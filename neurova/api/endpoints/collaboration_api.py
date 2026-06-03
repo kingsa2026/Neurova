@@ -524,7 +524,7 @@ async def create_template(data: TemplateCreateRequest, request: Request = None, 
     """
     try:
         from neurova.agent.templates import CollaborationTemplate
-        from neurova.agent.templates.collaboration_template import (
+        from neurova.collaborate import (
             TemplateType,
             AgentRole,
             WorkflowDefinition,
@@ -632,11 +632,11 @@ async def update_template(
         if data.description is not None:
             template.description = data.description
         if data.roles is not None:
-            from neurova.agent.templates.collaboration_template import AgentRole
+            from neurova.collaborate import AgentRole
             template.roles = {k: AgentRole(v) for k, v in data.roles.items()}
         if data.workflow is not None:
             # 重新构建工作流
-            from neurova.agent.templates.collaboration_template import WorkflowDefinition, TaskStep, AgentRole
+            from neurova.collaborate import WorkflowDefinition, TaskStep, AgentRole
             workflow_data = data.workflow
             steps = []
             for step_data in workflow_data.get("steps", []):
