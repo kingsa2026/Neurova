@@ -46,7 +46,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from neurova.mem_core import MemCore
-from neurova.context_orchestrator import ContextOrchestrator
+from neurova.context import ContextOrchestrator
 from neurova.llm_client import LLMClient, LLMConfig
 from neurova.router import MessageRouter, Message, MessageType, RouteResult
 from neurova.skill_system import SkillRegistry, SkillEvent, create_default_skills

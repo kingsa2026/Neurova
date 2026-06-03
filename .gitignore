@@ -21,6 +21,55 @@ develop-eggs/
 .coverage
 htmlcov/
 
+# 调试和临时文件
+_debug*.py
+_diag*.py
+_check*.py
+_verify*.py
+_patch*.py
+*_debug*.py
+*_diag*.py
+*_check*.py
+*_verify*.py
+*_patch*.py
+debug*.py
+diag*.py
+check*.py
+verify*.py
+patch*.py
+
+# 日志和输出文件
+*.log
+*_output.txt
+*_error.txt
+*_debug.txt
+*_log.txt
+server_*.txt
+backend_*.txt
+frontend_*.txt
+test_*.txt
+
+# 配置和令牌文件
+.neurova_token.json
+token.txt
+_cfg.json
+
+# 临时脚本
+quick_*.py
+simple_*.py
+reset_*.py
+fix_*.py
+migrate_*.py
+cleanup_*.py
+run_*.py
+upload_*.py
+
+# 测试输出
+pytest_output.txt
+test_output.txt
+test_err.txt
+import_error.txt
+
 # Node.js
 node_modules/
 package-lock.json
@@ -141,7 +190,6 @@ token.txt
 
 # Agent 工作区
 /agents/
-/agent/
 
 # 大型第三方项目
 /QwenPaw-main/
@@ -160,7 +208,7 @@ token.txt
 # 部署
 /deploy/
 
-# Web 前端文件夹（仅根目录）
+# Web 官方网站文件夹（仅根目录）
 /web/
 
 # 数据和存储
@@ -169,7 +217,6 @@ token.txt
 /neurova/data/
 /neurova/static/
 /neurova/tests/
-/neurova/neurova/
 /neurova/agents/
 /neurova/projects/
 /neurova/.test_deps/
