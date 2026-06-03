@@ -1,101 +1,101 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;!-- Agent 切换器 --&gt;
-    &lt;div  @click="toggleDropdown"&gt;
-      &lt;div &gt;
-        &lt;a-avatar size="small" &gt;
+<template>
+  <div >
+    <!-- Agent 切换器 -->
+    <div  @click="toggleDropdown">
+      <div >
+        <a-avatar size="small" >
           {{ currentAgentName.charAt(0).toUpperCase() }}
-        &lt;/a-avatar&gt;
-        &lt;span &gt;{{ currentAgentName || '选择 Agent' }}&lt;/span&gt;
-        &lt;CaretDownOutlined  /&gt;
-      &lt;/div&gt;
-      &lt;div v-if="showDropdown" &gt;
-        &lt;div
+        </a-avatar>
+        <span >{{ currentAgentName || '选择 Agent' }}</span>
+        <CaretDownOutlined  />
+      </div>
+      <div v-if="showDropdown" >
+        <div
           v-for="agent in agents"
           :key="agent.id || agent.agentId"
           :
           @click.stop="switchAgent(agent.id || agent.agentId)"
-        &gt;
-          &lt;a-avatar size="small" &gt;
+        >
+          <a-avatar size="small" >
             {{ (agent.name || 'A').charAt(0).toUpperCase() }}
-          &lt;/a-avatar&gt;
-          &lt;span &gt;{{ agent.name || '未命名' }}&lt;/span&gt;
-          &lt;CheckOutlined v-if="(agent.id || agent.agentId) === currentAgentId"  /&gt;
-        &lt;/div&gt;
-        &lt;div  /&gt;
-        &lt;div  @click.stop="$router.push('/agents/create')"&gt;
-          &lt;PlusOutlined  /&gt;
-          &lt;span &gt;创建新 Agent&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- Agent 专属菜单 --&gt;
-    &lt;div &gt;
-      &lt;a-menu
+          </a-avatar>
+          <span >{{ agent.name || '未命名' }}</span>
+          <CheckOutlined v-if="(agent.id || agent.agentId) === currentAgentId"  />
+        </div>
+        <div  />
+        <div  @click.stop="$router.push('/agents/create')">
+          <PlusOutlined  />
+          <span >创建新 Agent</span>
+        </div>
+      </div>
+    </div>
+    <!-- Agent 专属菜单 -->
+    <div >
+      <a-menu
         v-model:selectedKeys="selectedKeys"
         mode="inline"
         @click="onMenuClick"
-      &gt;
-        &lt;a-menu-item key="chat"&gt;
-          &lt;template #icon&gt;&lt;MessageOutlined /&gt;&lt;/template&gt;
+      >
+        <a-menu-item key="chat">
+          <template #icon><MessageOutlined /></template>
           聊天
-        &lt;/a-menu-item&gt;
-        &lt;a-sub-menu key="memory" title="记忆与认知"&gt;
-          &lt;template #icon&gt;&lt;RobotOutlined /&gt;&lt;/template&gt;
-          &lt;a-menu-item key="memory"&gt;记忆管理&lt;/a-menu-item&gt;
-          &lt;a-menu-item key="experience"&gt;经验知识库&lt;/a-menu-item&gt;
-          &lt;a-menu-item key="knowledge-graph"&gt;知识图谱&lt;/a-menu-item&gt;
-          &lt;a-menu-item key="metacognition"&gt;元认知&lt;/a-menu-item&gt;
-          &lt;a-menu-item key="reflection"&gt;反思管理&lt;/a-menu-item&gt;
-          &lt;a-menu-item key="growth"&gt;成长系统&lt;/a-menu-item&gt;
-        &lt;/a-sub-menu&gt;
-        &lt;a-sub-menu key="skills" title="技能与学习"&gt;
-          &lt;template #icon&gt;&lt;ThunderboltOutlined /&gt;&lt;/template&gt;
-          &lt;a-menu-item key="skills"&gt;Agent 技能&lt;/a-menu-item&gt;
-        &lt;/a-sub-menu&gt;
-        &lt;a-sub-menu key="knowledge" title="知识与文件"&gt;
-          &lt;template #icon&gt;&lt;FileTextOutlined /&gt;&lt;/template&gt;
-          &lt;a-menu-item key="files"&gt;文件管理&lt;/a-menu-item&gt;
-          &lt;a-menu-item key="media"&gt;媒体处理&lt;/a-menu-item&gt;
-        &lt;/a-sub-menu&gt;
-        &lt;a-sub-menu key="schedule" title="调度与规则"&gt;
-          &lt;template #icon&gt;&lt;ScheduleOutlined /&gt;&lt;/template&gt;
-          &lt;a-menu-item key="scheduler"&gt;调度器&lt;/a-menu-item&gt;
-          &lt;a-menu-item key="rules"&gt;规则管理&lt;/a-menu-item&gt;
-        &lt;/a-sub-menu&gt;
-        &lt;a-sub-menu key="personality" title="情感与人格"&gt;
-          &lt;template #icon&gt;&lt;SmileOutlined /&gt;&lt;/template&gt;
-          &lt;a-menu-item key="emotion"&gt;情绪分析&lt;/a-menu-item&gt;
-          &lt;a-menu-item key="personality"&gt;人格配置&lt;/a-menu-item&gt;
-        &lt;/a-sub-menu&gt;
-        &lt;a-sub-menu key="sleep" title="睡眠管理"&gt;
-          &lt;template #icon&gt;&lt;BulbOutlined /&gt;&lt;/template&gt;
-          &lt;a-menu-item key="sleep-status"&gt;睡眠状态&lt;/a-menu-item&gt;
-          &lt;a-menu-item key="sleep-settings"&gt;睡眠设置&lt;/a-menu-item&gt;
-        &lt;/a-sub-menu&gt;
-        &lt;a-menu-item key="firewall"&gt;
-          &lt;template #icon&gt;&lt;SafetyOutlined /&gt;&lt;/template&gt;
+        </a-menu-item>
+        <a-sub-menu key="memory" title="记忆与认知">
+          <template #icon><RobotOutlined /></template>
+          <a-menu-item key="memory">记忆管理</a-menu-item>
+          <a-menu-item key="experience">经验知识库</a-menu-item>
+          <a-menu-item key="knowledge-graph">知识图谱</a-menu-item>
+          <a-menu-item key="metacognition">元认知</a-menu-item>
+          <a-menu-item key="reflection">反思管理</a-menu-item>
+          <a-menu-item key="growth">成长系统</a-menu-item>
+        </a-sub-menu>
+        <a-sub-menu key="skills" title="技能与学习">
+          <template #icon><ThunderboltOutlined /></template>
+          <a-menu-item key="skills">Agent 技能</a-menu-item>
+        </a-sub-menu>
+        <a-sub-menu key="knowledge" title="知识与文件">
+          <template #icon><FileTextOutlined /></template>
+          <a-menu-item key="files">文件管理</a-menu-item>
+          <a-menu-item key="media">媒体处理</a-menu-item>
+        </a-sub-menu>
+        <a-sub-menu key="schedule" title="调度与规则">
+          <template #icon><ScheduleOutlined /></template>
+          <a-menu-item key="scheduler">调度器</a-menu-item>
+          <a-menu-item key="rules">规则管理</a-menu-item>
+        </a-sub-menu>
+        <a-sub-menu key="personality" title="情感与人格">
+          <template #icon><SmileOutlined /></template>
+          <a-menu-item key="emotion">情绪分析</a-menu-item>
+          <a-menu-item key="personality">人格配置</a-menu-item>
+        </a-sub-menu>
+        <a-sub-menu key="sleep" title="睡眠管理">
+          <template #icon><BulbOutlined /></template>
+          <a-menu-item key="sleep-status">睡眠状态</a-menu-item>
+          <a-menu-item key="sleep-settings">睡眠设置</a-menu-item>
+        </a-sub-menu>
+        <a-menu-item key="firewall">
+          <template #icon><SafetyOutlined /></template>
           防火墙
-        &lt;/a-menu-item&gt;
-        &lt;a-sub-menu key="trace" title="轨迹与调试"&gt;
-          &lt;template #icon&gt;&lt;BugOutlined /&gt;&lt;/template&gt;
-          &lt;a-menu-item key="trajectory"&gt;轨迹回放&lt;/a-menu-item&gt;
-          &lt;a-menu-item key="trace"&gt;调用追踪&lt;/a-menu-item&gt;
-        &lt;/a-sub-menu&gt;
-        &lt;a-sub-menu key="channels" title="渠道与通信"&gt;
-          &lt;template #icon&gt;&lt;GlobalOutlined /&gt;&lt;/template&gt;
-          &lt;a-menu-item key="channel"&gt;渠道管理&lt;/a-menu-item&gt;
-          &lt;a-menu-item key="channel-sharing"&gt;上下文共享&lt;/a-menu-item&gt;
-        &lt;/a-sub-menu&gt;
-        &lt;a-menu-item key="computer"&gt;
-          &lt;template #icon&gt;&lt;DesktopOutlined /&gt;&lt;/template&gt;
+        </a-menu-item>
+        <a-sub-menu key="trace" title="轨迹与调试">
+          <template #icon><BugOutlined /></template>
+          <a-menu-item key="trajectory">轨迹回放</a-menu-item>
+          <a-menu-item key="trace">调用追踪</a-menu-item>
+        </a-sub-menu>
+        <a-sub-menu key="channels" title="渠道与通信">
+          <template #icon><GlobalOutlined /></template>
+          <a-menu-item key="channel">渠道管理</a-menu-item>
+          <a-menu-item key="channel-sharing">上下文共享</a-menu-item>
+        </a-sub-menu>
+        <a-menu-item key="computer">
+          <template #icon><DesktopOutlined /></template>
           计算机使用
-        &lt;/a-menu-item&gt;
-      &lt;/a-menu&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+        </a-menu-item>
+      </a-menu>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAgentStore } from '@/stores/agents'
@@ -110,12 +110,12 @@ const router = useRouter()
 const route = useRoute()
 const agentStore = useAgentStore()
 const showDropdown = ref(false)
-const selectedKeys = ref&lt;string[]&gt;([])
-const agents = computed(() =&gt; agentStore.agents)
-const currentAgentId = computed(() =&gt; agentStore.currentAgentId)
-const currentAgentName = computed(() =&gt; agentStore.currentAgent?.name || '未选择')
+const selectedKeys = ref<string[]>([])
+const agents = computed(() => agentStore.agents)
+const currentAgentId = computed(() => agentStore.currentAgentId)
+const currentAgentName = computed(() => agentStore.currentAgent?.name || '未选择')
 // 菜单 key → 路由映射
-const keyToRoute: Record&lt;string, string&gt; = {
+const keyToRoute: Record<string, string> = {
   'chat': '/agent/:agentId/chat',
   'memory': '/agent/:agentId/memory',
   'experience': '/agent/:agentId/experience-knowledge',
@@ -171,17 +171,17 @@ function onDocClick(e: MouseEvent) {
     showDropdown.value = false
   }
 }
-onMounted(() =&gt; {
+onMounted(() => {
   document.addEventListener('click', onDocClick)
   if (agentStore.agents.length === 0) {
     agentStore.loadAgents()
   }
 })
-onUnmounted(() =&gt; {
+onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .agent-sidebar {
   width: 220px;
   height: 100%;
@@ -332,7 +332,7 @@ onUnmounted(() =&gt; {
   color: #e2e8f0 !important;
   background: rgba(255, 255, 255, 0.05) !important;
 }
-:deep(.agent-menu .ant-menu-submenu-selected &gt; .ant-menu-submenu-title) {
+:deep(.agent-menu .ant-menu-submenu-selected > .ant-menu-submenu-title) {
   color: #93c5fd !important;
 }
 :deep(.agent-menu .ant-menu-sub) {
@@ -341,5 +341,5 @@ onUnmounted(() =&gt; {
 :deep(.agent-menu .ant-menu-sub .ant-menu-item) {
   padding-left: 20px !important;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

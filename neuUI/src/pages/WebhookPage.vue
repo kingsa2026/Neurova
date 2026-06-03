@@ -1,82 +1,82 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;HookIcon :style="{ color: '#8b5cf6' }" /&gt; Webhook 管理&lt;/h2&gt;
-      &lt;div &gt;
-        &lt;a-button @click="loadWebhooks" :loading="loading"&gt;&lt;ReloadOutlined /&gt; 刷新&lt;/a-button&gt;
-        &lt;a-button type="primary" @click="openAddWebhook"&gt;&lt;PlusOutlined /&gt; 创建 Webhook&lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;HookIcon  /&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ webhooks.length }}&lt;/div&gt;
-          &lt;div &gt;Webhook 总数&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;CheckCircleOutlined  style="color: #34d399" /&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ webhooks.filter(w =&gt; w.is_active !== false).length }}&lt;/div&gt;
-          &lt;div &gt;已启用&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;ExclamationCircleOutlined  style="color: #f59e0b" /&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ failedCount }}&lt;/div&gt;
-          &lt;div &gt;失败投递&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" /&gt;
-    &lt;a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" /&gt;
-    &lt;div v-if="!loading" &gt;
-      &lt;a-table :columns="columns" :data-source="webhooks" row-key="id" size="middle" :pagination="pagination"&gt;
-        &lt;template #bodyCell="{ column, record }"&gt;
-          &lt;template v-if="column.key === 'name'"&gt;
-            &lt;div &gt;
-              &lt;HookIcon style="color: #8b5cf6" /&gt;
-              &lt;span&gt;{{ record.name }}&lt;/span&gt;
-            &lt;/div&gt;
-          &lt;/template&gt;
-          &lt;template v-else-if="column.key === 'url'"&gt;
-            &lt;a-tooltip :title="record.url"&gt;
-              &lt;span &gt;{{ record.url }}&lt;/span&gt;
-            &lt;/a-tooltip&gt;
-          &lt;/template&gt;
-          &lt;template v-else-if="column.key === 'events'"&gt;
-            &lt;a-tag v-for="event in (record.events || [])" :key="event" size="small" color="blue"&gt;
+<template>
+  <div >
+    <div >
+      <h2 ><HookIcon :style="{ color: '#8b5cf6' }" /> Webhook 管理</h2>
+      <div >
+        <a-button @click="loadWebhooks" :loading="loading"><ReloadOutlined /> 刷新</a-button>
+        <a-button type="primary" @click="openAddWebhook"><PlusOutlined /> 创建 Webhook</a-button>
+      </div>
+    </div>
+    <div >
+      <div >
+        <HookIcon  />
+        <div >
+          <div >{{ webhooks.length }}</div>
+          <div >Webhook 总数</div>
+        </div>
+      </div>
+      <div >
+        <CheckCircleOutlined  style="color: #34d399" />
+        <div >
+          <div >{{ webhooks.filter(w => w.is_active !== false).length }}</div>
+          <div >已启用</div>
+        </div>
+      </div>
+      <div >
+        <ExclamationCircleOutlined  style="color: #f59e0b" />
+        <div >
+          <div >{{ failedCount }}</div>
+          <div >失败投递</div>
+        </div>
+      </div>
+    </div>
+    <a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" />
+    <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
+    <div v-if="!loading" >
+      <a-table :columns="columns" :data-source="webhooks" row-key="id" size="middle" :pagination="pagination">
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'name'">
+            <div >
+              <HookIcon style="color: #8b5cf6" />
+              <span>{{ record.name }}</span>
+            </div>
+          </template>
+          <template v-else-if="column.key === 'url'">
+            <a-tooltip :title="record.url">
+              <span >{{ record.url }}</span>
+            </a-tooltip>
+          </template>
+          <template v-else-if="column.key === 'events'">
+            <a-tag v-for="event in (record.events || [])" :key="event" size="small" color="blue">
               {{ getEventLabel(event) }}
-            &lt;/a-tag&gt;
-          &lt;/template&gt;
-          &lt;template v-else-if="column.key === 'is_active'"&gt;
-            &lt;a-tag :color="record.is_active !== false ? 'green' : 'default'"&gt;
+            </a-tag>
+          </template>
+          <template v-else-if="column.key === 'is_active'">
+            <a-tag :color="record.is_active !== false ? 'green' : 'default'">
               {{ record.is_active !== false ? '启用' : '禁用' }}
-            &lt;/a-tag&gt;
-          &lt;/template&gt;
-          &lt;template v-else-if="column.key === 'stats'"&gt;
-            &lt;a-space&gt;
-              &lt;a-badge :count="record.success_count || 0" :number-style="{ backgroundColor: '#34d399' }" /&gt;
-              &lt;a-badge :count="record.failure_count || 0" :number-style="{ backgroundColor: '#ef4444' }" /&gt;
-            &lt;/a-space&gt;
-          &lt;/template&gt;
-          &lt;template v-else-if="column.key === 'action'"&gt;
-            &lt;a-space&gt;
-              &lt;a-button type="link" size="small" @click="openEdit(record)"&gt;编辑&lt;/a-button&gt;
-              &lt;a-button type="link" size="small" @click="handleTest(record)"&gt;测试&lt;/a-button&gt;
-              &lt;a-button type="link" size="small" @click="openDeliveries(record)"&gt;投递&lt;/a-button&gt;
-              &lt;a-popconfirm title="删除此 Webhook?" @confirm="handleDelete(record.id)"&gt;
-                &lt;a-button type="link" size="small" danger&gt;删除&lt;/a-button&gt;
-              &lt;/a-popconfirm&gt;
-            &lt;/a-space&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-    &lt;!-- 添加/编辑弹窗 --&gt;
-    &lt;a-modal
+            </a-tag>
+          </template>
+          <template v-else-if="column.key === 'stats'">
+            <a-space>
+              <a-badge :count="record.success_count || 0" :number-style="{ backgroundColor: '#34d399' }" />
+              <a-badge :count="record.failure_count || 0" :number-style="{ backgroundColor: '#ef4444' }" />
+            </a-space>
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-space>
+              <a-button type="link" size="small" @click="openEdit(record)">编辑</a-button>
+              <a-button type="link" size="small" @click="handleTest(record)">测试</a-button>
+              <a-button type="link" size="small" @click="openDeliveries(record)">投递</a-button>
+              <a-popconfirm title="删除此 Webhook?" @confirm="handleDelete(record.id)">
+                <a-button type="link" size="small" danger>删除</a-button>
+              </a-popconfirm>
+            </a-space>
+          </template>
+        </template>
+      </a-table>
+    </div>
+    <!-- 添加/编辑弹窗 -->
+    <a-modal
       v-model:open="formOpen"
       :title="editingWebhook ? '编辑 Webhook' : '创建 Webhook'"
       @ok="handleSave"
@@ -84,87 +84,87 @@
       ok-text="保存"
       cancel-text="取消"
       width="600px"
-    &gt;
-      &lt;a-form layout="vertical"&gt;
-        &lt;a-form-item label="名称" required&gt;
-          &lt;a-input v-model:value="form.name" placeholder="输入 Webhook 名称" /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="URL" required&gt;
-          &lt;a-input v-model:value="form.url" placeholder="https://your-server.com/webhook" /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="事件类型" required&gt;
-          &lt;a-select v-model:value="form.events" mode="multiple" placeholder="选择要监听的事件" style="width: 100%"&gt;
-            &lt;a-select-option value="CHAT_MESSAGE_RECEIVED"&gt;聊天消息&lt;/a-select-option&gt;
-            &lt;a-select-option value="AGENT_CREATED"&gt;Agent 创建&lt;/a-select-option&gt;
-            &lt;a-select-option value="AGENT_UPDATED"&gt;Agent 更新&lt;/a-select-option&gt;
-            &lt;a-select-option value="SKILL_INSTALLED"&gt;技能安装&lt;/a-select-option&gt;
-            &lt;a-select-option value="MEMORY_CREATED"&gt;记忆创建&lt;/a-select-option&gt;
-            &lt;a-select-option value="WORKFLOW_STARTED"&gt;工作流启动&lt;/a-select-option&gt;
-            &lt;a-select-option value="WORKFLOW_COMPLETED"&gt;工作流完成&lt;/a-select-option&gt;
-          &lt;/a-select&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="过滤条件 - Agent IDs"&gt;
-          &lt;a-select v-model:value="form.filter_agents" mode="tags" placeholder="输入 Agent ID" style="width: 100%" allow-clear /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="最大重试次数"&gt;
-          &lt;a-input-number v-model:value="form.max_retries" :min="0" :max="10" style="width: 100%" /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="启用状态"&gt;
-          &lt;a-switch v-model:checked="form.is_active" /&gt;
-        &lt;/a-form-item&gt;
-      &lt;/a-form&gt;
-    &lt;/a-modal&gt;
-    &lt;!-- 投递记录弹窗 --&gt;
-    &lt;a-modal v-model:open="deliveriesOpen" title="投递记录" :footer="null" width="800px"&gt;
-      &lt;a-spin v-if="loadingDeliveries" /&gt;
-      &lt;a-list v-else :data-source="deliveries" size="small" bordered&gt;
-        &lt;template #renderItem="{ item }"&gt;
-          &lt;a-list-item&gt;
-            &lt;a-list-item-meta
+    >
+      <a-form layout="vertical">
+        <a-form-item label="名称" required>
+          <a-input v-model:value="form.name" placeholder="输入 Webhook 名称" />
+        </a-form-item>
+        <a-form-item label="URL" required>
+          <a-input v-model:value="form.url" placeholder="https://your-server.com/webhook" />
+        </a-form-item>
+        <a-form-item label="事件类型" required>
+          <a-select v-model:value="form.events" mode="multiple" placeholder="选择要监听的事件" style="width: 100%">
+            <a-select-option value="CHAT_MESSAGE_RECEIVED">聊天消息</a-select-option>
+            <a-select-option value="AGENT_CREATED">Agent 创建</a-select-option>
+            <a-select-option value="AGENT_UPDATED">Agent 更新</a-select-option>
+            <a-select-option value="SKILL_INSTALLED">技能安装</a-select-option>
+            <a-select-option value="MEMORY_CREATED">记忆创建</a-select-option>
+            <a-select-option value="WORKFLOW_STARTED">工作流启动</a-select-option>
+            <a-select-option value="WORKFLOW_COMPLETED">工作流完成</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="过滤条件 - Agent IDs">
+          <a-select v-model:value="form.filter_agents" mode="tags" placeholder="输入 Agent ID" style="width: 100%" allow-clear />
+        </a-form-item>
+        <a-form-item label="最大重试次数">
+          <a-input-number v-model:value="form.max_retries" :min="0" :max="10" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="启用状态">
+          <a-switch v-model:checked="form.is_active" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+    <!-- 投递记录弹窗 -->
+    <a-modal v-model:open="deliveriesOpen" title="投递记录" :footer="null" width="800px">
+      <a-spin v-if="loadingDeliveries" />
+      <a-list v-else :data-source="deliveries" size="small" bordered>
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-list-item-meta
               :title="formatTime(item.created_at)"
               :description="item.response_status ? '响应状态: ' + item.response_status : '等待响应'"
-            &gt;
-              &lt;template #avatar&gt;
-                &lt;a-badge :status="getDeliveryStatus(item)" /&gt;
-              &lt;/template&gt;
-            &lt;/a-list-item-meta&gt;
-            &lt;template #actions&gt;
-              &lt;a-button type="link" size="small" @click="viewDeliveryDetail(item)"&gt;详情&lt;/a-button&gt;
-              &lt;a-button
+            >
+              <template #avatar>
+                <a-badge :status="getDeliveryStatus(item)" />
+              </template>
+            </a-list-item-meta>
+            <template #actions>
+              <a-button type="link" size="small" @click="viewDeliveryDetail(item)">详情</a-button>
+              <a-button
                 v-if="item.status === 'failed'"
                 type="link"
                 size="small"
                 @click="handleRetryDelivery(item)"
-              &gt;
+              >
                 重试
-              &lt;/a-button&gt;
-            &lt;/template&gt;
-          &lt;/a-list-item&gt;
-        &lt;/template&gt;
-      &lt;/a-list&gt;
-    &lt;/a-modal&gt;
-    &lt;!-- 投递详情弹窗 --&gt;
-    &lt;a-modal v-model:open="detailOpen" title="投递详情" :footer="null" width="700px"&gt;
-      &lt;a-descriptions bordered :column="1" v-if="currentDelivery"&gt;
-        &lt;a-descriptions-item label="投递 ID"&gt;{{ currentDelivery.id }}&lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="创建时间"&gt;{{ currentDelivery.created_at }}&lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="状态"&gt;
-          &lt;a-tag :color="getDeliveryColor(currentDelivery.status)"&gt;{{ currentDelivery.status }}&lt;/a-tag&gt;
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="事件类型"&gt;{{ getEventLabel(currentDelivery.event_type) }}&lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="响应状态"&gt;{{ currentDelivery.response_status || '-' }}&lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="响应体"&gt;
-          &lt;pre style="white-space: pre-wrap"&gt;{{ currentDelivery.response_body || '无' }}&lt;/pre&gt;
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="错误信息"&gt;
-          &lt;span v-if="currentDelivery.error"&gt;{{ currentDelivery.error }}&lt;/span&gt;
-          &lt;span v-else&gt;-&lt;/span&gt;
-        &lt;/a-descriptions-item&gt;
-      &lt;/a-descriptions&gt;
-    &lt;/a-modal&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+              </a-button>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
+    </a-modal>
+    <!-- 投递详情弹窗 -->
+    <a-modal v-model:open="detailOpen" title="投递详情" :footer="null" width="700px">
+      <a-descriptions bordered :column="1" v-if="currentDelivery">
+        <a-descriptions-item label="投递 ID">{{ currentDelivery.id }}</a-descriptions-item>
+        <a-descriptions-item label="创建时间">{{ currentDelivery.created_at }}</a-descriptions-item>
+        <a-descriptions-item label="状态">
+          <a-tag :color="getDeliveryColor(currentDelivery.status)">{{ currentDelivery.status }}</a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item label="事件类型">{{ getEventLabel(currentDelivery.event_type) }}</a-descriptions-item>
+        <a-descriptions-item label="响应状态">{{ currentDelivery.response_status || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="响应体">
+          <pre style="white-space: pre-wrap">{{ currentDelivery.response_body || '无' }}</pre>
+        </a-descriptions-item>
+        <a-descriptions-item label="错误信息">
+          <span v-if="currentDelivery.error">{{ currentDelivery.error }}</span>
+          <span v-else>-</span>
+        </a-descriptions-item>
+      </a-descriptions>
+    </a-modal>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
@@ -175,7 +175,7 @@ import {
 } from '@ant-design/icons-vue'
 import { webhooksAPI } from '@/api/modules/webhooks'
 import { h } from 'vue'
-const HookIcon = () =&gt; h('span', { style: 'font-size: 1.2rem' }, '🔗')
+const HookIcon = () => h('span', { style: 'font-size: 1.2rem' }, '🔗')
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
@@ -199,7 +199,7 @@ interface DeliveryData {
   event_type?: string
   error?: string
 }
-const webhooks = ref&lt;WebhookData[]&gt;([])
+const webhooks = ref<WebhookData[]>([])
 const failedCount = ref(0)
 const columns = [
   { title: '名称', dataIndex: 'name', key: 'name' },
@@ -217,7 +217,7 @@ const pagination = reactive({
   showQuickJumper: true,
 })
 const formOpen = ref(false)
-const editingWebhook = ref&lt;WebhookData | null&gt;(null)
+const editingWebhook = ref<WebhookData | null>(null)
 const form = reactive({
   name: '',
   url: '',
@@ -229,10 +229,10 @@ const form = reactive({
 const deliveriesOpen = ref(false)
 const loadingDeliveries = ref(false)
 const currentWebhookId = ref('')
-const deliveries = ref&lt;DeliveryData[]&gt;([])
+const deliveries = ref<DeliveryData[]>([])
 const detailOpen = ref(false)
-const currentDelivery = ref&lt;DeliveryData | null&gt;(null)
-const eventLabels: Record&lt;string, string&gt; = {
+const currentDelivery = ref<DeliveryData | null>(null)
+const eventLabels: Record<string, string> = {
   CHAT_MESSAGE_RECEIVED: '聊天消息',
   AGENT_CREATED: 'Agent 创建',
   AGENT_UPDATED: 'Agent 更新',
@@ -252,7 +252,7 @@ async function loadWebhooks() {
     if (res.data) {
       webhooks.value = res.data.items || res.data.webhooks || []
       pagination.total = res.data.total || webhooks.value.length
-      failedCount.value = webhooks.value.reduce((sum, w) =&gt; sum + (w.failure_count || 0), 0)
+      failedCount.value = webhooks.value.reduce((sum, w) => sum + (w.failure_count || 0), 0)
     }
   } catch (e: unknown) {
     const err = e as { message?: string }
@@ -386,11 +386,11 @@ function formatTime(time: string) {
   if (!time) return '-'
   return new Date(time).toLocaleString()
 }
-onMounted(() =&gt; {
+onMounted(() => {
   loadWebhooks()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg {
   display: flex;
   flex-direction: column;
@@ -464,5 +464,5 @@ onMounted(() =&gt; {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

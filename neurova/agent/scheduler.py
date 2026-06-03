@@ -1,11 +1,11 @@
+from __future__ import annotations
+
 """
 Neurova 自动化任务调度器核心模块
 
 提供任务调度、执行、依赖管理等核心功能。
 支持 Cron 表达式、间隔触发、条件触发等多种调度方式。
 """
-
-from __future__ import annotations
 
 import asyncio
 import json
@@ -31,11 +31,9 @@ from apscheduler.executors.pool import ThreadPoolExecutor, ProcessPoolExecutor
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================
 # 枚举定义
 # ============================================================
-
 
 class TaskType(str, Enum):
     """任务类型"""
@@ -44,7 +42,6 @@ class TaskType(str, Enum):
     SCRIPT = "script"
     WEBHOOK = "webhook"
 
-
 class TriggerType(str, Enum):
     """触发类型"""
     CRON = "cron"
@@ -52,7 +49,6 @@ class TriggerType(str, Enum):
     MANUAL = "manual"
     CONDITION = "condition"
     EVENT = "event"
-
 
 class TaskStatus(str, Enum):
     """任务状态"""
@@ -63,7 +59,6 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
     TIMEOUT = "timeout"
 
-
 class TaskPriority(str, Enum):
     """任务优先级"""
     LOW = "low"
@@ -71,11 +66,9 @@ class TaskPriority(str, Enum):
     HIGH = "high"
     CRITICAL = "critical"
 
-
 # ============================================================
 # 数据模型
 # ============================================================
-
 
 @dataclass
 class ScheduleConfig:
@@ -107,7 +100,6 @@ class ScheduleConfig:
             start_date=datetime.fromisoformat(data["start_date"]) if data.get("start_date") else None,
             end_date=datetime.fromisoformat(data["end_date"]) if data.get("end_date") else None,
         )
-
 
 @dataclass
 class TaskRequest:
@@ -149,7 +141,6 @@ class TaskRequest:
             max_retries=data.get("max_retries", 3),
         )
 
-
 @dataclass
 class TaskDependency:
     """任务依赖"""
@@ -162,7 +153,6 @@ class TaskDependency:
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> "TaskDependency":
         return cls(task_id=data["task_id"], type=data.get("type", "blocks"))
-
 
 @dataclass
 class RetryPolicy:
@@ -179,7 +169,6 @@ class RetryPolicy:
     def from_dict(cls, data: Dict[str, Any]) -> "RetryPolicy":
         return cls(**data) if data else cls()
 
-
 @dataclass
 class NotificationConfig:
     """通知配置"""
@@ -195,7 +184,6 @@ class NotificationConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "NotificationConfig":
         return cls(**data) if data else cls()
-
 
 @dataclass
 class AutomationTask:
@@ -279,7 +267,6 @@ class AutomationTask:
             failure_count=data.get("failure_count", 0),
         )
 
-
 @dataclass
 class TaskExecution:
     """任务执行记录"""
@@ -329,11 +316,9 @@ class TaskExecution:
             metadata=data.get("metadata", {}),
         )
 
-
 # ============================================================
 # 任务执行器接口
 # ============================================================
-
 
 class TaskExecutor(ABC):
     """任务执行器抽象基类"""
@@ -347,7 +332,6 @@ class TaskExecutor(ABC):
     async def validate(self, task: AutomationTask) -> tuple[bool, Optional[str]]:
         """验证任务配置是否有效"""
         pass
-
 
 class AgentTaskExecutor(TaskExecutor):
     """Agent 任务执行器"""
@@ -395,7 +379,6 @@ class AgentTaskExecutor(TaskExecutor):
             return False, "Agent ID is required"
         return True, None
 
-
 class WorkflowTaskExecutor(TaskExecutor):
     """工作流任务执行器"""
 
@@ -440,7 +423,6 @@ class WorkflowTaskExecutor(TaskExecutor):
             return False, "Workflow ID is required"
         return True, None
 
-
 class WebhookTaskExecutor(TaskExecutor):
     """Webhook 任务执行器"""
 
@@ -475,7 +457,6 @@ class WebhookTaskExecutor(TaskExecutor):
         if not task.request.webhook_url.startswith(('http://', 'https://')):
             return False, "Invalid webhook URL"
         return True, None
-
 
 class ScriptTaskExecutor(TaskExecutor):
     """脚本任务执行器"""
@@ -521,11 +502,9 @@ class ScriptTaskExecutor(TaskExecutor):
             return False, "Script is required"
         return True, None
 
-
 # ============================================================
 # 任务调度器核心
 # ============================================================
-
 
 class TaskScheduler:
     """
@@ -1115,13 +1094,11 @@ class TaskScheduler:
             "running_tasks": running,
         }
 
-
 # ============================================================
 # 全局实例
 # ============================================================
 
 _scheduler_instance: Optional[TaskScheduler] = None
-
 
 def get_scheduler() -> TaskScheduler:
     """获取任务调度器单例"""
@@ -1129,7 +1106,6 @@ def get_scheduler() -> TaskScheduler:
     if _scheduler_instance is None:
         _scheduler_instance = TaskScheduler()
     return _scheduler_instance
-
 
 def init_scheduler() -> TaskScheduler:
     """初始化任务调度器"""

@@ -1,122 +1,122 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;!-- 欢迎区域 --&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;h1 &gt;
+<template>
+  <div >
+    <!-- 欢迎区域 -->
+    <div >
+      <div >
+        <h1 >
           你好，{{ username }}
-          &lt;span &gt;👋&lt;/span&gt;
-        &lt;/h1&gt;
-        &lt;p &gt;欢迎回到 Neurova 智能平台 · {{ formattedDate }}&lt;/p&gt;
-        &lt;a-alert v-if="dashError" :message="dashError" type="error" show-icon closable style="margin-top:8px" /&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div  @click="$router.push('/agents/create')"&gt;
-          &lt;PlusOutlined /&gt; 新建 Agent
-        &lt;/div&gt;
-        &lt;div  @click="$router.push('/chat')"&gt;
-          &lt;MessageOutlined /&gt; 开始对话
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 统计卡片行 --&gt;
-    &lt;div &gt;
-      &lt;div
+          <span >👋</span>
+        </h1>
+        <p >欢迎回到 Neurova 智能平台 · {{ formattedDate }}</p>
+        <a-alert v-if="dashError" :message="dashError" type="error" show-icon closable style="margin-top:8px" />
+      </div>
+      <div >
+        <div  @click="$router.push('/agents/create')">
+          <PlusOutlined /> 新建 Agent
+        </div>
+        <div  @click="$router.push('/chat')">
+          <MessageOutlined /> 开始对话
+        </div>
+      </div>
+    </div>
+    <!-- 统计卡片行 -->
+    <div >
+      <div
         v-for="stat in stats"
         :key="stat.key"
         :style="{ '--accent': stat.color }"
-      &gt;
-        &lt;div &gt;
-          &lt;component :is="stat.icon" /&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;span &gt;{{ stat.label }}&lt;/span&gt;
-          &lt;span &gt;{{ stat.value }}&lt;/span&gt;
-          &lt;span &gt;
-            &lt;CaretUpOutlined v-if="stat.trend &gt; 0"  /&gt;
-            &lt;CaretDownOutlined v-else  /&gt;
+      >
+        <div >
+          <component :is="stat.icon" />
+        </div>
+        <div >
+          <span >{{ stat.label }}</span>
+          <span >{{ stat.value }}</span>
+          <span >
+            <CaretUpOutlined v-if="stat.trend > 0"  />
+            <CaretDownOutlined v-else  />
             {{ Math.abs(stat.trend) }}% vs 上周
-          &lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 主内容行 --&gt;
-    &lt;div &gt;
-      &lt;!-- 左侧：图表 + 快捷操作 --&gt;
-      &lt;div &gt;
-        &lt;!-- Token 消耗趋势图表 --&gt;
-        &lt;div &gt;
-          &lt;div &gt;
-            &lt;h3&gt;Token 消耗趋势&lt;/h3&gt;
-            &lt;a-radio-group v-model:value="chartRange" size="small"&gt;
-              &lt;a-radio-button value="7d"&gt;7 天&lt;/a-radio-button&gt;
-              &lt;a-radio-button value="30d"&gt;30 天&lt;/a-radio-button&gt;
-            &lt;/a-radio-group&gt;
-          &lt;/div&gt;
-          &lt;div &gt;
-            &lt;canvas ref="tokenChartRef" &gt;&lt;/canvas&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;!-- 快捷操作 --&gt;
-        &lt;div &gt;
-          &lt;h3&gt;快捷操作&lt;/h3&gt;
-          &lt;div &gt;
-            &lt;div  v-for="a in quickActions" :key="a.key" @click="$router.push(a.path)"&gt;
-              &lt;div  :style="{ background: a.color + '18', color: a.color }"&gt;
-                &lt;component :is="a.icon" /&gt;
-              &lt;/div&gt;
-              &lt;span &gt;{{ a.label }}&lt;/span&gt;
-              &lt;span &gt;{{ a.desc }}&lt;/span&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;!-- 右侧：最近动态 + 系统状态 --&gt;
-      &lt;div &gt;
-        &lt;!-- 最近动态 --&gt;
-        &lt;div &gt;
-          &lt;h3&gt;最近动态&lt;/h3&gt;
-          &lt;div  v-if="recentActivities.length &gt; 0"&gt;
-            &lt;div  v-for="item in recentActivities" :key="item.id"&gt;
-              &lt;div  :style="{ background: item.color }"&gt;&lt;/div&gt;
-              &lt;div &gt;
-                &lt;span &gt;{{ item.title }}&lt;/span&gt;
-                &lt;span &gt;{{ item.time }}&lt;/span&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-          &lt;div  v-else&gt;
-            &lt;HistoryOutlined  /&gt;
-            &lt;span&gt;暂无最近动态&lt;/span&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;!-- 系统状态 --&gt;
-        &lt;div &gt;
-          &lt;h3&gt;系统状态&lt;/h3&gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;span &gt;API 服务&lt;/span&gt;
-              &lt;a-badge status="processing" text="运行中" /&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;span &gt;LLM 引擎&lt;/span&gt;
-              &lt;a-badge status="processing" text="就绪" /&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;span &gt;记忆系统&lt;/span&gt;
-              &lt;a-badge status="processing" text="正常" /&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;span &gt;技能引擎&lt;/span&gt;
-              &lt;a-badge status="default" text="空闲" /&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+          </span>
+        </div>
+      </div>
+    </div>
+    <!-- 主内容行 -->
+    <div >
+      <!-- 左侧：图表 + 快捷操作 -->
+      <div >
+        <!-- Token 消耗趋势图表 -->
+        <div >
+          <div >
+            <h3>Token 消耗趋势</h3>
+            <a-radio-group v-model:value="chartRange" size="small">
+              <a-radio-button value="7d">7 天</a-radio-button>
+              <a-radio-button value="30d">30 天</a-radio-button>
+            </a-radio-group>
+          </div>
+          <div >
+            <canvas ref="tokenChartRef" ></canvas>
+          </div>
+        </div>
+        <!-- 快捷操作 -->
+        <div >
+          <h3>快捷操作</h3>
+          <div >
+            <div  v-for="a in quickActions" :key="a.key" @click="$router.push(a.path)">
+              <div  :style="{ background: a.color + '18', color: a.color }">
+                <component :is="a.icon" />
+              </div>
+              <span >{{ a.label }}</span>
+              <span >{{ a.desc }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 右侧：最近动态 + 系统状态 -->
+      <div >
+        <!-- 最近动态 -->
+        <div >
+          <h3>最近动态</h3>
+          <div  v-if="recentActivities.length > 0">
+            <div  v-for="item in recentActivities" :key="item.id">
+              <div  :style="{ background: item.color }"></div>
+              <div >
+                <span >{{ item.title }}</span>
+                <span >{{ item.time }}</span>
+              </div>
+            </div>
+          </div>
+          <div  v-else>
+            <HistoryOutlined  />
+            <span>暂无最近动态</span>
+          </div>
+        </div>
+        <!-- 系统状态 -->
+        <div >
+          <h3>系统状态</h3>
+          <div >
+            <div >
+              <span >API 服务</span>
+              <a-badge status="processing" text="运行中" />
+            </div>
+            <div >
+              <span >LLM 引擎</span>
+              <a-badge status="processing" text="就绪" />
+            </div>
+            <div >
+              <span >记忆系统</span>
+              <a-badge status="processing" text="正常" />
+            </div>
+            <div >
+              <span >技能引擎</span>
+              <a-badge status="default" text="空闲" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -138,13 +138,13 @@ import {
 } from '@ant-design/icons-vue'
 import { dashboardAPI } from '@/api/modules/dashboard'
 const authStore = useAuthStore()
-const username = computed(() =&gt; authStore.currentUser?.username || '用户')
+const username = computed(() => authStore.currentUser?.username || '用户')
 const dashLoading = ref(false)
 const dashError = ref('')
 // 获取真实数据
-const trendData = ref&lt;number[]&gt;([])
-const recentItems = ref&lt;Record&lt;string, unknown&gt;[]&gt;([])
-onMounted(async () =&gt; {
+const trendData = ref<number[]>([])
+const recentItems = ref<Record<string, unknown>[]>([])
+onMounted(async () => {
   dashLoading.value = true
   try {
     const [homeRes, trendsRes, statsRes] = await Promise.allSettled([
@@ -152,7 +152,7 @@ onMounted(async () =&gt; {
       dashboardAPI.getTrends(chartRange.value === '7d' ? 7 : 30),
       dashboardAPI.getSystemStats(),
     ])
-    if (homeRes.status === 'fulfilled' &amp;&amp; homeRes.value?.success &amp;&amp; homeRes.value.data) {
+    if (homeRes.status === 'fulfilled' && homeRes.value?.success && homeRes.value.data) {
       const d = homeRes.value.data
       if (d.stats) {
         stats.value[0].value = d.stats.agent_count ?? stats.value[0].value
@@ -167,17 +167,17 @@ onMounted(async () =&gt; {
       // 最近动态
       if (d.recent_activities?.length) {
         recentActivities.length = 0
-        d.recent_activities.forEach((a: Record&lt;string, unknown&gt;) =&gt; recentActivities.push({
+        d.recent_activities.forEach((a: Record<string, unknown>) => recentActivities.push({
           id: a.id, title: a.title || a.description, time: a.time || a.relative_time, color: a.color || '#60a5fa'
         }))
       }
     } else if (homeRes.status === 'fulfilled') {
       dashError.value = homeRes.value?.message || '获取数据失败'
     }
-    if (trendsRes.status === 'fulfilled' &amp;&amp; trendsRes.value?.success &amp;&amp; trendsRes.value.data?.values) {
+    if (trendsRes.status === 'fulfilled' && trendsRes.value?.success && trendsRes.value.data?.values) {
       trendData.value = trendsRes.value.data.values
     }
-    if (statsRes.status === 'fulfilled' &amp;&amp; statsRes.value?.success &amp;&amp; statsRes.value.data) {
+    if (statsRes.status === 'fulfilled' && statsRes.value?.success && statsRes.value.data) {
       const sd = statsRes.value.data
       if (sd.agent_count != null) stats.value[0].value = sd.agent_count
       if (sd.memory_count != null) stats.value[1].value = sd.memory_count
@@ -193,7 +193,7 @@ onMounted(async () =&gt; {
   drawChart()
   window.addEventListener('resize', drawChart)
 })
-const formattedDate = computed(() =&gt; {
+const formattedDate = computed(() => {
   const d = new Date()
   const week = ['日', '一', '二', '三', '四', '五', '六']
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 · 星期${week[d.getDay()]}`
@@ -223,14 +223,14 @@ const recentActivities = [
   { id: 5, title: 'Token 消耗达到日限额 80%', time: '昨天', color: '#fb7185' },
 ]
 // ─── Canvas 图表 ───
-const tokenChartRef = ref&lt;HTMLCanvasElement&gt;()
+const tokenChartRef = ref<HTMLCanvasElement>()
 const chartRange = ref('7d')
 let chartAnimationId = 0
 // 图表范围切换 → 重新加载趋势数据
-watch(chartRange, async (range) =&gt; {
+watch(chartRange, async (range) => {
   try {
     const res = await dashboardAPI.getTrends(range === '7d' ? 7 : 30)
-    if (res?.success &amp;&amp; res.data?.values) {
+    if (res?.success && res.data?.values) {
       trendData.value = res.data.values
       await nextTick(); drawChart()
     }
@@ -253,16 +253,16 @@ function drawChart() {
   const ph = h - pad.top - pad.bottom
   // 使用真实趋势数据或模拟数据
   const days = chartRange.value === '7d' ? 7 : 30
-  const data = trendData.value.length &gt;= days
+  const data = trendData.value.length >= days
     ? trendData.value.slice(-days)
-    : Array.from({ length: days }, () =&gt; Math.floor(Math.random() * 6000 + 2000))
+    : Array.from({ length: days }, () => Math.floor(Math.random() * 6000 + 2000))
   const max = Math.max(...data)
   const gridLines = 4
   ctx.clearRect(0, 0, w, h)
   // 网格
   ctx.strokeStyle = 'rgba(255,255,255,0.05)'
   ctx.lineWidth = 1
-  for (let i = 0; i &lt;= gridLines; i++) {
+  for (let i = 0; i <= gridLines; i++) {
     const y = pad.top + (ph / gridLines) * i
     ctx.beginPath()
     ctx.moveTo(pad.left, y)
@@ -280,7 +280,7 @@ function drawChart() {
   gradient.addColorStop(1, 'rgba(96,165,250,0)')
   ctx.beginPath()
   const xStep = pw / (data.length - 1)
-  data.forEach((v, i) =&gt; {
+  data.forEach((v, i) => {
     const x = pad.left + xStep * i
     const y = pad.top + ph - (v / max) * ph
     if (i === 0) ctx.moveTo(x, y)
@@ -294,7 +294,7 @@ function drawChart() {
   ctx.fill()
   // 线条
   ctx.beginPath()
-  data.forEach((v, i) =&gt; {
+  data.forEach((v, i) => {
     const x = pad.left + xStep * i
     const y = pad.top + ph - (v / max) * ph
     if (i === 0) ctx.moveTo(x, y)
@@ -304,7 +304,7 @@ function drawChart() {
   ctx.lineWidth = 2
   ctx.stroke()
   // 点
-  data.forEach((v, i) =&gt; {
+  data.forEach((v, i) => {
     const x = pad.left + xStep * i
     const y = pad.top + ph - (v / max) * ph
     ctx.beginPath()
@@ -317,19 +317,19 @@ function drawChart() {
   ctx.font = '10px -apple-system, sans-serif'
   ctx.textAlign = 'center'
   const now = new Date()
-  for (let i = 0; i &lt; data.length; i += Math.ceil(data.length / 6)) {
+  for (let i = 0; i < data.length; i += Math.ceil(data.length / 6)) {
     const d = new Date(now)
     d.setDate(d.getDate() - (data.length - 1 - i))
     const x = pad.left + xStep * i
     ctx.fillText(`${d.getMonth() + 1}/${d.getDate()}`, x, h - 4)
   }
 }
-onUnmounted(() =&gt; {
+onUnmounted(() => {
   window.removeEventListener('resize', drawChart)
   cancelAnimationFrame(chartAnimationId)
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .dashboard-page {
   padding: 24px 28px;
   display: flex;
@@ -623,5 +623,5 @@ onUnmounted(() =&gt; {
   .action-grid { grid-template-columns: repeat(2, 1fr); }
   .welcome-section { flex-direction: column; align-items: flex-start; }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

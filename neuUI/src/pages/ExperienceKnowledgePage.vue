@@ -1,32 +1,32 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;BulbOutlined :style="{color:'#f59e0b'}" /&gt; 经验知识库&lt;/h2&gt;
-      &lt;a-tag&gt;Agent: {{ agentId }}&lt;/a-tag&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;经验记录&lt;b &gt;{{ stats.count }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;最佳实践&lt;b &gt;{{ stats.bestPractices }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;技能排名&lt;b &gt;{{ stats.topRank }}&lt;/b&gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-table :columns="cols" :data-source="data" row-key="id" size="middle" :pagination="{pageSize:5}"&gt;
-        &lt;template #bodyCell="{column,record}"&gt;
-          &lt;template v-if="column.key==='type'"&gt;&lt;a-tag :color="record.tc"&gt;{{ record.type }}&lt;/a-tag&gt;&lt;/template&gt;
-          &lt;template v-if="column.key==='score'"&gt;&lt;span :style="{color:record.sc&gt;7?'#34d399':record.sc&gt;4?'#fbbf24':'#ef4444'}"&gt;&lt;StarFilled /&gt; {{ record.sc }}/10&lt;/span&gt;&lt;/template&gt;
-          &lt;template v-if="column.key==='act'"&gt;&lt;a-button type="link" size="small" @click="msg.info(record.desc)"&gt;详情&lt;/a-button&gt;&lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 ><BulbOutlined :style="{color:'#f59e0b'}" /> 经验知识库</h2>
+      <a-tag>Agent: {{ agentId }}</a-tag>
+    </div>
+    <div >
+      <div >经验记录<b >{{ stats.count }}</b></div>
+      <div >最佳实践<b >{{ stats.bestPractices }}</b></div>
+      <div >技能排名<b >{{ stats.topRank }}</b></div>
+    </div>
+    <div >
+      <a-table :columns="cols" :data-source="data" row-key="id" size="middle" :pagination="{pageSize:5}">
+        <template #bodyCell="{column,record}">
+          <template v-if="column.key==='type'"><a-tag :color="record.tc">{{ record.type }}</a-tag></template>
+          <template v-if="column.key==='score'"><span :style="{color:record.sc>7?'#34d399':record.sc>4?'#fbbf24':'#ef4444'}"><StarFilled /> {{ record.sc }}/10</span></template>
+          <template v-if="column.key==='act'"><a-button type="link" size="small" @click="msg.info(record.desc)">详情</a-button></template>
+        </template>
+      </a-table>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { BulbOutlined, StarFilled } from '@ant-design/icons-vue'
-const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/experience-knowledge', () =&gt; loadData())
+const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/experience-knowledge', () => loadData())
 const msg = message
 const cols = [
   { title: '经验ID', dataIndex: 'id', width: 100 },
@@ -43,16 +43,16 @@ interface ExperienceItem {
   sc: number
   desc: string
 }
-const data = ref&lt;ExperienceItem[]&gt;([])
+const data = ref<ExperienceItem[]>([])
 const stats = ref({ count: 0, bestPractices: 0, topRank: '--' })
 const loading = ref(false)
 async function loadData() {
   loading.value = true
   try {
     const res = await request.get(`/agents/${agentId.value}/experience/list`)
-    if (res.code === 0 &amp;&amp; res.data) {
+    if (res.code === 0 && res.data) {
       const items = res.data.experiences || res.data || []
-      data.value = items.map((e: Record&lt;string, unknown&gt;) =&gt; ({
+      data.value = items.map((e: Record<string, unknown>) => ({
         id: (e.id || e.experience_id) as string,
         title: (e.title || e.name || '') as string,
         type: (e.type || e.category || '经验') as string,
@@ -62,19 +62,19 @@ async function loadData() {
       }))
       stats.value = {
         count: res.data.total || data.value.length,
-        bestPractices: res.data.best_practices || data.value.filter((d: ExperienceItem) =&gt; d.sc &gt;= 8).length,
+        bestPractices: res.data.best_practices || data.value.filter((d: ExperienceItem) => d.sc >= 8).length,
         topRank: res.data.top_rank || 'Top5',
       }
     }
   } catch { /* keep empty */ }
   finally { loading.value = false }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await initAgent()
   loadData()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .exp-page{display:flex;flex-direction:column;gap:16px;}
 .page-hd{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-radius:12px;}
 .page-tit{font-size:1.2rem;color:#e2e8f0;margin:0;display:flex;align-items:center;gap:8px;}
@@ -83,5 +83,5 @@ onMounted(async () =&gt; {
 .stat b{font-size:1.4rem;}
 .c-orange{color:#f59e0b;}
 .card{padding:20px;border-radius:12px;}
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

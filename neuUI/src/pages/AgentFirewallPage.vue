@@ -1,241 +1,241 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;!-- 页面标题 --&gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;SafetyOutlined :style="{ color: '#ef4444' }" /&gt;
+<template>
+  <div >
+    <!-- 页面标题 -->
+    <div >
+      <h2 >
+        <SafetyOutlined :style="{ color: '#ef4444' }" />
         防火墙与合规
-      &lt;/h2&gt;
-      &lt;a-button type="primary" @click="loadGlobalRules"&gt;
-        &lt;template #icon&gt;&lt;ReloadOutlined /&gt;&lt;/template&gt;
+      </h2>
+      <a-button type="primary" @click="loadGlobalRules">
+        <template #icon><ReloadOutlined /></template>
         刷新
-      &lt;/a-button&gt;
-    &lt;/div&gt;
-    &lt;!-- 统计卡片 --&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;div &gt;&lt;SafetyCertificateOutlined /&gt;&lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.blockedCount || 0 }}&lt;/div&gt;
-          &lt;div &gt;已拦截&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;&lt;CheckCircleOutlined /&gt;&lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.compliantRate || '100%' }}&lt;/div&gt;
-          &lt;div &gt;合规率&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;&lt;FileProtectOutlined /&gt;&lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.ruleCount || 0 }}&lt;/div&gt;
-          &lt;div &gt;活跃规则&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 标签页 --&gt;
-    &lt;a-tabs v-model:activeKey="activeTab" &gt;
-      &lt;a-tab-pane key="global" tab="全局规则"&gt;
-        &lt;div &gt;
-          &lt;div &gt;
-            &lt;h3&gt;全局安全规则&lt;/h3&gt;
-          &lt;/div&gt;
-          &lt;a-form layout="vertical" &gt;
-            &lt;a-form-item label="拦截的文件扩展名"&gt;
-              &lt;a-select
+      </a-button>
+    </div>
+    <!-- 统计卡片 -->
+    <div >
+      <div >
+        <div ><SafetyCertificateOutlined /></div>
+        <div >
+          <div >{{ stats.blockedCount || 0 }}</div>
+          <div >已拦截</div>
+        </div>
+      </div>
+      <div >
+        <div ><CheckCircleOutlined /></div>
+        <div >
+          <div >{{ stats.compliantRate || '100%' }}</div>
+          <div >合规率</div>
+        </div>
+      </div>
+      <div >
+        <div ><FileProtectOutlined /></div>
+        <div >
+          <div >{{ stats.ruleCount || 0 }}</div>
+          <div >活跃规则</div>
+        </div>
+      </div>
+    </div>
+    <!-- 标签页 -->
+    <a-tabs v-model:activeKey="activeTab" >
+      <a-tab-pane key="global" tab="全局规则">
+        <div >
+          <div >
+            <h3>全局安全规则</h3>
+          </div>
+          <a-form layout="vertical" >
+            <a-form-item label="拦截的文件扩展名">
+              <a-select
                 v-model:value="globalRules.blocked_extensions"
                 mode="tags"
                 placeholder="输入扩展名后按回车"
                 style="width: 100%"
-              /&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item label="拦截的路径"&gt;
-              &lt;a-select
+              />
+            </a-form-item>
+            <a-form-item label="拦截的路径">
+              <a-select
                 v-model:value="globalRules.blocked_paths"
                 mode="tags"
                 placeholder="输入路径后按回车"
                 style="width: 100%"
-              /&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item label="拦截的模式"&gt;
-              &lt;a-select
+              />
+            </a-form-item>
+            <a-form-item label="拦截的模式">
+              <a-select
                 v-model:value="globalRules.blocked_patterns"
                 mode="tags"
                 placeholder="输入正则模式后按回车"
                 style="width: 100%"
-              /&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-row :gutter="16"&gt;
-              &lt;a-col :span="12"&gt;
-                &lt;a-form-item label="每分钟请求限制"&gt;
-                  &lt;a-input-number
+              />
+            </a-form-item>
+            <a-row :gutter="16">
+              <a-col :span="12">
+                <a-form-item label="每分钟请求限制">
+                  <a-input-number
                     v-model:value="globalRules.rate_limit_per_minute"
                     :min="1"
                     :max="10000"
                     style="width: 100%"
-                  /&gt;
-                &lt;/a-form-item&gt;
-              &lt;/a-col&gt;
-              &lt;a-col :span="12"&gt;
-                &lt;a-form-item label="最大载荷大小 (bytes)"&gt;
-                  &lt;a-input-number
+                  />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="最大载荷大小 (bytes)">
+                  <a-input-number
                     v-model:value="globalRules.max_payload_bytes"
                     :min="1024"
                     :max="104857600"
                     :step="1024"
                     style="width: 100%"
-                  /&gt;
-                &lt;/a-form-item&gt;
-              &lt;/a-col&gt;
-            &lt;/a-row&gt;
-            &lt;a-row :gutter="16"&gt;
-              &lt;a-col :span="12"&gt;
-                &lt;a-form-item label="IP 白名单"&gt;
-                  &lt;a-select
+                  />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-row :gutter="16">
+              <a-col :span="12">
+                <a-form-item label="IP 白名单">
+                  <a-select
                     v-model:value="globalRules.ip_whitelist"
                     mode="tags"
                     placeholder="输入 IP 地址"
                     style="width: 100%"
-                  /&gt;
-                &lt;/a-form-item&gt;
-              &lt;/a-col&gt;
-              &lt;a-col :span="12"&gt;
-                &lt;a-form-item label="IP 黑名单"&gt;
-                  &lt;a-select
+                  />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="IP 黑名单">
+                  <a-select
                     v-model:value="globalRules.ip_blacklist"
                     mode="tags"
                     placeholder="输入 IP 地址"
                     style="width: 100%"
-                  /&gt;
-                &lt;/a-form-item&gt;
-              &lt;/a-col&gt;
-            &lt;/a-row&gt;
-            &lt;a-form-item&gt;
-              &lt;a-space&gt;
-                &lt;a-button type="primary" @click="handleUpdateGlobalRules" :loading="loading"&gt;
+                  />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-form-item>
+              <a-space>
+                <a-button type="primary" @click="handleUpdateGlobalRules" :loading="loading">
                   保存规则
-                &lt;/a-button&gt;
-                &lt;a-button @click="loadGlobalRules"&gt;重置&lt;/a-button&gt;
-              &lt;/a-space&gt;
-            &lt;/a-form-item&gt;
-          &lt;/a-form&gt;
-        &lt;/div&gt;
-      &lt;/a-tab-pane&gt;
-      &lt;a-tab-pane key="user" tab="用户规则"&gt;
-        &lt;div &gt;
-          &lt;div &gt;
-            &lt;h3&gt;用户级防火墙规则&lt;/h3&gt;
-          &lt;/div&gt;
-          &lt;a-form layout="vertical" &gt;
-            &lt;a-row :gutter="16"&gt;
-              &lt;a-col :span="12"&gt;
-                &lt;a-form-item label="额外拦截的扩展名"&gt;
-                  &lt;a-select
+                </a-button>
+                <a-button @click="loadGlobalRules">重置</a-button>
+              </a-space>
+            </a-form-item>
+          </a-form>
+        </div>
+      </a-tab-pane>
+      <a-tab-pane key="user" tab="用户规则">
+        <div >
+          <div >
+            <h3>用户级防火墙规则</h3>
+          </div>
+          <a-form layout="vertical" >
+            <a-row :gutter="16">
+              <a-col :span="12">
+                <a-form-item label="额外拦截的扩展名">
+                  <a-select
                     v-model:value="userRules.extra_blocked_extensions"
                     mode="tags"
                     placeholder="输入扩展名后按回车"
                     style="width: 100%"
-                  /&gt;
-                &lt;/a-form-item&gt;
-              &lt;/a-col&gt;
-              &lt;a-col :span="12"&gt;
-                &lt;a-form-item label="额外拦截的路径"&gt;
-                  &lt;a-select
+                  />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="额外拦截的路径">
+                  <a-select
                     v-model:value="userRules.extra_blocked_paths"
                     mode="tags"
                     placeholder="输入路径后按回车"
                     style="width: 100%"
-                  /&gt;
-                &lt;/a-form-item&gt;
-              &lt;/a-col&gt;
-            &lt;/a-row&gt;
-            &lt;a-form-item&gt;
-              &lt;a-button type="primary" @click="handleUpdateUserRules" :loading="loading"&gt;
+                  />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-form-item>
+              <a-button type="primary" @click="handleUpdateUserRules" :loading="loading">
                 保存用户规则
-              &lt;/a-button&gt;
-            &lt;/a-form-item&gt;
-          &lt;/a-form&gt;
-        &lt;/div&gt;
-      &lt;/a-tab-pane&gt;
-      &lt;a-tab-pane key="sandbox" tab="沙箱设置"&gt;
-        &lt;div &gt;
-          &lt;div &gt;
-            &lt;h3&gt;Agent 间沙箱隔离&lt;/h3&gt;
-          &lt;/div&gt;
-          &lt;a-form layout="vertical" &gt;
-            &lt;a-form-item label="启用 Agent 隔离"&gt;
-              &lt;a-switch v-model:checked="sandbox.agent_isolation" /&gt;
-              &lt;div &gt;
+              </a-button>
+            </a-form-item>
+          </a-form>
+        </div>
+      </a-tab-pane>
+      <a-tab-pane key="sandbox" tab="沙箱设置">
+        <div >
+          <div >
+            <h3>Agent 间沙箱隔离</h3>
+          </div>
+          <a-form layout="vertical" >
+            <a-form-item label="启用 Agent 隔离">
+              <a-switch v-model:checked="sandbox.agent_isolation" />
+              <div >
                 启用后，不同 Agent 之间将无法直接访问彼此的内存、文件和配置
-              &lt;/div&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item&gt;
-              &lt;a-button type="primary" @click="handleUpdateSandbox" :loading="loading"&gt;
+              </div>
+            </a-form-item>
+            <a-form-item>
+              <a-button type="primary" @click="handleUpdateSandbox" :loading="loading">
                 保存沙箱设置
-              &lt;/a-button&gt;
-            &lt;/a-form-item&gt;
-          &lt;/a-form&gt;
-        &lt;/div&gt;
-      &lt;/a-tab-pane&gt;
-      &lt;a-tab-pane key="check" tab="路径检查"&gt;
-        &lt;div &gt;
-          &lt;div &gt;
-            &lt;h3&gt;文件路径安全检查&lt;/h3&gt;
-          &lt;/div&gt;
-          &lt;a-form layout="inline" &gt;
-            &lt;a-form-item label="路径"&gt;
-              &lt;a-input
+              </a-button>
+            </a-form-item>
+          </a-form>
+        </div>
+      </a-tab-pane>
+      <a-tab-pane key="check" tab="路径检查">
+        <div >
+          <div >
+            <h3>文件路径安全检查</h3>
+          </div>
+          <a-form layout="inline" >
+            <a-form-item label="路径">
+              <a-input
                 v-model:value="checkPath"
                 placeholder="输入要检查的文件路径"
                 style="width: 400px"
-              /&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item&gt;
-              &lt;a-button type="primary" @click="handleCheckPath" :loading="checking"&gt;
+              />
+            </a-form-item>
+            <a-form-item>
+              <a-button type="primary" @click="handleCheckPath" :loading="checking">
                 检查
-              &lt;/a-button&gt;
-            &lt;/a-form-item&gt;
-          &lt;/a-form&gt;
-          &lt;a-alert
+              </a-button>
+            </a-form-item>
+          </a-form>
+          <a-alert
             v-if="checkResult !== null"
             :type="checkResult.allowed ? 'success' : 'error'"
             :message="checkResult.allowed ? '路径安全' : '路径被拦截'"
             :description="checkResult.reason"
             show-icon
             style="margin-top: 16px"
-          /&gt;
-        &lt;/div&gt;
-      &lt;/a-tab-pane&gt;
-    &lt;/a-tabs&gt;
-    &lt;!-- 拦截记录 --&gt;
-    &lt;div &gt;
-      &lt;h3&gt;
-        &lt;WarningOutlined /&gt;
+          />
+        </div>
+      </a-tab-pane>
+    </a-tabs>
+    <!-- 拦截记录 -->
+    <div >
+      <h3>
+        <WarningOutlined />
         拦截记录
-      &lt;/h3&gt;
-      &lt;a-timeline v-if="blockLogs.length &gt; 0"&gt;
-        &lt;a-timeline-item
+      </h3>
+      <a-timeline v-if="blockLogs.length > 0">
+        <a-timeline-item
           v-for="log in blockLogs"
           :key="log.id"
           :color="getLogColor(log.type)"
-        &gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;a-tag :color="getLogColor(log.type)"&gt;{{ log.type }}&lt;/a-tag&gt;
-              &lt;span &gt;{{ formatTime(log.timestamp) }}&lt;/span&gt;
-            &lt;/div&gt;
-            &lt;div &gt;{{ log.message }}&lt;/div&gt;
-            &lt;div  v-if="log.details"&gt;{{ log.details }}&lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/a-timeline-item&gt;
-      &lt;/a-timeline&gt;
-      &lt;a-empty v-else description="暂无拦截记录" /&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+        >
+          <div >
+            <div >
+              <a-tag :color="getLogColor(log.type)">{{ log.type }}</a-tag>
+              <span >{{ formatTime(log.timestamp) }}</span>
+            </div>
+            <div >{{ log.message }}</div>
+            <div  v-if="log.details">{{ log.details }}</div>
+          </div>
+        </a-timeline-item>
+      </a-timeline>
+      <a-empty v-else description="暂无拦截记录" />
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
@@ -248,7 +248,7 @@ import {
 } from '@ant-design/icons-vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
-const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/firewall', () =&gt; loadData())
+const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/firewall', () => loadData())
 const loading = ref(false)
 const checking = ref(false)
 const activeTab = ref('global')
@@ -274,7 +274,7 @@ const sandbox = ref({
   agent_isolation: true,
 })
 const checkPath = ref('')
-const checkResult = ref&lt;{ allowed: boolean; reason: string } | null&gt;(null)
+const checkResult = ref<{ allowed: boolean; reason: string } | null>(null)
 interface BlockLog {
   id: string
   type: string
@@ -282,12 +282,12 @@ interface BlockLog {
   details?: string
   timestamp: number
 }
-const blockLogs = ref&lt;BlockLog[]&gt;([])
+const blockLogs = ref<BlockLog[]>([])
 async function loadGlobalRules() {
   try {
     loading.value = true
     const res = await request.get(`/agents/${agentId.value}/firewall/global`)
-    if (res.code === 0 &amp;&amp; res.data) {
+    if (res.code === 0 && res.data) {
       globalRules.value = res.data
     }
   } catch (error) {
@@ -365,39 +365,39 @@ function getLogColor(type: string) {
 }
 function formatTime(timestamp: number) {
   const diff = Date.now() - timestamp
-  if (diff &lt; 60000) return '刚刚'
-  if (diff &lt; 3600000) return `${Math.floor(diff / 60000)}分钟前`
-  if (diff &lt; 86400000) return `${Math.floor(diff / 360000)}小时前`
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
+  if (diff < 86400000) return `${Math.floor(diff / 360000)}小时前`
   return new Date(timestamp).toLocaleDateString()
 }
 async function loadData() {
   // 加载统计数据
   try {
     const res = await request.get(`/agents/${agentId.value}/firewall/stats`)
-    if (res.code === 0 &amp;&amp; res.data) {
+    if (res.code === 0 && res.data) {
       stats.value = res.data
     }
   } catch { /* 使用默认值 */ }
   // 加载拦截记录
   try {
     const res = await request.get(`/agents/${agentId.value}/firewall/logs`)
-    if (res.code === 0 &amp;&amp; res.data) {
+    if (res.code === 0 && res.data) {
       blockLogs.value = res.data
     }
   } catch { /* 使用空数组 */ }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   if (!agentStore.agents.length) await agentStore.loadAgents()
   // 确保有选中的 agent
-  if (agentStore.agents.length &amp;&amp; !agentId.value) {
+  if (agentStore.agents.length && !agentId.value) {
     agentId.value = agentStore.agents[0].id
     agentStore.setCurrentAgent(agentId.value)
   }
   loadGlobalRules()
   loadData()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg {
   display: flex;
   flex-direction: column;
@@ -505,5 +505,5 @@ onMounted(async () =&gt; {
   font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.6);
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

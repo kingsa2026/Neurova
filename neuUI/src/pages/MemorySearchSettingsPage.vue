@@ -1,237 +1,237 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h1 &gt;记忆检索设置&lt;/h1&gt;
-      &lt;p &gt;配置同义词库和语义搜索能力&lt;/p&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-tabs v-model:activeKey="activeTab"  size="large"&gt;
-        &lt;!-- ===== 同义词库管理 ===== --&gt;
-        &lt;a-tab-pane key="synonyms" tab="同义词库"&gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;div &gt;
-                &lt;h3 &gt;同义词词典&lt;/h3&gt;
-                &lt;div &gt;
-                  &lt;a-button @click="loadSynonyms" :loading="loading"&gt;
-                    &lt;ReloadOutlined /&gt; 重新加载
-                  &lt;/a-button&gt;
-                  &lt;a-button type="primary" @click="saveSynonyms" :loading="saving"&gt;
-                    &lt;SaveOutlined /&gt; 保存到文件
-                  &lt;/a-button&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-              &lt;a-alert
+<template>
+  <div >
+    <div >
+      <h1 >记忆检索设置</h1>
+      <p >配置同义词库和语义搜索能力</p>
+    </div>
+    <div >
+      <a-tabs v-model:activeKey="activeTab"  size="large">
+        <!-- ===== 同义词库管理 ===== -->
+        <a-tab-pane key="synonyms" tab="同义词库">
+          <div >
+            <div >
+              <div >
+                <h3 >同义词词典</h3>
+                <div >
+                  <a-button @click="loadSynonyms" :loading="loading">
+                    <ReloadOutlined /> 重新加载
+                  </a-button>
+                  <a-button type="primary" @click="saveSynonyms" :loading="saving">
+                    <SaveOutlined /> 保存到文件
+                  </a-button>
+                </div>
+              </div>
+              <a-alert
                 :message="`共 ${synonymStats.word_count} 个词条，平均 ${synonymStats.average_synonyms} 个同义词`"
                 type="info"
                 show-icon
                 style="margin-bottom: 16px"
-              /&gt;
-              &lt;div &gt;
-                &lt;div  v-for="item in synonymList" :key="item.word"&gt;
-                  &lt;div &gt;{{ item.word }}&lt;/div&gt;
-                  &lt;div &gt;
-                    &lt;a-tag v-for="syn in item.synonyms" :key="syn" closable @close="removeSynonym(item.word, syn)"&gt;
+              />
+              <div >
+                <div  v-for="item in synonymList" :key="item.word">
+                  <div >{{ item.word }}</div>
+                  <div >
+                    <a-tag v-for="syn in item.synonyms" :key="syn" closable @close="removeSynonym(item.word, syn)">
                       {{ syn }}
-                    &lt;/a-tag&gt;
-                  &lt;/div&gt;
-                  &lt;a-button type="link" danger size="small" @click="deleteWord(item.word)"&gt;
+                    </a-tag>
+                  </div>
+                  <a-button type="link" danger size="small" @click="deleteWord(item.word)">
                     删除
-                  &lt;/a-button&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-              &lt;a-divider&gt;添加新词条&lt;/a-divider&gt;
-              &lt;a-form layout="inline" @finish="addSynonym"&gt;
-                &lt;a-form-item name="word" :rules="[{ required: true, message: '请输入词语' }]"&gt;
-                  &lt;a-input v-model:value="newWord" placeholder="词语" style="width: 120px" /&gt;
-                &lt;/a-form-item&gt;
-                &lt;a-form-item name="synonyms" :rules="[{ required: true, message: '请输入同义词' }]"&gt;
-                  &lt;a-select
+                  </a-button>
+                </div>
+              </div>
+              <a-divider>添加新词条</a-divider>
+              <a-form layout="inline" @finish="addSynonym">
+                <a-form-item name="word" :rules="[{ required: true, message: '请输入词语' }]">
+                  <a-input v-model:value="newWord" placeholder="词语" style="width: 120px" />
+                </a-form-item>
+                <a-form-item name="synonyms" :rules="[{ required: true, message: '请输入同义词' }]">
+                  <a-select
                     v-model:value="newSynonyms"
                     mode="tags"
                     placeholder="输入同义词后按回车"
                     style="width: 300px"
                     :token-separators="[',', '，']"
-                  /&gt;
-                &lt;/a-form-item&gt;
-                &lt;a-form-item&gt;
-                  &lt;a-button type="primary" html-type="submit"&gt;
+                  />
+                </a-form-item>
+                <a-form-item>
+                  <a-button type="primary" html-type="submit">
                     添加
-                  &lt;/a-button&gt;
-                &lt;/a-form-item&gt;
-              &lt;/a-form&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/a-tab-pane&gt;
-        &lt;!-- ===== LLM配置 ===== --&gt;
-        &lt;a-tab-pane key="llm-config" tab="LLM 配置"&gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;h3 &gt;向量语义增强&lt;/h3&gt;
-              &lt;p &gt;
+                  </a-button>
+                </a-form-item>
+              </a-form>
+            </div>
+          </div>
+        </a-tab-pane>
+        <!-- ===== LLM配置 ===== -->
+        <a-tab-pane key="llm-config" tab="LLM 配置">
+          <div >
+            <div >
+              <h3 >向量语义增强</h3>
+              <p >
                 当同义词库无法覆盖时，使用LLM进行语义扩展，提升记忆检索的准确性
-              &lt;/p&gt;
-              &lt;div &gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;启用LLM增强&lt;/span&gt;
-                    &lt;span &gt;当同义词库无法覆盖时，调用LLM进行语义扩展&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="llmConfig.enable_llm_fallback" @change="saveLLMConfig" /&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-              &lt;a-divider /&gt;
-              &lt;a-form layout="vertical" &gt;
-                &lt;a-row :gutter="24"&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="API提供商"&gt;
-                      &lt;a-select v-model:value="llmConfig.llm_provider" @change="saveLLMConfig"&gt;
-                        &lt;a-select-option value="openai"&gt;OpenAI&lt;/a-select-option&gt;
-                        &lt;a-select-option value="azure"&gt;Azure OpenAI&lt;/a-select-option&gt;
-                        &lt;a-select-option value="anthropic"&gt;Anthropic&lt;/a-select-option&gt;
-                        &lt;a-select-option value="ollama"&gt;Ollama (本地)&lt;/a-select-option&gt;
-                        &lt;a-select-option value="custom"&gt;自定义&lt;/a-select-option&gt;
-                      &lt;/a-select&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="模型ID"&gt;
-                      &lt;a-input
+              </p>
+              <div >
+                <div >
+                  <div >
+                    <span >启用LLM增强</span>
+                    <span >当同义词库无法覆盖时，调用LLM进行语义扩展</span>
+                  </div>
+                  <a-switch v-model:checked="llmConfig.enable_llm_fallback" @change="saveLLMConfig" />
+                </div>
+              </div>
+              <a-divider />
+              <a-form layout="vertical" >
+                <a-row :gutter="24">
+                  <a-col :span="12">
+                    <a-form-item label="API提供商">
+                      <a-select v-model:value="llmConfig.llm_provider" @change="saveLLMConfig">
+                        <a-select-option value="openai">OpenAI</a-select-option>
+                        <a-select-option value="azure">Azure OpenAI</a-select-option>
+                        <a-select-option value="anthropic">Anthropic</a-select-option>
+                        <a-select-option value="ollama">Ollama (本地)</a-select-option>
+                        <a-select-option value="custom">自定义</a-select-option>
+                      </a-select>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="12">
+                    <a-form-item label="模型ID">
+                      <a-input
                         v-model:value="llmConfig.llm_model_id"
                         placeholder="text-embedding-3-small"
                         @change="saveLLMConfig"
-                      /&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                &lt;/a-row&gt;
-                &lt;a-form-item label="API地址"&gt;
-                  &lt;a-input
+                      />
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+                <a-form-item label="API地址">
+                  <a-input
                     v-model:value="llmConfig.llm_api_url"
                     placeholder="https://api.openai.com/v1"
                     @change="saveLLMConfig"
-                  /&gt;
-                &lt;/a-form-item&gt;
-                &lt;a-form-item label="API密钥"&gt;
-                  &lt;a-input-password
+                  />
+                </a-form-item>
+                <a-form-item label="API密钥">
+                  <a-input-password
                     v-model:value="llmConfig.llm_api_key"
                     placeholder="sk-..."
                     @change="saveLLMConfig"
-                  /&gt;
-                &lt;/a-form-item&gt;
-                &lt;a-row :gutter="24"&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="Temperature"&gt;
-                      &lt;a-slider
+                  />
+                </a-form-item>
+                <a-row :gutter="24">
+                  <a-col :span="12">
+                    <a-form-item label="Temperature">
+                      <a-slider
                         v-model:value="llmConfig.llm_temperature"
                         :min="0"
                         :max="1"
                         :step="0.1"
                         @change="saveLLMConfig"
-                      /&gt;
-                      &lt;span &gt;{{ llmConfig.llm_temperature }}&lt;/span&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="最大Token数"&gt;
-                      &lt;a-input-number
+                      />
+                      <span >{{ llmConfig.llm_temperature }}</span>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="12">
+                    <a-form-item label="最大Token数">
+                      <a-input-number
                         v-model:value="llmConfig.llm_max_tokens"
                         :min="100"
                         :max="4000"
                         style="width: 100%"
                         @change="saveLLMConfig"
-                      /&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                &lt;/a-row&gt;
-              &lt;/a-form&gt;
-            &lt;/div&gt;
-            &lt;!-- 测试区域 --&gt;
-            &lt;div &gt;
-              &lt;h3 &gt;语义搜索测试&lt;/h3&gt;
-              &lt;a-form layout="inline" @finish="testSearch"&gt;
-                &lt;a-form-item name="query" style="flex: 1"&gt;
-                  &lt;a-input
+                      />
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+              </a-form>
+            </div>
+            <!-- 测试区域 -->
+            <div >
+              <h3 >语义搜索测试</h3>
+              <a-form layout="inline" @finish="testSearch">
+                <a-form-item name="query" style="flex: 1">
+                  <a-input
                     v-model:value="testQuery"
                     placeholder="输入查询词测试语义扩展效果，如：宠物、开心..."
-                  /&gt;
-                &lt;/a-form-item&gt;
-                &lt;a-form-item&gt;
-                  &lt;a-button type="primary" html-type="submit" :loading="testing"&gt;
+                  />
+                </a-form-item>
+                <a-form-item>
+                  <a-button type="primary" html-type="submit" :loading="testing">
                     测试
-                  &lt;/a-button&gt;
-                &lt;/a-form-item&gt;
-              &lt;/a-form&gt;
-              &lt;div v-if="testResult" &gt;
-                &lt;a-descriptions :column="1" bordered size="small"&gt;
-                  &lt;a-descriptions-item label="原始查询"&gt;
-                    &lt;code&gt;{{ testResult.original_query }}&lt;/code&gt;
-                  &lt;/a-descriptions-item&gt;
-                  &lt;a-descriptions-item label="扩展查询"&gt;
-                    &lt;code&gt;{{ testResult.expanded_query }}&lt;/code&gt;
-                  &lt;/a-descriptions-item&gt;
-                  &lt;a-descriptions-item label="使用的同义词"&gt;
-                    &lt;a-tag v-for="syn in testResult.synonyms_used" :key="syn" color="blue"&gt;
+                  </a-button>
+                </a-form-item>
+              </a-form>
+              <div v-if="testResult" >
+                <a-descriptions :column="1" bordered size="small">
+                  <a-descriptions-item label="原始查询">
+                    <code>{{ testResult.original_query }}</code>
+                  </a-descriptions-item>
+                  <a-descriptions-item label="扩展查询">
+                    <code>{{ testResult.expanded_query }}</code>
+                  </a-descriptions-item>
+                  <a-descriptions-item label="使用的同义词">
+                    <a-tag v-for="syn in testResult.synonyms_used" :key="syn" color="blue">
                       {{ syn }}
-                    &lt;/a-tag&gt;
-                    &lt;span v-if="testResult.synonyms_used.length === 0"&gt;无&lt;/span&gt;
-                  &lt;/a-descriptions-item&gt;
-                  &lt;a-descriptions-item label="LLM增强"&gt;
-                    &lt;a-tag :color="testResult.llm_enhanced ? 'green' : 'default'"&gt;
+                    </a-tag>
+                    <span v-if="testResult.synonyms_used.length === 0">无</span>
+                  </a-descriptions-item>
+                  <a-descriptions-item label="LLM增强">
+                    <a-tag :color="testResult.llm_enhanced ? 'green' : 'default'">
                       {{ testResult.llm_enhanced ? '已启用' : '未启用' }}
-                    &lt;/a-tag&gt;
-                  &lt;/a-descriptions-item&gt;
-                &lt;/a-descriptions&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/a-tab-pane&gt;
-        &lt;!-- ===== 向量搜索配置 ===== --&gt;
-        &lt;a-tab-pane key="vector-config" tab="向量搜索"&gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;h3 &gt;向量搜索后端&lt;/h3&gt;
-              &lt;p &gt;选择记忆检索使用的向量搜索引擎&lt;/p&gt;
-              &lt;div &gt;
-                &lt;div
+                    </a-tag>
+                  </a-descriptions-item>
+                </a-descriptions>
+              </div>
+            </div>
+          </div>
+        </a-tab-pane>
+        <!-- ===== 向量搜索配置 ===== -->
+        <a-tab-pane key="vector-config" tab="向量搜索">
+          <div >
+            <div >
+              <h3 >向量搜索后端</h3>
+              <p >选择记忆检索使用的向量搜索引擎</p>
+              <div >
+                <div
                   :
-                &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;TF-IDF (默认)&lt;/span&gt;
-                    &lt;span &gt;轻量级，无需额外依赖，适合中小规模数据&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-tag color="green"&gt;可用&lt;/a-tag&gt;
-                &lt;/div&gt;
-                &lt;div
+                >
+                  <div >
+                    <span >TF-IDF (默认)</span>
+                    <span >轻量级，无需额外依赖，适合中小规模数据</span>
+                  </div>
+                  <a-tag color="green">可用</a-tag>
+                </div>
+                <div
                   :
-                &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;FAISS&lt;/span&gt;
-                    &lt;span &gt;Facebook开源，高性能，适合大规模向量检索&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-tag :color="availableBackends.faiss ? 'green' : 'default'"&gt;
+                >
+                  <div >
+                    <span >FAISS</span>
+                    <span >Facebook开源，高性能，适合大规模向量检索</span>
+                  </div>
+                  <a-tag :color="availableBackends.faiss ? 'green' : 'default'">
                     {{ availableBackends.faiss ? '可用' : '不可用' }}
-                  &lt;/a-tag&gt;
-                &lt;/div&gt;
-                &lt;div
+                  </a-tag>
+                </div>
+                <div
                   :
-                &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;ChromaDB&lt;/span&gt;
-                    &lt;span &gt;轻量级向量数据库，支持持久化&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-tag :color="availableBackends.chromadb ? 'green' : 'default'"&gt;
+                >
+                  <div >
+                    <span >ChromaDB</span>
+                    <span >轻量级向量数据库，支持持久化</span>
+                  </div>
+                  <a-tag :color="availableBackends.chromadb ? 'green' : 'default'">
                     {{ availableBackends.chromadb ? '可用' : '不可用' }}
-                  &lt;/a-tag&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/a-tab-pane&gt;
-      &lt;/a-tabs&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+                  </a-tag>
+                </div>
+              </div>
+            </div>
+          </div>
+        </a-tab-pane>
+      </a-tabs>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
@@ -244,17 +244,17 @@ const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
 // 同义词库数据
-const synonymStats = reactive&lt;SynonymStats&gt;({
+const synonymStats = reactive<SynonymStats>({
   word_count: 0,
   total_synonyms: 0,
   average_synonyms: 0,
   file_path: ''
 })
-const synonymList = ref&lt;SynonymWord[]&gt;([])
+const synonymList = ref<SynonymWord[]>([])
 const newWord = ref('')
-const newSynonyms = ref&lt;string[]&gt;([])
+const newSynonyms = ref<string[]>([])
 // LLM配置
-const llmConfig = reactive&lt;SynonymConfig&gt;({
+const llmConfig = reactive<SynonymConfig>({
   enable_llm_fallback: false,
   llm_provider: 'openai',
   llm_api_url: '',
@@ -271,7 +271,7 @@ const availableBackends = reactive({
 })
 // 测试结果
 const testQuery = ref('')
-const testResult = ref&lt;SemanticSearchResult | null&gt;(null)
+const testResult = ref<SemanticSearchResult | null>(null)
 // 加载同义词库
 async function loadSynonyms() {
   loading.value = true
@@ -384,7 +384,7 @@ async function testSearch() {
   }
 }
 // 初始化
-onMounted(async () =&gt; {
+onMounted(async () => {
   await loadSynonyms()
   try {
     const configRes = await synonymAPI.getLLMConfig()
@@ -399,8 +399,8 @@ onMounted(async () =&gt; {
     console.error('加载LLM配置失败:', err)
   }
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .memory-search-settings {
   padding: 24px 28px;
   max-width: 960px;
@@ -542,7 +542,7 @@ onMounted(async () =&gt; {
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
   color: #e2e8f0 !important;
 }
-:deep(.ant-form-item-label &gt; label) {
+:deep(.ant-form-item-label > label) {
   color: rgba(255, 255, 255, 0.6) !important;
 }
 :deep(.ant-divider) {
@@ -554,5 +554,5 @@ onMounted(async () =&gt; {
 :deep(.ant-descriptions-item-content) {
   color: #e2e8f0;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

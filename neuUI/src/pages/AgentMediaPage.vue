@@ -1,34 +1,34 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;PictureOutlined :style="{color:'#06b6d4'}"/&gt; 媒体处理&lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;a-radio-group v-model:value="tab" button-style="solid" size="small"  style="padding:10px 16px;border-radius:10px"&gt;
-      &lt;a-radio-button value="image"&gt;图片&lt;/a-radio-button&gt;
-      &lt;a-radio-button value="audio"&gt;音频&lt;/a-radio-button&gt;
-      &lt;a-radio-button value="video"&gt;视频&lt;/a-radio-button&gt;
-    &lt;/a-radio-group&gt;
-    &lt;div &gt;
-      &lt;div v-for="m in list" :key="m.id" &gt;
-        &lt;div  :style="{background:getMediaColor(m.type)+'15'}"&gt;
-          &lt;component :is="getMediaIcon(m.type)" :style="{color:getMediaColor(m.type),fontSize:'2rem'}"/&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;span &gt;{{ m.name }}&lt;/span&gt;
-          &lt;span &gt;{{ formatFileSize(m.size) }}&lt;/span&gt;
-          &lt;span &gt;{{ formatTime(m.created_at) }}&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 ><PictureOutlined :style="{color:'#06b6d4'}"/> 媒体处理</h2>
+    </div>
+    <a-radio-group v-model:value="tab" button-style="solid" size="small"  style="padding:10px 16px;border-radius:10px">
+      <a-radio-button value="image">图片</a-radio-button>
+      <a-radio-button value="audio">音频</a-radio-button>
+      <a-radio-button value="video">视频</a-radio-button>
+    </a-radio-group>
+    <div >
+      <div v-for="m in list" :key="m.id" >
+        <div  :style="{background:getMediaColor(m.type)+'15'}">
+          <component :is="getMediaIcon(m.type)" :style="{color:getMediaColor(m.type),fontSize:'2rem'}"/>
+        </div>
+        <div >
+          <span >{{ m.name }}</span>
+          <span >{{ formatFileSize(m.size) }}</span>
+          <span >{{ formatTime(m.created_at) }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { PictureOutlined, AudioOutlined, PlaySquareOutlined, FileImageOutlined } from '@ant-design/icons-vue'
 import { filesAPI } from '@/api/modules/files_api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { message } from 'ant-design-vue'
-const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/media', () =&gt; loadFiles())
+const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/media', () => loadFiles())
 const tab = ref('image')
 interface MediaFile {
   id: string
@@ -37,41 +37,41 @@ interface MediaFile {
   size: number
   created_at: string
 }
-const files = ref&lt;MediaFile[]&gt;([])
+const files = ref<MediaFile[]>([])
 const loading = ref(false)
-const list = computed(() =&gt; {
-  return files.value.filter(d =&gt; {
+const list = computed(() => {
+  return files.value.filter(d => {
     if (tab.value === 'image') return d.type === 'image' || d.name.match(/\.(png|jpg|jpeg|gif|webp|svg)$/i)
     if (tab.value === 'audio') return d.type === 'audio' || d.name.match(/\.(mp3|wav|ogg|flac|aac)$/i)
     if (tab.value === 'video') return d.type === 'video' || d.name.match(/\.(mp4|webm|mov|avi|mkv)$/i)
     return true
   })
 })
-const getMediaIcon = (type: string) =&gt; {
+const getMediaIcon = (type: string) => {
   if (type === 'image' || type?.match(/image/)) return FileImageOutlined
   if (type === 'audio' || type?.match(/audio/)) return AudioOutlined
   if (type === 'video' || type?.match(/video/)) return PlaySquareOutlined
   return PictureOutlined
 }
-const getMediaColor = (type: string) =&gt; {
+const getMediaColor = (type: string) => {
   if (type === 'image' || type?.match(/image/)) return '#3b82f6'
   if (type === 'audio' || type?.match(/audio/)) return '#8b5cf6'
   if (type === 'video' || type?.match(/video/)) return '#f59e0b'
   return '#06b6d4'
 }
-const formatFileSize = (bytes: number) =&gt; {
+const formatFileSize = (bytes: number) => {
   if (!bytes) return '0 B'
   const k = 1024
   const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
 }
-const formatTime = (time: string) =&gt; {
+const formatTime = (time: string) => {
   if (!time) return ''
   const d = new Date(time)
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-const loadFiles = async () =&gt; {
+const loadFiles = async () => {
   loading.value = true
   try {
     const res = await filesAPI.list(agentId.value)
@@ -85,12 +85,12 @@ const loadFiles = async () =&gt; {
     loading.value = false
   }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await initAgent()
   loadFiles()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg {
   display: flex;
   flex-direction: column;
@@ -148,5 +148,5 @@ onMounted(async () =&gt; {
   color: rgba(255, 255, 255, 0.2);
   font-size: 0.72rem;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

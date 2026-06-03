@@ -21,7 +21,6 @@ from typing import List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
-
 class ToolExecutor:
     """统一工具执行器
 
@@ -354,7 +353,7 @@ class ToolExecutor:
         logger.info(f"CLI工具执行（模拟）: {tool_name}, 参数: {tool_params}")
 
         if self.tool_router:
-            import asyncio as _asyncio
+            import asyncio
             try:
                 loop = _asyncio.get_running_loop()
                 # 已有 event loop 在运行，用 nest_asyncio 或直接创建新 loop

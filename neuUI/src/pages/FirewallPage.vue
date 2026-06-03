@@ -1,196 +1,196 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;FirewallOutlined :style="{color:'#f97316'}" /&gt; 防火墙管理
-      &lt;/h2&gt;
-      &lt;a-space&gt;
-        &lt;a-switch v-model:checked="globalEnabled" @change="toggleGlobal" /&gt;
-        &lt;span&gt;{{ globalEnabled ? '已启用' : '已禁用' }}&lt;/span&gt;
-      &lt;/a-space&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;ShieldAlertOutlined /&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.blockedRequests }}&lt;/div&gt;
-          &lt;div &gt;今日拦截&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;CheckCircleOutlined /&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.allowedRequests }}&lt;/div&gt;
-          &lt;div &gt;今日放行&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;BanOutlined /&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.blacklistedIPs }}&lt;/div&gt;
-          &lt;div &gt;黑名单IP&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;ClockCircleOutlined /&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.rateLimitHits }}&lt;/div&gt;
-          &lt;div &gt;触发限流&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;a-tabs default-active-key="rules" :items="tabs" &gt;
-      &lt;template #rules&gt;
-        &lt;div &gt;
-          &lt;div &gt;
-            &lt;h3 &gt;全局规则&lt;/h3&gt;
-            &lt;a-form :model="globalRules" layout="vertical"&gt;
-              &lt;a-row :gutter="16"&gt;
-                &lt;a-col :span="8"&gt;
-                  &lt;a-form-item label="速率限制 (次/分钟)"&gt;
-                    &lt;a-input-number v-model:value="globalRules.rateLimit" :min="10" :max="1000" /&gt;
-                  &lt;/a-form-item&gt;
-                &lt;/a-col&gt;
-                &lt;a-col :span="8"&gt;
-                  &lt;a-form-item label="最大请求大小 (MB)"&gt;
-                    &lt;a-input-number v-model:value="globalRules.maxPayloadMB" :min="1" :max="100" /&gt;
-                  &lt;/a-form-item&gt;
-                &lt;/a-col&gt;
-                &lt;a-col :span="8"&gt;
-                  &lt;a-form-item label="启用IP过滤"&gt;
-                    &lt;a-switch v-model:checked="globalRules.enableIPFilter" /&gt;
-                  &lt;/a-form-item&gt;
-                &lt;/a-col&gt;
-              &lt;/a-row&gt;
-              &lt;a-form-item label="禁止的文件扩展名"&gt;
-                &lt;a-input
+<template>
+  <div >
+    <div >
+      <h2 >
+        <FirewallOutlined :style="{color:'#f97316'}" /> 防火墙管理
+      </h2>
+      <a-space>
+        <a-switch v-model:checked="globalEnabled" @change="toggleGlobal" />
+        <span>{{ globalEnabled ? '已启用' : '已禁用' }}</span>
+      </a-space>
+    </div>
+    <div >
+      <div >
+        <div >
+          <ShieldAlertOutlined />
+        </div>
+        <div >
+          <div >{{ stats.blockedRequests }}</div>
+          <div >今日拦截</div>
+        </div>
+      </div>
+      <div >
+        <div >
+          <CheckCircleOutlined />
+        </div>
+        <div >
+          <div >{{ stats.allowedRequests }}</div>
+          <div >今日放行</div>
+        </div>
+      </div>
+      <div >
+        <div >
+          <BanOutlined />
+        </div>
+        <div >
+          <div >{{ stats.blacklistedIPs }}</div>
+          <div >黑名单IP</div>
+        </div>
+      </div>
+      <div >
+        <div >
+          <ClockCircleOutlined />
+        </div>
+        <div >
+          <div >{{ stats.rateLimitHits }}</div>
+          <div >触发限流</div>
+        </div>
+      </div>
+    </div>
+    <a-tabs default-active-key="rules" :items="tabs" >
+      <template #rules>
+        <div >
+          <div >
+            <h3 >全局规则</h3>
+            <a-form :model="globalRules" layout="vertical">
+              <a-row :gutter="16">
+                <a-col :span="8">
+                  <a-form-item label="速率限制 (次/分钟)">
+                    <a-input-number v-model:value="globalRules.rateLimit" :min="10" :max="1000" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="8">
+                  <a-form-item label="最大请求大小 (MB)">
+                    <a-input-number v-model:value="globalRules.maxPayloadMB" :min="1" :max="100" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="8">
+                  <a-form-item label="启用IP过滤">
+                    <a-switch v-model:checked="globalRules.enableIPFilter" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+              <a-form-item label="禁止的文件扩展名">
+                <a-input
                   v-model:value="globalRules.blockedExtensions"
                   placeholder="逗号分隔，如: .exe,.php,.sh"
-                /&gt;
-              &lt;/a-form-item&gt;
-              &lt;a-form-item label="禁止的路径模式"&gt;
-                &lt;a-textarea
+                />
+              </a-form-item>
+              <a-form-item label="禁止的路径模式">
+                <a-textarea
                   v-model:value="globalRules.blockedPaths"
                   placeholder="每行一个路径模式"
                   :rows="3"
-                /&gt;
-              &lt;/a-form-item&gt;
-              &lt;a-form-item&gt;
-                &lt;a-btn type="primary" @click="saveGlobalRules"&gt;保存全局规则&lt;/a-btn&gt;
-              &lt;/a-form-item&gt;
-            &lt;/a-form&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/template&gt;
-      &lt;template #whitelist&gt;
-        &lt;div &gt;
-          &lt;div &gt;
-            &lt;a-input-search
+                />
+              </a-form-item>
+              <a-form-item>
+                <a-btn type="primary" @click="saveGlobalRules">保存全局规则</a-btn>
+              </a-form-item>
+            </a-form>
+          </div>
+        </div>
+      </template>
+      <template #whitelist>
+        <div >
+          <div >
+            <a-input-search
               placeholder="搜索IP"
               v-model:value="ipFilter"
               @search="searchIP"
               style="width: 260px"
-            /&gt;
-            &lt;a-btn type="primary" size="small" @click="showAddIPModal = true"&gt;
-              &lt;PlusOutlined /&gt;添加白名单
-            &lt;/a-btn&gt;
-          &lt;/div&gt;
-          &lt;a-table
+            />
+            <a-btn type="primary" size="small" @click="showAddIPModal = true">
+              <PlusOutlined />添加白名单
+            </a-btn>
+          </div>
+          <a-table
             :columns="ipCols"
             :data-source="whitelistIPs"
             row-key="ip"
             size="small"
-          &gt;
-            &lt;template #bodyCell="{ c, r }"&gt;
-              &lt;template v-if="c.key === 'status'"&gt;
-                &lt;a-tag :color="r.status === 'active' ? 'green' : 'default'"&gt;
+          >
+            <template #bodyCell="{ c, r }">
+              <template v-if="c.key === 'status'">
+                <a-tag :color="r.status === 'active' ? 'green' : 'default'">
                   {{ r.status === 'active' ? '活跃' : '禁用' }}
-                &lt;/a-tag&gt;
-              &lt;/template&gt;
-              &lt;template v-if="c.key === 'actions'"&gt;
-                &lt;a-space&gt;
-                  &lt;a-btn size="small" type="link" @click="toggleIPStatus(r)"&gt;
+                </a-tag>
+              </template>
+              <template v-if="c.key === 'actions'">
+                <a-space>
+                  <a-btn size="small" type="link" @click="toggleIPStatus(r)">
                     {{ r.status === 'active' ? '禁用' : '启用' }}
-                  &lt;/a-btn&gt;
-                  &lt;a-popconfirm title="确定删除此IP？" @confirm="removeIP(r.ip)"&gt;
-                    &lt;a-btn size="small" type="link" danger&gt;删除&lt;/a-btn&gt;
-                  &lt;/a-popconfirm&gt;
-                &lt;/a-space&gt;
-              &lt;/template&gt;
-            &lt;/template&gt;
-          &lt;/a-table&gt;
-        &lt;/div&gt;
-      &lt;/template&gt;
-      &lt;template #blacklist&gt;
-        &lt;div &gt;
-          &lt;a-table
+                  </a-btn>
+                  <a-popconfirm title="确定删除此IP？" @confirm="removeIP(r.ip)">
+                    <a-btn size="small" type="link" danger>删除</a-btn>
+                  </a-popconfirm>
+                </a-space>
+              </template>
+            </template>
+          </a-table>
+        </div>
+      </template>
+      <template #blacklist>
+        <div >
+          <a-table
             :columns="blacklistCols"
             :data-source="blacklistIPs"
             row-key="ip"
             size="small"
-          &gt;
-            &lt;template #bodyCell="{ c, r }"&gt;
-              &lt;template v-if="c.key === 'reason'"&gt;
-                &lt;a-tag color="red"&gt;{{ r.reason }}&lt;/a-tag&gt;
-              &lt;/template&gt;
-              &lt;template v-if="c.key === 'actions'"&gt;
-                &lt;a-space&gt;
-                  &lt;a-btn size="small" type="link" @click="unblockIP(r)"&gt;解除封禁&lt;/a-btn&gt;
-                &lt;/a-space&gt;
-              &lt;/template&gt;
-            &lt;/template&gt;
-          &lt;/a-table&gt;
-        &lt;/div&gt;
-      &lt;/template&gt;
-      &lt;template #logs&gt;
-        &lt;div &gt;
-          &lt;a-table
+          >
+            <template #bodyCell="{ c, r }">
+              <template v-if="c.key === 'reason'">
+                <a-tag color="red">{{ r.reason }}</a-tag>
+              </template>
+              <template v-if="c.key === 'actions'">
+                <a-space>
+                  <a-btn size="small" type="link" @click="unblockIP(r)">解除封禁</a-btn>
+                </a-space>
+              </template>
+            </template>
+          </a-table>
+        </div>
+      </template>
+      <template #logs>
+        <div >
+          <a-table
             :columns="logCols"
             :data-source="firewallLogs"
             row-key="id"
             size="small"
             :pagination="logPagination"
-          &gt;
-            &lt;template #bodyCell="{ c, r }"&gt;
-              &lt;template v-if="c.key === 'action'"&gt;
-                &lt;a-tag :color="r.action === 'block' ? 'red' : 'green'"&gt;
+          >
+            <template #bodyCell="{ c, r }">
+              <template v-if="c.key === 'action'">
+                <a-tag :color="r.action === 'block' ? 'red' : 'green'">
                   {{ r.action === 'block' ? '拦截' : '放行' }}
-                &lt;/a-tag&gt;
-              &lt;/template&gt;
-              &lt;template v-if="c.key === 'time'"&gt;
+                </a-tag>
+              </template>
+              <template v-if="c.key === 'time'">
                 {{ formatTime(r.time) }}
-              &lt;/template&gt;
-            &lt;/template&gt;
-          &lt;/a-table&gt;
-        &lt;/div&gt;
-      &lt;/template&gt;
-    &lt;/a-tabs&gt;
-    &lt;a-modal
+              </template>
+            </template>
+          </a-table>
+        </div>
+      </template>
+    </a-tabs>
+    <a-modal
       v-model:open="showAddIPModal"
       title="添加白名单IP"
       @ok="addWhitelistIP"
       @cancel="showAddIPModal = false"
-    &gt;
-      &lt;a-form :model="newIPForm" layout="vertical"&gt;
-        &lt;a-form-item label="IP地址"&gt;
-          &lt;a-input v-model:value="newIPForm.ip" placeholder="请输入IP地址" /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="备注"&gt;
-          &lt;a-input v-model:value="newIPForm.note" placeholder="可选，如：公司办公网" /&gt;
-        &lt;/a-form-item&gt;
-      &lt;/a-form&gt;
-    &lt;/a-modal&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+    >
+      <a-form :model="newIPForm" layout="vertical">
+        <a-form-item label="IP地址">
+          <a-input v-model:value="newIPForm.ip" placeholder="请输入IP地址" />
+        </a-form-item>
+        <a-form-item label="备注">
+          <a-input v-model:value="newIPForm.note" placeholder="可选，如：公司办公网" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive } from 'vue';
 import { message } from 'ant-design-vue';
 import { request } from '@/api';
@@ -244,20 +244,20 @@ const newIPForm = reactive({
   ip: '',
   note: ''
 });
-const whitelistIPs = ref&lt;WhitelistIP[]&gt;([
+const whitelistIPs = ref<WhitelistIP[]>([
   { ip: '192.168.1.0/24', note: '内网网段', status: 'active', added_at: '2026-01-15' },
   { ip: '10.0.0.0/8', note: '公司内网', status: 'active', added_at: '2026-02-01' },
   { ip: '172.16.0.0/12', note: '测试环境', status: 'active', added_at: '2026-03-10' },
   { ip: '47.252.31.69', note: '生产服务器', status: 'active', added_at: '2026-04-05' },
   { ip: '127.0.0.1', note: '本地回环', status: 'active', added_at: '2026-01-01' }
 ]);
-const blacklistIPs = ref&lt;BlacklistIP[]&gt;([
+const blacklistIPs = ref<BlacklistIP[]>([
   { ip: '10.0.0.5', reason: '暴力破解', blocked_at: '2026-05-24', block_count: 156 },
   { ip: '198.51.100.20', reason: '恶意扫描', blocked_at: '2026-05-23', block_count: 89 },
   { ip: '203.0.113.45', reason: 'DDOS攻击', blocked_at: '2026-05-22', block_count: 456 },
   { ip: '192.0.2.100', reason: '异常请求', blocked_at: '2026-05-21', block_count: 34 }
 ]);
-const firewallLogs = ref&lt;FirewallLog[]&gt;([
+const firewallLogs = ref<FirewallLog[]>([
   { id: '1', ip: '10.0.0.5', action: 'block', rule: '暴力破解检测', time: new Date().toISOString(), detail: '连续10次登录失败' },
   { id: '2', ip: '192.168.1.100', action: 'allow', rule: '白名单', time: new Date().toISOString(), detail: '来自信任IP' },
   { id: '3', ip: '198.51.100.20', action: 'block', rule: '恶意扫描', time: new Date().toISOString(), detail: '检测到端口扫描' },
@@ -290,7 +290,7 @@ const logCols = [
   { title: '时间', key: 'time', width: 160 },
   { title: '详情', dataIndex: 'detail' }
 ];
-const toggleGlobal = async () =&gt; {
+const toggleGlobal = async () => {
   try {
     const res = await request.put('/firewall/global', {
       enabled: globalEnabled.value
@@ -304,13 +304,13 @@ const toggleGlobal = async () =&gt; {
     message.error('操作失败');
   }
 };
-const saveGlobalRules = async () =&gt; {
+const saveGlobalRules = async () => {
   try {
     const res = await request.put('/firewall/global', {
       rate_limit_per_minute: globalRules.rateLimit,
       max_payload_bytes: globalRules.maxPayloadMB * 1024 * 1024,
-      blocked_extensions: globalRules.blockedExtensions.split(',').map(s =&gt; s.trim()),
-      blocked_patterns: globalRules.blockedPaths.split('\n').map(s =&gt; s.trim()).filter(Boolean),
+      blocked_extensions: globalRules.blockedExtensions.split(',').map(s => s.trim()),
+      blocked_patterns: globalRules.blockedPaths.split('\n').map(s => s.trim()).filter(Boolean),
       ip_whitelist_enabled: globalRules.enableIPFilter
     });
     if (res.success) {
@@ -321,10 +321,10 @@ const saveGlobalRules = async () =&gt; {
     message.error('保存失败');
   }
 };
-const searchIP = () =&gt; {
+const searchIP = () => {
   console.log('搜索IP:', ipFilter.value);
 };
-const addWhitelistIP = async () =&gt; {
+const addWhitelistIP = async () => {
   if (!newIPForm.ip.trim()) {
     message.warning('请输入IP地址');
     return;
@@ -359,49 +359,49 @@ const addWhitelistIP = async () =&gt; {
     message.success('本地添加成功');
   }
 };
-const toggleIPStatus = (item: WhitelistIP) =&gt; {
+const toggleIPStatus = (item: WhitelistIP) => {
   item.status = item.status === 'active' ? 'disabled' : 'active';
   message.success(`IP ${item.ip} ${item.status === 'active' ? '已启用' : '已禁用'}`);
 };
-const removeIP = async (ip: string) =&gt; {
+const removeIP = async (ip: string) => {
   try {
     const res = await request.put('/firewall/user/rules', {
       extra_blocked_paths: []
     });
     if (res.success) {
       message.success('删除成功');
-      whitelistIPs.value = whitelistIPs.value.filter(item =&gt; item.ip !== ip);
+      whitelistIPs.value = whitelistIPs.value.filter(item => item.ip !== ip);
     }
   } catch (error) {
     console.error('删除白名单失败:', error);
-    whitelistIPs.value = whitelistIPs.value.filter(item =&gt; item.ip !== ip);
+    whitelistIPs.value = whitelistIPs.value.filter(item => item.ip !== ip);
     message.success('本地删除成功');
   }
 };
-const unblockIP = async (item: BlacklistIP) =&gt; {
+const unblockIP = async (item: BlacklistIP) => {
   try {
     const res = await request.post('/firewall/user/rules', {
       extra_blocked_paths: []
     });
     if (res.success) {
       message.success('已解除封禁');
-      blacklistIPs.value = blacklistIPs.value.filter(i =&gt; i.ip !== item.ip);
+      blacklistIPs.value = blacklistIPs.value.filter(i => i.ip !== item.ip);
     }
   } catch (error) {
     console.error('解除封禁失败:', error);
-    blacklistIPs.value = blacklistIPs.value.filter(i =&gt; i.ip !== item.ip);
+    blacklistIPs.value = blacklistIPs.value.filter(i => i.ip !== item.ip);
     message.success('本地解除成功');
   }
 };
-const formatTime = (time: string) =&gt; {
+const formatTime = (time: string) => {
   try {
     return new Date(time).toLocaleString('zh-CN');
   } catch {
     return time;
   }
 };
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg {
   display: flex;
   flex-direction: column;
@@ -497,4 +497,4 @@ const formatTime = (time: string) =&gt; {
   padding-bottom: 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
-&lt;/style&gt;
+</style>

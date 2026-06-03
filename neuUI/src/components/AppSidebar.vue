@@ -1,38 +1,38 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;a-menu
+<template>
+  <div >
+    <a-menu
       v-model:selectedKeys="selectedKeys"
       mode="horizontal"
       @click="onMenuClick"
-    &gt;
-      &lt;a-menu-item key="/dashboard"&gt;首页&lt;/a-menu-item&gt;
-      &lt;a-sub-menu key="agents-menu" title="Agent"&gt;
-        &lt;a-menu-item key="/agents"&gt;Agent 列表&lt;/a-menu-item&gt;
-        &lt;a-menu-item key="/agents/create"&gt;创建 Agent&lt;/a-menu-item&gt;
-      &lt;/a-sub-menu&gt;
-      &lt;a-menu-item key="/knowledge"&gt;知识库&lt;/a-menu-item&gt;
-      &lt;a-menu-item key="/models"&gt;模型管理&lt;/a-menu-item&gt;
-      &lt;a-sub-menu key="system-menu" title="系统"&gt;
-        &lt;a-menu-item key="/settings"&gt;系统设置&lt;/a-menu-item&gt;
-        &lt;a-menu-item key="/notifications"&gt;通知中心&lt;/a-menu-item&gt;
-      &lt;/a-sub-menu&gt;
-    &lt;/a-menu&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+    >
+      <a-menu-item key="/dashboard">首页</a-menu-item>
+      <a-sub-menu key="agents-menu" title="Agent">
+        <a-menu-item key="/agents">Agent 列表</a-menu-item>
+        <a-menu-item key="/agents/create">创建 Agent</a-menu-item>
+      </a-sub-menu>
+      <a-menu-item key="/knowledge">知识库</a-menu-item>
+      <a-menu-item key="/models">模型管理</a-menu-item>
+      <a-sub-menu key="system-menu" title="系统">
+        <a-menu-item key="/settings">系统设置</a-menu-item>
+        <a-menu-item key="/notifications">通知中心</a-menu-item>
+      </a-sub-menu>
+    </a-menu>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 const router = useRouter()
 const route = useRoute()
-const selectedKeys = ref&lt;string[]&gt;(['/dashboard'])
+const selectedKeys = ref<string[]>(['/dashboard'])
 const validRoutes = [
   '/dashboard', '/agents', '/agents/create',
   '/knowledge', '/models',
   '/settings', '/notifications',
 ]
 watch(
-  () =&gt; route.path,
-  (path) =&gt; {
+  () => route.path,
+  (path) => {
     if (validRoutes.includes(path)) {
       selectedKeys.value = [path]
     }
@@ -42,8 +42,8 @@ watch(
 function onMenuClick({ key }: { key: string }) {
   router.push(key)
 }
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .top-menu {
   background: transparent !important;
   border-bottom: none !important;
@@ -98,5 +98,5 @@ function onMenuClick({ key }: { key: string }) {
   color: #93c5fd !important;
   background: rgba(96, 165, 250, 0.1) !important;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

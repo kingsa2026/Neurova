@@ -1,22 +1,22 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;HistoryOutlined :style="{ color: '#34d399' }" /&gt; 协作历史
-      &lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-table :columns="cols" :data-source="list" row-key="id" size="middle" :pagination="{ pageSize: 10 }"&gt;
-        &lt;template #bodyCell="{ column: c, record: r }"&gt;
-          &lt;template v-if="c.key === 'st'"&gt;
-            &lt;a-tag :color="r.sc"&gt;{{ r.st }}&lt;/a-tag&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 >
+        <HistoryOutlined :style="{ color: '#34d399' }" /> 协作历史
+      </h2>
+    </div>
+    <div >
+      <a-table :columns="cols" :data-source="list" row-key="id" size="middle" :pagination="{ pageSize: 10 }">
+        <template #bodyCell="{ column: c, record: r }">
+          <template v-if="c.key === 'st'">
+            <a-tag :color="r.sc">{{ r.st }}</a-tag>
+          </template>
+        </template>
+      </a-table>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref } from 'vue'
 import { HistoryOutlined } from '@ant-design/icons-vue'
 const cols = [
@@ -34,11 +34,11 @@ const list = ref([
   { id: '4', name: '代码漏洞扫描', tmpl: '代码审查', agents: 'A,B,C,D', st: '已完成', sc: 'green', start: '05-12 08:00', dur: '4h' },
   { id: '5', name: '新功能头脑风暴', tmpl: '内容创作', agents: 'A,B,C', st: '中断', sc: 'orange', start: '05-19 15:00', dur: '-' },
 ])
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { padding: 16px 24px; border-radius: 12px; }
 .t { font-size: 1.2rem; color: #e2e8f0; margin: 0; display: flex; align-items: center; gap: 8px; }
 .tb { padding: 20px; border-radius: 12px; }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

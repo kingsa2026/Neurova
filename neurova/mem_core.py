@@ -32,6 +32,20 @@ from typing import List, Dict, Optional, Any
 logger = logging.getLogger(__name__)
 
 
+class Memory:
+    """记忆数据模型（pyc骨架恢复占位）"""
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
+class Conversation:
+    """对话数据模型（pyc骨架恢复占位）"""
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
 class MemCore:
     """深度记忆核心模块
 
@@ -640,5 +654,4 @@ class MemCore:
                 logger.warning(f"获取记忆管理器统计失败: {e}")
 
         return stats
-
 

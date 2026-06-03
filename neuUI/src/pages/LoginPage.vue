@@ -1,86 +1,86 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;!-- 星空背景 --&gt;
-    &lt;StarBackground /&gt;
-    &lt;!-- 登录表单 --&gt;
-    &lt;div &gt;
-      &lt;!-- Logo 和标题 --&gt;
-      &lt;div &gt;
-        &lt;img :src="logoWhite" alt="Neurova"  /&gt;
-      &lt;/div&gt;
-      &lt;!-- 登录表单 --&gt;
-      &lt;a-form
+<template>
+  <div >
+    <!-- 星空背景 -->
+    <StarBackground />
+    <!-- 登录表单 -->
+    <div >
+      <!-- Logo 和标题 -->
+      <div >
+        <img :src="logoWhite" alt="Neurova"  />
+      </div>
+      <!-- 登录表单 -->
+      <a-form
         :model="formState"
         @finish="handleLogin"
         layout="vertical"
-      &gt;
-        &lt;!-- 用户名/邮箱 --&gt;
-        &lt;a-form-item
+      >
+        <!-- 用户名/邮箱 -->
+        <a-form-item
           name="username"
           :rules="[{ required: true, message: '请输入用户名或邮箱' }]"
-        &gt;
-          &lt;a-input
+        >
+          <a-input
             v-model:value="formState.username"
             placeholder="用户名 / 邮箱"
             size="large"
-          &gt;
-            &lt;template #prefix&gt;
-              &lt;UserOutlined style="color: rgba(255, 255, 255, 0.4)" /&gt;
-            &lt;/template&gt;
-          &lt;/a-input&gt;
-        &lt;/a-form-item&gt;
-        &lt;!-- 密码 --&gt;
-        &lt;a-form-item
+          >
+            <template #prefix>
+              <UserOutlined style="color: rgba(255, 255, 255, 0.4)" />
+            </template>
+          </a-input>
+        </a-form-item>
+        <!-- 密码 -->
+        <a-form-item
           name="password"
           :rules="[{ required: true, message: '请输入密码' }]"
-        &gt;
-          &lt;a-input-password
+        >
+          <a-input-password
             v-model:value="formState.password"
             placeholder="密码"
             size="large"
-          &gt;
-            &lt;template #prefix&gt;
-              &lt;LockOutlined style="color: rgba(255, 255, 255, 0.4)" /&gt;
-            &lt;/template&gt;
-          &lt;/a-input-password&gt;
-        &lt;/a-form-item&gt;
-        &lt;!-- 记住我和忘记密码 --&gt;
-        &lt;div &gt;
-          &lt;a-checkbox v-model:checked="formState.remember" &gt;
+          >
+            <template #prefix>
+              <LockOutlined style="color: rgba(255, 255, 255, 0.4)" />
+            </template>
+          </a-input-password>
+        </a-form-item>
+        <!-- 记住我和忘记密码 -->
+        <div >
+          <a-checkbox v-model:checked="formState.remember" >
             记住我
-          &lt;/a-checkbox&gt;
-          &lt;a &gt;忘记密码？&lt;/a&gt;
-        &lt;/div&gt;
-        &lt;!-- 登录按钮 --&gt;
-        &lt;a-form-item&gt;
-          &lt;a-button
+          </a-checkbox>
+          <a >忘记密码？</a>
+        </div>
+        <!-- 登录按钮 -->
+        <a-form-item>
+          <a-button
             type="primary"
             html-type="submit"
             size="large"
             :loading="loading"
-          &gt;
+          >
             登录
-          &lt;/a-button&gt;
-        &lt;/a-form-item&gt;
-        &lt;!-- 错误提示 --&gt;
-        &lt;a-alert
+          </a-button>
+        </a-form-item>
+        <!-- 错误提示 -->
+        <a-alert
           v-if="error"
           :message="error"
           type="error"
           show-icon
-        /&gt;
-      &lt;/a-form&gt;
-      &lt;!-- 注册链接 --&gt;
-      &lt;div &gt;
-        &lt;span &gt;还没有账号？&lt;/span&gt;
-        &lt;router-link to="/register" &gt;
+        />
+      </a-form>
+      <!-- 注册链接 -->
+      <div >
+        <span >还没有账号？</span>
+        <router-link to="/register" >
           立即注册
-        &lt;/router-link&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+        </router-link>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
@@ -91,7 +91,7 @@ import logoWhite from '@/assets/img/NEUROVA-white.png'
 const router = useRouter()
 const authStore = useAuthStore()
 const loading = ref(false)
-const error = ref&lt;string | null&gt;(null)
+const error = ref<string | null>(null)
 const formState = reactive({
   username: '',
   password: '',
@@ -119,8 +119,8 @@ async function handleLogin() {
     loading.value = false
   }
 }
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .login-container {
   position: relative;
   width: 100vw;
@@ -250,5 +250,5 @@ async function handleLogin() {
     font-size: 2.5rem;
   }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

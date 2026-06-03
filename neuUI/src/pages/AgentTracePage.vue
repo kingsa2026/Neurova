@@ -1,27 +1,27 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;SearchOutlined :style="{ color: '#3b82f6' }" /&gt; 调用追踪
-      &lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-table :columns="cols" :data-source="list" row-key="id" size="middle" :pagination="{ pageSize: 10 }"&gt;
-        &lt;template #bodyCell="{ column: c, record: r }"&gt;
-          &lt;template v-if="c.key === 'st'"&gt;
-            &lt;a-tag :color="r.sc"&gt;{{ r.st }}&lt;/a-tag&gt;
-          &lt;/template&gt;
-          &lt;template v-if="c.key === 'dur'"&gt;
-            &lt;span :style="{ color: r.dv &gt; 500 ? '#ef4444' : r.dv &gt; 200 ? '#fbbf24' : '#34d399' }"&gt;
+<template>
+  <div >
+    <div >
+      <h2 >
+        <SearchOutlined :style="{ color: '#3b82f6' }" /> 调用追踪
+      </h2>
+    </div>
+    <div >
+      <a-table :columns="cols" :data-source="list" row-key="id" size="middle" :pagination="{ pageSize: 10 }">
+        <template #bodyCell="{ column: c, record: r }">
+          <template v-if="c.key === 'st'">
+            <a-tag :color="r.sc">{{ r.st }}</a-tag>
+          </template>
+          <template v-if="c.key === 'dur'">
+            <span :style="{ color: r.dv > 500 ? '#ef4444' : r.dv > 200 ? '#fbbf24' : '#34d399' }">
               {{ r.dur }}
-            &lt;/span&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+            </span>
+          </template>
+        </template>
+      </a-table>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref } from 'vue'
 import { SearchOutlined } from '@ant-design/icons-vue'
 const cols = [
@@ -41,11 +41,11 @@ const list = ref([
   { id: 'tr-007', ep: 'POST /auth/login', dur: '1800ms', dv: 1800, st: '200', sc: 'green', time: '05-21 11:27:00' },
   { id: 'tr-008', ep: 'DELETE /memory', dur: '67ms', dv: 67, st: '204', sc: 'blue', time: '05-21 11:26:30' },
 ])
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { padding: 16px 24px; border-radius: 12px; }
 .t { font-size: 1.2rem; color: #e2e8f0; margin: 0; display: flex; align-items: center; gap: 8px; }
 .tb { padding: 20px; border-radius: 12px; }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

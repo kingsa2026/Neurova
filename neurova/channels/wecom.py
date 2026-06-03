@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 企业微信渠道适配器
 
@@ -11,8 +13,6 @@ API 参考:
 - 接收消息: https://developer.work.weixin.qq.com/document/path/100719
 - 发送消息: https://developer.work.weixin.qq.com/document/path/90236
 """
-
-from __future__ import annotations
 
 import asyncio
 import hashlib
@@ -30,7 +30,6 @@ from neurova.channels.base import (
 )
 
 logger = logging.getLogger(__name__)
-
 
 class WeComAdapter(ChannelAdapter):
     """
@@ -320,11 +319,9 @@ class WeComAdapter(ChannelAdapter):
         })
         return base
 
-
 # ============================================================
 # 群机器人 Webhook（轻量级，仅发送）
 # ============================================================
-
 
 class WeComGroupBot:
     """
@@ -372,7 +369,6 @@ class WeComGroupBot:
             ) as resp:
                 result = await resp.json()
                 return result.get("errcode") == 0
-
 
 def create_wecom_adapter(
     corpid: str,

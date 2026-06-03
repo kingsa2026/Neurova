@@ -1,107 +1,107 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;ExperimentOutlined :style="{color:'#6366f1'}" /&gt; 沙箱管理
-      &lt;/h2&gt;
-      &lt;a-space&gt;
-        &lt;a-btn type="primary" size="small" @click="showCreateModal = true"&gt;
-          &lt;PlusOutlined /&gt;创建沙箱
-        &lt;/a-btn&gt;
-        &lt;a-btn size="small" @click="refreshSandboxes"&gt;
-          &lt;ReloadOutlined /&gt;刷新
-        &lt;/a-btn&gt;
-      &lt;/a-space&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        沙箱总数 &lt;b &gt;{{ stats.total }}&lt;/b&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        活跃中 &lt;b &gt;{{ stats.active }}&lt;/b&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        CPU使用率 &lt;b &gt;{{ stats.cpuUsage }}%&lt;/b&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        内存使用率 &lt;b &gt;{{ stats.memUsage }}%&lt;/b&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-table
+<template>
+  <div >
+    <div >
+      <h2 >
+        <ExperimentOutlined :style="{color:'#6366f1'}" /> 沙箱管理
+      </h2>
+      <a-space>
+        <a-btn type="primary" size="small" @click="showCreateModal = true">
+          <PlusOutlined />创建沙箱
+        </a-btn>
+        <a-btn size="small" @click="refreshSandboxes">
+          <ReloadOutlined />刷新
+        </a-btn>
+      </a-space>
+    </div>
+    <div >
+      <div >
+        沙箱总数 <b >{{ stats.total }}</b>
+      </div>
+      <div >
+        活跃中 <b >{{ stats.active }}</b>
+      </div>
+      <div >
+        CPU使用率 <b >{{ stats.cpuUsage }}%</b>
+      </div>
+      <div >
+        内存使用率 <b >{{ stats.memUsage }}%</b>
+      </div>
+    </div>
+    <div >
+      <a-table
         :columns="cols"
         :data-source="sandboxList"
         row-key="id"
         size="middle"
         :loading="loading"
-      &gt;
-        &lt;template #bodyCell="{ c, r }"&gt;
-          &lt;template v-if="c.key === 'st'"&gt;
-            &lt;a-tag :color="getStatusColor(r.status)"&gt;{{ r.status }}&lt;/a-tag&gt;
-          &lt;/template&gt;
-          &lt;template v-if="c.key === 'res'"&gt;
-            &lt;span&gt;{{ r.cpu }} CPU / {{ r.mem }} MEM&lt;/span&gt;
-          &lt;/template&gt;
-          &lt;template v-if="c.key === 'isolation'"&gt;
-            &lt;a-tag :color="r.isolation_enabled ? 'green' : 'default'"&gt;
+      >
+        <template #bodyCell="{ c, r }">
+          <template v-if="c.key === 'st'">
+            <a-tag :color="getStatusColor(r.status)">{{ r.status }}</a-tag>
+          </template>
+          <template v-if="c.key === 'res'">
+            <span>{{ r.cpu }} CPU / {{ r.mem }} MEM</span>
+          </template>
+          <template v-if="c.key === 'isolation'">
+            <a-tag :color="r.isolation_enabled ? 'green' : 'default'">
               {{ r.isolation_enabled ? '已启用' : '未启用' }}
-            &lt;/a-tag&gt;
-          &lt;/template&gt;
-          &lt;template v-if="c.key === 'act'"&gt;
-            &lt;a-space&gt;
-              &lt;a-btn size="small" type="link" :disabled="r.status === '运行中'" @click="startSandbox(r)"&gt;启动&lt;/a-btn&gt;
-              &lt;a-btn size="small" type="link" :disabled="r.status !== '运行中'" @click="stopSandbox(r)"&gt;停止&lt;/a-btn&gt;
-              &lt;a-btn size="small" type="link" @click="viewLogs(r)"&gt;日志&lt;/a-btn&gt;
-              &lt;a-popconfirm title="确定删除此沙箱？" @confirm="deleteSandbox(r.id)"&gt;
-                &lt;a-btn size="small" type="link" danger&gt;删除&lt;/a-btn&gt;
-              &lt;/a-popconfirm&gt;
-            &lt;/a-space&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-    &lt;a-modal
+            </a-tag>
+          </template>
+          <template v-if="c.key === 'act'">
+            <a-space>
+              <a-btn size="small" type="link" :disabled="r.status === '运行中'" @click="startSandbox(r)">启动</a-btn>
+              <a-btn size="small" type="link" :disabled="r.status !== '运行中'" @click="stopSandbox(r)">停止</a-btn>
+              <a-btn size="small" type="link" @click="viewLogs(r)">日志</a-btn>
+              <a-popconfirm title="确定删除此沙箱？" @confirm="deleteSandbox(r.id)">
+                <a-btn size="small" type="link" danger>删除</a-btn>
+              </a-popconfirm>
+            </a-space>
+          </template>
+        </template>
+      </a-table>
+    </div>
+    <a-modal
       v-model:open="showCreateModal"
       title="创建沙箱"
       @ok="createSandbox"
       @cancel="showCreateModal = false"
-    &gt;
-      &lt;a-form :model="createForm" layout="vertical"&gt;
-        &lt;a-form-item label="沙箱名称"&gt;
-          &lt;a-input v-model:value="createForm.name" placeholder="请输入沙箱名称" /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="运行环境"&gt;
-          &lt;a-select v-model:value="createForm.runtime"&gt;
-            &lt;a-select-option value="python-3.12"&gt;Python 3.12&lt;/a-select-option&gt;
-            &lt;a-select-option value="nodejs-22"&gt;Node.js 22&lt;/a-select-option&gt;
-            &lt;a-select-option value="rust-1.80"&gt;Rust 1.80&lt;/a-select-option&gt;
-            &lt;a-select-option value="go-1.22"&gt;Go 1.22&lt;/a-select-option&gt;
-            &lt;a-select-option value="java-21"&gt;Java 21&lt;/a-select-option&gt;
-          &lt;/a-select&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="资源配置"&gt;
-          &lt;a-row :gutter="12"&gt;
-            &lt;a-col :span="12"&gt;
-              &lt;a-form-item label="CPU核心"&gt;
-                &lt;a-input-number v-model:value="createForm.cpu" :min="1" :max="8" /&gt;
-              &lt;/a-form-item&gt;
-            &lt;/a-col&gt;
-            &lt;a-col :span="12"&gt;
-              &lt;a-form-item label="内存(GB)"&gt;
-                &lt;a-input-number v-model:value="createForm.memory" :min="1" :max="16" /&gt;
-              &lt;/a-form-item&gt;
-            &lt;/a-col&gt;
-          &lt;/a-row&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="启用隔离"&gt;
-          &lt;a-switch v-model:checked="createForm.isolation" /&gt;
-          &lt;span style="margin-left: 8px"&gt;启用Agent隔离&lt;/span&gt;
-        &lt;/a-form-item&gt;
-      &lt;/a-form&gt;
-    &lt;/a-modal&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+    >
+      <a-form :model="createForm" layout="vertical">
+        <a-form-item label="沙箱名称">
+          <a-input v-model:value="createForm.name" placeholder="请输入沙箱名称" />
+        </a-form-item>
+        <a-form-item label="运行环境">
+          <a-select v-model:value="createForm.runtime">
+            <a-select-option value="python-3.12">Python 3.12</a-select-option>
+            <a-select-option value="nodejs-22">Node.js 22</a-select-option>
+            <a-select-option value="rust-1.80">Rust 1.80</a-select-option>
+            <a-select-option value="go-1.22">Go 1.22</a-select-option>
+            <a-select-option value="java-21">Java 21</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="资源配置">
+          <a-row :gutter="12">
+            <a-col :span="12">
+              <a-form-item label="CPU核心">
+                <a-input-number v-model:value="createForm.cpu" :min="1" :max="8" />
+              </a-form-item>
+            </a-col>
+            <a-col :span="12">
+              <a-form-item label="内存(GB)">
+                <a-input-number v-model:value="createForm.memory" :min="1" :max="16" />
+              </a-form-item>
+            </a-col>
+          </a-row>
+        </a-form-item>
+        <a-form-item label="启用隔离">
+          <a-switch v-model:checked="createForm.isolation" />
+          <span style="margin-left: 8px">启用Agent隔离</span>
+        </a-form-item>
+      </a-form>
+    </a-modal>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive } from 'vue';
 import { message } from 'ant-design-vue';
 import { request } from '@/api';
@@ -118,7 +118,7 @@ interface Sandbox {
 }
 const loading = ref(false);
 const showCreateModal = ref(false);
-const sandboxList = ref&lt;Sandbox[]&gt;([]);
+const sandboxList = ref<Sandbox[]>([]);
 const stats = reactive({
   total: 3,
   active: 1,
@@ -141,8 +141,8 @@ const cols = [
   { title: '创建时间', dataIndex: 'created_at', width: 160 },
   { title: '操作', key: 'act', width: 280 }
 ];
-const getStatusColor = (status: string) =&gt; {
-  const colors: Record&lt;string, string&gt; = {
+const getStatusColor = (status: string) => {
+  const colors: Record<string, string> = {
     '运行中': 'green',
     '已停止': 'default',
     '创建中': 'blue',
@@ -150,12 +150,12 @@ const getStatusColor = (status: string) =&gt; {
   };
   return colors[status] || 'default';
 };
-const fetchSandboxes = async () =&gt; {
+const fetchSandboxes = async () => {
   loading.value = true;
   try {
     const res = await request.get('/runtime/types');
     if (res.success) {
-      sandboxList.value = (Array.isArray(res.data) ? res.data : []).map((item: Record&lt;string,unknown&gt;, idx: number) =&gt; ({
+      sandboxList.value = (Array.isArray(res.data) ? res.data : []).map((item: Record<string,unknown>, idx: number) => ({
         id: item.name || `runtime-${idx}`,
         name: item.name || '运行时',
         runtime: item.type || 'unknown',
@@ -166,7 +166,7 @@ const fetchSandboxes = async () =&gt; {
         created_at: item.created_at || new Date().toLocaleDateString()
       }));
       stats.total = sandboxList.value.length;
-      stats.active = sandboxList.value.filter(s =&gt; s.status === '运行中').length;
+      stats.active = sandboxList.value.filter(s => s.status === '运行中').length;
     }
   } catch (error) {
     console.error('获取沙箱列表失败:', error);
@@ -176,15 +176,15 @@ const fetchSandboxes = async () =&gt; {
       { id: '3', name: 'Rust-1.80', runtime: 'Rust 1.80', status: '已停止', cpu: '2核', mem: '2GB', isolation_enabled: false, created_at: '05-15 10:00' }
     ];
     stats.total = sandboxList.value.length;
-    stats.active = sandboxList.value.filter(s =&gt; s.status === '运行中').length;
+    stats.active = sandboxList.value.filter(s => s.status === '运行中').length;
   } finally {
     loading.value = false;
   }
 };
-const refreshSandboxes = () =&gt; {
+const refreshSandboxes = () => {
   fetchSandboxes();
 };
-const createSandbox = async () =&gt; {
+const createSandbox = async () => {
   if (!createForm.name.trim()) {
     message.warning('请输入沙箱名称');
     return;
@@ -228,7 +228,7 @@ const createSandbox = async () =&gt; {
     loading.value = false;
   }
 };
-const startSandbox = async (sandbox: Sandbox) =&gt; {
+const startSandbox = async (sandbox: Sandbox) => {
   loading.value = true;
   try {
     const runtimeType = sandbox.runtime.includes('python') ? 'python' :
@@ -254,7 +254,7 @@ const startSandbox = async (sandbox: Sandbox) =&gt; {
     loading.value = false;
   }
 };
-const stopSandbox = async (sandbox: Sandbox) =&gt; {
+const stopSandbox = async (sandbox: Sandbox) => {
   loading.value = true;
   try {
     const res = await request.delete('/runtime/' + sandbox.id);
@@ -272,21 +272,21 @@ const stopSandbox = async (sandbox: Sandbox) =&gt; {
     loading.value = false;
   }
 };
-const viewLogs = (sandbox: Sandbox) =&gt; {
+const viewLogs = (sandbox: Sandbox) => {
   message.info(`查看沙箱 ${sandbox.name} 的日志`);
 };
-const deleteSandbox = async (sandboxId: string) =&gt; {
+const deleteSandbox = async (sandboxId: string) => {
   loading.value = true;
   try {
     const res = await request.delete('/runtime/' + sandboxId);
     if (res.success) {
       message.success('删除成功');
-      sandboxList.value = sandboxList.value.filter(s =&gt; s.id !== sandboxId);
+      sandboxList.value = sandboxList.value.filter(s => s.id !== sandboxId);
       stats.total--;
     }
   } catch (error) {
     console.error('删除沙箱失败:', error);
-    sandboxList.value = sandboxList.value.filter(s =&gt; s.id !== sandboxId);
+    sandboxList.value = sandboxList.value.filter(s => s.id !== sandboxId);
     stats.total--;
     message.success('本地删除成功');
   } finally {
@@ -294,8 +294,8 @@ const deleteSandbox = async (sandboxId: string) =&gt; {
   }
 };
 fetchSandboxes();
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg {
   display: flex;
   flex-direction: column;
@@ -340,4 +340,4 @@ fetchSandboxes();
   padding: 20px;
   border-radius: 12px;
 }
-&lt;/style&gt;
+</style>

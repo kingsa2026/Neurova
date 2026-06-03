@@ -19,7 +19,6 @@ from neurova.cognitive_layers.memory_layer.unified_vector_store import (
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class QueryTags:
     """从查询中提取的结构化标签"""
@@ -30,7 +29,6 @@ class QueryTags:
     memory_types: List[Tuple[str, float]] = field(default_factory=list)
     is_tool_query: bool = False
 
-
 @dataclass
 class ProcessedResults:
     """处理后的结果"""
@@ -39,7 +37,6 @@ class ProcessedResults:
     evolution_chains: List[List[Dict]] = field(default_factory=list)
     injection_text: str = ""
     has_conflicts: bool = False
-
 
 class VectorGatingNetwork:
     """
@@ -92,7 +89,6 @@ class VectorGatingNetwork:
         # Top-K 稀疏选择
         sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         return dict(sorted_scores[:self.top_k])
-
 
 class ExpertDrilldownRetriever:
     """
@@ -268,7 +264,6 @@ class ExpertDrilldownRetriever:
             reverse=True
         )
         return sorted_candidates[:limit]
-
 
 class MoEMemoryRouter:
     """

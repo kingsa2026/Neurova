@@ -11,7 +11,6 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-
 def init_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
     """初始化数据库 schema
 
@@ -59,7 +58,7 @@ def init_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
         # ── FTS5 全文搜索 ──
         try:
             cursor.execute("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts 
+                CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
                 USING fts5(content)
             """)
             cursor.execute("""
@@ -193,7 +192,7 @@ def init_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tc_user_id ON trigger_chains(user_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tc_agent_id ON trigger_chains(agent_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tc_trigger_type ON trigger_chains(trigger_type)")
-            
+
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tcn_chain_id ON trigger_chain_nodes(chain_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tcn_neuser_id ON trigger_chain_nodes(neuser_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tcn_user_id ON trigger_chain_nodes(user_id)")
@@ -202,7 +201,6 @@ def init_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
 
         conn.commit()
         logger.info("Database schema initialized")
-
 
 def migrate_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
     """数据库迁移：为现有表添加新字段（如果不存在）

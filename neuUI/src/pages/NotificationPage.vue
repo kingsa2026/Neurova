@@ -1,108 +1,108 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;h2 &gt;
-          &lt;BellOutlined style="color: #f59e0b" /&gt;
+<template>
+  <div >
+    <div >
+      <div >
+        <h2 >
+          <BellOutlined style="color: #f59e0b" />
           通知中心
-        &lt;/h2&gt;
-        &lt;div &gt;
-          &lt;a-tag color="blue"&gt;未读 &lt;strong&gt;{{ unreadCount }}&lt;/strong&gt;&lt;/a-tag&gt;
-          &lt;a-tag&gt;总计 &lt;strong&gt;{{ totalCount }}&lt;/strong&gt;&lt;/a-tag&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;a-button size="small" @click="markAllAsRead" :loading="markingAllAsRead"&gt;
+        </h2>
+        <div >
+          <a-tag color="blue">未读 <strong>{{ unreadCount }}</strong></a-tag>
+          <a-tag>总计 <strong>{{ totalCount }}</strong></a-tag>
+        </div>
+      </div>
+      <div >
+        <a-button size="small" @click="markAllAsRead" :loading="markingAllAsRead">
           全部已读
-        &lt;/a-button&gt;
-        &lt;a-button size="small" danger @click="clearArchived" v-if="showArchived"&gt;
+        </a-button>
+        <a-button size="small" danger @click="clearArchived" v-if="showArchived">
           清空已归档
-        &lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-radio-group v-model:value="currentFilter" button-style="solid" size="small"&gt;
-        &lt;a-radio-button value="all"&gt;全部&lt;/a-radio-button&gt;
-        &lt;a-radio-button value="unread"&gt;未读&lt;/a-radio-button&gt;
-        &lt;a-radio-button value="archived"&gt;已归档&lt;/a-radio-button&gt;
-      &lt;/a-radio-group&gt;
-      &lt;a-select v-model:value="selectedType" style="width: 150px" placeholder="通知类型" allow-clear size="small"&gt;
-        &lt;a-select-option value="info"&gt;信息&lt;/a-select-option&gt;
-        &lt;a-select-option value="success"&gt;成功&lt;/a-select-option&gt;
-        &lt;a-select-option value="warning"&gt;警告&lt;/a-select-option&gt;
-        &lt;a-select-option value="error"&gt;错误&lt;/a-select-option&gt;
-        &lt;a-select-option value="system"&gt;系统&lt;/a-select-option&gt;
-        &lt;a-select-option value="agent"&gt;Agent&lt;/a-select-option&gt;
-        &lt;a-select-option value="task"&gt;任务&lt;/a-select-option&gt;
-      &lt;/a-select&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-spin :spinning="loading"&gt;
-        &lt;a-empty v-if="notifications.length === 0 &amp;&amp; !loading" description="暂无通知" /&gt;
-        &lt;template v-else&gt;
-          &lt;div
+        </a-button>
+      </div>
+    </div>
+    <div >
+      <a-radio-group v-model:value="currentFilter" button-style="solid" size="small">
+        <a-radio-button value="all">全部</a-radio-button>
+        <a-radio-button value="unread">未读</a-radio-button>
+        <a-radio-button value="archived">已归档</a-radio-button>
+      </a-radio-group>
+      <a-select v-model:value="selectedType" style="width: 150px" placeholder="通知类型" allow-clear size="small">
+        <a-select-option value="info">信息</a-select-option>
+        <a-select-option value="success">成功</a-select-option>
+        <a-select-option value="warning">警告</a-select-option>
+        <a-select-option value="error">错误</a-select-option>
+        <a-select-option value="system">系统</a-select-option>
+        <a-select-option value="agent">Agent</a-select-option>
+        <a-select-option value="task">任务</a-select-option>
+      </a-select>
+    </div>
+    <div >
+      <a-spin :spinning="loading">
+        <a-empty v-if="notifications.length === 0 && !loading" description="暂无通知" />
+        <template v-else>
+          <div
             v-for="notification in notifications"
             :key="notification.id"
             :
-          &gt;
-            &lt;div  :style="{ background: getTypeColor(notification.type) + '20', color: getTypeColor(notification.type) }"&gt;
-              &lt;component :is="getTypeIcon(notification.type)" /&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;div &gt;
-                &lt;span &gt;{{ notification.title }}&lt;/span&gt;
-                &lt;div &gt;
-                  &lt;a-tag v-if="!notification.is_read" color="blue" size="small"&gt;新&lt;/a-tag&gt;
-                  &lt;a-tag v-if="notification.is_archived" size="small"&gt;已归档&lt;/a-tag&gt;
-                  &lt;a-tag :color="getPriorityColor(notification.priority)" size="small"&gt;{{ getPriorityText(notification.priority) }}&lt;/a-tag&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-              &lt;p &gt;{{ notification.content }}&lt;/p&gt;
-              &lt;span &gt;{{ formatTime(notification.created_at) }}&lt;/span&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;template v-if="!notification.is_archived"&gt;
-                &lt;a-tooltip v-if="!notification.is_read" title="标记已读"&gt;
-                  &lt;a-button type="link" size="small" @click="markAsRead(notification.id)"&gt;
-                    &lt;CheckOutlined /&gt;
-                  &lt;/a-button&gt;
-                &lt;/a-tooltip&gt;
-                &lt;a-tooltip v-else title="标记未读"&gt;
-                  &lt;a-button type="link" size="small" @click="markAsUnread(notification.id)"&gt;
-                    &lt;UndoOutlined /&gt;
-                  &lt;/a-button&gt;
-                &lt;/a-tooltip&gt;
-                &lt;a-tooltip title="归档"&gt;
-                  &lt;a-button type="link" size="small" @click="archiveNotification(notification.id)"&gt;
-                    &lt;InboxOutlined /&gt;
-                  &lt;/a-button&gt;
-                &lt;/a-tooltip&gt;
-              &lt;/template&gt;
-              &lt;template v-else&gt;
-                &lt;a-tooltip title="取消归档"&gt;
-                  &lt;a-button type="link" size="small" @click="unarchiveNotification(notification.id)"&gt;
-                    &lt;RollbackOutlined /&gt;
-                  &lt;/a-button&gt;
-                &lt;/a-tooltip&gt;
-              &lt;/template&gt;
-              &lt;a-popconfirm
+          >
+            <div  :style="{ background: getTypeColor(notification.type) + '20', color: getTypeColor(notification.type) }">
+              <component :is="getTypeIcon(notification.type)" />
+            </div>
+            <div >
+              <div >
+                <span >{{ notification.title }}</span>
+                <div >
+                  <a-tag v-if="!notification.is_read" color="blue" size="small">新</a-tag>
+                  <a-tag v-if="notification.is_archived" size="small">已归档</a-tag>
+                  <a-tag :color="getPriorityColor(notification.priority)" size="small">{{ getPriorityText(notification.priority) }}</a-tag>
+                </div>
+              </div>
+              <p >{{ notification.content }}</p>
+              <span >{{ formatTime(notification.created_at) }}</span>
+            </div>
+            <div >
+              <template v-if="!notification.is_archived">
+                <a-tooltip v-if="!notification.is_read" title="标记已读">
+                  <a-button type="link" size="small" @click="markAsRead(notification.id)">
+                    <CheckOutlined />
+                  </a-button>
+                </a-tooltip>
+                <a-tooltip v-else title="标记未读">
+                  <a-button type="link" size="small" @click="markAsUnread(notification.id)">
+                    <UndoOutlined />
+                  </a-button>
+                </a-tooltip>
+                <a-tooltip title="归档">
+                  <a-button type="link" size="small" @click="archiveNotification(notification.id)">
+                    <InboxOutlined />
+                  </a-button>
+                </a-tooltip>
+              </template>
+              <template v-else>
+                <a-tooltip title="取消归档">
+                  <a-button type="link" size="small" @click="unarchiveNotification(notification.id)">
+                    <RollbackOutlined />
+                  </a-button>
+                </a-tooltip>
+              </template>
+              <a-popconfirm
                 title="确定要删除这条通知吗？"
                 ok-text="确定"
                 cancel-text="取消"
                 @confirm="deleteNotification(notification.id)"
-              &gt;
-                &lt;a-tooltip title="删除"&gt;
-                  &lt;a-button type="link" danger size="small"&gt;
-                    &lt;DeleteOutlined /&gt;
-                  &lt;/a-button&gt;
-                &lt;/a-tooltip&gt;
-              &lt;/a-popconfirm&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/template&gt;
-      &lt;/a-spin&gt;
-      &lt;a-pagination
-        v-if="totalCount &gt; pageSize"
+              >
+                <a-tooltip title="删除">
+                  <a-button type="link" danger size="small">
+                    <DeleteOutlined />
+                  </a-button>
+                </a-tooltip>
+              </a-popconfirm>
+            </div>
+          </div>
+        </template>
+      </a-spin>
+      <a-pagination
+        v-if="totalCount > pageSize"
         v-model:current="currentPage"
         v-model:page-size="pageSize"
         :total="totalCount"
@@ -111,11 +111,11 @@
         show-size-changer
         :page-size-options="['10', '20', '50']"
         @change="loadNotifications"
-      /&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+      />
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
@@ -133,17 +133,17 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons-vue'
 import { notificationsAPI, type Notification } from '@/api/modules/notifications'
-const notifications = ref&lt;Notification[]&gt;([])
+const notifications = ref<Notification[]>([])
 const loading = ref(false)
 const markingAllAsRead = ref(false)
 const unreadCount = ref(0)
 const totalCount = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
-const currentFilter = ref&lt;'all' | 'unread' | 'archived'&gt;('all')
-const selectedType = ref&lt;string | undefined&gt;(undefined)
-const showArchived = computed(() =&gt; currentFilter.value === 'archived')
-const typeIcons: Record&lt;string, Component&gt; = {
+const currentFilter = ref<'all' | 'unread' | 'archived'>('all')
+const selectedType = ref<string | undefined>(undefined)
+const showArchived = computed(() => currentFilter.value === 'archived')
+const typeIcons: Record<string, Component> = {
   info: InfoCircleOutlined,
   success: CheckCircleOutlined,
   warning: WarningOutlined,
@@ -153,7 +153,7 @@ const typeIcons: Record&lt;string, Component&gt; = {
   message: FolderOutlined,
   task: CheckCircleOutlined,
 }
-const typeColors: Record&lt;string, string&gt; = {
+const typeColors: Record<string, string> = {
   info: '#3b82f6',
   success: '#34d399',
   warning: '#f59e0b',
@@ -163,13 +163,13 @@ const typeColors: Record&lt;string, string&gt; = {
   message: '#10b981',
   task: '#f97316',
 }
-const priorityColors: Record&lt;string, string&gt; = {
+const priorityColors: Record<string, string> = {
   low: 'default',
   normal: 'blue',
   high: 'orange',
   urgent: 'red',
 }
-const priorityTexts: Record&lt;string, string&gt; = {
+const priorityTexts: Record<string, string> = {
   low: '低',
   normal: '普通',
   high: '高',
@@ -191,10 +191,10 @@ function formatTime(timeStr: string) {
   const date = new Date(timeStr)
   const now = new Date()
   const diff = now.getTime() - date.getTime()
-  if (diff &lt; 60000) return '刚刚'
-  if (diff &lt; 3600000) return `${Math.floor(diff / 60000)} 分钟前`
-  if (diff &lt; 86400000) return `${Math.floor(diff / 3600000)} 小时前`
-  if (diff &lt; 604800000) return `${Math.floor(diff / 86400000)} 天前`
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)} 天前`
   return date.toLocaleDateString('zh-CN')
 }
 async function loadNotifications() {
@@ -302,11 +302,11 @@ async function clearArchived() {
     message.error(e.response?.data?.message || '操作失败')
   }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await loadNotifications()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .notification-page {
   display: flex;
   flex-direction: column;
@@ -420,5 +420,5 @@ onMounted(async () =&gt; {
   gap: 4px;
   flex-shrink: 0;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

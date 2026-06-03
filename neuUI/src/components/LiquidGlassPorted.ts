@@ -18,12 +18,12 @@ export function isObjectEqual(obj1: Object, obj2: Object | undefined | null): bo
   const keys1 = Object.keys(obj1)
   const keys2 = Object.keys(obj2)
   if (keys1.length !== keys2.length) return false
-  return keys1.every((key) =&gt; obj1[key] === obj2[key])
+  return keys1.every((key) => obj1[key] === obj2[key])
 }
 export function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     const r = Math.random() * 16 | 0
-    const v = c === 'x' ? r : (r &amp; 0x3 | 0x8)
+    const v = c === 'x' ? r : (r & 0x3 | 0x8)
     return v.toString(16)
   })
 }
@@ -42,22 +42,22 @@ export interface LiquidGlassProps {
   cornerRadius?: number;
   className?: string;
   padding?: string;
-  style?: Record&lt;string, unknown&gt;;
+  style?: Record<string, unknown>;
   overLight?: boolean;
   mouseContainer?: HTMLElement;
   globalMousePos?: { x: number; y: number };
   mouseOffset?: { x: number; y: number };
   mode?: GlassMode;
   effect?: string;
-  onClick?: () =&gt; void;
+  onClick?: () => void;
 }
 export interface GlassContainerProps extends LiquidGlassProps {
   active?: boolean;
   glassSize?: { width: number; height: number };
-  onMouseEnter?: () =&gt; void;
-  onMouseLeave?: () =&gt; void;
-  onMouseDown?: () =&gt; void;
-  onMouseUp?: () =&gt; void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+  onMouseDown?: () => void;
+  onMouseUp?: () => void;
 }
 export interface GlassFilterProps {
   id: string;
@@ -68,5 +68,5 @@ export interface GlassFilterProps {
   height: number;
   shaderMapUrl?: string;
 }
-&nbsp;
-&nbsp;
+ 
+ 

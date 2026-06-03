@@ -1,10 +1,10 @@
+from __future__ import annotations
+
 """
 记忆接口 - 基础模块
 
 共享导入、请求/响应模型、辅助函数
 """
-
-from __future__ import annotations
 
 import logging
 from typing import Optional, List, Dict, Any
@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/memories", tags=["记忆管理"])
 
-
 # ============================================================
 # 辅助函数
 # ============================================================
@@ -32,16 +31,15 @@ router = APIRouter(prefix="/memories", tags=["记忆管理"])
 def _get_request_id(req: Optional[Request]) -> Optional[str]:
     return getattr(req.state, "request_id", None) if req else None
 
-
 def _get_user_ids_from_token(req: Optional[Request]) -> tuple:
     """从请求的 Token 中提取 neuser_id 和 user_id
-    
+
     尝试从 Authorization header 解析 JWT token 中的用户标识，
     如果解析失败则返回默认值。
     """
     neuser_id = "default"
     user_id = "default"
-    
+
     if req:
         try:
             auth_header = req.headers.get("Authorization", "")
@@ -54,14 +52,12 @@ def _get_user_ids_from_token(req: Optional[Request]) -> tuple:
                     user_id = payload.get("user_id", payload.get("sub", "default"))
         except Exception:
             pass  # Token 解析失败时使用默认值
-    
-    return neuser_id, user_id
 
+    return neuser_id, user_id
 
 # ============================================================
 # 请求/响应模型
 # ============================================================
-
 
 class AddMemoryRequest(BaseModel):
     """添加记忆请求"""
@@ -76,7 +72,6 @@ class AddMemoryRequest(BaseModel):
     auto_classify: bool = Field(default=True, description="是否自动分类推断 (默认开启)")
     classification_context: Optional[dict] = Field(default=None, description="分类上下文")
     auto_analyze_emotion: bool = Field(default=True, description="是否自动分析情绪 (默认开启)")
-
 
 class MemoryItem(BaseModel):
     """记忆项"""
@@ -93,7 +88,6 @@ class MemoryItem(BaseModel):
     access_count: int
     created_at: str
     last_accessed_at: Optional[str] = None
-
 
 def memory_to_dict(memory) -> dict:
     """将 Memory 对象转换为字典（安全序列化，容忍损坏数据）"""
@@ -118,7 +112,6 @@ def memory_to_dict(memory) -> dict:
             "content": str(getattr(memory, "content", "(数据损坏)")),
             "category": "unknown",
         }
-
 
 def get_memory_manager(agent_id: Optional[str] = None, user: Optional[Dict[str, Any]] = None):
     """

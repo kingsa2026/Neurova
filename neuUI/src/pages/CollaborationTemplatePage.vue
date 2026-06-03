@@ -1,120 +1,120 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;FileTextOutlined :style="{color:'#3b82f6'}"/&gt; 协作模板&lt;/h2&gt;
-      &lt;a-button type="primary" size="small" @click="showCreateModal = true"&gt;&lt;PlusOutlined/&gt; 新建模板&lt;/a-button&gt;
-    &lt;/div&gt;
-    &lt;!-- 统计 --&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        模板&lt;b &gt;{{ templates.length }}&lt;/b&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        预设&lt;b &gt;{{ presets.length }}&lt;/b&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 加载状态 --&gt;
-    &lt;a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" /&gt;
-    &lt;!-- 模板列表 --&gt;
-    &lt;div v-else&gt;
-      &lt;!-- 自定义模板 --&gt;
-      &lt;div  v-if="templates.length"&gt;
-        &lt;h3&gt;自定义模板&lt;/h3&gt;
-        &lt;div &gt;
-          &lt;div v-for="t in templates" :key="t.id"  @click="viewTemplate(t)"&gt;
-            &lt;h4&gt;{{ t.name }}&lt;/h4&gt;
-            &lt;p&gt;{{ t.description || '暂无描述' }}&lt;/p&gt;
-            &lt;div &gt;
-              &lt;span&gt;{{ t.steps || t.workflow?.steps?.length || 0 }} 步骤&lt;/span&gt;
-              &lt;a-tag v-if="t.tags?.length" size="small"&gt;{{ t.tags[0] }}&lt;/a-tag&gt;
-              &lt;span &gt;使用 {{ t.usage_count || 0 }} 次&lt;/span&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;!-- 预设模板 --&gt;
-      &lt;div  v-if="presets.length"&gt;
-        &lt;h3&gt;预设模板&lt;/h3&gt;
-        &lt;div &gt;
-          &lt;div v-for="t in presets" :key="t.id"  @click="viewTemplate(t)"&gt;
-            &lt;h4&gt;{{ t.name }}&lt;/h4&gt;
-            &lt;p&gt;{{ t.description || '暂无描述' }}&lt;/p&gt;
-            &lt;div &gt;
-              &lt;span&gt;{{ t.steps || t.workflow?.steps?.length || 0 }} 步骤&lt;/span&gt;
-              &lt;a-tag color="blue" size="small"&gt;预设&lt;/a-tag&gt;
-              &lt;span &gt;使用 {{ t.usage_count || 0 }} 次&lt;/span&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;!-- 空状态 --&gt;
-      &lt;div v-if="!templates.length &amp;&amp; !presets.length" &gt;
+<template>
+  <div >
+    <div >
+      <h2 ><FileTextOutlined :style="{color:'#3b82f6'}"/> 协作模板</h2>
+      <a-button type="primary" size="small" @click="showCreateModal = true"><PlusOutlined/> 新建模板</a-button>
+    </div>
+    <!-- 统计 -->
+    <div >
+      <div >
+        模板<b >{{ templates.length }}</b>
+      </div>
+      <div >
+        预设<b >{{ presets.length }}</b>
+      </div>
+    </div>
+    <!-- 加载状态 -->
+    <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
+    <!-- 模板列表 -->
+    <div v-else>
+      <!-- 自定义模板 -->
+      <div  v-if="templates.length">
+        <h3>自定义模板</h3>
+        <div >
+          <div v-for="t in templates" :key="t.id"  @click="viewTemplate(t)">
+            <h4>{{ t.name }}</h4>
+            <p>{{ t.description || '暂无描述' }}</p>
+            <div >
+              <span>{{ t.steps || t.workflow?.steps?.length || 0 }} 步骤</span>
+              <a-tag v-if="t.tags?.length" size="small">{{ t.tags[0] }}</a-tag>
+              <span >使用 {{ t.usage_count || 0 }} 次</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 预设模板 -->
+      <div  v-if="presets.length">
+        <h3>预设模板</h3>
+        <div >
+          <div v-for="t in presets" :key="t.id"  @click="viewTemplate(t)">
+            <h4>{{ t.name }}</h4>
+            <p>{{ t.description || '暂无描述' }}</p>
+            <div >
+              <span>{{ t.steps || t.workflow?.steps?.length || 0 }} 步骤</span>
+              <a-tag color="blue" size="small">预设</a-tag>
+              <span >使用 {{ t.usage_count || 0 }} 次</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 空状态 -->
+      <div v-if="!templates.length && !presets.length" >
         暂无模板，点击"新建模板"创建第一个协作模板
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 模板详情模态框 --&gt;
-    &lt;a-modal v-model:open="viewVisible" :title="currentTemplate?.name" width="700px" @ok="viewVisible=false"&gt;
-      &lt;div v-if="currentTemplate" &gt;
-        &lt;a-descriptions :column="2" bordered size="small"&gt;
-          &lt;a-descriptions-item label="描述" :span="2"&gt;{{ currentTemplate.description || '暂无' }}&lt;/a-descriptions-item&gt;
-          &lt;a-descriptions-item label="最大参与人数"&gt;{{ currentTemplate.max_participants || '无限制' }}&lt;/a-descriptions-item&gt;
-          &lt;a-descriptions-item label="最小参与人数"&gt;{{ currentTemplate.min_participants || 1 }}&lt;/a-descriptions-item&gt;
-          &lt;a-descriptions-item label="标签"&gt;
-            &lt;a-tag v-for="tag in currentTemplate.tags" :key="tag"&gt;{{ tag }}&lt;/a-tag&gt;
-          &lt;/a-descriptions-item&gt;
-        &lt;/a-descriptions&gt;
-        &lt;div  v-if="currentTemplate.workflow"&gt;
-          &lt;h4&gt;工作流&lt;/h4&gt;
-          &lt;div &gt;
-            &lt;div v-for="(step, idx) in (currentTemplate.workflow.steps || [])" :key="idx" &gt;
-              &lt;div &gt;{{ idx + 1 }}&lt;/div&gt;
-              &lt;div &gt;
-                &lt;span &gt;{{ step.name }}&lt;/span&gt;
-                &lt;span &gt;{{ step.description || step.agent || '自动执行' }}&lt;/span&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;template #footer&gt;
-        &lt;a-space&gt;
-          &lt;a-button @click="cloneTemplate(currentTemplate?.id)" :loading="cloning"&gt;克隆&lt;/a-button&gt;
-          &lt;a-button type="primary" @click="useTemplate(currentTemplate)"&gt;使用此模板&lt;/a-button&gt;
-        &lt;/a-space&gt;
-      &lt;/template&gt;
-    &lt;/a-modal&gt;
-    &lt;!-- 创建模板模态框 --&gt;
-    &lt;a-modal v-model:open="showCreateModal" title="新建模板" width="800px" @ok="createTemplate" :confirmLoading="creating"&gt;
-      &lt;a-form layout="vertical"&gt;
-        &lt;a-form-item label="模板名称" :rules="[{ required: true }]"&gt;
-          &lt;a-input v-model:value="newTemplate.name" placeholder="输入模板名称" /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="描述"&gt;
-          &lt;a-textarea v-model:value="newTemplate.description" placeholder="输入描述" :rows="3" /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="模板类型"&gt;
-          &lt;a-select v-model:value="newTemplate.template_type" placeholder="选择类型" :options="typeOptions" /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="标签"&gt;
-          &lt;a-select v-model:value="newTemplate.tags" mode="tags" placeholder="输入标签" /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-row :gutter="16"&gt;
-          &lt;a-col :span="12"&gt;
-            &lt;a-form-item label="最大参与人数"&gt;
-              &lt;a-input-number v-model:value="newTemplate.max_participants" :min="1" :max="10" /&gt;
-            &lt;/a-form-item&gt;
-          &lt;/a-col&gt;
-          &lt;a-col :span="12"&gt;
-            &lt;a-form-item label="最小参与人数"&gt;
-              &lt;a-input-number v-model:value="newTemplate.min_participants" :min="1" :max="5" /&gt;
-            &lt;/a-form-item&gt;
-          &lt;/a-col&gt;
-        &lt;/a-row&gt;
-      &lt;/a-form&gt;
-    &lt;/a-modal&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+      </div>
+    </div>
+    <!-- 模板详情模态框 -->
+    <a-modal v-model:open="viewVisible" :title="currentTemplate?.name" width="700px" @ok="viewVisible=false">
+      <div v-if="currentTemplate" >
+        <a-descriptions :column="2" bordered size="small">
+          <a-descriptions-item label="描述" :span="2">{{ currentTemplate.description || '暂无' }}</a-descriptions-item>
+          <a-descriptions-item label="最大参与人数">{{ currentTemplate.max_participants || '无限制' }}</a-descriptions-item>
+          <a-descriptions-item label="最小参与人数">{{ currentTemplate.min_participants || 1 }}</a-descriptions-item>
+          <a-descriptions-item label="标签">
+            <a-tag v-for="tag in currentTemplate.tags" :key="tag">{{ tag }}</a-tag>
+          </a-descriptions-item>
+        </a-descriptions>
+        <div  v-if="currentTemplate.workflow">
+          <h4>工作流</h4>
+          <div >
+            <div v-for="(step, idx) in (currentTemplate.workflow.steps || [])" :key="idx" >
+              <div >{{ idx + 1 }}</div>
+              <div >
+                <span >{{ step.name }}</span>
+                <span >{{ step.description || step.agent || '自动执行' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <a-space>
+          <a-button @click="cloneTemplate(currentTemplate?.id)" :loading="cloning">克隆</a-button>
+          <a-button type="primary" @click="useTemplate(currentTemplate)">使用此模板</a-button>
+        </a-space>
+      </template>
+    </a-modal>
+    <!-- 创建模板模态框 -->
+    <a-modal v-model:open="showCreateModal" title="新建模板" width="800px" @ok="createTemplate" :confirmLoading="creating">
+      <a-form layout="vertical">
+        <a-form-item label="模板名称" :rules="[{ required: true }]">
+          <a-input v-model:value="newTemplate.name" placeholder="输入模板名称" />
+        </a-form-item>
+        <a-form-item label="描述">
+          <a-textarea v-model:value="newTemplate.description" placeholder="输入描述" :rows="3" />
+        </a-form-item>
+        <a-form-item label="模板类型">
+          <a-select v-model:value="newTemplate.template_type" placeholder="选择类型" :options="typeOptions" />
+        </a-form-item>
+        <a-form-item label="标签">
+          <a-select v-model:value="newTemplate.tags" mode="tags" placeholder="输入标签" />
+        </a-form-item>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="最大参与人数">
+              <a-input-number v-model:value="newTemplate.max_participants" :min="1" :max="10" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="最小参与人数">
+              <a-input-number v-model:value="newTemplate.min_participants" :min="1" :max="5" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+      </a-form>
+    </a-modal>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { FileTextOutlined, PlusOutlined } from '@ant-design/icons-vue'
@@ -133,10 +133,10 @@ interface TemplateData {
   max_participants?: number
   min_participants?: number
 }
-const templates = ref&lt;TemplateData[]&gt;([])
-const presets = ref&lt;TemplateData[]&gt;([])
+const templates = ref<TemplateData[]>([])
+const presets = ref<TemplateData[]>([])
 const viewVisible = ref(false)
-const currentTemplate = ref&lt;TemplateData | null&gt;(null)
+const currentTemplate = ref<TemplateData | null>(null)
 const showCreateModal = ref(false)
 const creating = ref(false)
 const cloning = ref(false)
@@ -156,7 +156,7 @@ const typeOptions = [
   { label: '代码生成', value: 'code' },
   { label: '问答系统', value: 'qa' }
 ]
-const loadTemplates = async () =&gt; {
+const loadTemplates = async () => {
   loading.value = true
   try {
     const [customRes, presetRes] = await Promise.allSettled([
@@ -175,15 +175,15 @@ const loadTemplates = async () =&gt; {
     loading.value = false
   }
 }
-const viewTemplate = (t: TemplateData) =&gt; {
+const viewTemplate = (t: TemplateData) => {
   currentTemplate.value = t
   viewVisible.value = true
 }
-const useTemplate = (t: TemplateData) =&gt; {
+const useTemplate = (t: TemplateData) => {
   viewVisible.value = false
   router.push({ path: '/collaboration/initiate', query: { template_id: t.id } })
 }
-const cloneTemplate = async (id: string) =&gt; {
+const cloneTemplate = async (id: string) => {
   if (!id) return
   cloning.value = true
   try {
@@ -197,14 +197,14 @@ const cloneTemplate = async (id: string) =&gt; {
     cloning.value = false
   }
 }
-const createTemplate = async () =&gt; {
+const createTemplate = async () => {
   if (!newTemplate.value.name) {
     message.error('请输入模板名称')
     return
   }
   creating.value = true
   try {
-    await collaborationAPI.createTemplate(newTemplate.value as Parameters&lt;typeof collaborationAPI.createTemplate&gt;[0])
+    await collaborationAPI.createTemplate(newTemplate.value as Parameters<typeof collaborationAPI.createTemplate>[0])
     message.success('创建成功')
     showCreateModal.value = false
     newTemplate.value = {
@@ -223,11 +223,11 @@ const createTemplate = async () =&gt; {
     creating.value = false
   }
 }
-onMounted(() =&gt; {
+onMounted(() => {
   loadTemplates()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-radius: 12px; }
 .t { font-size: 1.2rem; color: #e2e8f0; margin: 0; display: flex; align-items: center; gap: 8px; }
@@ -254,5 +254,5 @@ onMounted(() =&gt; {
 .step-content { flex: 1; }
 .step-name { color: #e2e8f0; font-weight: 500; display: block; }
 .step-desc { color: rgba(255,255,255,0.4); font-size: 0.8rem; }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

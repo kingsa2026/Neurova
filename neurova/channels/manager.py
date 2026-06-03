@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 渠道管理器
 
@@ -7,8 +9,6 @@
 - 小接口: start / stop / get_adapter / list_adapters
 - 深实现: 适配器注册、连接管理、消息分发、健康检查
 """
-
-from __future__ import annotations
 
 import asyncio
 import logging
@@ -24,13 +24,11 @@ from neurova.channels.base import (
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================
 # 消息处理器类型
 # ============================================================
 
 MessageHandler = Callable[[ChannelMessage], Coroutine[Any, Any, str]]
-
 
 class ChannelManager:
     """
@@ -243,11 +241,9 @@ class ChannelManager:
             "adapters": statuses,
         }
 
-
 # ============================================================
 # 全局单例
 # ============================================================
-
 
 def get_channel_manager() -> ChannelManager:
     """获取渠道管理器单例"""

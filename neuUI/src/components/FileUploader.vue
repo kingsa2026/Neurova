@@ -1,36 +1,36 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;a-upload
+<template>
+  <div >
+    <a-upload
       v-model:file-list="fileList"
       :before-upload="beforeUpload"
       :custom-request="customRequest"
       :multiple="multiple"
       :accept="accept"
-    &gt;
-      &lt;a-button &gt;
-        &lt;UploadOutlined /&gt;
+    >
+      <a-button >
+        <UploadOutlined />
         {{ buttonText }}
-      &lt;/a-button&gt;
-    &lt;/a-upload&gt;
-    &lt;div v-if="fileList.length &gt; 0" &gt;
-      &lt;div
+      </a-button>
+    </a-upload>
+    <div v-if="fileList.length > 0" >
+      <div
         v-for="file in fileList"
         :key="file.uid"
-      &gt;
-        &lt;FileOutlined  /&gt;
-        &lt;span &gt;{{ file.name }}&lt;/span&gt;
-        &lt;a-button
+      >
+        <FileOutlined  />
+        <span >{{ file.name }}</span>
+        <a-button
           type="text"
           size="small"
           @click="removeFile(file)"
-        &gt;
-          &lt;DeleteOutlined /&gt;
-        &lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+        >
+          <DeleteOutlined />
+        </a-button>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref } from 'vue'
 import { message } from 'ant-design-vue'
 import {
@@ -38,16 +38,16 @@ import {
   FileOutlined,
   DeleteOutlined
 } from '@ant-design/icons-vue'
-const props = defineProps&lt;{
+const props = defineProps<{
   multiple?: boolean
   accept?: string
   maxSize?: number // MB
   buttonText?: string
-}&gt;()
-const emit = defineEmits&lt;{
+}>()
+const emit = defineEmits<{
   (e: 'upload', file: File): void
   (e: 'remove', file: UploadFile): void
-}&gt;()
+}>()
 interface UploadFile {
   uid: string
   name: string
@@ -56,10 +56,10 @@ interface UploadFile {
   status?: string
   url?: string
 }
-const fileList = ref&lt;UploadFile[]&gt;([])
+const fileList = ref<UploadFile[]>([])
 function beforeUpload(file: File) {
   // 检查文件大小
-  if (props.maxSize &amp;&amp; file.size &gt; props.maxSize * 1024 * 1024) {
+  if (props.maxSize && file.size > props.maxSize * 1024 * 1024) {
     message.error(`文件大小不能超过 ${props.maxSize}MB`)
     return false
   }
@@ -67,27 +67,27 @@ function beforeUpload(file: File) {
 }
 interface UploadOptions {
   file: File
-  onSuccess?: (body: unknown) =&gt; void
-  onError?: (err: unknown) =&gt; void
+  onSuccess?: (body: unknown) => void
+  onError?: (err: unknown) => void
 }
 function customRequest(options: UploadOptions) {
   const { file, onSuccess, onError } = options
   // 这里应该调用实际的 API
   // 暂时模拟上传成功
-  setTimeout(() =&gt; {
+  setTimeout(() => {
     onSuccess({ url: URL.createObjectURL(file) })
     emit('upload', file)
   }, 1000)
 }
 function removeFile(file: UploadFile) {
   const index = fileList.value.indexOf(file)
-  if (index &gt; -1) {
+  if (index > -1) {
     fileList.value.splice(index, 1)
     emit('remove', file)
   }
 }
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .file-uploader {
   margin-bottom: 16px;
 }
@@ -100,7 +100,7 @@ function removeFile(file: UploadFile) {
   background: rgba(255, 255, 255, 0.05) !important;
   border: 1px solid rgba(255, 255, 255, 0.2) !important;
   color: rgba(255, 255, 255, 0.8) !important;
-  &amp;:hover {
+  &:hover {
     border-color: #3b82f6 !important;
     color: #60a5fa !important;
   }
@@ -130,9 +130,9 @@ function removeFile(file: UploadFile) {
 }
 .remove-btn {
   color: rgba(255, 255, 255, 0.4) !important;
-  &amp;:hover {
+  &:hover {
     color: #ef4444 !important;
   }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

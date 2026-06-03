@@ -1,35 +1,35 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;EyeOutlined :style="{color:'#8b5cf6'}" /&gt; 元认知&lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;思考步骤&lt;b &gt;{{ stats.total }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;自我评估&lt;b &gt;{{ stats.evaluations }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;优化建议&lt;b &gt;{{ stats.suggestions }}&lt;/b&gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-timeline mode="left"&gt;
-        &lt;a-timeline-item v-for="it in items" :key="it.id"&gt;
-          &lt;template #dot&gt;&lt;span  :style="{background:it.color}"&gt;&lt;/span&gt;&lt;/template&gt;
-          &lt;div &gt;
-            &lt;div &gt;{{ it.title }}&lt;/div&gt;
-            &lt;div &gt;
-              &lt;a-tag :color="it.tc" size="small"&gt;{{ it.type }}&lt;/a-tag&gt;
-              &lt;span &gt;{{ it.time }}&lt;/span&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/a-timeline-item&gt;
-      &lt;/a-timeline&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 ><EyeOutlined :style="{color:'#8b5cf6'}" /> 元认知</h2>
+    </div>
+    <div >
+      <div >思考步骤<b >{{ stats.total }}</b></div>
+      <div >自我评估<b >{{ stats.evaluations }}</b></div>
+      <div >优化建议<b >{{ stats.suggestions }}</b></div>
+    </div>
+    <div >
+      <a-timeline mode="left">
+        <a-timeline-item v-for="it in items" :key="it.id">
+          <template #dot><span  :style="{background:it.color}"></span></template>
+          <div >
+            <div >{{ it.title }}</div>
+            <div >
+              <a-tag :color="it.tc" size="small">{{ it.type }}</a-tag>
+              <span >{{ it.time }}</span>
+            </div>
+          </div>
+        </a-timeline-item>
+      </a-timeline>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { EyeOutlined } from '@ant-design/icons-vue'
-const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/metacognition', () =&gt; loadData())
+const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/metacognition', () => loadData())
 const stats = ref({ total: 892, evaluations: 45, suggestions: 12 })
 const items = ref([
   {id:1,title:'分析用户查询意图，识别为"文档生成"类型',type:'分析',tc:'blue',color:'#3b82f6',time:'2分钟前'},
@@ -42,18 +42,18 @@ const items = ref([
 async function loadData() {
   try {
     const res = await request.get(`/agents/${agentId.value}/metacognition`)
-    if (res.code === 0 &amp;&amp; res.data) {
+    if (res.code === 0 && res.data) {
       if (res.data.items?.length) items.value = res.data.items
       if (res.data.stats) stats.value = res.data.stats
     }
   } catch { /* 使用静态数据 */ }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await initAgent()
   loadData()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg{display:flex;flex-direction:column;gap:14px;}
 .hd{padding:16px 24px;border-radius:12px;}
 .t{font-size:1.2rem;color:#e2e8f0;margin:0;display:flex;align-items:center;gap:8px;}
@@ -66,5 +66,5 @@ onMounted(async () =&gt; {
 .til{color:#e2e8f0;margin-bottom:6px;}
 .tim{display:flex;align-items:center;gap:8px;}
 .ts{color:rgba(255,255,255,0.25);font-size:0.75rem;}
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

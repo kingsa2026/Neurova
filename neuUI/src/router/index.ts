@@ -1,65 +1,65 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 // 懒加载页面
-const LoginPage = () =&gt; import('@/pages/LoginPage.vue')
-const RegisterPage = () =&gt; import('@/pages/RegisterPage.vue')
-const MainLayout = () =&gt; import('@/layouts/MainLayout.vue')
-const DashboardPage = () =&gt; import('@/pages/DashboardPage.vue')
-const SettingPage = () =&gt; import('@/pages/SettingPage.vue')
-const AgentListPage = () =&gt; import('@/pages/AgentListPage.vue')
-const AgentFormPage = () =&gt; import('@/pages/AgentFormPage.vue')
-const ChatPage = () =&gt; import('@/pages/ChatPage.vue')
-const MemoryPage = () =&gt; import('@/pages/MemoryPage.vue')
-const KnowledgePage = () =&gt; import('@/pages/KnowledgePage.vue')
-const SkillMarketPage = () =&gt; import('@/pages/SkillMarketPage.vue')
-const WorkflowPage = () =&gt; import('@/pages/WorkflowPage.vue')
-const ExperienceKnowledgePage = () =&gt; import('@/pages/ExperienceKnowledgePage.vue')
-const KnowledgeGraphPage = () =&gt; import('@/pages/KnowledgeGraphPage.vue')
-const MetacognitionPage = () =&gt; import('@/pages/MetacognitionPage.vue')
-const ReflectionPage = () =&gt; import('@/pages/ReflectionPage.vue')
-const GrowthPage = () =&gt; import('@/pages/GrowthPage.vue')
-const AgentSkillPage = () =&gt; import('@/pages/AgentSkillPage.vue')
-const SkillPoolPage = () =&gt; import('@/pages/SkillPoolPage.vue')
-const AIGCPage = () =&gt; import('@/pages/AIGCPage.vue')
-const AgentFilePage = () =&gt; import('@/pages/AgentFilePage.vue')
-const AgentMediaPage = () =&gt; import('@/pages/AgentMediaPage.vue')
-const CollaborationPage = () =&gt; import('@/pages/CollaborationPage.vue')
-const ProjectPage = () =&gt; import('@/pages/ProjectPage.vue')
-const TeamPage = () =&gt; import('@/pages/TeamPage.vue')
-const AgentSchedulerPage = () =&gt; import('@/pages/AgentSchedulerPage.vue')
-const TaskPage = () =&gt; import('@/pages/TaskPage.vue')
-const AgentRulePage = () =&gt; import('@/pages/AgentRulePage.vue')
-const ModelPage = () =&gt; import('@/pages/ModelPage.vue')
-const AnalyticsPage = () =&gt; import('@/pages/AnalyticsPage.vue')
-const AgentEmotionPage = () =&gt; import('@/pages/AgentEmotionPage.vue')
-const AgentPersonalityPage = () =&gt; import('@/pages/AgentPersonalityPage.vue')
-const AgentFirewallPage = () =&gt; import('@/pages/AgentFirewallPage.vue')
-const AuditPage = () =&gt; import('@/pages/AuditPage.vue')
-const BenchmarkPage = () =&gt; import('@/pages/BenchmarkPage.vue')
-const NotificationPage = () =&gt; import('@/pages/NotificationPage.vue')
-const HealthPage = () =&gt; import('@/pages/HealthPage.vue')
-const CollaborationTemplatePage = () =&gt; import('@/pages/CollaborationTemplatePage.vue')
-const CollaborationInitiatePage = () =&gt; import('@/pages/CollaborationInitiatePage.vue')
-const CollaborationHistoryPage = () =&gt; import('@/pages/CollaborationHistoryPage.vue')
-const AgentSleepPage = () =&gt; import('@/pages/AgentSleepPage.vue')
-const SleepStatusPage = () =&gt; import('@/pages/SleepStatusPage.vue')
-const SleepSettingsPage = () =&gt; import('@/pages/SleepSettingsPage.vue')
-const MemorySearchSettingsPage = () =&gt; import('@/pages/MemorySearchSettingsPage.vue')
-const AgentTrajectoryPage = () =&gt; import('@/pages/AgentTrajectoryPage.vue')
-const AgentTracePage = () =&gt; import('@/pages/AgentTracePage.vue')
-const AgentChannelPage = () =&gt; import('@/pages/AgentChannelPage.vue')
-const AgentComputerPage = () =&gt; import('@/pages/AgentComputerPage.vue')
-const MarketplacePage = () =&gt; import('@/pages/MarketplacePage.vue')
-const ToolLayerPage = () =&gt; import('@/pages/ToolLayerPage.vue')
-const ContextChannelPage = () =&gt; import('@/pages/ContextChannelPage.vue')
-const WebhookPage = () =&gt; import('@/pages/WebhookPage.vue')
-const SandboxPage = () =&gt; import('@/pages/SandboxPage.vue')
-const StatsPage = () =&gt; import('@/pages/StatsPage.vue')
-const MonitorPage = () =&gt; import('@/pages/MonitorPage.vue')
-const LogPage = () =&gt; import('@/pages/LogPage.vue')
-const GroupPage = () =&gt; import('@/pages/GroupPage.vue')
-const EnhancedUserPage = () =&gt; import('@/pages/EnhancedUserPage.vue')
-const PlaceholderPage = () =&gt; import('@/pages/PlaceholderPage.vue')
+const LoginPage = () => import('@/pages/LoginPage.vue')
+const RegisterPage = () => import('@/pages/RegisterPage.vue')
+const MainLayout = () => import('@/layouts/MainLayout.vue')
+const DashboardPage = () => import('@/pages/DashboardPage.vue')
+const SettingPage = () => import('@/pages/SettingPage.vue')
+const AgentListPage = () => import('@/pages/AgentListPage.vue')
+const AgentFormPage = () => import('@/pages/AgentFormPage.vue')
+const ChatPage = () => import('@/pages/ChatPage.vue')
+const MemoryPage = () => import('@/pages/MemoryPage.vue')
+const KnowledgePage = () => import('@/pages/KnowledgePage.vue')
+const SkillMarketPage = () => import('@/pages/SkillMarketPage.vue')
+const WorkflowPage = () => import('@/pages/WorkflowPage.vue')
+const ExperienceKnowledgePage = () => import('@/pages/ExperienceKnowledgePage.vue')
+const KnowledgeGraphPage = () => import('@/pages/KnowledgeGraphPage.vue')
+const MetacognitionPage = () => import('@/pages/MetacognitionPage.vue')
+const ReflectionPage = () => import('@/pages/ReflectionPage.vue')
+const GrowthPage = () => import('@/pages/GrowthPage.vue')
+const AgentSkillPage = () => import('@/pages/AgentSkillPage.vue')
+const SkillPoolPage = () => import('@/pages/SkillPoolPage.vue')
+const AIGCPage = () => import('@/pages/AIGCPage.vue')
+const AgentFilePage = () => import('@/pages/AgentFilePage.vue')
+const AgentMediaPage = () => import('@/pages/AgentMediaPage.vue')
+const CollaborationPage = () => import('@/pages/CollaborationPage.vue')
+const ProjectPage = () => import('@/pages/ProjectPage.vue')
+const TeamPage = () => import('@/pages/TeamPage.vue')
+const AgentSchedulerPage = () => import('@/pages/AgentSchedulerPage.vue')
+const TaskPage = () => import('@/pages/TaskPage.vue')
+const AgentRulePage = () => import('@/pages/AgentRulePage.vue')
+const ModelPage = () => import('@/pages/ModelPage.vue')
+const AnalyticsPage = () => import('@/pages/AnalyticsPage.vue')
+const AgentEmotionPage = () => import('@/pages/AgentEmotionPage.vue')
+const AgentPersonalityPage = () => import('@/pages/AgentPersonalityPage.vue')
+const AgentFirewallPage = () => import('@/pages/AgentFirewallPage.vue')
+const AuditPage = () => import('@/pages/AuditPage.vue')
+const BenchmarkPage = () => import('@/pages/BenchmarkPage.vue')
+const NotificationPage = () => import('@/pages/NotificationPage.vue')
+const HealthPage = () => import('@/pages/HealthPage.vue')
+const CollaborationTemplatePage = () => import('@/pages/CollaborationTemplatePage.vue')
+const CollaborationInitiatePage = () => import('@/pages/CollaborationInitiatePage.vue')
+const CollaborationHistoryPage = () => import('@/pages/CollaborationHistoryPage.vue')
+const AgentSleepPage = () => import('@/pages/AgentSleepPage.vue')
+const SleepStatusPage = () => import('@/pages/SleepStatusPage.vue')
+const SleepSettingsPage = () => import('@/pages/SleepSettingsPage.vue')
+const MemorySearchSettingsPage = () => import('@/pages/MemorySearchSettingsPage.vue')
+const AgentTrajectoryPage = () => import('@/pages/AgentTrajectoryPage.vue')
+const AgentTracePage = () => import('@/pages/AgentTracePage.vue')
+const AgentChannelPage = () => import('@/pages/AgentChannelPage.vue')
+const AgentComputerPage = () => import('@/pages/AgentComputerPage.vue')
+const MarketplacePage = () => import('@/pages/MarketplacePage.vue')
+const ToolLayerPage = () => import('@/pages/ToolLayerPage.vue')
+const ContextChannelPage = () => import('@/pages/ContextChannelPage.vue')
+const WebhookPage = () => import('@/pages/WebhookPage.vue')
+const SandboxPage = () => import('@/pages/SandboxPage.vue')
+const StatsPage = () => import('@/pages/StatsPage.vue')
+const MonitorPage = () => import('@/pages/MonitorPage.vue')
+const LogPage = () => import('@/pages/LogPage.vue')
+const GroupPage = () => import('@/pages/GroupPage.vue')
+const EnhancedUserPage = () => import('@/pages/EnhancedUserPage.vue')
+const PlaceholderPage = () => import('@/pages/PlaceholderPage.vue')
 const routes: RouteRecordRaw[] = [
   // ========== 公开路由 ==========
   {
@@ -154,9 +154,9 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'chat',
         name: 'ChatRedirect',
-        redirect: () =&gt; {
+        redirect: () => {
           const agentId = localStorage.getItem('currentAgentId')
-          return agentId &amp;&amp; agentId !== 'default' ? `/agent/${agentId}/chat` : '/agents'
+          return agentId && agentId !== 'default' ? `/agent/${agentId}/chat` : '/agents'
         },
         meta: { title: '聊天', module: 'chat' },
       },
@@ -462,13 +462,13 @@ function secureGetToken(): string | null {
  * 解析 JWT payload（仅解码 base64，不验证签名）
  * 返回 null 如果 token 格式无效或已过期
  */
-function parseJwtPayload(token: string): Record&lt;string, unknown&gt; | null {
+function parseJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const parts = token.split('.')
     if (parts.length !== 3) return null
     const payload = JSON.parse(atob(parts[1]))
     // 检查过期时间
-    if (payload.exp &amp;&amp; Date.now() &gt;= payload.exp * 1000) {
+    if (payload.exp && Date.now() >= payload.exp * 1000) {
       return null
     }
     return payload
@@ -477,15 +477,15 @@ function parseJwtPayload(token: string): Record&lt;string, unknown&gt; | null {
   }
 }
 // 路由守卫
-router.beforeEach((to, _from, next) =&gt; {
+router.beforeEach((to, _from, next) => {
   const token = secureGetToken()
-  const needAuth = to.matched.some(r =&gt; r.meta.requiresAuth)
-  const requireAdmin = to.matched.some(r =&gt; r.meta.requireAdmin)
-  if (needAuth &amp;&amp; !token) {
+  const needAuth = to.matched.some(r => r.meta.requiresAuth)
+  const requireAdmin = to.matched.some(r => r.meta.requireAdmin)
+  if (needAuth && !token) {
     next('/login')
     return
   }
-  if (needAuth &amp;&amp; token) {
+  if (needAuth && token) {
     // 验证 token 是否有效（格式正确且未过期）
     const payload = parseJwtPayload(token)
     if (!payload) {
@@ -505,7 +505,7 @@ router.beforeEach((to, _from, next) =&gt; {
       }
     }
   }
-  if ((to.path === '/login' || to.path === '/register') &amp;&amp; token) {
+  if ((to.path === '/login' || to.path === '/register') && token) {
     // 已登录用户访问登录页时，也验证 token 有效性
     const payload = parseJwtPayload(token)
     if (payload) {
@@ -517,4 +517,4 @@ router.beforeEach((to, _from, next) =&gt; {
   next()
 })
 export default router
-&nbsp;
+ 

@@ -1,40 +1,40 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;FolderOpenOutlined :style="{color:'#34d399'}"/&gt; 文件管理&lt;/h2&gt;
-      &lt;a-button type="primary" size="small"&gt;&lt;UploadOutlined/&gt;上传文件&lt;/a-button&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;文件&lt;b &gt;{{ stats.count }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;大小&lt;b &gt;{{ stats.size }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;类型&lt;b &gt;{{ stats.types }}&lt;/b&gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-table :columns="cols" :data-source="files" row-key="id" size="middle" :pagination="{pageSize:8}"&gt;
-        &lt;template #bodyCell="{column,record}"&gt;
-          &lt;template v-if="column.key==='type'"&gt;
-            &lt;a-tag :color="record.tc" size="small"&gt;{{ record.type }}&lt;/a-tag&gt;
-          &lt;/template&gt;
-          &lt;template v-if="column.key==='act'"&gt;
-            &lt;a-space&gt;
-              &lt;a-button type="link" size="small"&gt;预览&lt;/a-button&gt;
-              &lt;a-button type="link" size="small"&gt;下载&lt;/a-button&gt;
-              &lt;a-popconfirm title="删除?" @confirm="files=files.filter(f=&gt;f.id!==record.id)"&gt;
-                &lt;a-button type="link" size="small" danger&gt;删除&lt;/a-button&gt;
-              &lt;/a-popconfirm&gt;
-            &lt;/a-space&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 ><FolderOpenOutlined :style="{color:'#34d399'}"/> 文件管理</h2>
+      <a-button type="primary" size="small"><UploadOutlined/>上传文件</a-button>
+    </div>
+    <div >
+      <div >文件<b >{{ stats.count }}</b></div>
+      <div >大小<b >{{ stats.size }}</b></div>
+      <div >类型<b >{{ stats.types }}</b></div>
+    </div>
+    <div >
+      <a-table :columns="cols" :data-source="files" row-key="id" size="middle" :pagination="{pageSize:8}">
+        <template #bodyCell="{column,record}">
+          <template v-if="column.key==='type'">
+            <a-tag :color="record.tc" size="small">{{ record.type }}</a-tag>
+          </template>
+          <template v-if="column.key==='act'">
+            <a-space>
+              <a-button type="link" size="small">预览</a-button>
+              <a-button type="link" size="small">下载</a-button>
+              <a-popconfirm title="删除?" @confirm="files=files.filter(f=>f.id!==record.id)">
+                <a-button type="link" size="small" danger>删除</a-button>
+              </a-popconfirm>
+            </a-space>
+          </template>
+        </template>
+      </a-table>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { FolderOpenOutlined, UploadOutlined } from '@ant-design/icons-vue'
-const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/files', () =&gt; loadData())
+const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/files', () => loadData())
 const cols = [
   {title:'文件名',dataIndex:'name'},
   {title:'类型',key:'type',width:80},
@@ -50,12 +50,12 @@ interface FileItem {
   size: string
   time: string
 }
-const files = ref&lt;FileItem[]&gt;([])
+const files = ref<FileItem[]>([])
 const stats = ref({ count: 0, size: '0MB', types: 0 })
 async function loadData() {
   try {
     const res = await request.get(`/agents/${agentId.value}/files`)
-    if (res.code === 0 &amp;&amp; res.data) {
+    if (res.code === 0 && res.data) {
       if (res.data.files?.length) {
         files.value = res.data.files
         stats.value = {
@@ -75,12 +75,12 @@ async function loadData() {
     stats.value = { count: 3, size: '3.2MB', types: 3 }
   }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await initAgent()
   loadData()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg{display:flex;flex-direction:column;gap:14px;}
 .hd{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-radius:12px;}
 .t{font-size:1.2rem;color:#e2e8f0;margin:0;display:flex;align-items:center;gap:8px;}
@@ -88,5 +88,5 @@ onMounted(async () =&gt; {
 .s{flex:1;padding:14px 18px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;color:rgba(255,255,255,0.5);font-size:.85rem;}
 .s b{font-size:1.4rem;}.c1{color:#34d399;}
 .tb{padding:20px;border-radius:12px;}
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

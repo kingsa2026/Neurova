@@ -1,79 +1,79 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;UsergroupAddOutlined :style="{color:'#8b5cf6'}" /&gt; 用户组管理
-      &lt;/h2&gt;
-      &lt;a-btn type="primary" size="small" @click="showCreateModal = true"&gt;
-        &lt;PlusOutlined /&gt;新建组
-      &lt;/a-btn&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        总组数 &lt;b &gt;{{ stats.total }}&lt;/b&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        总用户数 &lt;b &gt;{{ stats.users }}&lt;/b&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-table
+<template>
+  <div >
+    <div >
+      <h2 >
+        <UsergroupAddOutlined :style="{color:'#8b5cf6'}" /> 用户组管理
+      </h2>
+      <a-btn type="primary" size="small" @click="showCreateModal = true">
+        <PlusOutlined />新建组
+      </a-btn>
+    </div>
+    <div >
+      <div >
+        总组数 <b >{{ stats.total }}</b>
+      </div>
+      <div >
+        总用户数 <b >{{ stats.users }}</b>
+      </div>
+    </div>
+    <div >
+      <a-table
         :columns="cols"
         :data-source="groupList"
         row-key="id"
         size="middle"
         :loading="loading"
         :expandable="{
-          expandedRowRender: (r: Group) =&gt; h('div', { class: 'exp' }, [
+          expandedRowRender: (r: Group) => h('div', { class: 'exp' }, [
             h('h5', '权限列表'),
-            h('div', { class: 'ptags' }, r.permissions?.map((p: string) =&gt; h('a-tag', { key: p, size: 'small' }, p)))
+            h('div', { class: 'ptags' }, r.permissions?.map((p: string) => h('a-tag', { key: p, size: 'small' }, p)))
           ])
         }"
-      &gt;
-        &lt;template #bodyCell="{ c, r }"&gt;
-          &lt;template v-if="c.key === 'ms'"&gt;
-            &lt;a-avatar-group :max-count="4" size="small"&gt;
-              &lt;a-avatar
+      >
+        <template #bodyCell="{ c, r }">
+          <template v-if="c.key === 'ms'">
+            <a-avatar-group :max-count="4" size="small">
+              <a-avatar
                 v-for="(member, idx) in r.members?.slice(0, 4)"
                 :key="idx"
                 size="small"
                 :style="{ background: '#' + Math.floor(Math.random() * 16777215).toString(16) }"
-              &gt;
+              >
                 {{ member.name?.charAt(0) || 'U' }}
-              &lt;/a-avatar&gt;
-              &lt;span v-if="r.member_count &gt; 4" &gt;+{{ r.member_count - 4 }}&lt;/span&gt;
-            &lt;/a-avatar-group&gt;
-          &lt;/template&gt;
-          &lt;template v-if="c.key === 'act'"&gt;
-            &lt;a-space&gt;
-              &lt;a-btn size="small" type="link" @click="editGroup(r)"&gt;编辑&lt;/a-btn&gt;
-              &lt;a-btn size="small" type="link" @click="managePermissions(r)"&gt;权限&lt;/a-btn&gt;
-              &lt;a-popconfirm title="确定删除该用户组？" @confirm="deleteGroup(r.id)"&gt;
-                &lt;a-btn size="small" type="link" danger&gt;删除&lt;/a-btn&gt;
-              &lt;/a-popconfirm&gt;
-            &lt;/a-space&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-    &lt;a-modal
+              </a-avatar>
+              <span v-if="r.member_count > 4" >+{{ r.member_count - 4 }}</span>
+            </a-avatar-group>
+          </template>
+          <template v-if="c.key === 'act'">
+            <a-space>
+              <a-btn size="small" type="link" @click="editGroup(r)">编辑</a-btn>
+              <a-btn size="small" type="link" @click="managePermissions(r)">权限</a-btn>
+              <a-popconfirm title="确定删除该用户组？" @confirm="deleteGroup(r.id)">
+                <a-btn size="small" type="link" danger>删除</a-btn>
+              </a-popconfirm>
+            </a-space>
+          </template>
+        </template>
+      </a-table>
+    </div>
+    <a-modal
       v-model:open="showCreateModal"
       title="新建用户组"
       @ok="handleCreate"
       @cancel="showCreateModal = false"
-    &gt;
-      &lt;a-form :model="form" layout="vertical"&gt;
-        &lt;a-form-item label="组名"&gt;
-          &lt;a-input v-model:value="form.name" placeholder="请输入组名" /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="描述"&gt;
-          &lt;a-textarea v-model:value="form.description" placeholder="请输入组描述" /&gt;
-        &lt;/a-form-item&gt;
-      &lt;/a-form&gt;
-    &lt;/a-modal&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+    >
+      <a-form :model="form" layout="vertical">
+        <a-form-item label="组名">
+          <a-input v-model:value="form.name" placeholder="请输入组名" />
+        </a-form-item>
+        <a-form-item label="描述">
+          <a-textarea v-model:value="form.description" placeholder="请输入组描述" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive, h } from 'vue';
 import { message } from 'ant-design-vue';
 import { request } from '@/api';
@@ -83,7 +83,7 @@ interface Group {
   name: string;
   description?: string;
   member_count: number;
-  members?: Array&lt;{ id: string; name: string }&gt;;
+  members?: Array<{ id: string; name: string }>;
   permissions: string[];
   created_at: string;
 }
@@ -93,9 +93,9 @@ interface GroupForm {
 }
 const loading = ref(false);
 const showCreateModal = ref(false);
-const groupList = ref&lt;Group[]&gt;([]);
+const groupList = ref<Group[]>([]);
 const stats = ref({ total: 0, users: 0 });
-const form = reactive&lt;GroupForm&gt;({
+const form = reactive<GroupForm>({
   name: '',
   description: ''
 });
@@ -106,23 +106,23 @@ const cols = [
   { title: '创建时间', dataIndex: 'created_at', width: 160 },
   { title: '操作', key: 'act', width: 200 }
 ];
-const fetchGroups = async () =&gt; {
+const fetchGroups = async () => {
   loading.value = true;
   try {
     const res = await request.get('/settings/groups');
     if (res.success) {
-      groupList.value = (Array.isArray(res.data) ? res.data : []).map((item: Record&lt;string,unknown&gt;) =&gt; ({
+      groupList.value = (Array.isArray(res.data) ? res.data : []).map((item: Record<string,unknown>) => ({
         id: (item.id || item.group_id) as string,
         name: item.name as string,
         description: item.description as string,
         member_count: ((item.member_count || (item.members as unknown[])?.length || 0) as number),
-        members: (item.members || []) as Array&lt;{ id: string; name: string }&gt;,
+        members: (item.members || []) as Array<{ id: string; name: string }>,
         permissions: (item.permissions || []) as string[],
         created_at: (item.created_at || '') as string
       }));
       stats.value = {
         total: groupList.value.length,
-        users: groupList.value.reduce((sum, g) =&gt; sum + (g.member_count || 0), 0)
+        users: groupList.value.reduce((sum, g) => sum + (g.member_count || 0), 0)
       };
     }
   } catch (error) {
@@ -138,7 +138,7 @@ const fetchGroups = async () =&gt; {
     loading.value = false;
   }
 };
-const handleCreate = async () =&gt; {
+const handleCreate = async () => {
   if (!form.name.trim()) {
     message.warning('请输入组名');
     return;
@@ -162,15 +162,15 @@ const handleCreate = async () =&gt; {
     message.error('创建失败');
   }
 };
-const editGroup = (group: Group) =&gt; {
+const editGroup = (group: Group) => {
   form.name = group.name;
   form.description = group.description || '';
   showCreateModal.value = true;
 };
-const managePermissions = (group: Group) =&gt; {
+const managePermissions = (group: Group) => {
   message.info(`管理组 ${group.name} 的权限`);
 };
-const deleteGroup = async (groupId: string) =&gt; {
+const deleteGroup = async (groupId: string) => {
   try {
     const res = await request.delete(`/settings/groups/${groupId}`);
     if (res.success) {
@@ -183,8 +183,8 @@ const deleteGroup = async (groupId: string) =&gt; {
   }
 };
 fetchGroups();
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg {
   display: flex;
   flex-direction: column;
@@ -247,4 +247,4 @@ fetchGroups();
   color: rgba(255, 255, 255, 0.5);
   margin-left: 4px;
 }
-&lt;/style&gt;
+</style>

@@ -1,106 +1,106 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;!-- 页面标题 --&gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;AuditOutlined :style="{ color: '#f59e0b' }" /&gt;
+<template>
+  <div >
+    <!-- 页面标题 -->
+    <div >
+      <h2 >
+        <AuditOutlined :style="{ color: '#f59e0b' }" />
         审计日志
-      &lt;/h2&gt;
-      &lt;a-space&gt;
-        &lt;a-button @click="handleExport" :loading="exporting"&gt;
-          &lt;template #icon&gt;&lt;DownloadOutlined /&gt;&lt;/template&gt;
+      </h2>
+      <a-space>
+        <a-button @click="handleExport" :loading="exporting">
+          <template #icon><DownloadOutlined /></template>
           导出
-        &lt;/a-button&gt;
-        &lt;a-button @click="loadLogs" :loading="loading"&gt;
-          &lt;template #icon&gt;&lt;ReloadOutlined /&gt;&lt;/template&gt;
+        </a-button>
+        <a-button @click="loadLogs" :loading="loading">
+          <template #icon><ReloadOutlined /></template>
           刷新
-        &lt;/a-button&gt;
-      &lt;/a-space&gt;
-    &lt;/div&gt;
-    &lt;!-- 统计卡片 --&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;div &gt;&lt;FileTextOutlined /&gt;&lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.total || 0 }}&lt;/div&gt;
-          &lt;div &gt;总日志数&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;&lt;ExclamationCircleOutlined /&gt;&lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.warnings || 0 }}&lt;/div&gt;
-          &lt;div &gt;警告事件&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;&lt;CloseCircleOutlined /&gt;&lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.errors || 0 }}&lt;/div&gt;
-          &lt;div &gt;错误事件&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 筛选条件 --&gt;
-    &lt;div &gt;
-      &lt;a-form layout="inline" :model="filterForm"&gt;
-        &lt;a-form-item label="时间范围"&gt;
-          &lt;a-range-picker
+        </a-button>
+      </a-space>
+    </div>
+    <!-- 统计卡片 -->
+    <div >
+      <div >
+        <div ><FileTextOutlined /></div>
+        <div >
+          <div >{{ stats.total || 0 }}</div>
+          <div >总日志数</div>
+        </div>
+      </div>
+      <div >
+        <div ><ExclamationCircleOutlined /></div>
+        <div >
+          <div >{{ stats.warnings || 0 }}</div>
+          <div >警告事件</div>
+        </div>
+      </div>
+      <div >
+        <div ><CloseCircleOutlined /></div>
+        <div >
+          <div >{{ stats.errors || 0 }}</div>
+          <div >错误事件</div>
+        </div>
+      </div>
+    </div>
+    <!-- 筛选条件 -->
+    <div >
+      <a-form layout="inline" :model="filterForm">
+        <a-form-item label="时间范围">
+          <a-range-picker
             v-model:value="filterForm.dateRange"
             @change="handleFilter"
-          /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="事件类型"&gt;
-          &lt;a-select
+          />
+        </a-form-item>
+        <a-form-item label="事件类型">
+          <a-select
             v-model:value="filterForm.event_type"
             placeholder="选择事件类型"
             allow-clear
             style="width: 150px"
             @change="handleFilter"
-          &gt;
-            &lt;a-select-option value="AUTH"&gt;认证&lt;/a-select-option&gt;
-            &lt;a-select-option value="DATA_ACCESS"&gt;数据访问&lt;/a-select-option&gt;
-            &lt;a-select-option value="SECURITY"&gt;安全&lt;/a-select-option&gt;
-            &lt;a-select-option value="CONFIG"&gt;系统配置&lt;/a-select-option&gt;
-            &lt;a-select-option value="AUTHORIZATION"&gt;授权&lt;/a-select-option&gt;
-          &lt;/a-select&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="严重性"&gt;
-          &lt;a-select
+          >
+            <a-select-option value="AUTH">认证</a-select-option>
+            <a-select-option value="DATA_ACCESS">数据访问</a-select-option>
+            <a-select-option value="SECURITY">安全</a-select-option>
+            <a-select-option value="CONFIG">系统配置</a-select-option>
+            <a-select-option value="AUTHORIZATION">授权</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="严重性">
+          <a-select
             v-model:value="filterForm.severity"
             placeholder="选择严重性"
             allow-clear
             style="width: 120px"
             @change="handleFilter"
-          &gt;
-            &lt;a-select-option value="INFO"&gt;信息&lt;/a-select-option&gt;
-            &lt;a-select-option value="WARNING"&gt;警告&lt;/a-select-option&gt;
-            &lt;a-select-option value="ERROR"&gt;错误&lt;/a-select-option&gt;
-            &lt;a-select-option value="CRITICAL"&gt;严重&lt;/a-select-option&gt;
-          &lt;/a-select&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="用户"&gt;
-          &lt;a-input
+          >
+            <a-select-option value="INFO">信息</a-select-option>
+            <a-select-option value="WARNING">警告</a-select-option>
+            <a-select-option value="ERROR">错误</a-select-option>
+            <a-select-option value="CRITICAL">严重</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="用户">
+          <a-input
             v-model:value="filterForm.actor_id"
             placeholder="输入用户 ID"
             allow-clear
             style="width: 150px"
             @pressEnter="handleFilter"
-          /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item&gt;
-          &lt;a-button type="primary" @click="handleFilter"&gt;
+          />
+        </a-form-item>
+        <a-form-item>
+          <a-button type="primary" @click="handleFilter">
             搜索
-          &lt;/a-button&gt;
-          &lt;a-button style="margin-left: 8px" @click="resetFilter"&gt;
+          </a-button>
+          <a-button style="margin-left: 8px" @click="resetFilter">
             重置
-          &lt;/a-button&gt;
-        &lt;/a-form-item&gt;
-      &lt;/a-form&gt;
-    &lt;/div&gt;
-    &lt;!-- 日志列表 --&gt;
-    &lt;div &gt;
-      &lt;a-table
+          </a-button>
+        </a-form-item>
+      </a-form>
+    </div>
+    <!-- 日志列表 -->
+    <div >
+      <a-table
         :columns="columns"
         :data-source="logs"
         :loading="loading"
@@ -109,85 +109,85 @@
         size="middle"
         :scroll="{ x: 1000 }"
         @change="handleTableChange"
-      &gt;
-        &lt;template #bodyCell="{ column, record }"&gt;
-          &lt;template v-if="column.key === 'severity'"&gt;
-            &lt;a-tag :color="getSeverityColor(record.severity)"&gt;
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'severity'">
+            <a-tag :color="getSeverityColor(record.severity)">
               {{ getSeverityText(record.severity) }}
-            &lt;/a-tag&gt;
-          &lt;/template&gt;
-          &lt;template v-else-if="column.key === 'event_type'"&gt;
-            &lt;a-tag :color="getEventTypeColor(record.event_type)"&gt;
+            </a-tag>
+          </template>
+          <template v-else-if="column.key === 'event_type'">
+            <a-tag :color="getEventTypeColor(record.event_type)">
               {{ getEventTypeText(record.event_type) }}
-            &lt;/a-tag&gt;
-          &lt;/template&gt;
-          &lt;template v-else-if="column.key === 'success'"&gt;
-            &lt;a-tag :color="record.success ? 'green' : 'red'"&gt;
+            </a-tag>
+          </template>
+          <template v-else-if="column.key === 'success'">
+            <a-tag :color="record.success ? 'green' : 'red'">
               {{ record.success ? '成功' : '失败' }}
-            &lt;/a-tag&gt;
-          &lt;/template&gt;
-          &lt;template v-else-if="column.key === 'action'"&gt;
-            &lt;a-space&gt;
-              &lt;a-button type="link" size="small" @click="showDetail(record)"&gt;
+            </a-tag>
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-space>
+              <a-button type="link" size="small" @click="showDetail(record)">
                 详情
-              &lt;/a-button&gt;
-            &lt;/a-space&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-    &lt;!-- 详情弹窗 --&gt;
-    &lt;a-modal
+              </a-button>
+            </a-space>
+          </template>
+        </template>
+      </a-table>
+    </div>
+    <!-- 详情弹窗 -->
+    <a-modal
       v-model:open="detailVisible"
       title="日志详情"
       :footer="null"
       width="600px"
-    &gt;
-      &lt;a-descriptions bordered :column="1" v-if="currentLog"&gt;
-        &lt;a-descriptions-item label="日志 ID"&gt;
+    >
+      <a-descriptions bordered :column="1" v-if="currentLog">
+        <a-descriptions-item label="日志 ID">
           {{ currentLog.id }}
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="时间"&gt;
+        </a-descriptions-item>
+        <a-descriptions-item label="时间">
           {{ currentLog.timestamp }}
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="事件类型"&gt;
-          &lt;a-tag :color="getEventTypeColor(currentLog.event_type)"&gt;
+        </a-descriptions-item>
+        <a-descriptions-item label="事件类型">
+          <a-tag :color="getEventTypeColor(currentLog.event_type)">
             {{ getEventTypeText(currentLog.event_type) }}
-          &lt;/a-tag&gt;
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="严重性"&gt;
-          &lt;a-tag :color="getSeverityColor(currentLog.severity)"&gt;
+          </a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item label="严重性">
+          <a-tag :color="getSeverityColor(currentLog.severity)">
             {{ getSeverityText(currentLog.severity) }}
-          &lt;/a-tag&gt;
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="用户"&gt;
+          </a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item label="用户">
           {{ currentLog.actor_id || '-' }}
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="资源类型"&gt;
+        </a-descriptions-item>
+        <a-descriptions-item label="资源类型">
           {{ currentLog.resource_type || '-' }}
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="操作结果"&gt;
-          &lt;a-tag :color="currentLog.success ? 'green' : 'red'"&gt;
+        </a-descriptions-item>
+        <a-descriptions-item label="操作结果">
+          <a-tag :color="currentLog.success ? 'green' : 'red'">
             {{ currentLog.success ? '成功' : '失败' }}
-          &lt;/a-tag&gt;
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="描述"&gt;
+          </a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item label="描述">
           {{ currentLog.description || '-' }}
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="详情"&gt;
-          &lt;pre style="white-space: pre-wrap; margin: 0"&gt;{{ currentLog.details || '无' }}&lt;/pre&gt;
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="IP地址"&gt;
+        </a-descriptions-item>
+        <a-descriptions-item label="详情">
+          <pre style="white-space: pre-wrap; margin: 0">{{ currentLog.details || '无' }}</pre>
+        </a-descriptions-item>
+        <a-descriptions-item label="IP地址">
           {{ currentLog.ip_address || '-' }}
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="用户代理"&gt;
+        </a-descriptions-item>
+        <a-descriptions-item label="用户代理">
           {{ currentLog.user_agent || '-' }}
-        &lt;/a-descriptions-item&gt;
-      &lt;/a-descriptions&gt;
-    &lt;/a-modal&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+        </a-descriptions-item>
+      </a-descriptions>
+    </a-modal>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import type { TableProps } from 'ant-design-vue'
@@ -217,7 +217,7 @@ interface AuditLog {
   ip_address?: string
   user_agent?: string
 }
-const currentLog = ref&lt;AuditLog | null&gt;(null)
+const currentLog = ref<AuditLog | null>(null)
 const stats = ref({
   total: 0,
   warnings: 0,
@@ -235,7 +235,7 @@ const pagination = reactive({
   total: 0,
   showSizeChanger: true,
   showQuickJumper: true,
-  showTotal: (total: number) =&gt; `共 ${total} 条`,
+  showTotal: (total: number) => `共 ${total} 条`,
 })
 const columns = [
   {
@@ -281,15 +281,15 @@ const columns = [
     fixed: 'right',
   },
 ]
-const logs = ref&lt;AuditLog[]&gt;([])
-const loadLogs = async () =&gt; {
+const logs = ref<AuditLog[]>([])
+const loadLogs = async () => {
   try {
     loading.value = true
-    const params: Record&lt;string, unknown&gt; = {
+    const params: Record<string, unknown> = {
       page: pagination.current,
       page_size: pagination.pageSize,
     }
-    if (filterForm.dateRange &amp;&amp; filterForm.dateRange.length === 2) {
+    if (filterForm.dateRange && filterForm.dateRange.length === 2) {
       params.start_time = dayjs(filterForm.dateRange[0]).startOf('day').toISOString()
       params.end_time = dayjs(filterForm.dateRange[1]).endOf('day').toISOString()
     }
@@ -319,27 +319,27 @@ const loadLogs = async () =&gt; {
     loading.value = false
   }
 }
-const handleFilter = () =&gt; {
+const handleFilter = () => {
   pagination.current = 1
   loadLogs()
 }
-const resetFilter = () =&gt; {
+const resetFilter = () => {
   filterForm.dateRange = []
   filterForm.event_type = undefined
   filterForm.severity = undefined
   filterForm.actor_id = undefined
   handleFilter()
 }
-const handleTableChange: TableProps['onChange'] = (pag) =&gt; {
+const handleTableChange: TableProps['onChange'] = (pag) => {
   pagination.current = pag.current || 1
   pagination.pageSize = pag.pageSize || 20
   loadLogs()
 }
-const handleExport = async () =&gt; {
+const handleExport = async () => {
   try {
     exporting.value = true
-    const params: Record&lt;string, unknown&gt; = { format: 'csv' }
-    if (filterForm.dateRange &amp;&amp; filterForm.dateRange.length === 2) {
+    const params: Record<string, unknown> = { format: 'csv' }
+    if (filterForm.dateRange && filterForm.dateRange.length === 2) {
       params.start_time = dayjs(filterForm.dateRange[0]).startOf('day').toISOString()
       params.end_time = dayjs(filterForm.dateRange[1]).endOf('day').toISOString()
     }
@@ -359,11 +359,11 @@ const handleExport = async () =&gt; {
     exporting.value = false
   }
 }
-const showDetail = (record: AuditLog) =&gt; {
+const showDetail = (record: AuditLog) => {
   currentLog.value = record
   detailVisible.value = true
 }
-const getSeverityColor = (severity: string) =&gt; {
+const getSeverityColor = (severity: string) => {
   switch (severity?.toUpperCase()) {
     case 'CRITICAL':
       return 'red'
@@ -377,7 +377,7 @@ const getSeverityColor = (severity: string) =&gt; {
       return 'default'
   }
 }
-const getSeverityText = (severity: string) =&gt; {
+const getSeverityText = (severity: string) => {
   switch (severity?.toUpperCase()) {
     case 'CRITICAL':
       return '严重'
@@ -391,7 +391,7 @@ const getSeverityText = (severity: string) =&gt; {
       return severity || '-'
   }
 }
-const getEventTypeColor = (eventType: string) =&gt; {
+const getEventTypeColor = (eventType: string) => {
   switch (eventType?.toUpperCase()) {
     case 'AUTH':
       return 'blue'
@@ -407,7 +407,7 @@ const getEventTypeColor = (eventType: string) =&gt; {
       return 'default'
   }
 }
-const getEventTypeText = (eventType: string) =&gt; {
+const getEventTypeText = (eventType: string) => {
   switch (eventType?.toUpperCase()) {
     case 'AUTH':
       return '认证'
@@ -423,11 +423,11 @@ const getEventTypeText = (eventType: string) =&gt; {
       return eventType || '-'
   }
 }
-onMounted(() =&gt; {
+onMounted(() => {
   loadLogs()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg {
   display: flex;
   flex-direction: column;
@@ -487,5 +487,5 @@ onMounted(() =&gt; {
   padding: 20px;
   border-radius: 12px;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

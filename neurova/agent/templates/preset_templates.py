@@ -107,7 +107,6 @@ CODE_REVIEW_TEMPLATE = CollaborationTemplate(
     is_preset=True,
 )
 
-
 # ==================== 结对编程模板 ====================
 
 PAIR_PROGRAMMING_WORKFLOW = WorkflowDefinition(
@@ -192,7 +191,6 @@ PAIR_PROGRAMMING_TEMPLATE = CollaborationTemplate(
     tags=["编程", "协作", "知识传递", "实时"],
     is_preset=True,
 )
-
 
 # ==================== 问题诊断模板 ====================
 
@@ -293,7 +291,6 @@ DIAGNOSTIC_TEMPLATE = CollaborationTemplate(
     is_preset=True,
 )
 
-
 # ==================== 知识共享模板 ====================
 
 KNOWLEDGE_SHARING_WORKFLOW = WorkflowDefinition(
@@ -393,7 +390,6 @@ KNOWLEDGE_SHARING_TEMPLATE = CollaborationTemplate(
     tags=["学习", "教学", "知识传递", "培训"],
     is_preset=True,
 )
-
 
 # ==================== 预设模板集合 ====================
 

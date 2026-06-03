@@ -19,7 +19,6 @@ from typing import List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
-
 class ContextOrchestrator:
     """统一上下文构建模块
 
@@ -182,7 +181,7 @@ class ContextOrchestrator:
         if session_context:
             # session_context 添加到历史末尾（更新近的对话）
             conversation_context.extend(session_context)
-        
+
         # 构建工具记忆上下文（包含执行状态）
         tool_memory_context = dict(tool_memory_result) if tool_memory_result else {}
         if auto_execute_result:

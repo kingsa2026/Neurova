@@ -3,30 +3,30 @@ import { ref, computed } from 'vue'
 import { request } from '@/api'
 import type { Agent } from '@/types/agent'
 import type { RawAgentData, RawAgentConfig, AgentConfig } from '@/types/api'
-&nbsp;
-export const useAgentStore = defineStore('agents', () =&gt; {
-  const agents = ref&lt;Agent[]&gt;([])
-  const currentAgentId = ref&lt;string&gt;(localStorage.getItem('currentAgentId') || '')
-  const loading = ref&lt;boolean&gt;(false)
-  const error = ref&lt;string | null&gt;(null)
-&nbsp;
-  const currentAgent = computed(() =&gt;
-    agents.value.find(agent =&gt; agent.id === currentAgentId.value || agent.agentId === currentAgentId.value)
+ 
+export const useAgentStore = defineStore('agents', () => {
+  const agents = ref<Agent[]>([])
+  const currentAgentId = ref<string>(localStorage.getItem('currentAgentId') || '')
+  const loading = ref<boolean>(false)
+  const error = ref<string | null>(null)
+ 
+  const currentAgent = computed(() =>
+    agents.value.find(agent => agent.id === currentAgentId.value || agent.agentId === currentAgentId.value)
   )
-&nbsp;
-  const agentOptions = computed(() =&gt;
-    agents.value.map(agent =&gt; ({ label: agent.name, value: agent.id || agent.agentId }))
+ 
+  const agentOptions = computed(() =>
+    agents.value.map(agent => ({ label: agent.name, value: agent.id || agent.agentId }))
   )
-&nbsp;
+ 
   async function loadAgents() {
     loading.value = true
     error.value = null
     try {
-      const response = await request.get&lt;{ agents?: RawAgentData[] } &amp; RawAgentData[]&gt;('/agents')
+      const response = await request.get<{ agents?: RawAgentData[] } & RawAgentData[]>('/agents')
       if (response.code === 0) {
         const rawAgents = (Array.isArray(response.data) ? response.data : response.data?.agents) || []
         // 规范化字段名：agent_id → id，并映射TTS配置
-        agents.value = rawAgents.map((a) =&gt; ({
+        agents.value = rawAgents.map((a) => ({
           id: a.agent_id || a.id,
           agentId: a.agent_id || a.id,
           name: a.name || '',
@@ -52,7 +52,7 @@ export const useAgentStore = defineStore('agents', () =&gt; {
             pitch: a.tts_pitch || 1.0,
           },
         }))
-        if ((!currentAgentId.value || !agents.value.some(a =&gt; a.agentId === currentAgentId.value)) &amp;&amp; agents.value.length &gt; 0) {
+        if ((!currentAgentId.value || !agents.value.some(a => a.agentId === currentAgentId.value)) && agents.value.length > 0) {
           setCurrentAgent(agents.value[0].agentId)
         }
       } else {
@@ -65,12 +65,12 @@ export const useAgentStore = defineStore('agents', () =&gt; {
       loading.value = false
     }
   }
-&nbsp;
-  async function getAgentConfig(agentId: string): Promise&lt;AgentConfig | null&gt; {
+ 
+  async function getAgentConfig(agentId: string): Promise<AgentConfig | null> {
     loading.value = true
     error.value = null
     try {
-      const response = await request.get&lt;RawAgentConfig&gt;(`/agents/${agentId}/config`)
+      const response = await request.get<RawAgentConfig>(`/agents/${agentId}/config`)
       if (response.code === 0) {
         const config = response.data as RawAgentConfig
         // 映射字段名：snake_case → camelCase
@@ -110,8 +110,8 @@ export const useAgentStore = defineStore('agents', () =&gt; {
       loading.value = false
     }
   }
-&nbsp;
-  async function createAgent(data: Partial&lt;Agent&gt;): Promise&lt;Agent | null&gt; {
+ 
+  async function createAgent(data: Partial<Agent>): Promise<Agent | null> {
     loading.value = true
     error.value = null
     try {
@@ -131,15 +131,15 @@ export const useAgentStore = defineStore('agents', () =&gt; {
       loading.value = false
     }
   }
-&nbsp;
-  async function updateAgent(id: string, data: Partial&lt;Agent&gt;): Promise&lt;boolean&gt; {
+ 
+  async function updateAgent(id: string, data: Partial<Agent>): Promise<boolean> {
     loading.value = true
     error.value = null
     try {
       const response = await request.put(`/agents/${id}/config`, data)
       if (response.code === 0) {
-        const index = agents.value.findIndex(a =&gt; a.id === id)
-        if (index &gt; -1) agents.value[index] = response.data
+        const index = agents.value.findIndex(a => a.id === id)
+        if (index > -1) agents.value[index] = response.data
         return true
       } else {
         error.value = response.message || '更新失败'
@@ -153,15 +153,15 @@ export const useAgentStore = defineStore('agents', () =&gt; {
       loading.value = false
     }
   }
-&nbsp;
-  async function deleteAgent(id: string): Promise&lt;boolean&gt; {
+ 
+  async function deleteAgent(id: string): Promise<boolean> {
     loading.value = true
     error.value = null
     try {
       const response = await request.delete(`/agents/${id}`)
       if (response.code === 0) {
-        agents.value = agents.value.filter(a =&gt; a.id !== id)
-        if (currentAgentId.value === id &amp;&amp; agents.value.length &gt; 0) {
+        agents.value = agents.value.filter(a => a.id !== id)
+        if (currentAgentId.value === id && agents.value.length > 0) {
           setCurrentAgent(agents.value[0].id)
         }
         return true
@@ -177,12 +177,12 @@ export const useAgentStore = defineStore('agents', () =&gt; {
       loading.value = false
     }
   }
-&nbsp;
+ 
   function setCurrentAgent(agentId: string) {
     currentAgentId.value = agentId
     localStorage.setItem('currentAgentId', agentId)
   }
-&nbsp;
+ 
   return {
     agents, currentAgentId, currentAgent, agentOptions,
     loading, error,
@@ -190,4 +190,4 @@ export const useAgentStore = defineStore('agents', () =&gt; {
     getAgentConfig,
   }
 })
-&nbsp;
+ 

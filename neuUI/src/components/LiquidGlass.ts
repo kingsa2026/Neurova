@@ -16,19 +16,19 @@ const displacementMaps = {
   polar: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAZABkAAD/2wCEAAQDAwMDAwQDAwQGBAMEBgcFBAQFBwgHBwcHBwgLCAkJCQkICwsMDAwMDAsNDQ4ODQ0SEhISEhQUFBQUFBQUFBQBBQUFCAgIEAsLEBQODg4UFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFP/CABEIAQABAAMBEQACEQEDEQH/8QAFgABAQEAAAAAAAAAAAAAAAAABgUEB//EAB8QAAIBBAMBAAAAAAAAAAAAAAECAxEEBSESMUH/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8A',
 }
 export default function useLiquidGlass(props: LiquidGlassProps = {}) {
-  const glassRef = ref&lt;HTMLElement | null&gt;(null)
+  const glassRef = ref<HTMLElement | null>(null)
   const isHovered = ref(false)
   const isActive = ref(false)
   const glassSize = ref({ width: 270, height: 69 })
   const mouseOffset = ref({ x: 0, y: 0 })
-  const displacementScale = computed(() =&gt; props.displacementScale ?? 70)
-  const blurAmount = computed(() =&gt; props.blurAmount ?? 0.0625)
-  const saturation = computed(() =&gt; props.saturation ?? 140)
-  const aberrationIntensity = computed(() =&gt; props.aberrationIntensity ?? 2)
-  const elasticity = computed(() =&gt; props.elasticity ?? 0.15)
-  const cornerRadius = computed(() =&gt; props.cornerRadius ?? 999)
-  const mode = computed(() =&gt; props.mode ?? 'standard')
-  const handleMouseMove = (e: MouseEvent) =&gt; {
+  const displacementScale = computed(() => props.displacementScale ?? 70)
+  const blurAmount = computed(() => props.blurAmount ?? 0.0625)
+  const saturation = computed(() => props.saturation ?? 140)
+  const aberrationIntensity = computed(() => props.aberrationIntensity ?? 2)
+  const elasticity = computed(() => props.elasticity ?? 0.15)
+  const cornerRadius = computed(() => props.cornerRadius ?? 999)
+  const mode = computed(() => props.mode ?? 'standard')
+  const handleMouseMove = (e: MouseEvent) => {
     if (!glassRef.value) return
     const rect = glassRef.value.getBoundingClientRect()
     const centerX = rect.left + rect.width / 2
@@ -38,33 +38,33 @@ export default function useLiquidGlass(props: LiquidGlassProps = {}) {
       y: ((e.clientY - centerY) / rect.height) * 100,
     }
   }
-  const handleMouseEnter = () =&gt; {
+  const handleMouseEnter = () => {
     isHovered.value = true
   }
-  const handleMouseLeave = () =&gt; {
+  const handleMouseLeave = () => {
     isHovered.value = false
     mouseOffset.value = { x: 0, y: 0 }
   }
-  const handleMouseDown = () =&gt; {
+  const handleMouseDown = () => {
     isActive.value = true
   }
-  const handleMouseUp = () =&gt; {
+  const handleMouseUp = () => {
     isActive.value = false
   }
-  const updateGlassSize = () =&gt; {
+  const updateGlassSize = () => {
     if (glassRef.value) {
       const rect = glassRef.value.getBoundingClientRect()
       glassSize.value = { width: rect.width, height: rect.height }
     }
   }
-  onMounted(() =&gt; {
+  onMounted(() => {
     updateGlassSize()
     window.addEventListener('resize', updateGlassSize)
   })
-  onUnmounted(() =&gt; {
+  onUnmounted(() => {
     window.removeEventListener('resize', updateGlassSize)
   })
-  watch(glassRef, (el) =&gt; {
+  watch(glassRef, (el) => {
     if (el) {
       el.addEventListener('mouseenter', handleMouseEnter)
       el.addEventListener('mouseleave', handleMouseLeave)
@@ -73,7 +73,7 @@ export default function useLiquidGlass(props: LiquidGlassProps = {}) {
       el.addEventListener('mouseup', handleMouseUp)
     }
   })
-  const containerStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
+  const containerStyle = computed<CSSProperties>(() => ({
     position: 'relative',
     display: 'inline-flex',
     alignItems: 'center',
@@ -85,11 +85,11 @@ export default function useLiquidGlass(props: LiquidGlassProps = {}) {
     boxShadow: '0px 12px 40px rgba(0, 0, 0, 0.25)',
     ...props.style,
   }))
-  const backdropStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
+  const backdropStyle = computed<CSSProperties>(() => ({
     filter: `url(#glass-${mode.value})`,
     backdropFilter: `blur(${4 + blurAmount.value * 32}px) saturate(${saturation.value}%)`,
   }))
-  const borderStyle = computed&lt;CSSProperties&gt;(() =&gt; {
+  const borderStyle = computed<CSSProperties>(() => {
     const gradientAngle = 135 + mouseOffset.value.x * 1.2
     const opacity1 = 0.12 + Math.abs(mouseOffset.value.x) * 0.008
     const opacity2 = 0.4 + Math.abs(mouseOffset.value.x) * 0.012
@@ -110,7 +110,7 @@ export default function useLiquidGlass(props: LiquidGlassProps = {}) {
       background: `linear-gradient(${gradientAngle}deg, rgba(255, 255, 255, 0.0) 0%, rgba(255, 255, 255, ${opacity1}) ${position1}%, rgba(255, 255, 255, ${opacity2}) ${position2}%, rgba(255, 255, 255, 0.0) 100%)`,
     }
   })
-  const hoverEffectStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
+  const hoverEffectStyle = computed<CSSProperties>(() => ({
     position: 'absolute',
     inset: 0,
     borderRadius: `${cornerRadius.value}px`,
@@ -136,4 +136,4 @@ export default function useLiquidGlass(props: LiquidGlassProps = {}) {
     aberrationIntensity,
   }
 }
-&nbsp;
+ 

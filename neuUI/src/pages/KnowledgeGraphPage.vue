@@ -1,34 +1,34 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;ShareAltOutlined :style="{color:'#06b6d4'}" /&gt; 知识图谱&lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;节点数&lt;b &gt;{{ stats.nodes }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;关系数&lt;b &gt;{{ stats.edges }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;社区&lt;b &gt;{{ stats.communities }}&lt;/b&gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;canvas ref="c"&gt;&lt;/canvas&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-input-search v-model:value="keyword" placeholder="搜索节点..." style="width:280px" @search="onSearch" /&gt;
-      &lt;a-space&gt;
-        &lt;a-button size="small" @click="zoomIn"&gt;&lt;ZoomInOutlined /&gt;放大&lt;/a-button&gt;
-        &lt;a-button size="small" @click="zoomOut"&gt;&lt;ZoomOutOutlined /&gt;缩小&lt;/a-button&gt;
-        &lt;a-button size="small" @click="resetView"&gt;&lt;SyncOutlined /&gt;重置&lt;/a-button&gt;
-      &lt;/a-space&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 ><ShareAltOutlined :style="{color:'#06b6d4'}" /> 知识图谱</h2>
+    </div>
+    <div >
+      <div >节点数<b >{{ stats.nodes }}</b></div>
+      <div >关系数<b >{{ stats.edges }}</b></div>
+      <div >社区<b >{{ stats.communities }}</b></div>
+    </div>
+    <div >
+      <canvas ref="c"></canvas>
+    </div>
+    <div >
+      <a-input-search v-model:value="keyword" placeholder="搜索节点..." style="width:280px" @search="onSearch" />
+      <a-space>
+        <a-button size="small" @click="zoomIn"><ZoomInOutlined />放大</a-button>
+        <a-button size="small" @click="zoomOut"><ZoomOutOutlined />缩小</a-button>
+        <a-button size="small" @click="resetView"><SyncOutlined />重置</a-button>
+      </a-space>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { onMounted, ref, nextTick, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { ShareAltOutlined, ZoomInOutlined, ZoomOutOutlined, SyncOutlined } from '@ant-design/icons-vue'
-const { agentId } = useAgentPage('/agent/:agentId/knowledge-graph', () =&gt; loadData())
-const c = ref&lt;HTMLCanvasElement&gt;()
+const { agentId } = useAgentPage('/agent/:agentId/knowledge-graph', () => loadData())
+const c = ref<HTMLCanvasElement>()
 const keyword = ref('')
 const stats = ref({ nodes: 0, edges: 0, communities: 0 })
 interface GraphNode {
@@ -45,14 +45,14 @@ interface GraphEdge {
   from?: string
   to?: string
 }
-const nodes = ref&lt;GraphNode[]&gt;([])
-const edges = ref&lt;GraphEdge[]&gt;([])
+const nodes = ref<GraphNode[]>([])
+const edges = ref<GraphEdge[]>([])
 const scale = ref(1)
 const msg = message
 async function loadData() {
   try {
     const res = await request.get(`/agents/${agentId.value}/knowledge-graph`)
-    if (res.code === 0 &amp;&amp; res.data) {
+    if (res.code === 0 && res.data) {
       const d = res.data
       stats.value = {
         nodes: d.node_count ?? d.nodes?.length ?? 0,
@@ -110,8 +110,8 @@ function draw() {
     l: string
     c: string
   }
-  const nodeMap: Record&lt;string, RenderedNode&gt; = {}
-  const renderedNodes = nodes.value.map((n, i) =&gt; {
+  const nodeMap: Record<string, RenderedNode> = {}
+  const renderedNodes = nodes.value.map((n, i) => {
     const x = (n.x ?? (0.1 + Math.random() * 0.8)) * w
     const y = (n.y ?? (0.1 + Math.random() * 0.8)) * h
     const obj = {
@@ -125,7 +125,7 @@ function draw() {
     nodeMap[obj.id] = obj
     return obj
   })
-  edges.value.forEach((e) =&gt; {
+  edges.value.forEach((e) => {
     const a = nodeMap[e.source] || nodeMap[e.from] || renderedNodes[0]
     const b = nodeMap[e.target] || nodeMap[e.to] || renderedNodes[1]
     if (!a || !b) return
@@ -136,7 +136,7 @@ function draw() {
     ctx.lineWidth = 1
     ctx.stroke()
   })
-  renderedNodes.forEach(n =&gt; {
+  renderedNodes.forEach(n => {
     ctx.beginPath()
     ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
     ctx.fillStyle = n.c + '30'
@@ -154,13 +154,13 @@ function zoomIn() { scale.value = Math.min(scale.value + 0.2, 3); nextTick(draw)
 function zoomOut() { scale.value = Math.max(scale.value - 0.2, 0.3); nextTick(draw) }
 function resetView() { scale.value = 1; nextTick(draw) }
 function onSearch() { loadData() }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await loadData()
   await nextTick()
   draw()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg{display:flex;flex-direction:column;gap:14px;}
 .hd{padding:16px 24px;border-radius:12px;}
 .t{font-size:1.2rem;color:#e2e8f0;margin:0;display:flex;align-items:center;gap:8px;}
@@ -171,5 +171,5 @@ onMounted(async () =&gt; {
 .cv{padding:20px;border-radius:12px;}
 .cv canvas{width:100%;height:300px;cursor:grab;}
 .bt{padding:12px 16px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;}
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

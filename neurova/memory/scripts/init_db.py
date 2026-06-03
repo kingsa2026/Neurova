@@ -11,10 +11,8 @@ import sys
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.insert(0, project_root)
 
-
 def get_db_path() -> str:
     return os.path.join(project_root, 'memory', 'data', 'yi_ling_memory.db')
-
 
 def create_all_tables(conn: sqlite3.Connection):
     """按蓝图创建所有表结构"""
@@ -369,26 +367,26 @@ def create_all_tables(conn: sqlite3.Connection):
             session_id TEXT,
             report_type TEXT NOT NULL DEFAULT 'sleep_consolidation'
                 CHECK(report_type IN ('sleep_consolidation', 'dream_analysis', 'memory_integration')),
-            
+
             -- 报告统计数据
             total_processed INTEGER DEFAULT 0,
             merged_count INTEGER DEFAULT 0,
             archived_count INTEGER DEFAULT 0,
-            
+
             -- 报告详细内容 (JSON)
             merged_details TEXT DEFAULT '[]',
             archived_ids TEXT DEFAULT '[]',
-            
+
             -- 梦境质量指标
             consolidation_quality REAL DEFAULT 0.0,
             emotional_intensity REAL DEFAULT 0.0,
             memory_coherence_score REAL DEFAULT 0.0,
-            
+
             -- 时间信息
             sleep_start_at TIMESTAMP,
             sleep_end_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            
+
             metadata TEXT DEFAULT '{}'
         );
         CREATE INDEX IF NOT EXISTS idx_dream_reports_agent ON dream_reports(agent_id, created_at DESC);
@@ -408,7 +406,6 @@ def create_all_tables(conn: sqlite3.Connection):
     """)
 
     conn.commit()
-
 
 def create_all_indexes(conn: sqlite3.Connection):
     """按蓝图创建所有索引"""
@@ -471,7 +468,6 @@ def create_all_indexes(conn: sqlite3.Connection):
 
     conn.commit()
 
-
 def init_db(db_path: str = None):
     """初始化数据库"""
     if db_path is None:
@@ -522,7 +518,6 @@ def init_db(db_path: str = None):
         print(f"    - {t}")
 
     return db_path
-
 
 if __name__ == "__main__":
     print("忆灵，正在初始化数据库...\n")

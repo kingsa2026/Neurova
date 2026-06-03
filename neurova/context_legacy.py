@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 统一上下文注入系统 - Unified Context Injection System
 
@@ -15,8 +17,6 @@
 - GrowthLogManager - 反思日志管理器
 - QuestionQueueManager - 问题队列管理器
 """
-
-from __future__ import annotations
 
 import time
 import logging
@@ -37,14 +37,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
 class ContextPriority(Enum):
     """上下文优先级"""
     CRITICAL = 100   # 系统提示、固化记忆
     HIGH = 80        # 高温记忆、反思日志
     NORMAL = 50      # 普通记忆
     LOW = 20         # 低温记忆、归档内容
-
 
 @dataclass
 class TokenBudget:
@@ -64,7 +62,6 @@ class TokenBudget:
     @property
     def english_ratio(self) -> float:
         return 0.25
-
 
 @dataclass
 class ContextEntry:
@@ -90,7 +87,6 @@ class ContextEntry:
             'created_at': self.created_at,
         }
 
-
 @dataclass
 class ContextBuildResult:
     """上下文构建结果"""
@@ -101,7 +97,6 @@ class ContextBuildResult:
     memory_count: int
     history_count: int
     stats: Dict[str, Any]
-
 
 class UnifiedContextInjector(BaseModule):
     """
@@ -200,7 +195,7 @@ class UnifiedContextInjector(BaseModule):
     ) -> ContextBuildResult:
         """
         构建完整的上下文
-        
+
         参数:
             system_prompt: 基础系统提示
             memories: 记忆列表
@@ -217,16 +212,16 @@ class UnifiedContextInjector(BaseModule):
         """
         # 如果指定了max_tokens，使用它；否则使用预算上限
         effective_max = max_tokens if max_tokens is not None else self._token_budget.max_total
-        
+
         # 动态调整各部分预算
         effective_budget = self._adjust_budget(
             conversation_history, memories, effective_max
         )
-        
+
         # 临时替换预算
         original_budget = self._token_budget
         self._token_budget = effective_budget
-        
+
         try:
             return self._build_context_internal(
                 system_prompt, memories, conversation_history,
@@ -236,11 +231,11 @@ class UnifiedContextInjector(BaseModule):
         finally:
             # 恢复原始预算
             self._token_budget = original_budget
-    
+
     def _adjust_budget(self, history: List[Dict], memories: List[Dict], max_tokens: int) -> TokenBudget:
         """
         根据实际内容量动态调整Token预算
-        
+
         策略：
         1. 如果内容量充足，按固定比例分配
         2. 如果总量不足，增加各部分上限
@@ -249,31 +244,31 @@ class UnifiedContextInjector(BaseModule):
         # 计算各部分实际需求
         history_estimate = sum(self._count_tokens(m.get('content', '')) for m in history)
         memory_estimate = sum(self._count_tokens(m.get('content', '')) for m in memories)
-        
+
         # 系统提示估算
         system_estimate = self._token_budget.system_prompt
-        
+
         # 总需求
         total_needed = history_estimate + memory_estimate + system_estimate + 500  # 500为user_input预留
-        
+
         # 如果总量充足，使用标准预算
         if total_needed <= max_tokens * 0.9:
             return self._token_budget
-        
+
         # 总量不足，需要压缩
         # 计算压缩比例
         compression_ratio = (max_tokens * 0.9) / total_needed
-        
+
         # 按优先级分配压缩后的预算
         # 1. 系统提示：不能压缩太多
         system_budget = max(int(self._token_budget.system_prompt * 0.8), 600)
-        
+
         # 2. 记忆：中等压缩
         memory_budget = int(memory_estimate * compression_ratio) if memory_estimate > 0 else self._token_budget.memories
-        
+
         # 3. 历史：主要压缩对象
         history_budget = max_tokens - system_budget - memory_budget - 500
-        
+
         return TokenBudget(
             max_total=max_tokens,
             system_prompt=system_budget,
@@ -281,7 +276,7 @@ class UnifiedContextInjector(BaseModule):
             memories=memory_budget,
             conversation_history=history_budget
         )
-    
+
     def _build_context_internal(
         self,
         system_prompt: str,
@@ -428,7 +423,7 @@ class UnifiedContextInjector(BaseModule):
     def _build_memory_context(self, memories: List[Dict], user_input: str = "") -> str:
         """
         构建记忆上下文 - 按分类优先级和话题相关性
-        
+
         优化策略：
         1. 根据话题相关性排序
         2. 17种记忆分类优先级
@@ -436,10 +431,10 @@ class UnifiedContextInjector(BaseModule):
         """
         if not memories:
             return ""
-        
+
         # 计算话题关键词
         topic_keywords = self._extract_keywords(user_input) if user_input else []
-        
+
         # 按优先级和相关性排序
         scored_memories = []
         for mem in memories:
@@ -450,7 +445,7 @@ class UnifiedContextInjector(BaseModule):
             elif mem.get('is_important'):
                 base_score += 80
             base_score += mem.get('temperature', 50) * 0.5
-            
+
             # 相关性分数
             relevance_score = 0
             if topic_keywords:
@@ -458,25 +453,25 @@ class UnifiedContextInjector(BaseModule):
                 for keyword in topic_keywords:
                     if keyword.lower() in content:
                         relevance_score += 20
-            
+
             # 分类优先级
             category_priority = self._get_category_priority(mem.get('category', ''))
-            
+
             total_score = base_score + relevance_score + category_priority
             scored_memories.append((total_score, mem))
-        
+
         # 排序
         scored_memories.sort(key=lambda x: x[0], reverse=True)
-        
+
         # 构建上下文
         lines = []
         total_tokens = 0
         budget = self._token_budget.memories
-        
+
         for score, mem in scored_memories:
             content = mem.get('content', '')
             mem_tokens = self._count_tokens(content)
-            
+
             # 检查是否超过预算
             if total_tokens + mem_tokens > budget:
                 # 尝试压缩这条记忆
@@ -486,10 +481,10 @@ class UnifiedContextInjector(BaseModule):
                     lines.append(f"- {truncated}... [已截断]")
                     total_tokens += self._count_tokens(lines[-1])
                 break
-            
+
             # 构建记忆行
             line = f"- {content}"
-            
+
             # 添加标记
             if self._show_temperature:
                 temp = mem.get('temperature', 50)
@@ -499,23 +494,23 @@ class UnifiedContextInjector(BaseModule):
                     line += f" ⭐ ({temp:.0f}°C)"
                 elif temp > 70:
                     line += f" ({temp:.0f}°C)"
-            
+
             # 添加分类标记
             category = mem.get('category', '')
             if category:
                 category_emoji = self._get_category_emoji(category)
                 line = f"{category_emoji} {line}"
-            
+
             lines.append(line)
             total_tokens += mem_tokens
-        
+
         return "\n".join(lines)
-    
+
     def _extract_keywords(self, text: str, top_k: int = 5) -> List[str]:
         """提取关键词"""
         if not text:
             return []
-        
+
         # 简单实现：提取长度>2的词
         words = []
         current = []
@@ -527,17 +522,17 @@ class UnifiedContextInjector(BaseModule):
                     current = current[-1:]
             else:
                 current = []
-        
+
         # 统计词频
         word_freq = {}
         for word in words:
             if len(word) >= 2:
                 word_freq[word] = word_freq.get(word, 0) + 1
-        
+
         # 返回top_k高频词
         sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
         return [w[0] for w in sorted_words[:top_k]]
-    
+
     def _get_category_priority(self, category: str) -> float:
         """获取记忆分类的优先级"""
         priorities = {
@@ -556,7 +551,7 @@ class UnifiedContextInjector(BaseModule):
             'creative': 15,     # 创意
         }
         return priorities.get(category.lower(), 10)
-    
+
     def _get_category_emoji(self, category: str) -> str:
         """获取记忆分类的emoji标记"""
         emojis = {
@@ -580,28 +575,28 @@ class UnifiedContextInjector(BaseModule):
         """构建经验上下文 - 从经验知识库中检索相关经验"""
         if not query:
             return ""
-        
+
         try:
             from neurova.skills.experience_knowledge_base import ExperienceKnowledgeBase
-            
+
             # 创建经验知识库实例
             ekb = ExperienceKnowledgeBase()
-            
+
             # 查找相似经验
             similar = ekb.find_similar_experiences(query, top_k=3)
-            
+
             if not similar:
                 return ""
-            
+
             parts = ["\n## 相关经验"]
             for exp in similar[:3]:  # 最多显示3条
                 context_summary = exp.get('context', '')[:50]
                 result_summary = exp.get('result', '')[:50]
                 success_mark = "✓" if exp.get('success') else "✗"
                 parts.append(f"{success_mark} {context_summary} → {result_summary}")
-            
+
             return "\n".join(parts)
-            
+
         except Exception as e:
             self.log_warning(f"构建经验上下文失败: {e}")
             return ""
@@ -609,20 +604,20 @@ class UnifiedContextInjector(BaseModule):
     def _format_experience_from_list(self, experiences: List[Dict]) -> str:
         """
         从预检索的经验列表格式化经验上下文（Phase 4: 消除双重检索）。
-        
+
         Args:
             experiences: 预检索的经验列表，每个字典应包含：
                 - context: 经验上下文描述
                 - result: 经验结果
                 - success: 是否成功（布尔值）
                 - 其他可选字段
-        
+
         Returns:
             格式化的经验上下文字符串
         """
         if not experiences:
             return ""
-        
+
         try:
             parts = []
             for exp in experiences[:3]:  # 最多显示3条
@@ -630,9 +625,9 @@ class UnifiedContextInjector(BaseModule):
                 result_summary = exp.get('result', '')[:50]
                 success_mark = "✓" if exp.get('success') else "✗"
                 parts.append(f"{success_mark} {context_summary} → {result_summary}")
-            
+
             return "\n".join(parts)
-            
+
         except Exception as e:
             self.log_warning(f"格式化经验列表失败: {e}")
             return ""
@@ -682,7 +677,7 @@ class UnifiedContextInjector(BaseModule):
         # 如果压缩器不可用，使用简单压缩
         if not self._compressor:
             return self._simple_compress(system_content, history, user_tokens)
-        
+
         try:
             # 准备记忆列表（从system_content中提取）
             memories = []
@@ -691,7 +686,7 @@ class UnifiedContextInjector(BaseModule):
                 for line in memory_lines:
                     if line.strip() and line.strip().startswith("- "):
                         memories.append({'content': line[2:].strip()})
-            
+
             # 使用SmartContextCompressor
             result = self._compressor.compress_context(
                 system_prompt=system_content,
@@ -700,22 +695,22 @@ class UnifiedContextInjector(BaseModule):
                 user_input="",  # user_input会在后面添加
                 current_tokens=None
             )
-            
+
             compressed_context = result['context']
-            
+
             # 从压缩后的上下文中提取system_content和history
             if compressed_context and len(compressed_context) > 0:
                 system_content = compressed_context[0].get('content', system_content)
                 history = compressed_context[1:-1] if len(compressed_context) > 1 else []
-            
+
             compression_ratio = result['stats'].get('compression_ratio', 1.0)
-            
+
             return system_content, history, compression_ratio
-            
+
         except Exception as e:
             logger.warning(f"Smart compression failed, using simple compression: {e}")
             return self._simple_compress(system_content, history, user_tokens)
-    
+
     def _simple_compress(
         self,
         system_content: str,
@@ -956,7 +951,6 @@ class UnifiedContextInjector(BaseModule):
         elif context_type == 'empathy':
             self._show_empathy = priority
 
-
 def create_unified_context_injector(
     memory_manager: 'MemoryManager',
     growth_log_manager: Optional[GrowthLogManager] = None,
@@ -987,11 +981,10 @@ def create_unified_context_injector(
         **kwargs
     )
 
-
 class ContextBuilder:
     """
     上下文构建器 - 兼容旧接口
-    
+
     Phase 6 简化：当 UnifiedContextInjector 可用时，ContextBuilder 成为纯代理。
     所有重复方法已移除，统一委托给 injector。
     """
@@ -1005,7 +998,7 @@ class ContextBuilder:
     ):
         self.config = config or {}
         self._unified_injector = unified_injector
-        
+
         if not self._unified_injector:
             logger.warning("ContextBuilder: UnifiedContextInjector 未提供，使用降级模式")
 
@@ -1020,7 +1013,7 @@ class ContextBuilder:
     ) -> List[Dict]:
         """
         构建完整上下文。
-        
+
         Phase 6: 统一委托给 UnifiedContextInjector。
         """
         if self._unified_injector:
@@ -1033,7 +1026,7 @@ class ContextBuilder:
                 experience=experience,
             )
             return result.context
-        
+
         # 降级模式：直接使用 injector 的静态方法
         return self._fallback_build_context(
             system_prompt, memories, conversation_history, user_input, agent_emotion
@@ -1050,7 +1043,7 @@ class ContextBuilder:
         从候选池构建上下文（Phase 3 新增接口）。
 
         流水线: candidate_pool → classify → summarize → select → format
-        
+
         Phase 6: 统一委托给 UnifiedContextInjector。
         """
         from neurova.context_pool import ContextPoolUtils, ContextSource
@@ -1193,17 +1186,17 @@ class ContextBuilder:
     ) -> List[Dict]:
         """
         降级模式：无 injector 时的简单上下文构建。
-        
+
         注意：这是临时降级方案，生产环境应确保 injector 可用。
         """
         from neurova.context import UnifiedContextInjector, TokenBudget
-        
+
         # 创建临时 injector
         temp_injector = UnifiedContextInjector(
             memory_manager=None,  # 无记忆管理器
             token_budget=TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)
         )
-        
+
         result = temp_injector.build_context(
             system_prompt=system_prompt,
             memories=memories,
@@ -1216,34 +1209,34 @@ class ContextBuilder:
     def _fallback_compress(self, context: List[Dict]) -> List[Dict]:
         """
         降级模式：简单压缩。
-        
+
         注意：这是临时降级方案，生产环境应确保 injector 可用。
         """
         from neurova.context import UnifiedContextInjector, TokenBudget
-        
+
         # 创建临时 injector
         temp_injector = UnifiedContextInjector(
             memory_manager=None,
             token_budget=TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)
         )
-        
+
         # 计算总 tokens
         total_tokens = sum(
             temp_injector._count_tokens(msg.get('content', ''))
             for msg in context
         )
-        
+
         if total_tokens <= self.MAX_CONTEXT_TOKENS:
             return context
-        
+
         # 需要压缩：使用 injector 的压缩逻辑
         system_msg = context[0]
         user_msg = context[-1]
         history = context[1:-1]
-        
+
         # 简单截断历史
         trimmed_history = temp_injector._trim_history(history)
-        
+
         return [system_msg] + trimmed_history + [user_msg]
 
     # ══════════════════════════════════════════════════════════════
@@ -1258,7 +1251,7 @@ class ContextBuilder:
     ) -> List[Dict]:
         """
         深度模块接口：简化上下文构建
-        
+
         参数:
             user_input: 用户输入（必需）
             session: 会话信息（可选）
@@ -1273,10 +1266,10 @@ class ContextBuilder:
                 - tool_memory_result: 工具记忆结果
                 - experience_items: 经验项目
                 - system_prompt: 自定义系统提示
-        
+
         返回:
             List[Dict]: 上下文消息列表
-        
+
         设计原则:
         - 最小参数：只需 user_input
         - 会话封装：session 包含所有上下文信息
@@ -1285,13 +1278,13 @@ class ContextBuilder:
         # 解析参数
         session = session or {}
         options = options or {}
-        
+
         # 提取会话信息
         conversation_history = session.get('conversation_history', [])
         user_id = session.get('user_id')
         agent_id = session.get('agent_id')
         metadata = session.get('metadata', {})
-        
+
         # 提取选项
         include_reflection_log = options.get('include_reflection_log', True)
         include_question_queue = options.get('include_question_queue', False)
@@ -1299,17 +1292,17 @@ class ContextBuilder:
         tool_memory_result = options.get('tool_memory_result')
         experience_items = options.get('experience_items')
         system_prompt = options.get('system_prompt', self._get_default_system_prompt())
-        
+
         # 自动检索记忆
         memories = self._auto_retrieve_memories(user_input, user_id)
-        
+
         # 自动分析情感
         agent_emotion = self._analyze_emotion(user_input, metadata)
-        
+
         # 合并工具记忆
         if tool_memory_result:
             memories = self._merge_tool_memory(memories, tool_memory_result)
-        
+
         # 调用内部实现
         if self._unified_injector:
             result = self._unified_injector.build_context(
@@ -1324,7 +1317,7 @@ class ContextBuilder:
                 experience=experience_items,
             )
             return result.context
-        
+
         # 降级模式
         return self._fallback_build_context(
             system_prompt, memories, conversation_history, user_input, agent_emotion
@@ -1338,7 +1331,7 @@ class ContextBuilder:
         """自动检索相关记忆"""
         if not self._unified_injector or not self._unified_injector._memory_manager:
             return []
-        
+
         try:
             # 使用记忆管理器检索相关记忆
             memory_manager = self._unified_injector._memory_manager
@@ -1362,32 +1355,32 @@ class ContextBuilder:
             'anger': ['生气', '愤怒', '讨厌', '烦'],
             'neutral': ['你好', '请问', '怎么', '什么'],
         }
-        
+
         user_input_lower = user_input.lower()
-        
+
         for emotion_type, keywords in emotion_keywords.items():
             for keyword in keywords:
                 if keyword in user_input_lower:
                     # 返回符合 _format_emotion 期望的格式
                     return {emotion_type: 0.7}
-        
+
         return None
 
     def _merge_tool_memory(self, memories: List[Dict], tool_memory_result: Dict) -> List[Dict]:
         """合并工具记忆到记忆列表"""
         if not tool_memory_result:
             return memories
-        
+
         # 提取工具记忆
         tool_memories = tool_memory_result.get('memories', [])
         if not tool_memories:
             return memories
-        
+
         # 合并并去重
         merged = memories.copy()
         for tool_mem in tool_memories:
             # 检查是否已存在
             if not any(m.get('content') == tool_mem.get('content') for m in merged):
                 merged.append(tool_mem)
-        
+
         return merged

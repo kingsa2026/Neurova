@@ -1,21 +1,21 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;HistoryOutlined :style="{ color: '#06b6d4' }" /&gt; 轨迹回放
-      &lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;轨迹&lt;b &gt;456&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;步骤&lt;b &gt;12K&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;异常&lt;b &gt;3&lt;/b&gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-table :columns="cols" :data-source="list" row-key="id" size="middle" :pagination="{ pageSize: 8 }" /&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 >
+        <HistoryOutlined :style="{ color: '#06b6d4' }" /> 轨迹回放
+      </h2>
+    </div>
+    <div >
+      <div >轨迹<b >456</b></div>
+      <div >步骤<b >12K</b></div>
+      <div >异常<b >3</b></div>
+    </div>
+    <div >
+      <a-table :columns="cols" :data-source="list" row-key="id" size="middle" :pagination="{ pageSize: 8 }" />
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref } from 'vue'
 import { HistoryOutlined } from '@ant-design/icons-vue'
 const cols = [
@@ -31,8 +31,8 @@ const list = ref([
   { id: 'T002', agent: 'Agent-B', task: '代码生成', sc: 8, dur: '0.8s', st: '完成' },
   { id: 'T003', agent: 'Agent-A', task: '语义搜索', sc: 15, dur: '2.1s', st: '完成' },
 ])
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { padding: 16px 24px; border-radius: 12px; }
 .t { font-size: 1.2rem; color: #e2e8f0; margin: 0; display: flex; align-items: center; gap: 8px; }
@@ -42,5 +42,5 @@ const list = ref([
 .c1 { color: #06b6d4; }
 .c2 { color: #ef4444; }
 .tb { padding: 20px; border-radius: 12px; }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

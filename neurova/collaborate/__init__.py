@@ -11,10 +11,10 @@ from .template import CollaborationTemplate, TemplateManager, get_template_manag
 __all__ = [
     # 数据模型
     "TemplateType",
-    "AgentRole", 
+    "AgentRole",
     "TaskStep",
     "WorkflowDefinition",
-    
+
     # 模板管理
     "CollaborationTemplate",
     "TemplateManager",

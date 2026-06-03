@@ -71,7 +71,7 @@ with sqlite3.connect(str(db_path)) as conn:
     now = time.time()
     for mem in memories:
         cursor.execute('''
-            INSERT OR REPLACE INTO memories 
+            INSERT OR REPLACE INTO memories
             (id, content, category, temperature, created_at, updated_at, access_count, last_accessed, metadata)
             VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?)
         ''', (

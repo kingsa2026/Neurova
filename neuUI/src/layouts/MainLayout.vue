@@ -1,53 +1,53 @@
-&lt;template&gt;
-  &lt;a-layout &gt;
-    &lt;!-- 顶部：全局导航 --&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;img :src="logoWhite"  alt="Neurova" @click="$router.push('/dashboard')" /&gt;
-        &lt;AppSidebar /&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;a-badge :count="3" size="small"&gt;
-          &lt;a-button type="text"  @click="$router.push('/notifications')"&gt;
-            &lt;BellOutlined /&gt;
-          &lt;/a-button&gt;
-        &lt;/a-badge&gt;
-        &lt;a-dropdown&gt;
-          &lt;div &gt;
-            &lt;a-avatar size="small" &gt;{{ usernameC }}&lt;/a-avatar&gt;
-            &lt;span &gt;{{ authStore.currentUser?.username || '用户' }}&lt;/span&gt;
-            &lt;CaretDownOutlined  /&gt;
-          &lt;/div&gt;
-          &lt;template #overlay&gt;
-            &lt;a-menu &gt;
-              &lt;a-menu-item key="profile" @click="$router.push('/settings')"&gt;
-                &lt;UserOutlined /&gt; 个人设置
-              &lt;/a-menu-item&gt;
-              &lt;a-menu-divider /&gt;
-              &lt;a-menu-item key="logout" @click="handleLogout"&gt;
-                &lt;LogoutOutlined /&gt; 退出登录
-              &lt;/a-menu-item&gt;
-            &lt;/a-menu&gt;
-          &lt;/template&gt;
-        &lt;/a-dropdown&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 下方：左侧 Agent 边栏 + 主内容 --&gt;
-    &lt;div &gt;
-      &lt;AgentSidebar /&gt;
-      &lt;a-layout-content &gt;
-        &lt;div &gt;
-          &lt;router-view v-slot="{ Component }"&gt;
-            &lt;Transition name="fade-slide" mode="out-in"&gt;
-              &lt;component :is="Component" /&gt;
-            &lt;/Transition&gt;
-          &lt;/router-view&gt;
-        &lt;/div&gt;
-      &lt;/a-layout-content&gt;
-    &lt;/div&gt;
-  &lt;/a-layout&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <a-layout >
+    <!-- 顶部：全局导航 -->
+    <div >
+      <div >
+        <img :src="logoWhite"  alt="Neurova" @click="$router.push('/dashboard')" />
+        <AppSidebar />
+      </div>
+      <div >
+        <a-badge :count="3" size="small">
+          <a-button type="text"  @click="$router.push('/notifications')">
+            <BellOutlined />
+          </a-button>
+        </a-badge>
+        <a-dropdown>
+          <div >
+            <a-avatar size="small" >{{ usernameC }}</a-avatar>
+            <span >{{ authStore.currentUser?.username || '用户' }}</span>
+            <CaretDownOutlined  />
+          </div>
+          <template #overlay>
+            <a-menu >
+              <a-menu-item key="profile" @click="$router.push('/settings')">
+                <UserOutlined /> 个人设置
+              </a-menu-item>
+              <a-menu-divider />
+              <a-menu-item key="logout" @click="handleLogout">
+                <LogoutOutlined /> 退出登录
+              </a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
+      </div>
+    </div>
+    <!-- 下方：左侧 Agent 边栏 + 主内容 -->
+    <div >
+      <AgentSidebar />
+      <a-layout-content >
+        <div >
+          <router-view v-slot="{ Component }">
+            <Transition name="fade-slide" mode="out-in">
+              <component :is="Component" />
+            </Transition>
+          </router-view>
+        </div>
+      </a-layout-content>
+    </div>
+  </a-layout>
+</template>
+<script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -62,20 +62,20 @@ import {
 const router = useRouter()
 const authStore = useAuthStore()
 const agentStore = useAgentStore()
-const usernameC = computed(() =&gt; {
+const usernameC = computed(() => {
   return (authStore.currentUser?.username || 'U')[0].toUpperCase()
 })
 async function handleLogout() {
   await authStore.logout()
   router.push('/login')
 }
-onMounted(() =&gt; {
+onMounted(() => {
   if (agentStore.agents.length === 0) {
     agentStore.loadAgents()
   }
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .main-layout {
   height: 100vh;
   width: 100vw;
@@ -196,5 +196,5 @@ onMounted(() =&gt; {
   opacity: 0;
   transform: translateY(-12px) scale(0.98);
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

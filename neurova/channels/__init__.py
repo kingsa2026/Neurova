@@ -16,14 +16,24 @@ from neurova.channels.base import (
     ChannelConfig,
     ChannelMessage,
     ChannelEventType,
+    MessageChannel,
 )
 from neurova.channels.manager import ChannelManager, get_channel_manager
+from neurova.channels.xiaoyi import XiaoYiAdapter, create_xiaoyi_adapter
+from neurova.session_manager import SessionManager, SessionMessage, SessionRecord, get_session_manager
 
 __all__ = [
     "ChannelAdapter",
     "ChannelConfig",
     "ChannelMessage",
     "ChannelEventType",
+    "MessageChannel",
     "ChannelManager",
     "get_channel_manager",
+    "XiaoYiAdapter",
+    "create_xiaoyi_adapter",
+    "SessionManager",
+    "SessionMessage",
+    "SessionRecord",
+    "get_session_manager",
 ]

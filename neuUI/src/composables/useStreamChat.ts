@@ -1,39 +1,39 @@
 import { ref, onUnmounted } from 'vue'
 import type { Ref } from 'vue'
-&nbsp;
+ 
 export interface UseStreamChatOptions {
-  onMessage?: (content: string) =&gt; void
-  onError?: (error: Error) =&gt; void
-  onFinish?: () =&gt; void
+  onMessage?: (content: string) => void
+  onError?: (error: Error) => void
+  onFinish?: () => void
 }
-&nbsp;
+ 
 export interface UseStreamChatReturn {
-  messages: Ref&lt;Array&lt;{ role: 'user' | 'assistant'; content: string }&gt;&gt;
-  isStreaming: Ref&lt;boolean&gt;
-  currentReply: Ref&lt;string&gt;
-  sendMessage: (message: string) =&gt; Promise&lt;void&gt;
-  stopGeneration: () =&gt; void
+  messages: Ref<Array<{ role: 'user' | 'assistant'; content: string }>>
+  isStreaming: Ref<boolean>
+  currentReply: Ref<string>
+  sendMessage: (message: string) => Promise<void>
+  stopGeneration: () => void
 }
-&nbsp;
+ 
 export function useStreamChat(options?: UseStreamChatOptions): UseStreamChatReturn {
-  const messages = ref&lt;Array&lt;{ role: 'user' | 'assistant'; content: string }&gt;&gt;([])
-  const isStreaming = ref&lt;boolean&gt;(false)
-  const currentReply = ref&lt;string&gt;('')
+  const messages = ref<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+  const isStreaming = ref<boolean>(false)
+  const currentReply = ref<string>('')
   let abortController: AbortController | null = null
-&nbsp;
-  async function sendMessage(message: string): Promise&lt;void&gt; {
+ 
+  async function sendMessage(message: string): Promise<void> {
     if (isStreaming.value) return
-&nbsp;
+ 
     // 添加用户消息
     messages.value.push({
       role: 'user',
       content: message
     })
-&nbsp;
+ 
     isStreaming.value = true
     currentReply.value = ''
     abortController = new AbortController()
-&nbsp;
+ 
     try {
       const response = await fetch('/api/v1/chat/stream', {
         method: 'POST',
@@ -44,33 +44,33 @@ export function useStreamChat(options?: UseStreamChatOptions): UseStreamChatRetu
         body: JSON.stringify({ message }),
         signal: abortController.signal
       })
-&nbsp;
+ 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
-&nbsp;
+ 
       const reader = response.body?.getReader()
       if (!reader) {
         throw new Error('Response body is null')
       }
-&nbsp;
+ 
       const decoder = new TextDecoder()
       let assistantMessage = ''
-&nbsp;
+ 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-&nbsp;
+ 
         const chunk = decoder.decode(value, { stream: true })
         const lines = chunk.split('\n')
-&nbsp;
+ 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const data = line.slice(6)
             if (data === '[DONE]') {
               break
             }
-&nbsp;
+ 
             try {
               const parsed = JSON.parse(data)
               const content = parsed.choices?.[0]?.delta?.content || ''
@@ -86,13 +86,13 @@ export function useStreamChat(options?: UseStreamChatOptions): UseStreamChatRetu
           }
         }
       }
-&nbsp;
+ 
       // 添加助手回复
       messages.value.push({
         role: 'assistant',
         content: assistantMessage
       })
-&nbsp;
+ 
       if (options?.onFinish) {
         options.onFinish()
       }
@@ -109,19 +109,19 @@ export function useStreamChat(options?: UseStreamChatOptions): UseStreamChatRetu
       abortController = null
     }
   }
-&nbsp;
+ 
   function stopGeneration(): void {
     if (abortController) {
       abortController.abort()
       abortController = null
     }
   }
-&nbsp;
+ 
   // 组件卸载时停止生成
-  onUnmounted(() =&gt; {
+  onUnmounted(() => {
     stopGeneration()
   })
-&nbsp;
+ 
   return {
     messages,
     isStreaming,
@@ -130,4 +130,4 @@ export function useStreamChat(options?: UseStreamChatOptions): UseStreamChatRetu
     stopGeneration
   }
 }
-&nbsp;
+ 

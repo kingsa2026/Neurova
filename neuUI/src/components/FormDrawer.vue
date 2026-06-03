@@ -1,35 +1,35 @@
-&lt;template&gt;
-  &lt;a-drawer
+<template>
+  <a-drawer
     :open="visible"
     :title="title"
     :width="width"
     @close="handleClose"
-  &gt;
-    &lt;a-form
+  >
+    <a-form
       :model="formData"
       :layout="layout"
-    &gt;
-      &lt;slot /&gt;
-    &lt;/a-form&gt;
-    &lt;div &gt;
-      &lt;a-button @click="handleClose"&gt;取消&lt;/a-button&gt;
-      &lt;a-button type="primary" @click="handleSubmit" :loading="loading"&gt;
+    >
+      <slot />
+    </a-form>
+    <div >
+      <a-button @click="handleClose">取消</a-button>
+      <a-button type="primary" @click="handleSubmit" :loading="loading">
         确定
-      &lt;/a-button&gt;
-    &lt;/div&gt;
-  &lt;/a-drawer&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+      </a-button>
+    </div>
+  </a-drawer>
+</template>
+<script setup lang="ts">
 import { ref } from 'vue'
-const props = defineProps&lt;{
+const props = defineProps<{
   title: string
   width?: number
   layout?: 'horizontal' | 'vertical' | 'inline'
   loading?: boolean
-}&gt;()
-const visible = ref&lt;boolean&gt;(false)
-const formData = ref&lt;Record&lt;string, unknown&gt;&gt;({})
-function open(data?: Record&lt;string, unknown&gt;) {
+}>()
+const visible = ref<boolean>(false)
+const formData = ref<Record<string, unknown>>({})
+function open(data?: Record<string, unknown>) {
   formData.value = data || {}
   visible.value = true
 }
@@ -42,15 +42,15 @@ function handleClose() {
 function handleSubmit() {
   emit('submit', formData.value)
 }
-const emit = defineEmits&lt;{
-  (e: 'submit', data: Record&lt;string, unknown&gt;): void
-}&gt;()
+const emit = defineEmits<{
+  (e: 'submit', data: Record<string, unknown>): void
+}>()
 defineExpose({
   open,
   close
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .form-drawer {
   :deep(.ant-drawer-header) {
     background: rgba(10, 14, 39, 0.9) !important;
@@ -69,7 +69,7 @@ defineExpose({
   }
 }
 .drawer-form {
-  :deep(.ant-form-item-label &gt; label) {
+  :deep(.ant-form-item-label > label) {
     color: rgba(255, 255, 255, 0.8) !important;
   }
 }
@@ -78,5 +78,5 @@ defineExpose({
   justify-content: flex-end;
   gap: 8px;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

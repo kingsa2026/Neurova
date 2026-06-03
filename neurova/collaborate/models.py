@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
-
 class TemplateType(str, Enum):
     """协作模板类型"""
     CODE_REVIEW = "code_review"           # 代码评审
@@ -19,7 +18,6 @@ class TemplateType(str, Enum):
     DIAGNOSTIC = "diagnostic"              # 问题诊断
     KNOWLEDGE_SHARING = "knowledge_sharing"  # 知识共享
     CUSTOM = "custom"                      # 自定义模板
-
 
 class AgentRole(str, Enum):
     """Agent 角色"""
@@ -32,7 +30,6 @@ class AgentRole(str, Enum):
     SOLVER = "solver"                     # 解决者
     OBSERVER = "observer"                 # 观察者
     PARTICIPANT = "participant"           # 参与者
-
 
 @dataclass
 class TaskStep:
@@ -47,7 +44,7 @@ class TaskStep:
     depends_on: List[str] = field(default_factory=list)   # 依赖步骤
     timeout_seconds: int = 300                            # 超时时间
     optional: bool = False                               # 是否可选
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -63,7 +60,6 @@ class TaskStep:
             "optional": self.optional,
         }
 
-
 @dataclass
 class WorkflowDefinition:
     """工作流定义"""
@@ -74,14 +70,14 @@ class WorkflowDefinition:
     parallel_allowed: bool = False                      # 是否允许并行
     max_concurrent_steps: int = 2                       # 最大并行步骤数
     rollback_on_failure: bool = True                    # 失败时是否回滚
-    
+
     def get_step(self, step_id: str) -> Optional[TaskStep]:
         """获取指定步骤"""
         for step in self.steps:
             if step.step_id == step_id:
                 return step
         return None
-    
+
     def get_step_order(self) -> List[str]:
         """获取拓扑排序后的步骤顺序"""
         # 简单的拓扑排序
@@ -89,7 +85,7 @@ class WorkflowDefinition:
         order = []
         remaining = set(step_ids)
         completed = set()
-        
+
         while remaining:
             # 找一个没有未完成依赖的步骤
             for step_id in list(remaining):
@@ -103,36 +99,36 @@ class WorkflowDefinition:
                 # 有循环依赖，选择第一个
                 order.append(next(iter(remaining)))
                 remaining.remove(next(iter(remaining)))
-        
+
         return order
-    
+
     def validate(self) -> tuple[bool, List[str]]:
         """验证工作流定义
-        
+
         Returns:
             (是否有效, 错误列表)
         """
         errors = []
-        
+
         # 检查步骤ID唯一性
         step_ids = [s.step_id for s in self.steps]
         if len(step_ids) != len(set(step_ids)):
             errors.append("步骤ID必须唯一")
-        
+
         # 检查依赖的有效性
         for step in self.steps:
             for dep in step.depends_on:
                 if dep not in step_ids:
                     errors.append(f"步骤 {step.step_id} 引用了不存在的依赖 {dep}")
-        
+
         # 检查循环依赖
         try:
             self.get_step_order()
         except Exception as e:
             errors.append(f"工作流存在循环依赖: {e}")
-        
+
         return len(errors) == 0, errors
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {

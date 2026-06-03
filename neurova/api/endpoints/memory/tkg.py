@@ -16,7 +16,6 @@ from .base import (
     router, logger, _get_request_id, get_memory_manager, _get_user_ids_from_token,
 )
 
-
 class AddTemporalFactRequest(BaseModel):
     """添加时序事实请求"""
     entity: str = Field(..., description="主体实体")
@@ -27,7 +26,6 @@ class AddTemporalFactRequest(BaseModel):
     source: Optional[str] = Field(default=None, description="信息来源")
     metadata: Optional[dict] = Field(default=None, description="额外元数据，如对话ID/环境等")
 
-
 class QueryTemporalRequest(BaseModel):
     """查询时序事实请求"""
     entity: str = Field(..., description="主体实体")
@@ -35,7 +33,6 @@ class QueryTemporalRequest(BaseModel):
     start_time: Optional[str] = Field(default=None, description="起始时间")
     end_time: Optional[str] = Field(default=None, description="结束时间")
     limit: Optional[int] = Field(default=10, ge=1, le=100, description="返回数量")
-
 
 @router.post("/tkg/facts", summary="添加时序事实")
 async def add_temporal_fact(
@@ -74,7 +71,6 @@ async def add_temporal_fact(
     except Exception as e:
         logger.exception(f"添加时序事实失败: {e}")
         raise APIError.internal(f"添加时序事实失败: {str(e)}")
-
 
 @router.post("/tkg/query", summary="查询时序事实")
 async def query_temporal_facts(
@@ -115,7 +111,6 @@ async def query_temporal_facts(
         logger.exception(f"查询时序事实失败: {e}")
         raise APIError.internal(f"查询时序事实失败: {str(e)}")
 
-
 @router.get("/tkg/history/{entity}/{relation}", summary="获取事实演变历史")
 async def get_temporal_history(
     entity: str,
@@ -152,7 +147,6 @@ async def get_temporal_history(
     except Exception as e:
         logger.exception(f"获取事实演变历史失败: {e}")
         raise APIError.internal(f"获取事实演变历史失败: {str(e)}")
-
 
 @router.get("/tkg/stats", summary="获取时序知识图谱统计")
 async def get_tkg_stats(

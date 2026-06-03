@@ -1,23 +1,23 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div  :style="{ background: color + '20', color: color }"&gt;
+<template>
+  <div >
+    <div  :style="{ background: color + '20', color: color }">
       {{ prefix }}
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;{{ title }}&lt;/div&gt;
-      &lt;div  :style="{ color: color }"&gt;{{ value }}&lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
-defineProps&lt;{
+    </div>
+    <div >
+      <div >{{ title }}</div>
+      <div  :style="{ color: color }">{{ value }}</div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
+defineProps<{
   title: string
   value: number
   prefix: string
   color: string
-}&gt;()
-&lt;/script&gt;
-&lt;style scoped&gt;
+}>()
+</script>
+<style scoped>
 .stat-card {
   padding: 24px;
   display: flex;
@@ -45,5 +45,5 @@ defineProps&lt;{
   font-size: 2rem;
   font-weight: 700;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

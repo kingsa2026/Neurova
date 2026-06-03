@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 上下文系统数据模型
 
@@ -8,13 +10,10 @@
 - ContextBuildResult: 上下文构建结果
 """
 
-from __future__ import annotations
-
 import datetime as dt
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List
-
 
 class ContextPriority(Enum):
     """上下文优先级"""
@@ -22,7 +21,6 @@ class ContextPriority(Enum):
     HIGH = 80        # 高温记忆、反思日志
     NORMAL = 50      # 普通记忆
     LOW = 20         # 低温记忆、归档内容
-
 
 @dataclass
 class TokenBudget:
@@ -42,7 +40,6 @@ class TokenBudget:
     @property
     def english_ratio(self) -> float:
         return 0.25
-
 
 @dataclass
 class ContextEntry:
@@ -67,7 +64,6 @@ class ContextEntry:
             'metadata': self.metadata,
             'created_at': self.created_at,
         }
-
 
 @dataclass
 class ContextBuildResult:

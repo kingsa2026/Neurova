@@ -1,58 +1,58 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;StarBackground /&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;h1 &gt;欢迎回来&lt;/h1&gt;
-        &lt;p &gt;开始您的智能之旅&lt;/p&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;p &gt;
+<template>
+  <div >
+    <StarBackground />
+    <div >
+      <div >
+        <h1 >欢迎回来</h1>
+        <p >开始您的智能之旅</p>
+      </div>
+      <div >
+        <p >
           您好，{{ authStore.currentUser?.username || '用户' }}！
-        &lt;/p&gt;
-        &lt;div &gt;
-          &lt;div &gt;
-            &lt;div &gt;🤖&lt;/div&gt;
-            &lt;h3 &gt;创建 Agent&lt;/h3&gt;
-            &lt;p &gt;创建您的专属智能伙伴&lt;/p&gt;
-          &lt;/div&gt;
-          &lt;div &gt;
-            &lt;div &gt;💬&lt;/div&gt;
-            &lt;h3 &gt;开始对话&lt;/h3&gt;
-            &lt;p &gt;与您的 Agent 交流&lt;/p&gt;
-          &lt;/div&gt;
-          &lt;div &gt;
-            &lt;div &gt;📚&lt;/div&gt;
-            &lt;h3 &gt;知识库&lt;/h3&gt;
-            &lt;p &gt;管理您的知识资源&lt;/p&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;a-button
+        </p>
+        <div >
+          <div >
+            <div >🤖</div>
+            <h3 >创建 Agent</h3>
+            <p >创建您的专属智能伙伴</p>
+          </div>
+          <div >
+            <div >💬</div>
+            <h3 >开始对话</h3>
+            <p >与您的 Agent 交流</p>
+          </div>
+          <div >
+            <div >📚</div>
+            <h3 >知识库</h3>
+            <p >管理您的知识资源</p>
+          </div>
+        </div>
+        <a-button
           type="primary"
           @click="handleLogout"
-        &gt;
+        >
           退出登录
-        &lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+        </a-button>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import StarBackground from '@/components/StarBackground.vue'
 const router = useRouter()
 const authStore = useAuthStore()
-onMounted(() =&gt; {
+onMounted(() => {
   authStore.restoreUser()
 })
 async function handleLogout() {
   await authStore.logout()
   router.push('/login')
 }
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .dashboard-container {
   position: relative;
   width: 100vw;
@@ -140,5 +140,5 @@ async function handleLogout() {
     grid-template-columns: 1fr;
   }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

@@ -1,40 +1,40 @@
 /**
  * 通用工具函数
  */
-&nbsp;
+ 
 /**
  * 防抖函数
  * @param fn - 要防抖的函数
  * @param delay - 延迟时间（毫秒）
  * @returns 防抖后的函数
  */
-export function debounce&lt;T extends (...args: unknown[]) =&gt; unknown&gt;(fn: T, delay: number): (...args: Parameters&lt;T&gt;) =&gt; void {
-  let timer: ReturnType&lt;typeof setTimeout&gt; | null = null
-  return function (this: unknown, ...args: Parameters&lt;T&gt;) {
+export function debounce<T extends (...args: unknown[]) => unknown>(fn: T, delay: number): (...args: Parameters<T>) => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  return function (this: unknown, ...args: Parameters<T>) {
     if (timer) clearTimeout(timer)
-    timer = setTimeout(() =&gt; {
+    timer = setTimeout(() => {
       fn.apply(this, args)
     }, delay)
   }
 }
-&nbsp;
+ 
 /**
  * 节流函数
  * @param fn - 要节流的函数
  * @param interval - 间隔时间（毫秒）
  * @returns 节流后的函数
  */
-export function throttle&lt;T extends (...args: unknown[]) =&gt; unknown&gt;(fn: T, interval: number): (...args: Parameters&lt;T&gt;) =&gt; void {
+export function throttle<T extends (...args: unknown[]) => unknown>(fn: T, interval: number): (...args: Parameters<T>) => void {
   let lastTime = 0
-  return function (this: unknown, ...args: Parameters&lt;T&gt;) {
+  return function (this: unknown, ...args: Parameters<T>) {
     const now = Date.now()
-    if (now - lastTime &gt;= interval) {
+    if (now - lastTime >= interval) {
       lastTime = now
       fn.apply(this, args)
     }
   }
 }
-&nbsp;
+ 
 /**
  * 格式化日期
  * @param date - 日期对象或时间戳
@@ -57,7 +57,7 @@ export function formatDate(date: Date | number, format: string = 'YYYY-MM-DD HH:
     .replace('mm', minutes)
     .replace('ss', seconds)
 }
-&nbsp;
+ 
 /**
  * 格式化文件大小
  * @param bytes - 字节数
@@ -70,7 +70,7 @@ export function formatFileSize(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + units[i]
 }
-&nbsp;
+ 
 /**
  * 生成唯一 ID
  * @returns 唯一 ID 字符串
@@ -78,17 +78,17 @@ export function formatFileSize(bytes: number): string {
 export function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9)
 }
-&nbsp;
+ 
 /**
  * 深拷贝
  * @param obj - 要拷贝的对象
  * @returns 拷贝后的对象
  */
-export function deepClone&lt;T&gt;(obj: T): T {
+export function deepClone<T>(obj: T): T {
   if (obj === null || typeof obj !== 'object') return obj
   return JSON.parse(JSON.stringify(obj))
 }
-&nbsp;
+ 
 /**
  * 检查是否为空值（null、undefined、空字符串、空数组、空对象）
  * @param value - 要检查的值
@@ -96,9 +96,9 @@ export function deepClone&lt;T&gt;(obj: T): T {
  */
 export function isEmpty(value: unknown): boolean {
   if (value === null || value === undefined) return true
-  if (typeof value === 'string' &amp;&amp; value.trim() === '') return true
-  if (Array.isArray(value) &amp;&amp; value.length === 0) return true
-  if (typeof value === 'object' &amp;&amp; Object.keys(value as object).length === 0) return true
+  if (typeof value === 'string' && value.trim() === '') return true
+  if (Array.isArray(value) && value.length === 0) return true
+  if (typeof value === 'object' && Object.keys(value as object).length === 0) return true
   return false
 }
-&nbsp;
+ 
