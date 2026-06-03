@@ -167,7 +167,6 @@ token.txt
 /data/
 /memory/
 /neurova/data/
-/neurova/memory/
 /neurova/static/
 /neurova/tests/
 /neurova/neurova/
@@ -176,6 +175,12 @@ token.txt
 /neurova/.test_deps/
 /tests/
 /backup_reports/
+
+# neurova/memory 只排除数据文件，保留脚本
+/neurova/memory/data/
+*.db
+*.db-shm
+*.db-wal
 
 # 文档构建
 /docs/*_INTEGRATION.md
