@@ -204,8 +204,8 @@ agents/
 .trae/
 node_modules
 
-# Web 前端文件夹
-web/
+# Web 前端文件夹（仅根目录）
+/web/
 
 # 第三方 SDK（不直接使用，仅参考）
 flow-kb-sdk/happy-notes/
