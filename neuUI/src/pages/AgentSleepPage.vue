@@ -1,58 +1,58 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;MedicineBoxOutlined :style="{ color: '#6366f1' }" /&gt; 睡眠管理
-      &lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;状态&lt;b &gt;{{ sleepStatus }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;今日&lt;b &gt;{{ todayHours }}h&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;唤醒&lt;b &gt;{{ wakeCount }}&lt;/b&gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;h4&gt;睡眠模式配置&lt;/h4&gt;
-        &lt;div &gt;
-          &lt;span&gt;启用睡眠&lt;/span&gt;
-          &lt;a-switch :checked="sleepOn" @change="(v: boolean) =&gt; sleepOn = v" /&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;span&gt;睡眠窗口&lt;/span&gt;
-          &lt;a-time-picker /&gt;
-          &lt;span&gt;-&lt;/span&gt;
-          &lt;a-time-picker /&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;h4&gt;唤醒规则&lt;/h4&gt;
-        &lt;div v-for="r in rules" :key="r.id" &gt;
-          &lt;div  :style="{ background: r.color }" /&gt;
-          &lt;div&gt;
-            &lt;span &gt;{{ r.name }}&lt;/span&gt;
-            &lt;span &gt;{{ r.desc }}&lt;/span&gt;
-          &lt;/div&gt;
-          &lt;a-switch v-model:checked="r.on" size="small" /&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;h4&gt;睡眠历史&lt;/h4&gt;
-      &lt;div &gt;
-        &lt;div v-for="d in dailys" :key="d.day" &gt;
-          &lt;div  :style="{ height: d.hrs * 12 + 'px' }" /&gt;
-          &lt;span&gt;{{ d.day }}&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 >
+        <MedicineBoxOutlined :style="{ color: '#6366f1' }" /> 睡眠管理
+      </h2>
+    </div>
+    <div >
+      <div >状态<b >{{ sleepStatus }}</b></div>
+      <div >今日<b >{{ todayHours }}h</b></div>
+      <div >唤醒<b >{{ wakeCount }}</b></div>
+    </div>
+    <div >
+      <div >
+        <h4>睡眠模式配置</h4>
+        <div >
+          <span>启用睡眠</span>
+          <a-switch :checked="sleepOn" @change="(v: boolean) => sleepOn = v" />
+        </div>
+        <div >
+          <span>睡眠窗口</span>
+          <a-time-picker />
+          <span>-</span>
+          <a-time-picker />
+        </div>
+      </div>
+      <div >
+        <h4>唤醒规则</h4>
+        <div v-for="r in rules" :key="r.id" >
+          <div  :style="{ background: r.color }" />
+          <div>
+            <span >{{ r.name }}</span>
+            <span >{{ r.desc }}</span>
+          </div>
+          <a-switch v-model:checked="r.on" size="small" />
+        </div>
+      </div>
+    </div>
+    <div >
+      <h4>睡眠历史</h4>
+      <div >
+        <div v-for="d in dailys" :key="d.day" >
+          <div  :style="{ height: d.hrs * 12 + 'px' }" />
+          <span>{{ d.day }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { MedicineBoxOutlined } from '@ant-design/icons-vue'
 import { sleepAPI } from '@/api/modules/sleep'
 import { useAgentPage } from '@/composables/useAgentPage'
-const { agentId, initAgent } = useAgentPage('/agent/:agentId/sleep', () =&gt; loadSleepData())
+const { agentId, initAgent } = useAgentPage('/agent/:agentId/sleep', () => loadSleepData())
 const sleepOn = ref(true)
 const sleepStatus = ref('清醒')
 const todayHours = ref(3)
@@ -71,7 +71,7 @@ const dailys = ref([
   { day: '05-20', hrs: 3 },
   { day: '05-21', hrs: 1.5 },
 ])
-const stageNames: Record&lt;string, string&gt; = {
+const stageNames: Record<string, string> = {
   active: '活跃', light: '浅睡', rem: 'REM', deep: '深睡', hibernate: '休眠',
 }
 async function loadSleepData() {
@@ -80,23 +80,23 @@ async function loadSleepData() {
       sleepAPI.getStatus(agentId.value),
       sleepAPI.getSettings(agentId.value),
     ])
-    if (statusRes.status === 'fulfilled' &amp;&amp; statusRes.value?.data) {
+    if (statusRes.status === 'fulfilled' && statusRes.value?.data) {
       const d = statusRes.value.data
       sleepStatus.value = stageNames[d.stage] || d.stage_name || d.stage || '清醒'
       if (d.duration_seconds) todayHours.value = Math.round(d.duration_seconds / 3600 * 10) / 10
     }
-    if (settingsRes.status === 'fulfilled' &amp;&amp; settingsRes.value?.data) {
+    if (settingsRes.status === 'fulfilled' && settingsRes.value?.data) {
       const s = settingsRes.value.data
       if (s.sleep_schedule?.enabled !== undefined) sleepOn.value = s.sleep_schedule.enabled
     }
   } catch { /* 使用默认数据 */ }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await initAgent()
   loadSleepData()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { padding: 16px 24px; border-radius: 12px; }
 .t { font-size: 1.2rem; color: #e2e8f0; margin: 0; display: flex; align-items: center; gap: 8px; }
@@ -119,5 +119,5 @@ onMounted(async () =&gt; {
 .hbf { width: 20px; background: linear-gradient(#6366f1, #8b5cf6); border-radius: 4px 4px 0 0; min-height: 4px; }
 .hb span { color: rgba(255,255,255,0.3); font-size: .68rem; }
 @media (max-width: 768px) { .grid { grid-template-columns: 1fr } }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

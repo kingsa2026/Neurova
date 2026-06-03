@@ -2,14 +2,14 @@
  * 存储工具函数
  * 统一封装 localStorage 和 sessionStorage 操作
  */
-&nbsp;
+ 
 /**
  * 安全地获取 localStorage 项
  * @param key - 键名
  * @param defaultValue - 默认值
  * @returns 存储的值或默认值
  */
-export function getLocalStorage&lt;T&gt;(key: string, defaultValue: T | null = null): T | null {
+export function getLocalStorage<T>(key: string, defaultValue: T | null = null): T | null {
   try {
     const item = localStorage.getItem(key)
     if (item === null) return defaultValue
@@ -19,20 +19,20 @@ export function getLocalStorage&lt;T&gt;(key: string, defaultValue: T | null = n
     return defaultValue
   }
 }
-&nbsp;
+ 
 /**
  * 安全地设置 localStorage 项
  * @param key - 键名
  * @param value - 值
  */
-export function setLocalStorage&lt;T&gt;(key: string, value: T): void {
+export function setLocalStorage<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value))
   } catch (error) {
     console.error(`Error setting localStorage key "${key}":`, error)
   }
 }
-&nbsp;
+ 
 /**
  * 安全地移除 localStorage 项
  * @param key - 键名
@@ -44,7 +44,7 @@ export function removeLocalStorage(key: string): void {
     console.error(`Error removing localStorage key "${key}":`, error)
   }
 }
-&nbsp;
+ 
 /**
  * 清空 localStorage
  */
@@ -55,14 +55,14 @@ export function clearLocalStorage(): void {
     console.error('Error clearing localStorage:', error)
   }
 }
-&nbsp;
+ 
 /**
  * 安全地获取 sessionStorage 项
  * @param key - 键名
  * @param defaultValue - 默认值
  * @returns 存储的值或默认值
  */
-export function getSessionStorage&lt;T&gt;(key: string, defaultValue: T | null = null): T | null {
+export function getSessionStorage<T>(key: string, defaultValue: T | null = null): T | null {
   try {
     const item = sessionStorage.getItem(key)
     if (item === null) return defaultValue
@@ -72,20 +72,20 @@ export function getSessionStorage&lt;T&gt;(key: string, defaultValue: T | null =
     return defaultValue
   }
 }
-&nbsp;
+ 
 /**
  * 安全地设置 sessionStorage 项
  * @param key - 键名
  * @param value - 值
  */
-export function setSessionStorage&lt;T&gt;(key: string, value: T): void {
+export function setSessionStorage<T>(key: string, value: T): void {
   try {
     sessionStorage.setItem(key, JSON.stringify(value))
   } catch (error) {
     console.error(`Error setting sessionStorage key "${key}":`, error)
   }
 }
-&nbsp;
+ 
 /**
  * 安全地移除 sessionStorage 项
  * @param key - 键名
@@ -97,7 +97,7 @@ export function removeSessionStorage(key: string): void {
     console.error(`Error removing sessionStorage key "${key}":`, error)
   }
 }
-&nbsp;
+ 
 /**
  * 清空 sessionStorage
  */
@@ -108,4 +108,4 @@ export function clearSessionStorage(): void {
     console.error('Error clearing sessionStorage:', error)
   }
 }
-&nbsp;
+ 

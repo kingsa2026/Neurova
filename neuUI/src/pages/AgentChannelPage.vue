@@ -1,136 +1,136 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;ApiOutlined :style="{ color: '#10b981' }" /&gt; 渠道管理&lt;/h2&gt;
-      &lt;div &gt;
-        &lt;a-button @click="loadChannels" :loading="loading"&gt;&lt;ReloadOutlined /&gt; 刷新&lt;/a-button&gt;
-        &lt;a-button type="primary" @click="openDrawer()"&gt;&lt;PlusOutlined /&gt; 添加渠道&lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;渠道数量&lt;b &gt;{{ channels.length }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;已启用&lt;b &gt;{{ channels.filter((c) =&gt; c.enabled !== false).length }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;渠道类型&lt;b &gt;{{ availableChannels.length }}&lt;/b&gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" /&gt;
-    &lt;a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" /&gt;
-    &lt;div v-if="!loading &amp;&amp; channels.length" &gt;
-      &lt;div v-for="channel in channels" :key="channel.channel"  @click="openDrawer(channel)"&gt;
-        &lt;span  :&gt;
-          &lt;CheckCircleFilled v-if="channel.enabled" /&gt;
-          &lt;MinusCircleFilled v-else /&gt;
-        &lt;/span&gt;
-        &lt;div &gt;
-          &lt;div  :style="{ background: getChannelColor(channel.channel) }"&gt;
-            &lt;component :is="getChannelIcon(channel.channel)" /&gt;
-          &lt;/div&gt;
-          &lt;div &gt;
-            &lt;h4&gt;{{ channel.display_name || getChannelLabel(channel.channel) || channel.channel }}&lt;/h4&gt;
-            &lt;div &gt;
-              &lt;a-tag size="small" :color="channel.enabled !== false ? 'green' : 'default'"&gt;
+<template>
+  <div >
+    <div >
+      <h2 ><ApiOutlined :style="{ color: '#10b981' }" /> 渠道管理</h2>
+      <div >
+        <a-button @click="loadChannels" :loading="loading"><ReloadOutlined /> 刷新</a-button>
+        <a-button type="primary" @click="openDrawer()"><PlusOutlined /> 添加渠道</a-button>
+      </div>
+    </div>
+    <div >
+      <div >渠道数量<b >{{ channels.length }}</b></div>
+      <div >已启用<b >{{ channels.filter((c) => c.enabled !== false).length }}</b></div>
+      <div >渠道类型<b >{{ availableChannels.length }}</b></div>
+    </div>
+    <a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" />
+    <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
+    <div v-if="!loading && channels.length" >
+      <div v-for="channel in channels" :key="channel.channel"  @click="openDrawer(channel)">
+        <span  :>
+          <CheckCircleFilled v-if="channel.enabled" />
+          <MinusCircleFilled v-else />
+        </span>
+        <div >
+          <div  :style="{ background: getChannelColor(channel.channel) }">
+            <component :is="getChannelIcon(channel.channel)" />
+          </div>
+          <div >
+            <h4>{{ channel.display_name || getChannelLabel(channel.channel) || channel.channel }}</h4>
+            <div >
+              <a-tag size="small" :color="channel.enabled !== false ? 'green' : 'default'">
                 {{ channel.enabled !== false ? '启用' : '禁用' }}
-              &lt;/a-tag&gt;
-              &lt;a-tag v-if="channel.health" size="small" :color="channel.health === 'healthy' ? 'blue' : 'red'"&gt;
+              </a-tag>
+              <a-tag v-if="channel.health" size="small" :color="channel.health === 'healthy' ? 'blue' : 'red'">
                 {{ channel.health }}
-              &lt;/a-tag&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;
-            &lt;ApiOutlined  /&gt;
-            &lt;span &gt;Webhook: /api/v1/channels/webhook/{{ channel.channel }}?agent_id={{ agentId }}&lt;/span&gt;
-          &lt;/div&gt;
-          &lt;div  v-if="channel.totalRequests !== undefined"&gt;
-            &lt;span &gt;请求: {{ channel.totalRequests || 0 }} | 错误: {{ channel.totalErrors || 0 }}&lt;/span&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div  @click.stop&gt;
-          &lt;a-button size="small" type="primary" ghost @click="openDrawer(channel)"&gt;&lt;SettingOutlined /&gt; 配置&lt;/a-button&gt;
-          &lt;a-button size="small" @click="handleToggle(channel)"&gt;{{ channel.enabled !== false ? '禁用' : '启用' }}&lt;/a-button&gt;
-          &lt;a-button size="small" danger @click="handleRemove(channel)"&gt;&lt;DeleteOutlined /&gt;&lt;/a-button&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div v-else-if="!loading" &gt;
-      &lt;ApiOutlined style="font-size:48px;color:rgba(255,255,255,0.1)" /&gt;
-      &lt;p&gt;暂无渠道配置&lt;/p&gt;
-      &lt;a-button type="primary" @click="openDrawer()"&gt;添加第一个渠道&lt;/a-button&gt;
-    &lt;/div&gt;
-    &lt;!-- 移动设备配对 --&gt;
-    &lt;div &gt;
-      &lt;MobilePairingPanel :agent-id="agentId" /&gt;
-    &lt;/div&gt;
-    &lt;!-- 配置/添加 Drawer --&gt;
-    &lt;a-drawer
+              </a-tag>
+            </div>
+          </div>
+        </div>
+        <div >
+          <div >
+            <ApiOutlined  />
+            <span >Webhook: /api/v1/channels/webhook/{{ channel.channel }}?agent_id={{ agentId }}</span>
+          </div>
+          <div  v-if="channel.totalRequests !== undefined">
+            <span >请求: {{ channel.totalRequests || 0 }} | 错误: {{ channel.totalErrors || 0 }}</span>
+          </div>
+        </div>
+        <div  @click.stop>
+          <a-button size="small" type="primary" ghost @click="openDrawer(channel)"><SettingOutlined /> 配置</a-button>
+          <a-button size="small" @click="handleToggle(channel)">{{ channel.enabled !== false ? '禁用' : '启用' }}</a-button>
+          <a-button size="small" danger @click="handleRemove(channel)"><DeleteOutlined /></a-button>
+        </div>
+      </div>
+    </div>
+    <div v-else-if="!loading" >
+      <ApiOutlined style="font-size:48px;color:rgba(255,255,255,0.1)" />
+      <p>暂无渠道配置</p>
+      <a-button type="primary" @click="openDrawer()">添加第一个渠道</a-button>
+    </div>
+    <!-- 移动设备配对 -->
+    <div >
+      <MobilePairingPanel :agent-id="agentId" />
+    </div>
+    <!-- 配置/添加 Drawer -->
+    <a-drawer
       v-model:open="drawerOpen"
       :title="drawerChannel ? '配置渠道' : '添加渠道'"
       :width="580"
       placement="right"
       @close="closeDrawer"
-    &gt;
-      &lt;a-form layout="vertical"&gt;
-        &lt;template v-if="!drawerChannel"&gt;
-          &lt;a-form-item label="渠道类型" required&gt;
-            &lt;a-select v-model:value="drawerForm.channel" placeholder="选择渠道类型" @change="onChannelTypeChange"&gt;
-              &lt;a-select-option v-for="ch in availableChannels" :key="ch.value" :value="ch.value"&gt;{{ ch.label }}&lt;/a-select-option&gt;
-            &lt;/a-select&gt;
-          &lt;/a-form-item&gt;
-        &lt;/template&gt;
-        &lt;template v-else&gt;
-          &lt;a-alert :message="'渠道: ' + (drawerChannel.display_name || drawerChannel.channel)" type="info" show-icon style="margin-bottom:16px" /&gt;
-        &lt;/template&gt;
-        &lt;!-- 渠道专属字段 --&gt;
-        &lt;template v-if="currentFields.length"&gt;
-          &lt;a-divider&gt;渠道配置&lt;/a-divider&gt;
-          &lt;template v-for="field in currentFields" :key="field.name"&gt;
-            &lt;a-form-item v-if="field.type === 'text'" :label="field.label" :required="field.required"&gt;
-              &lt;a-input v-model:value="drawerForm.fields[field.name]" :placeholder="field.name" /&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item v-else-if="field.type === 'password'" :label="field.label" :required="field.required"&gt;
-              &lt;a-input-password v-model:value="drawerForm.fields[field.name]" :placeholder="field.name" /&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item v-else-if="field.type === 'switch'" :label="field.label"&gt;
-              &lt;a-switch v-model:checked="drawerForm.fields[field.name]" /&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item v-else-if="field.type === 'select'" :label="field.label"&gt;
-              &lt;a-select v-model:value="drawerForm.fields[field.name]"&gt;
-                &lt;a-select-option v-for="o in field.options" :key="o" :value="o"&gt;{{ o }}&lt;/a-select-option&gt;
-              &lt;/a-select&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item v-else-if="field.type === 'number'" :label="field.label" :required="field.required"&gt;
-              &lt;a-input-number v-model:value="drawerForm.fields[field.name]" style="width:100%" /&gt;
-            &lt;/a-form-item&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-        &lt;!-- 通用字段 --&gt;
-        &lt;template v-if="currentCommonFields.length"&gt;
-          &lt;a-divider&gt;通用配置&lt;/a-divider&gt;
-          &lt;template v-for="field in currentCommonFields" :key="'c_'+field.name"&gt;
-            &lt;a-form-item v-if="field.type === 'switch'" :label="field.label"&gt;
-              &lt;a-switch v-model:checked="drawerForm.fields[field.name]" /&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item v-else-if="field.type === 'select'" :label="field.label"&gt;
-              &lt;a-select v-model:value="drawerForm.fields[field.name]"&gt;
-                &lt;a-select-option v-for="o in field.options" :key="o" :value="o"&gt;{{ o }}&lt;/a-select-option&gt;
-              &lt;/a-select&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item v-else :label="field.label"&gt;
-              &lt;a-input v-model:value="drawerForm.fields[field.name]" :placeholder="field.default?.toString() || ''" /&gt;
-            &lt;/a-form-item&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-form&gt;
-      &lt;template #footer&gt;
-        &lt;a-button @click="closeDrawer"&gt;取消&lt;/a-button&gt;
-        &lt;a-button type="primary" :loading="saving" @click="handleSave"&gt;
+    >
+      <a-form layout="vertical">
+        <template v-if="!drawerChannel">
+          <a-form-item label="渠道类型" required>
+            <a-select v-model:value="drawerForm.channel" placeholder="选择渠道类型" @change="onChannelTypeChange">
+              <a-select-option v-for="ch in availableChannels" :key="ch.value" :value="ch.value">{{ ch.label }}</a-select-option>
+            </a-select>
+          </a-form-item>
+        </template>
+        <template v-else>
+          <a-alert :message="'渠道: ' + (drawerChannel.display_name || drawerChannel.channel)" type="info" show-icon style="margin-bottom:16px" />
+        </template>
+        <!-- 渠道专属字段 -->
+        <template v-if="currentFields.length">
+          <a-divider>渠道配置</a-divider>
+          <template v-for="field in currentFields" :key="field.name">
+            <a-form-item v-if="field.type === 'text'" :label="field.label" :required="field.required">
+              <a-input v-model:value="drawerForm.fields[field.name]" :placeholder="field.name" />
+            </a-form-item>
+            <a-form-item v-else-if="field.type === 'password'" :label="field.label" :required="field.required">
+              <a-input-password v-model:value="drawerForm.fields[field.name]" :placeholder="field.name" />
+            </a-form-item>
+            <a-form-item v-else-if="field.type === 'switch'" :label="field.label">
+              <a-switch v-model:checked="drawerForm.fields[field.name]" />
+            </a-form-item>
+            <a-form-item v-else-if="field.type === 'select'" :label="field.label">
+              <a-select v-model:value="drawerForm.fields[field.name]">
+                <a-select-option v-for="o in field.options" :key="o" :value="o">{{ o }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item v-else-if="field.type === 'number'" :label="field.label" :required="field.required">
+              <a-input-number v-model:value="drawerForm.fields[field.name]" style="width:100%" />
+            </a-form-item>
+          </template>
+        </template>
+        <!-- 通用字段 -->
+        <template v-if="currentCommonFields.length">
+          <a-divider>通用配置</a-divider>
+          <template v-for="field in currentCommonFields" :key="'c_'+field.name">
+            <a-form-item v-if="field.type === 'switch'" :label="field.label">
+              <a-switch v-model:checked="drawerForm.fields[field.name]" />
+            </a-form-item>
+            <a-form-item v-else-if="field.type === 'select'" :label="field.label">
+              <a-select v-model:value="drawerForm.fields[field.name]">
+                <a-select-option v-for="o in field.options" :key="o" :value="o">{{ o }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item v-else :label="field.label">
+              <a-input v-model:value="drawerForm.fields[field.name]" :placeholder="field.default?.toString() || ''" />
+            </a-form-item>
+          </template>
+        </template>
+      </a-form>
+      <template #footer>
+        <a-button @click="closeDrawer">取消</a-button>
+        <a-button type="primary" :loading="saving" @click="handleSave">
           {{ drawerChannel ? '保存' : '添加' }}
-        &lt;/a-button&gt;
-      &lt;/template&gt;
-    &lt;/a-drawer&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+        </a-button>
+      </template>
+    </a-drawer>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, h, type VNode } from 'vue'
 import { message } from 'ant-design-vue'
 import {
@@ -147,8 +147,8 @@ interface ChannelData {
   health?: string
   totalRequests?: number
   totalErrors?: number
-  adapter_config?: Record&lt;string, unknown&gt;
-  config?: Record&lt;string, unknown&gt;
+  adapter_config?: Record<string, unknown>
+  config?: Record<string, unknown>
 }
 interface ChannelField {
   name: string
@@ -162,12 +162,12 @@ interface ChannelCapability {
   optional_fields?: ChannelField[]
   common_fields?: ChannelField[]
 }
-const { agentId, initAgent } = useAgentPage('/agent/:agentId/channel', () =&gt; loadChannels())
+const { agentId, initAgent } = useAgentPage('/agent/:agentId/channel', () => loadChannels())
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
-const channels = ref&lt;ChannelData[]&gt;([])
-const channelCapabilities = ref&lt;Record&lt;string, ChannelCapability&gt;&gt;({})
+const channels = ref<ChannelData[]>([])
+const channelCapabilities = ref<Record<string, ChannelCapability>>({})
 const availableChannels = [
   { value: 'feishu', label: '飞书' },
   { value: 'dingtalk', label: '钉钉' },
@@ -184,36 +184,36 @@ const availableChannels = [
   { value: 'websocket', label: 'WebSocket' },
   { value: 'mobile', label: '移动设备' },
 ]
-const channelLabels = Object.fromEntries(availableChannels.map(c =&gt; [c.value, c.label]))
+const channelLabels = Object.fromEntries(availableChannels.map(c => [c.value, c.label]))
 function getChannelLabel(name: string) { return channelLabels[name] || name }
 const drawerOpen = ref(false)
-const drawerChannel = ref&lt;ChannelData | null&gt;(null)
-const drawerForm = reactive({ channel: '', fields: {} as Record&lt;string, unknown&gt; })
-const currentFields = computed(() =&gt; {
+const drawerChannel = ref<ChannelData | null>(null)
+const drawerForm = reactive({ channel: '', fields: {} as Record<string, unknown> })
+const currentFields = computed(() => {
   const key = drawerChannel.value?.channel || drawerForm.channel
   const cap = channelCapabilities.value[key]
   return cap?.optional_fields || []
 })
-const currentCommonFields = computed(() =&gt; {
+const currentCommonFields = computed(() => {
   const key = drawerChannel.value?.channel || drawerForm.channel
   const cap = channelCapabilities.value[key]
   return cap?.common_fields || []
 })
-const channelIcons: Record&lt;string, () =&gt; VNode&gt; = {
-  feishu: () =&gt; h('span', null, '📱'), wechat: () =&gt; h('span', null, '💬'),
-  dingtalk: () =&gt; h('span', null, '🏢'), qq: () =&gt; h('span', null, '🐧'),
-  qqbot: () =&gt; h('span', null, '🤖'), discord: () =&gt; h('span', null, '🎮'),
-  telegram: () =&gt; h('span', null, '✈️'), wecom: () =&gt; h('span', null, '🏭'),
-  xiaoyi: () =&gt; h('span', null, '🤖'), sip: () =&gt; h('span', null, '📞'),
-  voice: () =&gt; h('span', null, '📞'), mqtt: () =&gt; h('span', null, '📡'),
-  websocket: () =&gt; h('span', null, '🔌'), mobile: () =&gt; h('span', null, '📱'),
+const channelIcons: Record<string, () => VNode> = {
+  feishu: () => h('span', null, '📱'), wechat: () => h('span', null, '💬'),
+  dingtalk: () => h('span', null, '🏢'), qq: () => h('span', null, '🐧'),
+  qqbot: () => h('span', null, '🤖'), discord: () => h('span', null, '🎮'),
+  telegram: () => h('span', null, '✈️'), wecom: () => h('span', null, '🏭'),
+  xiaoyi: () => h('span', null, '🤖'), sip: () => h('span', null, '📞'),
+  voice: () => h('span', null, '📞'), mqtt: () => h('span', null, '📡'),
+  websocket: () => h('span', null, '🔌'), mobile: () => h('span', null, '📱'),
 }
 function getChannelColor(name: string) {
   const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']
-  const idx = availableChannels.findIndex(c =&gt; c.value === name)
-  return colors[idx &gt;= 0 ? idx % colors.length : 0]
+  const idx = availableChannels.findIndex(c => c.value === name)
+  return colors[idx >= 0 ? idx % colors.length : 0]
 }
-function getChannelIcon(name: string) { return channelIcons[name] || (() =&gt; h('span', null, '📡')) }
+function getChannelIcon(name: string) { return channelIcons[name] || (() => h('span', null, '📡')) }
 async function loadChannels() {
   loading.value = true; error.value = ''
   try {
@@ -227,10 +227,10 @@ async function fetchCapabilities(key: string) {
   try {
     const res = await channelAPI.getCapabilities()
     const caps = res?.data?.capabilities || res?.capabilities || {}
-    channelCapabilities.value = caps as Record&lt;string, ChannelCapability&gt;
+    channelCapabilities.value = caps as Record<string, ChannelCapability>
     const cap = caps[key]
     if (cap) {
-      const fields: Record&lt;string, unknown&gt; = {}
+      const fields: Record<string, unknown> = {}
       for (const f of (cap.optional_fields || []))
         fields[f.name] = f.default ?? (f.type === 'switch' ? false : f.type === 'number' ? 0 : '')
       for (const f of (cap.common_fields || []))
@@ -262,7 +262,7 @@ async function handleSave() {
   if (!channel) { message.warning('请选择渠道类型'); return }
   saving.value = true
   try {
-    const config: Record&lt;string, unknown&gt; = { ...drawerForm.fields }
+    const config: Record<string, unknown> = { ...drawerForm.fields }
     config.agent_id = agentId.value || config.agent_id
     const res = await channelAPI.addOrUpdate(channel, { enabled: config.enabled !== false, config })
     if (res?.code === 0 || res?.success) {
@@ -293,14 +293,14 @@ async function handleRemove(channel: ChannelData) {
   } catch (e: unknown) { message.error((e as Error).message || '删除失败') }
 }
 let sseSource: EventSource | null = null
-let sseRetryTimer: ReturnType&lt;typeof setTimeout&gt; | null = null
+let sseRetryTimer: ReturnType<typeof setTimeout> | null = null
 function connectSSE() {
   if (sseSource) sseSource.close()
   if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null }
   const token = localStorage.getItem('token')
   if (!token) return
   sseSource = new EventSource('/api/v1/channels/events')
-  sseSource.onmessage = (e) =&gt; {
+  sseSource.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data)
       if (data.event === 'error') {
@@ -311,7 +311,7 @@ function connectSSE() {
       }
       if (data.event === 'init' || data.event === 'heartbeat') {
         for (const s of (data.channels || [])) {
-          const ch = channels.value.find((c) =&gt; c.channel === s.channel)
+          const ch = channels.value.find((c) => c.channel === s.channel)
           if (ch) {
             ch.health = s.health
             ch.totalRequests = s.totalRequests
@@ -321,23 +321,23 @@ function connectSSE() {
       }
     } catch { /* ignore */ }
   }
-  sseSource.onerror = () =&gt; {
+  sseSource.onerror = () => {
     sseSource?.close()
     sseSource = null
     // 5 秒后自动重试
-    sseRetryTimer = setTimeout(() =&gt; connectSSE(), 5000)
+    sseRetryTimer = setTimeout(() => connectSSE(), 5000)
   }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await initAgent()
-  loadChannels().then(() =&gt; connectSSE())
+  loadChannels().then(() => connectSSE())
 })
-onUnmounted(() =&gt; {
+onUnmounted(() => {
   if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null }
   if (sseSource) { sseSource.close(); sseSource = null }
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg { display:flex;flex-direction:column;gap:14px;padding:24px; }
 .hd { padding:14px 24px;border-radius:12px;display:flex;justify-content:space-between;align-items:center; }
 .hd-actions { display:flex;gap:8px; }
@@ -371,5 +371,5 @@ onUnmounted(() =&gt; {
   border-radius: 12px;
   margin-top: 8px;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

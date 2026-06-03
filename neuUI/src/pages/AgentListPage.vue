@@ -1,58 +1,58 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;RobotOutlined /&gt; Agent 管理&lt;/h2&gt;
-      &lt;a-button type="primary" @click="$router.push('/agents/create')"&gt;&lt;PlusOutlined /&gt; 创建 Agent&lt;/a-button&gt;
-    &lt;/div&gt;
-    &lt;!-- 视图切换 --&gt;
-    &lt;div &gt;
-      &lt;a-input-search v-model:value="kw" placeholder="搜索 Agent..." allow-clear style="width:280px" /&gt;
-      &lt;a-radio-group v-model:value="view" button-style="solid" size="small"&gt;
-        &lt;a-radio-button value="card"&gt;&lt;AppstoreOutlined /&gt; 卡片&lt;/a-radio-button&gt;
-        &lt;a-radio-button value="table"&gt;&lt;UnorderedListOutlined /&gt; 表格&lt;/a-radio-button&gt;
-      &lt;/a-radio-group&gt;
-    &lt;/div&gt;
-    &lt;!-- 卡片视图 --&gt;
-    &lt;div v-if="view==='card'" &gt;
-      &lt;div v-for="a in filteredAgents" :key="a.agentId" &gt;
-        &lt;div  @click="$router.push(`/agents/${a.agentId}`)"&gt;
-          &lt;a-avatar :size="48" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}"&gt;{{ a.name[0] }}&lt;/a-avatar&gt;
-          &lt;div &gt;
-            &lt;h3&gt;{{ a.name }}&lt;/h3&gt;
-            &lt;a-tag :color="a.status==='active'?'green':'default'"&gt;{{ a.status||'active' }}&lt;/a-tag&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;p  @click="$router.push(`/agents/${a.agentId}`)"&gt;{{ a.description || '暂无描述' }}&lt;/p&gt;
-        &lt;div  @click="$router.push(`/agents/${a.agentId}`)"&gt;
-          &lt;span&gt;&lt;DatabaseOutlined /&gt; {{ a.memoryCount || 0 }}&lt;/span&gt;
-          &lt;span&gt;&lt;ThunderboltOutlined /&gt; {{ a.skillCount || 0 }}&lt;/span&gt;
-          &lt;span&gt;{{ a.llmModel || '-' }}&lt;/span&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;a-button size="small" @click.stop="$router.push(`/agents/${a.agentId}`)"&gt;编辑&lt;/a-button&gt;
-          &lt;a-popconfirm title="确定删除?" @confirm="del(a.agentId)" @click.stop&gt;
-            &lt;a-button size="small" danger&gt;删除&lt;/a-button&gt;
-          &lt;/a-popconfirm&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div v-if="filteredAgents.length===0" &gt;暂无 Agent，点击上方按钮创建&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 表格视图 --&gt;
-    &lt;div v-else &gt;
-      &lt;a-table :columns="cols" :data-source="filteredAgents" :row-key="record =&gt; record.agentId" size="middle" :pagination="false"&gt;
-        &lt;template #bodyCell="{column,record}"&gt;
-          &lt;template v-if="column.key==='name'"&gt;&lt;a @click="$router.push(`/agents/${record.agentId}`)"&gt;{{ record.name }}&lt;/a&gt;&lt;/template&gt;
-          &lt;template v-if="column.key==='status'"&gt;&lt;a-tag :color="record.status==='active'?'green':'default'"&gt;{{ record.status||'active' }}&lt;/a-tag&gt;&lt;/template&gt;
-          &lt;template v-if="column.key==='actions'"&gt;
-            &lt;a-button type="link" size="small" @click="$router.push(`/agents/${record.agentId}`)"&gt;编辑&lt;/a-button&gt;
-            &lt;a-popconfirm title="删除?" @confirm="del(record.agentId)"&gt;&lt;a-button type="link" size="small" danger&gt;删除&lt;/a-button&gt;&lt;/a-popconfirm&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 ><RobotOutlined /> Agent 管理</h2>
+      <a-button type="primary" @click="$router.push('/agents/create')"><PlusOutlined /> 创建 Agent</a-button>
+    </div>
+    <!-- 视图切换 -->
+    <div >
+      <a-input-search v-model:value="kw" placeholder="搜索 Agent..." allow-clear style="width:280px" />
+      <a-radio-group v-model:value="view" button-style="solid" size="small">
+        <a-radio-button value="card"><AppstoreOutlined /> 卡片</a-radio-button>
+        <a-radio-button value="table"><UnorderedListOutlined /> 表格</a-radio-button>
+      </a-radio-group>
+    </div>
+    <!-- 卡片视图 -->
+    <div v-if="view==='card'" >
+      <div v-for="a in filteredAgents" :key="a.agentId" >
+        <div  @click="$router.push(`/agents/${a.agentId}`)">
+          <a-avatar :size="48" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}">{{ a.name[0] }}</a-avatar>
+          <div >
+            <h3>{{ a.name }}</h3>
+            <a-tag :color="a.status==='active'?'green':'default'">{{ a.status||'active' }}</a-tag>
+          </div>
+        </div>
+        <p  @click="$router.push(`/agents/${a.agentId}`)">{{ a.description || '暂无描述' }}</p>
+        <div  @click="$router.push(`/agents/${a.agentId}`)">
+          <span><DatabaseOutlined /> {{ a.memoryCount || 0 }}</span>
+          <span><ThunderboltOutlined /> {{ a.skillCount || 0 }}</span>
+          <span>{{ a.llmModel || '-' }}</span>
+        </div>
+        <div >
+          <a-button size="small" @click.stop="$router.push(`/agents/${a.agentId}`)">编辑</a-button>
+          <a-popconfirm title="确定删除?" @confirm="del(a.agentId)" @click.stop>
+            <a-button size="small" danger>删除</a-button>
+          </a-popconfirm>
+        </div>
+      </div>
+      <div v-if="filteredAgents.length===0" >暂无 Agent，点击上方按钮创建</div>
+    </div>
+    <!-- 表格视图 -->
+    <div v-else >
+      <a-table :columns="cols" :data-source="filteredAgents" :row-key="record => record.agentId" size="middle" :pagination="false">
+        <template #bodyCell="{column,record}">
+          <template v-if="column.key==='name'"><a @click="$router.push(`/agents/${record.agentId}`)">{{ record.name }}</a></template>
+          <template v-if="column.key==='status'"><a-tag :color="record.status==='active'?'green':'default'">{{ record.status||'active' }}</a-tag></template>
+          <template v-if="column.key==='actions'">
+            <a-button type="link" size="small" @click="$router.push(`/agents/${record.agentId}`)">编辑</a-button>
+            <a-popconfirm title="删除?" @confirm="del(record.agentId)"><a-button type="link" size="small" danger>删除</a-button></a-popconfirm>
+          </template>
+        </template>
+      </a-table>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { useAgentStore } from '@/stores/agents'
@@ -60,9 +60,9 @@ import { RobotOutlined, PlusOutlined, AppstoreOutlined, UnorderedListOutlined, D
 const agentStore = useAgentStore()
 const view = ref('card')
 const kw = ref('')
-const filteredAgents = computed(() =&gt; {
+const filteredAgents = computed(() => {
   if (!kw.value) return agentStore.agents
-  return agentStore.agents.filter(a =&gt; a.name.includes(kw.value) || (a.agentId &amp;&amp; a.agentId.includes(kw.value)))
+  return agentStore.agents.filter(a => a.name.includes(kw.value) || (a.agentId && a.agentId.includes(kw.value)))
 })
 const cols = [
   { title:'名称',key:'name',dataIndex:'name' },
@@ -74,9 +74,9 @@ const cols = [
 ]
 async function del(id:string){ const ok=await agentStore.deleteAgent(id); if(ok) message.success('已删除') }
 // 每次进入列表页都重新加载，确保数据最新
-onMounted(async ()=&gt;{ await agentStore.loadAgents() })
-&lt;/script&gt;
-&lt;style scoped&gt;
+onMounted(async ()=>{ await agentStore.loadAgents() })
+</script>
+<style scoped>
 .agent-list-page { display:flex;flex-direction:column;gap:16px; }
 .page-header { display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-radius:12px; }
 .page-title { font-size:1.25rem;color:#e2e8f0;margin:0;display:flex;align-items:center;gap:8px; }
@@ -89,5 +89,5 @@ onMounted(async ()=&gt;{ await agentStore.loadAgents() })
 .card-stats { display:flex;gap:16px;color:rgba(255,255,255,0.35);font-size:0.8rem; }
 .empty-state { grid-column:1/-1;text-align:center;padding:64px 0;color:rgba(255,255,255,0.3); }
 .card-actions { display:flex;gap:8px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.05);justify-content:flex-end; }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

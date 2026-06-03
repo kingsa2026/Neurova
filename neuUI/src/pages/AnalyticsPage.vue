@@ -1,98 +1,98 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;BarChartOutlined :style="{ color: '#3b82f6' }" /&gt;
+<template>
+  <div >
+    <div >
+      <h2 >
+        <BarChartOutlined :style="{ color: '#3b82f6' }" />
         分析统计
-      &lt;/h2&gt;
-      &lt;div &gt;
-        &lt;a-range-picker v-model:value="dateRange" @change="handleDateChange" /&gt;
-        &lt;a-button @click="loadData" :loading="loading"&gt;
-          &lt;ReloadOutlined /&gt; 刷新
-        &lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;LineChartOutlined  /&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ formatNumber(stats.total_tokens || 0) }}&lt;/div&gt;
-          &lt;div &gt;Token 消耗&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;ApiOutlined  /&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ formatNumber(stats.total_calls || 0) }}&lt;/div&gt;
-          &lt;div &gt;API 调用&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;UserOutlined  /&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.total_users || 0 }}&lt;/div&gt;
-          &lt;div &gt;活跃用户&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;CheckCircleOutlined  style="color: #34d399" /&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ ((stats.success_rate || 0) * 100).toFixed(1) }}%&lt;/div&gt;
-          &lt;div &gt;成功率&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" /&gt;
-    &lt;a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" /&gt;
-    &lt;div v-if="!loading" &gt;
-      &lt;div &gt;
-        &lt;h4&gt;&lt;LineChartOutlined /&gt; Token 消耗趋势&lt;/h4&gt;
-        &lt;canvas ref="c1" /&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;h4&gt;&lt;BarChartOutlined /&gt; LLM 调用分布&lt;/h4&gt;
-        &lt;canvas ref="c2" /&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div  v-if="!loading"&gt;
-      &lt;h4&gt;&lt;ApiOutlined /&gt; 模型统计&lt;/h4&gt;
-      &lt;a-table
+      </h2>
+      <div >
+        <a-range-picker v-model:value="dateRange" @change="handleDateChange" />
+        <a-button @click="loadData" :loading="loading">
+          <ReloadOutlined /> 刷新
+        </a-button>
+      </div>
+    </div>
+    <div >
+      <div >
+        <LineChartOutlined  />
+        <div >
+          <div >{{ formatNumber(stats.total_tokens || 0) }}</div>
+          <div >Token 消耗</div>
+        </div>
+      </div>
+      <div >
+        <ApiOutlined  />
+        <div >
+          <div >{{ formatNumber(stats.total_calls || 0) }}</div>
+          <div >API 调用</div>
+        </div>
+      </div>
+      <div >
+        <UserOutlined  />
+        <div >
+          <div >{{ stats.total_users || 0 }}</div>
+          <div >活跃用户</div>
+        </div>
+      </div>
+      <div >
+        <CheckCircleOutlined  style="color: #34d399" />
+        <div >
+          <div >{{ ((stats.success_rate || 0) * 100).toFixed(1) }}%</div>
+          <div >成功率</div>
+        </div>
+      </div>
+    </div>
+    <a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" />
+    <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
+    <div v-if="!loading" >
+      <div >
+        <h4><LineChartOutlined /> Token 消耗趋势</h4>
+        <canvas ref="c1" />
+      </div>
+      <div >
+        <h4><BarChartOutlined /> LLM 调用分布</h4>
+        <canvas ref="c2" />
+      </div>
+    </div>
+    <div  v-if="!loading">
+      <h4><ApiOutlined /> 模型统计</h4>
+      <a-table
         :columns="cols"
         :data-source="modelStats"
         row-key="model"
         size="middle"
         :pagination="false"
-      &gt;
-        &lt;template #bodyCell="{ column, record }"&gt;
-          &lt;template v-if="column.key === 'calls'"&gt;
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'calls'">
             {{ formatNumber(record.calls || 0) }}
-          &lt;/template&gt;
-          &lt;template v-else-if="column.key === 'tokens'"&gt;
+          </template>
+          <template v-else-if="column.key === 'tokens'">
             {{ formatNumber(record.tokens || 0) }}
-          &lt;/template&gt;
-          &lt;template v-else-if="column.key === 'rate'"&gt;
-            &lt;a-progress
+          </template>
+          <template v-else-if="column.key === 'rate'">
+            <a-progress
               :percent="((record.success_rate || 0) * 100)"
               :stroke-color="'#34d399'"
               size="small"
-            /&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-    &lt;div  v-if="!loading"&gt;
-      &lt;h3&gt;&lt;PieChartOutlined /&gt; 调用分布&lt;/h3&gt;
-      &lt;div &gt;
-        &lt;div  v-for="dist in distribution" :key="dist.name"&gt;
-          &lt;component :is="dist.icon" :style="{ color: dist.color }" /&gt;
-          &lt;div &gt;{{ dist.value }}&lt;/div&gt;
-          &lt;div &gt;{{ dist.name }}&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+            />
+          </template>
+        </template>
+      </a-table>
+    </div>
+    <div  v-if="!loading">
+      <h3><PieChartOutlined /> 调用分布</h3>
+      <div >
+        <div  v-for="dist in distribution" :key="dist.name">
+          <component :is="dist.icon" :style="{ color: dist.color }" />
+          <div >{{ dist.value }}</div>
+          <div >{{ dist.name }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import type { Dayjs } from 'dayjs'
@@ -117,7 +117,7 @@ import {
 import { statsAPI } from '@/api/modules/stats'
 const loading = ref(false)
 const error = ref('')
-const dateRange = ref&lt;[Dayjs, Dayjs] | null&gt;(null)
+const dateRange = ref<[Dayjs, Dayjs] | null>(null)
 const stats = reactive({
   total_tokens: 0,
   total_calls: 0,
@@ -125,9 +125,9 @@ const stats = reactive({
   success_rate: 0,
 })
 interface ModelStat { model:string;calls:number;tokens:number;success_rate:number }
-const modelStats = ref&lt;ModelStat[]&gt;([])
-const c1 = ref&lt;HTMLCanvasElement&gt;()
-const c2 = ref&lt;HTMLCanvasElement&gt;()
+const modelStats = ref<ModelStat[]>([])
+const c1 = ref<HTMLCanvasElement>()
+const c2 = ref<HTMLCanvasElement>()
 const cols = [
   { title: '模型', dataIndex: 'model', key: 'model' },
   { title: '调用', dataIndex: 'calls', key: 'calls', width: 120 },
@@ -141,8 +141,8 @@ const distribution = ref([
   { name: '其他', value: '10%', color: '#f59e0b', icon: MoreOutlined },
 ])
 function formatNumber(num: number) {
-  if (num &gt;= 1000000) return (num / 1000000).toFixed(1) + 'M'
-  if (num &gt;= 1000) return (num / 1000).toFixed(1) + 'K'
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
   return num.toString()
 }
 function draw(canvas: HTMLCanvasElement | null, color: string, data: number[]) {
@@ -160,7 +160,7 @@ function draw(canvas: HTMLCanvasElement | null, color: string, data: number[]) {
     ph = h - pad.t - pad.b
   const max = Math.max(...data)
   ctx.clearRect(0, 0, w, h)
-  for (let i = 0; i &lt;= 3; i++) {
+  for (let i = 0; i <= 3; i++) {
     const y = pad.t + (ph / 3) * i
     ctx.beginPath()
     ctx.moveTo(pad.l, y)
@@ -174,7 +174,7 @@ function draw(canvas: HTMLCanvasElement | null, color: string, data: number[]) {
   grad.addColorStop(1, 'transparent')
   ctx.beginPath()
   ctx.moveTo(pad.l, pad.t + ph)
-  data.forEach((v, i) =&gt; {
+  data.forEach((v, i) => {
     const x = pad.l + xs * i
     const y = pad.t + ph - (v / max) * ph
     ctx.lineTo(x, y)
@@ -183,7 +183,7 @@ function draw(canvas: HTMLCanvasElement | null, color: string, data: number[]) {
   ctx.fillStyle = grad
   ctx.fill()
   ctx.beginPath()
-  data.forEach((v, i) =&gt; {
+  data.forEach((v, i) => {
     const x = pad.l + xs * i
     const y = pad.t + ph - (v / max) * ph
     i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
@@ -192,7 +192,7 @@ function draw(canvas: HTMLCanvasElement | null, color: string, data: number[]) {
   ctx.lineWidth = 2
   ctx.stroke()
   ctx.fillStyle = color
-  data.forEach((v, i) =&gt; {
+  data.forEach((v, i) => {
     const x = pad.l + xs * i
     const y = pad.t + ph - (v / max) * ph
     ctx.beginPath()
@@ -204,7 +204,7 @@ async function loadData() {
   loading.value = true
   error.value = ''
   try {
-    const res = await statsAPI.getControlDashboard().catch(() =&gt; ({ data: null }))
+    const res = await statsAPI.getControlDashboard().catch(() => ({ data: null }))
     if (res.data) {
       if (res.data.key_metrics) {
         Object.assign(stats, {
@@ -233,11 +233,11 @@ async function loadData() {
 function handleDateChange() {
   loadData()
 }
-onMounted(() =&gt; {
+onMounted(() => {
   loadData()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg {
   display: flex;
   flex-direction: column;
@@ -352,7 +352,7 @@ onMounted(() =&gt; {
   align-items: center;
   gap: 8px;
 }
-.dist-card &gt; :first-child {
+.dist-card > :first-child {
   font-size: 2rem;
 }
 .dist-value {
@@ -375,5 +375,5 @@ onMounted(() =&gt; {
     grid-template-columns: repeat(2, 1fr);
   }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

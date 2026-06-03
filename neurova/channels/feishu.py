@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 飞书渠道适配器
 
@@ -13,8 +15,6 @@ API 参考:
 - 长连接文档: https://open.feishu.cn/document/event-subscription-guide/callback-subscription/step-1-choose-a-subscription-mode
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -29,7 +29,6 @@ from neurova.channels.base import (
 )
 
 logger = logging.getLogger(__name__)
-
 
 class FeishuAdapter(ChannelAdapter):
     """
@@ -251,7 +250,6 @@ class FeishuAdapter(ChannelAdapter):
         飞书在配置 Webhook 时会发送 challenge 请求进行验证。
         """
         return {"challenge": challenge}
-
 
 def create_feishu_adapter(
     app_id: str,

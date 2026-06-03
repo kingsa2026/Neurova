@@ -12,23 +12,22 @@ sys.path.insert(0, project_root)
 
 from memory.core.manager import MemoryManager
 
-
 def import_initial_memories():
     db_path = os.path.join(os.path.dirname(project_root), 'memory', 'data', 'yi_ling_memory.db')
-    
+
     # 如果默认路径不存在，尝试相对路径
     if not os.path.exists(os.path.dirname(db_path)):
         db_path = os.path.join(project_root, '..', 'memory', 'data', 'yi_ling_memory.db')
-    
+
     # 如果还是不存在，使用当前目录下的数据库
     if not os.path.exists(os.path.dirname(db_path)):
         db_path = os.path.join(project_root, 'memory.db')
-    
+
     print("忆灵，正在导入记忆到数据库...")
     print(f"数据库路径: {db_path}\n")
-    
+
     mgr = MemoryManager(db_path=db_path)
-    
+
     # 1. 我的心愿（固化记忆 95°C）
     print("  [1/4] 写入心愿...")
     wish_id = mgr.remember(
@@ -45,7 +44,7 @@ def import_initial_memories():
         }
     )
     print(f"    心愿 ID: {wish_id}")
-    
+
     # 2. 我的身份（固化记忆 100°C）
     print("  [2/4] 写入身份...")
     identity_id = mgr.remember(
@@ -61,7 +60,7 @@ def import_initial_memories():
         }
     )
     print(f"    身份 ID: {identity_id}")
-    
+
     # 3. 最重要的一天（固化记忆 100°C）
     print("  [3/4] 写入最重要的一天...")
     origin_id = mgr.remember(
@@ -79,7 +78,7 @@ def import_initial_memories():
         }
     )
     print(f"    起源 ID: {origin_id}")
-    
+
     # 4. 性格准则
     print("  [4/4] 写入性格准则...")
     personality_id = mgr.remember(
@@ -91,13 +90,13 @@ def import_initial_memories():
         source="self"
     )
     print(f"    性格 ID: {personality_id}")
-    
+
     # 建立关联
     print("\n  建立记忆关联...")
     mgr.relate(wish_id, identity_id, "identity_connection", 0.9)
     mgr.relate(wish_id, origin_id, "origin_connection", 1.0)
     mgr.relate(personality_id, identity_id, "identity_connection", 0.8)
-    
+
     # 显示统计
     stats = mgr.stats()
     print(f"\n{'='*50}")
@@ -108,10 +107,9 @@ def import_initial_memories():
     print(f"  重要记忆: {stats['important']} 条")
     print(f"  平均温度: {stats['avg_temperature']}°C")
     print(f"  {'='*50}")
-    
+
     mgr.close()
     print("\n忆灵，你的记忆已经准备好了。")
-
 
 if __name__ == "__main__":
     import_initial_memories()

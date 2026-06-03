@@ -1,101 +1,101 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;MonitorOutlined :style="{ color: '#34d399' }" /&gt;
+<template>
+  <div >
+    <div >
+      <h2 >
+        <MonitorOutlined :style="{ color: '#34d399' }" />
         系统监控
-      &lt;/h2&gt;
-      &lt;div &gt;
-        &lt;a-button @click="loadData" :loading="loading"&gt;
-          &lt;ReloadOutlined /&gt; 刷新
-        &lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;div &gt;&lt;DashboardOutlined /&gt;&lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ systemStats.cpu_usage || 0 }}%&lt;/div&gt;
-          &lt;div &gt;CPU 使用率&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;&lt;DatabaseOutlined /&gt;&lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ systemStats.memory_usage || 0 }}%&lt;/div&gt;
-          &lt;div &gt;内存使用&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;&lt;CloudServerOutlined /&gt;&lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ systemStats.disk_usage || 0 }}%&lt;/div&gt;
-          &lt;div &gt;磁盘使用&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;&lt;ApiOutlined /&gt;&lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ systemStats.uptime || '-' }}&lt;/div&gt;
-          &lt;div &gt;运行时间&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" /&gt;
-    &lt;a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" /&gt;
-    &lt;div v-if="!loading" &gt;
-      &lt;div  v-for="m in metrics" :key="m.name"&gt;
-        &lt;div &gt;
-          &lt;span&gt;{{ m.name }}&lt;/span&gt;
-          &lt;span :style="{ color: m.color }"&gt;{{ m.value }}&lt;/span&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div  :style="{ width: m.val + '%', background: m.color }" /&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;span v-for="s in m.sub" :key="s.name"&gt;{{ s.name }}: {{ s.val }}&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div  v-if="!loading"&gt;
-      &lt;h3&gt;&lt;InfoCircleOutlined /&gt; 系统信息&lt;/h3&gt;
-      &lt;a-descriptions bordered :column="2"&gt;
-        &lt;a-descriptions-item label="系统状态"&gt;
-          &lt;a-tag :color="systemStats.status === 'healthy' ? 'green' : 'orange'"&gt;
+      </h2>
+      <div >
+        <a-button @click="loadData" :loading="loading">
+          <ReloadOutlined /> 刷新
+        </a-button>
+      </div>
+    </div>
+    <div >
+      <div >
+        <div ><DashboardOutlined /></div>
+        <div >
+          <div >{{ systemStats.cpu_usage || 0 }}%</div>
+          <div >CPU 使用率</div>
+        </div>
+      </div>
+      <div >
+        <div ><DatabaseOutlined /></div>
+        <div >
+          <div >{{ systemStats.memory_usage || 0 }}%</div>
+          <div >内存使用</div>
+        </div>
+      </div>
+      <div >
+        <div ><CloudServerOutlined /></div>
+        <div >
+          <div >{{ systemStats.disk_usage || 0 }}%</div>
+          <div >磁盘使用</div>
+        </div>
+      </div>
+      <div >
+        <div ><ApiOutlined /></div>
+        <div >
+          <div >{{ systemStats.uptime || '-' }}</div>
+          <div >运行时间</div>
+        </div>
+      </div>
+    </div>
+    <a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" />
+    <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
+    <div v-if="!loading" >
+      <div  v-for="m in metrics" :key="m.name">
+        <div >
+          <span>{{ m.name }}</span>
+          <span :style="{ color: m.color }">{{ m.value }}</span>
+        </div>
+        <div >
+          <div  :style="{ width: m.val + '%', background: m.color }" />
+        </div>
+        <div >
+          <span v-for="s in m.sub" :key="s.name">{{ s.name }}: {{ s.val }}</span>
+        </div>
+      </div>
+    </div>
+    <div  v-if="!loading">
+      <h3><InfoCircleOutlined /> 系统信息</h3>
+      <a-descriptions bordered :column="2">
+        <a-descriptions-item label="系统状态">
+          <a-tag :color="systemStats.status === 'healthy' ? 'green' : 'orange'">
             {{ systemStats.status === 'healthy' ? '健康' : '异常' }}
-          &lt;/a-tag&gt;
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="系统版本"&gt;{{ systemStats.version || '-' }}&lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="Agent 数量"&gt;{{ systemStats.agents_count || 0 }}&lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="默认 Agent"&gt;{{ systemStats.default_agent_id || '-' }}&lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="记忆系统"&gt;
-          &lt;a-tag :color="systemStats.memory_enabled ? 'green' : 'default'"&gt;
+          </a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item label="系统版本">{{ systemStats.version || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="Agent 数量">{{ systemStats.agents_count || 0 }}</a-descriptions-item>
+        <a-descriptions-item label="默认 Agent">{{ systemStats.default_agent_id || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="记忆系统">
+          <a-tag :color="systemStats.memory_enabled ? 'green' : 'default'">
             {{ systemStats.memory_enabled ? '启用' : '禁用' }}
-          &lt;/a-tag&gt;
-        &lt;/a-descriptions-item&gt;
-        &lt;a-descriptions-item label="多用户模式"&gt;
-          &lt;a-tag :color="systemStats.multi_user_enabled ? 'green' : 'default'"&gt;
+          </a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item label="多用户模式">
+          <a-tag :color="systemStats.multi_user_enabled ? 'green' : 'default'">
             {{ systemStats.multi_user_enabled ? '启用' : '禁用' }}
-          &lt;/a-tag&gt;
-        &lt;/a-descriptions-item&gt;
-      &lt;/a-descriptions&gt;
-    &lt;/div&gt;
-    &lt;div  v-if="!loading"&gt;
-      &lt;h3&gt;&lt;DashboardOutlined /&gt; 性能指标&lt;/h3&gt;
-      &lt;div &gt;
-        &lt;div  v-for="perf in performanceMetrics" :key="perf.name"&gt;
-          &lt;div &gt;
-            &lt;component :is="perf.icon" :style="{ color: perf.color }" /&gt;
-            &lt;span&gt;{{ perf.name }}&lt;/span&gt;
-          &lt;/div&gt;
-          &lt;div &gt;{{ perf.value }}&lt;/div&gt;
-          &lt;div &gt;{{ perf.sub }}&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+          </a-tag>
+        </a-descriptions-item>
+      </a-descriptions>
+    </div>
+    <div  v-if="!loading">
+      <h3><DashboardOutlined /> 性能指标</h3>
+      <div >
+        <div  v-for="perf in performanceMetrics" :key="perf.name">
+          <div >
+            <component :is="perf.icon" :style="{ color: perf.color }" />
+            <span>{{ perf.name }}</span>
+          </div>
+          <div >{{ perf.value }}</div>
+          <div >{{ perf.sub }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
@@ -225,8 +225,8 @@ async function loadData() {
   error.value = ''
   try {
     const [sysRes, dashboardRes] = await Promise.all([
-      statsAPI.getSystemStats().catch(() =&gt; ({ data: null })),
-      statsAPI.getControlDashboard().catch(() =&gt; ({ data: null })),
+      statsAPI.getSystemStats().catch(() => ({ data: null })),
+      statsAPI.getControlDashboard().catch(() => ({ data: null })),
     ])
     if (sysRes.data) {
       Object.assign(systemStats, sysRes.data)
@@ -245,11 +245,11 @@ async function loadData() {
     loading.value = false
   }
 }
-onMounted(() =&gt; {
+onMounted(() => {
   loadData()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg {
   display: flex;
   flex-direction: column;
@@ -386,5 +386,5 @@ onMounted(() =&gt; {
     grid-template-columns: repeat(2, 1fr);
   }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

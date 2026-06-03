@@ -1,19 +1,19 @@
-&lt;template&gt;
-  &lt;a-layout &gt;
-    &lt;AppSidebar /&gt;
-    &lt;a-layout&gt;
-      &lt;AppHeader /&gt;
-      &lt;a-layout-content &gt;
-        &lt;router-view /&gt;
-      &lt;/a-layout-content&gt;
-    &lt;/a-layout&gt;
-  &lt;/a-layout&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <a-layout >
+    <AppSidebar />
+    <a-layout>
+      <AppHeader />
+      <a-layout-content >
+        <router-view />
+      </a-layout-content>
+    </a-layout>
+  </a-layout>
+</template>
+<script setup lang="ts">
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .app-layout {
   min-height: 100vh;
 }
@@ -27,5 +27,5 @@ import AppHeader from './AppHeader.vue'
   border-radius: 1rem;
   min-height: calc(100vh - 48px);
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

@@ -19,11 +19,9 @@ from .base import (
     memory_to_dict, _get_user_ids_from_token,
 )
 
-
 class AnalyzeEmotionRequest(BaseModel):
     """分析文本情绪请求"""
     text: str = Field(..., min_length=1, max_length=50000, description="待分析文本")
-
 
 class EmotionAnalysisResult(BaseModel):
     """情绪分析结果"""
@@ -31,7 +29,6 @@ class EmotionAnalysisResult(BaseModel):
     dominant_emotion: str
     overall_score: float
     tags: List[str]
-
 
 @router.get("/emotion/{emotion_type}", summary="按情绪类型查询记忆")
 async def get_memories_by_emotion(
@@ -70,7 +67,6 @@ async def get_memories_by_emotion(
         logger.exception(f"按情绪查询记忆失败: {e}")
         raise APIError.internal(f"按情绪查询记忆失败: {str(e)}")
 
-
 @router.get("/emotion/summary", summary="获取情绪统计摘要")
 async def get_emotion_summary(
     agent_id: Optional[str] = None,
@@ -96,7 +92,6 @@ async def get_emotion_summary(
     except Exception as e:
         logger.exception(f"获取情绪统计失败: {e}")
         raise APIError.internal(f"获取情绪统计失败: {str(e)}")
-
 
 @router.get("/emotion/distribution", summary="获取情绪分布")
 async def get_emotion_distribution(
@@ -127,7 +122,6 @@ async def get_emotion_distribution(
         logger.exception(f"获取情绪分布失败: {e}")
         raise APIError.internal(f"获取情绪分布失败: {str(e)}")
 
-
 @router.post("/emotion/analyze", summary="分析文本情绪")
 async def analyze_emotion(
     request: AnalyzeEmotionRequest,
@@ -154,7 +148,6 @@ async def analyze_emotion(
     except Exception as e:
         logger.exception(f"情绪分析失败: {e}")
         raise APIError.internal(f"情绪分析失败: {str(e)}")
-
 
 @router.get("/emotion/types", summary="获取支持的情绪类型")
 async def get_emotion_types(

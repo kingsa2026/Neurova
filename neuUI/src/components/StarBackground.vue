@@ -1,65 +1,65 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;!-- === 宇宙星云层 === --&gt;
-    &lt;!-- 核心亮斑 — 缓慢旋转 --&gt;
-    &lt;div &gt;&lt;/div&gt;
-    &lt;!-- 蓝紫色星云团 1 --&gt;
-    &lt;div &gt;&lt;/div&gt;
-    &lt;!-- 粉色星云团 2 --&gt;
-    &lt;div &gt;&lt;/div&gt;
-    &lt;!-- 深蓝星云团 3 --&gt;
-    &lt;div &gt;&lt;/div&gt;
-    &lt;!-- 银河尘带 — 横跨屏幕 --&gt;
-    &lt;div &gt;&lt;/div&gt;
-    &lt;!-- 第二层尘带 — 反向移动 --&gt;
-    &lt;div &gt;&lt;/div&gt;
-    &lt;!-- 微光粒子层 --&gt;
-    &lt;div &gt;&lt;/div&gt;
-    &lt;!-- 第一层：大星星 3px，向下慢速 --&gt;
-    &lt;div  :style="{ animationDuration: '120s' }"&gt;
-      &lt;div
+<template>
+  <div >
+    <!-- === 宇宙星云层 === -->
+    <!-- 核心亮斑 — 缓慢旋转 -->
+    <div ></div>
+    <!-- 蓝紫色星云团 1 -->
+    <div ></div>
+    <!-- 粉色星云团 2 -->
+    <div ></div>
+    <!-- 深蓝星云团 3 -->
+    <div ></div>
+    <!-- 银河尘带 — 横跨屏幕 -->
+    <div ></div>
+    <!-- 第二层尘带 — 反向移动 -->
+    <div ></div>
+    <!-- 微光粒子层 -->
+    <div ></div>
+    <!-- 第一层：大星星 3px，向下慢速 -->
+    <div  :style="{ animationDuration: '120s' }">
+      <div
         v-for="star in layer1"
         :key="'l1-' + star.id"
         :style="starStyle(star, 0)"
-      &gt;&lt;/div&gt;
-      &lt;!-- 副本：位于容器上方 100vh 处，实现无缝循环 --&gt;
-      &lt;div
+      ></div>
+      <!-- 副本：位于容器上方 100vh 处，实现无缝循环 -->
+      <div
         v-for="star in layer1"
         :key="'l1t-' + star.id"
         :style="starStyle(star, -100)"
-      &gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 第二层：中等星星 2px，向上中速 --&gt;
-    &lt;div  :style="{ animationDuration: '50s' }"&gt;
-      &lt;div
+      ></div>
+    </div>
+    <!-- 第二层：中等星星 2px，向上中速 -->
+    <div  :style="{ animationDuration: '50s' }">
+      <div
         v-for="star in layer2"
         :key="'l2-' + star.id"
         :style="starStyle(star, 0)"
-      &gt;&lt;/div&gt;
-      &lt;!-- 副本：位于容器下方 100vh 处 --&gt;
-      &lt;div
+      ></div>
+      <!-- 副本：位于容器下方 100vh 处 -->
+      <div
         v-for="star in layer2"
         :key="'l2t-' + star.id"
         :style="starStyle(star, 100)"
-      &gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 第三层：小星星 1px，向上快速（2倍速） --&gt;
-    &lt;div  :style="{ animationDuration: '30s' }"&gt;
-      &lt;div
+      ></div>
+    </div>
+    <!-- 第三层：小星星 1px，向上快速（2倍速） -->
+    <div  :style="{ animationDuration: '30s' }">
+      <div
         v-for="star in layer3"
         :key="'l3-' + star.id"
         :style="starStyle(star, 0)"
-      &gt;&lt;/div&gt;
-      &lt;!-- 副本：位于容器下方 100vh 处 --&gt;
-      &lt;div
+      ></div>
+      <!-- 副本：位于容器下方 100vh 处 -->
+      <div
         v-for="star in layer3"
         :key="'l3t-' + star.id"
         :style="starStyle(star, 100)"
-      &gt;&lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+      ></div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 interface Star {
   id: number
@@ -82,9 +82,9 @@ const PALETTE = [
   '#a0c8ff',
   '#ffc8d8',
 ]
-function pick&lt;T&gt;(arr: T[]) { return arr[Math.floor(Math.random() * arr.length)] }
+function pick<T>(arr: T[]) { return arr[Math.floor(Math.random() * arr.length)] }
 function makeStars(count: number, size: number): Star[] {
-  return Array.from({ length: count }, (_, i) =&gt; ({
+  return Array.from({ length: count }, (_, i) => ({
     id: i,
     x: Math.random() * 100,
     y: Math.random() * 100,
@@ -94,9 +94,9 @@ function makeStars(count: number, size: number): Star[] {
     twinkleDelay: -(Math.random() * 5),         // 负延迟 → 随机起始相位
   }))
 }
-const layer1 = ref&lt;Star[]&gt;([])
-const layer2 = ref&lt;Star[]&gt;([])
-const layer3 = ref&lt;Star[]&gt;([])
+const layer1 = ref<Star[]>([])
+const layer2 = ref<Star[]>([])
+const layer3 = ref<Star[]>([])
 /**
  * 计算单颗星星的样式
  * @param yOffset 副本偏移量（vh）：-100 = 放在容器上方；100 = 放在容器下方
@@ -115,7 +115,7 @@ function starStyle(star: Star, yOffset: number) {
     boxShadow: glow,
     animationDuration: `${star.twinkleDur}s`,
     animationDelay: `${star.twinkleDelay}s`,
-  } as Record&lt;string, string&gt;
+  } as Record<string, string>
 }
 function hexAlpha(hex: string, a: number): string {
   const r = parseInt(hex.slice(1, 3), 16)
@@ -123,13 +123,13 @@ function hexAlpha(hex: string, a: number): string {
   const b = parseInt(hex.slice(5, 7), 16)
   return `rgba(${r},${g},${b},${a})`
 }
-onMounted(() =&gt; {
+onMounted(() => {
   layer1.value = makeStars(20, 3)   // 第一层 20颗，3px
   layer2.value = makeStars(40, 2)   // 第二层 40颗，2px
   layer3.value = makeStars(80, 1)   // 第三层 80颗，1px
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 /* ========== 宇宙星云 — 动态银河 ========== */
 .nebula-core {
   position: absolute;
@@ -345,5 +345,5 @@ onMounted(() =&gt; {
   from { transform: translateY(0); }
   to   { transform: translateY(100vh); }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

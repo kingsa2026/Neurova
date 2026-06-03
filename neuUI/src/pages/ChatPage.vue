@@ -1,254 +1,254 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;!-- 顶部栏 --&gt;
-    &lt;div &gt;
-      &lt;a-button type="text"  @click="sidebarOpen = !sidebarOpen"&gt;
-        &lt;MenuFoldOutlined v-if="sidebarOpen" /&gt;
-        &lt;MenuUnfoldOutlined v-else /&gt;
-      &lt;/a-button&gt;
-&nbsp;
-      &lt;!-- 当前 Agent 名称显示 --&gt;
-      &lt;div &gt;
-        &lt;a-avatar :size="28" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}"&gt;
+<template>
+  <div >
+    <!-- 顶部栏 -->
+    <div >
+      <a-button type="text"  @click="sidebarOpen = !sidebarOpen">
+        <MenuFoldOutlined v-if="sidebarOpen" />
+        <MenuUnfoldOutlined v-else />
+      </a-button>
+ 
+      <!-- 当前 Agent 名称显示 -->
+      <div >
+        <a-avatar :size="28" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}">
           {{ (currentAgentName || 'A').charAt(0).toUpperCase() }}
-        &lt;/a-avatar&gt;
-        &lt;span &gt;{{ currentAgentName || '未选择' }}&lt;/span&gt;
-        &lt;!-- 模型选择器 --&gt;
-        &lt;a-dropdown :trigger="['click']" placement="bottomLeft" :getPopupContainer="getPopupContainer"&gt;
-          &lt;div  :&gt;
-            &lt;div v-if="activeModel"  /&gt;
-            &lt;span &gt;{{ activeModel || '选择模型' }}&lt;/span&gt;
-            &lt;DownOutlined  /&gt;
-          &lt;/div&gt;
-          &lt;template #overlay&gt;
-            &lt;div &gt;
-              &lt;div &gt;
-                &lt;span&gt;选择 LLM 模型&lt;/span&gt;
-                &lt;a-button type="text" size="small" @click.stop="loadAvailableModels" :loading="loadingModels"&gt;
-                  &lt;ReloadOutlined /&gt;
-                &lt;/a-button&gt;
-              &lt;/div&gt;
-              &lt;a-divider style="margin: 8px 0; border-color: rgba(255,255,255,0.08);" /&gt;
-              &lt;div v-if="loadingModels" &gt;加载中...&lt;/div&gt;
-              &lt;div v-else-if="providerModelsList.length === 0" &gt;暂无可用模型&lt;/div&gt;
-              &lt;div v-else &gt;
-                &lt;a-dropdown
+        </a-avatar>
+        <span >{{ currentAgentName || '未选择' }}</span>
+        <!-- 模型选择器 -->
+        <a-dropdown :trigger="['click']" placement="bottomLeft" :getPopupContainer="getPopupContainer">
+          <div  :>
+            <div v-if="activeModel"  />
+            <span >{{ activeModel || '选择模型' }}</span>
+            <DownOutlined  />
+          </div>
+          <template #overlay>
+            <div >
+              <div >
+                <span>选择 LLM 模型</span>
+                <a-button type="text" size="small" @click.stop="loadAvailableModels" :loading="loadingModels">
+                  <ReloadOutlined />
+                </a-button>
+              </div>
+              <a-divider style="margin: 8px 0; border-color: rgba(255,255,255,0.08);" />
+              <div v-if="loadingModels" >加载中...</div>
+              <div v-else-if="providerModelsList.length === 0" >暂无可用模型</div>
+              <div v-else >
+                <a-dropdown
                   v-for="group in providerModelsList"
                   :key="group.provider_id"
                   :trigger="['hover']"
                   placement="rightTop"
                   :getPopupContainer="getPopupContainer"
-                &gt;
-                  &lt;div  :&gt;
-                    &lt;span &gt;🏢&lt;/span&gt;
-                    &lt;span &gt;{{ group.provider_name }}&lt;/span&gt;
-                    &lt;span &gt;{{ group.models.length }}&lt;/span&gt;
-                    &lt;RightOutlined  /&gt;
-                  &lt;/div&gt;
-                  &lt;template #overlay&gt;
-                    &lt;div &gt;
-                      &lt;div &gt;{{ group.provider_name }}&lt;/div&gt;
-                      &lt;a-divider style="margin: 6px 0; border-color: rgba(255,255,255,0.08);" /&gt;
-                      &lt;div
+                >
+                  <div  :>
+                    <span >🏢</span>
+                    <span >{{ group.provider_name }}</span>
+                    <span >{{ group.models.length }}</span>
+                    <RightOutlined  />
+                  </div>
+                  <template #overlay>
+                    <div >
+                      <div >{{ group.provider_name }}</div>
+                      <a-divider style="margin: 6px 0; border-color: rgba(255,255,255,0.08);" />
+                      <div
                         v-for="m in group.models"
                         :key="`${group.provider_id}/${m.model}`"
                         :
                         @click="handleModelSwitch(group.provider_id, m.model)"
-                      &gt;
-                        &lt;span &gt;{{ m.display_name || m.model }}&lt;/span&gt;
-                        &lt;div &gt;
-                          &lt;a-tag v-if="m.capabilities?.includes('vision')" color="blue" size="small"&gt;视觉&lt;/a-tag&gt;
-                          &lt;a-tag v-if="m.capabilities?.includes('audio')" color="green" size="small"&gt;音频&lt;/a-tag&gt;
-                          &lt;a-tag v-if="m.capabilities?.includes('video')" color="purple" size="small"&gt;视频&lt;/a-tag&gt;
-                        &lt;/div&gt;
-                        &lt;CheckOutlined v-if="m.model === activeModel &amp;&amp; group.provider_id === activeProvider"  /&gt;
-                      &lt;/div&gt;
-                    &lt;/div&gt;
-                  &lt;/template&gt;
-                &lt;/a-dropdown&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/template&gt;
-        &lt;/a-dropdown&gt;
-      &lt;/div&gt;
-&nbsp;
-      &lt;div v-if="convId" &gt;{{ currentConvTitle }}&lt;/div&gt;
-      &lt;div  /&gt;
-      &lt;a-button  @click="startNew()"&gt;
-        &lt;PlusOutlined  /&gt;
-        &lt;span &gt;新对话&lt;/span&gt;
-      &lt;/a-button&gt;
-    &lt;/div&gt;
-&nbsp;
-    &lt;div &gt;
-      &lt;!-- 左侧历史会话侧栏 --&gt;
-      &lt;Transition name="slide"&gt;
-        &lt;aside v-if="sidebarOpen" &gt;
-          &lt;div &gt;
-            &lt;span &gt;历史对话&lt;/span&gt;
-            &lt;a-button type="text" size="small" @click="sidebarOpen = false"&gt;&lt;CloseOutlined /&gt;&lt;/a-button&gt;
-          &lt;/div&gt;
-          &lt;div &gt;
-            &lt;div v-if="convs.length===0 &amp;&amp; !convLoading" &gt;暂无历史对话&lt;/div&gt;
-            &lt;div v-for="c in convs" :key="c.id"  : @click="selectConv(c)"&gt;
-              &lt;MessageOutlined  /&gt;
-              &lt;template v-if="renamingConvId === c.id"&gt;
-                &lt;a-input v-model:value="renameTitle" size="small"  @pressEnter="confirmRename" @blur="confirmRename" @keydown.escape="cancelRename" @click.stop /&gt;
-              &lt;/template&gt;
-              &lt;span v-else &gt;{{ c.title || '新对话' }}&lt;/span&gt;
-              &lt;div &gt;
-                &lt;a-button type="text" size="small"  @click.stop="startRename(c)"&gt;&lt;EditOutlined /&gt;&lt;/a-button&gt;
-                &lt;a-popconfirm title="确定清空该 Agent 的所有对话历史吗？此操作不可恢复。" @confirm="delConv(c.id)" @click.stop&gt;
-                  &lt;a-button type="text" size="small" danger &gt;&lt;DeleteOutlined /&gt;&lt;/a-button&gt;
-                &lt;/a-popconfirm&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/aside&gt;
-      &lt;/Transition&gt;
-&nbsp;
-      &lt;!-- 聊天主区 --&gt;
-      &lt;div  ref="msgContainer"&gt;
-        &lt;!-- 空状态 --&gt;
-        &lt;div v-if="messages.length === 0 &amp;&amp; !streaming" &gt;
-          &lt;div &gt;
-            &lt;RobotOutlined /&gt;
-          &lt;/div&gt;
-          &lt;h3&gt;开始对话&lt;/h3&gt;
-          &lt;p&gt;输入文字、上传文件或使用语音与 Agent 交流&lt;/p&gt;
-          &lt;div &gt;
-            &lt;div &gt;&lt;PictureOutlined /&gt; 支持图片识别&lt;/div&gt;
-            &lt;div &gt;&lt;AudioOutlined /&gt; 支持语音输入&lt;/div&gt;
-            &lt;div &gt;&lt;FileTextOutlined /&gt; 支持文档分析&lt;/div&gt;
-            &lt;div &gt;&lt;VideoCameraOutlined /&gt; 支持视频理解&lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-&nbsp;
-        &lt;!-- 消息列表 --&gt;
-        &lt;div v-for="(m,i) in messages" :key="i"  :&gt;
-          &lt;div  v-if="m.role==='assistant'"&gt;
-            &lt;a-avatar :size="36" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}"&gt;AI&lt;/a-avatar&gt;
-          &lt;/div&gt;
-          &lt;div &gt;
-            &lt;div  :&gt;
-              &lt;!-- 附件预览 --&gt;
-              &lt;div v-if="m.attachments?.length" &gt;
-                &lt;div v-for="(att, ai) in m.attachments" :key="ai" &gt;
-                  &lt;img v-if="att.type==='image'" :src="att.preview"  /&gt;
-                  &lt;div v-else-if="att.type==='audio'"  @click="toggleAudio(i, att)"&gt;
-                    &lt;div &gt;
-                      &lt;template v-if="playingAudioIndex === i"&gt;
-                        &lt;span &gt;&lt;/span&gt;
-                        &lt;span &gt;&lt;/span&gt;
-                        &lt;span &gt;&lt;/span&gt;
-                      &lt;/template&gt;
-                      &lt;template v-else&gt;
-                        &lt;span &gt;&lt;AudioOutlined /&gt;&lt;/span&gt;
-                      &lt;/template&gt;
-                    &lt;/div&gt;
-                    &lt;div &gt;
-                      &lt;div  :style="{ width: playingAudioIndex === i &amp;&amp; audioDuration &gt; 0 ? (audioProgress / audioDuration * 100 + '%') : '0%' }"&gt;&lt;/div&gt;
-                    &lt;/div&gt;
-                    &lt;span &gt;
+                      >
+                        <span >{{ m.display_name || m.model }}</span>
+                        <div >
+                          <a-tag v-if="m.capabilities?.includes('vision')" color="blue" size="small">视觉</a-tag>
+                          <a-tag v-if="m.capabilities?.includes('audio')" color="green" size="small">音频</a-tag>
+                          <a-tag v-if="m.capabilities?.includes('video')" color="purple" size="small">视频</a-tag>
+                        </div>
+                        <CheckOutlined v-if="m.model === activeModel && group.provider_id === activeProvider"  />
+                      </div>
+                    </div>
+                  </template>
+                </a-dropdown>
+              </div>
+            </div>
+          </template>
+        </a-dropdown>
+      </div>
+ 
+      <div v-if="convId" >{{ currentConvTitle }}</div>
+      <div  />
+      <a-button  @click="startNew()">
+        <PlusOutlined  />
+        <span >新对话</span>
+      </a-button>
+    </div>
+ 
+    <div >
+      <!-- 左侧历史会话侧栏 -->
+      <Transition name="slide">
+        <aside v-if="sidebarOpen" >
+          <div >
+            <span >历史对话</span>
+            <a-button type="text" size="small" @click="sidebarOpen = false"><CloseOutlined /></a-button>
+          </div>
+          <div >
+            <div v-if="convs.length===0 && !convLoading" >暂无历史对话</div>
+            <div v-for="c in convs" :key="c.id"  : @click="selectConv(c)">
+              <MessageOutlined  />
+              <template v-if="renamingConvId === c.id">
+                <a-input v-model:value="renameTitle" size="small"  @pressEnter="confirmRename" @blur="confirmRename" @keydown.escape="cancelRename" @click.stop />
+              </template>
+              <span v-else >{{ c.title || '新对话' }}</span>
+              <div >
+                <a-button type="text" size="small"  @click.stop="startRename(c)"><EditOutlined /></a-button>
+                <a-popconfirm title="确定清空该 Agent 的所有对话历史吗？此操作不可恢复。" @confirm="delConv(c.id)" @click.stop>
+                  <a-button type="text" size="small" danger ><DeleteOutlined /></a-button>
+                </a-popconfirm>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </Transition>
+ 
+      <!-- 聊天主区 -->
+      <div  ref="msgContainer">
+        <!-- 空状态 -->
+        <div v-if="messages.length === 0 && !streaming" >
+          <div >
+            <RobotOutlined />
+          </div>
+          <h3>开始对话</h3>
+          <p>输入文字、上传文件或使用语音与 Agent 交流</p>
+          <div >
+            <div ><PictureOutlined /> 支持图片识别</div>
+            <div ><AudioOutlined /> 支持语音输入</div>
+            <div ><FileTextOutlined /> 支持文档分析</div>
+            <div ><VideoCameraOutlined /> 支持视频理解</div>
+          </div>
+        </div>
+ 
+        <!-- 消息列表 -->
+        <div v-for="(m,i) in messages" :key="i"  :>
+          <div  v-if="m.role==='assistant'">
+            <a-avatar :size="36" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}">AI</a-avatar>
+          </div>
+          <div >
+            <div  :>
+              <!-- 附件预览 -->
+              <div v-if="m.attachments?.length" >
+                <div v-for="(att, ai) in m.attachments" :key="ai" >
+                  <img v-if="att.type==='image'" :src="att.preview"  />
+                  <div v-else-if="att.type==='audio'"  @click="toggleAudio(i, att)">
+                    <div >
+                      <template v-if="playingAudioIndex === i">
+                        <span ></span>
+                        <span ></span>
+                        <span ></span>
+                      </template>
+                      <template v-else>
+                        <span ><AudioOutlined /></span>
+                      </template>
+                    </div>
+                    <div >
+                      <div  :style="{ width: playingAudioIndex === i && audioDuration > 0 ? (audioProgress / audioDuration * 100 + '%') : '0%' }"></div>
+                    </div>
+                    <span >
                       {{ playingAudioIndex === i ? formatDuration(audioProgress) : (att.duration ? formatDuration(att.duration) : '00:00') }}
-                    &lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;div v-else-if="att.type==='video'" &gt;&lt;VideoCameraOutlined /&gt; {{ att.name }}&lt;/div&gt;
-                  &lt;div v-else &gt;&lt;FileOutlined /&gt; {{ att.name }}&lt;/div&gt;
-                  &lt;a-button type="text" size="small"  @click="m.attachments?.splice(ai,1)"&gt;&lt;CloseOutlined /&gt;&lt;/a-button&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-              &lt;!-- 思考过程 --&gt;
-              &lt;div v-if="m.role==='assistant' &amp;&amp; m.reasoning_content &amp;&amp; agentShowThinking" &gt;
-                &lt;div  @click="m._reasoningOpen = !m._reasoningOpen"&gt;
-                  &lt;BulbOutlined  /&gt;
-                  &lt;span&gt;思考过程&lt;/span&gt;
-                  &lt;span &gt;{{ m._reasoningOpen !== false ? '收起' : '展开' }}&lt;/span&gt;
-                &lt;/div&gt;
-                &lt;div v-show="m._reasoningOpen !== false" &gt;{{ m.reasoning_content }}&lt;/div&gt;
-              &lt;/div&gt;
-              &lt;!-- 工具调用 --&gt;
-              &lt;div v-if="m.role==='assistant' &amp;&amp; m.tool_calls?.length &amp;&amp; agentShowToolMessages" &gt;
-                &lt;div v-for="(tc, ti) in m.tool_calls" :key="ti" &gt;
-                  &lt;div &gt;
-                    &lt;ToolOutlined  /&gt;
-                    &lt;span &gt;{{ tc.tool }}&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;div v-if="tc.input" &gt;&lt;span &gt;输入：&lt;/span&gt;{{ JSON.stringify(tc.input, null, 2) }}&lt;/div&gt;
-                  &lt;div v-if="tc.output !== undefined" &gt;&lt;span &gt;输出：&lt;/span&gt;{{ typeof tc.output === 'string' ? tc.output : JSON.stringify(tc.output, null, 2) }}&lt;/div&gt;
-                  &lt;div v-if="tc.error" &gt;&lt;span &gt;错误：&lt;/span&gt;{{ tc.error }}&lt;/div&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-              &lt;div &gt;{{ m.content }}&lt;/div&gt;
-              &lt;div &gt;{{ formatTime(m.timestamp) }}&lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-          &lt;div  v-if="m.role==='user'"&gt;
-            &lt;a-avatar :size="36" style="background:linear-gradient(135deg,#8b5cf6,#ec4899)"&gt;{{ usernameC }}&lt;/a-avatar&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-&nbsp;
-        &lt;!-- 流式回复 --&gt;
-        &lt;div v-if="streaming" &gt;
-          &lt;div &gt;
-            &lt;a-avatar :size="36" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}"&gt;AI&lt;/a-avatar&gt;
-          &lt;/div&gt;
-          &lt;div &gt;
-            &lt;div &gt;{{ currentReply }}&lt;span &gt;|&lt;/span&gt;&lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-&nbsp;
-        &lt;!-- 输入区 --&gt;
-        &lt;div &gt;
-          &lt;div v-if="recording" &gt;
-            &lt;div  /&gt;
-            &lt;span&gt;正在录音... {{ recordingTime }}s&lt;/span&gt;
-            &lt;a-button type="primary" danger size="small" @click="stopRecording"&gt;停止&lt;/a-button&gt;
-          &lt;/div&gt;
-&nbsp;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;a-upload :before-upload="handleFileUpload" :show-upload-list="false" accept="image/*" multiple&gt;
-                &lt;a-tooltip title="上传图片"&gt;&lt;a-button type="text" size="small"&gt;&lt;PictureOutlined /&gt;&lt;/a-button&gt;&lt;/a-tooltip&gt;
-              &lt;/a-upload&gt;
-              &lt;a-upload :before-upload="handleFileUpload" :show-upload-list="false" accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.pptx" multiple&gt;
-                &lt;a-tooltip title="上传文档"&gt;&lt;a-button type="text" size="small"&gt;&lt;FileTextOutlined /&gt;&lt;/a-button&gt;&lt;/a-tooltip&gt;
-              &lt;/a-upload&gt;
-              &lt;a-upload :before-upload="handleFileUpload" :show-upload-list="false" accept="audio/*"&gt;
-                &lt;a-tooltip title="上传音频"&gt;&lt;a-button type="text" size="small"&gt;&lt;AudioOutlined /&gt;&lt;/a-button&gt;&lt;/a-tooltip&gt;
-              &lt;/a-upload&gt;
-              &lt;a-upload :before-upload="handleFileUpload" :show-upload-list="false" accept="video/*"&gt;
-                &lt;a-tooltip title="上传视频"&gt;&lt;a-button type="text" size="small"&gt;&lt;VideoCameraOutlined /&gt;&lt;/a-button&gt;&lt;/a-tooltip&gt;
-              &lt;/a-upload&gt;
-              &lt;a-divider type="vertical" /&gt;
-              &lt;a-tooltip :title="recording ? '停止录音' : '语音输入'"&gt;
-                &lt;a-button type="text" size="small" : @click="toggleRecording"&gt;
-                  &lt;AudioMutedOutlined v-if="!recording" /&gt;&lt;PauseCircleOutlined v-else /&gt;
-                &lt;/a-button&gt;
-              &lt;/a-tooltip&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;a-textarea ref="textareaRef" v-model:value="inputText" placeholder="输入消息... (Enter 发送，Shift+Enter 换行)" :auto-size="{ minRows:1, maxRows:4 }" :disabled="streaming" @pressEnter="onKeyDown" /&gt;
-              &lt;a-button type="primary" size="large" :loading="streaming" @click="handleSend" :disabled="!inputText.trim() &amp;&amp; !pendingAttachments.length" &gt;&lt;SendOutlined /&gt;&lt;/a-button&gt;
-            &lt;/div&gt;
-            &lt;Transition name="fade"&gt;
-              &lt;div v-if="pendingAttachments.length" &gt;
-                &lt;div v-for="(f,i) in pendingAttachments" :key="i" &gt;
-                  &lt;img v-if="f.type==='image'" :src="f.preview"  /&gt;
-                  &lt;FileOutlined v-else  /&gt;
-                  &lt;span &gt;{{ f.name }}&lt;/span&gt;
-                  &lt;a-button type="text" size="small" @click="pendingAttachments.splice(i,1)"&gt;&lt;CloseOutlined /&gt;&lt;/a-button&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-            &lt;/Transition&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&nbsp;
-&lt;script setup lang="ts"&gt;
+                    </span>
+                  </div>
+                  <div v-else-if="att.type==='video'" ><VideoCameraOutlined /> {{ att.name }}</div>
+                  <div v-else ><FileOutlined /> {{ att.name }}</div>
+                  <a-button type="text" size="small"  @click="m.attachments?.splice(ai,1)"><CloseOutlined /></a-button>
+                </div>
+              </div>
+              <!-- 思考过程 -->
+              <div v-if="m.role==='assistant' && m.reasoning_content && agentShowThinking" >
+                <div  @click="m._reasoningOpen = !m._reasoningOpen">
+                  <BulbOutlined  />
+                  <span>思考过程</span>
+                  <span >{{ m._reasoningOpen !== false ? '收起' : '展开' }}</span>
+                </div>
+                <div v-show="m._reasoningOpen !== false" >{{ m.reasoning_content }}</div>
+              </div>
+              <!-- 工具调用 -->
+              <div v-if="m.role==='assistant' && m.tool_calls?.length && agentShowToolMessages" >
+                <div v-for="(tc, ti) in m.tool_calls" :key="ti" >
+                  <div >
+                    <ToolOutlined  />
+                    <span >{{ tc.tool }}</span>
+                  </div>
+                  <div v-if="tc.input" ><span >输入：</span>{{ JSON.stringify(tc.input, null, 2) }}</div>
+                  <div v-if="tc.output !== undefined" ><span >输出：</span>{{ typeof tc.output === 'string' ? tc.output : JSON.stringify(tc.output, null, 2) }}</div>
+                  <div v-if="tc.error" ><span >错误：</span>{{ tc.error }}</div>
+                </div>
+              </div>
+              <div >{{ m.content }}</div>
+              <div >{{ formatTime(m.timestamp) }}</div>
+            </div>
+          </div>
+          <div  v-if="m.role==='user'">
+            <a-avatar :size="36" style="background:linear-gradient(135deg,#8b5cf6,#ec4899)">{{ usernameC }}</a-avatar>
+          </div>
+        </div>
+ 
+        <!-- 流式回复 -->
+        <div v-if="streaming" >
+          <div >
+            <a-avatar :size="36" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}">AI</a-avatar>
+          </div>
+          <div >
+            <div >{{ currentReply }}<span >|</span></div>
+          </div>
+        </div>
+ 
+        <!-- 输入区 -->
+        <div >
+          <div v-if="recording" >
+            <div  />
+            <span>正在录音... {{ recordingTime }}s</span>
+            <a-button type="primary" danger size="small" @click="stopRecording">停止</a-button>
+          </div>
+ 
+          <div >
+            <div >
+              <a-upload :before-upload="handleFileUpload" :show-upload-list="false" accept="image/*" multiple>
+                <a-tooltip title="上传图片"><a-button type="text" size="small"><PictureOutlined /></a-button></a-tooltip>
+              </a-upload>
+              <a-upload :before-upload="handleFileUpload" :show-upload-list="false" accept=".pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.pptx" multiple>
+                <a-tooltip title="上传文档"><a-button type="text" size="small"><FileTextOutlined /></a-button></a-tooltip>
+              </a-upload>
+              <a-upload :before-upload="handleFileUpload" :show-upload-list="false" accept="audio/*">
+                <a-tooltip title="上传音频"><a-button type="text" size="small"><AudioOutlined /></a-button></a-tooltip>
+              </a-upload>
+              <a-upload :before-upload="handleFileUpload" :show-upload-list="false" accept="video/*">
+                <a-tooltip title="上传视频"><a-button type="text" size="small"><VideoCameraOutlined /></a-button></a-tooltip>
+              </a-upload>
+              <a-divider type="vertical" />
+              <a-tooltip :title="recording ? '停止录音' : '语音输入'">
+                <a-button type="text" size="small" : @click="toggleRecording">
+                  <AudioMutedOutlined v-if="!recording" /><PauseCircleOutlined v-else />
+                </a-button>
+              </a-tooltip>
+            </div>
+            <div >
+              <a-textarea ref="textareaRef" v-model:value="inputText" placeholder="输入消息... (Enter 发送，Shift+Enter 换行)" :auto-size="{ minRows:1, maxRows:4 }" :disabled="streaming" @pressEnter="onKeyDown" />
+              <a-button type="primary" size="large" :loading="streaming" @click="handleSend" :disabled="!inputText.trim() && !pendingAttachments.length" ><SendOutlined /></a-button>
+            </div>
+            <Transition name="fade">
+              <div v-if="pendingAttachments.length" >
+                <div v-for="(f,i) in pendingAttachments" :key="i" >
+                  <img v-if="f.type==='image'" :src="f.preview"  />
+                  <FileOutlined v-else  />
+                  <span >{{ f.name }}</span>
+                  <a-button type="text" size="small" @click="pendingAttachments.splice(i,1)"><CloseOutlined /></a-button>
+                </div>
+              </div>
+            </Transition>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+ 
+<script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
@@ -264,84 +264,84 @@ import {
   FileTextOutlined, RobotOutlined, AudioMutedOutlined, PauseCircleOutlined,
   EditOutlined, BulbOutlined, ToolOutlined, DownOutlined, RightOutlined, ReloadOutlined, CheckOutlined,
 } from '@ant-design/icons-vue'
-&nbsp;
+ 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const agentStore = useAgentStore()
-&nbsp;
+ 
 const sidebarOpen = ref(true)
-const selectedAgentId = computed(() =&gt; (route.params.agentId as string) || agentStore.currentAgentId || '')
-const currentAgentName = computed(() =&gt; agentStore.currentAgent?.name || '')
-const usernameC = computed(() =&gt; (authStore.currentUser?.username || 'U')[0].toUpperCase())
-&nbsp;
+const selectedAgentId = computed(() => (route.params.agentId as string) || agentStore.currentAgentId || '')
+const currentAgentName = computed(() => agentStore.currentAgent?.name || '')
+const usernameC = computed(() => (authStore.currentUser?.username || 'U')[0].toUpperCase())
+ 
 // 弹出层挂载到 body，避免被父容器 overflow 裁切
-const getPopupContainer = () =&gt; document.body
-&nbsp;
+const getPopupContainer = () => document.body
+ 
 // 路由参数变化时（Agent 切换器通过 router.push 触发）：加载配置 + 会话 + 重置对话
-watch(() =&gt; route.params.agentId, (newAgentId) =&gt; {
-  if (newAgentId &amp;&amp; typeof newAgentId === 'string') {
+watch(() => route.params.agentId, (newAgentId) => {
+  if (newAgentId && typeof newAgentId === 'string') {
     loadAgentDisplayConfig(newAgentId)
     loadConversations()
     startNew()
   }
 }, { immediate: false })
-&nbsp;
+ 
 // 其他组件直接修改 store 时（无路由跳转场景）：同步路由
-watch(() =&gt; agentStore.currentAgentId, (newId) =&gt; {
+watch(() => agentStore.currentAgentId, (newId) => {
   const routeAgentId = route.params.agentId as string
-  if (newId &amp;&amp; newId !== routeAgentId) { router.push(`/agent/${newId}/chat`) }
+  if (newId && newId !== routeAgentId) { router.push(`/agent/${newId}/chat`) }
 }, { immediate: false })
-&nbsp;
+ 
 interface Cnv { id: string; title?: string }
-const convs = ref&lt;Cnv[]&gt;([])
+const convs = ref<Cnv[]>([])
 const convId = ref('')
 const convLoading = ref(false)
-const currentConvTitle = computed(() =&gt; convs.value.find(c =&gt; c.id === convId.value)?.title || '')
+const currentConvTitle = computed(() => convs.value.find(c => c.id === convId.value)?.title || '')
 const renamingConvId = ref('')
 const renameTitle = ref('')
-&nbsp;
+ 
 function startRename(c: Cnv) { renamingConvId.value = c.id; renameTitle.value = c.title || '' }
 async function confirmRename() {
   if (!renameTitle.value.trim() || !renamingConvId.value) { renamingConvId.value = ''; return }
   try {
     const agentId = selectedAgentId.value || 'default'
     await renameConversation(agentId, renamingConvId.value, renameTitle.value.trim())
-    const item = convs.value.find(c =&gt; c.id === renamingConvId.value)
+    const item = convs.value.find(c => c.id === renamingConvId.value)
     if (item) item.title = renameTitle.value.trim()
   } catch { /* ignore */ }
   renamingConvId.value = ''
 }
 function cancelRename() { renamingConvId.value = '' }
-&nbsp;
+ 
 interface Attachment { type: string; name: string; preview?: string; _file?: File; url?: string }
 interface ToolCallInfo { tool: string; input?: unknown; output?: unknown; error?: string }
 interface Msg { role: 'user'|'assistant'; content: string; timestamp: number; attachments?: Attachment[]; reasoning_content?: string; tool_calls?: ToolCallInfo[] }
 interface RawConversation { id?: string; conversation_id?: string; title?: string }
 interface RawMessage { role?: string; content?: string; timestamp?: number | string; reasoning_content?: string; tool_calls?: RawToolMessage[] }
 interface RawToolMessage { type?: string; tool_name?: string; tool?: string; params?: unknown; input?: unknown; result?: unknown; output?: unknown; success?: boolean; error?: string }
-const messages = ref&lt;Msg[]&gt;([])
-const msgContainer = ref&lt;HTMLElement | null&gt;(null)
+const messages = ref<Msg[]>([])
+const msgContainer = ref<HTMLElement | null>(null)
 const inputText = ref('')
-const textareaRef = ref&lt;HTMLTextAreaElement | null&gt;(null)
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const streaming = ref(false)
 const currentReply = ref('')
-const pendingAttachments = ref&lt;Attachment[]&gt;([])
+const pendingAttachments = ref<Attachment[]>([])
 const recording = ref(false)
 const recordingTime = ref(0)
-let recordingTimer: ReturnType&lt;typeof setInterval&gt; | null = null
-&nbsp;
-const audioRef = ref&lt;HTMLAudioElement | null&gt;(null)
-const playingAudioIndex = ref&lt;number | null&gt;(null)
-const audioProgress = ref&lt;number&gt;(0)
-const audioDuration = ref&lt;number&gt;(0)
-let audioInterval: ReturnType&lt;typeof setInterval&gt; | null = null
-&nbsp;
+let recordingTimer: ReturnType<typeof setInterval> | null = null
+ 
+const audioRef = ref<HTMLAudioElement | null>(null)
+const playingAudioIndex = ref<number | null>(null)
+const audioProgress = ref<number>(0)
+const audioDuration = ref<number>(0)
+let audioInterval: ReturnType<typeof setInterval> | null = null
+ 
 function startNew() { convId.value = ''; messages.value = []; pendingAttachments.value = []; clearInput() }
-&nbsp;
+ 
 const agentShowThinking = ref(true)
 const agentShowToolMessages = ref(true)
-&nbsp;
+ 
 async function loadAgentDisplayConfig(agentId: string) {
   try {
     const cfg = await agentStore.getAgentConfig(agentId)
@@ -351,7 +351,7 @@ async function loadAgentDisplayConfig(agentId: string) {
     }
   } catch { /* default true */ }
 }
-&nbsp;
+ 
 async function loadConversations() {
   convLoading.value = true
   try {
@@ -359,7 +359,7 @@ async function loadConversations() {
     if (!agentId) { convs.value = []; return }
     const data = await getConversations(agentId)
     // 始终更新列表，避免切换到无会话的 Agent 时残留旧数据
-    convs.value = (data || []).map((c: RawConversation | unknown) =&gt; { const r = c as RawConversation; return { id: r.id || r.conversation_id || '0', title: r.title || '新对话' } })
+    convs.value = (data || []).map((c: RawConversation | unknown) => { const r = c as RawConversation; return { id: r.id || r.conversation_id || '0', title: r.title || '新对话' } })
   } catch {
     convs.value = [] // API 失败时清空，避免显示错误 Agent 的会话
   } finally { convLoading.value = false }
@@ -371,7 +371,7 @@ async function selectConv(c: Cnv) {
   try {
     const msgs = await getMessages(agentId, 50, 0, c.id)
     if (msgs?.length) {
-      messages.value = msgs.map((m: RawMessage | unknown) =&gt; {
+      messages.value = msgs.map((m: RawMessage | unknown) => {
         const r = m as RawMessage
         return {
           role: (r.role === 'user' ? 'user' : 'assistant') as 'user'|'assistant',
@@ -390,7 +390,7 @@ async function selectConv(c: Cnv) {
 function mergeToolCalls(toolMsgs: RawToolMessage[]): ToolCallInfo[] {
   if (!toolMsgs?.length) return []
   const merged: ToolCallInfo[] = []
-  const resultMap: Record&lt;string, { output?: unknown; error?: string }&gt; = {}
+  const resultMap: Record<string, { output?: unknown; error?: string }> = {}
   for (const tm of toolMsgs) {
     const name = tm.tool_name || tm.tool || 'unknown'
     if (tm.type === 'tool_result') {
@@ -407,50 +407,50 @@ function mergeToolCalls(toolMsgs: RawToolMessage[]): ToolCallInfo[] {
   // 补充没有配对 call 的独立 result
   for (const tm of toolMsgs) {
     const name = tm.tool_name || tm.tool || 'unknown'
-    if (tm.type === 'tool_result' &amp;&amp; !toolMsgs.some(t =&gt; (t.tool_name || t.tool) === name &amp;&amp; t.type === 'tool_call')) {
+    if (tm.type === 'tool_result' && !toolMsgs.some(t => (t.tool_name || t.tool) === name && t.type === 'tool_call')) {
       merged.push({ tool: name, output: tm.result || tm.output, error: tm.success === false ? '执行失败' : undefined })
     }
   }
   return merged
 }
-&nbsp;
+ 
 async function delConv(id: string) {
   const agentId = selectedAgentId.value || ''
   try { await deleteConversation(agentId, id) } catch { /* ignore */ }
-  convs.value = convs.value.filter(c=&gt;c.id!==id)
+  convs.value = convs.value.filter(c=>c.id!==id)
   if (convId.value === id) startNew()
 }
-&nbsp;
+ 
 function handleFileUpload(file: File): boolean {
   const isImage = file.type.startsWith('image/')
   const type = isImage ? 'image' : file.type.startsWith('audio/') ? 'audio' : file.type.startsWith('video/') ? 'video' : 'document'
   const att: Attachment = { type, name: file.name, _file: file }
-  if (isImage) { const reader = new FileReader(); reader.onload = (e) =&gt; { att.preview = e.target?.result as string }; reader.readAsDataURL(file) }
+  if (isImage) { const reader = new FileReader(); reader.onload = (e) => { att.preview = e.target?.result as string }; reader.readAsDataURL(file) }
   pendingAttachments.value.push(att)
   message.success(`已添加: ${file.name}`)
   return false
 }
-&nbsp;
+ 
 async function toggleRecording() {
   if (recording.value) { stopRecording(); return }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     recording.value = true; recordingTime.value = 0
-    recordingTimer = setInterval(() =&gt; recordingTime.value++, 1000)
-    const w = window as unknown as Record&lt;string, unknown&gt;
-    const SpeechRecognition = (w.SpeechRecognition || w.webkitSpeechRecognition) as (new () =&gt; { lang: string; interimResults: boolean; onresult: ((e: { results: ArrayLike&lt;ArrayLike&lt;{ transcript: string }&gt;&gt; }) =&gt; void) | null; onend: (() =&gt; void) | null; start: () =&gt; void }) | undefined
+    recordingTimer = setInterval(() => recordingTime.value++, 1000)
+    const w = window as unknown as Record<string, unknown>
+    const SpeechRecognition = (w.SpeechRecognition || w.webkitSpeechRecognition) as (new () => { lang: string; interimResults: boolean; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; start: () => void }) | undefined
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition(); recognition.lang = 'zh-CN'; recognition.interimResults = true
-      recognition.onresult = (e) =&gt; { inputText.value = Array.from(e.results).map((r) =&gt; r[0].transcript).join('') }
-      recognition.onend = () =&gt; { recording.value = false; clearInterval(recordingTimer); stream.getTracks().forEach(t =&gt; t.stop()) }
+      recognition.onresult = (e) => { inputText.value = Array.from(e.results).map((r) => r[0].transcript).join('') }
+      recognition.onend = () => { recording.value = false; clearInterval(recordingTimer); stream.getTracks().forEach(t => t.stop()) }
       recognition.start()
     } else {
-      setTimeout(() =&gt; { inputText.value = '这是模拟语音输入的结果。'; stopRecording() }, 3000)
+      setTimeout(() => { inputText.value = '这是模拟语音输入的结果。'; stopRecording() }, 3000)
     }
   } catch (e: unknown) { const err = e as Error; message.error('无法访问麦克风: ' + (err.message || '权限被拒绝')) }
 }
 function stopRecording() { recording.value = false; clearInterval(recordingTimer); recordingTime.value = 0 }
-&nbsp;
+ 
 function toggleAudio(index: number, attachment: Attachment) {
   if (playingAudioIndex.value === index) { pauseAudio(); return }
   playAudio(index, attachment)
@@ -464,11 +464,11 @@ function playAudio(index: number, attachment: Attachment) {
   if (!audioUrl) { message.error('无法播放此音频'); return }
   if (!audioRef.value) audioRef.value = new Audio(audioUrl)
   else audioRef.value.src = audioUrl
-  audioRef.value.onloadedmetadata = () =&gt; { audioDuration.value = audioRef.value?.duration || 0 }
-  audioRef.value.onended = () =&gt; { pauseAudio() }
-  audioRef.value.onerror = () =&gt; { message.error('音频播放失败'); pauseAudio() }
+  audioRef.value.onloadedmetadata = () => { audioDuration.value = audioRef.value?.duration || 0 }
+  audioRef.value.onended = () => { pauseAudio() }
+  audioRef.value.onerror = () => { message.error('音频播放失败'); pauseAudio() }
   audioRef.value.play(); playingAudioIndex.value = index; audioProgress.value = 0
-  audioInterval = setInterval(() =&gt; { if (audioRef.value) audioProgress.value = audioRef.value.currentTime }, 100)
+  audioInterval = setInterval(() => { if (audioRef.value) audioProgress.value = audioRef.value.currentTime }, 100)
 }
 function pauseAudio() {
   if (audioRef.value) audioRef.value.pause()
@@ -479,26 +479,26 @@ function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60); const secs = Math.floor(seconds % 60)
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
 }
-&nbsp;
-function onKeyDown(e: KeyboardEvent) { if (e.key === 'Enter' &amp;&amp; !e.shiftKey) { e.preventDefault(); handleSend() } }
-function clearInput() { inputText.value = ''; if (textareaRef.value) textareaRef.value.value = ''; nextTick(() =&gt; { inputText.value = '' }) }
-&nbsp;
+ 
+function onKeyDown(e: KeyboardEvent) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }
+function clearInput() { inputText.value = ''; if (textareaRef.value) textareaRef.value.value = ''; nextTick(() => { inputText.value = '' }) }
+ 
 const activeModel = ref('')
 const activeProvider = ref('')
-&nbsp;
+ 
 // 按服务商分组的模型列表
 interface ProviderModels {
   provider_id: string
   provider_name: string
-  models: Array&lt;{
+  models: Array<{
     model: string
     display_name: string
     capabilities?: string[]
-  }&gt;
+  }>
 }
-const providerModelsList = ref&lt;ProviderModels[]&gt;([])
+const providerModelsList = ref<ProviderModels[]>([])
 const loadingModels = ref(false)
-&nbsp;
+ 
 async function loadAvailableModels() {
   loadingModels.value = true
   try {
@@ -509,20 +509,20 @@ async function loadAvailableModels() {
     const result: ProviderModels[] = []
     for (const p of providers) {
       if (!p.enabled || !p.has_api_key) continue
-      const models = (p.models || []).map((m: string) =&gt; ({
+      const models = (p.models || []).map((m: string) => ({
         model: m,
         display_name: m,
         capabilities: [] as string[],
       }))
       // 如果有 default_model 且不在 models 列表中，添加它
-      if (p.default_model &amp;&amp; !models.some((m: { model: string }) =&gt; m.model === p.default_model)) {
+      if (p.default_model && !models.some((m: { model: string }) => m.model === p.default_model)) {
         models.unshift({
           model: p.default_model,
           display_name: p.default_model + ' (默认)',
           capabilities: [] as string[],
         })
       }
-      if (models.length &gt; 0) {
+      if (models.length > 0) {
         result.push({
           provider_id: p.id,
           provider_name: p.name,
@@ -538,7 +538,7 @@ async function loadAvailableModels() {
     loadingModels.value = false
   }
 }
-&nbsp;
+ 
 async function handleModelSwitch(providerId: string, model: string) {
   try {
     const agentId = selectedAgentId.value || undefined
@@ -555,24 +555,24 @@ async function handleModelSwitch(providerId: string, model: string) {
     message.error('切换模型失败')
   }
 }
-&nbsp;
+ 
 async function handleSend() {
   const txt = inputText.value.trim()
-  if ((!txt &amp;&amp; !pendingAttachments.value.length) || streaming.value) return
+  if ((!txt && !pendingAttachments.value.length) || streaming.value) return
   const content = txt || (pendingAttachments.value.length ? '请分析以下文件' : '')
   clearInput()
   const atts = [...pendingAttachments.value]; pendingAttachments.value = []
   const agentId = selectedAgentId.value || 'default'
   let uploadedMediaIds: string[] = []
   if (atts.length) {
-    const contentTypes = atts.map(a =&gt; a.type)
+    const contentTypes = atts.map(a => a.type)
     try {
       const res = await modelAPI.autoDetect({ content_types: contentTypes, message_text: txt || undefined, auto_switch: true })
       if (res?.success || res?.code === 0) {
         const d = res.data
         activeModel.value = d.model
         activeProvider.value = d.provider_id || d.provider_name || ''
-        message.info(`${atts.map(a =&gt; ({image:'📷',audio:'🎵',video:'🎬',document:'📄'}[a.type]||a.type)).join('+')} 内容 → 自动切换至 ${d.model}` + (d.warning ? `（${d.warning}）` : ''))
+        message.info(`${atts.map(a => ({image:'📷',audio:'🎵',video:'🎬',document:'📄'}[a.type]||a.type)).join('+')} 内容 → 自动切换至 ${d.model}` + (d.warning ? `（${d.warning}）` : ''))
       }
     } catch { /* continue */ }
     for (const att of atts) {
@@ -580,7 +580,7 @@ async function handleSend() {
     }
   }
   messages.value.push({ role: 'user', content, timestamp: Date.now(), attachments: atts.length ? atts : undefined })
-  const agentConfig = await agentStore.getAgentConfig(agentId).catch(() =&gt; null)
+  const agentConfig = await agentStore.getAgentConfig(agentId).catch(() => null)
   const enableStreaming = agentConfig?.enableStreaming ?? false
   const showThinking = agentConfig?.showThinking ?? true
   const showToolMessages = agentConfig?.showToolMessages ?? true
@@ -589,22 +589,22 @@ async function handleSend() {
     if (enableStreaming) {
       let assistantMsg: Msg | null = null; let reasoningContent = ''; let toolCalls: ToolCallInfo[] = []
       const callbacks = {
-        onReasoning: (content: string) =&gt; { if (!showThinking) return; reasoningContent += content; if (assistantMsg) assistantMsg.reasoning_content = reasoningContent },
-        onToolCall: (toolName: string, params: unknown) =&gt; { if (!showToolMessages) return; toolCalls.push({ tool: toolName, input: params, output: undefined, error: undefined }); if (assistantMsg) assistantMsg.tool_calls = [...toolCalls] },
-        onToolResult: (toolName: string, result: string, success: boolean) =&gt; { if (!showToolMessages) return; const tc = toolCalls.find(t =&gt; t.tool === toolName &amp;&amp; t.output === undefined); if (tc) { tc.output = result; tc.error = !success ? '执行失败' : undefined }; if (assistantMsg) assistantMsg.tool_calls = [...toolCalls] },
-        onMessage: (content: string) =&gt; { currentReply.value += content; if (!assistantMsg) { assistantMsg = { role: 'assistant', content: '', timestamp: Date.now(), reasoning_content: showThinking ? reasoningContent : undefined, tool_calls: showToolMessages ? toolCalls : [] }; messages.value.push(assistantMsg) }; assistantMsg.content += content; nextTick().then(() =&gt; scrollBottom()) },
-        onDone: (reply: string) =&gt; {
+        onReasoning: (content: string) => { if (!showThinking) return; reasoningContent += content; if (assistantMsg) assistantMsg.reasoning_content = reasoningContent },
+        onToolCall: (toolName: string, params: unknown) => { if (!showToolMessages) return; toolCalls.push({ tool: toolName, input: params, output: undefined, error: undefined }); if (assistantMsg) assistantMsg.tool_calls = [...toolCalls] },
+        onToolResult: (toolName: string, result: string, success: boolean) => { if (!showToolMessages) return; const tc = toolCalls.find(t => t.tool === toolName && t.output === undefined); if (tc) { tc.output = result; tc.error = !success ? '执行失败' : undefined }; if (assistantMsg) assistantMsg.tool_calls = [...toolCalls] },
+        onMessage: (content: string) => { currentReply.value += content; if (!assistantMsg) { assistantMsg = { role: 'assistant', content: '', timestamp: Date.now(), reasoning_content: showThinking ? reasoningContent : undefined, tool_calls: showToolMessages ? toolCalls : [] }; messages.value.push(assistantMsg) }; assistantMsg.content += content; nextTick().then(() => scrollBottom()) },
+        onDone: (reply: string) => {
           if (!assistantMsg) { assistantMsg = { role: 'assistant', content: reply, timestamp: Date.now(), reasoning_content: showThinking ? reasoningContent : undefined, tool_calls: showToolMessages ? toolCalls : [] }; messages.value.push(assistantMsg) }
           else { assistantMsg.reasoning_content = showThinking ? reasoningContent : undefined; assistantMsg.tool_calls = showToolMessages ? toolCalls : [] }
-          if (!convId.value) { const newSessionId = `session_${Date.now()}`; convId.value = newSessionId; convs.value = [{ id: newSessionId, title: content.substring(0, 50) + (content.length &gt; 50 ? "..." : "") }, ...convs.value] }
-          else { const idx = convs.value.findIndex(c =&gt; c.id === convId.value); if (idx &gt;= 0) { const [item] = convs.value.splice(idx, 1); convs.value.unshift(item) } }
-          streaming.value = false; currentReply.value = ''; nextTick().then(() =&gt; scrollBottom())
+          if (!convId.value) { const newSessionId = `session_${Date.now()}`; convId.value = newSessionId; convs.value = [{ id: newSessionId, title: content.substring(0, 50) + (content.length > 50 ? "..." : "") }, ...convs.value] }
+          else { const idx = convs.value.findIndex(c => c.id === convId.value); if (idx >= 0) { const [item] = convs.value.splice(idx, 1); convs.value.unshift(item) } }
+          streaming.value = false; currentReply.value = ''; nextTick().then(() => scrollBottom())
         },
-        onError: (error: string) =&gt; { console.error('[ChatPage] 流式对话错误:', error); message.error('流式对话失败: ' + error); messages.value.push({ role: 'assistant', content: '抱歉，对话服务暂时不可用，请稍后重试。\n错误详情: ' + error, timestamp: Date.now() }); streaming.value = false; currentReply.value = '' },
+        onError: (error: string) => { console.error('[ChatPage] 流式对话错误:', error); message.error('流式对话失败: ' + error); messages.value.push({ role: 'assistant', content: '抱歉，对话服务暂时不可用，请稍后重试。\n错误详情: ' + error, timestamp: Date.now() }); streaming.value = false; currentReply.value = '' },
       }
       await sendMessageStream(agentId, content, convId.value || undefined, callbacks)
     } else {
-      const requestParams: SendMessageRequest = { message: content, agent_id: agentId, session_id: convId.value || undefined, stream: false, save_memory: true, ...(uploadedMediaIds.length ? { attachments: uploadedMediaIds.map(id =&gt; ({ filename: id, content_type: undefined, size: undefined })) } : {}) }
+      const requestParams: SendMessageRequest = { message: content, agent_id: agentId, session_id: convId.value || undefined, stream: false, save_memory: true, ...(uploadedMediaIds.length ? { attachments: uploadedMediaIds.map(id => ({ filename: id, content_type: undefined, size: undefined })) } : {}) }
       const res = await sendMessage(requestParams)
       const reply = res?.reply || res?.data?.reply || ''
       const audioInfo = res?.audio || res?.data?.audio
@@ -613,11 +613,11 @@ async function handleSend() {
       if (sid) {
         if (!convId.value) {
           convId.value = sid
-          convs.value = [{ id: sid, title: content.substring(0, 50) + (content.length &gt; 50 ? "..." : "") }, ...convs.value]
+          convs.value = [{ id: sid, title: content.substring(0, 50) + (content.length > 50 ? "..." : "") }, ...convs.value]
         } else {
           // 已有会话：移到顶部，更新标题（仅首次用户消息）
-          const idx = convs.value.findIndex(c =&gt; c.id === sid)
-          if (idx &gt;= 0) {
+          const idx = convs.value.findIndex(c => c.id === sid)
+          if (idx >= 0) {
             const [item] = convs.value.splice(idx, 1)
             convs.value.unshift(item)
           }
@@ -625,7 +625,7 @@ async function handleSend() {
       }
       const toolMsgs = res?.tool_messages || res?.data?.tool_messages || []
       const mergedToolCalls = mergeToolCalls(toolMsgs)
-      if (toolMsgs.length &gt; 0) {
+      if (toolMsgs.length > 0) {
         console.log('[ChatPage] 后端返回 tool_messages:', toolMsgs.length, '条 → 合并后 tool_calls:', mergedToolCalls.length)
       }
       const newMessage: Msg = { role: 'assistant', content: reply, timestamp: Date.now(), reasoning_content: showThinking ? (res?.reasoning || res?.data?.reasoning || undefined) : undefined, tool_calls: showToolMessages ? mergedToolCalls : [] }
@@ -643,29 +643,29 @@ async function handleSend() {
     scrollBottom()
   }
 }
-&nbsp;
+ 
 function scrollBottom() {
-  nextTick(() =&gt; {
+  nextTick(() => {
     const el = msgContainer.value
     if (el) el.scrollTop = el.scrollHeight
   })
 }
 function formatTime(ts: number) { return new Date(ts).toLocaleTimeString('zh-CN') }
-&nbsp;
+ 
 // 自动滚动：监听消息数量变化和流式内容变化
 watch(
-  () =&gt; messages.value.length,
-  () =&gt; scrollBottom()
+  () => messages.value.length,
+  () => scrollBottom()
 )
 watch(
-  () =&gt; currentReply.value,
-  () =&gt; { if (streaming.value) scrollBottom() }
+  () => currentReply.value,
+  () => { if (streaming.value) scrollBottom() }
 )
-&nbsp;
-onMounted(async () =&gt; {
+ 
+onMounted(async () => {
   streaming.value = false; currentReply.value = ''
   if (!agentStore.agents.length) await agentStore.loadAgents()
-  if (agentStore.agents.length &amp;&amp; !selectedAgentId.value) { agentStore.setCurrentAgent(agentStore.agents[0].id) }
+  if (agentStore.agents.length && !selectedAgentId.value) { agentStore.setCurrentAgent(agentStore.agents[0].id) }
   if (selectedAgentId.value) { loadAgentDisplayConfig(selectedAgentId.value) }
   loadConversations()
   // 并行获取当前模型和可用模型列表
@@ -680,18 +680,18 @@ onMounted(async () =&gt; {
     }
   } catch { /* ignore */ }
 })
-&nbsp;
-onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAudio(); if (audioRef.value) { audioRef.value.pause(); audioRef.value = null } })
-&lt;/script&gt;
-&nbsp;
-&lt;style scoped&gt;
+ 
+onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio(); if (audioRef.value) { audioRef.value.pause(); audioRef.value = null } })
+</script>
+ 
+<style scoped>
 .chat-page { display: flex; flex-direction: column; height: calc(100vh - 130px); min-height: 500px; max-height: 100vh; }
-&nbsp;
+ 
 /* ===== 顶部栏 ===== */
 .chat-topbar { display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-radius: 14px; margin-bottom: 10px; flex-shrink: 0; min-height: 52px; border: 1px solid rgba(255,255,255,0.06); }
 .sidebar-toggle { color: rgba(255,255,255,0.45) !important; font-size: 1rem; transition: color 0.2s; }
 .sidebar-toggle:hover { color: rgba(255,255,255,0.8) !important; }
-&nbsp;
+ 
 /* Agent 名称徽章 */
 .agent-name-badge {
   display: flex; align-items: center; gap: 10px; padding: 6px 14px;
@@ -709,7 +709,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
   box-shadow: 0 2px 12px rgba(96,165,250,0.1);
 }
 .agent-name-label { font-size: 0.88rem; font-weight: 600; color: #e2e8f0; letter-spacing: 0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.2); }
-&nbsp;
+ 
 /* 模型选择器 */
 .model-selector {
   display: flex;
@@ -759,7 +759,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
   color: rgba(255,255,255,0.3);
   transition: transform 0.2s;
 }
-&nbsp;
+ 
 /* 模型下拉菜单 */
 .model-dropdown {
   min-width: 280px;
@@ -798,7 +798,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
   color: rgba(255,255,255,0.3);
   font-size: 0.82rem;
 }
-&nbsp;
+ 
 /* 服务商列表 */
 .provider-list {
   display: flex;
@@ -844,7 +844,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
 .provider-item:hover .provider-arrow {
   color: rgba(255,255,255,0.4);
 }
-&nbsp;
+ 
 /* 二级模型菜单 */
 .models-submenu {
   min-width: 200px;
@@ -907,15 +907,15 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
   font-size: 0.8rem;
   flex-shrink: 0;
 }
-&nbsp;
+ 
 /* 覆盖 ant-design Dropdown 的 z-index */
 :global(.ant-dropdown) {
   z-index: 1050 !important;
 }
-&nbsp;
+ 
 .conv-title-badge { color: rgba(255,255,255,0.35); font-size: 0.78rem; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topbar-spacer { flex: 1; }
-&nbsp;
+ 
 /* 新对话按钮 — 液态玻璃效果 */
 ::deep(.new-chat-btn) {
   border-radius: 12px !important; font-size: 0.82rem;
@@ -938,9 +938,9 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
 ::deep(.new-chat-btn .anticon) { font-size: 0.88rem; transition: transform 0.3s ease; }
 ::deep(.new-chat-btn:hover .anticon) { transform: rotate(90deg); }
 .new-chat-text { letter-spacing: 0.02em; }
-&nbsp;
+ 
 .chat-body { display: flex; flex: 1; gap: 12px; overflow: hidden; min-height: 0; }
-&nbsp;
+ 
 /* ===== 侧栏 ===== */
 .chat-sidebar {
   width: 260px; flex-shrink: 0; padding: 16px 12px;
@@ -1048,14 +1048,14 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
   box-shadow: 0 0 0 2px rgba(96,165,250,0.15);
   background: rgba(255,255,255,0.1) !important;
 }
-&nbsp;
+ 
 /* ===== 聊天主区 ===== */
 .chat-main-area { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 6px 12px; min-height: 0; scroll-behavior: smooth; }
 .chat-main-area::-webkit-scrollbar { width: 5px; }
 .chat-main-area::-webkit-scrollbar-track { background: transparent; }
 .chat-main-area::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
 .chat-main-area::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
-&nbsp;
+ 
 /* ===== 空状态 ===== */
 .chat-empty { text-align: center; padding: 80px 0 40px; color: rgba(255,255,255,0.3); flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .empty-avatar { width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(139,92,246,0.15)); display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 2.2rem; color: #60a5fa; border: 1px solid rgba(96,165,250,0.15); }
@@ -1064,7 +1064,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
 .empty-tips { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .tip { padding: 8px 16px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; font-size: 0.8rem; display: flex; align-items: center; gap: 7px; color: rgba(255,255,255,0.4); cursor: pointer; transition: all 0.2s; }
 .tip:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
-&nbsp;
+ 
 /* ===== 消息行 ===== */
 .msg-row { display: flex; align-items: flex-start; gap: 10px; padding: 0 4px; animation: msgIn 0.25s ease-out; }
 .msg-row.user { justify-content: flex-end; }
@@ -1075,11 +1075,11 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
 .msg-row.assistant .msg-bubble { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.07); border-bottom-left-radius: 6px; }
 .msg-content { color: #e2e8f0; line-height: 1.6; white-space: pre-wrap; font-size: 0.93rem; }
 .msg-time { font-size: 0.68rem; color: rgba(255,255,255,0.18); margin-top: 8px; }
-&nbsp;
+ 
 @keyframes msgIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .cursor { animation: blink 0.8s infinite; color: #60a5fa; }
 @keyframes blink { 50% { opacity: 0; } }
-&nbsp;
+ 
 /* ===== 思考过程 ===== */
 .msg-reasoning { margin-bottom: 10px; border: 1px solid rgba(168,85,247,0.25); border-radius: 10px; overflow: hidden; background: rgba(168,85,247,0.05); }
 .reasoning-header { display: flex; align-items: center; gap: 6px; padding: 7px 12px; cursor: pointer; font-size: 0.78rem; color: rgba(192,132,252,0.8); background: rgba(168,85,247,0.08); user-select: none; }
@@ -1092,7 +1092,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
 .reasoning-body::-webkit-scrollbar-track { background: transparent; }
 .reasoning-body::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.2); border-radius: 2px; }
 .reasoning-body::-webkit-scrollbar-thumb:hover { background: rgba(168,85,247,0.35); }
-&nbsp;
+ 
 /* ===== 工具调用 ===== */
 .msg-tool-calls { margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
 .tool-call-item { border: 1px solid rgba(59,130,246,0.2); border-radius: 10px; overflow: hidden; background: rgba(59,130,246,0.04); }
@@ -1107,7 +1107,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
 .tool-label { color: rgba(255,255,255,0.25); margin-right: 4px; }
 .tool-output { color: rgba(74,222,128,0.65); }
 .tool-error { color: rgba(248,113,113,0.75); }
-&nbsp;
+ 
 /* ===== 附件 ===== */
 .msg-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .att-item { position: relative; }
@@ -1116,7 +1116,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
 .att-file { padding: 8px 12px; background: rgba(255,255,255,0.05); border-radius: 8px; font-size: 0.78rem; display: flex; align-items: center; gap: 6px; color: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.06); }
 .att-remove { position: absolute; top: -6px; right: -6px; background: rgba(0,0,0,0.7) !important; border-radius: 50% !important; padding: 0 !important; width: 20px !important; height: 20px !important; line-height: 20px !important; font-size: 10px !important; color: #fff !important; opacity: 0; transition: opacity 0.2s; }
 .att-item:hover .att-remove { opacity: 1; }
-&nbsp;
+ 
 /* ===== 语音消息 ===== */
 .voice-message { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 20px; background: rgba(255,255,255,0.08); min-width: 120px; max-width: 240px; cursor: pointer; transition: all 0.2s ease; position: relative; }
 .voice-message:hover { background: rgba(255,255,255,0.14); }
@@ -1134,7 +1134,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
 .msg-row.user .voice-progress { background: linear-gradient(90deg, #fff, #e2e8f0); }
 .voice-duration { font-size: 0.78rem; color: rgba(255,255,255,0.55); min-width: 42px; text-align: right; flex-shrink: 0; }
 .msg-row.user .voice-duration { color: rgba(255,255,255,0.85); }
-&nbsp;
+ 
 /* ===== 输入区 ===== */
 .chat-input-wrapper {
   position: sticky; bottom: 0; margin-top: 8px; z-index: 10;
@@ -1144,7 +1144,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
   border-radius: 20px;
   transform: translateZ(0);
 }
-&nbsp;
+ 
 /* 液态玻璃输入框 */
 .chat-input-bar {
   padding: 12px 16px; border-radius: 18px; position: relative;
@@ -1158,7 +1158,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
     0 1px 0 rgba(255,255,255,0.15) inset;
   transition: box-shadow 0.35s ease;
 }
-&nbsp;
+ 
 .chat-input-bar::before {
   content: '';
   position: absolute; inset: 0; border-radius: 18px; pointer-events: none; z-index: 0;
@@ -1170,7 +1170,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
   mask-composite: exclude;
   transition: background 0.35s ease;
 }
-&nbsp;
+ 
 .chat-input-bar::after {
   content: '';
   position: absolute; inset: 0; border-radius: 18px; pointer-events: none; z-index: 1;
@@ -1184,7 +1184,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
   opacity: 0.6;
   transition: opacity 0.35s ease, background 0.35s ease;
 }
-&nbsp;
+ 
 .chat-input-bar:focus-within {
   box-shadow: 0 4px 28px rgba(59,130,246,0.2), 0 0 0 0.5px rgba(96,165,250,0.2) inset, 0 1px 0 rgba(168,220,255,0.2) inset;
 }
@@ -1192,7 +1192,7 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
   background: linear-gradient(140deg, rgba(96,165,250,0) 10%, rgba(96,165,250,0.35) 30%, rgba(168,220,255,0.7) 50%, rgba(139,92,246,0.25) 70%, rgba(255,255,255,0) 90%);
 }
 .chat-input-bar:focus-within::after { opacity: 1; }
-&nbsp;
+ 
 .upload-preview-bar { display: flex; gap: 8px; padding: 8px 0; flex-wrap: wrap; }
 .up-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: rgba(255,255,255,0.06); border-radius: 8px; font-size: 0.8rem; color: rgba(255,255,255,0.5); }
 .up-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 6px; }
@@ -1232,11 +1232,11 @@ onUnmounted(() =&gt; { streaming.value = false; currentReply.value = ''; pauseAu
   box-shadow: none;
   color: rgba(255,255,255,0.2) !important;
 }
-&nbsp;
+ 
 /* 过渡动画 */
 .slide-enter-active,.slide-leave-active { transition: all 0.25s ease; }
 .slide-enter-from,.slide-leave-to { transform: translateX(-100%); opacity: 0; }
 .fade-enter-active,.fade-leave-active { transition: all 0.2s ease; }
 .fade-enter-from,.fade-leave-to { opacity: 0; transform: translateY(-4px); }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

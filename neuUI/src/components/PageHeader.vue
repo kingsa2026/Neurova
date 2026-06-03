@@ -1,21 +1,21 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h1 &gt;{{ title }}&lt;/h1&gt;
-      &lt;p v-if="subtitle" &gt;{{ subtitle }}&lt;/p&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;slot name="actions" /&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
-defineProps&lt;{
+<template>
+  <div >
+    <div >
+      <h1 >{{ title }}</h1>
+      <p v-if="subtitle" >{{ subtitle }}</p>
+    </div>
+    <div >
+      <slot name="actions" />
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
+defineProps<{
   title: string
   subtitle?: string
-}&gt;()
-&lt;/script&gt;
-&lt;style scoped&gt;
+}>()
+</script>
+<style scoped>
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -39,5 +39,5 @@ defineProps&lt;{
     gap: 16px;
   }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

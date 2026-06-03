@@ -33,29 +33,29 @@ function secureRemoveItem(key: string): void {
 }
 // 请求拦截器
 request.interceptors.request.use(
-  (config) =&gt; {
+  (config) => {
     // 从 localStorage 获取 token
     const token = secureGetToken()
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
     // 安全检查：防止过大的请求数据
-    if (config.data &amp;&amp; typeof config.data === 'string') {
+    if (config.data && typeof config.data === 'string') {
       config.data = limitInputLength(config.data, 1000000) // 1MB 限制
     }
     return config
   },
-  (error) =&gt; {
+  (error) => {
     return Promise.reject(error)
   }
 )
 // 响应拦截器
 request.interceptors.response.use(
-  (response: AxiosResponse&lt;ApiResponse&lt;unknown&gt;&gt;) =&gt; {
+  (response: AxiosResponse<ApiResponse<unknown>>) => {
     // 直接返回 data
-    return response.data as ApiResponse&lt;unknown&gt;
+    return response.data as ApiResponse<unknown>
   },
-  (error) =&gt; {
+  (error) => {
     // 统一错误处理 - 安全模式，不暴露敏感信息
     if (error.response) {
       const { status, data } = error.response
@@ -77,25 +77,25 @@ request.interceptors.response.use(
 )
 // 封装常用请求方法
 export const http = {
-  get: &lt;T = unknown&gt;(url: string, config?: AxiosRequestConfig): Promise&lt;ApiResponse&lt;T&gt;&gt; =&gt; {
+  get: <T = unknown>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return request.get(url, config)
   },
-  post: &lt;T = unknown&gt;(url: string, data?: unknown, config?: AxiosRequestConfig): Promise&lt;ApiResponse&lt;T&gt;&gt; =&gt; {
+  post: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return request.post(url, data, config)
   },
-  put: &lt;T = unknown&gt;(url: string, data?: unknown, config?: AxiosRequestConfig): Promise&lt;ApiResponse&lt;T&gt;&gt; =&gt; {
+  put: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return request.put(url, data, config)
   },
-  delete: &lt;T = unknown&gt;(url: string, config?: AxiosRequestConfig): Promise&lt;ApiResponse&lt;T&gt;&gt; =&gt; {
+  delete: <T = unknown>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return request.delete(url, config)
   },
-  upload: &lt;T = unknown&gt;(url: string, formData: FormData, onProgress?: (percent: number) =&gt; void): Promise&lt;ApiResponse&lt;T&gt;&gt; =&gt; {
+  upload: <T = unknown>(url: string, formData: FormData, onProgress?: (percent: number) => void): Promise<ApiResponse<T>> => {
     return request.post(url, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
-      onUploadProgress: (progressEvent) =&gt; {
-        if (onProgress &amp;&amp; progressEvent.total) {
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
           const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
           onProgress(percent)
         }
@@ -104,4 +104,4 @@ export const http = {
   }
 }
 export default request
-&nbsp;
+ 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 渠道适配器基类
 
@@ -10,8 +12,6 @@
 - ChannelManager 负责生命周期和路由
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from abc import ABC, abstractmethod
@@ -22,11 +22,9 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================
 # 数据模型
 # ============================================================
-
 
 class ChannelEventType(str, Enum):
     """渠道事件类型"""
@@ -38,6 +36,24 @@ class ChannelEventType(str, Enum):
     USER_SUBSCRIBED = "user_subscribed"
     USER_UNSUBSCRIBED = "user_unsubscribed"
 
+class MessageChannel(str, Enum):
+    """消息渠道枚举"""
+    WECHAT = "wechat"
+    FEISHU = "feishu"
+    DINGTALK = "dingtalk"
+    WECOM = "wecom"
+    WEBHOOK = "webhook"
+    API = "api"
+    TELEGRAM = "telegram"
+    WEBSOCKET = "websocket"
+    SIP = "sip"
+    QQBOT = "qqbot"
+    QQ = "qq"
+    QCLAW = "qclaw"
+    MQTT = "mqtt"
+    DISCORD = "discord"
+    MOBILE = "mobile"
+    XIAOYI = "xiaoyi"
 
 @dataclass
 class ChannelConfig:
@@ -68,7 +84,6 @@ class ChannelConfig:
             "extra": self.extra,
         }
 
-
 @dataclass
 class ChannelMessage:
     """渠道消息 - 跨平台统一消息格式"""
@@ -84,15 +99,12 @@ class ChannelMessage:
     raw_event: Dict[str, Any] = field(default_factory=dict)  # 原始事件
     metadata: Dict[str, Any] = field(default_factory=dict)   # 附加元数据
 
-
 # 事件回调类型
 ChannelEventCallback = Callable[[ChannelEventType, ChannelMessage], Coroutine[Any, Any, None]]
-
 
 # ============================================================
 # 适配器基类
 # ============================================================
-
 
 class ChannelAdapter(ABC):
     """

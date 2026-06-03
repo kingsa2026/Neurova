@@ -1,100 +1,100 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;h2 &gt;
-          &lt;ShopOutlined style="color: #f59e0b" /&gt;
+<template>
+  <div >
+    <div >
+      <div >
+        <h2 >
+          <ShopOutlined style="color: #f59e0b" />
           市场
-        &lt;/h2&gt;
-        &lt;div &gt;
-          &lt;a-tag&gt;组件 &lt;strong&gt;{{ totalCount }}&lt;/strong&gt;&lt;/a-tag&gt;
-          &lt;a-tag color="orange"&gt;精选 &lt;strong&gt;{{ featuredCount }}&lt;/strong&gt;&lt;/a-tag&gt;
-          &lt;a-tag color="green"&gt;已安装 &lt;strong&gt;{{ installedCount }}&lt;/strong&gt;&lt;/a-tag&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;a-input-search
+        </h2>
+        <div >
+          <a-tag>组件 <strong>{{ totalCount }}</strong></a-tag>
+          <a-tag color="orange">精选 <strong>{{ featuredCount }}</strong></a-tag>
+          <a-tag color="green">已安装 <strong>{{ installedCount }}</strong></a-tag>
+        </div>
+      </div>
+      <div >
+        <a-input-search
           v-model:value="searchKeyword"
           placeholder="搜索..."
           style="width: 300px"
           @search="loadMarketItems"
-        /&gt;
-        &lt;a-button type="primary" @click="refresh"&gt;
-          &lt;ReloadOutlined /&gt;
+        />
+        <a-button type="primary" @click="refresh">
+          <ReloadOutlined />
           刷新
-        &lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;span &gt;分类:&lt;/span&gt;
-        &lt;a-radio-group v-model:value="selectedType" button-style="solid" size="small" @change="loadMarketItems"&gt;
-          &lt;a-radio-button value=""&gt;全部&lt;/a-radio-button&gt;
-          &lt;a-radio-button value="agent"&gt;Agent&lt;/a-radio-button&gt;
-          &lt;a-radio-button value="skill"&gt;技能&lt;/a-radio-button&gt;
-          &lt;a-radio-button value="workflow"&gt;工作流&lt;/a-radio-button&gt;
-          &lt;a-radio-button value="model"&gt;模型&lt;/a-radio-button&gt;
-          &lt;a-radio-button value="template"&gt;模板&lt;/a-radio-button&gt;
-          &lt;a-radio-button value="theme"&gt;主题&lt;/a-radio-button&gt;
-        &lt;/a-radio-group&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;span &gt;筛选:&lt;/span&gt;
-        &lt;a-checkbox v-model:checked="showFeatured" @change="loadMarketItems"&gt;仅精选&lt;/a-checkbox&gt;
-        &lt;a-checkbox v-model:checked="showVerified" @change="loadMarketItems"&gt;仅认证&lt;/a-checkbox&gt;
-        &lt;a-checkbox v-model:checked="showFree" @change="loadMarketItems"&gt;仅免费&lt;/a-checkbox&gt;
-        &lt;a-select v-model:value="sortBy" style="width: 150px" placeholder="排序" size="small" @change="loadMarketItems"&gt;
-          &lt;a-select-option value="newest"&gt;最新&lt;/a-select-option&gt;
-          &lt;a-select-option value="popular"&gt;热门&lt;/a-select-option&gt;
-          &lt;a-select-option value="rating"&gt;评分&lt;/a-select-option&gt;
-          &lt;a-select-option value="downloads"&gt;下载量&lt;/a-select-option&gt;
-          &lt;a-select-option value="price_low"&gt;价格低到高&lt;/a-select-option&gt;
-          &lt;a-select-option value="price_high"&gt;价格高到低&lt;/a-select-option&gt;
-        &lt;/a-select&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;a-spin :spinning="loading"&gt;
-      &lt;div  v-if="!loading"&gt;
-        &lt;a-empty v-if="marketItems.length === 0" description="暂无商品" /&gt;
-        &lt;div
+        </a-button>
+      </div>
+    </div>
+    <div >
+      <div >
+        <span >分类:</span>
+        <a-radio-group v-model:value="selectedType" button-style="solid" size="small" @change="loadMarketItems">
+          <a-radio-button value="">全部</a-radio-button>
+          <a-radio-button value="agent">Agent</a-radio-button>
+          <a-radio-button value="skill">技能</a-radio-button>
+          <a-radio-button value="workflow">工作流</a-radio-button>
+          <a-radio-button value="model">模型</a-radio-button>
+          <a-radio-button value="template">模板</a-radio-button>
+          <a-radio-button value="theme">主题</a-radio-button>
+        </a-radio-group>
+      </div>
+      <div >
+        <span >筛选:</span>
+        <a-checkbox v-model:checked="showFeatured" @change="loadMarketItems">仅精选</a-checkbox>
+        <a-checkbox v-model:checked="showVerified" @change="loadMarketItems">仅认证</a-checkbox>
+        <a-checkbox v-model:checked="showFree" @change="loadMarketItems">仅免费</a-checkbox>
+        <a-select v-model:value="sortBy" style="width: 150px" placeholder="排序" size="small" @change="loadMarketItems">
+          <a-select-option value="newest">最新</a-select-option>
+          <a-select-option value="popular">热门</a-select-option>
+          <a-select-option value="rating">评分</a-select-option>
+          <a-select-option value="downloads">下载量</a-select-option>
+          <a-select-option value="price_low">价格低到高</a-select-option>
+          <a-select-option value="price_high">价格高到低</a-select-option>
+        </a-select>
+      </div>
+    </div>
+    <a-spin :spinning="loading">
+      <div  v-if="!loading">
+        <a-empty v-if="marketItems.length === 0" description="暂无商品" />
+        <div
           v-for="item in marketItems"
           :key="item.id"
           @click="showItemDetail(item.id)"
-        &gt;
-          &lt;div  :style="{ background: getTypeBg(item.type) }"&gt;
-            &lt;component :is="getTypeIcon(item.type)"  /&gt;
-            &lt;div &gt;
-              &lt;a-tag v-if="item.featured" color="orange" size="small"&gt;精选&lt;/a-tag&gt;
-              &lt;a-tag v-if="item.verified" color="green" size="small"&gt;认证&lt;/a-tag&gt;
-              &lt;a-tag v-if="item.is_free" color="blue" size="small"&gt;免费&lt;/a-tag&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;h3 &gt;{{ item.name }}&lt;/h3&gt;
-              &lt;a-rate v-model:value="item.rating" disabled :allow-half="true" /&gt;
-            &lt;/div&gt;
-            &lt;p &gt;{{ item.description }}&lt;/p&gt;
-            &lt;div &gt;
-              &lt;div &gt;
-                &lt;a-tag :color="getTypeColor(item.type)" size="small"&gt;{{ getTypeText(item.type) }}&lt;/a-tag&gt;
-                &lt;span &gt;&lt;UserOutlined /&gt; {{ item.author_name }}&lt;/span&gt;
-                &lt;span &gt;&lt;DownloadOutlined /&gt; {{ item.download_count }}&lt;/span&gt;
-              &lt;/div&gt;
-              &lt;div &gt;
-                &lt;span  v-if="!item.is_free"&gt;¥{{ item.price }}&lt;/span&gt;
-                &lt;span  v-else&gt;免费&lt;/span&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;a-tag size="small" v-for="tag in item.tags.slice(0, 3)" :key="tag"&gt;{{ tag }}&lt;/a-tag&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/a-spin&gt;
-    &lt;a-pagination
-      v-if="totalCount &gt; pageSize"
+        >
+          <div  :style="{ background: getTypeBg(item.type) }">
+            <component :is="getTypeIcon(item.type)"  />
+            <div >
+              <a-tag v-if="item.featured" color="orange" size="small">精选</a-tag>
+              <a-tag v-if="item.verified" color="green" size="small">认证</a-tag>
+              <a-tag v-if="item.is_free" color="blue" size="small">免费</a-tag>
+            </div>
+          </div>
+          <div >
+            <div >
+              <h3 >{{ item.name }}</h3>
+              <a-rate v-model:value="item.rating" disabled :allow-half="true" />
+            </div>
+            <p >{{ item.description }}</p>
+            <div >
+              <div >
+                <a-tag :color="getTypeColor(item.type)" size="small">{{ getTypeText(item.type) }}</a-tag>
+                <span ><UserOutlined /> {{ item.author_name }}</span>
+                <span ><DownloadOutlined /> {{ item.download_count }}</span>
+              </div>
+              <div >
+                <span  v-if="!item.is_free">¥{{ item.price }}</span>
+                <span  v-else>免费</span>
+              </div>
+            </div>
+            <div >
+              <a-tag size="small" v-for="tag in item.tags.slice(0, 3)" :key="tag">{{ tag }}</a-tag>
+            </div>
+          </div>
+        </div>
+      </div>
+    </a-spin>
+    <a-pagination
+      v-if="totalCount > pageSize"
       v-model:current="currentPage"
       v-model:page-size="pageSize"
       :total="totalCount"
@@ -104,92 +104,92 @@
       show-total="共 {{ total }} 个"
       @change="loadMarketItems"
       style="margin-top: 24px; text-align: center"
-    /&gt;
-    &lt;a-modal
+    />
+    <a-modal
       v-model:open="detailModalVisible"
       :title="selectedItem?.name"
       width="800px"
       :footer="null"
-    &gt;
-      &lt;div v-if="selectedItem" &gt;
-        &lt;div &gt;
-          &lt;div  :style="{ background: getTypeBg(selectedItem.type) }"&gt;
-            &lt;component :is="getTypeIcon(selectedItem.type)"  /&gt;
-          &lt;/div&gt;
-          &lt;div &gt;
-            &lt;h2&gt;{{ selectedItem.name }}&lt;/h2&gt;
-            &lt;a-rate v-model:value="selectedItem.rating" disabled :allow-half="true" /&gt;
-            &lt;span &gt;({{ selectedItem.rating_count }} 评价)&lt;/span&gt;
-            &lt;div &gt;
-              &lt;span&gt;&lt;DownloadOutlined /&gt; {{ selectedItem.download_count }} 下载&lt;/span&gt;
-              &lt;span&gt;&lt;EyeOutlined /&gt; {{ selectedItem.view_count }} 浏览&lt;/span&gt;
-              &lt;span&gt;&lt;HeartOutlined /&gt; {{ selectedItem.like_count }} 喜欢&lt;/span&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;span  v-if="!selectedItem.is_free"&gt;¥{{ selectedItem.price }}&lt;/span&gt;
-              &lt;span  v-else&gt;免费&lt;/span&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;a-button type="primary" size="large" @click="installItem" :loading="installing"&gt;
-                &lt;DownloadOutlined /&gt; 安装
-              &lt;/a-button&gt;
-              &lt;a-button size="large" @click="purchaseItem" v-if="!selectedItem.is_free"&gt;
+    >
+      <div v-if="selectedItem" >
+        <div >
+          <div  :style="{ background: getTypeBg(selectedItem.type) }">
+            <component :is="getTypeIcon(selectedItem.type)"  />
+          </div>
+          <div >
+            <h2>{{ selectedItem.name }}</h2>
+            <a-rate v-model:value="selectedItem.rating" disabled :allow-half="true" />
+            <span >({{ selectedItem.rating_count }} 评价)</span>
+            <div >
+              <span><DownloadOutlined /> {{ selectedItem.download_count }} 下载</span>
+              <span><EyeOutlined /> {{ selectedItem.view_count }} 浏览</span>
+              <span><HeartOutlined /> {{ selectedItem.like_count }} 喜欢</span>
+            </div>
+            <div >
+              <span  v-if="!selectedItem.is_free">¥{{ selectedItem.price }}</span>
+              <span  v-else>免费</span>
+            </div>
+            <div >
+              <a-button type="primary" size="large" @click="installItem" :loading="installing">
+                <DownloadOutlined /> 安装
+              </a-button>
+              <a-button size="large" @click="purchaseItem" v-if="!selectedItem.is_free">
                 购买
-              &lt;/a-button&gt;
-              &lt;a-button size="large" @click="likeItem"&gt;
-                &lt;HeartOutlined /&gt;
-              &lt;/a-button&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;a-tabs&gt;
-            &lt;a-tab-pane key="description" tab="详情"&gt;
-              &lt;div &gt;
-                &lt;p&gt;{{ selectedItem.long_description || selectedItem.description }}&lt;/p&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;版本&lt;/span&gt;
-                    &lt;span &gt;{{ selectedItem.version }}&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;div &gt;
-                    &lt;span &gt;作者&lt;/span&gt;
-                    &lt;span &gt;{{ selectedItem.author_name }}&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;div &gt;
-                    &lt;span &gt;更新时间&lt;/span&gt;
-                    &lt;span &gt;{{ formatTime(selectedItem.updated_at) }}&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;div &gt;
-                    &lt;span &gt;发布时间&lt;/span&gt;
-                    &lt;span &gt;{{ formatTime(selectedItem.created_at) }}&lt;/span&gt;
-                  &lt;/div&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-            &lt;/a-tab-pane&gt;
-            &lt;a-tab-pane key="reviews" tab="评价"&gt;
-              &lt;div &gt;
-                &lt;a-empty description="暂无评价" v-if="reviews.length === 0" /&gt;
-                &lt;div v-else&gt;
-                  &lt;div v-for="review in reviews" :key="review.id" &gt;
-                    &lt;div &gt;
-                      &lt;span &gt;{{ review.user_name }}&lt;/span&gt;
-                      &lt;a-rate v-model:value="review.rating" disabled :allow-half="true" /&gt;
-                      &lt;span &gt;{{ formatTime(review.created_at) }}&lt;/span&gt;
-                    &lt;/div&gt;
-                    &lt;p v-if="review.title" &gt;{{ review.title }}&lt;/p&gt;
-                    &lt;p v-if="review.content" &gt;{{ review.content }}&lt;/p&gt;
-                  &lt;/div&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-            &lt;/a-tab-pane&gt;
-          &lt;/a-tabs&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/a-modal&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+              </a-button>
+              <a-button size="large" @click="likeItem">
+                <HeartOutlined />
+              </a-button>
+            </div>
+          </div>
+        </div>
+        <div >
+          <a-tabs>
+            <a-tab-pane key="description" tab="详情">
+              <div >
+                <p>{{ selectedItem.long_description || selectedItem.description }}</p>
+                <div >
+                  <div >
+                    <span >版本</span>
+                    <span >{{ selectedItem.version }}</span>
+                  </div>
+                  <div >
+                    <span >作者</span>
+                    <span >{{ selectedItem.author_name }}</span>
+                  </div>
+                  <div >
+                    <span >更新时间</span>
+                    <span >{{ formatTime(selectedItem.updated_at) }}</span>
+                  </div>
+                  <div >
+                    <span >发布时间</span>
+                    <span >{{ formatTime(selectedItem.created_at) }}</span>
+                  </div>
+                </div>
+              </div>
+            </a-tab-pane>
+            <a-tab-pane key="reviews" tab="评价">
+              <div >
+                <a-empty description="暂无评价" v-if="reviews.length === 0" />
+                <div v-else>
+                  <div v-for="review in reviews" :key="review.id" >
+                    <div >
+                      <span >{{ review.user_name }}</span>
+                      <a-rate v-model:value="review.rating" disabled :allow-half="true" />
+                      <span >{{ formatTime(review.created_at) }}</span>
+                    </div>
+                    <p v-if="review.title" >{{ review.title }}</p>
+                    <p v-if="review.content" >{{ review.content }}</p>
+                  </div>
+                </div>
+              </div>
+            </a-tab-pane>
+          </a-tabs>
+        </div>
+      </div>
+    </a-modal>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
@@ -208,9 +208,9 @@ import {
 } from '@ant-design/icons-vue'
 import { marketplaceAPI, type MarketItem, type MarketItemReview } from '@/api/modules/marketplace'
 import type { Component } from 'vue'
-const marketItems = ref&lt;MarketItem[]&gt;([])
-const reviews = ref&lt;MarketItemReview[]&gt;([])
-const selectedItem = ref&lt;MarketItem | null&gt;(null)
+const marketItems = ref<MarketItem[]>([])
+const reviews = ref<MarketItemReview[]>([])
+const selectedItem = ref<MarketItem | null>(null)
 const loading = ref(false)
 const installing = ref(false)
 const detailModalVisible = ref(false)
@@ -225,7 +225,7 @@ const showFeatured = ref(false)
 const showVerified = ref(false)
 const showFree = ref(false)
 const sortBy = ref('popular')
-const typeIcons: Record&lt;string, Component&gt; = {
+const typeIcons: Record<string, Component> = {
   agent: UserOutlined,
   skill: ThunderboltOutlined,
   workflow: ApiOutlined,
@@ -233,7 +233,7 @@ const typeIcons: Record&lt;string, Component&gt; = {
   template: FileTextOutlined,
   theme: LayoutOutlined,
 }
-const typeColors: Record&lt;string, string&gt; = {
+const typeColors: Record<string, string> = {
   agent: 'blue',
   skill: 'orange',
   workflow: 'cyan',
@@ -241,7 +241,7 @@ const typeColors: Record&lt;string, string&gt; = {
   template: 'green',
   theme: 'magenta',
 }
-const typeBgs: Record&lt;string, string&gt; = {
+const typeBgs: Record<string, string> = {
   agent: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
   skill: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
   workflow: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
@@ -249,7 +249,7 @@ const typeBgs: Record&lt;string, string&gt; = {
   template: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
   theme: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)',
 }
-const typeTexts: Record&lt;string, string&gt; = {
+const typeTexts: Record<string, string> = {
   agent: 'Agent',
   skill: '技能',
   workflow: '工作流',
@@ -366,11 +366,11 @@ async function likeItem() {
 async function refresh() {
   await Promise.all([loadMarketItems(), loadFeaturedItems(), loadInstalledItems()])
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await refresh()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .marketplace-page {
   display: flex;
   flex-direction: column;
@@ -617,5 +617,5 @@ onMounted(async () =&gt; {
   color: rgba(255, 255, 255, 0.6);
   margin: 0;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

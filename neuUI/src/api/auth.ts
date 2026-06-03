@@ -1,8 +1,8 @@
 import axios from 'axios'
 import type { LoginRequest, RegisterRequest, AuthResponse, ApiResponse } from '@/types/auth'
-&nbsp;
+ 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-&nbsp;
+ 
 const apiClient = axios.create({
   baseURL: API_BASE,
   timeout: 30000,
@@ -10,8 +10,8 @@ const apiClient = axios.create({
     'Content-Type': 'application/json'
   }
 })
-&nbsp;
-apiClient.interceptors.request.use((config) =&gt; {
+ 
+apiClient.interceptors.request.use((config) => {
   // 登录和注册请求不添加 token
   const url = config.url || ''
   if (url.includes('/auth/login') || url.includes('/auth/register')) {
@@ -27,40 +27,40 @@ apiClient.interceptors.request.use((config) =&gt; {
   }
   return config
 })
-&nbsp;
+ 
 apiClient.interceptors.response.use(
-  (response) =&gt; response.data,
-  (error) =&gt; Promise.reject(error)
+  (response) => response.data,
+  (error) => Promise.reject(error)
 )
-&nbsp;
+ 
 export interface SendCodeRequest {
   email: string
   purpose: 'register' | 'forgot_password' | 'change_email'
   invite_code?: string
 }
-&nbsp;
+ 
 export interface VerifyCodeRequest {
   email: string
   code: string
   purpose: 'register' | 'forgot_password'
 }
-&nbsp;
+ 
 export interface ChangePasswordRequest {
   old_password: string
   new_password: string
 }
-&nbsp;
+ 
 export interface ResetPasswordRequest {
   email: string
   code: string
   new_password: string
 }
-&nbsp;
+ 
 export interface DeactivateAccountRequest {
   password: string
   reason?: string
 }
-&nbsp;
+ 
 export interface AccountStatus {
   username: string
   email?: string
@@ -69,55 +69,55 @@ export interface AccountStatus {
   created_at: string
   activated_at?: string
 }
-&nbsp;
+ 
 export interface RefreshResponse {
   access_token: string
   refresh_token?: string
   expires_in: number
   token_type: string
 }
-&nbsp;
+ 
 export interface TokenRefreshRequest {
   refresh_token: string
 }
-&nbsp;
+ 
 export const authAPI = {
-  login: (data: LoginRequest): Promise&lt;ApiResponse&lt;AuthResponse&gt;&gt; =&gt; 
+  login: (data: LoginRequest): Promise<ApiResponse<AuthResponse>> => 
     apiClient.post('/auth/login', data),
-&nbsp;
-  register: (data: RegisterRequest): Promise&lt;ApiResponse&lt;AuthResponse&gt;&gt; =&gt; 
+ 
+  register: (data: RegisterRequest): Promise<ApiResponse<AuthResponse>> => 
     apiClient.post('/auth/register', data),
-&nbsp;
-  logout: (): Promise&lt;ApiResponse&lt;null&gt;&gt; =&gt; 
+ 
+  logout: (): Promise<ApiResponse<null>> => 
     apiClient.post('/auth/logout'),
-&nbsp;
-  getCurrentUser: (): Promise&lt;ApiResponse&lt;AuthResponse['user']&gt;&gt; =&gt; 
+ 
+  getCurrentUser: (): Promise<ApiResponse<AuthResponse['user']>> => 
     apiClient.get('/auth/me'),
-&nbsp;
-  refresh: (data: TokenRefreshRequest): Promise&lt;ApiResponse&lt;RefreshResponse&gt;&gt; =&gt; 
+ 
+  refresh: (data: TokenRefreshRequest): Promise<ApiResponse<RefreshResponse>> => 
     apiClient.post('/auth/refresh', data),
-&nbsp;
-  sendRegisterCode: (data: SendCodeRequest): Promise&lt;ApiResponse&lt;{email: string, expires_in: number}&gt;&gt; =&gt; 
+ 
+  sendRegisterCode: (data: SendCodeRequest): Promise<ApiResponse<{email: string, expires_in: number}>> => 
     apiClient.post('/auth/register/send-code', data),
-&nbsp;
-  verifyRegisterCode: (data: VerifyCodeRequest): Promise&lt;ApiResponse&lt;{verified: boolean}&gt;&gt; =&gt; 
+ 
+  verifyRegisterCode: (data: VerifyCodeRequest): Promise<ApiResponse<{verified: boolean}>> => 
     apiClient.post('/auth/register/verify-code', data),
-&nbsp;
-  forgotPassword: (email: string): Promise&lt;ApiResponse&lt;{email: string}&gt;&gt; =&gt; 
+ 
+  forgotPassword: (email: string): Promise<ApiResponse<{email: string}>> => 
     apiClient.post('/auth/forgot-password', { email }),
-&nbsp;
-  resetPassword: (data: ResetPasswordRequest): Promise&lt;ApiResponse&lt;{email: string}&gt;&gt; =&gt; 
+ 
+  resetPassword: (data: ResetPasswordRequest): Promise<ApiResponse<{email: string}>> => 
     apiClient.post('/auth/reset-password', data),
-&nbsp;
-  changePassword: (data: ChangePasswordRequest): Promise&lt;ApiResponse&lt;{username: string}&gt;&gt; =&gt; 
+ 
+  changePassword: (data: ChangePasswordRequest): Promise<ApiResponse<{username: string}>> => 
     apiClient.post('/auth/change-password', data),
-&nbsp;
-  getAccountStatus: (): Promise&lt;ApiResponse&lt;AccountStatus&gt;&gt; =&gt; 
+ 
+  getAccountStatus: (): Promise<ApiResponse<AccountStatus>> => 
     apiClient.get('/auth/account/status'),
-&nbsp;
-  deactivateAccount: (data: DeactivateAccountRequest): Promise&lt;ApiResponse&lt;{username: string, deactivated: boolean}&gt;&gt; =&gt; 
+ 
+  deactivateAccount: (data: DeactivateAccountRequest): Promise<ApiResponse<{username: string, deactivated: boolean}>> => 
     apiClient.post('/auth/account/deactivate', data),
 }
-&nbsp;
+ 
 export default authAPI
-&nbsp;
+ 

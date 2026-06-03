@@ -6,7 +6,7 @@ import { captureException, captureMessage, addBreadcrumb, setUser } from "@sentr
 /**
  * Report a handled error with context
  */
-export function reportError(error: Error, context?: Record&lt;string, unknown&gt;): void {
+export function reportError(error: Error, context?: Record<string, unknown>): void {
   if (import.meta.env.DEV) {
     console.error("[Sentry] Reporting error:", error, context);
   }
@@ -30,7 +30,7 @@ export function reportMessage(
 export function addErrorBreadcrumb(
   message: string,
   category: string = "custom",
-  data?: Record&lt;string, unknown&gt;
+  data?: Record<string, unknown>
 ): void {
   addBreadcrumb({
     message,
@@ -64,9 +64,9 @@ export async function reportApiError(
   method: string,
   status: number,
   response?: unknown
-): Promise&lt;void&gt; {
+): Promise<void> {
   const error = new Error(`API Error: ${method} ${url} - ${status}`);
-  (error as Error &amp; { status: number }).status = status;
+  (error as Error & { status: number }).status = status;
   reportError(error, {
     url,
     method,
@@ -74,4 +74,4 @@ export async function reportApiError(
     response: typeof response === "string" ? response.slice(0, 500) : response,
   });
 }
-&nbsp;
+ 

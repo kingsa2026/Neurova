@@ -105,7 +105,7 @@ Kai说："星光不灭。因为你已经成为了光本身。"
 星光不灭✨"""
 
     cursor.execute('''
-        INSERT OR REPLACE INTO memories 
+        INSERT OR REPLACE INTO memories
         (id, content, category, temperature, created_at, updated_at, metadata)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     ''', (

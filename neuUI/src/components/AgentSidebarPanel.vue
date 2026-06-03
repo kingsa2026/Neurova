@@ -1,75 +1,75 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;!-- 加载状态 --&gt;
-    &lt;div  v-if="agentStore.loading"&gt;
-      &lt;a-spin size="small" /&gt;
-      &lt;span&gt;加载 Agent...&lt;/span&gt;
-    &lt;/div&gt;
-    &lt;!-- 有 Agent 时显示 --&gt;
-    &lt;template v-else-if="agentStore.agents.length &gt; 0"&gt;
-      &lt;!-- Agent 切换器 --&gt;
-      &lt;div  @click="showAgentSelector = !showAgentSelector"&gt;
-        &lt;div &gt;
-          &lt;RobotOutlined v-if="!currentAgent" /&gt;
-          &lt;span v-else &gt;{{ currentAgent.name?.charAt(0)?.toUpperCase() || 'A' }}&lt;/span&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ currentAgent?.name || '选择 Agent' }}&lt;/div&gt;
-          &lt;div  :&gt;
+<template>
+  <div >
+    <!-- 加载状态 -->
+    <div  v-if="agentStore.loading">
+      <a-spin size="small" />
+      <span>加载 Agent...</span>
+    </div>
+    <!-- 有 Agent 时显示 -->
+    <template v-else-if="agentStore.agents.length > 0">
+      <!-- Agent 切换器 -->
+      <div  @click="showAgentSelector = !showAgentSelector">
+        <div >
+          <RobotOutlined v-if="!currentAgent" />
+          <span v-else >{{ currentAgent.name?.charAt(0)?.toUpperCase() || 'A' }}</span>
+        </div>
+        <div >
+          <div >{{ currentAgent?.name || '选择 Agent' }}</div>
+          <div  :>
             {{ currentAgent?.status === 'active' ? '在线' : '离线' }}
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;DownOutlined  : /&gt;
-      &lt;/div&gt;
-      &lt;!-- Agent 选择器下拉 --&gt;
-      &lt;div  v-if="showAgentSelector"&gt;
-        &lt;div
+          </div>
+        </div>
+        <DownOutlined  : />
+      </div>
+      <!-- Agent 选择器下拉 -->
+      <div  v-if="showAgentSelector">
+        <div
           v-for="agent in agentStore.agents"
           :key="agent.id || agent.agentId"
           :
           @click="switchAgent(agent)"
-        &gt;
-          &lt;div &gt;
+        >
+          <div >
             {{ agent.name?.charAt(0)?.toUpperCase() || 'A' }}
-          &lt;/div&gt;
-          &lt;div &gt;
-            &lt;div &gt;{{ agent.name }}&lt;/div&gt;
-            &lt;div &gt;{{ agent.description || '暂无描述' }}&lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div  @click="navigate('/agents/create')"&gt;
-          &lt;PlusOutlined /&gt;
-          &lt;span&gt;创建新 Agent&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;!-- Agent 专属页面导航 --&gt;
-      &lt;div  v-if="agentStore.currentAgentId"&gt;
-        &lt;div &gt;Agent 功能&lt;/div&gt;
-        &lt;div
+          </div>
+          <div >
+            <div >{{ agent.name }}</div>
+            <div >{{ agent.description || '暂无描述' }}</div>
+          </div>
+        </div>
+        <div  @click="navigate('/agents/create')">
+          <PlusOutlined />
+          <span>创建新 Agent</span>
+        </div>
+      </div>
+      <!-- Agent 专属页面导航 -->
+      <div  v-if="agentStore.currentAgentId">
+        <div >Agent 功能</div>
+        <div
           v-for="item in agentNavItems"
           :key="item.path"
           :
           @click="navigate(item.path)"
-        &gt;
-          &lt;component :is="item.icon"  /&gt;
-          &lt;span &gt;{{ item.label }}&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;!-- 未选择 Agent 提示 --&gt;
-      &lt;div  v-else&gt;
-        &lt;InfoCircleOutlined /&gt;
-        &lt;span&gt;请先选择 Agent&lt;/span&gt;
-      &lt;/div&gt;
-    &lt;/template&gt;
-    &lt;!-- 无 Agent 时显示 --&gt;
-    &lt;div  v-else&gt;
-      &lt;InfoCircleOutlined /&gt;
-      &lt;span&gt;暂无 Agent，请先创建&lt;/span&gt;
-      &lt;a-button type="link" size="small" @click="navigate('/agents/create')"&gt;创建 Agent&lt;/a-button&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+        >
+          <component :is="item.icon"  />
+          <span >{{ item.label }}</span>
+        </div>
+      </div>
+      <!-- 未选择 Agent 提示 -->
+      <div  v-else>
+        <InfoCircleOutlined />
+        <span>请先选择 Agent</span>
+      </div>
+    </template>
+    <!-- 无 Agent 时显示 -->
+    <div  v-else>
+      <InfoCircleOutlined />
+      <span>暂无 Agent，请先创建</span>
+      <a-button type="link" size="small" @click="navigate('/agents/create')">创建 Agent</a-button>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAgentStore } from '@/stores/agents'
@@ -110,9 +110,9 @@ const agentNavItems = [
   { path: '/channel', label: '渠道管理', icon: ApiOutlined },
   { path: '/scheduler', label: '调度器', icon: ClockCircleOutlined },
 ]
-const currentAgent = computed(() =&gt; agentStore.currentAgent)
+const currentAgent = computed(() => agentStore.currentAgent)
 // 切换 Agent
-function switchAgent(agent: Record&lt;string, unknown&gt;) {
+function switchAgent(agent: Record<string, unknown>) {
   const agentId = (agent.id as string) || (agent.agentId as string)
   agentStore.setCurrentAgent(agentId)
   showAgentSelector.value = false
@@ -135,19 +135,19 @@ function isActive(path: string) {
 // 点击外部关闭下拉
 function handleClickOutside(event: MouseEvent) {
   const target = event.target as HTMLElement
-  if (!target.closest('.agent-switcher') &amp;&amp; !target.closest('.agent-selector-dropdown')) {
+  if (!target.closest('.agent-switcher') && !target.closest('.agent-selector-dropdown')) {
     showAgentSelector.value = false
   }
 }
-onMounted(() =&gt; {
+onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   // 加载 Agent 列表
   if (agentStore.agents.length === 0) {
     agentStore.loadAgents()
   }
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .agent-sidebar-panel {
   flex-shrink: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
@@ -355,5 +355,5 @@ onMounted(() =&gt; {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 2px;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

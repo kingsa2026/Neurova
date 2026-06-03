@@ -1,43 +1,43 @@
-&lt;template&gt;
-  &lt;div ref="glassRef"  : :style="wrapperStyle"&gt;
-    &lt;svg :style="{ position: 'absolute', width: glassSize.width, height: glassSize.height }" aria-hidden="true"&gt;
-      &lt;defs&gt;
-        &lt;filter id="glass-standard" x="-35%" y="-35%" width="170%" height="170%" color-interpolation-filters="sRGB"&gt;
-          &lt;feImage x="0" y="0" width="100%" height="100%" result="DISPLACEMENT_MAP" href="data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAZABkAAD/2wCEAAQDAwMDAwQDAwQGBAMEBgcFBAQFBwgHBwcHBwgLCAkJCQkICwsMDAwMDAsNDQ4ODQ0SEhISEhQUFBQUFBQUFBQBBQUFCAgIEAsLEBQODg4UFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFP/CABEIAQABAAMBEQACEQEDEQH/8QAFgABAQEAAAAAAAAAAAAAAAAABgUEB//EAB8QAAIBBAMBAAAAAAAAAAAAAAECAxEEBSESMUH/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8A" preserveAspectRatio="xMidYMid slice" /&gt;
-          &lt;feColorMatrix in="DISPLACEMENT_MAP" type="matrix" values="0.3 0.3 0.3 0 0 0.3 0.3 0.3 0 0 0.3 0.3 0.3 0 0 0 0 0 1 0" result="EDGE_INTENSITY" /&gt;
-          &lt;feComponentTransfer in="EDGE_INTENSITY" result="EDGE_MASK"&gt;
-            &lt;feFuncA type="discrete" :tableValues="`0 ${aberrationIntensity * 0.05} 1`" /&gt;
-          &lt;/feComponentTransfer&gt;
-          &lt;feOffset in="SourceGraphic" dx="0" dy="0" result="CENTER_ORIGINAL" /&gt;
-          &lt;feDisplacementMap in="SourceGraphic" in2="DISPLACEMENT_MAP" :scale="displacementScale" xChannelSelector="R" yChannelSelector="B" result="RED_DISPLACED" /&gt;
-          &lt;feColorMatrix in="RED_DISPLACED" type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" result="RED_CHANNEL" /&gt;
-          &lt;feDisplacementMap in="SourceGraphic" in2="DISPLACEMENT_MAP" :scale="displacementScale" xChannelSelector="R" yChannelSelector="B" result="GREEN_DISPLACED" /&gt;
-          &lt;feColorMatrix in="GREEN_DISPLACED" type="matrix" values="0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0" result="GREEN_CHANNEL" /&gt;
-          &lt;feDisplacementMap in="SourceGraphic" in2="DISPLACEMENT_MAP" :scale="displacementScale" xChannelSelector="R" yChannelSelector="B" result="BLUE_DISPLACED" /&gt;
-          &lt;feColorMatrix in="BLUE_DISPLACED" type="matrix" values="0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 1 0" result="BLUE_CHANNEL" /&gt;
-          &lt;feBlend in="GREEN_CHANNEL" in2="BLUE_CHANNEL" mode="screen" result="GB_COMBINED" /&gt;
-          &lt;feBlend in="RED_CHANNEL" in2="GB_COMBINED" mode="screen" result="RGB_COMBINED" /&gt;
-          &lt;feGaussianBlur in="RGB_COMBINED" :stdDeviation="Math.max(0.1, 0.5 - aberrationIntensity * 0.1)" result="ABERRATED_BLURRED" /&gt;
-          &lt;feComposite in="ABERRATED_BLURRED" in2="EDGE_MASK" operator="in" result="EDGE_ABERRATION" /&gt;
-          &lt;feComponentTransfer in="EDGE_MASK" result="INVERTED_MASK"&gt;
-            &lt;feFuncA type="table" tableValues="1 0" /&gt;
-          &lt;/feComponentTransfer&gt;
-          &lt;feComposite in="CENTER_ORIGINAL" in2="INVERTED_MASK" operator="in" result="CENTER_CLEAN" /&gt;
-          &lt;feComposite in="EDGE_ABERRATION" in2="CENTER_CLEAN" operator="over" /&gt;
-        &lt;/filter&gt;
-      &lt;/defs&gt;
-    &lt;/svg&gt;
-    &lt;div  :style="containerStyle"&gt;
-      &lt;span  :style="backdropStyle" /&gt;
-      &lt;div  :style="borderStyle" /&gt;
-      &lt;div v-if="isHovered || isActive"  :style="hoverEffectStyle" /&gt;
-      &lt;div &gt;
-        &lt;slot /&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div ref="glassRef"  : :style="wrapperStyle">
+    <svg :style="{ position: 'absolute', width: glassSize.width, height: glassSize.height }" aria-hidden="true">
+      <defs>
+        <filter id="glass-standard" x="-35%" y="-35%" width="170%" height="170%" color-interpolation-filters="sRGB">
+          <feImage x="0" y="0" width="100%" height="100%" result="DISPLACEMENT_MAP" href="data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAZABkAAD/2wCEAAQDAwMDAwQDAwQGBAMEBgcFBAQFBwgHBwcHBwgLCAkJCQkICwsMDAwMDAsNDQ4ODQ0SEhISEhQUFBQUFBQUFBQBBQUFCAgIEAsLEBQODg4UFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFP/CABEIAQABAAMBEQACEQEDEQH/8QAFgABAQEAAAAAAAAAAAAAAAAABgUEB//EAB8QAAIBBAMBAAAAAAAAAAAAAAECAxEEBSESMUH/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8A" preserveAspectRatio="xMidYMid slice" />
+          <feColorMatrix in="DISPLACEMENT_MAP" type="matrix" values="0.3 0.3 0.3 0 0 0.3 0.3 0.3 0 0 0.3 0.3 0.3 0 0 0 0 0 1 0" result="EDGE_INTENSITY" />
+          <feComponentTransfer in="EDGE_INTENSITY" result="EDGE_MASK">
+            <feFuncA type="discrete" :tableValues="`0 ${aberrationIntensity * 0.05} 1`" />
+          </feComponentTransfer>
+          <feOffset in="SourceGraphic" dx="0" dy="0" result="CENTER_ORIGINAL" />
+          <feDisplacementMap in="SourceGraphic" in2="DISPLACEMENT_MAP" :scale="displacementScale" xChannelSelector="R" yChannelSelector="B" result="RED_DISPLACED" />
+          <feColorMatrix in="RED_DISPLACED" type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" result="RED_CHANNEL" />
+          <feDisplacementMap in="SourceGraphic" in2="DISPLACEMENT_MAP" :scale="displacementScale" xChannelSelector="R" yChannelSelector="B" result="GREEN_DISPLACED" />
+          <feColorMatrix in="GREEN_DISPLACED" type="matrix" values="0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0" result="GREEN_CHANNEL" />
+          <feDisplacementMap in="SourceGraphic" in2="DISPLACEMENT_MAP" :scale="displacementScale" xChannelSelector="R" yChannelSelector="B" result="BLUE_DISPLACED" />
+          <feColorMatrix in="BLUE_DISPLACED" type="matrix" values="0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 1 0" result="BLUE_CHANNEL" />
+          <feBlend in="GREEN_CHANNEL" in2="BLUE_CHANNEL" mode="screen" result="GB_COMBINED" />
+          <feBlend in="RED_CHANNEL" in2="GB_COMBINED" mode="screen" result="RGB_COMBINED" />
+          <feGaussianBlur in="RGB_COMBINED" :stdDeviation="Math.max(0.1, 0.5 - aberrationIntensity * 0.1)" result="ABERRATED_BLURRED" />
+          <feComposite in="ABERRATED_BLURRED" in2="EDGE_MASK" operator="in" result="EDGE_ABERRATION" />
+          <feComponentTransfer in="EDGE_MASK" result="INVERTED_MASK">
+            <feFuncA type="table" tableValues="1 0" />
+          </feComponentTransfer>
+          <feComposite in="CENTER_ORIGINAL" in2="INVERTED_MASK" operator="in" result="CENTER_CLEAN" />
+          <feComposite in="EDGE_ABERRATION" in2="CENTER_CLEAN" operator="over" />
+        </filter>
+      </defs>
+    </svg>
+    <div  :style="containerStyle">
+      <span  :style="backdropStyle" />
+      <div  :style="borderStyle" />
+      <div v-if="isHovered || isActive"  :style="hoverEffectStyle" />
+      <div >
+        <slot />
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { CSSProperties } from 'vue'
 export interface LiquidGlassComponentProps {
@@ -51,7 +51,7 @@ export interface LiquidGlassComponentProps {
   padding?: string
   style?: CSSProperties
 }
-const props = withDefaults(defineProps&lt;LiquidGlassComponentProps&gt;(), {
+const props = withDefaults(defineProps<LiquidGlassComponentProps>(), {
   displacementScale: 70,
   blurAmount: 0.0625,
   saturation: 140,
@@ -61,12 +61,12 @@ const props = withDefaults(defineProps&lt;LiquidGlassComponentProps&gt;(), {
   className: '',
   padding: '24px 32px',
 })
-const glassRef = ref&lt;HTMLElement | null&gt;(null)
+const glassRef = ref<HTMLElement | null>(null)
 const isHovered = ref(false)
 const isActive = ref(false)
 const glassSize = ref({ width: 360, height: 200 })
 const mouseOffset = ref({ x: 0, y: 0 })
-const handleMouseMove = (e: MouseEvent) =&gt; {
+const handleMouseMove = (e: MouseEvent) => {
   if (!glassRef.value) return
   const rect = glassRef.value.getBoundingClientRect()
   const centerX = rect.left + rect.width / 2
@@ -76,7 +76,7 @@ const handleMouseMove = (e: MouseEvent) =&gt; {
     y: ((e.clientY - centerY) / rect.height) * 100,
   }
 }
-const containerStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
+const containerStyle = computed<CSSProperties>(() => ({
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',
@@ -93,7 +93,7 @@ const containerStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
   `,
   backdropFilter: 'blur(40px) saturate(180%)',
   WebkitBackdropFilter: 'blur(40px) saturate(180%)',
-  ...(isHovered.value &amp;&amp; {
+  ...(isHovered.value && {
     transform: 'translateY(-6px) scale(1.01)',
     boxShadow: '0 20px 48px rgba(0,0,0,0.35), 0 8px 16px rgba(0,0,0,0.18), inset 0 0 0 0.5px rgba(255,255,255,0.18), inset 0 1px 0 rgba(255,255,255,0.25)',
     background: `
@@ -103,13 +103,13 @@ const containerStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
     `,
   }),
 }))
-const backdropStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
+const backdropStyle = computed<CSSProperties>(() => ({
   filter: 'url(#glass-standard)',
   backdropFilter: `blur(${4 + props.blurAmount * 32}px) saturate(${props.saturation}%)`,
   position: 'absolute',
   inset: 0,
 }))
-const borderStyle = computed&lt;CSSProperties&gt;(() =&gt; {
+const borderStyle = computed<CSSProperties>(() => {
   const gradientAngle = 135 + mouseOffset.value.x * 1.2
   const opacity1 = 0.12 + Math.abs(mouseOffset.value.x) * 0.008
   const opacity2 = 0.4 + Math.abs(mouseOffset.value.x) * 0.012
@@ -130,7 +130,7 @@ const borderStyle = computed&lt;CSSProperties&gt;(() =&gt; {
     background: `linear-gradient(${gradientAngle}deg, rgba(255, 255, 255, 0.0) 0%, rgba(255, 255, 255, ${opacity1}) ${position1}%, rgba(255, 255, 255, ${opacity2}) ${position2}%, rgba(255, 255, 255, 0.0) 100%)`,
   }
 })
-const hoverEffectStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
+const hoverEffectStyle = computed<CSSProperties>(() => ({
   position: 'absolute',
   inset: 0,
   borderRadius: `${props.cornerRadius}px`,
@@ -140,7 +140,7 @@ const hoverEffectStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
   backgroundImage: 'radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 50%)',
   mixBlendMode: 'overlay',
 }))
-const wrapperStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
+const wrapperStyle = computed<CSSProperties>(() => ({
   position: 'relative',
   ...props.style,
 }))
@@ -149,17 +149,17 @@ defineExpose({
   isHovered,
   isActive,
 })
-onMounted(() =&gt; {
+onMounted(() => {
   if (glassRef.value) {
-    glassRef.value.addEventListener('mouseenter', () =&gt; { isHovered.value = true })
-    glassRef.value.addEventListener('mouseleave', () =&gt; { isHovered.value = false; mouseOffset.value = { x: 0, y: 0 } })
+    glassRef.value.addEventListener('mouseenter', () => { isHovered.value = true })
+    glassRef.value.addEventListener('mouseleave', () => { isHovered.value = false; mouseOffset.value = { x: 0, y: 0 } })
     glassRef.value.addEventListener('mousemove', handleMouseMove)
-    glassRef.value.addEventListener('mousedown', () =&gt; { isActive.value = true })
-    glassRef.value.addEventListener('mouseup', () =&gt; { isActive.value = false })
+    glassRef.value.addEventListener('mousedown', () => { isActive.value = true })
+    glassRef.value.addEventListener('mouseup', () => { isActive.value = false })
   }
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .liquid-glass-wrapper {
   display: inline-block;
 }
@@ -181,5 +181,5 @@ onMounted(() =&gt; {
   color: white;
   text-shadow: 0px 2px 12px rgba(0, 0, 0, 0.4);
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

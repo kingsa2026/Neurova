@@ -11,24 +11,22 @@ from neurova.agent.loops.base import BaseAgentLoop
 from neurova.agent.loops.registry import register_loop
 from neurova.llm_client import LLMResponse
 
-
 logger = logging.getLogger(__name__)
-
 
 class OpenAILoop(BaseAgentLoop):
     """
     OpenAI 模型 Loop
-    
+
     处理 OpenAI 兼容 API 的调用流程，
     支持工具调用 (tool_calls) 和流式输出。
     """
-    
+
     def __init__(self, agent: 'Agent'):
         super().__init__(agent)
         self._tool_rounds = 0  # 递归深度计数
         self._tools_supported = True  # 初始假设支持，400 后设为 False
         logger.info(f"OpenAILoop initialized for agent: {agent.config.name}")
-    
+
     async def predict_step(
         self,
         messages: List[Dict],
@@ -38,13 +36,13 @@ class OpenAILoop(BaseAgentLoop):
     ) -> Any:
         """
         执行一步预测
-        
+
         参数:
             messages: 对话历史
             tools: 可用工具列表 (OpenAI Schema 格式)
             stream: 是否流式输出
             **kwargs: 额外参数
-            
+
         返回:
             LLMResponse 对象 (非流式) 或 AsyncGenerator (流式)
         """
@@ -54,7 +52,7 @@ class OpenAILoop(BaseAgentLoop):
             "messages": messages,
             "stream": stream,
         }
-        
+
         # 添加工具（如果 API 不支持则跳过）
         if tools and self._tools_supported:
             # 过滤格式不正确的工具（缺少 function 字段会触发 400 错误）
@@ -66,14 +64,14 @@ class OpenAILoop(BaseAgentLoop):
                 logger.warning("所有工具格式不正确，跳过 tools 注入")
         elif tools and not self._tools_supported:
             logger.info(f"跳过 tools 注入：API 不支持 function calling")
-        
+
         # 添加其他参数
         for key in ["temperature", "max_tokens", "top_p", "frequency_penalty"]:
             if hasattr(self.agent.llm_client.config, key):
                 value = getattr(self.agent.llm_client.config, key)
                 if value is not None:
                     request_params[key] = value
-        
+
         # 执行预测（如果 tools 导致 API 400，回退到无 tools 模式）
         try:
             if stream:
@@ -92,7 +90,7 @@ class OpenAILoop(BaseAgentLoop):
                 else:
                     return await self._predict_normal(request_params)
             raise
-    
+
     async def _predict_normal(self, request_params: Dict) -> LLMResponse:
         """普通预测 (非流式)"""
         response = self.llm_client.chat(**request_params)
@@ -103,27 +101,27 @@ class OpenAILoop(BaseAgentLoop):
             if hasattr(self.agent, '_current_reasoning'):
                 self.agent._current_reasoning = response.reasoning_content
             logger.info(f"🧠 捕获思考过程: {len(response.reasoning_content)} 字符")
-        
+
         # 处理 tool_calls
         if response.tool_calls:
             self._tool_rounds += 1
             if self._tool_rounds > 10:
                 logger.warning(f"工具调用轮次超过上限 ({self._tool_rounds})，停止递归")
                 return response
-            
+
             logger.info(f"LLM returned {len(response.tool_calls)} tool calls (round {self._tool_rounds})")
-            
+
             # 执行工具
             tool_messages = await self.handle_tool_calls(response.tool_calls, request_params["messages"])
-            
+
             # 将工具结果添加到消息
             request_params["messages"].extend(tool_messages)
-            
+
             # 递归调用，直到没有 tool_calls
             return await self._predict_normal(request_params)
-        
+
         return response
-    
+
     async def _predict_stream(self, request_params: Dict) -> Any:
         """流式预测 — 实时 yield 结构化事件（content / reasoning / tool_calls / done）"""
         reply_parts = []
@@ -189,7 +187,7 @@ class OpenAILoop(BaseAgentLoop):
                 yield {"type": "done", "reply": full_reply, "finish_reason": finish_reason}
 
         logger.debug("Stream completed")
-    
+
     async def handle_tool_calls(self, tool_calls: List, messages: List[Dict]) -> List[Dict]:
         """
         处理工具调用 (重写基类方法，添加更多日志)
@@ -197,11 +195,10 @@ class OpenAILoop(BaseAgentLoop):
         logger.info(f"Handling {len(tool_calls)} tool calls")
         return await super().handle_tool_calls(tool_calls, messages)
 
-
 # 注册到全局注册表
 try:
     from neurova.agent.loops.registry import register_loop
-    
+
     @register_loop(
         r"gpt-.*|openai/.*|/v1/.*|glm-.*|kimi-.*|qwen.*|deepseek-.*|doubao-.*|"
         r"zhipu/.*|zai-org/.*|moonshot/.*|yi-.*|internlm-.*|baichuan-.*|"
@@ -212,7 +209,7 @@ try:
     class RegisteredOpenAILoop(OpenAILoop):
         """注册到全局注册表的 OpenAI Loop (通用兼容)"""
         pass
-    
+
     logger.info("OpenAILoop registered to global registry")
 except ImportError:
     logger.warning("Could not register OpenAILoop (registry not available)")

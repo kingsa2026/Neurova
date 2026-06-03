@@ -1,5 +1,5 @@
-&lt;template&gt;
-  &lt;div
+<template>
+  <div
     ref="glassRef"
     :
     :style="containerStyle"
@@ -9,11 +9,11 @@
     @mousedown="handleMouseDown"
     @mouseup="handleMouseUp"
     @click="onClick"
-  &gt;
-    &lt;slot /&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+  >
+    <slot />
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, type CSSProperties } from 'vue'
 interface Props {
   displacementScale?: number
@@ -27,9 +27,9 @@ interface Props {
   style?: CSSProperties
   overLight?: boolean
   mode?: 'standard' | 'polar' | 'prominent'
-  onClick?: () =&gt; void
+  onClick?: () => void
 }
-const props = withDefaults(defineProps&lt;Props&gt;(), {
+const props = withDefaults(defineProps<Props>(), {
   displacementScale: 70,
   blurAmount: 0.0625,
   saturation: 150,
@@ -42,22 +42,22 @@ const props = withDefaults(defineProps&lt;Props&gt;(), {
   mode: 'standard',
 })
 const emit = defineEmits(['click'])
-const glassRef = ref&lt;HTMLElement | null&gt;(null)
+const glassRef = ref<HTMLElement | null>(null)
 const isHovered = ref(false)
 const isActive = ref(false)
 const mouseOffset = ref({ x: 0, y: 0 })
-const getBackground = () =&gt; {
+const getBackground = () => {
   if (props.overLight) {
     return 'rgba(255, 255, 255, 0.25)'
   }
   return 'rgba(255, 255, 255, 0.08)'
 }
-const getBoxShadow = () =&gt; {
+const getBoxShadow = () => {
   const intensity = isHovered.value ? 0.3 : 0.15
   const spread = isActive.value ? 8 : 20
   return `0 ${spread}px 40px rgba(0,0,0,${intensity}), 0 0 0 0.5px rgba(255,255,255,0.1)`
 }
-const containerStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
+const containerStyle = computed<CSSProperties>(() => ({
   position: 'relative' as const,
   padding: props.padding,
   borderRadius: `${props.cornerRadius}px`,
@@ -68,7 +68,7 @@ const containerStyle = computed&lt;CSSProperties&gt;(() =&gt; ({
   WebkitBackdropFilter: `blur(${4 + props.blurAmount * 32}px) saturate(${props.saturation}%)`,
   transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
 }))
-const handleMouseMove = (e: MouseEvent) =&gt; {
+const handleMouseMove = (e: MouseEvent) => {
   if (!glassRef.value) return
   const rect = glassRef.value.getBoundingClientRect()
   const centerX = rect.left + rect.width / 2
@@ -78,29 +78,29 @@ const handleMouseMove = (e: MouseEvent) =&gt; {
     y: ((e.clientY - centerY) / rect.height) * 100,
   }
 }
-const handleMouseEnter = () =&gt; {
+const handleMouseEnter = () => {
   isHovered.value = true
 }
-const handleMouseLeave = () =&gt; {
+const handleMouseLeave = () => {
   isHovered.value = false
   isActive.value = false
 }
-const handleMouseDown = () =&gt; {
+const handleMouseDown = () => {
   isActive.value = true
 }
-const handleMouseUp = () =&gt; {
+const handleMouseUp = () => {
   isActive.value = false
 }
-onMounted(() =&gt; {
+onMounted(() => {
   // Component ready
 })
-onUnmounted(() =&gt; {
+onUnmounted(() => {
   // Cleanup
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .glass-effect {
   will-change: transform, backdrop-filter;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

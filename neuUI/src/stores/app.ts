@@ -1,19 +1,19 @@
 import { defineStore, defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-&nbsp;
-export const useAppStore = defineStore('app', () =&gt; {
+ 
+export const useAppStore = defineStore('app', () => {
   // 主题
-  const theme = ref&lt;'light' | 'dark'&gt;('dark')
-  const isDark = computed(() =&gt; theme.value === 'dark')
+  const theme = ref<'light' | 'dark'>('dark')
+  const isDark = computed(() => theme.value === 'dark')
   // 语言
-  const locale = ref&lt;string&gt;('zh-CN')
+  const locale = ref<string>('zh-CN')
   // 侧边栏折叠
-  const sidebarCollapsed = ref&lt;boolean&gt;(false)
+  const sidebarCollapsed = ref<boolean>(false)
   // 当前 Agent ID
-  const currentAgentId = ref&lt;string&gt;('')
+  const currentAgentId = ref<string>('')
   // 加载状态
-  const globalLoading = ref&lt;boolean&gt;(false)
-  const loadingText = ref&lt;string&gt;('')
+  const globalLoading = ref<boolean>(false)
+  const loadingText = ref<string>('')
   // 方法
   function setTheme(newTheme: 'light' | 'dark') {
     theme.value = newTheme
@@ -75,4 +75,4 @@ export const useAppStore = defineStore('app', () =&gt; {
     init
   }
 })
-&nbsp;
+ 

@@ -1,171 +1,171 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;!-- 页面头部 --&gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;BookOutlined /&gt; 知识库&lt;/h2&gt;
-      &lt;div &gt;
-        &lt;a-button @click="configVisible = true"&gt;&lt;SettingOutlined /&gt; 配置管理&lt;/a-button&gt;
-        &lt;a-button @click="createColVisible = true"&gt;&lt;PlusOutlined /&gt; 创建知识库&lt;/a-button&gt;
-        &lt;a-button type="primary" @click="uploadVisible = true"&gt;&lt;UploadOutlined /&gt; 上传文档&lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 错误提示 --&gt;
-    &lt;a-alert v-if="kbError" :message="kbError" type="error" show-icon closable /&gt;
-    &lt;!-- 标签页 --&gt;
-    &lt;a-tabs v-model:activeKey="activeTab" &gt;
-      &lt;a-tab-pane key="collections" tab="知识库列表"&gt;
-        &lt;!-- 加载状态 --&gt;
-        &lt;a-spin v-if="colLoading" size="large" style="display:flex;justify-content:center;padding:40px" /&gt;
-        &lt;!-- 知识库列表 --&gt;
-        &lt;div  v-else-if="collections.length"&gt;
-          &lt;div v-for="col in collections" :key="col.id"  @click="selectCollection(col)"&gt;
-            &lt;div &gt;&lt;FolderOutlined /&gt;&lt;/div&gt;
-            &lt;div &gt;
-              &lt;h4&gt;{{ col.collection_name }}&lt;/h4&gt;
-              &lt;p&gt;{{ col.collection_description || '暂无描述' }}&lt;/p&gt;
-              &lt;div &gt;
-                &lt;a-tag size="small" :color="col.id === selectedCol?.id?'blue':'default'"&gt;
+<template>
+  <div >
+    <!-- 页面头部 -->
+    <div >
+      <h2 ><BookOutlined /> 知识库</h2>
+      <div >
+        <a-button @click="configVisible = true"><SettingOutlined /> 配置管理</a-button>
+        <a-button @click="createColVisible = true"><PlusOutlined /> 创建知识库</a-button>
+        <a-button type="primary" @click="uploadVisible = true"><UploadOutlined /> 上传文档</a-button>
+      </div>
+    </div>
+    <!-- 错误提示 -->
+    <a-alert v-if="kbError" :message="kbError" type="error" show-icon closable />
+    <!-- 标签页 -->
+    <a-tabs v-model:activeKey="activeTab" >
+      <a-tab-pane key="collections" tab="知识库列表">
+        <!-- 加载状态 -->
+        <a-spin v-if="colLoading" size="large" style="display:flex;justify-content:center;padding:40px" />
+        <!-- 知识库列表 -->
+        <div  v-else-if="collections.length">
+          <div v-for="col in collections" :key="col.id"  @click="selectCollection(col)">
+            <div ><FolderOutlined /></div>
+            <div >
+              <h4>{{ col.collection_name }}</h4>
+              <p>{{ col.collection_description || '暂无描述' }}</p>
+              <div >
+                <a-tag size="small" :color="col.id === selectedCol?.id?'blue':'default'">
                   {{ col.id === selectedCol?.id?'当前选择':'' }}
-                &lt;/a-tag&gt;
-                &lt;span &gt;{{ formatDate(col.created_at) }}&lt;/span&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div v-else &gt;暂无知识库，点击"创建知识库"开始&lt;/div&gt;
-      &lt;/a-tab-pane&gt;
-      &lt;a-tab-pane key="documents" tab="文档管理"&gt;
-        &lt;!-- 搜索栏 --&gt;
-        &lt;div &gt;
-          &lt;a-input-search v-model:value="kw" placeholder="搜索文档..." style="width:360px" allow-clear @search="searchDocs" /&gt;
-          &lt;a-select v-model:value="selCol" placeholder="选择知识库" style="width:200px" allow-clear @change="loadDocuments"&gt;
-            &lt;a-option v-for="c in collections" :key="c.id" :value="c.id"&gt;{{ c.collection_name }}&lt;/a-option&gt;
-          &lt;/a-select&gt;
-        &lt;/div&gt;
-        &lt;!-- 加载状态 --&gt;
-        &lt;a-spin v-if="docLoading" size="large" style="display:flex;justify-content:center;padding:40px" /&gt;
-        &lt;!-- 文档列表 --&gt;
-        &lt;div  v-else-if="documents.length"&gt;
-          &lt;div v-for="doc in documents" :key="doc.id" &gt;
-            &lt;div &gt;&lt;FileTextOutlined /&gt;&lt;/div&gt;
-            &lt;div &gt;
-              &lt;h4&gt;{{ doc.name }}&lt;/h4&gt;
-              &lt;p&gt;{{ doc.description || doc.summary || '暂无描述' }}&lt;/p&gt;
-              &lt;div &gt;
-                &lt;a-tag size="small" :color="getStatusColor(doc.status)"&gt;{{ doc.status || '处理中' }}&lt;/a-tag&gt;
-                &lt;span &gt;{{ formatDate(doc.created_at) }}&lt;/span&gt;
-                &lt;a-button type="link" size="small" danger @click.stop="deleteDoc(doc.id)"&gt;删除&lt;/a-button&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div v-else &gt;暂无文档，点击"上传文档"开始&lt;/div&gt;
-      &lt;/a-tab-pane&gt;
-      &lt;a-tab-pane key="search" tab="智能搜索"&gt;
-        &lt;div &gt;
-          &lt;a-input-search v-model:value="searchQuery" placeholder="输入搜索内容，进行语义检索..." size="large" @search="doSearch" enter-button="搜索" /&gt;
-          &lt;div  style="margin-top:10px"&gt;
-            &lt;a-select v-model:value="searchCol" placeholder="选择知识库（可选）" style="width:200px" allow-clear&gt;
-              &lt;a-option v-for="c in collections" :key="c.id" :value="c.id"&gt;{{ c.collection_name }}&lt;/a-option&gt;
-            &lt;/a-select&gt;
-            &lt;a-tag color="blue" style="margin-left:10px"&gt;支持语义搜索&lt;/a-tag&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;a-spin v-if="searchLoading" size="large" style="display:flex;justify-content:center;padding:40px" /&gt;
-        &lt;div  v-else-if="searchResults.length"&gt;
-          &lt;div v-for="(item,idx) in searchResults" :key="idx" &gt;
-            &lt;div &gt;{{ (item.score*100).toFixed(0) }}%&lt;/div&gt;
-            &lt;div &gt;
-              &lt;h4&gt;{{ item.title || item.source_name || '相关文档' }}&lt;/h4&gt;
-              &lt;p&gt;{{ item.content || item.text || item.summary }}&lt;/p&gt;
-              &lt;a-tag v-if="item.collection_id" size="small"&gt;{{ item.collection_id }}&lt;/a-tag&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div v-else-if="searchQuery" &gt;未找到相关结果&lt;/div&gt;
-        &lt;div v-else &gt;输入搜索内容开始检索&lt;/div&gt;
-      &lt;/a-tab-pane&gt;
-    &lt;/a-tabs&gt;
-    &lt;!-- 配置管理模态框 --&gt;
-    &lt;a-modal v-model:open="configVisible" title="知识库配置管理" width="800px" @ok="saveConfig"&gt;
-      &lt;a-spin v-if="configLoading" /&gt;
-      &lt;div v-else&gt;
-        &lt;a-button type="primary" size="small" @click="addNewConfig" style="margin-bottom:16px"&gt;&lt;PlusOutlined /&gt; 添加配置&lt;/a-button&gt;
-        &lt;a-list :data-source="configs" size="small"&gt;
-          &lt;template #renderItem="{ item }"&gt;
-            &lt;a-list-item&gt;
-              &lt;a-list-item-meta&gt;
-                &lt;template #title&gt;
+                </a-tag>
+                <span >{{ formatDate(col.created_at) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else >暂无知识库，点击"创建知识库"开始</div>
+      </a-tab-pane>
+      <a-tab-pane key="documents" tab="文档管理">
+        <!-- 搜索栏 -->
+        <div >
+          <a-input-search v-model:value="kw" placeholder="搜索文档..." style="width:360px" allow-clear @search="searchDocs" />
+          <a-select v-model:value="selCol" placeholder="选择知识库" style="width:200px" allow-clear @change="loadDocuments">
+            <a-option v-for="c in collections" :key="c.id" :value="c.id">{{ c.collection_name }}</a-option>
+          </a-select>
+        </div>
+        <!-- 加载状态 -->
+        <a-spin v-if="docLoading" size="large" style="display:flex;justify-content:center;padding:40px" />
+        <!-- 文档列表 -->
+        <div  v-else-if="documents.length">
+          <div v-for="doc in documents" :key="doc.id" >
+            <div ><FileTextOutlined /></div>
+            <div >
+              <h4>{{ doc.name }}</h4>
+              <p>{{ doc.description || doc.summary || '暂无描述' }}</p>
+              <div >
+                <a-tag size="small" :color="getStatusColor(doc.status)">{{ doc.status || '处理中' }}</a-tag>
+                <span >{{ formatDate(doc.created_at) }}</span>
+                <a-button type="link" size="small" danger @click.stop="deleteDoc(doc.id)">删除</a-button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else >暂无文档，点击"上传文档"开始</div>
+      </a-tab-pane>
+      <a-tab-pane key="search" tab="智能搜索">
+        <div >
+          <a-input-search v-model:value="searchQuery" placeholder="输入搜索内容，进行语义检索..." size="large" @search="doSearch" enter-button="搜索" />
+          <div  style="margin-top:10px">
+            <a-select v-model:value="searchCol" placeholder="选择知识库（可选）" style="width:200px" allow-clear>
+              <a-option v-for="c in collections" :key="c.id" :value="c.id">{{ c.collection_name }}</a-option>
+            </a-select>
+            <a-tag color="blue" style="margin-left:10px">支持语义搜索</a-tag>
+          </div>
+        </div>
+        <a-spin v-if="searchLoading" size="large" style="display:flex;justify-content:center;padding:40px" />
+        <div  v-else-if="searchResults.length">
+          <div v-for="(item,idx) in searchResults" :key="idx" >
+            <div >{{ (item.score*100).toFixed(0) }}%</div>
+            <div >
+              <h4>{{ item.title || item.source_name || '相关文档' }}</h4>
+              <p>{{ item.content || item.text || item.summary }}</p>
+              <a-tag v-if="item.collection_id" size="small">{{ item.collection_id }}</a-tag>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="searchQuery" >未找到相关结果</div>
+        <div v-else >输入搜索内容开始检索</div>
+      </a-tab-pane>
+    </a-tabs>
+    <!-- 配置管理模态框 -->
+    <a-modal v-model:open="configVisible" title="知识库配置管理" width="800px" @ok="saveConfig">
+      <a-spin v-if="configLoading" />
+      <div v-else>
+        <a-button type="primary" size="small" @click="addNewConfig" style="margin-bottom:16px"><PlusOutlined /> 添加配置</a-button>
+        <a-list :data-source="configs" size="small">
+          <template #renderItem="{ item }">
+            <a-list-item>
+              <a-list-item-meta>
+                <template #title>
                   {{ item.config_name }}
-                  &lt;a-tag v-if="item.is_default" color="blue"&gt;默认&lt;/a-tag&gt;
-                  &lt;a-tag v-if="item.is_active" color="green"&gt;已启用&lt;/a-tag&gt;
-                  &lt;a-tag v-else color="default"&gt;已禁用&lt;/a-tag&gt;
-                &lt;/template&gt;
-                &lt;template #description&gt;
+                  <a-tag v-if="item.is_default" color="blue">默认</a-tag>
+                  <a-tag v-if="item.is_active" color="green">已启用</a-tag>
+                  <a-tag v-else color="default">已禁用</a-tag>
+                </template>
+                <template #description>
                   {{ item.source_type }} · API Key: {{ item.api_key }}
-                &lt;/template&gt;
-              &lt;/a-list-item-meta&gt;
-              &lt;a-space&gt;
-                &lt;a-button size="small" @click="editConfig(item)"&gt;编辑&lt;/a-button&gt;
-                &lt;a-button size="small" danger @click="deleteConfig(item.id)"&gt;删除&lt;/a-button&gt;
-              &lt;/a-space&gt;
-            &lt;/a-list-item&gt;
-          &lt;/template&gt;
-        &lt;/a-list&gt;
-      &lt;/div&gt;
-      &lt;!-- 编辑配置的子模态框 --&gt;
-      &lt;a-modal v-model:open="editConfigVisible" title="编辑配置" @ok="submitConfig"&gt;
-        &lt;a-form layout="vertical"&gt;
-          &lt;a-form-item label="配置名称"&gt;
-            &lt;a-input v-model:value="editingConfig.config_name" /&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item label="API Key"&gt;
-            &lt;a-input-password v-model:value="editingConfig.api_key" placeholder="输入API Key" /&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item label="Base URL（可选）"&gt;
-            &lt;a-input v-model:value="editingConfig.base_url" placeholder="https://platform.iflow.cn" /&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item label="设为默认"&gt;
-            &lt;a-switch v-model:checked="editingConfig.is_default" /&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item label="启用"&gt;
-            &lt;a-switch v-model:checked="editingConfig.is_active" /&gt;
-          &lt;/a-form-item&gt;
-        &lt;/a-form&gt;
-      &lt;/a-modal&gt;
-    &lt;/a-modal&gt;
-    &lt;!-- 创建知识库模态框 --&gt;
-    &lt;a-modal v-model:open="createColVisible" title="创建知识库" @ok="createCollection"&gt;
-      &lt;a-form layout="vertical"&gt;
-        &lt;a-form-item label="知识库名称"&gt;
-          &lt;a-input v-model:value="newCol.name" placeholder="输入知识库名称" /&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="描述"&gt;
-          &lt;a-textarea v-model:value="newCol.description" placeholder="输入描述（可选）" :rows="3" /&gt;
-        &lt;/a-form-item&gt;
-      &lt;/a-form&gt;
-    &lt;/a-modal&gt;
-    &lt;!-- 上传文档模态框 --&gt;
-    &lt;a-modal v-model:open="uploadVisible" title="上传文档" @ok="uploadVisible = false" width="700px"&gt;
-      &lt;a-form layout="vertical"&gt;
-        &lt;a-form-item label="选择知识库"&gt;
-          &lt;a-select v-model:value="uploadCol" placeholder="请选择要上传到的知识库" style="width:100%"&gt;
-            &lt;a-option v-for="c in collections" :key="c.id" :value="c.id"&gt;{{ c.collection_name }}&lt;/a-option&gt;
-          &lt;/a-select&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="文档"&gt;
-          &lt;a-upload-dragger name="file" :file-list="fileList" :before-upload="beforeUpload" :on-change="handleFileChange" :multiple="true"&gt;
-            &lt;p &gt;&lt;InboxOutlined /&gt;&lt;/p&gt;
-            &lt;p &gt;点击或拖拽文件到此区域上传&lt;/p&gt;
-            &lt;p &gt;支持 PDF、Word、TXT、Markdown、PPT、Excel 等格式&lt;/p&gt;
-          &lt;/a-upload-dragger&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-button type="primary" :loading="uploading" @click="doUpload" block&gt;上传文档&lt;/a-button&gt;
-      &lt;/a-form&gt;
-    &lt;/a-modal&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+                </template>
+              </a-list-item-meta>
+              <a-space>
+                <a-button size="small" @click="editConfig(item)">编辑</a-button>
+                <a-button size="small" danger @click="deleteConfig(item.id)">删除</a-button>
+              </a-space>
+            </a-list-item>
+          </template>
+        </a-list>
+      </div>
+      <!-- 编辑配置的子模态框 -->
+      <a-modal v-model:open="editConfigVisible" title="编辑配置" @ok="submitConfig">
+        <a-form layout="vertical">
+          <a-form-item label="配置名称">
+            <a-input v-model:value="editingConfig.config_name" />
+          </a-form-item>
+          <a-form-item label="API Key">
+            <a-input-password v-model:value="editingConfig.api_key" placeholder="输入API Key" />
+          </a-form-item>
+          <a-form-item label="Base URL（可选）">
+            <a-input v-model:value="editingConfig.base_url" placeholder="https://platform.iflow.cn" />
+          </a-form-item>
+          <a-form-item label="设为默认">
+            <a-switch v-model:checked="editingConfig.is_default" />
+          </a-form-item>
+          <a-form-item label="启用">
+            <a-switch v-model:checked="editingConfig.is_active" />
+          </a-form-item>
+        </a-form>
+      </a-modal>
+    </a-modal>
+    <!-- 创建知识库模态框 -->
+    <a-modal v-model:open="createColVisible" title="创建知识库" @ok="createCollection">
+      <a-form layout="vertical">
+        <a-form-item label="知识库名称">
+          <a-input v-model:value="newCol.name" placeholder="输入知识库名称" />
+        </a-form-item>
+        <a-form-item label="描述">
+          <a-textarea v-model:value="newCol.description" placeholder="输入描述（可选）" :rows="3" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+    <!-- 上传文档模态框 -->
+    <a-modal v-model:open="uploadVisible" title="上传文档" @ok="uploadVisible = false" width="700px">
+      <a-form layout="vertical">
+        <a-form-item label="选择知识库">
+          <a-select v-model:value="uploadCol" placeholder="请选择要上传到的知识库" style="width:100%">
+            <a-option v-for="c in collections" :key="c.id" :value="c.id">{{ c.collection_name }}</a-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="文档">
+          <a-upload-dragger name="file" :file-list="fileList" :before-upload="beforeUpload" :on-change="handleFileChange" :multiple="true">
+            <p ><InboxOutlined /></p>
+            <p >点击或拖拽文件到此区域上传</p>
+            <p >支持 PDF、Word、TXT、Markdown、PPT、Excel 等格式</p>
+          </a-upload-dragger>
+        </a-form-item>
+        <a-button type="primary" :loading="uploading" @click="doUpload" block>上传文档</a-button>
+      </a-form>
+    </a-modal>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { BookOutlined, UploadOutlined, FileTextOutlined, InboxOutlined, FolderOutlined, SettingOutlined, PlusOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
@@ -178,44 +178,44 @@ const kbLoading = ref(false)
 // 配置管理
 const configVisible = ref(false)
 const configLoading = ref(false)
-const configs = ref&lt;KnowledgeConfig[]&gt;([])
+const configs = ref<KnowledgeConfig[]>([])
 const editConfigVisible = ref(false)
-const editingConfig = ref&lt;Partial&lt;KnowledgeConfig&gt;&gt;({})
+const editingConfig = ref<Partial<KnowledgeConfig>>({})
 // 知识库管理
 const createColVisible = ref(false)
 const colLoading = ref(false)
 interface CollectionData { id: string; collection_name: string; collection_description?: string; created_at?: string }
-const collections = ref&lt;CollectionData[]&gt;([])
-const selectedCol = ref&lt;CollectionData | null&gt;(null)
+const collections = ref<CollectionData[]>([])
+const selectedCol = ref<CollectionData | null>(null)
 const newCol = ref({ name: '', description: '' })
 // 文档管理
 const uploadVisible = ref(false)
 const docLoading = ref(false)
 interface DocumentData { id: string; name: string; description?: string; summary?: string; status?: string; created_at?: string }
-const documents = ref&lt;DocumentData[]&gt;([])
-const selCol = ref&lt;string&gt;('')
-const uploadCol = ref&lt;string&gt;('')
+const documents = ref<DocumentData[]>([])
+const selCol = ref<string>('')
+const uploadCol = ref<string>('')
 interface UploadFile { uid: string; name: string; originFileObj?: File; status?: string }
-const fileList = ref&lt;UploadFile[]&gt;([])
+const fileList = ref<UploadFile[]>([])
 const uploading = ref(false)
 // 搜索
 const searchQuery = ref('')
-const searchCol = ref&lt;string&gt;('')
+const searchCol = ref<string>('')
 const searchLoading = ref(false)
 interface SearchResult { score: number; title?: string; source_name?: string; content?: string; text?: string; summary?: string; collection_id?: string }
-const searchResults = ref&lt;SearchResult[]&gt;([])
+const searchResults = ref<SearchResult[]>([])
 // 格式化日期
-const formatDate = (d: string) =&gt; {
+const formatDate = (d: string) => {
   if (!d) return ''
   const dt = new Date(d)
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`
 }
-const getStatusColor = (status: string) =&gt; {
-  const map: Record&lt;string,string&gt; = { processed:'green', processing:'blue', error:'red', failed:'red', ready:'blue' }
+const getStatusColor = (status: string) => {
+  const map: Record<string,string> = { processed:'green', processing:'blue', error:'red', failed:'red', ready:'blue' }
   return map[status] || 'default'
 }
 // 加载配置
-const loadConfigs = async () =&gt; {
+const loadConfigs = async () => {
   configLoading.value = true
   try {
     const res = await knowledgeAPI.getConfigs()
@@ -226,15 +226,15 @@ const loadConfigs = async () =&gt; {
     configLoading.value = false
   }
 }
-const addNewConfig = () =&gt; {
+const addNewConfig = () => {
   editingConfig.value = { config_name:'新配置', is_default:false, is_active:true, source_type:'iflow' }
   editConfigVisible.value = true
 }
-const editConfig = (cfg: KnowledgeConfig) =&gt; {
+const editConfig = (cfg: KnowledgeConfig) => {
   editingConfig.value = { ...cfg }
   editConfigVisible.value = true
 }
-const deleteConfig = async (id: string) =&gt; {
+const deleteConfig = async (id: string) => {
   try {
     await knowledgeAPI.deleteConfig(id)
     message.success('删除成功')
@@ -243,7 +243,7 @@ const deleteConfig = async (id: string) =&gt; {
     message.error('删除失败')
   }
 }
-const submitConfig = async () =&gt; {
+const submitConfig = async () => {
   try {
     if (editingConfig.value.id) {
       await knowledgeAPI.updateConfig(editingConfig.value.id, editingConfig.value as KnowledgeConfig)
@@ -257,16 +257,16 @@ const submitConfig = async () =&gt; {
     message.error('保存失败')
   }
 }
-const saveConfig = () =&gt; { configVisible.value = false }
+const saveConfig = () => { configVisible.value = false }
 // 加载知识库
-const loadCollections = async () =&gt; {
+const loadCollections = async () => {
   colLoading.value = true
   kbError.value = ''
   try {
     const res = await knowledgeAPI.getCollections()
     if (res?.data?.collections) {
       collections.value = res.data.collections
-      if (collections.value.length &amp;&amp; !selectedCol.value) {
+      if (collections.value.length && !selectedCol.value) {
         selectedCol.value = collections.value[0]
         selCol.value = selectedCol.value.id
       }
@@ -279,13 +279,13 @@ const loadCollections = async () =&gt; {
     colLoading.value = false
   }
 }
-const selectCollection = (col: CollectionData) =&gt; {
+const selectCollection = (col: CollectionData) => {
   selectedCol.value = col
   selCol.value = col.id
   activeTab.value = 'documents'
   loadDocuments()
 }
-const createCollection = async () =&gt; {
+const createCollection = async () => {
   if (!newCol.value.name) { message.error('请输入知识库名称'); return }
   try {
     await knowledgeAPI.createCollection(newCol.value)
@@ -298,7 +298,7 @@ const createCollection = async () =&gt; {
   }
 }
 // 加载文档
-const loadDocuments = async () =&gt; {
+const loadDocuments = async () => {
   if (!selCol.value) return
   docLoading.value = true
   try {
@@ -310,8 +310,8 @@ const loadDocuments = async () =&gt; {
     docLoading.value = false
   }
 }
-const searchDocs = () =&gt; loadDocuments()
-const deleteDoc = async (id: string) =&gt; {
+const searchDocs = () => loadDocuments()
+const deleteDoc = async (id: string) => {
   try {
     await knowledgeAPI.deleteDocument(id)
     message.success('删除成功')
@@ -321,14 +321,14 @@ const deleteDoc = async (id: string) =&gt; {
   }
 }
 // 上传
-const beforeUpload = (file: UploadFile) =&gt; {
+const beforeUpload = (file: UploadFile) => {
   fileList.value = [...fileList.value, file]
   return false
 }
-const handleFileChange = (info: { fileList: UploadFile[] }) =&gt; {
+const handleFileChange = (info: { fileList: UploadFile[] }) => {
   fileList.value = info.fileList
 }
-const doUpload = async () =&gt; {
+const doUpload = async () => {
   if (!uploadCol.value) { message.error('请选择知识库'); return }
   if (!fileList.value.length) { message.error('请选择文件'); return }
   uploading.value = true
@@ -351,7 +351,7 @@ const doUpload = async () =&gt; {
   }
 }
 // 搜索
-const doSearch = async () =&gt; {
+const doSearch = async () => {
   if (!searchQuery.value) return
   searchLoading.value = true
   try {
@@ -363,11 +363,11 @@ const doSearch = async () =&gt; {
     searchLoading.value = false
   }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await Promise.all([loadConfigs(), loadCollections()])
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .knowledge-page { display:flex;flex-direction:column;gap:16px; }
 .page-header { display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-radius:12px; }
 .page-title { font-size:1.25rem;color:#e2e8f0;margin:0;display:flex;align-items:center;gap:8px; }
@@ -392,5 +392,5 @@ onMounted(async () =&gt; {
 .search-content { flex:1; }
 .search-content h4 { color:#e2e8f0;margin:0 0 6px; }
 .search-content p { color:rgba(255,255,255,0.5);margin:0; }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

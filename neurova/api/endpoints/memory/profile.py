@@ -16,7 +16,6 @@ from .base import (
     router, logger, _get_request_id, get_memory_manager, _get_user_ids_from_token,
 )
 
-
 class UpdateSelfModelRequest(BaseModel):
     """更新自我模型请求"""
     narrative_identity: Optional[str] = Field(default=None, description="叙事身份")
@@ -26,14 +25,12 @@ class UpdateSelfModelRequest(BaseModel):
     limitations: Optional[List[str]] = Field(default=None, description="限制列表")
     preferred_style: Optional[str] = Field(default=None, description="偏好风格")
 
-
 class UpdateUserProfileRequest(BaseModel):
     """更新用户画像请求"""
     preferences: Optional[dict] = Field(default=None, description="偏好设置")
     interaction_patterns: Optional[List[str]] = Field(default=None, description="交互模式")
     conversation_style: Optional[str] = Field(default=None, description="对话风格")
     knowledge_level: Optional[int] = Field(default=None, ge=1, le=5, description="知识水平")
-
 
 @router.get("/self-model", summary="获取自我模型")
 async def get_self_model(
@@ -60,7 +57,6 @@ async def get_self_model(
     except Exception as e:
         logger.exception(f"获取自我模型失败: {e}")
         raise APIError.internal(f"获取自我模型失败: {str(e)}")
-
 
 @router.put("/self-model", summary="更新自我模型")
 async def update_self_model(
@@ -103,7 +99,6 @@ async def update_self_model(
         logger.exception(f"更新自我模型失败: {e}")
         raise APIError.internal(f"更新自我模型失败: {str(e)}")
 
-
 @router.get("/users/{user_id}/profile", summary="获取用户画像")
 async def get_user_profile(
     user_id: str,
@@ -130,7 +125,6 @@ async def get_user_profile(
     except Exception as e:
         logger.exception(f"获取用户画像失败: {e}")
         raise APIError.internal(f"获取用户画像失败: {str(e)}")
-
 
 @router.put("/users/{user_id}/profile", summary="更新用户画像")
 async def update_user_profile(

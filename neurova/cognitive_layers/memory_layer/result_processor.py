@@ -20,7 +20,6 @@ from neurova.cognitive_layers.memory_layer.conflict_detector_v2 import (
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class ProcessedResults:
     """处理后的结果"""
@@ -29,7 +28,6 @@ class ProcessedResults:
     evolution_chains: List[List[Dict]] = field(default_factory=list)
     injection_text: str = ""
     has_conflicts: bool = False
-
 
 class ResultProcessor:
     """
@@ -223,7 +221,6 @@ class ResultProcessor:
 
         return "\n\n".join(prompts)
 
-
 class ConflictPresenter:
     """冲突呈现器"""
 
@@ -277,7 +274,6 @@ class ConflictPresenter:
                 opt["metadata"]["superseded_by"] = selected.get("id")
 
         return selected
-
 
 class ConflictResolution:
     """冲突解决后的记忆更新"""

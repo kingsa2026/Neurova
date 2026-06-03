@@ -1,34 +1,34 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;SyncOutlined :style="{color:'#34d399'}" /&gt; 反思管理&lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;反思记录&lt;b &gt;{{ stats.total }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;改进建议&lt;b &gt;{{ stats.suggestions }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;深度评估&lt;b &gt;{{ stats.status }}&lt;/b&gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div v-for="r in items" :key="r.id" &gt;
-        &lt;div &gt;
-          &lt;a-tag :color="r.tc"&gt;{{ r.tag }}&lt;/a-tag&gt;
-          &lt;span &gt;{{ r.date }}&lt;/span&gt;
-        &lt;/div&gt;
-        &lt;h4&gt;{{ r.title }}&lt;/h4&gt;
-        &lt;p&gt;{{ r.desc }}&lt;/p&gt;
-        &lt;div &gt;
-          &lt;span&gt;深度：&lt;b :style="{color:r.lv&gt;3?'#34d399':'#fbbf24'}"&gt;{{ '★'.repeat(r.lv) }}{{ '☆'.repeat(5-r.lv) }}&lt;/b&gt;&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 ><SyncOutlined :style="{color:'#34d399'}" /> 反思管理</h2>
+    </div>
+    <div >
+      <div >反思记录<b >{{ stats.total }}</b></div>
+      <div >改进建议<b >{{ stats.suggestions }}</b></div>
+      <div >深度评估<b >{{ stats.status }}</b></div>
+    </div>
+    <div >
+      <div v-for="r in items" :key="r.id" >
+        <div >
+          <a-tag :color="r.tc">{{ r.tag }}</a-tag>
+          <span >{{ r.date }}</span>
+        </div>
+        <h4>{{ r.title }}</h4>
+        <p>{{ r.desc }}</p>
+        <div >
+          <span>深度：<b :style="{color:r.lv>3?'#34d399':'#fbbf24'}">{{ '★'.repeat(r.lv) }}{{ '☆'.repeat(5-r.lv) }}</b></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { SyncOutlined } from '@ant-design/icons-vue'
-const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/reflection', () =&gt; loadData())
+const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/reflection', () => loadData())
 const stats = ref({ total: 67, suggestions: 34, status: '中' })
 const items = ref([
   {id:1,title:'RAG 检索准确率反思',desc:'今日文档检索准确率 78%，低于目标 90%。原因：向量模型对中文长文本效果不佳，建议切换到 BGE 模型',tag:'检索',tc:'blue',lv:4,date:'05-20'},
@@ -39,18 +39,18 @@ const items = ref([
 async function loadData() {
   try {
     const res = await request.get(`/agents/${agentId.value}/reflection`)
-    if (res.code === 0 &amp;&amp; res.data) {
+    if (res.code === 0 && res.data) {
       if (res.data.items?.length) items.value = res.data.items
       if (res.data.stats) stats.value = res.data.stats
     }
   } catch { /* 使用静态数据 */ }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await initAgent()
   loadData()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg{display:flex;flex-direction:column;gap:14px;}
 .hd{padding:16px 24px;border-radius:12px;}
 .t{font-size:1.2rem;color:#e2e8f0;margin:0;display:flex;align-items:center;gap:8px;}
@@ -65,5 +65,5 @@ onMounted(async () =&gt; {
 .cd{color:rgba(255,255,255,0.25);font-size:0.75rem;}
 .cb{color:rgba(255,255,255,0.35);font-size:0.82rem;}
 @media(max-width:768px){.grid{grid-template-columns:1fr}}
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

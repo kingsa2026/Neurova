@@ -1,33 +1,33 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;OrderedListOutlined :style="{ color: '#60a5fa' }" /&gt; 任务管理
-      &lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;总任务&lt;b &gt;{{ stats.total }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;已完成&lt;b &gt;{{ stats.done }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;进行中&lt;b &gt;{{ stats.inProgress }}&lt;/b&gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-table :columns="cols" :data-source="data" row-key="id" size="middle" :pagination="{ pageSize: 8 }"&gt;
-        &lt;template #bodyCell="{ column, record }"&gt;
-          &lt;template v-if="column.key === 'st'"&gt;
-            &lt;a-tag :color="record.sc"&gt;{{ record.st }}&lt;/a-tag&gt;
-          &lt;/template&gt;
-          &lt;template v-if="column.key === 'pg'"&gt;
-            &lt;div &gt;
-              &lt;div  :style="{ width: record.pg + '%' }" /&gt;
-              &lt;span&gt;{{ record.pg }}%&lt;/span&gt;
-            &lt;/div&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 >
+        <OrderedListOutlined :style="{ color: '#60a5fa' }" /> 任务管理
+      </h2>
+    </div>
+    <div >
+      <div >总任务<b >{{ stats.total }}</b></div>
+      <div >已完成<b >{{ stats.done }}</b></div>
+      <div >进行中<b >{{ stats.inProgress }}</b></div>
+    </div>
+    <div >
+      <a-table :columns="cols" :data-source="data" row-key="id" size="middle" :pagination="{ pageSize: 8 }">
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'st'">
+            <a-tag :color="record.sc">{{ record.st }}</a-tag>
+          </template>
+          <template v-if="column.key === 'pg'">
+            <div >
+              <div  :style="{ width: record.pg + '%' }" />
+              <span>{{ record.pg }}%</span>
+            </div>
+          </template>
+        </template>
+      </a-table>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref } from 'vue'
 import { OrderedListOutlined } from '@ant-design/icons-vue'
 const stats = ref({ total: 89, done: 67, inProgress: 12 })
@@ -48,8 +48,8 @@ const data = ref([
   { id: '7', name: '监控面板开发', type: '开发', st: '进行中', sc: 'blue', pg: 30, dl: '06-05' },
   { id: '8', name: '用户手册编写', type: '文档', st: '进行中', sc: 'blue', pg: 55, dl: '05-30' },
 ])
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { padding: 16px 24px; border-radius: 12px; }
 .t { font-size: 1.2rem; color: #e2e8f0; margin: 0; display: flex; align-items: center; gap: 8px; }
@@ -63,5 +63,5 @@ const data = ref([
 .bar { display: flex; align-items: center; gap: 8px; }
 .bf { height: 6px; background: linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius: 3px; }
 .bar span { color: rgba(255,255,255,0.35); font-size: 0.75rem; }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

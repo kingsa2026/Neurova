@@ -18,7 +18,6 @@ from .base import (
     router, logger, _get_request_id, get_memory_manager,
 )
 
-
 class ReflectionLogRequest(BaseModel):
     """反思日志生成请求"""
 
@@ -34,13 +33,11 @@ class ReflectionLogRequest(BaseModel):
     emotion_score: float = Field(default=0.0, ge=-1.0, le=1.0, description="情感分数")
     tags: Optional[List[str]] = Field(default=None, description="标签")
 
-
 class ValidateReflectionRequest(BaseModel):
     """验证反思应用请求"""
 
     validation_result: str = Field(..., description="验证结果 (success/failed)")
     feedback: Optional[str] = Field(default=None, description="反馈")
-
 
 class ReflectionLogItem(BaseModel):
     """反思日志条目"""
@@ -66,7 +63,6 @@ class ReflectionLogItem(BaseModel):
     updated_at: str
     tags: List[str]
 
-
 def reflection_log_entry_to_dict(entry) -> dict:
     """将 ReflectionLogEntry 转换为字典"""
     return {
@@ -91,7 +87,6 @@ def reflection_log_entry_to_dict(entry) -> dict:
         "created_at": entry.created_at.isoformat() if entry.created_at else None,
         "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
     }
-
 
 @router.get("/reflection/logs", summary="获取反思日志")
 async def get_reflection_logs(
@@ -133,7 +128,6 @@ async def get_reflection_logs(
         logger.exception(f"获取反思日志失败: {e}")
         raise APIError.internal(f"获取反思日志失败: {str(e)}")
 
-
 @router.post("/reflection/generate", summary="生成反思日志")
 async def generate_reflection(
     request: ReflectionLogRequest,
@@ -172,7 +166,6 @@ async def generate_reflection(
         logger.exception(f"生成反思日志失败: {e}")
         raise APIError.internal(f"生成反思日志失败: {str(e)}")
 
-
 @router.put("/reflection/{log_id}/validate", summary="验证反思应用结果")
 async def validate_reflection(
     log_id: str,
@@ -204,7 +197,6 @@ async def validate_reflection(
         logger.exception(f"验证反思日志失败: {e}")
         raise APIError.internal(f"验证反思日志失败: {str(e)}")
 
-
 @router.get("/reflection/stats", summary="获取反思日志统计")
 async def get_reflection_stats(
     agent_id: Optional[str] = None,
@@ -228,7 +220,6 @@ async def get_reflection_stats(
     except Exception as e:
         logger.exception(f"获取反思统计失败: {e}")
         raise APIError.internal(f"获取反思统计失败: {str(e)}")
-
 
 # ============================================================
 # Agent 级路由（兼容前端 /agents/{agent_id}/reflection 路径）
@@ -304,7 +295,6 @@ async def get_agent_reflection(
             data={"items": [], "total": 0, "stats": {"total": 0, "suggestions": 0, "status": "低"}},
             request_id=_get_request_id(req),
         )
-
 
 @router.get("/{agent_id}/reflection/stats", summary="获取 Agent 反思统计")
 async def get_agent_reflection_stats(

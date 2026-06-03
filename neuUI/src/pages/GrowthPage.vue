@@ -1,44 +1,44 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;&lt;ThunderboltOutlined :style="{color:'#f472b6'}" /&gt; 成长系统&lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;成长等级&lt;b &gt;{{ growthLevel }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;问题解决&lt;b &gt;{{ problemSolved }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;动机水平&lt;b &gt;{{ motivation }}&lt;/b&gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;canvas ref="c"&gt;&lt;/canvas&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;h4&gt;成长里程碑&lt;/h4&gt;
-      &lt;a-timeline&gt;
-        &lt;a-timeline-item v-for="m in ms" :key="m.id"&gt;
-          &lt;template #dot&gt;&lt;span :style="{background:m.color}" /&gt;&lt;/template&gt;
-          &lt;div&gt;
-            &lt;b&gt;{{ m.title }}&lt;/b&gt;
-            &lt;p&gt;{{ m.desc }}&lt;/p&gt;
-            &lt;span &gt;{{ m.date }}&lt;/span&gt;
-          &lt;/div&gt;
-        &lt;/a-timeline-item&gt;
-      &lt;/a-timeline&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 ><ThunderboltOutlined :style="{color:'#f472b6'}" /> 成长系统</h2>
+    </div>
+    <div >
+      <div >成长等级<b >{{ growthLevel }}</b></div>
+      <div >问题解决<b >{{ problemSolved }}</b></div>
+      <div >动机水平<b >{{ motivation }}</b></div>
+    </div>
+    <div >
+      <canvas ref="c"></canvas>
+    </div>
+    <div >
+      <h4>成长里程碑</h4>
+      <a-timeline>
+        <a-timeline-item v-for="m in ms" :key="m.id">
+          <template #dot><span :style="{background:m.color}" /></template>
+          <div>
+            <b>{{ m.title }}</b>
+            <p>{{ m.desc }}</p>
+            <span >{{ m.date }}</span>
+          </div>
+        </a-timeline-item>
+      </a-timeline>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, onMounted, nextTick, computed } from 'vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { ThunderboltOutlined } from '@ant-design/icons-vue'
-const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/growth', () =&gt; loadData())
+const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/growth', () => loadData())
 const growthLevel = ref('Lv.--')
 const problemSolved = ref('--')
 const motivation = ref('--')
 interface GrowthMilestone { id:number;title:string;desc:string;color:string;date:string }
-const chartData = ref&lt;number[]&gt;([20, 35, 45, 55, 70, 78, 82, 85])
-const ms = ref&lt;GrowthMilestone[]&gt;([])
-const c = ref&lt;HTMLCanvasElement&gt;()
+const chartData = ref<number[]>([20, 35, 45, 55, 70, 78, 82, 85])
+const ms = ref<GrowthMilestone[]>([])
+const c = ref<HTMLCanvasElement>()
 function draw() {
   const cv = c.value; if (!cv) return
   const ctx = cv.getContext('2d')!
@@ -56,7 +56,7 @@ function draw() {
   grad.addColorStop(1, 'rgba(244,114,182,0)')
   ctx.beginPath()
   const xs = pw / (data.length - 1)
-  data.forEach((v, i) =&gt; {
+  data.forEach((v, i) => {
     const x = pad.l + xs * i
     const y = pad.t + ph - (v / 100) * ph
     i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
@@ -66,13 +66,13 @@ function draw() {
   ctx.closePath()
   ctx.fillStyle = grad; ctx.fill()
   ctx.beginPath()
-  data.forEach((v, i) =&gt; {
+  data.forEach((v, i) => {
     const x = pad.l + xs * i
     const y = pad.t + ph - (v / 100) * ph
     i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
   })
   ctx.strokeStyle = '#f472b6'; ctx.lineWidth = 2; ctx.stroke()
-  data.forEach((v, i) =&gt; {
+  data.forEach((v, i) => {
     const x = pad.l + xs * i
     const y = pad.t + ph - (v / 100) * ph
     ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2)
@@ -80,7 +80,7 @@ function draw() {
   })
   ctx.fillStyle = 'rgba(255,255,255,0.3)'
   ctx.font = '10px sans-serif'; ctx.textAlign = 'center'
-  for (let i = 0; i &lt; data.length; i++) {
+  for (let i = 0; i < data.length; i++) {
     const x = pad.l + xs * i
     ctx.fillText(`Day${(i + 1) * 7}`, x, h - 8)
   }
@@ -89,13 +89,13 @@ const colors = ['#f472b6', '#a78bfa', '#60a5fa', '#34d399', '#fbbf24', '#ef4444'
 async function loadData() {
   try {
     const res = await request.get(`/growth/${agentId.value}`)
-    if (res.code === 0 &amp;&amp; res.data) {
+    if (res.code === 0 && res.data) {
       const d = res.data
       if (d.level) growthLevel.value = `Lv.${d.level}`
       if (d.problems_solved) problemSolved.value = String(d.problems_solved)
       if (d.motivation) motivation.value = d.motivation
-      if (d.level_history?.length) chartData.value = d.level_history.map((l: Record&lt;string,unknown&gt;) =&gt; ((l.value || l.score || l) as number))
-      if (d.milestones?.length) ms.value = d.milestones.map((m: Record&lt;string,unknown&gt;, i: number) =&gt; ({
+      if (d.level_history?.length) chartData.value = d.level_history.map((l: Record<string,unknown>) => ((l.value || l.score || l) as number))
+      if (d.milestones?.length) ms.value = d.milestones.map((m: Record<string,unknown>, i: number) => ({
         id: m.id || i + 1,
         title: m.title || m.name || '',
         desc: m.description || m.desc || '',
@@ -105,13 +105,13 @@ async function loadData() {
     }
   } catch { /* ignore */ }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await initAgent()
   loadData()
   await nextTick(); draw()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg{display:flex;flex-direction:column;gap:14px;}
 .hd{padding:16px 24px;border-radius:12px;}
 .t{font-size:1.2rem;color:#e2e8f0;margin:0;display:flex;align-items:center;gap:8px;}
@@ -126,5 +126,5 @@ onMounted(async () =&gt; {
 .ml p{color:rgba(255,255,255,0.4);font-size:0.82rem;margin:2px 0;}
 .md{color:rgba(255,255,255,0.2);font-size:0.72rem;}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;}
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

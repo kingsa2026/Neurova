@@ -1,42 +1,42 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;SmileOutlined :style="{ color: '#a78bfa' }" /&gt; 人格配置
-      &lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;h4&gt;OCEAN 五维度&lt;/h4&gt;
-        &lt;div v-for="d in dims" :key="d.name" &gt;
-          &lt;span &gt;{{ d.name }}&lt;/span&gt;
-          &lt;span &gt;{{ d.desc }}&lt;/span&gt;
-          &lt;div &gt;
-            &lt;div  :style="{ width: d.val + '%', background: d.color }" /&gt;
-            &lt;span&gt;{{ d.val }}%&lt;/span&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;h4&gt;MBTI 类型&lt;/h4&gt;
-        &lt;div &gt;
-          &lt;div  style="background: linear-gradient(135deg, #a78bfa, #6366f1)"&gt;
+<template>
+  <div >
+    <div >
+      <h2 >
+        <SmileOutlined :style="{ color: '#a78bfa' }" /> 人格配置
+      </h2>
+    </div>
+    <div >
+      <div >
+        <h4>OCEAN 五维度</h4>
+        <div v-for="d in dims" :key="d.name" >
+          <span >{{ d.name }}</span>
+          <span >{{ d.desc }}</span>
+          <div >
+            <div  :style="{ width: d.val + '%', background: d.color }" />
+            <span>{{ d.val }}%</span>
+          </div>
+        </div>
+      </div>
+      <div >
+        <h4>MBTI 类型</h4>
+        <div >
+          <div  style="background: linear-gradient(135deg, #a78bfa, #6366f1)">
             {{ mbti }}
-          &lt;/div&gt;
-          &lt;h3&gt;建筑师&lt;/h3&gt;
-          &lt;p&gt;富有战略思维，擅长系统规划和长期愿景&lt;/p&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;h5&gt;预设模板&lt;/h5&gt;
-          &lt;div &gt;
-            &lt;div v-for="p in presets" :key="p" &gt;{{ p }}&lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+          </div>
+          <h3>建筑师</h3>
+          <p>富有战略思维，擅长系统规划和长期愿景</p>
+        </div>
+        <div >
+          <h5>预设模板</h5>
+          <div >
+            <div v-for="p in presets" :key="p" >{{ p }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { request } from '@/api'
 import { SmileOutlined } from '@ant-design/icons-vue'
@@ -50,14 +50,14 @@ const dims = ref([
 ])
 const mbti = ref('--')
 const presets = ['专业顾问', '创意伙伴', '技术专家', '导师教练']
-const loadData = async () =&gt; {
+const loadData = async () => {
   try {
     const res = await request.get(`/agents/${agentId.value}/personality`)
-    if (res.code === 0 &amp;&amp; res.data) {
+    if (res.code === 0 && res.data) {
       const d = res.data
       if (d.ocean) {
         const keys = ['openness', 'conscientiousness', 'extraversion', 'agreeableness', 'neuroticism']
-        dims.value = dims.value.map((dd, i) =&gt; ({
+        dims.value = dims.value.map((dd, i) => ({
           ...dd,
           val: Math.round((d.ocean[keys[i]] || 0.5) * 100),
         }))
@@ -66,13 +66,13 @@ const loadData = async () =&gt; {
     }
   } catch { /* fallback to defaults */ }
 }
-const { agentId, initAgent } = useAgentPage('/agent/:agentId/personality', () =&gt; loadData())
-onMounted(async () =&gt; {
+const { agentId, initAgent } = useAgentPage('/agent/:agentId/personality', () => loadData())
+onMounted(async () => {
   await initAgent()
   loadData()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { padding: 16px 24px; border-radius: 12px; }
 .t { font-size: 1.2rem; color: #e2e8f0; margin: 0; display: flex; align-items: center; gap: 8px; }
@@ -94,5 +94,5 @@ onMounted(async () =&gt; {
 .preset { padding: 10px; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; color: rgba(255,255,255,0.5); font-size: 0.82rem; text-align: center; cursor: pointer; }
 .preset:hover { border-color: #a78bfa; color: #a78bfa; }
 @media (max-width: 768px) { .grid { grid-template-columns: 1fr } }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

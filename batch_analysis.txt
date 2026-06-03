@@ -1,0 +1,466 @@
+
+============================================================
+File: neurova/core/__pycache__/idle_tracker.cpython-315.pyc
+Size: 35613 bytes
+Names: ['__doc__', 'time', 'threading', 'typing', 'Dict', 'Optional', 'Callable', 'Any', 'List', 'dataclasses', 'dataclass', 'field', 'datetime', 'neurova.core.base_module', 'BaseModule', 'ModuleState', 'neurova.core.sleep_phase_config_manager', 'SleepPhaseConfigManager', 'neurova.cognitive_layers.memory_layer.sleep', 'SleepConsolidation', 'SleepPhaseThresholds', 'PhaseDuration', 'WakeCondition', 'IdleTimeTracker']
+Classes/Functions:
+  SleepPhaseThresholds (line 29)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'idle_to_light_sleep', 'idle_to_deep_sleep', 'idle_to_rem', 'idle_to_hibernate', '__annotate_func__', '__static_attributes__', '__classdictcell__']
+    constants: ["'SleepPhaseThresholds'", "'睡眠阶段阈值配置'", '3600', '7200', '10800', '43200']
+    -> __annotate__(line 29) args=('format',) names=['int']
+  PhaseDuration (line 38)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'light_sleep', 'deep_sleep', 'rem', 'hibernate', '__annotate_func__', '__static_attributes__', '__classdictcell__']
+    constants: ["'PhaseDuration'", "'睡眠阶段持续时间配置'", '1800', '3600', '7200', '14400']
+    -> __annotate__(line 38) args=('format',) names=['int']
+  WakeCondition (line 47)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'light_sleep', 'deep_sleep', 'rem', 'hibernate', '__annotate_func__', '__static_attributes__', '__classdictcell__']
+    constants: ["'WakeCondition'", "'唤醒条件配置'", "'either'", "'temperature'", "'time'"]
+    -> __annotate__(line 47) args=('format',) names=['str']
+  IdleTimeTracker (line 56)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'MODULE_ID', 'MODULE_NAME', 'MODULE_VERSION', 'PHASE_ORDER', 'PHASE_DISPLAY_NAMES', '__init__', 'on_initialize', 'on_start', 'on_stop', '_start_monitoring', '_stop_monitoring', '_monitor_phase', 'set_monitor_interval', 'adjust_parameters_based_on_sleep_quality', '_on_phase_changed']
+    constants: ["'IdleTimeTracker'", "'\\n空闲时间追踪器\\n\\n负责追踪用户空闲时长，并根据配置的阈值判断应该进入的睡眠阶段。\\n支持三种睡眠触发模式：\\n- temperature: 仅基于温度判断（传统模式）\\n- time: 仅基", "'idle_tracker'", "'Idle Time Tracker'", "'1.0.0'", "'active'", "'light_sleep'", "'deep_sleep'", "'rem'", "'hibernate'"]
+    -> __annotate__(line 86) args=('format',) names=['Dict', 'str', 'int', 'SleepPhaseConfigManager', 'SleepConsolidation']
+    -> __init__(line 86) args=('self', 'event_bus', 'state_manager', 'log_manager', 'error_handler') names=['super', '__init__', 'MODULE_ID', 'MODULE_NAME', 'MODULE_VERSION', 'time', '_last_activity_time', '_current_idle_time', '_current_phase', '_phase_start_time']
+    -> __annotate__(line 159) args=('format',) names=[]
+    -> on_initialize(line 159) args=('self',) names=['log_info', '_phase_config_manager', 'on_initialize', '_sleep_consolidation', 'set_state_value', '_sleep_mode', '_current_phase', '_idle_thresholds', '_phase_durations', '_wake_conditions']
+    -> __annotate__(line 173) args=('format',) names=[]
+    -> on_start(line 173) args=('self',) names=['log_info', '_phase_config_manager', 'on_start', '_sleep_consolidation', '_start_monitoring', 'set_state_value']
+    -> __annotate__(line 184) args=('format',) names=[]
+    -> on_stop(line 184) args=('self',) names=['log_info', '_stop_monitoring', '_phase_config_manager', 'on_stop', '_sleep_consolidation', 'set_state_value']
+    -> __annotate__(line 197) args=('format',) names=[]
+    -> _start_monitoring(line 197) args=('self',) names=['_monitor_running', 'threading', 'Thread', '_monitor_phase', '_monitor_thread', 'start', 'log_info', '_monitor_interval']
+    -> __annotate__(line 211) args=('format',) names=[]
+    -> _stop_monitoring(line 211) args=('self',) names=['_monitor_running', '_monitor_thread', 'is_alive', 'join', 'log_warning', 'log_info']
+    -> __annotate__(line 227) args=('format',) names=[]
+    -> _monitor_phase(line 227) args=('self',) names=['log_info', '_monitor_running', 'check_and_update_phase', 'range', '_monitor_interval', 'time', 'sleep', 'Exception', 'log_error']
+    -> __annotate__(line 250) args=('format',) names=['int']
+    -> set_monitor_interval(line 250) args=('self', 'interval') names=['log_warning', '_monitor_interval', 'log_info']
+    -> __annotate__(line 259) args=('format',) names=['Dict', 'str', 'Any']
+    -> adjust_parameters_based_on_sleep_quality(line 259) args=('self',) names=['_storage', 'log_debug', 'neurova.cognitive_layers.memory_layer.storage', 'MemoryStorage', 'isinstance', 'get_dream_report_stats', 'get', 'log_info', '_monitor_interval', 'min']
+    -> __annotate__(line 379) args=('format',) names=['str', 'Dict']
+    -> _on_phase_changed(line 379) args=('self', 'old_phase', 'new_phase', 'event_data') names=['_sleep_consolidation', 'log_info', '_trigger_consolidation']
+    -> __annotate__(line 384) args=('format',) names=['str', 'Optional', 'Dict']
+    -> _trigger_consolidation(line 384) args=('self', 'phase') names=['_sleep_consolidation', '_memory_manager', 'log_warning', 'get_all_memories', 'run_sleep_cycle', '_last_consolidation_result', 'log_info', '_callbacks', 'get', 'Exception']
+    -> __annotate__(line 414) args=('format',) names=['Optional', 'Dict']
+    -> get_last_consolidation_result(line 414) args=('self',) names=['_last_consolidation_result']
+    -> __annotate__(line 417) args=('format',) names=['SleepConsolidation']
+    -> set_sleep_consolidation(line 417) args=('self', 'consolidation') names=['_sleep_consolidation']
+    -> __annotate__(line 420) args=('format',) names=[]
+    -> set_memory_manager(line 420) args=('self', 'memory_manager') names=['_memory_manager']
+    -> __annotate__(line 423) args=('format',) names=['SleepPhaseConfigManager']
+    -> get_phase_config_manager(line 423) args=('self',) names=['_phase_config_manager']
+    -> __annotate__(line 426) args=('format',) names=[]
+    -> record_activity(line 426) args=('self',) names=['_current_phase', 'time', '_last_activity_time', '_current_idle_time', '_phase_start_time', '_emit_phase_changed', 'log_info', 'set_state_value']
+    -> __annotate__(line 440) args=('format',) names=['int']
+    -> get_current_idle_time(line 440) args=('self',) names=['int', 'time', '_last_activity_time', '_current_idle_time']
+    -> __annotate__(line 447) args=('format',) names=['str']
+    -> get_current_phase(line 447) args=('self',) names=['_current_phase']
+    -> __annotate__(line 450) args=('format',) names=['str']
+    -> get_phase_display_name(line 450) args=('self', 'phase') names=['_current_phase', 'PHASE_DISPLAY_NAMES', 'get']
+    -> __annotate__(line 455) args=('format',) names=['str', 'float', 'bool']
+    -> should_enter_phase(line 455) args=('self', 'target_phase', 'current_temperature') names=['get_current_idle_time', '_idle_thresholds', 'get', 'float', '_sleep_mode', '_get_temperature_threshold']
+    -> __annotate__(line 475) args=('format',) names=['str', 'float']
+    -> _get_temperature_threshold(line 475) args=('self', 'phase') names=['get']
+    -> __annotate__(line 484) args=('format',) names=['float', 'Optional', 'str']
+    -> get_next_phase(line 484) args=('self', 'current_temperature') names=['PHASE_ORDER', 'index', '_current_phase', 'get_current_idle_time', 'range', 'len', '_idle_thresholds', 'get', 'float', '_sleep_mode']
+    -> __annotate__(line 511) args=('format',) names=['float', 'Optional', 'str']
+    -> check_and_update_phase(line 511) args=('self', 'current_temperature') names=['get_next_phase', '_current_phase', '_transition_to_phase']
+    -> __annotate__(line 521) args=('format',) names=['str']
+    -> _transition_to_phase(line 521) args=('self', 'new_phase') names=['_current_phase', 'time', '_phase_start_time', 'set_state_value', '_emit_phase_changed', 'log_info']
+    -> __annotate__(line 532) args=('format',) names=['str']
+    -> _emit_phase_changed(line 532) args=('self', 'old_phase', 'new_phase') names=['datetime', 'now', 'isoformat', '_callbacks', 'get', 'Exception', 'log_error', 'emit_event']
+    -> __annotate__(line 547) args=('format',) names=['str', 'int', 'bool']
+    -> enter_manual_phase(line 547) args=('self', 'target_phase', 'duration') names=['PHASE_ORDER', 'log_error', 'record_activity', '_current_phase', '_transition_to_phase', '_phase_durations', 'datetime', 'now', 'isoformat', 'emit_event']
+    -> __annotate__(line 573) args=('format',) names=['str', 'Callable']
+    -> register_callback(line 573) args=('self', 'event_type', 'callback') names=['_callbacks', 'append']
+    -> __annotate__(line 579) args=('format',) names=['float', 'Dict', 'str', 'Any']
+    -> get_status_info(line 579) args=('self', 'current_temperature') names=['get_current_idle_time', 'get_next_phase', '_current_phase', 'get_phase_display_name', '_phase_start_time', '_last_activity_time', '_sleep_mode', '_idle_thresholds', '_phase_durations', '_wake_conditions']
+    -> __annotate__(line 599) args=('format',) names=['str', 'int']
+    -> _calculate_time_until_next(line 599) args=('self', 'next_phase') names=['get_current_idle_time', '_idle_thresholds', 'get', 'float', 'max', 'int']
+    -> __annotate__(line 605) args=('format',) names=['str', 'Dict', 'int']
+    -> update_config(line 605) args=('self', 'sleep_mode', 'idle_thresholds', 'phase_durations', 'wake_conditions') names=['_sleep_mode', 'set_state_value', '_idle_thresholds', 'update', '_phase_durations', '_wake_conditions', 'log_info']
+    -> __annotate__(line 630) args=('format',) names=['Dict', 'str', 'Any']
+    -> get_config(line 630) args=('self',) names=['_sleep_mode', '_idle_thresholds', 'copy', '_phase_durations', '_wake_conditions']
+    -> __annotate__(line 638) args=('format',) names=[]
+    -> reset(line 638) args=('self',) names=['record_activity', '_current_phase', 'time', '_phase_start_time', 'set_state_value', 'log_info']
+
+============================================================
+File: neurova/core/__pycache__/sleep_config_manager.cpython-315.pyc
+Size: 25653 bytes
+Names: ['__doc__', 'json', 'os', 'typing', 'Dict', 'Any', 'Optional', 'pathlib', 'Path', 'dataclasses', 'dataclass', 'asdict', 'datetime', 'neurova.core.base_module', 'BaseModule', 'IdleThresholds', 'PhaseDurations', 'WakeConditions', 'TemperatureThresholds', 'PhaseDaysConfig', 'SleepConfigData', 'SleepConfigManager']
+Classes/Functions:
+  IdleThresholds (line 27)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'to_light_sleep', 'to_deep_sleep', 'to_rem', 'to_hibernate', '__annotate_func__', '__static_attributes__', '__classdictcell__']
+    constants: ["'IdleThresholds'", "'空闲时间阈值配置（秒）'", '3600', '7200', '10800', '43200']
+    -> __annotate__(line 27) args=('format',) names=['int']
+  PhaseDurations (line 36)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'light_sleep', 'deep_sleep', 'rem', 'hibernate', '__annotate_func__', '__static_attributes__', '__classdictcell__']
+    constants: ["'PhaseDurations'", "'睡眠阶段持续时间配置（秒）'", '1800', '3600', '7200', '14400']
+    -> __annotate__(line 36) args=('format',) names=['int']
+  WakeConditions (line 45)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'light_sleep', 'deep_sleep', 'rem', 'hibernate', '__annotate_func__', '__static_attributes__', '__classdictcell__']
+    constants: ["'WakeConditions'", "'唤醒条件配置'", "'either'", "'temperature'", "'time'"]
+    -> __annotate__(line 45) args=('format',) names=['str']
+  TemperatureThresholds (line 54)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'sleep_threshold', 'wake_threshold', '__annotate_func__', '__static_attributes__', '__classdictcell__']
+    constants: ["'TemperatureThresholds'", "'温度阈值配置'", '30.0', '70.0']
+    -> __annotate__(line 54) args=('format',) names=['float']
+  PhaseDaysConfig (line 61)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'light_sleep_days_range', 'rem_days_range', 'deep_sleep_days_range', 'hibernate_days_range', '__annotate_func__', '__static_attributes__', '__classdictcell__']
+    constants: ["'PhaseDaysConfig'", "'各睡眠阶段的天数配置（前端可配置）'"]
+    -> __annotate__(line 61) args=('format',) names=['int']
+  SleepConfigData (line 70)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'auto_sleep', 'sleep_mode', 'idle_thresholds', 'phase_durations', 'wake_conditions', 'temperature_thresholds', 'phase_days_config', 'memory_merge_threshold', 'conflict_resolution', 'auto_cleanup_enabled', 'max_dream_logs', 'dream_analysis_enabled', 'memory_consolidation_enabled', 'sleep_schedule', '__post_init__']
+    constants: ["'SleepConfigData'", "'睡眠配置数据类'", 'True', "'temperature'", '0.75', "'latest'"]
+    -> __post_init__(line 90) args=('self',) names=['idle_thresholds', 'IdleThresholds', 'phase_durations', 'PhaseDurations', 'wake_conditions', 'WakeConditions', 'temperature_thresholds', 'TemperatureThresholds', 'phase_days_config', 'PhaseDaysConfig']
+    -> __annotate__(line 102) args=('format',) names=['Dict', 'str', 'Any']
+    -> to_dict(line 102) args=('self',) names=['auto_sleep', 'sleep_mode', 'asdict', 'idle_thresholds', 'phase_durations', 'wake_conditions', 'temperature_thresholds', 'phase_days_config', 'memory_merge_threshold', 'conflict_resolution']
+    -> __annotate__(line 122) args=('format',) names=['Dict', 'str', 'Any']
+    -> from_dict(line 121) args=('cls', 'data') names=['get', 'IdleThresholds', 'PhaseDurations', 'WakeConditions', 'TemperatureThresholds', 'PhaseDaysConfig']
+    -> __annotate__(line 70) args=('format',) names=['bool', 'str', 'IdleThresholds', 'PhaseDurations', 'WakeConditions', 'TemperatureThresholds', 'PhaseDaysConfig', 'float', 'int', 'Optional']
+  SleepConfigManager (line 142)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'MODULE_ID', 'MODULE_NAME', 'MODULE_VERSION', 'DEFAULT_CONFIG', '__init__', 'on_initialize', 'on_start', 'on_stop', 'load_config', 'save_config', 'get_config', 'get_config_dict', 'update_config', '_update_state', 'validate_config']
+    constants: ["'SleepConfigManager'", "'\\n睡眠配置管理器\\n\\n负责加载、保存和管理睡眠模块的所有配置。\\n支持配置的持久化和验证。\\n'", "'sleep_config_manager'", "'Sleep Config Manager'", "'1.0.0'", "'auto_sleep'", 'True', "'sleep_mode'", "'temperature'", "'idle_thresholds'"]
+    -> __annotate__(line 187) args=('format',) names=['str']
+    -> __init__(line 187) args=('self', 'config_path', 'event_bus', 'state_manager', 'log_manager') names=['super', '__init__', 'MODULE_ID', 'MODULE_NAME', 'MODULE_VERSION', 'Path', '__file__', 'parent', '_config_path', '_config']
+    -> __annotate__(line 213) args=('format',) names=[]
+    -> on_initialize(line 213) args=('self',) names=['log_info', 'load_config']
+    -> __annotate__(line 219) args=('format',) names=[]
+    -> on_start(line 219) args=('self',) names=['log_info']
+    -> __annotate__(line 223) args=('format',) names=[]
+    -> on_stop(line 223) args=('self',) names=['log_info']
+    -> __annotate__(line 227) args=('format',) names=['SleepConfigData']
+    -> load_config(line 227) args=('self',) names=['_config_path', 'exists', 'open', 'json', 'load', 'SleepConfigData', 'from_dict', '_config', 'log_info', 'DEFAULT_CONFIG']
+    -> __annotate__(line 253) args=('format',) names=['bool']
+    -> save_config(line 253) args=('self',) names=['_config_path', 'parent', 'mkdir', 'open', 'json', 'dump', '_config', 'to_dict', 'log_info', 'emit_event']
+    -> __annotate__(line 279) args=('format',) names=['SleepConfigData']
+    -> get_config(line 279) args=('self',) names=['_config', 'SleepConfigData', 'from_dict', 'DEFAULT_CONFIG']
+    -> __annotate__(line 290) args=('format',) names=['Dict', 'str', 'Any']
+    -> get_config_dict(line 290) args=('self',) names=['get_config', 'to_dict']
+    -> __annotate__(line 299) args=('format',) names=['Dict', 'str', 'Any', 'bool']
+    -> update_config(line 299) args=('self', 'updates') names=['_config', 'auto_sleep', 'ValueError', 'sleep_mode', 'items', 'hasattr', 'idle_thresholds', 'setattr', 'int', 'phase_durations']
+    -> __annotate__(line 362) args=('format',) names=[]
+    -> _update_state(line 362) args=('self',) names=['_config', 'set_state_value', 'auto_sleep', 'sleep_mode', 'asdict', 'idle_thresholds', 'phase_durations', 'wake_conditions', 'temperature_thresholds']
+    -> __annotate__(line 372) args=('format',) names=['Dict', 'str', 'Any', 'tuple', 'bool', 'Optional']
+    -> validate_config(line 372) args=('self', 'config_dict') names=['items', 'isinstance', 'int', 'float']
+    -> __annotate__(line 408) args=('format',) names=['Dict', 'str', 'int']
+    -> get_idle_thresholds_for_tracker(line 408) args=('self',) names=['get_config', 'idle_thresholds', 'to_light_sleep', 'to_deep_sleep', 'to_rem', 'to_hibernate']
+    -> __annotate__(line 423) args=('format',) names=['Dict', 'str', 'int']
+    -> get_phase_durations_for_tracker(line 423) args=('self',) names=['get_config', 'phase_durations', 'light_sleep', 'deep_sleep', 'rem', 'hibernate']
+    -> __annotate__(line 438) args=('format',) names=['Dict', 'str']
+    -> get_wake_conditions_for_tracker(line 438) args=('self',) names=['get_config', 'wake_conditions', 'light_sleep', 'deep_sleep', 'rem', 'hibernate']
+    -> __annotate__(line 453) args=('format',) names=['bool']
+    -> reset_to_default(line 453) args=('self',) names=['SleepConfigData', 'from_dict', 'DEFAULT_CONFIG', '_config', 'save_config', '_update_state', 'log_info', 'Exception', 'log_error']
+
+============================================================
+File: neurova/core/__pycache__/trace_models.cpython-315.pyc
+Size: 22321 bytes
+Names: ['__doc__', 'dataclasses', 'dataclass', 'field', 'datetime', 'timezone', 'enum', 'Enum', 'typing', 'Dict', 'List', 'Any', 'Optional', 'Union', 'uuid', 'str', 'TrajectoryEventType', 'TrajectoryEvent', 'TrajectorySpan', 'Trajectory', '__all__']
+Classes/Functions:
+  TrajectoryEventType (line 14)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'SESSION_START', 'SESSION_END', 'USER_INPUT', 'ROUTE_START', 'ROUTE_END', 'ROUTE_RESULT', 'MEMORY_RETRIEVAL_START', 'MEMORY_RETRIEVAL_END', 'MEMORY_RETRIEVAL_RESULT', 'MEMORY_STORAGE_START', 'MEMORY_STORAGE_END', 'CONTEXT_BUILD_START', 'CONTEXT_BUILD_END', 'CONTEXT_COMPRESS', 'LLM_CALL_START']
+    constants: ["'TrajectoryEventType'", "'轨迹事件类型'", "'session_start'", "'session_end'", "'user_input'", "'route_start'", "'route_end'", "'route_result'", "'memory_retrieval_start'", "'memory_retrieval_end'"]
+  TrajectoryEvent (line 69)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'timestamp', 'session_id', 'agent_id', 'user_id', 'trace_id', 'span_id', 'parent_span_id', 'field', 'dict', 'data', 'duration_ms', 'cpu_usage', 'memory_usage', 'status', 'error_message']
+    constants: ["'TrajectoryEvent'", "'轨迹事件\\n\\n记录 Agent 执行过程中的一个事件。\\n'", "''", '0.0', "'success'"]
+    -> __post_init__(line 97) args=('self',) names=['timestamp', 'datetime', 'now', 'timezone', 'utc', 'isoformat', 'span_id', 'str', 'uuid', 'uuid4']
+    -> __annotate__(line 105) args=('format',) names=['Dict', 'str', 'Any']
+    -> to_dict(line 105) args=('self',) names=['event_type', 'value', 'timestamp', 'session_id', 'agent_id', 'user_id', 'trace_id', 'span_id', 'parent_span_id', 'data']
+    -> __annotate__(line 123) args=('format',) names=['Dict', 'str', 'Any']
+    -> from_dict(line 122) args=('cls', 'data') names=['TrajectoryEventType', 'get']
+    -> __annotate__(line 69) args=('format',) names=['TrajectoryEventType', 'str', 'Dict', 'Any', 'float', 'Optional']
+  TrajectorySpan (line 141)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'span_id', 'trace_id', 'parent_span_id', 'session_id', 'agent_id', 'user_id', 'operation_name', 'operation_type', 'start_time', 'end_time', 'duration_ms', 'status', 'error_message', 'field', 'dict']
+    constants: ["'TrajectorySpan'", "'轨迹 Span\\n\\n表示一个有开始和结束的事件范围（类似 OpenTelemetry Span）。\\n用于追踪一个完整操作（如 LLM 调用、工具调用）。\\n'", "''", '0.0', "'running'"]
+    -> __post_init__(line 175) args=('self',) names=['span_id', 'str', 'uuid', 'uuid4', 'start_time', 'datetime', 'now', 'timezone', 'utc', 'isoformat']
+    -> __annotate__(line 183) args=('format',) names=['str', 'Optional']
+    -> end(line 183) args=('self', 'status', 'error_message') names=['datetime', 'now', 'timezone', 'utc', 'isoformat', 'end_time', 'fromisoformat', 'start_time', 'replace', 'total_seconds']
+    -> __annotate__(line 198) args=('format',) names=['TrajectoryEvent']
+    -> add_event(line 198) args=('self', 'event') names=['trace_id', 'span_id', 'events', 'append']
+    -> __annotate__(line 204) args=('format',) names=['Dict', 'str', 'Any']
+    -> to_dict(line 204) args=('self',) names=['span_id', 'trace_id', 'parent_span_id', 'session_id', 'agent_id', 'user_id', 'operation_name', 'operation_type', 'start_time', 'end_time']
+    -> __annotate__(line 226) args=('format',) names=['Dict', 'str', 'Any']
+    -> from_dict(line 225) args=('cls', 'data') names=['get', 'events', 'append', 'TrajectoryEvent', 'from_dict', 'child_spans']
+    -> __annotate__(line 141) args=('format',) names=['str', 'float', 'Optional', 'Dict', 'List', 'TrajectoryEvent']
+  Trajectory (line 254)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'trace_id', 'session_id', 'agent_id', 'user_id', 'start_time', 'end_time', 'total_duration_ms', 'root_span', 'field', 'dict', 'spans', 'metadata', 'stats', '__post_init__', 'add_span']
+    constants: ["'Trajectory'", "'完整轨迹\\n\\n包含一个 Session 或 Request 的完整执行轨迹。\\n'", "''", '0.0']
+    -> __post_init__(line 282) args=('self',) names=['trace_id', 'str', 'uuid', 'uuid4', 'start_time', 'datetime', 'now', 'timezone', 'utc', 'isoformat']
+    -> __annotate__(line 290) args=('format',) names=['TrajectorySpan']
+    -> add_span(line 290) args=('self', 'span') names=['trace_id', 'spans', 'span_id', 'parent_span_id', 'child_spans', 'append']
+    -> __annotate__(line 301) args=('format',) names=['str', 'Optional', 'TrajectorySpan']
+    -> get_span(line 301) args=('self', 'span_id') names=['spans', 'get']
+    -> __annotate__(line 305) args=('format',) names=['str', 'List', 'TrajectorySpan']
+    -> get_child_spans(line 305) args=('self', 'parent_span_id') names=['spans', 'get', 'child_spans']
+    -> end(line 313) args=('self',) names=['datetime', 'now', 'timezone', 'utc', 'isoformat', 'end_time', 'fromisoformat', 'start_time', 'replace', 'total_seconds']
+    -> _compute_stats(line 328) args=('self',) names=['len', 'spans', 'values', 'operation_name', 'lower', 'tags', 'int', 'status', 'events', 'stats']
+    -> __annotate__(line 363) args=('format',) names=['Dict', 'str', 'Any']
+    -> to_dict(line 363) args=('self',) names=['trace_id', 'session_id', 'agent_id', 'start_time', 'end_time', 'total_duration_ms', 'root_span', 'span_id', 'spans', 'items']
+    -> __annotate__(line 379) args=('format',) names=['Dict', 'str', 'Any']
+    -> from_dict(line 378) args=('cls', 'data') names=['get', 'items', 'TrajectorySpan', 'from_dict', 'spans', 'root_span']
+    -> __annotate__(line 403) args=('format',) names=['str']
+    -> to_json(line 403) args=('self',) names=['json', 'dumps', 'to_dict']
+    -> __annotate__(line 409) args=('format',) names=['str']
+    -> from_json(line 408) args=('cls', 'json_str') names=['json', 'loads', 'from_dict']
+    -> __annotate__(line 254) args=('format',) names=['str', 'float', 'Optional', 'TrajectorySpan', 'Dict', 'Any']
+
+============================================================
+File: neurova/core/__pycache__/trace_recorder.cpython-315.pyc
+Size: 33828 bytes
+Names: ['__doc__', 'json', 'logging', 'os', 'datetime', 'timezone', 'pathlib', 'Path', 'typing', 'Dict', 'List', 'Any', 'Optional', 'collections', 'defaultdict', 'neurova.core.trace_models', 'Trajectory', 'TrajectorySpan', 'TrajectoryEvent', 'TrajectoryEventType', 'getLogger', '__name__', 'logger', 'TrajectoryRecorder', 'get_trajectory_recorder', '__all__']
+Classes/Functions:
+  TrajectoryRecorder (line 26)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', '_instance', '_initialized', '__new__', '__init__', '_load_saved_traces_index', '_save_traces_index', 'start_trace', 'end_trace', 'start_span', 'end_span', 'record_event', 'record_llm_call', 'record_tool_call', 'save_trace', 'load_trace']
+    constants: ["'TrajectoryRecorder'", "'轨迹记录器（单例模式）\\n\\n记录 Agent 执行过程中的所有关键事件，支持保存和回放。\\n'", 'False']
+    -> __new__(line 35) args=('cls',) names=['_instance', 'super', '__new__']
+    -> __init__(line 40) args=('self',) names=['_initialized', '_active_traces', '_active_spans', 'Path', '_storage_dir', 'mkdir', '_enabled', '_auto_save', '_max_traces_in_memory', '_saved_traces']
+    -> _load_saved_traces_index(line 66) args=('self',) names=['_storage_dir', 'exists', 'open', 'json', 'load', '_saved_traces', 'logger', 'info', 'len', 'Exception']
+    -> _save_traces_index(line 78) args=('self',) names=['_storage_dir', 'open', 'json', 'dump', '_saved_traces', 'Exception', 'logger', 'error']
+    -> __annotate__(line 91) args=('format',) names=['str', 'Optional', 'Dict', 'Any']
+    -> start_trace(line 91) args=('self', 'session_id', 'agent_id', 'user_id', 'metadata') names=['_enabled', 'Trajectory', 'hasattr', '_active_traces_by_user', 'trace_id', '_active_traces', 'TrajectorySpan', 'root_span', 'add_span', '_active_spans']
+    -> __annotate__(line 147) args=('format',) names=['str']
+    -> end_trace(line 147) args=('self', 'trace_id') names=['_active_traces', 'logger', 'warning', 'end', 'spans', 'values', 'status', 'info', 'total_duration_ms', '_auto_save']
+    -> __annotate__(line 201) args=('format',) names=['str', 'Optional', 'Dict']
+    -> start_span(line 201) args=('self', 'trace_id', 'operation_name', 'operation_type', 'parent_span_id') names=['_enabled', '_active_traces', 'TrajectorySpan', 'session_id', 'agent_id', 'user_id', 'add_span', '_active_spans', 'span_id', 'logger']
+    -> __annotate__(line 244) args=('format',) names=['str', 'Optional']
+    -> end_span(line 244) args=('self', 'span_id', 'status', 'error_message') names=['_active_spans', 'end', 'logger', 'debug']
+    -> __annotate__(line 269) args=('format',) names=['str', 'TrajectoryEventType', 'Optional', 'Dict', 'Any']
+    -> record_event(line 269) args=('self', 'trace_id', 'event_type', 'data', 'span_id') names=['_enabled', '_active_traces', 'reversed', 'list', 'spans', 'values', 'status', 'span_id', 'TrajectoryEvent', 'session_id']
+    -> __annotate__(line 322) args=('format',) names=['str', 'int', 'float', 'Optional']
+    -> record_llm_call(line 322) args=('self', 'trace_id', 'model_name', 'input_tokens', 'output_tokens') names=['record_event', 'TrajectoryEventType', 'LLM_CALL_END']
+    -> __annotate__(line 353) args=('format',) names=['str', 'Dict', 'Any', 'float', 'bool', 'Optional']
+    -> record_tool_call(line 353) args=('self', 'trace_id', 'tool_name', 'tool_source', 'parameters') names=['record_event', 'TrajectoryEventType', 'TOOL_CALL_END', 'TOOL_CALL_ERROR']
+    -> __annotate__(line 393) args=('format',) names=['str', 'Optional']
+    -> save_trace(line 393) args=('self', 'trace_id', 'file_path') names=['_active_traces', 'logger', 'error', 'user_id', 'agent_id', '_storage_dir', 'mkdir', 'session_id', 'trace_id', 'str']
+    -> __annotate__(line 444) args=('format',) names=['str', 'Optional', 'Trajectory']
+    -> load_trace(line 444) args=('self', 'trace_id', 'user_id') names=['_active_traces', 'user_id', 'logger', 'warning', '_storage_dir', 'exists', 'iterdir', 'is_dir', 'glob', 'open']
+    -> __annotate__(line 509) args=('format',) names=['Optional', 'str', 'int', 'List', 'Dict', 'Any']
+    -> list_traces(line 509) args=('self', 'user_id', 'agent_id', 'session_id', 'limit') names=['_storage_dir', 'exists', 'iterdir', 'is_dir', 'glob', 'open', 'json', 'load', 'Trajectory', 'from_dict']
+    -> __annotate__(line 594) args=('format',) names=['str', 'Optional', 'bool']
+    -> delete_trace(line 594) args=('self', 'trace_id', 'user_id') names=['_active_traces', 'user_id', 'logger', 'warning', 'hasattr', 'agent_id', 'session_id', '_active_traces_by_user', '_saved_traces', 'remove']
+    -> __annotate__(line 684) args=('format',) names=['str', 'float', 'Optional', 'callable']
+    -> replay_trace(line 684) args=('self', 'trace_id', 'speed', 'callback') names=['load_trace', 'logger', 'error', 'info', 'spans', 'values', 'events', 'append', 'timestamp', 'sort']
+    -> __annotate__(line 750) args=('format',) names=['bool']
+    -> set_enabled(line 750) args=('self', 'enabled') names=['_enabled', 'logger', 'info']
+    -> __annotate__(line 755) args=('format',) names=['bool']
+    -> set_auto_save(line 755) args=('self', 'auto_save') names=['_auto_save']
+    -> __annotate__(line 759) args=('format',) names=['str']
+    -> set_storage_dir(line 759) args=('self', 'directory') names=['Path', '_storage_dir', 'mkdir', 'logger', 'info']
+    -> __annotate__(line 765) args=('format',) names=['Dict', 'str', 'Any']
+    -> get_status(line 765) args=('self',) names=['_enabled', '_auto_save', 'str', '_storage_dir', 'len', '_active_traces', '_active_spans', '_saved_traces']
+  __annotate__ (line 781)
+    args: ('format',)
+    names: ['TrajectoryRecorder']
+    constants: ['2', "'return'"]
+  get_trajectory_recorder (line 781)
+    args: ()
+    names: ['TrajectoryRecorder']
+    constants: ["'获取 TrajectoryRecorder 单例'"]
+
+============================================================
+File: neurova/skills/__pycache__/agent_skill_manager.cpython-315.pyc
+Size: 9543 bytes
+Names: ['__doc__', '__future__', 'annotations', 'logging', 'typing', 'Any', 'Dict', 'List', 'Optional', 'neurova.skills.task_decomposer', 'TaskDecomposer', 'TaskDecompositionResult', 'neurova.skills.skill_need_analyzer', 'SkillNeedAnalyzer', 'SkillAcquisitionResult', 'neurova.skills.market_searcher', 'SkillMarketSearcher', 'SearchResult', 'neurova.skills.market_importer', 'SkillMarketImporter', 'neurova.skills.registry', 'SkillRegistry', 'getLogger', '__name__', 'logger', 'AgentSkillManager']
+Classes/Functions:
+  AgentSkillManager (line 22)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', '__init__', 'analyze_task', 'suggest_skills_for_task', 'search_skill_in_markets', 'acquire_skill', 'get_skill_status', '__static_attributes__']
+    constants: ["'AgentSkillManager'", "'\\nAgent 技能管理器\\n\\n为 Agent 提供任务拆解、技能需求分析和主动获取能力。\\n\\nAttributes:\\n    agent_id: Agent ID\\n    decompos"]
+    -> __annotate__(line 38) args=('format',) names=[]
+    -> __init__(line 38) args=('self', 'agent_id', 'skill_registry', 'auto_acquire') names=['agent_id', 'skill_registry', 'auto_acquire', 'TaskDecomposer', 'decomposer', 'SkillMarketSearcher', 'searcher', 'SkillMarketImporter', 'importer', 'SkillNeedAnalyzer']
+    -> __annotate__(line 71) args=('format',) names=[]
+    -> analyze_task(line 71) args=('self', 'task', 'context') names=['logger', 'info', 'agent_id', 'analyzer', 'analyze_and_acquire', 'len']
+    -> __annotate__(line 98) args=('format',) names=[]
+    -> suggest_skills_for_task(line 98) args=('self', 'task', 'context') names=['logger', 'info', 'agent_id', 'analyzer', 'suggest_skills', 'len']
+    -> __annotate__(line 121) args=('format',) names=[]
+    -> search_skill_in_markets(line 121) args=('self', 'skill_name', 'markets', 'limit_per_market') names=['logger', 'info', 'agent_id', 'searcher', 'search_all_markets', 'len']
+    -> __annotate__(line 150) args=('format',) names=[]
+    -> acquire_skill(line 150) args=('self', 'skill_name', 'market') names=['logger', 'info', 'agent_id', 'searcher', 'search_market', 'search_all_markets', 'warning', 'SkillAcquisitionResult', 'importer', 'import_from_market']
+    -> __annotate__(line 223) args=('format',) names=[]
+    -> get_skill_status(line 223) args=('self',) names=['skill_registry', 'list_skills', 'name', 'agent_id', 'auto_acquire', 'len', 'searcher', 'list_markets']
+
+============================================================
+File: neurova/llm/__pycache__/multi_model_client.cpython-315.pyc
+Size: 25734 bytes
+Names: ['__conditional_annotations__', '__doc__', 'logging', 'threading', 'time', 'typing', 'Dict', 'List', 'Optional', 'Any', 'Callable', 'neurova.llm_client', 'LLMClient', 'LLMConfig', 'neurova.llm.provider_manager', 'LLMProviderManager', 'get_provider_manager', 'ProviderConfig', 'LoadBalancingStrategy', 'getLogger', '__name__', 'logger', 'ModelClient', 'MultiModelLLMClient', '_multi_model_client', 'get_multi_model_client', '__annotate__']
+Classes/Functions:
+  ModelClient (line 26)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', '__init__', 'property', 'success_rate', 'increment_request', '__static_attributes__', '__classdictcell__']
+    constants: ["'ModelClient'", "'单个模型的客户端封装'"]
+    -> __annotate__(line 29) args=('format',) names=['LLMClient', 'ProviderConfig', 'str']
+    -> __init__(line 29) args=('self', 'client', 'provider', 'model') names=['client', 'provider', 'model', 'request_count', 'error_count', 'last_used']
+    -> __annotate__(line 38) args=('format',) names=['float']
+    -> success_rate(line 37) args=('self',) names=['request_count', 'error_count']
+    -> __annotate__(line 45) args=('format',) names=['bool']
+    -> increment_request(line 45) args=('self', 'success') names=['time', 'request_count', 'last_used', 'error_count']
+  MultiModelLLMClient (line 54)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', '_instance', 'threading', 'Lock', '_lock', '__new__', 'LoadBalancingStrategy', 'PRIORITY_FIRST', '__init__', '_initialize_default_clients', '_initialize_provider_clients', '_create_model_client', 'get_client', 'get_current_client', 'set_active_model', 'switch_to_next_model']
+    constants: ["'MultiModelLLMClient'", "'\\n多模型 LLM 客户端管理器\\n\\n职责:\\n1. 管理多个 LLM 客户端实例（按服务商和模型组织）\\n2. 支持运行时切换当前活跃模型\\n3. 支持按模型名称自动路由请求\\n4. 支持负载均"]
+    -> __new__(line 69) args=('cls',) names=['_instance', '_lock', 'super', '__new__', '_initialized']
+    -> __annotate__(line 77) args=('format',) names=['Optional', 'LLMProviderManager', 'LoadBalancingStrategy']
+    -> __init__(line 77) args=('self', 'provider_manager', 'strategy') names=['_initialized', 'get_provider_manager', '_provider_manager', '_clients', '_current_provider_id', '_current_model', '_round_robin_index', 'threading', 'Lock', '_init_lock']
+    -> _initialize_default_clients(line 97) args=('self',) names=['_provider_manager', 'get_default_provider', 'enabled', 'api_key', '_initialize_provider_clients', 'default_model', 'id', '_current_provider_id', '_current_model', 'logger']
+    -> __annotate__(line 123) args=('format',) names=['ProviderConfig']
+    -> _initialize_provider_clients(line 123) args=('self', 'provider') names=['_init_lock', 'id', 'models', '_create_model_client', 'default_model']
+    -> __annotate__(line 134) args=('format',) names=['ProviderConfig', 'str', 'ModelClient']
+    -> _create_model_client(line 134) args=('self', 'provider', 'model') names=['id', '_clients', 'api_key', 'logger', 'warning', 'name', 'LLMConfig', 'base_url', 'LLMClient', 'ModelClient']
+    -> __annotate__(line 158) args=('format',) names=['Optional', 'str', 'ModelClient']
+    -> get_client(line 158) args=('self', 'provider_id', 'model') names=['_clients', 'get', 'items', 'endswith', 'startswith', 'model']
+    -> __annotate__(line 190) args=('format',) names=['Optional', 'ModelClient']
+    -> get_current_client(line 190) args=('self',) names=['_current_provider_id', '_current_model', 'get_client', 'logger', 'warning', '_clients', 'next', 'iter']
+    -> __annotate__(line 204) args=('format',) names=['str', 'bool']
+    -> set_active_model(line 204) args=('self', 'provider_id', 'model') names=['get_client', '_provider_manager', 'get_provider', 'logger', 'warning', '_create_model_client', '_current_provider_id', '_current_model', 'info', 'provider']
+    -> __annotate__(line 231) args=('format',) names=['bool']
+    -> switch_to_next_model(line 231) args=('self',) names=['_clients', 'list', 'set', 'values', '_current_provider_id', 'index', 'len', 'provider', 'id', 'set_active_model']
+    -> __annotate__(line 263) args=('format',) names=['List', 'Dict', 'str', 'Any']
+    -> list_available_models(line 263) args=('self',) names=['_clients', 'values', 'append', 'provider', 'id', 'name', 'model', '_current_provider_id', '_current_model', 'request_count']
+    -> __annotate__(line 291) args=('format',) names=['str', 'bool']
+    -> refresh_provider(line 291) args=('self', 'provider_id') names=['_provider_manager', 'get_provider', '_init_lock', '_clients', 'keys', 'startswith', 'enabled', 'api_key', '_initialize_provider_clients', 'logger']
+    -> refresh_all_providers(line 319) args=('self',) names=['_provider_manager', 'list_providers', 'refresh_provider', 'id']
+    -> __annotate__(line 324) args=('format',) names=['List', 'Dict', 'str', 'Optional', 'Any']
+    -> chat(line 324) args=('self', 'messages', 'model', 'provider_id') names=['_get_client_for_request', 'logger', 'warning', 'neurova.llm_client', 'LLMClient', 'LLMConfig', 'chat', 'time', 'client', 'increment_request']
+    -> __annotate__(line 379) args=('format',) names=['List', 'Dict', 'str', 'Optional']
+    -> chat_stream(line 379) args=('self', 'messages', 'model', 'provider_id') names=['_get_client_for_request', 'logger', 'warning', 'neurova.llm_client', 'LLMClient', 'LLMConfig', 'chat_stream', 'time', 'client', 'increment_request']
+    -> __annotate__(line 435) args=('format',) names=['Optional', 'str', 'ModelClient']
+    -> _get_client_for_request(line 435) args=('self', 'model', 'provider_id') names=['get_client', 'get_current_client']
+    -> __annotate__(line 446) args=('format',) names=['Dict', 'str', 'Any']
+    -> get_stats(line 446) args=('self',) names=['sum', '_clients', 'values', 'len', '_current_provider_id', '_current_model', 'list_available_models']
+  __annotate__ (line 468)
+    args: ('format',)
+    names: ['MultiModelLLMClient']
+    constants: ['2', "'return'"]
+  get_multi_model_client (line 468)
+    args: ()
+    names: ['_multi_model_client', 'MultiModelLLMClient']
+    constants: ["'获取 MultiModelLLMClient 单例'"]
+  __annotate__ (line 1)
+    args: ('format',)
+    names: ['__conditional_annotations__', 'Optional', 'MultiModelLLMClient']
+    constants: ['2', "'_multi_model_client'"]
+
+============================================================
+File: neurova/llm/__pycache__/provider_manager.cpython-315.pyc
+Size: 63931 bytes
+Names: ['__conditional_annotations__', '__doc__', '__future__', 'annotations', 'json', 'logging', 'os', 'threading', 'time', 'random', 'requests', 'dataclasses', 'dataclass', 'field', 'asdict', 'datetime', 'timedelta', 'pathlib', 'Path', 'typing', 'Dict', 'List', 'Optional', 'Any', 'Callable', 'TYPE_CHECKING', 'enum', 'Enum', 'neurova.core.module_system', 'Module', 'neurova.core.log_level', 'LogLevel', 'neurova.core.logger', 'get_logger', 'neurova.llm.presets', 'get_preset_registry', 'LLMPresetRegistry', 'ModelPreset', 'neurova.llm.providers.secret_store', 'SecretStore', 'encrypt_api_key', 'decrypt_api_key', 'neurova.llm.providers.types', 'ConnectionResult', 'ProbeResult', 'PydanticModelInfo', 'getLogger', '__name__', 'logger', 'str', 'LoadBalancingStrategy', 'ProviderConfig', 'LLMProviderManager', '_provider_manager', '__annotations__', 'get_provider_manager']
+Classes/Functions:
+  LoadBalancingStrategy (line 40)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'ROUND_ROBIN', 'WEIGHTED_RANDOM', 'PRIORITY_FIRST', 'LEAST_ERRORS', 'FASTEST_RESPONSE', '__static_attributes__']
+    constants: ["'LoadBalancingStrategy'", "'负载均衡策略'", "'round_robin'", "'weighted_random'", "'priority_first'", "'least_errors'", "'fastest_response'"]
+  ProviderConfig (line 49)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', '__annotations__', 'api_key', 'encrypted_api_key', 'default_model', 'field', 'list', 'models', 'enabled', 'priority', 'is_builtin', 'icon', 'description', 'created_at', 'updated_at', 'dict']
+    constants: ["'ProviderConfig'", "'服务商配置'", "'str'", "'id'", "'name'", "'provider'", "'base_url'", "'Optional[str]'", "'api_key'", "'encrypted_api_key'"]
+    -> __post_init__(line 83) args=('self',) names=['created_at', 'datetime', 'now', 'isoformat', 'updated_at']
+    -> __annotate__(line 89) args=('format',) names=[]
+    -> to_preset(line 89) args=('self',) names=['ModelPreset', 'id', 'name', 'provider', 'base_url', 'api_key', 'default_model', 'models', 'icon', 'description']
+    -> __annotate__(line 105) args=('format',) names=[]
+    -> to_dict(line 105) args=('self', 'encrypt') names=['asdict', 'get', 'pop', 'items']
+    -> __annotate__(line 121) args=('format',) names=[]
+    -> masked_api_key(line 121) args=('self',) names=['api_key', 'len']
+    -> __annotate__(line 131) args=('format',) names=[]
+    -> from_dict(line 130) args=('cls', 'data', 'decrypt') names=['get', 'decrypt_api_key', 'logger', 'info', 'warning', 'Exception', 'pop']
+  LLMProviderManager (line 159)
+    args: ()
+    names: ['__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', 'MODULE_ID', 'MODULE_NAME', 'MODULE_VERSION', '_instance', 'threading', 'Lock', '_lock', '__init__', '_on_init', '_on_start', '_get_default_config_path', '_load_config', '_make_backup', '_save_config', '_load_builtin_providers']
+    constants: ["'LLMProviderManager'", "'\\nLLM 服务商配置管理器\\n\\n职责:\\n1. 管理多个服务商配置（API Key、Base URL、默认模型等）\\n2. 支持配置持久化（JSON 文件）\\n3. 提供服务商选择和模型切换能力", "'llm_provider_manager'", "'LLM Provider Manager'", "'1.0.0'"]
+    -> __annotate__(line 177) args=('format',) names=[]
+    -> __init__(line 177) args=('self', 'config', 'event_bus') names=['super', '__init__', 'get_preset_registry', '_preset_registry', 'get', '_get_default_config_path', '_config_path', '_providers', '_default_provider_id', 'threading']
+    -> __annotate__(line 201) args=('format',) names=[]
+    -> _on_init(line 201) args=('self',) names=['_log', 'LogLevel', 'INFO']
+    -> __annotate__(line 207) args=('format',) names=[]
+    -> _on_start(line 207) args=('self',) names=['_log', 'LogLevel', 'INFO', 'len', '_providers']
+    -> __annotate__(line 211) args=('format',) names=[]
+    -> _get_default_config_path(line 211) args=('self',) names=['Path', 'home', 'mkdir', 'str']
+    -> _load_config(line 218) args=('self',) names=['os', 'path', 'exists', '_config_path', 'logger', 'info', '_load_builtin_providers', '_save_config', 'open', 'read']
+    -> __annotate__(line 274) args=('format',) names=[]
+    -> _make_backup(line 274) args=('self', 'reason') names=['shutil', 'datetime', 'os', 'path', 'exists', '_config_path', 'now', 'strftime', 'copy2', 'logger']
+    -> _save_config(line 287) args=('self',) names=['_config_lock', '_providers', 'items', 'to_dict', '_default_provider_id', 'datetime', 'now', 'isoformat', 'os', 'makedirs']
+    -> _load_builtin_providers(line 308) args=('self',) names=['_preset_registry', 'list_presets', 'is_builtin', 'ProviderConfig', 'name', 'display_name', 'provider', 'base_url', 'api_key', 'default_model']
+    -> __annotate__(line 328) args=('format',) names=[]
+    -> add_provider(line 328) args=('self', 'name', 'provider', 'base_url', 'api_key') names=['_generate_provider_id', 'ProviderConfig', '_config_lock', '_providers', '_save_config', 'logger', 'info']
+    -> __annotate__(line 385) args=('format',) names=[]
+    -> update_provider(line 385) args=('self', 'provider_id', 'api_key', 'default_model', 'models') names=['_providers', 'logger', 'warning', 'api_key', 'default_model', 'models', 'enabled', 'priority', 'base_url', 'description']
+    -> __annotate__(line 440) args=('format',) names=[]
+    -> update_provider_metadata(line 440) args=('self', 'provider_id', 'metadata') names=['_providers', 'get', 'logger', 'warning', 'isinstance', 'metadata', 'dict', 'update', 'datetime', 'now']
+    -> __annotate__(line 464) args=('format',) names=[]
+    -> remove_provider(line 464) args=('self', 'provider_id') names=['_providers', 'logger', 'warning', 'is_builtin', '_config_lock', '_default_provider_id', '_save_config', 'info', 'name']
+    -> __annotate__(line 494) args=('format',) names=[]
+    -> get_provider(line 494) args=('self', 'provider_id') names=['_providers', 'get']
+    -> __annotate__(line 498) args=('format',) names=[]
+    -> list_providers(line 498) args=('self', 'enabled_only', 'builtin_only', 'custom_only') names=['list', '_providers', 'values', 'enabled', 'is_builtin', 'sorted']
+    -> __annotate__(line 526) args=('format',) names=[]
+    -> get_default_provider(line 526) args=('self',) names=['_default_provider_id', '_providers', 'list_providers']
+    -> __annotate__(line 534) args=('format',) names=[]
+    -> set_default_provider(line 534) args=('self', 'provider_id') names=['_providers', 'logger', 'warning', '_default_provider_id', '_save_config', 'info', 'name']
+    -> __annotate__(line 554) args=('format',) names=[]
+    -> enable_provider(line 554) args=('self', 'provider_id') names=['update_provider']
+    -> __annotate__(line 558) args=('format',) names=[]
+    -> disable_provider(line 558) args=('self', 'provider_id') names=['update_provider']
+    -> __annotate__(line 562) args=('format',) names=[]
+    -> get_provider_for_model(line 562) args=('self', 'model') names=['list_providers', 'models']
+    -> __annotate__(line 577) args=('format',) names=[]
+    -> search_providers(line 577) args=('self', 'query') names=['lower', '_providers', 'values', 'name', 'provider', 'description', 'any', 'models', 'append']
+    -> __annotate__(line 599) args=('format',) names=[]
+    -> get_stats(line 599) args=('self',) names=['list_providers', 'sum', 'len', '_default_provider_id', '_config_path']
+    -> __annotate__(line 623) args=('format',) names=[]
+    -> health_check_provider(line 623) args=('self', 'provider_id') names=['_providers', 'logger', 'warning', 'health_check_enabled', 'debug', 'name', 'last_health_check', 'datetime', 'fromisoformat', 'now']
+    -> __annotate__(line 731) args=('format',) names=[]
+    -> mark_provider_success(line 731) args=('self', 'provider_id', 'response_time') names=['_providers', '_config_lock', 'consecutive_successes', 'consecutive_failures', 'max', 'current_requests', 'total_requests', 'total_response_time', 'health_status', 'logger']
+    -> __annotate__(line 757) args=('format',) names=[]
+    -> mark_provider_failure(line 757) args=('self', 'provider_id') names=['_providers', '_config_lock', 'consecutive_failures', 'consecutive_successes', 'max', 'current_requests', 'total_requests', 'health_status', 'logger', 'warning']
+    -> __annotate__(line 784) args=('format',) names=[]
+    -> get_healthy_providers(line 784) args=('self', 'strategy') names=['list_providers', 'health_status', 'logger', 'warning', 'LoadBalancingStrategy', 'ROUND_ROBIN', 'sorted', 'WEIGHTED_RANDOM', 'PRIORITY_FIRST', 'LEAST_ERRORS']
+    -> __annotate__(line 831) args=('format',) names=[]
+    -> select_provider(line 831) args=('self', 'model', 'strategy') names=['get_healthy_providers', 'logger', 'error', 'models', 'LoadBalancingStrategy', 'WEIGHTED_RANDOM', 'sum', 'random', 'uniform', 'weight']
+    -> __annotate__(line 877) args=('format',) names=[]
+    -> auto_failover(line 877) args=('self', 'current_provider_id') names=['_providers', 'get', 'logger', 'warning', 'mark_provider_failure', 'select_provider', 'default_model', 'LoadBalancingStrategy', 'PRIORITY_FIRST', 'id']
+    -> __annotate__(line 908) args=('format',) names=[]
+    -> detect_model_capabilities(line 908) args=('self', 'provider_id', 'model', 'use_cache') names=['neurova.llm.providers.capability_detector', 'detect_capabilities', 'get_provider', 'logger', 'warning', 'default_model', 'encrypted_api_key', 'decrypt_api_key', 'api_key', 'get_secret_value']
+    -> __annotate__(line 970) args=('format',) names=[]
+    -> _generate_provider_id(line 970) args=('self', 'name') names=['lower', 'replace', '_providers']
+    -> reset_to_builtin(line 982) args=('self',) names=['_config_lock', '_providers', 'clear', '_default_provider_id', '_load_builtin_providers', '_save_config', 'logger', 'info']
+    -> __annotate__(line 992) args=('format',) names=[]
+    -> export_config(line 992) args=('self', 'include_encrypted') names=['json', 'dumps', '_providers', 'items', 'to_dict', '_default_provider_id']
+    -> __annotate__(line 1007) args=('format',) names=[]
+    -> import_config(line 1007) args=('self', 'json_str') names=['json', 'loads', '_config_lock', 'get', 'items', 'ProviderConfig', 'from_dict', '_providers', '_default_provider_id', '_save_config']
+    -> __annotate__(line 1039) args=('format',) names=[]
+    -> activate_model(line 1039) args=('self', 'provider_id', 'model_id') names=['_providers', 'get', 'logger', 'error', 'enabled', 'default_model', 'datetime', 'now', 'isoformat', 'updated_at']
+    -> __annotate__(line 1083) args=('format',) names=[]
+    -> get_active_model(line 1083) args=('self',) names=['_default_provider_id', '_providers', 'get', 'enabled', 'default_model', 'name', 'items']
+    -> __annotate__(line 1111) args=('format',) names=[]
+    -> fetch_provider_models(line 1111) args=('self', 'provider_id') names=['neurova.llm.providers.types', 'ModelInfo', '_get_provider_instance', 'logger', 'error', 'fetch_models', '_providers', 'get', 'id', 'list']
+    -> __annotate__(line 1149) args=('format',) names=[]
+    -> probe_model_multimodal(line 1149) args=('self', 'provider_id', 'model_id') names=['neurova.llm.providers.types', 'ProbeResult', '_get_provider_instance', 'logger', 'error', 'probe_model_multimodal', 'Exception']
+    -> __annotate__(line 1178) args=('format',) names=[]
+    -> check_provider_connection(line 1178) args=('self', 'provider_id') names=['neurova.llm.providers.types', 'ConnectionResult', '_get_provider_instance', 'logger', 'error', 'check_connection', '_providers', 'get', 'success', 'health_status']
+    -> __annotate__(line 1219) args=('format',) names=[]
+    -> check_model_connection(line 1219) args=('self', 'provider_id', 'model_id') names=['neurova.llm.providers.types', 'ConnectionResult', '_get_provider_instance', 'logger', 'error', 'check_model_connection', 'Exception', 'str']
+    -> __annotate__(line 1248) args=('format',) names=[]
+    -> _get_provider_instance(line 1248) args=('self', 'provider_id') names=['neurova.llm.providers', 'OpenAIProvider', 'AnthropicProvider', 'GeminiProvider', 'OllamaProvider', 'LMStudioProvider', 'OpenRouterProvider', '_providers', 'get', 'provider']
+  __annotate__ (line 1355)
+    args: ('format',)
+    names: []
+    constants: ['2', "'config_path'", "'Optional[str]'", "'return'", "'LLMProviderManager'"]
+  get_provider_manager (line 1355)
+    args: ('config_path',)
+    names: ['_provider_manager', 'LLMProviderManager']
+    constants: ["'获取 LLMProviderManager 单例'", "'config_path'"]

@@ -1,80 +1,80 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;ShieldOutlined :style="{color:'#ef4444'}" /&gt; 安全管理
-      &lt;/h2&gt;
-      &lt;a-space&gt;
-        &lt;a-btn size="small" @click="refreshData"&gt;
-          &lt;RefreshOutlined /&gt;刷新
-        &lt;/a-btn&gt;
-        &lt;a-btn type="primary" size="small" @click="showExportModal = true"&gt;
-          &lt;DownloadOutlined /&gt;导出日志
-        &lt;/a-btn&gt;
-      &lt;/a-space&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;AlertTriangleOutlined /&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.alerts }}&lt;/div&gt;
-          &lt;div &gt;安全告警&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;LockOutlined /&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.blocked }}&lt;/div&gt;
-          &lt;div &gt;拦截次数&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;CheckCircleOutlined /&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.passed }}&lt;/div&gt;
-          &lt;div &gt;安全通过&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;ClockCircleOutlined /&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ stats.activeDays }}&lt;/div&gt;
-          &lt;div &gt;连续安全天数&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;a-tabs default-active-key="audit" :items="tabs" &gt;
-      &lt;template #audit&gt;
-        &lt;div &gt;
-          &lt;div &gt;
-            &lt;a-input-search
+<template>
+  <div >
+    <div >
+      <h2 >
+        <ShieldOutlined :style="{color:'#ef4444'}" /> 安全管理
+      </h2>
+      <a-space>
+        <a-btn size="small" @click="refreshData">
+          <RefreshOutlined />刷新
+        </a-btn>
+        <a-btn type="primary" size="small" @click="showExportModal = true">
+          <DownloadOutlined />导出日志
+        </a-btn>
+      </a-space>
+    </div>
+    <div >
+      <div >
+        <div >
+          <AlertTriangleOutlined />
+        </div>
+        <div >
+          <div >{{ stats.alerts }}</div>
+          <div >安全告警</div>
+        </div>
+      </div>
+      <div >
+        <div >
+          <LockOutlined />
+        </div>
+        <div >
+          <div >{{ stats.blocked }}</div>
+          <div >拦截次数</div>
+        </div>
+      </div>
+      <div >
+        <div >
+          <CheckCircleOutlined />
+        </div>
+        <div >
+          <div >{{ stats.passed }}</div>
+          <div >安全通过</div>
+        </div>
+      </div>
+      <div >
+        <div >
+          <ClockCircleOutlined />
+        </div>
+        <div >
+          <div >{{ stats.activeDays }}</div>
+          <div >连续安全天数</div>
+        </div>
+      </div>
+    </div>
+    <a-tabs default-active-key="audit" :items="tabs" >
+      <template #audit>
+        <div >
+          <div >
+            <a-input-search
               placeholder="搜索日志"
               v-model:value="auditFilter.keyword"
               @search="fetchAuditLogs"
               style="width: 260px"
-            /&gt;
-            &lt;a-select
+            />
+            <a-select
               v-model:value="auditFilter.level"
               placeholder="日志级别"
               style="width: 140px"
               @change="fetchAuditLogs"
-            &gt;
-              &lt;a-select-option value=""&gt;全部&lt;/a-select-option&gt;
-              &lt;a-select-option value="INFO"&gt;INFO&lt;/a-select-option&gt;
-              &lt;a-select-option value="WARN"&gt;WARN&lt;/a-select-option&gt;
-              &lt;a-select-option value="ERROR"&gt;ERROR&lt;/a-select-option&gt;
-            &lt;/a-select&gt;
-            &lt;a-range-picker @change="onDateChange" /&gt;
-          &lt;/div&gt;
-          &lt;a-table
+            >
+              <a-select-option value="">全部</a-select-option>
+              <a-select-option value="INFO">INFO</a-select-option>
+              <a-select-option value="WARN">WARN</a-select-option>
+              <a-select-option value="ERROR">ERROR</a-select-option>
+            </a-select>
+            <a-range-picker @change="onDateChange" />
+          </div>
+          <a-table
             :columns="auditCols"
             :data-source="auditLogs"
             row-key="id"
@@ -82,99 +82,99 @@
             :loading="auditLoading"
             :pagination="auditPagination"
             @change="onAuditPageChange"
-          &gt;
-            &lt;template #bodyCell="{ c, r }"&gt;
-              &lt;template v-if="c.key === 'level'"&gt;
-                &lt;a-tag :color="getLevelColor(r.level)"&gt;{{ r.level }}&lt;/a-tag&gt;
-              &lt;/template&gt;
-              &lt;template v-if="c.key === 'time'"&gt;
+          >
+            <template #bodyCell="{ c, r }">
+              <template v-if="c.key === 'level'">
+                <a-tag :color="getLevelColor(r.level)">{{ r.level }}</a-tag>
+              </template>
+              <template v-if="c.key === 'time'">
                 {{ formatTime(r.time) }}
-              &lt;/template&gt;
-              &lt;template v-if="c.key === 'action'"&gt;
-                &lt;a-tag size="small"&gt;{{ r.action }}&lt;/a-tag&gt;
-              &lt;/template&gt;
-            &lt;/template&gt;
-          &lt;/a-table&gt;
-        &lt;/div&gt;
-      &lt;/template&gt;
-      &lt;template #threats&gt;
-        &lt;div &gt;
-          &lt;a-table
+              </template>
+              <template v-if="c.key === 'action'">
+                <a-tag size="small">{{ r.action }}</a-tag>
+              </template>
+            </template>
+          </a-table>
+        </div>
+      </template>
+      <template #threats>
+        <div >
+          <a-table
             :columns="threatCols"
             :data-source="threats"
             row-key="id"
             size="small"
             :loading="threatLoading"
-          &gt;
-            &lt;template #bodyCell="{ c, r }"&gt;
-              &lt;template v-if="c.key === 'severity'"&gt;
-                &lt;a-tag :color="getSeverityColor(r.severity)"&gt;{{ r.severity }}&lt;/a-tag&gt;
-              &lt;/template&gt;
-              &lt;template v-if="c.key === 'status'"&gt;
-                &lt;a-tag :color="r.status === 'resolved' ? 'green' : 'orange'"&gt;
+          >
+            <template #bodyCell="{ c, r }">
+              <template v-if="c.key === 'severity'">
+                <a-tag :color="getSeverityColor(r.severity)">{{ r.severity }}</a-tag>
+              </template>
+              <template v-if="c.key === 'status'">
+                <a-tag :color="r.status === 'resolved' ? 'green' : 'orange'">
                   {{ r.status === 'resolved' ? '已处理' : '待处理' }}
-                &lt;/a-tag&gt;
-              &lt;/template&gt;
-              &lt;template v-if="c.key === 'act'"&gt;
-                &lt;a-space&gt;
-                  &lt;a-btn size="small" type="link" @click="viewThreat(r)"&gt;查看详情&lt;/a-btn&gt;
-                  &lt;a-btn size="small" type="link" v-if="r.status !== 'resolved'" @click="resolveThreat(r)"&gt;标记已处理&lt;/a-btn&gt;
-                &lt;/a-space&gt;
-              &lt;/template&gt;
-            &lt;/template&gt;
-          &lt;/a-table&gt;
-        &lt;/div&gt;
-      &lt;/template&gt;
-      &lt;template #settings&gt;
-        &lt;div &gt;
-          &lt;a-form :model="securitySettings" layout="vertical"&gt;
-            &lt;a-form-item label="登录安全"&gt;
-              &lt;a-space direction="vertical" style="width: 100%"&gt;
-                &lt;a-switch v-model:checked="securitySettings.loginLockout" /&gt;
-                &lt;span&gt;登录失败次数限制&lt;/span&gt;
-              &lt;/a-space&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item label="会话超时"&gt;
-              &lt;a-input-number v-model:value="securitySettings.sessionTimeout" :min="5" :max="1440" /&gt;
-              &lt;span style="margin-left: 8px"&gt;分钟&lt;/span&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item label="双因素认证"&gt;
-              &lt;a-switch v-model:checked="securitySettings.twoFactorAuth" /&gt;
-              &lt;span&gt;启用双因素认证&lt;/span&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item label="API访问限制"&gt;
-              &lt;a-switch v-model:checked="securitySettings.apiRateLimit" /&gt;
-              &lt;span&gt;启用API速率限制&lt;/span&gt;
-            &lt;/a-form-item&gt;
-            &lt;a-form-item&gt;
-              &lt;a-btn type="primary" @click="saveSettings"&gt;保存设置&lt;/a-btn&gt;
-            &lt;/a-form-item&gt;
-          &lt;/a-form&gt;
-        &lt;/div&gt;
-      &lt;/template&gt;
-    &lt;/a-tabs&gt;
-    &lt;a-modal
+                </a-tag>
+              </template>
+              <template v-if="c.key === 'act'">
+                <a-space>
+                  <a-btn size="small" type="link" @click="viewThreat(r)">查看详情</a-btn>
+                  <a-btn size="small" type="link" v-if="r.status !== 'resolved'" @click="resolveThreat(r)">标记已处理</a-btn>
+                </a-space>
+              </template>
+            </template>
+          </a-table>
+        </div>
+      </template>
+      <template #settings>
+        <div >
+          <a-form :model="securitySettings" layout="vertical">
+            <a-form-item label="登录安全">
+              <a-space direction="vertical" style="width: 100%">
+                <a-switch v-model:checked="securitySettings.loginLockout" />
+                <span>登录失败次数限制</span>
+              </a-space>
+            </a-form-item>
+            <a-form-item label="会话超时">
+              <a-input-number v-model:value="securitySettings.sessionTimeout" :min="5" :max="1440" />
+              <span style="margin-left: 8px">分钟</span>
+            </a-form-item>
+            <a-form-item label="双因素认证">
+              <a-switch v-model:checked="securitySettings.twoFactorAuth" />
+              <span>启用双因素认证</span>
+            </a-form-item>
+            <a-form-item label="API访问限制">
+              <a-switch v-model:checked="securitySettings.apiRateLimit" />
+              <span>启用API速率限制</span>
+            </a-form-item>
+            <a-form-item>
+              <a-btn type="primary" @click="saveSettings">保存设置</a-btn>
+            </a-form-item>
+          </a-form>
+        </div>
+      </template>
+    </a-tabs>
+    <a-modal
       v-model:open="showExportModal"
       title="导出审计日志"
       @ok="exportLogs"
       @cancel="showExportModal = false"
-    &gt;
-      &lt;a-form :model="exportForm" layout="vertical"&gt;
-        &lt;a-form-item label="导出格式"&gt;
-          &lt;a-select v-model:value="exportForm.format"&gt;
-            &lt;a-select-option value="csv"&gt;CSV&lt;/a-select-option&gt;
-            &lt;a-select-option value="json"&gt;JSON&lt;/a-select-option&gt;
-            &lt;a-select-option value="xlsx"&gt;Excel&lt;/a-select-option&gt;
-          &lt;/a-select&gt;
-        &lt;/a-form-item&gt;
-        &lt;a-form-item label="时间范围"&gt;
-          &lt;a-range-picker v-model:value="exportForm.dateRange" /&gt;
-        &lt;/a-form-item&gt;
-      &lt;/a-form&gt;
-    &lt;/a-modal&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+    >
+      <a-form :model="exportForm" layout="vertical">
+        <a-form-item label="导出格式">
+          <a-select v-model:value="exportForm.format">
+            <a-select-option value="csv">CSV</a-select-option>
+            <a-select-option value="json">JSON</a-select-option>
+            <a-select-option value="xlsx">Excel</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="时间范围">
+          <a-range-picker v-model:value="exportForm.dateRange" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive } from 'vue';
 import { message } from 'ant-design-vue';
 import { request } from '@/api';
@@ -218,14 +218,14 @@ const auditFilter = reactive({
   level: ''
 });
 const auditLoading = ref(false);
-const auditLogs = ref&lt;AuditLog[]&gt;([]);
+const auditLogs = ref<AuditLog[]>([]);
 const auditPagination = ref({
   current: 1,
   pageSize: 20,
   total: 0
 });
 const threatLoading = ref(false);
-const threats = ref&lt;Threat[]&gt;([]);
+const threats = ref<Threat[]>([]);
 const securitySettings = reactive({
   loginLockout: true,
   sessionTimeout: 60,
@@ -253,10 +253,10 @@ const threatCols = [
   { title: '描述', dataIndex: 'description' },
   { title: '操作', key: 'act', width: 160 }
 ];
-const fetchAuditLogs = async () =&gt; {
+const fetchAuditLogs = async () => {
   auditLoading.value = true;
   try {
-    const params: Record&lt;string, unknown&gt; = {
+    const params: Record<string, unknown> = {
       page: auditPagination.value.current,
       page_size: auditPagination.value.pageSize
     };
@@ -281,14 +281,14 @@ const fetchAuditLogs = async () =&gt; {
     auditLoading.value = false;
   }
 };
-const fetchThreats = async () =&gt; {
+const fetchThreats = async () => {
   threatLoading.value = true;
   try {
     const res = await request.get('/audit/logs', {
       params: { event_type: 'security', page_size: 50 }
     });
-    if (res.success &amp;&amp; res.data?.items) {
-      threats.value = res.data.items.map((item: Record&lt;string, unknown&gt;, idx: number) =&gt; ({
+    if (res.success && res.data?.items) {
+      threats.value = res.data.items.map((item: Record<string, unknown>, idx: number) => ({
         id: item.id || String(idx + 1),
         type: item.event_type || '安全事件',
         severity: item.severity === 'ERROR' ? 'high' : item.severity === 'WARN' ? 'medium' : 'low',
@@ -309,44 +309,44 @@ const fetchThreats = async () =&gt; {
     threatLoading.value = false;
   }
 };
-const refreshData = () =&gt; {
+const refreshData = () => {
   fetchAuditLogs();
   fetchThreats();
 };
-const onDateChange = () =&gt; {
+const onDateChange = () => {
   fetchAuditLogs();
 };
-const onAuditPageChange = (pagination: { current: number; pageSize: number; total: number }) =&gt; {
+const onAuditPageChange = (pagination: { current: number; pageSize: number; total: number }) => {
   auditPagination.value = pagination;
   fetchAuditLogs();
 };
-const getLevelColor = (level: string) =&gt; {
-  const colors: Record&lt;string, string&gt; = {
+const getLevelColor = (level: string) => {
+  const colors: Record<string, string> = {
     INFO: 'blue',
     WARN: 'orange',
     ERROR: 'red'
   };
   return colors[level] || 'default';
 };
-const getSeverityColor = (severity: string) =&gt; {
-  const colors: Record&lt;string, string&gt; = {
+const getSeverityColor = (severity: string) => {
+  const colors: Record<string, string> = {
     high: 'red',
     medium: 'orange',
     low: 'yellow'
   };
   return colors[severity] || 'default';
 };
-const formatTime = (time: string) =&gt; {
+const formatTime = (time: string) => {
   try {
     return new Date(time).toLocaleString('zh-CN');
   } catch {
     return time;
   }
 };
-const viewThreat = (threat: Threat) =&gt; {
+const viewThreat = (threat: Threat) => {
   message.info(`查看威胁详情: ${threat.type}`);
 };
-const resolveThreat = async (threat: Threat) =&gt; {
+const resolveThreat = async (threat: Threat) => {
   try {
     const res = await request.put('/audit/logs/' + threat.id, { resolved: true });
     if (res.success) {
@@ -358,7 +358,7 @@ const resolveThreat = async (threat: Threat) =&gt; {
     message.error('标记失败');
   }
 };
-const saveSettings = async () =&gt; {
+const saveSettings = async () => {
   try {
     const res = await request.put('/settings/security', securitySettings);
     if (res.success) {
@@ -369,12 +369,12 @@ const saveSettings = async () =&gt; {
     message.error('保存失败');
   }
 };
-const exportLogs = async () =&gt; {
+const exportLogs = async () => {
   try {
-    const params: Record&lt;string, unknown&gt; = {
+    const params: Record<string, unknown> = {
       format: exportForm.format
     };
-    if (exportForm.dateRange &amp;&amp; exportForm.dateRange.length === 2) {
+    if (exportForm.dateRange && exportForm.dateRange.length === 2) {
       params.start = exportForm.dateRange[0].toISOString();
       params.end = exportForm.dateRange[1].toISOString();
     }
@@ -390,8 +390,8 @@ const exportLogs = async () =&gt; {
 };
 fetchAuditLogs();
 fetchThreats();
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg {
   display: flex;
   flex-direction: column;
@@ -475,4 +475,4 @@ fetchThreats();
   margin-bottom: 16px;
   align-items: center;
 }
-&lt;/style&gt;
+</style>

@@ -1,64 +1,64 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;!-- 消息列表 --&gt;
-    &lt;div  ref="messagesContainer"&gt;
-      &lt;TransitionGroup name="message" tag="div"&gt;
-        &lt;div
+<template>
+  <div >
+    <!-- 消息列表 -->
+    <div  ref="messagesContainer">
+      <TransitionGroup name="message" tag="div">
+        <div
           v-for="message in messages"
           :key="message.id"
           :
-        &gt;
-          &lt;div &gt;
+        >
+          <div >
             {{ message.role === 'user' ? 'U' : 'A' }}
-          &lt;/div&gt;
-          &lt;div &gt;
-            &lt;div &gt;{{ message.role === 'user' ? '用户' : '助手' }}&lt;/div&gt;
-            &lt;div  v-if="message.role === 'user'"&gt;{{ message.content }}&lt;/div&gt;
-            &lt;div  v-else&gt;
-              &lt;span &gt;{{ message.content }}&lt;/span&gt;
-              &lt;span v-if="isStreaming &amp;&amp; message === messages[messages.length - 1]" &gt;|&lt;/span&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/TransitionGroup&gt;
-      &lt;!-- 正在输入指示器 --&gt;
-      &lt;div v-if="isStreaming &amp;&amp; messages.length === 0" &gt;
-        &lt;div &gt;&lt;/div&gt;
-        &lt;div &gt;&lt;/div&gt;
-        &lt;div &gt;&lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 输入区域 --&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;a-button
+          </div>
+          <div >
+            <div >{{ message.role === 'user' ? '用户' : '助手' }}</div>
+            <div  v-if="message.role === 'user'">{{ message.content }}</div>
+            <div  v-else>
+              <span >{{ message.content }}</span>
+              <span v-if="isStreaming && message === messages[messages.length - 1]" >|</span>
+            </div>
+          </div>
+        </div>
+      </TransitionGroup>
+      <!-- 正在输入指示器 -->
+      <div v-if="isStreaming && messages.length === 0" >
+        <div ></div>
+        <div ></div>
+        <div ></div>
+      </div>
+    </div>
+    <!-- 输入区域 -->
+    <div >
+      <div >
+        <a-button
           v-if="isStreaming"
           type="text"
           @click="stopGeneration"
-        &gt;
-          &lt;StopOutlined /&gt;
+        >
+          <StopOutlined />
           停止生成
-        &lt;/a-button&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;a-textarea
+        </a-button>
+      </div>
+      <div >
+        <a-textarea
           v-model:value="inputMessage"
           placeholder="输入消息..."
           :auto-size="{ minRows: 1, maxRows: 4 }"
           @press-enter="sendMessage"
-        /&gt;
-        &lt;a-button
+        />
+        <a-button
           type="primary"
           :disabled="!inputMessage.trim()"
           @click="sendMessage"
-        &gt;
-          &lt;SendOutlined /&gt;
-        &lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+        >
+          <SendOutlined />
+        </a-button>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, nextTick, onUnmounted } from 'vue'
 import { StopOutlined, SendOutlined } from '@ant-design/icons-vue'
 interface Message {
@@ -67,21 +67,21 @@ interface Message {
   content: string
   timestamp: number
 }
-const props = defineProps&lt;{
+const props = defineProps<{
   modelValue?: string
-}&gt;()
-const emit = defineEmits&lt;{
+}>()
+const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
   (e: 'send', message: string): void
   (e: 'stop'): void
-}&gt;()
-const messages = ref&lt;Message[]&gt;([])
-const inputMessage = ref&lt;string&gt;('')
-const isStreaming = ref&lt;boolean&gt;(false)
-const messagesContainer = ref&lt;HTMLElement | null&gt;(null)
+}>()
+const messages = ref<Message[]>([])
+const inputMessage = ref<string>('')
+const isStreaming = ref<boolean>(false)
+const messagesContainer = ref<HTMLElement | null>(null)
 // 逐字动画相关
-const streamingMessageId = ref&lt;string | null&gt;(null)
-const displayedContent = ref&lt;string&gt;('')
+const streamingMessageId = ref<string | null>(null)
+const displayedContent = ref<string>('')
 let streamingTimer: number | null = null
 const STREAMING_SPEED = 30 // 每个字符的延迟（毫秒）
 function sendMessage() {
@@ -116,7 +116,7 @@ function addAssistantMessage(content: string) {
 }
 function updateLastAssistantMessage(content: string) {
   const lastMessage = messages.value[messages.value.length - 1]
-  if (lastMessage &amp;&amp; lastMessage.role === 'assistant') {
+  if (lastMessage && lastMessage.role === 'assistant') {
     // 更新目标内容，动画会继续显示新内容
     if (streamingMessageId.value === lastMessage.id) {
       // 动画会继续进行，只需更新目标
@@ -132,12 +132,12 @@ function startStreamingAnimation(messageId: string, fullContent: string) {
     clearInterval(streamingTimer)
   }
   let currentIndex = 0
-  const targetMessage = messages.value.find(m =&gt; m.id === messageId)
+  const targetMessage = messages.value.find(m => m.id === messageId)
   if (!targetMessage) return
-  streamingTimer = window.setInterval(() =&gt; {
-    if (currentIndex &lt; fullContent.length) {
+  streamingTimer = window.setInterval(() => {
+    if (currentIndex < fullContent.length) {
       // 每次添加几个字符，速度更快
-      const chunkSize = Math.random() &gt; 0.5 ? 2 : 1
+      const chunkSize = Math.random() > 0.5 ? 2 : 1
       currentIndex = Math.min(currentIndex + chunkSize, fullContent.length)
       targetMessage.content = fullContent.substring(0, currentIndex)
       displayedContent.value = targetMessage.content
@@ -153,7 +153,7 @@ function startStreamingAnimation(messageId: string, fullContent: string) {
   }, STREAMING_SPEED)
 }
 // 组件卸载时清理定时器
-onUnmounted(() =&gt; {
+onUnmounted(() => {
   if (streamingTimer !== null) {
     clearInterval(streamingTimer)
     streamingTimer = null
@@ -164,7 +164,7 @@ function stopGeneration() {
   emit('stop')
 }
 function scrollToBottom() {
-  nextTick(() =&gt; {
+  nextTick(() => {
     if (messagesContainer.value) {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
     }
@@ -174,10 +174,10 @@ function scrollToBottom() {
 defineExpose({
   addAssistantMessage,
   updateLastAssistantMessage,
-  setStreaming: (value: boolean) =&gt; { isStreaming.value = value }
+  setStreaming: (value: boolean) => { isStreaming.value = value }
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .streaming-chat {
   display: flex;
   flex-direction: column;
@@ -328,11 +328,11 @@ defineExpose({
     color: white !important;
     border-radius: 0.5rem !important;
     resize: none;
-    &amp;:focus {
+    &:focus {
       border-color: #3b82f6 !important;
       box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
     }
-    &amp;::placeholder {
+    &::placeholder {
       color: rgba(255, 255, 255, 0.4) !important;
     }
   }
@@ -345,5 +345,5 @@ defineExpose({
   align-items: center;
   justify-content: center;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

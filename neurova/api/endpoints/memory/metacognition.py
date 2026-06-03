@@ -17,23 +17,19 @@ from .base import (
     router, logger, _get_request_id, get_memory_manager, _get_user_ids_from_token,
 )
 
-
 class AutoGenerateSkillRequest(BaseModel):
     """自动生成技能请求"""
     description: str = Field(..., min_length=1, max_length=2000, description="技能描述")
     category: Optional[str] = Field(default=None, description="技能分类")
-
 
 class MatchSkillsRequest(BaseModel):
     """匹配技能请求"""
     query: str = Field(..., min_length=1, max_length=500, description="查询内容")
     top_k: int = Field(default=5, ge=1, le=20, description="返回数量")
 
-
 # ============================================================
 # 元认知核心操作
 # ============================================================
-
 
 @router.post("/meta/monitor", summary="执行元认知监控")
 async def meta_monitor(
@@ -57,7 +53,6 @@ async def meta_monitor(
         logger.exception(f"元认知监控失败: {e}")
         raise APIError.internal(f"元认知监控失败: {str(e)}")
 
-
 @router.post("/meta/reflect", summary="执行元认知反思")
 async def meta_reflect(
     agent_id: Optional[str] = None,
@@ -79,7 +74,6 @@ async def meta_reflect(
     except Exception as e:
         logger.exception(f"元认知反思失败: {e}")
         raise APIError.internal(f"元认知反思失败: {str(e)}")
-
 
 @router.post("/meta/optimize", summary="执行元认知优化")
 async def meta_optimize(
@@ -107,7 +101,6 @@ async def meta_optimize(
         logger.exception(f"元认知优化失败: {e}")
         raise APIError.internal(f"元认知优化失败: {str(e)}")
 
-
 @router.post("/meta/evolve-skills", summary="执行技能进化")
 async def meta_evolve_skills(
     agent_id: Optional[str] = None,
@@ -134,11 +127,9 @@ async def meta_evolve_skills(
         logger.exception(f"技能进化失败: {e}")
         raise APIError.internal(f"技能进化失败: {str(e)}")
 
-
 # ============================================================
 # 元认知报告
 # ============================================================
-
 
 @router.get("/meta/health", summary="获取元认知健康报告")
 async def meta_get_health(
@@ -166,7 +157,6 @@ async def meta_get_health(
         logger.exception(f"获取健康报告失败: {e}")
         raise APIError.internal(f"获取健康报告失败: {str(e)}")
 
-
 @router.get("/meta/reflection", summary="获取元认知反思报告")
 async def meta_get_reflection(
     agent_id: Optional[str] = None,
@@ -193,11 +183,9 @@ async def meta_get_reflection(
         logger.exception(f"获取反思报告失败: {e}")
         raise APIError.internal(f"获取反思报告失败: {str(e)}")
 
-
 # ============================================================
 # 元认知条件检查
 # ============================================================
-
 
 @router.get("/meta/should-monitor", summary="检查是否需要监控")
 async def meta_should_monitor(
@@ -223,7 +211,6 @@ async def meta_should_monitor(
         logger.exception(f"检查监控条件失败: {e}")
         raise APIError.internal(f"检查监控条件失败: {str(e)}")
 
-
 @router.get("/meta/should-reflect", summary="检查是否需要反思")
 async def meta_should_reflect(
     agent_id: Optional[str] = None,
@@ -247,7 +234,6 @@ async def meta_should_reflect(
     except Exception as e:
         logger.exception(f"检查反思条件失败: {e}")
         raise APIError.internal(f"检查反思条件失败: {str(e)}")
-
 
 @router.get("/meta/should-optimize", summary="检查是否需要优化")
 async def meta_should_optimize(
@@ -273,7 +259,6 @@ async def meta_should_optimize(
         logger.exception(f"检查优化条件失败: {e}")
         raise APIError.internal(f"检查优化条件失败: {str(e)}")
 
-
 @router.get("/meta/should-evolve", summary="检查是否需要技能进化")
 async def meta_should_evolve(
     agent_id: Optional[str] = None,
@@ -298,11 +283,9 @@ async def meta_should_evolve(
         logger.exception(f"检查进化条件失败: {e}")
         raise APIError.internal(f"检查进化条件失败: {str(e)}")
 
-
 # ============================================================
 # 技能管理
 # ============================================================
-
 
 @router.get("/meta/skills", summary="获取所有技能")
 async def meta_get_all_skills(
@@ -334,7 +317,6 @@ async def meta_get_all_skills(
         logger.exception(f"获取技能列表失败: {e}")
         raise APIError.internal(f"获取技能列表失败: {str(e)}")
 
-
 @router.get("/meta/skills/stats", summary="获取技能统计")
 async def meta_get_skill_stats(
     agent_id: Optional[str] = None,
@@ -359,7 +341,6 @@ async def meta_get_skill_stats(
     except Exception as e:
         logger.exception(f"获取技能统计失败: {e}")
         raise APIError.internal(f"获取技能统计失败: {str(e)}")
-
 
 @router.post("/meta/skills/generate", summary="自动生成技能")
 async def meta_generate_skill(
@@ -386,7 +367,6 @@ async def meta_generate_skill(
     except Exception as e:
         logger.exception(f"生成技能失败: {e}")
         raise APIError.internal(f"生成技能失败: {str(e)}")
-
 
 @router.post("/meta/skills/match", summary="匹配技能")
 async def meta_match_skills(
@@ -416,7 +396,6 @@ async def meta_match_skills(
     except Exception as e:
         logger.exception(f"匹配技能失败: {e}")
         raise APIError.internal(f"匹配技能失败: {str(e)}")
-
 
 # ============================================================
 # Agent 级路由（兼容前端 /agents/{agent_id}/metacognition 路径）
@@ -476,7 +455,6 @@ async def get_agent_metacognition(
             data={"items": [], "total": 0, "stats": {"total": 0, "evaluations": 0, "suggestions": 0}},
             request_id=_get_request_id(req),
         )
-
 
 @router.get("/{agent_id}/metacognition/stats", summary="获取 Agent 元认知统计")
 async def get_agent_metacognition_stats(

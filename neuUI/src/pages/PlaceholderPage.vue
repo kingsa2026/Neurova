@@ -1,16 +1,16 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;component :is="icon" /&gt;
-      &lt;/div&gt;
-      &lt;h2 &gt;{{ title }}&lt;/h2&gt;
-      &lt;p &gt;{{ description }}&lt;/p&gt;
-      &lt;a-tag color="blue"&gt;{{ module }}&lt;/a-tag&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <div >
+        <component :is="icon" />
+      </div>
+      <h2 >{{ title }}</h2>
+      <p >{{ description }}</p>
+      <a-tag color="blue">{{ module }}</a-tag>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import {
@@ -19,17 +19,17 @@ import {
   AppstoreOutlined,
 } from '@ant-design/icons-vue'
 const route = useRoute()
-const title = computed(() =&gt; (route.meta.title as string) || '页面开发中')
-const module = computed(() =&gt; (route.meta.module as string) || '')
-const description = computed(() =&gt; '此页面正在开发中，敬请期待。')
-const icon = computed(() =&gt; {
+const title = computed(() => (route.meta.title as string) || '页面开发中')
+const module = computed(() => (route.meta.module as string) || '')
+const description = computed(() => '此页面正在开发中，敬请期待。')
+const icon = computed(() => {
   const m = module.value
   if (['agents', 'chat'].includes(m)) return AppstoreOutlined
   if (['workflows', 'collaboration', 'projects'].includes(m)) return BuildOutlined
   return CodeOutlined
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .placeholder-page {
   display: flex;
   align-items: center;
@@ -60,5 +60,5 @@ const icon = computed(() =&gt; {
   font-size: 0.95rem;
   margin: 0 0 16px;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

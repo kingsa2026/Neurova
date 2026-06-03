@@ -49,7 +49,7 @@ from neurova.mem_core import MemCore
 from neurova.context import ContextOrchestrator
 from neurova.llm_client import LLMClient, LLMConfig
 from neurova.router import MessageRouter, Message, MessageType, RouteResult
-from neurova.skill_system import SkillRegistry, SkillEvent, create_default_skills
+from neurova.skills.registry import SkillRegistry
 from neurova.core.idle_tracker import IdleTimeTracker
 from neurova.core.sleep_config_manager import SleepConfigManager
 from neurova.skills.agent_skill_manager import AgentSkillManager  # will be migrated to evolution
@@ -133,10 +133,6 @@ class AgentLLMClient:
     def get_stats(self):
         return self._get_client().get_stats()
 
-
-
-
-
 class AgentConfig:
     """Agent 配置"""
     def __init__(
@@ -158,12 +154,12 @@ class AgentConfig:
         enable_cognitive_capabilities: bool = True,  # 认知能力
         enable_evolution: bool = True,  # 进化能力
         enable_experience_summary: bool = True,  # 经验总结
-        
+
         # 个性和宪法配置
         personality: str = "",  # 个性设定
         constitution: str = "",  # 行为准则（宪法）
         behavior_rules: List[str] = None,  # 动态行为规则列表
-        
+
         # TTS 配置
         enable_tts: bool = False,  # 是否启用 TTS
         tts_engine: str = "mock",  # TTS 引擎类型 (edge/moss_nano/mock)
@@ -172,7 +168,7 @@ class AgentConfig:
     ):
         self.name = name
         self.agent_id = agent_id
-        
+
         # 工作目录路径 - 必须由调用者提供，不使用硬编码
         if not workspace_path:
             raise ValueError(
@@ -180,9 +176,9 @@ class AgentConfig:
                 "Please provide a custom workspace directory for the agent. "
                 f"Example: AgentConfig(name='{name}', agent_id='{agent_id}', workspace_path='/path/to/agent/workspace')"
             )
-        
+
         self.workspace_path = Path(workspace_path)
-        
+
         # 数据库路径配置 - 优先使用Agent工作目录下的memory文件夹
         if db_path:
             self.db_path = db_path
@@ -191,13 +187,13 @@ class AgentConfig:
             agent_memory_dir = self.workspace_path / "memory"
             agent_memory_dir.mkdir(parents=True, exist_ok=True)
             self.db_path = str(agent_memory_dir / "memory.db")
-        
+
         # 附件存储路径 - 标准路径：workspace/memory/attachments/
         self.attachment_dir = str(self.workspace_path / "memory" / "attachments")
-        
+
         # LLM 服务商 ID（用于路由到指定服务商）
         self.llm_provider = llm_provider
-        
+
         self.llm_config = LLMConfig(
             api_key=llm_api_key,
             base_url=llm_base_url,
@@ -206,27 +202,27 @@ class AgentConfig:
             max_tokens=max_tokens,
             stream=enable_streaming,
         )
-        
+
         self.enable_memory = enable_memory
         self.enable_streaming = enable_streaming
         self.enable_active_skill_acquisition = enable_active_skill_acquisition  # 主动技能获取
         self.enable_skill_packer = enable_skill_packer  # 自动打包技能
-        
+
         # 认知能力配置
         self.enable_cognitive_capabilities = enable_cognitive_capabilities
         self.enable_evolution = enable_evolution
         self.enable_experience_summary = enable_experience_summary
-        
+
         # TTS 配置
         self.enable_tts = enable_tts
         self.tts_engine = tts_engine
         self.tts_voice = tts_voice
         self.tts_auto_download = tts_auto_download
-        
+
         # 个性和宪法配置
         self.personality = personality
         self.constitution = constitution
-        
+
         # 动态行为规则（Phase 6.5: 统一行为规则配置）
         self.behavior_rules = behavior_rules or [
             "- 始终使用中文交流",
@@ -236,11 +232,10 @@ class AgentConfig:
             "- 如果发现用户的问题需要搜索或文件操作，使用 [TOOL_CALL:工具名(参数)] 格式调用工具",
         ]
 
-
 class Agent:
     """
     Agent 核心
-    
+
     职责:
     1. 接收用户输入（通过 Router）
     2. 检索相关记忆
@@ -248,36 +243,35 @@ class Agent:
     4. 调用 LLM 生成回复
     5. 存储新记忆
     6. 更新记忆温度
-    
+
     集成方式:
     - 所有消息通过 Router 路由，不直接调用 chat
     - Router 识别消息类型后分发给 Skill/记忆/对话处理器
     - 普通对话才由 Agent 的 chat 方法处理
     """
-    
+
     def __init__(self, config: Optional[AgentConfig] = None, **kwargs):
-        
+
         self.config = config or AgentConfig(**kwargs)
 
         debug_log(f"Agent.__init__() 开始: {self.config.name} (ID: {self.config.agent_id})")
-        
+
         # 加载身份和性格
         debug_log("步骤1: 加载身份和性格...")
         self._load_identity()
         debug_log("步骤1: 完成")
-        
 
         # 初始化模块 - 先初始化为 None，再根据配置决定是否启用
         debug_log("步骤2: 初始化记忆模块...")
         self.memory_manager = None
         self.storage = None
         self.temperature_engine = None
-        
+
         # P2: 初始化 MemCore 深度模块
         self.memory_agent = MemCore(self)
         # P2: 初始化 ContextOrchestrator 深度模块
         self.context_orchestrator = ContextOrchestrator(self)
-        
+
         if self.config.enable_memory:
             debug_log("步骤2.1: 调用 _init_memory_modules()...")
             self._init_memory_modules()
@@ -289,14 +283,14 @@ class Agent:
             except Exception as e:
                 logger.warning(f"MoE 路由器初始化失败，降级到普通检索: {e}")
         debug_log("步骤2: 完成")
-        
+
         # Phase 5: 工作记忆和对话缓冲区由 MemCore 管理
         self.working_memory: Optional[WorkingMemoryAugmenter] = None
         self.conversation_buffer: Optional[ConversationMemoryBuffer] = None
         self.buffer_module: Optional[BufferModule] = None
-        
+
         debug_log("步骤3: 创建上下文构建器和 LLM 客户端...")
-        
+
         # P2: 委托给 ContextOrchestrator 初始化上下文系统
         self.context_orchestrator.init_context_system()
         # 使用 LLM 路由客户端（不直接持有 API Key，通过路由层传递上下文）
@@ -311,28 +305,28 @@ class Agent:
 
         # 当前用户输入（供 ToolMemory 回调使用）
         self._current_user_input: Optional[str] = None
-        
+
         # 轨迹记录（用于调试和回放）
         self._current_trace_id: str = ""  # 当前轨迹 ID
         self._trajectory_recorder = get_trajectory_recorder()
-        
+
         # Session管理器 - 用于备份对话到文件
         self.session_manager = get_session_manager()
 
         # Router 集成
         self._router: Optional[MessageRouter] = None
         self._skill_registry: Optional[SkillRegistry] = None
-        
+
         # 睡眠模块集成
         self.sleep_config_manager = SleepConfigManager()
         self.idle_tracker = IdleTimeTracker()
-        
+
         # 技能管理器（任务拆解 + 主动技能获取）
         self.skill_manager: Optional[AgentSkillManager] = None
-        
+
         # 技能打包器（自动打包）
         self.skill_packer: Optional[Any] = None  # SkillPacker type
-        
+
         # ToolMemory 集成：闭环学习系统（Neurova 2.0 核心特性）
         # 工具运用 → 工具记忆 → 经验总结 → 相似问题检索 → 工具运用
         self.tool_memory: Optional[ToolMemoryIntegration] = None
@@ -344,7 +338,7 @@ class Agent:
                 agent_id=self.config.agent_id,
                 storage_dir=str(self.config.workspace_path / "memory" / "muscle_memory"),
             )
-            
+
             from neurova.cognitive_layers.memory_layer.tool_memory_integration import ToolMemoryIntegration
             # 初始化ToolMemoryIntegration，接入肌肉记忆
             self.tool_memory = ToolMemoryIntegration(
@@ -354,61 +348,61 @@ class Agent:
                 temperature_threshold=30.0,
             )
             logger.info(f"Agent {self.config.name}: ToolMemory（闭环学习）+ 肌肉记忆已启用")
-        
+
         # Neurova 统一记忆检索引擎（多维融合 + 意图钻取）
         self.recall_engine: Optional[NeurovaRecallEngine] = None
-        
+
         # TTS 管理器（语音合成）
         self.tts_manager = None
         if self.config.enable_tts:
             try:
                 from neurova.tts.manager import TTSManager, TTSConfig
-                
+
                 tts_config = TTSConfig(
                     engine=self.config.tts_engine,
                     voice=self.config.tts_voice,
                     moss_auto_download=self.config.tts_auto_download,
                     model_cache_dir=str(self.config.workspace_path / "models" / "tts"),
                 )
-                
+
                 self.tts_manager = TTSManager(tts_config)
                 logger.info(f"Agent {self.config.name}: TTS管理器已初始化 (engine={self.config.tts_engine})")
-                
+
             except Exception as e:
                 logger.warning(f"TTS管理器初始化失败: {e}")
-        
+
         # 审批管理器（危险命令审批）
         self.approval_manager = None
         try:
             from neurova.security.approval_manager import ApprovalManager, ApprovalLevel
-            
+
             self.approval_manager = ApprovalManager(
                 workspace_path=str(self.config.workspace_path),
                 approval_level=ApprovalLevel.SMART,  # 默认智能模式
             )
             logger.info(f"Agent {self.config.name}: 审批管理器已初始化")
-            
+
         except Exception as e:
             logger.warning(f"审批管理器初始化失败: {e}")
-        
+
         # ========== 认知能力、进化能力、经验总结接入 ==========
-        
+
         # 1. 认知能力 (GrowthAnalyzer)
         self.growth_analyzer = None
         if self.config.enable_cognitive_capabilities and self.memory_manager:
             try:
                 from neurova.cognitive_layers.growth_layer.analyzer import GrowthAnalyzer
-                
+
                 # GrowthAnalyzer.__init__() 只接受 storage_path 参数
                 growth_storage_path = str(self.config.workspace_path / "memory" / "growth")
                 self.growth_analyzer = GrowthAnalyzer(
                     storage_path=growth_storage_path,
                 )
                 logger.info(f"Agent {self.config.name}: 认知能力(GrowthAnalyzer)已初始化")
-                
+
             except Exception as e:
                 logger.warning(f"认知能力初始化失败: {e}")
-        
+
         # 2. 统一进化引擎 (EvolutionOrchestrator v2.0)
         # 合并了 SkillsEvolutionEngine + ExperienceCaller + AdaptiveToolWeights
         # 提供: 工具权重自适应 + 经验反哺 + 经验检索 + 统计报告
@@ -416,33 +410,33 @@ class Agent:
         if self.config.enable_evolution or self.config.enable_experience_summary:
             try:
                 from neurova.evolution import EvolutionOrchestrator
-                
+
                 self.evolution = EvolutionOrchestrator()
-                
+
                 # 从 skill_registry 注册已有工具
                 if self._skill_registry:
                     skill_names = [s.name for s in self._skill_registry.list_skills()]
                     self.evolution.register_tools(skill_names)
-                
+
                 # 将进化引擎的权重和生命周期同步到 ToolMemoryIntegration
                 if hasattr(self, 'tool_memory') and self.tool_memory:
                     self.tool_memory.tool_weights = self.evolution.tool_weights
                     self.tool_memory.tool_lifecycle = self.tool_lifecycle
                     logger.info(f"Agent {self.config.name}: ToolMemoryIntegration 已同步进化引擎权重和生命周期")
-                
+
                 logger.info(
                     f"Agent {self.config.name}: 统一进化引擎(EvolutionOrchestrator)已初始化 "
                     f"(evolution={self.config.enable_evolution}, "
                     f"experience={self.config.enable_experience_summary})"
                 )
-                
+
             except Exception as e:
                 logger.warning(f"统一进化引擎初始化失败: {e}")
-        
+
         # 向后兼容别名 (用于 API 端点 get_skill_modules())
         self.evolution_engine = self.evolution  # type: ignore
         self.experience_caller = self.evolution  # type: ignore
-        
+
         # ===== v1.0.0 新增: 工具路由器 + 模型适配器 =====
         # P3: 使用 BuiltinToolRegistry 替代内联的 15 个闭包
         self._builtin_tools: Optional[BuiltinToolRegistry] = None
@@ -453,21 +447,21 @@ class Agent:
             logger.info(f"Agent {self.config.name}: BuiltinToolRegistry 已初始化（15个工具）")
         except Exception as e:
             logger.warning(f"BuiltinToolRegistry 初始化失败: {e}")
-        
+
         # ToolRouter v1.0.0 — 统一工具路由（内置 + Skill + MCP）
         self.tool_router = None
         try:
             from neurova.tool_layers import ToolRouter
             self.tool_router = ToolRouter()
             self.tool_router.set_skill_manager(self.skill_registry)
-            
+
             # 注册内置工具（通过 BuiltinToolRegistry）
             if self._builtin_tools:
                 self.tool_router.register_builtin_batch(self._builtin_tools.get_all_tools())
             logger.info(f"Agent {self.config.name}: ToolRouter v1.0.0 已初始化（含文件操作 + Computer Use 工具）")
         except Exception as e:
             logger.warning(f"ToolRouter 初始化失败: {e}")
-        
+
         # ModelAdapter v1.0.0 — 多 LLM 自适应推理循环
         self.model_adapter = None
         try:
@@ -481,7 +475,7 @@ class Agent:
             )
         except Exception as e:
             logger.warning(f"模型适配器初始化失败: {e}")
-        
+
         # ===== P0: Phase 2+3 模块初始化 =====
         # 1. PatternMiner — PrefixSpan 序列模式挖掘
         self.pattern_miner: Optional[PatternMiner] = None
@@ -491,7 +485,7 @@ class Agent:
                 logger.info(f"Agent {self.config.name}: PatternMiner (序列模式挖掘) 已初始化")
             except Exception as e:
                 logger.warning(f"PatternMiner 初始化失败: {e}")
-        
+
         # 2. ToolGeneticEngine — 工具基因编程引擎
         self.genetic_engine: Optional[ToolGeneticEngine] = None
         if self.config.enable_evolution:
@@ -500,7 +494,7 @@ class Agent:
                 logger.info(f"Agent {self.config.name}: ToolGeneticEngine (基因编程) 已初始化")
             except Exception as e:
                 logger.warning(f"ToolGeneticEngine 初始化失败: {e}")
-        
+
         # 3. ToolLifecycleManager — 工具生命周期管理
         self.tool_lifecycle: Optional[ToolLifecycleManager] = None
         try:
@@ -508,7 +502,7 @@ class Agent:
             logger.info(f"Agent {self.config.name}: ToolLifecycleManager (生命周期) 已初始化")
         except Exception as e:
             logger.warning(f"ToolLifecycleManager 初始化失败: {e}")
-        
+
         # 4. NLToolSynthesizer — 自然语言工具合成
         self.tool_synthesizer: Optional[NLToolSynthesizer] = None
         if self.config.enable_evolution:
@@ -519,7 +513,7 @@ class Agent:
                 logger.info(f"Agent {self.config.name}: NLToolSynthesizer (NL合成) 已初始化")
             except Exception as e:
                 logger.warning(f"NLToolSynthesizer 初始化失败: {e}")
-        
+
         # 5. ToolOrchestrator — DAG 工具编排器
         self.tool_orchestrator: Optional[ToolOrchestrator] = None
         try:
@@ -551,7 +545,7 @@ class Agent:
             logger.info(f"Agent {self.config.name}: ToolOrchestrator (DAG编排) 已初始化")
         except Exception as e:
             logger.warning(f"ToolOrchestrator 初始化失败: {e}")
-        
+
         # 6. ToolMarketplace — 工具市场
         self.tool_marketplace: Optional[ToolMarketplace] = None
         try:
@@ -559,23 +553,23 @@ class Agent:
             logger.info(f"Agent {self.config.name}: ToolMarketplace (工具市场) 已初始化")
         except Exception as e:
             logger.warning(f"ToolMarketplace 初始化失败: {e}")
-        
+
         # P1: 提取的深度模块初始化
         # 7. ToolExecutor — 统一工具执行器（代理 agent_core 中的工具执行方法）
         self.tool_executor = ToolExecutor(self)
-        
+
         # 8. PostChatPipeline — 对话后处理管线（代理步骤 6-9）
         self.post_chat_pipeline = PostChatPipeline(self)
-        
+
         logger.info(f"Agent {self.config.name} 初始化完成")
-        
+
         # ===== 修复：从 llm_provider 加载 API Key 到 llm_config =====
         # 先确保 llm_config 不为 None
         logger.info(f"[DEBUG] llm_provider={self.config.llm_provider}, llm_config={self.config.llm_config}")
         if self.config.llm_config is None:
             self.config.llm_config = LLMConfig()
             logger.info("[DEBUG] llm_config 为 None，已创建默认 LLMConfig")
-        
+
         if self.config.llm_provider:
             try:
                 from neurova.llm.provider_manager import get_provider_manager
@@ -596,34 +590,33 @@ class Agent:
                 logger.warning(f"从 llm_provider 加载配置失败: {e}")
         else:
             logger.warning("[DEBUG] llm_provider 为空，无法加载 API Key")
-        
+
         # ===== Agent Loop 初始化 (v5.0) =====
         self.loop = None
         self._init_agent_loop()
-    
+
     def _init_file_operation_wrappers(self):
         """P3: 委托给 BuiltinToolRegistry（已移至 __init__ 中直接初始化）"""
         pass
-    
-    
+
     def _init_agent_loop(self):
         """
         初始化 Agent Loop (v5.0)
-        
+
         根据配置的模型自动选择合适的 Loop。
         如果 Agent Loop 系统不可用，则使用传统方法。
         """
         if not AGENT_LOOP_AVAILABLE:
             logger.warning("Agent Loop system not available, using legacy chat methods")
             return
-        
+
         try:
             # 获取模型名称
             model_name = self.config.llm_config.model
-            
+
             # 查找合适的 Loop 类
             loop_class = find_agent_loop(model_name)
-            
+
             if loop_class:
                 self.loop = loop_class(self)
                 logger.info(
@@ -632,7 +625,7 @@ class Agent:
                 )
             else:
                 logger.warning(f"No suitable Loop found for model: {model_name}")
-        
+
         except Exception as e:
             logger.warning(f"Agent Loop initialization failed: {e}")
             self.loop = None
@@ -640,26 +633,26 @@ class Agent:
     def rebuild_loop(self, model_name: str) -> bool:
         """
         重建 Agent Loop（模型热切换时调用）
-        
+
         当模型切换后，需要重新选择合适的 Loop 类型，
         因为不同模型可能需要不同的 Loop（如 OpenAI vs Anthropic）。
-        
+
         参数:
             model_name: 新的模型名称
-        
+
         返回:
             True 表示重建成功，False 表示失败
         """
         if not AGENT_LOOP_AVAILABLE:
             logger.warning("Agent Loop 系统不可用，无法重建")
             return False
-        
+
         # 更新 config 中的模型名
         self.config.llm_config.model = model_name
-        
+
         # 查找新模型对应的 Loop 类
         loop_class = find_agent_loop(model_name)
-        
+
         if loop_class:
             old_loop_name = type(self.loop).__name__ if self.loop else "None"
             try:
@@ -679,7 +672,7 @@ class Agent:
         else:
             logger.warning(f"No suitable Loop found for model: {model_name}")
             return False
-    
+
     async def process_multimodal(
         self,
         content: str,
@@ -689,30 +682,30 @@ class Agent:
     ) -> str:
         """
         处理多模态消息（图片、音频、视频、文档）
-        
+
         由 Router 的 _route_multimedia_message 调用。
         根据 media_type 使用 LLMRouter 选择合适的模型，
         然后将媒体信息注入上下文并调用 chat()。
-        
+
         Args:
             content: 用户文本内容
             media_type: 媒体类型 (image/voice/video/document)
             model: 指定模型名（可选，为空则由 LLMRouter 自动选择）
             metadata: 消息元数据（含 media_url, filename, mime_type 等）
-            
+
         Returns:
             str: Agent 回复文本
         """
         metadata = metadata or {}
         logger.info(f"处理多模态消息: media_type={media_type}, model={model}")
-        
+
         # 1. 将 media_type 映射为 LLM RequestType，使用 LLMRouter 选择模型
         try:
             from neurova.llm.llm_router import (
                 select_model_for_request,
                 RequestType as LLMRequestType,
             )
-            
+
             media_to_request_type = {
                 "image": LLMRequestType.IMAGE_UNDERSTANDING,
                 "voice": LLMRequestType.AUDIO_UNDERSTANDING,
@@ -720,7 +713,7 @@ class Agent:
                 "document": LLMRequestType.CHAT,  # 文档走普通聊天
             }
             request_type = media_to_request_type.get(media_type, LLMRequestType.CHAT)
-            
+
             # 使用 LLMRouter 选择最佳模型（如果未指定）
             if not model:
                 selection = select_model_for_request(request_type)
@@ -730,20 +723,20 @@ class Agent:
                         f"LLMRouter 为 {media_type} 选择模型: "
                         f"{selection.provider_name}/{selection.model}"
                     )
-            
+
             # 如果指定了模型且与当前不同，热切换
             if model and model != getattr(self.config.llm_config, 'model', None):
                 logger.info(f"多模态路由：热切换模型到 {model}")
                 self.rebuild_loop(model)
-                
+
         except Exception as e:
             logger.warning(f"多模态模型选择失败，使用当前模型: {e}")
-        
+
         # 2. 构建多模态上下文描述
         media_url = metadata.get("media_url", "")
         filename = metadata.get("filename", "")
         mime_type = metadata.get("mime_type", "")
-        
+
         media_descriptions = {
             "image": f"[用户发送了一张图片{': ' + filename if filename else ''}]",
             "voice": f"[用户发送了一段语音消息{': ' + filename if filename else ''}]",
@@ -751,49 +744,49 @@ class Agent:
             "document": f"[用户发送了一个文档{': ' + filename if filename else ''}]",
         }
         media_desc = media_descriptions.get(media_type, f"[用户发送了媒体文件: {media_type}]")
-        
+
         # 3. 将媒体描述注入用户输入，调用 chat()
         enriched_input = f"{media_desc}\n{content}" if content else media_desc
-        
+
         # 附加原始 metadata（含 attachment_ids 供附件管理器使用）
         chat_metadata = dict(metadata)
-        
+
         response = await self.chat(
             enriched_input,
             metadata=chat_metadata if chat_metadata else None,
         )
-        
+
         # chat() 返回 dict，提取文本
         if isinstance(response, dict):
             return response.get("text", str(response))
         return str(response)
-    
+
     @property
     def router(self) -> Optional[MessageRouter]:
         """获取 Router 实例"""
         return self._router
-    
+
     @router.setter
     def router(self, value: MessageRouter):
         """设置 Router 实例"""
         self._router = value
         logger.info(f"Agent {self.config.name} 已绑定 Router")
-    
+
     @property
     def skill_registry(self) -> Optional[SkillRegistry]:
         """获取 Skill 注册中心"""
         return self._skill_registry
-    
+
     @skill_registry.setter
     def skill_registry(self, value: SkillRegistry):
         """设置 Skill 注册中心"""
         self._skill_registry = value
         logger.info(f"Agent {self.config.name} 已绑定 SkillRegistry")
-    
+
     def _load_identity(self):
         """加载 Agent 身份和性格"""
         workspace = self.config.workspace_path / "workspace" / "memory"
-        
+
         # 加载 soul.md
         soul_path = workspace / "soul.md"
         if soul_path.exists():
@@ -802,7 +795,7 @@ class Agent:
         else:
             self.soul = f"你是 {self.config.name}，一个友好的 AI 助手。"
             logger.warning(f"未找到身份文件，使用默认身份")
-        
+
         # 加载 personality.md
         personality_path = workspace / "personality.md"
         if personality_path.exists():
@@ -813,13 +806,13 @@ class Agent:
 
     def _init_memory_modules(self, neuser_id: str = "default", user_id: str = "default"):
         """初始化记忆系统模块（委托给 MemCore）
-        
+
         Args:
             neuser_id: Neurova系统用户ID（三级隔离第2级）
             user_id: 对话用户ID（三级隔离第3级）
         """
         self.memory_agent.init_memory_modules(neuser_id=neuser_id, user_id=user_id)
-        
+
         # Phase 10: 初始化睡眠整理引擎（不启动，仅在 shutdown 时触发）
         try:
             from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
@@ -831,26 +824,26 @@ class Agent:
         except Exception as e:
             logger.warning(f"SleepConsolidation 初始化失败: {e}")
             self.sleep_consolidation = None
-        
+
         logger.info(f"记忆系统模块初始化成功: agent_id={self.config.agent_id}, neuser_id={neuser_id}, user_id={user_id}")
-      
+
     def init_router(self) -> MessageRouter:
         """
         初始化 Router 并注入依赖
-        
+
         这会创建默认的 Router，并注入:
         - Agent 自身（用于聊天处理）
         - SkillRegistry（用于 Skill 执行）
         - MemoryManager（用于记忆操作）
         """
         from neurova.router import create_default_router
-        
+
         # 先初始化 SkillRegistry
         if not self._skill_registry:
             self._skill_registry = create_default_skills(
                 memory_manager=self.memory_manager
             )
-        
+
         # 注册 ToolMemory 回调：Skill 成功执行后记录到 ToolMemory
         if self.tool_memory and self._skill_registry:
             self._skill_registry.register_event_callback(
@@ -858,14 +851,14 @@ class Agent:
                 self._on_skill_post_execute,
             )
             logger.info(f"Agent {self.config.name}: ToolMemory 回调已注册（Skill成功执行时记录）")
-        
+
         # 创建 Router 并注入所有依赖
         self._router = create_default_router(
             agent=self,
             skill_registry=self._skill_registry,
             memory_manager=self.memory_manager,
         )
-        
+
         # 初始化技能管理器（如果启用主动技能获取）
         if self.config.enable_active_skill_acquisition:
             self.skill_manager = AgentSkillManager(
@@ -874,40 +867,40 @@ class Agent:
                 auto_acquire=True,
             )
             logger.info(f"Agent {self.config.name} 的 SkillManager 已初始化")
-        
+
         # 初始化技能自动构建器 (AutoSkillBuilder from evolution)
         # 替换旧的 SkillPacker，统一在 evolution 模块中
         if self.config.enable_skill_packer:
             try:
                 from neurova.evolution import AutoSkillBuilder
-                
+
                 self.skill_packer = AutoSkillBuilder(
                     min_occurrences=3,
                     min_success_rate=0.7,
                 )
                 logger.info(f"Agent {self.config.name}: AutoSkillBuilder 已初始化")
-                
+
             except ImportError as e:
                 logger.warning(f"AutoSkillBuilder 初始化失败: {e}")
-        
+
         logger.info(f"Agent {self.config.name} 的 Router 已初始化")
         return self._router
-    
+
     def _on_skill_post_execute(self, skill, result, **kwargs):
         """
         Skill 成功执行后，记录到 ToolMemory（闭环学习）
-        
+
         通过 SkillRegistry 的 POST_EXECUTE 事件触发，
         仅在 result.success == True 时记录。
         """
         if not self.tool_memory or not result or not result.success:
             return
-        
+
         try:
             # 从 result.metadata 获取原始 skill 参数
             tool_params = result.metadata.get("skill_kwargs", {})
             problem_text = self._current_user_input or f"执行 {skill.name}"
-            
+
             self._on_tool_executed(
                 tool_name=skill.name,
                 params=tool_params,
@@ -919,46 +912,46 @@ class Agent:
             logger.info(f"ToolMemory 记录成功技能执行: {skill.name}")
         except Exception as e:
             logger.warning(f"ToolMemory 记录失败: {e}")
-    
+
     async def process_message(self, content: str, sender: str = "user") -> RouteResult:
         """
         处理消息的统一入口 - 通过 Router 接收消息
-        
+
         这是 D1 集成的核心方法：
         1. 创建 Message 对象
         2. 通过 Router 路由
         3. 返回 RouteResult
-        
+
         所有外部调用都应该使用此方法，而不是直接调用 chat
-        
+
         参数:
         content: 消息内容
         sender: 发送者
-        
+
         返回:
         RouteResult 路由结果
         """
         if not self._router:
             # 如果 Router 未初始化，自动初始化
             self.init_router()
-        
+
         # 创建消息对象
         message = self._router.create_message(content=content, sender=sender)
-        
+
         # 附加引用以便命令处理器访问
         message.metadata["agent"] = self
         message.metadata["router"] = self._router
         message.metadata["skill_registry"] = self._skill_registry
-        
+
         logger.info(f"Agent {self.config.name} 收到消息: {content[:50]}...")
-        
+
         # 通过 Router 路由（现在是异步的）
         result = await self._router.route(message)
-        
+
         logger.info(f"消息路由完成: {result.message_type.value}, success={result.success}")
-        
+
         return result
-    
+
     async def chat(
         self,
         user_input: str,
@@ -970,7 +963,7 @@ class Agent:
     ) -> Dict[str, Any]:
         """
         与用户对话（底层方法，由 Router 调用）
-        
+
         参数:
         user_input: 用户输入
         stream: 是否流式输出
@@ -978,7 +971,7 @@ class Agent:
         session_id: 会话ID（用于session备份）
         metadata: 附加元数据（如 attachment_ids）
         enable_tts: 是否启用TTS（覆盖配置，None表示使用配置）
-        
+
         返回:
         包含文本回复和音频路径的字典:
         {
@@ -990,20 +983,20 @@ class Agent:
         # 绝对路径调试：确认 chat() 是否被调用（已禁用）
         # with open(r"e:\chat_called.txt", "a", encoding="utf-8") as f:
         #     f.write(f"\n[{datetime.now()}] chat() 被调用! user_input={user_input[:50]}\n")
-        
+
         debug_log(f"========== chat() 方法开始 ==========")
         debug_log(f"用户输入: {user_input[:100]}")
         logger.info(f"收到用户输入: {user_input[:50]}...")
-        
+
         # 递增对话轮次计数（供 PostChatPipeline 反思触发使用）
         if not hasattr(self, '_turn_count'):
             self._turn_count = 0
         self._turn_count += 1
-        
+
         # 初始化思考过程收集
         self._current_reasoning = None
         self._tool_messages_list = []
-        
+
         # 🔄 根据 session_id 恢复对话历史（Phase 6.6: 增强恢复机制）
         # 不论当前 history 是否为空，都尝试恢复（避免中途重启丢失历史）
         if session_id:
@@ -1024,7 +1017,7 @@ class Agent:
                         debug_log(f"恢复对话历史: {len(saved_messages)} 条消息")
             except Exception as e:
                 logger.warning(f"恢复 session {session_id} 失败: {e}")
-        
+
         # 启动轨迹记录
         if self._trajectory_recorder:
             self._current_trace_id = self._trajectory_recorder.start_trace(
@@ -1032,17 +1025,17 @@ class Agent:
                 agent_id=self.config.agent_id,
                 metadata=metadata,
             )
-            
+
             # 记录用户输入事件
             self._trajectory_recorder.record_event(
                 trace_id=self._current_trace_id,
                 event_type=TrajectoryEventType.USER_INPUT,
                 data={"user_input": user_input[:500]},  # 限制长度
             )
-        
+
         # 记录当前用户输入（供 ToolMemory 回调使用）
         self._current_user_input = user_input
-        
+
         # 记录用户活动，重置空闲计时
         self.idle_tracker.record_activity()
 
@@ -1066,7 +1059,7 @@ class Agent:
         tool_memory_result = None
         tool_decision = "do_not_execute"
         auto_execute_result = None
-        
+
         if self.tool_memory:
             try:
                 tool_memory_result, tool_decision = self.tool_memory.check_tool_memory(user_input)
@@ -1076,7 +1069,7 @@ class Agent:
                         f"(置信度={tool_memory_result.get('confidence', 0):.2f}, "
                         f"决策={tool_decision})"
                     )
-                    
+
                     # 🔧 修复断点1和2：根据决策自动执行工具（增加安全验证）
                     if tool_decision == "auto_execute":
                         tool_name = tool_memory_result.get('tool_name')
@@ -1086,7 +1079,7 @@ class Agent:
                             logger.info(f"⚠️ 工具 {tool_name} 置信度 {confidence:.2f} < 0.7，转为建议模式")
                             tool_decision = "suggest"
                         else:
-                            import asyncio as _asyncio
+                            import asyncio
                             MUSCLE_TIMEOUT = 5.0  # 肌肉记忆执行超时阈值（秒）
                             logger.info(f"🚀 自动执行工具: {tool_name} (超时={MUSCLE_TIMEOUT}s)")
                             try:
@@ -1113,11 +1106,11 @@ class Agent:
                                 logger.warning(f"⏰ 工具自动执行超时: {tool_name} (>{MUSCLE_TIMEOUT}s)")
                                 tool_decision = "timeout"  # 超时降级，交给 LLM 处理
                                 auto_execute_result = None
-                            
+
             except Exception as e:
                 logger.warning(f"ToolMemory 检查失败: {e}")
         debug_log("步骤0: ToolMemory 检查完成")
-        
+
         # 0.1. 主动技能获取检查（如果启用）
         if self.skill_manager and self.skill_manager.auto_acquire:
             try:
@@ -1131,7 +1124,7 @@ class Agent:
                         logger.info(f"🔍 需要技能: {acquisition_result['missing_skills']}，但未在市场中找到")
             except Exception as e:
                 logger.warning(f"主动技能获取检查失败: {e}")
-        
+
         # 0.15. NL 工具合成检查 — 当用户描述新工具需求时自动生成 (P0)
         if self.tool_synthesizer and not (self.skill_manager and self.skill_manager.auto_acquire):
             try:
@@ -1200,7 +1193,7 @@ class Agent:
             ]
             if len(tools_for_llm) < original_count:
                 logger.info(f"🔒 已从工具列表移除已执行工具: {executed_tool}")
-        
+
         if self.loop:
             try:
                 if stream:
@@ -1274,7 +1267,7 @@ class Agent:
                     recent_contents = []  # 用于检测语义循环的最近内容窗口
                     tool_call_rounds = 0  # 工具调用轮数计数
                     MAX_TOOL_CALL_ROUNDS = 5  # 最大工具调用轮数
-                    
+
                     while (response
                            and getattr(response, 'finish_reason', '') == 'length'
                            and not getattr(response, 'tool_calls', None)
@@ -1298,14 +1291,14 @@ class Agent:
                         # 首次续写允许 tool_calls（模型可能在截断前正准备调工具）
                         # 后续续写聚焦纯文本（避免工具调用→截断→再调工具的循环）
                         _tools = tools_for_llm if continue_round == 1 else None
-                        
+
                         # 检查工具调用轮数
                         if _tools and getattr(response, 'tool_calls', None):
                             tool_call_rounds += 1
                             if tool_call_rounds >= MAX_TOOL_CALL_ROUNDS:
                                 logger.info(f"📝 工具调用轮数达到上限 ({MAX_TOOL_CALL_ROUNDS})，切换为纯文本续写")
                                 _tools = None
-                        
+
                         logger.info(
                             f"📝 截断续写第 {continue_round} 轮 "
                             f"(tools={'on' if _tools else 'off'}, "
@@ -1336,7 +1329,7 @@ class Agent:
                         recent_contents.append(new_content[:500])  # 只取前500字符用于比较
                         if len(recent_contents) > SIMILARITY_WINDOW:
                             recent_contents.pop(0)
-                        
+
                         if len(recent_contents) >= SIMILARITY_WINDOW:
                             # 计算最近窗口内内容的相似度
                             is_loop = self._detect_content_loop(recent_contents, SIMILARITY_THRESHOLD)
@@ -1358,7 +1351,7 @@ class Agent:
                         logger.info(f"📝 输出已达上限 ({MAX_TOTAL_CHARS} 字符)，终止续写")
 
                 logger.info(f"Agent Loop prediction completed")
-            
+
             except Exception as e:
                 # 检查是否为 API 配置类错误（400/401/403），这类错误在 legacy 方法中也会同样失败
                 # 只有 Loop 格式转换等特定错误才值得 fallback 到 legacy 方法
@@ -1392,13 +1385,13 @@ class Agent:
                 reply = await self._chat_stream(user_input, context, save_memory)
             else:
                 reply = self._chat_normal(user_input, context, save_memory)
-        
+
         # 解析并执行文本中的工具调用（API 不支持 function calling 时的降级通路）
         reply = await self._execute_text_tool_calls(reply, user_input)
-        
+
         # B5闭环修复 GAP-2: 更新对话历史（之前只在 legacy 方法中调用）
         self._update_history(user_input, reply)
-        
+
         # 记录 LLM 调用事件（简化：只记录结果）
         if self._trajectory_recorder and self._current_trace_id:
             # 获取 LLM 调用信息（简化）
@@ -1410,7 +1403,7 @@ class Agent:
                     "model": self.config.llm_config.model,
                 },
             )
-        
+
         # 6-9. P1: 对话后处理管线（委托给 PostChatPipeline）
         post_result = await self.post_chat_pipeline.process(
             user_input=user_input,
@@ -1426,7 +1419,7 @@ class Agent:
         cognitive_score = post_result["cognitive_score"]
         proactive_question = post_result.get("proactive_question")
         evolution_triggered = False  # PostChatPipeline 内部处理，此处保留兼容性
-        
+
         # 返回结果（包含文本和音频）
         result = {
             "text": reply,
@@ -1443,7 +1436,7 @@ class Agent:
             # Phase 10: 主动提问（如果有）
             "proactive_question": proactive_question,
         }
-        
+
         # 结束轨迹记录
         if self._trajectory_recorder and self._current_trace_id:
             self._trajectory_recorder.record_event(
@@ -1453,9 +1446,9 @@ class Agent:
             )
             self._trajectory_recorder.end_trace(self._current_trace_id)
             self._current_trace_id = ""
-        
+
         return result
-    
+
     def _execute_tool_from_memory(
         self,
         tool_memory_result: Dict[str, Any],
@@ -1546,7 +1539,7 @@ class Agent:
     ) -> Optional[Dict[str, Any]]:
         """P1: 委托给 ToolExecutor"""
         return self.tool_executor.execute_skill_tool(skill_name, skill_params, user_input)
-    
+
     def _execute_cli_tool(
         self,
         tool_name: str,
@@ -1555,7 +1548,7 @@ class Agent:
     ) -> Optional[Dict[str, Any]]:
         """P1: 委托给 ToolExecutor"""
         return self.tool_executor.execute_cli_tool(tool_name, tool_params, user_input)
-    
+
     def _chat_normal(
         self,
         user_input: str,
@@ -1564,9 +1557,9 @@ class Agent:
     ) -> str:
         """
         普通对话模式
-        
+
         ⚠️ DEPRECATED (v5.0): 此方法已废弃，请使用 Agent Loop 系统。
-        
+
         新的代码应该通过 `self.loop.predict_step()` 调用 LLM。
         此方法仅作为 Agent Loop 不可用时的 fallback。
         """
@@ -1577,23 +1570,23 @@ class Agent:
             stacklevel=2
         )
         logger.warning("Using deprecated _chat_normal(), please migrate to Agent Loop")
-        
+
         response = self.llm_client.chat(context)
         reply = response.content
-        
+
         # 更新对话历史
         self._update_history(user_input, reply)
-        
+
         # 保存记忆
         if save_memory and self.memory_manager:
             self._save_conversation_memory(user_input, reply)
-        
+
         # 更新记忆温度
         if self.temperature_engine:
             self._update_memory_temperature()
-        
+
         return reply
-    
+
     async def _chat_stream(
         self,
         user_input: str,
@@ -1602,9 +1595,9 @@ class Agent:
     ) -> str:
         """
         流式对话模式
-        
+
         ⚠️ DEPRECATED (v5.0): 此方法已废弃，请使用 Agent Loop 系统。
-        
+
         新的代码应该通过 `self.loop.predict_step()` 调用 LLM。
         此方法仅作为 Agent Loop 不可用时的 fallback。
         """
@@ -1615,7 +1608,7 @@ class Agent:
             stacklevel=2
         )
         logger.warning("Using deprecated _chat_stream(), please migrate to Agent Loop")
-        
+
         reply_parts = []
 
         async for chunk in self.llm_client.chat_stream(context):
@@ -1623,20 +1616,20 @@ class Agent:
             logger.debug(chunk)
 
         reply = "".join(reply_parts)
-        
+
         # 更新对话历史
         self._update_history(user_input, reply)
-        
+
         # 保存记忆
         if save_memory and self.memory_manager:
             self._save_conversation_memory(user_input, reply)
-        
+
         # 更新记忆温度
         if self.temperature_engine:
             self._update_memory_temperature()
-        
+
         return reply
-    
+
     def _get_builtin_tool_params(self, tool_name: str) -> Dict[str, Any]:
         """P3: 委托给 builtin_tools 模块"""
         return get_builtin_tool_params(tool_name)
@@ -1648,36 +1641,36 @@ class Agent:
     def _build_system_prompt(self, tools_desc: str = "") -> str:
         """构建系统提示（委托给 ContextOrchestrator）"""
         return self.context_orchestrator.build_system_prompt(tools_desc)
-    
+
     def _update_history(self, user_input: str, reply: str):
         """更新对话历史（委托给 MemCore）"""
         self.memory_agent.update_history(user_input, reply)
-    
+
     def _save_conversation_memory(self, user_input: str, reply: str):
         """保存对话记忆（委托给 MemCore）"""
         self.memory_agent.save_conversation_memory(user_input, reply)
-    
+
     def _save_to_session(self, user_input: str, reply: str, session_id: str = None, metadata: Optional[Dict[str, Any]] = None, assistant_metadata: Optional[Dict[str, Any]] = None) -> str:
         """保存对话到session文件（委托给 MemCore）"""
         return self.memory_agent.save_to_session(user_input, reply, session_id, metadata, assistant_metadata)
-    
+
     def _update_memory_temperature(self):
         """更新记忆温度（委托给 MemCore）"""
         self.memory_agent.update_memory_temperature()
-    
+
     def get_memory_stats(self) -> Dict[str, Any]:
         """获取记忆统计信息（委托给 MemCore）"""
         return self.memory_agent.get_memory_stats()
-    
+
     def get_llm_stats(self) -> Dict[str, Any]:
         """获取 LLM 统计信息"""
         return self.llm_client.get_stats()
-    
+
     def clear_history(self):
         """清空对话历史"""
         self.conversation_history = []
         logger.info("对话历史已清空")
-    
+
     def get_integration_info(self) -> Dict[str, Any]:
         """获取集成信息（用于调试和测试）"""
         return {
@@ -1688,79 +1681,79 @@ class Agent:
             "skill_count": len(self._skill_registry.skills) if self._skill_registry else 0,
             "conversation_history_length": len(self.conversation_history),
         }
-    
+
     def _detect_content_loop(self, contents: List[str], threshold: float = 0.8) -> bool:
         """
         检测内容循环
-        
+
         通过比较最近 N 次内容的相似度，判断是否陷入循环。
         使用简单的字符级相似度计算，避免复杂的 NLP 处理。
-        
+
         Args:
             contents: 最近的内容列表
             threshold: 相似度阈值，超过此值认为是循环
-            
+
         Returns:
             True 表示检测到循环，False 表示未检测到
         """
         if len(contents) < 2:
             return False
-        
+
         # 计算相邻内容的相似度
         similarities = []
         for i in range(1, len(contents)):
             prev = contents[i-1]
             curr = contents[i]
-            
+
             # 简单的字符级相似度计算
             # 使用最长公共子序列的简化版本
             similarity = self._calculate_similarity(prev, curr)
             similarities.append(similarity)
-        
+
         # 如果所有相邻内容的相似度都超过阈值，认为是循环
         if similarities and all(s > threshold for s in similarities):
             return True
-        
+
         # 检查是否有重复的句子或段落
         if self._has_repeated_patterns(contents):
             return True
-        
+
         return False
-    
+
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """
         计算两个文本的相似度
-        
+
         使用简化的字符级相似度计算，基于共同字符的比例。
         """
         if not text1 or not text2:
             return 0.0
-        
+
         # 转换为小写并去除标点符号
         import re
         clean1 = re.sub(r'[^\w\s]', '', text1.lower())
         clean2 = re.sub(r'[^\w\s]', '', text2.lower())
-        
+
         # 计算共同字符数
         set1 = set(clean1)
         set2 = set(clean2)
-        
+
         if not set1 or not set2:
             return 0.0
-        
+
         intersection = len(set1.intersection(set2))
         union = len(set1.union(set2))
-        
+
         return intersection / union if union > 0 else 0.0
-    
+
     def _has_repeated_patterns(self, contents: List[str]) -> bool:
         """
         检测是否有重复的句子或段落模式
-        
+
         将内容分割成句子，检查是否有重复的句子序列。
         """
         import re
-        
+
         # 将每个内容分割成句子
         all_sentences = []
         for content in contents:
@@ -1768,13 +1761,13 @@ class Agent:
             sentences = re.split(r'[。！？.!?]', content)
             sentences = [s.strip() for s in sentences if s.strip()]
             all_sentences.extend(sentences)
-        
+
         # 检查是否有重复的句子
         if len(all_sentences) > 3:
             # 检查最后几个句子是否与前面的句子重复
             recent_sentences = all_sentences[-3:]
             earlier_sentences = all_sentences[:-3]
-            
+
             for recent in recent_sentences:
                 if len(recent) > 20:  # 只检查长度足够的句子
                     for earlier in earlier_sentences:
@@ -1782,13 +1775,13 @@ class Agent:
                         similarity = self._calculate_similarity(recent, earlier)
                         if similarity > 0.9:  # 句子相似度阈值更高
                             return True
-        
+
         return False
-    
+
     def _collect_tool_messages(self) -> List[Dict[str, Any]]:
         """
         收集工具调用和执行的消息（用于前端展示）
-        
+
         返回:
             工具消息列表，每个消息包含:
             - type: "tool_call" | "tool_result"
@@ -1807,18 +1800,18 @@ class Agent:
     async def _execute_text_tool_calls(self, reply: str, user_input: str) -> str:
         """P1: 委托给 ToolExecutor"""
         return await self.tool_executor.execute_text_tool_calls(reply, user_input)
-    
+
     def _set_reasoning(self, reasoning: str):
         """设置当前思考过程（由 LLM 客户端调用）"""
         self._current_reasoning = reasoning
 
     async def shutdown(self) -> None:
         """Agent 关闭时的清理操作
-        
+
         触发睡眠整理、刷新缓冲等。
         """
         logger.info(f"Agent {self.config.name} 正在关闭...")
-        
+
         # Phase 10: 触发睡眠整理
         sleep_consolidation = getattr(self, 'sleep_consolidation', None)
         if sleep_consolidation and self.memory_manager:
@@ -1830,7 +1823,7 @@ class Agent:
                     logger.info(f"💤 睡眠整理完成: {result}")
             except Exception as e:
                 logger.warning(f"睡眠整理失败: {e}")
-        
+
         # 刷新对话历史缓冲（如果使用 ConversationBuffer）
         conversation_buffer = getattr(self, '_conversation_buffer', None)
         if conversation_buffer:
@@ -1839,7 +1832,7 @@ class Agent:
                 logger.debug("对话缓冲已刷新")
             except Exception as e:
                 logger.warning(f"对话缓冲刷新失败: {e}")
-        
+
         logger.info(f"Agent {self.config.name} 关闭完成")
 
     def __repr__(self):

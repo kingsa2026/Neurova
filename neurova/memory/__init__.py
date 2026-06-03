@@ -7,60 +7,161 @@ Memory模块兼容性层
 
 import sys
 import importlib
+import logging
 
-# 从 neurova.cognitive_layers.memory_layer 重新导出主要类
-from neurova.cognitive_layers.memory_layer import (
-    WorkingMemoryAugmenter,
-    TemporalKnowledgeGraph,
-    MemoryStorage,
-    SelfModel,
-    UserProfile,
-    Memory,
-    TemperatureEngine,
-    SleepConsolidation,
-    MemoryCompressor,
-    VectorSearch,
-    ProactiveRecall,
-    ProactiveQuestion,
-    AgentSelfManager,
-    ConversationBuffer,
-    MemoryStream,
-    ConflictDetector,
-    VersionControl as MemoryVersionControl,
-    MemoryCache,
-    MemorySecurity,
-)
-from neurova.cognitive_layers.memory_layer.manager import MemoryManager
-from neurova.cognitive_layers.memory_layer.meta_cognition import MetaCognition
-from neurova.cognitive_layers.memory_layer.models import MemoryCategory, MemoryType, LifecycleStage
-from neurova.cognitive_layers.memory_layer.emotion import EmotionAnalyzer
-from neurova.cognitive_layers.emotion_context_layer.emotion import (
-    EMOTION_KEYWORDS,
-    EMOTION_WEIGHTS
-)
+logger = logging.getLogger(__name__)
 
-# 为了支持 `from neurova.memory.xxx import ...` 这样的导入
-# 我们需要创建子模块引用
-sys.modules[__name__ + ".working_memory"] = importlib.import_module("neurova.cognitive_layers.memory_layer.working_memory")
-sys.modules[__name__ + ".temporal_knowledge_graph"] = importlib.import_module("neurova.cognitive_layers.memory_layer.temporal_knowledge_graph")
-sys.modules[__name__ + ".storage"] = importlib.import_module("neurova.cognitive_layers.memory_layer.storage")
-sys.modules[__name__ + ".models"] = importlib.import_module("neurova.cognitive_layers.memory_layer.models")
-sys.modules[__name__ + ".temperature"] = importlib.import_module("neurova.cognitive_layers.memory_layer.temperature")
-sys.modules[__name__ + ".sleep"] = importlib.import_module("neurova.cognitive_layers.memory_layer.sleep")
-sys.modules[__name__ + ".compression"] = importlib.import_module("neurova.cognitive_layers.memory_layer.compression")
-sys.modules[__name__ + ".vector_search"] = importlib.import_module("neurova.cognitive_layers.memory_layer.vector_search")
-sys.modules[__name__ + ".proactive_recall"] = importlib.import_module("neurova.cognitive_layers.memory_layer.proactive_recall")
-sys.modules[__name__ + ".proactive_question"] = importlib.import_module("neurova.cognitive_layers.memory_layer.proactive_question")
-sys.modules[__name__ + ".agent_self"] = importlib.import_module("neurova.cognitive_layers.memory_layer.agent_self")
-sys.modules[__name__ + ".conversation_buffer"] = importlib.import_module("neurova.cognitive_layers.memory_layer.conversation_buffer")
-sys.modules[__name__ + ".memory_stream"] = importlib.import_module("neurova.cognitive_layers.memory_layer.memory_stream")
-sys.modules[__name__ + ".conflict"] = importlib.import_module("neurova.cognitive_layers.memory_layer.conflict")
-sys.modules[__name__ + ".version_control"] = importlib.import_module("neurova.cognitive_layers.memory_layer.version_control")
-sys.modules[__name__ + ".cache"] = importlib.import_module("neurova.cognitive_layers.memory_layer.cache")
-sys.modules[__name__ + ".security"] = importlib.import_module("neurova.cognitive_layers.memory_layer.security")
+# 从 neurova.cognitive_layers.memory_layer 重新导出主要类（全部用 try/except 保护）
+try:
+    from neurova.cognitive_layers.memory_layer import (
+        MoEMemoryRouter,
+        UnifiedVectorStore,
+        ConflictDetector,
+        TemperatureEngine,
+        ConversationMemoryBuffer,
+        SleepConsolidation,
+        GraphTraversal,
+    )
+except ImportError as e:
+    logger.debug(f"部分 cognitive_layers.memory_layer 导入失败: {e}")
+
+# 可能不存在的类，用占位
+try:
+    from neurova.cognitive_layers.memory_layer.working_memory import WorkingMemoryAugmenter
+except ImportError:
+    WorkingMemoryAugmenter = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.temporal_knowledge_graph import TemporalKnowledgeGraph
+except ImportError:
+    TemporalKnowledgeGraph = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.storage import MemoryStorage
+except ImportError:
+    MemoryStorage = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.agent_self import SelfModel, AgentSelfManager
+except ImportError:
+    SelfModel = None
+    AgentSelfManager = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.agent_self import UserProfile
+except ImportError:
+    UserProfile = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.compression import MemoryCompressor
+except ImportError:
+    MemoryCompressor = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.vector_search import VectorSearch
+except ImportError:
+    VectorSearch = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.proactive_recall import ProactiveRecall
+except ImportError:
+    ProactiveRecall = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.proactive_question import ProactiveQuestion
+except ImportError:
+    ProactiveQuestion = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.memory_stream import MemoryStream
+except ImportError:
+    MemoryStream = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.version_control import VersionControl
+except ImportError:
+    VersionControl = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.cache import MemoryCache
+except ImportError:
+    MemoryCache = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.security import MemorySecurity
+except ImportError:
+    MemorySecurity = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationBuffer
+except ImportError:
+    ConversationBuffer = None
+
+try:
+    from neurova.mem_core import Memory
+except ImportError:
+    Memory = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+except ImportError:
+    MemoryManager = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.meta_cognition import MetaCognition
+except ImportError:
+    MetaCognition = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.models import MemoryCategory, MemoryType, LifecycleStage
+except ImportError:
+    MemoryCategory = None
+    MemoryType = None
+    LifecycleStage = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.emotion import EmotionAnalyzer
+except ImportError:
+    EmotionAnalyzer = None
+
+try:
+    from neurova.cognitive_layers.emotion_context_layer.emotion import (
+        EMOTION_KEYWORDS,
+        EMOTION_WEIGHTS,
+    )
+except ImportError:
+    EMOTION_KEYWORDS = {}
+    EMOTION_WEIGHTS = {}
 
 # 兼容性别名
-ProactiveQuestionManager = ProactiveQuestion  # 为了兼容旧代码
+ProactiveQuestionManager = ProactiveQuestion
+
+# 为了支持 `from neurova.memory.xxx import ...` 这样的导入
+_MODULE_MAP = {
+    "working_memory": "neurova.cognitive_layers.memory_layer.working_memory",
+    "temporal_knowledge_graph": "neurova.cognitive_layers.memory_layer.temporal_knowledge_graph",
+    "storage": "neurova.cognitive_layers.memory_layer.storage",
+    "models": "neurova.cognitive_layers.memory_layer.models",
+    "temperature": "neurova.cognitive_layers.memory_layer.temperature",
+    "sleep": "neurova.cognitive_layers.memory_layer.sleep",
+    "compression": "neurova.cognitive_layers.memory_layer.compression",
+    "vector_search": "neurova.cognitive_layers.memory_layer.vector_search",
+    "proactive_recall": "neurova.cognitive_layers.memory_layer.proactive_recall",
+    "proactive_question": "neurova.cognitive_layers.memory_layer.proactive_question",
+    "agent_self": "neurova.cognitive_layers.memory_layer.agent_self",
+    "conversation_buffer": "neurova.cognitive_layers.memory_layer.conversation_buffer",
+    "memory_stream": "neurova.cognitive_layers.memory_layer.memory_stream",
+    "conflict": "neurova.cognitive_layers.memory_layer.conflict",
+    "version_control": "neurova.cognitive_layers.memory_layer.version_control",
+    "cache": "neurova.cognitive_layers.memory_layer.cache",
+    "security": "neurova.cognitive_layers.memory_layer.security",
+}
+
+for alias, target in _MODULE_MAP.items():
+    try:
+        sys.modules[__name__ + "." + alias] = importlib.import_module(target)
+    except ImportError:
+        pass
 
 __all__ = [
     "WorkingMemoryAugmenter",
@@ -76,13 +177,12 @@ __all__ = [
     "ProactiveRecall",
     "ProactiveQuestionManager",
     "AgentSelfManager",
-    "ConversationBuffer",  # 实际类名
+    "ConversationBuffer",
     "MemoryStream",
     "ConflictDetector",
-    "MemoryVersionControl",
+    "VersionControl",
     "MemoryCache",
     "MemorySecurity",
-    # 新增
     "MemoryManager",
     "MetaCognition",
     "MemoryCategory",

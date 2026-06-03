@@ -18,12 +18,10 @@ from .base import (
     router, logger, _get_request_id, get_memory_manager,
 )
 
-
 class MarkQuestionAskedRequest(BaseModel):
     """标记问题已问请求"""
     question: str = Field(..., min_length=1, max_length=1000, description="问题内容")
     answer: str = Field(..., description="回答内容")
-
 
 class QuestionItem(BaseModel):
     """问题条目"""
@@ -38,7 +36,6 @@ class QuestionItem(BaseModel):
     created_at: str
     updated_at: str
     tags: List[str]
-
 
 def question_entry_to_dict(entry) -> dict:
     """将 QuestionQueueEntry 转换为字典"""
@@ -55,7 +52,6 @@ def question_entry_to_dict(entry) -> dict:
         "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
         "tags": list(entry.tags) if entry.tags else [],
     }
-
 
 @router.get("/questions/pending", summary="获取待问问题")
 async def get_pending_questions(
@@ -85,7 +81,6 @@ async def get_pending_questions(
         logger.exception(f"获取待问问题失败: {e}")
         raise APIError.internal(f"获取待问问题失败: {str(e)}")
 
-
 @router.post("/questions/ask", summary="标记问题已问")
 async def mark_question_asked(
     request: MarkQuestionAskedRequest,
@@ -113,7 +108,6 @@ async def mark_question_asked(
     except Exception as e:
         logger.exception(f"标记问题失败: {e}")
         raise APIError.internal(f"标记问题失败: {str(e)}")
-
 
 @router.get("/questions/stats", summary="获取问题队列统计")
 async def get_question_queue_stats(

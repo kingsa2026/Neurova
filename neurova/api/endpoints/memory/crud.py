@@ -19,7 +19,6 @@ from .base import (
     AddMemoryRequest, memory_to_dict, _get_user_ids_from_token,
 )
 
-
 @router.get("", summary="搜索记忆")
 async def search_memories(
     query: str = Query(default="", min_length=0, description="搜索关键词"),
@@ -53,7 +52,6 @@ async def search_memories(
     except Exception as e:
         logger.exception(f"记忆搜索失败: {e}")
         raise APIError(ErrorCodes.MEMORY_SEARCH_FAILED, f"记忆搜索失败: {str(e)}") from e
-
 
 @router.post("", summary="添加记忆")
 async def add_memory(
@@ -95,7 +93,6 @@ async def add_memory(
         logger.exception(f"添加记忆失败: {e}")
         raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, f"添加记忆失败: {str(e)}") from e
 
-
 @router.get("/stats", summary="获取记忆统计")
 async def get_memory_stats(
     agent_id: Optional[str] = Query(default=None, description="Agent ID"),
@@ -110,7 +107,6 @@ async def get_memory_stats(
     except Exception as e:
         logger.exception(f"获取记忆统计失败: {e}")
         raise APIError.internal(f"获取记忆统计失败: {str(e)}")
-
 
 @router.get("/{memory_id}", summary="获取记忆详情")
 async def get_memory(
@@ -147,7 +143,6 @@ async def get_memory(
         logger.exception(f"获取记忆失败: {e}")
         raise APIError(ErrorCodes.MEMORY_NOT_FOUND, f"获取记忆失败: {str(e)}")
 
-
 @router.delete("/{memory_id}", summary="删除记忆")
 async def delete_memory(
     memory_id: str,
@@ -175,7 +170,6 @@ async def delete_memory(
     except Exception as e:
         logger.exception(f"删除记忆失败: {e}")
         raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, f"删除记忆失败: {str(e)}")
-
 
 @router.get("/hot", summary="获取高温记忆")
 async def get_hot_memories(
@@ -205,7 +199,6 @@ async def get_hot_memories(
         logger.exception(f"获取高温记忆失败: {e}")
         raise APIError.internal(f"获取高温记忆失败: {str(e)}")
 
-
 @router.get("/crystallized", summary="获取固化记忆")
 async def get_crystallized_memories(
     limit: int = Query(default=20, ge=1, le=50, description="返回条数"),
@@ -233,7 +226,6 @@ async def get_crystallized_memories(
     except Exception as e:
         logger.exception(f"获取固化记忆失败: {e}")
         raise APIError.internal(f"获取固化记忆失败: {str(e)}")
-
 
 @router.post("/decay", summary="执行温度衰减")
 async def run_decay_cycle(

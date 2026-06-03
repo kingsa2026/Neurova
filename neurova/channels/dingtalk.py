@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 钉钉渠道适配器
 
@@ -13,8 +15,6 @@ API 参考:
 - Stream 模式文档: https://open.dingtalk.com/document/development/development-robot-overview
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -29,7 +29,6 @@ from neurova.channels.base import (
 )
 
 logger = logging.getLogger(__name__)
-
 
 class DingTalkAdapter(ChannelAdapter):
     """
@@ -71,7 +70,6 @@ class DingTalkAdapter(ChannelAdapter):
     async def _connect_stream(self) -> bool:
         """Stream 模式: 通过 WebSocket 长连接接收事件"""
         try:
-            import dingtalk_stream
 
             # 创建凭证
             credential = dingtalk_stream.Credential(
@@ -315,11 +313,9 @@ class DingTalkAdapter(ChannelAdapter):
         })
         return base
 
-
 # ============================================================
 # 群机器人 Webhook 适配器（轻量级，仅发送）
 # ============================================================
-
 
 class DingTalkWebhookBot:
     """
@@ -336,7 +332,6 @@ class DingTalkWebhookBot:
     async def send_text(self, text: str, at_all: bool = False, at_mobiles: list = None) -> bool:
         """发送文本消息"""
         import aiohttp
-        import hmac
         import hashlib
         import base64
         import urllib.parse
@@ -382,7 +377,6 @@ class DingTalkWebhookBot:
             ) as resp:
                 result = await resp.json()
                 return result.get("errcode") == 0
-
 
 def create_dingtalk_adapter(
     app_id: str,

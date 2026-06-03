@@ -12,27 +12,26 @@ from neurova.llm_client import LLMResponse
 
 logger = logging.getLogger(__name__)
 
-
 class BaseAgentLoop(ABC):
     """
     Agent Loop 基类
-    
+
     每个 Loop 实现特定的模型交互逻辑。
     子类必须实现 predict_step() 方法。
-    
+
     设计参考: cua-main 的 Agent Loop 系统
     """
-    
+
     def __init__(self, agent: 'Agent'):
         """
         初始化 Loop
-        
+
         参数:
             agent: Agent 实例，提供对记忆、技能等系统的访问
         """
         self.agent = agent
         self.llm_client = agent.llm_client
-    
+
     @abstractmethod
     async def predict_step(
         self,
@@ -42,37 +41,37 @@ class BaseAgentLoop(ABC):
     ) -> Any:
         """
         执行一步预测 - 子类必须实现
-        
+
         参数:
             messages: 对话历史
             tools: 可用工具列表 (OpenAI Schema 格式)
             **kwargs: 额外参数
-            
+
         返回:
             LLMResponse 对象或原始响应
         """
         pass
-    
+
     async def handle_tool_calls(self, tool_calls: List, messages: List[Dict]) -> List[Dict]:
         """
         处理工具调用 - 默认实现
-        
+
         遍历 tool_calls，执行对应的 Skill，
         并将结果作为 tool 消息添加到 messages。
-        
+
         参数:
             tool_calls: LLM 返回的工具调用列表
             messages: 当前对话历史
-            
+
         返回:
             新的消息列表 (tool 消息)
         """
         new_messages = []
-        
+
         # 初始化工具消息列表（如果不存在）
         if not hasattr(self.agent, '_tool_messages_list'):
             self.agent._tool_messages_list = []
-        
+
         for tool_call in tool_calls:
             # 每次迭代使用独立的变量名，防止跨迭代器状态污染
             _tc_function_name = tool_call["function"]["name"]
@@ -186,7 +185,7 @@ class BaseAgentLoop(ABC):
                     "success": False,
                     "timestamp": datetime.now().isoformat(),
                 })
-                
+
                 # 记录异常结果
                 if hasattr(self.agent, '_tool_messages_list'):
                     self.agent._tool_messages_list.append({
@@ -196,28 +195,28 @@ class BaseAgentLoop(ABC):
                         "success": False,
                         "timestamp": datetime.now().isoformat(),
                     })
-        
+
         return new_messages
-    
+
     def _build_tools_from_skills(self) -> List[Dict]:
         """
         将 Agent 的 Skills 转换为 OpenAI Tool Schema
-        
+
         返回:
             tools: OpenAI 兼容的 tool 列表
         """
         tools = []
-        
+
         if not self.agent.skill_registry:
             return tools
-        
+
         # 尝试使用 OpenAI Schema Adapter (如果存在)
         try:
             from neurova.skill_system.compat import OpenAISchemaAdapter
             use_adapter = True
         except ImportError:
             use_adapter = False
-        
+
         for skill_name, skill in self.agent.skill_registry.skills.items():
             if use_adapter:
                 tool_schema = OpenAISchemaAdapter.skill_to_tool_schema(skill)
@@ -235,7 +234,7 @@ class BaseAgentLoop(ABC):
                         }
                     }
                 }
-            
+
             tools.append(tool_schema)
-        
+
         return tools

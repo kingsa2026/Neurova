@@ -15,7 +15,6 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class ConflictGroup:
     """冲突记忆组"""
@@ -24,7 +23,6 @@ class ConflictGroup:
     conflict_type: str = "contradiction"  # "contradiction" | "evolution" | "version"
     entity_overlap: float = 0.0
     semantic_similarity: float = 0.0
-
 
 class ConflictDetector:
     """

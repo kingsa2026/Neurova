@@ -1,37 +1,37 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;MonitorOutlined :style="{ color: '#06b6d4' }" /&gt; 计算机使用
-      &lt;/h2&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;会话&lt;b &gt;{{ stats.sessions }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;脚本&lt;b &gt;{{ stats.scripts }}&lt;/b&gt;&lt;/div&gt;
-      &lt;div &gt;视觉&lt;b &gt;{{ stats.vision }}&lt;/b&gt;&lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;h4&gt;控制面板&lt;/h4&gt;
-      &lt;div &gt;
-        &lt;div  v-for="i in 4" :key="i"&gt;
-          &lt;span &gt;$&lt;/span&gt;
-          &lt;span &gt;{{ ['ls -la', 'cat config.yaml', 'python main.py', 'echo done'][i - 1] }}&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;h4&gt;操作历史&lt;/h4&gt;
-      &lt;div v-for="h in hist" :key="h.id" &gt;
-        &lt;div  :style="{ background: h.color }" /&gt;
-        &lt;div&gt;
-          &lt;span &gt;{{ h.name }}&lt;/span&gt;
-          &lt;span &gt;{{ h.time }}&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <div >
+      <h2 >
+        <MonitorOutlined :style="{ color: '#06b6d4' }" /> 计算机使用
+      </h2>
+    </div>
+    <div >
+      <div >会话<b >{{ stats.sessions }}</b></div>
+      <div >脚本<b >{{ stats.scripts }}</b></div>
+      <div >视觉<b >{{ stats.vision }}</b></div>
+    </div>
+    <div >
+      <h4>控制面板</h4>
+      <div >
+        <div  v-for="i in 4" :key="i">
+          <span >$</span>
+          <span >{{ ['ls -la', 'cat config.yaml', 'python main.py', 'echo done'][i - 1] }}</span>
+        </div>
+      </div>
+    </div>
+    <div >
+      <h4>操作历史</h4>
+      <div v-for="h in hist" :key="h.id" >
+        <div  :style="{ background: h.color }" />
+        <div>
+          <span >{{ h.name }}</span>
+          <span >{{ h.time }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref } from 'vue'
 import { MonitorOutlined } from '@ant-design/icons-vue'
 const stats = ref({ sessions: 12, scripts: 34, vision: '启用' })
@@ -40,8 +40,8 @@ const hist = ref([
   { id: '2', name: '屏幕捕获分析完成', color: '#34d399', time: '30分钟前' },
   { id: '3', name: '自动化任务 #42 完成', color: '#a78bfa', time: '1小时前' },
 ])
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { padding: 16px 24px; border-radius: 12px; }
 .t { font-size: 1.2rem; color: #e2e8f0; margin: 0; display: flex; align-items: center; gap: 8px; }
@@ -61,5 +61,5 @@ const hist = ref([
 .hdot { width: 8px; height: 8px; border-radius: 50%; }
 .hn { color: rgba(255,255,255,0.6); font-size: .82rem; display: block; }
 .ht { color: rgba(255,255,255,0.2); font-size: .7rem; }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

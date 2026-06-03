@@ -1,107 +1,107 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h2 &gt;
-        &lt;PieChartOutlined :style="{ color: '#8b5cf6' }" /&gt;
+<template>
+  <div >
+    <div >
+      <h2 >
+        <PieChartOutlined :style="{ color: '#8b5cf6' }" />
         统计概览
-      &lt;/h2&gt;
-      &lt;div &gt;
-        &lt;a-button @click="loadData" :loading="loading"&gt;
-          &lt;ReloadOutlined /&gt; 刷新
-        &lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;UserOutlined  /&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ userStats.total_users || 0 }}&lt;/div&gt;
-          &lt;div &gt;用户数&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;TeamOutlined  /&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ userStats.total_groups || 0 }}&lt;/div&gt;
-          &lt;div &gt;群组数&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;RobotOutlined  /&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ agentStats.total_agents || 0 }}&lt;/div&gt;
-          &lt;div &gt;Agent 数&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;FileTextOutlined  /&gt;
-        &lt;div &gt;
-          &lt;div &gt;{{ formatNumber(memoryStats.total_memories || 0) }}&lt;/div&gt;
-          &lt;div &gt;记忆数&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" /&gt;
-    &lt;a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" /&gt;
-    &lt;div v-if="!loading" &gt;
-      &lt;div &gt;
-        &lt;h4&gt;&lt;LineChartOutlined /&gt; 每日对话量&lt;/h4&gt;
-        &lt;canvas ref="c1" /&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;BarChartOutlined /&gt; Token 消耗分布
-        &lt;canvas ref="c2" /&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div  v-if="!loading"&gt;
-      &lt;h4&gt;&lt;RobotOutlined /&gt; Agent 统计&lt;/h4&gt;
-      &lt;a-table
+      </h2>
+      <div >
+        <a-button @click="loadData" :loading="loading">
+          <ReloadOutlined /> 刷新
+        </a-button>
+      </div>
+    </div>
+    <div >
+      <div >
+        <UserOutlined  />
+        <div >
+          <div >{{ userStats.total_users || 0 }}</div>
+          <div >用户数</div>
+        </div>
+      </div>
+      <div >
+        <TeamOutlined  />
+        <div >
+          <div >{{ userStats.total_groups || 0 }}</div>
+          <div >群组数</div>
+        </div>
+      </div>
+      <div >
+        <RobotOutlined  />
+        <div >
+          <div >{{ agentStats.total_agents || 0 }}</div>
+          <div >Agent 数</div>
+        </div>
+      </div>
+      <div >
+        <FileTextOutlined  />
+        <div >
+          <div >{{ formatNumber(memoryStats.total_memories || 0) }}</div>
+          <div >记忆数</div>
+        </div>
+      </div>
+    </div>
+    <a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" />
+    <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
+    <div v-if="!loading" >
+      <div >
+        <h4><LineChartOutlined /> 每日对话量</h4>
+        <canvas ref="c1" />
+      </div>
+      <div >
+        <BarChartOutlined /> Token 消耗分布
+        <canvas ref="c2" />
+      </div>
+    </div>
+    <div  v-if="!loading">
+      <h4><RobotOutlined /> Agent 统计</h4>
+      <a-table
         :columns="cols"
         :data-source="agentList"
         row-key="agent_id"
         size="middle"
         :pagination="false"
-      &gt;
-        &lt;template #bodyCell="{ column, record }"&gt;
-          &lt;template v-if="column.key === 'is_default'"&gt;
-            &lt;a-tag :color="record.is_default ? 'green' : 'default'"&gt;
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'is_default'">
+            <a-tag :color="record.is_default ? 'green' : 'default'">
               {{ record.is_default ? '默认' : '普通' }}
-            &lt;/a-tag&gt;
-          &lt;/template&gt;
-          &lt;template v-else-if="column.key === 'memory_enabled'"&gt;
-            &lt;a-tag :color="record.memory_enabled ? 'blue' : 'default'"&gt;
+            </a-tag>
+          </template>
+          <template v-else-if="column.key === 'memory_enabled'">
+            <a-tag :color="record.memory_enabled ? 'blue' : 'default'">
               {{ record.memory_enabled ? '启用' : '禁用' }}
-            &lt;/a-tag&gt;
-          &lt;/template&gt;
-        &lt;/template&gt;
-      &lt;/a-table&gt;
-    &lt;/div&gt;
-    &lt;div  v-if="!loading &amp;&amp; memoryStats"&gt;
-      &lt;h3&gt;&lt;DatabaseOutlined /&gt; 记忆分类统计&lt;/h3&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;div &gt;按分类&lt;/div&gt;
-          &lt;div  v-for="(count, cat) in memoryStats.by_category" :key="cat"&gt;
+            </a-tag>
+          </template>
+        </template>
+      </a-table>
+    </div>
+    <div  v-if="!loading && memoryStats">
+      <h3><DatabaseOutlined /> 记忆分类统计</h3>
+      <div >
+        <div >
+          <div >按分类</div>
+          <div  v-for="(count, cat) in memoryStats.by_category" :key="cat">
             {{ getCategoryLabel(cat) }}: {{ count }}
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;按情感&lt;/div&gt;
-          &lt;div  v-for="(count, emotion) in memoryStats.by_emotion" :key="emotion"&gt;
+          </div>
+        </div>
+        <div >
+          <div >按情感</div>
+          <div  v-for="(count, emotion) in memoryStats.by_emotion" :key="emotion">
             {{ emotion }}: {{ count }}
-          &lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;按温度&lt;/div&gt;
-          &lt;div  v-for="(count, temp) in memoryStats.temperature_distribution" :key="temp"&gt;
+          </div>
+        </div>
+        <div >
+          <div >按温度</div>
+          <div  v-for="(count, temp) in memoryStats.temperature_distribution" :key="temp">
             {{ temp }}: {{ count }}
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import {
@@ -125,13 +125,13 @@ const userStats = reactive({
 })
 const agentStats = reactive({
   total_agents: 0,
-  agents: [] as Record&lt;string, unknown&gt;[],
+  agents: [] as Record<string, unknown>[],
 })
 const memoryStats = reactive({
   total_memories: 0,
-  by_category: {} as Record&lt;string, number&gt;,
-  by_emotion: {} as Record&lt;string, number&gt;,
-  temperature_distribution: {} as Record&lt;string, number&gt;,
+  by_category: {} as Record<string, number>,
+  by_emotion: {} as Record<string, number>,
+  temperature_distribution: {} as Record<string, number>,
 })
 interface AgentStat {
   agent_id: string
@@ -140,16 +140,16 @@ interface AgentStat {
   memory_count?: number
   memory_stats?: { total?: number }
 }
-const agentList = ref&lt;AgentStat[]&gt;([])
-const c1 = ref&lt;HTMLCanvasElement&gt;()
-const c2 = ref&lt;HTMLCanvasElement&gt;()
+const agentList = ref<AgentStat[]>([])
+const c1 = ref<HTMLCanvasElement>()
+const c2 = ref<HTMLCanvasElement>()
 const cols = [
   { title: 'Agent ID', dataIndex: 'agent_id', key: 'agent_id' },
   { title: '类型', dataIndex: 'is_default', key: 'is_default', width: 100 },
   { title: '记忆', dataIndex: 'memory_enabled', key: 'memory_enabled', width: 100 },
   { title: '记忆数', key: 'memory_count', width: 120 },
 ]
-const categoryLabels: Record&lt;string, string&gt; = {
+const categoryLabels: Record<string, string> = {
   short_term: '短期记忆',
   long_term: '长期记忆',
   episodic: '情景记忆',
@@ -159,8 +159,8 @@ function getCategoryLabel(cat: string) {
   return categoryLabels[cat] || cat
 }
 function formatNumber(num: number) {
-  if (num &gt;= 1000000) return (num / 1000000).toFixed(1) + 'M'
-  if (num &gt;= 1000) return (num / 1000).toFixed(1) + 'K'
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
   return num.toString()
 }
 function barChart(canvas: HTMLCanvasElement | null, color: string, data: number[]) {
@@ -177,19 +177,19 @@ function barChart(canvas: HTMLCanvasElement | null, color: string, data: number[
     gap = 8
   const max = Math.max(...data)
   ctx.clearRect(0, 0, w, h)
-  data.forEach((v, i) =&gt; {
+  data.forEach((v, i) => {
     const x = 40 + i * (barW + gap),
       y = h - 20 - (v / max) * (h - 50),
       bh = (v / max) * (h - 50)
     ctx.fillStyle = color + '50'
     roundRect(ctx, x, y, barW, bh, 4)
     ctx.fillStyle = color
-    roundRect(ctx, x, y + (v &lt; max * 0.2 ? bh - 2 : 2), barW, v &lt; max * 0.2 ? 2 : bh - 2, 4)
+    roundRect(ctx, x, y + (v < max * 0.2 ? bh - 2 : 2), barW, v < max * 0.2 ? 2 : bh - 2, 4)
   })
   ctx.fillStyle = 'rgba(255,255,255,0.3)'
   ctx.font = '10px sans-serif'
   ctx.textAlign = 'center'
-  data.forEach((v, i) =&gt; ctx.fillText(v.toString(), 40 + i * (barW + gap) + barW / 2, h - 5))
+  data.forEach((v, i) => ctx.fillText(v.toString(), 40 + i * (barW + gap) + barW / 2, h - 5))
 }
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath()
@@ -210,9 +210,9 @@ async function loadData() {
   error.value = ''
   try {
     const [userRes, agentRes, memoryRes] = await Promise.all([
-      statsAPI.getUserStats().catch(() =&gt; ({ data: null })),
-      statsAPI.getAgentsStats().catch(() =&gt; ({ data: null })),
-      statsAPI.getMemoryStats().catch(() =&gt; ({ data: null })),
+      statsAPI.getUserStats().catch(() => ({ data: null })),
+      statsAPI.getAgentsStats().catch(() => ({ data: null })),
+      statsAPI.getMemoryStats().catch(() => ({ data: null })),
     ])
     if (userRes.data) {
       Object.assign(userStats, userRes.data)
@@ -220,7 +220,7 @@ async function loadData() {
     if (agentRes.data) {
       Object.assign(agentStats, agentRes.data)
       agentList.value = agentRes.data.agents || []
-      agentList.value.forEach((agent) =&gt; {
+      agentList.value.forEach((agent) => {
         agent.memory_count = agent.memory_stats?.total || 0
       })
     }
@@ -238,11 +238,11 @@ async function loadData() {
     loading.value = false
   }
 }
-onMounted(() =&gt; {
+onMounted(() => {
   loadData()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg {
   display: flex;
   flex-direction: column;
@@ -374,5 +374,5 @@ onMounted(() =&gt; {
     grid-template-columns: 1fr;
   }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

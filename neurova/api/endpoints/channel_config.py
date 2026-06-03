@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 渠道配置管理 API
 
@@ -11,8 +13,6 @@
 - DELETE /api/channel-configs/{channel_type}   - 删除渠道配置
 - POST   /api/channel-configs/{channel_type}/test - 测试连接
 """
-
-from __future__ import annotations
 
 import json
 import logging
@@ -36,11 +36,9 @@ router = APIRouter(prefix="/channel-configs", tags=["渠道配置"])
 CONFIG_DIR = Path(__file__).parent.parent.parent / "data"
 CONFIG_FILE = CONFIG_DIR / "channel_configs.json"
 
-
 # ============================================================
 # 请求/响应模型
 # ============================================================
-
 
 class ChannelConfigRequest(BaseModel):
     """渠道配置请求"""
@@ -55,7 +53,6 @@ class ChannelConfigRequest(BaseModel):
     verification_token: str = Field("", description="验证 Token")
     extra: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
 
-
 class ChannelConfigResponse(BaseModel):
     """渠道配置响应"""
     channel_type: str
@@ -65,18 +62,15 @@ class ChannelConfigResponse(BaseModel):
     connected: bool = False
     extra: Dict[str, Any] = Field(default_factory=dict)
 
-
 class ChannelTestResult(BaseModel):
     """连接测试结果"""
     success: bool
     message: str
     details: Dict[str, Any] = Field(default_factory=dict)
 
-
 # ============================================================
 # 配置持久化
 # ============================================================
-
 
 def _load_configs() -> Dict[str, Dict[str, Any]]:
     """从文件加载配置"""
@@ -87,7 +81,6 @@ def _load_configs() -> Dict[str, Dict[str, Any]]:
     except (json.JSONDecodeError, IOError):
         return {}
 
-
 def _save_configs(configs: Dict[str, Dict[str, Any]]):
     """保存配置到文件"""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -96,11 +89,9 @@ def _save_configs(configs: Dict[str, Dict[str, Any]]):
         encoding="utf-8",
     )
 
-
 # ============================================================
 # API 端点
 # ============================================================
-
 
 @router.get("", summary="列出所有渠道配置")
 async def list_configs():
@@ -121,7 +112,6 @@ async def list_configs():
         ))
     return result
 
-
 @router.get("/{channel_type}", summary="获取指定渠道配置")
 async def get_config(channel_type: str):
     """获取指定渠道的配置"""
@@ -141,7 +131,6 @@ async def get_config(channel_type: str):
         connected=adapter.is_connected if adapter else False,
         extra=cfg.get("extra", {}),
     )
-
 
 @router.post("", summary="创建/更新渠道配置")
 async def create_or_update_config(request: ChannelConfigRequest):
@@ -179,7 +168,6 @@ async def create_or_update_config(request: ChannelConfigRequest):
         "message": f"Channel '{request.channel_type}' configured and registered",
     }
 
-
 @router.delete("/{channel_type}", summary="删除渠道配置")
 async def delete_config(channel_type: str):
     """删除渠道配置并注销适配器"""
@@ -201,7 +189,6 @@ async def delete_config(channel_type: str):
     _save_configs(configs)
 
     return {"success": True, "message": f"Channel '{channel_type}' deleted"}
-
 
 @router.post("/{channel_type}/test", summary="测试渠道连接")
 async def test_connection(channel_type: str, request: ChannelConfigRequest):
@@ -239,7 +226,6 @@ async def test_connection(channel_type: str, request: ChannelConfigRequest):
             message=f"Connection error: {str(e)}",
             details={"error": str(e)},
         )
-
 
 def _create_adapter(channel_type: str, config: ChannelConfig):
     """根据类型创建适配器"""

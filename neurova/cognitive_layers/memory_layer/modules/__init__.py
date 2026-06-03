@@ -1,0 +1,25 @@
+"""
+MemoryBus 模块注册 — 集中导出所有 MemoryModule
+"""
+
+# cognitive_layers imports
+import neurova.cognitive_layers.memory_layer.modules.auto_context_module
+import neurova.cognitive_layers.memory_layer.modules.buffer_module
+import neurova.cognitive_layers.memory_layer.modules.classifier_module
+import neurova.cognitive_layers.memory_layer.modules.conflict_module
+import neurova.cognitive_layers.memory_layer.modules.eki_module
+import neurova.cognitive_layers.memory_layer.modules.emotion_conduction_module
+import neurova.cognitive_layers.memory_layer.modules.emotion_module
+import neurova.cognitive_layers.memory_layer.modules.explainability_module
+import neurova.cognitive_layers.memory_layer.modules.forgetting_recovery_module
+import neurova.cognitive_layers.memory_layer.modules.meta_cognition_module
+import neurova.cognitive_layers.memory_layer.modules.relation_module
+import neurova.cognitive_layers.memory_layer.modules.self_manager_module
+import neurova.cognitive_layers.memory_layer.modules.self_model_module
+import neurova.cognitive_layers.memory_layer.modules.sleep_module
+import neurova.cognitive_layers.memory_layer.modules.storage_module
+import neurova.cognitive_layers.memory_layer.modules.temperature_module
+import neurova.cognitive_layers.memory_layer.modules.tkg_module
+import neurova.cognitive_layers.memory_layer.modules.working_memory_module
+
+pass

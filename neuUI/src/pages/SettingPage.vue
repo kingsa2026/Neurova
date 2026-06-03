@@ -1,105 +1,105 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;h1 &gt;系统设置&lt;/h1&gt;
-      &lt;p &gt;管理您的账户、偏好和系统配置&lt;/p&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;a-tabs v-model:activeKey="activeTab"  size="large"&gt;
-        &lt;!-- ===== 个人设置 ===== --&gt;
-        &lt;a-tab-pane key="profile" tab="个人设置"&gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;h3 &gt;基本信息&lt;/h3&gt;
-              &lt;a-form :model="profileForm" layout="vertical" &gt;
-                &lt;a-row :gutter="24"&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="用户名"&gt;
-                      &lt;a-input v-model:value="profileForm.username" disabled /&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="邮箱"&gt;
-                      &lt;a-input v-model:value="profileForm.email" placeholder="请输入邮箱" /&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                &lt;/a-row&gt;
-                &lt;a-row :gutter="24"&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="角色"&gt;
-                      &lt;a-tag :color="profileForm.role === 'admin' ? 'purple' : 'blue'"&gt;
+<template>
+  <div >
+    <div >
+      <h1 >系统设置</h1>
+      <p >管理您的账户、偏好和系统配置</p>
+    </div>
+    <div >
+      <a-tabs v-model:activeKey="activeTab"  size="large">
+        <!-- ===== 个人设置 ===== -->
+        <a-tab-pane key="profile" tab="个人设置">
+          <div >
+            <div >
+              <h3 >基本信息</h3>
+              <a-form :model="profileForm" layout="vertical" >
+                <a-row :gutter="24">
+                  <a-col :span="12">
+                    <a-form-item label="用户名">
+                      <a-input v-model:value="profileForm.username" disabled />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="12">
+                    <a-form-item label="邮箱">
+                      <a-input v-model:value="profileForm.email" placeholder="请输入邮箱" />
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+                <a-row :gutter="24">
+                  <a-col :span="12">
+                    <a-form-item label="角色">
+                      <a-tag :color="profileForm.role === 'admin' ? 'purple' : 'blue'">
                         {{ profileForm.role === 'admin' ? '管理员' : '普通用户' }}
-                      &lt;/a-tag&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="注册时间"&gt;
-                      &lt;span &gt;{{ profileForm.createdAt || '未知' }}&lt;/span&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                &lt;/a-row&gt;
-                &lt;a-form-item&gt;
-                  &lt;a-button type="primary" :loading="profileSaving" @click="saveProfile"&gt;
+                      </a-tag>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="12">
+                    <a-form-item label="注册时间">
+                      <span >{{ profileForm.createdAt || '未知' }}</span>
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+                <a-form-item>
+                  <a-button type="primary" :loading="profileSaving" @click="saveProfile">
                     保存修改
-                  &lt;/a-button&gt;
-                &lt;/a-form-item&gt;
-              &lt;/a-form&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;h3 &gt;修改密码&lt;/h3&gt;
-              &lt;a-form :model="passwordForm" layout="vertical" &gt;
-                &lt;a-row :gutter="24"&gt;
-                  &lt;a-col :span="8"&gt;
-                    &lt;a-form-item label="当前密码"&gt;
-                      &lt;a-input-password v-model:value="passwordForm.oldPassword" placeholder="输入当前密码" /&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                  &lt;a-col :span="8"&gt;
-                    &lt;a-form-item label="新密码"&gt;
-                      &lt;a-input-password v-model:value="passwordForm.newPassword" placeholder="至少8位，含大小写+数字" /&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                  &lt;a-col :span="8"&gt;
-                    &lt;a-form-item label="确认新密码"&gt;
-                      &lt;a-input-password v-model:value="passwordForm.confirmPassword" placeholder="再次输入新密码" /&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                &lt;/a-row&gt;
-                &lt;a-form-item&gt;
-                  &lt;a-button type="primary" :loading="passwordSaving" @click="changePassword"&gt;
+                  </a-button>
+                </a-form-item>
+              </a-form>
+            </div>
+            <div >
+              <h3 >修改密码</h3>
+              <a-form :model="passwordForm" layout="vertical" >
+                <a-row :gutter="24">
+                  <a-col :span="8">
+                    <a-form-item label="当前密码">
+                      <a-input-password v-model:value="passwordForm.oldPassword" placeholder="输入当前密码" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="8">
+                    <a-form-item label="新密码">
+                      <a-input-password v-model:value="passwordForm.newPassword" placeholder="至少8位，含大小写+数字" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="8">
+                    <a-form-item label="确认新密码">
+                      <a-input-password v-model:value="passwordForm.confirmPassword" placeholder="再次输入新密码" />
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+                <a-form-item>
+                  <a-button type="primary" :loading="passwordSaving" @click="changePassword">
                     更新密码
-                  &lt;/a-button&gt;
-                &lt;/a-form-item&gt;
-              &lt;/a-form&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/a-tab-pane&gt;
-        &lt;!-- ===== 偏好设置 ===== --&gt;
-        &lt;a-tab-pane key="preferences" tab="偏好设置"&gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;h3 &gt;外观&lt;/h3&gt;
-              &lt;div &gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;主题模式&lt;/span&gt;
-                    &lt;span &gt;选择深色或浅色主题&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-segmented
+                  </a-button>
+                </a-form-item>
+              </a-form>
+            </div>
+          </div>
+        </a-tab-pane>
+        <!-- ===== 偏好设置 ===== -->
+        <a-tab-pane key="preferences" tab="偏好设置">
+          <div >
+            <div >
+              <h3 >外观</h3>
+              <div >
+                <div >
+                  <div >
+                    <span >主题模式</span>
+                    <span >选择深色或浅色主题</span>
+                  </div>
+                  <a-segmented
                     v-model:value="systemSettings.theme"
                     :options="[
                       { label: '深色', value: 'dark' },
                       { label: '浅色', value: 'light' },
                       { label: '跟随系统', value: 'system' },
                     ]"
-                  /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;界面语言&lt;/span&gt;
-                    &lt;span &gt;选择界面显示语言&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-select
+                  />
+                </div>
+                <div >
+                  <div >
+                    <span >界面语言</span>
+                    <span >选择界面显示语言</span>
+                  </div>
+                  <a-select
                     v-model:value="systemSettings.language"
                     style="width: 180px"
                     :options="[
@@ -107,356 +107,356 @@
                       { label: 'English', value: 'en-US' },
                       { label: '日本語', value: 'ja-JP' },
                     ]"
-                  /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;菜单折叠&lt;/span&gt;
-                    &lt;span &gt;默认折叠侧边菜单&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="systemSettings.sidebar_collapsed" /&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;h3 &gt;系统设置&lt;/h3&gt;
-              &lt;div &gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;自动保存&lt;/span&gt;
-                    &lt;span &gt;自动保存会话记录&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="systemSettings.auto_save" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;保存间隔&lt;/span&gt;
-                    &lt;span &gt;自动保存间隔（分钟）&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-input-number v-model:value="systemSettings.save_interval_minutes" :min="1" :max="60" style="width: 120px" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;最大历史记录&lt;/span&gt;
-                    &lt;span &gt;保留的历史记录数量&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-input-number v-model:value="systemSettings.max_history_size" :min="10" :max="1000" style="width: 120px" /&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;h3 &gt;通知&lt;/h3&gt;
-              &lt;div &gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;系统通知&lt;/span&gt;
-                    &lt;span &gt;接收系统更新和维护通知&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="systemSettings.notifications_enabled" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;声音提醒&lt;/span&gt;
-                    &lt;span &gt;收到通知时播放声音&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="systemSettings.sound_enabled" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;桌面通知&lt;/span&gt;
-                    &lt;span &gt;重要信息通过桌面通知&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="systemSettings.desktop_notifications" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;隐私模式&lt;/span&gt;
-                    &lt;span &gt;隐藏敏感信息&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="systemSettings.privacy_mode" /&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-            &lt;a-form-item&gt;
-              &lt;a-button type="primary" :loading="savingSettings" @click="saveSystemSettings"&gt;保存偏好设置&lt;/a-button&gt;
-            &lt;/a-form-item&gt;
-          &lt;/div&gt;
-        &lt;/a-tab-pane&gt;
-        &lt;!-- ===== 安全设置 ===== --&gt;
-        &lt;a-tab-pane key="security" tab="安全设置"&gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;h3 &gt;安全配置&lt;/h3&gt;
-              &lt;div &gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;双因素认证&lt;/span&gt;
-                    &lt;span &gt;启用双因素登录验证&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="securitySettings.two_factor_enabled" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;会话超时&lt;/span&gt;
-                    &lt;span &gt;无操作自动登出（分钟）&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-input-number v-model:value="securitySettings.session_timeout_minutes" :min="5" :max="1440" style="width: 120px" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;密码过期&lt;/span&gt;
-                    &lt;span &gt;密码强制过期天数&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-input-number v-model:value="securitySettings.password_expiry_days" :min="0" :max="365" style="width: 120px" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;登录告警&lt;/span&gt;
-                    &lt;span &gt;新设备登录时发送通知&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="securitySettings.login_alerts" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;设备管理&lt;/span&gt;
-                    &lt;span &gt;允许管理登录设备&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="securitySettings.device_management_enabled" /&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-              &lt;a-form-item style="margin-top: 20px"&gt;
-                &lt;a-button type="primary" :loading="savingSecurity" @click="saveSecuritySettings"&gt;保存安全设置&lt;/a-button&gt;
-              &lt;/a-form-item&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/a-tab-pane&gt;
-        &lt;!-- ===== 备份管理 ===== --&gt;
-        &lt;a-tab-pane key="backup" tab="备份管理"&gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px"&gt;
-                &lt;h3  style="margin: 0; border: none; padding: 0"&gt;备份历史&lt;/h3&gt;
-                &lt;a-button type="primary" :loading="creatingBackup" @click="createBackup"&gt;
-                  &lt;CloudUploadOutlined /&gt; 创建备份
-                &lt;/a-button&gt;
-              &lt;/div&gt;
-              &lt;a-spin :spinning="loadingBackups"&gt;
-                &lt;a-table
+                  />
+                </div>
+                <div >
+                  <div >
+                    <span >菜单折叠</span>
+                    <span >默认折叠侧边菜单</span>
+                  </div>
+                  <a-switch v-model:checked="systemSettings.sidebar_collapsed" />
+                </div>
+              </div>
+            </div>
+            <div >
+              <h3 >系统设置</h3>
+              <div >
+                <div >
+                  <div >
+                    <span >自动保存</span>
+                    <span >自动保存会话记录</span>
+                  </div>
+                  <a-switch v-model:checked="systemSettings.auto_save" />
+                </div>
+                <div >
+                  <div >
+                    <span >保存间隔</span>
+                    <span >自动保存间隔（分钟）</span>
+                  </div>
+                  <a-input-number v-model:value="systemSettings.save_interval_minutes" :min="1" :max="60" style="width: 120px" />
+                </div>
+                <div >
+                  <div >
+                    <span >最大历史记录</span>
+                    <span >保留的历史记录数量</span>
+                  </div>
+                  <a-input-number v-model:value="systemSettings.max_history_size" :min="10" :max="1000" style="width: 120px" />
+                </div>
+              </div>
+            </div>
+            <div >
+              <h3 >通知</h3>
+              <div >
+                <div >
+                  <div >
+                    <span >系统通知</span>
+                    <span >接收系统更新和维护通知</span>
+                  </div>
+                  <a-switch v-model:checked="systemSettings.notifications_enabled" />
+                </div>
+                <div >
+                  <div >
+                    <span >声音提醒</span>
+                    <span >收到通知时播放声音</span>
+                  </div>
+                  <a-switch v-model:checked="systemSettings.sound_enabled" />
+                </div>
+                <div >
+                  <div >
+                    <span >桌面通知</span>
+                    <span >重要信息通过桌面通知</span>
+                  </div>
+                  <a-switch v-model:checked="systemSettings.desktop_notifications" />
+                </div>
+                <div >
+                  <div >
+                    <span >隐私模式</span>
+                    <span >隐藏敏感信息</span>
+                  </div>
+                  <a-switch v-model:checked="systemSettings.privacy_mode" />
+                </div>
+              </div>
+            </div>
+            <a-form-item>
+              <a-button type="primary" :loading="savingSettings" @click="saveSystemSettings">保存偏好设置</a-button>
+            </a-form-item>
+          </div>
+        </a-tab-pane>
+        <!-- ===== 安全设置 ===== -->
+        <a-tab-pane key="security" tab="安全设置">
+          <div >
+            <div >
+              <h3 >安全配置</h3>
+              <div >
+                <div >
+                  <div >
+                    <span >双因素认证</span>
+                    <span >启用双因素登录验证</span>
+                  </div>
+                  <a-switch v-model:checked="securitySettings.two_factor_enabled" />
+                </div>
+                <div >
+                  <div >
+                    <span >会话超时</span>
+                    <span >无操作自动登出（分钟）</span>
+                  </div>
+                  <a-input-number v-model:value="securitySettings.session_timeout_minutes" :min="5" :max="1440" style="width: 120px" />
+                </div>
+                <div >
+                  <div >
+                    <span >密码过期</span>
+                    <span >密码强制过期天数</span>
+                  </div>
+                  <a-input-number v-model:value="securitySettings.password_expiry_days" :min="0" :max="365" style="width: 120px" />
+                </div>
+                <div >
+                  <div >
+                    <span >登录告警</span>
+                    <span >新设备登录时发送通知</span>
+                  </div>
+                  <a-switch v-model:checked="securitySettings.login_alerts" />
+                </div>
+                <div >
+                  <div >
+                    <span >设备管理</span>
+                    <span >允许管理登录设备</span>
+                  </div>
+                  <a-switch v-model:checked="securitySettings.device_management_enabled" />
+                </div>
+              </div>
+              <a-form-item style="margin-top: 20px">
+                <a-button type="primary" :loading="savingSecurity" @click="saveSecuritySettings">保存安全设置</a-button>
+              </a-form-item>
+            </div>
+          </div>
+        </a-tab-pane>
+        <!-- ===== 备份管理 ===== -->
+        <a-tab-pane key="backup" tab="备份管理">
+          <div >
+            <div >
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px">
+                <h3  style="margin: 0; border: none; padding: 0">备份历史</h3>
+                <a-button type="primary" :loading="creatingBackup" @click="createBackup">
+                  <CloudUploadOutlined /> 创建备份
+                </a-button>
+              </div>
+              <a-spin :spinning="loadingBackups">
+                <a-table
                   :columns="backupColumns"
                   :data-source="backups"
                   :pagination="{ pageSize: 5 }"
                   row-key="id"
                   size="middle"
-                &gt;
-                  &lt;template #bodyCell="{ column, record }"&gt;
-                    &lt;template v-if="column.key === 'status'"&gt;
-                      &lt;a-tag :color="getStatusColor(record.status)"&gt;
+                >
+                  <template #bodyCell="{ column, record }">
+                    <template v-if="column.key === 'status'">
+                      <a-tag :color="getStatusColor(record.status)">
                         {{ getStatusText(record.status) }}
-                      &lt;/a-tag&gt;
-                    &lt;/template&gt;
-                    &lt;template v-if="column.key === 'actions'"&gt;
-                      &lt;a-button
+                      </a-tag>
+                    </template>
+                    <template v-if="column.key === 'actions'">
+                      <a-button
                         v-if="record.status === 'completed'"
                         type="link"
                         size="small"
                         :loading="restoringBackupId === record.id"
                         @click="restoreBackup(record.id)"
-                      &gt;
+                      >
                         恢复
-                      &lt;/a-button&gt;
-                      &lt;a-popconfirm
+                      </a-button>
+                      <a-popconfirm
                         title="确定要删除此备份吗？"
                         ok-text="确定"
                         cancel-text="取消"
                         @confirm="deleteBackup(record.id)"
-                      &gt;
-                        &lt;a-button type="link" danger size="small"&gt;
+                      >
+                        <a-button type="link" danger size="small">
                           删除
-                        &lt;/a-button&gt;
-                      &lt;/a-popconfirm&gt;
-                    &lt;/template&gt;
-                  &lt;/template&gt;
-                &lt;/a-table&gt;
-              &lt;/a-spin&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;h3 &gt;备份设置&lt;/h3&gt;
-              &lt;div &gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;自动备份&lt;/span&gt;
-                    &lt;span &gt;启用自动定期备份&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="systemSettings.backup_enabled" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;备份频率&lt;/span&gt;
-                    &lt;span &gt;自动备份的频率&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-select v-model:value="systemSettings.backup_frequency" style="width: 150px"&gt;
-                    &lt;a-select-option value="daily"&gt;每天&lt;/a-select-option&gt;
-                    &lt;a-select-option value="weekly"&gt;每周&lt;/a-select-option&gt;
-                    &lt;a-select-option value="monthly"&gt;每月&lt;/a-select-option&gt;
-                  &lt;/a-select&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;保留期限&lt;/span&gt;
-                    &lt;span &gt;备份保留天数&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-input-number v-model:value="systemSettings.backup_retention_days" :min="1" :max="365" style="width: 120px" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;数据加密&lt;/span&gt;
-                    &lt;span &gt;加密备份文件&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="systemSettings.data_encryption" /&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/a-tab-pane&gt;
-        &lt;!-- ===== API 密钥 ===== --&gt;
-        &lt;a-tab-pane key="api-key" tab="API 密钥"&gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;h3 &gt;API 密钥管理&lt;/h3&gt;
-              &lt;p &gt;管理用于第三方集成的 API 密钥，密钥仅在创建时显示一次&lt;/p&gt;
-              &lt;div  v-if="apiKeys.length &gt; 0"&gt;
-                &lt;div  v-for="key in apiKeys" :key="key.id"&gt;
-                  &lt;div &gt;
-                    &lt;span &gt;{{ key.name }}&lt;/span&gt;
-                    &lt;span &gt;{{ key.prefix }}••••••••&lt;/span&gt;
-                    &lt;span &gt;创建于 {{ key.createdAt }}&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;div &gt;
-                    &lt;a-tag :color="key.status === 'active' ? 'green' : 'default'"&gt;
+                        </a-button>
+                      </a-popconfirm>
+                    </template>
+                  </template>
+                </a-table>
+              </a-spin>
+            </div>
+            <div >
+              <h3 >备份设置</h3>
+              <div >
+                <div >
+                  <div >
+                    <span >自动备份</span>
+                    <span >启用自动定期备份</span>
+                  </div>
+                  <a-switch v-model:checked="systemSettings.backup_enabled" />
+                </div>
+                <div >
+                  <div >
+                    <span >备份频率</span>
+                    <span >自动备份的频率</span>
+                  </div>
+                  <a-select v-model:value="systemSettings.backup_frequency" style="width: 150px">
+                    <a-select-option value="daily">每天</a-select-option>
+                    <a-select-option value="weekly">每周</a-select-option>
+                    <a-select-option value="monthly">每月</a-select-option>
+                  </a-select>
+                </div>
+                <div >
+                  <div >
+                    <span >保留期限</span>
+                    <span >备份保留天数</span>
+                  </div>
+                  <a-input-number v-model:value="systemSettings.backup_retention_days" :min="1" :max="365" style="width: 120px" />
+                </div>
+                <div >
+                  <div >
+                    <span >数据加密</span>
+                    <span >加密备份文件</span>
+                  </div>
+                  <a-switch v-model:checked="systemSettings.data_encryption" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </a-tab-pane>
+        <!-- ===== API 密钥 ===== -->
+        <a-tab-pane key="api-key" tab="API 密钥">
+          <div >
+            <div >
+              <h3 >API 密钥管理</h3>
+              <p >管理用于第三方集成的 API 密钥，密钥仅在创建时显示一次</p>
+              <div  v-if="apiKeys.length > 0">
+                <div  v-for="key in apiKeys" :key="key.id">
+                  <div >
+                    <span >{{ key.name }}</span>
+                    <span >{{ key.prefix }}••••••••</span>
+                    <span >创建于 {{ key.createdAt }}</span>
+                  </div>
+                  <div >
+                    <a-tag :color="key.status === 'active' ? 'green' : 'default'">
                       {{ key.status === 'active' ? '启用' : '禁用' }}
-                    &lt;/a-tag&gt;
-                    &lt;a-button type="link" danger size="small" @click="deleteKey(key.id)"&gt;
+                    </a-tag>
+                    <a-button type="link" danger size="small" @click="deleteKey(key.id)">
                       删除
-                    &lt;/a-button&gt;
-                  &lt;/div&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-              &lt;div  v-else&gt;
-                &lt;p&gt;暂无 API 密钥，点击下方按钮创建&lt;/p&gt;
-              &lt;/div&gt;
-              &lt;a-button  @click="showKeyModal = true"&gt;
-                &lt;PlusOutlined /&gt; 创建 API 密钥
-              &lt;/a-button&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/a-tab-pane&gt;
-        &lt;!-- ===== 系统配置（管理员） ===== --&gt;
-        &lt;a-tab-pane key="system" tab="系统配置" v-if="isAdmin"&gt;
-          &lt;div &gt;
-            &lt;div &gt;
-              &lt;h3 &gt;系统参数&lt;/h3&gt;
-              &lt;a-form layout="vertical" &gt;
-                &lt;a-row :gutter="24"&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="Token 日限额"&gt;
-                      &lt;a-input-number v-model:value="systemForm.dailyTokenLimit" :min="0" style="width:100%" addon-after="/天" /&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="最大并发对话"&gt;
-                      &lt;a-input-number v-model:value="systemForm.maxConcurrent" :min="1" style="width:100%" addon-after="个" /&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                &lt;/a-row&gt;
-                &lt;a-row :gutter="24"&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="会话超时时间"&gt;
-                      &lt;a-input-number v-model:value="systemForm.sessionTimeout" :min="60" style="width:100%" addon-after="秒" /&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                  &lt;a-col :span="12"&gt;
-                    &lt;a-form-item label="日志保留天数"&gt;
-                      &lt;a-input-number v-model:value="systemForm.logRetention" :min="7" style="width:100%" addon-after="天" /&gt;
-                    &lt;/a-form-item&gt;
-                  &lt;/a-col&gt;
-                &lt;/a-row&gt;
-                &lt;a-form-item&gt;
-                  &lt;a-button type="primary" :loading="systemSaving" @click="saveSystemConfig"&gt;
+                    </a-button>
+                  </div>
+                </div>
+              </div>
+              <div  v-else>
+                <p>暂无 API 密钥，点击下方按钮创建</p>
+              </div>
+              <a-button  @click="showKeyModal = true">
+                <PlusOutlined /> 创建 API 密钥
+              </a-button>
+            </div>
+          </div>
+        </a-tab-pane>
+        <!-- ===== 系统配置（管理员） ===== -->
+        <a-tab-pane key="system" tab="系统配置" v-if="isAdmin">
+          <div >
+            <div >
+              <h3 >系统参数</h3>
+              <a-form layout="vertical" >
+                <a-row :gutter="24">
+                  <a-col :span="12">
+                    <a-form-item label="Token 日限额">
+                      <a-input-number v-model:value="systemForm.dailyTokenLimit" :min="0" style="width:100%" addon-after="/天" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="12">
+                    <a-form-item label="最大并发对话">
+                      <a-input-number v-model:value="systemForm.maxConcurrent" :min="1" style="width:100%" addon-after="个" />
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+                <a-row :gutter="24">
+                  <a-col :span="12">
+                    <a-form-item label="会话超时时间">
+                      <a-input-number v-model:value="systemForm.sessionTimeout" :min="60" style="width:100%" addon-after="秒" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="12">
+                    <a-form-item label="日志保留天数">
+                      <a-input-number v-model:value="systemForm.logRetention" :min="7" style="width:100%" addon-after="天" />
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+                <a-form-item>
+                  <a-button type="primary" :loading="systemSaving" @click="saveSystemConfig">
                     保存配置
-                  &lt;/a-button&gt;
-                &lt;/a-form-item&gt;
-              &lt;/a-form&gt;
-            &lt;/div&gt;
-            &lt;div &gt;
-              &lt;h3 &gt;安全设置&lt;/h3&gt;
-              &lt;div &gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;注册开放&lt;/span&gt;
-                    &lt;span &gt;允许新用户自行注册&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="systemForm.allowRegister" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;邀请码验证&lt;/span&gt;
-                    &lt;span &gt;注册需要邀请码&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="systemForm.requireInvite" /&gt;
-                &lt;/div&gt;
-                &lt;div &gt;
-                  &lt;div &gt;
-                    &lt;span &gt;登录 IP 限制&lt;/span&gt;
-                    &lt;span &gt;限制登录 IP 白名单&lt;/span&gt;
-                  &lt;/div&gt;
-                  &lt;a-switch v-model:checked="systemForm.ipRestrict" /&gt;
-                &lt;/div&gt;
-              &lt;/div&gt;
-            &lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/a-tab-pane&gt;
-      &lt;/a-tabs&gt;
-    &lt;/div&gt;
-    &lt;!-- 创建 API 密钥弹窗 --&gt;
-    &lt;a-modal
+                  </a-button>
+                </a-form-item>
+              </a-form>
+            </div>
+            <div >
+              <h3 >安全设置</h3>
+              <div >
+                <div >
+                  <div >
+                    <span >注册开放</span>
+                    <span >允许新用户自行注册</span>
+                  </div>
+                  <a-switch v-model:checked="systemForm.allowRegister" />
+                </div>
+                <div >
+                  <div >
+                    <span >邀请码验证</span>
+                    <span >注册需要邀请码</span>
+                  </div>
+                  <a-switch v-model:checked="systemForm.requireInvite" />
+                </div>
+                <div >
+                  <div >
+                    <span >登录 IP 限制</span>
+                    <span >限制登录 IP 白名单</span>
+                  </div>
+                  <a-switch v-model:checked="systemForm.ipRestrict" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </a-tab-pane>
+      </a-tabs>
+    </div>
+    <!-- 创建 API 密钥弹窗 -->
+    <a-modal
       v-model:open="showKeyModal"
       title="创建 API 密钥"
       @ok="createApiKey"
       :confirmLoading="keyCreating"
-    &gt;
-      &lt;a-form layout="vertical"&gt;
-        &lt;a-form-item label="密钥名称" required&gt;
-          &lt;a-input v-model:value="newKeyName" placeholder="例如：生产环境、开发测试" /&gt;
-        &lt;/a-form-item&gt;
-      &lt;/a-form&gt;
-    &lt;/a-modal&gt;
-    &lt;!-- 新密钥展示 --&gt;
-    &lt;a-modal
+    >
+      <a-form layout="vertical">
+        <a-form-item label="密钥名称" required>
+          <a-input v-model:value="newKeyName" placeholder="例如：生产环境、开发测试" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+    <!-- 新密钥展示 -->
+    <a-modal
       v-model:open="showNewKey"
       title="API 密钥已创建"
       :footer="null"
       @cancel="showNewKey = false"
-    &gt;
-      &lt;a-alert
+    >
+      <a-alert
         type="warning"
         message="请立即复制此密钥，关闭后将无法再次查看"
         show-icon
         style="margin-bottom:16px"
-      /&gt;
-      &lt;a-input-password
+      />
+      <a-input-password
         :value="newKeyValue"
         readonly
-      &gt;
-        &lt;template #addonAfter&gt;
-          &lt;a-button type="link" size="small" @click="copyKey"&gt;
-            &lt;CopyOutlined /&gt;
-          &lt;/a-button&gt;
-        &lt;/template&gt;
-      &lt;/a-input-password&gt;
-    &lt;/a-modal&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+      >
+        <template #addonAfter>
+          <a-button type="link" size="small" @click="copyKey">
+            <CopyOutlined />
+          </a-button>
+        </template>
+      </a-input-password>
+    </a-modal>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import type { ColumnsType } from 'ant-design-vue/es/table'
@@ -470,7 +470,7 @@ import { authAPI } from '@/api/auth'
 import { settingsAPI, type SystemSettings, type SecuritySettings, type BackupInfo } from '@/api/modules/settings'
 const authStore = useAuthStore()
 const activeTab = ref('profile')
-const isAdmin = computed(() =&gt; authStore.currentUser?.role === 'admin')
+const isAdmin = computed(() => authStore.currentUser?.role === 'admin')
 // ─── 个人设置 ───
 const profileForm = reactive({
   username: '',
@@ -486,7 +486,7 @@ const passwordForm = reactive({
 })
 const passwordSaving = ref(false)
 // ─── 系统设置 ───
-const systemSettings = reactive&lt;Partial&lt;SystemSettings&gt;&gt;({
+const systemSettings = reactive<Partial<SystemSettings>>({
   theme: 'dark',
   language: 'zh-CN',
   timezone: 'Asia/Shanghai',
@@ -507,7 +507,7 @@ const systemSettings = reactive&lt;Partial&lt;SystemSettings&gt;&gt;({
 })
 const savingSettings = ref(false)
 // ─── 安全设置 ───
-const securitySettings = reactive&lt;Partial&lt;SecuritySettings&gt;&gt;({
+const securitySettings = reactive<Partial<SecuritySettings>>({
   two_factor_enabled: false,
   session_timeout_minutes: 60,
   password_expiry_days: 90,
@@ -517,20 +517,20 @@ const securitySettings = reactive&lt;Partial&lt;SecuritySettings&gt;&gt;({
 })
 const savingSecurity = ref(false)
 // ─── 备份管理 ───
-const backups = ref&lt;BackupInfo[]&gt;([])
+const backups = ref<BackupInfo[]>([])
 const loadingBackups = ref(false)
 const creatingBackup = ref(false)
-const restoringBackupId = ref&lt;string | null&gt;(null)
-const backupColumns: ColumnsType&lt;BackupInfo&gt; = [
+const restoringBackupId = ref<string | null>(null)
+const backupColumns: ColumnsType<BackupInfo> = [
   { title: '备份类型', dataIndex: 'type', width: 100 },
   { title: '状态', key: 'status', width: 100 },
-  { title: '文件大小', dataIndex: 'file_size', width: 120, customRender: (value) =&gt; `${(value / 1024 / 1024).toFixed(2)} MB` },
+  { title: '文件大小', dataIndex: 'file_size', width: 120, customRender: (value) => `${(value / 1024 / 1024).toFixed(2)} MB` },
   { title: '创建时间', dataIndex: 'created_at', width: 180 },
   { title: '完成时间', dataIndex: 'completed_at', width: 180 },
   { title: '操作', key: 'actions', width: 150 },
 ]
 // ─── API 密钥 ───
-const apiKeys = ref&lt;Array&lt;{ id: string; name: string; prefix: string; createdAt: string; status: string }&gt;&gt;([])
+const apiKeys = ref<Array<{ id: string; name: string; prefix: string; createdAt: string; status: string }>>([])
 const showKeyModal = ref(false)
 const showNewKey = ref(false)
 const keyCreating = ref(false)
@@ -548,7 +548,7 @@ const systemForm = reactive({
 })
 const systemSaving = ref(false)
 // ─── 初始化 ───
-onMounted(async () =&gt; {
+onMounted(async () => {
   const u = authStore.currentUser
   if (u) {
     profileForm.username = u.username || ''
@@ -660,7 +660,7 @@ async function deleteBackup(id: string) {
   }
 }
 function getStatusColor(status: string) {
-  const colors: Record&lt;string, string&gt; = {
+  const colors: Record<string, string> = {
     pending: 'orange',
     in_progress: 'blue',
     completed: 'green',
@@ -669,7 +669,7 @@ function getStatusColor(status: string) {
   return colors[status] || 'default'
 }
 function getStatusText(status: string) {
-  const texts: Record&lt;string, string&gt; = {
+  const texts: Record<string, string> = {
     pending: '等待中',
     in_progress: '进行中',
     completed: '已完成',
@@ -698,7 +698,7 @@ async function changePassword() {
     message.warning('请填写完整密码信息')
     return
   }
-  if (passwordForm.newPassword.length &lt; 8) {
+  if (passwordForm.newPassword.length < 8) {
     message.warning('新密码至少 8 位')
     return
   }
@@ -732,7 +732,7 @@ async function createApiKey() {
   keyCreating.value = true
   try {
     const prefix = 'nv-'
-    const key = prefix + Array.from({ length: 32 }, () =&gt;
+    const key = prefix + Array.from({ length: 32 }, () =>
       Math.random().toString(36)[2] || '0'
     ).join('')
     newKeyValue.value = key
@@ -754,7 +754,7 @@ async function createApiKey() {
   }
 }
 function deleteKey(id: string) {
-  apiKeys.value = apiKeys.value.filter(k =&gt; k.id !== id)
+  apiKeys.value = apiKeys.value.filter(k => k.id !== id)
   message.success('密钥已删除')
 }
 function copyKey() {
@@ -773,8 +773,8 @@ async function saveSystemConfig() {
     systemSaving.value = false
   }
 }
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .settings-page {
   padding: 24px 28px;
   max-width: 960px;
@@ -838,7 +838,7 @@ async function saveSystemConfig() {
 .settings-form {
   max-width: 640px;
 }
-:deep(.settings-form .ant-form-item-label &gt; label) {
+:deep(.settings-form .ant-form-item-label > label) {
   color: rgba(255, 255, 255, 0.6) !important;
   font-size: 0.85rem;
 }
@@ -969,12 +969,12 @@ async function saveSystemConfig() {
 :deep(.ant-table-wrapper .ant-table) {
   background: transparent;
 }
-:deep(.ant-table-wrapper .ant-table-thead &gt; tr &gt; th) {
+:deep(.ant-table-wrapper .ant-table-thead > tr > th) {
   background: rgba(255, 255, 255, 0.03);
   color: rgba(255, 255, 255, 0.6);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
-:deep(.ant-table-wrapper .ant-table-tbody &gt; tr &gt; td) {
+:deep(.ant-table-wrapper .ant-table-tbody > tr > td) {
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.7);
 }
@@ -991,5 +991,5 @@ async function saveSystemConfig() {
     padding: 18px 16px;
   }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

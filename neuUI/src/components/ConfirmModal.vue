@@ -1,25 +1,25 @@
-&lt;template&gt;
-  &lt;a-modal
+<template>
+  <a-modal
     :open="visible"
     :title="title"
     :confirm-loading="loading"
     @ok="handleOk"
     @cancel="handleCancel"
-  &gt;
-    &lt;div &gt;
-      &lt;ExclamationCircleFilled  /&gt;
-      &lt;p &gt;{{ content }}&lt;/p&gt;
-    &lt;/div&gt;
-  &lt;/a-modal&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+  >
+    <div >
+      <ExclamationCircleFilled  />
+      <p >{{ content }}</p>
+    </div>
+  </a-modal>
+</template>
+<script setup lang="ts">
 import { ExclamationCircleFilled } from '@ant-design/icons-vue'
-defineProps&lt;{
+defineProps<{
   title?: string
   content: string
   loading?: boolean
-}&gt;()
-const visible = ref&lt;boolean&gt;(false)
+}>()
+const visible = ref<boolean>(false)
 function open() {
   visible.value = true
 }
@@ -32,15 +32,15 @@ function handleOk() {
 function handleCancel() {
   close()
 }
-const emit = defineEmits&lt;{
+const emit = defineEmits<{
   (e: 'confirm'): void
-}&gt;()
+}>()
 defineExpose({
   open,
   close
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .confirm-modal {
   :deep(.ant-modal-header) {
     background: rgba(10, 14, 39, 0.9) !important;
@@ -71,5 +71,5 @@ defineExpose({
   color: rgba(255, 255, 255, 0.8);
   margin: 0;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

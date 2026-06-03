@@ -1,16 +1,16 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;canvas ref="canvasRef"  /&gt;
-    &lt;div &gt;
-      &lt;div v-for="wave in activeWaves" :key="wave.type" &gt;
-        &lt;span  :style="{ background: wave.color }"&gt;&lt;/span&gt;
-        &lt;span &gt;{{ wave.label }}&lt;/span&gt;
-        &lt;span &gt;{{ wave.percent }}%&lt;/span&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+<template>
+  <div >
+    <canvas ref="canvasRef"  />
+    <div >
+      <div v-for="wave in activeWaves" :key="wave.type" >
+        <span  :style="{ background: wave.color }"></span>
+        <span >{{ wave.label }}</span>
+        <span >{{ wave.percent }}%</span>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, onMounted, watch, onUnmounted, computed } from 'vue'
 /**
  * 脑波可视化组件
@@ -23,10 +23,10 @@ import { ref, onMounted, watch, onUnmounted, computed } from 'vue'
  * - β波 (Beta): 13~30Hz, 专注、逻辑思维、警觉
  * - γ波 (Gamma): 30~100Hz, 认知整合、注意力、记忆
  */
-const props = defineProps&lt;{
+const props = defineProps<{
   stage: 'active' | 'light' | 'rem' | 'deep'
-}&gt;()
-const canvasRef = ref&lt;HTMLCanvasElement | null&gt;(null)
+}>()
+const canvasRef = ref<HTMLCanvasElement | null>(null)
 let animationId: number | null = null
 let lastTime = 0
 // 脑波类型定义
@@ -39,7 +39,7 @@ interface BrainWave {
   percent: number
 }
 // 五种核心脑波配置
-const brainwaveTypes: Record&lt;string, Omit&lt;BrainWave, 'percent'&gt;&gt; = {
+const brainwaveTypes: Record<string, Omit<BrainWave, 'percent'>> = {
   delta: {
     type: 'delta',
     label: 'δ波',
@@ -77,7 +77,7 @@ const brainwaveTypes: Record&lt;string, Omit&lt;BrainWave, 'percent'&gt;&gt; = {
   },
 }
 // 四种状态的脑波分布
-const stageWaveDistribution: Record&lt;string, Record&lt;string, number&gt;&gt; = {
+const stageWaveDistribution: Record<string, Record<string, number>> = {
   active: { // 活跃状态 - 整合空闲/思考/工作
     alpha: 30,   // 放松成分
     beta: 45,    // 专注成分
@@ -111,18 +111,18 @@ const stageWaveDistribution: Record&lt;string, Record&lt;string, number&gt;&gt; 
   },
 }
 // 当前活跃的脑波列表
-const activeWaves = computed(() =&gt; {
+const activeWaves = computed(() => {
   const distribution = stageWaveDistribution[props.stage] || stageWaveDistribution.active
   const waves: BrainWave[] = []
   for (const [type, percent] of Object.entries(distribution)) {
-    if (percent &gt; 0 &amp;&amp; brainwaveTypes[type]) {
+    if (percent > 0 && brainwaveTypes[type]) {
       waves.push({
         ...brainwaveTypes[type],
         percent,
       })
     }
   }
-  return waves.sort((a, b) =&gt; b.percent - a.percent)
+  return waves.sort((a, b) => b.percent - a.percent)
 })
 // 状态参数配置
 const stageConfig = {
@@ -164,7 +164,7 @@ interface SpecialWave {
   color: string
   label: string
 }
-const specialWaves: Record&lt;string, SpecialWave[]&gt; = {
+const specialWaves: Record<string, SpecialWave[]> = {
   light: [ // N2期睡眠纺锤波和K复合波
     {
       type: 'spindle',
@@ -198,17 +198,17 @@ const specialWaves: Record&lt;string, SpecialWave[]&gt; = {
 let currentStage = ref(props.stage)
 let transitionProgress = ref(1) // 0-1, 1表示完全过渡完成
 let previousParams = ref(stageConfig[props.stage as keyof typeof stageConfig])
-watch(() =&gt; props.stage, (newStage, oldStage) =&gt; {
+watch(() => props.stage, (newStage, oldStage) => {
   if (newStage !== oldStage) {
     previousParams.value = stageConfig[oldStage as keyof typeof stageConfig]
     transitionProgress.value = 0
     // 过渡动画
     const transitionDuration = 1500 // 1.5秒过渡
     const startTime = Date.now()
-    const animateTransition = () =&gt; {
+    const animateTransition = () => {
       const elapsed = Date.now() - startTime
       transitionProgress.value = Math.min(elapsed / transitionDuration, 1)
-      if (transitionProgress.value &lt; 1) {
+      if (transitionProgress.value < 1) {
         requestAnimationFrame(animateTransition)
       }
     }
@@ -245,13 +245,13 @@ function generateBrainwave(
   // 1. 主脑波（基于状态的主导波）
   const distribution = stageWaveDistribution[stage] || stageWaveDistribution.active
   // α波（8~13Hz）- 空闲状态主导
-  if (distribution.alpha &gt; 0) {
+  if (distribution.alpha > 0) {
     const alphaFreq = lerp(9, 10, Math.sin(time * 0.1) * 0.5 + 0.5) // 9~10Hz波动
     const alphaAmp = baseAmp * 0.6 * (distribution.alpha / 100)
     wave += Math.sin(normalizedX * alphaFreq * Math.PI * 2 + time * speed) * alphaAmp
   }
   // β波（13~30Hz）- 思考和工作状态主导
-  if (distribution.beta &gt; 0) {
+  if (distribution.beta > 0) {
     const betaFreq = lerp(18, 25, Math.sin(time * 0.15) * 0.5 + 0.5) // 18~25Hz
     const betaAmp = baseAmp * 0.35 * (distribution.beta / 100)
     // 添加高频锯齿成分
@@ -259,44 +259,44 @@ function generateBrainwave(
     wave += Math.sin(normalizedX * betaFreq * 2 * Math.PI * 3 + time * speed * 2) * betaAmp * 0.2
   }
   // γ波（30~100Hz）- 认知整合
-  if (distribution.gamma &gt; 0) {
+  if (distribution.gamma > 0) {
     const gammaFreq = 40 // 40Hz为主
     const gammaAmp = baseAmp * 0.15 * (distribution.gamma / 100)
     wave += Math.sin(normalizedX * gammaFreq * Math.PI * 2 + time * speed * 3) * gammaAmp
   }
   // θ波（4~8Hz）- 浅睡和REM主导
-  if (distribution.theta &gt; 0) {
+  if (distribution.theta > 0) {
     const thetaFreq = lerp(4, 7, Math.sin(time * 0.05) * 0.5 + 0.5) // 4~7Hz
     const thetaAmp = baseAmp * 0.7 * (distribution.theta / 100)
     wave += Math.sin(normalizedX * thetaFreq * Math.PI * 2 + time * speed * 0.5) * thetaAmp
   }
   // δ波（0.5~4Hz）- 深睡主导
-  if (distribution.delta &gt; 0) {
+  if (distribution.delta > 0) {
     const deltaFreq = lerp(1, 2, Math.sin(time * 0.02) * 0.5 + 0.5) // 0.5~2Hz
     const deltaAmp = baseAmp * 0.9 * (distribution.delta / 100)
     wave += Math.sin(normalizedX * deltaFreq * Math.PI * 2 + time * speed * 0.2) * deltaAmp
   }
   // 2. 特殊波形
   // 睡眠纺锤波（N2期特征）
-  if (distribution.spindle &amp;&amp; distribution.spindle &gt; 0) {
+  if (distribution.spindle && distribution.spindle > 0) {
     const spindleTime = (time * 3) % 5 // 每3~5秒一次
-    if (spindleTime &lt; 1.5) {
+    if (spindleTime < 1.5) {
       const spindlePhase = spindleTime / 1.5
       const spindleAmp = Math.sin(spindlePhase * Math.PI) * 40 * (distribution.spindle / 100)
       wave += Math.sin(normalizedX * 13 * Math.PI * 2 + time * 8) * spindleAmp
     }
   }
   // K复合波（N2期特征）
-  if (distribution.kcomplex &amp;&amp; distribution.kcomplex &gt; 0) {
+  if (distribution.kcomplex && distribution.kcomplex > 0) {
     const kTime = (time * 2) % 8 // 随机出现
-    if (kTime &gt; 7.5 &amp;&amp; kTime &lt; 8) {
+    if (kTime > 7.5 && kTime < 8) {
       const kPhase = (kTime - 7.5) / 0.5
       const kAmp = Math.sin(kPhase * Math.PI) * 100 * (distribution.kcomplex / 100)
       wave += Math.sin(normalizedX * 2 * Math.PI + time * 2) * kAmp
     }
   }
   // SMR波（感觉运动节律，12~15Hz）
-  if (distribution.smr &amp;&amp; distribution.smr &gt; 0) {
+  if (distribution.smr && distribution.smr > 0) {
     const smrFreq = 13.5 // 12~15Hz中心值
     const smrAmp = baseAmp * 0.4 * (distribution.smr / 100)
     wave += Math.sin(normalizedX * smrFreq * Math.PI * 2 + time * speed * 0.8) * smrAmp
@@ -310,7 +310,7 @@ function generateBrainwave(
 }
 // 缓动函数
 function easeInOutCubic(t: number): number {
-  return t &lt; 0.5
+  return t < 0.5
     ? 4 * t * t * t
     : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
@@ -333,7 +333,7 @@ function draw(timestamp: number) {
   const waves = activeWaves.value
   const currentConfig = stageConfig[currentStage.value as keyof typeof stageConfig]
   // 绘制多层波形
-  for (let layer = 0; layer &lt; 3; layer++) {
+  for (let layer = 0; layer < 3; layer++) {
     const layerOffset = layer * 0.3
     const layerAlpha = 1 - layer * 0.25
     ctx.beginPath()
@@ -346,7 +346,7 @@ function draw(timestamp: number) {
       ? layerColor 
       : `${layerColor}${Math.round(layerAlpha * 80).toString(16).padStart(2, '0')}`
     ctx.lineWidth = layer === 1 ? 2.5 : 1.5
-    for (let x = 0; x &lt;= width; x += 2) {
+    for (let x = 0; x <= width; x += 2) {
       const y = generateBrainwave(x, time + layerOffset, currentStage.value, transitionProgress.value)
       if (x === 0) {
         ctx.moveTo(x, y)
@@ -389,20 +389,20 @@ function resizeCanvas() {
     canvas.height = 200
   }
 }
-onMounted(() =&gt; {
+onMounted(() => {
   resizeCanvas()
   lastTime = performance.now()
   animationId = requestAnimationFrame(draw)
   window.addEventListener('resize', resizeCanvas)
 })
-onUnmounted(() =&gt; {
+onUnmounted(() => {
   if (animationId) {
     cancelAnimationFrame(animationId)
   }
   window.removeEventListener('resize', resizeCanvas)
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .brainwave-visualizer {
   position: relative;
   width: 100%;
@@ -444,5 +444,5 @@ onUnmounted(() =&gt; {
   color: rgba(255, 255, 255, 0.5);
   font-size: 0.7rem;
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

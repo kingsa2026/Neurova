@@ -1,38 +1,38 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;TransitionGroup name="memory-item" tag="div" &gt;
-      &lt;div
+<template>
+  <div >
+    <TransitionGroup name="memory-item" tag="div" >
+      <div
         v-for="memory in memories"
         :key="memory.id"
-      &gt;
-        &lt;!-- 时间轴连接器 --&gt;
-        &lt;div &gt;
-          &lt;div  :style="{ background: getMemoryColor(getMemoryCategory(memory)) }"&gt;
-            &lt;component :is="getMemoryIcon(getMemoryCategory(memory))"  /&gt;
-          &lt;/div&gt;
-          &lt;div &gt;&lt;/div&gt;
-        &lt;/div&gt;
-        &lt;!-- 记忆卡片 --&gt;
-        &lt;div &gt;
-          &lt;div &gt;
-            &lt;span  :style="{ color: getMemoryColor(getMemoryCategory(memory)) }"&gt;{{ getMemoryTypeLabel(getMemoryCategory(memory)) }}&lt;/span&gt;
-            &lt;span &gt;{{ formatTime(memory.timestamp) }}&lt;/span&gt;
-          &lt;/div&gt;
-          &lt;div &gt;{{ memory.content || memory.summary || '' }}&lt;/div&gt;
-          &lt;div v-if="memory.tags &amp;&amp; memory.tags.length &gt; 0" &gt;
-            &lt;a-tag v-for="tag in memory.tags" :key="tag" &gt;
+      >
+        <!-- 时间轴连接器 -->
+        <div >
+          <div  :style="{ background: getMemoryColor(getMemoryCategory(memory)) }">
+            <component :is="getMemoryIcon(getMemoryCategory(memory))"  />
+          </div>
+          <div ></div>
+        </div>
+        <!-- 记忆卡片 -->
+        <div >
+          <div >
+            <span  :style="{ color: getMemoryColor(getMemoryCategory(memory)) }">{{ getMemoryTypeLabel(getMemoryCategory(memory)) }}</span>
+            <span >{{ formatTime(memory.timestamp) }}</span>
+          </div>
+          <div >{{ memory.content || memory.summary || '' }}</div>
+          <div v-if="memory.tags && memory.tags.length > 0" >
+            <a-tag v-for="tag in memory.tags" :key="tag" >
               {{ tag }}
-            &lt;/a-tag&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/TransitionGroup&gt;
-    &lt;div v-if="memories.length === 0" &gt;
-      &lt;p &gt;暂无记忆&lt;/p&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+            </a-tag>
+          </div>
+        </div>
+      </div>
+    </TransitionGroup>
+    <div v-if="memories.length === 0" >
+      <p >暂无记忆</p>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import {
   MessageCircle,
   FileText,
@@ -63,15 +63,15 @@ interface Memory {
   timestamp: number
   tags?: string[]
 }
-const props = defineProps&lt;{
+const props = defineProps<{
   memories: Memory[]
-}&gt;()
+}>()
 function getMemoryCategory(memory: Memory): string {
   // 优先使用 category 字段，其次 type 字段
   return memory.category || memory.type || 'conversation'
 }
 function getMemoryColor(type: string): string {
-  const colorMap: Record&lt;string, string&gt; = {
+  const colorMap: Record<string, string> = {
     // 后端标准分类（MemoryCategory 枚举）
     'conversation': '#3b82f6',      // 对话 - 蓝色
     'fact': '#8b5cf6',              // 事实 - 紫色
@@ -91,13 +91,13 @@ function getMemoryColor(type: string): string {
     'context_snapshot': '#059669',  // 上下文快照 - 翠绿色
     'tool_usage': '#0284c7',        // 工具使用 - 蓝色
     // 兼容旧类型
-    'vector': '#3b82f6',           // 向量记忆 -&gt; 对话
-    'working': '#10b981',          // 工作记忆 -&gt; 用户画像
+    'vector': '#3b82f6',           // 向量记忆 -> 对话
+    'working': '#10b981',          // 工作记忆 -> 用户画像
   }
   return colorMap[type] || '#6b7280'
 }
 function getMemoryIcon(type: string): LucideIcon {
-  const iconMap: Record&lt;string, LucideIcon&gt; = {
+  const iconMap: Record<string, LucideIcon> = {
     // 后端标准分类
     'conversation': MessageCircle,
     'fact': FileText,
@@ -123,7 +123,7 @@ function getMemoryIcon(type: string): LucideIcon {
   return iconMap[type] || FileText
 }
 function getMemoryTypeLabel(type: string): string {
-  const labelMap: Record&lt;string, string&gt; = {
+  const labelMap: Record<string, string> = {
     // 后端标准分类
     'conversation': '对话记忆',
     'fact': '事实记忆',
@@ -152,13 +152,13 @@ function formatTime(timestamp: number): string {
   const date = new Date(timestamp)
   const now = new Date()
   const diff = now.getTime() - date.getTime()
-  if (diff &lt; 60000) return '刚刚'
-  if (diff &lt; 3600000) return `${Math.floor(diff / 60000)}分钟前`
-  if (diff &lt; 86400000) return `${Math.floor(diff / 3600000)}小时前`
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`
   return date.toLocaleDateString('zh-CN')
 }
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .memory-timeline {
   padding: 16px;
   max-height: 600px;
@@ -283,5 +283,5 @@ function formatTime(timestamp: number): string {
     transform: translateX(20px);
   }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

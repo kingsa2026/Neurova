@@ -54,7 +54,7 @@ except ImportError:
 __version__ = "0.1.0"
 __all__ = [
     "MoEMemoryRouter",
-    "VectorGatingNetwork", 
+    "VectorGatingNetwork",
     "ExpertDrilldownRetriever",
     "UnifiedVectorStore",
     "MemoryCategory",

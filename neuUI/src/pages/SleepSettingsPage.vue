@@ -1,196 +1,196 @@
-&lt;template&gt;
-  &lt;div &gt;
-    &lt;div &gt;
-      &lt;div &gt;
-        &lt;SettingOutlined :style="{ color: '#6366f1' }" /&gt;
-        &lt;h2 &gt;睡眠设置&lt;/h2&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;a-select
+<template>
+  <div >
+    <div >
+      <div >
+        <SettingOutlined :style="{ color: '#6366f1' }" />
+        <h2 >睡眠设置</h2>
+      </div>
+      <div >
+        <a-select
           :value="agentId"
           style="width: 200px"
           placeholder="选择 Agent"
           @change="handleAgentChange"
-        &gt;
-          &lt;a-select-option
+        >
+          <a-select-option
             v-for="agent in agentOptions"
             :key="agent.id || agent.agent_id"
             :value="agent.id || agent.agent_id"
-          &gt;
+          >
             {{ agent.name }}
-          &lt;/a-select-option&gt;
-        &lt;/a-select&gt;
-        &lt;a-button type="primary" @click="saveSettings" :loading="saving"&gt;
-          &lt;CheckOutlined /&gt; 保存设置
-        &lt;/a-button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;!-- 睡眠阶段时间 --&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;ClockCircleOutlined /&gt;
-          &lt;h3&gt;睡眠阶段时间&lt;/h3&gt;
-        &lt;/div&gt;
-        &lt;a-form layout="vertical"&gt;
-          &lt;a-form-item label="空闲进入浅睡 (分钟)"&gt;
-            &lt;a-input-number
+          </a-select-option>
+        </a-select>
+        <a-button type="primary" @click="saveSettings" :loading="saving">
+          <CheckOutlined /> 保存设置
+        </a-button>
+      </div>
+    </div>
+    <div >
+      <!-- 睡眠阶段时间 -->
+      <div >
+        <div >
+          <ClockCircleOutlined />
+          <h3>睡眠阶段时间</h3>
+        </div>
+        <a-form layout="vertical">
+          <a-form-item label="空闲进入浅睡 (分钟)">
+            <a-input-number
               v-model:value="settings.idle_to_light_minutes"
               :min="1"
               :max="120"
               style="width: 100%"
-            /&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item label="浅睡进入眼动期 (分钟)"&gt;
-            &lt;a-input-number
+            />
+          </a-form-item>
+          <a-form-item label="浅睡进入眼动期 (分钟)">
+            <a-input-number
               v-model:value="settings.light_to_rem_minutes"
               :min="1"
               :max="120"
               style="width: 100%"
-            /&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item label="眼动期进入深睡 (分钟)"&gt;
-            &lt;a-input-number
+            />
+          </a-form-item>
+          <a-form-item label="眼动期进入深睡 (分钟)">
+            <a-input-number
               v-model:value="settings.rem_to_deep_minutes"
               :min="1"
               :max="120"
               style="width: 100%"
-            /&gt;
-          &lt;/a-form-item&gt;
-        &lt;/a-form&gt;
-      &lt;/div&gt;
-      &lt;!-- 记忆合并 --&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;MergeCellsOutlined /&gt;
-          &lt;h3&gt;记忆合并&lt;/h3&gt;
-        &lt;/div&gt;
-        &lt;a-form layout="vertical"&gt;
-          &lt;a-form-item label="记忆合并相似度阈值"&gt;
-            &lt;div &gt;
-              &lt;a-slider
+            />
+          </a-form-item>
+        </a-form>
+      </div>
+      <!-- 记忆合并 -->
+      <div >
+        <div >
+          <MergeCellsOutlined />
+          <h3>记忆合并</h3>
+        </div>
+        <a-form layout="vertical">
+          <a-form-item label="记忆合并相似度阈值">
+            <div >
+              <a-slider
                 v-model:value="settings.memory_merge_threshold"
                 :min="0.5"
                 :max="0.99"
                 :step="0.01"
-                :tooltip-formatter="(v) =&gt; `${Math.round(v * 100)}%`"
-              /&gt;
-              &lt;span &gt;{{ Math.round(settings.memory_merge_threshold * 100) }}%&lt;/span&gt;
-            &lt;/div&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item label="记忆冲突解决方式"&gt;
-            &lt;a-select v-model:value="settings.conflict_resolution" style="width: 100%"&gt;
-              &lt;a-select-option value="latest"&gt;最新为准&lt;/a-select-option&gt;
-              &lt;a-select-option value="count"&gt;数量为准&lt;/a-select-option&gt;
-              &lt;a-select-option value="consensus"&gt;共识机制&lt;/a-select-option&gt;
-              &lt;a-select-option value="importance"&gt;重要性优先&lt;/a-select-option&gt;
-            &lt;/a-select&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item&gt;
-            &lt;a-switch
+                :tooltip-formatter="(v) => `${Math.round(v * 100)}%`"
+              />
+              <span >{{ Math.round(settings.memory_merge_threshold * 100) }}%</span>
+            </div>
+          </a-form-item>
+          <a-form-item label="记忆冲突解决方式">
+            <a-select v-model:value="settings.conflict_resolution" style="width: 100%">
+              <a-select-option value="latest">最新为准</a-select-option>
+              <a-select-option value="count">数量为准</a-select-option>
+              <a-select-option value="consensus">共识机制</a-select-option>
+              <a-select-option value="importance">重要性优先</a-select-option>
+            </a-select>
+          </a-form-item>
+          <a-form-item>
+            <a-switch
               v-model:checked="settings.memory_consolidation_enabled"
               checked-children="启用"
               un-checked-children="禁用"
-            /&gt;
-            &lt;span &gt;睡眠期间自动整合记忆&lt;/span&gt;
-          &lt;/a-form-item&gt;
-        &lt;/a-form&gt;
-      &lt;/div&gt;
-      &lt;!-- 睡眠计划 --&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;CalendarOutlined /&gt;
-          &lt;h3&gt;睡眠计划&lt;/h3&gt;
-        &lt;/div&gt;
-        &lt;a-form layout="vertical"&gt;
-          &lt;a-form-item&gt;
-            &lt;a-switch
+            />
+            <span >睡眠期间自动整合记忆</span>
+          </a-form-item>
+        </a-form>
+      </div>
+      <!-- 睡眠计划 -->
+      <div >
+        <div >
+          <CalendarOutlined />
+          <h3>睡眠计划</h3>
+        </div>
+        <a-form layout="vertical">
+          <a-form-item>
+            <a-switch
               v-model:checked="settings.sleep_schedule!.enabled"
               checked-children="启用"
               un-checked-children="禁用"
-            /&gt;
-            &lt;span &gt;定时睡眠&lt;/span&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item label="入睡时间"&gt;
-            &lt;a-time-picker
+            />
+            <span >定时睡眠</span>
+          </a-form-item>
+          <a-form-item label="入睡时间">
+            <a-time-picker
               v-model:value="sleepTime"
               format="HH:mm"
               style="width: 100%"
               placeholder="选择入睡时间"
-            /&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item label="唤醒时间"&gt;
-            &lt;a-time-picker
+            />
+          </a-form-item>
+          <a-form-item label="唤醒时间">
+            <a-time-picker
               v-model:value="wakeTime"
               format="HH:mm"
               style="width: 100%"
               placeholder="选择唤醒时间"
-            /&gt;
-          &lt;/a-form-item&gt;
-        &lt;/a-form&gt;
-      &lt;/div&gt;
-      &lt;!-- 高级设置 --&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;ToolOutlined /&gt;
-          &lt;h3&gt;高级设置&lt;/h3&gt;
-        &lt;/div&gt;
-        &lt;a-form layout="vertical"&gt;
-          &lt;a-form-item&gt;
-            &lt;a-switch
+            />
+          </a-form-item>
+        </a-form>
+      </div>
+      <!-- 高级设置 -->
+      <div >
+        <div >
+          <ToolOutlined />
+          <h3>高级设置</h3>
+        </div>
+        <a-form layout="vertical">
+          <a-form-item>
+            <a-switch
               v-model:checked="settings.auto_cleanup_enabled"
               checked-children="启用"
               un-checked-children="禁用"
-            /&gt;
-            &lt;span &gt;自动清理旧梦境&lt;/span&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item label="最大保存梦境日志数"&gt;
-            &lt;a-input-number
+            />
+            <span >自动清理旧梦境</span>
+          </a-form-item>
+          <a-form-item label="最大保存梦境日志数">
+            <a-input-number
               v-model:value="settings.max_dream_logs"
               :min="10"
               :max="1000"
               style="width: 100%"
-            /&gt;
-          &lt;/a-form-item&gt;
-          &lt;a-form-item&gt;
-            &lt;a-switch
+            />
+          </a-form-item>
+          <a-form-item>
+            <a-switch
               v-model:checked="settings.dream_analysis_enabled"
               checked-children="启用"
               un-checked-children="禁用"
-            /&gt;
-            &lt;span &gt;梦境分析与洞察&lt;/span&gt;
-          &lt;/a-form-item&gt;
-        &lt;/a-form&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-    &lt;!-- 冲突解决说明 --&gt;
-    &lt;div  v-if="showConflictExplanation"&gt;
-      &lt;div &gt;
-        &lt;InfoCircleOutlined /&gt;
-        &lt;h4&gt;冲突解决方式说明&lt;/h4&gt;
-      &lt;/div&gt;
-      &lt;div &gt;
-        &lt;div &gt;
-          &lt;div &gt;最新为准&lt;/div&gt;
-          &lt;div &gt;保留最后创建或修改的记忆，丢弃较早的冲突记忆&lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;数量为准&lt;/div&gt;
-          &lt;div &gt;根据记忆被引用或使用的次数来决定保留哪个记忆&lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;共识机制&lt;/div&gt;
-          &lt;div &gt;合并多个冲突记忆的共同点，生成一个新的综合记忆&lt;/div&gt;
-        &lt;/div&gt;
-        &lt;div &gt;
-          &lt;div &gt;重要性优先&lt;/div&gt;
-          &lt;div &gt;根据记忆的重要性评分和情感强度来决定保留哪个记忆&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+            />
+            <span >梦境分析与洞察</span>
+          </a-form-item>
+        </a-form>
+      </div>
+    </div>
+    <!-- 冲突解决说明 -->
+    <div  v-if="showConflictExplanation">
+      <div >
+        <InfoCircleOutlined />
+        <h4>冲突解决方式说明</h4>
+      </div>
+      <div >
+        <div >
+          <div >最新为准</div>
+          <div >保留最后创建或修改的记忆，丢弃较早的冲突记忆</div>
+        </div>
+        <div >
+          <div >数量为准</div>
+          <div >根据记忆被引用或使用的次数来决定保留哪个记忆</div>
+        </div>
+        <div >
+          <div >共识机制</div>
+          <div >合并多个冲突记忆的共同点，生成一个新的综合记忆</div>
+        </div>
+        <div >
+          <div >重要性优先</div>
+          <div >根据记忆的重要性评分和情感强度来决定保留哪个记忆</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
@@ -202,14 +202,14 @@ import dayjs from 'dayjs'
 import { sleepAPI, type SleepSettings } from '@/api/modules/sleep'
 import { useAgentPage } from '@/composables/useAgentPage'
 const router = useRouter()
-const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/sleep/settings', () =&gt; loadData())
-const agentOptions = computed(() =&gt; agentStore.agentOptions)
+const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/sleep/settings', () => loadData())
+const agentOptions = computed(() => agentStore.agentOptions)
 function handleAgentChange(newAgentId: string) {
   agentStore.setCurrentAgent(newAgentId)
   router.push(`/agent/${newAgentId}/sleep/settings`)
 }
 const saving = ref(false)
-const settings = ref&lt;SleepSettings&gt;({
+const settings = ref<SleepSettings>({
   agent_id: 'default',
   idle_to_light_minutes: 5,
   light_to_rem_minutes: 15,
@@ -226,22 +226,22 @@ const settings = ref&lt;SleepSettings&gt;({
     wake_time: '07:00',
   },
 })
-const sleepTime = ref&lt;dayjs.Dayjs | null&gt;(null)
-const wakeTime = ref&lt;dayjs.Dayjs | null&gt;(null)
-const showConflictExplanation = computed(() =&gt; {
+const sleepTime = ref<dayjs.Dayjs | null>(null)
+const wakeTime = ref<dayjs.Dayjs | null>(null)
+const showConflictExplanation = computed(() => {
   return settings.value.conflict_resolution !== ''
 })
-watch(() =&gt; settings.value.sleep_schedule?.sleep_time, (val) =&gt; {
+watch(() => settings.value.sleep_schedule?.sleep_time, (val) => {
   sleepTime.value = val ? dayjs(val, 'HH:mm') : null
 })
-watch(() =&gt; settings.value.sleep_schedule?.wake_time, (val) =&gt; {
+watch(() => settings.value.sleep_schedule?.wake_time, (val) => {
   wakeTime.value = val ? dayjs(val, 'HH:mm') : null
 })
-watch(sleepTime, (val) =&gt; {
+watch(sleepTime, (val) => {
   if (!settings.value.sleep_schedule) return
   settings.value.sleep_schedule.sleep_time = val ? val.format('HH:mm') : '23:00'
 })
-watch(wakeTime, (val) =&gt; {
+watch(wakeTime, (val) => {
   if (!settings.value.sleep_schedule) return
   settings.value.sleep_schedule.wake_time = val ? val.format('HH:mm') : '07:00'
 })
@@ -274,12 +274,12 @@ async function saveSettings() {
     saving.value = false
   }
 }
-onMounted(async () =&gt; {
+onMounted(async () => {
   await initAgent()
   loadData()
 })
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { padding: 16px 24px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; }
 .hd-left { display: flex; align-items: center; gap: 12px; }
@@ -306,5 +306,5 @@ onMounted(async () =&gt; {
   .settings-grid { grid-template-columns: 1fr; }
   .explanation-content { grid-template-columns: 1fr; }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

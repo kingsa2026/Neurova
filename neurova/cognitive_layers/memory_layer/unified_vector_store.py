@@ -20,16 +20,13 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-
 def vector_norm(a: List[float]) -> float:
     """计算向量范数"""
     return math.sqrt(sum(x * x for x in a))
 
-
 def vector_dot(a: List[float], b: List[float]) -> float:
     """计算向量点积"""
     return sum(x * y for x, y in zip(a, b))
-
 
 def vector_normalize(a: List[float]) -> List[float]:
     """归一化向量"""
@@ -37,7 +34,6 @@ def vector_normalize(a: List[float]) -> List[float]:
     if norm == 0:
         return a
     return [x / norm for x in a]
-
 
 class UnifiedVectorStore:
     """三合一向量索引"""
@@ -397,7 +393,6 @@ class UnifiedVectorStore:
                 return False
 
         return True
-
 
 def cosine_similarity(a: List[float], b: List[float]) -> float:
     """计算余弦相似度"""

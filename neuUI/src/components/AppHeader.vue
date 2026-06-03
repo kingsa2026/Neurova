@@ -1,59 +1,59 @@
-&lt;template&gt;
-  &lt;a-layout-header &gt;
-    &lt;div &gt;
-      &lt;!-- 移动端菜单按钮 --&gt;
-      &lt;a-button type="text"  @click="emit('toggle-sidebar')"&gt;
-        &lt;MenuOutlined /&gt;
-      &lt;/a-button&gt;
-      &lt;!-- 面包屑 --&gt;
-      &lt;a-breadcrumb &gt;
-        &lt;a-breadcrumb-item v-for="item in breadcrumbs" :key="item.path || item.title"&gt;
-          &lt;router-link v-if="item.path" :to="item.path" &gt;
+<template>
+  <a-layout-header >
+    <div >
+      <!-- 移动端菜单按钮 -->
+      <a-button type="text"  @click="emit('toggle-sidebar')">
+        <MenuOutlined />
+      </a-button>
+      <!-- 面包屑 -->
+      <a-breadcrumb >
+        <a-breadcrumb-item v-for="item in breadcrumbs" :key="item.path || item.title">
+          <router-link v-if="item.path" :to="item.path" >
             {{ item.icon }} {{ item.title }}
-          &lt;/router-link&gt;
-          &lt;span v-else &gt;{{ item.title }}&lt;/span&gt;
-        &lt;/a-breadcrumb-item&gt;
-      &lt;/a-breadcrumb&gt;
-    &lt;/div&gt;
-    &lt;div &gt;
-      &lt;!-- 搜索 --&gt;
-      &lt;a-input-search
+          </router-link>
+          <span v-else >{{ item.title }}</span>
+        </a-breadcrumb-item>
+      </a-breadcrumb>
+    </div>
+    <div >
+      <!-- 搜索 -->
+      <a-input-search
         placeholder="搜索功能..."
         :bordered="false"
-      /&gt;
-      &lt;!-- 通知 --&gt;
-      &lt;a-badge :count="3" size="small"&gt;
-        &lt;a-button type="text"  @click="$router.push('/notifications')"&gt;
-          &lt;BellOutlined /&gt;
-        &lt;/a-button&gt;
-      &lt;/a-badge&gt;
-      &lt;!-- 用户下拉 --&gt;
-      &lt;a-dropdown&gt;
-        &lt;div &gt;
-          &lt;a-avatar size="small" &gt;
+      />
+      <!-- 通知 -->
+      <a-badge :count="3" size="small">
+        <a-button type="text"  @click="$router.push('/notifications')">
+          <BellOutlined />
+        </a-button>
+      </a-badge>
+      <!-- 用户下拉 -->
+      <a-dropdown>
+        <div >
+          <a-avatar size="small" >
             {{ usernameC }}
-          &lt;/a-avatar&gt;
-          &lt;span &gt;{{ authStore.currentUser?.username || '用户' }}&lt;/span&gt;
-          &lt;CaretDownOutlined  /&gt;
-        &lt;/div&gt;
-        &lt;template #overlay&gt;
-          &lt;a-menu &gt;
-            &lt;a-menu-item key="profile" @click="$router.push('/settings')"&gt;
-              &lt;UserOutlined /&gt;
-              &lt;span&gt;个人设置&lt;/span&gt;
-            &lt;/a-menu-item&gt;
-            &lt;a-menu-divider /&gt;
-            &lt;a-menu-item key="logout" @click="handleLogout"&gt;
-              &lt;LogoutOutlined /&gt;
-              &lt;span&gt;退出登录&lt;/span&gt;
-            &lt;/a-menu-item&gt;
-          &lt;/a-menu&gt;
-        &lt;/template&gt;
-      &lt;/a-dropdown&gt;
-    &lt;/div&gt;
-  &lt;/a-layout-header&gt;
-&lt;/template&gt;
-&lt;script setup lang="ts"&gt;
+          </a-avatar>
+          <span >{{ authStore.currentUser?.username || '用户' }}</span>
+          <CaretDownOutlined  />
+        </div>
+        <template #overlay>
+          <a-menu >
+            <a-menu-item key="profile" @click="$router.push('/settings')">
+              <UserOutlined />
+              <span>个人设置</span>
+            </a-menu-item>
+            <a-menu-divider />
+            <a-menu-item key="logout" @click="handleLogout">
+              <LogoutOutlined />
+              <span>退出登录</span>
+            </a-menu-item>
+          </a-menu>
+        </template>
+      </a-dropdown>
+    </div>
+  </a-layout-header>
+</template>
+<script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -67,22 +67,22 @@ import {
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
-const emit = defineEmits&lt;{
+const emit = defineEmits<{
   'toggle-sidebar': []
-}&gt;()
+}>()
 // 用户名首字母
-const usernameC = computed(() =&gt; {
+const usernameC = computed(() => {
   return (authStore.currentUser?.username || 'U')[0].toUpperCase()
 })
 // 面包屑
-const breadcrumbs = computed(() =&gt; {
+const breadcrumbs = computed(() => {
   const items: { title: string; path?: string; icon?: string }[] = []
   // 首页
   items.push({ title: '首页', path: '/dashboard', icon: '🏠' })
   const path = route.path
-  const meta = route.meta as Record&lt;string, unknown&gt;
+  const meta = route.meta as Record<string, unknown>
   const title = meta?.title
-  if (path !== '/dashboard' &amp;&amp; title) {
+  if (path !== '/dashboard' && title) {
     items.push({ title })
   }
   return items
@@ -91,8 +91,8 @@ async function handleLogout() {
   await authStore.logout()
   router.push('/login')
 }
-&lt;/script&gt;
-&lt;style scoped&gt;
+</script>
+<style scoped>
 .app-header {
   background: rgba(10, 14, 39, 0.85) !important;
   backdrop-filter: blur(20px);
@@ -210,5 +210,5 @@ async function handleLogout() {
   .mobile-menu-btn { display: inline-flex; }
   :deep(.header-search) { width: 140px; }
 }
-&lt;/style&gt;
-&nbsp;
+</style>
+ 

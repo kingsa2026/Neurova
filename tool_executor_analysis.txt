@@ -1,0 +1,2866 @@
+Detailed analysis: e:/项目/Neurova/neurova/__pycache__/tool_executor.cpython-315.pyc
+================================================================================
+Module info:
+  Name: <module>
+  File: neurova/tool_executor.py
+  Size: 20252 bytes
+
+Module-level imports and names:
+  0: __doc__
+  1: re
+  2: json
+  3: logging
+  4: datetime
+  5: typing
+  6: List
+  7: Dict
+  8: Optional
+  9: Any
+  10: getLogger
+  11: __name__
+  12: logger
+  13: ToolExecutor
+
+Module-level constants:
+  0: '\nToolExecutor — 统一工具执行器\n\n从 agent_core.py 提取 (P1 拆分)，负责：\n- 文本工具调用解析与执行 (_execute_text_tool_calls)\n- 肌肉记忆工具执行 (_execute_tool_from_memory)\n- Skill/CLI/MCP 工具分派 (_execute_skill_tool, _execute_cli_t
+  2: ('datetime',)
+  3: ('List', 'Dict', 'Optional', 'Any')
+  5: 'ToolExecutor'
+
+Module-level code disassembly:
+  0           RESUME                   0
+
+  1           LOAD_CONST               0 ('\nToolExecutor — 统一工具执行器\n\n从 agent_core.py 提取 (P1 拆分)，负责：\n- 文本工具调用解析与执行 (_execute_text_tool_calls)\n- 肌肉记忆工具执行 (_execute_tool_from_memory)\n- Skill/CLI/MCP 工具分派 (_execute_skill_tool, _execute_cli_tool)\n- 集中化工具执行后钩子 (_on_tool_executed)\n- 内置工具参数信息 (_get_builtin_tool_params)\n\n设计原则：\n- 依赖注入：通过 agent_ref 访问 Agent 实例的属性\n- 可独立测试：不依赖 Agent 类的完整初始化\n')
+              STORE_NAME               0 (__doc__)
+
+ 16           LOAD_SMALL_INT           0
+              LOAD_CONST               1 (None)
+              IMPORT_NAME              4 (re)
+              STORE_NAME               1 (re)
+
+ 17           LOAD_SMALL_INT           0
+              LOAD_CONST               1 (None)
+              IMPORT_NAME              8 (json)
+              STORE_NAME               2 (json)
+
+ 18           LOAD_SMALL_INT           0
+              LOAD_CONST               1 (None)
+              IMPORT_NAME             12 (logging)
+              STORE_NAME               3 (logging)
+
+ 19           LOAD_SMALL_INT           0
+              LOAD_CONST               2 (('datetime',))
+              IMPORT_NAME             16 (datetime)
+              IMPORT_FROM              4 (datetime)
+              STORE_NAME               4 (datetime)
+              POP_TOP
+
+ 20           LOAD_SMALL_INT           0
+              LOAD_CONST               3 (('List', 'Dict', 'Optional', 'Any'))
+              IMPORT_NAME             20 (typing)
+              IMPORT_FROM              6 (List)
+              STORE_NAME               6 (List)
+              IMPORT_FROM              7 (Dict)
+              STORE_NAME               7 (Dict)
+              IMPORT_FROM              8 (Optional)
+              STORE_NAME               8 (Optional)
+              IMPORT_FROM              9 (Any)
+              STORE_NAME               9 (Any)
+              POP_TOP
+
+ 22           LOAD_NAME                3 (logging)
+              LOAD_ATTR               20 (getLogger)
+              PUSH_NULL
+              LOAD_NAME               11 (__name__)
+              CALL                     1
+              STORE_NAME              12 (logger)
+
+ 25           LOAD_BUILD_CLASS
+              PUSH_NULL
+              LOAD_CONST               4 (<code object ToolExecutor at 0x000001EF45DC1430, file "neurova/tool_executor.py", line 25>)
+              MAKE_FUNCTION
+              LOAD_CONST               5 ('ToolExecutor')
+              CALL                     2
+              STORE_NAME              13 (ToolExecutor)
+              LOAD_CONST               1 (None)
+              RETURN_VALUE
+
+Disassembly of <code object ToolExecutor at 0x000001EF45DC1430, file "neurova/tool_executor.py", line 25>:
+  --           MAKE_CELL                0 (__classdict__)
+
+  25           RESUME                   0
+               LOAD_NAME                0 (__name__)
+               STORE_NAME               1 (__module__)
+               LOAD_CONST               0 ('ToolExecutor')
+               STORE_NAME               2 (__qualname__)
+               LOAD_SMALL_INT          25
+               STORE_NAME               3 (__firstlineno__)
+               LOAD_LOCALS
+               STORE_DEREF              0 (__classdict__)
+
+  26           LOAD_CONST               1 ('统一工具执行器\n\n通过 agent_ref 访问 Agent 实例的：\n- _skill_registry, tool_router, tool_memory, tool_lifecycle, skill_packer\n- _tool_messages_list, config\n')
+               STORE_NAME               4 (__doc__)
+
+  33           LOAD_CONST               2 (<code object __init__ at 0x000001EF459D1110, file "neurova/tool_executor.py", line 33>)
+               MAKE_FUNCTION
+               STORE_NAME               5 (__init__)
+
+  37           LOAD_NAME                6 (property)
+
+  38           LOAD_CONST               3 (<code object _skill_registry at 0x000001EF459AC330, file "neurova/tool_executor.py", line 37>)
+               MAKE_FUNCTION
+
+  37           CALL                     0
+
+  38           STORE_NAME               7 (_skill_registry)
+
+  41           LOAD_NAME                6 (property)
+
+  42           LOAD_CONST               4 (<code object tool_router at 0x000001EF45A4BD30, file "neurova/tool_executor.py", line 41>)
+               MAKE_FUNCTION
+
+  41           CALL                     0
+
+  42           STORE_NAME               8 (tool_router)
+
+  45           LOAD_NAME                6 (property)
+
+  46           LOAD_CONST               5 (<code object tool_memory at 0x000001EF45E00130, file "neurova/tool_executor.py", line 45>)
+               MAKE_FUNCTION
+
+  45           CALL                     0
+
+  46           STORE_NAME               9 (tool_memory)
+
+  49           LOAD_NAME                6 (property)
+
+  50           LOAD_CONST               6 (<code object tool_lifecycle at 0x000001EF45A49830, file "neurova/tool_executor.py", line 49>)
+               MAKE_FUNCTION
+
+  49           CALL                     0
+
+  50           STORE_NAME              10 (tool_lifecycle)
+
+  53           LOAD_NAME                6 (property)
+
+  54           LOAD_CONST               7 (<code object skill_packer at 0x000001EF45E00230, file "neurova/tool_executor.py", line 53>)
+               MAKE_FUNCTION
+
+  53           CALL                     0
+
+  54           STORE_NAME              11 (skill_packer)
+
+  57           LOAD_NAME                6 (property)
+
+  58           LOAD_CONST               8 (<code object config at 0x000001EF45E00330, file "neurova/tool_executor.py", line 57>)
+               MAKE_FUNCTION
+
+  57           CALL                     0
+
+  58           STORE_NAME              12 (config)
+
+  61           LOAD_CONST               9 (<code object _ensure_messages_list at 0x000001EF45DCC030, file "neurova/tool_executor.py", line 61>)
+               MAKE_FUNCTION
+               STORE_NAME              13 (_ensure_messages_list)
+
+  70           LOAD_FAST_BORROW         0 (__classdict__)
+               BUILD_TUPLE              1
+               LOAD_CONST              10 (<code object __annotate__ at 0x000001EF45E00430, file "neurova/tool_executor.py", line 70>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE   8 (closure)
+               LOAD_CONST              11 (<code object execute_text_tool_calls at 0x000001EF45BFB180, file "neurova/tool_executor.py", line 70>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE  16 (annotate)
+               STORE_NAME              14 (execute_text_tool_calls)
+
+ 178           LOAD_FAST_BORROW         0 (__classdict__)
+               BUILD_TUPLE              1
+               LOAD_CONST              12 (<code object __annotate__ at 0x000001EF459D61F0, file "neurova/tool_executor.py", line 178>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE   8 (closure)
+               LOAD_CONST              13 (<code object execute_from_memory at 0x000001EF45BFBBB0, file "neurova/tool_executor.py", line 178>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE  16 (annotate)
+               STORE_NAME              15 (execute_from_memory)
+
+ 246           LOAD_FAST_BORROW         0 (__classdict__)
+               BUILD_TUPLE              1
+               LOAD_CONST              14 (<code object __annotate__ at 0x000001EF45A37B90, file "neurova/tool_executor.py", line 246>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE   8 (closure)
+               LOAD_CONST              15 (<code object execute_skill_tool at 0x000001EF45BC76D0, file "neurova/tool_executor.py", line 246>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE  16 (annotate)
+               STORE_NAME              16 (execute_skill_tool)
+
+ 275           LOAD_FAST_BORROW         0 (__classdict__)
+               BUILD_TUPLE              1
+               LOAD_CONST              16 (<code object __annotate__ at 0x000001EF45A37340, file "neurova/tool_executor.py", line 275>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE   8 (closure)
+               LOAD_CONST              17 (<code object execute_cli_tool at 0x000001EF45BFCB80, file "neurova/tool_executor.py", line 275>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE  16 (annotate)
+               STORE_NAME              17 (execute_cli_tool)
+
+ 305           LOAD_CONST              28 (('skill_system', 0.0))
+               LOAD_FAST_BORROW         0 (__classdict__)
+               BUILD_TUPLE              1
+               LOAD_CONST              18 (<code object __annotate__ at 0x000001EF45A37CC0, file "neurova/tool_executor.py", line 305>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE   8 (closure)
+               LOAD_CONST              19 (<code object on_tool_executed at 0x000001EF45BA6790, file "neurova/tool_executor.py", line 305>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE  16 (annotate)
+               SET_FUNCTION_ATTRIBUTE   1 (defaults)
+               STORE_NAME              18 (on_tool_executed)
+
+ 351           LOAD_FAST_BORROW         0 (__classdict__)
+               BUILD_TUPLE              1
+               LOAD_CONST              20 (<code object __annotate__ at 0x000001EF45DA7110, file "neurova/tool_executor.py", line 351>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE   8 (closure)
+               LOAD_CONST              21 (<code object _parse_params at 0x000001EF45C06D90, file "neurova/tool_executor.py", line 351>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE  16 (annotate)
+               STORE_NAME              19 (_parse_params)
+
+ 386           LOAD_FAST_BORROW         0 (__classdict__)
+               BUILD_TUPLE              1
+               LOAD_CONST              22 (<code object __annotate__ at 0x000001EF45DE2670, file "neurova/tool_executor.py", line 386>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE   8 (closure)
+               LOAD_CONST              23 (<code object _get_tool_params_info at 0x000001EF45816CC0, file "neurova/tool_executor.py", line 386>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE  16 (annotate)
+               STORE_NAME              20 (_get_tool_params_info)
+
+ 397           LOAD_FAST_BORROW         0 (__classdict__)
+               BUILD_TUPLE              1
+               LOAD_CONST              24 (<code object __annotate__ at 0x000001EF45DA7220, file "neurova/tool_executor.py", line 397>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE   8 (closure)
+               LOAD_CONST              25 (<code object _get_builtin_tool_params at 0x000001EF45B5AF30, file "neurova/tool_executor.py", line 397>)
+               MAKE_FUNCTION
+               SET_FUNCTION_ATTRIBUTE  16 (annotate)
+               STORE_NAME              21 (_get_builtin_tool_params)
+               LOAD_CONST              26 (('_agent',))
+               STORE_NAME              22 (__static_attributes__)
+               LOAD_FAST_BORROW         0 (__classdict__)
+               STORE_NAME              23 (__classdictcell__)
+               LOAD_CONST              27 (None)
+               RETURN_VALUE
+
+Disassembly of <code object __init__ at 0x000001EF459D1110, file "neurova/tool_executor.py", line 33>:
+ 33           RESUME                   0
+
+ 34           LOAD_FAST_BORROW_LOAD_FAST_BORROW 16 (agent_ref, self)
+              STORE_ATTR               0 (_agent)
+              LOAD_CONST               0 (None)
+              RETURN_VALUE
+
+Disassembly of <code object _skill_registry at 0x000001EF459AC330, file "neurova/tool_executor.py", line 37>:
+ 37           RESUME                   0
+
+ 39           LOAD_GLOBAL              1 (getattr + NULL)
+              LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                2 (_agent)
+              LOAD_CONST               0 ('_skill_registry')
+              LOAD_CONST               1 (None)
+              CALL                     3
+              RETURN_VALUE
+
+Disassembly of <code object tool_router at 0x000001EF45A4BD30, file "neurova/tool_executor.py", line 41>:
+ 41           RESUME                   0
+
+ 43           LOAD_GLOBAL              1 (getattr + NULL)
+              LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                2 (_agent)
+              LOAD_CONST               0 ('tool_router')
+              LOAD_CONST               1 (None)
+              CALL                     3
+              RETURN_VALUE
+
+Disassembly of <code object tool_memory at 0x000001EF45E00130, file "neurova/tool_executor.py", line 45>:
+ 45           RESUME                   0
+
+ 47           LOAD_GLOBAL              1 (getattr + NULL)
+              LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                2 (_agent)
+              LOAD_CONST               0 ('tool_memory')
+              LOAD_CONST               1 (None)
+              CALL                     3
+              RETURN_VALUE
+
+Disassembly of <code object tool_lifecycle at 0x000001EF45A49830, file "neurova/tool_executor.py", line 49>:
+ 49           RESUME                   0
+
+ 51           LOAD_GLOBAL              1 (getattr + NULL)
+              LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                2 (_agent)
+              LOAD_CONST               0 ('tool_lifecycle')
+              LOAD_CONST               1 (None)
+              CALL                     3
+              RETURN_VALUE
+
+Disassembly of <code object skill_packer at 0x000001EF45E00230, file "neurova/tool_executor.py", line 53>:
+ 53           RESUME                   0
+
+ 55           LOAD_GLOBAL              1 (getattr + NULL)
+              LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                2 (_agent)
+              LOAD_CONST               0 ('skill_packer')
+              LOAD_CONST               1 (None)
+              CALL                     3
+              RETURN_VALUE
+
+Disassembly of <code object config at 0x000001EF45E00330, file "neurova/tool_executor.py", line 57>:
+ 57           RESUME                   0
+
+ 59           LOAD_GLOBAL              1 (getattr + NULL)
+              LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                2 (_agent)
+              LOAD_CONST               0 ('config')
+              LOAD_CONST               1 (None)
+              CALL                     3
+              RETURN_VALUE
+
+Disassembly of <code object _ensure_messages_list at 0x000001EF45DCC030, file "neurova/tool_executor.py", line 61>:
+ 61           RESUME                   0
+
+ 62           LOAD_GLOBAL              1 (hasattr + NULL)
+              LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                2 (_agent)
+              LOAD_CONST               0 ('_tool_messages_list')
+              CALL                     2
+              TO_BOOL
+              POP_JUMP_IF_TRUE        18 (to L1)
+              NOT_TAKEN
+
+ 63           BUILD_LIST               0
+              LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                2 (_agent)
+              STORE_ATTR               2 (_tool_messages_list)
+
+ 64   L1:     LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                2 (_agent)
+              LOAD_ATTR                4 (_tool_messages_list)
+              RETURN_VALUE
+
+Disassembly of <code object __annotate__ at 0x000001EF45E00430, file "neurova/tool_executor.py", line 70>:
+  --           COPY_FREE_VARS           1
+
+  70           RESUME                   0
+               LOAD_FAST_BORROW         0 (format)
+               LOAD_SMALL_INT           2
+               COMPARE_OP             132 (>)
+               POP_JUMP_IF_FALSE        3 (to L1)
+               NOT_TAKEN
+               LOAD_COMMON_CONSTANT     1 (NotImplementedError)
+               RAISE_VARARGS            1
+       L1:     LOAD_CONST               1 ('reply')
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               LOAD_CONST               2 ('user_input')
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               LOAD_CONST               3 ('return')
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               BUILD_MAP                3
+               RETURN_VALUE
+
+Disassembly of <code object execute_text_tool_calls at 0x000001EF45BFB180, file "neurova/tool_executor.py", line 70>:
+  70            RETURN_GENERATOR
+                POP_TOP
+        L1:     RESUME                   0
+
+  75            LOAD_CONST               1 ('\\[TOOL_CALL:([\\w:.\\-]+)\\((.+?)\\)\\]')
+                STORE_FAST               3 (pattern)
+
+  76            LOAD_GLOBAL              0 (re)
+                LOAD_ATTR                2 (findall)
+                PUSH_NULL
+                LOAD_FAST_BORROW_LOAD_FAST_BORROW 49 (pattern, reply)
+                CALL                     2
+                STORE_FAST               4 (matches)
+
+  77            LOAD_GLOBAL              4 (logger)
+                LOAD_ATTR                7 (info + NULL|self)
+
+  78            LOAD_CONST               2 ('[TOOL_PARSE] 检查回复中是否有工具调用: ')
+                LOAD_GLOBAL              9 (len + NULL)
+                LOAD_FAST_BORROW         4 (matches)
+                CALL                     1
+                FORMAT_SIMPLE
+                LOAD_CONST               3 (' 个匹配, 回复前100字: ')
+
+  79            LOAD_FAST_BORROW         1 (reply)
+                LOAD_CONST               4 (slice(None, 100, None))
+                BINARY_OP               26 ([])
+                FORMAT_SIMPLE
+
+  78            BUILD_STRING             4
+
+  77            CALL                     1
+                POP_TOP
+
+  81            LOAD_FAST_BORROW         4 (matches)
+                TO_BOOL
+                POP_JUMP_IF_TRUE         3 (to L4)
+        L2:     NOT_TAKEN
+
+  82    L3:     LOAD_FAST_BORROW         1 (reply)
+                RETURN_VALUE
+
+  84    L4:     BUILD_LIST               0
+                STORE_FAST               5 (results)
+
+  85            LOAD_FAST                4 (matches)
+                GET_ITER
+        L5:     EXTENDED_ARG             3
+                FOR_ITER               949 (to L57)
+                UNPACK_SEQUENCE          2
+                STORE_FAST_STORE_FAST  103 (tool_name, params_str)
+
+  86            LOAD_GLOBAL              4 (logger)
+                LOAD_ATTR                7 (info + NULL|self)
+                LOAD_CONST               5 ('🔧 解析到文本工具调用: ')
+                LOAD_FAST_BORROW         6 (tool_name)
+                FORMAT_SIMPLE
+                LOAD_CONST               6 ('(')
+                LOAD_FAST_BORROW         7 (params_str)
+                FORMAT_SIMPLE
+                LOAD_CONST               7 (')')
+                BUILD_STRING             5
+                CALL                     1
+                POP_TOP
+
+  87            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               11 (_parse_params + NULL|self)
+                LOAD_FAST_BORROW         7 (params_str)
+                CALL                     1
+                STORE_FAST               8 (params)
+
+  90            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               13 (_ensure_messages_list + NULL|self)
+                CALL                     0
+                LOAD_ATTR               15 (append + NULL|self)
+
+  91            LOAD_CONST               8 ('type')
+                LOAD_CONST               9 ('tool_call')
+
+  92            LOAD_CONST              10 ('tool_name')
+                LOAD_FAST_BORROW         6 (tool_name)
+
+  93            LOAD_CONST              11 ('params')
+                LOAD_FAST_BORROW         8 (params)
+
+  94            LOAD_CONST              12 ('timestamp')
+                LOAD_GLOBAL             16 (datetime)
+                LOAD_ATTR               18 (now)
+                PUSH_NULL
+                CALL                     0
+                LOAD_ATTR               21 (isoformat + NULL|self)
+                CALL                     0
+
+  90            BUILD_MAP                4
+                CALL                     1
+                POP_TOP
+
+  98    L6:     NOP
+
+ 100    L7:     LOAD_CONST              13 (None)
+                STORE_FAST               9 (skill_exec_error)
+
+ 101            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               22 (_skill_registry)
+                TO_BOOL
+                EXTENDED_ARG             1
+                POP_JUMP_IF_FALSE      364 (to L20)
+        L8:     NOT_TAKEN
+
+ 102    L9:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               22 (_skill_registry)
+                LOAD_ATTR               25 (get_skill + NULL|self)
+                LOAD_FAST_BORROW         6 (tool_name)
+                CALL                     1
+                STORE_FAST              10 (skill)
+
+ 103            LOAD_FAST_BORROW        10 (skill)
+                TO_BOOL
+                POP_JUMP_IF_FALSE       31 (to L12)
+       L10:     NOT_TAKEN
+
+ 104   L11:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               22 (_skill_registry)
+                LOAD_ATTR               26 (execute_skill)
+                PUSH_NULL
+                LOAD_FAST_BORROW         6 (tool_name)
+                BUILD_TUPLE              1
+                BUILD_MAP                0
+                LOAD_FAST_BORROW         8 (params)
+                DICT_MERGE               1
+                CALL_FUNCTION_EX
+                STORE_FAST              11 (result)
+
+ 105   L12:     LOAD_FAST_CHECK         11 (result)
+                LOAD_ATTR               28 (success)
+                TO_BOOL
+                EXTENDED_ARG             1
+                POP_JUMP_IF_FALSE      268 (to L19)
+       L13:     NOT_TAKEN
+
+ 106   L14:     LOAD_GLOBAL             30 (json)
+                LOAD_ATTR               32 (dumps)
+                PUSH_NULL
+                LOAD_FAST_BORROW        11 (result)
+                LOAD_ATTR               34 (data)
+                LOAD_CONST              14 (False)
+                LOAD_CONST              15 (('ensure_ascii',))
+                CALL_KW                  2
+                STORE_FAST              12 (result_str)
+
+ 107            LOAD_CONST              16 (8000)
+                STORE_FAST              13 (max_len)
+
+ 108            LOAD_GLOBAL             37 (int + NULL)
+                LOAD_FAST_BORROW         8 (params)
+                LOAD_ATTR               39 (get + NULL|self)
+                LOAD_CONST              17 ('offset')
+                LOAD_SMALL_INT           0
+                CALL                     2
+                CALL                     1
+                STORE_FAST              14 (offset)
+
+ 109            LOAD_FAST_BORROW_LOAD_FAST_BORROW 206 (result_str, offset)
+                LOAD_FAST_BORROW_LOAD_FAST_BORROW 237 (offset, max_len)
+                BINARY_OP                0 (+)
+                BINARY_SLICE
+                STORE_FAST              15 (chunk)
+
+ 110            LOAD_GLOBAL              9 (len + NULL)
+                LOAD_FAST_BORROW        12 (result_str)
+                CALL                     1
+                STORE_FAST              16 (total)
+
+ 111            LOAD_CONST              18 ('')
+                STORE_FAST              17 (suffix)
+
+ 112            LOAD_FAST_BORROW        16 (total)
+                LOAD_FAST_BORROW_LOAD_FAST_BORROW 237 (offset, max_len)
+                BINARY_OP                0 (+)
+                COMPARE_OP             148 (bool(>))
+                POP_JUMP_IF_FALSE       38 (to L17)
+       L15:     NOT_TAKEN
+
+ 114   L16:     LOAD_CONST              19 ('\n\n(已截断，共 ')
+                LOAD_FAST_BORROW        16 (total)
+                FORMAT_SIMPLE
+                LOAD_CONST              20 (' 字符，已显示 ')
+                LOAD_FAST_BORROW        14 (offset)
+                FORMAT_SIMPLE
+                LOAD_CONST              21 ('-')
+                LOAD_FAST_BORROW        14 (offset)
+                LOAD_GLOBAL              9 (len + NULL)
+                LOAD_FAST_BORROW        15 (chunk)
+                CALL                     1
+                BINARY_OP                0 (+)
+                FORMAT_SIMPLE
+                LOAD_CONST              22 ('。使用 offset=')
+
+ 115            LOAD_FAST_BORROW_LOAD_FAST_BORROW 237 (offset, max_len)
+                BINARY_OP                0 (+)
+                FORMAT_SIMPLE
+                LOAD_CONST              23 (' 继续获取后续内容)')
+
+ 114            BUILD_STRING             9
+
+ 113            STORE_FAST              17 (suffix)
+
+ 117   L17:     LOAD_FAST_BORROW         5 (results)
+                LOAD_ATTR               15 (append + NULL|self)
+                LOAD_CONST              24 ('\n\n**')
+                LOAD_FAST_BORROW         6 (tool_name)
+                FORMAT_SIMPLE
+                LOAD_CONST              25 (' 结果**: ')
+                LOAD_FAST_BORROW        15 (chunk)
+                FORMAT_SIMPLE
+                LOAD_FAST_BORROW        17 (suffix)
+                FORMAT_SIMPLE
+                BUILD_STRING             5
+                CALL                     1
+                POP_TOP
+
+ 118            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               13 (_ensure_messages_list + NULL|self)
+                CALL                     0
+                LOAD_ATTR               15 (append + NULL|self)
+
+ 119            LOAD_CONST               8 ('type')
+                LOAD_CONST              26 ('tool_result')
+                LOAD_CONST              10 ('tool_name')
+                LOAD_FAST_BORROW         6 (tool_name)
+
+ 120            LOAD_CONST              27 ('result')
+                LOAD_FAST_BORROW        15 (chunk)
+                LOAD_FAST_BORROW        17 (suffix)
+                BINARY_OP                0 (+)
+
+ 121            LOAD_CONST              28 ('success')
+                LOAD_CONST              29 (True)
+                LOAD_CONST              12 ('timestamp')
+                LOAD_GLOBAL             16 (datetime)
+                LOAD_ATTR               18 (now)
+                PUSH_NULL
+                CALL                     0
+                LOAD_ATTR               21 (isoformat + NULL|self)
+                CALL                     0
+
+ 118            BUILD_MAP                5
+                CALL                     1
+                POP_TOP
+
+ 124            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               41 (on_tool_executed + NULL|self)
+
+ 125            LOAD_FAST_BORROW         6 (tool_name)
+
+ 126            LOAD_FAST_BORROW         8 (params)
+
+ 127            LOAD_FAST_BORROW         2 (user_input)
+
+ 128            LOAD_CONST              29 (True)
+
+ 129            LOAD_CONST              30 ('skill_system')
+
+ 124            LOAD_CONST              31 (('tool_name', 'params', 'user_input', 'success', 'tool_source'))
+                CALL_KW                  5
+                POP_TOP
+
+ 131   L18:     EXTENDED_ARG             1
+                JUMP_BACKWARD          496 (to L5)
+
+ 133   L19:     LOAD_FAST_BORROW        11 (result)
+                LOAD_ATTR               42 (error)
+                STORE_FAST               9 (skill_exec_error)
+
+ 136   L20:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               44 (tool_router)
+                TO_BOOL
+                EXTENDED_ARG             1
+                POP_JUMP_IF_FALSE      283 (to L40)
+       L21:     NOT_TAKEN
+
+ 137   L22:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               46 (config)
+                TO_BOOL
+                POP_JUMP_IF_FALSE       24 (to L25)
+       L23:     NOT_TAKEN
+       L24:     LOAD_GLOBAL             49 (getattr + NULL)
+                LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               46 (config)
+                LOAD_CONST              32 ('user_id')
+                LOAD_CONST              33 ('default')
+                CALL                     3
+                JUMP_FORWARD             1 (to L26)
+       L25:     LOAD_CONST              33 ('default')
+       L26:     STORE_FAST              18 (user_id)
+
+ 138            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               44 (tool_router)
+                LOAD_ATTR               51 (execute + NULL|self)
+
+ 139            LOAD_FAST_LOAD_FAST    104 (tool_name, params)
+
+ 140            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               46 (config)
+                TO_BOOL
+                POP_JUMP_IF_FALSE       23 (to L29)
+       L27:     NOT_TAKEN
+       L28:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               46 (config)
+                LOAD_ATTR               52 (agent_id)
+                JUMP_FORWARD             1 (to L30)
+       L29:     LOAD_CONST              33 ('default')
+
+ 141   L30:     LOAD_FAST_BORROW        18 (user_id)
+
+ 138            LOAD_CONST              34 (('tool_name', 'params', 'agent_id', 'user_id'))
+                CALL_KW                  4
+                GET_AWAITABLE            0
+                LOAD_CONST              13 (None)
+       L31:     SEND                     3 (to L34)
+       L32:     YIELD_VALUE              1
+       L33:     RESUME                   3
+                JUMP_BACKWARD_NO_INTERRUPT 5 (to L31)
+       L34:     END_SEND
+                STORE_FAST              19 (router_result)
+
+ 143            LOAD_FAST_BORROW        19 (router_result)
+                TO_BOOL
+                POP_JUMP_IF_FALSE      154 (to L40)
+       L35:     NOT_TAKEN
+       L36:     LOAD_FAST_BORROW        19 (router_result)
+                LOAD_ATTR               28 (success)
+                TO_BOOL
+                POP_JUMP_IF_FALSE      136 (to L40)
+       L37:     NOT_TAKEN
+
+ 144   L38:     LOAD_GLOBAL             55 (str + NULL)
+                LOAD_FAST_BORROW        19 (router_result)
+                LOAD_ATTR               56 (result)
+                CALL                     1
+                STORE_FAST              12 (result_str)
+
+ 145            LOAD_FAST_BORROW         5 (results)
+                LOAD_ATTR               15 (append + NULL|self)
+                LOAD_CONST              24 ('\n\n**')
+                LOAD_FAST_BORROW         6 (tool_name)
+                FORMAT_SIMPLE
+                LOAD_CONST              25 (' 结果**: ')
+                LOAD_FAST_BORROW        12 (result_str)
+                LOAD_CONST              35 (slice(None, 8000, None))
+                BINARY_OP               26 ([])
+                FORMAT_SIMPLE
+                BUILD_STRING             4
+                CALL                     1
+                POP_TOP
+
+ 146            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               13 (_ensure_messages_list + NULL|self)
+                CALL                     0
+                LOAD_ATTR               15 (append + NULL|self)
+
+ 147            LOAD_CONST               8 ('type')
+                LOAD_CONST              26 ('tool_result')
+                LOAD_CONST              10 ('tool_name')
+                LOAD_FAST_BORROW         6 (tool_name)
+
+ 148            LOAD_CONST              27 ('result')
+                LOAD_FAST_BORROW        12 (result_str)
+                LOAD_CONST              35 (slice(None, 8000, None))
+                BINARY_OP               26 ([])
+
+ 149            LOAD_CONST              28 ('success')
+                LOAD_CONST              29 (True)
+                LOAD_CONST              12 ('timestamp')
+                LOAD_GLOBAL             16 (datetime)
+                LOAD_ATTR               18 (now)
+                PUSH_NULL
+                CALL                     0
+                LOAD_ATTR               21 (isoformat + NULL|self)
+                CALL                     0
+
+ 146            BUILD_MAP                5
+                CALL                     1
+                POP_TOP
+
+ 151   L39:     EXTENDED_ARG             3
+                JUMP_BACKWARD          809 (to L5)
+
+ 155   L40:     LOAD_FAST_BORROW         9 (skill_exec_error)
+                TO_BOOL
+                POP_JUMP_IF_FALSE        6 (to L43)
+       L41:     NOT_TAKEN
+       L42:     LOAD_CONST              36 ('执行失败: ')
+                LOAD_FAST_BORROW         9 (skill_exec_error)
+                FORMAT_SIMPLE
+                BUILD_STRING             2
+                JUMP_FORWARD             1 (to L44)
+
+ 156   L43:     LOAD_CONST              37 ('工具注册但执行未找到处理器，请检查参数是否正确')
+
+ 154   L44:     STORE_FAST              20 (err_msg)
+
+ 158            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               59 (_get_tool_params_info + NULL|self)
+                LOAD_FAST_BORROW         6 (tool_name)
+                CALL                     1
+                STORE_FAST              21 (params_info)
+
+ 159            LOAD_FAST_BORROW        21 (params_info)
+                TO_BOOL
+                POP_JUMP_IF_FALSE       78 (to L55)
+       L45:     NOT_TAKEN
+
+ 160   L46:     LOAD_FAST_BORROW        21 (params_info)
+                LOAD_ATTR               39 (get + NULL|self)
+                LOAD_CONST              38 ('required')
+                BUILD_LIST               0
+                CALL                     2
+                STORE_FAST              22 (required)
+
+ 161            LOAD_FAST               21 (params_info)
+                LOAD_FAST_AND_CLEAR     23 (k)
+                SWAP                     2
+       L47:     BUILD_LIST               0
+                SWAP                     2
+                GET_ITER
+       L48:     FOR_ITER                20 (to L53)
+                STORE_FAST              23 (k)
+                LOAD_FAST               23 (k)
+                FORMAT_SIMPLE
+                LOAD_CONST               6 ('(')
+                LOAD_FAST_BORROW        23 (k)
+                LOAD_FAST_BORROW        22 (required)
+                CONTAINS_OP              0 (in)
+                POP_JUMP_IF_FALSE        3 (to L51)
+       L49:     NOT_TAKEN
+       L50:     LOAD_CONST              39 ('必填')
+                JUMP_FORWARD             1 (to L52)
+       L51:     LOAD_CONST              40 ('可选')
+       L52:     FORMAT_SIMPLE
+                LOAD_CONST               7 (')')
+                BUILD_STRING             4
+                LIST_APPEND              3
+                JUMP_BACKWARD           22 (to L48)
+       L53:     END_FOR
+                POP_ITER
+       L54:     STORE_FAST              24 (hints)
+                STORE_FAST              23 (k)
+
+ 162            LOAD_FAST_BORROW        20 (err_msg)
+                LOAD_CONST              41 ('。可用参数: ')
+                LOAD_CONST              42 (', ')
+                LOAD_ATTR               61 (join + NULL|self)
+                LOAD_FAST_BORROW        24 (hints)
+                CALL                     1
+                FORMAT_SIMPLE
+                BUILD_STRING             2
+                BINARY_OP               13 (+=)
+                STORE_FAST              20 (err_msg)
+
+ 163   L55:     LOAD_FAST_BORROW         5 (results)
+                LOAD_ATTR               15 (append + NULL|self)
+                LOAD_CONST              24 ('\n\n**')
+                LOAD_FAST_BORROW         6 (tool_name)
+                FORMAT_SIMPLE
+                LOAD_CONST              25 (' 结果**: ')
+                LOAD_FAST_BORROW        20 (err_msg)
+                FORMAT_SIMPLE
+                BUILD_STRING             4
+                CALL                     1
+                POP_TOP
+       L56:     EXTENDED_ARG             3
+                JUMP_BACKWARD          952 (to L5)
+
+  85   L57:     END_FOR
+                POP_ITER
+
+ 169            LOAD_GLOBAL              0 (re)
+                LOAD_ATTR               66 (sub)
+                PUSH_NULL
+                LOAD_FAST_BORROW         3 (pattern)
+                LOAD_CONST              18 ('')
+                LOAD_FAST_BORROW         1 (reply)
+                CALL                     3
+                LOAD_ATTR               69 (strip + NULL|self)
+                CALL                     0
+                STORE_FAST              26 (clean_reply)
+
+ 170            LOAD_FAST_BORROW         5 (results)
+                TO_BOOL
+                POP_JUMP_IF_FALSE       25 (to L60)
+       L58:     NOT_TAKEN
+
+ 171   L59:     LOAD_FAST_BORROW        26 (clean_reply)
+                LOAD_CONST              45 ('\n')
+                LOAD_ATTR               61 (join + NULL|self)
+                LOAD_FAST_BORROW         5 (results)
+                CALL                     1
+                BINARY_OP               13 (+=)
+                STORE_FAST              26 (clean_reply)
+
+ 172   L60:     LOAD_FAST_BORROW        26 (clean_reply)
+                RETURN_VALUE
+
+ 138   L61:     CLEANUP_THROW
+       L62:     EXTENDED_ARG             1
+                JUMP_BACKWARD_NO_INTERRUPT 383 (to L34)
+
+  --   L63:     SWAP                     2
+                POP_TOP
+
+ 161            SWAP                     2
+                STORE_FAST              23 (k)
+                RERAISE                  0
+
+  --   L64:     PUSH_EXC_INFO
+
+ 164            LOAD_GLOBAL             62 (Exception)
+                CHECK_EXC_MATCH
+                POP_JUMP_IF_FALSE       63 (to L70)
+       L65:     NOT_TAKEN
+       L66:     STORE_FAST              25 (e)
+
+ 165   L67:     LOAD_GLOBAL              4 (logger)
+                LOAD_ATTR               65 (warning + NULL|self)
+                LOAD_CONST              43 ('文本工具调用执行失败: ')
+                LOAD_FAST                6 (tool_name)
+                FORMAT_SIMPLE
+                LOAD_CONST              42 (', ')
+                LOAD_FAST               25 (e)
+                FORMAT_SIMPLE
+                BUILD_STRING             4
+                CALL                     1
+                POP_TOP
+
+ 166            LOAD_FAST                5 (results)
+                LOAD_ATTR               15 (append + NULL|self)
+                LOAD_CONST              24 ('\n\n**')
+                LOAD_FAST                6 (tool_name)
+                FORMAT_SIMPLE
+                LOAD_CONST              44 (' 结果**: 执行出错: ')
+                LOAD_FAST               25 (e)
+                FORMAT_SIMPLE
+                BUILD_STRING             4
+                CALL                     1
+                POP_TOP
+       L68:     POP_EXCEPT
+                LOAD_CONST              13 (None)
+                STORE_FAST              25 (e)
+                DELETE_FAST             25 (e)
+                EXTENDED_ARG             4
+                JUMP_BACKWARD         1102 (to L5)
+
+  --   L69:     LOAD_CONST              13 (None)
+                STORE_FAST              25 (e)
+                DELETE_FAST             25 (e)
+                RERAISE                  1
+
+ 164   L70:     RERAISE                  0
+
+  --   L71:     COPY                     3
+                POP_EXCEPT
+                RERAISE                  1
+       L72:     CALL_INTRINSIC_1         3 (INTRINSIC_STOPITERATION_ERROR)
+                RERAISE                  1
+ExceptionTable:
+  L1 to L2 -> L72 [0] lasti
+  L3 to L6 -> L72 [0] lasti
+  L7 to L8 -> L64 [2]
+  L9 to L10 -> L64 [2]
+  L11 to L13 -> L64 [2]
+  L14 to L15 -> L64 [2]
+  L16 to L18 -> L64 [2]
+  L18 to L19 -> L72 [0] lasti
+  L19 to L21 -> L64 [2]
+  L22 to L23 -> L64 [2]
+  L24 to L27 -> L64 [2]
+  L28 to L32 -> L64 [2]
+  L32 to L33 -> L61 [4]
+  L33 to L35 -> L64 [2]
+  L36 to L37 -> L64 [2]
+  L38 to L39 -> L64 [2]
+  L39 to L40 -> L72 [0] lasti
+  L40 to L41 -> L64 [2]
+  L42 to L45 -> L64 [2]
+  L46 to L47 -> L64 [2]
+  L47 to L49 -> L63 [4]
+  L50 to L54 -> L63 [4]
+  L54 to L56 -> L64 [2]
+  L56 to L58 -> L72 [0] lasti
+  L59 to L61 -> L72 [0] lasti
+  L61 to L62 -> L64 [2]
+  L63 to L64 -> L64 [2]
+  L64 to L65 -> L71 [3] lasti
+  L66 to L67 -> L71 [3] lasti
+  L67 to L68 -> L69 [3] lasti
+  L68 to L69 -> L72 [0] lasti
+  L69 to L71 -> L71 [3] lasti
+  L71 to L72 -> L72 [0] lasti
+
+Disassembly of <code object __annotate__ at 0x000001EF459D61F0, file "neurova/tool_executor.py", line 178>:
+  --           COPY_FREE_VARS           1
+
+ 178           RESUME                   0
+               LOAD_FAST_BORROW         0 (format)
+               LOAD_SMALL_INT           2
+               COMPARE_OP             132 (>)
+               POP_JUMP_IF_FALSE        3 (to L1)
+               NOT_TAKEN
+               LOAD_COMMON_CONSTANT     1 (NotImplementedError)
+               RAISE_VARARGS            1
+       L1:     LOAD_CONST               1 ('tool_memory_result')
+
+ 180           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (Dict)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 1 (str)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 2 (Any)
+               BUILD_TUPLE              2
+               BINARY_OP               26 ([])
+
+ 178           LOAD_CONST               2 ('user_input')
+
+ 181           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 1 (str)
+
+ 178           LOAD_CONST               3 ('return')
+
+ 182           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 3 (Optional)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (Dict)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 1 (str)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 2 (Any)
+               BUILD_TUPLE              2
+               BINARY_OP               26 ([])
+               BINARY_OP               26 ([])
+
+ 178           BUILD_MAP                3
+               RETURN_VALUE
+
+Disassembly of <code object execute_from_memory at 0x000001EF45BFBBB0, file "neurova/tool_executor.py", line 178>:
+ 178            RESUME                   0
+
+ 184            LOAD_FAST_BORROW         1 (tool_memory_result)
+                TO_BOOL
+                POP_JUMP_IF_TRUE         3 (to L1)
+                NOT_TAKEN
+
+ 185            LOAD_CONST               1 (None)
+                RETURN_VALUE
+
+ 187    L1:     LOAD_FAST_BORROW         1 (tool_memory_result)
+                LOAD_ATTR                1 (get + NULL|self)
+                LOAD_CONST               2 ('tool_name')
+                CALL                     1
+                STORE_FAST               3 (tool_name)
+
+ 188            LOAD_FAST_BORROW         1 (tool_memory_result)
+                LOAD_ATTR                1 (get + NULL|self)
+                LOAD_CONST               3 ('tool_source')
+                CALL                     1
+                STORE_FAST               4 (tool_source)
+
+ 189            LOAD_FAST_BORROW         1 (tool_memory_result)
+                LOAD_ATTR                1 (get + NULL|self)
+                LOAD_CONST               4 ('tool_params')
+                BUILD_MAP                0
+                CALL                     2
+                STORE_FAST               5 (tool_params)
+
+ 191            LOAD_FAST_BORROW         3 (tool_name)
+                TO_BOOL
+                POP_JUMP_IF_TRUE        24 (to L2)
+                NOT_TAKEN
+
+ 192            LOAD_GLOBAL              2 (logger)
+                LOAD_ATTR                5 (warning + NULL|self)
+                LOAD_CONST               5 ('ToolMemory 结果缺少 tool_name')
+                CALL                     1
+                POP_TOP
+
+ 193            LOAD_CONST               1 (None)
+                RETURN_VALUE
+
+ 195    L2:     LOAD_GLOBAL              2 (logger)
+                LOAD_ATTR                7 (info + NULL|self)
+                LOAD_CONST               6 ('🚀 自动执行工具: ')
+                LOAD_FAST_BORROW         3 (tool_name)
+                FORMAT_SIMPLE
+                LOAD_CONST               7 (' (来源: ')
+                LOAD_FAST_BORROW         4 (tool_source)
+                FORMAT_SIMPLE
+                LOAD_CONST               8 (')')
+                BUILD_STRING             5
+                CALL                     1
+                POP_TOP
+
+ 197            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR                9 (_ensure_messages_list + NULL|self)
+                CALL                     0
+                LOAD_ATTR               11 (append + NULL|self)
+
+ 198            LOAD_CONST               9 ('type')
+                LOAD_CONST              10 ('tool_call')
+
+ 199            LOAD_CONST               2 ('tool_name')
+                LOAD_FAST_BORROW         3 (tool_name)
+
+ 200            LOAD_CONST               3 ('tool_source')
+                LOAD_FAST_BORROW         4 (tool_source)
+
+ 201            LOAD_CONST              11 ('params')
+                LOAD_FAST_BORROW         5 (tool_params)
+
+ 202            LOAD_CONST              12 ('timestamp')
+                LOAD_GLOBAL             12 (datetime)
+                LOAD_ATTR               14 (now)
+                PUSH_NULL
+                CALL                     0
+                LOAD_ATTR               17 (isoformat + NULL|self)
+                CALL                     0
+
+ 197            BUILD_MAP                5
+                CALL                     1
+                POP_TOP
+
+ 205            NOP
+
+ 206    L3:     LOAD_FAST_BORROW         4 (tool_source)
+                LOAD_CONST              13 ('skill_system')
+                COMPARE_OP              88 (bool(==))
+                POP_JUMP_IF_FALSE       38 (to L8)
+        L4:     NOT_TAKEN
+        L5:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               18 (_skill_registry)
+                TO_BOOL
+                POP_JUMP_IF_FALSE       20 (to L8)
+        L6:     NOT_TAKEN
+
+ 207    L7:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               21 (execute_skill_tool + NULL|self)
+                LOAD_FAST_BORROW_LOAD_FAST_BORROW 53 (tool_name, tool_params)
+                LOAD_FAST_BORROW         2 (user_input)
+                CALL                     3
+                STORE_FAST               6 (result)
+                JUMP_FORWARD            44 (to L12)
+
+ 208    L8:     LOAD_FAST_BORROW         4 (tool_source)
+                LOAD_CONST              24 (('cli', 'mcp'))
+                CONTAINS_OP              0 (in)
+                POP_JUMP_IF_FALSE       20 (to L11)
+        L9:     NOT_TAKEN
+
+ 209   L10:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               23 (execute_cli_tool + NULL|self)
+                LOAD_FAST_BORROW_LOAD_FAST_BORROW 53 (tool_name, tool_params)
+                LOAD_FAST_BORROW         2 (user_input)
+                CALL                     3
+                STORE_FAST               6 (result)
+                JUMP_FORWARD            18 (to L12)
+
+ 211   L11:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               21 (execute_skill_tool + NULL|self)
+                LOAD_FAST_BORROW_LOAD_FAST_BORROW 53 (tool_name, tool_params)
+                LOAD_FAST_BORROW         2 (user_input)
+                CALL                     3
+                STORE_FAST               6 (result)
+
+ 213   L12:     LOAD_FAST                0 (self)
+                LOAD_ATTR               25 (on_tool_executed + NULL|self)
+
+ 214            LOAD_FAST                3 (tool_name)
+
+ 215            LOAD_FAST                5 (tool_params)
+
+ 216            LOAD_FAST                2 (user_input)
+
+ 217            LOAD_FAST_BORROW         6 (result)
+                LOAD_CONST               1 (None)
+                IS_OP                    1 (is not)
+
+ 218            LOAD_FAST                4 (tool_source)
+                COPY                     1
+                TO_BOOL
+                POP_JUMP_IF_TRUE         3 (to L15)
+       L13:     NOT_TAKEN
+       L14:     POP_TOP
+                LOAD_CONST              14 ('unknown')
+
+ 213   L15:     LOAD_CONST              15 (('tool_name', 'params', 'user_input', 'success', 'tool_source'))
+                CALL_KW                  5
+                POP_TOP
+
+ 221            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR                9 (_ensure_messages_list + NULL|self)
+                CALL                     0
+                LOAD_ATTR               11 (append + NULL|self)
+
+ 222            LOAD_CONST               9 ('type')
+                LOAD_CONST              16 ('tool_result')
+
+ 223            LOAD_CONST               2 ('tool_name')
+                LOAD_FAST                3 (tool_name)
+
+ 224            LOAD_CONST              17 ('result')
+                LOAD_FAST_BORROW         6 (result)
+                TO_BOOL
+                POP_JUMP_IF_FALSE       19 (to L18)
+       L16:     NOT_TAKEN
+       L17:     LOAD_GLOBAL             27 (str + NULL)
+                LOAD_FAST_BORROW         6 (result)
+                CALL                     1
+                LOAD_CONST              18 (slice(None, 8000, None))
+                BINARY_OP               26 ([])
+                JUMP_FORWARD             1 (to L19)
+       L18:     LOAD_CONST              19 ('执行失败')
+
+ 225   L19:     LOAD_CONST              20 ('success')
+                LOAD_FAST_BORROW         6 (result)
+                LOAD_CONST               1 (None)
+                IS_OP                    1 (is not)
+
+ 226            LOAD_CONST              12 ('timestamp')
+                LOAD_GLOBAL             12 (datetime)
+                LOAD_ATTR               14 (now)
+                PUSH_NULL
+                CALL                     0
+                LOAD_ATTR               17 (isoformat + NULL|self)
+                CALL                     0
+
+ 221            BUILD_MAP                5
+                CALL                     1
+                POP_TOP
+
+ 229            LOAD_FAST_BORROW         6 (result)
+       L20:     RETURN_VALUE
+
+  --   L21:     PUSH_EXC_INFO
+
+ 231            LOAD_GLOBAL             28 (Exception)
+                CHECK_EXC_MATCH
+                POP_JUMP_IF_FALSE       71 (to L30)
+       L22:     NOT_TAKEN
+       L23:     STORE_FAST               7 (e)
+
+ 232   L24:     LOAD_GLOBAL              2 (logger)
+                LOAD_ATTR               31 (error + NULL|self)
+                LOAD_CONST              21 ('工具自动执行失败: ')
+                LOAD_FAST                3 (tool_name)
+                FORMAT_SIMPLE
+                LOAD_CONST              22 (', 错误: ')
+                LOAD_FAST                7 (e)
+                FORMAT_SIMPLE
+                BUILD_STRING             4
+                CALL                     1
+                POP_TOP
+
+ 233            LOAD_FAST                0 (self)
+                LOAD_ATTR               25 (on_tool_executed + NULL|self)
+
+ 234            LOAD_FAST                3 (tool_name)
+
+ 235            LOAD_FAST                5 (tool_params)
+
+ 236            LOAD_FAST                2 (user_input)
+
+ 237            LOAD_CONST              23 (False)
+
+ 238            LOAD_FAST                4 (tool_source)
+                COPY                     1
+                TO_BOOL
+                POP_JUMP_IF_TRUE         3 (to L27)
+       L25:     NOT_TAKEN
+       L26:     POP_TOP
+                LOAD_CONST              14 ('unknown')
+
+ 233   L27:     LOAD_CONST              15 (('tool_name', 'params', 'user_input', 'success', 'tool_source'))
+                CALL_KW                  5
+                POP_TOP
+
+ 240   L28:     POP_EXCEPT
+                LOAD_CONST               1 (None)
+                STORE_FAST               7 (e)
+                DELETE_FAST              7 (e)
+                LOAD_CONST               1 (None)
+                RETURN_VALUE
+
+  --   L29:     LOAD_CONST               1 (None)
+                STORE_FAST               7 (e)
+                DELETE_FAST              7 (e)
+                RERAISE                  1
+
+ 231   L30:     RERAISE                  0
+
+  --   L31:     COPY                     3
+                POP_EXCEPT
+                RERAISE                  1
+ExceptionTable:
+  L3 to L4 -> L21 [0]
+  L5 to L6 -> L21 [0]
+  L7 to L9 -> L21 [0]
+  L10 to L13 -> L21 [0]
+  L14 to L16 -> L21 [0]
+  L17 to L20 -> L21 [0]
+  L21 to L22 -> L31 [1] lasti
+  L23 to L24 -> L31 [1] lasti
+  L24 to L25 -> L29 [1] lasti
+  L26 to L28 -> L29 [1] lasti
+  L29 to L31 -> L31 [1] lasti
+
+Disassembly of <code object __annotate__ at 0x000001EF45A37B90, file "neurova/tool_executor.py", line 246>:
+  --           COPY_FREE_VARS           1
+
+ 246           RESUME                   0
+               LOAD_FAST_BORROW         0 (format)
+               LOAD_SMALL_INT           2
+               COMPARE_OP             132 (>)
+               POP_JUMP_IF_FALSE        3 (to L1)
+               NOT_TAKEN
+               LOAD_COMMON_CONSTANT     1 (NotImplementedError)
+               RAISE_VARARGS            1
+       L1:     LOAD_CONST               1 ('skill_name')
+
+ 248           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+
+ 246           LOAD_CONST               2 ('skill_params')
+
+ 249           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 1 (Dict)
+
+ 246           LOAD_CONST               3 ('user_input')
+
+ 250           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+
+ 246           LOAD_CONST               4 ('return')
+
+ 251           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 2 (Optional)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 1 (Dict)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 3 (Any)
+               BUILD_TUPLE              2
+               BINARY_OP               26 ([])
+               BINARY_OP               26 ([])
+
+ 246           BUILD_MAP                4
+               RETURN_VALUE
+
+Disassembly of <code object execute_skill_tool at 0x000001EF45BC76D0, file "neurova/tool_executor.py", line 246>:
+ 246            RESUME                   0
+
+ 253            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR                0 (_skill_registry)
+                TO_BOOL
+                POP_JUMP_IF_TRUE        24 (to L1)
+                NOT_TAKEN
+
+ 254            LOAD_GLOBAL              2 (logger)
+                LOAD_ATTR                5 (warning + NULL|self)
+                LOAD_CONST               1 ('SkillRegistry 未初始化，无法执行技能')
+                CALL                     1
+                POP_TOP
+
+ 255            LOAD_CONST               2 (None)
+                RETURN_VALUE
+
+ 257    L1:     NOP
+
+ 258    L2:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR                0 (_skill_registry)
+                LOAD_ATTR                7 (get_skill + NULL|self)
+                LOAD_FAST_BORROW         1 (skill_name)
+                CALL                     1
+                STORE_FAST               4 (skill)
+
+ 259            LOAD_FAST_BORROW         4 (skill)
+                TO_BOOL
+                POP_JUMP_IF_TRUE        27 (to L6)
+        L3:     NOT_TAKEN
+
+ 260    L4:     LOAD_GLOBAL              2 (logger)
+                LOAD_ATTR                5 (warning + NULL|self)
+                LOAD_CONST               3 ('技能未找到: ')
+                LOAD_FAST_BORROW         1 (skill_name)
+                FORMAT_SIMPLE
+                BUILD_STRING             2
+                CALL                     1
+                POP_TOP
+
+ 261    L5:     LOAD_CONST               2 (None)
+                RETURN_VALUE
+
+ 263    L6:     LOAD_GLOBAL              9 (hasattr + NULL)
+                LOAD_FAST_BORROW         4 (skill)
+                LOAD_CONST               4 ('execute')
+                CALL                     2
+                TO_BOOL
+                POP_JUMP_IF_FALSE       77 (to L12)
+        L7:     NOT_TAKEN
+        L8:     LOAD_GLOBAL             11 (callable + NULL)
+                LOAD_FAST_BORROW         4 (skill)
+                LOAD_ATTR               12 (execute)
+                CALL                     1
+                TO_BOOL
+                POP_JUMP_IF_FALSE       50 (to L12)
+        L9:     NOT_TAKEN
+
+ 264   L10:     LOAD_FAST_BORROW         4 (skill)
+                LOAD_ATTR               12 (execute)
+                PUSH_NULL
+                LOAD_CONST              11 (())
+                BUILD_MAP                0
+                LOAD_FAST_BORROW         2 (skill_params)
+                DICT_MERGE               1
+                CALL_FUNCTION_EX
+                STORE_FAST               5 (result)
+
+ 265            LOAD_GLOBAL              2 (logger)
+                LOAD_ATTR               15 (info + NULL|self)
+                LOAD_CONST               5 ('✅ 技能执行成功: ')
+                LOAD_FAST_BORROW         1 (skill_name)
+                FORMAT_SIMPLE
+                BUILD_STRING             2
+                CALL                     1
+                POP_TOP
+
+ 266            LOAD_CONST               6 ('result')
+                LOAD_FAST_BORROW         5 (result)
+                LOAD_CONST               7 ('skill_name')
+                LOAD_FAST_BORROW         1 (skill_name)
+                BUILD_MAP                2
+       L11:     RETURN_VALUE
+
+ 268   L12:     LOAD_GLOBAL              2 (logger)
+                LOAD_ATTR                5 (warning + NULL|self)
+                LOAD_CONST               8 ('技能没有 execute 方法: ')
+                LOAD_FAST_BORROW         1 (skill_name)
+                FORMAT_SIMPLE
+                BUILD_STRING             2
+                CALL                     1
+                POP_TOP
+
+ 269   L13:     LOAD_CONST               2 (None)
+                RETURN_VALUE
+
+  --   L14:     PUSH_EXC_INFO
+
+ 271            LOAD_GLOBAL             16 (Exception)
+                CHECK_EXC_MATCH
+                POP_JUMP_IF_FALSE       39 (to L20)
+       L15:     NOT_TAKEN
+       L16:     STORE_FAST               6 (e)
+
+ 272   L17:     LOAD_GLOBAL              2 (logger)
+                LOAD_ATTR               19 (error + NULL|self)
+                LOAD_CONST               9 ('技能执行异常: ')
+                LOAD_FAST                1 (skill_name)
+                FORMAT_SIMPLE
+                LOAD_CONST              10 (', 错误: ')
+                LOAD_FAST                6 (e)
+                FORMAT_SIMPLE
+                BUILD_STRING             4
+                CALL                     1
+                POP_TOP
+
+ 273   L18:     POP_EXCEPT
+                LOAD_CONST               2 (None)
+                STORE_FAST               6 (e)
+                DELETE_FAST              6 (e)
+                LOAD_CONST               2 (None)
+                RETURN_VALUE
+
+  --   L19:     LOAD_CONST               2 (None)
+                STORE_FAST               6 (e)
+                DELETE_FAST              6 (e)
+                RERAISE                  1
+
+ 271   L20:     RERAISE                  0
+
+  --   L21:     COPY                     3
+                POP_EXCEPT
+                RERAISE                  1
+ExceptionTable:
+  L2 to L3 -> L14 [0]
+  L4 to L5 -> L14 [0]
+  L6 to L7 -> L14 [0]
+  L8 to L9 -> L14 [0]
+  L10 to L11 -> L14 [0]
+  L12 to L13 -> L14 [0]
+  L14 to L15 -> L21 [1] lasti
+  L16 to L17 -> L21 [1] lasti
+  L17 to L18 -> L19 [1] lasti
+  L19 to L21 -> L21 [1] lasti
+
+Disassembly of <code object __annotate__ at 0x000001EF45A37340, file "neurova/tool_executor.py", line 275>:
+  --           COPY_FREE_VARS           1
+
+ 275           RESUME                   0
+               LOAD_FAST_BORROW         0 (format)
+               LOAD_SMALL_INT           2
+               COMPARE_OP             132 (>)
+               POP_JUMP_IF_FALSE        3 (to L1)
+               NOT_TAKEN
+               LOAD_COMMON_CONSTANT     1 (NotImplementedError)
+               RAISE_VARARGS            1
+       L1:     LOAD_CONST               1 ('tool_name')
+
+ 277           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+
+ 275           LOAD_CONST               2 ('tool_params')
+
+ 278           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 1 (Dict)
+
+ 275           LOAD_CONST               3 ('user_input')
+
+ 279           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+
+ 275           LOAD_CONST               4 ('return')
+
+ 280           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 2 (Optional)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 1 (Dict)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 3 (Any)
+               BUILD_TUPLE              2
+               BINARY_OP               26 ([])
+               BINARY_OP               26 ([])
+
+ 275           BUILD_MAP                4
+               RETURN_VALUE
+
+Disassembly of <code object execute_cli_tool at 0x000001EF45BFCB80, file "neurova/tool_executor.py", line 275>:
+275           RESUME                   0
+
+282           LOAD_GLOBAL              0 (logger)
+              LOAD_ATTR                3 (info + NULL|self)
+              LOAD_CONST               1 ('CLI工具执行（模拟）: ')
+              LOAD_FAST_BORROW         1 (tool_name)
+              FORMAT_SIMPLE
+              LOAD_CONST               2 (', 参数: ')
+              LOAD_FAST_BORROW         2 (tool_params)
+              FORMAT_SIMPLE
+              BUILD_STRING             4
+              CALL                     1
+              POP_TOP
+
+284           LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                4 (tool_router)
+              TO_BOOL
+              POP_JUMP_IF_FALSE      179 (to L6)
+              NOT_TAKEN
+
+285           LOAD_SMALL_INT           0
+              LOAD_CONST               3 (None)
+              IMPORT_NAME             14 (asyncio + eager)
+              STORE_FAST               4 (_asyncio)
+
+286           LOAD_FAST                4 (_asyncio)
+              LOAD_ATTR                9 (run + NULL|self)
+
+287           LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                4 (tool_router)
+              LOAD_ATTR               11 (execute + NULL|self)
+
+288           LOAD_FAST                1 (tool_name)
+
+289           LOAD_FAST                2 (tool_params)
+
+290           LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR               12 (config)
+              TO_BOOL
+              POP_JUMP_IF_FALSE       23 (to L1)
+              NOT_TAKEN
+              LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR               12 (config)
+              LOAD_ATTR               14 (agent_id)
+              JUMP_FORWARD             1 (to L2)
+      L1:     LOAD_CONST               4 ('default')
+
+291   L2:     LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR               12 (config)
+              TO_BOOL
+              POP_JUMP_IF_FALSE       24 (to L3)
+              NOT_TAKEN
+              LOAD_GLOBAL             17 (getattr + NULL)
+              LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR               12 (config)
+              LOAD_CONST               5 ('user_id')
+              LOAD_CONST               4 ('default')
+              CALL                     3
+              JUMP_FORWARD             1 (to L4)
+      L3:     LOAD_CONST               4 ('default')
+
+287   L4:     LOAD_CONST               6 (('tool_name', 'params', 'agent_id', 'user_id'))
+              CALL_KW                  4
+
+286           CALL                     1
+              STORE_FAST               5 (result)
+
+294           LOAD_FAST_BORROW         5 (result)
+              LOAD_ATTR               18 (success)
+              TO_BOOL
+              POP_JUMP_IF_FALSE       19 (to L5)
+              NOT_TAKEN
+
+295           LOAD_CONST               7 ('result')
+              LOAD_FAST_BORROW         5 (result)
+              LOAD_ATTR               20 (result)
+              LOAD_CONST               8 ('tool_name')
+              LOAD_FAST_BORROW         1 (tool_name)
+              LOAD_CONST               9 ('status')
+              LOAD_CONST              10 ('success')
+              BUILD_MAP                3
+              RETURN_VALUE
+
+297   L5:     LOAD_CONST               7 ('result')
+              LOAD_CONST              11 ('模拟执行: ')
+              LOAD_FAST_BORROW         1 (tool_name)
+              FORMAT_SIMPLE
+              BUILD_STRING             2
+              LOAD_CONST               8 ('tool_name')
+              LOAD_FAST_BORROW         1 (tool_name)
+              LOAD_CONST               9 ('status')
+              LOAD_CONST              12 ('simulated')
+              BUILD_MAP                3
+              RETURN_VALUE
+
+299   L6:     LOAD_CONST               7 ('result')
+              LOAD_CONST              11 ('模拟执行: ')
+              LOAD_FAST_BORROW         1 (tool_name)
+              FORMAT_SIMPLE
+              BUILD_STRING             2
+              LOAD_CONST               8 ('tool_name')
+              LOAD_FAST_BORROW         1 (tool_name)
+              LOAD_CONST               9 ('status')
+              LOAD_CONST              12 ('simulated')
+              BUILD_MAP                3
+              RETURN_VALUE
+
+Disassembly of <code object __annotate__ at 0x000001EF45A37CC0, file "neurova/tool_executor.py", line 305>:
+  --           COPY_FREE_VARS           1
+
+ 305           RESUME                   0
+               LOAD_FAST_BORROW         0 (format)
+               LOAD_SMALL_INT           2
+               COMPARE_OP             132 (>)
+               POP_JUMP_IF_FALSE        3 (to L1)
+               NOT_TAKEN
+               LOAD_COMMON_CONSTANT     1 (NotImplementedError)
+               RAISE_VARARGS            1
+       L1:     LOAD_CONST               1 ('tool_name')
+
+ 307           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+
+ 305           LOAD_CONST               2 ('params')
+
+ 308           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 1 (Dict)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 2 (Any)
+               BUILD_TUPLE              2
+               BINARY_OP               26 ([])
+
+ 305           LOAD_CONST               3 ('user_input')
+
+ 309           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+
+ 305           LOAD_CONST               4 ('success')
+
+ 310           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 3 (bool)
+
+ 305           LOAD_CONST               5 ('tool_source')
+
+ 311           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+
+ 305           LOAD_CONST               6 ('execution_time')
+
+ 312           LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 4 (float)
+
+ 305           BUILD_MAP                6
+               RETURN_VALUE
+
+Disassembly of <code object on_tool_executed at 0x000001EF45BA6790, file "neurova/tool_executor.py", line 305>:
+ 305            RESUME                   0
+
+ 316            LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR                0 (tool_memory)
+                TO_BOOL
+                POP_JUMP_IF_FALSE       35 (to L2)
+                NOT_TAKEN
+
+ 317            NOP
+
+ 318    L1:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR                0 (tool_memory)
+                LOAD_ATTR                3 (record_tool_usage + NULL|self)
+
+ 319            LOAD_FAST_BORROW         3 (user_input)
+
+ 320            LOAD_FAST_BORROW         1 (tool_name)
+
+ 321            LOAD_FAST_BORROW         5 (tool_source)
+
+ 322            LOAD_FAST_BORROW         2 (params)
+
+ 323            LOAD_FAST_BORROW         4 (success)
+
+ 324            LOAD_FAST_BORROW         6 (execution_time)
+
+ 318            LOAD_CONST               1 (('problem_text', 'tool_name', 'tool_source', 'tool_params', 'success', 'execution_time'))
+                CALL_KW                  6
+                POP_TOP
+
+ 330    L2:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               10 (tool_lifecycle)
+                TO_BOOL
+                POP_JUMP_IF_FALSE       29 (to L4)
+                NOT_TAKEN
+
+ 331            NOP
+
+ 332    L3:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               10 (tool_lifecycle)
+                LOAD_ATTR               13 (touch + NULL|self)
+                LOAD_FAST_BORROW         1 (tool_name)
+                CALL                     1
+                POP_TOP
+
+ 337    L4:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               14 (skill_packer)
+                TO_BOOL
+                POP_JUMP_IF_FALSE       42 (to L7)
+                NOT_TAKEN
+
+ 338            NOP
+
+ 339    L5:     LOAD_FAST_BORROW         0 (self)
+                LOAD_ATTR               14 (skill_packer)
+                LOAD_ATTR               17 (observe + NULL|self)
+
+ 340            LOAD_FAST_BORROW         1 (tool_name)
+                BUILD_LIST               1
+
+ 341            LOAD_FAST_BORROW         3 (user_input)
+                LOAD_CONST               5 (slice(None, 100, None))
+                BINARY_OP               26 ([])
+
+ 342            LOAD_FAST_BORROW         4 (success)
+
+ 339            LOAD_CONST               6 (('tool_sequence', 'context', 'success'))
+                CALL_KW                  3
+                POP_TOP
+        L6:     LOAD_CONST               3 (None)
+                RETURN_VALUE
+
+ 337    L7:     LOAD_CONST               3 (None)
+                RETURN_VALUE
+
+  --    L8:     PUSH_EXC_INFO
+
+ 326            LOAD_GLOBAL              4 (Exception)
+                CHECK_EXC_MATCH
+                POP_JUMP_IF_FALSE       35 (to L14)
+        L9:     NOT_TAKEN
+       L10:     STORE_FAST               7 (e)
+
+ 327   L11:     LOAD_GLOBAL              6 (logger)
+                LOAD_ATTR                9 (warning + NULL|self)
+                LOAD_CONST               2 ('记录工具使用失败: ')
+                LOAD_FAST                7 (e)
+                FORMAT_SIMPLE
+                BUILD_STRING             2
+                CALL                     1
+                POP_TOP
+       L12:     POP_EXCEPT
+                LOAD_CONST               3 (None)
+                STORE_FAST               7 (e)
+                DELETE_FAST              7 (e)
+                JUMP_BACKWARD_NO_INTERRUPT 147 (to L2)
+
+  --   L13:     LOAD_CONST               3 (None)
+                STORE_FAST               7 (e)
+                DELETE_FAST              7 (e)
+                RERAISE                  1
+
+ 326   L14:     RERAISE                  0
+
+  --   L15:     COPY                     3
+                POP_EXCEPT
+                RERAISE                  1
+       L16:     PUSH_EXC_INFO
+
+ 333            LOAD_GLOBAL              4 (Exception)
+                CHECK_EXC_MATCH
+                POP_JUMP_IF_FALSE       35 (to L22)
+       L17:     NOT_TAKEN
+       L18:     STORE_FAST               7 (e)
+
+ 334   L19:     LOAD_GLOBAL              6 (logger)
+                LOAD_ATTR                9 (warning + NULL|self)
+                LOAD_CONST               4 ('工具生命周期记录失败: ')
+                LOAD_FAST                7 (e)
+                FORMAT_SIMPLE
+                BUILD_STRING             2
+                CALL                     1
+                POP_TOP
+       L20:     POP_EXCEPT
+                LOAD_CONST               3 (None)
+                STORE_FAST               7 (e)
+                DELETE_FAST              7 (e)
+                JUMP_BACKWARD_NO_INTERRUPT 149 (to L4)
+
+  --   L21:     LOAD_CONST               3 (None)
+                STORE_FAST               7 (e)
+                DELETE_FAST              7 (e)
+                RERAISE                  1
+
+ 333   L22:     RERAISE                  0
+
+  --   L23:     COPY                     3
+                POP_EXCEPT
+                RERAISE                  1
+       L24:     PUSH_EXC_INFO
+
+ 344            LOAD_GLOBAL              4 (Exception)
+                CHECK_EXC_MATCH
+                POP_JUMP_IF_FALSE       36 (to L30)
+       L25:     NOT_TAKEN
+       L26:     STORE_FAST               7 (e)
+
+ 345   L27:     LOAD_GLOBAL              6 (logger)
+                LOAD_ATTR                9 (warning + NULL|self)
+                LOAD_CONST               7 ('技能打包器记录失败: ')
+                LOAD_FAST                7 (e)
+                FORMAT_SIMPLE
+                BUILD_STRING             2
+                CALL                     1
+                POP_TOP
+       L28:     POP_EXCEPT
+                LOAD_CONST               3 (None)
+                STORE_FAST               7 (e)
+                DELETE_FAST              7 (e)
+                LOAD_CONST               3 (None)
+                RETURN_VALUE
+
+  --   L29:     LOAD_CONST               3 (None)
+                STORE_FAST               7 (e)
+                DELETE_FAST              7 (e)
+                RERAISE                  1
+
+ 344   L30:     RERAISE                  0
+
+  --   L31:     COPY                     3
+                POP_EXCEPT
+                RERAISE                  1
+ExceptionTable:
+  L1 to L2 -> L8 [0]
+  L3 to L4 -> L16 [0]
+  L5 to L6 -> L24 [0]
+  L8 to L9 -> L15 [1] lasti
+  L10 to L11 -> L15 [1] lasti
+  L11 to L12 -> L13 [1] lasti
+  L13 to L15 -> L15 [1] lasti
+  L16 to L17 -> L23 [1] lasti
+  L18 to L19 -> L23 [1] lasti
+  L19 to L20 -> L21 [1] lasti
+  L21 to L23 -> L23 [1] lasti
+  L24 to L25 -> L31 [1] lasti
+  L26 to L27 -> L31 [1] lasti
+  L27 to L28 -> L29 [1] lasti
+  L29 to L31 -> L31 [1] lasti
+
+Disassembly of <code object __annotate__ at 0x000001EF45DA7110, file "neurova/tool_executor.py", line 351>:
+  --           COPY_FREE_VARS           1
+
+ 351           RESUME                   0
+               LOAD_FAST_BORROW         0 (format)
+               LOAD_SMALL_INT           2
+               COMPARE_OP             132 (>)
+               POP_JUMP_IF_FALSE        3 (to L1)
+               NOT_TAKEN
+               LOAD_COMMON_CONSTANT     1 (NotImplementedError)
+               RAISE_VARARGS            1
+       L1:     LOAD_CONST               1 ('params_str')
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               LOAD_CONST               2 ('return')
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 1 (Dict)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 2 (Any)
+               BUILD_TUPLE              2
+               BINARY_OP               26 ([])
+               BUILD_MAP                2
+               RETURN_VALUE
+
+Disassembly of <code object _parse_params at 0x000001EF45C06D90, file "neurova/tool_executor.py", line 351>:
+ 351            RESUME                   0
+
+ 353            LOAD_FAST_BORROW         1 (params_str)
+                LOAD_ATTR                1 (strip + NULL|self)
+                CALL                     0
+                STORE_FAST               1 (params_str)
+
+ 354            BUILD_MAP                0
+                STORE_FAST               2 (params)
+
+ 356            LOAD_FAST_BORROW         1 (params_str)
+                TO_BOOL
+                POP_JUMP_IF_TRUE         3 (to L1)
+                NOT_TAKEN
+
+ 357            LOAD_FAST_BORROW         2 (params)
+                RETURN_VALUE
+
+ 359    L1:     LOAD_FAST_BORROW         1 (params_str)
+                LOAD_ATTR                3 (startswith + NULL|self)
+                LOAD_CONST               1 ('{')
+                CALL                     1
+                TO_BOOL
+                POP_JUMP_IF_FALSE       24 (to L4)
+                NOT_TAKEN
+
+ 360            NOP
+
+ 361    L2:     LOAD_GLOBAL              4 (json)
+                LOAD_ATTR                6 (loads)
+                PUSH_NULL
+                LOAD_FAST_BORROW         1 (params_str)
+                CALL                     1
+        L3:     RETURN_VALUE
+
+ 367    L4:     LOAD_FAST_BORROW         1 (params_str)
+                LOAD_ATTR               15 (split + NULL|self)
+                LOAD_CONST               3 (',')
+                CALL                     1
+                GET_ITER
+        L5:     FOR_ITER               177 (to L11)
+                STORE_FAST               3 (pair)
+
+ 368            LOAD_FAST_BORROW         3 (pair)
+                LOAD_ATTR                1 (strip + NULL|self)
+                CALL                     0
+                STORE_FAST               3 (pair)
+
+ 369            LOAD_CONST               4 ('=')
+                LOAD_FAST_BORROW         3 (pair)
+                CONTAINS_OP              0 (in)
+                POP_JUMP_IF_TRUE         3 (to L6)
+                NOT_TAKEN
+                JUMP_BACKWARD           28 (to L5)
+
+ 370    L6:     LOAD_FAST_BORROW         3 (pair)
+                LOAD_ATTR               15 (split + NULL|self)
+                LOAD_CONST               4 ('=')
+                LOAD_SMALL_INT           1
+                CALL                     2
+                UNPACK_SEQUENCE          2
+                STORE_FAST_STORE_FAST   69 (k, v)
+
+ 371            LOAD_FAST_BORROW         4 (k)
+                LOAD_ATTR                1 (strip + NULL|self)
+                CALL                     0
+                LOAD_FAST_BORROW         5 (v)
+                LOAD_ATTR                1 (strip + NULL|self)
+                CALL                     0
+                LOAD_ATTR                1 (strip + NULL|self)
+                LOAD_CONST               5 ('"')
+                CALL                     1
+                LOAD_ATTR                1 (strip + NULL|self)
+                LOAD_CONST               6 ("'")
+                CALL                     1
+                STORE_FAST_STORE_FAST   84 (v, k)
+
+ 372            LOAD_FAST_BORROW         5 (v)
+                LOAD_ATTR               17 (lower + NULL|self)
+                CALL                     0
+                LOAD_CONST               7 ('true')
+                COMPARE_OP              88 (bool(==))
+                POP_JUMP_IF_FALSE        7 (to L7)
+                NOT_TAKEN
+
+ 373            LOAD_CONST               8 (True)
+                LOAD_FAST_BORROW_LOAD_FAST_BORROW 36 (params, k)
+                STORE_SUBSCR
+                JUMP_BACKWARD          136 (to L5)
+
+ 374    L7:     LOAD_FAST_BORROW         5 (v)
+                LOAD_ATTR               17 (lower + NULL|self)
+                CALL                     0
+                LOAD_CONST               9 ('false')
+                COMPARE_OP              88 (bool(==))
+                POP_JUMP_IF_FALSE        7 (to L8)
+                NOT_TAKEN
+
+ 375            LOAD_CONST              10 (False)
+                LOAD_FAST_BORROW_LOAD_FAST_BORROW 36 (params, k)
+                STORE_SUBSCR
+                JUMP_BACKWARD          163 (to L5)
+
+ 377    L8:     NOP
+
+ 378    L9:     LOAD_GLOBAL             19 (int + NULL)
+                LOAD_FAST_BORROW         5 (v)
+                CALL                     1
+                LOAD_FAST_BORROW_LOAD_FAST_BORROW 36 (params, k)
+                STORE_SUBSCR
+       L10:     JUMP_BACKWARD          179 (to L5)
+
+ 367   L11:     END_FOR
+                POP_ITER
+
+ 384            LOAD_FAST_BORROW         2 (params)
+                RETURN_VALUE
+
+  --   L12:     PUSH_EXC_INFO
+
+ 362            LOAD_GLOBAL              4 (json)
+                LOAD_ATTR                8 (JSONDecodeError)
+                CHECK_EXC_MATCH
+                POP_JUMP_IF_FALSE       30 (to L16)
+       L13:     NOT_TAKEN
+       L14:     POP_TOP
+
+ 363            LOAD_GLOBAL             10 (logger)
+                LOAD_ATTR               13 (warning + NULL|self)
+                LOAD_CONST               2 ('JSON参数解析失败: ')
+                LOAD_FAST                1 (params_str)
+                FORMAT_SIMPLE
+                BUILD_STRING             2
+                CALL                     1
+                POP_TOP
+
+ 364            LOAD_FAST                2 (params)
+                SWAP                     2
+       L15:     POP_EXCEPT
+                RETURN_VALUE
+
+ 362   L16:     RERAISE                  0
+
+  --   L17:     COPY                     3
+                POP_EXCEPT
+                RERAISE                  1
+       L18:     PUSH_EXC_INFO
+
+ 379            LOAD_GLOBAL             20 (ValueError)
+                CHECK_EXC_MATCH
+                POP_JUMP_IF_FALSE       44 (to L31)
+       L19:     NOT_TAKEN
+       L20:     POP_TOP
+
+ 380   L21:     NOP
+
+ 381   L22:     LOAD_GLOBAL             23 (float + NULL)
+                LOAD_FAST                5 (v)
+                CALL                     1
+                LOAD_FAST_LOAD_FAST     36 (params, k)
+                STORE_SUBSCR
+       L23:     POP_EXCEPT
+                EXTENDED_ARG             1
+                JUMP_BACKWARD          265 (to L5)
+
+  --   L24:     PUSH_EXC_INFO
+
+ 382            LOAD_GLOBAL             20 (ValueError)
+                CHECK_EXC_MATCH
+                POP_JUMP_IF_FALSE       11 (to L29)
+       L25:     NOT_TAKEN
+       L26:     POP_TOP
+
+ 383            LOAD_FAST_LOAD_FAST     82 (v, params)
+                LOAD_FAST                4 (k)
+                STORE_SUBSCR
+       L27:     POP_EXCEPT
+       L28:     POP_EXCEPT
+                EXTENDED_ARG             1
+                JUMP_BACKWARD          285 (to L5)
+
+ 382   L29:     RERAISE                  0
+
+  --   L30:     COPY                     3
+                POP_EXCEPT
+                RERAISE                  1
+
+ 379   L31:     RERAISE                  0
+
+  --   L32:     COPY                     3
+                POP_EXCEPT
+                RERAISE                  1
+ExceptionTable:
+  L2 to L3 -> L12 [0]
+  L9 to L10 -> L18 [2]
+  L12 to L13 -> L17 [1] lasti
+  L14 to L15 -> L17 [1] lasti
+  L16 to L17 -> L17 [1] lasti
+  L18 to L19 -> L32 [3] lasti
+  L20 to L21 -> L32 [3] lasti
+  L22 to L23 -> L24 [3]
+  L24 to L25 -> L30 [4] lasti
+  L26 to L27 -> L30 [4] lasti
+  L27 to L28 -> L32 [3] lasti
+  L29 to L30 -> L30 [4] lasti
+  L30 to L32 -> L32 [3] lasti
+
+Disassembly of <code object __annotate__ at 0x000001EF45DE2670, file "neurova/tool_executor.py", line 386>:
+  --           COPY_FREE_VARS           1
+
+ 386           RESUME                   0
+               LOAD_FAST_BORROW         0 (format)
+               LOAD_SMALL_INT           2
+               COMPARE_OP             132 (>)
+               POP_JUMP_IF_FALSE        3 (to L1)
+               NOT_TAKEN
+               LOAD_COMMON_CONSTANT     1 (NotImplementedError)
+               RAISE_VARARGS            1
+       L1:     LOAD_CONST               1 ('tool_name')
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               LOAD_CONST               2 ('return')
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 1 (Optional)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 2 (Dict)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 3 (Any)
+               BUILD_TUPLE              2
+               BINARY_OP               26 ([])
+               BINARY_OP               26 ([])
+               BUILD_MAP                2
+               RETURN_VALUE
+
+Disassembly of <code object _get_tool_params_info at 0x000001EF45816CC0, file "neurova/tool_executor.py", line 386>:
+386           RESUME                   0
+
+389           LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                0 (_skill_registry)
+              TO_BOOL
+              POP_JUMP_IF_FALSE       70 (to L1)
+              NOT_TAKEN
+
+390           LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                0 (_skill_registry)
+              LOAD_ATTR                3 (get_skill + NULL|self)
+              LOAD_FAST_BORROW         1 (tool_name)
+              CALL                     1
+              STORE_FAST               2 (sk)
+
+391           LOAD_FAST_BORROW         2 (sk)
+              TO_BOOL
+              POP_JUMP_IF_FALSE       35 (to L1)
+              NOT_TAKEN
+              LOAD_GLOBAL              5 (hasattr + NULL)
+              LOAD_FAST_BORROW         2 (sk)
+              LOAD_CONST               1 ('_get_parameters')
+              CALL                     2
+              TO_BOOL
+              POP_JUMP_IF_FALSE       17 (to L1)
+              NOT_TAKEN
+
+392           LOAD_FAST_BORROW         2 (sk)
+              LOAD_ATTR                7 (_get_parameters + NULL|self)
+              CALL                     0
+              RETURN_VALUE
+
+395   L1:     LOAD_FAST_BORROW         0 (self)
+              LOAD_ATTR                9 (_get_builtin_tool_params + NULL|self)
+              LOAD_FAST_BORROW         1 (tool_name)
+              CALL                     1
+              LOAD_ATTR               11 (get + NULL|self)
+              LOAD_CONST               2 ('parameters')
+              BUILD_MAP                0
+              CALL                     2
+              LOAD_ATTR               11 (get + NULL|self)
+              LOAD_CONST               3 ('properties')
+              BUILD_MAP                0
+              CALL                     2
+              RETURN_VALUE
+
+Disassembly of <code object __annotate__ at 0x000001EF45DA7220, file "neurova/tool_executor.py", line 397>:
+  --           COPY_FREE_VARS           1
+
+ 397           RESUME                   0
+               LOAD_FAST_BORROW         0 (format)
+               LOAD_SMALL_INT           2
+               COMPARE_OP             132 (>)
+               POP_JUMP_IF_FALSE        3 (to L1)
+               NOT_TAKEN
+               LOAD_COMMON_CONSTANT     1 (NotImplementedError)
+               RAISE_VARARGS            1
+       L1:     LOAD_CONST               1 ('tool_name')
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               LOAD_CONST               2 ('return')
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 1 (Dict)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 0 (str)
+               LOAD_DEREF               1 (__classdict__)
+               LOAD_FROM_DICT_OR_GLOBALS 2 (Any)
+               BUILD_TUPLE              2
+               BINARY_OP               26 ([])
+               BUILD_MAP                2
+               RETURN_VALUE
+
+Disassembly of <code object _get_builtin_tool_params at 0x000001EF45B5AF30, file "neurova/tool_executor.py", line 397>:
+397           RESUME                   0
+
+400           LOAD_CONST               1 ('memory_search')
+
+401           LOAD_CONST               2 ('parameters')
+
+402           LOAD_CONST               3 ('properties')
+
+403           LOAD_CONST               4 ('query')
+              BUILD_MAP                0
+
+404           LOAD_CONST               5 ('category')
+              BUILD_MAP                0
+
+405           LOAD_CONST               6 ('limit')
+              BUILD_MAP                0
+
+402           BUILD_MAP                3
+
+407           LOAD_CONST               7 ('required')
+              LOAD_CONST               4 ('query')
+              BUILD_LIST               1
+
+401           BUILD_MAP                2
+
+400           BUILD_MAP                1
+
+410           LOAD_CONST               8 ('file_read')
+
+411           LOAD_CONST               2 ('parameters')
+
+412           LOAD_CONST               3 ('properties')
+
+413           LOAD_CONST               9 ('file_path')
+              BUILD_MAP                0
+
+414           LOAD_CONST              10 ('offset')
+              BUILD_MAP                0
+
+415           LOAD_CONST              11 ('encoding')
+              BUILD_MAP                0
+
+412           BUILD_MAP                3
+
+417           LOAD_CONST               7 ('required')
+              LOAD_CONST               9 ('file_path')
+              BUILD_LIST               1
+
+411           BUILD_MAP                2
+
+410           BUILD_MAP                1
+
+420           LOAD_CONST              12 ('file_write')
+
+421           LOAD_CONST               2 ('parameters')
+
+422           LOAD_CONST               3 ('properties')
+
+423           LOAD_CONST               9 ('file_path')
+              BUILD_MAP                0
+
+424           LOAD_CONST              13 ('content')
+              BUILD_MAP                0
+
+425           LOAD_CONST              11 ('encoding')
+              BUILD_MAP                0
+
+422           BUILD_MAP                3
+
+427           LOAD_CONST               7 ('required')
+              LOAD_CONST               9 ('file_path')
+              LOAD_CONST              13 ('content')
+              BUILD_LIST               2
+
+421           BUILD_MAP                2
+
+420           BUILD_MAP                1
+
+430           LOAD_CONST              14 ('file_create')
+
+431           LOAD_CONST               2 ('parameters')
+
+432           LOAD_CONST               3 ('properties')
+              LOAD_CONST               9 ('file_path')
+              BUILD_MAP                0
+              LOAD_CONST              13 ('content')
+              BUILD_MAP                0
+              BUILD_MAP                2
+
+433           LOAD_CONST               7 ('required')
+              LOAD_CONST               9 ('file_path')
+              BUILD_LIST               1
+
+431           BUILD_MAP                2
+
+430           BUILD_MAP                1
+
+436           LOAD_CONST              15 ('file_delete')
+
+437           LOAD_CONST               2 ('parameters')
+
+438           LOAD_CONST               3 ('properties')
+              LOAD_CONST               9 ('file_path')
+              BUILD_MAP                0
+              BUILD_MAP                1
+
+439           LOAD_CONST               7 ('required')
+              LOAD_CONST               9 ('file_path')
+              BUILD_LIST               1
+
+437           BUILD_MAP                2
+
+436           BUILD_MAP                1
+
+442           LOAD_CONST              16 ('file_edit')
+
+443           LOAD_CONST               2 ('parameters')
+
+444           LOAD_CONST               3 ('properties')
+              LOAD_CONST               9 ('file_path')
+              BUILD_MAP                0
+              LOAD_CONST              17 ('old_str')
+              BUILD_MAP                0
+              LOAD_CONST              18 ('new_str')
+              BUILD_MAP                0
+              BUILD_MAP                3
+
+445           LOAD_CONST               7 ('required')
+              BUILD_LIST               0
+              LOAD_CONST              32 (('file_path', 'old_str', 'new_str'))
+              LIST_EXTEND              1
+
+443           BUILD_MAP                2
+
+442           BUILD_MAP                1
+
+448           LOAD_CONST              19 ('computer_screenshot')
+
+449           LOAD_CONST               2 ('parameters')
+
+450           LOAD_CONST               3 ('properties')
+              BUILD_MAP                0
+
+451           LOAD_CONST               7 ('required')
+              BUILD_LIST               0
+
+449           BUILD_MAP                2
+
+448           BUILD_MAP                1
+
+454           LOAD_CONST              20 ('computer_click')
+
+455           LOAD_CONST               2 ('parameters')
+
+456           LOAD_CONST               3 ('properties')
+              LOAD_CONST              21 ('x')
+              BUILD_MAP                0
+              LOAD_CONST              22 ('y')
+              BUILD_MAP                0
+              LOAD_CONST              23 ('button')
+              BUILD_MAP                0
+              BUILD_MAP                3
+
+457           LOAD_CONST               7 ('required')
+              LOAD_CONST              21 ('x')
+              LOAD_CONST              22 ('y')
+              BUILD_LIST               2
+
+455           BUILD_MAP                2
+
+454           BUILD_MAP                1
+
+460           LOAD_CONST              24 ('computer_type')
+
+461           LOAD_CONST               2 ('parameters')
+
+462           LOAD_CONST               3 ('properties')
+              LOAD_CONST              25 ('text')
+              BUILD_MAP                0
+              BUILD_MAP                1
+
+463           LOAD_CONST               7 ('required')
+              LOAD_CONST              25 ('text')
+              BUILD_LIST               1
+
+461           BUILD_MAP                2
+
+460           BUILD_MAP                1
+
+466           LOAD_CONST              26 ('computer_scroll')
+
+467           LOAD_CONST               2 ('parameters')
+
+468           LOAD_CONST               3 ('properties')
+              LOAD_CONST              21 ('x')
+              BUILD_MAP                0
+              LOAD_CONST              22 ('y')
+              BUILD_MAP                0
+              LOAD_CONST              27 ('scroll_x')
+              BUILD_MAP                0
+              LOAD_CONST              28 ('scroll_y')
+              BUILD_MAP                0
+              BUILD_MAP                4
+
+469           LOAD_CONST               7 ('required')
+              BUILD_LIST               0
+
+467           BUILD_MAP                2
+
+466           BUILD_MAP                1
+
+472           LOAD_CONST              29 ('computer_shell')
+
+473           LOAD_CONST               2 ('parameters')
+
+474           LOAD_CONST               3 ('properties')
+              LOAD_CONST              30 ('command')
+              BUILD_MAP                0
+              BUILD_MAP                1
+
+475           LOAD_CONST               7 ('required')
+              LOAD_CONST              30 ('command')
+              BUILD_LIST               1
+
+473           BUILD_MAP                2
+
+472           BUILD_MAP                1
+
+478           LOAD_CONST              31 ('emotion_analyze')
+
+479           LOAD_CONST               2 ('parameters')
+
+480           LOAD_CONST               3 ('properties')
+              LOAD_CONST              25 ('text')
+              BUILD_MAP                0
+              BUILD_MAP                1
+
+481           LOAD_CONST               7 ('required')
+              LOAD_CONST              25 ('text')
+              BUILD_LIST               1
+
+479           BUILD_MAP                2
+
+478           BUILD_MAP                1
+
+399           BUILD_MAP               12
+              STORE_FAST               2 (builtin_schemas)
+
+485           LOAD_FAST_BORROW         2 (builtin_schemas)
+              LOAD_ATTR                1 (get + NULL|self)
+              LOAD_FAST_BORROW         1 (tool_name)
+              LOAD_CONST               2 ('parameters')
+              LOAD_CONST               3 ('properties')
+              BUILD_MAP                0
+              LOAD_CONST               7 ('required')
+              BUILD_LIST               0
+              BUILD_MAP                2
+              BUILD_MAP                1
+              CALL                     2
+              RETURN_VALUE
+
+Classes and functions:
+  Code object: ToolExecutor
+    File: neurova/tool_executor.py
+    Line: 25
+    Args: ()
+    Locals: ()
+    Names: ('__name__', '__module__', '__qualname__', '__firstlineno__', '__doc__', '__init__', 'property', '_skill_registry', 'tool_router', 'tool_memory', 'tool_lifecycle', 'skill_packer', 'config', '_ensure_messages_list', 'execute_text_tool_calls', 'execute_from_memory', 'execute_skill_tool', 'execute_cli_tool', 'on_tool_executed', '_parse_params', '_get_tool_params_info', '_get_builtin_tool_params', '__static_attributes__', '__classdictcell__')
+    Constants:
+      0: 'ToolExecutor'
+      1: '统一工具执行器\n\n通过 agent_ref 访问 Agent 实例的：\n- _skill_registry, tool_router, tool_memory, tool_lifecycle,
+      2: <code object __init__>
+      3: <code object _skill_registry>
+      4: <code object tool_router>
+      5: <code object tool_memory>
+      6: <code object tool_lifecycle>
+      7: <code object skill_packer>
+      8: <code object config>
+      9: <code object _ensure_messages_list>
+      10: <code object __annotate__>
+      11: <code object execute_text_tool_calls>
+      12: <code object __annotate__>
+      13: <code object execute_from_memory>
+      14: <code object __annotate__>
+      15: <code object execute_skill_tool>
+      16: <code object __annotate__>
+      17: <code object execute_cli_tool>
+      18: <code object __annotate__>
+      19: <code object on_tool_executed>
+      20: <code object __annotate__>
+      21: <code object _parse_params>
+      22: <code object __annotate__>
+      23: <code object _get_tool_params_info>
+      24: <code object __annotate__>
+      25: <code object _get_builtin_tool_params>
+    Sub-code object:
+      Code object: __init__
+        File: neurova/tool_executor.py
+        Line: 33
+        Args: ('self', 'agent_ref')
+        Locals: ('self', 'agent_ref')
+        Names: ('_agent',)
+        Constants:
+    Sub-code object:
+      Code object: _skill_registry
+        File: neurova/tool_executor.py
+        Line: 37
+        Args: ('self',)
+        Locals: ('self',)
+        Names: ('getattr', '_agent')
+        Constants:
+          0: '_skill_registry'
+    Sub-code object:
+      Code object: tool_router
+        File: neurova/tool_executor.py
+        Line: 41
+        Args: ('self',)
+        Locals: ('self',)
+        Names: ('getattr', '_agent')
+        Constants:
+          0: 'tool_router'
+    Sub-code object:
+      Code object: tool_memory
+        File: neurova/tool_executor.py
+        Line: 45
+        Args: ('self',)
+        Locals: ('self',)
+        Names: ('getattr', '_agent')
+        Constants:
+          0: 'tool_memory'
+    Sub-code object:
+      Code object: tool_lifecycle
+        File: neurova/tool_executor.py
+        Line: 49
+        Args: ('self',)
+        Locals: ('self',)
+        Names: ('getattr', '_agent')
+        Constants:
+          0: 'tool_lifecycle'
+    Sub-code object:
+      Code object: skill_packer
+        File: neurova/tool_executor.py
+        Line: 53
+        Args: ('self',)
+        Locals: ('self',)
+        Names: ('getattr', '_agent')
+        Constants:
+          0: 'skill_packer'
+    Sub-code object:
+      Code object: config
+        File: neurova/tool_executor.py
+        Line: 57
+        Args: ('self',)
+        Locals: ('self',)
+        Names: ('getattr', '_agent')
+        Constants:
+          0: 'config'
+    Sub-code object:
+      Code object: _ensure_messages_list
+        File: neurova/tool_executor.py
+        Line: 61
+        Args: ('self',)
+        Locals: ('self',)
+        Names: ('hasattr', '_agent', '_tool_messages_list')
+        Constants:
+          0: '_tool_messages_list'
+    Sub-code object:
+      Code object: __annotate__
+        File: neurova/tool_executor.py
+        Line: 70
+        Args: ('format',)
+        Locals: ('format',)
+        Names: ('str',)
+        Constants:
+          0: 2
+          1: 'reply'
+          2: 'user_input'
+          3: 'return'
+    Sub-code object:
+      Code object: execute_text_tool_calls
+        File: neurova/tool_executor.py
+        Line: 70
+        Args: ('self', 'reply', 'user_input')
+        Locals: ('self', 'reply', 'user_input', 'pattern', 'matches', 'results', 'tool_name', 'params_str', 'params', 'skill_exec_error', 'skill', 'result', 'result_str', 'max_len', 'offset', 'chunk', 'total', 'suffix', 'user_id', 'router_result', 'err_msg', 'params_info', 'required', 'k', 'hints', 'e', 'clean_reply')
+        Names: ('re', 'findall', 'logger', 'info', 'len', '_parse_params', '_ensure_messages_list', 'append', 'datetime', 'now', 'isoformat', '_skill_registry', 'get_skill', 'execute_skill', 'success', 'json', 'dumps', 'data', 'int', 'get', 'on_tool_executed', 'error', 'tool_router', 'config', 'getattr', 'execute', 'agent_id', 'str', 'result', '_get_tool_params_info', 'join', 'Exception', 'warning', 'sub', 'strip')
+        Constants:
+          0: '\n解析 LLM 回复中的 [TOOL_CALL:name(params)] 格式并执行工具\nAPI 不支持原生 function calling 的降级通路\n'
+          1: '\\[TOOL_CALL:([\\w:.\\-]+)\\((.+?)\\)\\]'
+          2: '[TOOL_PARSE] 检查回复中是否有工具调用: '
+          3: ' 个匹配, 回复前100字: '
+          5: '🔧 解析到文本工具调用: '
+          6: '('
+          7: ')'
+          8: 'type'
+          9: 'tool_call'
+          10: 'tool_name'
+          11: 'params'
+          12: 'timestamp'
+          14: False
+          16: 8000
+          17: 'offset'
+          18: ''
+          19: '\n\n(已截断，共 '
+          20: ' 字符，已显示 '
+          21: '-'
+          22: '。使用 offset='
+          23: ' 继续获取后续内容)'
+          24: '\n\n**'
+          25: ' 结果**: '
+          26: 'tool_result'
+          27: 'result'
+          28: 'success'
+          29: True
+          30: 'skill_system'
+          32: 'user_id'
+          33: 'default'
+          36: '执行失败: '
+          37: '工具注册但执行未找到处理器，请检查参数是否正确'
+          38: 'required'
+          39: '必填'
+          40: '可选'
+          41: '。可用参数: '
+          42: ', '
+          43: '文本工具调用执行失败: '
+          44: ' 结果**: 执行出错: '
+          45: '\n'
+    Sub-code object:
+      Code object: __annotate__
+        File: neurova/tool_executor.py
+        Line: 178
+        Args: ('format',)
+        Locals: ('format',)
+        Names: ('Dict', 'str', 'Any', 'Optional')
+        Constants:
+          0: 2
+          1: 'tool_memory_result'
+          2: 'user_input'
+          3: 'return'
+    Sub-code object:
+      Code object: execute_from_memory
+        File: neurova/tool_executor.py
+        Line: 178
+        Args: ('self', 'tool_memory_result', 'user_input')
+        Locals: ('self', 'tool_memory_result', 'user_input', 'tool_name', 'tool_source', 'tool_params', 'result', 'e')
+        Names: ('get', 'logger', 'warning', 'info', '_ensure_messages_list', 'append', 'datetime', 'now', 'isoformat', '_skill_registry', 'execute_skill_tool', 'execute_cli_tool', 'on_tool_executed', 'str', 'Exception', 'error')
+        Constants:
+          0: '从肌肉记忆结果自动执行工具'
+          2: 'tool_name'
+          3: 'tool_source'
+          4: 'tool_params'
+          5: 'ToolMemory 结果缺少 tool_name'
+          6: '🚀 自动执行工具: '
+          7: ' (来源: '
+          8: ')'
+          9: 'type'
+          10: 'tool_call'
+          11: 'params'
+          12: 'timestamp'
+          13: 'skill_system'
+          14: 'unknown'
+          16: 'tool_result'
+          17: 'result'
+          19: '执行失败'
+          20: 'success'
+          21: '工具自动执行失败: '
+          22: ', 错误: '
+          23: False
+    Sub-code object:
+      Code object: __annotate__
+        File: neurova/tool_executor.py
+        Line: 246
+        Args: ('format',)
+        Locals: ('format',)
+        Names: ('str', 'Dict', 'Optional', 'Any')
+        Constants:
+          0: 2
+          1: 'skill_name'
+          2: 'skill_params'
+          3: 'user_input'
+          4: 'return'
+    Sub-code object:
+      Code object: execute_skill_tool
+        File: neurova/tool_executor.py
+        Line: 246
+        Args: ('self', 'skill_name', 'skill_params', 'user_input')
+        Locals: ('self', 'skill_name', 'skill_params', 'user_input', 'skill', 'result', 'e')
+        Names: ('_skill_registry', 'logger', 'warning', 'get_skill', 'hasattr', 'callable', 'execute', 'info', 'Exception', 'error')
+        Constants:
+          0: '执行技能工具'
+          1: 'SkillRegistry 未初始化，无法执行技能'
+          3: '技能未找到: '
+          4: 'execute'
+          5: '✅ 技能执行成功: '
+          6: 'result'
+          7: 'skill_name'
+          8: '技能没有 execute 方法: '
+          9: '技能执行异常: '
+          10: ', 错误: '
+    Sub-code object:
+      Code object: __annotate__
+        File: neurova/tool_executor.py
+        Line: 275
+        Args: ('format',)
+        Locals: ('format',)
+        Names: ('str', 'Dict', 'Optional', 'Any')
+        Constants:
+          0: 2
+          1: 'tool_name'
+          2: 'tool_params'
+          3: 'user_input'
+          4: 'return'
+    Sub-code object:
+      Code object: execute_cli_tool
+        File: neurova/tool_executor.py
+        Line: 275
+        Args: ('self', 'tool_name', 'tool_params', 'user_input')
+        Locals: ('self', 'tool_name', 'tool_params', 'user_input', '_asyncio', 'result')
+        Names: ('logger', 'info', 'tool_router', 'asyncio', 'run', 'execute', 'config', 'agent_id', 'getattr', 'success', 'result')
+        Constants:
+          0: '执行 CLI/MCP 工具'
+          1: 'CLI工具执行（模拟）: '
+          2: ', 参数: '
+          4: 'default'
+          5: 'user_id'
+          7: 'result'
+          8: 'tool_name'
+          9: 'status'
+          10: 'success'
+          11: '模拟执行: '
+          12: 'simulated'
+    Sub-code object:
+      Code object: __annotate__
+        File: neurova/tool_executor.py
+        Line: 305
+        Args: ('format',)
+        Locals: ('format',)
+        Names: ('str', 'Dict', 'Any', 'bool', 'float')
+        Constants:
+          0: 2
+          1: 'tool_name'
+          2: 'params'
+          3: 'user_input'
+          4: 'success'
+          5: 'tool_source'
+          6: 'execution_time'
+    Sub-code object:
+      Code object: on_tool_executed
+        File: neurova/tool_executor.py
+        Line: 305
+        Args: ('self', 'tool_name', 'params', 'user_input', 'success', 'tool_source', 'execution_time')
+        Locals: ('self', 'tool_name', 'params', 'user_input', 'success', 'tool_source', 'execution_time', 'e')
+        Names: ('tool_memory', 'record_tool_usage', 'Exception', 'logger', 'warning', 'tool_lifecycle', 'touch', 'skill_packer', 'observe')
+        Constants:
+          0: '集中化工具执行后钩子 — 记忆记录 + 生命周期 + 技能打包'
+          2: '记录工具使用失败: '
+          4: '工具生命周期记录失败: '
+          7: '技能打包器记录失败: '
+    Sub-code object:
+      Code object: __annotate__
+        File: neurova/tool_executor.py
+        Line: 351
+        Args: ('format',)
+        Locals: ('format',)
+        Names: ('str', 'Dict', 'Any')
+        Constants:
+          0: 2
+          1: 'params_str'
+          2: 'return'
+    Sub-code object:
+      Code object: _parse_params
+        File: neurova/tool_executor.py
+        Line: 351
+        Args: ('self', 'params_str')
+        Locals: ('self', 'params_str', 'params', 'pair', 'k', 'v')
+        Names: ('strip', 'startswith', 'json', 'loads', 'JSONDecodeError', 'logger', 'warning', 'split', 'lower', 'int', 'ValueError', 'float')
+        Constants:
+          0: '解析工具参数（支持 JSON 和 key=value 格式）'
+          1: '{'
+          2: 'JSON参数解析失败: '
+          3: ','
+          4: '='
+          5: '"'
+          6: "'"
+          7: 'true'
+          8: True
+          9: 'false'
+          10: False
+    Sub-code object:
+      Code object: __annotate__
+        File: neurova/tool_executor.py
+        Line: 386
+        Args: ('format',)
+        Locals: ('format',)
+        Names: ('str', 'Optional', 'Dict', 'Any')
+        Constants:
+          0: 2
+          1: 'tool_name'
+          2: 'return'
+    Sub-code object:
+      Code object: _get_tool_params_info
+        File: neurova/tool_executor.py
+        Line: 386
+        Args: ('self', 'tool_name')
+        Locals: ('self', 'tool_name', 'sk')
+        Names: ('_skill_registry', 'get_skill', 'hasattr', '_get_parameters', '_get_builtin_tool_params', 'get')
+        Constants:
+          0: '获取工具的参数信息（用于错误提示）'
+          1: '_get_parameters'
+          2: 'parameters'
+          3: 'properties'
+    Sub-code object:
+      Code object: __annotate__
+        File: neurova/tool_executor.py
+        Line: 397
+        Args: ('format',)
+        Locals: ('format',)
+        Names: ('str', 'Dict', 'Any')
+        Constants:
+          0: 2
+          1: 'tool_name'
+          2: 'return'
+    Sub-code object:
+      Code object: _get_builtin_tool_params
+        File: neurova/tool_executor.py
+        Line: 397
+        Args: ('self', 'tool_name')
+        Locals: ('self', 'tool_name', 'builtin_schemas')
+        Names: ('get',)
+        Constants:
+          0: '获取内置工具的参数定义'
+          1: 'memory_search'
+          2: 'parameters'
+          3: 'properties'
+          4: 'query'
+          5: 'category'
+          6: 'limit'
+          7: 'required'
+          8: 'file_read'
+          9: 'file_path'
+          10: 'offset'
+          11: 'encoding'
+          12: 'file_write'
+          13: 'content'
+          14: 'file_create'
+          15: 'file_delete'
+          16: 'file_edit'
+          17: 'old_str'
+          18: 'new_str'
+          19: 'computer_screenshot'
+          20: 'computer_click'
+          21: 'x'
+          22: 'y'
+          23: 'button'
+          24: 'computer_type'
+          25: 'text'
+          26: 'computer_scroll'
+          27: 'scroll_x'
+          28: 'scroll_y'
+          29: 'computer_shell'
+          30: 'command'
+          31: 'emotion_analyze'
+
