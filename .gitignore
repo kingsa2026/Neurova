@@ -1,3 +1,5 @@
+# ==================== 通用排除 ====================
+
 # Python
 __pycache__/
 *.py[cod]
@@ -12,23 +14,20 @@ dist/
 build/
 eggs/
 parts/
-bin/
-var/
-sdist/
 develop-eggs/
 .installed.cfg
 *.egg
+.pytest_cache/
+.coverage
+htmlcov/
 
-# 环境变量（敏感信息！）
-.env
+# Node.js
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
-# 版本控制
-.git/
-.gitignore
-.gitattributes
-.gitmodules
-
-# IDE
+# IDE 和编辑器
 .vscode/
 .idea/
 *.swp
@@ -37,209 +36,166 @@ develop-eggs/
 .DS_Store
 Thumbs.db
 
-# 测试
-.pytest_cache/
-.coverage
-htmlcov/
-*.cover
-tests/
+# 环境变量（敏感信息！）
+.env
+.env.*
+!.env.example
 
 # 日志
-logs/
 *.log
-
-# 数据文件
-data/
-memory/
-neurova/data/
-neurova/memory/
+logs/
 
 # 构建产物
 *.tar.gz
-*.zip
 *.whl
-neurova-*.tar.gz
-neurova-*.zip
 
-# QwenPaw（大型项目）
-QwenPaw-1.1.6/
-QwenPaw-main/
-
-# 临时文件
-*.tmp
+# 编辑器临时文件
 *.bak
+*.tmp
 *.backup
-*.sql
 
-# 测试文件
-test_*.py
-test_*.wav
-test_*.md
-__size_check.py
-_impact_check.py
-*_check.py
+# ==================== 隐藏目录（全部排除） ====================
+.*/
 
-# 输出文件
-*.wav
-*.mp3
-test_output/
-test_mock_*
+# ==================== 根目录临时文件 ====================
 
-# 临时文档
-docs/*_INTEGRATION.md
-example_*.py
+# 调试/检查/修复脚本（仅根目录）
+/_*.py
+/cleanup_redundant.py
+/debug_backend.py
+/debug_import.py
+/demo_closed_loop.py
+/demo_optimization.py
+/diagnose_post_issue.py
+/example_agent_with_tts.py
+/example_channel_tts.py
+/fix_app_py.py
+/fix_centroids.py
+/fix_centroids2.py
+/fix_chatpage.py
+/fix_experts.py
+/longmeval_simple.py
+/migrate_pickle_to_json.py
+/neurova_test.py
+/patch_agent_core.py
+/patch_mem_core.py
+/patch_moe_closure.py
+/quick_test_cu.py
+/reset_admin.py
+/reset_admin_password.py
+/run_audit_tests.py
+/simple_audit.py
+/test_import.py
+/test_simple.py
+/check_admin.py
+/check_agent.py
+/check_and_start.py
+/check_error.py
+/check_import.py
+/check_imports.py
+/final_check.py
+/run_longmeval.py
 
-# 调试和检查脚本
-_*.py
-*_debug*.py
-*_debug*.txt
-*_check*.py
-*_check*.txt
-*_test*.py
-*_test*.txt
-*_error*.txt
-*_output*.txt
-*_diag*.py
-*_patch*.py
-*_verify*.py
-*_admin*.py
-*_start*.py
-*_fix*.py
-*_import*.py
-*_migrate*.py
-*_reset*.py
-*_run*.py
-*_simple*.py
-*_quick*.py
-*_demo*.py
-*_audit*.py
-*_diagnose*.py
-*_cleanup*.py
-*_optimize*.py
-*_example*.py
+# 临时文本输出（仅根目录）
+/*_output*.txt
+/*_err*.txt
+/*_error*.txt
+/*_log*.txt
+/*_debug*.txt
+/*_stderr*.txt
+/*_stdout*.txt
 
-# 具体调试和临时文件
-_cfg.json
-agent_chat_src.txt
-backend_restart_log.txt
-chat.py
-check_agent.py
-check_agent_err.txt
-check_error.py
-cleanup_redundant.py
-debug_backend.py
-demo_closed_loop.py
-demo_optimization.py
-diagnose_post_issue.py
-fix_app_py.py
-fix_centroids.py
-fix_centroids2.py
-fix_chatpage.py
-fix_experts.py
-migrate_pickle_to_json.py
-patch_agent_core.py
-patch_mem_core.py
-patch_moe_closure.py
-run_longmeval.py
-server_stderr_new.txt
-test_err.txt
+# 临时HTML/JS（仅根目录）
+/debug_*.html
+/debug_*.js
+/BROWSER_TEST.js
+
+# 临时脚本（仅根目录）
+/*.ps1
+/*.bat
+
+# 临时报告
+/*_REPORT*.json
+/*_REPORT*.md
+/*_COVERAGE*.md
+/*_AUDIT*.md
+/*_SUMMARY*.md
 
 # 敏感信息
-*.token.json
-token.txt
 .neurova_token.json
+token.txt
+*.token.json
+*.pem
 
-# 测试报告
-*_REPORT*.json
-*_REPORT*.md
-*_SUMMARY*.md
-*_STATUS*.md
-*_INTEGRATION*.md
-*_AUDIT*.md
+# 其他临时文件
+/nul
+/backup_*.zip
+/test_skill*.zip
+/chat.py
+/chat.py.bak
+/_cfg.json
+/agent_chat_src.txt
+/TEST_AGENT_FORM.md
 
-# 临时HTML和JS
-debug_*.html
-debug_*.js
-BROWSER_TEST.js
-
-# 临时PowerShell脚本
-*.ps1
-
-# 临时批处理文件
-*.bat
-
-# 临时PHP文件
-*.php
-
-# 空文件
-nul
-
-# 静态文件（如果不需要版本控制）
-static/
-workspaces/
+# ==================== 排除的目录 ====================
 
 # Agent 工作区
-agent/
-agents/
+/agents/
+/agent/
 
-# 文档（可选）
-# docs/  # 取消注释以跟踪文档目录
-# *.md   # 取消注释以跟踪 Markdown 文件
-!README.md
-!requirements.txt
-!docker-compose.yml
-!docs/**/*.md
+# 大型第三方项目
+/QwenPaw-main/
+/QwenPaw-1.1.6/
+/openhuman-main/
+/flow-kb-sdk/
+/neuUI/liquid-glass-vue-main/
 
-# Docker
-.dockerignore
+# 备份/补丁/其他
+/backups/
+/code_patches/
+/other/
+/session/
+/backup_test_files/
 
-# 系统文件
-.cleanup
-.result
-
-# CodeBuddy
-.codebuddy/
-
-# Trae
-.trae/
-node_modules
+# 部署
+/deploy/
 
 # Web 前端文件夹（仅根目录）
 /web/
 
-# 第三方 SDK（不直接使用，仅参考）
-flow-kb-sdk/happy-notes/
+# 数据和存储
+/data/
+/memory/
+/neurova/data/
+/neurova/memory/
+/neurova/static/
+/neurova/tests/
+/neurova/neurova/
+/neurova/agents/
+/neurova/projects/
+/neurova/.test_deps/
+/tests/
+/backup_reports/
 
-# 备份文件夹
-backups/
+# 文档构建
+/docs/*_INTEGRATION.md
 
-# 测试文件夹（非项目核心代码）
-tests/
-
-# 部署脚本和测试文件
-deploy/
-
-# 所有隐藏文件夹（以 . 开头的文件夹）
-\.*/
-\.learnings/
-
-# 补丁文件目录
-code_patches/
-
-# 其他无关文件夹
-other/
-openhuman-main/
-session/
-
-# 源代码目录（与项目无关联，只忽略根目录的 src/）
-/src/
-
-# LLM 配置文件（敏感信息）
+# ==================== LLM 配置（敏感信息） ====================
 llm_config*
 provider_config*
 *.llm.json
-.env.llm
 api_keys*
 credentials*
 *_secret*
 secret_*.json
+
+# ==================== 允许的特殊文件 ====================
+!.gitignore
+!README.md
+!requirements*.txt
+!docker-compose*.yml
+!Dockerfile
+!Makefile
+!LICENSE
+!docs/**/*.md
+!neuUI/.gitignore

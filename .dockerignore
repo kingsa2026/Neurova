@@ -1,0 +1,96 @@
+# Python相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 测试和覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.coverage.*
+coverage.xml
+*.cover
+
+# 日志文件
+*.log
+logs/
+
+# 数据库文件
+*.db
+*.db-shm
+*.db-wal
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# 文档和报告（不需要打包到镜像）
+docs/
+*.md
+!requirements*.txt
+AUDIT_*.md
+BUG_*.md
+IMPLEMENTATION_*.md
+SCAN_*.md
+REPORT_*.md
+
+# 备份和归档
+backups/
+archive/
+other/
+code_patches/
+
+# 前端构建产物（如果有单独的前端构建过程）
+node_modules/
+dist/
+build/
+
+# 其他
+.monitoring/
+.flow-kb-sdk/
+.QwenPaw-1.1.6/
+
+# Git相关
+.git/
+.gitignore
+.gitattributes
+
+# Docker相关
+Dockerfile*
+docker-compose*.yml
+.dockerignore
