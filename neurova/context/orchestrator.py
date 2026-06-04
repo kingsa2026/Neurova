@@ -37,8 +37,28 @@ class ContextOrchestrator:
     - growth_log_manager, recall_engine
     """
 
-    def __init__(self, agent_ref):
+    def __init__(self, agent_ref, use_pool: bool = True, auto_tag: bool = False):
         self._agent = agent_ref
+        self.use_pool = use_pool
+        self.auto_tag = auto_tag
+        
+        # 初始化 ContextPool（如果启用）
+        if use_pool:
+            from neurova.context_pool import ContextPool
+            
+            # 动态获取 Token 预算
+            model_name = getattr(agent_ref.config, 'llm_model', 'gpt-4')
+            max_tokens = ContextPool.get_token_budget_for_model(model_name)
+            
+            self.context_pool = ContextPool(
+                user_id=getattr(agent_ref, 'user_id', 'default'),
+                agent_id=getattr(agent_ref, 'agent_id', 'default'),
+                max_tokens=max_tokens,
+                auto_tag=auto_tag
+            )
+            logger.info(f"ContextPool 初始化完成，模型: {model_name}，Token 预算: {max_tokens}")
+        else:
+            self.context_pool = None
 
     # ---- 属性代理（方便内部访问） ----
     @property
@@ -189,22 +209,187 @@ class ContextOrchestrator:
             tool_memory_context["auto_execute_result"] = auto_execute_result
         tool_memory_context["tool_decision"] = tool_decision
 
-        context_input = ContextInput(
-            user_message=user_input,
-            system_instructions=tuple(system_instructions),
-            developer_instructions=tuple(developer_instructions),
-            conversation_history=tuple(conversation_context),
-            agent_state={"step": "chat", "agent_name": self.config.name},
-            tool_memory_result=tool_memory_context if tool_memory_context else None,
-            memory=tuple(relevant_memories or []),
-            experience=tuple(experience_items or []),
-            reflection_logs=tuple(reflection_logs),
-            emotion=agent_emotion,
-            runtime_metadata={"time": datetime.now().strftime('%Y年%m月%d日 %H:%M')},
-        )
-
-        collector = ContextCollector()
-        candidate_pool = collector.collect(context_input)
+        # 如果启用 ContextPool，将上下文添加到 ContextPool
+        if self.use_pool and self.context_pool:
+            # 添加系统指令
+            for instruction in system_instructions:
+                self.context_pool.add_context(ContextInput(
+                    source=ContextSource.SYSTEM_INSTRUCTION,
+                    content=instruction,
+                    priority=100
+                ))
+            
+            # 添加开发者指令
+            for instruction in developer_instructions:
+                self.context_pool.add_context(ContextInput(
+                    source=ContextSource.DEVELOPER_INSTRUCTION,
+                    content=instruction,
+                    priority=90
+                ))
+            
+            # 添加用户输入
+            self.context_pool.add_context(ContextInput(
+                source=ContextSource.USER_INPUT,
+                content=user_input,
+                priority=90
+            ))
+            
+            # 添加对话历史
+            for msg in conversation_context:
+                self.context_pool.add_context(ContextInput(
+                    source=ContextSource.CONVERSATION,
+                    content=msg["content"],
+                    priority=60
+                ))
+            
+            # 添加记忆
+            for memory in relevant_memories or []:
+                if isinstance(memory, dict):
+                    content = memory.get("content", str(memory))
+                else:
+                    content = str(memory)
+                self.context_pool.add_context(ContextInput(
+                    source=ContextSource.MEMORY,
+                    content=content,
+                    priority=70
+                ))
+            
+            # 添加经验
+            for experience in experience_items or []:
+                if isinstance(experience, dict):
+                    content = experience.get("content", str(experience))
+                else:
+                    content = str(experience)
+                self.context_pool.add_context(ContextInput(
+                    source=ContextSource.EXPERIENCE,
+                    content=content,
+                    priority=70
+                ))
+            
+            # 添加情感状态
+            if agent_emotion:
+                self.context_pool.add_context(ContextInput(
+                    source=ContextSource.EMOTION,
+                    content=f"用户情感: {agent_emotion.get('label', 'neutral')}",
+                    priority=50
+                ))
+            
+            # 添加反思日志
+            for log in reflection_logs:
+                self.context_pool.add_context(ContextInput(
+                    source=ContextSource.REFLECTION,
+                    content=log.get("lesson", str(log)),
+                    priority=60
+                ))
+            
+            # 使用 ContextPool.draw() 获取相关上下文
+            drawn_contexts = self.context_pool.draw(need=user_input)
+            logger.debug(f"ContextPool.draw() 完成，共 {len(drawn_contexts)} 个上下文")
+            
+            # 将 drawn_contexts 转换为消息格式
+            context = []
+            for ctx in drawn_contexts:
+                if ctx.source == ContextSource.SYSTEM_INSTRUCTION:
+                    context.append({"role": "system", "content": ctx.content})
+                elif ctx.source == ContextSource.DEVELOPER_INSTRUCTION:
+                    context.append({"role": "system", "content": ctx.content})
+                elif ctx.source == ContextSource.USER_INPUT:
+                    context.append({"role": "user", "content": ctx.content})
+                elif ctx.source == ContextSource.CONVERSATION:
+                    context.append({"role": "user", "content": ctx.content})
+                elif ctx.source == ContextSource.MEMORY:
+                    context.append({"role": "system", "content": f"[记忆] {ctx.content}"})
+                elif ctx.source == ContextSource.EXPERIENCE:
+                    context.append({"role": "system", "content": f"[经验] {ctx.content}"})
+                elif ctx.source == ContextSource.EMOTION:
+                    context.append({"role": "system", "content": f"[情感] {ctx.content}"})
+                elif ctx.source == ContextSource.REFLECTION:
+                    context.append({"role": "system", "content": f"[反思] {ctx.content}"})
+                else:
+                    context.append({"role": "system", "content": ctx.content})
+            
+            return context
+        
+        # 如果未启用 ContextPool，使用原有方法
+        # 将所有上下文转换为 ContextInput 对象列表
+        candidate_pool = []
+        
+        # 添加系统指令
+        for instruction in system_instructions:
+            candidate_pool.append(ContextInput(
+                source=ContextSource.SYSTEM_INSTRUCTION,
+                content=instruction,
+                priority=100
+            ))
+        
+        # 添加开发者指令
+        for instruction in developer_instructions:
+            candidate_pool.append(ContextInput(
+                source=ContextSource.DEVELOPER_INSTRUCTION,
+                content=instruction,
+                priority=90
+            ))
+        
+        # 添加用户输入
+        candidate_pool.append(ContextInput(
+            source=ContextSource.USER_INPUT,
+            content=user_input,
+            priority=90
+        ))
+        
+        # 添加对话历史
+        for msg in conversation_context:
+            candidate_pool.append(ContextInput(
+                source=ContextSource.CONVERSATION,
+                content=msg["content"],
+                priority=60
+            ))
+        
+        # 添加记忆
+        for memory in relevant_memories or []:
+            if isinstance(memory, dict):
+                content = memory.get("content", str(memory))
+                metadata = {k: v for k, v in memory.items() if k != "content"}
+            else:
+                content = str(memory)
+                metadata = {}
+            candidate_pool.append(ContextInput(
+                source=ContextSource.MEMORY,
+                content=content,
+                priority=70,
+                metadata=metadata
+            ))
+        
+        # 添加经验
+        for experience in experience_items or []:
+            if isinstance(experience, dict):
+                content = experience.get("content", str(experience))
+            else:
+                content = str(experience)
+            candidate_pool.append(ContextInput(
+                source=ContextSource.EXPERIENCE,
+                content=content,
+                priority=70
+            ))
+        
+        # 添加情感状态
+        if agent_emotion:
+            candidate_pool.append(ContextInput(
+                source=ContextSource.EMOTION,
+                content=f"用户情感: {agent_emotion.get('label', 'neutral')}",
+                priority=50,
+                metadata=agent_emotion
+            ))
+        
+        # 添加反思日志
+        for log in reflection_logs:
+            candidate_pool.append(ContextInput(
+                source=ContextSource.REFLECTION,
+                content=log.get("lesson", str(log)),
+                priority=60,
+                metadata=log
+            ))
+        
         logger.debug(f"候选池构建完成，共 {len(candidate_pool)} 个候选项")
 
         # Phase 3.5: 从候选池构建上下文

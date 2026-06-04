@@ -415,6 +415,10 @@
             </div>
           </div>
         </a-tab-pane>
+        <!-- ===== 上下文池设置 ===== -->
+        <a-tab-pane key="context-pool" tab="上下文池">
+          <ContextPoolSettings />
+        </a-tab-pane>
       </a-tabs>
     </div>
     <!-- 创建 API 密钥弹窗 -->
@@ -468,6 +472,7 @@ import {
 } from '@ant-design/icons-vue'
 import { authAPI } from '@/api/auth'
 import { settingsAPI, type SystemSettings, type SecuritySettings, type BackupInfo } from '@/api/modules/settings'
+import ContextPoolSettings from '@/components/ContextPoolSettings.vue'
 const authStore = useAuthStore()
 const activeTab = ref('profile')
 const isAdmin = computed(() => authStore.currentUser?.role === 'admin')
