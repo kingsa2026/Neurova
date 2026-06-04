@@ -686,6 +686,303 @@ neurova/cognitive_layers/memory_layer/bayesian_eki/
 
 ---
 
+### 🚀 11. 工具层架构 — LLM Router + Context Pool + Tool Memory
+
+Neurova 的工具层不是简单的工具集合，而是一个**统一的智能编排系统**，包含三大核心组件：
+
+#### 🎯 LLM Router — 多模态自适应路由器
+
+> 根据请求类型自动选择最佳LLM模型，支持10种请求类型和10种模型能力
+
+**核心能力**：
+```python
+# 自动检测请求类型并选择模型
+request_type = detect_request_type("帮我画一张夕阳下的海滩")
+# → RequestType.TEXT_TO_IMAGE
+
+result = router.select_model(request_type)
+# → 自动选择支持图片生成的模型（如通义万相、DALL-E 3）
+```
+
+**请求类型支持**：
+| 请求类型 | 说明 | 匹配能力 |
+|----------|------|----------|
+| `CHAT` | 文本聊天 | TEXT |
+| `IMAGE_UNDERSTANDING` | 图像理解 | VISION |
+| `AUDIO_UNDERSTANDING` | 音频理解 | AUDIO |
+| `VIDEO_UNDERSTANDING` | 视频理解 | VIDEO |
+| `TEXT_TO_IMAGE` | 文生图 | IMAGE_GENERATION |
+| `IMAGE_TO_IMAGE` | 图生图 | IMAGE_GENERATION |
+| `TEXT_TO_VIDEO` | 文生视频 | VIDEO_GENERATION |
+| `IMAGE_TO_VIDEO` | 图生视频 | VIDEO_GENERATION |
+| `TEXT_TO_SPEECH` | 语音合成 | TTS |
+| `SPEECH_TO_TEXT` | 语音识别 | STT |
+
+**选择算法**：
+1. **能力匹配**：过滤掉不支持所需能力的模型
+2. **健康检查**：跳过不健康的提供商
+3. **优先级排序**：按优先级权重排序
+4. **响应时间优化**：优先选择响应快的模型
+5. **权重评分**：综合评分选择最佳模型
+
+#### 🧠 Context Pool — 统一上下文管理
+
+> 10种上下文来源、4层压缩策略、多模型格式自动转换
+
+**上下文来源**：
+```python
+class ContextSource(Enum):
+    SYSTEM_INSTRUCTION = "system_instruction"  # 系统指令
+    DEVELOPER_INSTRUCTION = "developer_instruction"  # 开发者指令
+    MEMORY = "memory"  # 记忆检索结果
+    CONVERSATION = "conversation"  # 对话历史
+    EXPERIENCE = "experience"  # 经验知识
+    EMOTION = "emotion"  # 情感状态
+    REFLECTION = "reflection"  # 反思日志
+    TOOL_CALL = "tool_call"  # 工具调用结果
+    MULTIMODAL = "multimodal"  # 多模态内容
+    USER_INPUT = "user_input"  # 用户输入
+```
+
+**核心组件**：
+- **ContextCollector**：优先级排序 + Token预算分配
+- **ContextConverter**：OpenAI ↔ Anthropic 格式自动转换
+- **ContextCompressor**：截断/摘要压缩
+- **ContextPool**：统一接口，build_context_for_model()
+
+**格式自动转换**：
+```python
+# 根据模型名称自动选择格式
+context = pool.build_context_for_model("gpt-4")  # → OpenAI格式
+context = pool.build_context_for_model("claude-3-opus")  # → Anthropic格式
+```
+
+#### 💪 Tool Memory — 肌肉记忆系统
+
+> 三层记忆架构，实现毫秒级工具调用响应
+
+**三层架构**：
+| 层级 | 匹配方式 | 响应速度 | 固化条件 | 遗忘条件 |
+|------|---------|---------|---------|----------|
+| **L1 肌肉记忆** | 关键词精确匹配 | 毫秒级 | 连续成功2次 | 30天未用→L2 |
+| **L2 热路径** | 向量相似度匹配 | 秒级 | 累计成功5次 | 30天未用→L3 |
+| **L3 工具记忆** | 关键词模糊匹配 | 需完整检索 | 初始创建 | 永不删除 |
+
+**闭环学习**：
+```
+用户输入 → 肌肉记忆匹配(L1/L2/L3) → 命中→直接执行
+   │                                                          │
+   └────────── 传统检索兜底 ─────────→ record_tool_usage()
+                                                   │
+                                                   ↓
+                                           肌肉记忆固化（连续成功→升级层级）
+```
+
+**动态置信度阈值**：
+```python
+# 根据工具权重动态计算置信度阈值
+threshold = base_confidence / sqrt(weight_factor)
+
+# 高权重工具(2.5) → 阈值0.51 (更容易自动执行)
+# 低权重工具(0.3) → 阈值1.0 (更难自动执行)
+```
+
+#### 🔌 MCP 集成 — 外部工具无缝接入
+
+> 支持 Model Context Protocol，连接外部工具服务器
+
+**使用方式**：
+```bash
+# 列出已连接的 MCP Server
+neurova mcp list
+
+# 连接新的 MCP Server
+neurova mcp connect my-server --command "python server.py" --args "--port 8080"
+
+# 查看 MCP Server 提供的工具
+neurova mcp tools my-server
+```
+
+**安全机制**：
+- 用户层隔离：每个用户的 MCP 配置独立
+- 工具权限控制：按 Agent 隔离工具访问权限
+- 沙箱执行：MCP 工具在沙箱环境中执行
+
+#### 🎛️ 统一工具编排 — Tool Orchestrator
+
+> 统一管理所有工具，支持链式调用、并行执行、错误恢复
+
+**工具类别**：
+| 类别 | 工具 | 说明 |
+|------|------|------|
+| **搜索类** | web_search, knowledge_search | 网络搜索、知识库检索 |
+| **计算类** | calculator, code_executor | 计算器、代码执行器 |
+| **文件类** | file_read, file_write | 文件读写、知识库管理 |
+| **通信类** | message_send, notification_push | 消息发送、通知推送 |
+| **数据分析类** | data_visualization, report_generator | 数据可视化、报表生成 |
+| **Computer Use** | screenshot, click, type, scroll | 桌面操作、视觉理解 |
+
+**编排能力**：
+- **链式调用**：多工具串联执行（A → B → C）
+- **并行执行**：多工具同时执行，提升效率
+- **错误恢复**：失败自动重试或降级
+- **动态调度**：根据资源状态和优先级动态调整
+
+> **设计理念**：工具层不是孤立的工具集合，而是一个**智能的工具生态系统**。LLM Router 自动选择最佳模型，Context Pool 智能管理上下文，Tool Memory 实现毫秒级响应，MCP 集成外部工具，Tool Orchestrator 统一编排——五大组件协同工作，让 Agent 真正拥有"手"和"大脑"。
+
+---
+
+### 🌊 12. 活水上下文池 — 语义匹配的智能上下文管理
+
+> **核心理念**：上下文不是"死水"，而是"活水"——流动性、新鲜度、纯净性、语义性、按需性
+
+#### 🌊 活水模型比喻
+
+```
+水源（输入）                    水池（存储）                    取水（输出）
+────────────────────────────────────────────────────────────────────────────
+对话历史 ──┐               ┌───────────────────┐           ┌─────────────┐
+记忆检索 ──┼─→ [去重+标签] → [活水上下文池]      → [向量匹配] → [按需取水] → LLM
+情感状态 ──┤               │  水滴 = 内容+标签  │           └─────────────┘
+工具结果 ──┘               │  向量 = 语义编码   │
+                          │  需求 = 字符串     │
+                          └───────────────────┘
+                                    ↑
+                              UnifiedVectorStore
+                            (BAAI/bge-small-zh-v1.5)
+```
+
+#### 🌊 五大活水特性
+
+| 特性 | 说明 | 实现方式 |
+|------|------|----------|
+| **流动性** | 新内容不断流入，旧内容自然流出 | 时间衰减 + TTL过期 |
+| **新鲜度** | 基于时间衰减，保持内容新鲜 | 创建时间戳 + 访问频率 |
+| **纯净性** | 多阶段去重机制，避免重复污染 | 精确去重 + 模式去重 + 语义去重 |
+| **语义性** | 向量语义匹配，理解同义词、近义词 | BAAI/bge-small-zh-v1.5 嵌入 |
+| **按需性** | 需求即字符串，自动匹配带标签的水滴 | 语义向量相似度匹配 |
+
+#### 🔄 多阶段去重机制
+
+**去重阶段**：
+```python
+class DriftSafeDeduplicator:
+    """防漂移去重器 - 多阶段去重，保留关键上下文"""
+    
+    def dedup(self, drops: List[ContextInput], stage: str = 'input') -> List[ContextInput]:
+        """
+        多阶段去重
+        
+        阶段1: 精确去重 (Exact Deduplication)
+        - 完全相同的内容 → 保留最新版本
+        - 安全，不会丢失信息
+        
+        阶段2: 模式去重 (Pattern Deduplication)  
+        - 相同来源 + 相似内容模式 → 保留关键信息
+        - 针对特定来源优化
+        
+        阶段3: 语义去重 (Semantic Deduplication)
+        - 相似语义内容 → 合并或保留最相关
+        - 使用向量相似度阈值 (0.85-0.95)
+        """
+```
+
+**安全去重策略**：
+1. **精确去重优先**：完全相同的内容只保留一份
+2. **保留关键信息**：去重时保留关键上下文
+3. **上下文感知去重**：根据当前查询决定去重策略
+
+#### 🎯 语义向量匹配取水
+
+```python
+# 用户需求 → 语义向量 → 匹配水滴
+query = "用户之前提到的项目进度怎么样？"
+query_embedding = vector_store.encode(query)
+
+# 从活水池中匹配相关水滴
+relevant_drops = pool.search_by_semantic(
+    query_embedding=query_embedding,
+    top_k=10,
+    min_similarity=0.7
+)
+
+# 按相关性排序，返回最相关的上下文
+context = pool.build_context(relevant_drops)
+```
+
+#### ⚖️ Token预算管理
+
+**动态预算分配**：
+```python
+# 根据模型类型分配Token预算
+model_budgets = {
+    "gpt-4": 32000,        # GPT-4: 32K tokens
+    "claude-3-opus": 200000,  # Claude: 200K tokens
+    "deepseek-chat": 32000,   # DeepSeek: 32K tokens
+}
+
+# 优先级分配策略
+budget_allocation = {
+    "system_instruction": 0.2,  # 20% 预算给系统指令
+    "memory": 0.3,              # 30% 预算给记忆检索
+    "conversation": 0.4,        # 40% 预算给对话历史
+    "experience": 0.1,          # 10% 预算给经验知识
+}
+```
+
+#### 🛡️ 防漂移机制
+
+**LLM漂移风险**：
+1. **语义去重阈值过高**：去除看似重复但实际有区别的内容
+2. **时间序列破坏**：去重打乱了对话的时间顺序
+3. **上下文缺失**：去重导致关键上下文丢失
+
+**防漂移策略**：
+```python
+# 1. 保留对话对完整性
+def preserve_conversation_pairs(drops):
+    """确保 user/assistant 对话对完整"""
+    # 不分离 user 和 assistant 的消息
+    
+# 2. 时间序列保护
+def protect_timeline(drops):
+    """保护时间序列完整性"""
+    # 按时间戳排序，不打乱顺序
+    
+# 3. 关键上下文保留
+def preserve_key_context(drops, query):
+    """保留与查询相关的关键上下文"""
+    # 相关内容使用更严格的去重阈值
+```
+
+#### 📊 实际应用场景
+
+1. **长对话管理**：自动去重重复内容，保留关键上下文
+2. **多轮对话**：跨会话记忆检索，语义匹配相关历史
+3. **工具调用结果**：智能压缩工具返回的大量数据
+4. **多模态内容**：统一管理文本、图片、音频、视频上下文
+5. **模型切换**：自动转换上下文格式（OpenAI ↔ Anthropic）
+
+#### 🔧 API 集成
+
+```python
+# 获取上下文池设置
+GET /api/v1/context/pool-settings
+
+# 更新上下文池设置
+PUT /api/v1/context/pool-settings
+
+# 获取特定模型的Token预算
+GET /api/v1/context/pool-settings/token-budget/{model_name}
+
+# 测试Token预算计算
+POST /api/v1/context/pool-settings/test-budget
+```
+
+> **设计理念**：活水上下文池不是简单的上下文缓存，而是一个**智能的上下文生态系统**。它像活水一样流动，像大脑一样思考，像水库一样调节——通过语义匹配理解用户需求，通过多阶段去重保持纯净，通过Token预算管理资源，通过防漂移机制保证质量。这是Neurova独有的上下文管理创新。
+
+---
+
 ## 目录
 
 - [NeuCova 独特特点](#-neucova-独特特点)
@@ -699,6 +996,8 @@ neurova/cognitive_layers/memory_layer/bayesian_eki/
   - [8. ToolMemory 闭环学习](#8-toolmemory-闭环学习)
   - [9. 强大的工具系统](#9-强大的工具系统--computer-use--cli--skill-生态)
   - [10. 贝叶斯 EKI 认知优化器](#10-贝叶斯-eki-认知优化器)
+  - [11. 工具层架构 — LLM Router + Context Pool + Tool Memory](#11-工具层架构--llm-router--context-pool--tool-memory)
+  - [12. 活水上下文池 — 语义匹配的智能上下文管理](#12-活水上下文池--语义匹配的智能上下文管理)
 - [🧪 Neutesting 测试框架](#️-neutesting-测试框架)
   - [测试覆盖率统计](#测试覆盖率统计)
   - [已修复的 Bug](#已修复的-bug)
