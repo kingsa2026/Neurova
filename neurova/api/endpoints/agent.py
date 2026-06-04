@@ -16,6 +16,7 @@ Agent 管理接口 - Agent Endpoint
 import datetime
 import json
 import logging
+import os
 from pathlib import Path
 import time
 import traceback
@@ -23,7 +24,8 @@ import typing
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import Path as FastAPIPath
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -161,7 +163,7 @@ async def list_agents(request: Request):
 
 
 @router.get("/{agent_id}", response_model=AgentInfo)
-async def get_agent(request: Request, agent_id: str = Path(...)):
+async def get_agent(request: Request, agent_id: str = FastAPIPath(...)):
     """获取 Agent 详情"""
     request_id = _get_request_id(request)
 
@@ -194,10 +196,13 @@ async def create_agent(request: Request, body: CreateAgentRequest):
         from neurova.agent_core import Agent, AgentConfig
 
         agent_id = str(uuid.uuid4())[:8]
+        workspace_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "agent_workspaces", agent_id)
+        os.makedirs(workspace_path, exist_ok=True)
         config = AgentConfig(
             name=body.name,
             agent_id=agent_id,
             enable_memory=body.enable_memory,
+            workspace_path=workspace_path,
         )
 
         agent = Agent(config=config)
@@ -217,7 +222,7 @@ async def create_agent(request: Request, body: CreateAgentRequest):
 
 
 @router.delete("/{agent_id}")
-async def delete_agent(request: Request, agent_id: str = Path(...)):
+async def delete_agent(request: Request, agent_id: str = FastAPIPath(...)):
     """删除 Agent"""
     request_id = _get_request_id(request)
 
@@ -244,7 +249,7 @@ async def delete_agent(request: Request, agent_id: str = Path(...)):
 
 
 @router.get("/{agent_id}/stats")
-async def get_agent_stats(request: Request, agent_id: str = Path(...)):
+async def get_agent_stats(request: Request, agent_id: str = FastAPIPath(...)):
     """获取 Agent 统计"""
     request_id = _get_request_id(request)
 
@@ -273,7 +278,7 @@ async def get_agent_stats(request: Request, agent_id: str = Path(...)):
 
 
 @router.post("/{agent_id}/switch")
-async def switch_agent(request: Request, agent_id: str = Path(...)):
+async def switch_agent(request: Request, agent_id: str = FastAPIPath(...)):
     """切换默认 Agent"""
     request_id = _get_request_id(request)
 
@@ -291,7 +296,7 @@ async def switch_agent(request: Request, agent_id: str = Path(...)):
 
 
 @router.get("/{agent_id}/constitution")
-async def get_constitution(request: Request, agent_id: str = Path(...)):
+async def get_constitution(request: Request, agent_id: str = FastAPIPath(...)):
     """获取 Agent 宪法"""
     request_id = _get_request_id(request)
 
@@ -312,7 +317,7 @@ async def get_constitution(request: Request, agent_id: str = Path(...)):
 @router.put("/{agent_id}/constitution")
 async def update_constitution(
     request: Request,
-    agent_id: str = Path(...),
+    agent_id: str = FastAPIPath(...),
     body: UpdateConstitutionRequest = Body(...),
 ):
     """更新 Agent 宪法"""
@@ -334,7 +339,7 @@ async def update_constitution(
 @router.post("/{agent_id}/decision")
 async def make_decision(
     request: Request,
-    agent_id: str = Path(...),
+    agent_id: str = FastAPIPath(...),
     body: DecisionRequest = Body(...),
 ):
     """请求 Agent 做出决策"""
@@ -367,7 +372,7 @@ async def make_decision(
 
 
 @router.post("/{agent_id}/rebuild-loop")
-async def rebuild_loop(request: Request, agent_id: str = Path(...), model: str = Query(default=None)):
+async def rebuild_loop(request: Request, agent_id: str = FastAPIPath(...), model: str = Query(default=None)):
     """重建 Agent Loop（热切换模型）"""
     request_id = _get_request_id(request)
 

@@ -30,7 +30,6 @@ from neurova.skills.models import (
 
 # skills imports
 import neurova.skills.evolution_engine
-import neurova.skills.experience_caller
 import neurova.skills.hub_client
 import neurova.skills.manifest
 import neurova.skills.market_searcher

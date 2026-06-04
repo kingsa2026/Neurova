@@ -366,9 +366,10 @@ class PostChatPipeline:
                     success=len(tool_messages) > 0,
                 )
 
-            # 再通过 experience_caller 记录
+            # 再通过 PatternCrystallizer 记录经验（替代已删除的 experience_caller）
             if len(tool_messages) > 0:
-                evolution.experience_caller.record(
+                # 使用 evolution 的 on_experience_recorded 方法记录经验
+                evolution.on_experience_recorded(
                     text=f"用户: {user_input}\n助手: {reply}",
                     task=user_input,
                     tools=tools_used,
