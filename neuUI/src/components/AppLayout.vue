@@ -1,22 +1,25 @@
 <template>
-  <a-layout >
+  <a-layout class="app-layout">
     <AppSidebar />
     <a-layout>
       <AppHeader />
-      <a-layout-content >
+      <a-layout-content class="app-content">
         <router-view />
       </a-layout-content>
     </a-layout>
   </a-layout>
 </template>
+
 <script setup lang="ts">
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
 </script>
+
 <style scoped>
 .app-layout {
   min-height: 100vh;
 }
+
 .app-content {
   margin: 24px;
   padding: 24px;
@@ -28,4 +31,3 @@ import AppHeader from './AppHeader.vue'
   min-height: calc(100vh - 48px);
 }
 </style>
- 

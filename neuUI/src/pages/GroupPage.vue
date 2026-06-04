@@ -1,22 +1,22 @@
 <template>
-  <div >
-    <div >
-      <h2 >
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t">
         <UsergroupAddOutlined :style="{color:'#8b5cf6'}" /> 用户组管理
       </h2>
       <a-btn type="primary" size="small" @click="showCreateModal = true">
         <PlusOutlined />新建组
       </a-btn>
     </div>
-    <div >
-      <div >
-        总组数 <b >{{ stats.total }}</b>
+    <div class="sr">
+      <div class="s glass-effect">
+        总组数 <b class="c1">{{ stats.total }}</b>
       </div>
-      <div >
-        总用户数 <b >{{ stats.users }}</b>
+      <div class="s glass-effect">
+        总用户数 <b class="c1">{{ stats.users }}</b>
       </div>
     </div>
-    <div >
+    <div class="tb glass-effect">
       <a-table
         :columns="cols"
         :data-source="groupList"
@@ -41,7 +41,7 @@
               >
                 {{ member.name?.charAt(0) || 'U' }}
               </a-avatar>
-              <span v-if="r.member_count > 4" >+{{ r.member_count - 4 }}</span>
+              <span v-if="r.member_count > 4" class="more">+{{ r.member_count - 4 }}</span>
             </a-avatar-group>
           </template>
           <template v-if="c.key === 'act'">
@@ -56,6 +56,7 @@
         </template>
       </a-table>
     </div>
+
     <a-modal
       v-model:open="showCreateModal"
       title="新建用户组"
@@ -73,11 +74,13 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, reactive, h } from 'vue';
 import { message } from 'ant-design-vue';
 import { request } from '@/api';
 import { UsergroupAddOutlined, PlusOutlined } from '@ant-design/icons-vue';
+
 interface Group {
   id: string;
   name: string;
@@ -87,18 +90,22 @@ interface Group {
   permissions: string[];
   created_at: string;
 }
+
 interface GroupForm {
   name: string;
   description: string;
 }
+
 const loading = ref(false);
 const showCreateModal = ref(false);
 const groupList = ref<Group[]>([]);
 const stats = ref({ total: 0, users: 0 });
+
 const form = reactive<GroupForm>({
   name: '',
   description: ''
 });
+
 const cols = [
   { title: '组名', dataIndex: 'name' },
   { title: '描述', dataIndex: 'description' },
@@ -106,6 +113,7 @@ const cols = [
   { title: '创建时间', dataIndex: 'created_at', width: 160 },
   { title: '操作', key: 'act', width: 200 }
 ];
+
 const fetchGroups = async () => {
   loading.value = true;
   try {
@@ -138,6 +146,7 @@ const fetchGroups = async () => {
     loading.value = false;
   }
 };
+
 const handleCreate = async () => {
   if (!form.name.trim()) {
     message.warning('请输入组名');
@@ -162,14 +171,17 @@ const handleCreate = async () => {
     message.error('创建失败');
   }
 };
+
 const editGroup = (group: Group) => {
   form.name = group.name;
   form.description = group.description || '';
   showCreateModal.value = true;
 };
+
 const managePermissions = (group: Group) => {
   message.info(`管理组 ${group.name} 的权限`);
 };
+
 const deleteGroup = async (groupId: string) => {
   try {
     const res = await request.delete(`/settings/groups/${groupId}`);
@@ -182,8 +194,10 @@ const deleteGroup = async (groupId: string) => {
     message.error('删除失败');
   }
 };
+
 fetchGroups();
 </script>
+
 <style scoped>
 .pg {
   display: flex;

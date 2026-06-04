@@ -1,13 +1,13 @@
 <template>
-  <div >
-    <div >
-      <h2 ><SafetyOutlined :style="{color:'#ef4444'}"/> 规则管理</h2>
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><SafetyOutlined :style="{color:'#ef4444'}"/> 规则管理</h2>
     </div>
-    <div >
-      <div >规则<b >{{ stats.total }}</b></div>
-      <div >启用<b >{{ stats.enabled }}</b></div>
+    <div class="sr">
+      <div class="s glass-effect">规则<b class="c1">{{ stats.total }}</b></div>
+      <div class="s glass-effect">启用<b class="c1">{{ stats.enabled }}</b></div>
     </div>
-    <div >
+    <div class="tb glass-effect">
       <a-table :columns="cols" :data-source="data" row-key="id" size="middle" :pagination="false">
         <template #bodyCell="{column,record}">
           <template v-if="column.key==='sw'">
@@ -18,12 +18,15 @@
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { SafetyOutlined } from '@ant-design/icons-vue'
+
 const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/rules', () => loadData())
+
 const cols = [
   {title:'名称',dataIndex:'name'},
   {title:'条件',dataIndex:'cond'},
@@ -31,6 +34,7 @@ const cols = [
   {title:'优先级',dataIndex:'pri'},
   {title:'开关',key:'sw',width:70}
 ]
+
 const stats = ref({ total: 24, enabled: 20 })
 const data = ref([
   {id:'1',name:'敏感词过滤',cond:'输入含敏感词',action:'阻止发送+通知',pri:'高',on:true},
@@ -40,6 +44,7 @@ const data = ref([
   {id:'5',name:'非工作时间降级',cond:'22:00-06:00',action:'降低模型优先级',pri:'低',on:false},
   {id:'6',name:'异常检测',cond:'连续错误>5',action:'暂停服务+告警',pri:'高',on:true}
 ])
+
 async function loadData() {
   try {
     const res = await request.get(`/agents/${agentId.value}/rules`)
@@ -49,11 +54,13 @@ async function loadData() {
     }
   } catch { /* 使用静态数据 */ }
 }
+
 onMounted(async () => {
   await initAgent()
   loadData()
 })
 </script>
+
 <style scoped>
 .pg{display:flex;flex-direction:column;gap:14px;}
 .hd{padding:16px 24px;border-radius:12px;}
@@ -63,4 +70,3 @@ onMounted(async () => {
 .s b{font-size:1.4rem;}.c1{color:#ef4444;}
 .tb{padding:20px;border-radius:12px;}
 </style>
- 

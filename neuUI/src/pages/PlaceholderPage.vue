@@ -1,15 +1,16 @@
 <template>
-  <div >
-    <div >
-      <div >
+  <div class="placeholder-page">
+    <div class="placeholder-card glass-effect">
+      <div class="placeholder-icon">
         <component :is="icon" />
       </div>
-      <h2 >{{ title }}</h2>
-      <p >{{ description }}</p>
+      <h2 class="placeholder-title">{{ title }}</h2>
+      <p class="placeholder-desc">{{ description }}</p>
       <a-tag color="blue">{{ module }}</a-tag>
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
@@ -18,10 +19,13 @@ import {
   BuildOutlined,
   AppstoreOutlined,
 } from '@ant-design/icons-vue'
+
 const route = useRoute()
+
 const title = computed(() => (route.meta.title as string) || '页面开发中')
 const module = computed(() => (route.meta.module as string) || '')
 const description = computed(() => '此页面正在开发中，敬请期待。')
+
 const icon = computed(() => {
   const m = module.value
   if (['agents', 'chat'].includes(m)) return AppstoreOutlined
@@ -29,6 +33,7 @@ const icon = computed(() => {
   return CodeOutlined
 })
 </script>
+
 <style scoped>
 .placeholder-page {
   display: flex;
@@ -61,4 +66,3 @@ const icon = computed(() => {
   margin: 0 0 16px;
 }
 </style>
- 

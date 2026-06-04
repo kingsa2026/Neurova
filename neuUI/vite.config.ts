@@ -1,46 +1,44 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import Components from 'unplugin-vue-components/vite'
+import { AntDesignVueResolver } from 'unplugin-vue-components/resolvers'
 import { resolve } from 'path'
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     vue(),
+    Components({
+      resolvers: [AntDesignVueResolver({ importStyle: false })]
+    })
   ],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
-    },
+      'liquid-glass-vue': resolve(__dirname, 'liquid-glass-vue-main/src')
+    }
   },
   server: {
     port: 8100,
-    host: '0.0.0.0',
+    strictPort: true, // 严格固定端口，被占用时直接报错而不自动切换
     proxy: {
-      // SSE 流式接口 - 专用代理规则
-      '/api/v1/chat/stream': {
-        target: 'http://localhost:9527',
-        changeOrigin: true,
-        headers: {
-          'Accept': 'text/event-stream',
-        },
-      },
-      // 通用 API 代理
       '/api': {
         target: 'http://localhost:9527',
         changeOrigin: true,
-      },
-    },
-  },
-  build: {
-    outDir: 'dist',
-    sourcemap: false,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['vue', 'vue-router', 'pinia'],
-          antd: ['ant-design-vue', '@ant-design/icons-vue'],
-        },
-      },
-    },
-  },
+        // 禁用代理缓冲，确保 SSE 流式响应正常工作
+        configure: (proxy, options) => {
+          proxy.on('error', (err, req, res) => {
+            console.log('代理错误:', err)
+          })
+          proxy.on('proxyReq', (proxyReq, req, res) => {
+            console.log('代理请求:', req.method, req.url, '->', options.target + req.url)
+          })
+          // 关键：禁用响应缓冲，让 SSE 数据实时转发
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            proxyRes.headers['Cache-Control'] = 'no-cache'
+            proxyRes.headers['X-Accel-Buffering'] = 'no'
+          })
+        }
+      }
+    }
+  }
 })

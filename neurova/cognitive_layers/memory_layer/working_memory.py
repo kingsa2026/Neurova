@@ -30,8 +30,13 @@ class MemoryItem:
 class WorkingMemoryAugmenter:
     """工作记忆增强器"""
     
-    def __init__(self, capacity: int = 100):
-        self.capacity = capacity
+    def __init__(self, capacity: int = 100, config: Dict[str, Any] = None):
+        if config:
+            self.capacity = config.get("max_items", capacity)
+            self.memory_manager = config.get("memory_manager")
+        else:
+            self.capacity = capacity
+            self.memory_manager = None
         self._items: Dict[str, MemoryItem] = {}
     
     def add(self, key: str, content: Any, importance: float = 0.5) -> bool:

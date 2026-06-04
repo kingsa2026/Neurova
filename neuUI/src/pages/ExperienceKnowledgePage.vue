@@ -1,15 +1,15 @@
 <template>
-  <div >
-    <div >
-      <h2 ><BulbOutlined :style="{color:'#f59e0b'}" /> 经验知识库</h2>
+  <div class="exp-page">
+    <div class="page-hd glass-effect">
+      <h2 class="page-tit"><BulbOutlined :style="{color:'#f59e0b'}" /> 经验知识库</h2>
       <a-tag>Agent: {{ agentId }}</a-tag>
     </div>
-    <div >
-      <div >经验记录<b >{{ stats.count }}</b></div>
-      <div >最佳实践<b >{{ stats.bestPractices }}</b></div>
-      <div >技能排名<b >{{ stats.topRank }}</b></div>
+    <div class="stat-row">
+      <div class="stat glass-effect">经验记录<b class="c-orange">{{ stats.count }}</b></div>
+      <div class="stat glass-effect">最佳实践<b class="c-orange">{{ stats.bestPractices }}</b></div>
+      <div class="stat glass-effect">技能排名<b class="c-orange">{{ stats.topRank }}</b></div>
     </div>
-    <div >
+    <div class="card glass-effect">
       <a-table :columns="cols" :data-source="data" row-key="id" size="middle" :pagination="{pageSize:5}">
         <template #bodyCell="{column,record}">
           <template v-if="column.key==='type'"><a-tag :color="record.tc">{{ record.type }}</a-tag></template>
@@ -26,7 +26,9 @@ import { message } from 'ant-design-vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { BulbOutlined, StarFilled } from '@ant-design/icons-vue'
+
 const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/experience-knowledge', () => loadData())
+
 const msg = message
 const cols = [
   { title: '经验ID', dataIndex: 'id', width: 100 },
@@ -46,6 +48,7 @@ interface ExperienceItem {
 const data = ref<ExperienceItem[]>([])
 const stats = ref({ count: 0, bestPractices: 0, topRank: '--' })
 const loading = ref(false)
+
 async function loadData() {
   loading.value = true
   try {
@@ -69,6 +72,7 @@ async function loadData() {
   } catch { /* keep empty */ }
   finally { loading.value = false }
 }
+
 onMounted(async () => {
   await initAgent()
   loadData()
@@ -84,4 +88,3 @@ onMounted(async () => {
 .c-orange{color:#f59e0b;}
 .card{padding:20px;border-radius:12px;}
 </style>
- 

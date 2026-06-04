@@ -1,11 +1,11 @@
 <template>
-  <div >
-    <div >
-      <div >
+  <div class="pg">
+    <div class="hd glass-effect">
+      <div class="hd-left">
         <MedicineBoxOutlined :style="{ color: '#6366f1' }" />
-        <h2 >睡眠状态</h2>
+        <h2 class="t">睡眠状态</h2>
       </div>
-      <div >
+      <div class="hd-right">
         <a-select
           v-model:value="currentAgentId"
           style="width: 200px"
@@ -28,54 +28,60 @@
         </a-button>
       </div>
     </div>
+
     <!-- 状态卡片 -->
-    <div >
+    <div class="status-grid">
       <div
         v-for="stage in sleepStages"
         :key="stage.id"
-        :
+        class="status-card glass-effect"
+        :class="{ active: sleepStatus?.stage === stage.id }"
         @click="setTargetStage(stage.id)"
       >
-        <div  :style="{ background: stage.color }">
+        <div class="stage-badge" :style="{ background: stage.color }">
           {{ stage.label }}
         </div>
-        <div >
+        <div class="stage-gif">
           <img :src="stage.gif" :alt="stage.label" />
         </div>
-        <div  v-if="sleepStatus?.stage === stage.id">
+        <div class="stage-duration" v-if="sleepStatus?.stage === stage.id">
           {{ formatDuration(sleepStatus.duration_seconds) }}
         </div>
       </div>
     </div>
+
     <!-- 脑波动画 -->
-    <div >
-      <div >
+    <div class="brainwave-container glass-effect">
+      <div class="brainwave-header">
         <h3>脑波活动</h3>
-        <span  :style="{ color: currentStage?.color }">
+        <span class="brainwave-label" :style="{ color: currentStage?.color }">
           {{ sleepStatus?.brainwave_pattern || 'Beta 波' }}
         </span>
       </div>
       <BrainwaveVisualizer :stage="sleepStatus?.stage || 'active'" />
     </div>
+
     <!-- 统计卡片 -->
-    <div >
+    <div class="stats-grid">
       <div
         v-for="stat in statCards"
         :key="stat.id"
+        class="stat-card glass-effect"
         @click="openDetailModal(stat.id)"
       >
-        <div  :style="{ background: stat.color }">
+        <div class="stat-icon" :style="{ background: stat.color }">
           <component :is="stat.icon" />
         </div>
-        <div >
-          <div >{{ stat.value }}</div>
-          <div >{{ stat.label }}</div>
+        <div class="stat-info">
+          <div class="stat-value">{{ stat.value }}</div>
+          <div class="stat-label">{{ stat.label }}</div>
         </div>
-        <div >
+        <div class="stat-arrow">
           <RightOutlined />
         </div>
       </div>
     </div>
+
     <!-- 详情弹窗 -->
     <a-modal
       v-model:open="detailModalVisible"
@@ -98,6 +104,7 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -111,6 +118,7 @@ import DreamInsightDetail from '@/components/sleep/DreamInsightDetail.vue'
 import MemoryMergeDetail from '@/components/sleep/MemoryMergeDetail.vue'
 import ConflictResolutionDetail from '@/components/sleep/ConflictResolutionDetail.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
+
 // 使用 composable
 const { agentId, agentStore, initAgent } = useAgentPage(
   '/agent/:agentId/sleep/status',
@@ -119,12 +127,13 @@ const { agentId, agentStore, initAgent } = useAgentPage(
     loadData()
   }
 )
+
 const currentAgentId = agentId // 别名，保持模板兼容
-const agents = computed(() => agentStore.agents)
 const sleepStatus = ref<SleepStatus | null>(null)
 const detailModalVisible = ref(false)
 const currentDetailType = ref<string>('')
 const detailModalTitle = ref('')
+
 // 睡眠阶段配置
 const sleepStages = [
   { id: 'active' as SleepStage, label: '活跃', color: '#6366f1', gif: '/img/sleep1.gif' },
@@ -132,6 +141,7 @@ const sleepStages = [
   { id: 'rem' as SleepStage, label: '眼动期', color: '#ec4899', gif: '/img/sleep2.gif' },
   { id: 'deep' as SleepStage, label: '深睡', color: '#1e40af', gif: '/img/sleep4.gif' },
 ]
+
 // 统计卡片配置
 const statCards = [
   { id: 'dreams', label: '梦境日志', icon: MessageOutlined, color: '#8b5cf6', value: '0' },
@@ -139,9 +149,11 @@ const statCards = [
   { id: 'merges', label: '合并记忆', icon: MergeCellsOutlined, color: '#6366f1', value: '0' },
   { id: 'conflicts', label: '解决冲突', icon: SafetyCertificateOutlined, color: '#10b981', value: '0' },
 ]
+
 const currentStage = computed(() => 
-  sleepStages.find(s => s.id === sleepStatus.value?.stage)
+  sleepStages.find(s => s.id === sleepStatus?.stage)
 )
+
 // 格式化时长
 function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60)
@@ -152,15 +164,16 @@ function formatDuration(seconds: number): string {
   }
   return `${remainingMinutes}分钟`
 }
+
 // 加载数据
 async function loadData() {
   try {
     const [statusRes, dreamsRes, insightsRes, mergesRes, conflictsRes] = await Promise.all([
       sleepAPI.getStatus(currentAgentId.value),
-      sleepAPI.getDreamLogs(currentAgentId.value, { limit: 1 }),
-      sleepAPI.getDreamInsights(currentAgentId.value, { limit: 1 }),
-      sleepAPI.getMemoryMerges(currentAgentId.value, { limit: 1 }),
-      sleepAPI.getConflictResolutions(currentAgentId.value, { limit: 1 }),
+      sleepAPI.getDreamLogs(currentAgentId, { limit: 1 }),
+      sleepAPI.getDreamInsights(currentAgentId, { limit: 1 }),
+      sleepAPI.getMemoryMerges(currentAgentId, { limit: 1 }),
+      sleepAPI.getConflictResolutions(currentAgentId, { limit: 1 }),
     ])
     sleepStatus.value = statusRes
     statCards[0].value = dreamsRes.total.toString()
@@ -171,6 +184,7 @@ async function loadData() {
     console.error('加载睡眠状态失败:', error)
   }
 }
+
 // 唤醒Agent
 async function wakeAgent() {
   try {
@@ -181,6 +195,7 @@ async function wakeAgent() {
     message.error('唤醒失败')
   }
 }
+
 // 启动睡眠
 async function startSleep() {
   try {
@@ -191,6 +206,7 @@ async function startSleep() {
     message.error('启动睡眠失败')
   }
 }
+
 // 打开详情弹窗
 function openDetailModal(type: string) {
   currentDetailType.value = type
@@ -203,12 +219,14 @@ function openDetailModal(type: string) {
   detailModalTitle.value = typeNames[type] || type
   detailModalVisible.value = true
 }
+
 // 设置目标阶段
 function setTargetStage(stage: SleepStage) {
   if (stage !== 'active') {
     startSleep()
   }
 }
+
 onMounted(() => {
   loadData()
   // 定期刷新（30秒，避免触发限流）
@@ -216,29 +234,36 @@ onMounted(() => {
   return () => clearInterval(interval)
 })
 </script>
+
 <style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
+
 .hd { padding: 16px 24px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; }
 .hd-left { display: flex; align-items: center; gap: 12px; }
 .hd-right { display: flex; gap: 12px; }
 .t { font-size: 1.2rem; color: #e2e8f0; margin: 0; }
+
 .status-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .status-card { padding: 20px; border-radius: 16px; cursor: pointer; transition: all 0.3s ease; position: relative; display: flex; flex-direction: column; align-items: center; }
 .status-card:hover { transform: translateY(-4px); }
 .status-card.active { border: 3px solid #6366f1; box-shadow: 0 0 30px rgba(99, 102, 241, 0.4), inset 0 0 20px rgba(99, 102, 241, 0.1); animation: pulse-glow 2s ease-in-out infinite; }
+
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 30px rgba(99, 102, 241, 0.4), inset 0 0 20px rgba(99, 102, 241, 0.1); }
   50% { box-shadow: 0 0 50px rgba(99, 102, 241, 0.6), inset 0 0 30px rgba(99, 102, 241, 0.15); }
 }
+
 .stage-badge { position: absolute; top: 12px; left: 12px; padding: 4px 12px; border-radius: 20px; color: white; font-size: 0.75rem; font-weight: 600; }
 .stage-gif { width: 100%; aspect-ratio: 1; max-width: 120px; margin: 20px 0; display: flex; align-items: center; justify-content: center; }
 .stage-gif img { width: 100%; height: 100%; object-fit: contain; border-radius: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); transition: all 0.3s ease; }
 .status-card.active .stage-gif img { border: 2px solid rgba(255, 255, 255, 0.5); box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4); transform: scale(1.05); }
 .stage-duration { color: #e2e8f0; font-size: 0.85rem; }
+
 .brainwave-container { padding: 24px; border-radius: 12px; }
 .brainwave-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .brainwave-header h3 { color: #e2e8f0; margin: 0; font-size: 1.1rem; }
 .brainwave-label { font-weight: 600; font-size: 0.9rem; }
+
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .stat-card { padding: 20px; border-radius: 12px; display: flex; align-items: center; gap: 16px; cursor: pointer; transition: all 0.3s ease; }
 .stat-card:hover { transform: translateX(4px); background: rgba(255, 255, 255, 0.06) !important; }
@@ -247,6 +272,7 @@ onMounted(() => {
 .stat-value { color: #e2e8f0; font-size: 1.5rem; font-weight: 700; }
 .stat-label { color: rgba(255, 255, 255, 0.5); font-size: 0.85rem; }
 .stat-arrow { color: rgba(255, 255, 255, 0.3); }
+
 @media (max-width: 1200px) {
   .status-grid { grid-template-columns: repeat(2, 1fr); }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -256,4 +282,3 @@ onMounted(() => {
   .stats-grid { grid-template-columns: 1fr; }
 }
 </style>
- 

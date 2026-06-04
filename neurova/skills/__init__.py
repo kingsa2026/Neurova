@@ -29,6 +29,7 @@ from neurova.skills.models import (
 )
 
 # skills imports
+import neurova.skills.auto_skill_improver
 import neurova.skills.evolution_engine
 import neurova.skills.hub_client
 import neurova.skills.manifest

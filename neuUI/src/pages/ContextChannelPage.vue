@@ -1,42 +1,45 @@
 <template>
-  <div >
-    <div >
-      <h2 ><ShareAltOutlined :style="{ color: '#06b6d4' }" /> 渠道上下文共享</h2>
-      <div >
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><ShareAltOutlined :style="{ color: '#06b6d4' }" /> 渠道上下文共享</h2>
+      <div class="hd-actions">
         <a-button @click="loadConfig" :loading="loading"><ReloadOutlined /> 刷新</a-button>
         <a-button type="primary" @click="handleToggleSharing" :loading="saving">
           {{ sharingConfig.enabled ? '禁用共享' : '启用共享' }}
         </a-button>
       </div>
     </div>
-    <div >
-      <div >
-        <ShareAltOutlined  />
-        <div >
-          <div >{{ sharingConfig.enabled ? '已启用' : '已禁用' }}</div>
-          <div >共享状态</div>
+
+    <div class="sr">
+      <div class="s glass-effect">
+        <ShareAltOutlined class="s-icon" />
+        <div class="s-info">
+          <div class="s-num">{{ sharingConfig.enabled ? '已启用' : '已禁用' }}</div>
+          <div class="s-label">共享状态</div>
         </div>
       </div>
-      <div >
-        <LinkOutlined  />
-        <div >
-          <div >{{ sharingConfig.shared_channels?.length || 0 }}</div>
-          <div >共享渠道数</div>
+      <div class="s glass-effect">
+        <LinkOutlined class="s-icon" />
+        <div class="s-info">
+          <div class="s-num">{{ sharingConfig.shared_channels?.length || 0 }}</div>
+          <div class="s-label">共享渠道数</div>
         </div>
       </div>
-      <div >
-        <ApiOutlined  />
-        <div >
-          <div >{{ availableChannels.length }}</div>
-          <div >可用渠道</div>
+      <div class="s glass-effect">
+        <ApiOutlined class="s-icon" />
+        <div class="s-info">
+          <div class="s-num">{{ availableChannels.length }}</div>
+          <div class="s-label">可用渠道</div>
         </div>
       </div>
     </div>
+
     <a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" style="margin-bottom: 16px" />
     <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
-    <div v-if="!loading" >
+
+    <div v-if="!loading" class="content">
       <!-- 共享配置 -->
-      <div >
+      <div class="section glass-effect">
         <h3><SettingOutlined /> 共享配置</h3>
         <a-form layout="vertical" style="max-width: 600px">
           <a-form-item label="共享描述">
@@ -67,8 +70,9 @@
           </a-form-item>
         </a-form>
       </div>
+
       <!-- 可用渠道 -->
-      <div >
+      <div class="section glass-effect">
         <h3><ApiOutlined /> 可用渠道</h3>
         <a-list :data-source="availableChannels" size="small" bordered>
           <template #renderItem="{ item }">
@@ -89,8 +93,9 @@
           </template>
         </a-list>
       </div>
+
       <!-- 共享状态 -->
-      <div >
+      <div class="section glass-effect">
         <h3><InfoCircleOutlined /> 共享状态</h3>
         <a-descriptions bordered :column="2" v-if="statusData">
           <a-descriptions-item label="启用状态">
@@ -107,6 +112,7 @@
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
@@ -119,15 +125,18 @@ import {
   InfoCircleOutlined,
 } from '@ant-design/icons-vue'
 import { channelSharingAPI } from '@/api/modules/channel_sharing'
+
 const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
 const error = ref('')
+
 const sharingConfig = reactive({
   enabled: false,
   description: '',
   shared_channels: [] as string[],
 })
+
 const availableChannels = ref<string[]>([])
 interface StatusInfo {
   enabled?: boolean
@@ -135,7 +144,9 @@ interface StatusInfo {
   last_updated?: string
   config_version?: string
 }
+
 const statusData = ref<StatusInfo | null>(null)
+
 const channelLabels: Record<string, string> = {
   feishu: '飞书',
   wechat: '微信',
@@ -144,14 +155,18 @@ const channelLabels: Record<string, string> = {
   discord: 'Discord',
   telegram: 'Telegram',
 }
+
 const channelColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']
+
 function getChannelLabel(channel: string) {
   return channelLabels[channel] || channel
 }
+
 function getChannelColor(channel: string) {
   const index = availableChannels.value.indexOf(channel) % channelColors.length
   return channelColors[index]
 }
+
 async function loadConfig() {
   loading.value = true
   error.value = ''
@@ -161,6 +176,7 @@ async function loadConfig() {
       channelSharingAPI.getAvailableChannels().catch(() => ({ data: [] })),
       channelSharingAPI.getStatus().catch(() => ({ data: null })),
     ])
+
     if (configRes.data) {
       Object.assign(sharingConfig, {
         enabled: configRes.data.enabled || false,
@@ -168,9 +184,11 @@ async function loadConfig() {
         shared_channels: configRes.data.shared_channels || [],
       })
     }
+
     if (channelsRes.data) {
       availableChannels.value = Array.isArray(channelsRes.data) ? channelsRes.data : []
     }
+
     if (statusRes.data) {
       statusData.value = statusRes.data
     }
@@ -181,6 +199,7 @@ async function loadConfig() {
     loading.value = false
   }
 }
+
 async function handleToggleSharing() {
   saving.value = true
   try {
@@ -200,6 +219,7 @@ async function handleToggleSharing() {
     saving.value = false
   }
 }
+
 async function handleSaveConfig() {
   saving.value = true
   try {
@@ -220,6 +240,7 @@ async function handleSaveConfig() {
     saving.value = false
   }
 }
+
 async function handleTestSharing() {
   testing.value = true
   try {
@@ -239,10 +260,12 @@ async function handleTestSharing() {
     testing.value = false
   }
 }
+
 onMounted(() => {
   loadConfig()
 })
 </script>
+
 <style scoped>
 .pg {
   display: flex;
@@ -250,6 +273,7 @@ onMounted(() => {
   gap: 16px;
   padding: 24px;
 }
+
 .hd {
   padding: 14px 24px;
   border-radius: 12px;
@@ -257,10 +281,12 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
 }
+
 .hd-actions {
   display: flex;
   gap: 8px;
 }
+
 .t {
   font-size: 1.2rem;
   color: #e2e8f0;
@@ -269,11 +295,13 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
 }
+
 .sr {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
+
 .s {
   padding: 20px;
   border-radius: 12px;
@@ -281,33 +309,40 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
 }
+
 .s-icon {
   font-size: 2rem;
   color: #06b6d4;
 }
+
 .s-info {
   flex: 1;
 }
+
 .s-num {
   font-size: 1.5rem;
   font-weight: 700;
   color: #e2e8f0;
   line-height: 1;
 }
+
 .s-label {
   font-size: 0.875rem;
   color: rgba(255, 255, 255, 0.6);
   margin-top: 4px;
 }
+
 .content {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
+
 .section {
   padding: 20px;
   border-radius: 12px;
 }
+
 .section h3 {
   margin: 0 0 16px 0;
   color: #e2e8f0;
@@ -316,4 +351,3 @@ onMounted(() => {
   gap: 8px;
 }
 </style>
- 

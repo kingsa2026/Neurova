@@ -1,30 +1,30 @@
 <template>
-  <div >
-    <div >
-      <h2 ><HeartOutlined :style="{color:'#f472b6'}"/> 情绪分析</h2>
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><HeartOutlined :style="{color:'#f472b6'}"/> 情绪分析</h2>
     </div>
-    <div >
-      <div >当前<b >{{ currentEmotion }}</b></div>
-      <div >波动<b >{{ volatility }}</b></div>
-      <div >触发<b >{{ triggersCount }}</b></div>
+    <div class="sr">
+      <div class="s glass-effect">当前<b class="c1">{{ currentEmotion }}</b></div>
+      <div class="s glass-effect">波动<b class="c1">{{ volatility }}</b></div>
+      <div class="s glass-effect">触发<b class="c1">{{ triggersCount }}</b></div>
     </div>
-    <div >
-      <div >
+    <div class="grid">
+      <div class="chart glass-effect">
         <h4>情绪雷达</h4>
         <canvas ref="c"></canvas>
       </div>
-      <div >
+      <div class="list glass-effect">
         <h4>历史记录</h4>
-        <div v-for="h in history" :key="h.id" >
-          <div  :style="{background:h.color}"></div>
+        <div v-for="h in history" :key="h.id" class="hitem">
+          <div class="hdot" :style="{background:h.color}"></div>
           <div>
-            <div >
-              <span >{{ h.emotion }}</span>
-              <span >{{ h.time }}</span>
+            <div class="hrow">
+              <span class="hem">{{ h.emotion }}</span>
+              <span class="htime">{{ h.time }}</span>
             </div>
-            <div >{{ h.trigger }}</div>
-            <div >
-              <div  :style="{width:h.intensity+'%',background:h.color}"></div>
+            <div class="htrigger">{{ h.trigger }}</div>
+            <div class="hbar">
+              <div class="hbf" :style="{width:h.intensity+'%',background:h.color}"></div>
               <span>{{ h.intensity }}%</span>
             </div>
           </div>
@@ -33,17 +33,20 @@
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { request } from '@/api'
-import { emotionAPI } from '@/api/modules/emotion'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { HeartOutlined } from '@ant-design/icons-vue'
-const { agentId, initAgent } = useAgentPage('/agent/:agentId/emotion', () => loadData())
+
+const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/emotion', () => loadData())
+
 const c = ref<HTMLCanvasElement>()
 const currentEmotion = ref('愉悦')
 const volatility = ref('低')
 const triggersCount = ref('3')
+
 const history = ref([
   { id: 1, emotion: '愉悦', trigger: '用户正面反馈', intensity: 85, time: '2分钟前', color: '#f472b6' },
   { id: 2, emotion: '好奇', trigger: '新类型问题', intensity: 65, time: '15分钟前', color: '#a78bfa' },
@@ -51,6 +54,7 @@ const history = ref([
   { id: 4, emotion: '满足', trigger: '任务完成确认', intensity: 78, time: '2小时前', color: '#34d399' },
   { id: 5, emotion: '困惑', trigger: '模糊指令', intensity: 55, time: '4小时前', color: '#fbbf24' }
 ])
+
 function draw() {
   const canvas = c.value
   if (!canvas) return
@@ -114,49 +118,19 @@ function draw() {
     ctx.fill()
   })
 }
+
 async function loadData() {
   try {
-    const res = await emotionAPI.getAgentEmotion(agentId.value)
-    const d = (res as { data?: Record<string, unknown> })?.data
-    if (d) {
-      if (d.emotion) currentEmotion.value = d.emotion as string
-      if (d.volatility) volatility.value = d.volatility as string
-      const triggers = d.triggers as unknown[]
-      if (triggers?.length) triggersCount.value = String(triggers.length)
-      const moodHistory = d.mood_history as { emotion: string; intensity: number; timestamp: string }[]
-      if (moodHistory?.length) {
-        const emotionColors: Record<string, string> = {
-          joy: '#f472b6', sadness: '#60a5fa', anger: '#ef4444', fear: '#fbbf24',
-          surprise: '#a78bfa', love: '#ec4899', hope: '#34d399', neutral: '#94a3b8',
-        }
-        history.value = moodHistory.map((h, i) => ({
-          id: i + 1,
-          emotion: h.emotion || '中性',
-          trigger: (triggers?.[i] as string) || '',
-          intensity: Math.round((h.intensity || 0) * 100),
-          time: h.timestamp || '',
-          color: emotionColors[h.emotion] || '#94a3b8',
-        }))
-      }
-      await nextTick()
-      draw()
+    const res = await request.get(`/agents/${agentId.value}/emotion`)
+    if (res.code === 0 && res.data) {
+      if (res.data.current_emotion) currentEmotion.value = res.data.current_emotion
+      if (res.data.volatility) volatility.value = res.data.volatility
+      if (res.data.triggers_count) triggersCount.value = res.data.triggers_count
+      if (res.data.history?.length) history.value = res.data.history
     }
-  } catch {
-    try {
-      const res = await request.get(`/agents/${agentId.value}/emotion`)
-      const d = (res as { data?: Record<string, unknown> })?.data
-      if (d) {
-        if (d.current_emotion) currentEmotion.value = d.current_emotion as string
-        if (d.volatility) volatility.value = d.volatility as string
-        if (d.triggers_count) triggersCount.value = d.triggers_count as string
-        const hist = d.history as { id: number; emotion: string; trigger: string; intensity: number; time: string; color: string }[]
-        if (hist?.length) history.value = hist
-        await nextTick()
-        draw()
-      }
-    } catch { /* 使用静态数据 */ }
-  }
+  } catch { /* 使用静态数据 */ }
 }
+
 onMounted(async () => {
   await initAgent()
   loadData()
@@ -164,6 +138,7 @@ onMounted(async () => {
   draw()
 })
 </script>
+
 <style scoped>
 .pg {
   display: flex;
@@ -280,4 +255,3 @@ onMounted(async () => {
   }
 }
 </style>
- 

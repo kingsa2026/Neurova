@@ -1,113 +1,119 @@
 <template>
-  <div >
+  <div class="dashboard-page">
     <!-- 欢迎区域 -->
-    <div >
-      <div >
-        <h1 >
+    <div class="welcome-section glass-effect">
+      <div class="welcome-left">
+        <h1 class="welcome-title">
           你好，{{ username }}
-          <span >👋</span>
+          <span class="welcome-wave">👋</span>
         </h1>
-        <p >欢迎回到 Neurova 智能平台 · {{ formattedDate }}</p>
+        <p class="welcome-sub">欢迎回到 Neurova 智能平台 · {{ formattedDate }}</p>
         <a-alert v-if="dashError" :message="dashError" type="error" show-icon closable style="margin-top:8px" />
       </div>
-      <div >
-        <div  @click="$router.push('/agents/create')">
+      <div class="welcome-right">
+        <div class="quick-badge" @click="$router.push('/agents/create')">
           <PlusOutlined /> 新建 Agent
         </div>
-        <div  @click="$router.push('/chat')">
+        <div class="quick-badge" @click="$router.push('/chat')">
           <MessageOutlined /> 开始对话
         </div>
       </div>
     </div>
+
     <!-- 统计卡片行 -->
-    <div >
+    <div class="stat-row">
       <div
         v-for="stat in stats"
         :key="stat.key"
+        class="stat-card glass-effect"
         :style="{ '--accent': stat.color }"
       >
-        <div >
+        <div class="stat-card__icon">
           <component :is="stat.icon" />
         </div>
-        <div >
-          <span >{{ stat.label }}</span>
-          <span >{{ stat.value }}</span>
-          <span >
-            <CaretUpOutlined v-if="stat.trend > 0"  />
-            <CaretDownOutlined v-else  />
+        <div class="stat-card__content">
+          <span class="stat-card__label">{{ stat.label }}</span>
+          <span class="stat-card__value">{{ stat.value }}</span>
+          <span class="stat-card__trend">
+            <CaretUpOutlined v-if="stat.trend > 0" class="trend-up" />
+            <CaretDownOutlined v-else class="trend-down" />
             {{ Math.abs(stat.trend) }}% vs 上周
           </span>
         </div>
       </div>
     </div>
+
     <!-- 主内容行 -->
-    <div >
+    <div class="main-row">
       <!-- 左侧：图表 + 快捷操作 -->
-      <div >
+      <div class="main-left">
         <!-- Token 消耗趋势图表 -->
-        <div >
-          <div >
+        <div class="chart-card glass-effect">
+          <div class="chart-header">
             <h3>Token 消耗趋势</h3>
             <a-radio-group v-model:value="chartRange" size="small">
               <a-radio-button value="7d">7 天</a-radio-button>
               <a-radio-button value="30d">30 天</a-radio-button>
             </a-radio-group>
           </div>
-          <div >
-            <canvas ref="tokenChartRef" ></canvas>
+          <div class="chart-container">
+            <canvas ref="tokenChartRef" class="token-chart"></canvas>
           </div>
         </div>
+
         <!-- 快捷操作 -->
-        <div >
+        <div class="actions-card glass-effect">
           <h3>快捷操作</h3>
-          <div >
-            <div  v-for="a in quickActions" :key="a.key" @click="$router.push(a.path)">
-              <div  :style="{ background: a.color + '18', color: a.color }">
+          <div class="action-grid">
+            <div class="action-item" v-for="a in quickActions" :key="a.key" @click="$router.push(a.path)">
+              <div class="action-item__icon" :style="{ background: a.color + '18', color: a.color }">
                 <component :is="a.icon" />
               </div>
-              <span >{{ a.label }}</span>
-              <span >{{ a.desc }}</span>
+              <span class="action-item__label">{{ a.label }}</span>
+              <span class="action-item__desc">{{ a.desc }}</span>
             </div>
           </div>
         </div>
       </div>
+
       <!-- 右侧：最近动态 + 系统状态 -->
-      <div >
+      <div class="main-right">
         <!-- 最近动态 -->
-        <div >
+        <div class="recent-card glass-effect">
           <h3>最近动态</h3>
-          <div  v-if="recentActivities.length > 0">
-            <div  v-for="item in recentActivities" :key="item.id">
-              <div  :style="{ background: item.color }"></div>
-              <div >
-                <span >{{ item.title }}</span>
-                <span >{{ item.time }}</span>
+          <div class="recent-list" v-if="recentActivities.length > 0">
+            <div class="recent-item" v-for="item in recentActivities" :key="item.id">
+              <div class="recent-item__dot" :style="{ background: item.color }"></div>
+              <div class="recent-item__content">
+                <span class="recent-item__title">{{ item.title }}</span>
+                <span class="recent-item__time">{{ item.time }}</span>
               </div>
             </div>
           </div>
-          <div  v-else>
-            <HistoryOutlined  />
+          <div class="recent-empty" v-else>
+            <HistoryOutlined class="empty-icon" />
             <span>暂无最近动态</span>
           </div>
         </div>
+
         <!-- 系统状态 -->
-        <div >
+        <div class="status-card glass-effect">
           <h3>系统状态</h3>
-          <div >
-            <div >
-              <span >API 服务</span>
+          <div class="status-list">
+            <div class="status-item">
+              <span class="status-item__label">API 服务</span>
               <a-badge status="processing" text="运行中" />
             </div>
-            <div >
-              <span >LLM 引擎</span>
+            <div class="status-item">
+              <span class="status-item__label">LLM 引擎</span>
               <a-badge status="processing" text="就绪" />
             </div>
-            <div >
-              <span >记忆系统</span>
+            <div class="status-item">
+              <span class="status-item__label">记忆系统</span>
               <a-badge status="processing" text="正常" />
             </div>
-            <div >
-              <span >技能引擎</span>
+            <div class="status-item">
+              <span class="status-item__label">技能引擎</span>
               <a-badge status="default" text="空闲" />
             </div>
           </div>
@@ -116,6 +122,7 @@
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
@@ -136,14 +143,19 @@ import {
   BarChartOutlined,
   UserOutlined,
 } from '@ant-design/icons-vue'
+
 import { dashboardAPI } from '@/api/modules/dashboard'
+
 const authStore = useAuthStore()
 const username = computed(() => authStore.currentUser?.username || '用户')
+
 const dashLoading = ref(false)
 const dashError = ref('')
+
 // 获取真实数据
 const trendData = ref<number[]>([])
 const recentItems = ref<Record<string, unknown>[]>([])
+
 onMounted(async () => {
   dashLoading.value = true
   try {
@@ -152,6 +164,7 @@ onMounted(async () => {
       dashboardAPI.getTrends(chartRange.value === '7d' ? 7 : 30),
       dashboardAPI.getSystemStats(),
     ])
+
     if (homeRes.status === 'fulfilled' && homeRes.value?.success && homeRes.value.data) {
       const d = homeRes.value.data
       if (d.stats) {
@@ -174,9 +187,11 @@ onMounted(async () => {
     } else if (homeRes.status === 'fulfilled') {
       dashError.value = homeRes.value?.message || '获取数据失败'
     }
+
     if (trendsRes.status === 'fulfilled' && trendsRes.value?.success && trendsRes.value.data?.values) {
       trendData.value = trendsRes.value.data.values
     }
+
     if (statsRes.status === 'fulfilled' && statsRes.value?.success && statsRes.value.data) {
       const sd = statsRes.value.data
       if (sd.agent_count != null) stats.value[0].value = sd.agent_count
@@ -188,16 +203,19 @@ onMounted(async () => {
   } finally {
     dashLoading.value = false
   }
+
   // 绘制图表（在数据加载完成后）
   await nextTick()
   drawChart()
   window.addEventListener('resize', drawChart)
 })
+
 const formattedDate = computed(() => {
   const d = new Date()
   const week = ['日', '一', '二', '三', '四', '五', '六']
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 · 星期${week[d.getDay()]}`
 })
+
 // ─── 统计数据 ───
 const stats = ref([
   { key: 'agents', label: 'Agent 数量', value: 12 as number|string, trend: 20, color: '#60a5fa', icon: RobotOutlined },
@@ -205,6 +223,7 @@ const stats = ref([
   { key: 'tokens', label: 'Token 消耗', value: '1.2M' as number|string, trend: 8, color: '#34d399', icon: ThunderboltOutlined },
   { key: 'calls', label: 'LLM 调用', value: 2048 as number|string, trend: -3, color: '#fbbf24', icon: ApiOutlined },
 ])
+
 // ─── 快捷操作 ───
 const quickActions = [
   { key: 'create', label: '新建 Agent', desc: '创建智能助手', path: '/agents/create', icon: PlusOutlined, color: '#60a5fa' },
@@ -214,6 +233,7 @@ const quickActions = [
   { key: 'memory', label: '记忆管理', desc: '查看记忆数据', path: '/agent/default/memory', icon: DatabaseOutlined, color: '#fb7185' },
   { key: 'settings', label: '系统设置', desc: '配置个性化', path: '/settings', icon: SettingOutlined, color: '#94a3b8' },
 ]
+
 // ─── 最近动态 ───
 const recentActivities = [
   { id: 1, title: 'Agent "智能助手" 完成对话任务', time: '10 分钟前', color: '#60a5fa' },
@@ -222,10 +242,12 @@ const recentActivities = [
   { id: 4, title: '知识库 "项目文档" 已更新', time: '昨天', color: '#fbbf24' },
   { id: 5, title: 'Token 消耗达到日限额 80%', time: '昨天', color: '#fb7185' },
 ]
+
 // ─── Canvas 图表 ───
 const tokenChartRef = ref<HTMLCanvasElement>()
 const chartRange = ref('7d')
 let chartAnimationId = 0
+
 // 图表范围切换 → 重新加载趋势数据
 watch(chartRange, async (range) => {
   try {
@@ -236,29 +258,36 @@ watch(chartRange, async (range) => {
     }
   } catch { /* ignore */ }
 })
+
 function drawChart() {
   const canvas = tokenChartRef.value
   if (!canvas) return
   const ctx = canvas.getContext('2d')
   if (!ctx) return
+
   const dpr = window.devicePixelRatio || 1
   const rect = canvas.getBoundingClientRect()
   canvas.width = rect.width * dpr
   canvas.height = rect.height * dpr
   ctx.scale(dpr, dpr)
+
   const w = rect.width
   const h = rect.height
   const pad = { top: 16, right: 16, bottom: 24, left: 40 }
   const pw = w - pad.left - pad.right
   const ph = h - pad.top - pad.bottom
+
   // 使用真实趋势数据或模拟数据
   const days = chartRange.value === '7d' ? 7 : 30
   const data = trendData.value.length >= days
     ? trendData.value.slice(-days)
     : Array.from({ length: days }, () => Math.floor(Math.random() * 6000 + 2000))
+
   const max = Math.max(...data)
   const gridLines = 4
+
   ctx.clearRect(0, 0, w, h)
+
   // 网格
   ctx.strokeStyle = 'rgba(255,255,255,0.05)'
   ctx.lineWidth = 1
@@ -268,16 +297,19 @@ function drawChart() {
     ctx.moveTo(pad.left, y)
     ctx.lineTo(w - pad.right, y)
     ctx.stroke()
+
     // 标签
     ctx.fillStyle = 'rgba(255,255,255,0.3)'
     ctx.font = '10px -apple-system, sans-serif'
     ctx.textAlign = 'right'
     ctx.fillText(Math.round(max - (max / gridLines) * i).toLocaleString(), pad.left - 6, y + 3)
   }
+
   // 渐变折线
   const gradient = ctx.createLinearGradient(0, pad.top, 0, pad.top + ph)
   gradient.addColorStop(0, 'rgba(96,165,250,0.3)')
   gradient.addColorStop(1, 'rgba(96,165,250,0)')
+
   ctx.beginPath()
   const xStep = pw / (data.length - 1)
   data.forEach((v, i) => {
@@ -286,12 +318,14 @@ function drawChart() {
     if (i === 0) ctx.moveTo(x, y)
     else ctx.lineTo(x, y)
   })
+
   // 面积
   ctx.lineTo(pad.left + xStep * (data.length - 1), pad.top + ph)
   ctx.lineTo(pad.left, pad.top + ph)
   ctx.closePath()
   ctx.fillStyle = gradient
   ctx.fill()
+
   // 线条
   ctx.beginPath()
   data.forEach((v, i) => {
@@ -303,6 +337,7 @@ function drawChart() {
   ctx.strokeStyle = '#60a5fa'
   ctx.lineWidth = 2
   ctx.stroke()
+
   // 点
   data.forEach((v, i) => {
     const x = pad.left + xStep * i
@@ -312,6 +347,7 @@ function drawChart() {
     ctx.fillStyle = '#60a5fa'
     ctx.fill()
   })
+
   // X 轴标签
   ctx.fillStyle = 'rgba(255,255,255,0.3)'
   ctx.font = '10px -apple-system, sans-serif'
@@ -324,11 +360,13 @@ function drawChart() {
     ctx.fillText(`${d.getMonth() + 1}/${d.getDate()}`, x, h - 4)
   }
 }
+
 onUnmounted(() => {
   window.removeEventListener('resize', drawChart)
   cancelAnimationFrame(chartAnimationId)
 })
 </script>
+
 <style scoped>
 .dashboard-page {
   padding: 24px 28px;
@@ -336,6 +374,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 20px;
 }
+
 /* ─── Welcome ─── */
 .welcome-section {
   display: flex;
@@ -386,6 +425,7 @@ onUnmounted(() => {
   border-color: rgba(96, 165, 250, 0.3);
   color: #93c5fd;
 }
+
 /* ─── Stats ─── */
 .stat-row {
   display: grid;
@@ -433,6 +473,7 @@ onUnmounted(() => {
 }
 .trend-up { color: #34d399; }
 .trend-down { color: #fb7185; }
+
 /* ─── Main content ─── */
 .main-row {
   display: grid;
@@ -449,6 +490,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 20px;
 }
+
 /* ─── Chart ─── */
 .chart-card {
   padding: 20px 24px;
@@ -491,6 +533,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
 }
+
 /* ─── Quick Actions ─── */
 .actions-card {
   padding: 20px 24px;
@@ -541,6 +584,7 @@ onUnmounted(() => {
   font-size: 0.72rem;
   color: rgba(255, 255, 255, 0.35);
 }
+
 /* ─── Recent ─── */
 .recent-card,
 .status-card {
@@ -596,6 +640,7 @@ onUnmounted(() => {
   font-size: 2rem;
   opacity: 0.5;
 }
+
 /* ─── Status ─── */
 .status-list {
   display: flex;
@@ -611,6 +656,7 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.6);
 }
+
 /* ─── Responsive ─── */
 @media (max-width: 1200px) {
   .stat-row { grid-template-columns: repeat(2, 1fr); }
@@ -624,4 +670,3 @@ onUnmounted(() => {
   .welcome-section { flex-direction: column; align-items: flex-start; }
 }
 </style>
- 

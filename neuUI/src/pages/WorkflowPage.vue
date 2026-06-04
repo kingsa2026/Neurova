@@ -1,8 +1,8 @@
 <template>
-  <div >
+  <div class="wf-root">
     <!-- 顶部工具栏 -->
-    <div >
-      <h2 ><ApartmentOutlined /> 工作流设计</h2>
+    <div class="wf-toolbar glass-effect">
+      <h2 class="wf-title"><ApartmentOutlined /> 工作流设计</h2>
       <a-space>
         <a-select v-model:value="currentWfId" style="width:180px" :options="wfOptions" @change="loadWorkflow" placeholder="选择工作流" />
         <a-input v-model:value="wfName" placeholder="新工作流名称" style="width:150px" size="small" />
@@ -20,28 +20,29 @@
       </a-space>
       <a-space style="margin-left:auto">
         <a-button size="small" type="text" @click="helpOpen=true"><QuestionCircleOutlined /></a-button>
-        <span >{{ Math.round(zoom * 100) }}%</span>
+        <span class="wf-zoom-label">{{ Math.round(zoom * 100) }}%</span>
         <a-button size="small" shape="circle" @click="zoomOut"><MinusOutlined /></a-button>
         <a-button size="small" shape="circle" @click="zoomIn"><PlusOutlined /></a-button>
         <a-button size="small" @click="fitView"><ExpandOutlined /></a-button>
       </a-space>
     </div>
-    <div >
+
+    <div class="wf-body">
       <!-- 左侧节点面板（AI 内容输出分类） -->
-      <div >
-        <div >🧩 节点库</div>
-        <div v-for="cat in nodeCategories" :key="cat.key" >
-          <div  @click="cat.open=!cat.open">
-            <span  :>▶</span>
-            <span >{{ cat.icon }}</span>
-            <span >{{ cat.label }}</span>
-            <span >{{ cat.items.length }}</span>
+      <div class="wf-panel glass-effect">
+        <div class="panel-title">🧩 节点库</div>
+        <div v-for="cat in nodeCategories" :key="cat.key" class="cat-group">
+          <div class="cat-header" @click="cat.open=!cat.open">
+            <span class="cat-arrow" :class="{open:cat.open}">▶</span>
+            <span class="cat-header-icon">{{ cat.icon }}</span>
+            <span class="cat-header-label">{{ cat.label }}</span>
+            <span class="cat-count">{{ cat.items.length }}</span>
           </div>
-          <div v-show="cat.open" >
-            <div v-for="nt in cat.items" :key="nt.type"  :title="nt.desc" draggable="true" @dragstart="onDragStart($event, nt)">
-              <span  :style="{background:nt.color}"></span>
-              <span >{{ nt.icon }}</span>
-              <span >{{ nt.label }}</span>
+          <div v-show="cat.open" class="node-list">
+            <div v-for="nt in cat.items" :key="nt.type" class="node-item" :title="nt.desc" draggable="true" @dragstart="onDragStart($event, nt)">
+              <span class="ni-dot" :style="{background:nt.color}"></span>
+              <span class="ni-icon">{{ nt.icon }}</span>
+              <span class="ni-label">{{ nt.label }}</span>
             </div>
           </div>
         </div>
@@ -49,8 +50,9 @@
           <a-button size="small" type="dashed" block @click="helpOpen=true" style="font-size:.72rem;color:rgba(255,255,255,0.35)">📖 使用帮助</a-button>
         </div>
       </div>
+
       <!-- 画布 -->
-      <div  @drop="onDrop" @dragover.prevent>
+      <div class="wf-canvas-wrap" @drop="onDrop" @dragover.prevent>
         <VueFlow
           ref="vfRef"
           v-model:nodes="nodes"
@@ -63,6 +65,7 @@
           :snap-grid="[20, 20]"
           :default-edge-options="{ type: 'smoothstep', animated: true, style: { stroke: 'rgba(150,180,210,0.5)', strokeWidth: 1.5 } }"
           fit-view-on-init
+          class="vf-canvas"
           connection-line-style="color:rgba(96,165,250,0.5)"
           @connect="onConnect"
           @viewport-change="onViewportChange"
@@ -78,18 +81,20 @@
           </template>
         </VueFlow>
         <!-- 画布提示 -->
-        <div  v-if="!nodes.length">
-          <div >🖱️</div>
+        <div class="canvas-hint" v-if="!nodes.length">
+          <div class="hint-icon">🖱️</div>
           <div>从左侧<span style="color:#60a5fa">拖拽节点</span>到画布<br>拖拽节点圆点<span style="color:#a78bfa">连线</span> · 滚轮缩放 · Alt+/-缩放</div>
         </div>
       </div>
     </div>
+
     <!-- 节点配置抽屉 -->
     <a-drawer v-model:open="configOpen" :title="'⚙ '+ (configNode?.data?.label || '节点配置')" width="400px" placement="right">
       <template v-if="configNode">
         <a-form layout="vertical" size="small">
           <a-form-item label="节点名称"><a-input v-model:value="configForm.label" /></a-form-item>
           <a-form-item label="节点描述"><a-input v-model:value="configForm.description" placeholder="简要说明该节点的作用" /></a-form-item>
+
           <!-- AI 处理类 -->
           <template v-if="configNode.type==='llm'">
             <a-form-item label="选择 LLM（已联通的服务商）">
@@ -117,6 +122,7 @@
             <a-form-item label="上下文窗口大小"><a-input-number v-model:value="configForm.contextWindow" :min="1" :max="100" style="width:100%" /></a-form-item>
             <a-form-item label="组装策略"><a-radio-group v-model:value="configForm.contextStrategy"><a-radio value="recent">最近N轮</a-radio><a-radio value="summary">摘要压缩</a-radio><a-radio value="relevance">相关性筛选</a-radio></a-radio-group></a-form-item>
           </template>
+
           <!-- 内容生成类 -->
           <!-- LLM 选择器（仅联通且有能力的服务商） -->
           <template v-if="genTypes.includes(configNode.type)">
@@ -146,6 +152,7 @@
             <a-form-item label="分辨率"><a-select v-model:value="configForm.videoRes" :options="[{label:'720p',value:'720p'},{label:'1080p',value:'1080p'}]" /></a-form-item>
             <a-form-item label="帧率"><a-input-number v-model:value="configForm.videoFps" :min="15" :max="60" :step="5" style="width:100%" /></a-form-item>
           </template>
+
           <!-- 后处理类 -->
           <template v-else-if="configNode.type==='format'">
             <a-form-item label="输出格式"><a-select v-model:value="configForm.outFormat" :options="[{label:'纯文本',value:'text'},{label:'Markdown',value:'md'},{label:'JSON',value:'json'},{label:'HTML',value:'html'},{label:'Table',value:'table'}]" /></a-form-item>
@@ -161,6 +168,7 @@
           <template v-else-if="configNode.type==='extract'">
             <a-form-item label="提取目标"><a-textarea v-model:value="configForm.extractTarget" :rows="2" placeholder="描述要提取的内容：如「人名、日期、金额」" /></a-form-item>
           </template>
+
           <!-- 质量控制类 -->
           <template v-else-if="configNode.type==='validate'">
             <a-form-item label="验证规则"><a-textarea v-model:value="configForm.validateRule" :rows="2" placeholder="如：字数 > 100、包含关键词、JSON 格式正确" /></a-form-item>
@@ -174,6 +182,7 @@
             <a-form-item label="过滤规则"><a-textarea v-model:value="configForm.filterRule" :rows="2" placeholder="如：score > 0.7 && !is_sensitive" /></a-form-item>
             <a-form-item label="过滤方向"><a-radio-group v-model:value="configForm.filterPass"><a-radio :value="true">通过符合条件的 → 真出口</a-radio><a-radio :value="false">拦截符合条件的 → 假出口</a-radio></a-radio-group></a-form-item>
           </template>
+
           <!-- 输出分发类 -->
           <template v-else-if="configNode.type==='send'">
             <a-form-item label="发送渠道"><a-select v-model:value="configForm.channel" :options="[{label:'即时通讯',value:'im'},{label:'邮件',value:'email'},{label:'Webhook',value:'webhook'},{label:'API 响应',value:'api'}]" /></a-form-item>
@@ -183,6 +192,7 @@
             <a-form-item label="存储类型"><a-select v-model:value="configForm.storeType" :options="[{label:'数据库',value:'db'},{label:'文件系统',value:'fs'},{label:'向量库',value:'vector'},{label:'缓存',value:'cache'}]" /></a-form-item>
             <a-form-item label="存储键/路径"><a-input v-model:value="configForm.storePath" placeholder="collection/table/file path" /></a-form-item>
           </template>
+
           <!-- 记忆类 -->
           <template v-else-if="configNode.type==='load-mem'">
             <a-form-item label="所属 Agent"><a-select v-model:value="configForm.memAgentId" placeholder="选择 Agent" :options="agentOpts" show-search allow-clear /></a-form-item>
@@ -195,6 +205,7 @@
             <a-form-item label="重要性"><a-slider v-model:value="configForm.memImportance" :min="1" :max="10" /></a-form-item>
             <a-form-item label="过期时间"><a-input-number v-model:value="configForm.memTTL" :min="0" :max="365" placeholder="天，0=永久" style="width:100%" /></a-form-item>
           </template>
+
           <!-- 输入类 -->
           <template v-else-if="configNode.type==='input-text'">
             <a-form-item label="默认文本"><a-textarea v-model:value="configForm.inputDefault" :rows="2" placeholder="默认输入内容（可被上游覆盖）" /></a-form-item>
@@ -205,6 +216,7 @@
           <template v-else-if="configNode.type==='input-audio'||configNode.type==='input-video'">
             <a-form-item label="媒体来源"><a-radio-group v-model:value="configForm.inputSrc"><a-radio value="upload">上传</a-radio><a-radio value="url">URL</a-radio><a-radio value="upstream">上游传递</a-radio></a-radio-group></a-form-item>
           </template>
+
           <!-- 任务类 -->
           <template v-else-if="configNode.type==='task'">
             <a-form-item label="任务描述"><a-textarea v-model:value="configForm.taskDesc" :rows="2" placeholder="描述任务的工作内容" /></a-form-item>
@@ -212,6 +224,7 @@
             <a-form-item label="所需技能"><a-select v-model:value="configForm.skill" placeholder="自动匹配" allow-clear :options="skillOpts" show-search /></a-form-item>
             <a-form-item label="超时(秒)"><a-input-number v-model:value="configForm.timeout" :min="10" :max="3600" style="width:100%" /></a-form-item>
           </template>
+
           <!-- 逻辑控制类 -->
           <template v-else-if="configNode.type==='switch'">
             <a-form-item label="条件表达式"><a-textarea v-model:value="configForm.expression" :rows="2" placeholder="如: $input.score > 0.8 && $input.type === 'article'" /></a-form-item>
@@ -232,6 +245,7 @@
           <template v-else-if="configNode.type==='merge'">
             <a-form-item label="合并策略"><a-radio-group v-model:value="configForm.mergeMode"><a-radio value="waitAll">等候全部</a-radio><a-radio value="waitAny">任一到达即合并</a-radio></a-radio-group></a-form-item>
           </template>
+
           <!-- 触发器 -->
           <template v-else-if="configNode.type==='trigger-cron'">
             <a-form-item label="Cron 表达式"><a-input v-model:value="configForm.cron" placeholder="0 */6 * * *" /></a-form-item>
@@ -247,6 +261,7 @@
         </div>
       </template>
     </a-drawer>
+
     <!-- 使用帮助 -->
     <a-modal v-model:open="helpOpen" title="📖 使用指南" width="520px" :footer="null">
       <div style="color:#cbd5e1;font-size:.84rem;line-height:2">
@@ -257,6 +272,7 @@
         <p style="font-size:.75rem;color:rgba(255,255,255,0.3)">✅ 自动检测死循环 · 重复连线 · 自连接</p>
       </div>
     </a-modal>
+
     <!-- AI 自动设计 -->
     <a-modal v-model:open="aiGenOpen" title="✨ AI 自动设计工作流" width="560px" :footer="null">
       <a-form layout="vertical">
@@ -286,6 +302,7 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, reactive, onMounted, nextTick, h, computed } from 'vue'
 import { message } from 'ant-design-vue'
@@ -297,6 +314,7 @@ import {
   ApartmentOutlined, PlusOutlined, DeleteOutlined, SaveOutlined,
   MinusOutlined, ExpandOutlined, UndoOutlined, QuestionCircleOutlined,
 } from '@ant-design/icons-vue'
+
 // ─── AI 内容输出节点库 ───
 const nodeCategories = reactive([
   { key:'source', icon:'📥', label:'输入源', open:true, items:[
@@ -347,6 +365,7 @@ const nodeCategories = reactive([
     { type:'task', icon:'📋', label:'人工任务', desc:'指派成员执行操作', color:'#ef4444' },
   ]},
 ])
+
 // ─── 表单字段 & 通用类型 ───
 interface NodeConfig {
   label:string; description?:string
@@ -399,13 +418,13 @@ interface NodeConfig {
   // 触发器
   cron?:string; webhookAuth?:string
 }
+
 const vfRef = ref()
 const nodes = ref<Node[]>([])
 const edges = ref<Edge[]>([])
 const zoom = ref(1)
 const selectedNode = ref<string|null>(null)
 const currentWfId = ref('')
-let viewportTimer: ReturnType<typeof setTimeout> | null = null
 const wfName = ref('')
 const wfOptions = ref<{label:string;value:string}[]>([])
 const configOpen = ref(false)
@@ -426,6 +445,7 @@ const helpOpen = ref(false)
 const memberOpts = [{label:'管理员',value:'admin'},{label:'开发者',value:'dev'},{label:'分析师',value:'analyst'}]
 const skillOpts = [{label:'文本处理',value:'text'},{label:'代码生成',value:'code'},{label:'数据分析',value:'data'},{label:'图像识别',value:'vision'}]
 const langOpts = [{label:'中文',value:'zh-CN'},{label:'英文',value:'en'},{label:'日文',value:'ja'},{label:'韩文',value:'ko'},{label:'法文',value:'fr'},{label:'德文',value:'de'},{label:'自动检测',value:'auto'}]
+
 // LLM 服务商+模型列表（仅已联通且有正确能力的）
 interface ProviderModel {
   name?: string
@@ -433,21 +453,27 @@ interface ProviderModel {
   capabilities?: string[]
   caps?: string[]
 }
+
 interface ProviderInfo {
   id: string
   name: string
   models?: (string | ProviderModel)[]
   model_capabilities?: Record<string, string[]>
 }
+
 const providerList = ref<ProviderInfo[]>([])
 const agentOpts = ref<{label:string;value:string}[]>([])
+
 const genTypes = ['gen-text','gen-code','gen-image','gen-video']
 const providerOpts = computed(() => providerList.value.map((p)=>({label:p.name,value:p.id})))
+
 const genCapMap:Record<string,string> = { 'gen-text':'text','gen-code':'text','gen-image':'image_generate','gen-video':'video_generate' }
+
 function genCapLabel(type:string):string {
   const capLabels: Record<string,string> = {text:'文本',image_generate:'图片生成',video_generate:'视频生成'}
   return capLabels[genCapMap[type]]||''
 }
+
 function genModelOpts(type:string):{label:string;value:string;disabled?:boolean}[] {
   const cap = genCapMap[type]||'text'; const pid = configForm.genProviderId||''
   const p = providerList.value.find(x=>x.id===pid)
@@ -458,11 +484,13 @@ function genModelOpts(type:string):{label:string;value:string;disabled?:boolean}
     return {label:name,value:name,disabled:cap!=='text'&&caps.length&&!caps.includes(cap)?true:false}
   })
 }
+
 const llmModelOpts = computed(() => {
   const p = providerList.value.find(x=>x.id===configForm.llmProviderId)
   if(!p?.models) return []
   return p.models.map((m)=>({label:typeof m==='string'?m:(m.name||m.model||''),value:typeof m==='string'?m:(m.name||m.model||'')}))
 })
+
 function onGenPChange(id:string, type:string) {
   configForm.genProviderId = id
   configForm.genModel = ''
@@ -477,6 +505,7 @@ function onGenPChange(id:string, type:string) {
     if(first) configForm.genModel = typeof first==='string'?first:(first.name||first.model||'')
   }
 }
+
 // ─── 撤销 ───
 interface HistoryState {
   nodes: typeof nodes.value
@@ -486,6 +515,7 @@ const history = ref<HistoryState[]>([])
 const canUndo = ref(false)
 function pushHistory() { history.value.push({nodes:JSON.parse(JSON.stringify(nodes.value)),edges:JSON.parse(JSON.stringify(edges.value))}); canUndo.value=true; if(history.value.length>50) history.value.shift() }
 function undo() { if(!canUndo.value)return; const s=history.value.pop()!; nodes.value=s.nodes; edges.value=s.edges; canUndo.value=history.value.length>0 }
+
 // ─── 拖放 ───
 interface NodeType {
   type: string
@@ -494,9 +524,11 @@ interface NodeType {
   icon?: string
   desc?: string
 }
+
 let dragNodeType: NodeType | null = null
 const idC = { v:0 }
 function nid(){return'n_'+(idC.v++)}
+
 function onDragStart(e:DragEvent,nt:NodeType){dragNodeType=nt;e.dataTransfer!.effectAllowed='move'}
 function onDrop(e:DragEvent){
   if(!dragNodeType)return
@@ -517,6 +549,7 @@ function removeNode(id:string){
   nodes.value=[...nodes.value];edges.value=[...edges.value]
   if(selectedNode.value===id)selectedNode.value=null
 }
+
 // ─── 节点渲染（Handle 连线） ───
 interface WorkflowNodeProps {
   id: string
@@ -525,11 +558,13 @@ interface WorkflowNodeProps {
   selected?: boolean
   configure?: () => void
 }
+
 const WorkflowNode = (props: WorkflowNodeProps)=>{
   const d=props.data||{},sel=props.selected
   const c=d.color||'#60a5fa'
   const isT=!!d.type?.startsWith('trigger'),isO=d.type==='output',isS=d.type==='switch',isM=d.type==='merge',isL=d.type==='loop',isF=d.type==='filter'
   const handleStyle = (bg:string) => ({background:bg,border:'2px solid '+bg,width:10,height:10})
+
   const children: ReturnType<typeof h>[]=[
     h('div',{class:'cn-header',style:`background:rgba(${c.slice(1).match(/.{2}/g)!.map(x=>parseInt(x,16)).join(',')},0.12)`,ondblclick:()=>props.configure?.()},[
       h('span',{class:'cn-icon'},d.icon||'◆'),
@@ -556,12 +591,14 @@ const WorkflowNode = (props: WorkflowNodeProps)=>{
   }else if(!isO){
     children.push(h(Handle,{key:'ho',type:'source',position:Position.Right,id:'out',style:handleStyle(c)}))
   }
+
   return h('div',{
     class:'cn-node',style:`border-left:3px solid ${c};${sel?'box-shadow:0 6px 28px rgba(0,0,0,0.5),0 0 0 2px rgba(96,165,250,0.3)':''}`,
     onContextmenu:(e:MouseEvent)=>{e.preventDefault();removeNode(props.id)},
   },children)
 }
 const customNodeTypes:Record<string, typeof WorkflowNode> = { default: WorkflowNode }
+
 // ─── 连线（验证） ───
 function onConnect(cx:Connection){
   if(!cx.source||!cx.target)return
@@ -580,26 +617,15 @@ function hasCycle(from:string,to:string):boolean{
   while(stack.length){const cur=stack.pop()!;if(cur===from)return true;if(vis.has(cur))continue;vis.add(cur);for(const n of adj.get(cur)||[])if(!vis.has(n))stack.push(n)}
   return false
 }
+
 // ─── 交互 ───
 function onNodeSelect({node}:{node:Node}){selectedNode.value=node.id}
 function onNodeDblClick({node}:{node:Node}){openNodeConfig(node.id)}
-function onViewportChange(vp:{zoom:number; x:number; y:number}){
-  zoom.value=vp.zoom
-  // 防抖保存视图状态到后端
-  if(currentWfId.value){
-    if(viewportTimer) clearTimeout(viewportTimer)
-    viewportTimer = setTimeout(()=>{
-      workflowAPI.updateViewport(currentWfId.value,{
-        zoom: vp.zoom,
-        offset_x: Math.round(vp.x),
-        offset_y: Math.round(vp.y)
-      }).catch(()=>{})
-    },500)
-  }
-}
+function onViewportChange(vp:{zoom:number}){zoom.value=vp.zoom}
 function zoomIn(){vfRef.value?.zoomIn?.()}
 function zoomOut(){vfRef.value?.zoomOut?.()}
 function fitView(){vfRef.value?.fitView?.({padding:0.2})}
+
 function openNodeConfig(nodeId:string){
   const n=nodes.value.find(x=>x.id===nodeId);if(!n)return
   configNode.value=n
@@ -612,23 +638,14 @@ function applyConfig(){
   if(!configNode.value)return;const n=nodes.value.find(x=>x.id===configNode.value!.id);if(!n)return
   pushHistory();n.data={...n.data,...configForm};nodes.value=[...nodes.value];message.success('已应用')
 }
+
 // ─── CRUD ───
 async function loadList(){try{const r=await workflowAPI.list();if(r?.success||r?.code===0){const wfs=r.data?.workflows||r.data||[];wfOptions.value=wfs.map((w:Record<string,unknown>)=>({label:(w.name as string)||String(w.id),value:String(w.id)}))}}catch{}}
-async function restoreViewport(id:string){
-  try{
-    const r=await workflowAPI.getViewport(id)
-    if(r?.success||r?.code===0){
-      const vp=r.data
-      if(vp&&vfRef.value){
-        vfRef.value.setViewport({x:vp.offset_x||0,y:vp.offset_y||0,zoom:vp.zoom||1})
-      }
-    }
-  }catch{}
-}
-async function loadWorkflow(id:string){if(!id){nodes.value=[];edges.value=[];return};try{const r=await workflowAPI.get(id);if(r?.success||r?.code===0){const d=r.data;wfName.value=d?.name||'';nodes.value=(d?.nodes||[]).map((n:Record<string,unknown>)=>({...n,data:(n as Node).data||{},width:180,height:64}));edges.value=(d?.edges||[]).map((e:Record<string,unknown>)=>({...e,type:'smoothstep',animated:true,style:{stroke:'rgba(150,180,210,0.5)',strokeWidth:1.5}}));idC.v=nodes.value.length;nextTick(()=>{fitView();restoreViewport(id)})}}catch{}}
+async function loadWorkflow(id:string){if(!id){nodes.value=[];edges.value=[];return};try{const r=await workflowAPI.get(id);if(r?.success||r?.code===0){const d=r.data;wfName.value=d?.name||'';nodes.value=(d?.nodes||[]).map((n:Record<string,unknown>)=>({...n,data:(n as Node).data||{},width:180,height:64}));edges.value=(d?.edges||[]).map((e:Record<string,unknown>)=>({...e,type:'smoothstep',animated:true,style:{stroke:'rgba(150,180,210,0.5)',strokeWidth:1.5}}));idC.v=nodes.value.length;nextTick(()=>fitView())}}catch{}}
 async function createWf(){if(!wfName.value.trim()){message.warning('请输入名称');return};try{const r=await workflowAPI.create({name:wfName.value,nodes:[],edges:[]});if(r?.success||r?.code===0){message.success('已创建');currentWfId.value=r.data?.id||'';await loadList()}}catch(e:unknown){const err=e as {message?:string};message.error(err?.message||'失败')}}
 async function saveWf(){if(!currentWfId.value){message.warning('请先新建或选择');return};try{await workflowAPI.update(currentWfId.value,{name:wfName.value,nodes:nodes.value.map(n=>({id:n.id,type:n.type,position:n.position,data:n.data})),edges:edges.value.map(e=>({id:e.id,source:e.source,target:e.target}))});message.success('已保存')}catch(e:unknown){const err=e as {message?:string};message.error(err?.message||'失败')}}
 async function delWf(){if(!currentWfId.value)return;try{await workflowAPI.delete(currentWfId.value);message.success('已删除');currentWfId.value='';nodes.value=[];edges.value=[];await loadList()}catch(e:unknown){const err=e as {message?:string};message.error(err?.message||'失败')}}
+
 // ─── AI 自动设计 ───
 const aiGenOpen = ref(false)
 const aiGenDesc = ref('')
@@ -641,6 +658,7 @@ interface AIGenResult {
 }
 const aiGenResult = ref<AIGenResult | null>(null)
 const aiGenError = ref('')
+
 async function aiGenerate(save: boolean) {
   if(!aiGenDesc.value.trim()){message.warning('请描述你的工作流需求');return}
   aiGenLoading.value=true;aiGenError.value='';aiGenResult.value=null
@@ -684,6 +702,7 @@ async function aiGenerate(save: boolean) {
   }catch(e:unknown){const err=e as {response?:{data?:{message?:string}};message?:string};aiGenError.value=err?.response?.data?.message||err?.message||'AI 生成失败，请检查后端 LLM 配置'}
   finally{aiGenLoading.value=false;aiGenSaving.value=false}
 }
+
 onMounted(async ()=>{
   loadList()
   // 加载已联通服务商列表
@@ -696,6 +715,7 @@ const onKD=(e:KeyboardEvent)=>{
 }
 onMounted(()=>window.addEventListener('keydown',onKD))
 </script>
+
 <style scoped>
 .wf-root{display:flex;flex-direction:column;height:calc(100vh - 88px);gap:8px;padding:0 0 8px}
 .wf-toolbar{padding:10px 16px;border-radius:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -723,6 +743,7 @@ onMounted(()=>window.addEventListener('keydown',onKD))
 .vf-canvas{width:100%;height:100%}
 .canvas-hint{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:rgba(255,255,255,0.22);font-size:.8rem;pointer-events:none;line-height:1.8}
 .hint-icon{font-size:1.8rem;margin-bottom:6px;opacity:.4}
+
 :deep(.cn-node){background:rgba(20,28,48,0.92);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.08);border-radius:8px;font-size:.73rem;color:#cbd5e1;position:relative;min-width:140px;box-shadow:0 2px 12px rgba(0,0,0,0.25);transition:all .2s;cursor:move}
 :deep(.cn-node:hover){box-shadow:0 4px 20px rgba(0,0,0,0.4)}
 :deep(.cn-header){padding:6px 10px;border-radius:8px 8px 0 0;display:flex;align-items:center;gap:5px;cursor:pointer}
@@ -730,9 +751,9 @@ onMounted(()=>window.addEventListener('keydown',onKD))
 :deep(.cn-title){font-weight:600;font-size:.73rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 :deep(.cn-del){margin-left:auto;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.55rem;color:rgba(255,255,255,0.15);cursor:pointer;transition:all .15s;flex-shrink:0}
 :deep(.cn-del:hover){background:rgba(239,68,68,0.2);color:#ef4444}
+
 :deep(.vue-flow__edge-path){stroke:rgba(150,180,210,0.5)!important}
 :deep(.vue-flow__connection-line){stroke:rgba(96,165,250,0.5)!important;stroke-width:2px}
 :deep(.vue-flow__background){background:rgba(10,15,30,0.55)!important}
 :deep(.vue-flow__controls){display:none}
 </style>
- 

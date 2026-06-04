@@ -1,4 +1,4 @@
-<template><div ><div ><h2 ><UsergroupAddOutlined :style="{color:'#8b5cf6'}"/> 团队管理</h2><a-button type="primary" size="small"><PlusOutlined/>新建团队</a-button></div><div ><div >团队<b >3</b></div><div >成员<b >28</b></div></div><div ><div v-for="t in list" :key="t.id" ><div  :style="{background:t.c+'15',color:t.c}"><TeamOutlined/></div><div ><h4>{{ t.name }}</h4><p>{{ t.desc }}</p></div><div ><span >{{ t.ms }} 成员</span><a-button size="small" type="link">管理</a-button></div></div></div></div></template>
+<template><div class="pg"><div class="hd glass-effect"><h2 class="t"><UsergroupAddOutlined :style="{color:'#8b5cf6'}"/> 团队管理</h2><a-button type="primary" size="small"><PlusOutlined/>新建团队</a-button></div><div class="sr"><div class="s glass-effect">团队<b class="c1">3</b></div><div class="s glass-effect">成员<b class="c1">28</b></div></div><div class="grid"><div v-for="t in list" :key="t.id" class="card glass-effect card-hover"><div class="ci" :style="{background:t.c+'15',color:t.c}"><TeamOutlined/></div><div class="cc"><h4>{{ t.name }}</h4><p>{{ t.desc }}</p></div><div class="cb"><span class="mc">{{ t.ms }} 成员</span><a-button size="small" type="link">管理</a-button></div></div></div></div></template>
 <script setup lang="ts">
 import { ref } from 'vue'
 import { UsergroupAddOutlined, TeamOutlined, PlusOutlined } from '@ant-design/icons-vue'
@@ -19,4 +19,3 @@ const list=ref([{id:'1',name:'前端开发组',desc:'负责 Neurova UI 开发和
 .cb{display:flex;justify-content:space-between;align-items:center;}
 .mc{color:rgba(255,255,255,0.35);font-size:0.78rem;}
 </style>
- 

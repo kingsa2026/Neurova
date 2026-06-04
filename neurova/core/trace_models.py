@@ -32,6 +32,7 @@ class TrajectoryEventType(Enum):
     TOOL_CALL_START = 'tool_call_start'
     TOOL_CALL_END = 'tool_call_end'
     TOOL_CALL_ERROR = 'tool_call_error'
+    OUTPUT_END = 'output_end'
     ERROR = 'error'
     WARNING = 'warning'
     INFO = 'info'

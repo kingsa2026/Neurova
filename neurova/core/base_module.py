@@ -30,13 +30,24 @@ class BaseModule(ABC):
     MODULE_NAME: str = "Base Module"
     MODULE_VERSION: str = "1.0.0"
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, event_bus=None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, event_bus=None, 
+                 module_id: str = None, name: str = None, version: str = None,
+                 description: str = None, dependencies: list = None, **kwargs):
         self._config = config or {}
         self._event_bus = event_bus
         self._state = ModuleState.UNINITIALIZED
         self._state_manager = None
         self._log_manager = None
         self._error_handler = None
+        
+        # 允许通过参数覆盖类属性
+        if module_id:
+            self.MODULE_ID = module_id
+        if name:
+            self.MODULE_NAME = name
+        if version:
+            self.MODULE_VERSION = version
+            
         self._logger = logging.getLogger(f"{self.MODULE_ID}")
 
         # 状态值存储

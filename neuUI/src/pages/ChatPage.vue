@@ -1,213 +1,158 @@
 <template>
-  <div >
+  <div class="chat-page">
     <!-- 顶部栏 -->
-    <div >
-      <a-button type="text"  @click="sidebarOpen = !sidebarOpen">
+    <div class="chat-topbar glass-effect">
+      <a-button type="text" class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
         <MenuFoldOutlined v-if="sidebarOpen" />
         <MenuUnfoldOutlined v-else />
       </a-button>
- 
+
       <!-- 当前 Agent 名称显示 -->
-      <div >
+      <div class="agent-name-badge">
         <a-avatar :size="28" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}">
           {{ (currentAgentName || 'A').charAt(0).toUpperCase() }}
         </a-avatar>
-        <span >{{ currentAgentName || '未选择' }}</span>
-        <!-- 模型选择器 -->
-        <a-dropdown :trigger="['click']" placement="bottomLeft" :getPopupContainer="getPopupContainer">
-          <div  :>
-            <div v-if="activeModel"  />
-            <span >{{ activeModel || '选择模型' }}</span>
-            <DownOutlined  />
-          </div>
-          <template #overlay>
-            <div >
-              <div >
-                <span>选择 LLM 模型</span>
-                <a-button type="text" size="small" @click.stop="loadAvailableModels" :loading="loadingModels">
-                  <ReloadOutlined />
-                </a-button>
-              </div>
-              <a-divider style="margin: 8px 0; border-color: rgba(255,255,255,0.08);" />
-              <div v-if="loadingModels" >加载中...</div>
-              <div v-else-if="providerModelsList.length === 0" >暂无可用模型</div>
-              <div v-else >
-                <a-dropdown
-                  v-for="group in providerModelsList"
-                  :key="group.provider_id"
-                  :trigger="['hover']"
-                  placement="rightTop"
-                  :getPopupContainer="getPopupContainer"
-                >
-                  <div  :>
-                    <span >🏢</span>
-                    <span >{{ group.provider_name }}</span>
-                    <span >{{ group.models.length }}</span>
-                    <RightOutlined  />
-                  </div>
-                  <template #overlay>
-                    <div >
-                      <div >{{ group.provider_name }}</div>
-                      <a-divider style="margin: 6px 0; border-color: rgba(255,255,255,0.08);" />
-                      <div
-                        v-for="m in group.models"
-                        :key="`${group.provider_id}/${m.model}`"
-                        :
-                        @click="handleModelSwitch(group.provider_id, m.model)"
-                      >
-                        <span >{{ m.display_name || m.model }}</span>
-                        <div >
-                          <a-tag v-if="m.capabilities?.includes('vision')" color="blue" size="small">视觉</a-tag>
-                          <a-tag v-if="m.capabilities?.includes('audio')" color="green" size="small">音频</a-tag>
-                          <a-tag v-if="m.capabilities?.includes('video')" color="purple" size="small">视频</a-tag>
-                        </div>
-                        <CheckOutlined v-if="m.model === activeModel && group.provider_id === activeProvider"  />
-                      </div>
-                    </div>
-                  </template>
-                </a-dropdown>
-              </div>
-            </div>
-          </template>
-        </a-dropdown>
+        <span class="agent-name-label">{{ currentAgentName || '未选择' }}</span>
+        <div v-if="activeModel" class="model-dot" />
+        <span v-if="activeModel" class="model-badge">{{ activeModel }}</span>
       </div>
- 
-      <div v-if="convId" >{{ currentConvTitle }}</div>
-      <div  />
-      <a-button  @click="startNew()">
-        <PlusOutlined  />
-        <span >新对话</span>
+
+      <div v-if="convId" class="conv-title-badge">{{ currentConvTitle }}</div>
+      <div class="topbar-spacer" />
+      <a-button class="new-chat-btn" @click="startNew()">
+        <PlusOutlined class="new-chat-icon" />
+        <span class="new-chat-text">新对话</span>
       </a-button>
     </div>
- 
-    <div >
+
+    <div class="chat-body">
       <!-- 左侧历史会话侧栏 -->
       <Transition name="slide">
-        <aside v-if="sidebarOpen" >
-          <div >
-            <span >历史对话</span>
+        <aside v-if="sidebarOpen" class="chat-sidebar">
+          <div class="sidebar-header">
+            <span class="sidebar-title">历史对话</span>
             <a-button type="text" size="small" @click="sidebarOpen = false"><CloseOutlined /></a-button>
           </div>
-          <div >
-            <div v-if="convs.length===0 && !convLoading" >暂无历史对话</div>
-            <div v-for="c in convs" :key="c.id"  : @click="selectConv(c)">
-              <MessageOutlined  />
+          <div class="conv-list">
+            <div v-if="convs.length===0 && !convLoading" class="sidebar-empty">暂无历史对话</div>
+            <div v-for="c in convs" :key="c.id" class="conv-item" :class="{active:c.id===convId}" @click="selectConv(c)">
+              <MessageOutlined class="conv-icon" />
               <template v-if="renamingConvId === c.id">
-                <a-input v-model:value="renameTitle" size="small"  @pressEnter="confirmRename" @blur="confirmRename" @keydown.escape="cancelRename" @click.stop />
+                <a-input v-model:value="renameTitle" size="small" class="rename-input" @pressEnter="confirmRename" @blur="confirmRename" @keydown.escape="cancelRename" @click.stop />
               </template>
-              <span v-else >{{ c.title || '新对话' }}</span>
-              <div >
-                <a-button type="text" size="small"  @click.stop="startRename(c)"><EditOutlined /></a-button>
+              <span v-else class="conv-text">{{ c.title || '新对话' }}</span>
+              <div class="conv-actions">
+                <a-button type="text" size="small" class="conv-rename" @click.stop="startRename(c)"><EditOutlined /></a-button>
                 <a-popconfirm title="确定清空该 Agent 的所有对话历史吗？此操作不可恢复。" @confirm="delConv(c.id)" @click.stop>
-                  <a-button type="text" size="small" danger ><DeleteOutlined /></a-button>
+                  <a-button type="text" size="small" danger class="conv-del"><DeleteOutlined /></a-button>
                 </a-popconfirm>
               </div>
             </div>
           </div>
         </aside>
       </Transition>
- 
+
       <!-- 聊天主区 -->
-      <div  ref="msgContainer">
+      <div class="chat-main-area" ref="msgContainer">
         <!-- 空状态 -->
-        <div v-if="messages.length === 0 && !streaming" >
-          <div >
+        <div v-if="messages.length === 0 && !streaming" class="chat-empty">
+          <div class="empty-avatar">
             <RobotOutlined />
           </div>
           <h3>开始对话</h3>
           <p>输入文字、上传文件或使用语音与 Agent 交流</p>
-          <div >
-            <div ><PictureOutlined /> 支持图片识别</div>
-            <div ><AudioOutlined /> 支持语音输入</div>
-            <div ><FileTextOutlined /> 支持文档分析</div>
-            <div ><VideoCameraOutlined /> 支持视频理解</div>
+          <div class="empty-tips">
+            <div class="tip"><PictureOutlined /> 支持图片识别</div>
+            <div class="tip"><AudioOutlined /> 支持语音输入</div>
+            <div class="tip"><FileTextOutlined /> 支持文档分析</div>
+            <div class="tip"><VideoCameraOutlined /> 支持视频理解</div>
           </div>
         </div>
- 
+
         <!-- 消息列表 -->
-        <div v-for="(m,i) in messages" :key="i"  :>
-          <div  v-if="m.role==='assistant'">
+        <div v-for="(m,i) in messages" :key="i" class="msg-row" :class="m.role">
+          <div class="msg-avatar" v-if="m.role==='assistant'">
             <a-avatar :size="36" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}">AI</a-avatar>
           </div>
-          <div >
-            <div  :>
+          <div class="msg-body">
+            <div class="msg-bubble glass-effect" :class="m.role">
               <!-- 附件预览 -->
-              <div v-if="m.attachments?.length" >
-                <div v-for="(att, ai) in m.attachments" :key="ai" >
-                  <img v-if="att.type==='image'" :src="att.preview"  />
-                  <div v-else-if="att.type==='audio'"  @click="toggleAudio(i, att)">
-                    <div >
+              <div v-if="m.attachments?.length" class="msg-attachments">
+                <div v-for="(att, ai) in m.attachments" :key="ai" class="att-item">
+                  <img v-if="att.type==='image'" :src="att.preview" class="att-img" />
+                  <div v-else-if="att.type==='audio'" class="voice-message" @click="toggleAudio(i, att)">
+                    <div class="voice-icon">
                       <template v-if="playingAudioIndex === i">
-                        <span ></span>
-                        <span ></span>
-                        <span ></span>
+                        <span class="voice-wave voice-wave-1"></span>
+                        <span class="voice-wave voice-wave-2"></span>
+                        <span class="voice-wave voice-wave-3"></span>
                       </template>
                       <template v-else>
-                        <span ><AudioOutlined /></span>
+                        <span class="voice-static"><AudioOutlined /></span>
                       </template>
                     </div>
-                    <div >
-                      <div  :style="{ width: playingAudioIndex === i && audioDuration > 0 ? (audioProgress / audioDuration * 100 + '%') : '0%' }"></div>
+                    <div class="voice-bar">
+                      <div class="voice-progress" :style="{ width: playingAudioIndex === i && audioDuration > 0 ? (audioProgress / audioDuration * 100 + '%') : '0%' }"></div>
                     </div>
-                    <span >
+                    <span class="voice-duration">
                       {{ playingAudioIndex === i ? formatDuration(audioProgress) : (att.duration ? formatDuration(att.duration) : '00:00') }}
                     </span>
                   </div>
-                  <div v-else-if="att.type==='video'" ><VideoCameraOutlined /> {{ att.name }}</div>
-                  <div v-else ><FileOutlined /> {{ att.name }}</div>
-                  <a-button type="text" size="small"  @click="m.attachments?.splice(ai,1)"><CloseOutlined /></a-button>
+                  <div v-else-if="att.type==='video'" class="att-file"><VideoCameraOutlined /> {{ att.name }}</div>
+                  <div v-else class="att-file"><FileOutlined /> {{ att.name }}</div>
+                  <a-button type="text" size="small" class="att-remove" @click="m.attachments?.splice(ai,1)"><CloseOutlined /></a-button>
                 </div>
               </div>
               <!-- 思考过程 -->
-              <div v-if="m.role==='assistant' && m.reasoning_content && agentShowThinking" >
-                <div  @click="m._reasoningOpen = !m._reasoningOpen">
-                  <BulbOutlined  />
+              <div v-if="m.role==='assistant' && m.reasoning_content && agentShowThinking" class="msg-reasoning">
+                <div class="reasoning-header" @click="m._reasoningOpen = !m._reasoningOpen">
+                  <BulbOutlined class="reasoning-icon" />
                   <span>思考过程</span>
-                  <span >{{ m._reasoningOpen !== false ? '收起' : '展开' }}</span>
+                  <span class="reasoning-toggle">{{ m._reasoningOpen !== false ? '收起' : '展开' }}</span>
                 </div>
-                <div v-show="m._reasoningOpen !== false" >{{ m.reasoning_content }}</div>
+                <div v-show="m._reasoningOpen !== false" class="reasoning-body">{{ m.reasoning_content }}</div>
               </div>
               <!-- 工具调用 -->
-              <div v-if="m.role==='assistant' && m.tool_calls?.length && agentShowToolMessages" >
-                <div v-for="(tc, ti) in m.tool_calls" :key="ti" >
-                  <div >
-                    <ToolOutlined  />
-                    <span >{{ tc.tool }}</span>
+              <div v-if="m.role==='assistant' && m.tool_calls?.length && agentShowToolMessages" class="msg-tool-calls">
+                <div v-for="(tc, ti) in m.tool_calls" :key="ti" class="tool-call-item">
+                  <div class="tool-call-header">
+                    <ToolOutlined class="tool-icon" />
+                    <span class="tool-name">{{ tc.tool }}</span>
                   </div>
-                  <div v-if="tc.input" ><span >输入：</span>{{ JSON.stringify(tc.input, null, 2) }}</div>
-                  <div v-if="tc.output !== undefined" ><span >输出：</span>{{ typeof tc.output === 'string' ? tc.output : JSON.stringify(tc.output, null, 2) }}</div>
-                  <div v-if="tc.error" ><span >错误：</span>{{ tc.error }}</div>
+                  <div v-if="tc.input" class="tool-input"><span class="tool-label">输入：</span>{{ JSON.stringify(tc.input, null, 2) }}</div>
+                  <div v-if="tc.output !== undefined" class="tool-output"><span class="tool-label">输出：</span>{{ typeof tc.output === 'string' ? tc.output : JSON.stringify(tc.output, null, 2) }}</div>
+                  <div v-if="tc.error" class="tool-error"><span class="tool-label">错误：</span>{{ tc.error }}</div>
                 </div>
               </div>
-              <div >{{ m.content }}</div>
-              <div >{{ formatTime(m.timestamp) }}</div>
+              <div class="msg-content">{{ m.content }}</div>
+              <div class="msg-time">{{ formatTime(m.timestamp) }}</div>
             </div>
           </div>
-          <div  v-if="m.role==='user'">
+          <div class="msg-avatar" v-if="m.role==='user'">
             <a-avatar :size="36" style="background:linear-gradient(135deg,#8b5cf6,#ec4899)">{{ usernameC }}</a-avatar>
           </div>
         </div>
- 
+
         <!-- 流式回复 -->
-        <div v-if="streaming" >
-          <div >
+        <div v-if="streaming" class="msg-row assistant">
+          <div class="msg-avatar">
             <a-avatar :size="36" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}">AI</a-avatar>
           </div>
-          <div >
-            <div >{{ currentReply }}<span >|</span></div>
+          <div class="msg-bubble glass-effect streaming">
+            <div class="msg-content">{{ currentReply }}<span class="cursor">|</span></div>
           </div>
         </div>
- 
+
         <!-- 输入区 -->
-        <div >
-          <div v-if="recording" >
-            <div  />
+        <div class="chat-input-wrapper">
+          <div v-if="recording" class="recording-bar">
+            <div class="rec-pulse" />
             <span>正在录音... {{ recordingTime }}s</span>
             <a-button type="primary" danger size="small" @click="stopRecording">停止</a-button>
           </div>
- 
-          <div >
-            <div >
+
+          <div class="chat-input-bar">
+            <div class="input-toolbar">
               <a-upload :before-upload="handleFileUpload" :show-upload-list="false" accept="image/*" multiple>
                 <a-tooltip title="上传图片"><a-button type="text" size="small"><PictureOutlined /></a-button></a-tooltip>
               </a-upload>
@@ -222,21 +167,21 @@
               </a-upload>
               <a-divider type="vertical" />
               <a-tooltip :title="recording ? '停止录音' : '语音输入'">
-                <a-button type="text" size="small" : @click="toggleRecording">
+                <a-button type="text" size="small" :class="{recording: recording}" @click="toggleRecording">
                   <AudioMutedOutlined v-if="!recording" /><PauseCircleOutlined v-else />
                 </a-button>
               </a-tooltip>
             </div>
-            <div >
+            <div class="input-row">
               <a-textarea ref="textareaRef" v-model:value="inputText" placeholder="输入消息... (Enter 发送，Shift+Enter 换行)" :auto-size="{ minRows:1, maxRows:4 }" :disabled="streaming" @pressEnter="onKeyDown" />
-              <a-button type="primary" size="large" :loading="streaming" @click="handleSend" :disabled="!inputText.trim() && !pendingAttachments.length" ><SendOutlined /></a-button>
+              <a-button type="primary" size="large" :loading="streaming" @click="handleSend" :disabled="!inputText.trim() && !pendingAttachments.length" class="send-btn"><SendOutlined /></a-button>
             </div>
             <Transition name="fade">
-              <div v-if="pendingAttachments.length" >
-                <div v-for="(f,i) in pendingAttachments" :key="i" >
-                  <img v-if="f.type==='image'" :src="f.preview"  />
-                  <FileOutlined v-else  />
-                  <span >{{ f.name }}</span>
+              <div v-if="pendingAttachments.length" class="upload-preview-bar">
+                <div v-for="(f,i) in pendingAttachments" :key="i" class="up-item">
+                  <img v-if="f.type==='image'" :src="f.preview" class="up-thumb" />
+                  <FileOutlined v-else class="up-icon" />
+                  <span class="up-name">{{ f.name }}</span>
                   <a-button type="text" size="small" @click="pendingAttachments.splice(i,1)"><CloseOutlined /></a-button>
                 </div>
               </div>
@@ -247,7 +192,7 @@
     </div>
   </div>
 </template>
- 
+
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -262,22 +207,19 @@ import {
   MessageOutlined, DeleteOutlined, SendOutlined,
   PictureOutlined, AudioOutlined, VideoCameraOutlined, FileOutlined,
   FileTextOutlined, RobotOutlined, AudioMutedOutlined, PauseCircleOutlined,
-  EditOutlined, BulbOutlined, ToolOutlined, DownOutlined, RightOutlined, ReloadOutlined, CheckOutlined,
+  EditOutlined, BulbOutlined, ToolOutlined,
 } from '@ant-design/icons-vue'
- 
+
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const agentStore = useAgentStore()
- 
+
 const sidebarOpen = ref(true)
 const selectedAgentId = computed(() => (route.params.agentId as string) || agentStore.currentAgentId || '')
 const currentAgentName = computed(() => agentStore.currentAgent?.name || '')
 const usernameC = computed(() => (authStore.currentUser?.username || 'U')[0].toUpperCase())
- 
-// 弹出层挂载到 body，避免被父容器 overflow 裁切
-const getPopupContainer = () => document.body
- 
+
 // 路由参数变化时（Agent 切换器通过 router.push 触发）：加载配置 + 会话 + 重置对话
 watch(() => route.params.agentId, (newAgentId) => {
   if (newAgentId && typeof newAgentId === 'string') {
@@ -286,13 +228,13 @@ watch(() => route.params.agentId, (newAgentId) => {
     startNew()
   }
 }, { immediate: false })
- 
+
 // 其他组件直接修改 store 时（无路由跳转场景）：同步路由
 watch(() => agentStore.currentAgentId, (newId) => {
   const routeAgentId = route.params.agentId as string
   if (newId && newId !== routeAgentId) { router.push(`/agent/${newId}/chat`) }
 }, { immediate: false })
- 
+
 interface Cnv { id: string; title?: string }
 const convs = ref<Cnv[]>([])
 const convId = ref('')
@@ -300,7 +242,7 @@ const convLoading = ref(false)
 const currentConvTitle = computed(() => convs.value.find(c => c.id === convId.value)?.title || '')
 const renamingConvId = ref('')
 const renameTitle = ref('')
- 
+
 function startRename(c: Cnv) { renamingConvId.value = c.id; renameTitle.value = c.title || '' }
 async function confirmRename() {
   if (!renameTitle.value.trim() || !renamingConvId.value) { renamingConvId.value = ''; return }
@@ -313,7 +255,7 @@ async function confirmRename() {
   renamingConvId.value = ''
 }
 function cancelRename() { renamingConvId.value = '' }
- 
+
 interface Attachment { type: string; name: string; preview?: string; _file?: File; url?: string }
 interface ToolCallInfo { tool: string; input?: unknown; output?: unknown; error?: string }
 interface Msg { role: 'user'|'assistant'; content: string; timestamp: number; attachments?: Attachment[]; reasoning_content?: string; tool_calls?: ToolCallInfo[] }
@@ -330,18 +272,18 @@ const pendingAttachments = ref<Attachment[]>([])
 const recording = ref(false)
 const recordingTime = ref(0)
 let recordingTimer: ReturnType<typeof setInterval> | null = null
- 
+
 const audioRef = ref<HTMLAudioElement | null>(null)
 const playingAudioIndex = ref<number | null>(null)
 const audioProgress = ref<number>(0)
 const audioDuration = ref<number>(0)
 let audioInterval: ReturnType<typeof setInterval> | null = null
- 
+
 function startNew() { convId.value = ''; messages.value = []; pendingAttachments.value = []; clearInput() }
- 
+
 const agentShowThinking = ref(true)
 const agentShowToolMessages = ref(true)
- 
+
 async function loadAgentDisplayConfig(agentId: string) {
   try {
     const cfg = await agentStore.getAgentConfig(agentId)
@@ -351,7 +293,7 @@ async function loadAgentDisplayConfig(agentId: string) {
     }
   } catch { /* default true */ }
 }
- 
+
 async function loadConversations() {
   convLoading.value = true
   try {
@@ -413,14 +355,14 @@ function mergeToolCalls(toolMsgs: RawToolMessage[]): ToolCallInfo[] {
   }
   return merged
 }
- 
+
 async function delConv(id: string) {
   const agentId = selectedAgentId.value || ''
   try { await deleteConversation(agentId, id) } catch { /* ignore */ }
   convs.value = convs.value.filter(c=>c.id!==id)
   if (convId.value === id) startNew()
 }
- 
+
 function handleFileUpload(file: File): boolean {
   const isImage = file.type.startsWith('image/')
   const type = isImage ? 'image' : file.type.startsWith('audio/') ? 'audio' : file.type.startsWith('video/') ? 'video' : 'document'
@@ -430,7 +372,7 @@ function handleFileUpload(file: File): boolean {
   message.success(`已添加: ${file.name}`)
   return false
 }
- 
+
 async function toggleRecording() {
   if (recording.value) { stopRecording(); return }
   try {
@@ -450,7 +392,7 @@ async function toggleRecording() {
   } catch (e: unknown) { const err = e as Error; message.error('无法访问麦克风: ' + (err.message || '权限被拒绝')) }
 }
 function stopRecording() { recording.value = false; clearInterval(recordingTimer); recordingTime.value = 0 }
- 
+
 function toggleAudio(index: number, attachment: Attachment) {
   if (playingAudioIndex.value === index) { pauseAudio(); return }
   playAudio(index, attachment)
@@ -479,83 +421,13 @@ function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60); const secs = Math.floor(seconds % 60)
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
 }
- 
+
 function onKeyDown(e: KeyboardEvent) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }
 function clearInput() { inputText.value = ''; if (textareaRef.value) textareaRef.value.value = ''; nextTick(() => { inputText.value = '' }) }
- 
+
 const activeModel = ref('')
 const activeProvider = ref('')
- 
-// 按服务商分组的模型列表
-interface ProviderModels {
-  provider_id: string
-  provider_name: string
-  models: Array<{
-    model: string
-    display_name: string
-    capabilities?: string[]
-  }>
-}
-const providerModelsList = ref<ProviderModels[]>([])
-const loadingModels = ref(false)
- 
-async function loadAvailableModels() {
-  loadingModels.value = true
-  try {
-    // 从 providers 接口获取所有服务商及其模型
-    const providersRes = await modelAPI.getProviders()
-    const providers = providersRes?.data?.providers || []
-    // 按服务商分组
-    const result: ProviderModels[] = []
-    for (const p of providers) {
-      if (!p.enabled || !p.has_api_key) continue
-      const models = (p.models || []).map((m: string) => ({
-        model: m,
-        display_name: m,
-        capabilities: [] as string[],
-      }))
-      // 如果有 default_model 且不在 models 列表中，添加它
-      if (p.default_model && !models.some((m: { model: string }) => m.model === p.default_model)) {
-        models.unshift({
-          model: p.default_model,
-          display_name: p.default_model + ' (默认)',
-          capabilities: [] as string[],
-        })
-      }
-      if (models.length > 0) {
-        result.push({
-          provider_id: p.id,
-          provider_name: p.name,
-          models,
-        })
-      }
-    }
-    providerModelsList.value = result
-  } catch (err) {
-    console.error('[ChatPage] 加载可用模型失败:', err)
-    providerModelsList.value = []
-  } finally {
-    loadingModels.value = false
-  }
-}
- 
-async function handleModelSwitch(providerId: string, model: string) {
-  try {
-    const agentId = selectedAgentId.value || undefined
-    const res = await modelAPI.switch(providerId, model, agentId)
-    if (res?.success || res?.code === 0) {
-      activeModel.value = model
-      activeProvider.value = providerId
-      message.success(`已切换至 ${model}`)
-    } else {
-      message.error('切换模型失败')
-    }
-  } catch (err) {
-    console.error('[ChatPage] 切换模型失败:', err)
-    message.error('切换模型失败')
-  }
-}
- 
+
 async function handleSend() {
   const txt = inputText.value.trim()
   if ((!txt && !pendingAttachments.value.length) || streaming.value) return
@@ -569,9 +441,7 @@ async function handleSend() {
     try {
       const res = await modelAPI.autoDetect({ content_types: contentTypes, message_text: txt || undefined, auto_switch: true })
       if (res?.success || res?.code === 0) {
-        const d = res.data
-        activeModel.value = d.model
-        activeProvider.value = d.provider_id || d.provider_name || ''
+        const d = res.data; activeModel.value = d.model; activeProvider.value = d.provider_name || d.provider_id || ''
         message.info(`${atts.map(a => ({image:'📷',audio:'🎵',video:'🎬',document:'📄'}[a.type]||a.type)).join('+')} 内容 → 自动切换至 ${d.model}` + (d.warning ? `（${d.warning}）` : ''))
       }
     } catch { /* continue */ }
@@ -634,16 +504,9 @@ async function handleSend() {
       if (audioInfo?.url) { await nextTick(); toggleAudio(messages.value.length - 1, newMessage.attachments[0]) }
     }
   } catch (e: unknown) { const err = e as { response?: { data?: { message?: string } }; message?: string }; const errMsg = err?.response?.data?.message || err?.message || '网络错误'; console.error('[ChatPage] 对话请求失败:', e); message.error('对话请求失败: ' + errMsg); messages.value.push({ role: 'assistant', content: '抱歉，对话服务暂时不可用，请稍后重试。\n错误详情: ' + errMsg, timestamp: Date.now() }) }
-  finally {
-    // 兜底：无论流式还是非流式，确保 streaming 状态被重置
-    // （流式模式下 onDone 会提前重置，这里是安全兜底）
-    streaming.value = false
-    currentReply.value = ''
-    await nextTick()
-    scrollBottom()
-  }
+  finally { if (!enableStreaming) { currentReply.value = ''; streaming.value = false; await nextTick(); scrollBottom() } }
 }
- 
+
 function scrollBottom() {
   nextTick(() => {
     const el = msgContainer.value
@@ -651,7 +514,7 @@ function scrollBottom() {
   })
 }
 function formatTime(ts: number) { return new Date(ts).toLocaleTimeString('zh-CN') }
- 
+
 // 自动滚动：监听消息数量变化和流式内容变化
 watch(
   () => messages.value.length,
@@ -661,261 +524,37 @@ watch(
   () => currentReply.value,
   () => { if (streaming.value) scrollBottom() }
 )
- 
+
 onMounted(async () => {
   streaming.value = false; currentReply.value = ''
   if (!agentStore.agents.length) await agentStore.loadAgents()
   if (agentStore.agents.length && !selectedAgentId.value) { agentStore.setCurrentAgent(agentStore.agents[0].id) }
   if (selectedAgentId.value) { loadAgentDisplayConfig(selectedAgentId.value) }
   loadConversations()
-  // 并行获取当前模型和可用模型列表
-  try {
-    const [currentRes] = await Promise.all([
-      modelAPI.getCurrent(),
-      loadAvailableModels(),
-    ])
-    if (currentRes?.success || currentRes?.code === 0) {
-      activeModel.value = currentRes.data?.model || ''
-      activeProvider.value = currentRes.data?.provider_name || currentRes.data?.provider_id || ''
-    }
-  } catch { /* ignore */ }
+  try { const res = await modelAPI.getCurrent(); if (res?.success || res?.code === 0) { activeModel.value = res.data?.model || ''; activeProvider.value = res.data?.provider_name || '' } } catch { /* ignore */ }
 })
- 
+
 onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio(); if (audioRef.value) { audioRef.value.pause(); audioRef.value = null } })
 </script>
- 
+
 <style scoped>
 .chat-page { display: flex; flex-direction: column; height: calc(100vh - 130px); min-height: 500px; max-height: 100vh; }
- 
+
 /* ===== 顶部栏 ===== */
 .chat-topbar { display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-radius: 14px; margin-bottom: 10px; flex-shrink: 0; min-height: 52px; border: 1px solid rgba(255,255,255,0.06); }
 .sidebar-toggle { color: rgba(255,255,255,0.45) !important; font-size: 1rem; transition: color 0.2s; }
 .sidebar-toggle:hover { color: rgba(255,255,255,0.8) !important; }
- 
+
 /* Agent 名称徽章 */
-.agent-name-badge {
-  display: flex; align-items: center; gap: 10px; padding: 6px 14px;
-  border-radius: 12px; background: linear-gradient(135deg, rgba(96,165,250,0.1), rgba(139,92,246,0.06));
-  border: 1px solid rgba(96,165,250,0.15); transition: all 0.3s ease;
-  position: relative; overflow: hidden;
-}
-.agent-name-badge::before {
-  content: ''; position: absolute; inset: 0; border-radius: 12px; pointer-events: none;
-  background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 50%);
-}
-.agent-name-badge:hover {
-  background: linear-gradient(135deg, rgba(96,165,250,0.16), rgba(139,92,246,0.1));
-  border-color: rgba(96,165,250,0.25);
-  box-shadow: 0 2px 12px rgba(96,165,250,0.1);
-}
-.agent-name-label { font-size: 0.88rem; font-weight: 600; color: #e2e8f0; letter-spacing: 0.02em; text-shadow: 0 1px 2px rgba(0,0,0,0.2); }
- 
-/* 模型选择器 */
-.model-selector {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
-  cursor: pointer;
-  transition: all 0.25s ease;
-  margin-left: 10px;
-  position: relative;
-  overflow: hidden;
-}
-.model-selector::before {
-  content: ''; position: absolute; inset: 0; border-radius: 10px; pointer-events: none;
-  background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, transparent 60%);
-}
-.model-selector:hover {
-  background: rgba(96,165,250,0.12);
-  border-color: rgba(96,165,250,0.2);
-  box-shadow: 0 2px 8px rgba(96,165,250,0.08);
-}
-.model-selector.has-model {
-  background: linear-gradient(135deg, rgba(52,211,153,0.08), rgba(52,211,153,0.04));
-  border-color: rgba(52,211,153,0.18);
-}
-.model-selector.has-model:hover {
-  background: linear-gradient(135deg, rgba(52,211,153,0.15), rgba(52,211,153,0.08));
-  border-color: rgba(52,211,153,0.28);
-  box-shadow: 0 2px 8px rgba(52,211,153,0.1);
-}
-.model-dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; flex-shrink: 0; box-shadow: 0 0 6px rgba(52,211,153,0.4); }
-.model-name {
-  font-size: 0.78rem;
-  color: rgba(255,255,255,0.75);
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  letter-spacing: 0.02em;
-}
-.model-arrow {
-  font-size: 0.6rem;
-  color: rgba(255,255,255,0.3);
-  transition: transform 0.2s;
-}
- 
-/* 模型下拉菜单 */
-.model-dropdown {
-  min-width: 280px;
-  max-height: 400px;
-  overflow-y: auto;
-  padding: 12px;
-  border-radius: 12px;
-  background: rgba(15,21,50,0.95);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255,255,255,0.1);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-  z-index: 1050;
-}
-.model-dropdown::-webkit-scrollbar { width: 4px; }
-.model-dropdown::-webkit-scrollbar-track { background: transparent; }
-.model-dropdown::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
-.model-dropdown::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
-.dropdown-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: rgba(255,255,255,0.65);
-}
-.dropdown-header .ant-btn {
-  color: rgba(255,255,255,0.45) !important;
-}
-.dropdown-header .ant-btn:hover {
-  color: #93c5fd !important;
-}
-.dropdown-loading, .dropdown-empty {
-  text-align: center;
-  padding: 20px;
-  color: rgba(255,255,255,0.3);
-  font-size: 0.82rem;
-}
- 
-/* 服务商列表 */
-.provider-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.provider-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.provider-item:hover {
-  background: rgba(255,255,255,0.06);
-}
-.provider-item.has-active {
-  background: rgba(96,165,250,0.06);
-}
-.provider-icon {
-  font-size: 0.85rem;
-}
-.provider-name {
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: rgba(255,255,255,0.7);
-  flex: 1;
-}
-.provider-count {
-  font-size: 0.6rem;
-  color: rgba(255,255,255,0.25);
-  background: rgba(255,255,255,0.06);
-  padding: 1px 5px;
-  border-radius: 8px;
-}
-.provider-arrow {
-  font-size: 0.6rem;
-  color: rgba(255,255,255,0.2);
-  transition: transform 0.2s;
-}
-.provider-item:hover .provider-arrow {
-  color: rgba(255,255,255,0.4);
-}
- 
-/* 二级模型菜单 */
-.models-submenu {
-  min-width: 200px;
-  max-height: 350px;
-  overflow-y: auto;
-  padding: 8px;
-  border-radius: 10px;
-  background: rgba(15,21,50,0.95);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255,255,255,0.1);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-  z-index: 1060;
-}
-.models-submenu::-webkit-scrollbar { width: 4px; }
-.models-submenu::-webkit-scrollbar-track { background: transparent; }
-.models-submenu::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
-.models-submenu::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
-.submenu-header {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: rgba(255,255,255,0.45);
-  padding: 4px 8px;
-}
-.model-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.model-item:hover {
-  background: rgba(255,255,255,0.06);
-}
-.model-item.active {
-  background: rgba(96,165,250,0.1);
-}
-.model-item-name {
-  flex: 1;
-  font-size: 0.78rem;
-  color: rgba(255,255,255,0.75);
-  font-weight: 400;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.model-item.active .model-item-name {
-  color: #93c5fd;
-  font-weight: 500;
-}
-.model-item-tags {
-  display: flex;
-  gap: 3px;
-  flex-shrink: 0;
-}
-.model-check {
-  color: #34d399;
-  font-size: 0.8rem;
-  flex-shrink: 0;
-}
- 
-/* 覆盖 ant-design Dropdown 的 z-index */
-:global(.ant-dropdown) {
-  z-index: 1050 !important;
-}
- 
+.agent-name-badge { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 10px; background: rgba(96,165,250,0.08); border: 1px solid rgba(96,165,250,0.12); transition: all 0.2s; }
+.agent-name-badge:hover { background: rgba(96,165,250,0.14); border-color: rgba(96,165,250,0.2); }
+.agent-name-label { font-size: 0.85rem; font-weight: 600; color: #e2e8f0; letter-spacing: 0.01em; }
+.model-dot { width: 6px; height: 6px; border-radius: 50%; background: #34d399; margin-left: 4px; flex-shrink: 0; }
+.model-badge { font-size: 0.65rem; color: rgba(255,255,255,0.35); font-family: monospace; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; }
+
 .conv-title-badge { color: rgba(255,255,255,0.35); font-size: 0.78rem; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topbar-spacer { flex: 1; }
- 
+
 /* 新对话按钮 — 液态玻璃效果 */
 ::deep(.new-chat-btn) {
   border-radius: 12px !important; font-size: 0.82rem;
@@ -938,124 +577,64 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
 ::deep(.new-chat-btn .anticon) { font-size: 0.88rem; transition: transform 0.3s ease; }
 ::deep(.new-chat-btn:hover .anticon) { transform: rotate(90deg); }
 .new-chat-text { letter-spacing: 0.02em; }
- 
+
 .chat-body { display: flex; flex: 1; gap: 12px; overflow: hidden; min-height: 0; }
- 
+
 /* ===== 侧栏 ===== */
 .chat-sidebar {
   width: 260px; flex-shrink: 0; padding: 16px 12px;
   overflow-y: auto; border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.05);
   display: flex; flex-direction: column; min-height: 0;
-  background: linear-gradient(180deg, rgba(15,21,50,0.92), rgba(10,14,39,0.96));
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  box-shadow: 0 4px 24px rgba(0,0,0,0.3), 0 0 0 0.5px rgba(255,255,255,0.06) inset;
+  background: linear-gradient(180deg, rgba(15,21,50,0.85), rgba(10,14,39,0.9));
 }
-.chat-sidebar::-webkit-scrollbar { width: 4px; }
-.chat-sidebar::-webkit-scrollbar-track { background: transparent; }
-.chat-sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
-.chat-sidebar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 .sidebar-header {
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 14px; flex-shrink: 0;
   padding-bottom: 12px;
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
-.sidebar-title {
-  font-weight: 600; color: rgba(255,255,255,0.6); font-size: 0.8rem;
-  letter-spacing: 0.05em; text-transform: uppercase;
-  display: flex; align-items: center; gap: 8px;
-}
-.sidebar-title::before {
-  content: ''; display: block; width: 3px; height: 14px;
-  border-radius: 2px; background: linear-gradient(180deg, #60a5fa, #a78bfa);
-}
+.sidebar-title { font-weight: 600; color: rgba(255,255,255,0.65); font-size: 0.85rem; letter-spacing: 0.03em; text-transform: uppercase; }
 .sidebar-empty {
-  color: rgba(255,255,255,0.25); text-align: center; padding: 60px 20px 48px;
-  font-size: 0.82rem; display: flex; flex-direction: column; align-items: center; gap: 14px;
-  position: relative;
+  color: rgba(255,255,255,0.15); text-align: center; padding: 40px 0 32px; font-size: 0.82rem;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
 }
-.sidebar-empty::before {
-  content: ''; display: block; width: 64px; height: 64px;
-  border-radius: 50%; background: linear-gradient(135deg, rgba(96,165,250,0.08), rgba(139,92,246,0.06));
-  border: 1.5px dashed rgba(96,165,250,0.2);
-  box-shadow: 0 0 20px rgba(96,165,250,0.05);
-  position: relative;
-}
-.sidebar-empty::after {
-  content: '💬'; position: absolute; top: 72px; left: 50%; transform: translateX(-50%);
-  font-size: 1.6rem; opacity: 0.6; filter: grayscale(0.3);
-}
-.conv-list {
-  flex: 1; overflow-y: auto; min-height: 0; padding-right: 4px;
-  display: flex; flex-direction: column; gap: 3px;
-}
-.conv-list::-webkit-scrollbar { width: 4px; }
-.conv-list::-webkit-scrollbar-track { background: transparent; }
-.conv-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
-.conv-list::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+.sidebar-empty::before { content: '💬'; font-size: 1.8rem; opacity: 0.3; display: block; }
+.conv-list { flex: 1; overflow-y: auto; min-height: 0; padding-right: 2px; }
 .conv-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; border-radius: 10px; cursor: pointer;
-  color: rgba(255,255,255,0.4); font-size: 0.82rem;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 10px 14px; border-radius: 10px; cursor: pointer;
+  margin-bottom: 3px; color: rgba(255,255,255,0.45);
+  font-size: 0.83rem; transition: all 0.2s ease;
   position: relative; border: 1px solid transparent;
 }
 .conv-item:hover {
-  background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.75);
-  border-color: rgba(255,255,255,0.05);
-  transform: translateX(2px);
+  background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.8);
+  border-color: rgba(255,255,255,0.06);
 }
 .conv-item.active {
-  background: linear-gradient(135deg, rgba(96,165,250,0.1), rgba(139,92,246,0.06));
-  color: #93c5fd; border-color: rgba(96,165,250,0.18);
-  box-shadow: inset 0 0 0 1px rgba(96,165,250,0.08), 0 2px 8px rgba(59,130,246,0.08);
+  background: rgba(96,165,250,0.1); color: #93c5fd;
+  border-color: rgba(96,165,250,0.18);
+  box-shadow: inset 0 0 0 1px rgba(96,165,250,0.1);
 }
 .conv-item.active::before {
   content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 20px; border-radius: 2px;
+  width: 3px; height: 24px; border-radius: 2px;
   background: linear-gradient(180deg, #60a5fa, #a78bfa);
-  box-shadow: 0 0 8px rgba(96,165,250,0.3);
 }
-.conv-icon { font-size: 0.78rem; opacity: 0.3; flex-shrink: 0; transition: all 0.2s; }
-.conv-item:hover .conv-icon { opacity: 0.6; color: rgba(255,255,255,0.5); }
-.conv-item.active .conv-icon { opacity: 0.8; color: #60a5fa; }
-.conv-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; line-height: 1.4; }
+.conv-icon { font-size: 0.82rem; opacity: 0.4; flex-shrink: 0; transition: opacity 0.2s; }
+.conv-item:hover .conv-icon, .conv-item.active .conv-icon { opacity: 0.7; }
+.conv-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
 .conv-item.active .conv-text { font-weight: 500; }
 .conv-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
-.conv-rename, .conv-del {
-  opacity: 0; transition: all 0.2s; color: rgba(255,255,255,0.3) !important;
-  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
-  border-radius: 6px;
-}
+.conv-rename, .conv-del { opacity: 0; transition: opacity 0.2s; color: rgba(255,255,255,0.35) !important; }
 .conv-item:hover .conv-rename, .conv-item:hover .conv-del { opacity: 1; }
-.conv-rename:hover { background: rgba(96,165,250,0.15); color: #60a5fa !important; }
-.conv-del:hover { background: rgba(239,68,68,0.12); color: #ef4444 !important; }
 .rename-input { flex: 1; max-width: 140px; }
-::deep(.rename-input .ant-input) {
-  background: rgba(255,255,255,0.08) !important;
-  border: 1px solid rgba(96,165,250,0.3) !important;
-  color: #e2e8f0 !important;
-  font-size: 0.82rem;
-  padding: 4px 8px;
-  height: 30px;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-}
-::deep(.rename-input .ant-input:focus) {
-  border-color: rgba(96,165,250,0.5) !important;
-  box-shadow: 0 0 0 2px rgba(96,165,250,0.15);
-  background: rgba(255,255,255,0.1) !important;
-}
- 
+::deep(.rename-input .ant-input) { background: rgba(255,255,255,0.08) !important; border: 1px solid rgba(96,165,250,0.3) !important; color: #e2e8f0 !important; font-size: 0.82rem; padding: 4px 8px; height: 30px; border-radius: 6px; }
+
 /* ===== 聊天主区 ===== */
 .chat-main-area { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 6px 12px; min-height: 0; scroll-behavior: smooth; }
-.chat-main-area::-webkit-scrollbar { width: 5px; }
-.chat-main-area::-webkit-scrollbar-track { background: transparent; }
-.chat-main-area::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
-.chat-main-area::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
- 
+
 /* ===== 空状态 ===== */
 .chat-empty { text-align: center; padding: 80px 0 40px; color: rgba(255,255,255,0.3); flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .empty-avatar { width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(139,92,246,0.15)); display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 2.2rem; color: #60a5fa; border: 1px solid rgba(96,165,250,0.15); }
@@ -1064,7 +643,7 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
 .empty-tips { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .tip { padding: 8px 16px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; font-size: 0.8rem; display: flex; align-items: center; gap: 7px; color: rgba(255,255,255,0.4); cursor: pointer; transition: all 0.2s; }
 .tip:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
- 
+
 /* ===== 消息行 ===== */
 .msg-row { display: flex; align-items: flex-start; gap: 10px; padding: 0 4px; animation: msgIn 0.25s ease-out; }
 .msg-row.user { justify-content: flex-end; }
@@ -1075,11 +654,11 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
 .msg-row.assistant .msg-bubble { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.07); border-bottom-left-radius: 6px; }
 .msg-content { color: #e2e8f0; line-height: 1.6; white-space: pre-wrap; font-size: 0.93rem; }
 .msg-time { font-size: 0.68rem; color: rgba(255,255,255,0.18); margin-top: 8px; }
- 
+
 @keyframes msgIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .cursor { animation: blink 0.8s infinite; color: #60a5fa; }
 @keyframes blink { 50% { opacity: 0; } }
- 
+
 /* ===== 思考过程 ===== */
 .msg-reasoning { margin-bottom: 10px; border: 1px solid rgba(168,85,247,0.25); border-radius: 10px; overflow: hidden; background: rgba(168,85,247,0.05); }
 .reasoning-header { display: flex; align-items: center; gap: 6px; padding: 7px 12px; cursor: pointer; font-size: 0.78rem; color: rgba(192,132,252,0.8); background: rgba(168,85,247,0.08); user-select: none; }
@@ -1088,11 +667,7 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
 .reasoning-toggle { margin-left: auto; font-size: 0.7rem; opacity: 0.5; transition: opacity 0.2s; }
 .reasoning-header:hover .reasoning-toggle { opacity: 0.8; }
 .reasoning-body { padding: 10px 14px; font-size: 0.8rem; color: rgba(192,132,252,0.65); line-height: 1.5; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
-.reasoning-body::-webkit-scrollbar { width: 4px; }
-.reasoning-body::-webkit-scrollbar-track { background: transparent; }
-.reasoning-body::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.2); border-radius: 2px; }
-.reasoning-body::-webkit-scrollbar-thumb:hover { background: rgba(168,85,247,0.35); }
- 
+
 /* ===== 工具调用 ===== */
 .msg-tool-calls { margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
 .tool-call-item { border: 1px solid rgba(59,130,246,0.2); border-radius: 10px; overflow: hidden; background: rgba(59,130,246,0.04); }
@@ -1100,14 +675,10 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
 .tool-icon { font-size: 0.85rem; color: #60a5fa; }
 .tool-name { font-weight: 500; }
 .tool-input, .tool-output, .tool-error { padding: 6px 14px; font-size: 0.76rem; color: rgba(255,255,255,0.45); line-height: 1.45; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
-.tool-input::-webkit-scrollbar, .tool-output::-webkit-scrollbar, .tool-error::-webkit-scrollbar { width: 3px; }
-.tool-input::-webkit-scrollbar-track, .tool-output::-webkit-scrollbar-track, .tool-error::-webkit-scrollbar-track { background: transparent; }
-.tool-input::-webkit-scrollbar-thumb, .tool-output::-webkit-scrollbar-thumb, .tool-error::-webkit-scrollbar-thumb { background: rgba(96,165,250,0.2); border-radius: 2px; }
-.tool-input::-webkit-scrollbar-thumb:hover, .tool-output::-webkit-scrollbar-thumb:hover, .tool-error::-webkit-scrollbar-thumb:hover { background: rgba(96,165,250,0.35); }
 .tool-label { color: rgba(255,255,255,0.25); margin-right: 4px; }
 .tool-output { color: rgba(74,222,128,0.65); }
 .tool-error { color: rgba(248,113,113,0.75); }
- 
+
 /* ===== 附件 ===== */
 .msg-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .att-item { position: relative; }
@@ -1116,7 +687,7 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
 .att-file { padding: 8px 12px; background: rgba(255,255,255,0.05); border-radius: 8px; font-size: 0.78rem; display: flex; align-items: center; gap: 6px; color: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.06); }
 .att-remove { position: absolute; top: -6px; right: -6px; background: rgba(0,0,0,0.7) !important; border-radius: 50% !important; padding: 0 !important; width: 20px !important; height: 20px !important; line-height: 20px !important; font-size: 10px !important; color: #fff !important; opacity: 0; transition: opacity 0.2s; }
 .att-item:hover .att-remove { opacity: 1; }
- 
+
 /* ===== 语音消息 ===== */
 .voice-message { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 20px; background: rgba(255,255,255,0.08); min-width: 120px; max-width: 240px; cursor: pointer; transition: all 0.2s ease; position: relative; }
 .voice-message:hover { background: rgba(255,255,255,0.14); }
@@ -1134,7 +705,7 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
 .msg-row.user .voice-progress { background: linear-gradient(90deg, #fff, #e2e8f0); }
 .voice-duration { font-size: 0.78rem; color: rgba(255,255,255,0.55); min-width: 42px; text-align: right; flex-shrink: 0; }
 .msg-row.user .voice-duration { color: rgba(255,255,255,0.85); }
- 
+
 /* ===== 输入区 ===== */
 .chat-input-wrapper {
   position: sticky; bottom: 0; margin-top: 8px; z-index: 10;
@@ -1144,7 +715,7 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
   border-radius: 20px;
   transform: translateZ(0);
 }
- 
+
 /* 液态玻璃输入框 */
 .chat-input-bar {
   padding: 12px 16px; border-radius: 18px; position: relative;
@@ -1158,7 +729,7 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
     0 1px 0 rgba(255,255,255,0.15) inset;
   transition: box-shadow 0.35s ease;
 }
- 
+
 .chat-input-bar::before {
   content: '';
   position: absolute; inset: 0; border-radius: 18px; pointer-events: none; z-index: 0;
@@ -1170,7 +741,7 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
   mask-composite: exclude;
   transition: background 0.35s ease;
 }
- 
+
 .chat-input-bar::after {
   content: '';
   position: absolute; inset: 0; border-radius: 18px; pointer-events: none; z-index: 1;
@@ -1184,7 +755,7 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
   opacity: 0.6;
   transition: opacity 0.35s ease, background 0.35s ease;
 }
- 
+
 .chat-input-bar:focus-within {
   box-shadow: 0 4px 28px rgba(59,130,246,0.2), 0 0 0 0.5px rgba(96,165,250,0.2) inset, 0 1px 0 rgba(168,220,255,0.2) inset;
 }
@@ -1192,7 +763,7 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
   background: linear-gradient(140deg, rgba(96,165,250,0) 10%, rgba(96,165,250,0.35) 30%, rgba(168,220,255,0.7) 50%, rgba(139,92,246,0.25) 70%, rgba(255,255,255,0) 90%);
 }
 .chat-input-bar:focus-within::after { opacity: 1; }
- 
+
 .upload-preview-bar { display: flex; gap: 8px; padding: 8px 0; flex-wrap: wrap; }
 .up-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: rgba(255,255,255,0.06); border-radius: 8px; font-size: 0.8rem; color: rgba(255,255,255,0.5); }
 .up-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 6px; }
@@ -1232,11 +803,10 @@ onUnmounted(() => { streaming.value = false; currentReply.value = ''; pauseAudio
   box-shadow: none;
   color: rgba(255,255,255,0.2) !important;
 }
- 
+
 /* 过渡动画 */
 .slide-enter-active,.slide-leave-active { transition: all 0.25s ease; }
 .slide-enter-from,.slide-leave-to { transform: translateX(-100%); opacity: 0; }
 .fade-enter-active,.fade-leave-active { transition: all 0.2s ease; }
 .fade-enter-from,.fade-leave-to { opacity: 0; transform: translateY(-4px); }
 </style>
- 

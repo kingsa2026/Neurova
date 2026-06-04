@@ -1,11 +1,12 @@
 <template>
-  <div >
-    <div >
-      <h2 >{{ isEdit ? '编辑 Agent' : '创建 Agent' }}</h2>
+  <div class="agent-form-page">
+    <div class="page-header glass-effect">
+      <h2 class="page-title">{{ isEdit ? '编辑 Agent' : '创建 Agent' }}</h2>
       <a-button @click="$router.back()">返回</a-button>
     </div>
-    <div >
-      <a-form :model="form" layout="vertical" >
+
+    <div class="form-body glass-effect">
+      <a-form :model="form" layout="vertical" class="settings-form">
         <a-row :gutter="24">
           <a-col :span="12">
             <a-form-item label="Agent ID" required extra="英文+数字+下划线，创建后不可修改">
@@ -18,9 +19,11 @@
             </a-form-item>
           </a-col>
         </a-row>
+
         <a-form-item label="描述">
           <a-textarea v-model:value="form.description" :rows="3" placeholder="描述 Agent 的功能和用途" />
         </a-form-item>
+
         <a-row :gutter="24">
           <a-col :span="24">
             <a-form-item label="LLM 模式">
@@ -44,14 +47,19 @@
             </a-form-item>
           </a-col>
         </a-row>
+
         <a-divider orientation="left">个性与准则</a-divider>
+
         <a-form-item label="个性设定">
           <a-textarea v-model:value="form.personality" :rows="3" placeholder="例如：友善、专业、幽默..." />
         </a-form-item>
+
         <a-form-item label="行为准则（宪法）">
           <a-textarea v-model:value="form.constitution" :rows="4" placeholder="定义 Agent 的核心行为准则..." />
         </a-form-item>
+
         <a-divider orientation="left">TTS 配置</a-divider>
+
         <a-row :gutter="24">
           <a-col :span="6">
             <a-form-item label="启用 TTS">
@@ -74,6 +82,7 @@
             </a-form-item>
           </a-col>
         </a-row>
+
         <a-divider orientation="left">对话显示设置</a-divider>
         <a-row :gutter="24">
           <a-col :span="12">
@@ -87,6 +96,7 @@
             </a-form-item>
           </a-col>
         </a-row>
+
         <a-divider />
         <a-space>
           <a-button type="primary" size="large" :loading="saving" @click="handleSave">保存</a-button>
@@ -96,6 +106,7 @@
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -103,11 +114,14 @@ import { message } from 'ant-design-vue'
 import { useAgentStore } from '@/stores/agents'
 import { providerAPI } from '@/api/modules/providers'
 import type { Agent } from '@/types/agent'
+
 const route = useRoute()
 const router = useRouter()
 const agentStore = useAgentStore()
+
 const isEdit = computed(() => !!route.params.id)
 const saving = ref(false)
+
 const form = reactive({
   agentId: '',
   name: '',
@@ -123,6 +137,7 @@ const form = reactive({
   showThinking: true,
   showToolMessages: true,
 })
+
 // 已联通服务商列表（仅 has_api_key + enabled）
 interface ConnectedProvider { id:string;name:string;models?:Array<string|{name?:string;model?:string}> }
 const connectedProviders = ref<ConnectedProvider[]>([])
@@ -130,13 +145,16 @@ const selectedProvider = ref('')
 const routeAuto = ref(true)
 const providerOpts = ref<{ label: string; value: string }[]>([])
 const providerLoading = ref(false)
+
 const modelOptions = ref<{ label: string; value: string }[]>([])
 const modelLoading = ref(false)
+
 const voiceOptions = [
   { label: '女声', value: 'female' },
   { label: '男声', value: 'male' },
   { label: '自定义', value: 'custom' },
 ]
+
 function onAutoChange(checked: boolean) {
   if (checked) {
     form.llmModel = 'auto'
@@ -148,6 +166,7 @@ function onAutoChange(checked: boolean) {
     modelOptions.value = []
   }
 }
+
 async function onProviderChange(pid: string) {
   form.llmModel = ''; modelOptions.value = []
   if (!pid) return
@@ -182,8 +201,10 @@ async function onProviderChange(pid: string) {
     modelLoading.value = false
   }
 }
+
 async function handleSave() {
   if (!form.agentId || !form.name) { message.warning('请填写必填项'); return }
+  
   // 验证：关闭自动路由时，必须选择服务商和模型
   if (!routeAuto.value) {
     if (!selectedProvider.value) {
@@ -195,6 +216,7 @@ async function handleSave() {
       return
     }
   }
+  
   saving.value = true
   try {
     const data: Record<string, unknown> = {
@@ -220,6 +242,7 @@ async function handleSave() {
     if (!routeAuto.value && selectedProvider.value && form.llmModel) {
       data.llm_provider = selectedProvider.value
     }
+    
     console.log('[AgentForm] 保存数据:', JSON.stringify(data, null, 2))
     console.log('[AgentForm] routeAuto:', routeAuto.value)
     console.log('[AgentForm] selectedProvider:', selectedProvider.value)
@@ -230,6 +253,7 @@ async function handleSave() {
       speed: form.ttsSpeed,
       pitch: form.ttsPitch
     })
+    
     // 特别检查 llm_model 是否在数据中
     console.log('[AgentForm] 检查 llm_model 字段:', {
       'data.llm_model': data.llm_model,
@@ -256,8 +280,10 @@ async function handleSave() {
     message.error(err?.response?.data?.message || '操作失败')
   } finally { saving.value = false }
 }
+
 onMounted(async () => {
   console.log('[AgentForm] ========== onMounted 开始 ==========')
+  
   // 加载已联通服务商（仅 has_api_key + enabled）
   providerLoading.value = true
   try {
@@ -269,11 +295,14 @@ onMounted(async () => {
     console.log('[AgentForm] API 响应 (res):', res)
     console.log('[AgentForm] res.data:', res?.data)
     console.log('[AgentForm] res.data?.providers:', res?.data?.providers)
+    
     const providers = (res?.data?.providers || []) as Array<{ id: string; name: string; has_api_key?: boolean; enabled?: boolean; models?: Array<string | { name?: string; model?: string }> }>
     console.log('[AgentForm] providers 数量:', providers.length)
+    
     const connected = providers.filter(p => p.has_api_key && p.enabled !== false)
     console.log('[AgentForm] 已配置服务商 (has_api_key=true):', connected)
     console.log('[AgentForm] 已配置服务商数量:', connected.length)
+    
     if (connected.length) {
       connectedProviders.value = connected
       providerOpts.value = connected.map(p => ({
@@ -292,11 +321,13 @@ onMounted(async () => {
     providerLoading.value = false 
     console.log('[AgentForm] ========== onMounted 结束 ==========')
   }
+
   // 新建：默认自动路由
   if (!isEdit.value) {
     routeAuto.value = true
     form.llmModel = 'auto'
   }
+
   // 编辑模式：加载配置（提取成函数，供 onMounted 和 watch 调用）
   async function loadConfig() {
     if (!isEdit.value) return
@@ -317,12 +348,14 @@ onMounted(async () => {
       form.ttsVoice = config.ttsVoice || 'female'
       form.ttsSpeed = config.ttsSpeed || 1.0
       form.ttsPitch = config.ttsPitch || 1.0
+      
       console.log('[AgentForm] 加载TTS配置:', {
         enabled: form.ttsEnabled,
         voice: form.ttsVoice,
         speed: form.ttsSpeed,
         pitch: form.ttsPitch
       })
+      
       // 编辑模式：还原路由模式（优先用 llmProvider 直接匹配）
       const savedProvider = config.llmProvider || ''
       if (tempLlmModel === 'auto') {
@@ -377,8 +410,10 @@ onMounted(async () => {
       }
     }
   }
+
   // 初次加载
   await loadConfig()
+  
   // 监听路由参数变化（处理同组件不同 ID 的切换）
   watch(() => route.params.id, async () => {
     console.log('[AgentForm] route.params.id 变化:', route.params.id)
@@ -397,11 +432,13 @@ onMounted(async () => {
     selectedProvider.value = ''
     modelOptions.value = []
     routeAuto.value = !isEdit.value
+    
     // 重新加载配置
     await loadConfig()
   })
 })
 </script>
+
 <style scoped>
 .agent-form-page { display:flex;flex-direction:column;gap:16px;max-width:860px; }
 .page-header { display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-radius:12px; }
@@ -411,4 +448,3 @@ onMounted(async () => {
 :deep(.settings-form .ant-input),:deep(.settings-form .ant-input-affix-wrapper),:deep(.settings-form textarea.ant-input){ background:rgba(255,255,255,0.05)!important;border:1px solid rgba(255,255,255,0.1)!important;color:#e2e8f0!important; }
 :deep(.ant-divider-inner-text){ color:rgba(255,255,255,0.4)!important;font-size:0.85rem; }
 </style>
- 

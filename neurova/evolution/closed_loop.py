@@ -53,6 +53,40 @@ class ToolLifecycleManager:
         """获取工具最后使用时间"""
         return self._last_used.get(tool_name)
 
+    def evaluate(self, tool_name: str = None) -> Dict[str, Any]:
+        """
+        评估工具生命周期状态
+        
+        Args:
+            tool_name: 工具名称，如果为 None 则评估所有工具
+            
+        Returns:
+            评估结果字典
+        """
+        with self._lock:
+            if tool_name:
+                # 评估单个工具
+                count = self._usage_counts.get(tool_name, 0)
+                last_used = self._last_used.get(tool_name)
+                return {
+                    "tool_name": tool_name,
+                    "usage_count": count,
+                    "last_used": last_used.isoformat() if last_used else None,
+                    "status": "active" if count > 0 else "unused",
+                }
+            else:
+                # 评估所有工具
+                results = {}
+                for name in set(list(self._usage_counts.keys()) + list(self._last_used.keys())):
+                    count = self._usage_counts.get(name, 0)
+                    last_used = self._last_used.get(name)
+                    results[name] = {
+                        "usage_count": count,
+                        "last_used": last_used.isoformat() if last_used else None,
+                        "status": "active" if count > 0 else "unused",
+                    }
+                return results
+
 class AdaptiveToolWeights:
     """自适应权重管理器 — 根据工具表现调整权重"""
 

@@ -1,18 +1,18 @@
 <template>
-  <div >
-    <div >
-      <div >
-        <h2 >
+  <div class="marketplace-page">
+    <div class="page-header glass-effect">
+      <div class="header-left">
+        <h2 class="page-title">
           <ShopOutlined style="color: #f59e0b" />
           市场
         </h2>
-        <div >
+        <div class="stats">
           <a-tag>组件 <strong>{{ totalCount }}</strong></a-tag>
           <a-tag color="orange">精选 <strong>{{ featuredCount }}</strong></a-tag>
           <a-tag color="green">已安装 <strong>{{ installedCount }}</strong></a-tag>
         </div>
       </div>
-      <div >
+      <div class="header-right">
         <a-input-search
           v-model:value="searchKeyword"
           placeholder="搜索..."
@@ -25,9 +25,10 @@
         </a-button>
       </div>
     </div>
-    <div >
-      <div >
-        <span >分类:</span>
+
+    <div class="filter-section glass-effect">
+      <div class="filter-group">
+        <span class="filter-label">分类:</span>
         <a-radio-group v-model:value="selectedType" button-style="solid" size="small" @change="loadMarketItems">
           <a-radio-button value="">全部</a-radio-button>
           <a-radio-button value="agent">Agent</a-radio-button>
@@ -38,8 +39,8 @@
           <a-radio-button value="theme">主题</a-radio-button>
         </a-radio-group>
       </div>
-      <div >
-        <span >筛选:</span>
+      <div class="filter-group">
+        <span class="filter-label">筛选:</span>
         <a-checkbox v-model:checked="showFeatured" @change="loadMarketItems">仅精选</a-checkbox>
         <a-checkbox v-model:checked="showVerified" @change="loadMarketItems">仅认证</a-checkbox>
         <a-checkbox v-model:checked="showFree" @change="loadMarketItems">仅免费</a-checkbox>
@@ -53,46 +54,49 @@
         </a-select>
       </div>
     </div>
+
     <a-spin :spinning="loading">
-      <div  v-if="!loading">
+      <div class="market-grid" v-if="!loading">
         <a-empty v-if="marketItems.length === 0" description="暂无商品" />
         <div
           v-for="item in marketItems"
           :key="item.id"
+          class="market-item glass-effect"
           @click="showItemDetail(item.id)"
         >
-          <div  :style="{ background: getTypeBg(item.type) }">
-            <component :is="getTypeIcon(item.type)"  />
-            <div >
+          <div class="item-cover" :style="{ background: getTypeBg(item.type) }">
+            <component :is="getTypeIcon(item.type)" class="cover-icon" />
+            <div class="item-badges">
               <a-tag v-if="item.featured" color="orange" size="small">精选</a-tag>
               <a-tag v-if="item.verified" color="green" size="small">认证</a-tag>
               <a-tag v-if="item.is_free" color="blue" size="small">免费</a-tag>
             </div>
           </div>
-          <div >
-            <div >
-              <h3 >{{ item.name }}</h3>
+          <div class="item-info">
+            <div class="item-title-row">
+              <h3 class="item-title">{{ item.name }}</h3>
               <a-rate v-model:value="item.rating" disabled :allow-half="true" />
             </div>
-            <p >{{ item.description }}</p>
-            <div >
-              <div >
+            <p class="item-desc">{{ item.description }}</p>
+            <div class="item-meta">
+              <div class="meta-left">
                 <a-tag :color="getTypeColor(item.type)" size="small">{{ getTypeText(item.type) }}</a-tag>
-                <span ><UserOutlined /> {{ item.author_name }}</span>
-                <span ><DownloadOutlined /> {{ item.download_count }}</span>
+                <span class="meta-item"><UserOutlined /> {{ item.author_name }}</span>
+                <span class="meta-item"><DownloadOutlined /> {{ item.download_count }}</span>
               </div>
-              <div >
-                <span  v-if="!item.is_free">¥{{ item.price }}</span>
-                <span  v-else>免费</span>
+              <div class="meta-right">
+                <span class="item-price" v-if="!item.is_free">¥{{ item.price }}</span>
+                <span class="item-price free" v-else>免费</span>
               </div>
             </div>
-            <div >
+            <div class="item-tags">
               <a-tag size="small" v-for="tag in item.tags.slice(0, 3)" :key="tag">{{ tag }}</a-tag>
             </div>
           </div>
         </div>
       </div>
     </a-spin>
+
     <a-pagination
       v-if="totalCount > pageSize"
       v-model:current="currentPage"
@@ -105,31 +109,32 @@
       @change="loadMarketItems"
       style="margin-top: 24px; text-align: center"
     />
+
     <a-modal
       v-model:open="detailModalVisible"
       :title="selectedItem?.name"
       width="800px"
       :footer="null"
     >
-      <div v-if="selectedItem" >
-        <div >
-          <div  :style="{ background: getTypeBg(selectedItem.type) }">
-            <component :is="getTypeIcon(selectedItem.type)"  />
+      <div v-if="selectedItem" class="item-detail">
+        <div class="detail-header">
+          <div class="detail-cover" :style="{ background: getTypeBg(selectedItem.type) }">
+            <component :is="getTypeIcon(selectedItem.type)" class="cover-icon" />
           </div>
-          <div >
+          <div class="detail-info">
             <h2>{{ selectedItem.name }}</h2>
             <a-rate v-model:value="selectedItem.rating" disabled :allow-half="true" />
-            <span >({{ selectedItem.rating_count }} 评价)</span>
-            <div >
+            <span class="rating-count">({{ selectedItem.rating_count }} 评价)</span>
+            <div class="detail-stats">
               <span><DownloadOutlined /> {{ selectedItem.download_count }} 下载</span>
               <span><EyeOutlined /> {{ selectedItem.view_count }} 浏览</span>
               <span><HeartOutlined /> {{ selectedItem.like_count }} 喜欢</span>
             </div>
-            <div >
-              <span  v-if="!selectedItem.is_free">¥{{ selectedItem.price }}</span>
-              <span  v-else>免费</span>
+            <div class="detail-price">
+              <span class="price" v-if="!selectedItem.is_free">¥{{ selectedItem.price }}</span>
+              <span class="price free" v-else>免费</span>
             </div>
-            <div >
+            <div class="detail-actions">
               <a-button type="primary" size="large" @click="installItem" :loading="installing">
                 <DownloadOutlined /> 安装
               </a-button>
@@ -142,43 +147,43 @@
             </div>
           </div>
         </div>
-        <div >
+        <div class="detail-body">
           <a-tabs>
             <a-tab-pane key="description" tab="详情">
-              <div >
+              <div class="tab-content">
                 <p>{{ selectedItem.long_description || selectedItem.description }}</p>
-                <div >
-                  <div >
-                    <span >版本</span>
-                    <span >{{ selectedItem.version }}</span>
+                <div class="info-grid">
+                  <div class="info-item">
+                    <span class="info-label">版本</span>
+                    <span class="info-value">{{ selectedItem.version }}</span>
                   </div>
-                  <div >
-                    <span >作者</span>
-                    <span >{{ selectedItem.author_name }}</span>
+                  <div class="info-item">
+                    <span class="info-label">作者</span>
+                    <span class="info-value">{{ selectedItem.author_name }}</span>
                   </div>
-                  <div >
-                    <span >更新时间</span>
-                    <span >{{ formatTime(selectedItem.updated_at) }}</span>
+                  <div class="info-item">
+                    <span class="info-label">更新时间</span>
+                    <span class="info-value">{{ formatTime(selectedItem.updated_at) }}</span>
                   </div>
-                  <div >
-                    <span >发布时间</span>
-                    <span >{{ formatTime(selectedItem.created_at) }}</span>
+                  <div class="info-item">
+                    <span class="info-label">发布时间</span>
+                    <span class="info-value">{{ formatTime(selectedItem.created_at) }}</span>
                   </div>
                 </div>
               </div>
             </a-tab-pane>
             <a-tab-pane key="reviews" tab="评价">
-              <div >
+              <div class="tab-content">
                 <a-empty description="暂无评价" v-if="reviews.length === 0" />
                 <div v-else>
-                  <div v-for="review in reviews" :key="review.id" >
-                    <div >
-                      <span >{{ review.user_name }}</span>
+                  <div v-for="review in reviews" :key="review.id" class="review-item">
+                    <div class="review-header">
+                      <span class="review-user">{{ review.user_name }}</span>
                       <a-rate v-model:value="review.rating" disabled :allow-half="true" />
-                      <span >{{ formatTime(review.created_at) }}</span>
+                      <span class="review-time">{{ formatTime(review.created_at) }}</span>
                     </div>
-                    <p v-if="review.title" >{{ review.title }}</p>
-                    <p v-if="review.content" >{{ review.content }}</p>
+                    <p v-if="review.title" class="review-title">{{ review.title }}</p>
+                    <p v-if="review.content" class="review-content">{{ review.content }}</p>
                   </div>
                 </div>
               </div>
@@ -189,6 +194,7 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
@@ -208,6 +214,7 @@ import {
 } from '@ant-design/icons-vue'
 import { marketplaceAPI, type MarketItem, type MarketItemReview } from '@/api/modules/marketplace'
 import type { Component } from 'vue'
+
 const marketItems = ref<MarketItem[]>([])
 const reviews = ref<MarketItemReview[]>([])
 const selectedItem = ref<MarketItem | null>(null)
@@ -225,6 +232,7 @@ const showFeatured = ref(false)
 const showVerified = ref(false)
 const showFree = ref(false)
 const sortBy = ref('popular')
+
 const typeIcons: Record<string, Component> = {
   agent: UserOutlined,
   skill: ThunderboltOutlined,
@@ -233,6 +241,7 @@ const typeIcons: Record<string, Component> = {
   template: FileTextOutlined,
   theme: LayoutOutlined,
 }
+
 const typeColors: Record<string, string> = {
   agent: 'blue',
   skill: 'orange',
@@ -241,6 +250,7 @@ const typeColors: Record<string, string> = {
   template: 'green',
   theme: 'magenta',
 }
+
 const typeBgs: Record<string, string> = {
   agent: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
   skill: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
@@ -249,6 +259,7 @@ const typeBgs: Record<string, string> = {
   template: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
   theme: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)',
 }
+
 const typeTexts: Record<string, string> = {
   agent: 'Agent',
   skill: '技能',
@@ -257,21 +268,27 @@ const typeTexts: Record<string, string> = {
   template: '模板',
   theme: '主题',
 }
+
 function getTypeIcon(type: string) {
   return typeIcons[type] || AppstoreOutlined
 }
+
 function getTypeColor(type: string) {
   return typeColors[type] || 'default'
 }
+
 function getTypeBg(type: string) {
   return typeBgs[type] || 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)'
 }
+
 function getTypeText(type: string) {
   return typeTexts[type] || '其他'
 }
+
 function formatTime(timeStr: string) {
   return new Date(timeStr).toLocaleDateString('zh-CN')
 }
+
 async function loadMarketItems() {
   loading.value = true
   try {
@@ -294,6 +311,7 @@ async function loadMarketItems() {
     loading.value = false
   }
 }
+
 async function loadFeaturedItems() {
   try {
     const res = await marketplaceAPI.getFeaturedItems()
@@ -302,6 +320,7 @@ async function loadFeaturedItems() {
     console.error('Failed to load featured items:', err)
   }
 }
+
 async function loadInstalledItems() {
   try {
     const res = await marketplaceAPI.getInstalledItems()
@@ -310,6 +329,7 @@ async function loadInstalledItems() {
     console.error('Failed to load installed items:', err)
   }
 }
+
 async function showItemDetail(id: string) {
   try {
     const res = await marketplaceAPI.getMarketItem(id)
@@ -321,6 +341,7 @@ async function showItemDetail(id: string) {
     message.error(e.response?.data?.message || '加载详情失败')
   }
 }
+
 async function loadItemReviews(id: string) {
   try {
     const res = await marketplaceAPI.getMarketItemReviews(id)
@@ -329,6 +350,7 @@ async function loadItemReviews(id: string) {
     console.error('Failed to load reviews:', err)
   }
 }
+
 async function installItem() {
   if (!selectedItem.value) return
   installing.value = true
@@ -343,6 +365,7 @@ async function installItem() {
     installing.value = false
   }
 }
+
 async function purchaseItem() {
   if (!selectedItem.value) return
   try {
@@ -353,6 +376,7 @@ async function purchaseItem() {
     message.error(e.response?.data?.message || '购买失败')
   }
 }
+
 async function likeItem() {
   if (!selectedItem.value) return
   try {
@@ -363,19 +387,23 @@ async function likeItem() {
     message.error(e.response?.data?.message || '操作失败')
   }
 }
+
 async function refresh() {
   await Promise.all([loadMarketItems(), loadFeaturedItems(), loadInstalledItems()])
 }
+
 onMounted(async () => {
   await refresh()
 })
 </script>
+
 <style scoped>
 .marketplace-page {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
+
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -383,11 +411,13 @@ onMounted(async () => {
   padding: 16px 24px;
   border-radius: 12px;
 }
+
 .header-left {
   display: flex;
   align-items: center;
   gap: 16px;
 }
+
 .page-title {
   font-size: 1.2rem;
   color: #e2e8f0;
@@ -396,15 +426,18 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
 }
+
 .stats {
   display: flex;
   gap: 8px;
 }
+
 .header-right {
   display: flex;
   gap: 12px;
   align-items: center;
 }
+
 .filter-section {
   padding: 16px 24px;
   border-radius: 12px;
@@ -412,29 +445,35 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
 }
+
 .filter-group {
   display: flex;
   align-items: center;
   gap: 12px;
 }
+
 .filter-label {
   color: rgba(255, 255, 255, 0.6);
   font-size: 0.9rem;
 }
+
 .market-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 20px;
 }
+
 .market-item {
   border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
   transition: all 0.2s;
 }
+
 .market-item:hover {
   transform: translateY(-4px);
 }
+
 .item-cover {
   height: 140px;
   display: flex;
@@ -442,10 +481,12 @@ onMounted(async () => {
   justify-content: center;
   position: relative;
 }
+
 .cover-icon {
   font-size: 3rem;
   color: white;
 }
+
 .item-badges {
   position: absolute;
   top: 12px;
@@ -453,20 +494,24 @@ onMounted(async () => {
   display: flex;
   gap: 6px;
 }
+
 .item-info {
   padding: 16px;
 }
+
 .item-title-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
 }
+
 .item-title {
   color: #e2e8f0;
   font-size: 1rem;
   margin: 0;
 }
+
 .item-desc {
   color: rgba(255, 255, 255, 0.5);
   font-size: 0.85rem;
@@ -478,17 +523,20 @@ onMounted(async () => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+
 .item-meta {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
 }
+
 .meta-left {
   display: flex;
   gap: 10px;
   align-items: center;
 }
+
 .meta-item {
   color: rgba(255, 255, 255, 0.4);
   font-size: 0.8rem;
@@ -496,22 +544,27 @@ onMounted(async () => {
   align-items: center;
   gap: 4px;
 }
+
 .item-price {
   font-weight: 600;
   color: #f59e0b;
   font-size: 1rem;
 }
+
 .item-price.free {
   color: #34d399;
 }
+
 .item-tags {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
 }
+
 .item-detail {
   color: #e2e8f0;
 }
+
 .detail-header {
   display: flex;
   gap: 24px;
@@ -519,6 +572,7 @@ onMounted(async () => {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   margin-bottom: 24px;
 }
+
 .detail-cover {
   width: 160px;
   height: 160px;
@@ -528,94 +582,114 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
 }
+
 .detail-cover .cover-icon {
   font-size: 4rem;
 }
+
 .detail-info {
   flex: 1;
 }
+
 .detail-info h2 {
   margin: 0 0 12px;
   color: #e2e8f0;
 }
+
 .rating-count {
   color: rgba(255, 255, 255, 0.5);
   margin-left: 8px;
 }
+
 .detail-stats {
   display: flex;
   gap: 20px;
   margin: 12px 0;
   color: rgba(255, 255, 255, 0.6);
 }
+
 .detail-price {
   margin: 16px 0;
 }
+
 .detail-price .price {
   font-size: 1.5rem;
   font-weight: 600;
   color: #f59e0b;
 }
+
 .detail-price .price.free {
   color: #34d399;
 }
+
 .detail-actions {
   display: flex;
   gap: 12px;
 }
+
 .tab-content {
   padding: 16px 0;
 }
+
 .tab-content p {
   color: rgba(255, 255, 255, 0.7);
   line-height: 1.6;
 }
+
 .info-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 16px;
   margin-top: 24px;
 }
+
 .info-item {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
+
 .info-label {
   color: rgba(255, 255, 255, 0.5);
   font-size: 0.85rem;
 }
+
 .info-value {
   color: #e2e8f0;
   font-weight: 500;
 }
+
 .review-item {
   padding: 16px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
+
 .review-header {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 8px;
 }
+
 .review-user {
   color: #e2e8f0;
   font-weight: 500;
 }
+
 .review-time {
   color: rgba(255, 255, 255, 0.4);
   font-size: 0.8rem;
   margin-left: auto;
 }
+
 .review-title {
   color: #e2e8f0;
   margin: 4px 0;
   font-weight: 500;
 }
+
 .review-content {
   color: rgba(255, 255, 255, 0.6);
   margin: 0;
 }
 </style>
- 

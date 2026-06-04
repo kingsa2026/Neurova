@@ -1,9 +1,9 @@
 import DOMPurify from 'dompurify'
- 
+
 /**
  * XSS安全工具
  */
- 
+
 /**
  * 安全清理HTML内容
  * @param html 待清理的HTML
@@ -18,7 +18,7 @@ export function sanitizeHtml(html: string): string {
     ALLOWED_ATTR: ['href', 'target', 'class'],
   })
 }
- 
+
 /**
  * 安全显示文本（防止XSS）
  * @param text 待显示的文本
@@ -35,11 +35,11 @@ export function sanitizeText(text: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
 }
- 
+
 /**
  * 输入验证工具
  */
- 
+
 /**
  * 验证用户名格式
  * @param username 用户名
@@ -52,7 +52,7 @@ export function validateUsername(username: string): boolean {
   // 3-20个字符，只允许字母、数字、下划线
   return /^[a-zA-Z0-9_]{3,20}$/.test(username)
 }
- 
+
 /**
  * 验证邮箱格式
  * @param email 邮箱地址
@@ -64,7 +64,7 @@ export function validateEmail(email: string): boolean {
   }
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
- 
+
 /**
  * 验证密码强度
  * @param password 密码
@@ -76,19 +76,19 @@ export function validatePasswordStrength(password: string): { valid: boolean; sc
   if (!password || typeof password !== 'string') {
     return { valid: false, score: 0 }
   }
- 
+
   if (password.length >= 8) score++
   if (password.length >= 12) score++
   if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++
   if (/\d/.test(password)) score++
   if (/[^a-zA-Z0-9]/.test(password)) score++
- 
+
   return {
     valid: score >= 3,
     score
   }
 }
- 
+
 /**
  * 限制输入长度
  * @param text 输入文本
@@ -101,7 +101,7 @@ export function limitInputLength(text: string, maxLength: number = 10000): strin
   }
   return text.slice(0, maxLength)
 }
- 
+
 /**
  * 安全的JSON解析
  * @param jsonStr JSON字符串
@@ -115,4 +115,3 @@ export function safeJsonParse<T>(jsonStr: string, fallback: T): T {
     return fallback
   }
 }
- 

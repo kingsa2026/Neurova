@@ -21,7 +21,7 @@ import httpx
 
 # 默认配置
 DEFAULT_BASE_URL = "http://localhost:9527"
-API_PREFIX = "/v1"
+API_PREFIX = "/api/v1"
 
 
 class NeurovaCLI:

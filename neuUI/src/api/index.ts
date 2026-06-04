@@ -2,17 +2,17 @@ import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import type { ApiResponse, AuthResponse } from '@/types/auth'
 import type { DownloadProgressEvent } from '@/types/api'
 import { limitInputLength } from '@/utils/security'
- 
+
 // 统一的存储键名
 const TOKEN_KEY = 'token'
 const REFRESH_TOKEN_KEY = 'refresh_token'
 const USER_KEY = 'user'
- 
+
 // 生产环境使用完整 URL（绕过 vite 代理），开发环境使用相对路径
 // Vite 代理 /api/* -> http://localhost:9527/* (自动去掉 /api 前缀)
 // 后端路由前缀是 /v1，所以完整路径是 /api/v1/*
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1'
- 
+
 // 创建 axios 实例
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE,
@@ -21,7 +21,7 @@ const apiClient: AxiosInstance = axios.create({
     'Content-Type': 'application/json'
   }
 })
- 
+
 // 安全存储工具
 function secureGet(key: string): string | null {
   try {
@@ -30,7 +30,7 @@ function secureGet(key: string): string | null {
     return null
   }
 }
- 
+
 function secureRemove(key: string): void {
   try {
     localStorage.removeItem(key)
@@ -38,7 +38,7 @@ function secureRemove(key: string): void {
     // ignore
   }
 }
- 
+
 // 请求拦截器
 apiClient.interceptors.request.use(
   (config) => {
@@ -58,7 +58,7 @@ apiClient.interceptors.request.use(
   },
   (error) => Promise.reject(error)
 )
- 
+
 // 响应拦截器 — 401 自动清 token 并跳转登录
 apiClient.interceptors.response.use(
   (response) => {
@@ -74,21 +74,25 @@ apiClient.interceptors.response.use(
     return Promise.reject(error)
   }
 )
- 
+
 // 通用请求方法
 export const request = {
   get: <T = unknown>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return apiClient.get(url, config)
   },
+  
   post: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return apiClient.post(url, data, config)
   },
+  
   put: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return apiClient.put(url, data, config)
   },
+  
   delete: <T = unknown>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return apiClient.delete(url, config)
   },
+  
   upload: <T = unknown>(url: string, formData: FormData, onProgress?: (percent: number) => void): Promise<ApiResponse<T>> => {
     return apiClient.post(url, formData, {
       headers: {
@@ -103,6 +107,5 @@ export const request = {
     })
   }
 }
- 
+
 export default apiClient
- 

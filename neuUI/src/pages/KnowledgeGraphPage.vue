@@ -1,17 +1,17 @@
 <template>
-  <div >
-    <div >
-      <h2 ><ShareAltOutlined :style="{color:'#06b6d4'}" /> 知识图谱</h2>
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><ShareAltOutlined :style="{color:'#06b6d4'}" /> 知识图谱</h2>
     </div>
-    <div >
-      <div >节点数<b >{{ stats.nodes }}</b></div>
-      <div >关系数<b >{{ stats.edges }}</b></div>
-      <div >社区<b >{{ stats.communities }}</b></div>
+    <div class="sr">
+      <div class="s glass-effect">节点数<b class="c1">{{ stats.nodes }}</b></div>
+      <div class="s glass-effect">关系数<b class="c1">{{ stats.edges }}</b></div>
+      <div class="s glass-effect">社区<b class="c1">{{ stats.communities }}</b></div>
     </div>
-    <div >
+    <div class="cv glass-effect">
       <canvas ref="c"></canvas>
     </div>
-    <div >
+    <div class="bt glass-effect">
       <a-input-search v-model:value="keyword" placeholder="搜索节点..." style="width:280px" @search="onSearch" />
       <a-space>
         <a-button size="small" @click="zoomIn"><ZoomInOutlined />放大</a-button>
@@ -21,13 +21,16 @@
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { onMounted, ref, nextTick, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { ShareAltOutlined, ZoomInOutlined, ZoomOutOutlined, SyncOutlined } from '@ant-design/icons-vue'
+
 const { agentId } = useAgentPage('/agent/:agentId/knowledge-graph', () => loadData())
+
 const c = ref<HTMLCanvasElement>()
 const keyword = ref('')
 const stats = ref({ nodes: 0, edges: 0, communities: 0 })
@@ -39,16 +42,20 @@ interface GraphNode {
   y?: number
   r?: number
 }
+
 interface GraphEdge {
   source: string
   target: string
   from?: string
   to?: string
 }
+
 const nodes = ref<GraphNode[]>([])
 const edges = ref<GraphEdge[]>([])
 const scale = ref(1)
+
 const msg = message
+
 async function loadData() {
   try {
     const res = await request.get(`/agents/${agentId.value}/knowledge-graph`)
@@ -69,6 +76,7 @@ async function loadData() {
     useDemoData()
   }
 }
+
 function useDemoData() {
   stats.value = { nodes: 8, edges: 9, communities: 3 }
   nodes.value = [
@@ -93,6 +101,7 @@ function useDemoData() {
     { source: 'n2', target: 'n8' },
   ]
 }
+
 function draw() {
   const cv = c.value; if (!cv) return
   const ctx = cv.getContext('2d')!
@@ -102,6 +111,7 @@ function draw() {
   ctx.scale(dpr * scale.value, dpr * scale.value)
   const w = r.width, h = r.height
   ctx.clearRect(0, 0, w, h)
+
   interface RenderedNode {
     id: string
     x: number
@@ -125,6 +135,7 @@ function draw() {
     nodeMap[obj.id] = obj
     return obj
   })
+
   edges.value.forEach((e) => {
     const a = nodeMap[e.source] || nodeMap[e.from] || renderedNodes[0]
     const b = nodeMap[e.target] || nodeMap[e.to] || renderedNodes[1]
@@ -136,6 +147,7 @@ function draw() {
     ctx.lineWidth = 1
     ctx.stroke()
   })
+
   renderedNodes.forEach(n => {
     ctx.beginPath()
     ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
@@ -150,16 +162,19 @@ function draw() {
     ctx.fillText(n.l, n.x, n.y - n.r - 4)
   })
 }
+
 function zoomIn() { scale.value = Math.min(scale.value + 0.2, 3); nextTick(draw) }
 function zoomOut() { scale.value = Math.max(scale.value - 0.2, 0.3); nextTick(draw) }
 function resetView() { scale.value = 1; nextTick(draw) }
 function onSearch() { loadData() }
+
 onMounted(async () => {
   await loadData()
   await nextTick()
   draw()
 })
 </script>
+
 <style scoped>
 .pg{display:flex;flex-direction:column;gap:14px;}
 .hd{padding:16px 24px;border-radius:12px;}
@@ -172,4 +187,3 @@ onMounted(async () => {
 .cv canvas{width:100%;height:300px;cursor:grab;}
 .bt{padding:12px 16px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;}
 </style>
- 

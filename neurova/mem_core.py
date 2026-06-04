@@ -593,10 +593,9 @@ class MemCore:
         return sm.add_message(
             agent_id=agent_id,
             session_id=session_id,
-            user_message=user_input,
-            assistant_message=reply,
+            user_content=user_input,
+            assistant_content=reply,
             metadata=metadata,
-            assistant_metadata=assistant_metadata,
         )
 
     # ══════════════════════════════════════════════════════════════

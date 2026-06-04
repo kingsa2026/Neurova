@@ -1,9 +1,10 @@
 <template>
-  <div >
-    <div >
-      <h2 ><SendOutlined :style="{color:'#8b5cf6'}"/> 发起协作</h2>
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><SendOutlined :style="{color:'#8b5cf6'}"/> 发起协作</h2>
     </div>
-    <div >
+
+    <div class="card glass-effect">
       <a-spin v-if="loading" style="display:flex;justify-content:center;padding:20px" />
       <a-form v-else layout="vertical" @finish="handleSubmit">
         <a-row :gutter="24">
@@ -18,15 +19,19 @@
             </a-form-item>
           </a-col>
         </a-row>
+
         <a-form-item label="参与Agent" name="participants" :rules="[{ required: true, message: '请选择至少一个Agent' }]">
           <a-select v-model:value="form.participants" mode="multiple" placeholder="选择参与Agent" :options="agents.map(a=>({label:a.agent_name || a.agent_id,value:a.agent_id}))" />
         </a-form-item>
+
         <a-form-item label="所需能力" name="required_capabilities">
           <a-select v-model:value="form.required_capabilities" mode="multiple" placeholder="选择所需能力（可选）" :options="capabilityOptions" allow-clear />
         </a-form-item>
+
         <a-form-item label="任务描述" name="task_description" :rules="[{ required: true, message: '请输入任务描述' }]">
           <a-textarea v-model:value="form.task_description" placeholder="描述协作目标" :rows="4" />
         </a-form-item>
+
         <a-row :gutter="24">
           <a-col :span="12">
             <a-form-item label="优先级" name="priority">
@@ -39,53 +44,61 @@
             </a-form-item>
           </a-col>
         </a-row>
+
         <a-form-item>
           <a-button type="primary" html-type="submit" size="large" :loading="submitting">启动协作</a-button>
         </a-form-item>
       </a-form>
     </div>
+
     <!-- 推荐Agent -->
-    <div  v-if="recommendations.length">
+    <div class="recommend glass-effect" v-if="recommendations.length">
       <h3><BulbOutlined /> 推荐Agent</h3>
-      <div >
-        <div v-for="r in recommendations" :key="r.agent_id"  @click="selectAgent(r.agent_id)">
-          <div >
-            <span >{{ r.agent_name || r.agent_id }}</span>
+      <div class="rec-list">
+        <div v-for="r in recommendations" :key="r.agent_id" class="rec-item" @click="selectAgent(r.agent_id)">
+          <div class="rec-info">
+            <span class="rec-name">{{ r.agent_name || r.agent_id }}</span>
             <a-tag :color="getMatchColor(r.match_score)">{{ (r.match_score*100).toFixed(0) }}% 匹配</a-tag>
           </div>
-          <div >
-            <span v-for="cap in r.matched_capabilities" :key="cap" >{{ cap }}</span>
+          <div class="rec-caps">
+            <span v-for="cap in r.matched_capabilities" :key="cap" class="cap-tag">{{ cap }}</span>
           </div>
         </div>
       </div>
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { SendOutlined, BulbOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { collaborationAPI } from '@/api/modules/collaboration'
 import { agentAPI } from '@/api/modules/agents'
+
 const loading = ref(false)
 const submitting = ref(false)
 interface TemplateInfo {
   id: string
   name: string
 }
+
 interface AgentInfo {
   agent_id: string
   agent_name?: string
 }
+
 interface Recommendation {
   agent_id: string
   agent_name?: string
   match_score: number
   matched_capabilities?: string[]
 }
+
 const templates = ref<TemplateInfo[]>([])
 const agents = ref<AgentInfo[]>([])
 const recommendations = ref<Recommendation[]>([])
+
 const form = ref({
   name: '',
   template_id: undefined,
@@ -95,6 +108,7 @@ const form = ref({
   priority: 'normal',
   timeout_seconds: 300
 })
+
 const capabilityOptions = [
   { label: '对话', value: 'chat' },
   { label: '搜索', value: 'search' },
@@ -102,22 +116,26 @@ const capabilityOptions = [
   { label: '代码', value: 'code' },
   { label: '数据分析', value: 'analytics' }
 ]
+
 const priorityOptions = [
   { label: '低', value: 'low' },
   { label: '普通', value: 'normal' },
   { label: '高', value: 'high' },
   { label: '紧急', value: 'urgent' }
 ]
+
 const getMatchColor = (score: number) => {
   if (score >= 0.8) return 'green'
   if (score >= 0.6) return 'orange'
   return 'red'
 }
+
 const selectAgent = (agentId: string) => {
   if (!form.value.participants.includes(agentId)) {
     form.value.participants.push(agentId)
   }
 }
+
 const loadData = async () => {
   loading.value = true
   try {
@@ -125,9 +143,11 @@ const loadData = async () => {
       collaborationAPI.getTemplates(),
       agentAPI.list()
     ])
+
     if (templatesRes.status === 'fulfilled') {
       templates.value = templatesRes.value?.data?.templates || []
     }
+
     if (agentsRes.status === 'fulfilled') {
       agents.value = agentsRes.value?.data || []
     }
@@ -137,11 +157,13 @@ const loadData = async () => {
     loading.value = false
   }
 }
+
 const loadRecommendations = async () => {
   if (!form.value.task_description || form.value.required_capabilities.length === 0) {
     recommendations.value = []
     return
   }
+
   try {
     const res = await collaborationAPI.getRecommendations({
       required_capabilities: form.value.required_capabilities,
@@ -152,6 +174,7 @@ const loadRecommendations = async () => {
     console.error('加载推荐失败', err)
   }
 }
+
 const handleSubmit = async () => {
   submitting.value = true
   try {
@@ -180,14 +203,17 @@ const handleSubmit = async () => {
     submitting.value = false
   }
 }
+
 // 监听任务描述和能力变化，获取推荐
 watch([() => form.value.task_description, () => form.value.required_capabilities], () => {
   loadRecommendations()
 }, { debounce: 500 } as { debounce?: number })
+
 onMounted(() => {
   loadData()
 })
 </script>
+
 <style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { padding: 16px 24px; border-radius: 12px; }
@@ -203,4 +229,3 @@ onMounted(() => {
 .rec-caps { display: flex; flex-wrap: wrap; gap: 6px; }
 .cap-tag { padding: 2px 8px; background: rgba(59,130,246,0.15); color: #60a5fa; border-radius: 4px; font-size: 0.75rem; }
 </style>
- 

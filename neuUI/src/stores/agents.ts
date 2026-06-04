@@ -3,21 +3,21 @@ import { ref, computed } from 'vue'
 import { request } from '@/api'
 import type { Agent } from '@/types/agent'
 import type { RawAgentData, RawAgentConfig, AgentConfig } from '@/types/api'
- 
+
 export const useAgentStore = defineStore('agents', () => {
   const agents = ref<Agent[]>([])
   const currentAgentId = ref<string>(localStorage.getItem('currentAgentId') || '')
   const loading = ref<boolean>(false)
   const error = ref<string | null>(null)
- 
+
   const currentAgent = computed(() =>
     agents.value.find(agent => agent.id === currentAgentId.value || agent.agentId === currentAgentId.value)
   )
- 
+
   const agentOptions = computed(() =>
     agents.value.map(agent => ({ label: agent.name, value: agent.id || agent.agentId }))
   )
- 
+
   async function loadAgents() {
     loading.value = true
     error.value = null
@@ -65,7 +65,7 @@ export const useAgentStore = defineStore('agents', () => {
       loading.value = false
     }
   }
- 
+
   async function getAgentConfig(agentId: string): Promise<AgentConfig | null> {
     loading.value = true
     error.value = null
@@ -110,7 +110,7 @@ export const useAgentStore = defineStore('agents', () => {
       loading.value = false
     }
   }
- 
+
   async function createAgent(data: Partial<Agent>): Promise<Agent | null> {
     loading.value = true
     error.value = null
@@ -131,7 +131,7 @@ export const useAgentStore = defineStore('agents', () => {
       loading.value = false
     }
   }
- 
+
   async function updateAgent(id: string, data: Partial<Agent>): Promise<boolean> {
     loading.value = true
     error.value = null
@@ -153,7 +153,7 @@ export const useAgentStore = defineStore('agents', () => {
       loading.value = false
     }
   }
- 
+
   async function deleteAgent(id: string): Promise<boolean> {
     loading.value = true
     error.value = null
@@ -177,12 +177,12 @@ export const useAgentStore = defineStore('agents', () => {
       loading.value = false
     }
   }
- 
+
   function setCurrentAgent(agentId: string) {
     currentAgentId.value = agentId
     localStorage.setItem('currentAgentId', agentId)
   }
- 
+
   return {
     agents, currentAgentId, currentAgent, agentOptions,
     loading, error,
@@ -190,4 +190,3 @@ export const useAgentStore = defineStore('agents', () => {
     getAgentConfig,
   }
 })
- 

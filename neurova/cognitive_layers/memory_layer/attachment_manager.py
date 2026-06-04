@@ -23,29 +23,29 @@ import sqlite3
 
 class AttachmentManager:
     """
-    AttachmentManager
+    AttachmentManager - 附件管理器
     """
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def from_agent_config(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def __init__(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
+    def __init__(self, db_path: str = None, *args, **kwargs):
+        self.db_path = db_path
+        self._init_db()
+
+    @classmethod
+    def from_agent_config(cls, agent_id=None, agent_workspace_path=None, db_path=None, *args, **kwargs):
+        """从 Agent 配置创建 AttachmentManager"""
+        if db_path is None and agent_workspace_path:
+            db_path = f"{agent_workspace_path}/attachments.db"
+        return cls(db_path=db_path)
+
     def _init_db(self, *args, **kwargs):
+        """初始化数据库"""
         pass
-    def __annotate__(self, *args, **kwargs):
-        pass
+
     def _init_attachment_table(self, *args, **kwargs):
+        """初始化附件表"""
         pass
-    def __annotate__(self, *args, **kwargs):
-        pass
+
     def save_attachment(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
+        """保存附件"""
         pass
     def get_attachment(self, *args, **kwargs):
         pass

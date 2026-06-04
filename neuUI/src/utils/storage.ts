@@ -2,7 +2,7 @@
  * 存储工具函数
  * 统一封装 localStorage 和 sessionStorage 操作
  */
- 
+
 /**
  * 安全地获取 localStorage 项
  * @param key - 键名
@@ -19,7 +19,7 @@ export function getLocalStorage<T>(key: string, defaultValue: T | null = null): 
     return defaultValue
   }
 }
- 
+
 /**
  * 安全地设置 localStorage 项
  * @param key - 键名
@@ -32,7 +32,7 @@ export function setLocalStorage<T>(key: string, value: T): void {
     console.error(`Error setting localStorage key "${key}":`, error)
   }
 }
- 
+
 /**
  * 安全地移除 localStorage 项
  * @param key - 键名
@@ -44,7 +44,7 @@ export function removeLocalStorage(key: string): void {
     console.error(`Error removing localStorage key "${key}":`, error)
   }
 }
- 
+
 /**
  * 清空 localStorage
  */
@@ -55,7 +55,7 @@ export function clearLocalStorage(): void {
     console.error('Error clearing localStorage:', error)
   }
 }
- 
+
 /**
  * 安全地获取 sessionStorage 项
  * @param key - 键名
@@ -72,7 +72,7 @@ export function getSessionStorage<T>(key: string, defaultValue: T | null = null)
     return defaultValue
   }
 }
- 
+
 /**
  * 安全地设置 sessionStorage 项
  * @param key - 键名
@@ -85,7 +85,7 @@ export function setSessionStorage<T>(key: string, value: T): void {
     console.error(`Error setting sessionStorage key "${key}":`, error)
   }
 }
- 
+
 /**
  * 安全地移除 sessionStorage 项
  * @param key - 键名
@@ -97,7 +97,7 @@ export function removeSessionStorage(key: string): void {
     console.error(`Error removing sessionStorage key "${key}":`, error)
   }
 }
- 
+
 /**
  * 清空 sessionStorage
  */
@@ -108,4 +108,3 @@ export function clearSessionStorage(): void {
     console.error('Error clearing sessionStorage:', error)
   }
 }
- 

@@ -6,8 +6,10 @@ import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/auth'
 import type { DownloadProgressEvent } from '@/types/api'
 import { limitInputLength } from '@/utils/security'
+
 // 安全的存储键名
 const TOKEN_KEY = 'auth_token'
+
 // 创建 axios 实例
 const request = axios.create({
   baseURL: '/api/v1',
@@ -16,6 +18,7 @@ const request = axios.create({
     'Content-Type': 'application/json'
   }
 })
+
 // 安全存储工具
 function secureGetToken(): string | null {
   try {
@@ -24,6 +27,7 @@ function secureGetToken(): string | null {
     return null
   }
 }
+
 function secureRemoveItem(key: string): void {
   try {
     localStorage.removeItem(key)
@@ -31,6 +35,7 @@ function secureRemoveItem(key: string): void {
     // ignore
   }
 }
+
 // 请求拦截器
 request.interceptors.request.use(
   (config) => {
@@ -49,6 +54,7 @@ request.interceptors.request.use(
     return Promise.reject(error)
   }
 )
+
 // 响应拦截器
 request.interceptors.response.use(
   (response: AxiosResponse<ApiResponse<unknown>>) => {
@@ -59,6 +65,7 @@ request.interceptors.response.use(
     // 统一错误处理 - 安全模式，不暴露敏感信息
     if (error.response) {
       const { status, data } = error.response
+      
       if (status === 401) {
         // Token 过期或无效
         secureRemoveItem(TOKEN_KEY)
@@ -70,25 +77,32 @@ request.interceptors.response.use(
       } else if (status === 500) {
         console.error('服务器错误')
       }
+      
       return Promise.reject(data || error)
     }
+    
     return Promise.reject(error)
   }
 )
+
 // 封装常用请求方法
 export const http = {
   get: <T = unknown>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return request.get(url, config)
   },
+  
   post: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return request.post(url, data, config)
   },
+  
   put: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return request.put(url, data, config)
   },
+  
   delete: <T = unknown>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> => {
     return request.delete(url, config)
   },
+  
   upload: <T = unknown>(url: string, formData: FormData, onProgress?: (percent: number) => void): Promise<ApiResponse<T>> => {
     return request.post(url, formData, {
       headers: {
@@ -103,5 +117,5 @@ export const http = {
     })
   }
 }
+
 export default request
- 

@@ -1,34 +1,37 @@
 <template>
-  <div >
-    <div >
-      <h2 ><SyncOutlined :style="{color:'#34d399'}" /> 反思管理</h2>
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><SyncOutlined :style="{color:'#34d399'}" /> 反思管理</h2>
     </div>
-    <div >
-      <div >反思记录<b >{{ stats.total }}</b></div>
-      <div >改进建议<b >{{ stats.suggestions }}</b></div>
-      <div >深度评估<b >{{ stats.status }}</b></div>
+    <div class="sr">
+      <div class="s glass-effect">反思记录<b class="c1">{{ stats.total }}</b></div>
+      <div class="s glass-effect">改进建议<b class="c1">{{ stats.suggestions }}</b></div>
+      <div class="s glass-effect">深度评估<b class="c1">{{ stats.status }}</b></div>
     </div>
-    <div >
-      <div v-for="r in items" :key="r.id" >
-        <div >
+    <div class="grid">
+      <div v-for="r in items" :key="r.id" class="card glass-effect card-hover">
+        <div class="ct">
           <a-tag :color="r.tc">{{ r.tag }}</a-tag>
-          <span >{{ r.date }}</span>
+          <span class="cd">{{ r.date }}</span>
         </div>
         <h4>{{ r.title }}</h4>
         <p>{{ r.desc }}</p>
-        <div >
+        <div class="cb">
           <span>深度：<b :style="{color:r.lv>3?'#34d399':'#fbbf24'}">{{ '★'.repeat(r.lv) }}{{ '☆'.repeat(5-r.lv) }}</b></span>
         </div>
       </div>
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { SyncOutlined } from '@ant-design/icons-vue'
+
 const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/reflection', () => loadData())
+
 const stats = ref({ total: 67, suggestions: 34, status: '中' })
 const items = ref([
   {id:1,title:'RAG 检索准确率反思',desc:'今日文档检索准确率 78%，低于目标 90%。原因：向量模型对中文长文本效果不佳，建议切换到 BGE 模型',tag:'检索',tc:'blue',lv:4,date:'05-20'},
@@ -36,6 +39,7 @@ const items = ref([
   {id:3,title:'代码生成质量回顾',desc:'本周代码生成正确率 85%，比上周提升 5%。改进点：增加代码审查步骤',tag:'技能',tc:'green',lv:4,date:'05-18'},
   {id:4,title:'资源消耗反思',desc:'Token 日消耗 1.2M，超出预算 20%。建议优化 prompt 长度和实施缓存策略',tag:'资源',tc:'orange',lv:3,date:'05-17'},
 ])
+
 async function loadData() {
   try {
     const res = await request.get(`/agents/${agentId.value}/reflection`)
@@ -45,11 +49,13 @@ async function loadData() {
     }
   } catch { /* 使用静态数据 */ }
 }
+
 onMounted(async () => {
   await initAgent()
   loadData()
 })
 </script>
+
 <style scoped>
 .pg{display:flex;flex-direction:column;gap:14px;}
 .hd{padding:16px 24px;border-radius:12px;}
@@ -66,4 +72,3 @@ onMounted(async () => {
 .cb{color:rgba(255,255,255,0.35);font-size:0.82rem;}
 @media(max-width:768px){.grid{grid-template-columns:1fr}}
 </style>
- 

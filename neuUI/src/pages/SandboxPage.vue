@@ -1,7 +1,7 @@
 <template>
-  <div >
-    <div >
-      <h2 >
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t">
         <ExperimentOutlined :style="{color:'#6366f1'}" /> 沙箱管理
       </h2>
       <a-space>
@@ -13,21 +13,23 @@
         </a-btn>
       </a-space>
     </div>
-    <div >
-      <div >
-        沙箱总数 <b >{{ stats.total }}</b>
+
+    <div class="sr">
+      <div class="s glass-effect">
+        沙箱总数 <b class="c1">{{ stats.total }}</b>
       </div>
-      <div >
-        活跃中 <b >{{ stats.active }}</b>
+      <div class="s glass-effect">
+        活跃中 <b class="c1">{{ stats.active }}</b>
       </div>
-      <div >
-        CPU使用率 <b >{{ stats.cpuUsage }}%</b>
+      <div class="s glass-effect">
+        CPU使用率 <b class="c1">{{ stats.cpuUsage }}%</b>
       </div>
-      <div >
-        内存使用率 <b >{{ stats.memUsage }}%</b>
+      <div class="s glass-effect">
+        内存使用率 <b class="c1">{{ stats.memUsage }}%</b>
       </div>
     </div>
-    <div >
+
+    <div class="tb glass-effect">
       <a-table
         :columns="cols"
         :data-source="sandboxList"
@@ -60,6 +62,7 @@
         </template>
       </a-table>
     </div>
+
     <a-modal
       v-model:open="showCreateModal"
       title="创建沙箱"
@@ -101,11 +104,13 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
 import { message } from 'ant-design-vue';
 import { request } from '@/api';
 import { ExperimentOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons-vue';
+
 interface Sandbox {
   id: string;
   name: string;
@@ -116,15 +121,18 @@ interface Sandbox {
   isolation_enabled: boolean;
   created_at: string;
 }
+
 const loading = ref(false);
 const showCreateModal = ref(false);
 const sandboxList = ref<Sandbox[]>([]);
+
 const stats = reactive({
   total: 3,
   active: 1,
   cpuUsage: 23,
   memUsage: 45
 });
+
 const createForm = reactive({
   name: '',
   runtime: 'python-3.12',
@@ -132,6 +140,7 @@ const createForm = reactive({
   memory: 4,
   isolation: true
 });
+
 const cols = [
   { title: '名称', dataIndex: 'name' },
   { title: '运行环境', dataIndex: 'runtime', width: 140 },
@@ -141,6 +150,7 @@ const cols = [
   { title: '创建时间', dataIndex: 'created_at', width: 160 },
   { title: '操作', key: 'act', width: 280 }
 ];
+
 const getStatusColor = (status: string) => {
   const colors: Record<string, string> = {
     '运行中': 'green',
@@ -150,6 +160,7 @@ const getStatusColor = (status: string) => {
   };
   return colors[status] || 'default';
 };
+
 const fetchSandboxes = async () => {
   loading.value = true;
   try {
@@ -181,9 +192,11 @@ const fetchSandboxes = async () => {
     loading.value = false;
   }
 };
+
 const refreshSandboxes = () => {
   fetchSandboxes();
 };
+
 const createSandbox = async () => {
   if (!createForm.name.trim()) {
     message.warning('请输入沙箱名称');
@@ -228,6 +241,7 @@ const createSandbox = async () => {
     loading.value = false;
   }
 };
+
 const startSandbox = async (sandbox: Sandbox) => {
   loading.value = true;
   try {
@@ -254,6 +268,7 @@ const startSandbox = async (sandbox: Sandbox) => {
     loading.value = false;
   }
 };
+
 const stopSandbox = async (sandbox: Sandbox) => {
   loading.value = true;
   try {
@@ -272,9 +287,11 @@ const stopSandbox = async (sandbox: Sandbox) => {
     loading.value = false;
   }
 };
+
 const viewLogs = (sandbox: Sandbox) => {
   message.info(`查看沙箱 ${sandbox.name} 的日志`);
 };
+
 const deleteSandbox = async (sandboxId: string) => {
   loading.value = true;
   try {
@@ -293,8 +310,10 @@ const deleteSandbox = async (sandboxId: string) => {
     loading.value = false;
   }
 };
+
 fetchSandboxes();
 </script>
+
 <style scoped>
 .pg {
   display: flex;
