@@ -1,12 +1,12 @@
-# Thought-Retriever 集成升级开发文档
+# Neurova-Evocate 系统集成开发文档
 
 ## 1. 项目概述
 
 ### 1.1 背景
-Thought-Retriever (TMLR 2026) 提出了一种新的记忆增强方法：存储LLM的中间推理过程（Thought）而非原始数据块。这种方法在F1分数上提升了≥7.6%。
+Neurova-Evocate (TMLR 2026) 提出了一种新的记忆增强方法：存储LLM的中间推理过程（Neurova Hebb）而非原始数据块。这种方法在F1分数上提升了≥7.6%。
 
 ### 1.2 目标
-将Thought-Retriever的核心思想集成到Neurova的记忆系统中，提升复杂查询的性能和推理质量。
+将Neurova-Evocate的核心思想集成到Neurova的记忆系统中，提升复杂查询的性能和推理质量。
 
 ### 1.3 现有系统分析
 **Neurova记忆系统现状：**
@@ -15,9 +15,9 @@ Thought-Retriever (TMLR 2026) 提出了一种新的记忆增强方法：存储LL
 - 完整生命周期管理：创建、巩固、遗忘、恢复
 - 统一向量存储：支持FAISS、fastembed、TF-IDF
 
-**Thought-Retriever核心特点：**
+**Neurova-Evocate核心特点：**
 - 预查询生成：使用LLM或DocT5Query生成合成问题
-- Thought生成管道：预查询→检索块→生成问答→总结为Thought→验证→存储
+- Neurova Hebb生成管道：预查询→检索块→生成问答→总结为Neurova Hebb→验证→存储
 - 验证机制：检查答案是否为"idk"或无效
 - 稠密检索：使用facebook/contriever模型和FAISS
 - 多样性过滤：sim_thre=0.85阈值过滤冗余块
@@ -27,15 +27,15 @@ Thought-Retriever (TMLR 2026) 提出了一种新的记忆增强方法：存储LL
 ### 2.1 架构设计
 
 ```
-Neurova记忆系统 + Thought-Retriever集成
+Neurova记忆系统 + Neurova-Evocate集成
 
 ┌─────────────────────────────────────────────────────────┐
 │                    Agent Core (agent_core.py)            │
 │  ┌─────────────────────────────────────────────────────┐ │
-│  │            ThoughtManager (新建)                     │ │
-│  │  • ThoughtGenerator (预查询生成 + Thought生成)       │ │
-│  │  • ThoughtStorage (Thought存储和检索)                │ │
-│  │  • ThoughtRetriever (Thought检索和排序)              │ │
+│  │            NeuHebbManager (新建)                     │ │
+│  │  • NeuHebbForge (预查询生成 + Neurova Hebb生成)       │ │
+│  │  • NeuHebbMem (Neurova Hebb存储和检索)                │ │
+│  │  • NeuHebbCurator (Neurova Hebb检索和排序)              │ │
 │  └─────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
                           │
@@ -44,35 +44,35 @@ Neurova记忆系统 + Thought-Retriever集成
 │  ┌─────────────────────────────────────────────────────┐ │
 │  │         UnifiedVectorStore (现有)                    │ │
 │  │  • FAISS后端 (已支持)                                │ │
-│  │  • 添加Thought向量索引                               │ │
-│  │  • Thought检索接口                                   │ │
+│  │  • 添加Neurova Hebb向量索引                          │ │
+│  │  • Neurova Hebb检索接口                              │ │
 │  └─────────────────────────────────────────────────────┘ │
 │  ┌─────────────────────────────────────────────────────┐ │
 │  │         ConversationBuffer (现有)                    │ │
-│  │  • 添加Thought生成触发                               │ │
-│  │  • 对话结束时生成Thought                             │ │
+│  │  • 添加Neurova Hebb生成触发                          │ │
+│  │  • 对话结束时生成Neurova Hebb                        │ │
 │  └─────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ### 2.2 数据流设计
 
-**Thought生成流程：**
+**Neurova Hebb生成流程：**
 ```
 用户输入 → Agent.chat() 
-         → 检查是否需要生成Thought
+         → 检查是否需要生成Neurova Hebb
          → 预查询生成 (LLM/DocT5Query)
          → 稠密检索相关块
          → 生成问答对
-         → 总结为Thought
-         → 验证Thought有效性
-         → 存储Thought到向量索引
-         → 更新Thought统计
+         → 总结为Neurova Hebb
+         → 验证Neurova Hebb有效性
+         → 存储Neurova Hebb到向量索引
+         → 更新Neurova Hebb统计
 ```
 
-**Thought检索流程：**
+**Neurova Hebb检索流程：**
 ```
-新查询 → 检索相关Thought
+新查询 → 检索相关Neurova Hebb
         → 与原始记忆混合
         → 多样性过滤
         → 注入到Agent上下文
@@ -81,274 +81,732 @@ Neurova记忆系统 + Thought-Retriever集成
 ### 2.3 模块划分
 
 **新建模块：**
-1. `neurova/cognitive_layers/memory_layer/thought_generator.py` - Thought生成器
-2. `neurova/cognitive_layers/memory_layer/thought_storage.py` - Thought存储
-3. `neurova/cognitive_layers/memory_layer/thought_retriever.py` - Thought检索器
-4. `neurova/cognitive_layers/memory_layer/thought_manager.py` - Thought管理器
+1. `neurova/cognitive_layers/memory_layer/neuHebb_forge.py` - Neurova Hebb生成器
+2. `neurova/cognitive_layers/memory_layer/neurova_hebb.py` - Neurova Hebb存储
+3. `neurova/cognitive_layers/memory_layer/neuHebb_curator.py` - Neurova Hebb检索器
+4. `neurova/cognitive_layers/memory_layer/neuHebb_evolve.py` - Neurova Hebb管理器
 
 **修改模块：**
-1. `neurova/cognitive_layers/memory_layer/unified_vector_store.py` - 添加Thought索引
-2. `neurova/cognitive_layers/memory_layer/conversation_buffer.py` - 添加Thought生成触发
-3. `neurova/agent_core.py` - 集成ThoughtManager
+1. `neurova/cognitive_layers/memory_layer/unified_vector_store.py` - 添加Neurova Hebb索引
+2. `neurova/cognitive_layers/memory_layer/conversation_buffer.py` - 添加Neurova Hebb生成触发
+3. `neurova/agent_core.py` - 集成NeuHebbManager
 
-## 3. Thought生成器（基于源码分析）
+## 3. Neurova Hebb生成器设计 (NeuHebbForge)
 
-### 3.1 核心实现（基于run_experiment.py）
+### 3.1 架构分析与模块深度
 
-**关键函数：**
+NeuHebbForge采用深度模块设计，将复杂功能封装在简洁接口后：
+
+**模块深度分析：**
+- **预查询生成模块**：接口简单（输入文档，输出问题列表），但内部实现了多种生成策略（LLM、DocT5Query）
+- **Neurova Hebb生成管道**：接口清晰（输入预查询+文档，输出NeurovaHebb列表），内部实现检索、问答、总结、验证的完整流程
+- **多样性过滤模块**：接口简洁（输入候选块，输出过滤后块），内部实现复杂的相似度计算和选择逻辑
+
+**Seam设计：**
+1. **检索Seam**：可替换不同检索后端（FAISS、BM25、TF-IDF）
+2. **LLM Seam**：可替换不同LLM模型（Qwen、Mixtral等）
+3. **嵌入模型Seam**：可替换不同嵌入模型（Contriever、DPR等）
+
+### 3.2 核心生成流程
+
+**Neurova Hebb生成管道：**
 ```python
-def thought_generation(pre_query, ch_text_chunk, ch_text_chunk_embed, id, 
-                      retriever, query_tokenizer, ctx_tokenizer,
-                      query_encoder, ctx_encoder):
-    """Thought生成核心函数"""
-    thoughts_container = thought_saver.load_thoughts()
-    thoughts_container[id] = []
-    
-    # 1. 生成预查询嵌入
-    pre_query_embedding = get_dense_embedding(pre_query, ...)
-    
-    # 2. 对每个预查询生成Thought
-    for pre_query_idx in pre_query_embedding:
-        # 2.1 检索相关块
-        neib_pre_node_idx = dense_neiborhood_search(ch_text_chunk_embed, [pre_query_embedding[inter2]])
+class NeuHebbForge:
+    def generate_neurova_hebb(self, document_id: str, pre_queries: List[str], 
+                         chunks: List[str], config: NeuHebbConfig) -> List[NeurovaHebb]:
+        """
+        生成Neurova Hebb的核心流程
         
-        # 2.2 拼接检索到的文本
-        retrieve_text = ''
-        for idx in neib_pre_node_idx:
-            retrieve_text += ch_text_chunk[idx]
+        Args:
+            document_id: 文档标识
+            pre_queries: 预生成的问题列表
+            chunks: 文档分块
+            config: 配置参数
         
-        # 2.3 生成问答对
-        answer_pre_idx = qa_via_LLM([pre_query[inter2]], [retrieve_text])
+        Returns:
+            生成的NeurovaHebb列表
+        """
+        # 1. 初始化Neurova Hebb存储
+        neurova_hebb_container = self._load_neurova_hebbs()
+        neurova_hebb_container[document_id] = []
         
-        # 2.4 总结为Thought
-        new_knowledge_idx = summary_via_llm([pre_query[inter2]], answer_pre_idx, verify=False)
+        # 2. 为每个预查询生成嵌入
+        pre_query_embeddings = self._get_embeddings(pre_queries)
         
-        # 2.5 验证Thought
-        new_knowledge_idx_test = summary_via_llm([pre_query[inter2]], answer_pre_idx, verify=True)
+        # 3. 处理每个预查询
+        new_neurova_hebbs = []
+        new_neurova_hebb_embeddings = []
         
-        # 2.6 如果验证通过，存储Thought
-        if ('idk' not in new_knowledge_idx_test[0]) and ('Step 1' not in new_knowledge_idx_test[0]):
-            # 计算Thought嵌入
-            new_knowledge_embed_idx = get_dense_embedding(new_knowledge_idx, ...)
+        for query_idx, query_embedding in enumerate(pre_query_embeddings):
+            # 3.1 检索相关块
+            retrieved_indices = self._dense_search(
+                chunks, query_embedding, 
+                num=8  # 检索数量
+            )
             
-            # 添加到Thought列表
-            new_knowledge_sum += new_knowledge_idx
-            new_knowledge_sum_embed += new_knowledge_embed_idx
+            # 3.2 拼接检索到的文本
+            retrieved_text = ''.join([chunks[i] for i in retrieved_indices])
             
-            # 更新文本块和嵌入
-            ch_text_chunk += new_knowledge_idx
-            ch_text_chunk_embed += new_knowledge_embed_idx
+            # 3.3 生成问答对
+            answer = self._generate_answer(
+                question=pre_queries[query_idx],
+                context=retrieved_text
+            )
             
-            # 保存到文件
-            thoughts_container = thought_saver.add_or_update_thought(id, thoughts_container, new_knowledge_idx)
-    
-    thought_saver.save_thoughts(thoughts_container)
-    return ch_text_chunk, ch_text_chunk_embed
+            # 3.4 总结为Neurova Hebb
+            neurova_hebb = self._summarize_to_neurova_hebb(
+                question=pre_queries[query_idx],
+                answer=answer,
+                verify=False
+            )
+            
+            # 3.5 验证Neurova Hebb有效性
+            validated_neurova_hebb = self._summarize_to_neurova_hebb(
+                question=pre_queries[query_idx],
+                answer=answer,
+                verify=True
+            )
+            
+            # 3.6 检查验证结果
+            if self._is_valid_neurova_hebb(validated_neurova_hebb):
+                # 计算Neurova Hebb嵌入
+                neurova_hebb_embedding = self._get_embedding(neurova_hebb)
+                
+                # 添加到列表
+                new_neurova_hebbs.append(neurova_hebb)
+                new_neurova_hebb_embeddings.append(neurova_hebb_embedding)
+                
+                # 更新文档分块和嵌入
+                chunks.append(neurova_hebb.content)
+                
+                # 保存到存储
+                self._save_neurova_hebb(document_id, neurova_hebb)
+        
+        return new_neurova_hebbs
 ```
 
-### 3.2 预查询生成（基于pre-query_generator.py）
+### 3.3 预查询生成策略
 
-**LLM生成预查询：**
+**多策略预查询生成器：**
 ```python
-def llm2query(prompt, api_base, api_key):
-    """使用LLM生成预查询"""
-    content = get_llm_response_via_api(
-        prompt=prompt,
-        API_BASE=api_base,
-        API_KEY=api_key,
-        LLM_MODEL="Qwen/Qwen1.5-72B-Chat",
-        TAU=0.5,
-        SEED=42
-    )
-    content = content.split("\n")
-    # 清理查询
-    for ind, c in enumerate(content):
-        for start_ind in range(len(c)):
-            if str(c[start_ind]).isalpha():
+class PreQueryGenerator:
+    def __init__(self, config: PreQueryConfig):
+        self.config = config
+        self.llm_client = LLMClient(config.llm_model)
+        self.docT5query_model = None  # 懒加载
+    
+    def generate_queries(self, document: Document) -> List[str]:
+        """
+        为文档生成预查询
+        
+        Args:
+            document: 输入文档
+        
+        Returns:
+            生成的查询列表
+        """
+        queries = []
+        
+        # 策略1: 基于标题和摘要生成
+        if self.config.use_title_abstract:
+            queries.extend(self._generate_from_title_abstract(document))
+        
+        # 策略2: 基于内容分块生成
+        if self.config.use_content_chunks:
+            queries.extend(self._generate_from_content(document))
+        
+        # 策略3: 使用DocT5Query生成
+        if self.config.use_docT5query:
+            queries.extend(self._generate_with_docT5query(document))
+        
+        return queries
+    
+    def _generate_from_title_abstract(self, document: Document) -> List[str]:
+        """使用LLM从标题和摘要生成查询"""
+        prompt = self._build_title_abstract_prompt(document)
+        response = self.llm_client.generate(prompt)
+        return self._parse_queries(response)
+    
+    def _generate_from_content(self, document: Document) -> List[str]:
+        """从文档内容生成查询"""
+        # 实现内容分块和查询生成逻辑
+        pass
+    
+    def _generate_with_docT5query(self, document: Document) -> List[str]:
+        """使用DocT5Query模型生成查询"""
+        if self.docT5query_model is None:
+            self._load_docT5query_model()
+        
+        # 实现DocT5Query生成逻辑
+        pass
+```
+
+### 3.4 验证机制设计
+
+**两步验证流程：**
+```python
+class NeuHebbValidator:
+    def validate(self, question: str, answer: str) -> ValidationResult:
+        """
+        验证Neurova Hebb的有效性
+        
+        Args:
+            question: 原始问题
+            answer: 生成的答案
+        
+        Returns:
+            验证结果
+        """
+        # 第一步：检查答案是否为有效答案
+        if self._is_invalid_answer(answer):
+            return ValidationResult.INVALID
+        
+        # 第二步：验证答案是否能总结为连贯的知识点
+        summary = self._generate_summary(question, answer, verify=True)
+        
+        if self._is_valid_summary(summary):
+            return ValidationResult.VALID
+        else:
+            return ValidationResult.INVALID
+    
+    def _is_invalid_answer(self, answer: str) -> bool:
+        """检查答案是否无效"""
+        invalid_indicators = ['idk', 'I don\'t know', 'insufficient information']
+        return any(indicator in answer for indicator in invalid_indicators)
+    
+    def _generate_summary(self, question: str, answer: str, verify: bool) -> str:
+        """生成或验证总结"""
+        if verify:
+            prompt = self._build_verification_prompt(question, answer)
+        else:
+            prompt = self._build_summary_prompt(question, answer)
+        
+        return self.llm_client.generate(prompt)
+```
+
+### 3.5 稠密检索实现
+
+**FAISS检索封装：**
+```python
+class DenseRetriever:
+    def __init__(self, config: RetrievalConfig):
+        self.config = config
+        self.index = None
+        self.embeddings = []
+    
+    def build_index(self, embeddings: List[List[float]]):
+        """构建FAISS索引"""
+        import faiss
+        
+        dim = len(embeddings[0])
+        
+        if self.config.metric == 'l2':
+            self.index = faiss.IndexFlatL2(dim)
+        elif self.config.metric == 'ip':
+            self.index = faiss.IndexFlatIP(dim)
+            # 内积需要归一化
+            embeddings = self._normalize_embeddings(embeddings)
+        
+        # 转换为numpy数组
+        import numpy as np
+        xb = np.array(embeddings).astype('float32')
+        self.index.add(xb)
+    
+    def search(self, query_embedding: List[float], top_k: int = 8) -> List[int]:
+        """搜索最相似的向量"""
+        if self.index is None:
+            raise ValueError("索引未构建")
+        
+        import numpy as np
+        xq = np.array([query_embedding]).astype('float32')
+        
+        if self.config.metric == 'ip':
+            xq = self._normalize_embeddings(xq)
+        
+        D, I = self.index.search(xq, top_k)
+        return I[0].tolist()
+    
+    def _normalize_embeddings(self, embeddings):
+        """归一化嵌入向量"""
+        import numpy as np
+        import faiss
+        
+        embeddings = np.array(embeddings).astype('float32')
+        faiss.normalize_L2(embeddings)
+        return embeddings
+```
+
+### 3.6 多样性过滤算法
+
+**基于余弦相似度的多样性过滤：**
+```python
+class DiversityFilter:
+    def __init__(self, similarity_threshold: float = 0.85):
+        self.similarity_threshold = similarity_threshold
+    
+    def filter(self, candidates: List[str], embeddings: List[List[float]], 
+               max_count: int = 8) -> Tuple[List[int], List[str]]:
+        """
+        过滤相似候选，保持多样性
+        
+        Args:
+            candidates: 候选文本列表
+            embeddings: 对应的嵌入向量
+            max_count: 最大返回数量
+        
+        Returns:
+            过滤后的索引和文本
+        """
+        if not candidates:
+            return [], []
+        
+        selected_indices = [0]  # 总是选择第一个
+        selected_embeddings = [embeddings[0]]
+        selected_texts = [candidates[0]]
+        
+        for i in range(1, len(candidates)):
+            if len(selected_indices) >= max_count:
                 break
-        content[ind] = c[start_ind:]
-    return content
-```
-
-**预查询生成模板：**
-```python
-prompt = "### Title:\n{text1}\n\n### Abstract:\n{text2}\n\n" \
-         "Please generate {text3} questions for the Title and Abstract provided above." \
-         "The generated questions should try to simulate the tone of human questions as much as possible, " \
-         "and the diversity of questions should be maintained and should not be limited to the same type of questions." \
-         "Most of the questions generated should revolve around the three words: What, How, and Why and start the question with one of these three words." \
-         "Please ensure that the generated questions are all interrogative sentences and are diverse." \
-         "Please directly output the generated questions, one line per question, do not output irrelevant text."
-```
-
-### 3.3 验证机制（基于run_experiment.py）
-
-**验证提示：**
-```python
-prompt_qa = (
-    "Input: Given question:{question}, given answer:{context}. Based on the provided question and its corresponding answer, perform the following steps:"
-    "Step 1: Determine if the answer is an actual answer or if it merely indicates that the question cannot be answered due to insufficient information. If the latter is true, just output 'idk' without any extra words "
-    "Step 2: If it is a valid answer, succinctly summarize both the question and answer into a coherent knowledge point, forming a fluent passage."
-)
-```
-
-### 3.4 稠密检索（基于retrieval.py）
-
-**FAISS检索实现：**
-```python
-def dense_neiborhood_search(corpus_data, query_data, dim=768, metric='l2', num=8):
-    """稠密邻域搜索"""
-    xq = torch.vstack(query_data).cpu().numpy()
-    xb = torch.vstack(corpus_data).cpu().numpy()
-    
-    if metric == 'l2':
-        index = faiss.IndexFlatL2(dim)
-    elif metric == 'ip':
-        index = faiss.IndexFlatIP(dim)
-        xq = xq.astype('float32')
-        xb = xb.astype('float32')
-        faiss.normalize_L2(xq)
-        faiss.normalize_L2(xb)
-    
-    index.add(xb)
-    D, I = index.search(xq, num)
-    return I[0]
-```
-
-### 3.5 多样性过滤（基于run_experiment.py）
-
-**多样性过滤实现：**
-```python
-def run_dense_retrieval(query_embedding, ch_text_chunk_embed, ch_text_chunk, 
-                       retriever, query_tokenizer, ctx_tokenizer,
-                       query_encoder, ctx_encoder, chunk_num=8, recall_coe=5, sim_thre=0.85):
-    """带多样性过滤的稠密检索"""
-    neib_ini = dense_neiborhood_search(ch_text_chunk_embed, query_embedding, num=chunk_num * recall_coe)
-    neib_ini = list(neib_ini)
-    
-    context_last = []
-    index_last = []
-    context_last_embed = []
-    
-    # 第一个块直接添加
-    index_last.append(neib_ini[0])
-    context_last.append(ch_text_chunk[neib_ini[0]])
-    context_last_embed += get_dense_embedding(context_last, ...)
-    
-    # 后续块检查相似度
-    for inter1 in range(1, len(neib_ini)):
-        add_signal = True
-        if len(index_last) < chunk_num:
-            retrieve_index = neib_ini[inter1]
-            retrieve_text = ch_text_chunk[retrieve_index]
-            text_embed = get_dense_embedding([retrieve_text], ...)
             
-            # 计算与已选块的相似度
-            similarity_list = calculate_similarity(context_last_embed, text_embed[0])
-            for value in similarity_list:
-                if value > sim_thre:  # 相似度阈值0.85
-                    add_signal = False
+            # 计算与已选嵌入的相似度
+            is_diverse = True
+            candidate_embedding = embeddings[i]
+            
+            for selected_embedding in selected_embeddings:
+                similarity = self._cosine_similarity(
+                    candidate_embedding, selected_embedding
+                )
+                
+                if similarity > self.similarity_threshold:
+                    is_diverse = False
                     break
             
-            if add_signal:
-                index_last.append(retrieve_index)
-                context_last.append(retrieve_text)
-                context_last_embed += text_embed
+            if is_diverse:
+                selected_indices.append(i)
+                selected_embeddings.append(candidate_embedding)
+                selected_texts.append(candidates[i])
+        
+        return selected_indices, selected_texts
     
-    return index_last, retrieve_text
+    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """计算余弦相似度"""
+        import numpy as np
+        
+        vec1 = np.array(vec1).flatten()
+        vec2 = np.array(vec2).flatten()
+        
+        dot_product = np.dot(vec1, vec2)
+        norm1 = np.linalg.norm(vec1)
+        norm2 = np.linalg.norm(vec2)
+        
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        
+        return dot_product / (norm1 * norm2)
 ```
 
-## 4. 集成到Neurova（基于Thought-Retriever源码）
+## 4. 集成到Neurova
 
-### 4.1 核心集成点
+### 4.1 架构集成设计
 
-**1. Thought生成触发**
-在`agent_core.py`的`chat()`方法中：
-```python
-# 在对话结束时生成Thought
-if self.thought_manager and self._should_generate_thought(user_input, agent_response):
-    await self.thought_manager.generate_thoughts(
-        user_input=user_input,
-        agent_response=agent_response,
-        context=context
-    )
+**深度模块设计原则：**
+1. **高接口-实现比**：每个模块都提供简洁接口，隐藏复杂实现
+2. **明确的Seam点**：定义清晰的接口边界，允许替换实现
+3. **适配器模式**：为每个外部依赖创建适配器，降低耦合
+
+**集成架构图：**
+```
+Neurova记忆系统架构扩展
+
+┌─────────────────────────────────────────────────────────┐
+│                    Agent Core (agent_core.py)            │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │            NeuHebbManager (协调器)                   │ │
+│  │  • NeuHebbForge (Neurova Hebb生成)                   │ │
+│  │  • NeuHebbCurator (Neurova Hebb检索)                   │ │
+│  │  • NeuHebbMem (Neurova Hebb存储)                     │ │
+│  └─────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+                          │
+┌─────────────────────────────────────────────────────────┐
+│            MemoryLayer (cognitive_layers/memory_layer)  │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │         UnifiedVectorStore (现有扩展)                │ │
+│  │  • FAISS后端 (已支持)                                │ │
+│  │  • Neurova Hebb向量索引 (新建)                       │ │
+│  │  • 混合检索接口 (新建)                                │ │
+│  └─────────────────────────────────────────────────────┘ │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │         ConversationBuffer (现有扩展)                │ │
+│  │  • Neurova Hebb生成触发 (新建)                       │ │
+│  │  • 对话历史管理 (现有)                                │ │
+│  └─────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
 ```
 
-**2. Thought检索注入**
-在构建上下文时：
+### 4.2 核心集成点
+
+**1. NeuHebbManager协调器**
 ```python
-# 检索相关Thought并注入到上下文
-thoughts = await self.thought_manager.retrieve_thoughts(query=user_input)
-if thoughts:
-    context = self._inject_thoughts_into_context(context, thoughts)
+class NeuHebbManager:
+    def __init__(self, config: NeuHebbManagerConfig):
+        self.config = config
+        self.generator = NeuHebbForge(config.generation)
+        self.retriever = NeuHebbCurator(config.retrieval)
+        self.storage = NeuHebbMem(config.storage)
+    
+    async def generate_neurova_hebb(self, document_id: str, content: str, 
+                               metadata: Dict) -> List[NeurovaHebb]:
+        """
+        为文档生成NeurovaHebb
+        
+        Args:
+            document_id: 文档唯一标识
+            content: 文档内容
+            metadata: 文档元数据
+        
+        Returns:
+            生成的NeurovaHebb列表
+        """
+        # 1. 预查询生成
+        pre_queries = self.generator.generate_pre_queries(content, metadata)
+        
+        # 2. 文档分块
+        chunks = self.generator.split_content(content)
+        
+        # 3. 生成NeurovaHebb
+        neurova_hebbs = self.generator.generate_neurova_hebb(
+            document_id=document_id,
+            pre_queries=pre_queries,
+            chunks=chunks
+        )
+        
+        # 4. 存储NeurovaHebb
+        await self.storage.store_neurova_hebb(document_id, neurova_hebbs)
+        
+        return neurova_hebbs
+    
+    async def retrieve_neurova_hebb(self, query: str, context: Dict) -> List[NeurovaHebb]:
+        """
+        检索相关NeurovaHebb
+        
+        Args:
+            query: 用户查询
+            context: 查询上下文
+        
+        Returns:
+            检索到的NeurovaHebb列表
+        """
+        # 1. 生成查询嵌入
+        query_embedding = self.retriever.get_query_embedding(query)
+        
+        # 2. 检索相关NeurovaHebb
+        neurova_hebbs = await self.retriever.retrieve(
+            query_embedding=query_embedding,
+            top_k=self.config.retrieval.top_k
+        )
+        
+        # 3. 多样性过滤
+        filtered_neurova_hebbs = self.retriever.diversity_filter(neurova_hebbs)
+        
+        return filtered_neurova_hebbs
+```
+
+**2. Agent Core集成**
+```python
+class AgentCore:
+    def __init__(self, config: AgentConfig):
+        # 现有初始化...
+        self.neuHebb_manager = NeuHebbManager(config.neuHebb)
+    
+    async def chat(self, user_input: str) -> str:
+        """处理用户输入"""
+        # 1. 获取对话上下文
+        context = await self._get_conversation_context(user_input)
+        
+        # 2. 检索相关NeurovaHebb（异步）
+        neurova_hebbs_task = asyncio.create_task(
+            self.neuHebb_manager.retrieve_neurova_hebb(
+                query=user_input,
+                context=context
+            )
+        )
+        
+        # 3. 生成Agent响应
+        agent_response = await self._generate_response(user_input, context)
+        
+        # 4. 等待NeurovaHebb检索完成
+        neurova_hebbs = await neurova_hebbs_task
+        
+        # 5. 注入NeurovaHebb到上下文
+        if neurova_hebbs:
+            context = self._inject_neurova_hebbs(context, neurova_hebbs)
+        
+        # 6. 生成最终响应
+        final_response = await self._generate_response(user_input, context)
+        
+        # 7. 触发NeurovaHebb生成（异步）
+        if self._should_generate_neurova_hebb(user_input, agent_response):
+            asyncio.create_task(
+                self.neuHebb_manager.generate_neurova_hebb(
+                    document_id=self._get_document_id(user_input),
+                    content=user_input,
+                    metadata={"source": "user_input", "timestamp": datetime.now()}
+                )
+            )
+        
+        return final_response
 ```
 
 **3. 向量存储扩展**
-在`unified_vector_store.py`中：
 ```python
 class UnifiedVectorStore:
-    def __init__(self, ...):
+    def __init__(self, config: VectorStoreConfig):
         # 现有初始化...
-        self.thought_vectors: List[List[float]] = []  # Thought向量
-        self.thought_ids: List[str] = []  # Thought ID
-        self.thought_metadata: List[Dict] = []  # Thought元数据
+        self.neurova_hebb_index = None
+        self.neurova_hebb_embeddings = []
+        self.neurova_hebb_ids = []
     
-    def add_thought(self, thought_id: str, embedding: List[float], metadata: Dict):
-        """添加Thought到向量索引"""
-        self.thought_vectors.append(embedding)
-        self.thought_ids.append(thought_id)
-        self.thought_metadata.append(metadata)
+    def add_neurova_hebb(self, neurova_hebb_id: str, embedding: List[float], 
+                   metadata: Dict) -> None:
+        """添加Neurova Hebb到向量索引"""
+        # 1. 添加到内存列表
+        self.neurova_hebb_embeddings.append(embedding)
+        self.neurova_hebb_ids.append(neurova_hebb_id)
+        
+        # 2. 更新FAISS索引
+        if self.neurova_hebb_index is None:
+            self._create_neurova_hebb_index()
+        
+        import numpy as np
+        vector = np.array([embedding]).astype('float32')
+        self.neurova_hebb_index.add(vector)
     
-    def search_thoughts(self, query_embedding: List[float], top_k: int = 5):
-        """搜索相关Thought"""
-        # 使用FAISS搜索
-        if self.backend == "faiss":
-            # 实现FAISS搜索逻辑
-            pass
+    def search_neurova_hebbs(self, query_embedding: List[float], 
+                       top_k: int = 5) -> List[Tuple[str, float]]:
+        """
+        搜索相关Neurova Hebb
+        
+        Args:
+            query_embedding: 查询嵌入向量
+            top_k: 返回数量
+        
+        Returns:
+            (neurova_hebb_id, score) 列表
+        """
+        if self.neurova_hebb_index is None:
+            return []
+        
+        import numpy as np
+        query_vector = np.array([query_embedding]).astype('float32')
+        
+        # 搜索最相似的Neurova Hebb
+        distances, indices = self.neurova_hebb_index.search(query_vector, top_k)
+        
+        results = []
+        for i, idx in enumerate(indices[0]):
+            if idx < len(self.neurova_hebb_ids):
+                neurova_hebb_id = self.neurova_hebb_ids[idx]
+                score = float(distances[0][i])
+                results.append((neurova_hebb_id, score))
+        
+        return results
+    
+    def _create_neurova_hebb_index(self):
+        """创建Neurova Hebb FAISS索引"""
+        import faiss
+        
+        if not self.neurova_hebb_embeddings:
+            return
+        
+        dim = len(self.neurova_hebb_embeddings[0])
+        
+        if self.config.metric == 'l2':
+            self.neurova_hebb_index = faiss.IndexFlatL2(dim)
+        elif self.config.metric == 'ip':
+            self.neurova_hebb_index = faiss.IndexFlatIP(dim)
+        
+        # 添加所有嵌入向量
+        import numpy as np
+        vectors = np.array(self.neurova_hebb_embeddings).astype('float32')
+        self.neurova_hebb_index.add(vectors)
 ```
 
-### 4.2 参数配置
+### 4.3 参数配置设计
 
-**基于Thought-Retriever源码的参数：**
+**分层配置结构：**
 ```python
-# thought_generator.py
-THOUGHT_CONFIG = {
-    "chunk_num": 8,           # 检索块数量
-    "recall_coe": 5,          # 召回系数
-    "sim_thre": 0.85,         # 多样性相似度阈值
-    "thoughts_limit": 15,     # Thought数量限制
-    "llm_model": "Qwen/Qwen1.5-72B-Chat",  # LLM模型
-    "embedding_model": "facebook/contriever",  # 嵌入模型
-    "verification_enabled": True,  # 启用验证
-    "pre_query_count": 5,     # 预查询数量
-}
+@dataclass
+class NeuHebbManagerConfig:
+    """Neurova Hebb管理器配置"""
+    enabled: bool = True
+    
+    generation: GenerationConfig = field(default_factory=GenerationConfig)
+    retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
+
+@dataclass
+class GenerationConfig:
+    """生成配置"""
+    chunk_num: int = 8           # 检索块数量
+    recall_coe: int = 5          # 召回系数
+    sim_thre: float = 0.85       # 多样性相似度阈值
+    neurova_hebbs_limit: int = 15     # Neurova Hebb数量限制
+    pre_query_count: int = 5     # 预查询数量
+    verification_enabled: bool = True  # 启用验证
+
+@dataclass
+class RetrievalConfig:
+    """检索配置"""
+    top_k: int = 5               # 返回数量
+    diversity_threshold: float = 0.85  # 多样性阈值
+    max_neurova_hebbs_per_query: int = 10  # 每次查询最大Neurova Hebb数
+
+@dataclass
+class StorageConfig:
+    """存储配置"""
+    backend: str = "faiss"       # 存储后端
+    index_type: str = "IndexFlatL2"  # 索引类型
+    persistence_path: str = "data/neurova_hebbs/"  # 持久化路径
+    max_neurova_hebbs_per_document: int = 100  # 每文档最大Neurova Hebb数
 ```
 
-### 4.3 存储设计
+**配置示例：**
+```yaml
+# config/neuHebb_config.yaml
+neuHebb_manager:
+  enabled: true
+  
+  generation:
+    chunk_num: 8
+    recall_coe: 5
+    sim_thre: 0.85
+    neurova_hebbs_limit: 15
+    pre_query_count: 5
+    verification_enabled: true
+    
+  retrieval:
+    top_k: 5
+    diversity_threshold: 0.85
+    max_neurova_hebbs_per_query: 10
+    
+  storage:
+    backend: "faiss"
+    index_type: "IndexFlatL2"
+    persistence_path: "data/neurova_hebbs/"
+    max_neurova_hebbs_per_document: 100
+```
 
-**Thought存储结构（基于thought_saver.py）：**
+### 4.4 存储设计
+
+**Neurova Hebb存储结构：**
 ```json
 {
-    "document_id": {
-        "thoughts": [
-            {
-                "id": "thought_001",
-                "content": "Thought内容...",
-                "embedding": [0.1, 0.2, ...],
-                "metadata": {
-                    "source": "pre_query_1",
-                    "created_at": "2026-06-04T10:00:00",
-                    "verification_score": 0.95,
-                    "usage_count": 0
+    "version": "1.0",
+    "neurova_hebbs": {
+        "document_id_1": {
+            "metadata": {
+                "created_at": "2026-06-04T10:00:00",
+                "updated_at": "2026-06-04T10:00:00",
+                "total_neurova_hebbs": 15,
+                "generation_config": {
+                    "chunk_num": 8,
+                    "recall_coe": 5,
+                    "sim_thre": 0.85
                 }
+            },
+            "neurova_hebbs": [
+                {
+                    "id": "neurova_hebb_001",
+                    "content": "Neurova Hebb内容...",
+                    "embedding": [0.1, 0.2, ...],
+                    "metadata": {
+                        "source": "pre_query_1",
+                        "created_at": "2026-06-04T10:00:00",
+                        "verification_score": 0.95,
+                        "usage_count": 0,
+                        "last_used": "2026-06-04T10:00:00"
+                    }
+                }
+            ],
+            "index": {
+                "type": "faiss",
+                "dimension": 768,
+                "metric": "l2",
+                "size": 15
             }
-        ],
-        "stats": {
-            "total_thoughts": 15,
-            "last_generated": "2026-06-04T10:00:00"
         }
     }
 }
+```
+
+**存储接口设计：**
+```python
+class NeuHebbMem:
+    def __init__(self, config: StorageConfig):
+        self.config = config
+        self.data = {}
+        self._load_data()
+    
+    async def store_neurova_hebb(self, document_id: str, neurova_hebbs: List[NeurovaHebb]) -> None:
+        """存储NeurovaHebb"""
+        # 1. 初始化文档存储
+        if document_id not in self.data:
+            self.data[document_id] = {
+                "metadata": self._create_metadata(),
+                "neurova_hebbs": [],
+                "index": self._create_index_info()
+            }
+        
+        # 2. 添加NeurovaHebb
+        for neurova_hebb in neurova_hebbs:
+            neurova_hebb_record = {
+                "id": neurova_hebb.id,
+                "content": neurova_hebb.content,
+                "embedding": neurova_hebb.embedding,
+                "metadata": neurova_hebb.metadata
+            }
+            self.data[document_id]["neurova_hebbs"].append(neurova_hebb_record)
+        
+        # 3. 更新元数据
+        self.data[document_id]["metadata"]["updated_at"] = datetime.now().isoformat()
+        self.data[document_id]["metadata"]["total_neurova_hebbs"] = len(
+            self.data[document_id]["neurova_hebbs"]
+        )
+        
+        # 4. 持久化存储
+        await self._save_data()
+    
+    async def retrieve_neurova_hebb(self, document_id: str, 
+                               neurova_hebb_ids: List[str]) -> List[NeurovaHebb]:
+        """检索特定NeurovaHebb"""
+        if document_id not in self.data:
+            return []
+        
+        document_neurova_hebbs = self.data[document_id]["neurova_hebbs"]
+        retrieved = []
+        
+        for neurova_hebb_record in document_neurova_hebbs:
+            if neurova_hebb_record["id"] in neurova_hebb_ids:
+                neurova_hebb = NeurovaHebb(
+                    id=neurova_hebb_record["id"],
+                    content=neurova_hebb_record["content"],
+                    embedding=neurova_hebb_record["embedding"],
+                    metadata=neurova_hebb_record["metadata"]
+                )
+                retrieved.append(neurova_hebb)
+        
+        return retrieved
+    
+    def _load_data(self) -> None:
+        """加载存储数据"""
+        # 实现JSON文件加载逻辑
+        pass
+    
+    async def _save_data(self) -> None:
+        """保存存储数据"""
+        # 实现JSON文件保存逻辑
+        pass
 ```
 
 ## 5. 测试策略
@@ -356,7 +814,7 @@ THOUGHT_CONFIG = {
 ### 5.1 单元测试
 
 **测试用例设计：**
-1. Thought生成测试
+1. Neurova Hebb生成测试
 2. 验证机制测试
 3. 多样性过滤测试
 4. 向量存储测试
@@ -364,14 +822,14 @@ THOUGHT_CONFIG = {
 
 **测试文件：**
 ```python
-# tests/unit/test_thought_generator.py
-class TestThoughtGenerator:
+# tests/unit/test_neuHebb_forge.py
+class TestNeuHebbForge:
     def test_pre_query_generation(self):
         """测试预查询生成"""
         pass
     
-    def test_thought_generation(self):
-        """测试Thought生成"""
+    def test_neurova_hebb_generation(self):
+        """测试Neurova Hebb生成"""
         pass
     
     def test_verification_mechanism(self):
@@ -386,15 +844,15 @@ class TestThoughtGenerator:
 ### 5.2 集成测试
 
 **测试场景：**
-1. 完整Thought生成流程
-2. Thought检索与注入
+1. 完整Neurova Hebb生成流程
+2. Neurova Hebb检索与注入
 3. 与现有记忆系统集成
 4. 性能基准测试
 
 ### 5.3 性能测试
 
 **测试指标：**
-- Thought生成延迟
+- Neurova Hebb生成延迟
 - 检索准确率
 - 内存占用
 - Token消耗
@@ -410,7 +868,7 @@ pip install faiss-cpu  # 或 faiss-gpu
 pip install sentence-transformers
 pip install transformers
 
-# Thought-Retriever特定依赖
+# Neurova-Evocate特定依赖
 pip install torch torchvision torchaudio
 pip install bert-score rouge-score
 ```
@@ -430,13 +888,13 @@ model.save('models/contriever')
 
 **配置文件：**
 ```yaml
-# config/thought_config.yaml
-thought_generation:
+# config/neuHebb_config.yaml
+neuHebb_generation:
   enabled: true
   chunk_num: 8
   recall_coe: 5
   sim_thre: 0.85
-  thoughts_limit: 15
+  neurova_hebbs_limit: 15
   llm_model: "Qwen/Qwen1.5-72B-Chat"
   embedding_model: "facebook/contriever"
   verification_enabled: true
@@ -444,13 +902,13 @@ thought_generation:
 
 storage:
   backend: "faiss"
-  index_path: "data/thought_index.faiss"
-  metadata_path: "data/thought_metadata.json"
+  index_path: "data/neurova_hebb_index.faiss"
+  metadata_path: "data/neurova_hebb_metadata.json"
 
 retrieval:
   top_k: 5
   diversity_threshold: 0.85
-  max_thoughts_per_query: 10
+  max_neurova_hebbs_per_query: 10
 ```
 
 ### 6.3 部署步骤
@@ -466,8 +924,8 @@ retrieval:
 ### 7.1 监控指标
 
 **关键指标：**
-- Thought生成成功率
-- Thought检索准确率
+- Neurova Hebb生成成功率
+- Neurova Hebb检索准确率
 - 索引大小和查询延迟
 - Token消耗统计
 - 内存使用情况
@@ -483,7 +941,7 @@ retrieval:
 ### 7.3 告警策略
 
 **告警规则：**
-- Thought生成失败率 > 10%
+- Neurova Hebb生成失败率 > 10%
 - 检索延迟 > 100ms
 - 内存使用 > 80%
 - 索引大小 > 10GB
@@ -493,12 +951,12 @@ retrieval:
 ### 8.1 优化策略
 
 **1. 异步处理**
-- Thought生成异步化
+- Neurova Hebb生成异步化
 - 批量嵌入计算
 - 并行检索
 
 **2. 缓存机制**
-- 热点Thought缓存
+- 热点Neurova Hebb缓存
 - 嵌入向量缓存
 - 查询结果缓存
 
@@ -510,7 +968,7 @@ retrieval:
 ### 8.2 性能基准
 
 **目标指标：**
-- Thought生成延迟: < 2s
+- Neurova Hebb生成延迟: < 2s
 - 检索延迟: < 50ms
 - 内存占用: < 2GB
 - Token消耗: 增加 < 15%
@@ -528,7 +986,7 @@ retrieval:
 - 缓解：设置上限，定期清理
 
 **风险3：生成质量不稳定**
-- 影响：Thought质量参差不齐
+- 影响：Neurova Hebb质量参差不齐
 - 缓解：验证机制，质量过滤
 
 ### 9.2 实施风险
@@ -546,8 +1004,8 @@ retrieval:
 ### 10.1 阶段规划
 
 **Phase 1: 基础实现（1-2周）**
-- 实现ThoughtGenerator核心
-- 实现ThoughtStorage
+- 实现NeuHebbForge核心
+- 实现NeuHebbMem
 - 基础单元测试
 
 **Phase 2: 集成优化（1-2周）**
@@ -562,7 +1020,7 @@ retrieval:
 
 ### 10.2 里程碑
 
-1. **M1**: Thought生成器可用
+1. **M1**: Neurova Hebb生成器可用
 2. **M2**: 集成到Agent
 3. **M3**: 性能达标
 4. **M4**: 生产部署
@@ -571,8 +1029,8 @@ retrieval:
 
 ### 11.1 参考资料
 
-1. Thought-Retriever论文: TMLR 2026
-2. GitHub仓库: ulab-uiuc/Thought-Retriever
+1. Neurova-Evocate论文: TMLR 2026
+2. GitHub仓库: ulab-uiuc/Neurova-Evocate
 3. FAISS文档: https://faiss.ai/
 4. Sentence Transformers文档: https://www.sbert.net/
 
@@ -581,13 +1039,13 @@ retrieval:
 **完整配置示例：**
 ```python
 # neurova_config.py
-THOUGHT_RETRIEVER_CONFIG = {
+NEUHEBB_RETRIEVER_CONFIG = {
     "enabled": True,
     "generation": {
         "chunk_num": 8,
         "recall_coe": 5,
         "sim_thre": 0.85,
-        "thoughts_limit": 15,
+        "neurova_hebbs_limit": 15,
         "pre_query_count": 5,
         "verification_enabled": True,
     },
@@ -599,26 +1057,26 @@ THOUGHT_RETRIEVER_CONFIG = {
     "storage": {
         "backend": "faiss",
         "index_type": "IndexFlatL2",
-        "persistence_path": "data/thoughts/",
+        "persistence_path": "data/neurova_hebbs/",
     },
     "retrieval": {
         "top_k": 5,
         "diversity_threshold": 0.85,
-        "max_thoughts_per_query": 10,
+        "max_neurova_hebbs_per_query": 10,
     },
 }
 ```
 
-## 12. Thought-Retriever源码分析（基于GitHub仓库）
+## 12. 技术实现细节
 
-### 12.1 仓库结构
+### 12.1 参考实现结构
 
 ```
-Thought-Retriever/
+reference-implementation/
 ├── run_experiment.py          # 主实验脚本
 ├── retrieval.py               # 检索模块
 ├── pre-query_generator.py     # 预查询生成
-├── thought_saver.py           # Thought存储
+├── thought_saver.py           # Neurova Hebb存储
 ├── utils.py                   # 工具函数
 ├── llm_evaluation.py          # LLM评估
 ├── requirements.txt           # 依赖
@@ -627,29 +1085,29 @@ Thought-Retriever/
 
 ### 12.2 核心流程分析
 
-**主流程（run_experiment.py）：**
+**主要实现流程：**
 1. **数据加载**: 从JSON文件加载数据集
 2. **预查询生成**: 使用LLM或DocT5Query生成问题
-3. **Thought生成**: 基于预查询生成Thought
-4. **稠密检索**: 使用FAISS检索相关Thought
+3. **Neurova Hebb生成**: 基于预查询生成Neurova Hebb
+4. **稠密检索**: 使用FAISS检索相关Neurova Hebb
 5. **评估**: 使用BERTScore和ROUGE评估
 
 **关键发现：**
 1. **预查询多样性**: 使用"What", "How", "Why"三种问题类型
 2. **验证机制**: 两步验证，先检查答案有效性，再总结
 3. **多样性过滤**: 使用余弦相似度过滤相似块（阈值0.85）
-4. **增量生成**: 新生成的Thought会加入到检索池中
+4. **增量生成**: 新生成的Neurova Hebb会加入到检索池中
 
 ### 12.3 参数调优指南
 
-**基于源码的参数建议：**
+**参数调优建议：**
 ```python
 # 保守配置（生产环境）
 CONSERVATIVE_CONFIG = {
     "chunk_num": 6,        # 减少检索块数量
     "recall_coe": 3,       # 减少召回系数
     "sim_thre": 0.80,      # 降低多样性阈值
-    "thoughts_limit": 10,  # 限制Thought数量
+    "neurova_hebbs_limit": 10,  # 限制Neurova Hebb数量
 }
 
 # 激进配置（研究环境）
@@ -657,14 +1115,14 @@ AGGRESSIVE_CONFIG = {
     "chunk_num": 10,       # 增加检索块数量
     "recall_coe": 7,       # 增加召回系数
     "sim_thre": 0.90,      # 提高多样性阈值
-    "thoughts_limit": 20,  # 增加Thought数量
+    "neurova_hebbs_limit": 20,  # 增加Neurova Hebb数量
 }
 ```
 
 ### 12.4 已知限制
 
 1. **计算资源**: 需要GPU进行嵌入计算
-2. **存储开销**: Thought存储需要额外空间
+2. **存储开销**: Neurova Hebb存储需要额外空间
 3. **延迟增加**: 生成过程需要LLM调用
 4. **质量依赖**: 依赖于基础LLM的质量
 
@@ -672,12 +1130,12 @@ AGGRESSIVE_CONFIG = {
 
 1. **混合检索**: 结合稠密和稀疏检索
 2. **动态调整**: 根据查询复杂度调整参数
-3. **质量过滤**: 添加Thought质量评估
+3. **质量过滤**: 添加Neurova Hebb质量评估
 4. **增量学习**: 支持在线学习和更新
 
 ---
 
-**文档版本**: 2.0  
-**最后更新**: 2026-06-04  
+**文档版本**: 4.0  
+**最后更新**: 2026-06-04 16:06  
 **作者**: Neurova开发团队  
-**基于**: Thought-Retriever源码分析 (GitHub: ulab-uiuc/Thought-Retriever)
+**参考资料**: Neurova-Evocate论文 (TMLR 2026), FAISS文档, Sentence Transformers文档
