@@ -22,6 +22,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from neurova.api.auth import get_current_user
+from neurova.context_pool import ContextPool, ContextInput, ContextSource
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +78,21 @@ def _get_agent(agent_id: str = "default"):
     return get_agent_instance(agent_id)
 
 
-def _get_context_builder():
-    """获取上下文构建器"""
+def _get_context_builder(user_id: str = None, agent_id: str = None, session_id: str = None):
+    """获取上下文构建器（隔离版本）
+    
+    Args:
+        user_id: 用户ID（必需）
+        agent_id: Agent ID（必需）
+        session_id: 会话ID（可选）
+    """
     try:
         from neurova.context_pool import ContextPool
-        return ContextPool()
+        if user_id is None or agent_id is None:
+            logger.warning("ContextPool requires user_id and agent_id for isolation. Using default values.")
+            user_id = user_id or "default_user"
+            agent_id = agent_id or "default_agent"
+        return ContextPool(user_id=user_id, agent_id=agent_id, session_id=session_id)
     except Exception as e:
         logger.warning(f"ContextPool not available: {e}")
         return None
@@ -90,39 +102,79 @@ def _get_context_builder():
 async def build_context(
     request: Request,
     body: BuildContextRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """构建上下文"""
+    """构建上下文（带用户隔离）"""
     request_id = _get_request_id(request)
     start_time = time.time()
     context_id = str(uuid.uuid4())
     
     try:
-        agent = _get_agent(body.agent_id)
-        if not agent:
-            raise HTTPException(status_code=404, detail=f"Agent '{body.agent_id}' not found")
+        # 从JWT获取用户ID，确保隔离
+        user_id = current_user.get("user_id", "unknown")
+        agent_id = body.agent_id
+        session_id = body.session_id
         
-        # 尝试使用 Agent 的上下文构建器
-        context_content = ""
-        sources = []
+        # 使用隔离的上下文构建器
+        context_builder = _get_context_builder(
+            user_id=user_id,
+            agent_id=agent_id,
+            session_id=session_id
+        )
         
-        if hasattr(agent, "build_context"):
-            result = await agent.build_context(
-                user_input=body.user_input,
-                session_id=body.session_id,
-                max_tokens=body.max_tokens,
-                include_reflection=body.include_reflection,
-                include_memories=body.include_memories,
-                include_constitution=body.include_constitution,
-            )
-            if isinstance(result, dict):
-                context_content = result.get("content", "")
-                sources = result.get("sources", [])
+        if context_builder:
+            # 使用 ContextPool 构建上下文
+            try:
+                # 添加用户输入到上下文池
+                user_context = ContextInput(
+                    content=body.user_input,
+                    source=ContextSource.USER_INPUT,
+                    priority=10,  # 高优先级
+                )
+                context_builder.add_context(user_context)
+                
+                # 构建上下文（使用默认模型名称）
+                context_messages = context_builder.build_context_for_model("default")
+                
+                # 转换为字符串格式
+                context_content = "\n".join(
+                    f"{msg.get('role', 'unknown')}: {msg.get('content', '')}"
+                    for msg in context_messages
+                )
+                sources = [msg.get('source', 'context_pool') for msg in context_messages]
+                
+            except Exception as e:
+                logger.warning(f"ContextPool failed, falling back: {e}")
+                # 降级到原有逻辑
+                context_builder = None
+        
+        if not context_builder:
+            # 降级：使用原有的 Agent 构建器
+            agent = _get_agent(agent_id)
+            if not agent:
+                raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+            
+            context_content = ""
+            sources = []
+            
+            if hasattr(agent, "build_context"):
+                result = await agent.build_context(
+                    user_input=body.user_input,
+                    session_id=session_id,
+                    max_tokens=body.max_tokens,
+                    include_reflection=body.include_reflection,
+                    include_memories=body.include_memories,
+                    include_constitution=body.include_constitution,
+                )
+                if isinstance(result, dict):
+                    context_content = result.get("content", "")
+                    sources = result.get("sources", [])
+                else:
+                    context_content = str(result)
             else:
-                context_content = str(result)
-        else:
-            # 降级：构建基础上下文
-            context_content = f"User: {body.user_input}\n\nSystem: Processing request..."
-            sources = ["user_input"]
+                # 降级：构建基础上下文
+                context_content = f"User: {body.user_input}\n\nSystem: Processing request..."
+                sources = ["user_input"]
         
         return BuildContextResponse(
             context_id=context_id,
@@ -142,44 +194,85 @@ async def build_context(
 async def build_context_v2(
     request: Request,
     body: BuildContextRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """构建上下文 V2（增强版）"""
+    """构建上下文 V2（增强版，带用户隔离）"""
     request_id = _get_request_id(request)
     start_time = time.time()
     context_id = str(uuid.uuid4())
     
     try:
-        agent = _get_agent(body.agent_id)
-        if not agent:
-            raise HTTPException(status_code=404, detail=f"Agent '{body.agent_id}' not found")
+        # 从JWT获取用户ID，确保隔离
+        user_id = current_user.get("user_id", "unknown")
+        agent_id = body.agent_id
+        session_id = body.session_id
         
-        # 使用 UnifiedContextInjector
-        context_content = ""
-        sources = []
+        # 使用隔离的上下文构建器
+        context_builder = _get_context_builder(
+            user_id=user_id,
+            agent_id=agent_id,
+            session_id=session_id
+        )
         
-        if hasattr(agent, "unified_injector") and agent.unified_injector:
-            result = await agent.unified_injector.build_context(
-                user_input=body.user_input,
-                max_tokens=body.max_tokens,
-                include_reflection=body.include_reflection,
-                include_memories=body.include_memories,
-            )
-            context_content = result.get("content", "")
-            sources = result.get("sources", [])
-        elif hasattr(agent, "build_context"):
-            result = await agent.build_context(
-                user_input=body.user_input,
-                session_id=body.session_id,
-                max_tokens=body.max_tokens,
-            )
-            if isinstance(result, dict):
+        if context_builder:
+            # 使用 ContextPool 构建上下文
+            try:
+                # 添加用户输入到上下文池
+                user_context = ContextInput(
+                    content=body.user_input,
+                    source=ContextSource.USER_INPUT,
+                    priority=10,  # 高优先级
+                )
+                context_builder.add_context(user_context)
+                
+                # 构建上下文（使用默认模型名称）
+                context_messages = context_builder.build_context_for_model("default")
+                
+                # 转换为字符串格式
+                context_content = "\n".join(
+                    f"{msg.get('role', 'unknown')}: {msg.get('content', '')}"
+                    for msg in context_messages
+                )
+                sources = [msg.get('source', 'context_pool') for msg in context_messages]
+                
+            except Exception as e:
+                logger.warning(f"ContextPool failed, falling back: {e}")
+                # 降级到原有逻辑
+                context_builder = None
+        
+        if not context_builder:
+            # 降级：使用原有的 Agent 构建器
+            agent = _get_agent(agent_id)
+            if not agent:
+                raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+            
+            # 使用 UnifiedContextInjector
+            context_content = ""
+            sources = []
+            
+            if hasattr(agent, "unified_injector") and agent.unified_injector:
+                result = await agent.unified_injector.build_context(
+                    user_input=body.user_input,
+                    max_tokens=body.max_tokens,
+                    include_reflection=body.include_reflection,
+                    include_memories=body.include_memories,
+                )
                 context_content = result.get("content", "")
                 sources = result.get("sources", [])
+            elif hasattr(agent, "build_context"):
+                result = await agent.build_context(
+                    user_input=body.user_input,
+                    session_id=session_id,
+                    max_tokens=body.max_tokens,
+                )
+                if isinstance(result, dict):
+                    context_content = result.get("content", "")
+                    sources = result.get("sources", [])
+                else:
+                    context_content = str(result)
             else:
-                context_content = str(result)
-        else:
-            context_content = f"User: {body.user_input}"
-            sources = ["user_input"]
+                context_content = f"User: {body.user_input}"
+                sources = ["user_input"]
         
         return BuildContextResponse(
             context_id=context_id,

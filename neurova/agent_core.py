@@ -165,6 +165,10 @@ class AgentConfig:
         tts_engine: str = "mock",  # TTS 引擎类型 (edge/moss_nano/mock)
         tts_voice: str = "mock",  # 音色名称
         tts_auto_download: bool = True,  # 是否自动下载模型
+        
+        # 活水上下文池配置
+        enable_context_pool: bool = True,  # 是否启用活水上下文池
+        enable_auto_tagging: bool = False,  # 是否启用自动标签生成
     ):
         self.name = name
         self.agent_id = agent_id
@@ -218,6 +222,10 @@ class AgentConfig:
         self.tts_engine = tts_engine
         self.tts_voice = tts_voice
         self.tts_auto_download = tts_auto_download
+        
+        # 活水上下文池配置
+        self.enable_context_pool = enable_context_pool
+        self.enable_auto_tagging = enable_auto_tagging
 
         # 个性和宪法配置
         self.personality = personality
@@ -270,7 +278,11 @@ class Agent:
         # P2: 初始化 MemCore 深度模块
         self.memory_agent = MemCore(self)
         # P2: 初始化 ContextOrchestrator 深度模块
-        self.context_orchestrator = ContextOrchestrator(self)
+        self.context_orchestrator = ContextOrchestrator(
+            self,
+            use_pool=self.config.enable_context_pool,
+            auto_tag=self.config.enable_auto_tagging
+        )
 
         if self.config.enable_memory:
             debug_log("步骤2.1: 调用 _init_memory_modules()...")
