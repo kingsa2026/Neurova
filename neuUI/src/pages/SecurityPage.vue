@@ -1,7 +1,7 @@
 <template>
-  <div >
-    <div >
-      <h2 >
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t">
         <ShieldOutlined :style="{color:'#ef4444'}" /> 安全管理
       </h2>
       <a-space>
@@ -13,48 +13,50 @@
         </a-btn>
       </a-space>
     </div>
-    <div >
-      <div >
-        <div >
+
+    <div class="stats-row">
+      <div class="stat-card glass-effect">
+        <div class="stat-icon red">
           <AlertTriangleOutlined />
         </div>
-        <div >
-          <div >{{ stats.alerts }}</div>
-          <div >安全告警</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.alerts }}</div>
+          <div class="stat-label">安全告警</div>
         </div>
       </div>
-      <div >
-        <div >
+      <div class="stat-card glass-effect">
+        <div class="stat-icon orange">
           <LockOutlined />
         </div>
-        <div >
-          <div >{{ stats.blocked }}</div>
-          <div >拦截次数</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.blocked }}</div>
+          <div class="stat-label">拦截次数</div>
         </div>
       </div>
-      <div >
-        <div >
+      <div class="stat-card glass-effect">
+        <div class="stat-icon green">
           <CheckCircleOutlined />
         </div>
-        <div >
-          <div >{{ stats.passed }}</div>
-          <div >安全通过</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.passed }}</div>
+          <div class="stat-label">安全通过</div>
         </div>
       </div>
-      <div >
-        <div >
+      <div class="stat-card glass-effect">
+        <div class="stat-icon blue">
           <ClockCircleOutlined />
         </div>
-        <div >
-          <div >{{ stats.activeDays }}</div>
-          <div >连续安全天数</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.activeDays }}</div>
+          <div class="stat-label">连续安全天数</div>
         </div>
       </div>
     </div>
-    <a-tabs default-active-key="audit" :items="tabs" >
+
+    <a-tabs default-active-key="audit" :items="tabs" class="tabs">
       <template #audit>
-        <div >
-          <div >
+        <div class="tab-content">
+          <div class="filter-bar">
             <a-input-search
               placeholder="搜索日志"
               v-model:value="auditFilter.keyword"
@@ -97,8 +99,9 @@
           </a-table>
         </div>
       </template>
+
       <template #threats>
-        <div >
+        <div class="tab-content">
           <a-table
             :columns="threatCols"
             :data-source="threats"
@@ -125,8 +128,9 @@
           </a-table>
         </div>
       </template>
+
       <template #settings>
-        <div >
+        <div class="tab-content">
           <a-form :model="securitySettings" layout="vertical">
             <a-form-item label="登录安全">
               <a-space direction="vertical" style="width: 100%">
@@ -153,6 +157,7 @@
         </div>
       </template>
     </a-tabs>
+
     <a-modal
       v-model:open="showExportModal"
       title="导出审计日志"
@@ -174,6 +179,7 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
 import { message } from 'ant-design-vue';
@@ -182,6 +188,7 @@ import {
   ShieldOutlined, RefreshOutlined, DownloadOutlined,
   AlertTriangleOutlined, LockOutlined, CheckCircleOutlined, ClockCircleOutlined
 } from '@ant-design/icons-vue';
+
 interface AuditLog {
   id: string;
   level: string;
@@ -191,6 +198,7 @@ interface AuditLog {
   time: string;
   detail: string;
 }
+
 interface Threat {
   id: string;
   type: string;
@@ -200,23 +208,28 @@ interface Threat {
   status: string;
   description: string;
 }
+
 const tabs = [
   { key: 'audit', label: '审计日志' },
   { key: 'threats', label: '安全威胁' },
   { key: 'settings', label: '安全设置' }
 ];
+
 const loading = ref(false);
 const showExportModal = ref(false);
+
 const stats = reactive({
   alerts: 3,
   blocked: 127,
   passed: 8945,
   activeDays: 15
 });
+
 const auditFilter = reactive({
   keyword: '',
   level: ''
 });
+
 const auditLoading = ref(false);
 const auditLogs = ref<AuditLog[]>([]);
 const auditPagination = ref({
@@ -224,18 +237,22 @@ const auditPagination = ref({
   pageSize: 20,
   total: 0
 });
+
 const threatLoading = ref(false);
 const threats = ref<Threat[]>([]);
+
 const securitySettings = reactive({
   loginLockout: true,
   sessionTimeout: 60,
   twoFactorAuth: true,
   apiRateLimit: true
 });
+
 const exportForm = reactive({
   format: 'csv',
   dateRange: []
 });
+
 const auditCols = [
   { title: '级别', key: 'level', width: 80 },
   { title: '操作', key: 'action', width: 120 },
@@ -244,6 +261,7 @@ const auditCols = [
   { title: '时间', key: 'time', width: 160 },
   { title: '详情', dataIndex: 'detail' }
 ];
+
 const threatCols = [
   { title: '类型', dataIndex: 'type', width: 120 },
   { title: '严重程度', key: 'severity', width: 100 },
@@ -253,6 +271,7 @@ const threatCols = [
   { title: '描述', dataIndex: 'description' },
   { title: '操作', key: 'act', width: 160 }
 ];
+
 const fetchAuditLogs = async () => {
   auditLoading.value = true;
   try {
@@ -262,6 +281,7 @@ const fetchAuditLogs = async () => {
     };
     if (auditFilter.keyword) params.keyword = auditFilter.keyword;
     if (auditFilter.level) params.level = auditFilter.level;
+
     const res = await request.get('/audit/logs', { params });
     if (res.success) {
       auditLogs.value = res.data.items || [];
@@ -281,6 +301,7 @@ const fetchAuditLogs = async () => {
     auditLoading.value = false;
   }
 };
+
 const fetchThreats = async () => {
   threatLoading.value = true;
   try {
@@ -309,17 +330,21 @@ const fetchThreats = async () => {
     threatLoading.value = false;
   }
 };
+
 const refreshData = () => {
   fetchAuditLogs();
   fetchThreats();
 };
+
 const onDateChange = () => {
   fetchAuditLogs();
 };
+
 const onAuditPageChange = (pagination: { current: number; pageSize: number; total: number }) => {
   auditPagination.value = pagination;
   fetchAuditLogs();
 };
+
 const getLevelColor = (level: string) => {
   const colors: Record<string, string> = {
     INFO: 'blue',
@@ -328,6 +353,7 @@ const getLevelColor = (level: string) => {
   };
   return colors[level] || 'default';
 };
+
 const getSeverityColor = (severity: string) => {
   const colors: Record<string, string> = {
     high: 'red',
@@ -336,6 +362,7 @@ const getSeverityColor = (severity: string) => {
   };
   return colors[severity] || 'default';
 };
+
 const formatTime = (time: string) => {
   try {
     return new Date(time).toLocaleString('zh-CN');
@@ -343,9 +370,11 @@ const formatTime = (time: string) => {
     return time;
   }
 };
+
 const viewThreat = (threat: Threat) => {
   message.info(`查看威胁详情: ${threat.type}`);
 };
+
 const resolveThreat = async (threat: Threat) => {
   try {
     const res = await request.put('/audit/logs/' + threat.id, { resolved: true });
@@ -358,6 +387,7 @@ const resolveThreat = async (threat: Threat) => {
     message.error('标记失败');
   }
 };
+
 const saveSettings = async () => {
   try {
     const res = await request.put('/settings/security', securitySettings);
@@ -369,6 +399,7 @@ const saveSettings = async () => {
     message.error('保存失败');
   }
 };
+
 const exportLogs = async () => {
   try {
     const params: Record<string, unknown> = {
@@ -388,9 +419,11 @@ const exportLogs = async () => {
     message.error('导出失败');
   }
 };
+
 fetchAuditLogs();
 fetchThreats();
 </script>
+
 <style scoped>
 .pg {
   display: flex;

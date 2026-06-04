@@ -1,43 +1,46 @@
 <template>
-  <div >
-    <div >
-      <h2 ><ShopOutlined /> 技能市场</h2>
+  <div class="skill-page">
+    <div class="page-header glass-effect">
+      <h2 class="page-title"><ShopOutlined /> 技能市场</h2>
       <a-button type="primary" @click="$router.push('/skill-pool')"><AppstoreOutlined /> 技能池</a-button>
     </div>
-    <div >
+
+    <div class="search-bar glass-effect">
       <a-input-search v-model:value="kw" placeholder="搜索技能..." style="width:300px" />
-      <div >
+      <div class="tag-filters">
         <a-tag v-for="t in allTags" :key="t" :color="selTag===t?'blue':undefined" style="cursor:pointer" @click="selTag=selTag===t?'':t">{{ t }}</a-tag>
       </div>
     </div>
-    <div  v-if="filtered.length">
-      <div v-for="s in filtered" :key="s.id"  @click="openDetail(s)">
-        <div >
-          <div  :style="{background: colorFor(s.tag)}">{{ s.name[0] }}</div>
-          <div >
+
+    <div class="skill-grid" v-if="filtered.length">
+      <div v-for="s in filtered" :key="s.id" class="skill-card glass-effect card-hover" @click="openDetail(s)">
+        <div class="skill-top">
+          <div class="skill-avatar" :style="{background: colorFor(s.tag)}">{{ s.name[0] }}</div>
+          <div class="skill-meta">
             <h4>{{ s.name }}</h4>
-            <span >v{{ s.version }}</span>
+            <span class="skill-ver">v{{ s.version }}</span>
           </div>
         </div>
-        <p >{{ s.desc }}</p>
-        <div >
-          <span><StarFilled  /> {{ s.rating }}</span>
+        <p class="skill-desc">{{ s.desc }}</p>
+        <div class="skill-bottom">
+          <span><StarFilled class="star" /> {{ s.rating }}</span>
           <span><DownloadOutlined /> {{ s.downloads }}</span>
           <a-button size="small" type="primary" @click.stop="install(s)">安装</a-button>
         </div>
       </div>
     </div>
-    <div v-else  style="text-align:center;padding:64px 0;color:rgba(255,255,255,0.3)">暂无匹配技能</div>
+    <div v-else class="glass-effect" style="text-align:center;padding:64px 0;color:rgba(255,255,255,0.3)">暂无匹配技能</div>
+
     <a-drawer v-model:open="detailOpen" title="技能详情" placement="right" :width="420">
       <template v-if="detailSkill">
-        <div >
-          <div  :style="{background: colorFor(detailSkill.tag)}">{{ detailSkill.name[0] }}</div>
+        <div class="detail-header">
+          <div class="detail-avatar" :style="{background: colorFor(detailSkill.tag)}">{{ detailSkill.name[0] }}</div>
           <h3>{{ detailSkill.name }}</h3>
           <a-tag>{{ detailSkill.tag }}</a-tag>
         </div>
-        <p >{{ detailSkill.desc }}</p>
-        <div >
-          <span><StarFilled  /> {{ detailSkill.rating }} 分</span>
+        <p class="detail-desc">{{ detailSkill.desc }}</p>
+        <div class="detail-stats">
+          <span><StarFilled class="star" /> {{ detailSkill.rating }} 分</span>
           <span><DownloadOutlined /> {{ detailSkill.downloads }} 次安装</span>
         </div>
         <a-divider />
@@ -46,22 +49,27 @@
     </a-drawer>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { useAgentStore } from '@/stores/agents'
 import { listPublicSkills, installPublicSkill } from '@/api/modules/skill'
 import { ShopOutlined, AppstoreOutlined, StarFilled, DownloadOutlined } from '@ant-design/icons-vue'
+
 const agentStore = useAgentStore()
+
 const kw = ref('')
 const selTag = ref('')
 const detailOpen = ref(false)
 const detailSkill = ref<Skill|null>(null)
 const allTags = ['对话','搜索','文档','代码','分析','图像']
+
 interface Skill { id:string;name:string;desc:string;version:string;tag:string;rating:number;downloads:number }
 const skills = ref<Skill[]>([])
 const loading = ref(false)
 const errorMsg = ref('')
+
 // 从 API 加载公共技能
 onMounted(async () => {
   loading.value = true
@@ -88,11 +96,14 @@ onMounted(async () => {
     errorMsg.value = err?.message || '加载技能市场失败'
   } finally { loading.value = false }
 })
+
 const filtered = computed(() => skills.value.filter(s => (!kw.value||s.name.includes(kw.value)) && (!selTag.value||s.tag===selTag.value)))
+
 function colorFor(tag: string) {
   const colors: Record<string,string> = { '对话':'#3b82f6','搜索':'#8b5cf6','文档':'#10b981','代码':'#f59e0b','分析':'#ef4444','图像':'#06b6d4' }
   return colors[tag] || '#60a5fa'
 }
+
 function openDetail(s: Skill) { detailSkill.value = s; detailOpen.value = true }
 async function install(s: Skill) {
   const targetAgentId = agentStore.currentAgentId || agentStore.agents[0]?.id || 'default'
@@ -101,6 +112,7 @@ async function install(s: Skill) {
   else message.error(`技能「${s.name}」安装失败`)
 }
 </script>
+
 <style scoped>
 .skill-page { display:flex;flex-direction:column;gap:16px; }
 .page-header { display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-radius:12px; }
@@ -121,4 +133,3 @@ async function install(s: Skill) {
 .detail-desc { color:rgba(255,255,255,0.5); }
 .detail-stats { display:flex;gap:24px;color:rgba(255,255,255,0.4);margin:16px 0; }
 </style>
- 

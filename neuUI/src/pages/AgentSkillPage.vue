@@ -1,11 +1,13 @@
-<template><div ><div ><h2 ><ThunderboltOutlined :style="{color:'#3b82f6'}"/> Agent 技能</h2><a-button type="primary" size="small">打包可打包技能</a-button></div><div ><div >已安装<b >{{ data.length }}</b></div><div >启用<b style="color:#34d399">{{ data.filter(d=>d.on).length }}</b></div><div >可打包<b style="color:#fbbf24">{{ data.filter(d=>d.pk).length }}</b></div></div><div ><a-table :columns="cols" :data-source="data" row-key="id" size="middle" :pagination="false"><template #bodyCell="{column,record}"><template v-if="column.key==='st'"><a-switch v-model:checked="record.on" size="small" @change="toggleSkill(record)"/></template><template v-if="column.key==='act'"><a-space><a-button type="link" size="small" :disabled="!record.pk" @click="packSkill(record)">打包</a-button><a-button type="link" size="small" @click="pushSkill(record.id)">推送</a-button><a-popconfirm title="卸载?" @confirm="data=data.filter(d=>d.id!==record.id)"><a-button type="link" size="small" danger>卸载</a-button></a-popconfirm></a-space></template></template></a-table></div></div></template>
+<template><div class="pg"><div class="hd glass-effect"><h2 class="t"><ThunderboltOutlined :style="{color:'#3b82f6'}"/> Agent 技能</h2><a-button type="primary" size="small">打包可打包技能</a-button></div><div class="sr"><div class="s glass-effect">已安装<b class="c1">{{ data.length }}</b></div><div class="s glass-effect">启用<b style="color:#34d399">{{ data.filter(d=>d.on).length }}</b></div><div class="s glass-effect">可打包<b style="color:#fbbf24">{{ data.filter(d=>d.pk).length }}</b></div></div><div class="tb glass-effect"><a-table :columns="cols" :data-source="data" row-key="id" size="middle" :pagination="false"><template #bodyCell="{column,record}"><template v-if="column.key==='st'"><a-switch v-model:checked="record.on" size="small" @change="toggleSkill(record)"/></template><template v-if="column.key==='act'"><a-space><a-button type="link" size="small" :disabled="!record.pk" @click="packSkill(record)">打包</a-button><a-button type="link" size="small" @click="pushSkill(record.id)">推送</a-button><a-popconfirm title="卸载?" @confirm="data=data.filter(d=>d.id!==record.id)"><a-button type="link" size="small" danger>卸载</a-button></a-popconfirm></a-space></template></template></a-table></div></div></template>
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { listPrivateSkills, pushSkillToAgent } from '@/api/modules/skill'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { ThunderboltOutlined } from '@ant-design/icons-vue'
+
 const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/skills', () => loadSkills())
+
 const cols = [
   { title: '技能名', dataIndex: 'name' },
   { title: '版本', dataIndex: 'ver' },
@@ -13,6 +15,7 @@ const cols = [
   { title: '状态', key: 'st', width: 80 },
   { title: '操作', key: 'act', width: 200 }
 ]
+
 interface SkillData {
   id: string
   name: string
@@ -21,8 +24,10 @@ interface SkillData {
   on: boolean
   pk: boolean
 }
+
 const data = ref<SkillData[]>([])
 const loading = ref(false)
+
 async function loadSkills() {
   loading.value = true
   try {
@@ -43,10 +48,12 @@ async function loadSkills() {
     loading.value = false
   }
 }
+
 onMounted(async () => {
   await initAgent()
   loadSkills()
 })
+
 async function pushSkill(skillId: string) {
   const ok = await pushSkillToAgent(skillId, agentId.value, false)
   if (ok) message.success('推送成功')
@@ -69,4 +76,3 @@ async function packSkill(item: SkillData) {
 .s b{font-size:1.4rem;}.c1{color:#3b82f6;}
 .tb{padding:20px;border-radius:12px;}
 </style>
- 

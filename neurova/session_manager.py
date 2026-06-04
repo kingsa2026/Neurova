@@ -347,6 +347,44 @@ class SessionManager:
             'dates': sorted(dates),
         }
 
+    def get_recent_context(self, agent_id: str, session_id: str, max_messages: int = 20) -> List[Dict[str, str]]:
+        """
+        获取最近的对话上下文
+        
+        Args:
+            agent_id: Agent ID
+            session_id: 会话 ID
+            max_messages: 最大消息数
+            
+        Returns:
+            消息列表，格式为 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+        """
+        # 获取所有日期的 session 数据
+        sessions = self._get_session_data_list(agent_id, session_id)
+        
+        if not sessions:
+            return []
+        
+        # 按日期排序，获取最新的
+        sessions.sort(key=lambda x: x.get('session_date', ''), reverse=True)
+        
+        # 收集所有消息
+        all_messages = []
+        for session in sessions:
+            messages = session.get('messages', [])
+            for msg in messages:
+                if isinstance(msg, dict):
+                    role = msg.get('role', '')
+                    content = msg.get('content', '')
+                    if role and content:
+                        all_messages.append({
+                            "role": role,
+                            "content": content,
+                        })
+        
+        # 返回最近的 max_messages 条消息
+        return all_messages[-max_messages:] if len(all_messages) > max_messages else all_messages
+
 def get_session_manager() -> SessionManager:
     """获取SessionManager单例"""
     return SessionManager()

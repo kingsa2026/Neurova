@@ -1,17 +1,18 @@
 <template>
-  <div >
-    <div >
-      <h1 >系统设置</h1>
-      <p >管理您的账户、偏好和系统配置</p>
+  <div class="settings-page">
+    <div class="settings-header">
+      <h1 class="page-title">系统设置</h1>
+      <p class="page-sub">管理您的账户、偏好和系统配置</p>
     </div>
-    <div >
-      <a-tabs v-model:activeKey="activeTab"  size="large">
+
+    <div class="settings-body">
+      <a-tabs v-model:activeKey="activeTab" class="settings-tabs" size="large">
         <!-- ===== 个人设置 ===== -->
         <a-tab-pane key="profile" tab="个人设置">
-          <div >
-            <div >
-              <h3 >基本信息</h3>
-              <a-form :model="profileForm" layout="vertical" >
+          <div class="tab-content">
+            <div class="section glass-effect">
+              <h3 class="section-title">基本信息</h3>
+              <a-form :model="profileForm" layout="vertical" class="settings-form">
                 <a-row :gutter="24">
                   <a-col :span="12">
                     <a-form-item label="用户名">
@@ -34,7 +35,7 @@
                   </a-col>
                   <a-col :span="12">
                     <a-form-item label="注册时间">
-                      <span >{{ profileForm.createdAt || '未知' }}</span>
+                      <span class="form-text">{{ profileForm.createdAt || '未知' }}</span>
                     </a-form-item>
                   </a-col>
                 </a-row>
@@ -45,9 +46,10 @@
                 </a-form-item>
               </a-form>
             </div>
-            <div >
-              <h3 >修改密码</h3>
-              <a-form :model="passwordForm" layout="vertical" >
+
+            <div class="section glass-effect">
+              <h3 class="section-title">修改密码</h3>
+              <a-form :model="passwordForm" layout="vertical" class="settings-form">
                 <a-row :gutter="24">
                   <a-col :span="8">
                     <a-form-item label="当前密码">
@@ -74,16 +76,17 @@
             </div>
           </div>
         </a-tab-pane>
+
         <!-- ===== 偏好设置 ===== -->
         <a-tab-pane key="preferences" tab="偏好设置">
-          <div >
-            <div >
-              <h3 >外观</h3>
-              <div >
-                <div >
-                  <div >
-                    <span >主题模式</span>
-                    <span >选择深色或浅色主题</span>
+          <div class="tab-content">
+            <div class="section glass-effect">
+              <h3 class="section-title">外观</h3>
+              <div class="pref-list">
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">主题模式</span>
+                    <span class="pref-desc">选择深色或浅色主题</span>
                   </div>
                   <a-segmented
                     v-model:value="systemSettings.theme"
@@ -94,10 +97,10 @@
                     ]"
                   />
                 </div>
-                <div >
-                  <div >
-                    <span >界面语言</span>
-                    <span >选择界面显示语言</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">界面语言</span>
+                    <span class="pref-desc">选择界面显示语言</span>
                   </div>
                   <a-select
                     v-model:value="systemSettings.language"
@@ -109,117 +112,121 @@
                     ]"
                   />
                 </div>
-                <div >
-                  <div >
-                    <span >菜单折叠</span>
-                    <span >默认折叠侧边菜单</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">菜单折叠</span>
+                    <span class="pref-desc">默认折叠侧边菜单</span>
                   </div>
                   <a-switch v-model:checked="systemSettings.sidebar_collapsed" />
                 </div>
               </div>
             </div>
-            <div >
-              <h3 >系统设置</h3>
-              <div >
-                <div >
-                  <div >
-                    <span >自动保存</span>
-                    <span >自动保存会话记录</span>
+
+            <div class="section glass-effect">
+              <h3 class="section-title">系统设置</h3>
+              <div class="pref-list">
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">自动保存</span>
+                    <span class="pref-desc">自动保存会话记录</span>
                   </div>
                   <a-switch v-model:checked="systemSettings.auto_save" />
                 </div>
-                <div >
-                  <div >
-                    <span >保存间隔</span>
-                    <span >自动保存间隔（分钟）</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">保存间隔</span>
+                    <span class="pref-desc">自动保存间隔（分钟）</span>
                   </div>
                   <a-input-number v-model:value="systemSettings.save_interval_minutes" :min="1" :max="60" style="width: 120px" />
                 </div>
-                <div >
-                  <div >
-                    <span >最大历史记录</span>
-                    <span >保留的历史记录数量</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">最大历史记录</span>
+                    <span class="pref-desc">保留的历史记录数量</span>
                   </div>
                   <a-input-number v-model:value="systemSettings.max_history_size" :min="10" :max="1000" style="width: 120px" />
                 </div>
               </div>
             </div>
-            <div >
-              <h3 >通知</h3>
-              <div >
-                <div >
-                  <div >
-                    <span >系统通知</span>
-                    <span >接收系统更新和维护通知</span>
+
+            <div class="section glass-effect">
+              <h3 class="section-title">通知</h3>
+              <div class="pref-list">
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">系统通知</span>
+                    <span class="pref-desc">接收系统更新和维护通知</span>
                   </div>
                   <a-switch v-model:checked="systemSettings.notifications_enabled" />
                 </div>
-                <div >
-                  <div >
-                    <span >声音提醒</span>
-                    <span >收到通知时播放声音</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">声音提醒</span>
+                    <span class="pref-desc">收到通知时播放声音</span>
                   </div>
                   <a-switch v-model:checked="systemSettings.sound_enabled" />
                 </div>
-                <div >
-                  <div >
-                    <span >桌面通知</span>
-                    <span >重要信息通过桌面通知</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">桌面通知</span>
+                    <span class="pref-desc">重要信息通过桌面通知</span>
                   </div>
                   <a-switch v-model:checked="systemSettings.desktop_notifications" />
                 </div>
-                <div >
-                  <div >
-                    <span >隐私模式</span>
-                    <span >隐藏敏感信息</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">隐私模式</span>
+                    <span class="pref-desc">隐藏敏感信息</span>
                   </div>
                   <a-switch v-model:checked="systemSettings.privacy_mode" />
                 </div>
               </div>
             </div>
+
             <a-form-item>
               <a-button type="primary" :loading="savingSettings" @click="saveSystemSettings">保存偏好设置</a-button>
             </a-form-item>
           </div>
         </a-tab-pane>
+
         <!-- ===== 安全设置 ===== -->
         <a-tab-pane key="security" tab="安全设置">
-          <div >
-            <div >
-              <h3 >安全配置</h3>
-              <div >
-                <div >
-                  <div >
-                    <span >双因素认证</span>
-                    <span >启用双因素登录验证</span>
+          <div class="tab-content">
+            <div class="section glass-effect">
+              <h3 class="section-title">安全配置</h3>
+              <div class="pref-list">
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">双因素认证</span>
+                    <span class="pref-desc">启用双因素登录验证</span>
                   </div>
                   <a-switch v-model:checked="securitySettings.two_factor_enabled" />
                 </div>
-                <div >
-                  <div >
-                    <span >会话超时</span>
-                    <span >无操作自动登出（分钟）</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">会话超时</span>
+                    <span class="pref-desc">无操作自动登出（分钟）</span>
                   </div>
                   <a-input-number v-model:value="securitySettings.session_timeout_minutes" :min="5" :max="1440" style="width: 120px" />
                 </div>
-                <div >
-                  <div >
-                    <span >密码过期</span>
-                    <span >密码强制过期天数</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">密码过期</span>
+                    <span class="pref-desc">密码强制过期天数</span>
                   </div>
                   <a-input-number v-model:value="securitySettings.password_expiry_days" :min="0" :max="365" style="width: 120px" />
                 </div>
-                <div >
-                  <div >
-                    <span >登录告警</span>
-                    <span >新设备登录时发送通知</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">登录告警</span>
+                    <span class="pref-desc">新设备登录时发送通知</span>
                   </div>
                   <a-switch v-model:checked="securitySettings.login_alerts" />
                 </div>
-                <div >
-                  <div >
-                    <span >设备管理</span>
-                    <span >允许管理登录设备</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">设备管理</span>
+                    <span class="pref-desc">允许管理登录设备</span>
                   </div>
                   <a-switch v-model:checked="securitySettings.device_management_enabled" />
                 </div>
@@ -230,16 +237,18 @@
             </div>
           </div>
         </a-tab-pane>
+
         <!-- ===== 备份管理 ===== -->
         <a-tab-pane key="backup" tab="备份管理">
-          <div >
-            <div >
+          <div class="tab-content">
+            <div class="section glass-effect">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px">
-                <h3  style="margin: 0; border: none; padding: 0">备份历史</h3>
+                <h3 class="section-title" style="margin: 0; border: none; padding: 0">备份历史</h3>
                 <a-button type="primary" :loading="creatingBackup" @click="createBackup">
                   <CloudUploadOutlined /> 创建备份
                 </a-button>
               </div>
+
               <a-spin :spinning="loadingBackups">
                 <a-table
                   :columns="backupColumns"
@@ -279,20 +288,21 @@
                 </a-table>
               </a-spin>
             </div>
-            <div >
-              <h3 >备份设置</h3>
-              <div >
-                <div >
-                  <div >
-                    <span >自动备份</span>
-                    <span >启用自动定期备份</span>
+
+            <div class="section glass-effect">
+              <h3 class="section-title">备份设置</h3>
+              <div class="pref-list">
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">自动备份</span>
+                    <span class="pref-desc">启用自动定期备份</span>
                   </div>
                   <a-switch v-model:checked="systemSettings.backup_enabled" />
                 </div>
-                <div >
-                  <div >
-                    <span >备份频率</span>
-                    <span >自动备份的频率</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">备份频率</span>
+                    <span class="pref-desc">自动备份的频率</span>
                   </div>
                   <a-select v-model:value="systemSettings.backup_frequency" style="width: 150px">
                     <a-select-option value="daily">每天</a-select-option>
@@ -300,17 +310,17 @@
                     <a-select-option value="monthly">每月</a-select-option>
                   </a-select>
                 </div>
-                <div >
-                  <div >
-                    <span >保留期限</span>
-                    <span >备份保留天数</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">保留期限</span>
+                    <span class="pref-desc">备份保留天数</span>
                   </div>
                   <a-input-number v-model:value="systemSettings.backup_retention_days" :min="1" :max="365" style="width: 120px" />
                 </div>
-                <div >
-                  <div >
-                    <span >数据加密</span>
-                    <span >加密备份文件</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">数据加密</span>
+                    <span class="pref-desc">加密备份文件</span>
                   </div>
                   <a-switch v-model:checked="systemSettings.data_encryption" />
                 </div>
@@ -318,20 +328,22 @@
             </div>
           </div>
         </a-tab-pane>
+
         <!-- ===== API 密钥 ===== -->
         <a-tab-pane key="api-key" tab="API 密钥">
-          <div >
-            <div >
-              <h3 >API 密钥管理</h3>
-              <p >管理用于第三方集成的 API 密钥，密钥仅在创建时显示一次</p>
-              <div  v-if="apiKeys.length > 0">
-                <div  v-for="key in apiKeys" :key="key.id">
-                  <div >
-                    <span >{{ key.name }}</span>
-                    <span >{{ key.prefix }}••••••••</span>
-                    <span >创建于 {{ key.createdAt }}</span>
+          <div class="tab-content">
+            <div class="section glass-effect">
+              <h3 class="section-title">API 密钥管理</h3>
+              <p class="section-desc">管理用于第三方集成的 API 密钥，密钥仅在创建时显示一次</p>
+
+              <div class="keys-list" v-if="apiKeys.length > 0">
+                <div class="key-item" v-for="key in apiKeys" :key="key.id">
+                  <div class="key-info">
+                    <span class="key-name">{{ key.name }}</span>
+                    <span class="key-prefix">{{ key.prefix }}••••••••</span>
+                    <span class="key-date">创建于 {{ key.createdAt }}</span>
                   </div>
-                  <div >
+                  <div class="key-actions">
                     <a-tag :color="key.status === 'active' ? 'green' : 'default'">
                       {{ key.status === 'active' ? '启用' : '禁用' }}
                     </a-tag>
@@ -341,21 +353,23 @@
                   </div>
                 </div>
               </div>
-              <div  v-else>
+              <div class="keys-empty" v-else>
                 <p>暂无 API 密钥，点击下方按钮创建</p>
               </div>
-              <a-button  @click="showKeyModal = true">
+
+              <a-button class="create-key-btn" @click="showKeyModal = true">
                 <PlusOutlined /> 创建 API 密钥
               </a-button>
             </div>
           </div>
         </a-tab-pane>
+
         <!-- ===== 系统配置（管理员） ===== -->
         <a-tab-pane key="system" tab="系统配置" v-if="isAdmin">
-          <div >
-            <div >
-              <h3 >系统参数</h3>
-              <a-form layout="vertical" >
+          <div class="tab-content">
+            <div class="section glass-effect">
+              <h3 class="section-title">系统参数</h3>
+              <a-form layout="vertical" class="settings-form">
                 <a-row :gutter="24">
                   <a-col :span="12">
                     <a-form-item label="Token 日限额">
@@ -387,27 +401,28 @@
                 </a-form-item>
               </a-form>
             </div>
-            <div >
-              <h3 >安全设置</h3>
-              <div >
-                <div >
-                  <div >
-                    <span >注册开放</span>
-                    <span >允许新用户自行注册</span>
+
+            <div class="section glass-effect">
+              <h3 class="section-title">安全设置</h3>
+              <div class="pref-list">
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">注册开放</span>
+                    <span class="pref-desc">允许新用户自行注册</span>
                   </div>
                   <a-switch v-model:checked="systemForm.allowRegister" />
                 </div>
-                <div >
-                  <div >
-                    <span >邀请码验证</span>
-                    <span >注册需要邀请码</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">邀请码验证</span>
+                    <span class="pref-desc">注册需要邀请码</span>
                   </div>
                   <a-switch v-model:checked="systemForm.requireInvite" />
                 </div>
-                <div >
-                  <div >
-                    <span >登录 IP 限制</span>
-                    <span >限制登录 IP 白名单</span>
+                <div class="pref-item">
+                  <div class="pref-info">
+                    <span class="pref-label">登录 IP 限制</span>
+                    <span class="pref-desc">限制登录 IP 白名单</span>
                   </div>
                   <a-switch v-model:checked="systemForm.ipRestrict" />
                 </div>
@@ -415,12 +430,9 @@
             </div>
           </div>
         </a-tab-pane>
-        <!-- ===== 上下文池设置 ===== -->
-        <a-tab-pane key="context-pool" tab="上下文池">
-          <ContextPoolSettings />
-        </a-tab-pane>
       </a-tabs>
     </div>
+
     <!-- 创建 API 密钥弹窗 -->
     <a-modal
       v-model:open="showKeyModal"
@@ -434,6 +446,7 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
     <!-- 新密钥展示 -->
     <a-modal
       v-model:open="showNewKey"
@@ -450,6 +463,7 @@
       <a-input-password
         :value="newKeyValue"
         readonly
+        class="key-display"
       >
         <template #addonAfter>
           <a-button type="link" size="small" @click="copyKey">
@@ -460,6 +474,7 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
@@ -472,10 +487,11 @@ import {
 } from '@ant-design/icons-vue'
 import { authAPI } from '@/api/auth'
 import { settingsAPI, type SystemSettings, type SecuritySettings, type BackupInfo } from '@/api/modules/settings'
-import ContextPoolSettings from '@/components/ContextPoolSettings.vue'
+
 const authStore = useAuthStore()
 const activeTab = ref('profile')
 const isAdmin = computed(() => authStore.currentUser?.role === 'admin')
+
 // ─── 个人设置 ───
 const profileForm = reactive({
   username: '',
@@ -484,12 +500,14 @@ const profileForm = reactive({
   createdAt: '',
 })
 const profileSaving = ref(false)
+
 const passwordForm = reactive({
   oldPassword: '',
   newPassword: '',
   confirmPassword: '',
 })
 const passwordSaving = ref(false)
+
 // ─── 系统设置 ───
 const systemSettings = reactive<Partial<SystemSettings>>({
   theme: 'dark',
@@ -511,6 +529,7 @@ const systemSettings = reactive<Partial<SystemSettings>>({
   workspace_layout: 'default',
 })
 const savingSettings = ref(false)
+
 // ─── 安全设置 ───
 const securitySettings = reactive<Partial<SecuritySettings>>({
   two_factor_enabled: false,
@@ -521,6 +540,7 @@ const securitySettings = reactive<Partial<SecuritySettings>>({
   device_management_enabled: true,
 })
 const savingSecurity = ref(false)
+
 // ─── 备份管理 ───
 const backups = ref<BackupInfo[]>([])
 const loadingBackups = ref(false)
@@ -534,6 +554,7 @@ const backupColumns: ColumnsType<BackupInfo> = [
   { title: '完成时间', dataIndex: 'completed_at', width: 180 },
   { title: '操作', key: 'actions', width: 150 },
 ]
+
 // ─── API 密钥 ───
 const apiKeys = ref<Array<{ id: string; name: string; prefix: string; createdAt: string; status: string }>>([])
 const showKeyModal = ref(false)
@@ -541,6 +562,7 @@ const showNewKey = ref(false)
 const keyCreating = ref(false)
 const newKeyName = ref('')
 const newKeyValue = ref('')
+
 // ─── 系统配置 ───
 const systemForm = reactive({
   dailyTokenLimit: 1000000,
@@ -552,6 +574,7 @@ const systemForm = reactive({
   ipRestrict: false,
 })
 const systemSaving = ref(false)
+
 // ─── 初始化 ───
 onMounted(async () => {
   const u = authStore.currentUser
@@ -565,6 +588,7 @@ onMounted(async () => {
   await loadSecuritySettings()
   await loadBackups()
 })
+
 // 加载系统设置
 async function loadSettings() {
   try {
@@ -574,6 +598,7 @@ async function loadSettings() {
     console.error('Failed to load settings:', err)
   }
 }
+
 // 加载安全设置
 async function loadSecuritySettings() {
   try {
@@ -583,6 +608,7 @@ async function loadSecuritySettings() {
     console.error('Failed to load security settings:', err)
   }
 }
+
 // 加载备份列表
 async function loadBackups() {
   loadingBackups.value = true
@@ -595,6 +621,7 @@ async function loadBackups() {
     loadingBackups.value = false
   }
 }
+
 // 保存系统设置
 async function saveSystemSettings() {
   savingSettings.value = true
@@ -613,6 +640,7 @@ async function saveSystemSettings() {
     savingSettings.value = false
   }
 }
+
 // 保存安全设置
 async function saveSecuritySettings() {
   savingSecurity.value = true
@@ -626,6 +654,7 @@ async function saveSecuritySettings() {
     savingSecurity.value = false
   }
 }
+
 // 创建备份
 async function createBackup() {
   creatingBackup.value = true
@@ -640,6 +669,7 @@ async function createBackup() {
     creatingBackup.value = false
   }
 }
+
 // 恢复备份
 async function restoreBackup(id: string) {
   restoringBackupId.value = id
@@ -653,6 +683,7 @@ async function restoreBackup(id: string) {
     restoringBackupId.value = null
   }
 }
+
 // 删除备份
 async function deleteBackup(id: string) {
   try {
@@ -664,6 +695,7 @@ async function deleteBackup(id: string) {
     message.error(e.response?.data?.message || '删除备份失败')
   }
 }
+
 function getStatusColor(status: string) {
   const colors: Record<string, string> = {
     pending: 'orange',
@@ -673,6 +705,7 @@ function getStatusColor(status: string) {
   }
   return colors[status] || 'default'
 }
+
 function getStatusText(status: string) {
   const texts: Record<string, string> = {
     pending: '等待中',
@@ -682,6 +715,7 @@ function getStatusText(status: string) {
   }
   return texts[status] || status
 }
+
 // ─── 保存个人信息 ───
 async function saveProfile() {
   profileSaving.value = true
@@ -697,6 +731,7 @@ async function saveProfile() {
     profileSaving.value = false
   }
 }
+
 // ─── 修改密码 ───
 async function changePassword() {
   if (!passwordForm.oldPassword || !passwordForm.newPassword) {
@@ -728,6 +763,7 @@ async function changePassword() {
     passwordSaving.value = false
   }
 }
+
 // ─── 创建 API 密钥 ───
 async function createApiKey() {
   if (!newKeyName.value.trim()) {
@@ -758,14 +794,17 @@ async function createApiKey() {
     keyCreating.value = false
   }
 }
+
 function deleteKey(id: string) {
   apiKeys.value = apiKeys.value.filter(k => k.id !== id)
   message.success('密钥已删除')
 }
+
 function copyKey() {
   navigator.clipboard.writeText(newKeyValue.value)
   message.success('密钥已复制')
 }
+
 // ─── 系统配置 ───
 async function saveSystemConfig() {
   systemSaving.value = true
@@ -779,11 +818,13 @@ async function saveSystemConfig() {
   }
 }
 </script>
+
 <style scoped>
 .settings-page {
   padding: 24px 28px;
   max-width: 960px;
 }
+
 /* Header */
 .settings-header {
   margin-bottom: 20px;
@@ -799,6 +840,7 @@ async function saveSystemConfig() {
   font-size: 0.9rem;
   margin: 0;
 }
+
 /* Tabs */
 :deep(.settings-tabs .ant-tabs-nav) {
   margin-bottom: 20px;
@@ -817,6 +859,7 @@ async function saveSystemConfig() {
 :deep(.settings-tabs .ant-tabs-content-holder) {
   min-height: 400px;
 }
+
 /* Sections */
 .tab-content {
   display: flex;
@@ -839,6 +882,7 @@ async function saveSystemConfig() {
   font-size: 0.85rem;
   margin: -12px 0 16px;
 }
+
 /* Form */
 .settings-form {
   max-width: 640px;
@@ -872,6 +916,7 @@ async function saveSystemConfig() {
   color: rgba(255, 255, 255, 0.4);
   font-size: 0.9rem;
 }
+
 /* Preferences list */
 .pref-list {
   display: flex;
@@ -901,6 +946,7 @@ async function saveSystemConfig() {
   color: rgba(255, 255, 255, 0.35);
   font-size: 0.78rem;
 }
+
 /* Segmented */
 :deep(.ant-segmented) {
   background: rgba(255, 255, 255, 0.05);
@@ -913,6 +959,7 @@ async function saveSystemConfig() {
   color: #93c5fd;
   background: rgba(96, 165, 250, 0.15);
 }
+
 /* API Keys */
 .keys-list {
   margin-bottom: 20px;
@@ -958,6 +1005,7 @@ async function saveSystemConfig() {
 .create-key-btn {
   margin-top: 4px;
 }
+
 /* Modal */
 :deep(.ant-modal-content) {
   background: rgba(20, 25, 50, 0.96) !important;
@@ -987,6 +1035,7 @@ async function saveSystemConfig() {
   font-family: monospace;
   font-size: 0.85rem;
 }
+
 /* Responsive */
 @media (max-width: 768px) {
   .settings-page {
@@ -997,4 +1046,3 @@ async function saveSystemConfig() {
   }
 }
 </style>
- 

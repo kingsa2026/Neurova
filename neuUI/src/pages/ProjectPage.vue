@@ -1,4 +1,4 @@
-<template><div ><div ><h2 ><ProjectOutlined :style="{color:'#f59e0b'}"/> 项目管理</h2><a-button type="primary" size="small"><PlusOutlined/>新建</a-button></div><div ><div >活跃<b >5</b></div><div >成员<b >12</b></div><div >完成率<b >78%</b></div></div><div ><div v-for="p in list" :key="p.id" ><div ><h4>{{ p.name }}</h4><a-tag :color="p.st==='进行中'?'blue':p.st==='已完成'?'green':'default'">{{ p.st }}</a-tag></div><p>{{ p.desc }}</p><div ><div ><div  :style="{width:p.pg+'%'}"/></div><span>{{ p.pg }}%</span></div><div ><a-avatar-group :max-count="3" size="small"><a-avatar :style="{background:'#'+Math.floor(Math.random()*16777215).toString(16)}" v-for="i in p.ms" :key="i">{{ 'ABCDEFGH'[i-1] }}</a-avatar></a-avatar-group><span >{{ p.date }}</span></div></div></div></div></template>
+<template><div class="pg"><div class="hd glass-effect"><h2 class="t"><ProjectOutlined :style="{color:'#f59e0b'}"/> 项目管理</h2><a-button type="primary" size="small"><PlusOutlined/>新建</a-button></div><div class="sr"><div class="s glass-effect">活跃<b class="c1">5</b></div><div class="s glass-effect">成员<b class="c1">12</b></div><div class="s glass-effect">完成率<b class="c1">78%</b></div></div><div class="grid"><div v-for="p in list" :key="p.id" class="card glass-effect card-hover"><div class="ct"><h4>{{ p.name }}</h4><a-tag :color="p.st==='进行中'?'blue':p.st==='已完成'?'green':'default'">{{ p.st }}</a-tag></div><p>{{ p.desc }}</p><div class="cbar"><div class="bar"><div class="bf" :style="{width:p.pg+'%'}"/></div><span>{{ p.pg }}%</span></div><div class="cf"><a-avatar-group :max-count="3" size="small"><a-avatar :style="{background:'#'+Math.floor(Math.random()*16777215).toString(16)}" v-for="i in p.ms" :key="i">{{ 'ABCDEFGH'[i-1] }}</a-avatar></a-avatar-group><span class="cd">{{ p.date }}</span></div></div></div></div></template>
 <script setup lang="ts">
 import { ref } from 'vue'
 import { ProjectOutlined, PlusOutlined } from '@ant-design/icons-vue'
@@ -23,4 +23,3 @@ const list=ref([{id:'1',name:'Agent 对话系统优化',desc:'提升多轮对话
 .cf{display:flex;justify-content:space-between;align-items:center;}
 .cd{color:rgba(255,255,255,0.2);font-size:0.72rem;}
 </style>
- 

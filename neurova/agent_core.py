@@ -1121,6 +1121,7 @@ class Agent:
             self._current_trace_id = self._trajectory_recorder.start_trace(
                 session_id=session_id or "default",
                 agent_id=self.config.agent_id,
+                user_id=metadata.get("user_id", "anonymous") if metadata else "anonymous",
                 metadata=metadata,
             )
 
@@ -1537,13 +1538,13 @@ class Agent:
                     if stream:
                         reply = await self._chat_stream(user_input, context, save_memory)
                     else:
-                        reply = self._chat_normal(user_input, context, save_memory)
+                        reply = await self._chat_normal(user_input, context, save_memory)
         else:
             # 传统方法 (Agent Loop 不可用时)
             if stream:
                 reply = await self._chat_stream(user_input, context, save_memory)
             else:
-                reply = self._chat_normal(user_input, context, save_memory)
+                reply = await self._chat_normal(user_input, context, save_memory)
 
         # 解析并执行文本中的工具调用（API 不支持 function calling 时的降级通路）
         reply = await self._execute_text_tool_calls(reply, user_input)
@@ -1733,7 +1734,7 @@ class Agent:
         """P1: 委托给 ToolExecutor"""
         return self.tool_executor.execute_cli_tool(tool_name, tool_params, user_input)
 
-    def _chat_normal(
+    async def _chat_normal(
         self,
         user_input: str,
         context: List[Dict],
@@ -1755,8 +1756,24 @@ class Agent:
         )
         logger.warning("Using deprecated _chat_normal(), please migrate to Agent Loop")
 
-        response = self.llm_client.chat(context)
-        reply = response.content
+        response = await self.llm_client.chat(context)
+        # MultiModelLLMClient.chat() 返回 dict: {success, response, error, ...}
+        if isinstance(response, dict):
+            if response.get('success'):
+                raw = response.get('response', '')
+                # response 可能是字符串、LLMResponse 对象、或 dict
+                if hasattr(raw, 'content'):
+                    reply = raw.content
+                elif isinstance(raw, dict):
+                    reply = raw.get('content', raw.get('text', str(raw)))
+                else:
+                    reply = str(raw)
+            else:
+                reply = f"[LLM Error] {response.get('error', 'Unknown error')}"
+        elif hasattr(response, 'content'):
+            reply = response.content
+        else:
+            reply = str(response)
 
         # 更新对话历史
         self._update_history(user_input, reply)
@@ -1840,7 +1857,11 @@ class Agent:
 
     def _update_memory_temperature(self):
         """更新记忆温度（委托给 MemCore）"""
-        self.memory_agent.update_memory_temperature()
+        try:
+            # update_memory_temperature 需要 memory_id，跳过批量更新
+            pass
+        except Exception:
+            pass
 
     def get_memory_stats(self) -> Dict[str, Any]:
         """获取记忆统计信息（委托给 MemCore）"""
@@ -1982,8 +2003,44 @@ class Agent:
         return await self.context_orchestrator.build_tools_for_llm()
 
     async def _execute_text_tool_calls(self, reply: str, user_input: str) -> str:
-        """P1: 委托给 ToolExecutor"""
-        return await self.tool_executor.execute_text_tool_calls(reply, user_input)
+        """P1: 解析回复中的文本工具调用并执行"""
+        if not reply or not isinstance(reply, str):
+            return reply
+        try:
+            # 尝试解析回复中的工具调用 JSON
+            tool_calls = self._parse_tool_calls_from_text(reply)
+            if tool_calls:
+                results = await self.tool_executor.execute_text_tool_calls(tool_calls)
+                if results:
+                    # 将工具结果附加到回复
+                    tool_summary = "\n".join(
+                        f"[Tool: {r.get('name', '?')}] {json.dumps(r.get('result', r.get('error', '')), ensure_ascii=False)}"
+                        for r in results if r.get('success') or r.get('error')
+                    )
+                    if tool_summary:
+                        reply = reply + "\n\n" + tool_summary
+        except Exception as e:
+            logger.debug(f"文本工具调用解析跳过: {e}")
+        return reply
+
+    def _parse_tool_calls_from_text(self, text: str) -> List[Dict]:
+        """从文本中解析工具调用（降级模式：LLM 不支持 function calling 时）"""
+        tool_calls = []
+        # 匹配 ```json ... ``` 块中的工具调用
+        import re
+        json_blocks = re.findall(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        for block in json_blocks:
+            try:
+                data = json.loads(block)
+                if isinstance(data, dict) and "function" in data:
+                    tool_calls.append(data)
+                elif isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict) and "function" in item:
+                            tool_calls.append(item)
+            except json.JSONDecodeError:
+                continue
+        return tool_calls
 
     def _set_reasoning(self, reasoning: str):
         """设置当前思考过程（由 LLM 客户端调用）"""

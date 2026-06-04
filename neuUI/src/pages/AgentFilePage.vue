@@ -1,15 +1,15 @@
 <template>
-  <div >
-    <div >
-      <h2 ><FolderOpenOutlined :style="{color:'#34d399'}"/> 文件管理</h2>
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><FolderOpenOutlined :style="{color:'#34d399'}"/> 文件管理</h2>
       <a-button type="primary" size="small"><UploadOutlined/>上传文件</a-button>
     </div>
-    <div >
-      <div >文件<b >{{ stats.count }}</b></div>
-      <div >大小<b >{{ stats.size }}</b></div>
-      <div >类型<b >{{ stats.types }}</b></div>
+    <div class="sr">
+      <div class="s glass-effect">文件<b class="c1">{{ stats.count }}</b></div>
+      <div class="s glass-effect">大小<b class="c1">{{ stats.size }}</b></div>
+      <div class="s glass-effect">类型<b class="c1">{{ stats.types }}</b></div>
     </div>
-    <div >
+    <div class="tb glass-effect">
       <a-table :columns="cols" :data-source="files" row-key="id" size="middle" :pagination="{pageSize:8}">
         <template #bodyCell="{column,record}">
           <template v-if="column.key==='type'">
@@ -29,12 +29,15 @@
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { FolderOpenOutlined, UploadOutlined } from '@ant-design/icons-vue'
+
 const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/files', () => loadData())
+
 const cols = [
   {title:'文件名',dataIndex:'name'},
   {title:'类型',key:'type',width:80},
@@ -52,6 +55,7 @@ interface FileItem {
 }
 const files = ref<FileItem[]>([])
 const stats = ref({ count: 0, size: '0MB', types: 0 })
+
 async function loadData() {
   try {
     const res = await request.get(`/agents/${agentId.value}/files`)
@@ -75,11 +79,13 @@ async function loadData() {
     stats.value = { count: 3, size: '3.2MB', types: 3 }
   }
 }
+
 onMounted(async () => {
   await initAgent()
   loadData()
 })
 </script>
+
 <style scoped>
 .pg{display:flex;flex-direction:column;gap:14px;}
 .hd{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-radius:12px;}
@@ -89,4 +95,3 @@ onMounted(async () => {
 .s b{font-size:1.4rem;}.c1{color:#34d399;}
 .tb{padding:20px;border-radius:12px;}
 </style>
- 

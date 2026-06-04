@@ -1,5 +1,5 @@
 <template>
-  <div ref="glassRef"  : :style="wrapperStyle">
+  <div ref="glassRef" class="liquid-glass-wrapper" :class="className" :style="wrapperStyle">
     <svg :style="{ position: 'absolute', width: glassSize.width, height: glassSize.height }" aria-hidden="true">
       <defs>
         <filter id="glass-standard" x="-35%" y="-35%" width="170%" height="170%" color-interpolation-filters="sRGB">
@@ -27,19 +27,25 @@
         </filter>
       </defs>
     </svg>
-    <div  :style="containerStyle">
-      <span  :style="backdropStyle" />
-      <div  :style="borderStyle" />
-      <div v-if="isHovered || isActive"  :style="hoverEffectStyle" />
-      <div >
+
+    <div class="glass-content" :style="containerStyle">
+      <span class="glass-backdrop" :style="backdropStyle" />
+
+      <div class="glass-border" :style="borderStyle" />
+
+      <div v-if="isHovered || isActive" class="glass-hover-effect" :style="hoverEffectStyle" />
+
+      <div class="glass-children">
         <slot />
       </div>
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { CSSProperties } from 'vue'
+
 export interface LiquidGlassComponentProps {
   displacementScale?: number
   blurAmount?: number
@@ -51,6 +57,7 @@ export interface LiquidGlassComponentProps {
   padding?: string
   style?: CSSProperties
 }
+
 const props = withDefaults(defineProps<LiquidGlassComponentProps>(), {
   displacementScale: 70,
   blurAmount: 0.0625,
@@ -61,11 +68,13 @@ const props = withDefaults(defineProps<LiquidGlassComponentProps>(), {
   className: '',
   padding: '24px 32px',
 })
+
 const glassRef = ref<HTMLElement | null>(null)
 const isHovered = ref(false)
 const isActive = ref(false)
 const glassSize = ref({ width: 360, height: 200 })
 const mouseOffset = ref({ x: 0, y: 0 })
+
 const handleMouseMove = (e: MouseEvent) => {
   if (!glassRef.value) return
   const rect = glassRef.value.getBoundingClientRect()
@@ -76,6 +85,7 @@ const handleMouseMove = (e: MouseEvent) => {
     y: ((e.clientY - centerY) / rect.height) * 100,
   }
 }
+
 const containerStyle = computed<CSSProperties>(() => ({
   position: 'relative',
   display: 'flex',
@@ -103,18 +113,21 @@ const containerStyle = computed<CSSProperties>(() => ({
     `,
   }),
 }))
+
 const backdropStyle = computed<CSSProperties>(() => ({
   filter: 'url(#glass-standard)',
   backdropFilter: `blur(${4 + props.blurAmount * 32}px) saturate(${props.saturation}%)`,
   position: 'absolute',
   inset: 0,
 }))
+
 const borderStyle = computed<CSSProperties>(() => {
   const gradientAngle = 135 + mouseOffset.value.x * 1.2
   const opacity1 = 0.12 + Math.abs(mouseOffset.value.x) * 0.008
   const opacity2 = 0.4 + Math.abs(mouseOffset.value.x) * 0.012
   const position1 = Math.max(10, 33 + mouseOffset.value.y * 0.3)
   const position2 = Math.min(90, 66 + mouseOffset.value.y * 0.4)
+
   return {
     position: 'absolute',
     inset: 0,
@@ -130,6 +143,7 @@ const borderStyle = computed<CSSProperties>(() => {
     background: `linear-gradient(${gradientAngle}deg, rgba(255, 255, 255, 0.0) 0%, rgba(255, 255, 255, ${opacity1}) ${position1}%, rgba(255, 255, 255, ${opacity2}) ${position2}%, rgba(255, 255, 255, 0.0) 100%)`,
   }
 })
+
 const hoverEffectStyle = computed<CSSProperties>(() => ({
   position: 'absolute',
   inset: 0,
@@ -140,15 +154,18 @@ const hoverEffectStyle = computed<CSSProperties>(() => ({
   backgroundImage: 'radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 50%)',
   mixBlendMode: 'overlay',
 }))
+
 const wrapperStyle = computed<CSSProperties>(() => ({
   position: 'relative',
   ...props.style,
 }))
+
 defineExpose({
   glassRef,
   isHovered,
   isActive,
 })
+
 onMounted(() => {
   if (glassRef.value) {
     glassRef.value.addEventListener('mouseenter', () => { isHovered.value = true })
@@ -159,22 +176,28 @@ onMounted(() => {
   }
 })
 </script>
+
 <style scoped>
 .liquid-glass-wrapper {
   display: inline-block;
 }
+
 .glass-content {
   position: relative;
 }
+
 .glass-backdrop {
   z-index: 0;
 }
+
 .glass-border {
   z-index: 2;
 }
+
 .glass-hover-effect {
   z-index: 3;
 }
+
 .glass-children {
   position: relative;
   z-index: 1;
@@ -182,4 +205,3 @@ onMounted(() => {
   text-shadow: 0px 2px 12px rgba(0, 0, 0, 0.4);
 }
 </style>
- 

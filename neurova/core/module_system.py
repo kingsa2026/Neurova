@@ -76,8 +76,9 @@ class Module(ABC):
     - _on_stop(): 停止逻辑
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, event_bus=None, **kwargs):
         self._config = config or {}
+        self._event_bus = event_bus
         self._state = ModuleState.CREATED
         self._logger = logging.getLogger(f"neurova.module.{self.name}")
         self._lock = threading.RLock()

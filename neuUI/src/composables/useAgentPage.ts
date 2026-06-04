@@ -1,7 +1,7 @@
 import { computed, watch, onUnmounted, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agents'
- 
+
 /**
  * Agent 级功能页面的通用 composable
  * 提供响应式的 agentId，自动响应路由参数和 store 变化
@@ -26,17 +26,17 @@ export function useAgentPage(
   const route = useRoute()
   const router = useRouter()
   const agentStore = useAgentStore()
- 
+
   // 响应式 agentId：优先从路由参数获取，其次从 store
   const agentId = computed(() => {
     const fromRoute = route.params.agentId as string
     const fromStore = agentStore.currentAgentId
     return fromRoute || fromStore || ''
   })
- 
+
   // 标记是否已初始化，防止 store→route watch 在初始化时误触发
   let initialized = false
- 
+
   // 监听路由参数变化 → 同步 store + 触发回调
   watch(
     () => route.params.agentId,
@@ -52,7 +52,7 @@ export function useAgentPage(
       }
     },
   )
- 
+
   // 监听 store 变化 → 同步路由（仅在初始化完成后）
   watch(
     () => agentStore.currentAgentId,
@@ -65,7 +65,7 @@ export function useAgentPage(
       }
     },
   )
- 
+
   // 初始化：确保 agents 已加载且有默认选中
   async function initAgent() {
     if (!agentStore.agents.length) {
@@ -76,11 +76,10 @@ export function useAgentPage(
     }
     initialized = true
   }
- 
+
   return {
     agentId,
     agentStore,
     initAgent,
   }
 }
- 

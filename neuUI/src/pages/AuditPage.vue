@@ -1,8 +1,8 @@
 <template>
-  <div >
+  <div class="pg">
     <!-- 页面标题 -->
-    <div >
-      <h2 >
+    <div class="hd glass-effect">
+      <h2 class="t">
         <AuditOutlined :style="{ color: '#f59e0b' }" />
         审计日志
       </h2>
@@ -17,32 +17,34 @@
         </a-button>
       </a-space>
     </div>
+
     <!-- 统计卡片 -->
-    <div >
-      <div >
-        <div ><FileTextOutlined /></div>
-        <div >
-          <div >{{ stats.total || 0 }}</div>
-          <div >总日志数</div>
+    <div class="sr">
+      <div class="s glass-effect">
+        <div class="s-icon"><FileTextOutlined /></div>
+        <div class="s-info">
+          <div class="s-num">{{ stats.total || 0 }}</div>
+          <div class="s-label">总日志数</div>
         </div>
       </div>
-      <div >
-        <div ><ExclamationCircleOutlined /></div>
-        <div >
-          <div >{{ stats.warnings || 0 }}</div>
-          <div >警告事件</div>
+      <div class="s glass-effect">
+        <div class="s-icon"><ExclamationCircleOutlined /></div>
+        <div class="s-info">
+          <div class="s-num">{{ stats.warnings || 0 }}</div>
+          <div class="s-label">警告事件</div>
         </div>
       </div>
-      <div >
-        <div ><CloseCircleOutlined /></div>
-        <div >
-          <div >{{ stats.errors || 0 }}</div>
-          <div >错误事件</div>
+      <div class="s glass-effect">
+        <div class="s-icon"><CloseCircleOutlined /></div>
+        <div class="s-info">
+          <div class="s-num">{{ stats.errors || 0 }}</div>
+          <div class="s-label">错误事件</div>
         </div>
       </div>
     </div>
+
     <!-- 筛选条件 -->
-    <div >
+    <div class="filter glass-effect">
       <a-form layout="inline" :model="filterForm">
         <a-form-item label="时间范围">
           <a-range-picker
@@ -98,8 +100,9 @@
         </a-form-item>
       </a-form>
     </div>
+
     <!-- 日志列表 -->
-    <div >
+    <div class="tb glass-effect">
       <a-table
         :columns="columns"
         :data-source="logs"
@@ -136,6 +139,7 @@
         </template>
       </a-table>
     </div>
+
     <!-- 详情弹窗 -->
     <a-modal
       v-model:open="detailVisible"
@@ -187,6 +191,7 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
@@ -201,6 +206,7 @@ import {
 } from '@ant-design/icons-vue'
 import { auditAPI } from '@/api/modules/audit'
 import dayjs from 'dayjs'
+
 const loading = ref(false)
 const exporting = ref(false)
 const detailVisible = ref(false)
@@ -218,17 +224,20 @@ interface AuditLog {
   user_agent?: string
 }
 const currentLog = ref<AuditLog | null>(null)
+
 const stats = ref({
   total: 0,
   warnings: 0,
   errors: 0,
 })
+
 const filterForm = reactive({
   dateRange: [] as unknown[],
   event_type: undefined as string | undefined,
   severity: undefined as string | undefined,
   actor_id: undefined as string | undefined,
 })
+
 const pagination = reactive({
   current: 1,
   pageSize: 20,
@@ -237,6 +246,7 @@ const pagination = reactive({
   showQuickJumper: true,
   showTotal: (total: number) => `共 ${total} 条`,
 })
+
 const columns = [
   {
     title: '时间',
@@ -281,7 +291,9 @@ const columns = [
     fixed: 'right',
   },
 ]
+
 const logs = ref<AuditLog[]>([])
+
 const loadLogs = async () => {
   try {
     loading.value = true
@@ -289,6 +301,7 @@ const loadLogs = async () => {
       page: pagination.current,
       page_size: pagination.pageSize,
     }
+
     if (filterForm.dateRange && filterForm.dateRange.length === 2) {
       params.start_time = dayjs(filterForm.dateRange[0]).startOf('day').toISOString()
       params.end_time = dayjs(filterForm.dateRange[1]).endOf('day').toISOString()
@@ -302,6 +315,7 @@ const loadLogs = async () => {
     if (filterForm.actor_id) {
       params.actor_id = filterForm.actor_id
     }
+
     const res = await auditAPI.getLogs(params)
     if (res.data) {
       logs.value = res.data.logs || res.data.items || []
@@ -319,10 +333,12 @@ const loadLogs = async () => {
     loading.value = false
   }
 }
+
 const handleFilter = () => {
   pagination.current = 1
   loadLogs()
 }
+
 const resetFilter = () => {
   filterForm.dateRange = []
   filterForm.event_type = undefined
@@ -330,15 +346,18 @@ const resetFilter = () => {
   filterForm.actor_id = undefined
   handleFilter()
 }
+
 const handleTableChange: TableProps['onChange'] = (pag) => {
   pagination.current = pag.current || 1
   pagination.pageSize = pag.pageSize || 20
   loadLogs()
 }
+
 const handleExport = async () => {
   try {
     exporting.value = true
     const params: Record<string, unknown> = { format: 'csv' }
+
     if (filterForm.dateRange && filterForm.dateRange.length === 2) {
       params.start_time = dayjs(filterForm.dateRange[0]).startOf('day').toISOString()
       params.end_time = dayjs(filterForm.dateRange[1]).endOf('day').toISOString()
@@ -346,6 +365,7 @@ const handleExport = async () => {
     if (filterForm.event_type) {
       params.event_type = filterForm.event_type
     }
+
     const res = await auditAPI.exportLogs(params)
     if (res.data?.url) {
       window.open(res.data.url, '_blank')
@@ -359,10 +379,12 @@ const handleExport = async () => {
     exporting.value = false
   }
 }
+
 const showDetail = (record: AuditLog) => {
   currentLog.value = record
   detailVisible.value = true
 }
+
 const getSeverityColor = (severity: string) => {
   switch (severity?.toUpperCase()) {
     case 'CRITICAL':
@@ -377,6 +399,7 @@ const getSeverityColor = (severity: string) => {
       return 'default'
   }
 }
+
 const getSeverityText = (severity: string) => {
   switch (severity?.toUpperCase()) {
     case 'CRITICAL':
@@ -391,6 +414,7 @@ const getSeverityText = (severity: string) => {
       return severity || '-'
   }
 }
+
 const getEventTypeColor = (eventType: string) => {
   switch (eventType?.toUpperCase()) {
     case 'AUTH':
@@ -407,6 +431,7 @@ const getEventTypeColor = (eventType: string) => {
       return 'default'
   }
 }
+
 const getEventTypeText = (eventType: string) => {
   switch (eventType?.toUpperCase()) {
     case 'AUTH':
@@ -423,10 +448,12 @@ const getEventTypeText = (eventType: string) => {
       return eventType || '-'
   }
 }
+
 onMounted(() => {
   loadLogs()
 })
 </script>
+
 <style scoped>
 .pg {
   display: flex;
@@ -434,6 +461,7 @@ onMounted(() => {
   gap: 16px;
   padding: 24px;
 }
+
 .hd {
   padding: 16px 24px;
   border-radius: 12px;
@@ -441,6 +469,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
 }
+
 .t {
   font-size: 1.25rem;
   color: #e2e8f0;
@@ -449,11 +478,13 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
 }
+
 .sr {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
+
 .s {
   padding: 20px;
   border-radius: 12px;
@@ -461,31 +492,36 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
 }
+
 .s-icon {
   font-size: 2rem;
   color: #f59e0b;
 }
+
 .s-info {
   flex: 1;
 }
+
 .s-num {
   font-size: 1.75rem;
   font-weight: 700;
   color: #e2e8f0;
   line-height: 1;
 }
+
 .s-label {
   font-size: 0.875rem;
   color: rgba(255, 255, 255, 0.6);
   margin-top: 4px;
 }
+
 .filter {
   padding: 16px 24px;
   border-radius: 12px;
 }
+
 .tb {
   padding: 20px;
   border-radius: 12px;
 }
 </style>
- 

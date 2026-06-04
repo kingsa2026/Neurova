@@ -1,43 +1,47 @@
 <template>
-  <div >
-    <div >
-      <h2 ><ThunderboltOutlined :style="{color:'#f472b6'}" /> 成长系统</h2>
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><ThunderboltOutlined :style="{color:'#f472b6'}" /> 成长系统</h2>
     </div>
-    <div >
-      <div >成长等级<b >{{ growthLevel }}</b></div>
-      <div >问题解决<b >{{ problemSolved }}</b></div>
-      <div >动机水平<b >{{ motivation }}</b></div>
+    <div class="sr">
+      <div class="s glass-effect">成长等级<b class="c1">{{ growthLevel }}</b></div>
+      <div class="s glass-effect">问题解决<b class="c1">{{ problemSolved }}</b></div>
+      <div class="s glass-effect">动机水平<b class="c1">{{ motivation }}</b></div>
     </div>
-    <div >
+    <div class="cv glass-effect">
       <canvas ref="c"></canvas>
     </div>
-    <div >
+    <div class="ml glass-effect">
       <h4>成长里程碑</h4>
       <a-timeline>
         <a-timeline-item v-for="m in ms" :key="m.id">
-          <template #dot><span :style="{background:m.color}" /></template>
+          <template #dot><span :style="{background:m.color}" class="dot"/></template>
           <div>
             <b>{{ m.title }}</b>
             <p>{{ m.desc }}</p>
-            <span >{{ m.date }}</span>
+            <span class="md">{{ m.date }}</span>
           </div>
         </a-timeline-item>
       </a-timeline>
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, onMounted, nextTick, computed } from 'vue'
 import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { ThunderboltOutlined } from '@ant-design/icons-vue'
+
 const { agentId, agentStore, initAgent } = useAgentPage('/agent/:agentId/growth', () => loadData())
+
 const growthLevel = ref('Lv.--')
 const problemSolved = ref('--')
 const motivation = ref('--')
 interface GrowthMilestone { id:number;title:string;desc:string;color:string;date:string }
 const chartData = ref<number[]>([20, 35, 45, 55, 70, 78, 82, 85])
 const ms = ref<GrowthMilestone[]>([])
+
 const c = ref<HTMLCanvasElement>()
 function draw() {
   const cv = c.value; if (!cv) return
@@ -86,6 +90,7 @@ function draw() {
   }
 }
 const colors = ['#f472b6', '#a78bfa', '#60a5fa', '#34d399', '#fbbf24', '#ef4444', '#06b6d4', '#f472b6']
+
 async function loadData() {
   try {
     const res = await request.get(`/growth/${agentId.value}`)
@@ -105,12 +110,14 @@ async function loadData() {
     }
   } catch { /* ignore */ }
 }
+
 onMounted(async () => {
   await initAgent()
   loadData()
   await nextTick(); draw()
 })
 </script>
+
 <style scoped>
 .pg{display:flex;flex-direction:column;gap:14px;}
 .hd{padding:16px 24px;border-radius:12px;}
@@ -127,4 +134,3 @@ onMounted(async () => {
 .md{color:rgba(255,255,255,0.2);font-size:0.72rem;}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;}
 </style>
- 

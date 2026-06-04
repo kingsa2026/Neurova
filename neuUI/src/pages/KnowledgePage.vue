@@ -1,91 +1,100 @@
 <template>
-  <div >
+  <div class="knowledge-page">
     <!-- 页面头部 -->
-    <div >
-      <h2 ><BookOutlined /> 知识库</h2>
-      <div >
+    <div class="page-header glass-effect">
+      <h2 class="page-title"><BookOutlined /> 知识库</h2>
+      <div class="header-actions">
         <a-button @click="configVisible = true"><SettingOutlined /> 配置管理</a-button>
         <a-button @click="createColVisible = true"><PlusOutlined /> 创建知识库</a-button>
         <a-button type="primary" @click="uploadVisible = true"><UploadOutlined /> 上传文档</a-button>
       </div>
     </div>
+
     <!-- 错误提示 -->
     <a-alert v-if="kbError" :message="kbError" type="error" show-icon closable />
+
     <!-- 标签页 -->
-    <a-tabs v-model:activeKey="activeTab" >
+    <a-tabs v-model:activeKey="activeTab" class="kb-tabs">
       <a-tab-pane key="collections" tab="知识库列表">
         <!-- 加载状态 -->
         <a-spin v-if="colLoading" size="large" style="display:flex;justify-content:center;padding:40px" />
+
         <!-- 知识库列表 -->
-        <div  v-else-if="collections.length">
-          <div v-for="col in collections" :key="col.id"  @click="selectCollection(col)">
-            <div ><FolderOutlined /></div>
-            <div >
+        <div class="kb-grid" v-else-if="collections.length">
+          <div v-for="col in collections" :key="col.id" class="kb-card glass-effect card-hover" @click="selectCollection(col)">
+            <div class="kb-icon"><FolderOutlined /></div>
+            <div class="kb-info">
               <h4>{{ col.collection_name }}</h4>
               <p>{{ col.collection_description || '暂无描述' }}</p>
-              <div >
+              <div class="kb-meta">
                 <a-tag size="small" :color="col.id === selectedCol?.id?'blue':'default'">
                   {{ col.id === selectedCol?.id?'当前选择':'' }}
                 </a-tag>
-                <span >{{ formatDate(col.created_at) }}</span>
+                <span class="kb-date">{{ formatDate(col.created_at) }}</span>
               </div>
             </div>
           </div>
         </div>
-        <div v-else >暂无知识库，点击"创建知识库"开始</div>
+        <div v-else class="empty-state glass-effect">暂无知识库，点击"创建知识库"开始</div>
       </a-tab-pane>
+
       <a-tab-pane key="documents" tab="文档管理">
         <!-- 搜索栏 -->
-        <div >
+        <div class="search-bar glass-effect">
           <a-input-search v-model:value="kw" placeholder="搜索文档..." style="width:360px" allow-clear @search="searchDocs" />
           <a-select v-model:value="selCol" placeholder="选择知识库" style="width:200px" allow-clear @change="loadDocuments">
             <a-option v-for="c in collections" :key="c.id" :value="c.id">{{ c.collection_name }}</a-option>
           </a-select>
         </div>
+
         <!-- 加载状态 -->
         <a-spin v-if="docLoading" size="large" style="display:flex;justify-content:center;padding:40px" />
+
         <!-- 文档列表 -->
-        <div  v-else-if="documents.length">
-          <div v-for="doc in documents" :key="doc.id" >
-            <div ><FileTextOutlined /></div>
-            <div >
+        <div class="kb-grid" v-else-if="documents.length">
+          <div v-for="doc in documents" :key="doc.id" class="kb-card glass-effect card-hover">
+            <div class="kb-icon"><FileTextOutlined /></div>
+            <div class="kb-info">
               <h4>{{ doc.name }}</h4>
               <p>{{ doc.description || doc.summary || '暂无描述' }}</p>
-              <div >
+              <div class="kb-meta">
                 <a-tag size="small" :color="getStatusColor(doc.status)">{{ doc.status || '处理中' }}</a-tag>
-                <span >{{ formatDate(doc.created_at) }}</span>
+                <span class="kb-date">{{ formatDate(doc.created_at) }}</span>
                 <a-button type="link" size="small" danger @click.stop="deleteDoc(doc.id)">删除</a-button>
               </div>
             </div>
           </div>
         </div>
-        <div v-else >暂无文档，点击"上传文档"开始</div>
+        <div v-else class="empty-state glass-effect">暂无文档，点击"上传文档"开始</div>
       </a-tab-pane>
+
       <a-tab-pane key="search" tab="智能搜索">
-        <div >
+        <div class="search-section glass-effect">
           <a-input-search v-model:value="searchQuery" placeholder="输入搜索内容，进行语义检索..." size="large" @search="doSearch" enter-button="搜索" />
-          <div  style="margin-top:10px">
+          <div class="search-options" style="margin-top:10px">
             <a-select v-model:value="searchCol" placeholder="选择知识库（可选）" style="width:200px" allow-clear>
               <a-option v-for="c in collections" :key="c.id" :value="c.id">{{ c.collection_name }}</a-option>
             </a-select>
             <a-tag color="blue" style="margin-left:10px">支持语义搜索</a-tag>
           </div>
         </div>
+
         <a-spin v-if="searchLoading" size="large" style="display:flex;justify-content:center;padding:40px" />
-        <div  v-else-if="searchResults.length">
-          <div v-for="(item,idx) in searchResults" :key="idx" >
-            <div >{{ (item.score*100).toFixed(0) }}%</div>
-            <div >
+        <div class="search-results" v-else-if="searchResults.length">
+          <div v-for="(item,idx) in searchResults" :key="idx" class="search-item glass-effect">
+            <div class="search-score">{{ (item.score*100).toFixed(0) }}%</div>
+            <div class="search-content">
               <h4>{{ item.title || item.source_name || '相关文档' }}</h4>
               <p>{{ item.content || item.text || item.summary }}</p>
               <a-tag v-if="item.collection_id" size="small">{{ item.collection_id }}</a-tag>
             </div>
           </div>
         </div>
-        <div v-else-if="searchQuery" >未找到相关结果</div>
-        <div v-else >输入搜索内容开始检索</div>
+        <div v-else-if="searchQuery" class="empty-state glass-effect">未找到相关结果</div>
+        <div v-else class="empty-state glass-effect">输入搜索内容开始检索</div>
       </a-tab-pane>
     </a-tabs>
+
     <!-- 配置管理模态框 -->
     <a-modal v-model:open="configVisible" title="知识库配置管理" width="800px" @ok="saveConfig">
       <a-spin v-if="configLoading" />
@@ -113,6 +122,7 @@
           </template>
         </a-list>
       </div>
+
       <!-- 编辑配置的子模态框 -->
       <a-modal v-model:open="editConfigVisible" title="编辑配置" @ok="submitConfig">
         <a-form layout="vertical">
@@ -134,6 +144,7 @@
         </a-form>
       </a-modal>
     </a-modal>
+
     <!-- 创建知识库模态框 -->
     <a-modal v-model:open="createColVisible" title="创建知识库" @ok="createCollection">
       <a-form layout="vertical">
@@ -145,6 +156,7 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
     <!-- 上传文档模态框 -->
     <a-modal v-model:open="uploadVisible" title="上传文档" @ok="uploadVisible = false" width="700px">
       <a-form layout="vertical">
@@ -155,9 +167,9 @@
         </a-form-item>
         <a-form-item label="文档">
           <a-upload-dragger name="file" :file-list="fileList" :before-upload="beforeUpload" :on-change="handleFileChange" :multiple="true">
-            <p ><InboxOutlined /></p>
-            <p >点击或拖拽文件到此区域上传</p>
-            <p >支持 PDF、Word、TXT、Markdown、PPT、Excel 等格式</p>
+            <p class="ant-upload-drag-icon"><InboxOutlined /></p>
+            <p class="ant-upload-text">点击或拖拽文件到此区域上传</p>
+            <p class="ant-upload-hint">支持 PDF、Word、TXT、Markdown、PPT、Excel 等格式</p>
           </a-upload-dragger>
         </a-form-item>
         <a-button type="primary" :loading="uploading" @click="doUpload" block>上传文档</a-button>
@@ -165,22 +177,26 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { BookOutlined, UploadOutlined, FileTextOutlined, InboxOutlined, FolderOutlined, SettingOutlined, PlusOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { knowledgeAPI, type KnowledgeConfig } from '@/api/modules/knowledge_api'
+
 // 状态
 const activeTab = ref('collections')
 const kw = ref('')
 const kbError = ref('')
 const kbLoading = ref(false)
+
 // 配置管理
 const configVisible = ref(false)
 const configLoading = ref(false)
 const configs = ref<KnowledgeConfig[]>([])
 const editConfigVisible = ref(false)
 const editingConfig = ref<Partial<KnowledgeConfig>>({})
+
 // 知识库管理
 const createColVisible = ref(false)
 const colLoading = ref(false)
@@ -188,6 +204,7 @@ interface CollectionData { id: string; collection_name: string; collection_descr
 const collections = ref<CollectionData[]>([])
 const selectedCol = ref<CollectionData | null>(null)
 const newCol = ref({ name: '', description: '' })
+
 // 文档管理
 const uploadVisible = ref(false)
 const docLoading = ref(false)
@@ -198,22 +215,26 @@ const uploadCol = ref<string>('')
 interface UploadFile { uid: string; name: string; originFileObj?: File; status?: string }
 const fileList = ref<UploadFile[]>([])
 const uploading = ref(false)
+
 // 搜索
 const searchQuery = ref('')
 const searchCol = ref<string>('')
 const searchLoading = ref(false)
 interface SearchResult { score: number; title?: string; source_name?: string; content?: string; text?: string; summary?: string; collection_id?: string }
 const searchResults = ref<SearchResult[]>([])
+
 // 格式化日期
 const formatDate = (d: string) => {
   if (!d) return ''
   const dt = new Date(d)
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`
 }
+
 const getStatusColor = (status: string) => {
   const map: Record<string,string> = { processed:'green', processing:'blue', error:'red', failed:'red', ready:'blue' }
   return map[status] || 'default'
 }
+
 // 加载配置
 const loadConfigs = async () => {
   configLoading.value = true
@@ -226,14 +247,17 @@ const loadConfigs = async () => {
     configLoading.value = false
   }
 }
+
 const addNewConfig = () => {
   editingConfig.value = { config_name:'新配置', is_default:false, is_active:true, source_type:'iflow' }
   editConfigVisible.value = true
 }
+
 const editConfig = (cfg: KnowledgeConfig) => {
   editingConfig.value = { ...cfg }
   editConfigVisible.value = true
 }
+
 const deleteConfig = async (id: string) => {
   try {
     await knowledgeAPI.deleteConfig(id)
@@ -243,6 +267,7 @@ const deleteConfig = async (id: string) => {
     message.error('删除失败')
   }
 }
+
 const submitConfig = async () => {
   try {
     if (editingConfig.value.id) {
@@ -257,7 +282,9 @@ const submitConfig = async () => {
     message.error('保存失败')
   }
 }
+
 const saveConfig = () => { configVisible.value = false }
+
 // 加载知识库
 const loadCollections = async () => {
   colLoading.value = true
@@ -279,12 +306,14 @@ const loadCollections = async () => {
     colLoading.value = false
   }
 }
+
 const selectCollection = (col: CollectionData) => {
   selectedCol.value = col
   selCol.value = col.id
   activeTab.value = 'documents'
   loadDocuments()
 }
+
 const createCollection = async () => {
   if (!newCol.value.name) { message.error('请输入知识库名称'); return }
   try {
@@ -297,6 +326,7 @@ const createCollection = async () => {
     message.error('创建失败')
   }
 }
+
 // 加载文档
 const loadDocuments = async () => {
   if (!selCol.value) return
@@ -310,7 +340,9 @@ const loadDocuments = async () => {
     docLoading.value = false
   }
 }
+
 const searchDocs = () => loadDocuments()
+
 const deleteDoc = async (id: string) => {
   try {
     await knowledgeAPI.deleteDocument(id)
@@ -320,14 +352,17 @@ const deleteDoc = async (id: string) => {
     message.error('删除失败')
   }
 }
+
 // 上传
 const beforeUpload = (file: UploadFile) => {
   fileList.value = [...fileList.value, file]
   return false
 }
+
 const handleFileChange = (info: { fileList: UploadFile[] }) => {
   fileList.value = info.fileList
 }
+
 const doUpload = async () => {
   if (!uploadCol.value) { message.error('请选择知识库'); return }
   if (!fileList.value.length) { message.error('请选择文件'); return }
@@ -350,6 +385,7 @@ const doUpload = async () => {
     uploading.value = false
   }
 }
+
 // 搜索
 const doSearch = async () => {
   if (!searchQuery.value) return
@@ -363,10 +399,12 @@ const doSearch = async () => {
     searchLoading.value = false
   }
 }
+
 onMounted(async () => {
   await Promise.all([loadConfigs(), loadCollections()])
 })
 </script>
+
 <style scoped>
 .knowledge-page { display:flex;flex-direction:column;gap:16px; }
 .page-header { display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-radius:12px; }
@@ -393,4 +431,3 @@ onMounted(async () => {
 .search-content h4 { color:#e2e8f0;margin:0 0 6px; }
 .search-content p { color:rgba(255,255,255,0.5);margin:0; }
 </style>
- 

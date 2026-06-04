@@ -1,23 +1,23 @@
 <template>
-  <div >
-    <div >
-      <h2 ><MedicineBoxOutlined :style="{color:'#34d399'}"/> 健康管理</h2>
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><MedicineBoxOutlined :style="{color:'#34d399'}"/> 健康管理</h2>
       <a-button type="primary" size="small" :loading="loading" @click="runAllChecks">
         <SyncOutlined/> 一键检查
       </a-button>
     </div>
-    <div >
-      <div >
-        健康<b >{{ healthPercent }}%</b>
+    <div class="sr">
+      <div class="s glass-effect">
+        健康<b class="c1">{{ healthPercent }}%</b>
       </div>
-      <div >
-        检查<b >{{ totalChecks }}</b>
+      <div class="s glass-effect">
+        检查<b class="c1">{{ totalChecks }}</b>
       </div>
-      <div >
-        告警<b >{{ warningCount }}</b>
+      <div class="s glass-effect">
+        告警<b class="c2">{{ warningCount }}</b>
       </div>
     </div>
-    <div >
+    <div class="tb glass-effect">
       <a-table
         :columns="cols"
         :data-source="data"
@@ -42,17 +42,20 @@
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { MedicineBoxOutlined, SyncOutlined } from '@ant-design/icons-vue';
 import { systemAPI } from '@/api/modules/system';
 import { message } from 'ant-design-vue';
+
 const loading = ref(false);
 interface HealthStatus { healthy: boolean; [key: string]: unknown }
 interface CheckResult { status: string; duration_ms?: number; timestamp?: string }
 interface HealthCheck { last_result?: CheckResult; [key: string]: unknown }
 const healthData = ref<HealthStatus | null>(null);
 const checks = ref<Record<string, HealthCheck>>({});
+
 const cols = [
   { title: '检查项', dataIndex: 'name' },
   { title: '状态', key: 'st', width: 80 },
@@ -65,6 +68,7 @@ const cols = [
   { title: '上次检查', dataIndex: 'last', width: 160 },
   { title: '操作', key: 'act', width: 100 }
 ];
+
 const data = computed(() => {
   const items: Array<{ name: string; status: string; duration_ms?: number; last: string; [key: string]: unknown }> = [];
   Object.entries(checks.value).forEach(([name, check]) => {
@@ -80,16 +84,20 @@ const data = computed(() => {
   });
   return items;
 });
+
 const healthPercent = computed(() => {
   if (!healthData.value) return 99.8;
   return healthData.value.healthy ? 100 : 80;
 });
+
 const totalChecks = computed(() => Object.keys(checks.value).length);
+
 const warningCount = computed(() => {
   return Object.values(checks.value).filter((c) => 
     c.last_result && (c.last_result.status === 'warning' || c.last_result.status === 'unhealthy')
   ).length;
 });
+
 const getStatusColor = (status: string) => {
   const colorMap: Record<string, string> = {
     healthy: 'green',
@@ -99,6 +107,7 @@ const getStatusColor = (status: string) => {
   };
   return colorMap[status] || 'default';
 };
+
 const getStatusText = (status: string) => {
   const textMap: Record<string, string> = {
     healthy: '正常',
@@ -108,6 +117,7 @@ const getStatusText = (status: string) => {
   };
   return textMap[status] || status;
 };
+
 const loadHealthData = async () => {
   loading.value = true;
   try {
@@ -124,6 +134,7 @@ const loadHealthData = async () => {
     loading.value = false;
   }
 };
+
 const runAllChecks = async () => {
   loading.value = true;
   try {
@@ -137,6 +148,7 @@ const runAllChecks = async () => {
     loading.value = false;
   }
 };
+
 const runSingleCheck = async (checkName: string) => {
   try {
     await systemAPI.runHealthCheck(checkName);
@@ -147,10 +159,12 @@ const runSingleCheck = async (checkName: string) => {
     message.error('检查失败');
   }
 };
+
 onMounted(() => {
   loadHealthData();
 });
 </script>
+
 <style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-radius: 12px; }
@@ -162,4 +176,3 @@ onMounted(() => {
 .s .c2 { color: #ef4444; }
 .tb { padding: 20px; border-radius: 12px; }
 </style>
- 

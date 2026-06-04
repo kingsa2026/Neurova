@@ -1,49 +1,52 @@
 <template>
-  <div >
-    <div >
-      <h2 ><HookIcon :style="{ color: '#8b5cf6' }" /> Webhook 管理</h2>
-      <div >
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><HookIcon :style="{ color: '#8b5cf6' }" /> Webhook 管理</h2>
+      <div class="hd-actions">
         <a-button @click="loadWebhooks" :loading="loading"><ReloadOutlined /> 刷新</a-button>
         <a-button type="primary" @click="openAddWebhook"><PlusOutlined /> 创建 Webhook</a-button>
       </div>
     </div>
-    <div >
-      <div >
-        <HookIcon  />
-        <div >
-          <div >{{ webhooks.length }}</div>
-          <div >Webhook 总数</div>
+
+    <div class="sr">
+      <div class="s glass-effect">
+        <HookIcon class="s-icon" />
+        <div class="s-info">
+          <div class="s-num">{{ webhooks.length }}</div>
+          <div class="s-label">Webhook 总数</div>
         </div>
       </div>
-      <div >
-        <CheckCircleOutlined  style="color: #34d399" />
-        <div >
-          <div >{{ webhooks.filter(w => w.is_active !== false).length }}</div>
-          <div >已启用</div>
+      <div class="s glass-effect">
+        <CheckCircleOutlined class="s-icon" style="color: #34d399" />
+        <div class="s-info">
+          <div class="s-num">{{ webhooks.filter(w => w.is_active !== false).length }}</div>
+          <div class="s-label">已启用</div>
         </div>
       </div>
-      <div >
-        <ExclamationCircleOutlined  style="color: #f59e0b" />
-        <div >
-          <div >{{ failedCount }}</div>
-          <div >失败投递</div>
+      <div class="s glass-effect">
+        <ExclamationCircleOutlined class="s-icon" style="color: #f59e0b" />
+        <div class="s-info">
+          <div class="s-num">{{ failedCount }}</div>
+          <div class="s-label">失败投递</div>
         </div>
       </div>
     </div>
+
     <a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" />
     <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
-    <div v-if="!loading" >
+
+    <div v-if="!loading" class="tb glass-effect">
       <a-table :columns="columns" :data-source="webhooks" row-key="id" size="middle" :pagination="pagination">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'name'">
-            <div >
+            <div class="webhook-name">
               <HookIcon style="color: #8b5cf6" />
               <span>{{ record.name }}</span>
             </div>
           </template>
           <template v-else-if="column.key === 'url'">
             <a-tooltip :title="record.url">
-              <span >{{ record.url }}</span>
+              <span class="url-text">{{ record.url }}</span>
             </a-tooltip>
           </template>
           <template v-else-if="column.key === 'events'">
@@ -75,6 +78,7 @@
         </template>
       </a-table>
     </div>
+
     <!-- 添加/编辑弹窗 -->
     <a-modal
       v-model:open="formOpen"
@@ -114,6 +118,7 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
     <!-- 投递记录弹窗 -->
     <a-modal v-model:open="deliveriesOpen" title="投递记录" :footer="null" width="800px">
       <a-spin v-if="loadingDeliveries" />
@@ -143,6 +148,7 @@
         </template>
       </a-list>
     </a-modal>
+
     <!-- 投递详情弹窗 -->
     <a-modal v-model:open="detailOpen" title="投递详情" :footer="null" width="700px">
       <a-descriptions bordered :column="1" v-if="currentDelivery">
@@ -164,6 +170,7 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
@@ -175,7 +182,9 @@ import {
 } from '@ant-design/icons-vue'
 import { webhooksAPI } from '@/api/modules/webhooks'
 import { h } from 'vue'
+
 const HookIcon = () => h('span', { style: 'font-size: 1.2rem' }, '🔗')
+
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
@@ -190,6 +199,7 @@ interface WebhookData {
   success_count?: number
   failure_count?: number
 }
+
 interface DeliveryData {
   id: string
   status?: string
@@ -199,8 +209,10 @@ interface DeliveryData {
   event_type?: string
   error?: string
 }
+
 const webhooks = ref<WebhookData[]>([])
 const failedCount = ref(0)
+
 const columns = [
   { title: '名称', dataIndex: 'name', key: 'name' },
   { title: 'URL', dataIndex: 'url', key: 'url', ellipsis: true },
@@ -209,6 +221,7 @@ const columns = [
   { title: '统计', key: 'stats', width: 120 },
   { title: '操作', key: 'action', width: 280, fixed: 'right' },
 ]
+
 const pagination = reactive({
   current: 1,
   pageSize: 10,
@@ -216,6 +229,7 @@ const pagination = reactive({
   showSizeChanger: true,
   showQuickJumper: true,
 })
+
 const formOpen = ref(false)
 const editingWebhook = ref<WebhookData | null>(null)
 const form = reactive({
@@ -226,12 +240,15 @@ const form = reactive({
   max_retries: 3,
   is_active: true,
 })
+
 const deliveriesOpen = ref(false)
 const loadingDeliveries = ref(false)
 const currentWebhookId = ref('')
 const deliveries = ref<DeliveryData[]>([])
+
 const detailOpen = ref(false)
 const currentDelivery = ref<DeliveryData | null>(null)
+
 const eventLabels: Record<string, string> = {
   CHAT_MESSAGE_RECEIVED: '聊天消息',
   AGENT_CREATED: 'Agent 创建',
@@ -241,9 +258,11 @@ const eventLabels: Record<string, string> = {
   WORKFLOW_STARTED: '工作流启动',
   WORKFLOW_COMPLETED: '工作流完成',
 }
+
 function getEventLabel(event: string) {
   return eventLabels[event] || event
 }
+
 async function loadWebhooks() {
   loading.value = true
   error.value = ''
@@ -261,6 +280,7 @@ async function loadWebhooks() {
     loading.value = false
   }
 }
+
 function openAddWebhook() {
   editingWebhook.value = null
   form.name = ''
@@ -271,6 +291,7 @@ function openAddWebhook() {
   form.is_active = true
   formOpen.value = true
 }
+
 function openEdit(webhook: WebhookData) {
   editingWebhook.value = webhook
   form.name = webhook.name
@@ -281,6 +302,7 @@ function openEdit(webhook: WebhookData) {
   form.is_active = webhook.is_active !== false
   formOpen.value = true
 }
+
 async function handleSave() {
   if (!form.name.trim() || !form.url.trim() || !form.events.length) {
     message.warning('请填写完整信息')
@@ -315,6 +337,7 @@ async function handleSave() {
     saving.value = false
   }
 }
+
 async function handleDelete(id: string) {
   try {
     const res = await webhooksAPI.delete(id)
@@ -328,6 +351,7 @@ async function handleDelete(id: string) {
     message.error((e as Error).message || '删除失败')
   }
 }
+
 async function handleTest(webhook: WebhookData) {
   try {
     const res = await webhooksAPI.test(webhook.id)
@@ -340,6 +364,7 @@ async function handleTest(webhook: WebhookData) {
     message.error((e as Error).message || '测试失败')
   }
 }
+
 async function openDeliveries(webhook: WebhookData) {
   currentWebhookId.value = webhook.id
   deliveriesOpen.value = true
@@ -355,10 +380,12 @@ async function openDeliveries(webhook: WebhookData) {
     loadingDeliveries.value = false
   }
 }
+
 function viewDeliveryDetail(delivery: DeliveryData) {
   currentDelivery.value = delivery
   detailOpen.value = true
 }
+
 async function handleRetryDelivery(delivery: DeliveryData) {
   try {
     const res = await webhooksAPI.retryDelivery(currentWebhookId.value, delivery.id)
@@ -372,24 +399,29 @@ async function handleRetryDelivery(delivery: DeliveryData) {
     message.error((e as Error).message || '重试失败')
   }
 }
+
 function getDeliveryStatus(item: DeliveryData) {
   if (item.status === 'success') return 'success'
   if (item.status === 'failed') return 'error'
   return 'warning'
 }
+
 function getDeliveryColor(status: string) {
   if (status === 'success') return 'green'
   if (status === 'failed') return 'red'
   return 'orange'
 }
+
 function formatTime(time: string) {
   if (!time) return '-'
   return new Date(time).toLocaleString()
 }
+
 onMounted(() => {
   loadWebhooks()
 })
 </script>
+
 <style scoped>
 .pg {
   display: flex;
@@ -397,6 +429,7 @@ onMounted(() => {
   gap: 16px;
   padding: 24px;
 }
+
 .hd {
   padding: 14px 24px;
   border-radius: 12px;
@@ -404,10 +437,12 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
 }
+
 .hd-actions {
   display: flex;
   gap: 8px;
 }
+
 .t {
   font-size: 1.2rem;
   color: #e2e8f0;
@@ -416,11 +451,13 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
 }
+
 .sr {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
+
 .s {
   padding: 20px;
   border-radius: 12px;
@@ -428,34 +465,41 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
 }
+
 .s-icon {
   font-size: 2rem;
   color: #8b5cf6;
 }
+
 .s-info {
   flex: 1;
 }
+
 .s-num {
   font-size: 1.5rem;
   font-weight: 700;
   color: #e2e8f0;
   line-height: 1;
 }
+
 .s-label {
   font-size: 0.875rem;
   color: rgba(255, 255, 255, 0.6);
   margin-top: 4px;
 }
+
 .tb {
   padding: 20px;
   border-radius: 12px;
 }
+
 .webhook-name {
   display: flex;
   align-items: center;
   gap: 8px;
   font-weight: 500;
 }
+
 .url-text {
   font-family: monospace;
   font-size: 0.85rem;
@@ -465,4 +509,3 @@ onMounted(() => {
   white-space: nowrap;
 }
 </style>
- 

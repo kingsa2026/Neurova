@@ -1,7 +1,7 @@
 <template>
-  <div >
-    <div >
-      <h2 ><UserSwitchOutlined :style="{color:'#60a5fa'}"/> 增强用户</h2>
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><UserSwitchOutlined :style="{color:'#60a5fa'}"/> 增强用户</h2>
       <a-space>
         <a-input-search v-model:value="searchText" placeholder="搜索用户..." style="width:200px" @search="loadUsers" allow-clear />
         <a-select v-model:value="filterRole" placeholder="筛选角色" style="width:120px" allow-clear @change="loadUsers">
@@ -16,21 +16,24 @@
         <a-button type="primary" @click="showCreateModal = true"><PlusOutlined /> 添加用户</a-button>
       </a-space>
     </div>
+
     <!-- 统计 -->
-    <div >
-      <div >总用户<b >{{ total }}</b></div>
-      <div >活跃<b >{{ activeCount }}</b></div>
-      <div >停用<b >{{ inactiveCount }}</b></div>
+    <div class="stats">
+      <div class="s glass-effect">总用户<b class="c1">{{ total }}</b></div>
+      <div class="s glass-effect">活跃<b class="c1">{{ activeCount }}</b></div>
+      <div class="s glass-effect">停用<b class="c1">{{ inactiveCount }}</b></div>
     </div>
+
     <!-- 加载状态 -->
     <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
+
     <!-- 用户列表 -->
-    <div  v-else>
-      <div v-for="u in users" :key="u.user_id"  @click="viewUser(u)">
+    <div class="grid" v-else>
+      <div v-for="u in users" :key="u.user_id" class="card glass-effect card-hover" @click="viewUser(u)">
         <a-avatar :size="56" :style="{background:'linear-gradient(135deg,#3b82f6,#8b5cf6)'}">{{ u.username[0] }}</a-avatar>
         <h4>{{ u.username }}</h4>
         <a-tag size="small" :color="getRoleColor(u.group_type)">{{ getRoleText(u.group_type) }}</a-tag>
-        <div >
+        <div class="ud">
           <span>邮箱: {{ u.email }}</span>
           <span>状态: <a-tag size="small" :color="u.status==='active'?'green':'default'">{{ u.status === 'active' ? '活跃' : '停用' }}</a-tag></span>
           <span>注册: {{ formatDate(u.created_at) }}</span>
@@ -38,10 +41,12 @@
         </div>
       </div>
     </div>
+
     <!-- 分页 -->
-    <div  v-if="total > pageSize">
+    <div class="pagination" v-if="total > pageSize">
       <a-pagination v-model:current="currentPage" :total="total" :pageSize="pageSize" @change="loadUsers" show-quick-jumper />
     </div>
+
     <!-- 用户详情模态框 -->
     <a-modal v-model:open="viewVisible" :title="currentUser?.username" width="600px" @ok="viewVisible=false">
       <a-descriptions v-if="currentUser" :column="2" bordered size="small">
@@ -56,6 +61,7 @@
         <a-descriptions-item label="注册时间" :span="2">{{ formatDate(currentUser.created_at) }}</a-descriptions-item>
         <a-descriptions-item label="最后登录" :span="2">{{ currentUser.last_login ? formatDate(currentUser.last_login) : '未登录' }}</a-descriptions-item>
       </a-descriptions>
+
       <template #footer>
         <a-space>
           <a-button @click="editUser(currentUser)" :loading="loadingUserDetail">编辑</a-button>
@@ -64,6 +70,7 @@
         </a-space>
       </template>
     </a-modal>
+
     <!-- 编辑用户模态框 -->
     <a-modal v-model:open="editVisible" title="编辑用户" @ok="saveUser" :confirmLoading="saving">
       <a-form layout="vertical">
@@ -106,6 +113,7 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
     <!-- 创建用户模态框 -->
     <a-modal v-model:open="showCreateModal" title="添加用户" @ok="createUser" :confirmLoading="creating">
       <a-form layout="vertical">
@@ -129,11 +137,13 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { UserSwitchOutlined, PlusOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { enhancedUserAPI, type EnhancedUser } from '@/api/modules/enhanced-users'
+
 const loading = ref(false)
 const users = ref<EnhancedUser[]>([])
 const total = ref(0)
@@ -142,6 +152,7 @@ const pageSize = ref(20)
 const searchText = ref('')
 const filterRole = ref<string>()
 const filterStatus = ref<string>()
+
 const viewVisible = ref(false)
 const editVisible = ref(false)
 const showCreateModal = ref(false)
@@ -150,6 +161,7 @@ const loadingUserDetail = ref(false)
 const saving = ref(false)
 const creating = ref(false)
 const deleting = ref(false)
+
 interface EditingUser {
   user_id?: string
   username: string
@@ -168,21 +180,26 @@ const newUser = ref({
   password: '',
   group_type: 'user'
 })
+
 const activeCount = computed(() => users.value.filter(u => u.status === 'active').length)
 const inactiveCount = computed(() => users.value.filter(u => u.status !== 'active').length)
+
 const getRoleColor = (role: string) => {
   const map: Record<string, string> = { admin: 'purple', developer: 'blue', user: 'default' }
   return map[role] || 'default'
 }
+
 const getRoleText = (role: string) => {
   const map: Record<string, string> = { admin: '管理员', developer: '开发者', user: '用户' }
   return map[role] || role
 }
+
 const formatDate = (d: string) => {
   if (!d) return '未设置'
   const dt = new Date(d)
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`
 }
+
 const loadUsers = async () => {
   loading.value = true
   try {
@@ -203,16 +220,19 @@ const loadUsers = async () => {
     loading.value = false
   }
 }
+
 const viewUser = (u: EnhancedUser) => {
   currentUser.value = u
   viewVisible.value = true
 }
+
 const editUser = (u: EnhancedUser | null) => {
   if (!u) return
   editingUser.value = { ...u }
   viewVisible.value = false
   editVisible.value = true
 }
+
 const saveUser = async () => {
   if (!editingUser.value.user_id) return
   saving.value = true
@@ -227,6 +247,7 @@ const saveUser = async () => {
     saving.value = false
   }
 }
+
 const createUser = async () => {
   if (!newUser.value.username || !newUser.value.email || !newUser.value.password) {
     message.error('请填写必填项')
@@ -245,6 +266,7 @@ const createUser = async () => {
     creating.value = false
   }
 }
+
 const deleteUser = async (id: string | number | undefined) => {
   if (!id) return
   deleting.value = true
@@ -259,10 +281,12 @@ const deleteUser = async (id: string | number | undefined) => {
     deleting.value = false
   }
 }
+
 onMounted(() => {
   loadUsers()
 })
 </script>
+
 <style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-radius: 12px; }
@@ -278,4 +302,3 @@ onMounted(() => {
 .ud { display: flex; flex-direction: column; align-items: center; gap: 4px; color: rgba(255,255,255,0.35); font-size: 0.78rem; }
 .pagination { display: flex; justify-content: center; margin-top: 16px; }
 </style>
- 

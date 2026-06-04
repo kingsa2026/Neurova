@@ -1,26 +1,29 @@
 <template>
-  <div >
-    <div >
-      <h2 ><TeamOutlined :style="{color:'#3b82f6'}"/> 协作中心</h2>
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><TeamOutlined :style="{color:'#3b82f6'}"/> 协作中心</h2>
     </div>
+
     <!-- 统计卡片 -->
-    <div >
-      <div >
-        协作<b >{{ stats.collaborations || 0 }}</b>
+    <div class="sr">
+      <div class="s glass-effect">
+        协作<b class="c1">{{ stats.collaborations || 0 }}</b>
       </div>
-      <div >
-        Agent<b >{{ stats.agents || 0 }}</b>
+      <div class="s glass-effect">
+        Agent<b class="c1">{{ stats.agents || 0 }}</b>
       </div>
-      <div >
-        模板<b >{{ stats.templates || 0 }}</b>
+      <div class="s glass-effect">
+        模板<b class="c1">{{ stats.templates || 0 }}</b>
       </div>
     </div>
+
     <!-- 加载状态 -->
     <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
+
     <!-- 主内容区 -->
-    <div  v-else>
+    <div class="body" v-else>
       <!-- 能力矩阵卡片 -->
-      <div >
+      <div class="card glass-effect">
         <h3>能力矩阵</h3>
         <a-table
           :columns="mcols"
@@ -31,33 +34,35 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key!=='agent'">
-              <div >
-                <div  :style="{width:record[column.key]*10+'%',background:getCapabilityColor(record[column.key])}"/>
+              <div class="bar">
+                <div class="bf" :style="{width:record[column.key]*10+'%',background:getCapabilityColor(record[column.key])}"/>
                 <span>{{ record[column.key] }}/10</span>
               </div>
             </template>
           </template>
         </a-table>
       </div>
+
       <!-- 侧边栏 -->
-      <div >
-        <div  v-for="e in entries" :key="e.path" @click="$router.push(e.path)">
-          <div :style="{background:e.c+'15',color:e.c}" >
+      <div class="side">
+        <div class="entry glass-effect" v-for="e in entries" :key="e.path" @click="$router.push(e.path)">
+          <div :style="{background:e.c+'15',color:e.c}" class="ei">
             <component :is="e.icon"/>
           </div>
           <div>
-            <span >{{ e.label }}</span>
-            <span >{{ e.desc }}</span>
+            <span class="el">{{ e.label }}</span>
+            <span class="ed">{{ e.desc }}</span>
           </div>
         </div>
+
         <!-- 死信队列统计 -->
-        <div  v-if="dlqStats">
+        <div class="dlq glass-effect" v-if="dlqStats">
           <h4>死信队列</h4>
-          <div >
+          <div class="dlq-stat">
             <span>消息数</span>
             <b>{{ dlqStats.message_count }}</b>
           </div>
-          <div >
+          <div class="dlq-stat">
             <span>平均延迟</span>
             <b>{{ dlqStats.avg_delay_seconds }}s</b>
           </div>
@@ -66,10 +71,12 @@
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { TeamOutlined, AppstoreOutlined, PlusOutlined, HistoryOutlined } from '@ant-design/icons-vue'
 import { collaborationAPI } from '@/api/modules/collaboration'
+
 const loading = ref(false)
 const stats = ref({ collaborations: 0, agents: 0, templates: 0 })
 interface MatrixRow {
@@ -86,6 +93,7 @@ interface DlqStats {
   avg_delay_seconds: number
 }
 const dlqStats = ref<DlqStats | null>(null)
+
 const mcols = [
   { title: 'Agent', dataIndex: 'agent', key: 'agent' },
   { title: '对话', key: 'chat' },
@@ -94,16 +102,19 @@ const mcols = [
   { title: '代码', key: 'code' },
   { title: '分析', key: 'analytics' }
 ]
+
 const entries = [
   { path: '/collaboration/templates', label: '模板库', desc: '查看模板', c: '#3b82f6', icon: AppstoreOutlined },
   { path: '/collaboration/initiate', label: '发起协作', desc: '创建新协作', c: '#8b5cf6', icon: PlusOutlined },
   { path: '/collaboration/history', label: '历史记录', desc: '查看过往', c: '#34d399', icon: HistoryOutlined }
 ]
+
 const getCapabilityColor = (level: number) => {
   if (level >= 8) return '#34d399'
   if (level >= 6) return '#fbbf24'
   return '#ef4444'
 }
+
 const loadData = async () => {
   loading.value = true
   try {
@@ -114,6 +125,7 @@ const loadData = async () => {
       collaborationAPI.getTemplates(),
       collaborationAPI.getDlqStats()
     ])
+
     // 处理能力矩阵
     if (matrixRes.status === 'fulfilled' && matrixRes.value?.data) {
       const data = matrixRes.value.data
@@ -128,16 +140,19 @@ const loadData = async () => {
         }))
       }
     }
+
     // 处理能力列表
     if (capabilitiesRes.status === 'fulfilled' && capabilitiesRes.value?.data) {
       const data = capabilitiesRes.value.data
       stats.value.agents = Array.isArray(data.capabilities) ? data.capabilities.length : 0
     }
+
     // 处理模板列表
     if (templatesRes.status === 'fulfilled' && templatesRes.value?.data) {
       const data = templatesRes.value.data
       stats.value.templates = Array.isArray(data.templates) ? data.templates.length : 0
     }
+
     // 处理死信队列
     if (dlqRes.status === 'fulfilled' && dlqRes.value?.data) {
       dlqStats.value = dlqRes.value.data
@@ -148,10 +163,12 @@ const loadData = async () => {
     loading.value = false
   }
 }
+
 onMounted(() => {
   loadData()
 })
 </script>
+
 <style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { padding: 16px 24px; border-radius: 12px; }
@@ -179,4 +196,3 @@ onMounted(() => {
 .dlq-stat b { color: #f59e0b; }
 @media (max-width: 900px) { .body { grid-template-columns: 1fr } }
 </style>
- 

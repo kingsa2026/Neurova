@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+
 // 懒加载页面
 const LoginPage = () => import('@/pages/LoginPage.vue')
 const RegisterPage = () => import('@/pages/RegisterPage.vue')
@@ -60,6 +61,7 @@ const LogPage = () => import('@/pages/LogPage.vue')
 const GroupPage = () => import('@/pages/GroupPage.vue')
 const EnhancedUserPage = () => import('@/pages/EnhancedUserPage.vue')
 const PlaceholderPage = () => import('@/pages/PlaceholderPage.vue')
+
 const routes: RouteRecordRaw[] = [
   // ========== 公开路由 ==========
   {
@@ -74,6 +76,7 @@ const routes: RouteRecordRaw[] = [
     component: RegisterPage,
     meta: { requiresAuth: false },
   },
+
   // ========== 受保护路由 ==========
   {
     path: '/',
@@ -88,6 +91,7 @@ const routes: RouteRecordRaw[] = [
         component: DashboardPage,
         meta: { title: '首页看板', module: 'dashboard' },
       },
+
       // ─── 模块2: Agent 管理核心 ───
       {
         path: 'agents',
@@ -107,6 +111,7 @@ const routes: RouteRecordRaw[] = [
         component: AgentFormPage,
         meta: { title: '编辑 Agent', module: 'agents' },
       },
+
       // ─── 模块3: 记忆与认知系统 (Agent级) ───
       {
         path: 'agent/:agentId/memory',
@@ -144,6 +149,7 @@ const routes: RouteRecordRaw[] = [
         component: GrowthPage,
         meta: { title: '成长系统', module: 'memory' },
       },
+
       // ─── 模块2: 聊天 (Agent级) ───
       {
         path: 'agent/:agentId/chat',
@@ -160,6 +166,7 @@ const routes: RouteRecordRaw[] = [
         },
         meta: { title: '聊天', module: 'chat' },
       },
+
       // ─── 模块4: 技能与学习系统 (Agent级) ───
       {
         path: 'agent/:agentId/skills',
@@ -185,6 +192,7 @@ const routes: RouteRecordRaw[] = [
         component: AIGCPage,
         meta: { title: 'AIGC 生成', module: 'skills' },
       },
+
       // ─── 模块5: 知识库与文档 ───
       {
         path: 'knowledge',
@@ -204,6 +212,7 @@ const routes: RouteRecordRaw[] = [
         component: AgentMediaPage,
         meta: { title: '媒体处理', module: 'knowledge' },
       },
+
       // ─── 模块6: 工作流与协作 ───
       {
         path: 'workflows',
@@ -247,6 +256,7 @@ const routes: RouteRecordRaw[] = [
         component: TeamPage,
         meta: { title: '团队管理', module: 'collaboration' },
       },
+
       // ─── 模块7: 调度与自动化 ───
       {
         path: 'agent/:agentId/scheduler',
@@ -266,6 +276,7 @@ const routes: RouteRecordRaw[] = [
         component: AgentRulePage,
         meta: { title: '规则管理', module: 'scheduler' },
       },
+
       // ─── 模块8: 模型与提供商 ───
       {
         path: 'models',
@@ -283,6 +294,7 @@ const routes: RouteRecordRaw[] = [
         component: ToolLayerPage,
         meta: { title: '工具层管理', module: 'models' },
       },
+
       // ─── 模块9: 情感与人格 (Agent级) ───
       {
         path: 'agent/:agentId/emotion',
@@ -315,6 +327,7 @@ const routes: RouteRecordRaw[] = [
         component: MemorySearchSettingsPage,
         meta: { title: '记忆检索设置', module: 'memory' },
       },
+
       // ─── 模块10: 安全与合规 ───
       {
         path: 'agent/:agentId/firewall',
@@ -328,6 +341,7 @@ const routes: RouteRecordRaw[] = [
         component: AuditPage,
         meta: { title: '审计日志', module: 'security' },
       },
+
       // ─── 模块11: 轨迹与调试 ───
       {
         path: 'agent/:agentId/trajectory',
@@ -345,6 +359,7 @@ const routes: RouteRecordRaw[] = [
         component: BenchmarkPage,
         meta: { title: '基准测试', module: 'trace' },
       },
+
       // ─── 模块14: 渠道与通信 ───
       {
         path: 'agent/:agentId/channel',
@@ -364,6 +379,7 @@ const routes: RouteRecordRaw[] = [
         component: WebhookPage,
         meta: { title: 'Webhook 管理', module: 'channels' },
       },
+
       // ─── 模块13: 计算机使用 ───
       {
         path: 'agent/:agentId/computer',
@@ -376,6 +392,7 @@ const routes: RouteRecordRaw[] = [
         component: SandboxPage,
         meta: { title: '沙箱管理', module: 'computer' },
       },
+
       // ─── 模块14: 分析与监控 ───
       {
         path: 'analytics',
@@ -407,12 +424,14 @@ const routes: RouteRecordRaw[] = [
         component: HealthPage,
         meta: { title: '健康管理', module: 'analytics' },
       },
+
       // ─── 模块15: 市场与发现 ───
       {
         path: 'marketplace',
         name: 'Marketplace',
         component: MarketplacePage,
       },
+
       // ─── 模块1: 用户系统 ───
       {
         path: 'settings',
@@ -440,16 +459,19 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
+
   // 404
   {
     path: '/:pathMatch(.*)*',
     redirect: '/dashboard',
   },
 ]
+
 const router = createRouter({
   history: createWebHistory(),
   routes,
 })
+
 // 安全的存储工具（与 auth.ts store 保持一致）
 function secureGetToken(): string | null {
   try {
@@ -458,6 +480,7 @@ function secureGetToken(): string | null {
     return null
   }
 }
+
 /**
  * 解析 JWT payload（仅解码 base64，不验证签名）
  * 返回 null 如果 token 格式无效或已过期
@@ -476,15 +499,18 @@ function parseJwtPayload(token: string): Record<string, unknown> | null {
     return null
   }
 }
+
 // 路由守卫
 router.beforeEach((to, _from, next) => {
   const token = secureGetToken()
   const needAuth = to.matched.some(r => r.meta.requiresAuth)
   const requireAdmin = to.matched.some(r => r.meta.requireAdmin)
+
   if (needAuth && !token) {
     next('/login')
     return
   }
+
   if (needAuth && token) {
     // 验证 token 是否有效（格式正确且未过期）
     const payload = parseJwtPayload(token)
@@ -496,6 +522,7 @@ router.beforeEach((to, _from, next) => {
       next('/login')
       return
     }
+
     // 检查管理员权限
     if (requireAdmin) {
       const userRole = payload.role as string | undefined
@@ -505,6 +532,7 @@ router.beforeEach((to, _from, next) => {
       }
     }
   }
+
   if ((to.path === '/login' || to.path === '/register') && token) {
     // 已登录用户访问登录页时，也验证 token 有效性
     const payload = parseJwtPayload(token)
@@ -514,7 +542,8 @@ router.beforeEach((to, _from, next) => {
     }
     // token 无效，允许访问登录页
   }
+
   next()
 })
+
 export default router
- 

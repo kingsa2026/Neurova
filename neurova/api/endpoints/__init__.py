@@ -169,6 +169,7 @@ def register_endpoint_routers(app) -> None:
     # 端点模块列表
     endpoint_modules = [
         ("neurova.api.endpoints.health", "/v1/health", "Health API"),
+        ("neurova.api.endpoints.home", "/v1", "Home API"),
         ("neurova.api.endpoints.chat", "/v1/chat", "Chat API"),
         ("neurova.api.endpoints.agent", "/v1/agents", "Agent API"),
         ("neurova.api.endpoints.auth", "/v1/auth", "Auth API"),
@@ -247,7 +248,7 @@ def register_endpoint_routers(app) -> None:
         try:
             module = importlib.import_module(module_path)
             if hasattr(module, "router"):
-                app.include_router(module.router, prefix=prefix, tags=[description])
+                app.include_router(module.router, prefix="/api" + prefix, tags=[description])
                 registered += 1
                 logger.debug(f"Registered router: {prefix} ({description})")
             elif hasattr(module, "endpoints"):

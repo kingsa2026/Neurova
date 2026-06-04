@@ -1,37 +1,41 @@
 <template>
-  <div >
-    <TransitionGroup name="memory-item" tag="div" >
+  <div class="memory-timeline">
+    <TransitionGroup name="memory-item" tag="div" class="memories-container">
       <div
         v-for="memory in memories"
         :key="memory.id"
+        class="timeline-item"
       >
         <!-- 时间轴连接器 -->
-        <div >
-          <div  :style="{ background: getMemoryColor(getMemoryCategory(memory)) }">
-            <component :is="getMemoryIcon(getMemoryCategory(memory))"  />
+        <div class="timeline-connector">
+          <div class="timeline-dot" :style="{ background: getMemoryColor(getMemoryCategory(memory)) }">
+            <component :is="getMemoryIcon(getMemoryCategory(memory))" class="memory-icon" />
           </div>
-          <div ></div>
+          <div class="timeline-line"></div>
         </div>
+        
         <!-- 记忆卡片 -->
-        <div >
-          <div >
-            <span  :style="{ color: getMemoryColor(getMemoryCategory(memory)) }">{{ getMemoryTypeLabel(getMemoryCategory(memory)) }}</span>
-            <span >{{ formatTime(memory.timestamp) }}</span>
+        <div class="memory-card glass-effect">
+          <div class="memory-header">
+            <span class="memory-type" :style="{ color: getMemoryColor(getMemoryCategory(memory)) }">{{ getMemoryTypeLabel(getMemoryCategory(memory)) }}</span>
+            <span class="memory-time">{{ formatTime(memory.timestamp) }}</span>
           </div>
-          <div >{{ memory.content || memory.summary || '' }}</div>
-          <div v-if="memory.tags && memory.tags.length > 0" >
-            <a-tag v-for="tag in memory.tags" :key="tag" >
+          <div class="memory-content">{{ memory.content || memory.summary || '' }}</div>
+          <div v-if="memory.tags && memory.tags.length > 0" class="memory-tags">
+            <a-tag v-for="tag in memory.tags" :key="tag" class="memory-tag">
               {{ tag }}
             </a-tag>
           </div>
         </div>
       </div>
     </TransitionGroup>
-    <div v-if="memories.length === 0" >
-      <p >暂无记忆</p>
+    
+    <div v-if="memories.length === 0" class="empty-state">
+      <p class="empty-text">暂无记忆</p>
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import {
   MessageCircle,
@@ -54,6 +58,7 @@ import {
   MessageSquare,
   type LucideIcon,
 } from '@lucide/vue'
+
 interface Memory {
   id: string
   type?: string
@@ -63,13 +68,16 @@ interface Memory {
   timestamp: number
   tags?: string[]
 }
+
 const props = defineProps<{
   memories: Memory[]
 }>()
+
 function getMemoryCategory(memory: Memory): string {
   // 优先使用 category 字段，其次 type 字段
   return memory.category || memory.type || 'conversation'
 }
+
 function getMemoryColor(type: string): string {
   const colorMap: Record<string, string> = {
     // 后端标准分类（MemoryCategory 枚举）
@@ -90,12 +98,14 @@ function getMemoryColor(type: string): string {
     'heartbeat_task': '#7c3aed',   // 心跳任务 - 紫色
     'context_snapshot': '#059669',  // 上下文快照 - 翠绿色
     'tool_usage': '#0284c7',        // 工具使用 - 蓝色
+    
     // 兼容旧类型
     'vector': '#3b82f6',           // 向量记忆 -> 对话
     'working': '#10b981',          // 工作记忆 -> 用户画像
   }
   return colorMap[type] || '#6b7280'
 }
+
 function getMemoryIcon(type: string): LucideIcon {
   const iconMap: Record<string, LucideIcon> = {
     // 后端标准分类
@@ -116,12 +126,14 @@ function getMemoryIcon(type: string): LucideIcon {
     'heartbeat_task': Activity,
     'context_snapshot': Camera,
     'tool_usage': Settings,
+    
     // 兼容旧类型
     'vector': MessageCircle,
     'working': User,
   }
   return iconMap[type] || FileText
 }
+
 function getMemoryTypeLabel(type: string): string {
   const labelMap: Record<string, string> = {
     // 后端标准分类
@@ -142,37 +154,45 @@ function getMemoryTypeLabel(type: string): string {
     'heartbeat_task': '心跳任务',
     'context_snapshot': '上下文快照',
     'tool_usage': '工具使用',
+    
     // 兼容旧类型
     'vector': '对话记忆',
     'working': '工作记忆',
   }
   return labelMap[type] || type
 }
+
 function formatTime(timestamp: number): string {
   const date = new Date(timestamp)
   const now = new Date()
   const diff = now.getTime() - date.getTime()
+  
   if (diff < 60000) return '刚刚'
   if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`
+  
   return date.toLocaleDateString('zh-CN')
 }
 </script>
+
 <style scoped>
 .memory-timeline {
   padding: 16px;
   max-height: 600px;
   overflow-y: auto;
 }
+
 .memories-container {
   position: relative;
 }
+
 .timeline-item {
   display: flex;
   gap: 16px;
   margin-bottom: 24px;
   transition: all 0.5s ease;
 }
+
 .timeline-connector {
   display: flex;
   flex-direction: column;
@@ -180,6 +200,7 @@ function formatTime(timestamp: number): string {
   width: 32px;
   flex-shrink: 0;
 }
+
 .timeline-dot {
   width: 32px;
   height: 32px;
@@ -190,17 +211,20 @@ function formatTime(timestamp: number): string {
   font-size: 0.9rem;
   z-index: 1;
 }
+
 .memory-icon {
   width: 16px;
   height: 16px;
   color: white;
 }
+
 .timeline-line {
   width: 2px;
   flex: 1;
   background: rgba(255, 255, 255, 0.1);
   margin-top: 4px;
 }
+
 .memory-card {
   flex: 1;
   padding: 16px;
@@ -209,60 +233,73 @@ function formatTime(timestamp: number): string {
   transition: all 0.3s;
   min-width: 0;
 }
+
 .memory-card:hover {
   transform: translateX(4px);
   border-color: rgba(255, 255, 255, 0.2);
 }
+
 .memory-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
 }
+
 .memory-type {
   font-size: 0.85rem;
   font-weight: 600;
 }
+
 .memory-time {
   font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.4);
 }
+
 .memory-content {
   color: rgba(255, 255, 255, 0.8);
   line-height: 1.6;
   font-size: 0.95rem;
   word-break: break-word;
 }
+
 .memory-tags {
   margin-top: 8px;
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
 }
+
 .memory-tag {
   background: rgba(96, 165, 250, 0.1) !important;
   border-color: rgba(96, 165, 250, 0.3) !important;
   color: #60a5fa !important;
   font-size: 0.8rem;
 }
+
 .empty-state {
   text-align: center;
   padding: 48px 0;
 }
+
 .empty-text {
   color: rgba(255, 255, 255, 0.4);
   font-size: 0.95rem;
 }
+
 /* TransitionGroup 动画 */
 .memory-item-enter-active {
   animation: slideIn 0.5s ease;
 }
+
 .memory-item-leave-active {
   animation: slideOut 0.3s ease;
 }
+
 .memory-item-move {
   transition: transform 0.5s ease;
 }
+
 @keyframes slideIn {
   from {
     opacity: 0;
@@ -273,6 +310,7 @@ function formatTime(timestamp: number): string {
     transform: translateX(0);
   }
 }
+
 @keyframes slideOut {
   from {
     opacity: 1;
@@ -284,4 +322,3 @@ function formatTime(timestamp: number): string {
   }
 }
 </style>
- 

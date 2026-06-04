@@ -1,161 +1,452 @@
 <template>
-  <div >
-    <div >
-      <h2 ><CloudOutlined :style="{color:'#8b5cf6'}" /> 模型管理</h2>
-      <div >
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><CloudOutlined :style="{ color: '#8b5cf6' }" /> 模型管理</h2>
+      <div class="hd-actions">
         <a-button @click="handleDetectAll" :loading="detectingAll"><RadarChartOutlined /> 检测全部能力</a-button>
         <a-button type="primary" @click="openAddProvider"><PlusOutlined /> 添加服务商</a-button>
       </div>
     </div>
-    <div >
-      <div ><ThunderboltOutlined style="color:#f59e0b" /><span >默认 LLM</span><span v-if="activeProviderName&&activeModelName" >{{ activeProviderName }} / {{ activeModelName }}</span><span v-else >未设置</span></div>
-      <div >
-        <a-select v-model:value="activeForm.providerId" placeholder="选择服务商" style="width:200px" :options="eligibleProviders.map(p=>({label:p.name,value:p.id}))" @change="activeForm.modelId='';activeDirty=true" />
-        <a-select v-model:value="activeForm.modelId" placeholder="选择模型" style="flex:1;min-width:200px" :options="activeFormModelOptions" show-search :filter-option="(i:string,o:{label:string})=>o.label.toLowerCase().includes(i.toLowerCase())" @change="activeDirty=true" />
-        <a-button type="primary" :loading="activeSaving" :disabled="!activeForm.providerId||!activeForm.modelId||!activeDirty" @click="saveActiveModel"><SaveOutlined /> 保存</a-button>
-      </div>
+
+    <div class="sr">
+      <div class="s glass-effect">服务商<b class="c1">{{ providers.length }}</b></div>
+      <div class="s glass-effect">已启用<b class="c3">{{ providers.filter(p => p.enabled !== false).length }}</b></div>
+      <div class="s glass-effect">模型<b class="c2">{{ totalModels }}</b></div>
+      <div class="s glass-effect">当前<b class="c4">{{ currentModel || '--' }}</b></div>
     </div>
-    <div >
-      <div >服务商<b >{{ providers.length }}</b></div>
-      <div >已启用<b >{{ providers.filter(p=>p.enabled!==false).length }}</b></div>
-      <div >模型<b >{{ totalModels }}</b></div>
-      <div >当前<b >{{ currentModel||'--' }}</b></div>
-    </div>
-    <a-alert v-if="error" :message="error" type="error" show-icon closable @close="error=''" />
+
+    <a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" />
     <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
-    <div v-if="!loading&&providers.length" >
-      <div v-for="p in providers" :key="p.id"  :>
-        <GlassContainer :displacement-scale="60" :blur-amount="2.56" :saturation="160" :aberration-intensity="3" :corner-radius="28" padding="0" :over-light="false">
-          <div >
-            <span  :><CheckCircleFilled v-if="p._available&&(p.models?.length||p.extra_models?.length)" /><ExclamationCircleFilled v-else-if="p._available" style="color:#f59e0b" /><CloseCircleFilled v-else /></span>
-            <div ><div  :style="{background:pColor(p.id)}">{{ (p.icon||p.name||'?')[0] }}</div><div ><h4>{{ p.name }}</h4><div ><a-tag v-if="p.is_builtin" size="small" color="blue">内置</a-tag><a-tag v-if="p.is_custom" size="small" color="cyan">自定义</a-tag><a-tag size="small" :color="p.enabled!==false?'green':'default'">{{ p.enabled!==false?'启用':'禁用' }}</a-tag><a-tag size="small" color="purple">{{ p.provider||'openai' }}</a-tag><a-tag v-if="p.support_model_discovery" size="small" color="geekblue">自动发现</a-tag></div></div></div>
-            <div ><div ><CloudServerOutlined  /><span >{{ p.base_url||'--' }}</span></div><div ><KeyOutlined  /><span >{{ p.has_api_key?(p.api_key_prefix||'🔑 已配置'):'⚠️ 未配置' }}</span></div><div ><BlockOutlined  /><span >内置{{ (p.models||[]).length }}个<span v-if="(p.extra_models||[]).length"> · 用户{{ p.extra_models.length }}个</span></span></div><div v-if="p.health_status&&p.health_status!=='unknown'" ><HeartOutlined  :style="{color:p.health_status==='healthy'?'#34d399':'#ef4444'}" /><span  :style="{color:p.health_status==='healthy'?'#34d399':'#ef4444'}">{{ p.health_status==='healthy'?'健康':'不可用' }}</span></div></div>
-            <div ><a-button size="small" type="primary" ghost @click="openModelModal(p)"><BlockOutlined /> 模型</a-button><a-button size="small" @click="openSettings(p)"><SettingOutlined /> 设置</a-button><a-button size="small" :loading="p._testing" :disabled="!p.has_api_key" @click="handleTest(p)"><ApiOutlined /> 测试</a-button><a-button size="small" :type="p.enabled!==false?'primary':'primary'" :danger="p.enabled!==false" ghost @click="handleToggle(p)">{{ p.enabled!==false?'禁用':'启用' }}</a-button><a-popconfirm v-if="!p.is_builtin" title="删除?" @confirm="handleDelete(p.id)"><a-button size="small" danger><DeleteOutlined /></a-button></a-popconfirm></div>
+
+    <div v-if="!loading && providers.length" class="grid">
+      <div v-for="p in providers" :key="p.id" class="card-wrapper" :class="{ disabled: p.enabled === false }">
+        <GlassContainer 
+          :displacement-scale="60"
+          :blur-amount="2.56"
+          :saturation="160"
+          :aberration-intensity="3"
+          :corner-radius="28"
+          padding="0"
+          :over-light="false"
+        >
+          <div class="card">
+            <!-- 状态圆点 -->
+            <span class="status-dot" :class="p._available ? 'green' : 'red'" :title="p._available ? '可用' : '不可用'">
+              <CheckCircleFilled v-if="p._available" />
+              <CloseCircleFilled v-else />
+            </span>
+            <div class="card-top">
+              <div class="card-avatar" :style="{ background: pColor(p.id) }">{{ (p.icon || p.name || '?')[0] }}</div>
+              <div class="card-meta">
+                <h4>{{ p.name }}</h4>
+                <div class="card-tags">
+                  <a-tag v-if="p.is_builtin" size="small" color="blue">内置</a-tag>
+                  <a-tag size="small" :color="p.enabled !== false ? 'green' : 'default'">{{ p.enabled !== false ? '启用' : '禁用' }}</a-tag>
+                  <a-tag size="small" color="purple">{{ p.provider || 'openai' }}</a-tag>
+                </div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="info-row"><CloudServerOutlined class="ii" /> <span class="iv">{{ p.base_url || '--' }}</span></div>
+              <div class="info-row"><KeyOutlined class="ii" /> <span class="iv">{{ p.has_api_key ? '🔑 已配置' : '⚠️ 未配置' }}</span></div>
+              <div class="info-row"><BlockOutlined class="ii" /> <span class="iv">内置 {{ (p.models || []).length }} 个模型</span></div>
+            </div>
+            <div class="card-actions">
+              <a-button size="small" type="primary" ghost @click="openModelModal(p)"><BlockOutlined /> 模型</a-button>
+              <a-button size="small" @click="openSettings(p)"><SettingOutlined /> 设置</a-button>
+              <a-button size="small" @click="handleTest(p)"><ApiOutlined /> 测试</a-button>
+              <a-button size="small" :type="p.enabled !== false ? 'default' : 'primary'" ghost @click="handleToggle(p)">{{ p.enabled !== false ? '禁用' : '启用' }}</a-button>
+              <a-popconfirm v-if="!p.is_builtin" title="删除服务商及模型?" @confirm="handleDelete(p.id)">
+                <a-button size="small" danger><DeleteOutlined /></a-button>
+              </a-popconfirm>
+            </div>
           </div>
         </GlassContainer>
       </div>
     </div>
-    <div v-else-if="!loading" ><CloudOutlined style="font-size:48px;color:rgba(255,255,255,0.1)" /><p>暂无服务商</p></div>
-    <a-modal v-model:open="pmOpen" :title="editingP?'编辑服务商':'添加服务商'" @ok="saveP" :confirm-loading="saving" ok-text="保存" width="520px"><a-form layout="vertical"><a-form-item label="名称" required><a-input v-model:value="pf.name" placeholder="DeepSeek" /></a-form-item><a-form-item label="协议" required><a-select v-model:value="pf.protocol" :options="protoOpts" /></a-form-item><a-form-item label="API URL" required><a-input v-model:value="pf.url" placeholder="https://api.xxx.com/v1" /></a-form-item><a-form-item label="API Key"><template v-if="editingP&&!pf._showKey"><span style="color:rgba(255,255,255,0.45)">🔒 已配置</span><a-button type="link" size="small" @click="pf._showKey=true">更改</a-button></template><a-input-password v-else v-model:value="pf.api_key" placeholder="sk-xxx" /></a-form-item><a-form-item label="描述"><a-textarea v-model:value="pf.desc" :rows="2" /></a-form-item></a-form></a-modal>
-    <a-modal v-model:open="setOpen" :title="'设置：'+(settingP?.name||'')" @ok="saveSettings" :confirm-loading="setSaving" width="640px"><a-form layout="vertical"><a-form-item label="兼容模式"><a-select v-model:value="setForm.protocol" :options="protoOpts" /></a-form-item><a-form-item label="API 地址"><a-input v-model:value="setForm.url" placeholder="https://api-inference.modelscope.cn/v1" /></a-form-item><a-form-item label="API Key"><a-input-password v-model:value="setForm.apiKey" :placeholder="setForm._hasKey?'已配置（留空不变）':'sk-xxx'" /><div v-if="setForm._hasKey" style="margin-top:4px"><span style="color:rgba(255,255,255,0.45);font-size:.78rem">✅ 已配置</span><a-button type="link" size="small" danger @click="revokeApiKey">撤销</a-button></div></a-form-item><a-collapse ghost><a-collapse-panel key="adv" header="高级配置"><a-form-item v-if="settingP?.provider?.toLowerCase().includes('anthropic')" label="认证模式"><a-radio-group v-model:value="setForm.authMode"><a-radio value="api_key">API Key</a-radio><a-radio value="auth_token">Auth Token</a-radio></a-radio-group></a-form-item><a-form-item label="自定义HTTP头"><div v-for="(h,idx) in setForm.customHeaders" :key="idx" style="display:flex;gap:8px;margin-bottom:6px"><a-input v-model:value="h.key" placeholder="Key" style="flex:1" size="small" /><a-input v-model:value="h.value" placeholder="Value" style="flex:2" size="small" /><a-button size="small" danger @click="setForm.customHeaders.splice(idx,1)"><DeleteOutlined /></a-button></div><a-button size="small" type="dashed" @click="setForm.customHeaders.push({key:'',value:''})"><PlusOutlined /> 添加</a-button></a-form-item><a-form-item label="生成参数JSON"><a-textarea v-model:value="setForm.generateKwargs" placeholder='{"temperature":0.7}' :rows="3" style="font-family:monospace" /><div v-if="setForm.jsonError" style="color:#ef4444;font-size:.78rem">{{ setForm.jsonError }}</div></a-form-item></a-collapse-panel></a-collapse></a-form><template #footer><div style="display:flex;justify-content:space-between"><a-button :loading="setTesting" :disabled="!setForm._hasKey&&!setForm.apiKey" @click="testFromSettings"><ApiOutlined /> 测试</a-button><div><a-button @click="setOpen=false">取消</a-button><a-button type="primary" :loading="setSaving" @click="saveSettings">保存</a-button></div></div></template></a-modal>
-    <a-modal v-model:open="mmOpen" :title="'「'+(activeP?.name||'')+'」模型管理'" width="860px" :footer="null"><template v-if="activeP"><div style="display:flex;gap:10px;margin-bottom:14px"><a-input v-model:value="modelSearch" placeholder="搜索模型..." allow-clear style="flex:1"><template #prefix><SearchOutlined /></template></a-input><a-button v-if="activeP.support_model_discovery" :loading="discoveringModels" @click="handleDiscoverModels"><CloudDownloadOutlined /> 自动发现</a-button></div><div ><div v-for="m in filteredModels" :key="m.name" ><div ><div ><span >{{ m.displayName||m.name }}</span><span v-if="m.displayName&&m.displayName!==m.name" >{{ m.name }}</span><span ><a-tag v-if="m.supports_multimodal===true" size="small" color="purple">多模态</a-tag><a-tag v-if="m.supports_image===true" size="small" color="green">图片</a-tag><a-tag v-if="m.supports_video===true" size="small" color="magenta">视频</a-tag><a-tag v-if="m.is_free" size="small" color="gold">免费</a-tag><template v-if="m.capabilities?.length"><a-tag v-for="c in m.capabilities" :key="c" size="small" :color="capC[c]||'default'">{{ capL[c]||c }}</a-tag></template><span v-if="!m.capabilities?.length&&m.supports_multimodal===undefined" >未检测</span></span></div><div ><a-tooltip title="探测多模态"><a-button type="link" size="small" :loading="probingModelId===m.name" @click="handleProbeMultimodal(m)"><ScanOutlined /></a-button></a-tooltip><a-tooltip title="测试连接"><a-button type="link" size="small" :loading="testingModelId===m.name" @click="handleTestModel(m)"><ApiOutlined /></a-button></a-tooltip><a-tooltip title="编辑"><a-button type="link" size="small" @click="configOpenModelId=configOpenModelId===m.name?'':m.name"><EditOutlined /></a-button></a-tooltip><a-popconfirm v-if="m.source!=='builtin'" title="删除?" @confirm="delM(m.name)"><a-button type="link" size="small" danger><DeleteOutlined /></a-button></a-popconfirm></div></div><div v-if="configOpenModelId===m.name" ><a-form layout="inline" style="flex-wrap:wrap;gap:8px"><a-form-item label="MaxTokens"><a-input-number v-model:value="m.maxTokens" :min="1024" :max="1000000" :step="1024" style="width:120px" size="small" /></a-form-item><a-form-item label="MaxInput"><a-input-number v-model:value="m.maxInputLength" :min="1024" :max="1000000" :step="1024" style="width:120px" size="small" /></a-form-item></a-form><div style="margin-top:8px"><span style="color:rgba(255,255,255,0.4);font-size:.78rem">生成参数：</span><a-textarea v-model:value="m._genKwargsJson" :rows="2" style="font-family:monospace;margin-top:4px" size="small" /></div><div style="margin-top:8px;display:flex;gap:8px"><a-button type="primary" size="small" :loading="savingModelConfig===m.name" @click="saveModelConfig(m)">保存</a-button><a-button size="small" @click="configOpenModelId=''">取消</a-button></div></div></div><div v-if="!filteredModels.length" style="text-align:center;padding:20px;color:rgba(255,255,255,0.3)">{{ modelSearch?'无匹配':'暂无模型' }}</div></div><template v-if="discoveredModels.length"><a-divider style="margin:16px 0;border-color:rgba(255,255,255,0.08)"><span style="color:rgba(255,255,255,0.4);font-size:.78rem">发现的模型（点击添加）</span></a-divider><div ><div v-for="dm in discoveredModels" :key="dm.id"  : @click="addDiscoveredModel(dm)"><span >{{ dm.name||dm.id }}</span><span v-if="dm.is_free" >免费</span><span v-if="allModelNames.has(dm.id)" >已添加</span><CheckOutlined v-else style="color:#34d399" /></div></div></template><a-divider style="margin:16px 0;border-color:rgba(255,255,255,0.08)"><span style="color:rgba(255,255,255,0.4);font-size:.78rem">手动添加</span></a-divider><a-card size="small" :title="editMN?'编辑: '+editMN:'添加模型'" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06)"><a-form layout="inline" style="flex-wrap:wrap;gap:8px"><a-form-item label="标识"><a-input v-model:value="mf.name" style="width:150px" :disabled="!!editMN" /></a-form-item><a-form-item label="显示名"><a-input v-model:value="mf.dname" style="width:130px" /></a-form-item><a-form-item label="Token"><a-input-number v-model:value="mf.maxT" :min="1024" :max="1000000" :step="1024" style="width:110px" /></a-form-item></a-form><div style="margin:8px 0"><span style="color:rgba(255,255,255,0.4);font-size:.78rem">能力：</span><a-checkbox-group v-model:value="mf.caps" style="margin-left:4px"><a-checkbox value="text">📝文本</a-checkbox><a-checkbox value="image_understand">🖼️图形</a-checkbox><a-checkbox value="video_understand">🎬视频</a-checkbox><a-checkbox value="audio_understand">🎵语音</a-checkbox><a-checkbox value="image_generate">🎨图像生成</a-checkbox><a-checkbox value="video_generate">🎞️视频生成</a-checkbox><a-checkbox value="audio_generate">🔊音频生成</a-checkbox></a-checkbox-group><a-button type="link" size="small" @click="autoDetectCaps" :loading="detectingOne"><ScanOutlined />自动检测</a-button></div><a-space><a-button type="primary" size="small" @click="saveM" :loading="savingModel">{{ editMN?'更新':'添加' }}</a-button><a-button v-if="editMN" size="small" @click="editMN='';mf.name='';mf.dname='';mf.maxT=8192;mf.caps=['text']">取消</a-button></a-space></a-card><a-divider style="margin:16px 0;border-color:rgba(255,255,255,0.08)"><span style="color:rgba(255,255,255,0.4);font-size:.78rem">对接地址</span></a-divider><div style="position:relative"><a-input :value="modelEndpointUrl" readonly style="font-family:monospace;font-size:.8rem;background:rgba(0,0,0,0.2);color:rgba(255,255,255,0.8)"><template #suffix><a-tooltip title="复制"><CopyOutlined style="cursor:pointer;color:rgba(255,255,255,0.4)" @click="copyModelEndpoint" /></a-tooltip></template></a-input></div></template>    </a-modal>
+    <div v-else-if="!loading" class="empty-state glass-effect"><CloudOutlined style="font-size:48px;color:rgba(255,255,255,0.1)" /><p>暂无服务商</p></div>
+
+    <!-- 服务商弹窗 -->
+    <a-modal v-model:open="pmOpen" :title="editingP ? '编辑服务商' : '添加服务商'" @ok="saveP" :confirm-loading="saving" ok-text="保存" cancel-text="取消" width="520px">
+      <a-form layout="vertical">
+        <a-form-item label="名称" required><a-input v-model:value="pf.name" placeholder="DeepSeek/OpenAI" /></a-form-item>
+        <a-form-item label="协议类型" required><a-select v-model:value="pf.protocol" :options="protoOpts" /></a-form-item>
+        <a-form-item label="API URL" required><a-input v-model:value="pf.url" placeholder="https://api.xxx.com/v1" /></a-form-item>
+        <a-form-item label="API Key">
+          <template v-if="editingP && !pf._showKey">
+            <span style="color:rgba(255,255,255,0.45)">🔒 已配置（留空保持不变）</span>
+            <a-button type="link" size="small" @click="pf._showKey=true" style="padding:0 8px">更改</a-button>
+          </template>
+          <a-input-password v-else v-model:value="pf.api_key" :placeholder="editingP?'输入新密钥':'sk-xxx'" />
+        </a-form-item>
+        <a-form-item label="描述"><a-textarea v-model:value="pf.desc" placeholder="服务商描述" :rows="2" /></a-form-item>
+      </a-form>
+    </a-modal>
+
+    <!-- 设置弹窗（协议+APIKey） -->
+    <a-modal v-model:open="setOpen" title="设置：{{ settingP?.name || '' }}" @ok="saveSettings" :confirm-loading="setSaving" ok-text="保存并测试" cancel-text="取消" width="480px">
+      <a-form layout="vertical">
+        <a-form-item label="兼容模式" extra="切换 OpenAI 或 Anthropic 协议">
+          <a-select v-model:value="setForm.protocol" :options="protoOpts" />
+        </a-form-item>
+        <a-form-item label="API Key">
+          <a-input-password
+            v-model:value="setForm.apiKey"
+            :placeholder="setForm._hasKey ? '已配置（留空保持不变）' : 'sk-xxx'"
+          />
+          <div v-if="setForm._hasKey" style="color:rgba(255,255,255,0.45);font-size:0.78rem;margin-top:4px">
+            ✅ 已配置（留空保持不变，输入新值将覆盖）
+          </div>
+          <div v-else style="color:rgba(255,255,255,0.3);font-size:0.78rem;margin-top:4px">
+            未配置，请输入
+          </div>
+        </a-form-item>
+        <a-form-item label="API URL" v-if="settingP && !settingP.is_builtin" extra="自定义服务商可修改 URL">
+          <a-input v-model:value="setForm.url" placeholder="https://api.xxx.com/v1" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <!-- 模型管理浮层（modal） -->
+    <a-modal v-model:open="mmOpen" :title="'「'+(activeP?.name||'')+'」模型配置'" width="720px" :footer="null">
+      <template v-if="activeP">
+        <a-table :columns="mCols" :data-source="activePModels" row-key="name" size="middle" :pagination="false" style="margin-bottom:16px">
+          <template #bodyCell="{column,record}">
+            <template v-if="column.key==='caps'">
+              <template v-if="record.capabilities?.length"><a-tag v-for="c in record.capabilities" :key="c" size="small" :color="capC(c)">{{ capL(c) }}</a-tag></template>
+              <span v-else class="cu">未检测</span>
+            </template>
+            <template v-if="column.key==='st'"><a-switch v-model:checked="record.enabled" size="small" @change="toggleModel(record)" /></template>
+            <template v-if="column.key==='act'"><a-space><a-button type="link" size="small" @click="editM(record)"><EditOutlined /></a-button><a-button type="link" size="small" :loading="record._detect" @click="detectOne(record)"><ScanOutlined /></a-button><a-popconfirm title="删除?" @confirm="delM(record.name)"><a-button type="link" size="small" danger><DeleteOutlined /></a-button></a-popconfirm></a-space></template>
+          </template>
+        </a-table>
+        <a-card size="small" :title="editMN ? '编辑: '+editMN : '添加模型'" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06)">
+          <a-form layout="inline" style="flex-wrap:wrap;gap:8px">
+            <a-form-item label="标识"><a-input v-model:value="mf.name" placeholder="模型标识" style="width:150px" :disabled="!!editMN" /></a-form-item>
+            <a-form-item label="显示名"><a-input v-model:value="mf.dname" placeholder="友好名称" style="width:130px" /></a-form-item>
+            <a-form-item label="Token"><a-input-number v-model:value="mf.maxT" :min="1024" :max="131072" :step="1024" style="width:100px" /></a-form-item>
+          </a-form>
+          <div style="margin:8px 0">
+            <span style="color:rgba(255,255,255,0.4);font-size:.78rem">能力：</span>
+            <a-checkbox-group v-model:value="mf.caps" style="margin-left:4px">
+              <a-checkbox value="text">📝纯文本</a-checkbox><a-checkbox value="image_understand">🖼️图形</a-checkbox>
+              <a-checkbox value="video_understand">🎬视频</a-checkbox><a-checkbox value="audio_understand">🎵语音</a-checkbox>
+              <a-checkbox value="image_generate">🎨图像生成</a-checkbox><a-checkbox value="video_generate">🎞️视频生成</a-checkbox>
+              <a-checkbox value="audio_generate">🔊音频生成</a-checkbox>
+            </a-checkbox-group>
+            <a-button type="link" size="small" style="margin-left:8px" @click="autoDetectCaps" :loading="detectingOne"><ScanOutlined />自动检测</a-button>
+          </div>
+          <a-space><a-button type="primary" size="small" @click="saveM" :loading="savingModel">{{ editMN?'更新':'添加并测试' }}</a-button><a-button v-if="editMN" size="small" @click="cancelEditM">取消</a-button></a-space>
+        </a-card>
+      </template>
+    </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, watch } from 'vue'
+import { ref, computed, reactive, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { providerAPI, type ProviderCreateRequest, type ProviderUpdateRequest, type ProviderModelInfo } from '@/api/modules/providers'
+import { providerAPI, type ProviderCreateRequest, type ProviderUpdateRequest } from '@/api/modules/providers'
 import { modelAPI } from '@/api/modules/models'
-import { CloudOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ApiOutlined, CloudServerOutlined, KeyOutlined, BlockOutlined, ScanOutlined, RadarChartOutlined, CheckCircleFilled, CloseCircleFilled, SettingOutlined, ExclamationCircleFilled, ThunderboltOutlined, SaveOutlined, SearchOutlined, CloudDownloadOutlined, HeartOutlined, CheckOutlined, CopyOutlined } from '@ant-design/icons-vue'
+import { CloudOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ApiOutlined, CloudServerOutlined, KeyOutlined, BlockOutlined, ScanOutlined, RadarChartOutlined, CheckCircleFilled, CloseCircleFilled, SettingOutlined } from '@ant-design/icons-vue'
 import { GlassContainer } from '@/components/NeuGlass'
-interface ProviderData { id:string;name:string;provider?:string;protocol?:string;base_url?:string;url?:string;description?:string;has_api_key?:boolean;api_key_prefix?:string;is_builtin?:boolean;is_custom?:boolean;enabled?:boolean;icon?:string;freeze_url?:boolean;support_model_discovery?:boolean;support_connection_check?:boolean;auth_mode?:string;generate_kwargs?:Record<string,unknown>;custom_headers?:Record<string,string>;meta?:Record<string,unknown>;models?:(string|Record<string,unknown>)[];extra_models?:ProviderModelInfo[];model_capabilities?:Record<string,string[]>;health_status?:string;consecutive_failures?:number;_modelCaps?:Record<string,string[]>;_available?:boolean;_testing?:boolean }
-interface ModelItem { name:string;displayName:string;capabilities:string[];enabled:boolean;maxTokens?:number;maxInputLength?:number;supports_multimodal?:boolean|null;supports_image?:boolean|null;supports_video?:boolean|null;probe_source?:string|null;is_free?:boolean;generate_kwargs?:Record<string,unknown>;source?:string;_genKwargsJson?:string }
-interface HeaderEntry { key:string;value:string }
-const loading=ref(false);const error=ref('');const saving=ref(false);const savingModel=ref(false);const providers=ref<ProviderData[]>([]);const currentModel=ref('');const currentProvider=ref('');const detectingOne=ref(false);const detectingAll=ref(false)
-const activeForm=reactive({providerId:'',modelId:''});const activeSaving=ref(false);const activeDirty=ref(false);const activeProviderName=ref('');const activeModelName=ref('')
-const eligibleProviders=computed(()=>providers.value.filter(p=>p.enabled!==false&&p.has_api_key&&((p.models?.length||0)+(p.extra_models?.length||0)>0)))
-const activeFormModelOptions=computed(()=>{const p=providers.value.find(x=>x.id===activeForm.providerId);if(!p)return[];const all:ProviderModelInfo[]=[...(p.models||[]).map(m=>typeof m==='string'?{id:m,name:m}:m as unknown as ProviderModelInfo),...(p.extra_models||[])];return all.map(m=>({label:m.name||m.id,value:m.id}))})
-const pmOpen=ref(false);const editingP=ref(false);const editingPid=ref('');const pf=reactive<ProviderCreateRequest&{desc:string;url:string;protocol:string;_showKey:boolean}>({name:'',provider:'openai',base_url:'',api_key:'',description:'',desc:'',url:'',protocol:'openai',_showKey:false})
-const protoOpts=[{label:'OpenAI兼容',value:'openai'},{label:'Anthropic',value:'anthropic'},{label:'Gemini',value:'gemini'},{label:'Ollama',value:'ollama'},{label:'OpenRouter',value:'openrouter'},{label:'自定义',value:'custom'}]
-const setOpen=ref(false);const setSaving=ref(false);const setTesting=ref(false);const settingP=ref<ProviderData|null>(null);const setForm=reactive({protocol:'openai',apiKey:'',url:'',_hasKey:false,authMode:'api_key',customHeaders:[] as HeaderEntry[],generateKwargs:'',jsonError:''})
-const mmOpen=ref(false);const activeP=ref<ProviderData|null>(null);const editMN=ref('');const mf=reactive({name:'',dname:'',maxT:8192,caps:['text'] as string[]})
-const modelSearch=ref('');const discoveringModels=ref(false);const discoveredModels=ref<ProviderModelInfo[]>([]);const probingModelId=ref('');const testingModelId=ref('');const configOpenModelId=ref('');const savingModelConfig=ref('')
+
+interface ProviderData {
+  id: string
+  name: string
+  provider?: string
+  protocol?: string
+  base_url?: string
+  url?: string
+  description?: string
+  has_api_key?: boolean
+  is_builtin?: boolean
+  enabled?: boolean
+  models?: (string | { name?: string; model?: string; displayName?: string; model_display_name?: string; capabilities?: string[]; caps?: string[]; enabled?: boolean; max_tokens?: number })[]
+  model_capabilities?: Record<string, string[]>
+  _modelCaps?: Record<string, string[]>
+  _available?: boolean
+}
+
+const loading=ref(false);const error=ref('');const saving=ref(false);const savingModel=ref(false)
+const providers=ref<ProviderData[]>([]);const currentModel=ref('');const currentProvider=ref('')
+const detectingOne=ref(false);const detectingAll=ref(false)
+
+const pmOpen=ref(false);const editingP=ref(false);const editingPid=ref('')
+const pf=reactive<ProviderCreateRequest&{desc:string;url:string;protocol:string;_showKey:boolean}>({name:'',provider:'openai',base_url:'',api_key:'',description:'',desc:'',url:'',protocol:'openai',_showKey:false})
+const protoOpts=[{label:'OpenAI兼容',value:'openai'},{label:'Anthropic',value:'anthropic'},{label:'自定义',value:'custom'}]
+
+// 设置弹窗
+const setOpen=ref(false);const setSaving=ref(false);const settingP=ref<ProviderData | null>(null)
+const setForm=reactive({protocol:'openai',apiKey:'',url:'',_hasKey:false})
+
+function openSettings(p: ProviderData) {
+  settingP.value = p
+  setForm.protocol = p.provider || p.protocol || 'openai'
+  setForm.apiKey = ''
+  setForm.url = p.base_url || ''
+  setForm._hasKey = !!p.has_api_key
+  setOpen.value = true
+}
+async function saveSettings(){
+  if(!settingP.value)return;setSaving.value=true
+  try{
+    const d:ProviderUpdateRequest={}
+    const hasNewKey=!!setForm.apiKey
+    if(hasNewKey)d.api_key=setForm.apiKey
+    if(!settingP.value.is_builtin&&setForm.url)d.base_url=setForm.url
+    const r=await providerAPI.update(settingP.value.id,d)
+    if(r?.success||r?.code===0){
+      message.success('设置已保存')
+      setOpen.value=false
+      await loadData()
+      // 保存后自动测试连通性
+      const testR=await providerAPI.test(settingP.value.id)
+      const prov=providers.value.find(x=>x.id===settingP.value?.id)
+      if(testR?.success||testR?.code===0){
+        const td=testR.data||{}
+        if(td.health_status==='unconfigured')message.warning('保存成功，但未配置API Key')
+        else if(td.is_healthy){
+          if(prov)prov._available=true
+          message.success('连接测试通过 ✓')
+          // 自动触发能力检测并持久化
+          if(hasNewKey&&prov?.models?.length){
+            try{const capsRes=await modelAPI.detectCapability(prov.id);if(capsRes?.success||capsRes?.code===0){const results=capsRes.data?.results||{};prov._modelCaps=results;if(Object.keys(results).length)message.success(`自动检测: ${Object.keys(results).length} 个模型能力已记录`)}}catch{}
+          }
+        }
+        else{if(prov)prov._available=false;message.error('连接测试未通过')}
+      }
+    }else message.error(r?.message||'保存失败')
+  }catch(e:unknown){const err=e as {message?:string};message.error(err?.message||'保存失败')}
+  finally{setSaving.value=false}
+}
+
+// 模型浮层（modal 替代 drawer）
+const mmOpen=ref(false);const activeP=ref<ProviderData | null>(null);const editMN=ref('')
+const mf=reactive({name:'',dname:'',maxT:8192,caps:['text'] as string[]})
+const mCols=[{title:'模型名',dataIndex:'name'},{title:'能力标签',key:'caps',width:280},{title:'启用',key:'st',width:60},{title:'操作',key:'act',width:160}]
+
 const capL:Record<string,string>={text:'📝纯文本',image_understand:'🖼️图形',video_understand:'🎬视频',audio_understand:'🎵语音',image_generate:'🎨图像生成',video_generate:'🎞️视频生成',audio_generate:'🔊音频生成'}
 const capC:Record<string,string>={text:'blue',image_understand:'green',video_understand:'purple',audio_understand:'orange',image_generate:'pink',video_generate:'magenta',audio_generate:'gold'}
-const pColors=['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#f472b6','#6366f1','#14b8a6','#f97316','#84cc16','#ec4899','#0ea5e9','#a855f7','#22c55e','#eab308','#64748b','#0891b2','#d946ef']
+
+const pColors=['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#f472b6','#6366f1','#14b8a6','#f97316','#84cc16','#ec4899','#0ea5e9','#a855f7','#22c55e','#eab308','#ef4444','#64748b','#0891b2','#d946ef']
 function pColor(id:string){let h=0;for(let i=0;i<id.length;i++)h=id.charCodeAt(i)+((h<<5)-h);return pColors[Math.abs(h)%pColors.length]}
-const totalModels=computed(()=>providers.value.reduce((s,p)=>s+(p.models?.length||0)+(p.extra_models?.length||0),0))
-const activePModels=computed<ModelItem[]>(()=>{if(!activeP.value)return[];return[...(activeP.value.models||[]).map(m=>normalizeModel(m,'builtin')),...(activeP.value.extra_models||[]).map(m=>normalizeModel(m as unknown as string|Record<string,unknown>,'user'))]})
-const filteredModels=computed(()=>{if(!modelSearch.value)return activePModels.value;const q=modelSearch.value.toLowerCase();return activePModels.value.filter(m=>m.name.toLowerCase().includes(q)||m.displayName.toLowerCase().includes(q))})
-const allModelNames=computed(()=>{const s=new Set<string>();for(const m of activePModels.value)s.add(m.name);return s})
-function normalizeModel(m:string|Record<string,unknown>,source:string):ModelItem{if(typeof m==='string')return{name:m,displayName:m,capabilities:(activeP.value?._modelCaps||{})[m]||[],enabled:true,source};return{name:(m.name||m.model||m.id||'')as string,displayName:(m.displayName||m.model_display_name||m.name||m.id||'')as string,capabilities:(m.capabilities||m.caps||[])as string[],enabled:m.enabled!==false,maxTokens:m.max_tokens as number|undefined,maxInputLength:m.max_input_length as number|undefined,supports_multimodal:m.supports_multimodal as boolean|null|undefined,supports_image:m.supports_image as boolean|null|undefined,supports_video:m.supports_video as boolean|null|undefined,probe_source:m.probe_source as string|null|undefined,is_free:m.is_free as boolean|undefined,generate_kwargs:m.generate_kwargs as Record<string,unknown>|undefined,source,_genKwargsJson:m.generate_kwargs?JSON.stringify(m.generate_kwargs,null,2):''}}
-function pStatusCls(p:ProviderData){if(!p.has_api_key)return'gray';if(p._available&&((p.models?.length||0)+(p.extra_models?.length||0))>0)return'green';if(p._available)return'yellow';return'red'}
-async function loadData(){loading.value=true;error.value='';try{const[pr,cr,ar]=await Promise.all([providerAPI.list().catch(e=>({success:false,_err:e})),modelAPI.getCurrent().catch(e=>({success:false,_err:e})),providerAPI.getActiveModel().catch(()=>null)]);if(pr?.success||pr?.code===0){providers.value=(pr.data?.providers||[]).map((p:Record<string,unknown>)=>({...p,_modelCaps:(p.model_capabilities as Record<string,string[]>)||{},_available:!!p.has_api_key}as ProviderData))}else error.value=pr?.message||pr?._err?.message||'获取服务商列表失败';if(cr?.success&&cr.data){currentProvider.value=cr.data.provider_id||'';currentModel.value=cr.data.model||''};if(ar?.success&&ar.data){activeForm.providerId=ar.data.provider_id||'';activeForm.modelId=ar.data.model_id||ar.data.model||'';activeProviderName.value=ar.data.provider_name||'';activeModelName.value=ar.data.model_id||ar.data.model||'';activeDirty.value=false}}catch(e:unknown){error.value=(e as{message?:string}).message||'加载失败'}finally{loading.value=false}}
-async function checkProvidersAvailability(){await Promise.allSettled(providers.value.filter(p=>p.has_api_key).map(async p=>{try{const r=await providerAPI.checkConnection(p.id);if(r?.success||r?.code===0){p._available=!!r.data?.success;p.health_status=r.data?.success?'healthy':'unhealthy'}}catch{p._available=false}}))}
+
+const totalModels=computed(()=>providers.value.reduce((s,p)=>s+(p.models?.length||0),0))
+const activePModels=computed(()=>{if(!activeP.value)return[];return (activeP.value.models||[]).map((m)=>{if(typeof m==='string')return{name:m,displayName:m,capabilities:(activeP.value!._modelCaps||{})[m]||[],enabled:true};return{name:m.name||m.model||'',displayName:m.displayName||m.model_display_name||m.name||'',capabilities:m.capabilities||m.caps||[],enabled:m.enabled!==false,maxTokens:m.max_tokens}})})
+
+async function loadData(){loading.value=true;error.value='';try{const[pr,cr]=await Promise.all([providerAPI.list().catch(e=>({success:false,_err:e})),modelAPI.getCurrent().catch(e=>({success:false,_err:e}))]);if(pr?.success||pr?.code===0){const raw=pr.data?.providers||[];providers.value=raw.map((p)=>({...p,_modelCaps:p.model_capabilities||{},_available:p.has_api_key}));const builtin=raw.filter((p)=>p.is_builtin).length;localStorage.setItem('builtinProviders',JSON.stringify(builtin))}else error.value=pr?.message||pr?._err?.message||'获取服务商列表失败';if(cr?.success&&cr.data){currentProvider.value=cr.data.provider_id||'';currentModel.value=cr.data.model||''}}catch(e:unknown){const err=e as {message?:string};error.value=err?.message||'加载失败'}finally{loading.value=false}}
+
+// 服务商连通检测 + 能力自动检测（已配置 Key 的自动检测能力并持久化）
+async function checkProvidersAvailability(){for(const p of providers.value){if(!p.has_api_key)continue;try{const r=await providerAPI.test(p.id);if(r?.success||r?.code===0){const d=r.data||{};p._available=!!d.is_healthy}}catch{p._available=false}
+  // 连通且无能力数据 → 自动检测
+  if(p._available&&p.models?.length&&!Object.keys(p._modelCaps||{}).length){try{const capsRes=await modelAPI.detectCapability(p.id);if(capsRes?.success||capsRes?.code===0){const results=capsRes.data?.results||{};p._modelCaps=results;if(Object.keys(results).length)message.success(`${p.name}: ${Object.keys(results).length} 个模型能力已检测并记录`)}}catch{}}}}
+
+// 单个服务商刷新能力（从后端重载）
+async function refreshCaps(pid:string){try{const r=await modelAPI.getCapabilities(pid);if(r?.success||r?.code===0){const caps=r.data?.model_capabilities||{};const p=providers.value.find(x=>x.id===pid);if(p){p._modelCaps=caps}}}catch{}}
+
 onMounted(async()=>{await loadData();checkProvidersAvailability()})
-async function saveActiveModel(){if(!activeForm.providerId||!activeForm.modelId)return;activeSaving.value=true;try{const r=await providerAPI.activateModel({provider_id:activeForm.providerId,model_id:activeForm.modelId});if(r?.success||r?.code===0){message.success('默认模型已保存');activeDirty.value=false;activeProviderName.value=eligibleProviders.value.find(p=>p.id===activeForm.providerId)?.name||'';activeModelName.value=activeForm.modelId;currentModel.value=activeForm.modelId}else message.error(r?.message||'保存失败')}catch(e:unknown){message.error((e as{message?:string}).message||'保存失败')}finally{activeSaving.value=false}}
+
 function openAddProvider(){editingP.value=false;editingPid.value='';pf.name='';pf.protocol='openai';pf.url='';pf.api_key='';pf.desc='';pf._showKey=true;pmOpen.value=true}
-async function saveP(){if(!pf.name.trim()||!pf.url.trim()){message.warning('请填写名称和API URL');return};saving.value=true;try{if(editingP.value){const d:ProviderUpdateRequest={name:pf.name,base_url:pf.url,description:pf.desc};if(pf.api_key)d.api_key=pf.api_key;const r=await providerAPI.update(editingPid.value,d);if(r?.success||r?.code===0)message.success('已更新');else message.error(r?.message||'失败')}else{const r=await providerAPI.create({name:pf.name,provider:pf.protocol,base_url:pf.url,api_key:pf.api_key||undefined,description:pf.desc});if(r?.success||r?.code===0)message.success('已创建');else message.error(r?.message||'失败')};pmOpen.value=false;await loadData();checkProvidersAvailability()}catch(e:unknown){message.error((e as{message?:string}).message||'保存失败')}finally{saving.value=false}}
-async function handleDelete(id:string){try{const r=await providerAPI.delete(id);if(r?.success||r?.code===0){message.success('已删除');await loadData()}else message.error(r?.message||'失败')}catch(e:unknown){message.error((e as{message?:string}).message||'失败')}}
-async function handleToggle(p:ProviderData){const v=p.enabled===false;try{const r=await providerAPI.toggle(p.id,v);if(r?.success||r?.code===0){p.enabled=v;message.success(v?'已启用':'已禁用')}else message.error(r?.message||'失败')}catch(e:unknown){message.error((e as{message?:string}).message||'失败')}}
-async function handleTest(p:ProviderData){p._testing=true;try{const r=await providerAPI.checkConnection(p.id);if(r?.success||r?.code===0){const d=r.data||{};if(d.success){p._available=true;p.health_status='healthy';message.success(`连接成功 (${d.latency_ms||0}ms)`)}else{p._available=false;p.health_status='unhealthy';message.error('连接失败: '+(d.message||''))}}else message.error(r?.message||'测试失败')}catch(e:unknown){message.error((e as{message?:string}).message||'测试失败')}finally{p._testing=false}}
-function protoToSelectValue(raw:string):string{const low=raw.toLowerCase();if(low.includes('anthropic'))return'anthropic';if(low.includes('gemini')||low.includes('google'))return'gemini';if(low.includes('ollama'))return'ollama';if(low.includes('openrouter'))return'openrouter';return'openai'}
-function openSettings(p:ProviderData){settingP.value=p;setForm.protocol=protoToSelectValue(p.provider||p.protocol||'openai');setForm.apiKey='';setForm.url=p.base_url||'';setForm._hasKey=!!p.has_api_key;setForm.authMode=p.auth_mode||'api_key';setForm.customHeaders=Object.entries(p.custom_headers||{}).map(([k,v])=>({key:k,value:v}));setForm.generateKwargs=p.generate_kwargs?JSON.stringify(p.generate_kwargs,null,2):'';setForm.jsonError='';setForm.endpointUrl='';setForm.endpointDirty=false;setOpen.value=true}
-async function revokeApiKey(){if(!settingP.value)return;try{await Modal.confirm({title:'撤销 API Key?',content:'撤销后该服务商将无法使用，确认？',okText:'确认',cancelText:'取消'});const r=await providerAPI.update(settingP.value.id,{api_key:''});if(r?.success||r?.code===0){message.success('已撤销');setForm._hasKey=false;setForm.apiKey='';await loadData()}else message.error(r?.message||'失败')}catch{/* cancelled */}}
-async function testFromSettings(){if(!settingP.value)return;setTesting.value=true;try{const r=await providerAPI.checkConnection(settingP.value.id);if(r?.success||r?.code===0){const d=r.data||{};if(d.success)message.success(`连接成功 (${d.latency_ms||0}ms)`);else message.error('连接失败: '+(d.message||''))}else message.error(r?.message||'测试失败')}catch(e:unknown){message.error((e as{message?:string}).message||'测试失败')}finally{setTesting.value=false}}
-function normalizeProtocol(p:string):string{const m:Record<string,string>={'anthropic':'anthropic','gemini':'gemini','google':'gemini','ollama':'ollama','openrouter':'openrouter','openai':'openai','azure':'openai','dashscope':'openai','deepseek':'openai','lm studio':'openai','lm_studio':'openai','minimax':'openai','modelscope':'openai','moonshot':'openai','neurova':'openai','neurova-local':'openai','opencode':'openai','sambanova':'openai','siliconflow':'openai','zhipu ai':'openai','aliyun':'openai','custom':'openai'};return m[p.toLowerCase()]||'openai'}
-function buildEndpointUrl(baseUrl:string,protocol:string):string{const clean=baseUrl.replace(/\/+$/,'');const np=normalizeProtocol(protocol);if(np==='anthropic')return clean+'/v1/messages';if(np==='gemini')return clean+'/v1beta/models/{model}:generateContent';return clean+'/chat/completions'}
-const endpointPlaceholder=computed(()=>{if(!settingP.value)return'';const p=settingP.value;const baseUrl=setForm.url||p.base_url||'';const protocol=setForm.protocol||p.provider||'openai';return buildEndpointUrl(baseUrl,protocol)})
-function copyEndpoint(){const text=setForm.endpointUrl||endpointPlaceholder.value;if(!text)return;navigator.clipboard.writeText(text).then(()=>message.success('已复制')).catch(()=>message.error('复制失败'))}
-const modelEndpointUrl=computed(()=>{if(!activeP.value)return'';const p=activeP.value;const baseUrl=p.base_url||'';const protocol=p.provider||p.protocol||'openai';return buildEndpointUrl(baseUrl,protocol)})
-function copyModelEndpoint(){if(!modelEndpointUrl.value)return;navigator.clipboard.writeText(modelEndpointUrl.value).then(()=>message.success('已复制')).catch(()=>message.error('复制失败'))}
-async function saveSettings(){if(!settingP.value)return;try{setForm.jsonError='';if(setForm.generateKwargs.trim()){try{JSON.parse(setForm.generateKwargs)}catch{setForm.jsonError='JSON格式错误';return}}if(setForm.endpointDirty&&setForm.endpointUrl.trim()){const url=setForm.endpointUrl.trim();setForm.url=url.replace(/\/(chat\/completions|v1\/messages|v1beta\/models\/.*|v1\/completions)$/,'').replace(/\/+$/,'');}setSaving.value=true;const d:ProviderUpdateRequest={};if(setForm.apiKey)d.api_key=setForm.apiKey;if(!settingP.value.is_builtin&&setForm.url)d.base_url=setForm.url;if(setForm.customHeaders.length){const h:Record<string,string>={};setForm.customHeaders.forEach(e=>{if(e.key.trim())h[e.key.trim()]=e.value});d.custom_headers=h}if(setForm.generateKwargs.trim())d.generate_kwargs=JSON.parse(setForm.generateKwargs);if(settingP.value.provider?.toLowerCase().includes('anthropic'))d.auth_mode=setForm.authMode;const r=await providerAPI.update(settingP.value.id,d);if(r?.success||r?.code===0){message.success('设置已保存');setOpen.value=false;await loadData();checkProvidersAvailability()}else message.error(r?.message||'保存失败')}catch(e:unknown){message.error((e as{message?:string}).message||'保存失败')}finally{setSaving.value=false}}
-function openModelModal(p:ProviderData){activeP.value=p;editMN.value='';mf.name='';mf.dname='';mf.maxT=8192;mf.caps=['text'];modelSearch.value='';discoveredModels.value=[];configOpenModelId.value='';mmOpen.value=true}
-async function handleDiscoverModels(){if(!activeP.value)return;discoveringModels.value=true;try{const r=await providerAPI.discoverModels(activeP.value.id);if(r?.success||r?.code===0){discoveredModels.value=r.data?.models||[];message.success(`发现 ${discoveredModels.value.length} 个模型`)}else message.error(r?.message||'发现失败')}catch(e:unknown){message.error((e as{message?:string}).message||'发现失败')}finally{discoveringModels.value=false}}
-async function addDiscoveredModel(dm:ProviderModelInfo){if(!activeP.value||allModelNames.value.has(dm.id))return;try{const r=await modelAPI.add({provider_id:activeP.value.id,model_name:dm.id,model_display_name:dm.name,max_tokens:dm.max_tokens||8192});if(r?.success||r?.code===0){message.success(`已添加 ${dm.name||dm.id}`);await refreshP();discoveredModels.value=discoveredModels.value.filter(m=>m.id!==dm.id)}else message.error(r?.message||'添加失败')}catch(e:unknown){message.error((e as{message?:string}).message||'添加失败')}}
-async function handleProbeMultimodal(m:ModelItem){if(!activeP.value)return;probingModelId.value=m.name;try{const r=await providerAPI.probeMultimodal(activeP.value.id,m.name);if(r?.success||r?.code===0){const d=r.data||{};m.supports_multimodal=!!d.supports_multimodal;m.supports_image=!!d.supports_image;m.supports_video=!!d.supports_video;m.probe_source=d.probe_source||'probe';const caps:string[]=[];if(d.supports_image)caps.push('image_understand');if(d.supports_video)caps.push('video_understand');if(!d.supports_image&&!d.supports_video)caps.push('text');m.capabilities=caps;message.success(`${m.name}: ${d.supports_multimodal?'多模态':'纯文本'}`)}else message.error(r?.message||'探测失败')}catch(e:unknown){message.error((e as{message?:string}).message||'探测失败')}finally{probingModelId.value=''}}
-async function handleTestModel(m:ModelItem){if(!activeP.value)return;testingModelId.value=m.name;try{const r=await modelAPI.checkModelConnection(activeP.value.id,m.name);if(r?.success||r?.code===0){const d=r.data||{};if(d.success)message.success(`${m.name}: 连接成功 (${d.latency_ms||0}ms)`);else message.error(`${m.name}: 连接失败`)}else message.error(r?.message||'测试失败')}catch(e:unknown){message.error((e as{message?:string}).message||'测试失败')}finally{testingModelId.value=''}}
-async function saveModelConfig(m:ModelItem){if(!activeP.value)return;savingModelConfig.value=m.name;try{let genKwargs:Record<string,unknown>|undefined;if(m._genKwargsJson?.trim()){try{genKwargs=JSON.parse(m._genKwargsJson)}catch{message.error('JSON格式错误');return}}const r=await modelAPI.updateModel(activeP.value.id,m.name,{max_tokens:m.maxTokens,max_input_length:m.maxInputLength,generate_kwargs:genKwargs});if(r?.success||r?.code===0){message.success('配置已保存');configOpenModelId.value=''}else message.error(r?.message||'保存失败')}catch(e:unknown){message.error((e as{message?:string}).message||'保存失败')}finally{savingModelConfig.value=''}}
-async function delM(name:string){try{const r=await modelAPI.remove(activeP.value!.id,name);if(r?.success||r?.code===0){message.success('已删除');await refreshP()}else message.error(r?.message||'失败')}catch(e:unknown){message.error((e as{message?:string}).message||'失败')}}
-async function saveM(){if(!mf.name.trim()){message.warning('请输入模型名');return};savingModel.value=true;try{if(editMN.value){const r=await modelAPI.updateModel(activeP.value!.id,editMN.value,{model_display_name:mf.dname||undefined,max_tokens:mf.maxT,capabilities:mf.caps});if(r?.success||r?.code===0){message.success('已更新');editMN.value='';mf.name='';mf.dname='';mf.maxT=8192;mf.caps=['text'];await refreshP()}else message.error(r?.message||'失败')}else{const r=await modelAPI.add({provider_id:activeP.value!.id,model_name:mf.name,model_display_name:mf.dname||undefined,max_tokens:mf.maxT,capabilities:mf.caps});if(r?.success||r?.code===0){message.success('已添加');mf.name='';mf.dname='';mf.caps=['text'];await refreshP()}else message.error(r?.message||'失败')}}catch(e:unknown){message.error((e as{message?:string}).message||'保存失败')}finally{savingModel.value=false}}
-async function autoDetectCaps(){if(!mf.name.trim()&&!editMN.value){message.warning('请先输入模型名');return};detectingOne.value=true;try{const r=await modelAPI.detectCapability(activeP.value!.id,mf.name||editMN.value);if(r?.success||r?.code===0){const results=r.data?.results||{};const caps=results[mf.name||editMN.value||'']||[];if(caps.length){mf.caps=caps;message.success(`检测到${caps.length}项能力`)}}}catch{}finally{detectingOne.value=false}}
-async function handleDetectAll(){detectingAll.value=true;let c=0;for(const p of providers.value){if(!p.models?.length)continue;try{const r=await modelAPI.detectCapability(p.id);if(r?.success||r?.code===0){p._modelCaps=r.data?.results||{};c+=Object.keys(p._modelCaps).length}}catch{}}message.success(`全部检测完成: ${c} 项能力`);detectingAll.value=false}
+function openEditProvider(p:ProviderData){editingP.value=true;editingPid.value=p.id;pf.name=p.name;pf.protocol=p.provider||p.protocol||'openai';pf.url=p.base_url||p.url||'';pf.api_key='';pf.desc=p.description||'';pf._showKey=false;pmOpen.value=true}
+async function saveP(){if(!pf.name.trim()||!pf.url.trim()){message.warning('请填写名称和API URL');return};saving.value=true;try{if(editingP.value){const d:ProviderUpdateRequest={name:pf.name,base_url:pf.url,description:pf.desc};if(pf.api_key)d.api_key=pf.api_key;const r=await providerAPI.update(editingPid.value,d);if(r?.success||r?.code===0)message.success('已更新');else message.error(r?.message||'失败')}else{const r=await providerAPI.create({name:pf.name,provider:pf.protocol,base_url:pf.url,api_key:pf.api_key||undefined,description:pf.desc});if(r?.success||r?.code===0)message.success('已创建');else message.error(r?.message||'失败')};pmOpen.value=false;await loadData();checkProvidersAvailability()}catch(e:unknown){const err=e as {message?:string};message.error(err?.message||'保存失败')}finally{saving.value=false}}
+async function handleDelete(id:string){try{const r=await providerAPI.delete(id);if(r?.success||r?.code===0){message.success('已删除');await loadData()}else message.error(r?.message||'失败')}catch(e:unknown){const err=e as {message?:string};message.error(err?.message||'失败')}}
+async function handleToggle(p:ProviderData){const v=p.enabled===false;try{const r=await providerAPI.toggle(p.id,v);if(r?.success||r?.code===0){p.enabled=v;message.success(v?'已启用':'已禁用')}else message.error(r?.message||'失败')}catch(e:unknown){const err=e as {message?:string};message.error(err?.message||'失败')}}
+async function handleTest(p:ProviderData){try{const r=await providerAPI.test(p.id);if(r?.success||r?.code===0){const d=r.data||{};if(d.health_status==='unconfigured'){message.warning(d.message||'未配置 API Key，无法测试')}else if(d.is_healthy){p._available=true;message.success('连接成功')}else{p._available=false;message.error('连接失败: '+(d.health_status||'unhealthy'))}}else message.error(r?.message||'测试失败')}catch(e:unknown){const err=e as {message?:string};message.error(err?.message||'测试失败')}}
+
+// 模型浮层（modal）
+function openModelModal(p:ProviderData){activeP.value=p;editMN.value='';mf.name='';mf.dname='';mf.maxT=8192;mf.caps=['text'];mmOpen.value=true}
+function editM(m:{name:string;displayName?:string;maxTokens?:number;capabilities?:string[]}){editMN.value=m.name;mf.name=m.name;mf.dname=m.displayName||m.name;mf.maxT=m.maxTokens||8192;mf.caps=m.capabilities?.slice()||['text']}
+function cancelEditM(){editMN.value='';mf.name='';mf.dname='';mf.maxT=8192;mf.caps=['text']}
+async function delM(name:string){try{const r=await modelAPI.remove(activeP.value!.id,name);if(r?.success||r?.code===0){message.success('已删除');await refreshP()}else message.error(r?.message||'失败')}catch(e:unknown){const err=e as {message?:string};message.error(err?.message||'失败')}}
+function toggleModel(m:{name:string;enabled?:boolean}){message.info(`「${m.name}」${m.enabled?'已启用':'已禁用'}`)}
+async function saveM(){if(!mf.name.trim()){message.warning('请输入模型名');return}
+
+  // 新增模型时：先测试连通性
+  if(!editMN.value){
+    savingModel.value=true
+    try{
+      const testRes=await providerAPI.test(activeP.value.id)
+      const connected=testRes?.success&&testRes.data?.is_healthy
+      if(!connected){
+        // 不可连通 → 弹窗确认
+        const reason=testRes?.data?.health_status==='unconfigured'?'未配置 API Key':(testRes?.data?.health_status||'无法连接')
+        await new Promise<void>((resolve,reject)=>{
+          Modal.confirm({
+            title:'连接测试失败',
+            content:`「${activeP.value.name}」${reason}。是否仍然添加该模型？`,
+            okText:'继续添加',
+            cancelText:'取消',
+            onOk:()=>resolve(),
+            onCancel:()=>reject(new Error('USER_CANCEL')),
+          })
+        })
+      }
+    }catch(e:unknown){const err=e as {message?:string};if(err.message==='USER_CANCEL'){savingModel.value=false;return}/* 其他错误继续添加 */}
+    savingModel.value=false
+  }
+
+  savingModel.value=true
+  try{
+    if(editMN.value){const r=await modelAPI.updateModel(activeP.value.id,editMN.value,{model_display_name:mf.dname||undefined,max_tokens:mf.maxT,capabilities:mf.caps});if(r?.success||r?.code===0){message.success('已更新');cancelEditM();await refreshP()}else message.error(r?.message||'失败')}
+    else{const r=await modelAPI.add({provider_id:activeP.value.id,model_name:mf.name,model_display_name:mf.dname||undefined,max_tokens:mf.maxT,capabilities:mf.caps});if(r?.success||r?.code===0){message.success('已添加');mf.name='';mf.dname='';mf.caps=['text'];await refreshP()}else message.error(r?.message||'失败')}
+  }catch(e:unknown){const err=e as {message?:string};message.error(err?.message||'保存失败')}
+  finally{savingModel.value=false}
+}
+async function autoDetectCaps(){if(!mf.name.trim()&&!editMN.value){message.warning('请先输入模型名');return};detectingOne.value=true;try{const r=await modelAPI.detectCapability(activeP.value.id,mf.name||editMN.value);if(r?.success||r?.code===0){const results=r.data?.results||{};const caps=results[mf.name||editMN.value||'']||[];if(caps.length){mf.caps=caps;message.success(`检测到${caps.length}项能力: ${caps.join(',')}`)}}}catch{}finally{detectingOne.value=false}}
+async function detectOne(m:{name:string;_detect?:boolean}){m._detect=true;try{const r=await modelAPI.detectCapability(activeP.value!.id,m.name);if(r?.success||r?.code===0){const results=r.data?.results||{};const caps=results[m.name]||[];if(caps.length){m.capabilities=caps;if(activeP.value._modelCaps)activeP.value._modelCaps[m.name]=caps;message.success(`${m.name}:${caps.length}项已记录`)}}}catch{}finally{m._detect=false}}
+async function handleDetectAll(){detectingAll.value=true;let c=0;for(const p of providers.value){if(!p.models?.length)continue;try{const r=await modelAPI.detectCapability(p.id);if(r?.success||r?.code===0){const results=r.data?.results||{};p._modelCaps=results;c+=Object.keys(results).length}}catch{}}message.success(`全部检测完成: ${c} 项能力已记录`);detectingAll.value=false}
 async function refreshP(){try{const r=await providerAPI.list();if(r?.success||r?.code===0){const newP=(r.data?.providers||[]).map((p:Record<string,unknown>)=>({...p,_modelCaps:(p.model_capabilities as Record<string,string[]>)||{}}));const cur=providers.value.find(x=>x.id===activeP.value?.id);const upd=newP.find(x=>x.id===activeP.value?.id);if(cur&&upd){Object.assign(cur,upd);activeP.value=cur}}}catch{}}
 </script>
+
 <style scoped>
 .pg{display:flex;flex-direction:column;gap:16px}
-.hd{padding:18px 28px;border-radius:24px;display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,rgba(255,255,255,0.08) 0%,rgba(255,255,255,0.03) 50%,rgba(255,255,255,0.06) 100%);border:1px solid rgba(255,255,255,0.1);box-shadow:0 8px 32px rgba(0,0,0,0.2),inset 0 0 0 0.5px rgba(255,255,255,0.08),inset 0 1px 0 rgba(255,255,255,0.15);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%)}
+.hd{
+  padding:18px 28px;
+  border-radius:24px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  background: linear-gradient(
+    135deg,
+    rgba(255,255,255,0.08) 0%,
+    rgba(255,255,255,0.03) 50%,
+    rgba(255,255,255,0.06) 100%
+  );
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow:
+    0 8px 32px rgba(0,0,0,0.2),
+    inset 0 0 0 0.5px rgba(255,255,255,0.08),
+    inset 0 1px 0 rgba(255,255,255,0.15);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+}
 .hd-actions{display:flex;gap:10px}
 .t{font-size:1.25rem;color:#e2e8f0;margin:0;display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-0.2px}
 .sr{display:flex;gap:14px}
-.s{flex:1;padding:18px 22px;border-radius:20px;display:flex;justify-content:space-between;align-items:center;color:rgba(255,255,255,0.55);font-size:.86rem;background:linear-gradient(135deg,rgba(255,255,255,0.07) 0%,rgba(255,255,255,0.02) 100%);border:1px solid rgba(255,255,255,0.08);box-shadow:0 4px 24px rgba(0,0,0,0.15),inset 0 0 0 0.5px rgba(255,255,255,0.06);backdrop-filter:blur(32px) saturate(180%);-webkit-backdrop-filter:blur(32px) saturate(180%);transition:all 0.35s cubic-bezier(0.4,0,0.2,1)}
-.s:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,0,0,0.22),inset 0 0 0 0.5px rgba(255,255,255,0.1)}
+.s{
+  flex:1;
+  padding:18px 22px;
+  border-radius:20px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  color:rgba(255,255,255,0.55);
+  font-size:.86rem;
+  background: linear-gradient(
+    135deg,
+    rgba(255,255,255,0.07) 0%,
+    rgba(255,255,255,0.02) 100%
+  );
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow:
+    0 4px 24px rgba(0,0,0,0.15),
+    inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  transition: all 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+.s:hover{
+  transform: translateY(-2px);
+  box-shadow:
+    0 8px 32px rgba(0,0,0,0.22),
+    inset 0 0 0 0.5px rgba(255,255,255,0.1);
+}
 .s b{font-size:1.5rem;font-weight:700}.c1{color:#8b5cf6}.c2{color:#f59e0b}.c3{color:#34d399}.c4{color:#60a5fa}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:18px}
+
+/* 卡片包裹层 */
 .card-wrapper{display:block;position:relative;isolation:isolate;overflow:visible}
 .card-wrapper.disabled{opacity:.55;filter:grayscale(0.3)}
-.card{padding:22px;border-radius:28px;display:flex;flex-direction:column;gap:14px;position:relative;overflow:hidden;background:radial-gradient(120px 80px at 20% 0%,rgba(139,92,246,0.12) 0%,transparent 100%),radial-gradient(90px 60px at 90% 20%,rgba(99,102,241,0.08) 0%,transparent 100%),linear-gradient(145deg,rgba(255,255,255,0.08) 0%,rgba(255,255,255,0.03) 50%,rgba(255,255,255,0.06) 100%);border:1px solid rgba(255,255,255,0.12);box-shadow:0 8px 32px rgba(0,0,0,0.25),0 2px 8px rgba(0,0,0,0.1),inset 0 0 0 0.5px rgba(255,255,255,0.12),inset 0 1px 0 rgba(255,255,255,0.18);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%)}
+
+/* iOS 16 液态玻璃卡片 - 现在是内容层 */
+.card{
+  padding:22px;
+  border-radius:28px;
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  position:relative;
+  overflow:hidden;
+  background:
+    radial-gradient(
+      120px 80px at 20% 0%,
+      rgba(139,92,246,0.12) 0%,
+      transparent 100%
+    ),
+    radial-gradient(
+      90px 60px at 90% 20%,
+      rgba(99,102,241,0.08) 0%,
+      transparent 100%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(255,255,255,0.08) 0%,
+      rgba(255,255,255,0.03) 50%,
+      rgba(255,255,255,0.06) 100%
+    );
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow:
+    0 8px 32px rgba(0,0,0,0.25),
+    0 2px 8px rgba(0,0,0,0.1),
+    inset 0 0 0 0.5px rgba(255,255,255,0.12),
+    inset 0 1px 0 rgba(255,255,255,0.18);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+}
+
 .card.disabled{opacity:.55;filter:grayscale(0.3)}
-.status-dot{position:absolute;top:18px;right:18px;font-size:1.15rem;line-height:1;padding:4px;border-radius:50%;background:rgba(0,0,0,0.2);backdrop-filter:blur(8px)}
+.card.disabled:hover{transform:none}
+
+/* 状态圆点 */
+.status-dot{
+  position:absolute;
+  top:18px;
+  right:18px;
+  font-size:1.15rem;
+  line-height:1;
+  padding:4px;
+  border-radius:50%;
+  background:rgba(0,0,0,0.2);
+  backdrop-filter: blur(8px);
+}
 .status-dot.green{color:#34d399;text-shadow:0 0 12px rgba(52,211,153,0.4)}
-.status-dot.yellow{color:#f59e0b;text-shadow:0 0 12px rgba(245,158,11,0.4)}
 .status-dot.red{color:#ef4444;text-shadow:0 0 12px rgba(239,68,68,0.4)}
-.status-dot.gray{color:rgba(255,255,255,0.3)}
+
 .card-top{display:flex;align-items:center;gap:14px}
-.card-avatar{width:52px;height:52px;border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:1.25rem;flex-shrink:0;box-shadow:0 8px 24px rgba(0,0,0,0.3),inset 0 0 0 0.5px rgba(255,255,255,0.2)}
+.card-avatar{
+  width:52px;height:52px;
+  border-radius:16px;
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-weight:800;font-size:1.25rem;
+  flex-shrink:0;
+  box-shadow:
+    0 8px 24px rgba(0,0,0,0.3),
+    inset 0 0 0 0.5px rgba(255,255,255,0.2);
+}
 .card-meta{flex:1}.card-meta h4{color:#e2e8f0;margin:0 0 6px;font-size:1rem;font-weight:600;letter-spacing:-0.2px}
-.card-tags{display:flex;gap:8px;flex-wrap:wrap}
+.card-tags{display:flex;gap:8px}
 .card-body{display:flex;flex-direction:column;gap:8px}
 .info-row{display:flex;align-items:center;gap:10px;color:rgba(255,255,255,0.48);font-size:.82rem}
 .ii{font-size:.9rem;opacity:.7}.iv{font-family:monospace;font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}
-.card-actions{display:flex;gap:10px;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,0.08);padding-top:14px;margin-top:4px}
-.empty-state{text-align:center;padding:80px 30px;border-radius:28px;display:flex;flex-direction:column;align-items:center;gap:18px;background:linear-gradient(135deg,rgba(255,255,255,0.05) 0%,rgba(255,255,255,0.02) 100%);border:1px solid rgba(255,255,255,0.08);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%)}
+.card-actions{
+  display:flex;gap:10px;flex-wrap:wrap;
+  border-top:1px solid rgba(255,255,255,0.08);
+  padding-top:14px;
+  margin-top:4px;
+}
+.empty-state{
+  text-align:center;padding:80px 30px;border-radius:28px;
+  display:flex;flex-direction:column;align-items:center;gap:18px;
+  background: linear-gradient(
+    135deg,
+    rgba(255,255,255,0.05) 0%,
+    rgba(255,255,255,0.02) 100%
+  );
+  border:1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+}
 .empty-state p{color:rgba(255,255,255,0.35);margin:0;font-size:.95rem}
 .cu{color:rgba(255,255,255,0.22);font-size:.78rem;font-style:italic}
-/* Active LLM Selector */
-.active-llm{padding:16px 24px;border-radius:20px;background:linear-gradient(135deg,rgba(245,158,11,0.06) 0%,rgba(139,92,246,0.04) 100%);border:1px solid rgba(245,158,11,0.12);box-shadow:0 4px 24px rgba(0,0,0,0.12),inset 0 0 0 0.5px rgba(255,255,255,0.06);backdrop-filter:blur(32px) saturate(180%);-webkit-backdrop-filter:blur(32px) saturate(180%)}
-.active-llm-header{display:flex;align-items:center;gap:8px;margin-bottom:10px}
-.active-llm-title{color:#e2e8f0;font-weight:600;font-size:.95rem}
-.active-llm-badge{font-size:.78rem;padding:2px 10px;border-radius:10px;background:rgba(139,92,246,0.15);color:#a78bfa}
-.active-llm-badge.dim{background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.3)}
-.active-llm-form{display:flex;gap:10px;align-items:center}
-/* Model List */
-.model-list{max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
-.model-item{border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:10px 14px;background:rgba(255,255,255,0.02);transition:background 0.2s}
-.model-item:hover{background:rgba(255,255,255,0.05)}
-.model-item-main{display:flex;justify-content:space-between;align-items:center}
-.model-item-info{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
-.model-name{color:#e2e8f0;font-weight:500;font-size:.9rem}
-.model-id{color:rgba(255,255,255,0.35);font-size:.75rem;font-family:monospace}
-.model-tags{display:flex;gap:4px;flex-wrap:wrap}
-.model-item-actions{display:flex;gap:4px;flex-shrink:0}
-.model-config-editor{margin-top:10px;padding:10px;border:1px solid rgba(255,255,255,0.06);border-radius:8px;background:rgba(255,255,255,0.02)}
-/* Discovered Models */
-.discovered-grid{display:flex;flex-wrap:wrap;gap:8px}
-.discovered-item{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);cursor:pointer;transition:all 0.2s;font-size:.82rem}
-.discovered-item:hover{background:rgba(255,255,255,0.08);border-color:rgba(139,92,246,0.3)}
-.discovered-item.already-added{opacity:0.4;cursor:default}
-.discovered-name{color:rgba(255,255,255,0.7)}
-.discovered-free{font-size:.7rem;padding:1px 6px;border-radius:4px;background:rgba(245,158,11,0.15);color:#f59e0b}
-.discovered-added{font-size:.7rem;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.3)}
 </style>

@@ -92,6 +92,49 @@ async def get_system_stats(request: Request):
     return stats
 
 
+@router.get("/system")
+async def get_system_info(request: Request):
+    """获取系统信息（前端 Dashboard 用）"""
+    try:
+        import psutil
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        
+        return {
+            "cpu": {
+                "percent": cpu_percent,
+                "count": psutil.cpu_count(),
+            },
+            "memory": {
+                "total": memory.total,
+                "used": memory.used,
+                "percent": memory.percent,
+            },
+            "disk": {
+                "total": disk.total,
+                "used": disk.used,
+                "percent": disk.percent,
+            },
+            "status": "running",
+            "version": "1.0.0",
+        }
+    except ImportError:
+        return {
+            "cpu": {"percent": 0, "count": 0},
+            "memory": {"total": 0, "used": 0, "percent": 0},
+            "disk": {"total": 0, "used": 0, "percent": 0},
+            "status": "running",
+            "version": "1.0.0",
+        }
+    except Exception as e:
+        logger.error(f"获取系统信息失败: {e}", exc_info=True)
+        return {"error": str(e)}
+
+
+
+
+
 @router.get("/agents", response_model=List[AgentStats])
 async def get_agents_stats(request: Request):
     """获取 Agent 统计"""

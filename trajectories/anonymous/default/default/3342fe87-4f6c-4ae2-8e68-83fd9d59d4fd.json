@@ -1,0 +1,112 @@
+{
+  "trace_id": "3342fe87-4f6c-4ae2-8e68-83fd9d59d4fd",
+  "session_id": "default",
+  "agent_id": "default",
+  "start_time": "2026-06-04T16:27:07.983888+00:00",
+  "end_time": "2026-06-04T16:27:07.992703+00:00",
+  "total_duration_ms": 8.815,
+  "root_span": "458d1159-6b93-4c6b-be62-06205801215b",
+  "spans": {
+    "458d1159-6b93-4c6b-be62-06205801215b": {
+      "span_id": "458d1159-6b93-4c6b-be62-06205801215b",
+      "trace_id": "3342fe87-4f6c-4ae2-8e68-83fd9d59d4fd",
+      "parent_span_id": null,
+      "session_id": "default",
+      "agent_id": "default",
+      "user_id": "anonymous",
+      "operation_name": "session",
+      "operation_type": "session",
+      "start_time": "2026-06-04T16:27:07.983906+00:00",
+      "end_time": "2026-06-04T16:27:07.992696+00:00",
+      "duration_ms": 8.79,
+      "status": "completed",
+      "error_message": null,
+      "events": [
+        {
+          "event_type": "user_input",
+          "timestamp": "2026-06-04T16:27:07.984055+00:00",
+          "session_id": "default",
+          "agent_id": "default",
+          "user_id": "anonymous",
+          "trace_id": "3342fe87-4f6c-4ae2-8e68-83fd9d59d4fd",
+          "span_id": "458d1159-6b93-4c6b-be62-06205801215b",
+          "parent_span_id": null,
+          "data": {
+            "user_input": "hello"
+          },
+          "duration_ms": 0.0,
+          "cpu_usage": 0.0,
+          "memory_usage": 0.0,
+          "status": "success",
+          "error_message": null
+        },
+        {
+          "event_type": "llm_call_end",
+          "timestamp": "2026-06-04T16:27:07.991067+00:00",
+          "session_id": "default",
+          "agent_id": "default",
+          "user_id": "anonymous",
+          "trace_id": "3342fe87-4f6c-4ae2-8e68-83fd9d59d4fd",
+          "span_id": "458d1159-6b93-4c6b-be62-06205801215b",
+          "parent_span_id": null,
+          "data": {
+            "reply_length": 31,
+            "model": "gpt-4"
+          },
+          "duration_ms": 0.0,
+          "cpu_usage": 0.0,
+          "memory_usage": 0.0,
+          "status": "success",
+          "error_message": null
+        },
+        {
+          "event_type": "output_end",
+          "timestamp": "2026-06-04T16:27:07.992684+00:00",
+          "session_id": "default",
+          "agent_id": "default",
+          "user_id": "anonymous",
+          "trace_id": "3342fe87-4f6c-4ae2-8e68-83fd9d59d4fd",
+          "span_id": "458d1159-6b93-4c6b-be62-06205801215b",
+          "parent_span_id": null,
+          "data": {
+            "result": {
+              "text": "[LLM Error] No client available",
+              "audio_path": null,
+              "audio_data": null,
+              "cognitive_score": 0.75,
+              "evolution_triggered": false,
+              "experience_used": false,
+              "experience_count": 0,
+              "session_id": "",
+              "reasoning": null,
+              "tool_messages": [],
+              "proactive_question": null
+            }
+          },
+          "duration_ms": 0.0,
+          "cpu_usage": 0.0,
+          "memory_usage": 0.0,
+          "status": "success",
+          "error_message": null
+        }
+      ],
+      "child_spans": []
+    }
+  },
+  "metadata": {},
+  "stats": {
+    "span_count": 1,
+    "total_duration_ms": 8.815,
+    "tags": {
+      "session": 1
+    },
+    "status": {
+      "completed": 1
+    },
+    "events": {
+      "user_input": 1,
+      "llm_call_end": 1,
+      "output_end": 1
+    }
+  }
+}

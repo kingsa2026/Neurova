@@ -1,63 +1,67 @@
 <template>
-  <div >
-    <div >
-      <h2 >
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t">
         <MonitorOutlined :style="{ color: '#34d399' }" />
         系统监控
       </h2>
-      <div >
+      <div class="hd-actions">
         <a-button @click="loadData" :loading="loading">
           <ReloadOutlined /> 刷新
         </a-button>
       </div>
     </div>
-    <div >
-      <div >
-        <div ><DashboardOutlined /></div>
-        <div >
-          <div >{{ systemStats.cpu_usage || 0 }}%</div>
-          <div >CPU 使用率</div>
+
+    <div class="sr">
+      <div class="s glass-effect">
+        <div class="s-icon"><DashboardOutlined /></div>
+        <div class="s-info">
+          <div class="s-num">{{ systemStats.cpu_usage || 0 }}%</div>
+          <div class="s-label">CPU 使用率</div>
         </div>
       </div>
-      <div >
-        <div ><DatabaseOutlined /></div>
-        <div >
-          <div >{{ systemStats.memory_usage || 0 }}%</div>
-          <div >内存使用</div>
+      <div class="s glass-effect">
+        <div class="s-icon"><DatabaseOutlined /></div>
+        <div class="s-info">
+          <div class="s-num">{{ systemStats.memory_usage || 0 }}%</div>
+          <div class="s-label">内存使用</div>
         </div>
       </div>
-      <div >
-        <div ><CloudServerOutlined /></div>
-        <div >
-          <div >{{ systemStats.disk_usage || 0 }}%</div>
-          <div >磁盘使用</div>
+      <div class="s glass-effect">
+        <div class="s-icon"><CloudServerOutlined /></div>
+        <div class="s-info">
+          <div class="s-num">{{ systemStats.disk_usage || 0 }}%</div>
+          <div class="s-label">磁盘使用</div>
         </div>
       </div>
-      <div >
-        <div ><ApiOutlined /></div>
-        <div >
-          <div >{{ systemStats.uptime || '-' }}</div>
-          <div >运行时间</div>
+      <div class="s glass-effect">
+        <div class="s-icon"><ApiOutlined /></div>
+        <div class="s-info">
+          <div class="s-num">{{ systemStats.uptime || '-' }}</div>
+          <div class="s-label">运行时间</div>
         </div>
       </div>
     </div>
+
     <a-alert v-if="error" :message="error" type="error" show-icon closable @close="error = ''" />
     <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
-    <div v-if="!loading" >
-      <div  v-for="m in metrics" :key="m.name">
-        <div >
+
+    <div v-if="!loading" class="grid">
+      <div class="card glass-effect" v-for="m in metrics" :key="m.name">
+        <div class="mh">
           <span>{{ m.name }}</span>
           <span :style="{ color: m.color }">{{ m.value }}</span>
         </div>
-        <div >
-          <div  :style="{ width: m.val + '%', background: m.color }" />
+        <div class="mbar">
+          <div class="mbf" :style="{ width: m.val + '%', background: m.color }" />
         </div>
-        <div >
+        <div class="ms">
           <span v-for="s in m.sub" :key="s.name">{{ s.name }}: {{ s.val }}</span>
         </div>
       </div>
     </div>
-    <div  v-if="!loading">
+
+    <div class="section glass-effect" v-if="!loading">
       <h3><InfoCircleOutlined /> 系统信息</h3>
       <a-descriptions bordered :column="2">
         <a-descriptions-item label="系统状态">
@@ -80,21 +84,23 @@
         </a-descriptions-item>
       </a-descriptions>
     </div>
-    <div  v-if="!loading">
+
+    <div class="section glass-effect" v-if="!loading">
       <h3><DashboardOutlined /> 性能指标</h3>
-      <div >
-        <div  v-for="perf in performanceMetrics" :key="perf.name">
-          <div >
+      <div class="metrics-grid">
+        <div class="metric-card" v-for="perf in performanceMetrics" :key="perf.name">
+          <div class="metric-header">
             <component :is="perf.icon" :style="{ color: perf.color }" />
             <span>{{ perf.name }}</span>
           </div>
-          <div >{{ perf.value }}</div>
-          <div >{{ perf.sub }}</div>
+          <div class="metric-value">{{ perf.value }}</div>
+          <div class="metric-sub">{{ perf.sub }}</div>
         </div>
       </div>
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
@@ -111,8 +117,10 @@ import {
   LineChartOutlined,
 } from '@ant-design/icons-vue'
 import { statsAPI } from '@/api/modules/stats'
+
 const loading = ref(false)
 const error = ref('')
+
 const systemStats = reactive({
   status: 'healthy',
   uptime: '-',
@@ -126,6 +134,7 @@ const systemStats = reactive({
   memory_usage: 62,
   disk_usage: 38,
 })
+
 const metrics = ref([
   {
     name: 'CPU 使用率',
@@ -190,6 +199,7 @@ const metrics = ref([
     ],
   },
 ])
+
 const performanceMetrics = ref([
   {
     name: '响应时间',
@@ -220,6 +230,7 @@ const performanceMetrics = ref([
     icon: ApiOutlined,
   },
 ])
+
 async function loadData() {
   loading.value = true
   error.value = ''
@@ -228,9 +239,11 @@ async function loadData() {
       statsAPI.getSystemStats().catch(() => ({ data: null })),
       statsAPI.getControlDashboard().catch(() => ({ data: null })),
     ])
+
     if (sysRes.data) {
       Object.assign(systemStats, sysRes.data)
     }
+
     if (dashboardRes.data) {
       if (dashboardRes.data.key_metrics) {
         performanceMetrics.value[0].value = `${dashboardRes.data.key_metrics.average_response_time}ms`
@@ -245,10 +258,12 @@ async function loadData() {
     loading.value = false
   }
 }
+
 onMounted(() => {
   loadData()
 })
 </script>
+
 <style scoped>
 .pg {
   display: flex;
@@ -256,6 +271,7 @@ onMounted(() => {
   gap: 14px;
   padding: 24px;
 }
+
 .hd {
   padding: 14px 24px;
   border-radius: 12px;
@@ -263,10 +279,12 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
 }
+
 .hd-actions {
   display: flex;
   gap: 8px;
 }
+
 .t {
   font-size: 1.2rem;
   color: #e2e8f0;
@@ -275,11 +293,13 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
 }
+
 .sr {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
+
 .s {
   padding: 14px 18px;
   border-radius: 10px;
@@ -287,33 +307,40 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
 }
+
 .s-icon {
   font-size: 2rem;
   color: #34d399;
 }
+
 .s-info {
   flex: 1;
 }
+
 .s-num {
   font-size: 1.4rem;
   font-weight: 700;
   color: #e2e8f0;
   line-height: 1;
 }
+
 .s-label {
   font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.6);
   margin-top: 4px;
 }
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 14px;
 }
+
 .card {
   padding: 20px;
   border-radius: 12px;
 }
+
 .mh {
   display: flex;
   justify-content: space-between;
@@ -321,6 +348,7 @@ onMounted(() => {
   color: rgba(255, 255, 255, 0.6);
   font-size: 0.85rem;
 }
+
 .mbar {
   height: 8px;
   background: rgba(255, 255, 255, 0.05);
@@ -328,21 +356,25 @@ onMounted(() => {
   overflow: hidden;
   margin-bottom: 8px;
 }
+
 .mbf {
   height: 100%;
   border-radius: 4px;
   transition: width 0.5s;
 }
+
 .ms {
   display: flex;
   gap: 16px;
   color: rgba(255, 255, 255, 0.3);
   font-size: 0.75rem;
 }
+
 .section {
   padding: 20px;
   border-radius: 12px;
 }
+
 .section h3 {
   margin: 0 0 16px 0;
   color: #e2e8f0;
@@ -350,16 +382,19 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
 }
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 14px;
 }
+
 .metric-card {
   background: rgba(255, 255, 255, 0.03);
   border-radius: 10px;
   padding: 16px;
 }
+
 .metric-header {
   display: flex;
   align-items: center;
@@ -368,16 +403,19 @@ onMounted(() => {
   color: rgba(255, 255, 255, 0.6);
   margin-bottom: 8px;
 }
+
 .metric-value {
   font-size: 1.5rem;
   font-weight: 700;
   color: #e2e8f0;
   margin-bottom: 4px;
 }
+
 .metric-sub {
   font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.4);
 }
+
 @media (max-width: 1024px) {
   .sr {
     grid-template-columns: repeat(2, 1fr);
@@ -387,4 +425,3 @@ onMounted(() => {
   }
 }
 </style>
- 

@@ -35,15 +35,29 @@ def __annotate__(*args, **kwargs):
     """TODO: Auto-restored from .pyc, needs implementation"""
     pass
 
-"""
-获取指定模块的记录器
+def get_logger(name: str = "neurova", level: int = logging.DEBUG) -> logging.Logger:
+    """
+    获取指定模块的记录器
 
-参数:
-...
-"""
-def get_logger(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+    参数:
+        name: 记录器名称（通常是模块的 __name__）
+        level: 日志级别
+
+    返回:
+        配置好的 logging.Logger 实例
+    """
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        logger.setLevel(level)
+        # 控制台 handler
+        handler = logging.StreamHandler()
+        handler.setLevel(level)
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    return logger
 
 def __annotate__(*args, **kwargs):
     """TODO: Auto-restored from .pyc, needs implementation"""

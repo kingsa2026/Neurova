@@ -203,10 +203,14 @@ def _initialize_components(app_state: AppState) -> None:
     # 初始化默认 Agent
     try:
         from neurova.agent_core import Agent, AgentConfig
+        import os
+        default_workspace = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "agent_workspaces", "default")
+        os.makedirs(default_workspace, exist_ok=True)
         config = AgentConfig(
             name="Neurova",
             agent_id="default",
             enable_memory=True,
+            workspace_path=default_workspace,
         )
         agent = Agent(config=config)
         app_state.add_agent("default", agent)

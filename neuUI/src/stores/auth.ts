@@ -3,14 +3,14 @@ import { ref, computed } from 'vue'
 import { authAPI } from '@/api/auth'
 import type { UserInfo, LoginRequest, RegisterRequest } from '@/types/auth'
 import { validateUsername, validateEmail, validatePasswordStrength, safeJsonParse, limitInputLength } from '@/utils/security'
- 
+
 /**
  * 安全的Token存储 - 使用加密的localStorage（或迁移到HTTP-only cookies）
  */
 const TOKEN_KEY = 'token'
 const REFRESH_TOKEN_KEY = 'refresh_token'
 const USER_KEY = 'user'
- 
+
 // 安全存储工具（生产环境建议使用HTTP-only cookies）
 function secureStorageSet(key: string, value: string): void {
   try {
@@ -19,7 +19,7 @@ function secureStorageSet(key: string, value: string): void {
     console.warn('Storage not available', e)
   }
 }
- 
+
 function secureStorageGet(key: string): string | null {
   try {
     return localStorage.getItem(key)
@@ -27,7 +27,7 @@ function secureStorageGet(key: string): string | null {
     return null
   }
 }
- 
+
 function secureStorageRemove(key: string): void {
   try {
     localStorage.removeItem(key)
@@ -35,18 +35,18 @@ function secureStorageRemove(key: string): void {
     // ignore
   }
 }
- 
+
 export const useAuthStore = defineStore('auth', () => {
   // 状态
   const token = ref<string | null>(secureStorageGet(TOKEN_KEY))
   const user = ref<UserInfo | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
- 
+
   // 计算属性
   const isAuthenticated = computed(() => !!token.value)
   const currentUser = computed(() => user.value)
- 
+
   // 从 localStorage 恢复用户状态
   function restoreUser() {
     const saved = secureStorageGet(USER_KEY)
@@ -54,7 +54,7 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = safeJsonParse<UserInfo | null>(saved, null)
     }
   }
- 
+
   // 获取用户信息
   async function fetchCurrentUser() {
     if (!token.value) return
@@ -71,16 +71,18 @@ export const useAuthStore = defineStore('auth', () => {
       // 网络错误暂不清除
     }
   }
- 
+
   // actions
   async function login(credentials: LoginRequest) {
     loading.value = true
     error.value = null
- 
+
     try {
       // 安全验证输入
       const { username, password } = credentials
+      
       console.log('[AuthStore] 尝试登录:', { username, passwordLength: password?.length })
+      
       if (!validateUsername(username) && !validateEmail(username)) {
         throw new Error('请输入有效的用户名或邮箱')
       }
@@ -88,24 +90,27 @@ export const useAuthStore = defineStore('auth', () => {
       if (!passwordCheck.valid || password.length < 3) {
         throw new Error('密码强度不够或太短（至少3个字符）')
       }
- 
+
       // 限制输入长度
       const safeCredentials: LoginRequest = {
         username: limitInputLength(username, 100),
         password: limitInputLength(password, 128),
       }
- 
+
       console.log('[AuthStore] 发送登录请求:', { url: '/api/v1/auth/login', credentials: { username } })
+      
       const response = await authAPI.login(safeCredentials)
+      
       console.log('[AuthStore] 登录响应:', response)
-      if (response.success) {
-        const tokenData = response.data
+      // 后端直接返回 { access_token, refresh_token, ... }，无 success 包装
+      if (response.access_token) {
+        const tokenData = response
         token.value = tokenData.access_token
         secureStorageSet(TOKEN_KEY, tokenData.access_token)
         if (tokenData.refresh_token) {
           secureStorageSet(REFRESH_TOKEN_KEY, tokenData.refresh_token)
         }
- 
+
         // 先返回登录成功，用户信息异步获取不阻塞
         // 避免 getCurrentUser 失败被 401 拦截器误杀刚写入的 token
         setTimeout(() => {
@@ -116,7 +121,7 @@ export const useAuthStore = defineStore('auth', () => {
             }
           }).catch(() => { /* 静默失败 */ })
         }, 100)
- 
+
         return { success: true }
       } else {
         error.value = response.message
@@ -133,6 +138,7 @@ export const useAuthStore = defineStore('auth', () => {
         request_data: errorObj.config?.data,
       }
       console.error('[AuthStore] 登录失败 (详细):', errInfo)
+      
       // 提取错误信息
       let msg = '登录失败，请重试'
       if (errorObj.response?.data?.message) {
@@ -142,17 +148,18 @@ export const useAuthStore = defineStore('auth', () => {
       } else if (errorObj.message) {
         msg = errorObj.message
       }
+      
       error.value = msg
       return { success: false, message: msg, _debug: errInfo }
     } finally {
       loading.value = false
     }
   }
- 
+
   async function register(data: RegisterRequest) {
     loading.value = true
     error.value = null
- 
+
     try {
       // 安全验证输入
       if (!validateUsername(data.username)) {
@@ -168,7 +175,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (data.password !== data.confirmPassword) {
         throw new Error('两次输入的密码不一致')
       }
- 
+
       // 限制输入长度
       const safeData: RegisterRequest = {
         username: limitInputLength(data.username, 50),
@@ -176,14 +183,14 @@ export const useAuthStore = defineStore('auth', () => {
         password: limitInputLength(data.password, 128),
         confirmPassword: limitInputLength(data.confirmPassword, 128),
       }
- 
+
       const response = await authAPI.register({
         ...safeData,
         agreed_terms: true,
         agreed_privacy: true,
         register_source: 'web',
       })
- 
+
       if (response.success) {
         const tokenData = response.data
         token.value = tokenData.access_token
@@ -191,7 +198,7 @@ export const useAuthStore = defineStore('auth', () => {
         if (tokenData.refresh_token) {
           secureStorageSet(REFRESH_TOKEN_KEY, tokenData.refresh_token)
         }
- 
+
         // 异步获取用户信息，不阻塞注册流程
         setTimeout(() => {
           getCurrentUser().then(userResp => {
@@ -201,7 +208,7 @@ export const useAuthStore = defineStore('auth', () => {
             }
           }).catch(() => {})
         }, 100)
- 
+
         return { success: true }
       } else {
         error.value = response.message
@@ -216,7 +223,7 @@ export const useAuthStore = defineStore('auth', () => {
       loading.value = false
     }
   }
- 
+
   async function logout() {
     try {
       await authAPI.logout()
@@ -226,7 +233,7 @@ export const useAuthStore = defineStore('auth', () => {
       clearAuth()
     }
   }
- 
+
   function clearAuth() {
     token.value = null
     user.value = null
@@ -234,7 +241,7 @@ export const useAuthStore = defineStore('auth', () => {
     secureStorageRemove(REFRESH_TOKEN_KEY)
     secureStorageRemove(USER_KEY)
   }
- 
+
   return {
     token, user, loading, error,
     isAuthenticated, currentUser,
@@ -242,7 +249,7 @@ export const useAuthStore = defineStore('auth', () => {
     fetchCurrentUser, restoreUser,
   }
 })
- 
+
 interface RawUserData {
   id?: string
   username?: string
@@ -251,7 +258,7 @@ interface RawUserData {
   status?: string
   created_at?: string
 }
- 
+
 // 内部辅助函数
 async function getCurrentUser() {
   const token = secureStorageGet(TOKEN_KEY)
@@ -273,4 +280,3 @@ async function getCurrentUser() {
   }
   return { success: false, data: null }
 }
- 

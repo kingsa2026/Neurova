@@ -19,6 +19,34 @@ from neurova.core.base_module import BaseModule, ModuleState
 from neurova.core.sleep_phase_config_manager import SleepPhaseConfigManager
 from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
 
+
+@dataclass
+class SleepPhaseThresholds:
+    """睡眠阶段阈值配置"""
+    idle_warning: float = 300.0  # 5分钟
+    idle_drowsy: float = 600.0   # 10分钟
+    idle_light_sleep: float = 1800.0  # 30分钟
+    idle_deep_sleep: float = 3600.0   # 60分钟
+
+
+@dataclass
+class PhaseDuration:
+    """阶段持续时间配置"""
+    active: float = 0.0
+    warning: float = 300.0
+    drowsy: float = 600.0
+    light_sleep: float = 1800.0
+    deep_sleep: float = 3600.0
+
+
+@dataclass
+class WakeCondition:
+    """唤醒条件配置"""
+    min_temperature: float = 0.3
+    min_activity_count: int = 3
+    activity_window: float = 60.0
+
+
 class IdleTimeTracker(BaseModule):
     """
     空闲时间追踪器

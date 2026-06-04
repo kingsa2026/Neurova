@@ -1,4 +1,4 @@
-<template><div ><div ><h2 ><SwitcherOutlined :style="{color:'#8b5cf6'}"/> 技能池</h2></div><a-tabs v-model:activeKey="tab"  style="padding:0 16px;border-radius:12px"><a-tab-pane key="mine" tab="我的技能"/><a-tab-pane key="pool" tab="技能池"/><a-tab-pane key="learning" tab="学习中"/></a-tabs><div ><div v-for="s in list" :key="s.id" ><div  :style="{background:s.color+'20',color:s.color}">{{ s.name[0] }}</div><div ><h4>{{ s.name }}</h4><a-tag size="small">{{ s.tag }}</a-tag></div><div v-if="tab==='mine'" ><div ><div  :style="{width:s.lv+'%',background:s.color}"/></div><span >Lv.{{ s.lv }}</span></div><a-button v-else-if="tab==='pool'" size="small" type="primary" ghost>学习</a-button><a-button v-else size="small" @click="list=list.filter(d=>d.id!==s.id)">取消</a-button></div></div></div></template>
+<template><div class="pg"><div class="hd glass-effect"><h2 class="t"><SwitcherOutlined :style="{color:'#8b5cf6'}"/> 技能池</h2></div><a-tabs v-model:activeKey="tab" class="glass-effect" style="padding:0 16px;border-radius:12px"><a-tab-pane key="mine" tab="我的技能"/><a-tab-pane key="pool" tab="技能池"/><a-tab-pane key="learning" tab="学习中"/></a-tabs><div class="grid"><div v-for="s in list" :key="s.id" class="card glass-effect card-hover"><div class="ci" :style="{background:s.color+'20',color:s.color}">{{ s.name[0] }}</div><div class="cc"><h4>{{ s.name }}</h4><a-tag size="small">{{ s.tag }}</a-tag></div><div v-if="tab==='mine'" class="cbar"><div class="bar"><div class="bf" :style="{width:s.lv+'%',background:s.color}"/></div><span class="bl">Lv.{{ s.lv }}</span></div><a-button v-else-if="tab==='pool'" size="small" type="primary" ghost>学习</a-button><a-button v-else size="small" @click="list=list.filter(d=>d.id!==s.id)">取消</a-button></div></div></div></template>
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
@@ -10,6 +10,7 @@ const skills=ref<SkillPoolItem[]>([])
 const loading=ref(false)
 const tags=['对话','搜索','文档','代码','分析','图像','语音','知识']
 const colors:Record<string,string>={'对话':'#3b82f6','搜索':'#8b5cf6','文档':'#34d399','代码':'#f59e0b','分析':'#ef4444','图像':'#06b6d4','语音':'#a78bfa','知识':'#f472b6'}
+
 onMounted(async()=>{
   loading.value=true
   try{
@@ -39,4 +40,3 @@ const list=computed(()=>tab.value==='mine'?skills.value.filter(d=>d.lv>=50):tab.
 .bf{height:100%;border-radius:3px;transition:width 0.3s;}
 .bl{color:rgba(255,255,255,0.4);font-size:0.75rem;min-width:40px;}
 </style>
- 

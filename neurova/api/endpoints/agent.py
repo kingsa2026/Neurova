@@ -98,13 +98,26 @@ def load_agents_config() -> Dict[str, Any]:
 
 def agent_to_info(agent) -> Dict[str, Any]:
     """将 Agent 对象转换为信息字典"""
+    # 从 config 获取 agent_id
+    agent_id = "unknown"
+    name = "Unknown"
+    description = ""
+    enable_memory = False
+    
+    if hasattr(agent, "config"):
+        config = agent.config
+        agent_id = getattr(config, "agent_id", "unknown")
+        name = getattr(config, "name", "Unknown")
+        description = getattr(config, "description", "")
+        enable_memory = getattr(config, "enable_memory", False)
+    
     info = {
-        "agent_id": getattr(agent, "agent_id", "unknown"),
-        "name": getattr(agent, "name", "Unknown"),
-        "description": getattr(agent, "description", ""),
+        "agent_id": agent_id,
+        "name": name,
+        "description": description,
         "model": "",
         "status": "running",
-        "memory_enabled": getattr(agent, "enable_memory", False),
+        "memory_enabled": enable_memory,
         "tools_count": 0,
     }
 

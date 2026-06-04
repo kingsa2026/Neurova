@@ -1,7 +1,7 @@
 <template>
-  <div >
-    <div >
-      <h2 >
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t">
         <FirewallOutlined :style="{color:'#f97316'}" /> 防火墙管理
       </h2>
       <a-space>
@@ -9,49 +9,51 @@
         <span>{{ globalEnabled ? '已启用' : '已禁用' }}</span>
       </a-space>
     </div>
-    <div >
-      <div >
-        <div >
+
+    <div class="stats-row">
+      <div class="stat-card glass-effect">
+        <div class="stat-icon orange">
           <ShieldAlertOutlined />
         </div>
-        <div >
-          <div >{{ stats.blockedRequests }}</div>
-          <div >今日拦截</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.blockedRequests }}</div>
+          <div class="stat-label">今日拦截</div>
         </div>
       </div>
-      <div >
-        <div >
+      <div class="stat-card glass-effect">
+        <div class="stat-icon green">
           <CheckCircleOutlined />
         </div>
-        <div >
-          <div >{{ stats.allowedRequests }}</div>
-          <div >今日放行</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.allowedRequests }}</div>
+          <div class="stat-label">今日放行</div>
         </div>
       </div>
-      <div >
-        <div >
+      <div class="stat-card glass-effect">
+        <div class="stat-icon red">
           <BanOutlined />
         </div>
-        <div >
-          <div >{{ stats.blacklistedIPs }}</div>
-          <div >黑名单IP</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.blacklistedIPs }}</div>
+          <div class="stat-label">黑名单IP</div>
         </div>
       </div>
-      <div >
-        <div >
+      <div class="stat-card glass-effect">
+        <div class="stat-icon blue">
           <ClockCircleOutlined />
         </div>
-        <div >
-          <div >{{ stats.rateLimitHits }}</div>
-          <div >触发限流</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.rateLimitHits }}</div>
+          <div class="stat-label">触发限流</div>
         </div>
       </div>
     </div>
-    <a-tabs default-active-key="rules" :items="tabs" >
+
+    <a-tabs default-active-key="rules" :items="tabs" class="tabs">
       <template #rules>
-        <div >
-          <div >
-            <h3 >全局规则</h3>
+        <div class="tab-content">
+          <div class="rule-section">
+            <h3 class="section-title">全局规则</h3>
             <a-form :model="globalRules" layout="vertical">
               <a-row :gutter="16">
                 <a-col :span="8">
@@ -90,9 +92,10 @@
           </div>
         </div>
       </template>
+
       <template #whitelist>
-        <div >
-          <div >
+        <div class="tab-content">
+          <div class="filter-bar">
             <a-input-search
               placeholder="搜索IP"
               v-model:value="ipFilter"
@@ -129,8 +132,9 @@
           </a-table>
         </div>
       </template>
+
       <template #blacklist>
-        <div >
+        <div class="tab-content">
           <a-table
             :columns="blacklistCols"
             :data-source="blacklistIPs"
@@ -150,8 +154,9 @@
           </a-table>
         </div>
       </template>
+
       <template #logs>
-        <div >
+        <div class="tab-content">
           <a-table
             :columns="logCols"
             :data-source="firewallLogs"
@@ -173,6 +178,7 @@
         </div>
       </template>
     </a-tabs>
+
     <a-modal
       v-model:open="showAddIPModal"
       title="添加白名单IP"
@@ -190,6 +196,7 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
 import { message } from 'ant-design-vue';
@@ -198,18 +205,21 @@ import {
   FirewallOutlined, ShieldAlertOutlined, CheckCircleOutlined,
   BanOutlined, ClockCircleOutlined, PlusOutlined
 } from '@ant-design/icons-vue';
+
 interface WhitelistIP {
   ip: string;
   note?: string;
   status: string;
   added_at: string;
 }
+
 interface BlacklistIP {
   ip: string;
   reason: string;
   blocked_at: string;
   block_count: number;
 }
+
 interface FirewallLog {
   id: string;
   ip: string;
@@ -218,21 +228,25 @@ interface FirewallLog {
   time: string;
   detail: string;
 }
+
 const tabs = [
   { key: 'rules', label: '规则设置' },
   { key: 'whitelist', label: 'IP白名单' },
   { key: 'blacklist', label: 'IP黑名单' },
   { key: 'logs', label: '拦截日志' }
 ];
+
 const globalEnabled = ref(true);
 const showAddIPModal = ref(false);
 const ipFilter = ref('');
+
 const stats = reactive({
   blockedRequests: 127,
   allowedRequests: 8945,
   blacklistedIPs: 15,
   rateLimitHits: 23
 });
+
 const globalRules = reactive({
   rateLimit: 100,
   maxPayloadMB: 10,
@@ -240,10 +254,12 @@ const globalRules = reactive({
   blockedExtensions: '.exe,.php,.sh,.py,.bat,.cmd',
   blockedPaths: '/etc/\n/home/\n/root/'
 });
+
 const newIPForm = reactive({
   ip: '',
   note: ''
 });
+
 const whitelistIPs = ref<WhitelistIP[]>([
   { ip: '192.168.1.0/24', note: '内网网段', status: 'active', added_at: '2026-01-15' },
   { ip: '10.0.0.0/8', note: '公司内网', status: 'active', added_at: '2026-02-01' },
@@ -251,12 +267,14 @@ const whitelistIPs = ref<WhitelistIP[]>([
   { ip: '47.252.31.69', note: '生产服务器', status: 'active', added_at: '2026-04-05' },
   { ip: '127.0.0.1', note: '本地回环', status: 'active', added_at: '2026-01-01' }
 ]);
+
 const blacklistIPs = ref<BlacklistIP[]>([
   { ip: '10.0.0.5', reason: '暴力破解', blocked_at: '2026-05-24', block_count: 156 },
   { ip: '198.51.100.20', reason: '恶意扫描', blocked_at: '2026-05-23', block_count: 89 },
   { ip: '203.0.113.45', reason: 'DDOS攻击', blocked_at: '2026-05-22', block_count: 456 },
   { ip: '192.0.2.100', reason: '异常请求', blocked_at: '2026-05-21', block_count: 34 }
 ]);
+
 const firewallLogs = ref<FirewallLog[]>([
   { id: '1', ip: '10.0.0.5', action: 'block', rule: '暴力破解检测', time: new Date().toISOString(), detail: '连续10次登录失败' },
   { id: '2', ip: '192.168.1.100', action: 'allow', rule: '白名单', time: new Date().toISOString(), detail: '来自信任IP' },
@@ -264,11 +282,13 @@ const firewallLogs = ref<FirewallLog[]>([
   { id: '4', ip: '10.0.0.10', action: 'block', rule: '速率限制', time: new Date().toISOString(), detail: '超过每分钟100次请求' },
   { id: '5', ip: '172.16.0.5', action: 'allow', rule: '白名单', time: new Date().toISOString(), detail: '来自测试环境' }
 ]);
+
 const logPagination = ref({
   current: 1,
   pageSize: 20,
   total: 100
 });
+
 const ipCols = [
   { title: 'IP地址', dataIndex: 'ip' },
   { title: '备注', dataIndex: 'note' },
@@ -276,6 +296,7 @@ const ipCols = [
   { title: '添加时间', dataIndex: 'added_at', width: 120 },
   { title: '操作', key: 'actions', width: 160 }
 ];
+
 const blacklistCols = [
   { title: 'IP地址', dataIndex: 'ip' },
   { title: '封禁原因', key: 'reason', width: 120 },
@@ -283,6 +304,7 @@ const blacklistCols = [
   { title: '拦截次数', dataIndex: 'block_count', width: 100 },
   { title: '操作', key: 'actions', width: 120 }
 ];
+
 const logCols = [
   { title: 'IP地址', dataIndex: 'ip', width: 140 },
   { title: '操作', key: 'action', width: 80 },
@@ -290,6 +312,7 @@ const logCols = [
   { title: '时间', key: 'time', width: 160 },
   { title: '详情', dataIndex: 'detail' }
 ];
+
 const toggleGlobal = async () => {
   try {
     const res = await request.put('/firewall/global', {
@@ -304,6 +327,7 @@ const toggleGlobal = async () => {
     message.error('操作失败');
   }
 };
+
 const saveGlobalRules = async () => {
   try {
     const res = await request.put('/firewall/global', {
@@ -321,9 +345,11 @@ const saveGlobalRules = async () => {
     message.error('保存失败');
   }
 };
+
 const searchIP = () => {
   console.log('搜索IP:', ipFilter.value);
 };
+
 const addWhitelistIP = async () => {
   if (!newIPForm.ip.trim()) {
     message.warning('请输入IP地址');
@@ -359,10 +385,12 @@ const addWhitelistIP = async () => {
     message.success('本地添加成功');
   }
 };
+
 const toggleIPStatus = (item: WhitelistIP) => {
   item.status = item.status === 'active' ? 'disabled' : 'active';
   message.success(`IP ${item.ip} ${item.status === 'active' ? '已启用' : '已禁用'}`);
 };
+
 const removeIP = async (ip: string) => {
   try {
     const res = await request.put('/firewall/user/rules', {
@@ -378,6 +406,7 @@ const removeIP = async (ip: string) => {
     message.success('本地删除成功');
   }
 };
+
 const unblockIP = async (item: BlacklistIP) => {
   try {
     const res = await request.post('/firewall/user/rules', {
@@ -393,6 +422,7 @@ const unblockIP = async (item: BlacklistIP) => {
     message.success('本地解除成功');
   }
 };
+
 const formatTime = (time: string) => {
   try {
     return new Date(time).toLocaleString('zh-CN');
@@ -401,6 +431,7 @@ const formatTime = (time: string) => {
   }
 };
 </script>
+
 <style scoped>
 .pg {
   display: flex;

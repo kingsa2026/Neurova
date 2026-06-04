@@ -1,60 +1,66 @@
 <template>
-  <div >
-    <div >
-      <h2 ><FileTextOutlined :style="{color:'#3b82f6'}"/> 协作模板</h2>
+  <div class="pg">
+    <div class="hd glass-effect">
+      <h2 class="t"><FileTextOutlined :style="{color:'#3b82f6'}"/> 协作模板</h2>
       <a-button type="primary" size="small" @click="showCreateModal = true"><PlusOutlined/> 新建模板</a-button>
     </div>
+
     <!-- 统计 -->
-    <div >
-      <div >
-        模板<b >{{ templates.length }}</b>
+    <div class="stats">
+      <div class="s glass-effect">
+        模板<b class="c1">{{ templates.length }}</b>
       </div>
-      <div >
-        预设<b >{{ presets.length }}</b>
+      <div class="s glass-effect">
+        预设<b class="c1">{{ presets.length }}</b>
       </div>
     </div>
+
     <!-- 加载状态 -->
     <a-spin v-if="loading" size="large" style="display:flex;justify-content:center;padding:40px" />
+
     <!-- 模板列表 -->
     <div v-else>
       <!-- 自定义模板 -->
-      <div  v-if="templates.length">
+      <div class="section" v-if="templates.length">
         <h3>自定义模板</h3>
-        <div >
-          <div v-for="t in templates" :key="t.id"  @click="viewTemplate(t)">
+        <div class="grid">
+          <div v-for="t in templates" :key="t.id" class="card glass-effect card-hover" @click="viewTemplate(t)">
             <h4>{{ t.name }}</h4>
             <p>{{ t.description || '暂无描述' }}</p>
-            <div >
+            <div class="cf">
               <span>{{ t.steps || t.workflow?.steps?.length || 0 }} 步骤</span>
               <a-tag v-if="t.tags?.length" size="small">{{ t.tags[0] }}</a-tag>
-              <span >使用 {{ t.usage_count || 0 }} 次</span>
+              <span class="usage">使用 {{ t.usage_count || 0 }} 次</span>
             </div>
           </div>
         </div>
       </div>
+
       <!-- 预设模板 -->
-      <div  v-if="presets.length">
+      <div class="section" v-if="presets.length">
         <h3>预设模板</h3>
-        <div >
-          <div v-for="t in presets" :key="t.id"  @click="viewTemplate(t)">
+        <div class="grid">
+          <div v-for="t in presets" :key="t.id" class="card glass-effect card-hover preset" @click="viewTemplate(t)">
             <h4>{{ t.name }}</h4>
             <p>{{ t.description || '暂无描述' }}</p>
-            <div >
+            <div class="cf">
               <span>{{ t.steps || t.workflow?.steps?.length || 0 }} 步骤</span>
               <a-tag color="blue" size="small">预设</a-tag>
-              <span >使用 {{ t.usage_count || 0 }} 次</span>
+              <span class="usage">使用 {{ t.usage_count || 0 }} 次</span>
             </div>
           </div>
         </div>
       </div>
+
       <!-- 空状态 -->
-      <div v-if="!templates.length && !presets.length" >
+      <div v-if="!templates.length && !presets.length" class="empty glass-effect">
         暂无模板，点击"新建模板"创建第一个协作模板
       </div>
     </div>
+
     <!-- 模板详情模态框 -->
     <a-modal v-model:open="viewVisible" :title="currentTemplate?.name" width="700px" @ok="viewVisible=false">
-      <div v-if="currentTemplate" >
+      <div v-if="currentTemplate" class="template-detail">
         <a-descriptions :column="2" bordered size="small">
           <a-descriptions-item label="描述" :span="2">{{ currentTemplate.description || '暂无' }}</a-descriptions-item>
           <a-descriptions-item label="最大参与人数">{{ currentTemplate.max_participants || '无限制' }}</a-descriptions-item>
@@ -63,19 +69,21 @@
             <a-tag v-for="tag in currentTemplate.tags" :key="tag">{{ tag }}</a-tag>
           </a-descriptions-item>
         </a-descriptions>
-        <div  v-if="currentTemplate.workflow">
+
+        <div class="workflow-section" v-if="currentTemplate.workflow">
           <h4>工作流</h4>
-          <div >
-            <div v-for="(step, idx) in (currentTemplate.workflow.steps || [])" :key="idx" >
-              <div >{{ idx + 1 }}</div>
-              <div >
-                <span >{{ step.name }}</span>
-                <span >{{ step.description || step.agent || '自动执行' }}</span>
+          <div class="steps">
+            <div v-for="(step, idx) in (currentTemplate.workflow.steps || [])" :key="idx" class="step-item">
+              <div class="step-num">{{ idx + 1 }}</div>
+              <div class="step-content">
+                <span class="step-name">{{ step.name }}</span>
+                <span class="step-desc">{{ step.description || step.agent || '自动执行' }}</span>
               </div>
             </div>
           </div>
         </div>
       </div>
+
       <template #footer>
         <a-space>
           <a-button @click="cloneTemplate(currentTemplate?.id)" :loading="cloning">克隆</a-button>
@@ -83,6 +91,7 @@
         </a-space>
       </template>
     </a-modal>
+
     <!-- 创建模板模态框 -->
     <a-modal v-model:open="showCreateModal" title="新建模板" width="800px" @ok="createTemplate" :confirmLoading="creating">
       <a-form layout="vertical">
@@ -114,12 +123,14 @@
     </a-modal>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { FileTextOutlined, PlusOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { collaborationAPI } from '@/api/modules/collaboration'
+
 const router = useRouter()
 const loading = ref(false)
 interface TemplateData {
@@ -133,6 +144,7 @@ interface TemplateData {
   max_participants?: number
   min_participants?: number
 }
+
 const templates = ref<TemplateData[]>([])
 const presets = ref<TemplateData[]>([])
 const viewVisible = ref(false)
@@ -140,6 +152,7 @@ const currentTemplate = ref<TemplateData | null>(null)
 const showCreateModal = ref(false)
 const creating = ref(false)
 const cloning = ref(false)
+
 const newTemplate = ref({
   name: '',
   description: '',
@@ -149,6 +162,7 @@ const newTemplate = ref({
   min_participants: 1,
   workflow: { steps: [] }
 })
+
 const typeOptions = [
   { label: '自定义', value: 'custom' },
   { label: '文档处理', value: 'document' },
@@ -156,6 +170,7 @@ const typeOptions = [
   { label: '代码生成', value: 'code' },
   { label: '问答系统', value: 'qa' }
 ]
+
 const loadTemplates = async () => {
   loading.value = true
   try {
@@ -163,9 +178,11 @@ const loadTemplates = async () => {
       collaborationAPI.getTemplates(),
       collaborationAPI.getPresetTemplates()
     ])
+
     if (customRes.status === 'fulfilled') {
       templates.value = customRes.value?.data?.templates || []
     }
+
     if (presetRes.status === 'fulfilled') {
       presets.value = presetRes.value?.data?.templates || []
     }
@@ -175,14 +192,17 @@ const loadTemplates = async () => {
     loading.value = false
   }
 }
+
 const viewTemplate = (t: TemplateData) => {
   currentTemplate.value = t
   viewVisible.value = true
 }
+
 const useTemplate = (t: TemplateData) => {
   viewVisible.value = false
   router.push({ path: '/collaboration/initiate', query: { template_id: t.id } })
 }
+
 const cloneTemplate = async (id: string) => {
   if (!id) return
   cloning.value = true
@@ -197,6 +217,7 @@ const cloneTemplate = async (id: string) => {
     cloning.value = false
   }
 }
+
 const createTemplate = async () => {
   if (!newTemplate.value.name) {
     message.error('请输入模板名称')
@@ -223,10 +244,12 @@ const createTemplate = async () => {
     creating.value = false
   }
 }
+
 onMounted(() => {
   loadTemplates()
 })
 </script>
+
 <style scoped>
 .pg { display: flex; flex-direction: column; gap: 14px; }
 .hd { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-radius: 12px; }
@@ -255,4 +278,3 @@ onMounted(() => {
 .step-name { color: #e2e8f0; font-weight: 500; display: block; }
 .step-desc { color: rgba(255,255,255,0.4); font-size: 0.8rem; }
 </style>
- 
