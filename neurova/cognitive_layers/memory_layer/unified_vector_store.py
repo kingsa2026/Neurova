@@ -58,6 +58,11 @@ class UnifiedVectorStore:
         self._idf_values: Dict[str, float] = {}
         self._document_vectors: List[Dict[int, float]] = []
 
+        # Neurova Hebb 向量索引
+        self._neurova_hebb_vectors: List[List[float]] = []
+        self._neurova_hebb_ids: List[str] = []
+        self._neurova_hebb_metadata: List[Dict] = []
+
         # 初始化编码器
         self._encoder = self._create_encoder()
 
@@ -367,6 +372,72 @@ class UnifiedVectorStore:
             排序后的记忆列表
         """
         return self.search(query, limit=limit, filter_dict=expert_def)
+
+    # ── Neurova Hebb 向量索引 ──
+
+    def add_neurova_hebb(self, neurova_hebb_id: str,
+                         embedding: List[float],
+                         metadata: Dict[str, Any]) -> None:
+        """
+        添加 Neurova Hebb 到向量索引。
+
+        Args:
+            neurova_hebb_id: Neurova Hebb 唯一标识
+            embedding: 嵌入向量
+            metadata: 附加元数据
+        """
+        norm = vector_norm(embedding)
+        if norm > 0:
+            embedding = vector_normalize(embedding)
+        self._neurova_hebb_vectors.append(embedding)
+        self._neurova_hebb_ids.append(neurova_hebb_id)
+        self._neurova_hebb_metadata.append(metadata)
+
+    def search_neurova_hebbs(self, query_embedding: List[float],
+                             top_k: int = 5) -> List[Tuple[str, float]]:
+        """
+        搜索最相似的 Neurova Hebb。
+
+        Args:
+            query_embedding: 查询向量
+            top_k: 返回数量
+
+        Returns:
+            [(neurova_hebb_id, score), ...] 按相似度降序
+        """
+        if not self._neurova_hebb_vectors:
+            return []
+
+        norm = vector_norm(query_embedding)
+        if norm > 0:
+            query_embedding = vector_normalize(query_embedding)
+
+        scores = []
+        for i, vec in enumerate(self._neurova_hebb_vectors):
+            sim = vector_dot(query_embedding, vec)
+            scores.append((i, sim))
+
+        scores.sort(key=lambda x: x[1], reverse=True)
+
+        results = []
+        for idx, score in scores[:top_k]:
+            results.append((self._neurova_hebb_ids[idx], score))
+        return results
+
+    def remove_neurova_hebb(self, neurova_hebb_id: str) -> bool:
+        """删除指定 Neurova Hebb，返回是否找到并删除。"""
+        try:
+            idx = self._neurova_hebb_ids.index(neurova_hebb_id)
+            self._neurova_hebb_ids.pop(idx)
+            self._neurova_hebb_vectors.pop(idx)
+            self._neurova_hebb_metadata.pop(idx)
+            return True
+        except ValueError:
+            return False
+
+    def neurova_hebb_count(self) -> int:
+        """返回 Neurova Hebb 索引中的条目数。"""
+        return len(self._neurova_hebb_ids)
 
     def _matches_filter(self, memory: Dict, filter_dict: Dict) -> bool:
         """检查记忆是否匹配过滤条件"""

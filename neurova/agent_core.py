@@ -54,6 +54,14 @@ from neurova.core.idle_tracker import IdleTimeTracker
 from neurova.core.sleep_config_manager import SleepConfigManager
 from neurova.skills.agent_skill_manager import AgentSkillManager  # will be migrated to evolution
 
+# Neurova-Evocate: Neurova Hebb 记忆系统
+try:
+    from neurova.cognitive_layers.memory_layer.neuHebb_manager import NeuHebbManager
+    from neurova.cognitive_layers.memory_layer.neurova_hebb import NeuHebbConfig
+    NEUHEBB_AVAILABLE = True
+except ImportError:
+    NEUHEBB_AVAILABLE = False
+
 # P0: Phase 2+3 模块接线 — 序列挖掘 / 基因编程 / 生命周期 / NL合成 / DAG编排 / 工具市场
 from neurova.evolution import (
     PatternMiner,
@@ -363,6 +371,19 @@ class Agent:
 
         # Neurova 统一记忆检索引擎（多维融合 + 意图钻取）
         self.recall_engine: Optional[NeurovaRecallEngine] = None
+
+        # Neurova-Evocate: Neurova Hebb 记忆系统（结构化推理记忆）
+        self.neuHebb_manager = None
+        if NEUHEBB_AVAILABLE and self.config.enable_memory:
+            try:
+                hebb_config = NeuHebbConfig(
+                    persistence_path=str(self.config.workspace_path / "data" / "neurova_hebbs"),
+                    enabled=True,
+                )
+                self.neuHebb_manager = NeuHebbManager(config=hebb_config)
+                logger.info(f"Agent {self.config.name}: Neurova-Evocate (NeuHebbManager) 已启用")
+            except Exception as e:
+                logger.warning(f"Neurova-Evocate 初始化失败: {e}")
 
         # TTS 管理器（语音合成）
         self.tts_manager = None
@@ -1190,6 +1211,27 @@ class Agent:
             session_context=session_context,  # B5闭环修复 GAP-1
         )
         debug_log(f"步骤2-5: 上下文构建完成，共 {len(context)} 条消息")
+
+        # 2.6 Neurova-Evocate: 检索相关 Neurova Hebb 注入上下文
+        if self.neuHebb_manager:
+            try:
+                neurova_hebbs = self.neuHebb_manager.retrieve_neurova_hebb(user_input)
+                if neurova_hebbs:
+                    hebb_texts = []
+                    for h in neurova_hebbs:
+                        hebb_texts.append(
+                            f"[Retrieved Knowledge] {h.content}"
+                            f" (source: {h.source}, confidence: {h.verification_score:.2f})"
+                        )
+                    hebb_context = "\n".join(hebb_texts)
+                    # 注入到系统消息末尾
+                    for msg in context:
+                        if msg.get("role") == "system":
+                            msg["content"] += f"\n\n## Retrieved Knowledge (Neurova Hebb)\n{hebb_context}"
+                            break
+                    debug_log(f"步骤2.6: 注入 {len(neurova_hebbs)} 条 Neurova Hebb 到上下文")
+            except Exception as e:
+                logger.warning(f"Neurova Hebb 检索失败: {e}")
 
         # 5. 调用 LLM (使用 Agent Loop v5.0)
         # 构建工具列表（OpenAI function calling 格式）- 用于原生工具调用
