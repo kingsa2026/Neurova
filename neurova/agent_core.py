@@ -62,6 +62,17 @@ try:
 except ImportError:
     NEUHEBB_AVAILABLE = False
 
+# 认知图谱存储架构 — 一步到位替换
+try:
+    from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
+    from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
+    from neurova.cognitive_layers.memory_layer.pattern_crystallizer import PatternCrystallizer
+    from neurova.cognitive_layers.memory_layer.reasoning_trace_manager import ReasoningTraceManager
+    COGNITIVE_GRAPH_AVAILABLE = True
+except ImportError:
+    COGNITIVE_GRAPH_AVAILABLE = False
+    logging.warning("Cognitive Graph modules not available")
+
 # P0: Phase 2+3 模块接线 — 序列挖掘 / 基因编程 / 生命周期 / NL合成 / DAG编排 / 工具市场
 from neurova.evolution import (
     PatternMiner,
@@ -283,7 +294,7 @@ class Agent:
         self.storage = None
         self.temperature_engine = None
 
-        # P2: 初始化 MemCore 深度模块
+        # P2: 初始化 MemCore 深度模块（保留兼容性）
         self.memory_agent = MemCore(self)
         # P2: 初始化 ContextOrchestrator 深度模块
         self.context_orchestrator = ContextOrchestrator(
@@ -291,6 +302,12 @@ class Agent:
             use_pool=self.config.enable_context_pool,
             auto_tag=self.config.enable_auto_tagging
         )
+
+        # 认知图谱存储架构 — 一步到位替换
+        self.cognitive_engine = None
+        self.unified_retriever = None
+        self.crystallizer = None
+        self.trace_manager = None
 
         if self.config.enable_memory:
             debug_log("步骤2.1: 调用 _init_memory_modules()...")
@@ -302,6 +319,15 @@ class Agent:
                 debug_log("步骤2.2: MoE 路由器初始化完成")
             except Exception as e:
                 logger.warning(f"MoE 路由器初始化失败，降级到普通检索: {e}")
+            
+            # 初始化认知图谱存储架构
+            if COGNITIVE_GRAPH_AVAILABLE:
+                try:
+                    debug_log("步骤2.3: 初始化认知图谱存储架构...")
+                    self._init_cognitive_graph()
+                    debug_log("步骤2.3: 认知图谱初始化完成")
+                except Exception as e:
+                    logger.warning(f"认知图谱初始化失败: {e}")
         debug_log("步骤2: 完成")
 
         # Phase 5: 工作记忆和对话缓冲区由 MemCore 管理
@@ -468,7 +494,6 @@ class Agent:
 
         # 向后兼容别名 (用于 API 端点 get_skill_modules())
         self.evolution_engine = self.evolution  # type: ignore
-        self.experience_caller = self.evolution  # type: ignore
 
         # ===== v1.0.0 新增: 工具路由器 + 模型适配器 =====
         # P3: 使用 BuiltinToolRegistry 替代内联的 15 个闭包
@@ -860,6 +885,46 @@ class Agent:
 
         logger.info(f"记忆系统模块初始化成功: agent_id={self.config.agent_id}, neuser_id={neuser_id}, user_id={user_id}")
 
+    def _init_cognitive_graph(self):
+        """初始化认知图谱存储架构"""
+        # 创建数据目录
+        data_dir = Path(f"data/{self.config.agent_id}")
+        data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 1. 初始化 CognitiveStorageEngine
+        self.cognitive_engine = CognitiveStorageEngine(
+            agent_id=self.config.agent_id,
+            data_dir=str(data_dir),
+        )
+        logger.info(f"CognitiveStorageEngine 初始化完成: {data_dir}")
+        
+        # 2. 初始化 UnifiedRetriever（包装旧检索器）
+        moe_router = getattr(self.memory_agent, 'moe_router', None)
+        recall_engine = getattr(self.memory_agent, 'recall_engine', None)
+        hebb_manager = getattr(self.memory_agent, 'hebb_manager', None)
+        
+        self.unified_retriever = UnifiedRetriever(
+            engine=self.cognitive_engine,
+            moe_router=moe_router,
+            recall_engine=recall_engine,
+            hebb_manager=hebb_manager,
+        )
+        logger.info("UnifiedRetriever 初始化完成")
+        
+        # 3. 初始化 PatternCrystallizer
+        evolution = getattr(self, 'evolution', None)
+        self.crystallizer = PatternCrystallizer(
+            engine=self.cognitive_engine,
+            evolution_orchestrator=evolution,
+        )
+        logger.info("PatternCrystallizer 初始化完成")
+        
+        # 4. 初始化 ReasoningTraceManager
+        self.trace_manager = ReasoningTraceManager(
+            engine=self.cognitive_engine,
+        )
+        logger.info("ReasoningTraceManager 初始化完成")
+
     def init_router(self) -> MessageRouter:
         """
         初始化 Router 并注入依赖
@@ -1190,17 +1255,56 @@ class Agent:
         # COLLECT 阶段：收集所有来源信息到候选池（Phase 3 重构）
         # ══════════════════════════════════════════════════════════════
 
-        # 0.5+1. MoE 统一检索（合并经验检索+记忆检索，专家路由）
-        debug_log("步骤0.5+1: MoE 统一检索开始")
-        moe_results = self.memory_agent.moe_retrieve(user_input)
-        # MoE 返回统一结果，全部作为 relevant_memories
+        # 0.5+1. 统一检索（使用新的 UnifiedRetriever 或降级到旧的 MoE）
+        debug_log("步骤0.5+1: 统一检索开始")
+        
+        # 启动推理链
+        trace_id = None
+        if self.trace_manager:
+            trace_id = self.trace_manager.start_trace(user_input)
+        
+        # 使用新的 UnifiedRetriever
+        if self.unified_retriever:
+            relevant_memories = self.unified_retriever.retrieve(
+                user_input, limit=10, include_patterns=True
+            )
+            debug_log(f"UnifiedRetriever 返回 {len(relevant_memories)} 条记忆")
+            
+            # 记录推理步骤
+            if trace_id and self.trace_manager:
+                self.trace_manager.add_step(
+                    trace_id, "retrieve",
+                    user_input, f"找到 {len(relevant_memories)} 条记忆"
+                )
+        else:
+            # 降级到旧的 MoE 检索
+            moe_results = self.memory_agent.moe_retrieve(user_input)
+            relevant_memories = moe_results
+            debug_log(f"MoE 降级检索返回 {len(relevant_memories)} 条记忆")
+        
         # MoE 已合并经验检索，experience_items 不再需要
         experience_items: list = []  # 保留参数兼容性
-        relevant_memories = moe_results
         debug_log(f"步骤0.5+1: MoE 检索完成，共 {len(relevant_memories)} 条")
 
         # Phase 2-5: 构建上下文（委托给 ContextOrchestrator）
         debug_log("步骤2-5: 构建上下文开始")
+        
+        # 检索结晶经验
+        crystallized_patterns = []
+        if self.crystallizer:
+            try:
+                crystallized_patterns = self.crystallizer.retrieve(user_input, limit=3)
+                debug_log(f"检索到 {len(crystallized_patterns)} 条结晶经验")
+                
+                # 记录推理步骤
+                if trace_id and self.trace_manager:
+                    self.trace_manager.add_step(
+                        trace_id, "crystallize",
+                        user_input, f"检索到 {len(crystallized_patterns)} 条结晶经验"
+                    )
+            except Exception as e:
+                logger.warning(f"结晶经验检索失败: {e}")
+        
         context = await self.context_orchestrator.build_context(
             user_input=user_input,
             tool_memory_result=tool_memory_result,
@@ -1208,6 +1312,7 @@ class Agent:
             tool_decision=tool_decision,
             experience_items=experience_items,
             relevant_memories=relevant_memories,
+            crystallized_patterns=crystallized_patterns,  # 新增：结晶经验
             session_context=session_context,  # B5闭环修复 GAP-1
         )
         debug_log(f"步骤2-5: 上下文构建完成，共 {len(context)} 条消息")
@@ -1459,6 +1564,31 @@ class Agent:
             )
 
         # 6-9. P1: 对话后处理管线（委托给 PostChatPipeline）
+        
+        # 记录推理链（如果启用了认知图谱）
+        if trace_id and self.trace_manager:
+            try:
+                # 计算使用的 token 数（简化估算）
+                total_tokens = len(user_input) + len(reply) if reply else len(user_input)
+                self.trace_manager.finish_trace(
+                    trace_id, reply or "", total_tokens=total_tokens
+                )
+                debug_log(f"推理链记录完成: trace_id={trace_id}")
+            except Exception as e:
+                logger.warning(f"推理链记录失败: {e}")
+        
+        # 结晶器观察工具使用（如果有）
+        if self.crystallizer and hasattr(self, '_last_tool_used') and self._last_tool_used:
+            try:
+                self.crystallizer.observe(
+                    tool_name=self._last_tool_used,
+                    context=user_input,
+                    success=True,  # 简化：假设成功
+                )
+                debug_log(f"结晶器观察: tool={self._last_tool_used}")
+            except Exception as e:
+                logger.warning(f"结晶器观察失败: {e}")
+        
         post_result = await self.post_chat_pipeline.process(
             user_input=user_input,
             reply=reply,

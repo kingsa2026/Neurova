@@ -44,7 +44,6 @@ import neurova.skill_system
 
 # skills imports
 import neurova.skills.evolution_engine
-import neurova.skills.experience_caller
 import neurova.skills.hub_client
 import neurova.skills.manifest
 import neurova.skills.models

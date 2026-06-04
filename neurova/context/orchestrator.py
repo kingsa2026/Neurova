@@ -138,6 +138,7 @@ class ContextOrchestrator:
         experience_items: Optional[list] = None,
         relevant_memories: Optional[list] = None,
         session_context: Optional[list] = None,
+        crystallized_patterns: Optional[list] = None,
     ) -> List[Dict]:
         """构建完整的 LLM 上下文（Phase 2-5）
 
@@ -149,6 +150,7 @@ class ContextOrchestrator:
             experience_items: 经验检索结果（Phase 0.5）
             relevant_memories: 记忆检索结果（Phase 1）
             session_context: Session 文件提取的最近对话上下文（B3修复）
+            crystallized_patterns: 结晶经验检索结果（认知图谱 PatternCrystallizer）
 
         Returns:
             上下文消息列表，可直接传给 LLM
@@ -266,6 +268,18 @@ class ContextOrchestrator:
                     priority=70
                 ))
             
+            # 添加结晶经验（认知图谱 PatternCrystallizer 产物）
+            for pattern in crystallized_patterns or []:
+                if isinstance(pattern, dict):
+                    content = pattern.get("content", str(pattern))
+                else:
+                    content = str(pattern)
+                self.context_pool.add_context(ContextInput(
+                    source=ContextSource.EXPERIENCE,
+                    content=f"[结晶经验] {content}",
+                    priority=80,  # 结晶经验优先级高于普通经验
+                ))
+            
             # 添加情感状态
             if agent_emotion:
                 self.context_pool.add_context(ContextInput(
@@ -370,6 +384,18 @@ class ContextOrchestrator:
                 source=ContextSource.EXPERIENCE,
                 content=content,
                 priority=70
+            ))
+        
+        # 添加结晶经验（认知图谱 PatternCrystallizer 产物）
+        for pattern in crystallized_patterns or []:
+            if isinstance(pattern, dict):
+                content = pattern.get("content", str(pattern))
+            else:
+                content = str(pattern)
+            candidate_pool.append(ContextInput(
+                source=ContextSource.EXPERIENCE,
+                content=f"[结晶经验] {content}",
+                priority=80,  # 结晶经验优先级高于普通经验
             ))
         
         # 添加情感状态

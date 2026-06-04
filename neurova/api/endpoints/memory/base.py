@@ -97,7 +97,7 @@ def memory_to_dict(memory) -> dict:
             "agent_id": getattr(memory, "agent_id", ""),
             "content": str(getattr(memory, "content", "")),
             "category": str(getattr(memory, "category", "")),
-            "temperature": float(getattr(memory, "temperature", 1.0)),
+            "temperature": float(getattr(memory, "temperature", 100.0)),
             "lifecycle_stage": str(getattr(memory, "lifecycle_stage", "")),
             "is_important": bool(getattr(memory, "is_important", False)),
             "is_crystallized": bool(getattr(memory, "is_crystallized", False)),

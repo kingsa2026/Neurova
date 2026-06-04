@@ -50,9 +50,36 @@ try:
 except ImportError:
     pass
 
+# 认知图谱存储架构 — 一步到位替换
+try:
+    from .cognitive_storage_engine import CognitiveStorageEngine, UnifiedMemoryNode, MemoryType as CognitiveMemoryType, StorageLayer
+except ImportError:
+    pass
+
+try:
+    from .unified_retriever import UnifiedRetriever
+except ImportError:
+    pass
+
+try:
+    from .pattern_crystallizer import PatternCrystallizer
+except ImportError:
+    pass
+
+try:
+    from .reasoning_trace_manager import ReasoningTraceManager, ReasoningStep, ReasoningTrace
+except ImportError:
+    pass
+
+try:
+    from .sleep_adapter import SleepConsolidationAdapter
+except ImportError:
+    pass
+
 # 版本信息
-__version__ = "0.1.0"
+__version__ = "0.2.0"  # 升级版本号
 __all__ = [
+    # 原有模块
     "MoEMemoryRouter",
     "VectorGatingNetwork",
     "ExpertDrilldownRetriever",
@@ -61,4 +88,14 @@ __all__ = [
     "MemoryType",
     "LifecycleStage",
     "ConflictDetector",
+    # 认知图谱模块
+    "CognitiveStorageEngine",
+    "UnifiedMemoryNode",
+    "CognitiveMemoryType",
+    "StorageLayer",
+    "UnifiedRetriever",
+    "PatternCrystallizer",
+    "ReasoningTraceManager",
+    "ReasoningStep",
+    "ReasoningTrace",
 ]
