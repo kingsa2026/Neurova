@@ -69,6 +69,21 @@ class UnifiedVectorStore:
 
         logger.info(f"UnifiedVectorStore 初始化完成，后端: {self.backend}")
 
+    async def initialize_encoder(self) -> bool:
+        """
+        异步初始化编码器（用于 ONNX 后端的懒加载）
+
+        Returns:
+            初始化是否成功
+        """
+        if self.backend == "onnx" and self._encoder and not self._encoder.is_initialized:
+            try:
+                return await self._encoder.initialize()
+            except Exception as e:
+                logger.warning(f"ONNX 编码器异步初始化失败: {e}")
+                return False
+        return True
+
     def _select_backend(self, backend: str) -> str:
         """根据环境自动选择后端"""
         if backend != "auto":
@@ -159,8 +174,7 @@ class UnifiedVectorStore:
                             logger.warning("ONNX 编码器初始化失败，降级到 TF-IDF")
                             return self._tfidf_encode(text)
                 
-                result = self._encoder.encode(text)
-                return list(result.vectors[0]) if result.vectors else [0.0] * 512
+                return self._encoder.encode(text)
             else:
                 vec = list(self._encoder.embed([text]))[0]
             return list(vec)
