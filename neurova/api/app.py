@@ -55,6 +55,8 @@ class AppState:
         self.skill_pool_manager = None
         self.user_group_manager = None
         self.token_manager = None
+        self.tts_manager = None
+        self.audio_engine = None
         self.sleep_manager = None
         self.shutdown_guard = None
         self.start_time: float = time.time()
@@ -218,6 +220,31 @@ def _initialize_components(app_state: AppState) -> None:
     except Exception as e:
         logger.warning(f"Default Agent init failed: {e}")
 
+    # 初始化 TTS Manager
+    try:
+        from neurova.tts.manager import TTSManager, TTSConfig
+        tts_config = TTSConfig(
+            engine=app_state.config.get("tts_engine", "edge-tts"),
+            model_path=app_state.config.get("tts_model_path", "models/tts/moss-nano"),
+            tokenizer_path=app_state.config.get("tts_tokenizer_path", "models/tts/moss-tokenizer"),
+            auto_download=app_state.config.get("tts_auto_download", False),
+            voice=app_state.config.get("tts_voice", "zh-CN-XiaoxiaoNeural"),
+        )
+        app_state.tts_manager = TTSManager(config=tts_config)
+    except Exception as e:
+        logger.warning(f"TTSManager init failed: {e}")
+
+    # 初始化 MOSS Audio Engine（可选，需要 GPU）
+    try:
+        from neurova.tts.moss_audio import MOSSAudioEngine
+        app_state.audio_engine = MOSSAudioEngine(
+            model_dir=app_state.config.get("audio_model_path", "models/audio/moss-audio-4b"),
+            model_name=app_state.config.get("audio_model_name", "moss-audio-4b"),
+            auto_download=app_state.config.get("audio_auto_download", True),
+        )
+    except Exception as e:
+        logger.warning(f"MOSSAudioEngine init failed: {e}")
+
     logger.info("Core components initialized")
 
 
@@ -270,6 +297,8 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
         "channel_manager": app_state.channel_manager,
         "admin_service": app_state.admin_service,
         "token_manager": app_state.token_manager,
+        "tts_manager": app_state.tts_manager,
+        "audio_engine": app_state.audio_engine,
     })
 
     # 注册主路由
@@ -360,6 +389,47 @@ async def _on_startup(app_state: AppState) -> None:
 
     # 初始化组件
     _initialize_components(app_state)
+
+    # 初始化 TTS 引擎
+    if hasattr(app_state, "tts_manager") and app_state.tts_manager:
+        try:
+            success = await app_state.tts_manager.initialize()
+            if success:
+                logger.info(f"TTS engine ready: {app_state.tts_manager.get_engine_name()}")
+            else:
+                logger.warning("TTS engine initialization failed, fallback will be used")
+        except Exception as e:
+            logger.warning(f"TTS engine init error: {e}")
+
+    # 初始化 Audio Engine（可选）
+    if hasattr(app_state, "audio_engine") and app_state.audio_engine:
+        try:
+            if app_state.audio_engine.is_available:
+                success = await app_state.audio_engine.initialize()
+                if success:
+                    logger.info("Audio understanding engine ready")
+                else:
+                    logger.warning("Audio engine initialization failed")
+            else:
+                logger.info("Audio engine skipped (no GPU available)")
+        except Exception as e:
+            logger.warning(f"Audio engine init error: {e}")
+
+    # 更新全局应用状态（TTS/Audio 引擎已初始化）
+    from neurova.api.endpoints import set_app_state as _update_app_state
+    _update_app_state({
+        "startup_manager": app_state.startup_manager,
+        "health_checker": app_state.health_checker,
+        "agents": app_state.agents,
+        "llm_client": app_state.llm_client,
+        "provider_manager": app_state.provider_manager,
+        "llm_router": app_state.llm_router,
+        "channel_manager": app_state.channel_manager,
+        "admin_service": app_state.admin_service,
+        "token_manager": app_state.token_manager,
+        "tts_manager": app_state.tts_manager,
+        "audio_engine": app_state.audio_engine,
+    })
 
     # 注册核心模块
     _register_core_modules(app_state)

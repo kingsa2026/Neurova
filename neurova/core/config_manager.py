@@ -1,159 +1,94 @@
-from __future__ import annotations
-
 """
-统一配置管理模块 - 集中管理应用配置
+核心配置管理器 - 最小化实现
 
 功能:
-- 分层配置 (默认/应用/模块/环境)
-- 配置验证
-- 动态配置热更新
-- 配置持久化
-- 配置导入/导出
+- 内存中存储配置键值对
+- 支持 get/set 操作
+- 兼容 knowledge/config.py 的 ConfigManager 接口
 """
 
-import copy
-from dataclasses import dataclass
-import enum
 import json
-import logging
 import os
+import threading
 from pathlib import Path
-import time
-import typing
+from typing import Any, Dict, Optional
 
-from enum import Enum
-from asyncio import Event
-from asyncio import Event
-from fastapi import Path
-
-# core imports
-import neurova.core.event_bus
-
-"""
-ConfigLevel
-"""
-def ConfigLevel(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
-
-"""
-ConfigEntry
-"""
-def ConfigEntry(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
 class ConfigManager:
     """
-    ConfigManager
+    最小化配置管理器
+
+    提供简单的键值对配置存储，支持从文件和环境变量加载。
     """
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def __init__(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def get(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def set(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def delete(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def has(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def get_all(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def bulk_set(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def register_validator(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def validate_all(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def on_change(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def remove_change_callback(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def _notify_change(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def _notify_bulk_change(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def _emit_config_event(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def save(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def load(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def load_from_dict(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def export(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def load_from_env(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def _convert_env_value(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def config_count(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def read_only_keys(self, *args, **kwargs):
-        pass
 
-def __annotate__(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+    def __init__(self, config_path: Optional[str] = None):
+        self._config_path = config_path
+        self._data: Dict[str, Any] = {}
+        self._lock = threading.Lock()
 
-"""
-获取全局配置管理器
-"""
-def get_config_manager(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+    def get(self, key: str, default: Any = None) -> Any:
+        """获取配置值"""
+        with self._lock:
+            return self._data.get(key, default)
 
-def __annotate__(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+    def set(self, key: str, value: Any) -> None:
+        """设置配置值"""
+        with self._lock:
+            self._data[key] = value
 
-"""
-重置全局配置管理器 (主要用于测试)
-"""
-def reset_config_manager(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+    def has(self, key: str) -> bool:
+        """检查配置是否存在"""
+        return key in self._data
+
+    def delete(self, key: str) -> bool:
+        """删除配置"""
+        with self._lock:
+            if key in self._data:
+                del self._data[key]
+                return True
+            return False
+
+    def get_all(self) -> Dict[str, Any]:
+        """获取所有配置"""
+        with self._lock:
+            return dict(self._data)
+
+    def load(self, path: Optional[str] = None) -> None:
+        """从 JSON 文件加载配置"""
+        load_path = path or self._config_path
+        if not load_path or not Path(load_path).exists():
+            return
+        try:
+            with open(load_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            with self._lock:
+                self._data.update(data)
+        except Exception:
+            pass
+
+    def save(self, path: Optional[str] = None) -> None:
+        """保存配置到 JSON 文件"""
+        save_path = path or self._config_path
+        if not save_path:
+            return
+        try:
+            Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def load_from_env(self, prefix: str = "NEUVA_") -> int:
+        """从环境变量加载"""
+        count = 0
+        for key, value in os.environ.items():
+            if key.startswith(prefix):
+                config_key = key[len(prefix):].lower()
+                self.set(config_key, value)
+                count += 1
+        return count
+
+    def clear(self) -> None:
+        """清空所有配置"""
+        with self._lock:
+            self._data.clear()

@@ -31,9 +31,6 @@ class LogLevel(Enum):
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
 
-def __annotate__(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
 def get_logger(name: str = "neurova", level: int = logging.DEBUG) -> logging.Logger:
     """
@@ -58,10 +55,6 @@ def get_logger(name: str = "neurova", level: int = logging.DEBUG) -> logging.Log
         handler.setFormatter(formatter)
         logger.addHandler(handler)
     return logger
-
-def __annotate__(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
 def _sanitize_context(context: Dict[str, Any]) -> Dict[str, Any]:
     """过滤敏感字段
@@ -325,10 +318,6 @@ class LogManager:
             日志条目数量
         """
         return len(self._entries)
-
-def __annotate__(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
 """
 获取全局日志管理器

@@ -241,6 +241,7 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.mobile_pairing", "/v1/mobile", "Mobile Pairing API"),
         ("neurova.api.endpoints.memory_enhancement", "/v1/memory-enhancement", "Memory Enhancement API"),
         ("neurova.api.endpoints.channel_sharing", "/v1/channel-sharing", "Channel Sharing API"),
+        ("neurova.api.endpoints.audio", "/v1/audio", "Audio API"),
     ]
 
     registered = 0

@@ -110,7 +110,7 @@ def start_prod():
         if static_dir.exists():
             shutil.rmtree(static_dir)
         shutil.copytree(dist_dir, static_dir)
-        print(f"[✓] 前端文件已复制到 {static_dir}")
+        print(f"[OK] 前端文件已复制到 {static_dir}")
 
     return subprocess.Popen(
         [sys.executable, "start_server.py"],
@@ -176,7 +176,7 @@ def main():
             frontend_proc = start_frontend(args.frontend_port)
             processes.append(("Frontend", frontend_proc))
 
-        print("\n[✓] 所有服务已启动")
+        print("\n[OK] 所有服务已启动")
         print("\n按 Ctrl+C 停止所有服务\n")
 
         # 等待进程结束
@@ -193,7 +193,7 @@ def main():
             try:
                 proc.terminate()
                 proc.wait(timeout=5)
-                print(f"[✓] {name} 已停止")
+                print(f"[OK] {name} 已停止")
             except Exception:
                 proc.kill()
                 print(f"[!] {name} 已强制停止")

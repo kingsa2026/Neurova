@@ -19,16 +19,11 @@ import time
 import traceback
 import typing
 
-from asyncio import Event
-from asyncio import Event
 from enum import IntEnum
-from neurova.core.logger import LogLevel
-from typing import Type
+from typing import Optional, Type
 
 # core imports
-import neurova.core.event_bus
-import neurova.core.log_level
-import neurova.core.logger
+import asyncio
 
 class ErrorCode(IntEnum):
     """错误码定义"""
@@ -505,10 +500,6 @@ class ErrorHandler:
                 callback(record)
             except Exception as e:
                 self._logger.error(f"错误回调执行失败: {e}")
-
-def __annotate__(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
 """
 获取全局错误处理器

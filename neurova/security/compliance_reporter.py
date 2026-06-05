@@ -130,7 +130,7 @@ class ComplianceReporter:
         self._workspace_path = Path(workspace_path)
         self._reports_dir = self._workspace_path / ".compliance" / "reports"
         self._db_path = db_path or str(self._workspace_path / ".compliance" / "compliance.db")
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
         # 确保目录存在
         self._ensure_reports_dir()

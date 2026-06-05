@@ -120,18 +120,45 @@ async def generate_image(request: Request, body: ImageGenerationRequest):
 
 @router.post("/audio")
 async def generate_audio(request: Request, body: AudioGenerationRequest):
-    """音频生成"""
+    """音频生成（TTS 语音合成）"""
+    from fastapi.responses import Response
+
     request_id = _get_request_id(request)
 
-    # TODO: 实现音频生成
-    return {
-        "code": 0,
-        "data": {
-            "message": "Audio generation not yet implemented",
-            "text": body.text,
-            "request_id": request_id,
-        },
-    }
+    try:
+        from neurova.api.endpoints import get_app_state
+        state = get_app_state()
+        tts_manager = state.get("tts_manager") if state else None
+
+        if not tts_manager or not tts_manager.is_initialized:
+            return {
+                "code": -1,
+                "message": "TTS 引擎未就绪",
+                "data": {"request_id": request_id},
+            }
+
+        audio_bytes = await tts_manager.synthesize(body.text)
+
+        if not audio_bytes:
+            return {
+                "code": -1,
+                "message": "合成失败",
+                "data": {"request_id": request_id},
+            }
+
+        return Response(
+            content=audio_bytes,
+            media_type="audio/wav",
+            headers={"X-Request-ID": request_id},
+        )
+
+    except Exception as e:
+        logger.error(f"Audio generation error: {e}", exc_info=True)
+        return {
+            "code": -1,
+            "message": f"Audio generation failed: {str(e)}",
+            "data": {"request_id": request_id},
+        }
 
 
 @router.post("/video")

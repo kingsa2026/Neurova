@@ -6,10 +6,11 @@ UnifiedVectorStore — 三合一向量索引
 2. 兜底: query_vec vs memories → Top-K 记忆
 3. 可塑性: centroid drift (LTP/LTD 更新质心位置)
 
-支持 Tier 0/1/2 后端:
+支持 Tier 0/1/2/3 后端:
 - Tier 0: TF-IDF (零依赖)
-- Tier 1: fastembed (~50MB)
-- Tier 2: FAISS + sentence-transformers (~2GB)
+- Tier 1: ONNXEmbedding (~130MB, ONNX Runtime)
+- Tier 2: fastembed (~50MB)
+- Tier 3: FAISS + sentence-transformers (~2GB)
 """
 
 import logging
@@ -86,6 +87,14 @@ class UnifiedVectorStore:
         except ImportError:
             pass
 
+        # Tier 1: ONNX Embedding (默认推荐)
+        try:
+            import onnxruntime
+            from neurova.embedding.onnx_embedding import ONNXEmbeddingEngine
+            return "onnx"
+        except ImportError:
+            pass
+
         return "tfidf"
 
     def _create_encoder(self):
@@ -106,6 +115,15 @@ class UnifiedVectorStore:
                 logger.warning(f"fastembed 编码器创建失败: {e}，降级到 TF-IDF")
                 return None
 
+        elif self.backend == "onnx":
+            try:
+                from neurova.embedding.onnx_embedding import ONNXEmbeddingEngine
+                engine = ONNXEmbeddingEngine(auto_download=True)
+                return engine
+            except Exception as e:
+                logger.warning(f"ONNX 编码器创建失败: {e}，降级到 TF-IDF")
+                return None
+
         return None  # TF-IDF 不需要预训练编码器
 
     def encode(self, text: str) -> List[float]:
@@ -118,10 +136,31 @@ class UnifiedVectorStore:
         Returns:
             归一化向量
         """
-        if self.backend in ("faiss", "fastembed") and self._encoder:
+        if self.backend in ("faiss", "fastembed", "onnx") and self._encoder:
             # 使用预训练模型
             if self.backend == "faiss":
                 vec = self._encoder.encode(text, normalize_embeddings=True)
+            elif self.backend == "onnx":
+                # 懒初始化 ONNX 引擎
+                if not self._encoder.is_initialized:
+                    import asyncio
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = None
+                    
+                    if loop and loop.is_running():
+                        # 已有运行的事件循环，无法同步初始化
+                        logger.warning("ONNX 编码器未初始化，降级到 TF-IDF")
+                        return self._tfidf_encode(text)
+                    else:
+                        asyncio.run(self._encoder.initialize())
+                        if not self._encoder.is_initialized:
+                            logger.warning("ONNX 编码器初始化失败，降级到 TF-IDF")
+                            return self._tfidf_encode(text)
+                
+                result = self._encoder.encode(text)
+                return list(result.vectors[0]) if result.vectors else [0.0] * 512
             else:
                 vec = list(self._encoder.embed([text]))[0]
             return list(vec)

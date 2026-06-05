@@ -9,15 +9,31 @@ EKI认知优化框架 - Ensemble Kalman Inversion for Cognitive Optimization
 
 设计理念:
 - 用EKI近似贝叶斯后验
-...
+- 集合粒子表示参数分布
+- 通过观测更新参数
+
+核心组件:
+- EKICognitiveOptimizer: 认知优化器
+- TaskValue: 任务价值级别
+- ReinforcementAction: 强化动作
 """
 
-from neurova.mem_core import Memory
-import re
+from .cognitive_optimizer import (
+    EKICognitiveOptimizer,
+    TaskValue,
+    TaskResult,
+    MemoryState,
+    ReinforcementAction,
+    get_cognitive_optimizer,
+    reset_cognitive_optimizer,
+)
 
-"""
-EnsembleKalmanInversion
-"""
-def __getattr__(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+__all__ = [
+    "EKICognitiveOptimizer",
+    "TaskValue",
+    "TaskResult",
+    "MemoryState",
+    "ReinforcementAction",
+    "get_cognitive_optimizer",
+    "reset_cognitive_optimizer",
+]
