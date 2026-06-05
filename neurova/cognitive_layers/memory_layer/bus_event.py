@@ -11,98 +11,187 @@ CogArch 1.0.0 事件总线 — MemoryManager 的骨架替代
 
 设计原则：
   - 模块不直接引用彼此，只 emit / subscribe 事件
-...
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 import asyncio
-from dataclasses import dataclass
 import enum
 import inspect
 import logging
 import time
-import typing
+from typing import Any, Callable, Dict, List, Optional, Set
 
-from abc import ABC
-from typing import Awaitable
-from abc import abstractmethod
+logger = logging.getLogger(__name__)
 
-"""
-ModuleHealth
-"""
-def ModuleHealth(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
-"""
-MemoryEvent
-"""
-def MemoryEvent(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+# ────── ModuleHealth ──────
 
-class MemoryModule:
-    """
-    MemoryModule
-    """
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def __init__(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def name(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def init(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def shutdown(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def health(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def health(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def __repr__(self, *args, **kwargs):
-        pass
+@dataclass
+class ModuleHealth:
+    """模块健康状态"""
+    module_name: str
+    status: str = "ok"  # ok, degraded, error
+    message: str = ""
+    details: Dict[str, Any] = field(default_factory=dict)
+    timestamp: float = field(default_factory=time.time)
+
+    def is_healthy(self) -> bool:
+        return self.status == "ok"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "module_name": self.module_name,
+            "status": self.status,
+            "message": self.message,
+            "details": self.details,
+            "timestamp": self.timestamp,
+        }
+
+
+# ────── MemoryEvent ──────
+
+class MemoryEvent:
+    """模块间通信的事件载体"""
+
+    # 事件类型常量
+    MEMORY_CREATED = "memory_created"
+    MEMORY_ACCESSED = "memory_accessed"
+    MEMORY_UPDATED = "memory_updated"
+    MEMORY_DELETED = "memory_deleted"
+    MEMORY_CONSOLIDATED = "memory_consolidated"
+    MEMORY_CONFLICT = "memory_conflict"
+    TEMPERATURE_UPDATED = "temperature_updated"
+    BUFFER_FLUSHED = "buffer_flushed"
+    SLEEP_STARTED = "sleep_started"
+    SLEEP_COMPLETED = "sleep_completed"
+    CONTEXT_BUILT = "context_built"
+    TOOL_INVOKED = "tool_invoked"
+    EVOLUTION_TRIGGERED = "evolution_triggered"
+    METACOGNITION_EVALUATED = "metacognition_evaluated"
+
+    def __init__(self, type: str, source: str, payload: Optional[Dict[str, Any]] = None):
+        self.type = type
+        self.source = source
+        self.payload = payload or {}
+        self.timestamp = time.time()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.type,
+            "source": self.source,
+            "payload": self.payload,
+            "timestamp": self.timestamp,
+        }
+
+    def __repr__(self) -> str:
+        return f"MemoryEvent(type={self.type!r}, source={self.source!r})"
+
+
+# ────── MemoryModule ──────
+
+class MemoryModule(ABC):
+    """所有记忆子模块的统一协议"""
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """模块唯一名称"""
+        ...
+
+    @abstractmethod
+    def init(self, bus: "EventBus", config: Dict[str, Any]) -> None:
+        """初始化模块，注册事件监听"""
+        ...
+
+    @abstractmethod
+    def shutdown(self) -> None:
+        """优雅关闭"""
+        ...
+
+    def health(self) -> ModuleHealth:
+        """返回模块健康状态（子类可覆盖）"""
+        return ModuleHealth(module_name=self.name, status="ok")
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__} name={self.name!r}>"
+
+
+# ────── EventBus ──────
 
 class EventBus:
-    """
-    EventBus
-    """
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def __init__(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def on(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def off(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def emit(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def aemit(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def _run_async_handler(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def registered_events(self, *args, **kwargs):
-        pass
+    """事件路由引擎（同步 + async 双模）"""
+
+    def __init__(self):
+        self._handlers: Dict[str, List[Callable]] = {}
+        self._emit_count: int = 0
+
+    def on(self, event_type: str, handler: Callable) -> None:
+        """订阅事件"""
+        if event_type not in self._handlers:
+            self._handlers[event_type] = []
+        self._handlers[event_type].append(handler)
+
+    def off(self, event_type: str, handler: Callable) -> None:
+        """取消订阅"""
+        if event_type in self._handlers:
+            try:
+                self._handlers[event_type].remove(handler)
+            except ValueError:
+                pass
+
+    def emit(self, event: MemoryEvent) -> int:
+        """同步发射事件，返回调用的 handler 数量"""
+        self._emit_count += 1
+        handlers = self._handlers.get(event.type, [])
+        called = 0
+        for handler in handlers:
+            try:
+                if inspect.iscoroutinefunction(handler):
+                    asyncio.ensure_future(self._run_async_handler(handler, event))
+                else:
+                    handler(event)
+                called += 1
+            except Exception as e:
+                logger.error(f"EventBus handler error for {event.type}: {e}")
+        return called
+
+    async def aemit(self, event: MemoryEvent) -> int:
+        """异步发射事件，返回调用的 handler 数量"""
+        self._emit_count += 1
+        handlers = self._handlers.get(event.type, [])
+        called = 0
+        for handler in handlers:
+            try:
+                if inspect.iscoroutinefunction(handler):
+                    await handler(event)
+                else:
+                    handler(event)
+                called += 1
+            except Exception as e:
+                logger.error(f"EventBus async handler error for {event.type}: {e}")
+        return called
+
+    async def _run_async_handler(self, handler: Callable, event: MemoryEvent) -> None:
+        """在异步上下文中运行 async handler"""
+        try:
+            await handler(event)
+        except Exception as e:
+            logger.error(f"EventBus _run_async_handler error: {e}")
+
+    def registered_events(self) -> List[str]:
+        """返回已注册事件类型的列表"""
+        return list(self._handlers.keys())
+
+    def handler_count(self, event_type: Optional[str] = None) -> int:
+        """返回 handler 数量"""
+        if event_type:
+            return len(self._handlers.get(event_type, []))
+        return sum(len(h) for h in self._handlers.values())
+
+    @property
+    def emit_count(self) -> int:
+        return self._emit_count
+
+    def __repr__(self) -> str:
+        return f"EventBus(events={len(self._handlers)}, handlers={self.handler_count()})"

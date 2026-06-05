@@ -267,6 +267,6 @@ SkillInfo = Skill
 SkillSource = SkillSource
 SkillEvolutionRecord = SkillExecutionLog
 ExperienceRecord = SkillExecutionLog
-SkillManifest = SkillMetadata
+SkillManifest = Skill
 PluginEntryPoints = Dict[str, Any]
 SkillRecord = Skill
