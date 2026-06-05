@@ -97,6 +97,38 @@ try:
 except ImportError as e:
     logger.warning(f"Failed to import skill_pool_manager: {e}")
 
+# 导入 Skill 类（从模块导入）
+try:
+    # 动态导入模块，避免循环导入
+    import importlib
+    # 临时移除当前模块，避免循环导入
+    current_module = sys.modules.pop('neurova.skill_system', None)
+    skill_system_module = importlib.import_module('neurova.skill_system')
+    Skill = skill_system_module.Skill
+    SkillResult = skill_system_module.SkillResult
+    SkillInfo = skill_system_module.SkillInfo
+    # 恢复当前模块
+    if current_module:
+        sys.modules['neurova.skill_system'] = current_module
+except ImportError as e:
+    logger.warning(f"Failed to import Skill from skill_system module: {e}")
+    # 定义占位类
+    class Skill:
+        def __init__(self, name, description=""):
+            self.name = name
+            self.description = description
+    class SkillResult:
+        def __init__(self, success=True, data=None, error=None, execution_time=0.0):
+            self.success = success
+            self.data = data
+            self.error = error
+            self.execution_time = execution_time
+    class SkillInfo:
+        def __init__(self, name, description="", status=None):
+            self.name = name
+            self.description = description
+            self.status = status
+
 
 __all__ = [
     'SkillPoolManager',
@@ -104,5 +136,8 @@ __all__ = [
     'SkillVisibility',
     'SkillMetadata',
     'SkillStatus',
+    'Skill',
+    'SkillResult',
+    'SkillInfo',
     '_get_skill_module',
 ]

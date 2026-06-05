@@ -1,24 +1,12 @@
 from __future__ import annotations
 
 """
-channels/base_adapter.py — 渠道适配器抽象基类 (P4 从 __init__.py 提取)
+channels/base_adapter.py — 渠道适配器抽象基类 (兼容性模块)
 
-定义所有渠道适配器必须实现的统一接口。
+此模块已弃用，请直接使用 neurova.channels.base
+保留此文件仅为向后兼容性。
 """
 
-from abc import ABC, abstractmethod
-import typing
+from neurova.channels.base import ChannelAdapter
 
-from abc import ABC
-from neurova.router import Message
-from abc import abstractmethod
-
-# channels imports
-import neurova.channels.models
-
-"""
-ChannelAdapter
-"""
-def ChannelAdapter(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+__all__ = ["ChannelAdapter"]

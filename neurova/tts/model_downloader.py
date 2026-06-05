@@ -136,14 +136,110 @@ class ModelDownloader:
 
         try:
             from huggingface_hub import snapshot_download
+            from huggingface_hub.utils import enable_progress_bars, disable_progress_bars
+            import threading
+            import time
 
             model_dir.mkdir(parents=True, exist_ok=True)
 
-            snapshot_download(
-                repo_id=registry["repo_id"],
-                local_dir=str(model_dir),
-                resume_download=True,
-            )
+            # Disable default tqdm bars so our callback owns the output
+            try:
+                disable_progress_bars()
+            except Exception:
+                pass
+
+            def _tqdm_progress_callback(file_path, current_size, total_size):
+                """snapshot_download 的 tqdm 风格回调（如果支持）"""
+                try:
+                    if total_size and total_size > 0 and self._progress_callback:
+                        pct = min(100.0, current_size / total_size * 100.0)
+                        speed = float(current_size)  # approximate
+                        eta = 0.0
+                        self._progress_callback(DownloadProgress(
+                            model_name=model_name,
+                            total_size=int(total_size),
+                            downloaded_size=int(current_size),
+                            percentage=pct,
+                            speed=speed,
+                            eta=eta,
+                        ))
+                except Exception:
+                    pass
+
+            # 启动一个后台线程，通过监控目录大小来推送进度
+            stop_event = threading.Event()
+            expected_size = _parse_size_hint(registry.get("size_hint", ""))
+            start_ts = time.time()
+            last_size = 0
+            last_ts = start_ts
+
+            def _poll_progress():
+                nonlocal last_size, last_ts
+                while not stop_event.is_set():
+                    try:
+                        current_size = _dir_size(model_dir)
+                        now = time.time()
+                        dt = max(now - last_ts, 0.001)
+                        speed = max(current_size - last_size, 0) / dt
+                        last_size = current_size
+                        last_ts = now
+                        if self._progress_callback:
+                            total = expected_size if expected_size > 0 else max(current_size, 1)
+                            pct = min(99.0, current_size / total * 100.0) if expected_size > 0 else 0.0
+                            eta = (total - current_size) / speed if speed > 0 and expected_size > 0 else 0.0
+                            try:
+                                self._progress_callback(DownloadProgress(
+                                    model_name=model_name,
+                                    total_size=int(total),
+                                    downloaded_size=int(current_size),
+                                    percentage=pct,
+                                    speed=speed,
+                                    eta=eta,
+                                ))
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    stop_event.wait(0.2)
+
+            poll_thread = None
+            if self._progress_callback:
+                poll_thread = threading.Thread(target=_poll_progress, daemon=True)
+                poll_thread.start()
+
+            try:
+                try:
+                    snapshot_download(
+                        repo_id=registry["repo_id"],
+                        local_dir=str(model_dir),
+                        resume_download=True,
+                        tqdm_class=None,
+                    )
+                except TypeError:
+                    # 旧版 huggingface_hub 不支持 tqdm_class 参数
+                    snapshot_download(
+                        repo_id=registry["repo_id"],
+                        local_dir=str(model_dir),
+                        resume_download=True,
+                    )
+            finally:
+                stop_event.set()
+                if poll_thread is not None:
+                    poll_thread.join(timeout=1.0)
+                # 发送 100% 进度
+                if self._progress_callback:
+                    try:
+                        final_size = _dir_size(model_dir)
+                        self._progress_callback(DownloadProgress(
+                            model_name=model_name,
+                            total_size=max(final_size, 1),
+                            downloaded_size=final_size,
+                            percentage=100.0,
+                            speed=0.0,
+                            eta=0.0,
+                        ))
+                    except Exception:
+                        pass
 
             # 验证下载完整性
             if not self.is_model_available(model_name):
@@ -191,6 +287,55 @@ class ModelDownloader:
 
 # 全局单例
 _downloader: Optional[ModelDownloader] = None
+
+
+def _parse_size_hint(size_hint: str) -> int:
+    """解析形如 '~130MB' / '~8GB' 的体积字符串为字节数。
+
+    Returns:
+        字节数；解析失败返回 0。
+    """
+    try:
+        s = size_hint.strip().lower().lstrip("~")
+        # 数字部分
+        num = ""
+        unit = ""
+        for ch in s:
+            if ch.isdigit() or ch == ".":
+                num += ch
+            else:
+                unit += ch
+        num_f = float(num) if num else 0.0
+        unit = unit.strip()
+        if unit in ("gb", "g"):
+            return int(num_f * 1024 ** 3)
+        if unit in ("mb", "m"):
+            return int(num_f * 1024 ** 2)
+        if unit in ("kb", "k"):
+            return int(num_f * 1024)
+        if unit in ("b", ""):
+            return int(num_f)
+        return int(num_f * 1024 ** 2)  # 默认按 MB 处理
+    except Exception:
+        return 0
+
+
+def _dir_size(path: Path) -> int:
+    """递归计算目录大小（字节）。"""
+    total = 0
+    try:
+        if not path.exists():
+            return 0
+        for root, _dirs, files in os.walk(path):
+            for f in files:
+                try:
+                    fp = Path(root) / f
+                    total += fp.stat().st_size
+                except (OSError, FileNotFoundError):
+                    pass
+    except Exception:
+        pass
+    return total
 
 
 def get_model_downloader(base_dir: str = ".") -> ModelDownloader:

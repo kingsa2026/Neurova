@@ -23,26 +23,34 @@ from neurova.skills.models import Skill
 import neurova.skills.manifest
 import neurova.skills.registry
 
-"""
-AttentionLevel
-"""
-def AttentionLevel(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+class AttentionLevel(str, Enum):
+    """注意力级别"""
+    LOW = "low"           # 低注意力
+    MEDIUM = "medium"     # 中等注意力
+    HIGH = "high"         # 高注意力
+    CRITICAL = "critical" # 关键注意力
 
-"""
-MemoryType
-"""
-def MemoryType(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
-"""
-CognitiveState
-"""
-def CognitiveState(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+class MemoryType(str, Enum):
+    """记忆类型"""
+    SHORT_TERM = "short_term"   # 短期记忆
+    LONG_TERM = "long_term"     # 长期记忆
+    WORKING = "working"         # 工作记忆
+    EPISODIC = "episodic"       # 情景记忆
+    SEMANTIC = "semantic"       # 语义记忆
+    PROCEDURAL = "procedural"   # 程序记忆
+
+
+class CognitiveState(str, Enum):
+    """认知状态"""
+    IDLE = "idle"                 # 空闲状态
+    FOCUSED = "focused"           # 专注状态
+    EXPLORING = "exploring"       # 探索状态
+    LEARNING = "learning"         # 学习状态
+    CREATING = "creating"         # 创造状态
+    ANALYZING = "analyzing"       # 分析状态
+    DECIDING = "deciding"         # 决策状态
+    REFLECTING = "reflecting"     # 反思状态
 
 class AttentionManager:
     """

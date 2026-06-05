@@ -434,7 +434,8 @@ Skill 系统
 ├── 内置 Skill
 │   ├── 记忆管理 (memory_manage) — 添加、查询、删除记忆
 │   ├── 网络搜索 (web_search) — 搜索网络信息
-│   └── 文件操作 (file_operation) — 读写文件（受路径保护）
+│   ├── 文件操作 (file_operation) — 读写文件（受路径保护）
+│   └── GitHub 推送 (github_push) — Git 操作封装，支持直接推送到 main 分支
 │
 ├── 外部 Skill
 │   ├── OpenClaw 兼容 Skill
@@ -444,6 +445,29 @@ Skill 系统
 └── 复合 Skill
     ├── 链式 Skill (多 Skill 串联)
     └── 并行 Skill (多 Skill 并行)
+```
+
+**GitHub Push Skill 示例**：
+
+```python
+from neurova.skills.builtin.github_push import create_github_push_skill
+
+# 创建技能实例
+skill = create_github_push_skill()
+
+# 完整推送工作流
+result = await skill.execute({
+    "action": "full_push",
+    "message": "添加新功能",
+    "push_to_main": True  # 直接推送到 main 分支
+})
+
+# 支持的操作：
+# - status: 获取 Git 状态
+# - add: 添加文件到暂存区
+# - commit: 提交更改
+# - push: 推送到远程仓库
+# - full_push: 完整工作流（状态→添加→提交→推送）
 ```
 
 **Skill 基类**（所有 Skill 必须继承）：

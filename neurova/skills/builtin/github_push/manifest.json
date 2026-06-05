@@ -1,0 +1,87 @@
+{
+  "id": "github_push",
+  "name": "Neurova GitHub Push Skill",
+  "version": "1.0.0",
+  "description": "GitHub 推送技能 - 封装完整的 Git 操作流程，支持状态检查、文件添加、提交和推送到 main 分支",
+  "author": "Neurova Team",
+  "source": "builtin",
+  "enabled": true,
+  "metadata": {
+    "name": "Neurova GitHub Push Skill",
+    "version": "1.0.0",
+    "description": "GitHub 推送技能 - 封装完整的 Git 操作流程，支持状态检查、文件添加、提交和推送到 main 分支",
+    "author": "Neurova Team",
+    "tags": ["git", "github", "push", "version-control", "devops"],
+    "dependencies": []
+  },
+  "config": {
+    "default_action": "full_push",
+    "default_commit_message": "Update from Neurova GitHub Push Skill",
+    "push_to_main_by_default": true,
+    "require_clean_worktree": false
+  },
+  "parameters": {
+    "action": {
+      "type": "string",
+      "description": "操作类型：status, add, commit, push, full_push",
+      "required": false,
+      "default": "full_push",
+      "enum": ["status", "add", "commit", "push", "full_push"]
+    },
+    "message": {
+      "type": "string",
+      "description": "提交信息（commit 操作需要）",
+      "required": false,
+      "default": "Update from Neurova GitHub Push Skill"
+    },
+    "files": {
+      "type": "array",
+      "description": "要添加的文件列表（add 操作需要，默认为所有文件）",
+      "required": false,
+      "items": {
+        "type": "string"
+      }
+    },
+    "push_to_main": {
+      "type": "boolean",
+      "description": "是否直接推送到 main 分支",
+      "required": false,
+      "default": true
+    },
+    "branch": {
+      "type": "string",
+      "description": "指定分支（可选）",
+      "required": false
+    },
+    "repo_path": {
+      "type": "string",
+      "description": "仓库路径（默认为当前目录）",
+      "required": false,
+      "default": "."
+    }
+  },
+  "examples": [
+    {
+      "description": "获取 Git 状态",
+      "params": {
+        "action": "status"
+      }
+    },
+    {
+      "description": "添加所有文件并提交",
+      "params": {
+        "action": "full_push",
+        "message": "添加新功能"
+      }
+    },
+    {
+      "description": "推送到 main 分支",
+      "params": {
+        "action": "push",
+        "push_to_main": true
+      }
+    }
+  ],
+  "created_at": "2026-06-05T16:45:00Z",
+  "updated_at": "2026-06-05T16:45:00Z"
+}

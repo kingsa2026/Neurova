@@ -37,6 +37,11 @@ sentencepiece>=0.2.0
 # Edge TTS (online fallback)
 edge-tts>=6.1.0
 
+# Embedding (ONNX-based local inference)
+sentence-transformers>=2.2.0
+transformers>=4.20.0
+tokenizers>=0.13.0
+
 # Testing (dev)
 pytest>=7.4.0
 pytest-asyncio>=0.21.0

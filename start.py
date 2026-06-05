@@ -28,12 +28,66 @@ FRONTEND_DIR = ROOT_DIR / "neuUI"
 BACKEND_PORT = 9527
 FRONTEND_PORT = 8100
 
+# ==================== 天蓝色 LOGO ====================
+
+# ANSI 天蓝色 (256 色) - 明亮易读
+SKY_BLUE = "\033[38;5;117m"
+SKY_BLUE_BRIGHT = "\033[38;5;159m"
+COLOR_RESET = "\033[0m"
+COLOR_BOLD = "\033[1m"
+
+
+def _supports_color():
+    """检测终端是否支持 ANSI 颜色。"""
+    if not sys.stdout.isatty():
+        return False
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.GetStdHandle(-11)
+            mode = ctypes.c_uint32()
+            if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+                return bool(mode.value & 0x4)
+        except Exception:
+            pass
+    return True
+
+
+_USE_COLOR = _supports_color()
+
+
+def sky(text):
+    """给文本添加天蓝色（如果终端支持）。"""
+    if not _USE_COLOR:
+        return text
+    return f"{SKY_BLUE_BRIGHT}{text}{COLOR_RESET}"
+
+
+def print_logo(subtitle: str = "智能无限，协作无间"):
+    """以天蓝色打印 NEUROVA logo。"""
+    logo = r"""
+    ╔═══════════════════════════════════════════════════════════════════╗
+    ║                                                                   ║
+    ║   ███╗   ██╗███████╗██╗   ██╗██████╗  ██████╗ ██╗   ██╗  █████╗   ║
+    ║   ████╗  ██║██╔════╝██║   ██║██╔══██╗██╔═══██╗██║   ██║ ██╔══██╗  ║
+    ║   ██╔██╗ ██║█████╗  ██║   ██║██████╔╝██║   ██║██║   ██║ ███████║  ║
+    ║   ██║╚██╗██║██╔══╝  ██║   ██║██╔══██╗██║   ██║╚██╗ ██╔╝ ██╔══██║  ║
+    ║   ██║ ╚████║███████╗╚██████╔╝██║  ██║╚██████╔╝ ╚████╔╝  ██║  ██║  ║
+    ║   ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝   ╚═══╝   ╚═╝  ╚═╝  ║
+    ║                                                                   ║
+    ║            """ + f"{subtitle:^51}" + r"""  ║
+    ╚═══════════════════════════════════════════════════════════════════╝
+    """
+    print(sky(logo))
+
 
 def check_python_deps():
     """检查 Python 依赖"""
     try:
         import fastapi
         import uvicorn
+        import sentence_transformers  # Embedding support
         return True
     except ImportError:
         print("[!] 缺少 Python 依赖，正在安装...")
@@ -127,19 +181,7 @@ def main():
     parser.add_argument("--frontend-port", type=int, default=FRONTEND_PORT, help="前端端口")
     args = parser.parse_args()
 
-    print("""
-    ╔═══════════════════════════════════════════════════════════╗
-    ║                                                           ║
-    ║   ███╗   ██╗███████╗██╗   ██╗██████╗  ██████╗ ██╗   ██╗  ║
-    ║   ████╗  ██║██╔════╝██║   ██║██╔══██╗██╔═══██╗██║   ██║  ║
-    ║   ██╔██╗ ██║█████╗  ██║   ██║██████╔╝██║   ██║██║   ██║  ║
-    ║   ██║╚██╗██║██╔══╝  ██║   ██║██╔══██╗██║   ██║╚██╗ ██╔╝  ║
-    ║   ██║ ╚████║███████╗╚██████╔╝██║  ██║╚██████╔╝ ╚████╔╝   ║
-    ║   ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝   ╚═══╝    ║
-    ║                                                           ║
-    ║            智能无限，协作无间                                ║
-    ╚═══════════════════════════════════════════════════════════╝
-    """)
+    print_logo()
 
     processes = []
 

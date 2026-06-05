@@ -32,12 +32,43 @@ import neurova.auth.user_group_model
 import neurova.core.module_system
 import neurova.core.startup_manager
 
-"""
-UserBackup
-"""
-def UserBackup(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+@dataclass
+class UserBackup:
+    """用户备份数据"""
+    backup_id: str
+    user_id: str
+    created_at: datetime.datetime
+    backup_path: str
+    size_bytes: int
+    description: str = ""
+    metadata: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "backup_id": self.backup_id,
+            "user_id": self.user_id,
+            "created_at": self.created_at.isoformat(),
+            "backup_path": self.backup_path,
+            "size_bytes": self.size_bytes,
+            "description": self.description,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "UserBackup":
+        return cls(
+            backup_id=data["backup_id"],
+            user_id=data["user_id"],
+            created_at=datetime.datetime.fromisoformat(data["created_at"]),
+            backup_path=data["backup_path"],
+            size_bytes=data["size_bytes"],
+            description=data.get("description", ""),
+            metadata=data.get("metadata", {}),
+        )
 
 class AdminService:
     """
