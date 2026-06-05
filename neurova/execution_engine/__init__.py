@@ -10,8 +10,4 @@ Neurova CogArch 1.0.0 - 执行引擎（手脚）
 - mcp_manager: MCP 协议管理器
 """
 
-from neurova.agent_core import Agent
-from neurova.agent_core import Agent
-from neurova.agent_core import Agent
-
 pass
