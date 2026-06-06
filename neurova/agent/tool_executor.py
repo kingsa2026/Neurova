@@ -421,7 +421,7 @@ class ToolExecutor:
         tool_source: str = "skill_system",
         execution_time: float = 0.0,
     ):
-        """集中化工具执行后钩子 — 记忆记录 + 生命周期 + 技能打包"""
+        """集中化工具执行后钩子 — 记忆记录 + 生命周期 + 技能打包 + 进化反馈"""
         # 1. 工具记忆记录（闭环学习核心）
         if self.tool_memory:
             try:
@@ -453,6 +453,19 @@ class ToolExecutor:
                 )
             except Exception as e:
                 logger.warning(f"技能打包器记录失败: {e}")
+
+        # 4. 进化系统反馈（权重更新 + 生命周期评估）
+        evolution = getattr(self._agent, "evolution", None)
+        if evolution:
+            try:
+                evolution.on_after_tool_execution(
+                    tool_name=tool_name,
+                    success=success,
+                    context=user_input[:100],
+                    latency=execution_time,
+                )
+            except Exception as e:
+                logger.warning(f"进化系统反馈失败: {e}")
 
     # ================================================================
     # 辅助方法

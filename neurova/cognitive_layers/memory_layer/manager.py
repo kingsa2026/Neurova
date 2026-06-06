@@ -66,6 +66,11 @@ class MemoryManager:
         self._forgetting_recovery = None
         self._emotion_conduction = None
         self._write_queue = None
+        
+        # 情感模块（立即初始化）
+        from neurova.cognitive_layers.memory_layer.modules.emotion_module import EmotionModule
+        self._emotion_module = EmotionModule(db_path=db_path)
+        self._emotion_module.init()
 
         # 统计
         self._stats = {
@@ -94,16 +99,30 @@ class MemoryManager:
     def user_id(self) -> str:
         return self._user_id
 
+    @property
+    def emotion_module(self):
+        """情感模块"""
+        return self._emotion_module
+
     # ────── Core Memory Operations ──────
 
     def remember(self, content: str, category: str = "general",
                  memory_type: str = "semantic", temperature: float = 100.0,
                  importance: float = 50.0, metadata: Optional[Dict[str, Any]] = None,
+                 emotion: Optional[str] = None,
                  **kwargs) -> str:
         """存储一条记忆"""
         with self._lock:
             self._counter += 1
             mem_id = kwargs.get("id", f"mem_{self._counter:06d}")
+
+            # 处理 emotion 参数
+            emotion_val = EmotionType.NEUTRAL
+            if emotion:
+                try:
+                    emotion_val = EmotionType(emotion) if isinstance(emotion, str) else emotion
+                except (ValueError, KeyError):
+                    emotion_val = EmotionType.NEUTRAL
 
             mem = Memory(
                 id=mem_id,
@@ -112,6 +131,7 @@ class MemoryManager:
                 category=MemoryCategory(category) if isinstance(category, str) else category,
                 temperature=temperature,
                 importance=importance,
+                emotion=emotion_val,
                 metadata=metadata or {},
                 agent_id=self._agent_id,
                 user_id=self._user_id,
@@ -119,6 +139,16 @@ class MemoryManager:
             self._memories[mem_id] = mem
             self._stats["remember_count"] += 1
             self._stats["total_memories"] = len(self._memories)
+
+            # 自动情感标注（如果 content 包含情感关键词）
+            if self._emotion_module and not emotion:
+                try:
+                    emotion_state = self._emotion_module.analyze_text_emotion(content)
+                    if emotion_state and emotion_state.primary_emotion.value != "neutral":
+                        self._emotion_module.set_emotion(mem_id, emotion_state)
+                        mem.emotion = emotion_state.primary_emotion
+                except Exception:
+                    pass
 
             # 发射事件
             self._bus.emit(MemoryEvent(
@@ -189,6 +219,12 @@ class MemoryManager:
             mem.importance = kwargs["importance"]
         if "category" in kwargs:
             mem.category = MemoryCategory(kwargs["category"]) if isinstance(kwargs["category"], str) else kwargs["category"]
+        if "lifecycle_stage" in kwargs:
+            stage_val = kwargs["lifecycle_stage"]
+            if isinstance(stage_val, str):
+                mem.lifecycle_stage = LifecycleStage(stage_val)
+            elif isinstance(stage_val, LifecycleStage):
+                mem.lifecycle_stage = stage_val
         mem.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
         self._bus.emit(MemoryEvent(
             type=MemoryEvent.MEMORY_UPDATED,
@@ -223,6 +259,11 @@ class MemoryManager:
             mems = list(self._memories.values())
             mems.sort(key=lambda m: m.created_at, reverse=True)
             return [m.to_dict() for m in mems[offset:offset + limit]]
+
+    def get_all_memories(self) -> List[Dict[str, Any]]:
+        """获取所有记忆（用于睡眠整合）"""
+        with self._lock:
+            return [m.to_dict() for m in self._memories.values()]
 
     def query_memories(self, **filters) -> List[Dict[str, Any]]:
         """查询记忆（高级过滤）"""
@@ -527,7 +568,35 @@ class MemoryManager:
     # ────── Advanced Features (delegated stubs) ──────
 
     def get_memories_by_emotion(self, emotion: str, limit: int = 10) -> List[Dict[str, Any]]:
-        return []
+        """获取带有特定情感的记忆"""
+        if not self._emotion_module:
+            return []
+        
+        from neurova.cognitive_layers.memory_layer.modules.emotion_module import EmotionType
+        try:
+            emotion_type = EmotionType(emotion)
+        except ValueError:
+            return []
+        
+        memory_ids = self._emotion_module.get_emotional_memories(
+            emotion_type=emotion_type,
+            min_intensity=0.3,
+            limit=limit,
+        )
+        
+        # 将 memory_id 转为完整的记忆字典
+        results = []
+        for mid in memory_ids:
+            mem = self._memories.get(mid)
+            if mem:
+                mem_dict = mem.to_dict()
+                # 附加情感信息
+                emotion_state = self._emotion_module.get_emotion(mid)
+                if emotion_state:
+                    mem_dict["emotion_state"] = emotion_state.to_dict()
+                results.append(mem_dict)
+        
+        return results
 
     def remember_with_trace(self, content: str, trace: Dict[str, Any], **kwargs) -> str:
         return self.remember(content, **kwargs)

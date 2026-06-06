@@ -288,17 +288,17 @@ class ChatPipeline:
                 error_msg = ctx.auto_execute_result.get("error", "未知错误")
                 logger.warning(f"工具自动执行失败: {tool_name}, 错误: {error_msg}")
                 ctx.tool_decision = "failed"
-                self._record_tool_failure(tool_name, ctx.user_input, error_msg)
+                await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
         except _asyncio.TimeoutError:
             logger.warning(f"工具自动执行超时: {tool_name} (>{MUSCLE_TIMEOUT}s)")
             ctx.tool_decision = "timeout"
             ctx.auto_execute_result = None
 
-    def _record_tool_failure(self, tool_name: str, user_input: str, error_msg: str):
+    async def _record_tool_failure(self, tool_name: str, user_input: str, error_msg: str):
         """记录工具失败教训"""
         try:
             if hasattr(self._agent, '_record_tool_failure_lesson'):
-                self._agent._record_tool_failure_lesson(tool_name, user_input, error_msg)
+                await self._agent._record_tool_failure_lesson(tool_name, user_input, error_msg)
         except Exception:
             pass
 

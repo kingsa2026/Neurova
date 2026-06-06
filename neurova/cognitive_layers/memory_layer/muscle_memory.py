@@ -107,14 +107,15 @@ class MuscleMemory:
     三层记忆架构，实现条件反射级的工具使用记忆。
     """
 
-    def __init__(self, storage_path: Optional[str] = None):
+    def __init__(self, storage_path: Optional[str] = None, storage_dir: Optional[str] = None, **kwargs):
         """
         初始化肌肉记忆系统
 
         Args:
             storage_path: 持久化存储路径
+            storage_dir: storage_path 的别名（向后兼容）
         """
-        self._storage_path = storage_path
+        self._storage_path = storage_path or storage_dir
         self._lock = threading.RLock()
 
         # 三层存储
@@ -168,6 +169,50 @@ class MuscleMemory:
         # L3: 广泛检索
         l3_matches = self._match_l3(tool_name, fingerprint, vector_fp)
         results.extend(l3_matches)
+
+        # 去重并按置信度排序
+        seen = set()
+        unique_results = []
+        for item, conf in results:
+            if item.id not in seen:
+                seen.add(item.id)
+                unique_results.append((item, conf))
+
+        unique_results.sort(key=lambda x: x[1], reverse=True)
+        return unique_results[:top_k]
+
+    def match_by_query(
+        self,
+        query: str,
+        top_k: int = 5,
+    ) -> List[Tuple[MuscleMemoryItem, float]]:
+        """
+        按查询文本匹配（不指定工具名，跨工具搜索）
+
+        用于 ToolMemoryIntegration.check_tool_memory() 中的肌肉记忆路径。
+
+        Args:
+            query: 查询文本
+            top_k: 返回数量
+
+        Returns:
+            [(item, confidence)] 列表，按置信度降序
+        """
+        fingerprint = self._extract_keywords(query)
+        vector_fp = self._text_to_embedding_hash(query)
+
+        results = []
+
+        # 搜索所有层级（不按工具名过滤）
+        for store, min_conf in [
+            (self._l1, 0.5),
+            (self._l2, 0.3),
+            (self._l3, 0.2),
+        ]:
+            for item_id, item in store.items():
+                conf = self._compute_confidence(item, fingerprint, vector_fp)
+                if conf > min_conf:
+                    results.append((item, conf))
 
         # 去重并按置信度排序
         seen = set()

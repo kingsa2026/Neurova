@@ -273,7 +273,7 @@ class Memory:
             "category": self.category.value,
             "lifecycle_stage": self.lifecycle_stage.value,
             "perspective": self.perspective.value,
-            "emotion": self.emotion.value,
+            "emotion": self.emotion.value if hasattr(self.emotion, 'value') else str(self.emotion),
             "temperature": self.temperature,
             "importance": self.importance,
             "access_count": self.access_count,

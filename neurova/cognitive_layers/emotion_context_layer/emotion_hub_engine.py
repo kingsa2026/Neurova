@@ -139,6 +139,9 @@ class EmotionHubEngine:
         """
         self._agent_id = agent_id
         
+        # 线程锁（必须在 _init_emotion_state 之前初始化）
+        self._lock = threading.RLock()
+        
         # 情感状态：17种情感的强度值 (0-1)
         self._emotion_state: Dict[str, float] = {}
         self._init_emotion_state()
@@ -162,9 +165,6 @@ class EmotionHubEngine:
             "dominant_emotion_changes": 0,
             "conduction_events": 0,
         }
-        
-        # 线程安全
-        self._lock = threading.RLock()
         
         logger.info(f"EmotionHubEngine 初始化完成 (agent_id={agent_id})")
     

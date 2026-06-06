@@ -205,9 +205,15 @@ class IdleTimeTracker(BaseModule):
         try:
             memories = self._memory_manager.get_all_memories()
             if memories:
-                result = self._sleep_consolidation.run_sleep_cycle(memories)
+                # 转换Dict为MemoryRecord
+                from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord
+                memory_records = [MemoryRecord.from_dict(m) for m in memories]
+                result = self._sleep_consolidation.run_sleep_cycle(memory_records)
                 self._last_consolidation_result = result
                 self.log_info(f"Consolidation completed: {len(memories)} memories processed")
+                
+                # 写回合并后的记忆
+                self._write_back_consolidated_memories(result)
 
                 # 通知回调
                 for callback in self._callbacks.get('consolidation', []):
@@ -217,6 +223,56 @@ class IdleTimeTracker(BaseModule):
                         self.log_error(f"Error in consolidation callback: {e}")
         except Exception as e:
             self.log_error(f"Error during consolidation: {e}")
+    
+    def _write_back_consolidated_memories(self, result: Dict) -> None:
+        """将合并后的记忆写回MemoryManager"""
+        if not self._memory_manager:
+            return
+            
+        try:
+            merged_memories = result.get("merged_memories", [])
+            merge_results = result.get("merge_results", [])
+            
+            # 1. 删除原始记忆（被合并的）
+            source_ids = set()
+            for merge_result in merge_results:
+                source_ids.update(merge_result.source_ids)
+            
+            # 2. 更新或添加合并后的记忆
+            for memory in merged_memories:
+                if memory.merged_from:
+                    # 这是合并后的新记忆，添加到MemoryManager
+                    content = memory.content
+                    categories = memory.categories[0] if memory.categories else "general"
+                    self._memory_manager.remember(
+                        content=content,
+                        category=categories,
+                        importance=memory.importance,
+                        temperature=memory.temperature,
+                    )
+                    self.log_debug(f"Added merged memory: {memory.id}")
+                else:
+                    # 这是未合并的原始记忆，更新其状态
+                    if memory.is_archived:
+                        # 归档的记忆，更新生命周期阶段
+                        self._memory_manager.update_memory(
+                            memory_id=memory.id,
+                            lifecycle_stage="archived",
+                            temperature=memory.temperature,
+                        )
+                        self.log_debug(f"Archived memory: {memory.id}")
+                    else:
+                        # 活跃的记忆，更新温度
+                        self._memory_manager.update_memory_temperature(
+                            memory_id=memory.id,
+                            interaction_type="consolidation",
+                        )
+                        self.log_debug(f"Updated memory temperature: {memory.id}")
+            
+            self.log_info(f"Write-back completed: {len(merged_memories)} memories updated")
+            
+        except Exception as e:
+            self.log_error(f"Error during write-back: {e}")
 
     def get_last_consolidation_result(self) -> Optional[Dict[str, Any]]:
         """获取最近一次巩固结果"""

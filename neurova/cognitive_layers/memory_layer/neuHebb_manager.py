@@ -126,6 +126,60 @@ class NeuHebbManager:
 
         return hebbs
 
+    def generate_from_conversation(
+        self,
+        user_input: str,
+        reply: str,
+        session_id: str = "default",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[NeurovaHebb]:
+        """
+        从对话内容生成 NeurovaHebb（Evocate 闭环的核心生成方法）。
+
+        将对话视为文档，提取结构化推理记忆。
+
+        Args:
+            user_input: 用户输入
+            reply: 助手回复
+            session_id: 会话 ID
+            metadata: 可选的元数据
+
+        Returns:
+            生成的 NeurovaHebb 列表
+        """
+        # 1. 构建文档内容
+        content = f"用户: {user_input}\n助手: {reply}"
+
+        # 2. 生成唯一的 document_id（使用会话 ID + 时间戳）
+        from datetime import datetime, timezone
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        document_id = f"conversation_{session_id}_{timestamp}"
+
+        # 3. 构建对话特定的元数据
+        conversation_metadata = {
+            "source": "conversation",
+            "session_id": session_id,
+            "user_input_length": len(user_input),
+            "reply_length": len(reply),
+        }
+        if metadata:
+            conversation_metadata.update(metadata)
+
+        # 4. 委托给 generate_neurova_hebb
+        hebbs = self.generate_neurova_hebb(
+            document_id=document_id,
+            content=content,
+            metadata=conversation_metadata,
+        )
+
+        if hebbs:
+            logger.info(
+                "Generated %d NeurovaHebbs from conversation (session: %s)",
+                len(hebbs), session_id,
+            )
+
+        return hebbs
+
     def retrieve_neurova_hebb(self, query: str) -> List[NeurovaHebb]:
         """
         检索与查询相关的 NeurovaHebb。

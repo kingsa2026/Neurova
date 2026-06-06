@@ -2,10 +2,10 @@
 上下文池设置API - Context Pool Settings Endpoint
 
 提供以下API:
-1. 获取上下文池设置 (GET /api/v1/context/pool-settings)
-2. 更新上下文池设置 (PUT /api/v1/context/pool-settings)
-3. 获取特定模型的Token预算 (GET /api/v1/context/pool-settings/token-budget/{model_name})
-4. 测试Token预算计算 (POST /api/v1/context/pool-settings/test-budget)
+1. 获取上下文池设置 (GET /api/v1/context-pool/pool-settings)
+2. 更新上下文池设置 (PUT /api/v1/context-pool/pool-settings)
+3. 获取特定模型的Token预算 (GET /api/v1/context-pool/pool-settings/token-budget/{model_name})
+4. 测试Token预算计算 (POST /api/v1/context-pool/pool-settings/test-budget)
 """
 
 from __future__ import annotations

@@ -51,6 +51,8 @@ class PatternMiner:
         
         # 存储所有序列
         self._sequences: List[List[str]] = []
+        # 存储序列上下文
+        self._contexts: List[str] = []
         # 存储所有工具
         self._all_tools: Set[str] = set()
         # 存储挖掘结果
@@ -68,12 +70,13 @@ class PatternMiner:
         """统计唯一工具数"""
         return len(self._all_tools)
     
-    def add_sequence(self, sequence) -> None:
+    def add_sequence(self, sequence, context: str = "") -> None:
         """
         添加工具调用序列
         
         Args:
             sequence: 工具调用序列，可以是字符串列表或 ToolEntry 对象列表
+            context: 上下文描述（可选）
         """
         # 提取工具名称
         tool_names = []
@@ -89,6 +92,10 @@ class PatternMiner:
         if tool_names:
             self._sequences.append(tool_names)
             self._all_tools.update(tool_names)
+            if context:
+                self._contexts.append(context)
+            else:
+                self._contexts.append("")
             logger.debug(f"Added sequence: {tool_names}")
     
     def mine(self) -> List[FrequentPattern]:
@@ -128,6 +135,7 @@ class PatternMiner:
     def reset(self) -> None:
         """清空所有数据"""
         self._sequences.clear()
+        self._contexts.clear()
         self._all_tools.clear()
         self._patterns.clear()
         logger.info("PatternMiner reset")

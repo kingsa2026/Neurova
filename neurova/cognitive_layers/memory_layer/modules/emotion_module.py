@@ -1,12 +1,15 @@
 """
 EmotionModule — 情感模块
 
-管理与记忆关联的情感状态
+管理与记忆关联的情感状态，支持 SQLite 持久化。
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import sqlite3
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
@@ -67,17 +70,76 @@ class EmotionModule:
     - 情感标注
     - 情感检索
     - 情感影响记忆温度
+    - SQLite 持久化
     """
     
-    def __init__(self, emotion_weight: float = 0.3):
+    def __init__(self, emotion_weight: float = 0.3, db_path: Optional[str] = None):
         """
         Args:
             emotion_weight: 情感对记忆温度的影响权重
+            db_path: SQLite 数据库路径（None 则仅内存）
         """
         self._emotion_weight = emotion_weight
         self._memory_emotions: Dict[str, EmotionState] = {}
         self._lock = threading.RLock()
         self._initialized = False
+        self._db_path = db_path
+        self._conn: Optional[sqlite3.Connection] = None
+        
+        if db_path:
+            self._init_db()
+    
+    def _init_db(self) -> None:
+        """初始化 SQLite 数据库"""
+        try:
+            self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS memory_emotions (
+                    memory_id TEXT PRIMARY KEY,
+                    emotion_data TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            self._conn.commit()
+            
+            # 从数据库加载到内存
+            cursor = self._conn.execute("SELECT memory_id, emotion_data FROM memory_emotions")
+            for row in cursor.fetchall():
+                try:
+                    data = json.loads(row[1])
+                    self._memory_emotions[row[0]] = EmotionState.from_dict(data)
+                except Exception:
+                    pass
+            
+            logger.debug(f"EmotionModule DB loaded: {len(self._memory_emotions)} emotions")
+        except Exception as e:
+            logger.warning(f"EmotionModule DB init failed: {e}")
+            self._conn = None
+    
+    def _save_to_db(self, memory_id: str, emotion: EmotionState) -> None:
+        """保存情感到数据库"""
+        if not self._conn:
+            return
+        try:
+            data = json.dumps(emotion.to_dict())
+            self._conn.execute("""
+                INSERT OR REPLACE INTO memory_emotions (memory_id, emotion_data, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+            """, (memory_id, data))
+            self._conn.commit()
+        except Exception as e:
+            logger.debug(f"EmotionModule DB save failed: {e}")
+    
+    def _delete_from_db(self, memory_id: str) -> None:
+        """从数据库删除情感"""
+        if not self._conn:
+            return
+        try:
+            self._conn.execute("DELETE FROM memory_emotions WHERE memory_id = ?", (memory_id,))
+            self._conn.commit()
+        except Exception as e:
+            logger.debug(f"EmotionModule DB delete failed: {e}")
     
     @property
     def name(self) -> str:
@@ -93,6 +155,12 @@ class EmotionModule:
     def shutdown(self) -> None:
         """关闭模块"""
         self._initialized = False
+        if self._conn:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
         logger.info("EmotionModule shutdown")
     
     def set_emotion(
@@ -109,6 +177,7 @@ class EmotionModule:
         """
         with self._lock:
             self._memory_emotions[memory_id] = emotion
+            self._save_to_db(memory_id, emotion)
     
     def get_emotion(self, memory_id: str) -> Optional[EmotionState]:
         """获取记忆的情感状态"""
@@ -235,7 +304,10 @@ class EmotionModule:
     def remove_emotion(self, memory_id: str) -> bool:
         """移除记忆的情感标注"""
         with self._lock:
-            return self._memory_emotions.pop(memory_id, None) is not None
+            result = self._memory_emotions.pop(memory_id, None) is not None
+            if result:
+                self._delete_from_db(memory_id)
+            return result
     
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""

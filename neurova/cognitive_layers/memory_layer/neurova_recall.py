@@ -300,10 +300,62 @@ class NeurovaRecallEngine:
         return []
     
     def _channel_emotion(self, query: str, limit: int) -> List[RecalledMemory]:
-        """情感通道（情感相似度）"""
-        # 简化实现
+        """情感通道（情感相似度）
+        
+        检索与查询文本情感相似的记忆：
+        1. 分析查询文本的情感
+        2. 搜索相同情感类型的记忆
+        3. 按情感强度排序
+        """
         logger.debug(f"情感通道检索: {query}")
-        return []
+        
+        if not self.memory_manager:
+            return []
+        
+        try:
+            # 分析查询情感
+            from neurova.cognitive_layers.memory_layer.modules.emotion_module import EmotionModule
+            emotion_module = getattr(self.memory_manager, 'emotion_module', None)
+            if not emotion_module:
+                return []
+            
+            # 分析查询情感
+            emotion_state = emotion_module.analyze_text_emotion(query)
+            if not emotion_state or emotion_state.primary_emotion.value == "neutral":
+                return []
+            
+            # 搜索相同情感的记忆
+            memory_ids = emotion_module.get_emotional_memories(
+                emotion_type=emotion_state.primary_emotion,
+                min_intensity=0.3,
+                limit=limit,
+            )
+            
+            results = []
+            for mid in memory_ids:
+                mem_dict = self.memory_manager.recall(query="", limit=1)
+                # 找到对应记忆
+                mem_obj = self.memory_manager._memories.get(mid)
+                if mem_obj:
+                    mem_emotion = emotion_module.get_emotion(mid)
+                    score = mem_emotion.intensity if mem_emotion else 0.5
+                    
+                    results.append(RecalledMemory(
+                        memory_id=mid,
+                        content=mem_obj.content,
+                        score=score,
+                        channel=RecallChannel.EMOTION,
+                        metadata={
+                            "emotion": emotion_state.primary_emotion.value,
+                            "intensity": emotion_state.intensity,
+                        },
+                    ))
+            
+            return results
+            
+        except Exception as e:
+            logger.debug(f"情感通道检索失败: {e}")
+            return []
     
     def _fusion_score(self, memory: RecalledMemory, query: str) -> float:
         """计算融合分数"""

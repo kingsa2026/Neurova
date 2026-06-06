@@ -5,14 +5,14 @@ from __future__ import annotations
 
 提供渠道适配器的配置、状态查询、Webhook 回调处理等 API。
 
-路由:
-- GET  /api/channels                    - 列出所有渠道状态
-- GET  /api/channels/{type}             - 获取指定渠道状态
-- POST /api/channels/{type}/connect     - 连接指定渠道
-- POST /api/channels/{type}/disconnect  - 断开指定渠道
-- POST /api/channels/{type}/send        - 通过指定渠道发送消息
-- POST /api/channels/{type}/webhook     - Webhook 回调入口（飞书/钉钉/企微）
-- POST /api/channels/{type}/verify      - URL 验证（飞书/企微）
+路由 (注册前缀: /api/v1/channel-adapters):
+- GET  /api/v1/channel-adapters/channels                    - 列出所有渠道状态
+- GET  /api/v1/channel-adapters/channels/{type}             - 获取指定渠道状态
+- POST /api/v1/channel-adapters/channels/{type}/connect     - 连接指定渠道
+- POST /api/v1/channel-adapters/channels/{type}/disconnect  - 断开指定渠道
+- POST /api/v1/channel-adapters/channels/{type}/send        - 通过指定渠道发送消息
+- POST /api/v1/channel-adapters/channels/{type}/webhook     - Webhook 回调入口（飞书/钉钉/企微）
+- GET  /api/v1/channel-adapters/channels/health/all         - 渠道健康检查
 """
 
 import logging
@@ -26,7 +26,7 @@ from neurova.channels.manager import get_channel_manager
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/channels", tags=["渠道管理"])
+router = APIRouter(tags=["渠道管理"])
 
 # ============================================================
 # 请求/响应模型

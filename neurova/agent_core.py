@@ -515,23 +515,13 @@ class Agent:
             logger.warning(f"模型适配器初始化失败: {e}")
 
         # ===== P0: Phase 2+3 模块初始化 =====
-        # 1. PatternMiner — PrefixSpan 序列模式挖掘
+        # 1. PatternMiner + ToolGeneticEngine — 统一使用 EvolutionOrchestrator 的实例（避免双重实例）
         self.pattern_miner: Optional[PatternMiner] = None
-        if self.config.enable_evolution:
-            try:
-                self.pattern_miner = PatternMiner(min_support=3, min_length=2, max_length=10)
-                logger.info(f"Agent {self.config.name}: PatternMiner (序列模式挖掘) 已初始化")
-            except Exception as e:
-                logger.warning(f"PatternMiner 初始化失败: {e}")
-
-        # 2. ToolGeneticEngine — 工具基因编程引擎
         self.genetic_engine: Optional[ToolGeneticEngine] = None
-        if self.config.enable_evolution:
-            try:
-                self.genetic_engine = ToolGeneticEngine()
-                logger.info(f"Agent {self.config.name}: ToolGeneticEngine (基因编程) 已初始化")
-            except Exception as e:
-                logger.warning(f"ToolGeneticEngine 初始化失败: {e}")
+        if self.evolution:
+            self.pattern_miner = self.evolution.pattern_miner
+            self.genetic_engine = self.evolution.genetic_engine
+            logger.info(f"Agent {self.config.name}: PatternMiner + ToolGeneticEngine 从 EvolutionOrchestrator 统一获取")
 
         # 3. ToolLifecycleManager — 工具生命周期管理
         self.tool_lifecycle: Optional[ToolLifecycleManager] = None
@@ -861,6 +851,10 @@ class Agent:
                 memory_manager=self.memory_manager,
                 storage=self.storage,
             )
+            # 连接 IdleTimeTracker 和 SleepConsolidation
+            if hasattr(self, 'idle_tracker') and self.idle_tracker:
+                self.idle_tracker.set_sleep_consolidation(self.sleep_consolidation)
+                self.idle_tracker.set_memory_manager(self.memory_manager)
             logger.info(f"Agent {self.config.name}: SleepConsolidation（睡眠整理）已初始化")
         except Exception as e:
             logger.warning(f"SleepConsolidation 初始化失败: {e}")
@@ -901,6 +895,11 @@ class Agent:
             evolution_orchestrator=evolution,
         )
         logger.info("PatternCrystallizer 初始化完成")
+        
+        # 将 crystallizer 注入到 EvolutionOrchestrator
+        if evolution and hasattr(evolution, 'crystallizer'):
+            evolution.crystallizer = self.crystallizer
+            logger.info("PatternCrystallizer 已注入到 EvolutionOrchestrator")
         
         # 4. 初始化 ReasoningTraceManager
         self.trace_manager = ReasoningTraceManager(
@@ -1098,7 +1097,7 @@ class Agent:
             tool_memory_result, user_input
         )
 
-    def _record_tool_failure_lesson(
+    async def _record_tool_failure_lesson(
         self,
         tool_name: str,
         user_input: str,
@@ -1125,15 +1124,26 @@ class Agent:
         try:
             glog = getattr(self, 'growth_log_manager', None)
             if glog:
-                glog.add_log(
-                    lesson=(
+                from neurova.cognitive_layers.meta_cognition_layer.growth_log import ReflectionType
+                entry = await glog.generate_log(
+                    type=ReflectionType.ERROR,
+                    title=f"工具失败: {tool_name}",
+                    content=(
                         f"工具「{tool_name}」肌肉记忆自动执行失败: {error_msg}。"
                         f"用户输入: {user_input[:200]}。"
                         f"下次遇到类似输入时应降低自动执行置信度。"
                     ),
-                    reflection_type="tool_failure",
+                    context={
+                        "tool_name": tool_name,
+                        "error_msg": error_msg,
+                        "user_input": user_input[:200],
+                        "trigger": "tool_failure",
+                    },
+                    insights=[f"工具 {tool_name} 执行失败"],
+                    action_items=["降低自动执行置信度"],
+                    confidence=0.7,
                 )
-                logger.info(f"📝 已记录工具失败教训: {tool_name}")
+                logger.info(f"📝 已记录工具失败教训: {tool_name} (反思ID: {entry.id})")
         except Exception as e:
             logger.debug(f"反思日志记录跳过: {e}")
 
@@ -1500,7 +1510,10 @@ class Agent:
                 # 获取所有记忆进行整理
                 all_memories = self.memory_manager.recall(query="", limit=1000)
                 if all_memories:
-                    result = sleep_consolidation.run_sleep_cycle(memories=all_memories)
+                    # 转换Dict为MemoryRecord
+                    from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord
+                    memory_records = [MemoryRecord.from_dict(m) for m in all_memories]
+                    result = sleep_consolidation.run_sleep_cycle(memories=memory_records)
                     logger.info(f"💤 睡眠整理完成: {result}")
             except Exception as e:
                 logger.warning(f"睡眠整理失败: {e}")

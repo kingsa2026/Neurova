@@ -116,6 +116,7 @@ class ContextOrchestrator:
         experience_items: Optional[list] = None,
         relevant_memories: Optional[list] = None,
         session_context: Optional[list] = None,
+        crystallized_patterns: Optional[list] = None,
     ) -> List[Dict]:
         """构建完整的 LLM 上下文（Phase 2-5）
 
@@ -127,6 +128,7 @@ class ContextOrchestrator:
             experience_items: 经验检索结果（Phase 0.5）
             relevant_memories: 记忆检索结果（Phase 1）
             session_context: Session 文件提取的最近对话上下文（B3修复）
+            crystallized_patterns: 结晶经验检索结果（Phase 1.5）
 
         Returns:
             上下文消息列表，可直接传给 LLM
@@ -142,6 +144,15 @@ class ContextOrchestrator:
             system_instructions.append(self.personality)
         if self.config.constitution:
             system_instructions.append(self.config.constitution)
+
+        # Phase 2.3: 注入结晶经验
+        if crystallized_patterns:
+            crystallized_text = "\n".join([
+                f"- {p.get('content', str(p))} (置信度: {p.get('confidence', 0):.2f})"
+                for p in crystallized_patterns
+            ])
+            system_instructions.append(f"## 结晶经验\n{crystallized_text}")
+            logger.debug(f"注入 {len(crystallized_patterns)} 条结晶经验到上下文")
 
         # 使用配置的行为规则
         developer_instructions = list(self.config.behavior_rules)
@@ -163,10 +174,10 @@ class ContextOrchestrator:
         reflection_logs: list = []
         if self.growth_log_manager:
             try:
-                validated = self.growth_log_manager.get_validated_logs(limit=3)
-                pending = self.growth_log_manager.get_pending_logs(limit=2)
+                validated = await self.growth_log_manager.get_validated_logs(limit=3)
+                pending = await self.growth_log_manager.get_pending_logs(limit=2)
                 reflection_logs = [
-                    {"lesson": l.lesson, "reflection_type": l.reflection_type.value, "status": l.status.value}
+                    {"lesson": l.content, "reflection_type": l.type.value, "status": l.status.value}
                     for l in validated + pending
                 ]
             except Exception as e:

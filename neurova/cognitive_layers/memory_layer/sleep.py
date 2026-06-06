@@ -44,6 +44,50 @@ class MemoryRecord:
     categories: List[str] = field(default_factory=list)
     is_archived: bool = False
     merged_from: List[str] = field(default_factory=list)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "MemoryRecord":
+        """从字典创建MemoryRecord（兼容Memory.to_dict()格式）"""
+        # 处理日期时间
+        created_at = data.get("created_at")
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.fromisoformat(created_at)
+            except ValueError:
+                created_at = datetime.now()
+        elif not isinstance(created_at, datetime):
+            created_at = datetime.now()
+            
+        # 映射MemoryManager的字段到MemoryRecord
+        return cls(
+            id=data.get("id", ""),
+            content=data.get("content", ""),
+            embedding=data.get("embedding", []),
+            temperature=data.get("temperature", 50.0),
+            importance=data.get("importance", 0.5),
+            emotion_score=data.get("emotion_score", 0.0),
+            recall_count=data.get("recall_count", data.get("access_count", 0)),
+            created_at=created_at,
+            categories=data.get("categories", []),
+            is_archived=data.get("is_archived", False),
+            merged_from=data.get("merged_from", []),
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式（兼容Memory.from_dict()格式）"""
+        return {
+            "id": self.id,
+            "content": self.content,
+            "embedding": self.embedding,
+            "temperature": self.temperature,
+            "importance": self.importance,
+            "emotion_score": self.emotion_score,
+            "recall_count": self.recall_count,
+            "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else str(self.created_at),
+            "categories": self.categories,
+            "is_archived": self.is_archived,
+            "merged_from": self.merged_from,
+        }
 
 @dataclass
 class MergeResult:
@@ -68,21 +112,36 @@ class SleepConsolidation:
     def __init__(self,
                  similarity_threshold: float = 0.7,
                  archive_threshold: float = 20.0,
-                 decay_rate: float = 0.1):
+                 decay_rate: float = 0.1,
+                 memory_manager=None,
+                 storage=None):
         """初始化睡眠整合引擎
 
         Args:
             similarity_threshold: 语义相似度阈值（高于此值的记忆合并）
             archive_threshold: 归档温度阈值
             decay_rate: 睡眠期间的温度衰减率
+            memory_manager: 记忆管理器实例（可选）
+            storage: 存储实例（可选）
         """
         self.similarity_threshold = similarity_threshold
         self.archive_threshold = archive_threshold
         self.decay_rate = decay_rate
+        self.memory_manager = memory_manager
+        self.storage = storage
+        self._state: Dict[str, Any] = {}
 
         logger.debug(f"SleepConsolidation 初始化: "
                     f"similarity={similarity_threshold}, "
                     f"archive={archive_threshold}")
+
+    def set_state_value(self, key: str, value: Any) -> None:
+        """设置状态值（供 IdleTimeTracker 调用）"""
+        self._state[key] = value
+
+    def get_state_value(self, key: str, default: Any = None) -> Any:
+        """获取状态值"""
+        return self._state.get(key, default)
 
     def cluster_by_similarity(self, memories: List[MemoryRecord]) -> List[List[MemoryRecord]]:
         """基于语义相似度聚类
@@ -274,3 +333,33 @@ class SleepConsolidation:
                    f"活跃 {active_count}, 归档 {archived_count}")
 
         return merged_memories, merge_results
+
+    def run_sleep_cycle(self, memories: List[MemoryRecord], phase: str = "sleep") -> Dict[str, Any]:
+        """执行睡眠周期（向后兼容包装）
+
+        Args:
+            memories: 记忆列表
+            phase: 睡眠阶段（默认 "sleep"）
+
+        Returns:
+            Dict[str, Any]: 包含整合结果的字典
+        """
+        merged_memories, merge_results = self.consolidate(memories)
+        
+        # 计算统计信息
+        active_count = sum(1 for m in merged_memories if not m.is_archived)
+        archived_count = sum(1 for m in merged_memories if m.is_archived)
+        
+        # 构建结果字典（向后兼容）
+        result = {
+            "phase": phase,
+            "total_processed": len(memories),
+            "merged_count": len(merge_results),
+            "archived_count": archived_count,
+            "active_count": active_count,
+            "merged_memories": merged_memories,
+            "merge_results": merge_results,
+        }
+        
+        logger.info(f"睡眠周期完成: 阶段={phase}, 处理={len(memories)} 条记忆")
+        return result

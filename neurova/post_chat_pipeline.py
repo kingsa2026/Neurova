@@ -95,6 +95,9 @@ class PostChatPipeline:
         # 步骤 9: 经验记录
         await self._step_record_experience(user_input, reply, save_memory)
 
+        # 步骤 9.1: Evocate 生成（从对话中提取结构化推理记忆）
+        await self._step_evocate_generation(user_input, reply, actual_session_id)
+
         # 步骤 9.5-9.8: P0 后处理
         await self._step_p0_post_processing(save_memory)
 
@@ -171,19 +174,39 @@ class PostChatPipeline:
 
         if memory_manager:
             try:
-                memory_manager.remember(
-                    content=f"用户: {user_input}\n助手: {reply}",
+                # 保存用户消息记忆
+                user_memory_id = memory_manager.remember(
+                    content=f"用户: {user_input}",
                     memory_type="conversation",
                     metadata={"sender_type": "user", "session_id": session_id or "default"},
                 )
-                memory_manager.remember(
+                # 保存助手回复记忆
+                agent_memory_id = memory_manager.remember(
                     content=f"助手: {reply}",
                     memory_type="conversation",
                     metadata={"sender_type": "agent", "session_id": session_id or "default"},
                 )
                 logger.debug("对话已直接写入记忆数据库")
+                
+                # 保存情感信息到记忆
+                self._save_emotion_to_memory(memory_manager, user_input, user_memory_id)
             except Exception as e:
                 logger.warning(f"对话记忆保存失败: {e}")
+
+    def _save_emotion_to_memory(self, memory_manager, user_input: str, memory_id: str):
+        """将情感信息保存到记忆"""
+        emotion_module = getattr(memory_manager, "emotion_module", None)
+        if not emotion_module:
+            return
+        
+        try:
+            # 分析用户输入的情感
+            emotion_state = emotion_module.analyze_text_emotion(user_input)
+            if emotion_state and emotion_state.primary_emotion.value != "neutral":
+                emotion_module.set_emotion(memory_id, emotion_state)
+                logger.debug(f"情感已保存到记忆 {memory_id}: {emotion_state.primary_emotion.value}")
+        except Exception as e:
+            logger.debug(f"情感保存失败: {e}")
 
     async def _step_generate_tts(
         self,
@@ -267,20 +290,30 @@ class PostChatPipeline:
 
         try:
             reflection_type = self._infer_reflection_type(user_input, reply)
-            situation = f"用户输入: {user_input[:200]}\nAgent 回复: {reply[:200]}"
-            thought = "待验证"
-            trigger = self._get_reflection_trigger_reason(user_input, reply)
+            title = f"对话反思 - {reflection_type.value}"
+            content = f"用户输入: {user_input[:200]}\nAgent 回复: {reply[:200]}"
+            context = {
+                "trigger": self._get_reflection_trigger_reason(user_input, reply),
+                "source": "post_chat",
+                "user_input_length": len(user_input),
+                "reply_length": len(reply),
+            }
+            insights = []
+            action_items = []
+            confidence = 0.5
 
-            entry = growth_log_manager.generate_log(
-                reflection_type=reflection_type,
-                situation=situation,
-                thought=thought,
-                trigger="auto_reflection",
-                source="post_chat",
+            entry = await growth_log_manager.generate_log(
+                type=reflection_type,
+                title=title,
+                content=content,
+                context=context,
+                insights=insights,
+                action_items=action_items,
+                confidence=confidence,
             )
             if entry:
                 logger.info(
-                    f"🧠 反思日志已生成: {entry.id} (类型: {reflection_type.value}, 触发: {trigger})"
+                    f"🧠 反思日志已生成: {entry.id} (类型: {reflection_type.value}, 触发: {context['trigger']})"
                 )
         except Exception as e:
             logger.warning(f"Step 8.5 反思日志生成失败: {e}")
@@ -305,21 +338,31 @@ class PostChatPipeline:
 
         return False
 
-    def _infer_reflection_type(self, user_input: str, reply: str) -> ReflectionType:
-        """根据对话内容推断反思类型"""
+    def _infer_reflection_type(self, user_input: str, reply: str) -> 'ReflectionType':
+        """根据对话内容推断反思类型
+        
+        映射关系:
+        - 错误/失败 → ERROR
+        - 问题/怎么 → IMPROVEMENT
+        - 决定/选择 → STRATEGY
+        - 不确定性 → PERFORMANCE
+        - 默认 → INSIGHT
+        """
+        from neurova.cognitive_layers.meta_cognition_layer.growth_log import ReflectionType as RT
+
         user_lower = user_input.lower()
         reply_lower = reply.lower()
 
         if any(kw in user_lower for kw in ["错误", "失败", "出错", "bug"]):
-            return ReflectionType.ERROR_ANALYSIS
+            return RT.ERROR
         if any(kw in user_lower for kw in ["问题", "怎么", "如何", "为什么"]):
-            return ReflectionType.PROBLEM_SOLVING
+            return RT.IMPROVEMENT
         if any(kw in user_lower for kw in ["决定", "选择", "应该"]):
-            return ReflectionType.DECISION_MAKING
+            return RT.STRATEGY
         if any(kw in reply_lower for kw in self.REFLECTION_UNCERTAINTY_KEYWORDS):
-            return ReflectionType.INTERACTION
+            return RT.PERFORMANCE
 
-        return ReflectionType.LEARNING
+        return RT.INSIGHT
 
     def _get_reflection_trigger_reason(self, user_input: str, reply: str) -> str:
         """获取反思触发原因"""
@@ -357,27 +400,46 @@ class PostChatPipeline:
                 tm.get("tool_name", "unknown") for tm in tool_messages
             ))
 
-            # 先通过事件系统通知
+            # 记录经验到进化系统（只调用一次）
             if hasattr(evolution, "on_experience_recorded"):
-                evolution.on_experience_recorded(
-                    text=f"用户: {user_input[:100]}...\n助手: {reply[:200]}...",
-                    task=user_input,
-                    tools=tools_used,
-                    success=len(tool_messages) > 0,
-                )
-
-            # 再通过 PatternCrystallizer 记录经验（替代已删除的 experience_caller）
-            if len(tool_messages) > 0:
-                # 使用 evolution 的 on_experience_recorded 方法记录经验
                 evolution.on_experience_recorded(
                     text=f"用户: {user_input}\n助手: {reply}",
                     task=user_input,
                     tools=tools_used,
-                    success=True,
+                    success=len(tool_messages) > 0,
                 )
                 logger.info(f"📚 对话经验已记录 (工具: {tools_used})")
         except Exception as e:
             logger.warning(f"经验记录失败: {e}")
+
+    async def _step_evocate_generation(
+        self,
+        user_input: str,
+        reply: str,
+        session_id: str,
+    ):
+        """Step 9.1: 从对话中生成 NeurovaHebb（Evocate 闭环生成端）
+
+        数据流: 对话 → generate_from_conversation → 存储 NeurovaHebb → 下次检索注入
+        """
+        neuHebb_manager = getattr(self._agt, "neuHebb_manager", None)
+        if not neuHebb_manager:
+            logger.debug("NeuHebbManager 未初始化，跳过 Evocate 生成")
+            return
+
+        try:
+            hebbs = neuHebb_manager.generate_from_conversation(
+                user_input=user_input,
+                reply=reply,
+                session_id=session_id or "default",
+            )
+            if hebbs:
+                logger.info(
+                    f"🧠 Evocate: 从对话生成 %d 个 NeurovaHebb (session: %s)",
+                    len(hebbs), session_id,
+                )
+        except Exception as e:
+            logger.warning(f"Evocate 生成失败: {e}")
 
     async def _step_p0_post_processing(self, save_memory: bool):
         """P0: 执行所有 P0 接线模块的后处理"""
@@ -414,7 +476,8 @@ class PostChatPipeline:
 
     async def _step_pattern_mining(self):
         """9.6: PatternMiner 序列收集与挖掘"""
-        pattern_miner = getattr(self._agt, "pattern_miner", None)
+        evolution = getattr(self._agt, "evolution", None)
+        pattern_miner = getattr(evolution, "pattern_miner", None) if evolution else None
         if not pattern_miner:
             return
 
@@ -425,63 +488,62 @@ class PostChatPipeline:
 
             # 构建工具调用序列
             sequence = []
-            ToolEntry = None
-            try:
-                from neurova.evolution.genetic_engine import ToolEntry as _ToolEntry
-                ToolEntry = _ToolEntry
-            except ImportError:
-                pass
-
             for tm in tool_messages:
-                if ToolEntry:
-                    sequence.append(ToolEntry(
-                        tool_name=tm.get("tool_name", "unknown"),
-                    ))
-                else:
-                    sequence.append(tm.get("tool_name", "unknown"))
+                sequence.append(tm.get("tool_name", "unknown"))
 
+            # 添加序列并挖掘
             pattern_miner.add_sequence(sequence)
             patterns = pattern_miner.mine()
 
             if patterns:
-                logger.info(f"⛏️ PatternMiner 发现 {len(patterns)} 个频繁模式: {patterns}")
+                logger.info(f"⛏️ PatternMiner 发现 {len(patterns)} 个频繁模式")
 
             # 将模式反馈给 skill_packer
             skill_packer = getattr(self._agt, "skill_packer", None)
             if skill_packer and patterns:
                 templates = pattern_miner.to_skill_template_list()
                 for tmpl in templates:
-                    skill_packer.observe(tools=tmpl.tools, support=tmpl.support, auto_registered=True)
+                    skill_packer.observe(tools=tmpl["tools"], support=tmpl["support"], auto_registered=True)
         except Exception as e:
             logger.warning(f"PatternMiner 序列收集失败: {e}")
 
     async def _step_genetic_evolution(self):
         """9.7: ToolGeneticEngine 种子种群并进化"""
-        genetic_engine = getattr(self._agt, "genetic_engine", None)
-        if not genetic_engine:
+        evolution = getattr(self._agt, "evolution", None)
+        if not evolution:
+            return
+
+        genetic_engine = getattr(evolution, "genetic_engine", None)
+        pattern_miner = getattr(evolution, "pattern_miner", None)
+        if not genetic_engine or not pattern_miner:
             return
 
         try:
-            pattern_miner = getattr(self._agt, "pattern_miner", None)
-            if not pattern_miner or pattern_miner.sequence_count == 0:
+            if pattern_miner.sequence_count == 0:
                 return
 
             top_patterns = pattern_miner.get_top_patterns()
 
-            # 从模式构建基因
-            try:
-                from neurova.evolution.genetic_engine import ToolGenotype
-                for pattern in top_patterns:
-                    genotype = ToolGenotype(
-                        tools=pattern.tools,
-                        success_rate=pattern.success_rate if hasattr(pattern, "success_rate") else 0.5,
-                    )
-                    genetic_engine.add_to_population(genotype)
-            except (ImportError, AttributeError):
-                pass
+            # 从模式构建基因型种子
+            from neurova.evolution.genetic_engine import ToolGenotype
+            for pattern in top_patterns:
+                genotype = ToolGenotype(
+                    tool_sequence=pattern.tools,
+                    success_rate=0.5,
+                )
+                genetic_engine.add_to_population(genotype)
 
+            # 执行进化
             new_gen = genetic_engine.evolve()
             logger.info(f"🧬 ToolGeneticEngine 进化完成: 种群={len(genetic_engine.population)}, 新个体={len(new_gen)}")
+
+            # 将进化结果反馈到工具权重
+            for genotype in new_gen:
+                for tool_name in genotype.tools:
+                    if tool_name in evolution._registered_tools:
+                        # 高适应度个体的工具应获得权重提升
+                        if genotype.fitness > 0.5:
+                            evolution.tool_weights.update_weight(tool_name, True)
         except Exception as e:
             logger.warning(f"ToolGeneticEngine 进化失败: {e}")
 

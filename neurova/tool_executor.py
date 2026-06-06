@@ -146,8 +146,8 @@ class ToolExecutor:
         # 检查工具记忆
         if self.tool_memory:
             try:
-                # 检查工具记忆
-                memory_result = self.tool_memory.check_tool_memory(tool_name, params)
+                # check_tool_memory 接受 user_input 字符串
+                memory_result, _ = self.tool_memory.check_tool_memory(tool_name)
                 if memory_result and memory_result.get("confidence", 0) > 0.8:
                     # 使用记忆中的结果
                     return memory_result.get("result", {})
@@ -160,11 +160,76 @@ class ToolExecutor:
         # 记录工具使用
         if self.tool_memory:
             try:
-                self.tool_memory.record_tool_usage(tool_name, params, result)
+                self.tool_memory.record_tool_usage(
+                    tool_name=tool_name,
+                    success=result is not None,
+                    tool_params=params,
+                )
             except Exception as e:
                 logger.debug(f"工具记忆记录失败: {e}")
 
         return result
+
+    async def execute_from_memory_async(
+        self,
+        tool_memory_result: Dict[str, Any],
+        user_input: str,
+    ) -> Dict[str, Any]:
+        """从肌肉记忆结果自动执行工具（异步版本，支持超时控制）
+
+        Args:
+            tool_memory_result: 肌肉记忆匹配结果（来自 check_tool_memory）
+            user_input: 用户原始输入
+
+        Returns:
+            {"status": "success"|"failure", "result": ..., "tool_name": ..., "error": ...}
+        """
+        if not tool_memory_result:
+            return {"status": "failure", "error": "空的 tool_memory_result", "tool_name": ""}
+
+        tool_name = tool_memory_result.get("tool_name")
+        tool_source = tool_memory_result.get("tool_source")
+        tool_params = tool_memory_result.get("tool_params", tool_memory_result.get("tool_params_template", {}))
+
+        if not tool_name:
+            return {"status": "failure", "error": "ToolMemory 结果缺少 tool_name", "tool_name": ""}
+
+        logger.info(f"自动执行工具（异步）: {tool_name} (来源: {tool_source})")
+
+        self._messages_list.append({
+            "type": "tool_call",
+            "tool_name": tool_name,
+            "tool_source": tool_source,
+            "params": tool_params,
+            "timestamp": datetime.now().isoformat(),
+        })
+
+        try:
+            result = await self._execute_single_tool(tool_name, tool_params)
+            success = result is not None and "error" not in result
+
+            # 记录工具使用
+            if self.tool_memory:
+                try:
+                    self.tool_memory.record_tool_usage(
+                        tool_name=tool_name,
+                        success=success,
+                        problem_text=user_input,
+                        tool_source=tool_source,
+                        tool_params=tool_params,
+                    )
+                except Exception as e:
+                    logger.debug(f"工具记忆记录失败: {e}")
+
+            if success:
+                return {"status": "success", "result": result, "tool_name": tool_name}
+            else:
+                error_msg = result.get("error", "未知错误") if isinstance(result, dict) else "执行失败"
+                return {"status": "failure", "error": error_msg, "tool_name": tool_name, "result": result}
+
+        except Exception as e:
+            logger.error(f"工具自动执行异常: {tool_name}, {e}")
+            return {"status": "failure", "error": str(e), "tool_name": tool_name}
 
     async def execute_skill_tool(self, skill_name: str, params: Dict, context: Optional[Dict] = None) -> Dict:
         """
@@ -412,7 +477,11 @@ class ToolExecutor:
         # 记录工具使用统计
         if self.tool_memory:
             try:
-                self.tool_memory.record_tool_usage(tool_name, {}, result)
+                self.tool_memory.record_tool_usage(
+                    tool_name=tool_name,
+                    success=success,
+                    tool_params=result,
+                )
             except Exception as e:
                 logger.debug(f"工具记忆记录失败: {e}")
 

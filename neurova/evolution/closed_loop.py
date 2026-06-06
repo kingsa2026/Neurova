@@ -180,6 +180,7 @@ class EvolutionOrchestrator:
     def __init__(
         self,
         tool_lifecycle: Optional[Any] = None,
+        crystallizer: Optional[Any] = None,
     ):
         self.tool_weights = AdaptiveToolWeights()
         self.tool_lifecycle = tool_lifecycle or ToolLifecycleManager()
@@ -187,6 +188,7 @@ class EvolutionOrchestrator:
         self.genetic_engine = ToolGeneticEngine()
         self.tool_synthesizer = NLToolSynthesizer(self.pattern_miner)
         self.experience_feedback = ExperienceFeedback()
+        self.crystallizer = crystallizer
 
         # 工具注册表
         self._registered_tools: List[str] = []
@@ -282,8 +284,8 @@ class EvolutionOrchestrator:
         # 更新权重
         self.tool_weights.update_weight(tool_name, success, latency)
 
-        # 更新生命周期
-        self.tool_lifecycle.touch(tool_name, success=success)
+        # 更新生命周期（touch 只记录使用，不关心成败）
+        self.tool_lifecycle.touch(tool_name)
 
         # 可能触发生命周期评估
         self._maybe_evaluate_lifecycle()
@@ -318,6 +320,18 @@ class EvolutionOrchestrator:
         # 更新模式挖掘器
         if tools:
             self.pattern_miner.add_sequence(tools, context=task)
+
+        # 触发经验结晶
+        if self.crystallizer and tools:
+            for tool in tools:
+                try:
+                    self.crystallizer.observe(
+                        tool_name=tool,
+                        context=task,
+                        success=success,
+                    )
+                except Exception as e:
+                    logger.warning(f"经验结晶观察失败: {e}")
 
         logger.info(f"Experience recorded: task='{task}', tools={tools}, success={success}")
 

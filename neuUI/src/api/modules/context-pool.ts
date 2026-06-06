@@ -53,21 +53,21 @@ export interface TestBudgetResponse {
 export const contextPoolAPI = {
   /** 获取上下文池设置 */
   getSettings: () =>
-    request.get<PoolSettings>('/context/pool-settings'),
+    request.get<PoolSettings>('/context-pool/pool-settings'),
 
   /** 更新上下文池设置 */
   updateSettings: (data: UpdatePoolSettingsRequest) =>
-    request.put<PoolSettings>('/context/pool-settings', data),
+    request.put<PoolSettings>('/context-pool/pool-settings', data),
 
   /** 获取特定模型的 Token 预算 */
   getTokenBudget: (modelName: string) =>
     request.get<{ model_name: string; token_budget: number }>(
-      `/context/pool-settings/token-budget/${encodeURIComponent(modelName)}`
+      `/context-pool/pool-settings/token-budget/${encodeURIComponent(modelName)}`
     ),
 
   /** 测试 Token 预算计算 */
   testBudget: (data: TestBudgetRequest) =>
-    request.post<TestBudgetResponse['data']>('/context/pool-settings/test-budget', data),
+    request.post<TestBudgetResponse['data']>('/context-pool/pool-settings/test-budget', data),
 }
 
 export default contextPoolAPI
