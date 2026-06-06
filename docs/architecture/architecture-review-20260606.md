@@ -87,9 +87,11 @@ model_adapter, pattern_miner, ...
 
 **解决方案**：SubSystemContainer — 按职责分组的子系统容器
 
-### P1: chat() 方法过长（~580 行）
+### P1: ~~chat() 方法过长（~580 行）~~ ✅ 已完成
 
-`chat()` 方法（lines 1053-1635）承担了太多职责：
+`chat()` 方法已通过 ChatPipeline 提取，从 ~580 行减少到 39 行（-93%）。
+
+~~`chat()` 方法（lines 1053-1635）承担了太多职责：~~
 
 1. ToolMemory 检查（~50 行）
 2. 主动技能获取检查（~15 行）
@@ -179,28 +181,9 @@ class EvolutionSubSystems:
 
 **预期效果**：Agent.__init__ 从 ~360 行减少到 ~50 行
 
-### Phase 2: chat() 方法提取
+### Phase 2: ~~chat() 方法提取~~ ✅ 已完成
 
-将 chat() 中的步骤提取到 ChatPipeline：
-
-```python
-class ChatPipeline:
-    """对话流程管线"""
-    
-    async def execute(self, user_input, **kwargs):
-        context = ChatContext(user_input, **kwargs)
-        
-        await self._step_tool_memory_check(context)
-        await self._step_skill_acquisition(context)
-        await self._step_evocate_retrieval(context)
-        await self._step_build_context(context)
-        await self._step_llm_call(context)
-        await self._step_post_processing(context)
-        
-        return context.result
-```
-
-**预期效果**：chat() 从 ~580 行减少到 ~30 行
+已将 chat() 中的步骤提取到 ChatPipeline（706行），chat() 从 ~580 行减少到 39 行。
 
 ### Phase 3: 清理重复模块
 
