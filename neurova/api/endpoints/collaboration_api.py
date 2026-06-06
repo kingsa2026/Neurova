@@ -25,6 +25,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 导入协作服务
+try:
+    from neurova.collaboration.collaboration_isolation import get_collaboration_manager, CollaborationIsolationManager
+except ImportError:
+    logger.warning("Collaboration service not available")
+    get_collaboration_manager = None
+    CollaborationIsolationManager = None
+
 
 class CollaborationTemplate(BaseModel):
     """协作模板"""
@@ -63,8 +71,32 @@ async def get_collaboration_templates(
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
 ):
     """获取协作模板"""
-    # TODO: 实现真正的协作模板获取
-    return []
+    if get_collaboration_manager is None:
+        raise HTTPException(status_code=503, detail="Collaboration service not available")
+    
+    try:
+        manager = get_collaboration_manager()
+        
+        # 获取所有项目作为模板
+        projects = manager.list_projects(limit=limit)
+        
+        # 转换为模板格式
+        templates = []
+        for project in projects:
+            templates.append(CollaborationTemplate(
+                template_id=project.project_id,
+                name=project.name,
+                description=project.description,
+                workflow=project.metadata.get("workflow", {}),
+                participants=list(project.members.keys()),
+                created_at=project.created_at,
+                updated_at=project.updated_at,
+            ))
+        
+        return templates
+    except Exception as e:
+        logger.exception(f"Error getting collaboration templates: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get collaboration templates: {str(e)}")
 
 
 @router.post("/templates", response_model=CollaborationTemplate)
@@ -75,20 +107,40 @@ async def create_collaboration_template(
     """创建协作模板"""
     request_id = _get_request_id(request)
     
-    template_id = str(uuid.uuid4())
-    timestamp = time.time()
+    if get_collaboration_manager is None:
+        raise HTTPException(status_code=503, detail="Collaboration service not available")
     
-    # TODO: 实现真正的模板创建
-    
-    return CollaborationTemplate(
-        template_id=template_id,
-        name=body.name,
-        description=body.description,
-        workflow=body.workflow,
-        participants=body.participants,
-        created_at=timestamp,
-        updated_at=timestamp,
-    )
+    try:
+        manager = get_collaboration_manager()
+        
+        # 创建项目作为模板
+        project = manager.create_project(
+            name=body.name,
+            description=body.description,
+            metadata={"workflow": body.workflow}
+        )
+        
+        if project is None:
+            raise HTTPException(status_code=500, detail="Failed to create collaboration template")
+        
+        # 添加参与者
+        for participant_id in body.participants:
+            manager.add_member(project.project_id, participant_id)
+        
+        return CollaborationTemplate(
+            template_id=project.project_id,
+            name=project.name,
+            description=project.description,
+            workflow=body.workflow,
+            participants=list(project.members.keys()),
+            created_at=project.created_at,
+            updated_at=project.updated_at,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error creating collaboration template: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create collaboration template: {str(e)}")
 
 
 @router.get("/templates/{template_id}", response_model=CollaborationTemplate)
@@ -97,8 +149,30 @@ async def get_collaboration_template(
     template_id: str = Path(..., description="模板ID"),
 ):
     """获取协作模板详情"""
-    # TODO: 实现真正的模板获取
-    raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+    if get_collaboration_manager is None:
+        raise HTTPException(status_code=503, detail="Collaboration service not available")
+    
+    try:
+        manager = get_collaboration_manager()
+        project = manager.get_project(template_id)
+        
+        if project is None:
+            raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+        
+        return CollaborationTemplate(
+            template_id=project.project_id,
+            name=project.name,
+            description=project.description,
+            workflow=project.metadata.get("workflow", {}),
+            participants=list(project.members.keys()),
+            created_at=project.created_at,
+            updated_at=project.updated_at,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting collaboration template {template_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get collaboration template: {str(e)}")
 
 
 @router.put("/templates/{template_id}", response_model=CollaborationTemplate)
@@ -110,8 +184,56 @@ async def update_collaboration_template(
     """更新协作模板"""
     request_id = _get_request_id(request)
     
-    # TODO: 实现真正的模板更新
-    raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+    if get_collaboration_manager is None:
+        raise HTTPException(status_code=503, detail="Collaboration service not available")
+    
+    try:
+        manager = get_collaboration_manager()
+        project = manager.get_project(template_id)
+        
+        if project is None:
+            raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+        
+        # 更新项目信息
+        if body.name:
+            project.name = body.name
+        if body.description:
+            project.description = body.description
+        
+        # 更新工作流
+        if body.workflow:
+            project.metadata["workflow"] = body.workflow
+        
+        # 更新参与者
+        if body.participants:
+            # 移除现有成员（除了所有者）
+            current_members = list(project.members.keys())
+            for member_id in current_members:
+                if member_id != project.owner_id and member_id not in body.participants:
+                    manager.remove_member(template_id, member_id)
+            
+            # 添加新成员
+            for participant_id in body.participants:
+                if participant_id not in project.members:
+                    manager.add_member(template_id, participant_id)
+        
+        # 保存更新
+        manager._save_project(project)
+        
+        return CollaborationTemplate(
+            template_id=project.project_id,
+            name=project.name,
+            description=project.description,
+            workflow=project.metadata.get("workflow", {}),
+            participants=list(project.members.keys()),
+            created_at=project.created_at,
+            updated_at=project.updated_at,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error updating collaboration template {template_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update collaboration template: {str(e)}")
 
 
 @router.delete("/templates/{template_id}")
@@ -122,14 +244,27 @@ async def delete_collaboration_template(
     """删除协作模板"""
     request_id = _get_request_id(request)
     
-    # TODO: 实现真正的模板删除
+    if get_collaboration_manager is None:
+        raise HTTPException(status_code=503, detail="Collaboration service not available")
     
-    return {
-        "code": 0,
-        "message": f"Template '{template_id}' deleted",
-        "data": {"template_id": template_id},
-        "request_id": request_id,
-    }
+    try:
+        manager = get_collaboration_manager()
+        success = manager.delete_project(template_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+        
+        return {
+            "code": 0,
+            "message": f"Template '{template_id}' deleted",
+            "data": {"template_id": template_id},
+            "request_id": request_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error deleting collaboration template {template_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete collaboration template: {str(e)}")
 
 
 @router.post("/start")
@@ -140,15 +275,55 @@ async def start_collaboration(
     """启动协作"""
     request_id = _get_request_id(request)
     
-    # TODO: 实现真正的协作启动
+    if get_collaboration_manager is None:
+        raise HTTPException(status_code=503, detail="Collaboration service not available")
     
-    return {
-        "code": 0,
-        "message": "Collaboration started",
-        "data": {
-            "collaboration_id": str(uuid.uuid4()),
-            "template_id": body.template_id,
-            "participants": body.participants,
-        },
-        "request_id": request_id,
-    }
+    try:
+        manager = get_collaboration_manager()
+        
+        # 如果指定了模板，使用模板创建新项目
+        if body.template_id:
+            template_project = manager.get_project(body.template_id)
+            if template_project is None:
+                raise HTTPException(status_code=404, detail=f"Template '{body.template_id}' not found")
+            
+            # 基于模板创建新项目
+            new_project = manager.create_project(
+                name=f"Collaboration from {template_project.name}",
+                description=template_project.description,
+                metadata={
+                    "workflow": template_project.metadata.get("workflow", {}),
+                    "context": body.context,
+                    "template_id": body.template_id,
+                }
+            )
+        else:
+            # 创建新项目
+            new_project = manager.create_project(
+                name="New Collaboration",
+                description="Started from API",
+                metadata={"context": body.context}
+            )
+        
+        if new_project is None:
+            raise HTTPException(status_code=500, detail="Failed to create collaboration")
+        
+        # 添加参与者
+        for participant_id in body.participants:
+            manager.add_member(new_project.project_id, participant_id)
+        
+        return {
+            "code": 0,
+            "message": "Collaboration started",
+            "data": {
+                "collaboration_id": new_project.project_id,
+                "template_id": body.template_id,
+                "participants": list(new_project.members.keys()),
+            },
+            "request_id": request_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error starting collaboration: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start collaboration: {str(e)}")

@@ -25,6 +25,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 导入防火墙服务
+try:
+    from neurova.core.firewall import get_firewall, AgentFirewall
+except ImportError:
+    logger.warning("Firewall service not available")
+    get_firewall = None
+    AgentFirewall = None
+
 
 class FirewallRule(BaseModel):
     """防火墙规则"""
@@ -60,8 +68,76 @@ async def get_firewall_rules(
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
 ):
     """获取防火墙规则"""
-    # TODO: 实现真正的防火墙规则获取
-    return []
+    if get_firewall is None:
+        raise HTTPException(status_code=503, detail="Firewall service not available")
+    
+    try:
+        firewall = get_firewall()
+        global_rules = firewall.get_global_rules()
+        
+        # 转换为规则列表
+        rules = []
+        
+        # IP规则
+        for ip in global_rules.get("blocked_ips", []):
+            rules.append(FirewallRule(
+                rule_id=f"ip_block_{ip}",
+                name=f"Block IP {ip}",
+                rule_type="ip",
+                action="block",
+                value=ip,
+                enabled=True,
+                created_at=time.time(),
+                updated_at=time.time(),
+            ))
+        
+        # 路径规则
+        for path in global_rules.get("blocked_paths", []):
+            rules.append(FirewallRule(
+                rule_id=f"path_block_{path}",
+                name=f"Block path {path}",
+                rule_type="path",
+                action="block",
+                value=path,
+                enabled=True,
+                created_at=time.time(),
+                updated_at=time.time(),
+            ))
+        
+        # 速率限制规则
+        rules.append(FirewallRule(
+            rule_id="rate_limit_minute",
+            name="Rate limit per minute",
+            rule_type="rate_limit",
+            action="limit",
+            value=str(global_rules.get("rate_limit_per_minute", 60)),
+            enabled=True,
+            created_at=time.time(),
+            updated_at=time.time(),
+        ))
+        
+        rules.append(FirewallRule(
+            rule_id="rate_limit_hour",
+            name="Rate limit per hour",
+            rule_type="rate_limit",
+            action="limit",
+            value=str(global_rules.get("rate_limit_per_hour", 1000)),
+            enabled=True,
+            created_at=time.time(),
+            updated_at=time.time(),
+        ))
+        
+        # 过滤规则类型
+        if rule_type:
+            rules = [r for r in rules if r.rule_type == rule_type]
+        
+        # 限制数量
+        rules = rules[:limit]
+        
+        return rules
+    except Exception as e:
+        logger.exception(f"Error getting firewall rules: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get firewall rules: {str(e)}")
 
 
 @router.post("/rules", response_model=FirewallRule)
@@ -72,21 +148,58 @@ async def create_firewall_rule(
     """添加防火墙规则"""
     request_id = _get_request_id(request)
     
-    rule_id = str(uuid.uuid4())
-    timestamp = time.time()
+    if get_firewall is None:
+        raise HTTPException(status_code=503, detail="Firewall service not available")
     
-    # TODO: 实现真正的规则创建
-    
-    return FirewallRule(
-        rule_id=rule_id,
-        name=body.name,
-        rule_type=body.rule_type,
-        action=body.action,
-        value=body.value,
-        enabled=body.enabled,
-        created_at=timestamp,
-        updated_at=timestamp,
-    )
+    try:
+        firewall = get_firewall()
+        
+        # 根据规则类型更新防火墙配置
+        if body.rule_type == "ip":
+            if body.action == "block":
+                # 添加到IP黑名单
+                global_rules = firewall.get_global_rules()
+                blocked_ips = global_rules.get("blocked_ips", [])
+                if body.value not in blocked_ips:
+                    blocked_ips.append(body.value)
+                    firewall.update_global_rules({"blocked_ips": blocked_ips})
+            elif body.action == "allow":
+                # 添加到IP白名单
+                global_rules = firewall.get_global_rules()
+                allowed_ips = global_rules.get("allowed_ips", [])
+                if body.value not in allowed_ips:
+                    allowed_ips.append(body.value)
+                    firewall.update_global_rules({"allowed_ips": allowed_ips})
+        elif body.rule_type == "path":
+            if body.action == "block":
+                # 添加到路径黑名单
+                global_rules = firewall.get_global_rules()
+                blocked_paths = global_rules.get("blocked_paths", [])
+                if body.value not in blocked_paths:
+                    blocked_paths.append(body.value)
+                    firewall.update_global_rules({"blocked_paths": blocked_paths})
+        elif body.rule_type == "rate_limit":
+            # 更新速率限制
+            if "minute" in body.name.lower():
+                firewall.update_global_rules({"rate_limit_per_minute": int(body.value)})
+            elif "hour" in body.name.lower():
+                firewall.update_global_rules({"rate_limit_per_hour": int(body.value)})
+        
+        timestamp = time.time()
+        
+        return FirewallRule(
+            rule_id=f"{body.rule_type}_{body.action}_{body.value}",
+            name=body.name,
+            rule_type=body.rule_type,
+            action=body.action,
+            value=body.value,
+            enabled=body.enabled,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+    except Exception as e:
+        logger.exception(f"Error creating firewall rule: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create firewall rule: {str(e)}")
 
 
 @router.put("/rules/{rule_id}", response_model=FirewallRule)
@@ -98,8 +211,63 @@ async def update_firewall_rule(
     """更新防火墙规则"""
     request_id = _get_request_id(request)
     
-    # TODO: 实现真正的规则更新
-    raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
+    if get_firewall is None:
+        raise HTTPException(status_code=503, detail="Firewall service not available")
+    
+    try:
+        firewall = get_firewall()
+        
+        # 解析规则ID获取规则类型和值
+        parts = rule_id.split("_", 2)
+        if len(parts) < 3:
+            raise HTTPException(status_code=400, detail="Invalid rule ID format")
+        
+        rule_type, action, old_value = parts
+        
+        # 根据规则类型更新
+        if rule_type == "ip":
+            global_rules = firewall.get_global_rules()
+            if action == "block":
+                blocked_ips = global_rules.get("blocked_ips", [])
+                if old_value in blocked_ips:
+                    blocked_ips.remove(old_value)
+                    if body.value not in blocked_ips:
+                        blocked_ips.append(body.value)
+                    firewall.update_global_rules({"blocked_ips": blocked_ips})
+            elif action == "allow":
+                allowed_ips = global_rules.get("allowed_ips", [])
+                if old_value in allowed_ips:
+                    allowed_ips.remove(old_value)
+                    if body.value not in allowed_ips:
+                        allowed_ips.append(body.value)
+                    firewall.update_global_rules({"allowed_ips": allowed_ips})
+        elif rule_type == "path":
+            global_rules = firewall.get_global_rules()
+            if action == "block":
+                blocked_paths = global_rules.get("blocked_paths", [])
+                if old_value in blocked_paths:
+                    blocked_paths.remove(old_value)
+                    if body.value not in blocked_paths:
+                        blocked_paths.append(body.value)
+                    firewall.update_global_rules({"blocked_paths": blocked_paths})
+        
+        timestamp = time.time()
+        
+        return FirewallRule(
+            rule_id=rule_id,
+            name=body.name,
+            rule_type=body.rule_type,
+            action=body.action,
+            value=body.value,
+            enabled=body.enabled,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error updating firewall rule {rule_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update firewall rule: {str(e)}")
 
 
 @router.delete("/rules/{rule_id}")
@@ -110,14 +278,51 @@ async def delete_firewall_rule(
     """删除防火墙规则"""
     request_id = _get_request_id(request)
     
-    # TODO: 实现真正的规则删除
+    if get_firewall is None:
+        raise HTTPException(status_code=503, detail="Firewall service not available")
     
-    return {
-        "code": 0,
-        "message": f"Rule '{rule_id}' deleted",
-        "data": {"rule_id": rule_id},
-        "request_id": request_id,
-    }
+    try:
+        firewall = get_firewall()
+        
+        # 解析规则ID获取规则类型和值
+        parts = rule_id.split("_", 2)
+        if len(parts) < 3:
+            raise HTTPException(status_code=400, detail="Invalid rule ID format")
+        
+        rule_type, action, value = parts
+        
+        # 根据规则类型删除
+        if rule_type == "ip":
+            global_rules = firewall.get_global_rules()
+            if action == "block":
+                blocked_ips = global_rules.get("blocked_ips", [])
+                if value in blocked_ips:
+                    blocked_ips.remove(value)
+                    firewall.update_global_rules({"blocked_ips": blocked_ips})
+            elif action == "allow":
+                allowed_ips = global_rules.get("allowed_ips", [])
+                if value in allowed_ips:
+                    allowed_ips.remove(value)
+                    firewall.update_global_rules({"allowed_ips": allowed_ips})
+        elif rule_type == "path":
+            global_rules = firewall.get_global_rules()
+            if action == "block":
+                blocked_paths = global_rules.get("blocked_paths", [])
+                if value in blocked_paths:
+                    blocked_paths.remove(value)
+                    firewall.update_global_rules({"blocked_paths": blocked_paths})
+        
+        return {
+            "code": 0,
+            "message": f"Rule '{rule_id}' deleted",
+            "data": {"rule_id": rule_id},
+            "request_id": request_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error deleting firewall rule {rule_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete firewall rule: {str(e)}")
 
 
 @router.get("/blocked")
@@ -126,9 +331,24 @@ async def get_blocked_ips(
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
 ):
     """获取阻止列表"""
-    # TODO: 实现真正的阻止列表获取
-    return {
-        "code": 0,
-        "message": "success",
-        "data": {"blocked_ips": []},
-    }
+    if get_firewall is None:
+        raise HTTPException(status_code=503, detail="Firewall service not available")
+    
+    try:
+        firewall = get_firewall()
+        global_rules = firewall.get_global_rules()
+        
+        blocked_ips = global_rules.get("blocked_ips", [])[:limit]
+        blocked_paths = global_rules.get("blocked_paths", [])[:limit]
+        
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "blocked_ips": blocked_ips,
+                "blocked_paths": blocked_paths,
+            },
+        }
+    except Exception as e:
+        logger.exception(f"Error getting blocked list: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get blocked list: {str(e)}")

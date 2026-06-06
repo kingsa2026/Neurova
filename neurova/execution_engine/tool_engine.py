@@ -5,9 +5,11 @@ Neurova CogArch 1.0.0 的执行组件之一
 负责：智能工具选择、自动参数填充、安全执行、工具调用记录、工具链执行
 """
 
+from __future__ import annotations
+
 import asyncio
 import collections
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import datetime
 import enum
 import functools
@@ -19,208 +21,466 @@ import typing
 import uuid
 
 from enum import Enum
-from fastapi import Path
-from neurova.skills.models import Skill
-from collections import defaultdict
 
-# security imports
-import neurova.security.cognitive_security
-import neurova.security.constitution
-import neurova.security.tool_guard
+logger = logging.getLogger(__name__)
 
-# skills imports
-import neurova.skills.security_scanner
 
-def __annotate__(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+def cache_token(func_name: str, args: tuple, kwargs: dict) -> str:
+    """生成缓存键"""
+    import hashlib
+    key = f"{func_name}:{args}:{sorted(kwargs.items())}"
+    return hashlib.md5(key.encode()).hexdigest()
 
-"""
-生成缓存键
-"""
-def cache_to_ken(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
-def __annotate__(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+def cached(ttl: float = 300):
+    """缓存装饰器（简化版）"""
+    def decorator(func):
+        _cache: typing.Dict[str, typing.Tuple[float, typing.Any]] = {}
+        
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            key = cache_token(func.__name__, args, kwargs)
+            now = datetime.datetime.now().timestamp()
+            
+            if key in _cache:
+                ts, val = _cache[key]
+                if now - ts < ttl:
+                    return val
+            
+            result = await func(*args, **kwargs)
+            _cache[key] = (now, result)
+            return result
+        
+        wrapper._cache = _cache
+        return wrapper
+    return decorator
 
-"""
-缓存装饰器（简化版）
 
-参数:
-...
-"""
-def cached(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+class ToolStatus(Enum):
+    """工具状态"""
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    DEPRECATED = "deprecated"
+    DISABLED = "disabled"
 
-"""
-ToolStatus
-"""
-def ToolStatus(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
-"""
-ToolParameter
-"""
-def ToolParameter(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+@dataclass
+class ToolParameter:
+    """工具参数定义"""
+    name: str
+    type: str = "string"
+    description: str = ""
+    required: bool = False
+    default: typing.Any = None
+    enum_values: typing.Optional[typing.List[str]] = None
+    
+    def to_dict(self) -> typing.Dict[str, typing.Any]:
+        d = {"name": self.name, "type": self.type, "description": self.description, "required": self.required}
+        if self.default is not None:
+            d["default"] = self.default
+        if self.enum_values:
+            d["enum"] = self.enum_values
+        return d
 
-"""
-ToolDefinition
-"""
-def ToolDefinition(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
-"""
-ToolInvocation
-"""
-def ToolInvocation(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+@dataclass
+class ToolDefinition:
+    """工具定义"""
+    name: str
+    description: str = ""
+    parameters: typing.List[ToolParameter] = field(default_factory=list)
+    status: ToolStatus = ToolStatus.AVAILABLE
+    version: str = "1.0.0"
+    tags: typing.List[str] = field(default_factory=list)
+    owner: str = ""
+    shared_with: typing.List[str] = field(default_factory=list)
+    is_public: bool = False
+    
+    def to_dict(self) -> typing.Dict[str, typing.Any]:
+        return {
+            "name": self.name, "description": self.description,
+            "parameters": [p.to_dict() for p in self.parameters],
+            "status": self.status.value, "version": self.version,
+            "tags": self.tags, "owner": self.owner, "is_public": self.is_public
+        }
 
-"""
-ToolSelection
-"""
-def ToolSelection(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
-"""
-ToolCallingContext
-"""
-def ToolCallingContext(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+@dataclass
+class ToolInvocation:
+    """工具调用记录"""
+    invocation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    tool_name: str = ""
+    arguments: typing.Dict[str, typing.Any] = field(default_factory=dict)
+    result: typing.Any = None
+    error: typing.Optional[str] = None
+    start_time: typing.Optional[datetime.datetime] = None
+    end_time: typing.Optional[datetime.datetime] = None
+    duration: typing.Optional[float] = None
+    success: bool = True
+    
+    def to_dict(self) -> typing.Dict[str, typing.Any]:
+        return {
+            "invocation_id": self.invocation_id, "tool_name": self.tool_name,
+            "arguments": self.arguments, "error": self.error,
+            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "duration": self.duration, "success": self.success
+        }
 
-"""
-ToolVersion
-"""
-def ToolVersion(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
 
-"""
-ToolDiscoveryResult
-"""
-def ToolDiscoveryResult(*args, **kwargs):
-    """TODO: Auto-restored from .pyc, needs implementation"""
-    pass
+@dataclass
+class ToolSelection:
+    """工具选择结果"""
+    tool_name: str
+    confidence: float
+    reason: str = ""
+    parameters: typing.Dict[str, typing.Any] = field(default_factory=dict)
+
+
+@dataclass
+class ToolCallingContext:
+    """工具调用上下文"""
+    agent_id: str = ""
+    user_id: str = ""
+    session_id: str = ""
+    conversation_history: typing.List[typing.Dict[str, typing.Any]] = field(default_factory=list)
+    metadata: typing.Dict[str, typing.Any] = field(default_factory=dict)
+
+
+@dataclass
+class ToolVersion:
+    """工具版本"""
+    version: str
+    tool_func: typing.Optional[typing.Callable] = None
+    definition: typing.Optional[ToolDefinition] = None
+    created_at: datetime.datetime = field(default_factory=datetime.datetime.now)
+    is_active: bool = True
+
+
+@dataclass
+class ToolDiscoveryResult:
+    """工具发现结果"""
+    tools: typing.List[ToolDefinition] = field(default_factory=list)
+    source: str = ""
+    discovered_at: datetime.datetime = field(default_factory=datetime.datetime.now)
+
 
 class ToolEngine:
     """
-    ToolEngine
+    工具引擎
+    
+    管理工具注册、执行、版本控制、共享和发现。
     """
-    def __init__(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def register_tool(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def unregister_tool(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def get_tool(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def list_tools(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def get_tool_versions(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def get_tool_version(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def set_active_version(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def share_tool_with_user(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def unshare_tool_with_user(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def publish_tool(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def unpublish_tool(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def get_tools_shared_with_me(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def get_my_shared_tools(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def discover_public_tools(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def discover_tools(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def select_tools(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def prepare_arguments(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def execute_with_safeguards(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def chain_tools(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def _is_skill_tool(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def _scan_skill_tool(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def _validate_parameters(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def _validate_result(self, *args, **kwargs):
-        pass
-    def _rebuild_indexes(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def get_invocation(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def get_tool_history(self, *args, **kwargs):
-        pass
-    def __annotate__(self, *args, **kwargs):
-        pass
-    def clear_history(self, *args, **kwargs):
-        pass
+    
+    def __init__(self, config: typing.Dict[str, typing.Any] = None):
+        self._config = config or {}
+        self._lock = __import__('threading').RLock()
+        
+        # 工具注册表
+        self._tools: typing.Dict[str, ToolDefinition] = {}
+        self._tool_funcs: typing.Dict[str, typing.Callable] = {}
+        
+        # 版本控制
+        self._versions: typing.Dict[str, typing.List[ToolVersion]] = {}
+        
+        # 调用历史
+        self._invocations: collections.deque = collections.deque(maxlen=10000)
+        
+        # 共享记录
+        self._shared_tools: typing.Dict[str, typing.List[str]] = {}  # tool_name -> [user_ids]
+        
+        logger.info("ToolEngine 初始化完成")
+    
+    def register_tool(self, tool_name: str, tool_func: typing.Callable, description: str = "", 
+                      parameters: typing.List[ToolParameter] = None, tags: typing.List[str] = None) -> None:
+        """注册工具"""
+        with self._lock:
+            # 提取参数信息
+            if parameters is None:
+                parameters = self._extract_parameters(tool_func)
+            
+            definition = ToolDefinition(
+                name=tool_name,
+                description=description or (tool_func.__doc__ or "").strip(),
+                parameters=parameters,
+                tags=tags or []
+            )
+            
+            self._tools[tool_name] = definition
+            self._tool_funcs[tool_name] = tool_func
+            
+            # 创建初始版本
+            if tool_name not in self._versions:
+                self._versions[tool_name] = []
+            self._versions[tool_name].append(ToolVersion(
+                version="1.0.0",
+                tool_func=tool_func,
+                definition=definition
+            ))
+            
+            logger.debug(f"工具已注册: {tool_name}")
+    
+    def unregister_tool(self, tool_name: str) -> bool:
+        """取消注册工具"""
+        with self._lock:
+            if tool_name in self._tools:
+                del self._tools[tool_name]
+                del self._tool_funcs[tool_name]
+                logger.debug(f"工具已取消注册: {tool_name}")
+                return True
+            return False
+    
+    def get_tool(self, tool_name: str) -> typing.Optional[ToolDefinition]:
+        """获取工具定义"""
+        return self._tools.get(tool_name)
+    
+    def list_tools(self, status: ToolStatus = None, tags: typing.List[str] = None) -> typing.List[ToolDefinition]:
+        """列出工具"""
+        tools = list(self._tools.values())
+        if status:
+            tools = [t for t in tools if t.status == status]
+        if tags:
+            tools = [t for t in tools if any(tag in t.tags for tag in tags)]
+        return tools
+    
+    def get_tool_versions(self, tool_name: str) -> typing.List[ToolVersion]:
+        """获取工具版本列表"""
+        return self._versions.get(tool_name, [])
+    
+    def get_tool_version(self, tool_name: str, version: str) -> typing.Optional[ToolVersion]:
+        """获取特定版本"""
+        for v in self._versions.get(tool_name, []):
+            if v.version == version:
+                return v
+        return None
+    
+    def set_active_version(self, tool_name: str, version: str) -> bool:
+        """设置活跃版本"""
+        with self._lock:
+            for v in self._versions.get(tool_name, []):
+                if v.version == version:
+                    v.is_active = True
+                    if v.tool_func:
+                        self._tool_funcs[tool_name] = v.tool_func
+                    if v.definition:
+                        self._tools[tool_name] = v.definition
+                    # 将其他版本设为非活跃
+                    for other in self._versions[tool_name]:
+                        if other.version != version:
+                            other.is_active = False
+                    return True
+            return False
+    
+    def share_tool_with_user(self, tool_name: str, user_id: str) -> bool:
+        """与用户共享工具"""
+        with self._lock:
+            if tool_name not in self._tools:
+                return False
+            if tool_name not in self._shared_tools:
+                self._shared_tools[tool_name] = []
+            if user_id not in self._shared_tools[tool_name]:
+                self._shared_tools[tool_name].append(user_id)
+                self._tools[tool_name].shared_with.append(user_id)
+            return True
+    
+    def unshare_tool_with_user(self, tool_name: str, user_id: str) -> bool:
+        """取消共享"""
+        with self._lock:
+            if tool_name in self._shared_tools and user_id in self._shared_tools[tool_name]:
+                self._shared_tools[tool_name].remove(user_id)
+                if user_id in self._tools[tool_name].shared_with:
+                    self._tools[tool_name].shared_with.remove(user_id)
+                return True
+            return False
+    
+    def publish_tool(self, tool_name: str) -> bool:
+        """发布工具为公开"""
+        with self._lock:
+            if tool_name in self._tools:
+                self._tools[tool_name].is_public = True
+                return True
+            return False
+    
+    def unpublish_tool(self, tool_name: str) -> bool:
+        """取消发布"""
+        with self._lock:
+            if tool_name in self._tools:
+                self._tools[tool_name].is_public = False
+                return True
+            return False
+    
+    def get_tools_shared_with_me(self, user_id: str) -> typing.List[ToolDefinition]:
+        """获取与我共享的工具"""
+        return [t for t in self._tools.values() if user_id in t.shared_with]
+    
+    def get_my_shared_tools(self, owner: str) -> typing.List[ToolDefinition]:
+        """获取我共享的工具"""
+        return [t for t in self._tools.values() if t.owner == owner and t.shared_with]
+    
+    def discover_public_tools(self) -> ToolDiscoveryResult:
+        """发现公开工具"""
+        public = [t for t in self._tools.values() if t.is_public]
+        return ToolDiscoveryResult(tools=public, source="local")
+    
+    def discover_tools(self, query: str = "", tags: typing.List[str] = None) -> ToolDiscoveryResult:
+        """发现工具"""
+        tools = list(self._tools.values())
+        if query:
+            tools = [t for t in tools if query.lower() in t.name.lower() or query.lower() in t.description.lower()]
+        if tags:
+            tools = [t for t in tools if any(tag in t.tags for tag in tags)]
+        return ToolDiscoveryResult(tools=tools, source="local")
+    
+    def select_tools(self, query: str, context: ToolCallingContext = None, top_k: int = 3) -> typing.List[ToolSelection]:
+        """智能工具选择"""
+        results = []
+        query_lower = query.lower()
+        
+        for name, defn in self._tools.items():
+            if defn.status != ToolStatus.AVAILABLE:
+                continue
+            
+            # 简单匹配：名称 + 描述 + 标签
+            score = 0.0
+            if query_lower in name.lower():
+                score += 0.5
+            if query_lower in defn.description.lower():
+                score += 0.3
+            for tag in defn.tags:
+                if query_lower in tag.lower():
+                    score += 0.2
+            
+            if score > 0:
+                results.append(ToolSelection(
+                    tool_name=name,
+                    confidence=min(score, 1.0),
+                    reason=f"匹配查询: {query}"
+                ))
+        
+        results.sort(key=lambda x: x.confidence, reverse=True)
+        return results[:top_k]
+    
+    def prepare_arguments(self, tool_name: str, raw_args: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+        """准备工具参数"""
+        defn = self._tools.get(tool_name)
+        if not defn:
+            return raw_args
+        
+        prepared = {}
+        for param in defn.parameters:
+            if param.name in raw_args:
+                prepared[param.name] = raw_args[param.name]
+            elif param.default is not None:
+                prepared[param.name] = param.default
+            elif param.required:
+                logger.warning(f"缺少必需参数: {param.name}")
+        
+        return prepared
+    
+    async def execute(self, tool_name: str, parameters: typing.Dict[str, typing.Any] = None,
+                      timeout: float = None, context: ToolCallingContext = None) -> typing.Any:
+        """执行工具"""
+        invocation = ToolInvocation(
+            tool_name=tool_name,
+            arguments=parameters or {},
+            start_time=datetime.datetime.now()
+        )
+        
+        try:
+            func = self._tool_funcs.get(tool_name)
+            if func is None:
+                raise ValueError(f"工具未注册: {tool_name}")
+            
+            # 准备参数
+            prepared = self.prepare_arguments(tool_name, parameters or {})
+            
+            # 执行
+            if asyncio.iscoroutinefunction(func):
+                if timeout:
+                    result = await asyncio.wait_for(func(**prepared), timeout=timeout)
+                else:
+                    result = await func(**prepared)
+            else:
+                result = func(**prepared)
+            
+            invocation.result = result
+            invocation.success = True
+            
+        except Exception as e:
+            invocation.error = str(e)
+            invocation.success = False
+            logger.error(f"工具执行失败: {tool_name}, 错误: {e}")
+            raise
+        finally:
+            invocation.end_time = datetime.datetime.now()
+            invocation.duration = (invocation.end_time - invocation.start_time).total_seconds()
+            self._invocations.append(invocation)
+        
+        return invocation.result
+    
+    async def execute_with_safeguards(self, tool_name: str, parameters: typing.Dict[str, typing.Any] = None,
+                                       timeout: float = 30, context: ToolCallingContext = None) -> typing.Any:
+        """安全执行工具（带防护）"""
+        # 检查工具状态
+        defn = self._tools.get(tool_name)
+        if not defn:
+            raise ValueError(f"工具未注册: {tool_name}")
+        if defn.status != ToolStatus.AVAILABLE:
+            raise ValueError(f"工具不可用: {tool_name}, 状态: {defn.status.value}")
+        
+        return await self.execute(tool_name, parameters, timeout, context)
+    
+    async def chain_tools(self, chain: typing.List[typing.Dict[str, typing.Any]], 
+                          initial_input: typing.Any = None) -> typing.Any:
+        """链式执行工具"""
+        result = initial_input
+        
+        for step in chain:
+            tool_name = step.get("tool_name", "")
+            params = step.get("parameters", {})
+            
+            # 将上一步结果注入参数
+            if result is not None and "input_key" in step:
+                params[step["input_key"]] = result
+            
+            result = await self.execute(tool_name, params)
+        
+        return result
+    
+    def _extract_parameters(self, func: typing.Callable) -> typing.List[ToolParameter]:
+        """从函数签名提取参数"""
+        parameters = []
+        try:
+            sig = inspect.signature(func)
+            for name, param in sig.parameters.items():
+                if name in ('self', 'cls'):
+                    continue
+                p = ToolParameter(
+                    name=name,
+                    type="string",
+                    required=param.default is inspect.Parameter.empty,
+                    default=None if param.default is inspect.Parameter.empty else param.default
+                )
+                parameters.append(p)
+        except Exception:
+            pass
+        return parameters
+    
+    def _is_skill_tool(self, tool_name: str) -> bool:
+        """检查是否为技能工具"""
+        return tool_name.startswith("skill.")
+    
+    def get_statistics(self) -> typing.Dict[str, typing.Any]:
+        """获取统计信息"""
+        invocations = list(self._invocations)
+        total = len(invocations)
+        successful = sum(1 for i in invocations if i.success)
+        
+        return {
+            "total_tools": len(self._tools),
+            "total_invocations": total,
+            "successful_invocations": successful,
+            "failed_invocations": total - successful,
+            "success_rate": successful / total if total > 0 else 0,
+            "average_duration": sum(i.duration or 0 for i in invocations) / total if total > 0 else 0
+        }

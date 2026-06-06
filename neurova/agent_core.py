@@ -17,29 +17,6 @@ from pathlib import Path
 
 import sys
 
-# 配置调试日志到文件（使用绝对路径）
-_log_file = Path(__file__).parent.parent / 'debug.log'
-debug_logger = logging.getLogger('neurova.agent_core.debug')
-debug_logger.setLevel(logging.DEBUG)
-
-# 避免重复添加 handler
-if not debug_logger.handlers:
-    debug_handler = logging.FileHandler(str(_log_file), mode='a', encoding='utf-8')
-    debug_handler.setLevel(logging.DEBUG)
-    debug_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    debug_handler.setFormatter(debug_formatter)
-    debug_logger.addHandler(debug_handler)
-
-def debug_log(message: str):
-    """输出调试日志到文件（使用绝对路径）"""
-    timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-    log_message = f"[{timestamp}] {message}"
-    print(log_message, flush=True)
-    debug_logger.debug(log_message)
-    # 强制刷新文件缓冲区
-    for handler in debug_logger.handlers:
-        handler.flush()
-
 # 添加项目根目录到 sys.path (用于导入 agent.loops)
 project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
@@ -89,6 +66,9 @@ from neurova.tool_layers import (
 # P1: 提取的深度模块
 from neurova.tool_executor import ToolExecutor
 from neurova.post_chat_pipeline import PostChatPipeline
+
+# P5: 对话管线（从 chat() 提取）
+from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
 
 # P3: 内置工具注册器（替代 _init_file_operation_wrappers 的 15 个闭包）
 from neurova.builtin_tools import BuiltinToolRegistry, get_builtin_tool_params
@@ -281,15 +261,15 @@ class Agent:
 
         self.config = config or AgentConfig(**kwargs)
 
-        debug_log(f"Agent.__init__() 开始: {self.config.name} (ID: {self.config.agent_id})")
+        logger.debug(f"Agent.__init__() 开始: {self.config.name} (ID: {self.config.agent_id})")
 
         # 加载身份和性格
-        debug_log("步骤1: 加载身份和性格...")
+        logger.debug("步骤1: 加载身份和性格...")
         self._load_identity()
         debug_log("步骤1: 完成")
 
         # 初始化模块 - 先初始化为 None，再根据配置决定是否启用
-        debug_log("步骤2: 初始化记忆模块...")
+        logger.debug("步骤2: 初始化记忆模块...")
         self.memory_manager = None
         self.storage = None
         self.temperature_engine = None
@@ -310,9 +290,9 @@ class Agent:
         self.trace_manager = None
 
         if self.config.enable_memory:
-            debug_log("步骤2.1: 调用 _init_memory_modules()...")
+            logger.debug("步骤2.1: 调用 _init_memory_modules()...")
             self._init_memory_modules()
-            debug_log("步骤2.1: _init_memory_modules() 完成")
+            logger.debug("步骤2.1: _init_memory_modules() 完成")
             # MoE 路由器初始化（在记忆模块之后）
             try:
                 self.memory_agent.init_moe_router()
@@ -344,7 +324,7 @@ class Agent:
             model=self.config.llm_config.model if hasattr(self.config, 'llm_config') else 'auto',
             provider_id=getattr(self.config, 'llm_provider', '') or '',
         )
-        debug_log("步骤3: 完成")
+        logger.debug("步骤3: 完成")
 
         # 对话历史
         self.conversation_history: List[Dict[str, str]] = []
@@ -618,6 +598,9 @@ class Agent:
 
         # 8. PostChatPipeline — 对话后处理管线（代理步骤 6-9）
         self.post_chat_pipeline = PostChatPipeline(self)
+
+        # 9. ChatPipeline — 对话流程管线（从 chat() 提取）
+        self.chat_pipeline = ChatPipeline(self)
 
         logger.info(f"Agent {self.config.name} 初始化完成")
 
@@ -1057,10 +1040,12 @@ class Agent:
         save_memory: bool = True,
         session_id: str = None,
         metadata: Optional[Dict[str, Any]] = None,
-        enable_tts: bool = None,  # 是否启用TTS（覆盖配置）
+        enable_tts: bool = None,
     ) -> Dict[str, Any]:
         """
         与用户对话（底层方法，由 Router 调用）
+
+        P5 重构：委托给 ChatPipeline，将 ~580 行逻辑拆分为独立可测试的步骤。
 
         参数:
         user_input: 用户输入
@@ -1078,561 +1063,16 @@ class Agent:
             "audio_data": b"音频数据（如果有）",
         }
         """
-        # 绝对路径调试：确认 chat() 是否被调用（已禁用）
-        # with open(r"e:\chat_called.txt", "a", encoding="utf-8") as f:
-        #     f.write(f"\n[{datetime.now()}] chat() 被调用! user_input={user_input[:50]}\n")
-
-        debug_log(f"========== chat() 方法开始 ==========")
-        debug_log(f"用户输入: {user_input[:100]}")
         logger.info(f"收到用户输入: {user_input[:50]}...")
-
-        # 递增对话轮次计数（供 PostChatPipeline 反思触发使用）
-        if not hasattr(self, '_turn_count'):
-            self._turn_count = 0
-        self._turn_count += 1
-
-        # 初始化思考过程收集
-        self._current_reasoning = None
-        self._tool_messages_list = []
-
-        # 🔄 根据 session_id 恢复对话历史（Phase 6.6: 增强恢复机制）
-        # 不论当前 history 是否为空，都尝试恢复（避免中途重启丢失历史）
-        if session_id:
-            try:
-                record = self.session_manager.get_session(
-                    agent_id=self.config.agent_id,
-                    session_id=session_id
-                )
-                if record and hasattr(record, 'messages') and len(record.messages) > 0:
-                    saved_messages = [
-                        {"role": msg.role, "content": msg.content}
-                        for msg in record.messages
-                    ]
-                    # 只有当 session 中的消息比当前历史更多时才恢复
-                    if len(saved_messages) > len(self.conversation_history):
-                        self.conversation_history = saved_messages
-                        logger.info(f"✅ 从 session {session_id} 恢复了 {len(saved_messages)} 条对话历史")
-                        debug_log(f"恢复对话历史: {len(saved_messages)} 条消息")
-            except Exception as e:
-                logger.warning(f"恢复 session {session_id} 失败: {e}")
-
-        # 启动轨迹记录
-        if self._trajectory_recorder:
-            self._current_trace_id = self._trajectory_recorder.start_trace(
-                session_id=session_id or "default",
-                agent_id=self.config.agent_id,
-                user_id=metadata.get("user_id", "anonymous") if metadata else "anonymous",
-                metadata=metadata,
-            )
-
-            # 记录用户输入事件
-            self._trajectory_recorder.record_event(
-                trace_id=self._current_trace_id,
-                event_type=TrajectoryEventType.USER_INPUT,
-                data={"user_input": user_input[:500]},  # 限制长度
-            )
-
-        # 记录当前用户输入（供 ToolMemory 回调使用）
-        self._current_user_input = user_input
-
-        # 记录用户活动，重置空闲计时
-        self.idle_tracker.record_activity()
-
-        # 🔄 B5闭环修复 GAP-1: 从 session 文件提取最近对话上下文
-        # 注入到 build_context() 中以维持跨轮对话连续性
-        session_context = None
-        if session_id:
-            try:
-                session_context = self.session_manager.get_recent_context(
-                    agent_id=self.config.agent_id,
-                    session_id=session_id,
-                    max_messages=20,
-                )
-                if session_context:
-                    debug_log(f"从 session 提取了 {len(session_context)} 条对话上下文")
-            except Exception as e:
-                logger.warning(f"获取 session 上下文失败: {e}")
-
-        # 0. ToolMemory 检查：条件反射式工具记忆（闭环学习核心）
-        debug_log("步骤0: ToolMemory 检查开始")
-        tool_memory_result = None
-        tool_decision = "do_not_execute"
-        auto_execute_result = None
-
-        if self.tool_memory:
-            try:
-                tool_memory_result, tool_decision = self.tool_memory.check_tool_memory(user_input)
-                if tool_memory_result:
-                    logger.info(
-                        f"🧠 ToolMemory 命中: {tool_memory_result.get('tool_name')} "
-                        f"(置信度={tool_memory_result.get('confidence', 0):.2f}, "
-                        f"决策={tool_decision})"
-                    )
-
-                    # 🔧 修复断点1和2：根据决策自动执行工具（增加安全验证）
-                    if tool_decision == "auto_execute":
-                        tool_name = tool_memory_result.get('tool_name')
-                        confidence = tool_memory_result.get('confidence', 0)
-                        # 安全验证：低置信度不自动执行，避免误操作
-                        if confidence < 0.7:
-                            logger.info(f"⚠️ 工具 {tool_name} 置信度 {confidence:.2f} < 0.7，转为建议模式")
-                            tool_decision = "suggest"
-                        else:
-                            import asyncio
-                            MUSCLE_TIMEOUT = 5.0  # 肌肉记忆执行超时阈值（秒）
-                            logger.info(f"🚀 自动执行工具: {tool_name} (超时={MUSCLE_TIMEOUT}s)")
-                            try:
-                                auto_execute_result = await _asyncio.wait_for(
-                                    self._execute_tool_from_memory_async(
-                                        tool_memory_result, user_input
-                                    ),
-                                    timeout=MUSCLE_TIMEOUT,
-                                )
-                                # 根据执行结果更新决策状态
-                                exec_status = auto_execute_result.get("status")
-                                if exec_status == "success":
-                                    logger.info(f"✅ 工具自动执行成功: {tool_name}")
-                                    tool_decision = "auto_executed"  # 已执行完毕，LLM 无需再调
-                                elif exec_status == "failure":
-                                    error_msg = auto_execute_result.get("error", "未知错误")
-                                    logger.warning(f"❌ 工具自动执行失败: {tool_name}, 错误: {error_msg}")
-                                    tool_decision = "failed"  # 执行失败，交给 LLM 处理
-                                    # 记录失败教训
-                                    self._record_tool_failure_lesson(
-                                        tool_name, user_input, error_msg
-                                    )
-                            except _asyncio.TimeoutError:
-                                logger.warning(f"⏰ 工具自动执行超时: {tool_name} (>{MUSCLE_TIMEOUT}s)")
-                                tool_decision = "timeout"  # 超时降级，交给 LLM 处理
-                                auto_execute_result = None
-
-            except Exception as e:
-                logger.warning(f"ToolMemory 检查失败: {e}")
-        debug_log("步骤0: ToolMemory 检查完成")
-
-        # 0.1. 主动技能获取检查（如果启用）
-        if self.skill_manager and self.skill_manager.auto_acquire:
-            try:
-                acquisition_result = self.skill_manager.analyze_task(user_input)
-                if acquisition_result:
-                    sc = acquisition_result.get("success_count", 0)
-                    if sc > 0:
-                        acquired = [r.get("skill_name") for r in acquisition_result.get("acquisition_results", []) if r.get("success")]
-                        logger.info(f"📦 主动技能获取: 成功安装 {sc} 个技能 {acquired}")
-                    elif acquisition_result.get("missing_skills"):
-                        logger.info(f"🔍 需要技能: {acquisition_result['missing_skills']}，但未在市场中找到")
-            except Exception as e:
-                logger.warning(f"主动技能获取检查失败: {e}")
-
-        # 0.15. NL 工具合成检查 — 当用户描述新工具需求时自动生成 (P0)
-        if self.tool_synthesizer and not (self.skill_manager and self.skill_manager.auto_acquire):
-            try:
-                # 只在用户输入看起来像工具请求时触发（包含动作词）
-                action_keywords = ["帮我", "读取", "写入", "搜索", "下载", "转换", "生成",
-                                   "read", "write", "search", "download", "convert", "generate"]
-                if any(kw in user_input.lower() for kw in action_keywords):
-                    # 检查是否有匹配的工具
-                    has_tool = False
-                    if self._skill_registry:
-                        has_tool = any(
-                            self._skill_registry.get_skill(s.name)
-                            for s in self._skill_registry.list_skills()
-                            if any(kw in s.name.lower() for kw in user_input.lower().split())
-                        )
-                    if not has_tool:
-                        synth_result = self.tool_synthesizer.synthesize(
-                            description=user_input,
-                            author_id=self.config.agent_id,
-                        )
-                        if synth_result and synth_result.stage.value == "COMPLETED":
-                            logger.info(
-                                f"🔮 NL工具合成: {synth_result.tool.name} "
-                                f"(置信度={synth_result.confidence:.2f})"
-                            )
-            except Exception as e:
-                logger.warning(f"NL工具合成检查失败: {e}")
-
-        # ══════════════════════════════════════════════════════════════
-        # COLLECT 阶段：收集所有来源信息到候选池（Phase 3 重构）
-        # ══════════════════════════════════════════════════════════════
-
-        # 0.5+1. 统一检索（使用新的 UnifiedRetriever 或降级到旧的 MoE）
-        debug_log("步骤0.5+1: 统一检索开始")
-        
-        # 启动推理链
-        trace_id = None
-        if self.trace_manager:
-            trace_id = self.trace_manager.start_trace(user_input)
-        
-        # 使用新的 UnifiedRetriever
-        if self.unified_retriever:
-            relevant_memories = self.unified_retriever.retrieve(
-                user_input, limit=10, include_patterns=True
-            )
-            debug_log(f"UnifiedRetriever 返回 {len(relevant_memories)} 条记忆")
-            
-            # 记录推理步骤
-            if trace_id and self.trace_manager:
-                self.trace_manager.add_step(
-                    trace_id, "retrieve",
-                    user_input, f"找到 {len(relevant_memories)} 条记忆"
-                )
-        else:
-            # 降级到旧的 MoE 检索
-            moe_results = self.memory_agent.moe_retrieve(user_input)
-            relevant_memories = moe_results
-            debug_log(f"MoE 降级检索返回 {len(relevant_memories)} 条记忆")
-        
-        # MoE 已合并经验检索，experience_items 不再需要
-        experience_items: list = []  # 保留参数兼容性
-        debug_log(f"步骤0.5+1: MoE 检索完成，共 {len(relevant_memories)} 条")
-
-        # Phase 2-5: 构建上下文（委托给 ContextOrchestrator）
-        debug_log("步骤2-5: 构建上下文开始")
-        
-        # 检索结晶经验
-        crystallized_patterns = []
-        if self.crystallizer:
-            try:
-                crystallized_patterns = self.crystallizer.retrieve(user_input, limit=3)
-                debug_log(f"检索到 {len(crystallized_patterns)} 条结晶经验")
-                
-                # 记录推理步骤
-                if trace_id and self.trace_manager:
-                    self.trace_manager.add_step(
-                        trace_id, "crystallize",
-                        user_input, f"检索到 {len(crystallized_patterns)} 条结晶经验"
-                    )
-            except Exception as e:
-                logger.warning(f"结晶经验检索失败: {e}")
-        
-        context = await self.context_orchestrator.build_context(
+        ctx = ChatContext(
             user_input=user_input,
-            tool_memory_result=tool_memory_result,
-            auto_execute_result=auto_execute_result,
-            tool_decision=tool_decision,
-            experience_items=experience_items,
-            relevant_memories=relevant_memories,
-            crystallized_patterns=crystallized_patterns,  # 新增：结晶经验
-            session_context=session_context,  # B5闭环修复 GAP-1
-        )
-        debug_log(f"步骤2-5: 上下文构建完成，共 {len(context)} 条消息")
-
-        # 2.6 Neurova-Evocate: 检索相关 Neurova Hebb 注入上下文
-        if self.neuHebb_manager:
-            try:
-                neurova_hebbs = self.neuHebb_manager.retrieve_neurova_hebb(user_input)
-                if neurova_hebbs:
-                    hebb_texts = []
-                    for h in neurova_hebbs:
-                        hebb_texts.append(
-                            f"[Retrieved Knowledge] {h.content}"
-                            f" (source: {h.source}, confidence: {h.verification_score:.2f})"
-                        )
-                    hebb_context = "\n".join(hebb_texts)
-                    # 注入到系统消息末尾
-                    for msg in context:
-                        if msg.get("role") == "system":
-                            msg["content"] += f"\n\n## Retrieved Knowledge (Neurova Hebb)\n{hebb_context}"
-                            break
-                    debug_log(f"步骤2.6: 注入 {len(neurova_hebbs)} 条 Neurova Hebb 到上下文")
-            except Exception as e:
-                logger.warning(f"Neurova Hebb 检索失败: {e}")
-
-        # 5. 调用 LLM (使用 Agent Loop v5.0)
-        # 构建工具列表（OpenAI function calling 格式）- 用于原生工具调用
-        tools_for_llm = await self._build_tools_for_llm()
-
-        # 如果肌肉记忆已成功执行工具，从工具列表中移除该工具，防止 LLM 重复调用
-        if tool_decision == "auto_executed" and auto_execute_result and tools_for_llm:
-            executed_tool = auto_execute_result.get("tool_name", "")
-            original_count = len(tools_for_llm)
-            tools_for_llm = [
-                t for t in tools_for_llm
-                if t.get("function", {}).get("name", "") != executed_tool
-            ]
-            if len(tools_for_llm) < original_count:
-                logger.info(f"🔒 已从工具列表移除已执行工具: {executed_tool}")
-
-        if self.loop:
-            try:
-                if stream:
-                    reply_parts = []
-                    gen = self.loop.predict_step(messages=context, tools=tools_for_llm, stream=True)
-                    async for event in gen:
-                        if isinstance(event, dict) and event.get("type") == "content":
-                            reply_parts.append(event.get("data", ""))
-                        else:
-                            reply_parts.append(str(event))
-                    reply = "".join(reply_parts)
-                else:
-                    response = await self.loop.predict_step(
-                        messages=context, tools=tools_for_llm, stream=False
-                    )
-                    reply = response.content if response else ""
-                    # 捕获思考过程（DeepSeek-R1、GLM 等模型）
-                    if response and hasattr(response, 'reasoning_content') and response.reasoning_content:
-                        self._current_reasoning = response.reasoning_content
-                        logger.info(f"🧠 捕获思考过程: {len(response.reasoning_content)} 字符")
-
-                    # ============================================================
-                    # 自动续写
-                    #
-                    # 当 LLM 因 max_tokens 截断 (finish_reason=length) 且无未完成 tool_calls 时：
-                    #   1. 截取已输出回复的尾部作为上下文片段
-                    #   2. 注入双语自适应 hint：让模型判断是继续写还是需要调工具
-                    #   3. 首次续写允许 tool_calls（模型可能正打算调工具就被截断了）
-                    #   4. 后续续写聚焦纯文本续写，避免陷入工具调用-截断循环
-                    #
-                    # 安全护栏（任一触发即终止）：
-                    #   A. finish_reason 非 length — LLM 自述已完成
-                    #   B. 新内容与上文高度重叠（>50%）— 疑似死循环
-                    #   C. 续写内容过短（<5 字符）— LLM 无更多内容
-                    #   D. 总输出超过 max_tokens × 6 字符上限
-                    #   E. 轮次达到安全上限
-                    #   F. 连续相似内容检测（避免语义循环）
-                    # ============================================================
-                    MAX_CONTINUE_ROUNDS = 100  # 增大轮数限制，允许更长输出
-                    MAX_TOTAL_CHARS = getattr(self.llm_client.config, 'max_tokens', 8192) * 10  # 增大总字符数限制
-                    OVERLAP_CHECK_LEN = 200  # 增大重叠检测长度
-                    OVERLAP_THRESHOLD = 0.6  # 提高重叠阈值，减少误判
-                    MIN_CONTINUE_LEN = 10  # 增大最小续写长度
-                    TAIL_CONTEXT_CHARS = 800  # 增大尾部上下文长度
-                    SIMILARITY_WINDOW = 3  # 相似内容检测窗口大小
-                    SIMILARITY_THRESHOLD = 0.8  # 语义相似度阈值
-
-                    # 检测语言倾向（用于自适应 hint）
-                    _sample = (user_input or '') + (reply or '')
-                    _cjk = sum(1 for c in _sample if '\u4e00' <= c <= '\u9fff')
-                    _is_cjk = _cjk > len(_sample) * 0.15 if _sample else False
-
-                    if _is_cjk:
-                        CONTINUE_HINT_PREFIX = (
-                            "<system-hint>上轮回复因长度限制被截断。"
-                            "请结合下文 <previous-tail> 片段判断："
-                            "若仍需执行操作则立刻调用工具；"
-                            "若仅为文本未写完，从截断处直接接续，不要重复已说内容。"
-                            "</system-hint>"
-                        )
-                    else:
-                        CONTINUE_HINT_PREFIX = (
-                            "<system-hint>Previous reply was truncated due to length limit. "
-                            "Review <previous-tail> below and decide: "
-                            "if tools are still needed, call them now; "
-                            "if only text remains, continue from cutoff, do NOT repeat."
-                            "</system-hint>"
-                        )
-
-                    continue_round = 0
-                    recent_contents = []  # 用于检测语义循环的最近内容窗口
-                    tool_call_rounds = 0  # 工具调用轮数计数
-                    MAX_TOOL_CALL_ROUNDS = 5  # 最大工具调用轮数
-
-                    while (response
-                           and getattr(response, 'finish_reason', '') == 'length'
-                           and not getattr(response, 'tool_calls', None)
-                           and continue_round < MAX_CONTINUE_ROUNDS
-                           and len(reply) < MAX_TOTAL_CHARS):
-                        continue_round += 1
-
-                        # 构建含尾部上下文的智能续写提示
-                        tail_text = (response.content or '')[-TAIL_CONTEXT_CHARS:].strip()
-                        if tail_text:
-                            hint = (
-                                f"{CONTINUE_HINT_PREFIX}\n\n"
-                                f"<previous-tail>\n{tail_text}\n</previous-tail>"
-                            )
-                        else:
-                            hint = CONTINUE_HINT_PREFIX
-
-                        context.append({"role": "assistant", "content": response.content})
-                        context.append({"role": "user", "content": hint})
-
-                        # 首次续写允许 tool_calls（模型可能在截断前正准备调工具）
-                        # 后续续写聚焦纯文本（避免工具调用→截断→再调工具的循环）
-                        _tools = tools_for_llm if continue_round == 1 else None
-
-                        # 检查工具调用轮数
-                        if _tools and getattr(response, 'tool_calls', None):
-                            tool_call_rounds += 1
-                            if tool_call_rounds >= MAX_TOOL_CALL_ROUNDS:
-                                logger.info(f"📝 工具调用轮数达到上限 ({MAX_TOOL_CALL_ROUNDS})，切换为纯文本续写")
-                                _tools = None
-
-                        logger.info(
-                            f"📝 截断续写第 {continue_round} 轮 "
-                            f"(tools={'on' if _tools else 'off'}, "
-                            f"已输出 {len(reply)} 字符)..."
-                        )
-                        response = await self.loop.predict_step(
-                            messages=context, tools=_tools, stream=False
-                        )
-                        new_content = getattr(response, 'content', '') if response else ''
-
-                        # 护栏 A: 续写过短
-                        if not new_content or len(new_content.strip()) < MIN_CONTINUE_LEN:
-                            logger.info(f"📝 续写内容过短 ({len(new_content)} 字符)，视为已完成")
-                            break
-
-                        # 护栏 B: 与上文重叠检测
-                        prev_tail = reply[-OVERLAP_CHECK_LEN:] if len(reply) >= OVERLAP_CHECK_LEN else reply
-                        new_head = new_content[:OVERLAP_CHECK_LEN]
-                        if prev_tail and new_head:
-                            overlap_chars = sum(1 for a, b in zip(prev_tail, new_head) if a == b)
-                            overlap_ratio = overlap_chars / max(len(prev_tail), 1)
-                            if overlap_ratio > OVERLAP_THRESHOLD:
-                                logger.info(f"📝 续写重叠 {overlap_ratio:.0%}（>{OVERLAP_THRESHOLD:.0%}），疑似重复，终止")
-                                break
-
-                        # 护栏 C: 语义循环检测（新增）
-                        # 检查最近 N 次续写内容是否高度相似
-                        recent_contents.append(new_content[:500])  # 只取前500字符用于比较
-                        if len(recent_contents) > SIMILARITY_WINDOW:
-                            recent_contents.pop(0)
-
-                        if len(recent_contents) >= SIMILARITY_WINDOW:
-                            # 计算最近窗口内内容的相似度
-                            is_loop = self._detect_content_loop(recent_contents, SIMILARITY_THRESHOLD)
-                            if is_loop:
-                                logger.info(f"📝 检测到语义循环（最近 {SIMILARITY_WINDOW} 次内容高度相似），终止续写")
-                                break
-
-                        # 护栏 D: 工具调用循环检测（新增）
-                        if getattr(response, 'tool_calls', None):
-                            tool_call_rounds += 1
-                            if tool_call_rounds >= MAX_TOOL_CALL_ROUNDS:
-                                logger.info(f"📝 检测到工具调用循环（连续 {MAX_TOOL_CALL_ROUNDS} 次工具调用），切换为纯文本续写")
-                                _tools = None
-
-                        reply += new_content
-                        logger.info(f"📝 续写完成 +{len(new_content)} 字符，累计 {len(reply)} 字符")
-
-                    if len(reply) >= MAX_TOTAL_CHARS:
-                        logger.info(f"📝 输出已达上限 ({MAX_TOTAL_CHARS} 字符)，终止续写")
-
-                logger.info(f"Agent Loop prediction completed")
-
-            except Exception as e:
-                # 检查是否为 API 配置类错误（400/401/403），这类错误在 legacy 方法中也会同样失败
-                # 只有 Loop 格式转换等特定错误才值得 fallback 到 legacy 方法
-                _is_api_config_error = False
-                try:
-                    from openai import BadRequestError, AuthenticationError
-                    if isinstance(e, (BadRequestError, AuthenticationError)):
-                        _is_api_config_error = True
-                except ImportError:
-                    pass
-                # APIError 的 status_code 检查（兼容不同版本）
-                if not _is_api_config_error:
-                    _status = getattr(e, 'status_code', None) or getattr(e, 'code', None)
-                    if _status in (400, 401, 403):
-                        _is_api_config_error = True
-
-                if _is_api_config_error:
-                    # API 配置错误：直接抛出，不做无意义的 fallback
-                    logger.error(f"Agent Loop API 配置错误（不会 fallback）: {e}")
-                    raise
-                else:
-                    # Loop 特定错误（格式转换等）：fallback 到 legacy 方法
-                    logger.warning(f"Agent Loop failed: {e}, falling back to legacy methods")
-                    if stream:
-                        reply = await self._chat_stream(user_input, context, save_memory)
-                    else:
-                        reply = await self._chat_normal(user_input, context, save_memory)
-        else:
-            # 传统方法 (Agent Loop 不可用时)
-            if stream:
-                reply = await self._chat_stream(user_input, context, save_memory)
-            else:
-                reply = await self._chat_normal(user_input, context, save_memory)
-
-        # 解析并执行文本中的工具调用（API 不支持 function calling 时的降级通路）
-        reply = await self._execute_text_tool_calls(reply, user_input)
-
-        # B5闭环修复 GAP-2: 更新对话历史（之前只在 legacy 方法中调用）
-        self._update_history(user_input, reply)
-
-        # 记录 LLM 调用事件（简化：只记录结果）
-        if self._trajectory_recorder and self._current_trace_id:
-            # 获取 LLM 调用信息（简化）
-            self._trajectory_recorder.record_event(
-                trace_id=self._current_trace_id,
-                event_type=TrajectoryEventType.LLM_CALL_END,
-                data={
-                    "reply_length": len(reply) if reply else 0,
-                    "model": self.config.llm_config.model,
-                },
-            )
-
-        # 6-9. P1: 对话后处理管线（委托给 PostChatPipeline）
-        
-        # 记录推理链（如果启用了认知图谱）
-        if trace_id and self.trace_manager:
-            try:
-                # 计算使用的 token 数（简化估算）
-                total_tokens = len(user_input) + len(reply) if reply else len(user_input)
-                self.trace_manager.finish_trace(
-                    trace_id, reply or "", total_tokens=total_tokens
-                )
-                debug_log(f"推理链记录完成: trace_id={trace_id}")
-            except Exception as e:
-                logger.warning(f"推理链记录失败: {e}")
-        
-        # 结晶器观察工具使用（如果有）
-        if self.crystallizer and hasattr(self, '_last_tool_used') and self._last_tool_used:
-            try:
-                self.crystallizer.observe(
-                    tool_name=self._last_tool_used,
-                    context=user_input,
-                    success=True,  # 简化：假设成功
-                )
-                debug_log(f"结晶器观察: tool={self._last_tool_used}")
-            except Exception as e:
-                logger.warning(f"结晶器观察失败: {e}")
-        
-        post_result = await self.post_chat_pipeline.process(
-            user_input=user_input,
-            reply=reply,
-            session_id=session_id,
+            stream=stream,
             save_memory=save_memory,
-            enable_tts=enable_tts,
+            session_id=session_id,
             metadata=metadata,
+            enable_tts=enable_tts,
         )
-        actual_session_id = post_result["actual_session_id"]
-        audio_path = post_result["audio_path"]
-        audio_data = post_result["audio_data"]
-        cognitive_score = post_result["cognitive_score"]
-        proactive_question = post_result.get("proactive_question")
-        evolution_triggered = False  # PostChatPipeline 内部处理，此处保留兼容性
-
-        # 返回结果（包含文本和音频）
-        result = {
-            "text": reply,
-            "audio_path": audio_path,
-            "audio_data": audio_data,
-            "cognitive_score": cognitive_score,
-            "evolution_triggered": evolution_triggered,
-            "experience_used": len(experience_items) > 0,  # Phase 4: 简化为布尔值
-            "experience_count": len(experience_items),  # Phase 4: 经验数量
-            "session_id": actual_session_id,  # 返回实际使用的 session_id
-            # 思考过程和工具调用（用于前端展示）
-            "reasoning": getattr(self, '_current_reasoning', None),
-            "tool_messages": self._collect_tool_messages(),
-            # Phase 10: 主动提问（如果有）
-            "proactive_question": proactive_question,
-        }
-
-        # 结束轨迹记录
-        if self._trajectory_recorder and self._current_trace_id:
-            self._trajectory_recorder.record_event(
-                trace_id=self._current_trace_id,
-                event_type=TrajectoryEventType.OUTPUT_END,
-                data={"result": result},
-            )
-            self._trajectory_recorder.end_trace(self._current_trace_id)
-            self._current_trace_id = ""
-
-        return result
+        return await self.chat_pipeline.execute(ctx)
 
     def _execute_tool_from_memory(
         self,
