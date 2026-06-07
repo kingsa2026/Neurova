@@ -31,6 +31,7 @@ class RecallChannel(Enum):
     CATEGORY = "category"        # 分类通道（同类别记忆）
     GRAPH = "graph"              # 图通道（关系图谱）
     EMOTION = "emotion"          # 情感通道（情感相似度）
+    VOICE = "voice"              # 语音通道（语音转写记忆）
 
 
 class DrillIntent(Enum):
@@ -119,11 +120,12 @@ class NeurovaRecallEngine:
         
         # 通道权重
         self._channel_weights = {
-            RecallChannel.TEMPERATURE: 0.3,
-            RecallChannel.TEXT: 0.35,
+            RecallChannel.TEMPERATURE: 0.25,
+            RecallChannel.TEXT: 0.30,
             RecallChannel.CATEGORY: 0.15,
-            RecallChannel.GRAPH: 0.1,
-            RecallChannel.EMOTION: 0.1,
+            RecallChannel.GRAPH: 0.10,
+            RecallChannel.EMOTION: 0.10,
+            RecallChannel.VOICE: 0.10,
         }
         
         logger.info("NeurovaRecallEngine 初始化完成")
@@ -253,6 +255,8 @@ class NeurovaRecallEngine:
                     futures[executor.submit(self._channel_graph, query, limit)] = channel
                 elif channel == RecallChannel.EMOTION:
                     futures[executor.submit(self._channel_emotion, query, limit)] = channel
+                elif channel == RecallChannel.VOICE:
+                    futures[executor.submit(self._channel_voice, query, limit)] = channel
             
             # 收集结果
             for future in as_completed(futures):
@@ -355,6 +359,64 @@ class NeurovaRecallEngine:
             
         except Exception as e:
             logger.debug(f"情感通道检索失败: {e}")
+            return []
+    
+    def _channel_voice(self, query: str, limit: int) -> List[RecalledMemory]:
+        """语音通道（语音转写记忆检索）
+        
+        检索语音转写记忆（用户通过语音说过的内容）：
+        1. 搜索 memory_type="asr_transcription" 的记忆
+        2. 按置信度和时间衰减排序
+        3. 返回 RecalledMemory 对象列表
+        """
+        logger.debug(f"语音通道检索: {query}")
+        
+        if not self.memory_manager:
+            return []
+        
+        try:
+            # 搜索语音转写记忆
+            all_memories = self.memory_manager.get_all_memories()
+            voice_memories = []
+            
+            for mem_dict in all_memories:
+                mem_type = mem_dict.get("memory_type", "")
+                meta = mem_dict.get("metadata", {})
+                
+                # 筛选语音转写记忆
+                if mem_type == "asr_transcription" or meta.get("record"):
+                    content = mem_dict.get("content", "")
+                    # 简单关键词匹配
+                    if query.lower() in content.lower() or not query.strip():
+                        # 提取置信度和时间
+                        record_data = meta.get("record", {})
+                        confidence = record_data.get("confidence", 0.5)
+                        timestamp = mem_dict.get("timestamp", "")
+                        
+                        # 计算分数（置信度 + 时间衰减）
+                        recency_score = 1.0  # 简化：假设都是近期记忆
+                        score = confidence * 0.7 + recency_score * 0.3
+                        
+                        voice_memories.append(RecalledMemory(
+                            memory_id=mem_dict.get("id", ""),
+                            content=content,
+                            score=score,
+                            channel=RecallChannel.VOICE,
+                            metadata={
+                                "confidence": confidence,
+                                "engine": record_data.get("engine", "unknown"),
+                                "language": record_data.get("language", "unknown"),
+                                "emotion": record_data.get("emotion_label"),
+                            },
+                        ))
+            
+            # 按分数排序
+            voice_memories.sort(key=lambda m: m.score, reverse=True)
+            
+            return voice_memories[:limit]
+            
+        except Exception as e:
+            logger.debug(f"语音通道检索失败: {e}")
             return []
     
     def _fusion_score(self, memory: RecalledMemory, query: str) -> float:

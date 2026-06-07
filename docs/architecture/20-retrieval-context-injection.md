@@ -1,5 +1,20 @@
 # 记忆检索与上下文注入机制架构设计
 
+## 实现对齐说明
+
+> **注意**: 本文档描述的是设计理论和概念模型。以下为文档术语与实际代码实现的对应关系：
+
+| 文档术语 | 实际代码类/方法 | 文件位置 |
+|---------|---------------|---------|
+| 6层架构（语义理解→混合检索→主动回忆→记忆理解→上下文构建→LLM注入） | `ContextOrchestrator.build_context()` 的5阶段流程：Phase 0-0.5（检索）→ Phase 1（记忆）→ Phase 1.5-2.3（结晶经验注入）→ Phase 2.5-3.5（情感分析+候选池构建）→ Phase 4（压缩输出） | `neurova/agent/context_orchestrator.py` |
+| `ContextBuilder` | `ContextBuilder`（由 `ContextOrchestrator` 代理使用，负责候选池到最终上下文的构建） | `neurova/agent/context_orchestrator.py` |
+| `UnifiedContextInjector` | `UnifiedContextInjector`（由 `ContextOrchestrator.init_context_system()` 创建） | `neurova/agent/context_orchestrator.py` |
+| 上下文协调器 | `ContextOrchestrator`（统一协调入口） | `neurova/agent/context_orchestrator.py` |
+
+文档描述的6层理论架构与实际代码的5阶段实现有对应关系但不完全相同。实际实现中 `ContextOrchestrator` 作为统一入口，内部组合使用 `ContextBuilder`、`UnifiedContextInjector`、`ContextCollector` 等组件。
+
+实际实现以代码为准。
+
 ## 1. 概述
 
 ### 1.1 设计理念

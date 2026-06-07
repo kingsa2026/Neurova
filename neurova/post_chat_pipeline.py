@@ -502,7 +502,7 @@ class PostChatPipeline:
 
             # 对降级/归档的工具应用权重衰减
             if evolution and hasattr(evolution, "_tool_weights"):
-                decay = tool_lifecycle.get("decay", {})
+                decay = lifecycle_report.get("decay", {})
                 if decay:
                     for tool_name, factor in decay.items():
                         if tool_name in evolution._tool_weights:

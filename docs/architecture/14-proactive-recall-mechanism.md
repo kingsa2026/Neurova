@@ -1,5 +1,16 @@
 # 主动回忆机制架构设计
 
+## 实现对齐说明
+
+> **注意**: 本文档描述的是设计理论和概念模型。以下为文档术语与实际代码实现的对应关系：
+
+| 文档术语 | 实际代码类/方法 | 文件位置 |
+|---------|---------------|---------|
+| `ScheduledRecallEngine` | `ProactiveRecall`（支持关键词、情感、时间、频率、上下文等6种触发器） | `neurova/cognitive_layers/memory_layer/proactive_recall.py` |
+| `ProactiveMemoryManager` | **不存在** — 主动回忆功能统一由 `ProactiveRecall` 类实现 | `neurova/cognitive_layers/memory_layer/proactive_recall.py` |
+
+实际实现以代码为准。
+
 ## 1. 概述
 
 ### 1.1 设计理念

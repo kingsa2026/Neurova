@@ -37,11 +37,8 @@ Agent 分类
 ### 2.1 Agent 配置
 
 ```python
-from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Dict, List, Optional, Any
 from enum import Enum
-import uuid
 
 class AgentStatus(Enum):
     IDLE = "idle"
@@ -56,48 +53,79 @@ class AgentRole(Enum):
     SUPERVISOR = "supervisor"
     SPECIALIST = "specialist"
 
-@dataclass
-class AgentCapabilities:
-    """Agent 能力定义"""
-    skills: List[str] = field(default_factory=list)
-    max_concurrent_tasks: int = 5
-    supported_languages: List[str] = field(default_factory=list)
-    max_context_length: int = 4096
-    supports_streaming: bool = True
-
-@dataclass
 class AgentConfig:
-    """Agent 配置"""
-    id: str = field(default_factory=lambda: f"agent_{uuid.uuid4().hex[:8]}")
-    name: str = ""
-    description: str = ""
-    role: AgentRole = AgentRole.WORKER
-    
-    # LLM 配置
-    llm_provider: str = "openai"
-    llm_model: str = "gpt-4"
-    llm_config: Dict[str, Any] = field(default_factory=dict)
-    
-    # 能力
-    capabilities: AgentCapabilities = field(default_factory=AgentCapabilities)
-    
-    # 技能
-    skills: List[str] = field(default_factory=list)
-    
-    # 系统提示词
-    system_prompt: str = ""
-    
-    # 行为配置
-    temperature: float = 0.7
-    max_tokens: int = 2048
-    response_timeout: int = 30
-    
-    # 记忆配置
-    memory_enabled: bool = True
-    memory_size: int = 100
-    
-    # 状态
-    status: AgentStatus = AgentStatus.OFFLINE
+    """Agent 配置 - 当前实现 (neurova/agent_core.py)"""
+    def __init__(
+        self,
+        name: str = "忆灵",
+        agent_id: str = "yi_ling",
+        workspace_path: str = "",
+        db_path: str = "",
+        llm_api_key: str = "",
+        llm_base_url: str = "https://api.openai.com/v1",
+        llm_model: str = "gpt-4",
+        llm_temperature: float = 0.7,
+        max_tokens: int = 8192,
+        enable_memory: bool = True,
+        enable_streaming: bool = False,
+        enable_active_skill_acquisition: bool = False,  # 主动技能获取
+        llm_provider: str = "",  # LLM 服务商 ID
+        enable_skill_packer: bool = False,  # 自动打包技能
+        enable_cognitive_capabilities: bool = True,  # 认知能力
+        enable_evolution: bool = True,  # 进化能力
+        enable_experience_summary: bool = True,  # 经验总结
+
+        # 个性和宪法配置
+        personality: str = "",  # 个性设定
+        constitution: str = "",  # 行为准则（宪法）
+        behavior_rules: List[str] = None,  # 动态行为规则列表
+
+        # TTS 配置
+        enable_tts: bool = False,  # 是否启用 TTS
+        tts_engine: str = "mock",  # TTS 引擎类型 (edge/moss_nano/mock)
+        tts_voice: str = "mock",  # 音色名称
+        tts_auto_download: bool = True,  # 是否自动下载模型
+        
+        # ASR 配置
+        enable_asr: bool = False,  # 是否启用 ASR
+        asr_engine: str = "mock",  # ASR 引擎类型 (funasr/whisper/mock)
+        asr_voice: str = "zh",  # 语言
+        asr_auto_download: bool = True,  # 是否自动下载模型
+        
+        # 活水上下文池配置
+        enable_context_pool: bool = True,  # 是否启用活水上下文池
+        enable_auto_tagging: bool = False,  # 是否启用自动标签生成
+    ):
+        self.name = name
+        self.agent_id = agent_id
+        self.workspace_path = workspace_path
+        self.db_path = db_path
+        self.llm_api_key = llm_api_key
+        self.llm_base_url = llm_base_url
+        self.llm_model = llm_model
+        self.llm_temperature = llm_temperature
+        self.max_tokens = max_tokens
+        self.enable_memory = enable_memory
+        self.enable_streaming = enable_streaming
+        self.enable_active_skill_acquisition = enable_active_skill_acquisition
+        self.llm_provider = llm_provider
+        self.enable_skill_packer = enable_skill_packer
+        self.enable_cognitive_capabilities = enable_cognitive_capabilities
+        self.enable_evolution = enable_evolution
+        self.enable_experience_summary = enable_experience_summary
+        self.personality = personality
+        self.constitution = constitution
+        self.behavior_rules = behavior_rules or []
+        self.enable_tts = enable_tts
+        self.tts_engine = tts_engine
+        self.tts_voice = tts_voice
+        self.tts_auto_download = tts_auto_download
+        self.enable_asr = enable_asr
+        self.asr_engine = asr_engine
+        self.asr_voice = asr_voice
+        self.asr_auto_download = asr_auto_download
+        self.enable_context_pool = enable_context_pool
+        self.enable_auto_tagging = enable_auto_tagging
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     # 时间戳

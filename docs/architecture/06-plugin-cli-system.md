@@ -33,135 +33,114 @@
 
 ## 2. 插件数据模型
 
-### 2.1 插件元数据
+### 2.1 语义化版本 (SemVer)
 
 ```python
-from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Callable
-from enum import Enum
-from datetime import datetime
-import json
+from neurova.plugins.plugin_manifest import SemVersion, VersionConstraint
 
-class PluginStatus(Enum):
-    INSTALLED = "installed"
-    ENABLED = "enabled"
-    DISABLED = "disabled"
-    ERROR = "error"
-    UPDATING = "updating"
+# 语义化版本解析
+version = SemVersion("1.2.3")
+print(version.major, version.minor, version.patch)  # 1 2 3
 
-class PluginType(Enum):
-    FUNCTIONAL = "functional"
-    EXTENSION = "extension"
-    THEME = "theme"
+# 版本比较
+v1 = SemVersion("1.2.3")
+v2 = SemVersion("1.3.0")
+print(v1 < v2)  # True
+
+# 版本约束
+constraint = VersionConstraint(">=1.0.0,<2.0.0")
+print(constraint.satisfies(SemVersion("1.5.0")))  # True
+print(constraint.satisfies(SemVersion("2.0.0")))  # False
+
+# 兼容版本约束
+constraint = VersionConstraint("^1.2.3")  # 等价于 >=1.2.3,<2.0.0
+print(constraint.satisfies(SemVersion("1.9.9")))  # True
+
+# 近似版本约束
+constraint = VersionConstraint("~1.2.3")  # 等价于 >=1.2.3,<1.3.0
+print(constraint.satisfies(SemVersion("1.2.9")))  # True
+print(constraint.satisfies(SemVersion("1.3.0")))  # False
+```
+
+### 2.2 插件类型和状态
+
+```python
+from neurova.plugins.plugin_manifest import PluginType, PluginState, PluginPermission
+
+# 插件类型
+class PluginType(str, Enum):
+    CORE = "core"           # 核心插件
+    SKILL = "skill"         # 技能插件
+    CHANNEL = "channel"     # 渠道插件
+    TOOL = "tool"           # 工具插件
+    THEME = "theme"         # 主题插件
+    FUNCTIONAL = "functional"  # 功能插件
+    EXTENSION = "extension"    # 扩展插件
+
+# 插件状态
+class PluginState(str, Enum):
+    INSTALLED = "installed"   # 已安装
+    ENABLED = "enabled"       # 已启用
+    DISABLED = "disabled"     # 已禁用
+    LOADED = "loaded"         # 已加载
+    ERROR = "error"           # 错误
+    UPDATING = "updating"     # 更新中
+
+# 插件权限
+class PluginPermission(str, Enum):
+    READ_EVENTS = "read:events"      # 读取事件
+    EMIT_EVENTS = "emit:events"      # 发送事件
+    HTTP_REQUEST = "http:request"    # HTTP 请求
+    READ_FILES = "read:files"        # 读取文件
+    WRITE_FILES = "write:files"      # 写入文件
+    EXECUTE_COMMANDS = "execute:commands"  # 执行命令
+    NETWORK_ACCESS = "network:access"    # 网络访问
+    ADMIN = "admin"                    # 管理员权限
+```
+
+### 2.3 插件清单 (PluginManifest)
+
+```python
+from dataclasses import dataclass
+from typing import Dict, List, Any, Optional
+from neurova.plugins.plugin_manifest import SemVersion, PluginType, PluginPermission
 
 @dataclass
 class PluginManifest:
-    """插件清单"""
-    # 基本信息
-    id: str
-    name: str
-    description: str
-    version: str
-    author: str
-    type: PluginType = PluginType.FUNCTIONAL
+    """插件清单数据结构"""
+    plugin_id: str                    # 插件 ID
+    name: str                         # 插件名称
+    version: SemVersion               # 版本号
+    description: str = ""             # 描述
+    author: str = ""                  # 作者
+    plugin_type: PluginType = PluginType.FUNCTIONAL  # 插件类型
     
     # 依赖
-    dependencies: List[str] = field(default_factory=list)
-    min_framework_version: str = "1.0.0"
-    max_framework_version: str = "2.0.0"
+    dependencies: Dict[str, str] = None      # 依赖插件及版本约束
+    optional_dependencies: Dict[str, str] = None  # 可选依赖
+    neurova_min_version: str = ""      # 最低框架版本
     
     # 入口
-    main: str = ""  # 入口模块/类
-    entry_point: Optional[Callable] = None
-    
-    # 配置
-    config_schema: Dict[str, Any] = field(default_factory=dict)
-    default_config: Dict[str, Any] = field(default_factory=dict)
+    entry_point: str = ""              # 入口模块
+    module_class: str = ""             # 入口类
     
     # 权限
-    permissions: List[str] = field(default_factory=list)
+    required_permissions: List[PluginPermission] = None
     
-    # 钩子
-    hooks: Dict[str, str] = field(default_factory=dict)
+    # 配置
+    config_schema: Dict[str, Any] = None
+    default_config: Dict[str, Any] = None
     
-    # 状态
-    status: PluginStatus = PluginStatus.INSTALLED
-    error: Optional[str] = None
+    # API 端点
+    api_endpoints: List[Dict[str, str]] = None
     
-    # 时间戳
-    installed_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
+    # 前端资源
+    frontend_resources: List[str] = None
     
-    def to_dict(self) -> Dict:
-        """转换为字典"""
-        return {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
-            'version': self.version,
-            'author': self.author,
-            'type': self.type.value,
-            'dependencies': self.dependencies,
-            'min_framework_version': self.min_framework_version,
-            'max_framework_version': self.max_framework_version,
-            'main': self.main,
-            'config_schema': self.config_schema,
-            'default_config': self.default_config,
-            'permissions': self.permissions,
-            'hooks': self.hooks,
-            'status': self.status.value,
-            'error': self.error,
-            'installed_at': self.installed_at.isoformat(),
-            'updated_at': self.updated_at.isoformat()
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict) -> 'PluginManifest':
-        """从字典创建"""
-        return cls(
-            id=data['id'],
-            name=data['name'],
-            description=data['description'],
-            version=data['version'],
-            author=data['author'],
-            type=PluginType(data.get('type', 'functional')),
-            dependencies=data.get('dependencies', []),
-            min_framework_version=data.get('min_framework_version', '1.0.0'),
-            max_framework_version=data.get('max_framework_version', '2.0.0'),
-            main=data.get('main', ''),
-            config_schema=data.get('config_schema', {}),
-            default_config=data.get('default_config', {}),
-            permissions=data.get('permissions', []),
-            hooks=data.get('hooks', {}),
-            status=PluginStatus(data.get('status', 'installed')),
-            error=data.get('error')
-        )
-
-@dataclass
-class PluginContext:
-    """插件上下文"""
-    plugin_id: str
-    base_path: str
-    config: Dict[str, Any]
-    logger: Any
-    data_dir: str
-    cache_dir: str
-    
-    # 框架服务
-    skill_manager: Optional[Any] = None
-    memory_manager: Optional[Any] = None
-    message_router: Optional[Any] = None
-    agent_orchestrator: Optional[Any] = None
-    
-    def get_service(self, name: str) -> Any:
-        """获取框架服务"""
-        services = {
-            'skill_manager': self.skill_manager,
-            'memory_manager': self.memory_manager,
-            'message_router': self.message_router,
-            'agent_orchestrator': self.agent_orchestrator
-        }
-        return services.get(name)
+    # 标签和元数据
+    tags: List[str] = None
+    homepage: str = ""
+    license: str = ""
 ```
 
 ## 3. 插件管理器
@@ -169,931 +148,375 @@ class PluginContext:
 ### 3.1 核心实现
 
 ```python
-import os
-import sys
-import importlib
-import importlib.util
-from pathlib import Path
-import asyncio
+from neurova.plugins.plugin_manager import PluginManager, get_plugin_manager
 
-class PluginManager:
-    """
-    插件管理器
-    管理插件的加载、卸载、启用、禁用
-    """
+# 获取全局插件管理器
+manager = get_plugin_manager("~/.neurova/plugins")
+
+# 发现插件
+plugins = manager.discover_plugins()
+print(f"发现 {len(plugins)} 个插件")
+
+# 安装插件
+success = manager.install_plugin("/path/to/plugin")
+if success:
+    print("插件安装成功")
+
+# 启用插件
+success = manager.enable_plugin("my-plugin")
+if success:
+    print("插件已启用")
+
+# 加载插件（启用后才能加载）
+success = manager.load_plugin("my-plugin")
+if success:
+    print("插件已加载")
+
+# 获取插件实例
+plugin_instance = manager.get_module("my-plugin")
+if plugin_instance:
+    # 调用插件方法
+    plugin_instance.do_something()
+
+# 列出所有插件
+plugins = manager.list_plugins()
+for plugin in plugins:
+    print(f"{plugin.name} v{plugin.version} - {'启用' if plugin.enabled else '禁用'}")
+
+# 禁用插件
+manager.disable_plugin("my-plugin")
+
+# 卸载插件
+manager.uninstall_plugin("my-plugin")
+```
+
+### 3.2 依赖解析
+
+```python
+# 拓扑排序确定加载顺序
+load_order = manager.resolve_load_order()
+print("加载顺序:", load_order)
+
+# 批量操作
+manager.enable_all()   # 启用所有插件
+manager.load_all()     # 加载所有已启用的插件
+manager.disable_all()  # 禁用所有插件
+manager.unload_all()   # 卸载所有插件
+```
+
+### 3.3 插件生命周期管理
+
+```python
+from neurova.plugins.plugin_lifecycle import (
+    LifecycleEvent, LifecycleHook, PluginLifecycleManager,
+    get_lifecycle_manager, register_lifecycle_hook
+)
+
+# 获取生命周期管理器
+lifecycle = get_lifecycle_manager()
+
+# 注册生命周期钩子
+hook = register_lifecycle_hook(
+    event=LifecycleEvent.BEFORE_ENABLE,
+    callback=lambda plugin_name: print(f"即将启用插件: {plugin_name}"),
+    plugin_name="my-plugin",
+    priority=10,
+    description="启用前检查"
+)
+
+# 注册事件监听器
+def on_plugin_enabled(plugin_name, **kwargs):
+    print(f"插件已启用: {plugin_name}")
+
+lifecycle.add_event_listener(LifecycleEvent.AFTER_ENABLE, on_plugin_enabled)
+
+# 执行生命周期事件（自动触发钩子和监听器）
+lifecycle.execute_lifecycle(LifecycleEvent.AFTER_ENABLE, "my-plugin")
+```
+
+### 3.4 插件基类
+
+```python
+from neurova.plugins.base_plugin import BasePlugin, APIEndpoint
+from neurova.plugins.plugin_manifest import PluginManifest, PluginType, PluginPermission
+
+class MyPlugin(BasePlugin):
+    """示例插件"""
     
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.plugins: Dict[str, PluginManifest] = {}
-        self.plugin_instances: Dict[str, Any] = {}
-        self.hooks: Dict[str, List[Callable]] = defaultdict(list)
-        
-        # 路径
-        self.plugins_dir = Path(config.get('plugins_dir', 'plugins'))
-        self.data_dir = Path(config.get('data_dir', 'data/plugins'))
-        self.cache_dir = Path(config.get('cache_dir', 'cache/plugins'))
-        
-        # 创建目录
-        self.plugins_dir.mkdir(parents=True, exist_ok=True)
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 事件总线
-        self.event_bus = EventBus()
-        
-        # 加载已安装的插件
-        self._load_installed_plugins()
-    
-    def _load_installed_plugins(self):
-        """加载已安装的插件"""
-        for plugin_dir in self.plugins_dir.iterdir():
-            if plugin_dir.is_dir():
-                manifest_path = plugin_dir / 'manifest.json'
-                if manifest_path.exists():
-                    try:
-                        with open(manifest_path, 'r') as f:
-                            data = json.load(f)
-                        manifest = PluginManifest.from_dict(data)
-                        self.plugins[manifest.id] = manifest
-                    except Exception as e:
-                        logger.error(f"Failed to load plugin {plugin_dir}: {e}")
-    
-    def install_plugin(
-        self,
-        source: str,
-        version: Optional[str] = None
-    ) -> PluginManifest:
-        """
-        安装插件
-        - source: 插件源 (路径、URL、仓库名)
-        - version: 版本号
-        """
-        try:
-            # 下载/复制插件
-            plugin_path = self._download_plugin(source, version)
-            
-            # 读取清单
-            manifest = self._read_manifest(plugin_path)
-            
-            # 检查依赖
-            self._check_dependencies(manifest)
-            
-            # 安装依赖
-            self._install_dependencies(manifest)
-            
-            # 保存清单
-            self._save_manifest(manifest)
-            
-            # 添加到注册表
-            self.plugins[manifest.id] = manifest
-            
-            # 发布事件
-            self.event_bus.publish(Event(
-                type='plugin.installed',
-                data={'plugin_id': manifest.id}
-            ))
-            
-            return manifest
-            
-        except Exception as e:
-            raise PluginInstallError(f"Failed to install plugin: {e}")
-    
-    def uninstall_plugin(self, plugin_id: str) -> bool:
-        """卸载插件"""
-        if plugin_id not in self.plugins:
-            return False
-        
-        manifest = self.plugins[plugin_id]
-        
-        # 先禁用
-        if manifest.status == PluginStatus.ENABLED:
-            self.disable_plugin(plugin_id)
-        
-        # 删除文件
-        plugin_path = self.plugins_dir / plugin_id
-        if plugin_path.exists():
-            import shutil
-            shutil.rmtree(plugin_path)
-        
-        # 从注册表移除
-        del self.plugins[plugin_id]
-        
-        # 发布事件
-        self.event_bus.publish(Event(
-            type='plugin.uninstalled',
-            data={'plugin_id': plugin_id}
-        ))
-        
-        return True
-    
-    def enable_plugin(self, plugin_id: str) -> bool:
-        """启用插件"""
-        if plugin_id not in self.plugins:
-            return False
-        
-        manifest = self.plugins[plugin_id]
-        
-        if manifest.status == PluginStatus.ENABLED:
-            return True
-        
-        try:
-            # 加载插件
-            plugin_instance = self._load_plugin(manifest)
-            
-            # 初始化
-            context = self._create_context(manifest)
-            asyncio.create_task(plugin_instance.initialize(context))
-            
-            # 注册钩子
-            self._register_hooks(manifest, plugin_instance)
-            
-            # 更新状态
-            manifest.status = PluginStatus.ENABLED
-            
-            # 保存实例
-            self.plugin_instances[plugin_id] = plugin_instance
-            
-            # 发布事件
-            self.event_bus.publish(Event(
-                type='plugin.enabled',
-                data={'plugin_id': plugin_id}
-            ))
-            
-            return True
-            
-        except Exception as e:
-            manifest.error = str(e)
-            manifest.status = PluginStatus.ERROR
-            return False
-    
-    def disable_plugin(self, plugin_id: str) -> bool:
-        """禁用插件"""
-        if plugin_id not in self.plugins:
-            return False
-        
-        manifest = self.plugins[plugin_id]
-        
-        if manifest.status != PluginStatus.ENABLED:
-            return True
-        
-        try:
-            # 获取实例
-            plugin_instance = self.plugin_instances.get(plugin_id)
-            
-            if plugin_instance:
-                # 关闭
-                asyncio.create_task(plugin_instance.shutdown())
-                
-                # 注销钩子
-                self._unregister_hooks(manifest)
-                
-                # 删除实例
-                del self.plugin_instances[plugin_id]
-            
-            # 更新状态
-            manifest.status = PluginStatus.DISABLED
-            
-            # 发布事件
-            self.event_bus.publish(Event(
-                type='plugin.disabled',
-                data={'plugin_id': plugin_id}
-            ))
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to disable plugin {plugin_id}: {e}")
-            return False
-    
-    def _load_plugin(self, manifest: PluginManifest) -> Any:
-        """加载插件模块"""
-        plugin_path = self.plugins_dir / manifest.id
-        
-        # 添加入口
-        sys.path.insert(0, str(plugin_path))
-        
-        try:
-            # 导入模块
-            module = importlib.import_module(manifest.main)
-            
-            # 获取入口类
-            if hasattr(module, 'Plugin'):
-                return module.Plugin()
-            else:
-                raise ValueError(f"Plugin class not found in {manifest.main}")
-        
-        finally:
-            sys.path.remove(str(plugin_path))
-    
-    def _create_context(self, manifest: PluginManifest) -> PluginContext:
-        """创建插件上下文"""
-        return PluginContext(
-            plugin_id=manifest.id,
-            base_path=str(self.plugins_dir / manifest.id),
-            config=manifest.default_config,
-            logger=logging.getLogger(f'plugin.{manifest.id}'),
-            data_dir=str(self.data_dir / manifest.id),
-            cache_dir=str(self.cache_dir / manifest.id),
-            skill_manager=self.get_service('skill_manager'),
-            memory_manager=self.get_service('memory_manager'),
-            message_router=self.get_service('message_router'),
-            agent_orchestrator=self.get_service('agent_orchestrator')
+    # 插件元数据
+    plugin_type = PluginType.FUNCTIONAL
+    api_endpoints = [
+        APIEndpoint(
+            method="GET",
+            path="/api/my-plugin/status",
+            handler_name="get_status",
+            description="获取插件状态",
+            tags=["status"]
         )
+    ]
+    required_permissions = [PluginPermission.READ_EVENTS]
     
-    def _register_hooks(self, manifest: PluginManifest, plugin: Any):
-        """注册插件钩子"""
-        for hook_name, method_name in manifest.hooks.items():
-            if hasattr(plugin, method_name):
-                method = getattr(plugin, method_name)
-                self.hooks[hook_name].append(method)
+    def __init__(self, manifest: PluginManifest):
+        super().__init__(manifest)
+        self._data = {}
     
-    def _unregister_hooks(self, manifest: PluginManifest):
-        """注销插件钩子"""
-        for hook_name in manifest.hooks:
-            if hook_name in self.hooks:
-                # 移除该插件的所有钩子
-                self.hooks[hook_name] = [
-                    h for h in self.hooks[hook_name]
-                    if getattr(h, '__self__', None) != self.plugin_instances.get(manifest.id)
-                ]
+    async def on_initialize(self) -> None:
+        """初始化回调"""
+        self.log_info("插件初始化")
+        # 加载配置
+        config = self.manifest.default_config
+        self._data = config.get("data", {})
     
-    async def trigger_hook(
-        self,
-        hook_name: str,
-        *args,
-        **kwargs
-    ) -> List[Any]:
-        """触发钩子"""
-        results = []
-        for hook in self.hooks.get(hook_name, []):
-            try:
-                if asyncio.iscoroutinefunction(hook):
-                    result = await hook(*args, **kwargs)
-                else:
-                    result = hook(*args, **kwargs)
-                results.append(result)
-            except Exception as e:
-                logger.error(f"Hook {hook_name} failed: {e}")
-        return results
+    async def on_start(self) -> None:
+        """启动回调"""
+        self.log_info("插件启动")
+        # 注册事件监听器
+        self.subscribe("message.received", self._on_message)
     
-    def list_plugins(
-        self,
-        status: Optional[PluginStatus] = None,
-        type: Optional[PluginType] = None
-    ) -> List[PluginManifest]:
-        """列出插件"""
-        plugins = list(self.plugins.values())
-        
-        if status:
-            plugins = [p for p in plugins if p.status == status]
-        
-        if type:
-            plugins = [p for p in plugins if p.type == type]
-        
-        return plugins
+    async def on_stop(self) -> None:
+        """停止回调"""
+        self.log_info("插件停止")
     
-    def get_plugin(self, plugin_id: str) -> Optional[PluginManifest]:
-        """获取插件信息"""
-        return self.plugins.get(plugin_id)
+    async def on_destroy(self) -> None:
+        """销毁回调"""
+        self.log_info("插件销毁")
+        self._data.clear()
     
-    def _download_plugin(
-        self,
-        source: str,
-        version: Optional[str]
-    ) -> Path:
-        """下载插件"""
-        import shutil
-        
-        # 如果是本地路径
-        if os.path.exists(source):
-            plugin_path = Path(source)
-            dest = self.plugins_dir / plugin_path.name
-            shutil.copytree(plugin_path, dest)
-            return dest
-        
-        # 如果是 URL
-        if source.startswith('http'):
-            return self._download_from_url(source, version)
-        
-        # 如果是仓库名
-        return self._download_from_repo(source, version)
+    def _on_message(self, data):
+        """处理消息事件"""
+        self.log_info(f"收到消息: {data}")
+        # 发布自定义事件
+        self.publish_event("my_plugin.processed", {"result": "ok"})
     
-    def _download_from_url(
-        self,
-        url: str,
-        version: Optional[str]
-    ) -> Path:
-        """从 URL 下载"""
-        import requests
-        import zipfile
-        import tempfile
-        
-        # 下载
-        response = requests.get(url)
-        
-        # 解压
-        with tempfile.NamedTemporaryFile(suffix='.zip') as f:
-            f.write(response.content)
-            f.flush()
-            
-            with zipfile.ZipFile(f) as zip_file:
-                plugin_id = url.split('/')[-1].replace('.zip', '')
-                dest = self.plugins_dir / plugin_id
-                zip_file.extractall(dest)
-        
-        return dest
-    
-    def _download_from_repo(
-        self,
-        name: str,
-        version: Optional[str]
-    ) -> Path:
-        """从仓库下载"""
-        # 从配置的仓库下载
-        repo_url = self.config.get('plugin_repo', 'https://plugins.neurova.io')
-        download_url = f"{repo_url}/plugins/{name}"
-        
-        if version:
-            download_url += f"/{version}"
-        
-        return self._download_from_url(download_url, version)
-    
-    def _read_manifest(self, plugin_path: Path) -> PluginManifest:
-        """读取插件清单"""
-        manifest_path = plugin_path / 'manifest.json'
-        
-        if not manifest_path.exists():
-            raise ValueError(f"Manifest not found: {manifest_path}")
-        
-        with open(manifest_path, 'r') as f:
-            data = json.load(f)
-        
-        return PluginManifest.from_dict(data)
-    
-    def _check_dependencies(self, manifest: PluginManifest):
-        """检查依赖"""
-        for dep in manifest.dependencies:
-            # 检查是否已安装
-            if dep not in self.plugins:
-                raise PluginDependencyError(f"Missing dependency: {dep}")
-            
-            # 检查版本
-            dep_plugin = self.plugins[dep]
-            # TODO: 版本检查逻辑
-    
-    def _install_dependencies(self, manifest: PluginManifest):
-        """安装依赖"""
-        for dep in manifest.dependencies:
-            if dep not in self.plugins:
-                # 安装依赖
-                self.install_plugin(dep)
-    
-    def _save_manifest(self, manifest: PluginManifest):
-        """保存清单"""
-        plugin_path = self.plugins_dir / manifest.id
-        plugin_path.mkdir(parents=True, exist_ok=True)
-        
-        manifest_path = plugin_path / 'manifest.json'
-        with open(manifest_path, 'w') as f:
-            json.dump(manifest.to_dict(), f, indent=2)
-    
-    def get_service(self, name: str) -> Any:
-        """获取服务 (占位符)"""
-        # 实际实现中需要从框架获取服务
-        return None
+    def get_status(self):
+        """API 端点处理函数"""
+        return {"status": "running", "data_count": len(self._data)}
 ```
 
 ## 4. CLI 接口设计
 
 ### 4.1 CLI 架构
 
+Neurova CLI 是一个交互式命令行客户端，通过 HTTP API 与 Neurova 服务器通信。
+
 ```python
-import click
-import asyncio
-from typing import Optional
+from cli import NeurovaCLI
 
-@click.group()
-@click.version_option(version='1.0.0')
-@click.option('--config', '-c', default='config.yaml', help='配置文件路径')
-@click.pass_context
-def cli(ctx, config, version):
-    """neurova CLI - 智能体代理框架命令行工具"""
-    ctx.ensure_object(dict)
-    ctx.obj['config'] = config
-    ctx.obj['version'] = version
+# 创建 CLI 实例
+cli = NeurovaCLI(base_url="http://localhost:9527")
 
-# ========== Agent 管理 ==========
-
-@cli.group()
-def agent():
-    """Agent 管理命令"""
-    pass
-
-@agent.command('list')
-@click.option('--status', '-s', type=click.Choice(['idle', 'busy', 'offline']), help='按状态过滤')
-@click.pass_context
-def agent_list(ctx, status):
-    """列出所有 Agent"""
-    orchestrator = get_orchestrator(ctx.obj['config'])
-    agents = orchestrator.list_agents(status=status)
-    
-    click.echo(f"Found {len(agents)} agents:")
-    click.echo()
-    
-    for agent in agents:
-        click.echo(f"  ID: {agent.config.id}")
-        click.echo(f"  Name: {agent.config.name}")
-        click.echo(f"  Status: {agent.status.value}")
-        click.echo(f"  Role: {agent.config.role.value}")
-        click.echo()
-
-@agent.command('create')
-@click.argument('name')
-@click.option('--config', '-c', 'config_file', required=True, help='Agent 配置文件')
-@click.pass_context
-def agent_create(ctx, name, config_file):
-    """创建新 Agent"""
-    orchestrator = get_orchestrator(ctx.obj['config'])
-    
-    # 读取配置
-    with open(config_file, 'r') as f:
-        agent_config = yaml.safe_load(f)
-    
-    config = AgentConfig(
-        name=name,
-        **agent_config
-    )
-    
-    agent = orchestrator.create_agent(config)
-    click.echo(f"Agent created: {agent.config.id}")
-
-@agent.command('destroy')
-@click.argument('agent_id')
-@click.option('--force', '-f', is_flag=True, help='强制删除')
-@click.pass_context
-def agent_destroy(ctx, agent_id, force):
-    """删除 Agent"""
-    orchestrator = get_orchestrator(ctx.obj['config'])
-    
-    if not force:
-        click.confirm(f"Are you sure you want to delete agent {agent_id}?", abort=True)
-    
-    success = orchestrator.destroy_agent(agent_id)
-    if success:
-        click.echo(f"Agent {agent_id} destroyed")
-    else:
-        click.echo(f"Failed to destroy agent {agent_id}")
-
-@agent.command('status')
-@click.argument('agent_id')
-@click.pass_context
-def agent_status(ctx, agent_id):
-    """查看 Agent 状态"""
-    orchestrator = get_orchestrator(ctx.obj['config'])
-    agent = orchestrator.get_agent(agent_id)
-    
-    if not agent:
-        click.echo(f"Agent {agent_id} not found")
-        return
-    
-    click.echo(f"Agent: {agent.config.name}")
-    click.echo(f"  ID: {agent.config.id}")
-    click.echo(f"  Status: {agent.status.value}")
-    click.echo(f"  Current Tasks: {len(agent.current_tasks)}")
-    click.echo(f"  Completed Tasks: {len(agent.completed_tasks)}")
-    click.echo(f"  Success Rate: {agent.get_success_rate():.2%}")
-
-# ========== Skill 管理 ==========
-
-@cli.group()
-def skill():
-    """Skill 管理命令"""
-    pass
-
-@skill.command('list')
-@click.option('--category', '-c', help='按分类过滤')
-@click.option('--tag', '-t', multiple=True, help='按标签过滤')
-@click.pass_context
-def skill_list(ctx, category, tag):
-    """列出所有 Skill"""
-    manager = get_skill_manager(ctx.obj['config'])
-    skills = manager.list_skills(category=category, tags=list(tag) if tag else None)
-    
-    click.echo(f"Found {len(skills)} skills:")
-    click.echo()
-    
-    for skill in skills:
-        click.echo(f"  {skill.id}")
-        click.echo(f"    Name: {skill.name}")
-        click.echo(f"    Description: {skill.description}")
-        click.echo(f"    Category: {skill.category}")
-        click.echo(f"    Tags: {', '.join(skill.tags)}")
-        click.echo()
-
-@skill.command('info')
-@click.argument('skill_id')
-@click.pass_context
-def skill_info(ctx, skill_id):
-    """查看 Skill 详情"""
-    manager = get_skill_manager(ctx.obj['config'])
-    skill = manager.get_skill(skill_id)
-    
-    if not skill:
-        click.echo(f"Skill {skill_id} not found")
-        return
-    
-    click.echo(f"Skill: {skill.name}")
-    click.echo(f"  ID: {skill.id}")
-    click.echo(f"  Version: {skill.version}")
-    click.echo(f"  Author: {skill.author}")
-    click.echo(f"  Description: {skill.description}")
-    click.echo()
-    click.echo("Parameters:")
-    for param in skill.parameters:
-        required = " (required)" if param.required else ""
-        click.echo(f"  - {param.name} ({param.type}){required}")
-        click.echo(f"    {param.description}")
-        if param.default is not None:
-            click.echo(f"    Default: {param.default}")
-    click.echo()
-
-@skill.command('execute')
-@click.argument('skill_id')
-@click.option('--param', '-p', multiple=True, help='参数 (格式：key=value)')
-@click.pass_context
-def skill_execute(ctx, skill_id, param):
-    """执行 Skill"""
-    manager = get_skill_manager(ctx.obj['config'])
-    
-    # 解析参数
-    params = {}
-    for p in param:
-        key, value = p.split('=', 1)
-        params[key] = value
-    
-    # 执行
-    result = asyncio.run(manager.execute_skill(
-        skill_id=skill_id,
-        agent_id='cli',
-        params=params
-    ))
-    
-    if result.success:
-        click.echo("Success!")
-        click.echo(json.dumps(result.data, indent=2))
-    else:
-        click.echo(f"Failed: {result.error}", err=True)
-
-# ========== 插件管理 ==========
-
-@cli.group()
-def plugin():
-    """插件管理命令"""
-    pass
-
-@plugin.command('list')
-@click.option('--status', '-s', type=click.Choice(['installed', 'enabled', 'disabled', 'error']), help='按状态过滤')
-@click.pass_context
-def plugin_list(ctx, status):
-    """列出所有插件"""
-    manager = get_plugin_manager(ctx.obj['config'])
-    plugins = manager.list_plugins(status=PluginStatus(status) if status else None)
-    
-    click.echo(f"Found {len(plugins)} plugins:")
-    click.echo()
-    
-    for plugin in plugins:
-        status_icon = {
-            PluginStatus.ENABLED: "✓",
-            PluginStatus.DISABLED: "✗",
-            PluginStatus.ERROR: "!",
-            PluginStatus.INSTALLED: "○"
-        }[plugin.status]
-        
-        click.echo(f"  [{status_icon}] {plugin.id} v{plugin.version}")
-        click.echo(f"      {plugin.name}")
-        click.echo(f"      {plugin.description}")
-        click.echo()
-
-@plugin.command('install')
-@click.argument('source')
-@click.option('--version', '-v', help='版本号')
-@click.pass_context
-def plugin_install(ctx, source, version):
-    """安装插件"""
-    manager = get_plugin_manager(ctx.obj['config'])
-    
-    click.echo(f"Installing plugin from {source}...")
-    
-    try:
-        manifest = manager.install_plugin(source, version)
-        click.echo(f"Plugin installed: {manifest.id} v{manifest.version}")
-    except Exception as e:
-        click.echo(f"Failed to install: {e}", err=True)
-
-@plugin.command('uninstall')
-@click.argument('plugin_id')
-@click.option('--force', '-f', is_flag=True, help='强制卸载')
-@click.pass_context
-def plugin_uninstall(ctx, plugin_id, force):
-    """卸载插件"""
-    manager = get_plugin_manager(ctx.obj['config'])
-    
-    if not force:
-        click.confirm(f"Are you sure you want to uninstall {plugin_id}?", abort=True)
-    
-    success = manager.uninstall_plugin(plugin_id)
-    if success:
-        click.echo(f"Plugin {plugin_id} uninstalled")
-    else:
-        click.echo(f"Plugin {plugin_id} not found", err=True)
-
-@plugin.command('enable')
-@click.argument('plugin_id')
-@click.pass_context
-def plugin_enable(ctx, plugin_id):
-    """启用插件"""
-    manager = get_plugin_manager(ctx.obj['config'])
-    
-    success = manager.enable_plugin(plugin_id)
-    if success:
-        click.echo(f"Plugin {plugin_id} enabled")
-    else:
-        click.echo(f"Failed to enable plugin {plugin_id}", err=True)
-
-@plugin.command('disable')
-@click.argument('plugin_id')
-@click.pass_context
-def plugin_disable(ctx, plugin_id):
-    """禁用插件"""
-    manager = get_plugin_manager(ctx.obj['config'])
-    
-    success = manager.disable_plugin(plugin_id)
-    if success:
-        click.echo(f"Plugin {plugin_id} disabled")
-    else:
-        click.echo(f"Failed to disable plugin {plugin_id}", err=True)
-
-# ========== 系统命令 ==========
-
-@cli.command()
-@click.pass_context
-def start(ctx):
-    """启动 neurova 服务"""
-    config = load_config(ctx.obj['config'])
-    
-    # 初始化框架
-    framework = neurovaFramework(config)
-    framework.start()
-    
-    click.echo("neurova started successfully")
-    click.echo(f"Web UI: http://localhost:{config.get('web_port', 8080)}")
-    click.echo("Press Ctrl+C to stop")
-    
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        click.echo("\nShutting down...")
-        framework.stop()
-
-@cli.command('stop')
-@click.pass_context
-def stop(ctx):
-    """停止 neurova 服务"""
-    # 发送停止信号
-    import signal
-    os.kill(os.getpid(), signal.SIGTERM)
-    click.echo("neurova stopped")
-
-@cli.command('status')
-@click.pass_context
-def system_status(ctx):
-    """查看系统状态"""
-    config = load_config(ctx.obj['config'])
-    
-    click.echo("neurova Status")
-    click.echo("=" * 40)
-    
-    # Agent 状态
-    orchestrator = get_orchestrator(config)
-    agents = orchestrator.list_agents()
-    click.echo(f"Agents: {len(agents)}")
-    click.echo(f"  - Online: {len([a for a in agents if a.status != AgentStatus.OFFLINE])}")
-    click.echo(f"  - Offline: {len([a for a in agents if a.status == AgentStatus.OFFLINE])}")
-    
-    # Skill 状态
-    manager = get_skill_manager(config)
-    skills = manager.list_skills()
-    click.echo(f"Skills: {len(skills)}")
-    
-    # 插件状态
-    plugin_mgr = get_plugin_manager(config)
-    plugins = plugin_mgr.list_plugins(status=PluginStatus.ENABLED)
-    click.echo(f"Plugins Enabled: {len(plugins)}")
-    
-    # 内存使用
-    import psutil
-    process = psutil.Process()
-    memory = process.memory_info().rss / 1024 / 1024
-    click.echo(f"Memory Usage: {memory:.2f} MB")
-
-@cli.command('config')
-@click.option('--show', is_flag=True, help='显示当前配置')
-@click.option('--validate', is_flag=True, help='验证配置')
-@click.pass_context
-def config_cmd(ctx, show, validate):
-    """配置管理"""
-    config_path = ctx.obj['config']
-    
-    if show:
-        with open(config_path, 'r') as f:
-            click.echo(f.read())
-    
-    if validate:
-        try:
-            config = load_config(config_path)
-            click.echo("Configuration is valid")
-        except Exception as e:
-            click.echo(f"Configuration error: {e}", err=True)
-
-# ========== 工具命令 ==========
-
-@cli.command('logs')
-@click.option('--follow', '-f', is_flag=True, help='跟踪日志')
-@click.option('--lines', '-n', default=100, help='显示行数')
-@click.pass_context
-def logs(ctx, follow, lines):
-    """查看日志"""
-    log_file = get_log_file(ctx.obj['config'])
-    
-    if not os.path.exists(log_file):
-        click.echo("No log file found", err=True)
-        return
-    
-    if follow:
-        # 跟踪模式
-        with open(log_file, 'r') as f:
-            # 移动到文件末尾
-            f.seek(0, 2)
-            while True:
-                line = f.readline()
-                if line:
-                    click.echo(line, nl=False)
-                else:
-                    time.sleep(0.1)
-    else:
-        # 显示最后 N 行
-        with open(log_file, 'r') as f:
-            all_lines = f.readlines()
-            for line in all_lines[-lines:]:
-                click.echo(line, nl=False)
-
-def get_orchestrator(config):
-    """获取 Agent 编排器"""
-    # 实现略
-    pass
-
-def get_skill_manager(config):
-    """获取 Skill 管理器"""
-    # 实现略
-    pass
-
-def get_plugin_manager(config):
-    """获取插件管理器"""
-    # 实现略
-    pass
-
-def load_config(config_path):
-    """加载配置"""
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
-
-def get_log_file(config):
-    """获取日志文件路径"""
-    return config.get('logging', {}).get('file', 'logs/neurova.log')
-
-if __name__ == '__main__':
-    cli()
+# 运行交互式客户端
+cli.run()
 ```
 
-## 5. CLI 使用示例
+### 4.2 CLI 命令
 
-### 5.1 使用示例
+#### 系统命令
 
 ```bash
-# 查看帮助
-neurova --help
+# 显示帮助
+/help
 
-# 启动服务
-neurova start
+# 清屏
+/clear
 
-# 查看系统状态
-neurova status
+# 退出
+/exit
+# 或按 Ctrl+C
+```
 
+#### Agent 管理命令
+
+```bash
 # 列出所有 Agent
-neurova agent list
+/agent
 
-# 创建 Agent
-neurova agent create assistant --config agents/assistant.yaml
+# 创建新 Agent
+/agent add
 
-# 查看 Agent 状态
-neurova agent status agent_12345
+# 删除 Agent
+/agent del
 
-# 列出所有 Skill
-neurova skill list
+# 切换 Agent（方式1）
+/agent switch 1
 
-# 查看 Skill 详情
-neurova skill info search
+# 切换 Agent（方式2，快捷方式）
+/agent 1
+```
 
-# 执行 Skill
-neurova skill execute search -p query="Python tutorial" -p num_results=5
+#### LLM 管理命令
 
-# 列出插件
-neurova plugin list
+```bash
+# 列出所有 LLM 服务商
+/llm
 
-# 安装插件
-neurova plugin install wechat-connector
+# 添加 LLM 服务商
+/llm add
 
-# 启用插件
-neurova plugin enable wechat-connector
+# 删除 LLM 服务商
+/llm del
 
-# 查看日志
-neurova logs -f -n 100
+# 切换 LLM 服务商/模型（方式1）
+/llm switch 1
 
-# 验证配置
-neurova config --validate
+# 切换 LLM 服务商/模型（方式2，快捷方式）
+/llm 1
+```
+
+### 4.3 CLI 使用示例
+
+```bash
+# 启动 CLI 客户端
+python cli.py
+
+# 指定服务器 URL
+python cli.py --url http://192.168.1.100:9527
+
+# 交互式会话示例
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║   ███╗   ██╗███████╗██╗   ██╗██████╗  ██████╗ ██╗   ██╗      ║
+║   ████╗  ██║██╔════╝██║   ██║██╔══██╗██╔═══██╗██║   ██║      ║
+║   ██╔██╗ ██║█████╗  ██║   ██║██████╔╝██║   ██║██║   ██║      ║
+║   ██║╚██╗██║██╔══╝  ██║   ██║██╔══██╗██║   ██║╚██╗ ██╔╝      ║
+║   ██║ ╚████║███████╗╚██████╔╝██║  ██║╚██████╔╝ ╚████╔╝       ║
+║   ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝   ╚═══╝        ║
+║                                                               ║
+║            智能无限，协作无间 - CLI 聊天客户端                  ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+
+[✓] 服务器连接成功: http://localhost:9527
+[✓] 登录成功
+[✓] 已选择 Agent: 默认助手 (ID: agent_001)
+
+输入 /help 查看命令帮助，输入消息开始聊天，Ctrl+C 退出
+
+[默认助手] > 你好
+[思考中...]
+[Neurova] 你好！有什么可以帮助你的吗？
+
+[默认助手] > /agent
+┌─────────────────────────────────────────────────────────────┐
+│  Agent 列表                                                 │
+├─────────────────────────────────────────────────────────────┤
+│ ► 1. 默认助手               ID: agent_001      状态: running 模型: gpt-4
+│   2. 代码助手               ID: agent_002      状态: running 模型: claude-3
+└─────────────────────────────────────────────────────────────┘
+
+提示: 输入序号切换 Agent，或使用 /agent switch <序号>
+```
+
+## 5. CLI 工具执行器
+
+### 5.1 功能概述
+
+CLIToolExecutor 提供安全的命令行执行能力，包括：
+- 风险评估
+- 命令白名单
+- 输出脱敏
+- 超时控制
+
+```python
+from neurova.tool_layers.cli_tool import CLIToolExecutor
+
+# 创建执行器
+executor = CLIToolExecutor()
+
+# 评估命令风险
+risk = executor.assess_risk("rm -rf /")
+print(risk)
+# {
+#     "level": "critical",
+#     "score": 0.95,
+#     "reasons": ["Pattern: rm\\s+-rf\\s+/", "Dangerous character: /"],
+#     "allowed": False
+# }
+
+# 安全命令执行
+result = executor.execute_sync("ls -la", timeout=10.0)
+print(result)
+# {
+#     "success": True,
+#     "output": "total 123...",
+#     "error": "",
+#     "return_code": 0,
+#     "risk": {"level": "low", "score": 0.0, ...}
+# }
+
+# 创建 CLI 工具模板
+tool = executor.create_cli_tool(
+    name="git_status",
+    command="git -C {repo_path} status",
+    parameters={
+        "repo_path": {
+            "type": "string",
+            "required": True,
+            "description": "Git 仓库路径"
+        }
+    },
+    description="获取 Git 仓库状态"
+)
+
+# 执行 CLI 工具
+result = executor.execute_cli_tool("git_status", {"repo_path": "/path/to/repo"})
+```
+
+### 5.2 风险评估
+
+```python
+# 风险级别
+# - critical: 极高风险（rm -rf /, dd, mkfs 等）
+# - high: 高风险（sudo rm, eval, exec 等）
+# - medium: 中等风险（cat /etc/passwd, find / 等）
+# - low: 低风险（ls, echo, cat 等）
+
+# 白名单命令
+allowed_commands = [
+    'ls', 'echo', 'cat', 'grep', 'find', 'wc', 'head', 'tail',
+    'sort', 'uniq', 'awk', 'sed', 'tr', 'cut', 'paste',
+    'mkdir', 'rmdir', 'touch', 'cp', 'mv', 'ln',
+    'ps', 'top', 'df', 'du', 'free', 'uptime',
+    'git', 'python', 'pip', 'node', 'npm',
+    'docker', 'kubectl', 'make', 'cmake'
+]
+```
+
+### 5.3 输出脱敏
+
+```python
+# 敏感信息模式（自动脱敏）
+sensitive_patterns = [
+    (r'password\s*[=:]\s*\S+', "password=***"),
+    (r'api_key\s*[=:]\s*\S+', "api_key=***"),
+    (r'secret\s*[=:]\s*\S+', "secret=***"),
+    (r'token\s*[=:]\s*\S+', "token=***"),
+    (r'key\s*[=:]\s*[A-Za-z0-9+/=]{20,}', "key=***"),
+    (r'[A-Za-z0-9+/=]{40,}', "***"),  # Base64 编码的长字符串
+]
 ```
 
 ## 6. 配置示例
 
-### 6.1 CLI 配置
-
-```yaml
-# config.yaml
-framework:
-  name: "neurova"
-  version: "1.0.0"
-
-# 插件配置
-plugins:
-  plugins_dir: "plugins"
-  data_dir: "data/plugins"
-  cache_dir: "cache/plugins"
-  plugin_repo: "https://plugins.neurova.io"
-
-# 日志配置
-logging:
-  level: "INFO"
-  file: "logs/neurova.log"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  max_size: 10485760  # 10MB
-  backup_count: 5
-
-# Web 配置
-web:
-  enabled: true
-  host: "0.0.0.0"
-  port: 8080
-
-# API 配置
-api:
-  enabled: true
-  host: "0.0.0.0"
-  port: 8081
-```
-
-## 7. 插件开发模板
-
-### 7.1 插件结构
-
-```
-my-plugin/
-├── manifest.json
-├── my_plugin/
-│   ├── __init__.py
-│   └── plugin.py
-├── requirements.txt
-└── README.md
-```
-
-### 7.2 manifest.json
+### 6.1 插件清单示例
 
 ```json
 {
-  "id": "my-plugin",
+  "plugin_id": "my-plugin",
   "name": "My Plugin",
-  "description": "A sample plugin for neurova",
+  "description": "A sample plugin for Neurova",
   "version": "1.0.0",
   "author": "Your Name",
-  "type": "functional",
-  "main": "my_plugin.plugin",
-  "dependencies": [],
-  "permissions": ["network", "file_read"],
-  "hooks": {
-    "on_message": "handle_message",
-    "on_task": "handle_task"
-  },
+  "plugin_type": "functional",
+  "dependencies": {},
+  "optional_dependencies": {},
+  "neurova_min_version": "4.0.0",
+  "entry_point": "main.py",
+  "module_class": "MyPlugin",
+  "required_permissions": [
+    "read:events",
+    "emit:events"
+  ],
   "config_schema": {
     "type": "object",
     "properties": {
@@ -1105,35 +528,219 @@ my-plugin/
   },
   "default_config": {
     "api_key": ""
-  }
+  },
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/my-plugin/status",
+      "handler": "get_status"
+    }
+  ],
+  "frontend_resources": [
+    "dist/index.js",
+    "dist/index.css"
+  ],
+  "tags": ["sample", "demo"],
+  "homepage": "https://github.com/yourname/my-plugin",
+  "license": "MIT"
 }
 ```
 
-### 7.3 plugin.py
+### 6.2 插件目录结构
+
+```
+my-plugin/
+├── manifest.json          # 插件清单
+├── main.py                # 入口模块
+├── requirements.txt       # Python 依赖
+├── README.md              # 插件文档
+├── dist/                  # 前端资源
+│   ├── index.js
+│   └── index.css
+└── tests/                 # 测试文件
+    └── test_plugin.py
+```
+
+### 6.3 插件入口模块
 
 ```python
-from neurova import Plugin, PluginContext
+# main.py
+from neurova.plugins.base_plugin import BasePlugin, APIEndpoint
+from neurova.plugins.plugin_manifest import PluginManifest, PluginType, PluginPermission
 
-class Plugin:
-    def __init__(self):
-        self.context = None
+class MyPlugin(BasePlugin):
+    """示例插件"""
     
-    async def initialize(self, context: PluginContext):
-        """初始化插件"""
-        self.context = context
-        self.context.log('info', 'Plugin initialized')
+    plugin_type = PluginType.FUNCTIONAL
+    api_endpoints = [
+        APIEndpoint(
+            method="GET",
+            path="/api/my-plugin/status",
+            handler_name="get_status",
+            description="获取插件状态"
+        )
+    ]
+    required_permissions = [PluginPermission.READ_EVENTS]
     
-    async def shutdown(self):
-        """关闭插件"""
-        self.context.log('info', 'Plugin shutdown')
+    def __init__(self, manifest: PluginManifest):
+        super().__init__(manifest)
+        self._counter = 0
     
-    async def handle_message(self, message):
-        """处理消息钩子"""
-        # 实现消息处理逻辑
-        pass
+    async def on_initialize(self) -> None:
+        """初始化"""
+        self.log_info("插件初始化完成")
     
-    async def handle_task(self, task):
-        """处理任务钩子"""
-        # 实现任务处理逻辑
-        pass
+    async def on_start(self) -> None:
+        """启动"""
+        self.log_info("插件启动")
+        self.subscribe("message.received", self._on_message)
+    
+    async def on_stop(self) -> None:
+        """停止"""
+        self.log_info("插件停止")
+    
+    async def on_destroy(self) -> None:
+        """销毁"""
+        self.log_info("插件销毁")
+    
+    def _on_message(self, data):
+        """处理消息"""
+        self._counter += 1
+        self.publish_event("my_plugin.count", {"count": self._counter})
+    
+    def get_status(self):
+        """API 端点"""
+        return {"status": "running", "count": self._counter}
+```
+
+## 7. API 接口
+
+### 7.1 插件管理 API
+
+```http
+# 列出所有插件
+GET /api/v1/plugins
+
+# 获取插件详情
+GET /api/v1/plugins/{plugin_id}
+
+# 安装插件
+POST /api/v1/plugins/install
+Content-Type: application/json
+{
+  "source": "/path/to/plugin",
+  "version": "1.0.0"
+}
+
+# 卸载插件
+DELETE /api/v1/plugins/{plugin_id}
+
+# 启用插件
+POST /api/v1/plugins/{plugin_id}/enable
+
+# 禁用插件
+POST /api/v1/plugins/{plugin_id}/disable
+
+# 获取插件状态
+GET /api/v1/plugins/status
+```
+
+### 7.2 CLI API
+
+```http
+# 聊天接口
+POST /api/v1/chat
+Content-Type: application/json
+{
+  "message": "你好",
+  "agent_id": "agent_001"
+}
+
+# 列出 Agent
+GET /api/v1/agents
+
+# 创建 Agent
+POST /api/v1/agents
+Content-Type: application/json
+{
+  "name": "新助手",
+  "description": "一个新助手",
+  "enable_memory": true
+}
+
+# 列出 LLM 服务商
+GET /api/v1/providers
+
+# 切换模型
+POST /api/v1/providers/activate-model
+Content-Type: application/json
+{
+  "provider_id": "openai",
+  "model_id": "gpt-4"
+}
+```
+
+## 8. 最佳实践
+
+### 8.1 插件开发
+
+1. **遵循 SemVer 规范**：版本号应反映兼容性变化
+2. **声明依赖**：明确列出必需和可选依赖
+3. **最小权限原则**：只申请必需的权限
+4. **错误处理**：在生命周期回调中妥善处理异常
+5. **资源清理**：在 `on_destroy()` 中释放所有资源
+6. **日志记录**：使用 `self.log_info/warning/error()` 记录日志
+
+### 8.2 CLI 使用
+
+1. **使用 `/help` 查看命令**：了解所有可用命令
+2. **切换 Agent 前先列出**：使用 `/agent` 查看所有 Agent
+3. **切换模型前先列出**：使用 `/llm` 查看所有服务商和模型
+4. **使用快捷方式**：`/agent 1` 等同于 `/agent switch 1`
+
+### 8.3 安全考虑
+
+1. **插件签名**：验证插件来源和完整性
+2. **权限控制**：限制插件可访问的资源
+3. **沙箱执行**：在隔离环境中运行插件
+4. **审计日志**：记录所有插件操作
+5. **CLI 命令白名单**：只允许安全命令执行
+6. **输出脱敏**：自动过滤敏感信息
+
+## 9. 故障排除
+
+### 9.1 常见问题
+
+**插件无法加载**
+- 检查 `manifest.json` 格式是否正确
+- 确认 `entry_point` 指向的文件存在
+- 检查依赖是否已安装
+- 查看日志中的错误信息
+
+**CLI 无法连接服务器**
+- 确认服务器已启动（`python start.py`）
+- 检查 URL 是否正确（默认 `http://localhost:9527`）
+- 检查网络连接和防火墙设置
+
+**命令执行被拒绝**
+- 检查命令是否在白名单中
+- 评估命令风险级别
+- 使用更安全的替代命令
+
+### 9.2 调试技巧
+
+```python
+# 启用详细日志
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# 检查插件状态
+manager = get_plugin_manager()
+status = manager.get_status()
+print(status)
+
+# 检查生命周期钩子
+lifecycle = get_lifecycle_manager()
+hooks = lifecycle.list_hooks()
+print(hooks)
 ```

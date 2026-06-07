@@ -2,122 +2,117 @@
 
 ## 1. 项目结构
 
-### 1.1 目录结构
+### 1.1 目录结构 (v4.0)
 
 ```
 neurova/
 ├── README.md
-├── LICENSE
-├── setup.py
+├── CONTEXT.md                    # 项目上下文文档
+├── API_REFERENCE.md              # API 参考文档
+├── PRODUCT_GUIDE.md              # 产品指南
+├── start.py                      # 启动脚本
 ├── requirements.txt
 ├── requirements-dev.txt
-├── Dockerfile
-├── docker-compose.yml
-├── .trae/
-│   └── project_rules.md
+├── .gitignore
 ├── docs/
-│   ├── architecture/
-│   │   ├── 01-core-architecture.md
-│   │   ├── 02-memory-system.md
-│   │   ├── 03-message-routing.md
-│   │   ├── 04-multi-agent-collaboration.md
-│   │   ├── 05-skill-system.md
-│   │   ├── 06-plugin-cli-system.md
-│   │   └── 07-implementation-plan.md
-│   ├── api/
-│   │   └── api-reference.md
-│   └── guides/
-│       ├── quickstart.md
-│       ├── user-guide.md
-│       └── developer-guide.md
-├── src/
-│   └── neurova/
-│       ├── __init__.py
-│       ├── core/
-│       │   ├── __init__.py
-│       │   ├── agent.py
-│       │   ├── orchestrator.py
-│       │   ├── config.py
-│       │   └── events.py
-│       ├── memory/
-│       │   ├── __init__.py
-│       │   ├── manager.py
-│       │   ├── models.py
-│       │   ├── storage.py
-│       │   └── emotion.py
-│       ├── messaging/
-│       │   ├── __init__.py
-│       │   ├── router.py
-│       │   ├── message.py
-│       │   ├── event_bus.py
-│       │   └── channels/
-│       │       ├── __init__.py
-│       │       ├── base.py
-│       │       ├── wechat.py
-│       │       ├── telegram.py
-│       │       └── webhook.py
-│       ├── llm/
-│       │   ├── __init__.py
-│       │   ├── base.py
-│       │   ├── openai_provider.py
-│       │   └── anthropic_provider.py
-│       ├── skills/
-│       │   ├── __init__.py
-│       │   ├── manager.py
-│       │   ├── base.py
-│       │   ├── context.py
-│       │   └── builtin/
-│       │       ├── __init__.py
-│       │       ├── search.py
-│       │       ├── calculator.py
-│       │       └── file_ops.py
-│       ├── plugins/
-│       │   ├── __init__.py
-│       │   ├── manager.py
-│       │   ├── models.py
-│       │   └── loader.py
-│       ├── cli/
-│       │   ├── __init__.py
-│       │   └── commands.py
-│       ├── api/
-│       │   ├── __init__.py
-│       │   ├── server.py
-│       │   └── routes/
-│       │       ├── __init__.py
-│       │       ├── agents.py
-│       │       ├── skills.py
-│       │       └── plugins.py
-│       └── utils/
-│           ├── __init__.py
-│           ├── logging.py
-│           ├── helpers.py
-│           └── security.py
-├── tests/
-│   ├── __init__.py
-│   ├── unit/
-│   │   ├── test_agent.py
-│   │   ├── test_memory.py
-│   │   ├── test_skills.py
-│   │   └── test_plugins.py
-│   ├── integration/
-│   │   ├── test_orchestrator.py
-│   │   └── test_messaging.py
-│   └── fixtures/
-│       ├── config.yaml
-│       └── skills/
-├── examples/
-│   ├── basic_agent.py
-│   ├── multi_agent.py
-│   ├── custom_skill.py
-│   └── custom_plugin/
-├── config/
-│   ├── default.yaml
-│   ├── development.yaml
-│   └── production.yaml
-├── data/
-│   └── .gitkeep
-└── logs/
-    └── .gitkeep
+│   ├── architecture/             # 架构设计文档 (20+)
+│   ├── dev_progress/             # 开发进度文档 (74+)
+│   └── DOCS_ALIGNMENT_PLAN.md    # 文档对齐计划
+├── neurova/                      # 后端核心代码 (550+ Python 文件)
+│   ├── agent_core.py             # Agent 核心类 (1621 行, 37 方法)
+│   ├── agent/                    # Agent 深度模块
+│   │   ├── __init__.py
+│   │   ├── config.py             # AgentConfig 配置
+│   │   ├── memory_agent.py       # 记忆管理模块
+│   │   ├── context_orchestrator.py # 上下文构建模块
+│   │   ├── tool_executor.py      # 工具执行模块
+│   │   ├── chat_pipeline.py      # 对话管线 (6步)
+│   │   └── loops/                # Agent Loop 系统
+│   ├── cognitive_layers/         # 认知层
+│   │   ├── memory_layer/         # 记忆层核心 (17维分类)
+│   │   ├── emotion_context_layer/ # 情感上下文注入
+│   │   ├── growth_layer/         # 成长分析
+│   │   ├── meta_cognition_layer/ # 元认知
+│   │   └── model_adapter/        # 模型适配器
+│   ├── llm/                      # LLM 模块 (6+ 提供商)
+│   │   ├── llm_router.py         # 多模态自适应路由器
+│   │   ├── multi_model_client.py # 多模型统一客户端
+│   │   ├── provider_manager.py   # 服务商管理器
+│   │   └── providers/            # 提供商实现
+│   │       ├── openai_provider.py
+│   │       ├── anthropic_provider.py
+│   │       ├── gemini_provider.py
+│   │       ├── ollama_provider.py
+│   │       ├── openrouter_provider.py
+│   │       └── litellm_provider.py
+│   ├── channels/                 # 通信渠道 (14 种)
+│   │   ├── base.py               # 渠道适配器基类
+│   │   ├── manager.py            # 渠道管理器
+│   │   ├── feishu.py             # 飞书适配器
+│   │   ├── dingtalk.py           # 钉钉适配器
+│   │   ├── wecom.py              # 企业微信适配器
+│   │   ├── wechat.py             # 微信适配器
+│   │   ├── telegram.py           # Telegram 适配器
+│   │   ├── discord.py            # Discord 适配器
+│   │   ├── qq.py                 # QQ 适配器
+│   │   ├── mqtt.py               # MQTT 适配器
+│   │   ├── websocket.py          # WebSocket 适配器
+│   │   ├── sip.py                # SIP 适配器
+│   │   └── mobile_pairing.py     # 移动设备配对
+│   ├── evolution/                # 进化系统
+│   │   ├── closed_loop.py        # 统一进化引擎
+│   │   ├── pattern_miner.py      # 序列模式挖掘
+│   │   ├── tool_lifecycle.py     # 工具生命周期管理
+│   │   └── crystallizer.py       # 经验结晶器
+│   ├── skills/                   # 技能系统
+│   │   ├── registry.py           # Skill 注册表
+│   │   ├── manifest.py           # Skill 清单
+│   │   └── hub_client.py         # 技能中心客户端
+│   ├── plugins/                  # 插件系统
+│   │   ├── plugin_manifest.py    # 插件清单
+│   │   ├── base_plugin.py        # 插件基类
+│   │   ├── plugin_manager.py     # 插件管理器
+│   │   └── plugin_lifecycle.py   # 插件生命周期
+│   ├── api/                      # API 端点 (77+ 路由)
+│   │   ├── app.py                # FastAPI 应用
+│   │   └── endpoints/            # 端点实现
+│   │       ├── agent.py
+│   │       ├── memory.py
+│   │       ├── channels.py
+│   │       ├── providers.py
+│   │       └── ...
+│   ├── tts/                      # TTS 模块
+│   │   ├── base.py               # TTS 基类
+│   │   ├── edge_tts.py           # Edge TTS
+│   │   └── manager.py            # TTS 管理器
+│   ├── computer_use/             # 计算机使用模块
+│   │   ├── browser_manager.py    # 浏览器管理器
+│   │   └── vision_basic.py       # 视觉理解
+│   └── core/                     # 核心模块
+│       ├── logger.py             # 日志系统
+│       ├── event_bus.py          # 事件总线
+│       └── module_system.py      # 模块系统
+├── neuUI/                        # 前端代码 (82 页面组件)
+│   ├── src/
+│   │   ├── pages/                # 页面组件
+│   │   │   ├── ChatPage.vue      # 聊天页面 (47KB)
+│   │   │   ├── DashboardPage.vue # 仪表盘页面
+│   │   │   ├── SettingPage.vue   # 设置页面
+│   │   │   └── ...               # 82 个页面组件
+│   │   ├── components/           # 通用组件
+│   │   ├── api/                  # API 模块
+│   │   ├── router/               # 路由配置
+│   │   └── stores/               # Pinia 状态管理
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── tsconfig.json
+├── tests/                        # 测试文件 (532 测试文件)
+│   ├── unit/                     # 单元测试
+│   ├── integration/              # 集成测试
+│   └── e2e/                      # 端到端测试
+└── data/                         # 数据目录
+    ├── agents/                   # Agent 配置
+    └── memory/                   # 记忆数据
 ```
 
 ## 2. 实现阶段

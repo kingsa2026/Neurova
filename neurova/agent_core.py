@@ -472,6 +472,16 @@ class Agent:
             except Exception as e:
                 logger.warning(f"语音记忆桥接器初始化失败: {e}")
 
+        # 统一语音管线（ASR→上下文→记忆 的单一入口）
+        self.voice_pipeline = None
+        if self.config.enable_tts or self.config.enable_asr:
+            try:
+                from neurova.voice_pipeline import get_voice_pipeline
+                self.voice_pipeline = get_voice_pipeline()
+                logger.info(f"Agent {self.config.name}: 统一语音管线已初始化")
+            except Exception as e:
+                logger.debug(f"UnifiedVoicePipeline 初始化跳过: {e}")
+
         # 审批管理器（危险命令审批）
         self.approval_manager = None
         try:
@@ -519,11 +529,7 @@ class Agent:
                     skill_names = [s.name for s in self._skill_registry.list_skills()]
                     self.evolution.register_tools(skill_names)
 
-                # 将进化引擎的权重和生命周期同步到 ToolMemoryIntegration
-                if hasattr(self, 'tool_memory') and self.tool_memory:
-                    self.tool_memory.tool_weights = self.evolution.tool_weights
-                    self.tool_memory.tool_lifecycle = self.tool_lifecycle
-                    logger.info(f"Agent {self.config.name}: ToolMemoryIntegration 已同步进化引擎权重和生命周期")
+                # 注意：ToolMemoryIntegration 同步需要等待 tool_lifecycle 初始化完成
 
                 logger.info(
                     f"Agent {self.config.name}: 统一进化引擎(EvolutionOrchestrator)已初始化 "
@@ -592,6 +598,12 @@ class Agent:
             logger.info(f"Agent {self.config.name}: ToolLifecycleManager (生命周期) 已初始化")
         except Exception as e:
             logger.warning(f"ToolLifecycleManager 初始化失败: {e}")
+
+        # 将进化引擎的权重和生命周期同步到 ToolMemoryIntegration
+        if hasattr(self, 'tool_memory') and self.tool_memory and self.evolution:
+            self.tool_memory.tool_weights = self.evolution.tool_weights
+            self.tool_memory.tool_lifecycle = self.tool_lifecycle
+            logger.info(f"Agent {self.config.name}: ToolMemoryIntegration 已同步进化引擎权重和生命周期")
 
         # 4. NLToolSynthesizer — 自然语言工具合成
         self.tool_synthesizer: Optional[NLToolSynthesizer] = None
@@ -839,81 +851,59 @@ class Agent:
         }
         media_desc = media_descriptions.get(media_type, f"[用户发送了媒体文件: {media_type}]")
         
-        # 语音消息：调用 ASR 引擎转写
-        if media_type == "voice" and audio_bytes and self.asr_manager:
-            try:
-                start_time = time.time()
-                asr_result = await self.asr_manager.transcribe(audio_bytes)
-                duration_ms = int((time.time() - start_time) * 1000)
-                
-                if asr_result and "text" in asr_result:
-                    transcribed_text = asr_result["text"]
-                    logger.info(f"ASR 转写结果: {transcribed_text[:100]}...")
-                    # 将转写结果作为用户输入，而不是仅注入描述
-                    media_desc = f"[语音识别结果: {transcribed_text}]"
-                    
-                    # 记录ASR结果到语音记忆桥接器
-                    voice_memory_bridge = getattr(self, "voice_memory_bridge", None)
-                    if voice_memory_bridge:
-                        try:
-                            # 提取ASR结果中的元数据
-                            confidence = asr_result.get("confidence", 0.0)
-                            language = asr_result.get("language", "zh")
-                            engine = asr_result.get("engine", "unknown")
-                            
-                            asr_memory_result = {
-                                "text": transcribed_text,
-                                "confidence": confidence,
-                                "language": language,
-                                "engine": engine,
-                                "duration_ms": duration_ms,
-                            }
-                            
-                            # 获取用户和Agent ID
-                            user_id = getattr(self.config, "user_id", "default")
-                            agent_id = getattr(self.config, "agent_id", "default")
-                            
-                            # 构建音频元数据
-                            audio_metadata = {
-                                "filename": metadata.get("filename", ""),
-                                "mime_type": metadata.get("mime_type", ""),
+        # 语音消息：通过统一语音管线处理（ASR→情感→上下文→记忆）
+        voice_context = None
+        if media_type == "voice" and audio_bytes:
+            if self.voice_pipeline:
+                try:
+                    user_id = getattr(self.config, "user_id", "default")
+                    agent_id = getattr(self.config, "agent_id", "default")
+                    pipeline_result = await self.voice_pipeline.process_asr(
+                        audio_data=audio_bytes,
+                        user_id=user_id,
+                        agent_id=agent_id,
+                        **{k: v for k, v in (metadata or {}).items()
+                           if k not in ("audio_bytes",)},
+                    )
+                    if pipeline_result.text:
+                        transcribed_text = pipeline_result.text
+                        logger.info(f"ASR 转写结果: {transcribed_text[:100]}...")
+                        media_desc = f"[语音识别结果: {transcribed_text}]"
+                        # 构建语音上下文供后续 metadata 注入
+                        voice_context = {
+                            "text": transcribed_text,
+                            "confidence": pipeline_result.confidence,
+                            "language": pipeline_result.language,
+                            "engine": pipeline_result.engine,
+                            "duration_ms": pipeline_result.duration_ms,
+                            "emotion": pipeline_result.emotion,
+                            "audio_metadata": {
+                                "filename": metadata.get("filename", "") if metadata else "",
+                                "mime_type": metadata.get("mime_type", "") if metadata else "",
                                 "file_size": len(audio_bytes),
-                            }
-                            
-                            await voice_memory_bridge.record_asr_result(
-                                asr_result=asr_memory_result,
-                                user_id=user_id,
-                                agent_id=agent_id,
-                                audio_metadata=audio_metadata,
-                            )
-                            logger.debug("ASR结果已记录到语音记忆桥接器")
-                        except Exception as e:
-                            logger.warning(f"记录ASR结果到语音记忆桥接器失败: {e}")
-                    
-                    # 构建语音上下文，传递给上下文构建
-                    voice_context = {
-                        "text": transcribed_text,
-                        "confidence": confidence,
-                        "language": language,
-                        "engine": engine,
-                        "duration_ms": duration_ms,
-                        "audio_metadata": {
-                            "filename": metadata.get("filename", ""),
-                            "mime_type": metadata.get("mime_type", ""),
-                            "file_size": len(audio_bytes),
-                        },
-                    }
-                    
-                    # 分析语音情感
-                    try:
-                        from neurova.voice_context_module import VoiceContextModule
-                        voice_module = VoiceContextModule()
-                        emotion_context = voice_module.analyze_emotion(transcribed_text)
-                        voice_context["emotion"] = emotion_context
-                    except Exception as e:
-                        logger.debug(f"语音情感分析跳过: {e}")
-            except Exception as e:
-                logger.warning(f"ASR 转写失败: {e}")
+                            },
+                        }
+                    elif pipeline_result.error:
+                        logger.warning(f"语音管线 ASR 失败: {pipeline_result.error}")
+                except Exception as e:
+                    logger.warning(f"统一语音管线处理失败: {e}")
+            elif self.asr_manager:
+                # 降级：直接调用 ASR 引擎（无管线集成）
+                try:
+                    asr_result = await self.asr_manager.transcribe(audio_bytes)
+                    if asr_result and "text" in asr_result:
+                        transcribed_text = asr_result["text"]
+                        logger.info(f"ASR 转写结果（降级模式）: {transcribed_text[:100]}...")
+                        media_desc = f"[语音识别结果: {transcribed_text}]"
+                        voice_context = {
+                            "text": transcribed_text,
+                            "confidence": asr_result.get("confidence", 0.0),
+                            "language": asr_result.get("language", "zh"),
+                            "engine": asr_result.get("engine", "unknown"),
+                            "duration_ms": asr_result.get("duration_ms", 0),
+                        }
+                except Exception as e:
+                    logger.warning(f"ASR 转写失败（降级模式）: {e}")
 
         # 3. 将媒体描述注入用户输入，调用 chat()
         enriched_input = f"{media_desc}\n{content}" if content else media_desc

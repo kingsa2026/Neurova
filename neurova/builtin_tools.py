@@ -149,6 +149,41 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["text"],
         },
     },
+    "asr_transcribe": {
+        "description": "将音频转写为文本（语音识别）",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "audio_data": {"type": "string", "description": "Base64编码的音频数据"},
+                "language": {"type": "string", "description": "语言代码（如 zh, en）", "default": "zh"},
+                "engine": {"type": "string", "description": "ASR 引擎（如 funasr, whisper, auto）", "default": "auto"},
+            },
+            "required": ["audio_data"],
+        },
+    },
+    "tts_synthesize": {
+        "description": "将文本合成为语音",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "要合成的文本"},
+                "voice": {"type": "string", "description": "音色名称（如 zh-CN-XiaoxiaoNeural）", "default": "default"},
+                "engine": {"type": "string", "description": "TTS 引擎（如 edge-tts, moss-nano, auto）", "default": "auto"},
+            },
+            "required": ["text"],
+        },
+    },
+    "voice_memory_search": {
+        "description": "搜索语音转写记忆（用户通过语音说过的内容）",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "搜索关键词"},
+                "limit": {"type": "integer", "description": "返回数量上限", "default": 5},
+            },
+            "required": ["query"],
+        },
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════

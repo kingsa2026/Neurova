@@ -1,5 +1,17 @@
 # 向量检索机制架构设计
 
+## 实现对齐说明
+
+> **注意**: 本文档描述的是设计理论和概念模型。以下为文档术语与实际代码实现的对应关系：
+
+| 文档术语 | 实际代码类/方法 | 文件位置 |
+|---------|---------------|---------|
+| `SQLiteVectorStore` / `FAISSVectorStore` | `TFIDFBackend`（TF-IDF后备）/ `FaissBackend`（FAISS加速）/ `ChromaDBBackend`（ChromaDB） | `neurova/cognitive_layers/memory_layer/vector_search_advanced.py` |
+| 统一向量存储接口 | `VectorSearchBackend`（抽象基类） | `neurova/cognitive_layers/memory_layer/vector_search_advanced.py` |
+| 检索协调器 (Retrieval Coordinator) | `AdvancedVectorSearch`（统一接口，自动选择最优后端） | `neurova/cognitive_layers/memory_layer/vector_search_advanced.py` |
+
+实际实现以代码为准。
+
 ## 1. 概述
 
 ### 1.1 设计理念

@@ -228,6 +228,34 @@ class VoiceContextModule:
                 ))
                 
                 logger.debug(f"语音上下文已注入: {len(content_parts)} 项信息")
+            
+            # 语音情感独立注入到 ContextSource.EMOTION
+            emotion = voice_context.get("emotion")
+            if emotion and emotion.get("primary_emotion") != "neutral":
+                emotion_content = (
+                    f"语音情感状态: {emotion['primary_emotion']} "
+                    f"(强度: {emotion.get('confidence', 0):.2f})"
+                )
+                if emotion.get("valence"):
+                    valence_desc = "正面" if emotion["valence"] > 0 else "负面"
+                    emotion_content += f", 效价: {valence_desc}"
+                if emotion.get("arousal"):
+                    arousal_desc = "激动" if emotion["arousal"] > 0.5 else "平静"
+                    emotion_content += f", 唤醒度: {arousal_desc}"
+                
+                context_pool.add_context(ContextInput(
+                    source=ContextSource.EMOTION,
+                    content=emotion_content,
+                    priority=60,  # 情感上下文中等偏低优先级
+                    metadata={
+                        "type": "voice_emotion",
+                        "primary_emotion": emotion["primary_emotion"],
+                        "confidence": emotion.get("confidence", 0),
+                        "valence": emotion.get("valence", 0),
+                        "arousal": emotion.get("arousal", 0),
+                    }
+                ))
+                logger.debug(f"语音情感已注入 EMOTION 上下文: {emotion['primary_emotion']}")
                 
         except Exception as e:
             logger.warning(f"注入语音上下文失败: {e}")

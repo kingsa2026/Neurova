@@ -216,6 +216,7 @@ class VoiceMemoryBridge:
             
             # 3. 情感分析（如果启用）
             emotion_label = None
+            emotion_state = None
             if self.config.enable_emotion_analysis and self._emotion_module:
                 emotion_state = await self.analyze_voice_emotion(record.text, user_id)
                 if emotion_state:
@@ -232,6 +233,40 @@ class VoiceMemoryBridge:
                     metadata=record.to_dict(),
                 )
                 logger.debug(f"ASR 结果已存储到记忆系统: {memory_id}")
+            
+            # 5. 记录到进化系统（P0 修复：ASR → 进化）
+            if self._evolution_orchestrator:
+                try:
+                    self._evolution_orchestrator.on_after_tool_execution(
+                        tool_name="asr_transcribe",
+                        params={
+                            "engine": record.engine,
+                            "language": record.language,
+                            "confidence": record.confidence,
+                            "duration_ms": record.duration_ms,
+                            "user_id": user_id,
+                            "agent_id": agent_id,
+                        },
+                        success=True,
+                        execution_time=record.duration_ms / 1000.0,
+                    )
+                    logger.debug(f"ASR 结果已记录到进化系统")
+                except Exception as e:
+                    logger.warning(f"ASR 进化记录失败: {e}")
+            
+            # 6. 语音情感 → 进化系统（P2 修复）
+            if emotion_state and self._evolution_orchestrator:
+                try:
+                    self._evolution_orchestrator.on_experience_recorded(
+                        experience_type="voice_emotion",
+                        emotion_data=emotion_state,
+                        tool_name="asr_transcribe",
+                        user_id=user_id,
+                        agent_id=agent_id,
+                    )
+                    logger.debug(f"语音情感已记录到进化系统")
+                except Exception as e:
+                    logger.warning(f"语音情感进化记录失败: {e}")
             
             return VoiceMemoryResult(
                 success=True,

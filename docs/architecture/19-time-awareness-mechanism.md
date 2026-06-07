@@ -1,5 +1,16 @@
 # 时间感知模块架构设计
 
+## 实现对齐说明
+
+> **注意**: 本文档描述的是设计理论和概念模型。以下为文档术语与实际代码实现的对应关系：
+
+| 文档术语 | 实际代码类/方法 | 文件位置 |
+|---------|---------------|---------|
+| `TimePatternDetector`（时间模式识别） | `TemporalKnowledgeGraph`（时序知识图谱引擎，管理带时间窗口的事实） | `neurova/cognitive_layers/memory_layer/temporal_knowledge_graph.py` |
+| `TimeEventPredictor`（时间事件预测） | `TemporalKGMemoryBridge`（时序知识图谱与记忆系统的桥梁，负责事实提取与关联） | `neurova/cognitive_layers/memory_layer/temporal_knowledge_graph.py` |
+
+实际实现以代码为准。
+
 ## 1. 概述
 
 ### 1.1 设计理念

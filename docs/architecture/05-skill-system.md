@@ -1,204 +1,98 @@
-# Skill 协议兼容层设计
+# Skill 系统设计
 
 ## 1. 概述
 
 ### 1.1 设计目标
-- 兼容主流 Skill 协议 (OpenClaw, Qwenpaw 等)
 - 统一的 Skill 接口抽象
-- 支持动态加载和卸载
-- Skill 沙箱执行环境
+- 支持动态注册和执行
 - 完善的错误处理和日志
-- 支持 Skill 组合和链式调用
+- 支持事件触发机制
+- 与记忆系统集成
 
 ### 1.2 Skill 分类
 
 ```
 Skill 系统
 ├── 内置 Skill
-│   ├── 搜索类 (search, web_search)
-│   ├── 计算类 (calculator, code_executor)
-│   ├── 文件类 (file_reader, file_writer)
-│   └── 工具类 (translator, summarizer)
+│   ├── 记忆类 (memory) - 记忆搜索和存储
+│   ├── 搜索类 (web_search) - 网络搜索
+│   └── 文件类 (file_operation) - 文件读写操作
 │
-├── 外部 Skill
-│   ├── OpenClaw 兼容 Skill
-│   ├── Qwenpaw 兼容 Skill
-│   └── 自定义 Skill
-│
-└── 复合 Skill
-    ├── 链式 Skill (多 Skill 串联)
-    └── 并行 Skill (多 Skill 并行)
+└── 自定义 Skill
+    └── 通过 SkillRegistry 注册的扩展技能
 ```
 
 ## 2. Skill 数据模型
 
-### 2.1 Skill 元数据
+### 2.1 Skill 状态
+
+```python
+from enum import Enum
+
+class SkillStatus(Enum):
+    """Skill 状态"""
+    ACTIVE = "active"      # 活跃状态
+    INACTIVE = "inactive"  # 非活跃状态
+    LOADING = "loading"    # 加载中
+    ERROR = "error"        # 错误状态
+```
+
+### 2.2 Skill 执行结果
 
 ```python
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional
-from enum import Enum
-import json
-from datetime import datetime
-
-class SkillStatus(Enum):
-    READY = "ready"
-    LOADING = "loading"
-    ERROR = "error"
-    DISABLED = "disabled"
-
-class SkillScope(Enum):
-    GLOBAL = "global"  # 所有 Agent 可用
-    AGENT = "agent"    # 仅特定 Agent 可用
-    PRIVATE = "private" # 仅创建者可用
-
-@dataclass
-class SkillParameter:
-    """Skill 参数定义"""
-    name: str
-    type: str  # str, int, float, bool, list, dict
-    description: str
-    required: bool = True
-    default: Any = None
-    enum: Optional[List[Any]] = None  # 枚举值
-    min: Optional[float] = None  # 数值最小值
-    max: Optional[float] = None  # 数值最大值
-    pattern: Optional[str] = None  # 字符串正则
-
-@dataclass
-class SkillMetadata:
-    """Skill 元数据"""
-    id: str
-    name: str
-    description: str
-    version: str = "1.0.0"
-    author: str = ""
-    status: SkillStatus = SkillStatus.READY
-    scope: SkillScope = SkillScope.GLOBAL
-    
-    # 能力
-    parameters: List[SkillParameter] = field(default_factory=list)
-    returns: Dict[str, Any] = field(default_factory=dict)
-    
-    # 配置
-    timeout: int = 30  # 执行超时 (秒)
-    max_retries: int = 3
-    rate_limit: int = 100  # 每分钟调用次数
-    
-    # 依赖
-    dependencies: List[str] = field(default_factory=list)
-    required_permissions: List[str] = field(default_factory=list)
-    
-    # 标签和分类
-    tags: List[str] = field(default_factory=list)
-    category: str = "general"
-    
-    # 文档
-    documentation: str = ""
-    examples: List[Dict] = field(default_factory=list)
-    
-    # 时间戳
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
-    
-    def to_dict(self) -> Dict:
-        """转换为字典"""
-        return {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
-            'version': self.version,
-            'author': self.author,
-            'status': self.status.value,
-            'scope': self.scope.value,
-            'parameters': [self._param_to_dict(p) for p in self.parameters],
-            'returns': self.returns,
-            'timeout': self.timeout,
-            'max_retries': self.max_retries,
-            'rate_limit': self.rate_limit,
-            'dependencies': self.dependencies,
-            'required_permissions': self.required_permissions,
-            'tags': self.tags,
-            'category': self.category,
-            'documentation': self.documentation,
-            'examples': self.examples,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat()
-        }
-    
-    def _param_to_dict(self, param: SkillParameter) -> Dict:
-        """参数转字典"""
-        return {
-            'name': param.name,
-            'type': param.type,
-            'description': param.description,
-            'required': param.required,
-            'default': param.default,
-            'enum': param.enum,
-            'min': param.min,
-            'max': param.max,
-            'pattern': param.pattern
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict) -> 'SkillMetadata':
-        """从字典创建"""
-        return cls(
-            id=data['id'],
-            name=data['name'],
-            description=data['description'],
-            version=data.get('version', '1.0.0'),
-            author=data.get('author', ''),
-            status=SkillStatus(data.get('status', 'ready')),
-            scope=SkillScope(data.get('scope', 'global')),
-            parameters=[cls._dict_to_param(p) for p in data.get('parameters', [])],
-            returns=data.get('returns', {}),
-            timeout=data.get('timeout', 30),
-            max_retries=data.get('max_retries', 3),
-            rate_limit=data.get('rate_limit', 100),
-            dependencies=data.get('dependencies', []),
-            required_permissions=data.get('required_permissions', []),
-            tags=data.get('tags', []),
-            category=data.get('category', 'general'),
-            documentation=data.get('documentation', ''),
-            examples=data.get('examples', [])
-        )
-    
-    @staticmethod
-    def _dict_to_param(data: Dict) -> SkillParameter:
-        """字典转参数"""
-        return SkillParameter(
-            name=data['name'],
-            type=data['type'],
-            description=data['description'],
-            required=data.get('required', True),
-            default=data.get('default'),
-            enum=data.get('enum'),
-            min=data.get('min'),
-            max=data.get('max'),
-            pattern=data.get('pattern')
-        )
+from typing import Dict, Any, Optional
 
 @dataclass
 class SkillResult:
     """Skill 执行结果"""
-    success: bool
+    success: bool = True
     data: Any = None
     error: Optional[str] = None
-    error_code: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     execution_time: float = 0.0
-    tokens_used: int = 0
+```
+
+### 2.3 Skill 信息
+
+```python
+from datetime import datetime
+
+@dataclass
+class SkillInfo:
+    """Skill 信息"""
+    name: str
+    description: str
+    version: str = "1.0.0"
+    author: str = ""
+    tags: List[str] = field(default_factory=list)
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    required_params: List[str] = field(default_factory=list)
+    status: SkillStatus = SkillStatus.ACTIVE
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+```
+
+### 2.4 Skill 事件
+
+```python
+from datetime import datetime
+
+class SkillEvent:
+    """Skill 事件"""
     
-    def to_dict(self) -> Dict:
+    def __init__(self, event_type: str, skill_name: str, data: Any = None):
+        self.event_type = event_type
+        self.skill_name = skill_name
+        self.data = data
+        self.timestamp = datetime.now()
+    
+    def to_dict(self) -> Dict[str, Any]:
         return {
-            'success': self.success,
-            'data': self.data,
-            'error': self.error,
-            'error_code': self.error_code,
-            'metadata': self.metadata,
-            'execution_time': self.execution_time,
-            'tokens_used': self.tokens_used
+            "event_type": self.event_type,
+            "skill_name": self.skill_name,
+            "data": self.data,
+            "timestamp": self.timestamp.isoformat(),
         }
 ```
 
@@ -208,1037 +102,490 @@ class SkillResult:
 
 ```python
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
-import asyncio
-
-class SkillContext:
-    """
-    Skill 执行上下文
-    提供运行环境、配置、日志等
-    """
-    
-    def __init__(
-        self,
-        agent_id: str,
-        skill_id: str,
-        config: Dict[str, Any],
-        logger: Any,
-        memory_manager: Optional[Any] = None,
-        message_router: Optional[Any] = None
-    ):
-        self.agent_id = agent_id
-        self.skill_id = skill_id
-        self.config = config
-        self.logger = logger
-        self.memory = memory_manager
-        self.message_router = message_router
-        self.state: Dict[str, Any] = {}
-    
-    def get_config(self, key: str, default: Any = None) -> Any:
-        """获取配置"""
-        return self.config.get(key, default)
-    
-    def log(self, level: str, message: str, **kwargs):
-        """记录日志"""
-        log_entry = {
-            'skill_id': self.skill_id,
-            'agent_id': self.agent_id,
-            'level': level,
-            'message': message,
-            **kwargs
-        }
-        getattr(self.logger, level.lower())(json.dumps(log_entry))
-    
-    async def store_state(self, key: str, value: Any):
-        """存储状态"""
-        self.state[key] = value
-        if self.memory:
-            await self.memory.save(f"skill_state:{self.skill_id}:{key}", value)
-    
-    async def load_state(self, key: str, default: Any = None) -> Any:
-        """加载状态"""
-        if key in self.state:
-            return self.state[key]
-        if self.memory:
-            return await self.memory.load(f"skill_state:{self.skill_id}:{key}", default)
-        return default
+from typing import Dict, Any, Optional, Callable
+import logging
+import time
 
 class Skill(ABC):
-    """
-    Skill 抽象基类
-    所有 Skill 必须继承此类
-    """
+    """Skill 基类"""
     
-    def __init__(self):
-        self.metadata = self.define_metadata()
-        self.context: Optional[SkillContext] = None
-        self._initialized = False
+    def __init__(self, name: str, description: str = ""):
+        self.name = name
+        self.description = description
+        self.status = SkillStatus.ACTIVE
+        self._event_handlers: List[Callable] = []
     
     @abstractmethod
-    def define_metadata(self) -> SkillMetadata:
-        """定义 Skill 元数据"""
-        pass
-    
-    @abstractmethod
-    async def execute(self, context: SkillContext, params: Dict[str, Any]) -> SkillResult:
+    async def execute(self, params: Dict[str, Any], context: Optional[Dict] = None) -> SkillResult:
         """
         执行 Skill
-        - context: 执行上下文
-        - params: 参数
-        - return: 执行结果
+        
+        Args:
+            params: 参数
+            context: 上下文
+        
+        Returns:
+            执行结果
         """
-        pass
+        raise NotImplementedError("子类必须实现 execute 方法")
     
-    async def initialize(self, context: SkillContext):
-        """初始化 Skill"""
-        self.context = context
-        self._initialized = True
-    
-    async def shutdown(self):
-        """关闭 Skill"""
-        self._initialized = False
-    
-    def validate_params(self, params: Dict[str, Any]) -> tuple[bool, Optional[str]]:
-        """
-        验证参数
-        返回 (是否有效，错误信息)
-        """
-        for param_def in self.metadata.parameters:
-            # 检查必填参数
-            if param_def.required and param_def.name not in params:
-                return False, f"Missing required parameter: {param_def.name}"
-            
-            # 检查参数类型
-            if param_def.name in params:
-                value = params[param_def.name]
-                if not self._check_type(value, param_def.type):
-                    return False, f"Invalid type for {param_def.name}: expected {param_def.type}"
-                
-                # 检查枚举值
-                if param_def.enum and value not in param_def.enum:
-                    return False, f"Value {value} not in allowed values: {param_def.enum}"
-                
-                # 检查数值范围
-                if param_def.type in ['int', 'float']:
-                    if param_def.min is not None and value < param_def.min:
-                        return False, f"Value {value} is less than minimum {param_def.min}"
-                    if param_def.max is not None and value > param_def.max:
-                        return False, f"Value {value} is greater than maximum {param_def.max}"
-        
-        return True, None
-    
-    def _check_type(self, value: Any, type_name: str) -> bool:
-        """检查参数类型"""
-        type_map = {
-            'str': str,
-            'int': int,
-            'float': (int, float),
-            'bool': bool,
-            'list': list,
-            'dict': dict
-        }
-        
-        expected_type = type_map.get(type_name)
-        if not expected_type:
-            return True  # 未知类型，跳过检查
-        
-        return isinstance(value, expected_type)
-
-class SkillManager:
-    """
-    Skill 管理器
-    负责加载、卸载、执行 Skill
-    """
-    
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.skills: Dict[str, Skill] = {}
-        self.skill_registry: Dict[str, SkillMetadata] = {}
-        self.context_factory = SkillContextFactory()
-        self.metrics = SkillMetrics()
-        
-        # 沙箱配置
-        self.sandbox_config = config.get('sandbox', {
-            'enabled': True,
-            'network_access': False,
-            'file_access': False,
-            'max_memory_mb': 256,
-            'max_cpu_percent: 50
-        })
-    
-    def load_skill(self, skill_path: str) -> SkillMetadata:
-        """
-        加载 Skill
-        - skill_path: Skill 路径 (文件或模块名)
-        """
-        try:
-            # 动态导入
-            skill_class = self._import_skill(skill_path)
-            
-            # 创建实例
-            skill = skill_class()
-            
-            # 验证
-            if not isinstance(skill, Skill):
-                raise ValueError(f"Invalid skill type: {type(skill)}")
-            
-            # 注册
-            self.skills[skill.metadata.id] = skill
-            self.skill_registry[skill.metadata.id] = skill.metadata
-            
-            # 初始化
-            context = self.context_factory.create_context(skill.metadata.id)
-            asyncio.create_task(skill.initialize(context))
-            
-            return skill.metadata
-            
-        except Exception as e:
-            raise SkillLoadError(f"Failed to load skill {skill_path}: {e}")
-    
-    def unload_skill(self, skill_id: str) -> bool:
-        """卸载 Skill"""
-        if skill_id not in self.skills:
-            return False
-        
-        skill = self.skills[skill_id]
-        
-        # 关闭
-        asyncio.create_task(skill.shutdown())
-        
-        # 移除
-        del self.skills[skill_id]
-        del self.skill_registry[skill_id]
-        
-        return True
-    
-    async def execute_skill(
-        self,
-        skill_id: str,
-        agent_id: str,
-        params: Dict[str, Any]
-    ) -> SkillResult:
-        """
-        执行 Skill
-        """
-        if skill_id not in self.skills:
-            return SkillResult(
-                success=False,
-                error=f"Skill not found: {skill_id}",
-                error_code="SKILL_NOT_FOUND"
-            )
-        
-        skill = self.skills[skill_id]
-        
-        # 检查状态
-        if skill.metadata.status != SkillStatus.READY:
-            return SkillResult(
-                success=False,
-                error=f"Skill not ready: {skill.metadata.status.value}",
-                error_code="SKILL_NOT_READY"
-            )
-        
-        # 验证参数
-        valid, error = skill.validate_params(params)
-        if not valid:
-            return SkillResult(
-                success=False,
-                error=error,
-                error_code="INVALID_PARAMS"
-            )
-        
-        # 创建上下文
-        context = self.context_factory.create_context(
-            skill_id=skill_id,
-            agent_id=agent_id
-        )
-        
-        # 执行 (带超时和重试)
-        start_time = time.time()
-        
-        try:
-            result = await asyncio.wait_for(
-                skill.execute(context, params),
-                timeout=skill.metadata.timeout
-            )
-            
-            # 记录指标
-            execution_time = time.time() - start_time
-            self.metrics.record_execution(skill_id, execution_time, result.success)
-            
-            return result
-            
-        except asyncio.TimeoutError:
-            return SkillResult(
-                success=False,
-                error=f"Skill execution timeout ({skill.metadata.timeout}s)",
-                error_code="TIMEOUT"
-            )
-        except Exception as e:
-            return SkillResult(
-                success=False,
-                error=str(e),
-                error_code="EXECUTION_ERROR"
-            )
-    
-    def _import_skill(self, skill_path: str) -> type:
-        """导入 Skill 类"""
-        import importlib
-        
-        # 从文件加载
-        if skill_path.endswith('.py'):
-            spec = importlib.util.spec_from_file_location("skill_module", skill_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            return module.Skill
-        
-        # 从模块加载
-        module = importlib.import_module(skill_path)
-        return module.Skill
-    
-    def list_skills(
-        self,
-        category: Optional[str] = None,
-        tags: Optional[List[str]] = None
-    ) -> List[SkillMetadata]:
-        """列出可用的 Skill"""
-        skills = list(self.skill_registry.values())
-        
-        if category:
-            skills = [s for s in skills if s.category == category]
-        
-        if tags:
-            skills = [s for s in skills if any(tag in s.tags for tag in tags)]
-        
-        return skills
-    
-    def get_skill(self, skill_id: str) -> Optional[SkillMetadata]:
+    def get_info(self) -> SkillInfo:
         """获取 Skill 信息"""
-        return self.skill_registry.get(skill_id)
-```
-
-### 3.2 Skill 上下文工厂
-
-```python
-class SkillContextFactory:
-    """Skill 上下文工厂"""
-    
-    def __init__(self):
-        self.logger = logging.getLogger('skill')
-        self.memory_manager = None
-        self.message_router = None
-        self.config = {}
-    
-    def create_context(
-        self,
-        skill_id: str,
-        agent_id: str = ""
-    ) -> SkillContext:
-        """创建 Skill 上下文"""
-        return SkillContext(
-            agent_id=agent_id,
-            skill_id=skill_id,
-            config=self.config,
-            logger=self.logger,
-            memory_manager=self.memory_manager,
-            message_router=self.message_router
+        return SkillInfo(
+            name=self.name,
+            description=self.description,
+            status=self.status,
         )
+    
+    def add_event_handler(self, handler: Callable):
+        """添加事件处理器"""
+        self._event_handlers.append(handler)
+    
+    def _emit_event(self, event_type: str, data: Any = None):
+        """触发事件"""
+        event = SkillEvent(event_type, self.name, data)
+        for handler in self._event_handlers:
+            try:
+                handler(event)
+            except Exception as e:
+                logging.getLogger(__name__).error(f"事件处理失败: {e}")
 ```
 
 ## 4. 内置 Skill 实现
 
-### 4.1 搜索 Skill
+### 4.1 记忆 Skill
 
 ```python
-class SearchSkill(Skill):
-    """
-    搜索 Skill
-    支持多种搜索引擎
-    """
+class MemorySkill(Skill):
+    """记忆 Skill"""
     
-    def define_metadata(self) -> SkillMetadata:
-        return SkillMetadata(
-            id="search",
-            name="Web Search",
-            description="Search the web for information",
-            version="1.0.0",
-            author="Neurova",
-            category="search",
-            tags=["search", "web", "information"],
-            parameters=[
-                SkillParameter(
-                    name="query",
-                    type="str",
-                    description="Search query",
-                    required=True
-                ),
-                SkillParameter(
-                    name="engine",
-                    type="str",
-                    description="Search engine (google, bing, baidu)",
-                    required=False,
-                    default="google",
-                    enum=["google", "bing", "baidu"]
-                ),
-                SkillParameter(
-                    name="num_results",
-                    type="int",
-                    description="Number of results",
-                    required=False,
-                    default=10,
-                    min=1,
-                    max=100
-                )
-            ],
-            returns={
-                "type": "list",
-                "description": "List of search results",
-                "schema": {
-                    "title": "str",
-                    "url": "str",
-                    "snippet": "str"
-                }
-            },
-            timeout=30,
-            examples=[
-                {
-                    "description": "Search for Python tutorials",
-                    "params": {
-                        "query": "Python tutorial",
-                        "num_results": 5
-                    }
-                }
-            ]
-        )
+    def __init__(self, memory_manager=None):
+        super().__init__("memory", "记忆管理 Skill")
+        self.memory_manager = memory_manager
     
-    async def execute(self, context: SkillContext, params: Dict[str, Any]) -> SkillResult:
-        """执行搜索"""
-        query = params['query']
-        engine = params.get('engine', 'google')
-        num_results = params.get('num_results', 10)
+    async def execute(self, params: Dict[str, Any], context: Optional[Dict] = None) -> SkillResult:
+        """执行记忆操作"""
+        start_time = time.time()
         
         try:
-            context.log('info', f"Searching for: {query}", engine=engine)
+            action = params.get("action", "search")
             
-            # 调用搜索引擎 API
-            results = await self._search(engine, query, num_results)
-            
-            return SkillResult(
-                success=True,
-                data=results,
-                metadata={
-                    'engine': engine,
-                    'query': query,
-                    'count': len(results)
-                }
-            )
-            
+            if action == "search":
+                query = params.get("query", "")
+                results = await self._search_memory(query, params)
+                return SkillResult(
+                    success=True,
+                    data=results,
+                    execution_time=time.time() - start_time,
+                )
+            elif action == "store":
+                content = params.get("content", "")
+                result = await self._store_memory(content, params)
+                return SkillResult(
+                    success=True,
+                    data=result,
+                    execution_time=time.time() - start_time,
+                )
+            else:
+                return SkillResult(
+                    success=False,
+                    error=f"未知操作: {action}",
+                    execution_time=time.time() - start_time,
+                )
+        
         except Exception as e:
-            context.log('error', f"Search failed: {e}")
             return SkillResult(
                 success=False,
                 error=str(e),
-                error_code="SEARCH_ERROR"
+                execution_time=time.time() - start_time,
             )
     
-    async def _search(self, engine: str, query: str, num_results: int) -> List[Dict]:
-        """执行搜索"""
-        # 实现搜索逻辑
-        # 这里使用伪代码
-        if engine == 'google':
-            return await self._google_search(query, num_results)
-        elif engine == 'bing':
-            return await self._bing_search(query, num_results)
-        elif engine == 'baidu':
-            return await self._baidu_search(query, num_results)
-        else:
-            raise ValueError(f"Unknown search engine: {engine}")
+    async def _search_memory(self, query: str, params: Dict) -> List[Dict]:
+        """搜索记忆"""
+        # 这里应该调用记忆管理器
+        return []
     
-    async def _google_search(self, query: str, num_results: int) -> List[Dict]:
-        """Google 搜索"""
-        # 调用 Google Custom Search API
-        pass
+    async def _store_memory(self, content: str, params: Dict) -> Dict:
+        """存储记忆"""
+        # 这里应该调用记忆管理器
+        return {"stored": True}
 ```
 
-### 4.2 计算器 Skill
+### 4.2 网络搜索 Skill
 
 ```python
-class CalculatorSkill(Skill):
-    """
-    计算器 Skill
-    支持数学表达式计算
-    """
+class WebSearchSkill(Skill):
+    """网络搜索 Skill"""
     
-    def define_metadata(self) -> SkillMetadata:
-        return SkillMetadata(
-            id="calculator",
-            name="Calculator",
-            description="Evaluate mathematical expressions",
-            version="1.0.0",
-            author="Neurova",
-            category="utility",
-            tags=["math", "calculator", "computation"],
-            parameters=[
-                SkillParameter(
-                    name="expression",
-                    type="str",
-                    description="Mathematical expression",
-                    required=True,
-                    pattern=r"^[\d+\-*/().\s]+$"
-                )
-            ],
-            returns={
-                "type": "float",
-                "description": "Calculation result"
-            },
-            examples=[
-                {
-                    "description": "Calculate 2 + 2",
-                    "params": {
-                        "expression": "2 + 2"
-                    }
-                }
-            ]
-        )
+    def __init__(self):
+        super().__init__("web_search", "网络搜索 Skill")
     
-    async def execute(self, context: SkillContext, params: Dict[str, Any]) -> SkillResult:
-        """执行计算"""
-        expression = params['expression']
+    async def execute(self, params: Dict[str, Any], context: Optional[Dict] = None) -> SkillResult:
+        """执行网络搜索"""
+        start_time = time.time()
         
         try:
-            # 安全计算
-            result = self._safe_eval(expression)
-            
+            query = params.get("query", "")
+            results = await self._search_web(query, params)
             return SkillResult(
                 success=True,
-                data=result,
-                metadata={
-                    'expression': expression
-                }
+                data=results,
+                execution_time=time.time() - start_time,
             )
-            
         except Exception as e:
             return SkillResult(
                 success=False,
-                error=f"Invalid expression: {e}",
-                error_code="CALCULATION_ERROR"
+                error=str(e),
+                execution_time=time.time() - start_time,
             )
     
-    def _safe_eval(self, expression: str) -> float:
-        """安全计算表达式"""
-        import ast
-        import operator
-        
-        # 定义允许的操作符
-        operators = {
-            ast.Add: operator.add,
-            ast.Sub: operator.sub,
-            ast.Mult: operator.mul,
-            ast.Div: operator.truediv,
-            ast.Pow: operator.pow,
-            ast.USub: operator.neg
-        }
-        
-        def eval_node(node):
-            if isinstance(node, ast.Num):
-                return node.n
-            elif isinstance(node, ast.BinOp):
-                left = eval_node(node.left)
-                right = eval_node(node.right)
-                return operators[type(node.op)](left, right)
-            elif isinstance(node, ast.UnaryOp):
-                operand = eval_node(node.operand)
-                return operators[type(node.op)](operand)
-            else:
-                raise ValueError(f"Unsupported operation: {node}")
-        
-        tree = ast.parse(expression, mode='eval')
-        return eval_node(tree.body)
+    async def _search_web(self, query: str, params: Dict) -> List[Dict]:
+        """搜索网络"""
+        # 这里应该实现网络搜索逻辑
+        return []
 ```
 
 ### 4.3 文件操作 Skill
 
 ```python
-class FileReaderSkill(Skill):
-    """
-    文件读取 Skill
-    """
+class FileOperationSkill(Skill):
+    """文件操作 Skill"""
     
-    def define_metadata(self) -> SkillMetadata:
-        return SkillMetadata(
-            id="file_reader",
-            name="File Reader",
-            description="Read content from files",
-            version="1.0.0",
-            author="Neurova",
-            category="file",
-            tags=["file", "read", "io"],
-            parameters=[
-                SkillParameter(
-                    name="file_path",
-                    type="str",
-                    description="Path to the file",
-                    required=True
-                ),
-                SkillParameter(
-                    name="encoding",
-                    type="str",
-                    description="File encoding",
-                    required=False,
-                    default="utf-8"
-                ),
-                SkillParameter(
-                    name="max_size",
-                    type="int",
-                    description="Maximum file size in bytes",
-                    required=False,
-                    default=1024*1024,  # 1MB
-                    min=1
-                )
-            ],
-            returns={
-                "type": "str",
-                "description": "File content"
-            }
-        )
+    def __init__(self):
+        super().__init__("file_operation", "文件操作 Skill")
     
-    async def execute(self, context: SkillContext, params: Dict[str, Any]) -> SkillResult:
-        """读取文件"""
-        file_path = params['file_path']
-        encoding = params.get('encoding', 'utf-8')
-        max_size = params.get('max_size', 1024*1024)
+    async def execute(self, params: Dict[str, Any], context: Optional[Dict] = None) -> SkillResult:
+        """执行文件操作"""
+        start_time = time.time()
         
         try:
-            # 安全检查
-            if not self._is_safe_path(file_path):
+            operation = params.get("operation", "read")
+            
+            if operation == "read":
+                file_path = params.get("file_path", "")
+                result = await self._read_file(file_path, params)
+                return SkillResult(
+                    success=True,
+                    data=result,
+                    execution_time=time.time() - start_time,
+                )
+            elif operation == "write":
+                file_path = params.get("file_path", "")
+                content = params.get("content", "")
+                result = await self._write_file(file_path, content, params)
+                return SkillResult(
+                    success=True,
+                    data=result,
+                    execution_time=time.time() - start_time,
+                )
+            else:
                 return SkillResult(
                     success=False,
-                    error="Access denied: path outside allowed directories",
-                    error_code="ACCESS_DENIED"
+                    error=f"未知操作: {operation}",
+                    execution_time=time.time() - start_time,
                 )
-            
-            # 检查文件大小
-            file_size = os.path.getsize(file_path)
-            if file_size > max_size:
-                return SkillResult(
-                    success=False,
-                    error=f"File too large: {file_size} > {max_size}",
-                    error_code="FILE_TOO_LARGE"
-                )
-            
-            # 读取文件
-            with open(file_path, 'r', encoding=encoding) as f:
-                content = f.read()
-            
-            return SkillResult(
-                success=True,
-                data=content,
-                metadata={
-                    'file_path': file_path,
-                    'size': file_size
-                }
-            )
-            
+        
         except Exception as e:
             return SkillResult(
                 success=False,
                 error=str(e),
-                error_code="FILE_READ_ERROR"
+                execution_time=time.time() - start_time,
             )
     
-    def _is_safe_path(self, file_path: str) -> bool:
-        """检查路径是否安全"""
-        import os
-        
-        # 解析绝对路径
-        abs_path = os.path.abspath(file_path)
-        
-        # 检查是否在允许的目录内
-        allowed_dirs = self.context.get_config('allowed_directories', [])
-        for allowed_dir in allowed_dirs:
-            if abs_path.startswith(os.path.abspath(allowed_dir)):
-                return True
-        
-        return False
+    async def _read_file(self, file_path: str, params: Dict) -> Dict:
+        """读取文件"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                return {"content": content, "file_path": file_path}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    async def _write_file(self, file_path: str, content: str, params: Dict) -> Dict:
+        """写入文件"""
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+                return {"success": True, "file_path": file_path}
+        except Exception as e:
+            return {"error": str(e)}
 ```
 
-## 5. OpenClaw 兼容层
+## 5. Skill 注册表
 
-### 5.1 协议适配器
-
-```python
-class OpenClawAdapter:
-    """
-    OpenClaw 协议适配器
-    实现 OpenClaw Skill 协议
-    """
-    
-    def __init__(self, skill_manager: SkillManager):
-        self.skill_manager = skill_manager
-    
-    async def handle_request(self, request: Dict) -> Dict:
-        """处理 OpenClaw 请求"""
-        action = request.get('action')
-        
-        if action == 'list_skills':
-            return await self._list_skills(request)
-        elif action == 'get_skill':
-            return await self._get_skill(request)
-        elif action == 'execute_skill':
-            return await self._execute_skill(request)
-        else:
-            return {
-                'success': False,
-                'error': f'Unknown action: {action}'
-            }
-    
-    async def _list_skills(self, request: Dict) -> Dict:
-        """列出 Skills"""
-        category = request.get('category')
-        tags = request.get('tags')
-        
-        skills = self.skill_manager.list_skills(category, tags)
-        
-        return {
-            'success': True,
-            'data': {
-                'skills': [s.to_dict() for s in skills],
-                'count': len(skills)
-            }
-        }
-    
-    async def _get_skill(self, request: Dict) -> Dict:
-        """获取 Skill 信息"""
-        skill_id = request.get('skill_id')
-        
-        skill = self.skill_manager.get_skill(skill_id)
-        
-        if not skill:
-            return {
-                'success': False,
-                'error': f'Skill not found: {skill_id}'
-            }
-        
-        return {
-            'success': True,
-            'data': skill.to_dict()
-        }
-    
-    async def _execute_skill(self, request: Dict) -> Dict:
-        """执行 Skill"""
-        skill_id = request.get('skill_id')
-        agent_id = request.get('agent_id', 'default')
-        params = request.get('params', {})
-        
-        result = await self.skill_manager.execute_skill(
-            skill_id=skill_id,
-            agent_id=agent_id,
-            params=params
-        )
-        
-        return {
-            'success': result.success,
-            'data': result.data,
-            'error': result.error,
-            'error_code': result.error_code,
-            'metadata': result.metadata
-        }
-```
-
-## 6. Qwenpaw 兼容层
-
-### 6.1 协议适配器
+### 5.1 核心实现
 
 ```python
-class QwenpawAdapter:
-    """
-    Qwenpaw 协议适配器
-    实现 Qwenpaw Skill 协议
-    """
-    
-    def __init__(self, skill_manager: SkillManager):
-        self.skill_manager = skill_manager
-    
-    async def handle_command(self, command: str, params: Dict) -> Dict:
-        """处理 Qwenpaw 命令"""
-        if command == 'skill.list':
-            return await self._list_skills(params)
-        elif command == 'skill.info':
-            return await self._skill_info(params)
-        elif command == 'skill.exec':
-            return await self._execute_skill(params)
-        else:
-            return {
-                'status': 'error',
-                'message': f'Unknown command: {command}'
-            }
-    
-    async def _list_skills(self, params: Dict) -> Dict:
-        """列出 Skills"""
-        skills = self.skill_manager.list_skills()
-        
-        return {
-            'status': 'ok',
-            'result': {
-                'skills': [
-                    {
-                        'id': s.id,
-                        'name': s.name,
-                        'description': s.description,
-                        'tags': s.tags
-                    }
-                    for s in skills
-                ]
-            }
-        }
-    
-    async def _skill_info(self, params: Dict) -> Dict:
-        """获取 Skill 信息"""
-        skill_id = params.get('skill_id')
-        
-        skill = self.skill_manager.get_skill(skill_id)
-        
-        if not skill:
-            return {
-                'status': 'error',
-                'message': f'Skill not found: {skill_id}'
-            }
-        
-        return {
-            'status': 'ok',
-            'result': skill.to_dict()
-        }
-    
-    async def _execute_skill(self, params: Dict) -> Dict:
-        """执行 Skill"""
-        skill_id = params.get('skill')
-        agent_id = params.get('agent', 'default')
-        arguments = params.get('arguments', {})
-        
-        result = await self.skill_manager.execute_skill(
-            skill_id=skill_id,
-            agent_id=agent_id,
-            params=arguments
-        )
-        
-        if result.success:
-            return {
-                'status': 'ok',
-                'result': result.data,
-                'execution_time': result.execution_time
-            }
-        else:
-            return {
-                'status': 'error',
-                'message': result.error,
-                'code': result.error_code
-            }
-```
+from typing import Dict, List, Optional, Callable
+import threading
+import asyncio
+import inspect
 
-## 7. Skill 沙箱
-
-### 7.1 沙箱环境
-
-```python
-import multiprocessing
-import signal
-
-class SkillSandbox:
-    """
-    Skill 执行沙箱
-    提供资源限制和隔离
-    """
-    
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.max_memory = config.get('max_memory_mb', 256) * 1024 * 1024
-        self.max_cpu = config.get('max_cpu_percent', 50)
-        self.timeout = config.get('timeout', 30)
-    
-    async def execute(
-        self,
-        skill: Skill,
-        context: SkillContext,
-        params: Dict[str, Any]
-    ) -> SkillResult:
-        """在沙箱中执行 Skill"""
-        if not self.config.get('enabled', True):
-            # 沙箱禁用，直接执行
-            return await skill.execute(context, params)
-        
-        # 在多进程中执行
-        def target():
-            # 设置资源限制
-            self._set_resource_limits()
-            
-            # 执行
-            return asyncio.run(skill.execute(context, params))
-        
-        process = multiprocessing.Process(target=target)
-        process.start()
-        process.join(timeout=self.timeout)
-        
-        if process.is_alive():
-            # 超时，终止进程
-            process.terminate()
-            process.join()
-            return SkillResult(
-                success=False,
-                error=f"Skill execution timeout ({self.timeout}s)",
-                error_code="TIMEOUT"
-            )
-        
-        return process.exitcode == 0
-    
-    def _set_resource_limits(self):
-        """设置资源限制"""
-        import resource
-        
-        # 内存限制
-        resource.setrlimit(
-            resource.RLIMIT_AS,
-            (self.max_memory, self.max_memory)
-        )
-        
-        # CPU 限制 (通过信号)
-        signal.signal(signal.SIGXCPU, self._handle_cpu_limit)
-        resource.setrlimit(
-            resource.RLIMIT_CPU,
-            (self.timeout, self.timeout + 5)
-        )
-    
-    def _handle_cpu_limit(self, signum, frame):
-        """CPU 限制处理"""
-        raise TimeoutError("CPU time limit exceeded")
-```
-
-## 8. Skill 组合
-
-### 8.1 链式 Skill
-
-```python
-class ChainSkill(Skill):
-    """
-    链式 Skill
-    多个 Skill 顺序执行，前一个的输出作为后一个的输入
-    """
-    
-    def __init__(self, skills: List[Skill], connections: List[Dict]):
-        """
-        - skills: Skill 列表
-        - connections: 连接配置
-          [{"from": "skill1", "to": "skill2", "param_map": {"output": "input"}}]
-        """
-        self.skills = {s.metadata.id: s for s in skills}
-        self.connections = connections
-    
-    def define_metadata(self) -> SkillMetadata:
-        return SkillMetadata(
-            id=f"chain_{uuid.uuid4().hex[:8]}",
-            name="Chain Skill",
-            description="Chain multiple skills together",
-            version="1.0.0",
-            category="composite"
-        )
-    
-    async def execute(self, context: SkillContext, params: Dict[str, Any]) -> SkillResult:
-        """执行链式 Skill"""
-        current_data = params
-        
-        for connection in self.connections:
-            from_skill_id = connection['from']
-            to_skill_id = connection['to']
-            param_map = connection.get('param_map', {})
-            
-            # 执行前一个 Skill
-            from_skill = self.skills[from_skill_id]
-            result = await from_skill.execute(context, current_data)
-            
-            if not result.success:
-                return result
-            
-            # 映射参数
-            current_data = self._map_params(result.data, param_map)
-        
-        return SkillResult(
-            success=True,
-            data=current_data
-        )
-    
-    def _map_params(self, data: Any, param_map: Dict) -> Dict:
-        """参数映射"""
-        mapped = {}
-        for src, dst in param_map.items():
-            if isinstance(data, dict) and src in data:
-                mapped[dst] = data[src]
-            else:
-                mapped[dst] = data
-        return mapped
-```
-
-## 9. 监控和指标
-
-### 9.1 Skill 指标
-
-```python
-class SkillMetrics:
-    """Skill 指标收集"""
+class SkillRegistry:
+    """Skill 注册表"""
     
     def __init__(self):
-        self.executions: Dict[str, int] = defaultdict(int)
-        self.failures: Dict[str, int] = defaultdict(int)
-        self.latencies: Dict[str, List[float]] = defaultdict(list)
-        self.last_executed: Dict[str, datetime] = {}
+        self._skills: Dict[str, Skill] = {}
+        self._event_handlers: List[Callable] = []
     
-    def record_execution(
-        self,
-        skill_id: str,
-        execution_time: float,
-        success: bool
-    ):
-        """记录执行"""
-        self.executions[skill_id] += 1
-        self.latencies[skill_id].append(execution_time)
-        self.last_executed[skill_id] = datetime.now()
-        
-        if not success:
-            self.failures[skill_id] += 1
-        
-        # 保持列表大小
-        if len(self.latencies[skill_id]) > 1000:
-            self.latencies[skill_id] = self.latencies[skill_id][-1000:]
+    def register(self, skill: Skill):
+        """注册 Skill"""
+        self._skills[skill.name] = skill
+        skill.add_event_handler(self._on_skill_event)
     
-    def get_stats(self, skill_id: str) -> Dict:
-        """获取统计信息"""
-        latencies = self.latencies.get(skill_id, [])
+    def unregister(self, skill_name: str):
+        """注销 Skill"""
+        if skill_name in self._skills:
+            del self._skills[skill_name]
+    
+    def get_skill(self, skill_name: str) -> Optional[Skill]:
+        """获取 Skill"""
+        return self._skills.get(skill_name)
+    
+    def has_skill(self, skill_name: str) -> bool:
+        """检查 Skill 是否存在"""
+        return skill_name in self._skills
+    
+    def list_skills(self) -> List[SkillInfo]:
+        """列出所有 Skill"""
+        return [skill.get_info() for skill in self._skills.values()]
+    
+    def get_skill_names(self) -> List[str]:
+        """获取所有 Skill 名称"""
+        return list(self._skills.keys())
+    
+    async def execute_skill(self, skill_name: str, params: Dict[str, Any], context: Optional[Dict] = None) -> SkillResult:
+        """执行 Skill"""
+        skill = self.get_skill(skill_name)
+        if not skill:
+            return SkillResult(success=False, error=f"Skill {skill_name} 不存在")
         
-        return {
-            'total_executions': self.executions.get(skill_id, 0),
-            'total_failures': self.failures.get(skill_id, 0),
-            'success_rate': 1 - (self.failures.get(skill_id, 0) / max(self.executions.get(skill_id, 1), 1)),
-            'avg_latency': sum(latencies) / len(latencies) if latencies else 0,
-            'p95_latency': sorted(latencies)[int(len(latencies) * 0.95)] if len(latencies) > 20 else 0,
-            'last_executed': self.last_executed.get(skill_id)
-        }
+        # 触发前置事件
+        self._emit_event("before_execute", skill_name, params)
+        
+        try:
+            result = await skill.execute(params, context)
+            
+            # 触发后置事件
+            self._emit_event("after_execute", skill_name, result)
+            
+            return result
+        except Exception as e:
+            # 触发错误事件
+            self._emit_event("error", skill_name, {"error": str(e)})
+            return SkillResult(success=False, error=str(e))
+    
+    def add_event_handler(self, handler: Callable):
+        """添加事件处理器"""
+        self._event_handlers.append(handler)
+    
+    def _on_skill_event(self, event: SkillEvent):
+        """处理 Skill 事件"""
+        for handler in self._event_handlers:
+            try:
+                handler(event)
+            except Exception as e:
+                logging.getLogger(__name__).error(f"事件处理失败: {e}")
+    
+    def _emit_event(self, event_type: str, skill_name: str, data: Any = None):
+        """触发事件"""
+        event = SkillEvent(event_type, skill_name, data)
+        for handler in self._event_handlers:
+            try:
+                handler(event)
+            except Exception as e:
+                logging.getLogger(__name__).error(f"事件处理失败: {e}")
 ```
 
-## 10. 配置示例
+### 5.2 默认 Skill 创建
 
-### 10.1 Skill 配置
+```python
+def create_default_skills(memory_manager=None) -> SkillRegistry:
+    """
+    创建默认 Skill 注册表
+    
+    Args:
+        memory_manager: 记忆管理器
+    
+    Returns:
+        Skill 注册表
+    """
+    registry = SkillRegistry()
+    
+    # 注册默认 Skill
+    registry.register(MemorySkill(memory_manager))
+    registry.register(WebSearchSkill())
+    registry.register(FileOperationSkill())
+    
+    return registry
+```
+
+## 6. Skill 扩展系统
+
+### 6.1 技能市场集成
+
+```python
+# skills/models.py 中定义的数据模型
+
+class SkillSource(Enum):
+    """技能来源"""
+    LOCAL = "local"           # 本地技能
+    MARKETPLACE = "marketplace"  # 市场技能
+    BUILTIN = "builtin"       # 内置技能
+
+@dataclass
+class Skill:
+    """技能主模型"""
+    id: str = ""
+    name: str = ""
+    version: str = "0.1.0"
+    description: str = ""
+    author: str = ""
+    source: SkillSource = SkillSource.LOCAL
+    enabled: bool = True
+    metadata: Optional[SkillMetadata] = None
+    config: Dict[str, Any] = field(default_factory=dict)
+    created_at: str = ""
+    updated_at: str = ""
+```
+
+### 6.2 技能注册表（市场版）
+
+```python
+class SkillRegistry:
+    """
+    SkillRegistry - 中央注册表
+    
+    实现Singleton模式，确保全局唯一的注册表实例。
+    线程安全的技能注册与管理。
+    """
+    
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls, *args, **kwargs):
+        """单例模式实现"""
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        """初始化注册表（仅执行一次）"""
+        if self._initialized:
+            return
+        
+        self._skills: Dict[str, Tuple[Skill, Path]] = {}
+        self._startup_hooks: List[HookRegistration] = []
+        self._shutdown_hooks: List[HookRegistration] = []
+        self._control_commands: List[ControlCommandRegistration] = []
+        self._event_callbacks: Dict[str, List[Callable]] = {}
+        self._runtime_helpers: Dict[str, Any] = {}
+        self._initialized = True
+        self._logger = logging.getLogger(__name__)
+    
+    def register_skill(self, manifest: Skill, path: Path) -> bool:
+        """注册技能"""
+        with self._lock:
+            if manifest.id in self._skills:
+                self._logger.warning(f"技能 {manifest.id} 已注册")
+                return False
+            
+            self._skills[manifest.id] = (manifest, path)
+            self._trigger_event("skill_registered", {"skill_id": manifest.id})
+            return True
+    
+    def register(self, manifest: Skill, path: Path) -> bool:
+        """注册技能（别名）"""
+        return self.register_skill(manifest, path)
+    
+    def execute_skill(self, skill_id: str, *args, **kwargs) -> Any:
+        """执行技能"""
+        skill_info = self.get_skill(skill_id)
+        if skill_info is None:
+            raise ValueError(f"技能 {skill_id} 未注册")
+        
+        manifest, path = skill_info
+        self._trigger_event("skill_executing", {"skill_id": skill_id})
+        
+        # 这里可以添加实际的技能执行逻辑
+        # 目前返回一个模拟结果
+        return {"skill_id": skill_id, "status": "executed"}
+```
+
+## 7. 事件系统
+
+### 7.1 事件类型
+
+```python
+# 支持的事件类型
+EVENT_TYPES = [
+    "before_execute",    # 执行前
+    "after_execute",     # 执行后
+    "error",            # 错误
+    "skill_registered",  # 技能注册
+    "skill_unregistered",  # 技能注销
+    "skill_executing",   # 技能执行中
+]
+```
+
+### 7.2 事件处理
+
+```python
+class EventHandler:
+    """事件处理器"""
+    
+    def __init__(self):
+        self._handlers: Dict[str, List[Callable]] = {}
+    
+    def register(self, event_type: str, handler: Callable):
+        """注册事件处理器"""
+        if event_type not in self._handlers:
+            self._handlers[event_type] = []
+        self._handlers[event_type].append(handler)
+    
+    def unregister(self, event_type: str, handler: Callable):
+        """注销事件处理器"""
+        if event_type in self._handlers:
+            self._handlers[event_type] = [
+                h for h in self._handlers[event_type] if h != handler
+            ]
+    
+    async def trigger(self, event_type: str, data: Any = None):
+        """触发事件"""
+        if event_type in self._handlers:
+            for handler in self._handlers[event_type]:
+                try:
+                    if asyncio.iscoroutinefunction(handler):
+                        await handler(data)
+                    else:
+                        handler(data)
+                except Exception as e:
+                    logging.getLogger(__name__).error(f"事件处理失败: {e}")
+```
+
+## 8. 配置示例
+
+### 8.1 Skill 配置
 
 ```yaml
 # skills.yaml
 skills:
   # 内置 Skill
-  - id: "search"
+  - id: "memory"
+    enabled: true
+    config:
+      max_results: 10
+  
+  - id: "web_search"
     enabled: true
     config:
       default_engine: "google"
       api_key: "${GOOGLE_SEARCH_API_KEY}"
   
-  - id: "calculator"
-    enabled: true
-  
-  - id: "file_reader"
+  - id: "file_operation"
     enabled: true
     config:
       allowed_directories:
@@ -1252,19 +599,61 @@ skills:
     enabled: true
     config:
       model_path: "/app/models/analyzer.pkl"
-  
-  # 外部 Skill
-  - id: "openclaw_translator"
-    source: "openclaw"
-    remote_url: "http://openclaw.example.com/api"
-    api_key: "${OPENCLAW_API_KEY}"
-
-# 沙箱配置
-sandbox:
-  enabled: true
-  max_memory_mb: 256
-  max_cpu_percent: 50
-  timeout: 30
-  network_access: false
-  file_access: false
 ```
+
+### 8.2 事件配置
+
+```yaml
+# events.yaml
+events:
+  # 执行前事件
+  before_execute:
+    - handler: "log_execution"
+      level: "info"
+  
+  # 执行后事件
+  after_execute:
+    - handler: "record_metrics"
+      enabled: true
+  
+  # 错误事件
+  error:
+    - handler: "send_alert"
+      enabled: true
+      channels: ["email", "slack"]
+```
+
+## 9. 最佳实践
+
+### 9.1 Skill 开发规范
+
+1. **单一职责**: 每个 Skill 只负责一个特定功能
+2. **错误处理**: 所有异常都应该被捕获并返回 SkillResult
+3. **性能监控**: 记录执行时间用于性能分析
+4. **日志记录**: 使用结构化日志记录关键操作
+5. **资源清理**: 在 Skill 关闭时释放所有资源
+
+### 9.2 事件使用规范
+
+1. **事件命名**: 使用小写字母和下划线，如 `before_execute`
+2. **事件数据**: 保持事件数据简单，避免传递复杂对象
+3. **错误处理**: 事件处理器中的异常不应影响主流程
+4. **性能考虑**: 避免在事件处理器中执行耗时操作
+
+### 9.3 注册表使用规范
+
+1. **线程安全**: 注册表操作是线程安全的
+2. **单例模式**: 使用单例模式确保全局唯一
+3. **生命周期管理**: 正确处理 Skill 的注册和注销
+4. **资源管理**: 在系统关闭时清理所有 Skill
+
+## 10. 版本历史
+
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| 1.0.0 | 2026-06-07 | 初始版本，基于当前 skill_system.py 实现 |
+
+---
+
+**最后更新**: 2026-06-07
+**维护者**: Neurova 开发团队

@@ -1,5 +1,19 @@
 # 情感共鸣引擎架构设计
 
+## 实现对齐说明
+
+> **注意**: 本文档描述的是设计理论和概念模型。以下为文档术语与实际代码实现的对应关系：
+
+| 文档术语 | 实际代码类/方法 | 文件位置 |
+|---------|---------------|---------|
+| `AgentEmotionManager` / `EmotionResonanceEngine` | `EmotionAnalyzerAdapter`（情感分析适配器，代理 `emotion.py` 中的分析器） | `neurova/cognitive_layers/memory_layer/emotion_adapter.py` |
+| 详细情感共鸣协议（情感同步/传递/调节） | 实际实现为简化的适配器模式，通过 `analyze()` / `batch_analyze()` 进行情感分析 | `neurova/cognitive_layers/memory_layer/emotion_adapter.py` |
+| `AgentEmotionState` | `EmotionAnalyzerAdapter` 返回 `Dict` 格式结果（含 `primary_emotion`, `confidence`, `emotions`, `score`） | `neurova/cognitive_layers/memory_layer/emotion_adapter.py` |
+
+文档描述的多层情感共鸣系统（Agent情感状态、情感同步、情感传递、情感调节）是理论设计。实际代码采用更简洁的适配器模式，通过 `EmotionAnalyzerAdapter` 封装情感分析功能，并支持 `use_legacy` 参数切换新旧算法。
+
+实际实现以代码为准。
+
 ## 1. 概述
 
 ### 1.1 设计理念

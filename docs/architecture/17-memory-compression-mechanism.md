@@ -1,5 +1,19 @@
 # 记忆压缩机制架构设计
 
+## 实现对齐说明
+
+> **注意**: 本文档描述的是设计理论和概念模型。以下为文档术语与实际代码实现的对应关系：
+
+| 文档术语 | 实际代码类/方法 | 文件位置 |
+|---------|---------------|---------|
+| `HierarchicalCompressionEngine` | `MemoryCompressor` | `neurova/cognitive_layers/memory_layer/compression.py` |
+| `CompressionStrategy`（5策略） | `CompressionStrategy` 枚举：`TIER` / `SEMANTIC` / `AGGREGATION` / `LLM` / `RULE_BASED` | `neurova/cognitive_layers/memory_layer/compression.py` |
+| 压缩入口方法 | `MemoryCompressor.compress(memories, strategy, **kwargs)` → 返回 `CompressionResult` | `neurova/cognitive_layers/memory_layer/compression.py` |
+
+文档中的5种压缩策略与实际 `CompressionStrategy` 枚举名称略有不同（文档使用描述性名称如"时间触发压缩"，实际代码使用 `TIER`/`SEMANTIC`/`AGGREGATION`/`LLM`/`RULE_BASED`）。
+
+实际实现以代码为准。
+
 ## 1. 概述
 
 ### 1.1 设计理念

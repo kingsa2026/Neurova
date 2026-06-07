@@ -101,35 +101,35 @@ class ToolExecutor:
                     skill = self._skill_registry.get_skill(tool_name)
                     if skill:
                         result = self._skill_registry.execute_skill(tool_name, **params)
-                    if result.success:
-                        result_str = json.dumps(result.data, ensure_ascii=False)
-                        max_len = 8000
-                        offset = int(params.get("offset", 0))
-                        chunk = result_str[offset:offset + max_len]
-                        total = len(result_str)
-                        suffix = ""
-                        if total > offset + max_len:
-                            suffix = (
-                                f"\n\n(已截断，共 {total} 字符，已显示 {offset}-{offset + len(chunk)}。"
-                                f"使用 offset={offset + max_len} 继续获取后续内容)"
+                        if result.success:
+                            result_str = json.dumps(result.data, ensure_ascii=False)
+                            max_len = 8000
+                            offset = int(params.get("offset", 0))
+                            chunk = result_str[offset:offset + max_len]
+                            total = len(result_str)
+                            suffix = ""
+                            if total > offset + max_len:
+                                suffix = (
+                                    f"\n\n(已截断，共 {total} 字符，已显示 {offset}-{offset + len(chunk)}。"
+                                    f"使用 offset={offset + max_len} 继续获取后续内容)"
+                                )
+                            results.append(f"\n\n**{tool_name} 结果**: {chunk}{suffix}")
+                            self._ensure_messages_list().append({
+                                "type": "tool_result", "tool_name": tool_name,
+                                "result": chunk + suffix,
+                                "success": True, "timestamp": datetime.now().isoformat(),
+                            })
+                            # P0: 使用集中化钩子（记忆+生命周期+技能打包三合一）
+                            self.on_tool_executed(
+                                tool_name=tool_name,
+                                params=params,
+                                user_input=user_input,
+                                success=True,
+                                tool_source="skill_system",
                             )
-                        results.append(f"\n\n**{tool_name} 结果**: {chunk}{suffix}")
-                        self._ensure_messages_list().append({
-                            "type": "tool_result", "tool_name": tool_name,
-                            "result": chunk + suffix,
-                            "success": True, "timestamp": datetime.now().isoformat(),
-                        })
-                        # P0: 使用集中化钩子（记忆+生命周期+技能打包三合一）
-                        self.on_tool_executed(
-                            tool_name=tool_name,
-                            params=params,
-                            user_input=user_input,
-                            success=True,
-                            tool_source="skill_system",
-                        )
-                        continue
-                    else:
-                        skill_exec_error = result.error
+                            continue
+                        else:
+                            skill_exec_error = result.error
 
                 # 2. ToolRouter fallback
                 if self.tool_router:
@@ -355,12 +355,12 @@ class ToolExecutor:
         if self.tool_router:
             import asyncio
             try:
-                loop = _asyncio.get_running_loop()
+                loop = asyncio.get_running_loop()
                 # 已有 event loop 在运行，用 nest_asyncio 或直接创建新 loop
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     result = pool.submit(
-                        _asyncio.run,
+                        asyncio.run,
                         self.tool_router.execute(
                             tool_name=tool_name,
                             params=tool_params,

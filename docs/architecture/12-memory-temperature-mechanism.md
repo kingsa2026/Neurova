@@ -31,10 +31,10 @@
 
 | 阶段 | 温度范围 | 触发条件 | 数据库状态 | 查询优先级 | 存储策略 |
 |------|---------|---------|-----------|-----------|---------|
-| **活跃 (Active)** | 50-100°C | 新创建或 7 天内被访问 | `lifecycle_stage='active'` | 最高 | 主表优先 |
-| **次要 (Secondary)** | 20-50°C | 7-30 天未被访问 | `lifecycle_stage='secondary'` | 中等 | 降级索引 |
-| **归档 (Archived)** | 0-20°C | 30-60 天未被访问 | `lifecycle_stage='archived'` | 低 | 归档存储 |
-| **删除 (Deleted)** | 0°C | 超过 60 天未访问的归档记忆 | `lifecycle_stage='deleted'` | 无 | 物理清理 |
+| **活跃 (Active)** | ≥60°C | 新创建或温度≥60°C | `lifecycle_stage='active'` | 最高 | 主表优先 |
+| **次要 (Secondary)** | 20-60°C | 温度降至20-60°C | `lifecycle_stage='secondary'` | 中等 | 降级索引 |
+| **归档 (Archived)** | 5-20°C | 温度降至5-20°C | `lifecycle_stage='archived'` | 低 | 归档存储 |
+| **删除 (Deleted)** | <5°C | 温度降至<5°C | `lifecycle_stage='deleted'` | 无 | 物理清理 |
 
 ### 1.4 记忆属性分类（温度衍生）
 
@@ -79,54 +79,61 @@ T(t) = T_base + ΔT_hit + ΔT_emotion + ΔT_relation + ΔT_decay
 
 ### 2.2 升温机制
 
-#### 2.2.1 命中升温 (Hit Warming)
+#### 2.2.1 访问升温 (Access Warming)
 
 ```python
-def calculate_hit_temperature_boost(current_temp: float, hit_count: int) -> float:
+@classmethod
+def on_access(cls, current_temp: float,
+              importance: float = 0.5,
+              recall_count: int = 0) -> float:
+    """记忆被访问时更新温度
+    
+    Args:
+        current_temp: 当前温度
+        importance: 重要性分数 (0.0 - 1.0)
+        recall_count: 回忆次数
+        
+    Returns:
+        float: 更新后的温度
     """
-    每次查询命中，温度上升一个维度
-    采用对数增长，避免无限升温
-    """
-    # 基础升温: 每次命中 +5°C
-    base_boost = 5.0
+    # 访问升温
+    access_boost = 10.0 * importance
     
-    # 连击加成: 连续命中时额外升温
-    combo_multiplier = 1.0 + (hit_count % 10) * 0.1  # 每 10 次连击增加 10%
+    # 回忆次数加成
+    recall_boost = min(recall_count * 2.0, 20.0)
     
-    # 温度上限衰减: 温度越高，升温越慢 (模拟边际效应)
-    saturation_factor = 1.0 - (current_temp / 100.0) ** 2
+    # 计算新温度
+    new_temp = current_temp + access_boost + recall_boost
     
-    return base_boost * combo_multiplier * saturation_factor
+    # 限制在有效范围内
+    return max(0.0, min(100.0, new_temp))
 ```
 
 **升温示例**:
 ```
-初始温度: 50°C
-第 1 次命中: 50 + 5 * 1.0 * 0.75 = 53.75°C
-第 2 次命中: 53.75 + 5 * 1.1 * 0.71 = 57.66°C
-第 10 次命中 (连击): 温度增速加快
-第 90 次命中: 温度接近 100°C，升温极慢
+初始温度: 50°C，重要性: 0.5，回忆次数: 0
+第 1 次访问: 50 + 10 * 0.5 + 0 = 55°C
+第 2 次访问: 55 + 10 * 0.5 + 0 = 60°C
+第 3 次访问 (回忆次数+1): 60 + 10 * 0.5 + 2 = 67°C
 ```
 
-#### 2.2.2 情感加成 (Emotion Bonus)
+#### 2.2.2 情感保护 (Emotion Protection)
 
 ```python
-EMOTION_TEMPERATURE_BONUS = {
-    'joy': 10.0,        # 快乐记忆升温显著
-    'surprise': 8.0,    # 惊喜记忆保持温热
-    'fear': 5.0,        # 恐惧记忆有一定影响
-    'anger': 5.0,       # 愤怒记忆有一定影响
-    'sadness': 3.0,     # 悲伤记忆轻微升温
-    'disgust': 2.0,     # 厌恶记忆影响较小
-    'neutral': 0.0      # 中性记忆无加成
-}
+# 情感保护参数
+_CLASS_EMOTIONAL_PROTECTION_THRESHOLD = 0.5
+_CLASS_EMOTIONAL_PROTECTION_FACTOR = 0.6
 
-def calculate_emotion_bonus(emotion_tags: List[str], emotion_score: float) -> float:
+def calculate_emotion_protection(emotion_score: float) -> float:
     """
-    情感加成计算
-    强情感标签显著提升记忆温度
+    情感保护计算
+    强情感记忆衰减更慢
     """
-    if not emotion_tags:
+    if emotion_score > _CLASS_EMOTIONAL_PROTECTION_THRESHOLD:
+        return _CLASS_EMOTIONAL_PROTECTION_FACTOR  # 0.6，减缓40%衰减
+    else:
+        return 1.0  # 无保护
+```
         return 0.0
     
     # 取最高情感强度的加成
@@ -141,79 +148,75 @@ def calculate_emotion_bonus(emotion_tags: List[str], emotion_score: float) -> fl
     return max_bonus * intensity_factor
 ```
 
-#### 2.2.3 关联加成 (Relation Bonus)
+### 2.3 降温机制 (贝叶斯遗忘曲线)
+
+#### 2.3.1 贝叶斯遗忘曲线公式
 
 ```python
-def calculate_relation_bonus(memory: Memory, related_memories: List[Memory]) -> float:
-    """
-    特殊意义关联加成
-    与其他重要记忆关联的记忆获得温度保护
-    """
-    bonus = 0.0
+@classmethod
+def on_decay(cls, current_temp: float,
+             days_idle: float,
+             importance: float = 0.5,
+             emotion_score: float = 0.0,
+             recall_count: int = 0) -> float:
+    """计算温度衰减
     
-    # 每个关联提供基础加成
-    for related in related_memories:
-        # 关联强度影响加成
-        relation_strength = get_relation_strength(memory.id, related.id)
+    Args:
+        current_temp: 当前温度
+        days_idle: 空闲天数
+        importance: 重要性分数 (0.0 - 1.0)
+        emotion_score: 情感分数 (0.0 - 1.0)
+        recall_count: 回忆次数
         
-        # 被关联记忆的温度也会传递
-        related_temp_influence = related.temperature * 0.1
-        
-        bonus += relation_strength * 5.0 + related_temp_influence
-    
-    # 上限保护: 关联加成最多 +15°C
-    return min(bonus, 15.0)
-```
-
-### 2.3 降温机制 (遗忘曲线)
-
-#### 2.3.1 时间衰减公式
-
-```python
-def calculate_temperature_decay(
-    current_temp: float,
-    days_since_last_access: int,
-    has_emotion_bonus: bool,
-    has_relation_bonus: bool
-) -> float:
+    Returns:
+        float: 衰减后的温度
     """
-    温度衰减计算 (模拟艾宾浩斯遗忘曲线)
+    # 1. 计算衰减因子（贝叶斯遗忘曲线）
+    curve_factor = cls._calculate_curve_factor(days_idle)
     
-    遗忘曲线特征:
-    - 初期衰减快 (24 小时内遗忘 50%)
-    - 后期衰减慢 (30 天后遗忘速度减缓)
-    - 情感/关联记忆衰减更慢
+    # 2. 情感保护
+    emotion_protect = (cls._CLASS_EMOTIONAL_PROTECTION_FACTOR
+                      if emotion_score > cls._CLASS_EMOTIONAL_PROTECTION_THRESHOLD
+                      else 1.0)
+    
+    # 3. 饱和效应
+    saturation_factor = 1.0 - (current_temp / 100.0) ** 2
+    
+    # 4. 重要性加权（重要记忆衰减更少）
+    importance_weight = 1.0 - 0.5 * importance
+    
+    # 5. 回忆次数保护
+    recall_protection = min(1.0 + recall_count * 0.05, 1.5)
+    
+    # 6. 计算最终衰减
+    decay = curve_factor * emotion_protect * saturation_factor * importance_weight
+    
+    # 应用衰减
+    new_temp = current_temp * (1.0 - decay)
+    
+    # 最后应用回忆保护（防止过度衰减）
+    new_temp = max(new_temp, current_temp * recall_protection * 0.1)
+    
+    return max(0.0, min(100.0, new_temp))
+
+@classmethod
+def _calculate_curve_factor(cls, days_idle: float) -> float:
+    """计算遗忘曲线因子
+    
+    基于空闲天数的分段函数：
+    - ≤1天: 2.0 (快速衰减)
+    - ≤7天: 1.0 (正常衰减)
+    - ≤30天: 0.5 (慢速衰减)
+    - >30天: 0.2 (极慢衰减)
     """
-    if days_since_last_access <= 0:
-        return 0.0  # 不降温
-    
-    # 基础衰减率 (艾宾浩斯曲线拟合)
-    # 使用指数衰减: decay = a * e^(-b*t)
-    base_decay_rate = 0.05  # 每日基础衰减 5%
-    
-    # 遗忘曲线加速因子 (初期快，后期慢)
-    if days_since_last_access <= 1:
-        curve_factor = 2.0  # 24 小时内快速衰减
-    elif days_since_last_access <= 7:
-        curve_factor = 1.0  # 一周内正常衰减
-    elif days_since_last_access <= 30:
-        curve_factor = 0.5  # 一月内衰减减缓
+    if days_idle <= 1:
+        return 2.0
+    elif days_idle <= 7:
+        return 1.0
+    elif days_idle <= 30:
+        return 0.5
     else:
-        curve_factor = 0.2  # 超过一月极慢衰减
-    
-    # 情感保护: 减缓 40% 衰减
-    emotion_protect = 0.6 if has_emotion_bonus else 1.0
-    
-    # 关联保护: 减缓 30% 衰减
-    relation_protect = 0.7 if has_relation_bonus else 1.0
-    
-    # 计算每日衰减
-    daily_decay = (
-        current_temp * base_decay_rate * curve_factor * 
-        emotion_protect * relation_protect
-    )
-    
-    return daily_decay * days_since_last_access
+        return 0.2
 ```
 
 #### 2.3.2 遗忘曲线可视化
@@ -221,14 +224,14 @@ def calculate_temperature_decay(
 ```
 温度 (°C)
 100 │
-    │  ╭───────── 无情感/关联记忆 (快速遗忘)
+    │  ╭───────── 无情感记忆 (快速遗忘)
  80 │ ╱
     │╱
  60 │╲
     │ ╲
  40 │  ╲╭──────── 有情感记忆 (缓慢遗忘)
     │   ╲
- 20 │    ╲╭────── 有关联记忆 (极慢遗忘)
+ 20 │    ╲────── 低重要性记忆
     │     ╲
   0 │______╲______→ 时间 (天)
     0   7   14  30  60  90
@@ -237,63 +240,102 @@ def calculate_temperature_decay(
 ### 2.4 综合温度计算
 
 ```python
-class MemoryTemperatureEngine:
+class TemperatureEngine:
     """
-    记忆温度计算引擎
+    温度引擎
+    
+    管理记忆的"温度"（活跃度），实现贝叶斯遗忘曲线。
+    温度值范围：0.0（完全遗忘）到 100.0（高度活跃）
     """
     
-    # 生命周期阶段阈值
-    ACTIVE_THRESHOLD = 50.0      # 50°C 以上为活跃
-    SECONDARY_THRESHOLD = 20.0   # 20-50°C 为次要
-    ARCHIVED_THRESHOLD = 5.0     # 5-20°C 为归档
-    DELETE_THRESHOLD = 0.0       # 0°C 触发删除
+    # 生命周期阶段
+    STAGE_ACTIVE = "active"
+    STAGE_SECONDARY = "secondary"
+    STAGE_ARCHIVED = "archived"
+    STAGE_DELETED = "deleted"
     
-    # 时间阈值 (天)
-    DAYS_TO_SECONDARY = 7        # 7 天未命中降为次要
-    DAYS_TO_ARCHIVED = 30        # 30 天未命中降为归档
-    DAYS_TO_DELETE = 60          # 60 天未命中触发删除
+    # 生命周期阈值
+    THRESHOLD_SECONDARY = 60.0   # ≥60°C 为活跃
+    THRESHOLD_ARCHIVED = 20.0    # 20-60°C 为次要
+    THRESHOLD_DELETED = 5.0      # 5-20°C 为归档
+                                # <5°C 为删除
     
-    def update_temperature(self, memory: Memory) -> Memory:
+    # 类级别默认值
+    _CLASS_DECAY_RATE = 0.1
+    _CLASS_EMOTIONAL_PROTECTION_THRESHOLD = 0.5
+    _CLASS_EMOTIONAL_PROTECTION_FACTOR = 0.6
+    
+    @classmethod
+    def on_access(cls, current_temp: float,
+                  importance: float = 0.5,
+                  recall_count: int = 0) -> float:
+        """记忆被访问时更新温度
+        
+        Args:
+            current_temp: 当前温度
+            importance: 重要性分数 (0.0 - 1.0)
+            recall_count: 回忆次数
+            
+        Returns:
+            float: 更新后的温度
         """
-        更新记忆温度
-        """
-        # 1. 计算升温因素
-        hit_boost = self._calculate_hit_boost(memory)
-        emotion_bonus = self._calculate_emotion_bonus(memory)
-        relation_bonus = self._calculate_relation_bonus(memory)
+        # 访问升温
+        access_boost = 10.0 * importance
         
-        # 2. 计算降温因素
-        days_idle = (datetime.now() - memory.last_accessed_at).days
-        decay = self._calculate_decay(
-            memory.temperature, days_idle,
-            has_emotion=emotion_bonus > 0,
-            has_relation=relation_bonus > 0
-        )
+        # 回忆次数加成
+        recall_boost = min(recall_count * 2.0, 20.0)
         
-        # 3. 综合计算
-        new_temp = (
-            memory.temperature 
-            + hit_boost 
-            + emotion_bonus 
-            + relation_bonus 
-            - decay
-        )
+        # 计算新温度
+        new_temp = current_temp + access_boost + recall_boost
         
-        # 4. 温度边界限制
-        new_temp = max(0.0, min(100.0, new_temp))
-        
-        # 5. 更新生命周期阶段
-        new_stage = self._determine_lifecycle_stage(
-            new_temp, days_idle, memory
-        )
-        
-        # 5. 更新记忆对象
-    memory.temperature = new_temp
-    memory.lifecycle_stage = new_stage
-    memory.last_accessed_at = datetime.now()
+        # 限制在有效范围内
+        return max(0.0, min(100.0, new_temp))
     
-    # 6. 检查属性升级
-    memory = self._check_attribute_upgrade(memory)
+    @classmethod
+    def on_decay(cls, current_temp: float,
+                 days_idle: float,
+                 importance: float = 0.5,
+                 emotion_score: float = 0.0,
+                 recall_count: int = 0) -> float:
+        """计算温度衰减
+        
+        Args:
+            current_temp: 当前温度
+            days_idle: 空闲天数
+            importance: 重要性分数 (0.0 - 1.0)
+            emotion_score: 情感分数 (0.0 - 1.0)
+            recall_count: 回忆次数
+            
+        Returns:
+            float: 衰减后的温度
+        """
+        # 1. 计算衰减因子（贝叶斯遗忘曲线）
+        curve_factor = cls._calculate_curve_factor(days_idle)
+        
+        # 2. 情感保护
+        emotion_protect = (cls._CLASS_EMOTIONAL_PROTECTION_FACTOR
+                          if emotion_score > cls._CLASS_EMOTIONAL_PROTECTION_THRESHOLD
+                          else 1.0)
+        
+        # 3. 饱和效应
+        saturation_factor = 1.0 - (current_temp / 100.0) ** 2
+        
+        # 4. 重要性加权（重要记忆衰减更少）
+        importance_weight = 1.0 - 0.5 * importance
+        
+        # 5. 回忆次数保护
+        recall_protection = min(1.0 + recall_count * 0.05, 1.5)
+        
+        # 6. 计算最终衰减
+        decay = curve_factor * emotion_protect * saturation_factor * importance_weight
+        
+        # 应用衰减
+        new_temp = current_temp * (1.0 - decay)
+        
+        # 最后应用回忆保护（防止过度衰减）
+        new_temp = max(new_temp, current_temp * recall_protection * 0.1)
+        
+        return max(0.0, min(100.0, new_temp))
     
     return memory
     
@@ -443,28 +485,28 @@ class MemoryTemperatureEngine:
 ```
                 ┌─────────────────────────────────────┐
                 │                                     │
-                ▼  创建 (50°C)                        │
+                ▼  创建 (默认50°C)                    │
             ┌────────┐                                │
             │ ACTIVE │                                │
-            │ 50-100°│                                │
+            │ ≥60°C  │                                │
             └───┬────┘                                │
-                │ 7 天未命中 + T<50°C                 │
+                │ 温度降至20-60°C                     │
                 ▼                                     │
             ┌────────────┐                            │
             │ SECONDARY  │                            │
-            │ 20-50°C    │                            │
+            │ 20-60°C    │                            │
             └───┬────────┘                            │
-                │ 30 天未命中 + T<20°C                │
+                │ 温度降至5-20°C                      │
                 ▼                                     │
             ┌────────┐                                │
             │ARCHIVED│                                │
             │ 5-20°C │                                │
             └───┬────┘                                │
-                │ 60 天未命中 + T<5°C                 │
+                │ 温度降至<5°C                        │
                 ▼                                     │
             ┌────────┐                                │
             │ DELETED│────────────────────────────────┘
-            │ 0°C    │  (物理删除)
+            │ <5°C   │  (物理删除)
             └────────┘
                 
     ←─── 命中升温可逆向转换 ───→
@@ -482,7 +524,7 @@ class TemperatureDecayScheduler:
     def __init__(self, db_connection, config: Optional[Dict] = None):
         self.db = db_connection
         self.config = config or {}
-        self.engine = MemoryTemperatureEngine()
+        self.engine = TemperatureEngine()
     
     def run_decay_cycle(self):
         """
@@ -924,16 +966,16 @@ temperature:
   # 生命周期阈值
   lifecycle_thresholds:
     active:
-      min_temperature: 50.0
+      min_temperature: 60.0     # ≥60°C 为活跃
       max_idle_days: 7
     secondary:
-      min_temperature: 20.0
+      min_temperature: 20.0     # 20-60°C 为次要
       max_idle_days: 30
     archived:
-      min_temperature: 5.0
+      min_temperature: 5.0      # 5-20°C 为归档
       max_idle_days: 60
     deleted:
-      min_temperature: 0.0
+      min_temperature: 0.0      # <5°C 为删除
       cleanup_after_days: 30
   
   # 调度器配置
@@ -954,84 +996,108 @@ temperature:
 ### 10.1 单元测试
 
 ```python
-def test_temperature_increase_on_hit():
-    """测试命中升温"""
-    engine = MemoryTemperatureEngine()
-    memory = Memory(
-        id="test_1",
-        agent_id="test",
-        temperature=50.0,
-        access_count=0,
-        last_accessed_at=datetime.now()
+def test_temperature_increase_on_access():
+    """测试访问升温"""
+    # 初始温度 50°C，重要性 0.5，回忆次数 0
+    new_temp = TemperatureEngine.on_access(
+        current_temp=50.0,
+        importance=0.5,
+        recall_count=0
     )
     
-    # 模拟命中
-    updated = engine.update_temperature(memory)
+    # 50 + 10 * 0.5 + 0 = 55°C
+    assert new_temp == 55.0
     
-    assert updated.temperature > 50.0
-    assert updated.temperature <= 55.0  # 升温不超过 5°C
+    # 测试回忆次数加成
+    new_temp_with_recall = TemperatureEngine.on_access(
+        current_temp=50.0,
+        importance=0.5,
+        recall_count=3
+    )
+    
+    # 50 + 10 * 0.5 + min(3 * 2.0, 20.0) = 50 + 5 + 6 = 61°C
+    assert new_temp_with_recall == 61.0
 
 def test_temperature_decay_after_idle():
     """测试空闲降温"""
-    engine = MemoryTemperatureEngine()
-    memory = Memory(
-        id="test_2",
-        agent_id="test",
-        temperature=60.0,
-        access_count=5,
-        last_accessed_at=datetime.now() - timedelta(days=8)  # 8 天前访问
+    # 初始温度 60°C，空闲 8 天
+    new_temp = TemperatureEngine.on_decay(
+        current_temp=60.0,
+        days_idle=8.0,
+        importance=0.5,
+        emotion_score=0.0,
+        recall_count=5
     )
     
-    updated = engine.update_temperature(memory)
+    # 应该降温
+    assert new_temp < 60.0
     
-    assert updated.temperature < 60.0
-    assert updated.lifecycle_stage == 'secondary'  # 应降为次要
+    # 测试情感保护
+    new_temp_with_emotion = TemperatureEngine.on_decay(
+        current_temp=60.0,
+        days_idle=8.0,
+        importance=0.5,
+        emotion_score=0.8,  # 强情感
+        recall_count=5
+    )
+    
+    # 有情感保护时降温更少
+    assert new_temp_with_emotion > new_temp
 
 def test_emotion_protection():
     """测试情感保护"""
-    engine = MemoryTemperatureEngine()
-    memory = Memory(
-        id="test_3",
-        agent_id="test",
-        temperature=40.0,
-        emotion_score=0.9,  # 强情感
-        last_accessed_at=datetime.now() - timedelta(days=10)
+    # 无情感保护
+    temp_without_emotion = TemperatureEngine.on_decay(
+        current_temp=40.0,
+        days_idle=10.0,
+        importance=0.5,
+        emotion_score=0.0,  # 无情感
+        recall_count=0
     )
     
-    updated = engine.update_temperature(memory)
+    # 有情感保护
+    temp_with_emotion = TemperatureEngine.on_decay(
+        current_temp=40.0,
+        days_idle=10.0,
+        importance=0.5,
+        emotion_score=0.9,  # 强情感
+        recall_count=0
+    )
     
-    # 强情感记忆温度不应低于 30°C
-    assert updated.temperature >= 25.0
+    # 有情感保护时降温更少
+    assert temp_with_emotion > temp_without_emotion
 
 def test_lifecycle_transition_to_archived():
     """测试归档转换"""
-    engine = MemoryTemperatureEngine()
-    memory = Memory(
-        id="test_4",
-        agent_id="test",
-        temperature=15.0,
-        lifecycle_stage='secondary',
-        last_accessed_at=datetime.now() - timedelta(days=35)  # 35 天未访问
+    # 温度 15°C，空闲 35 天，低重要性
+    new_temp = TemperatureEngine.on_decay(
+        current_temp=15.0,
+        days_idle=35.0,
+        importance=0.5,
+        emotion_score=0.0,
+        recall_count=0
     )
     
-    updated = engine.update_temperature(memory)
+    # 检查生命周期阶段
+    stage = TemperatureEngine.get_lifecycle_stage(new_temp)
     
-   <think>
-    assert updated.lifecycle_stage == 'archived'
+    # 温度应降至归档范围 (5-20°C)
+    assert stage in ['archived', 'deleted']
 
 def test_memory_consolidation():
     """测试记忆巩固"""
-    engine = MemoryTemperatureEngine()
-    memory = Memory(
-        id="test_5",
-        agent_id="test",
-        type='short_term',
-        temperature=65.0,
-        access_count=5,
-        last_accessed_at=datetime.now()
+    # 温度 65°C，访问 5 次
+    new_temp = TemperatureEngine.on_access(
+        current_temp=65.0,
+        importance=0.5,
+        recall_count=5
     )
     
-    assert should_consolidate(memory) == True
+    # 检查生命周期阶段
+    stage = TemperatureEngine.get_lifecycle_stage(new_temp)
+    
+    # 应该保持活跃
+    assert stage == 'active'
 ```
 
 ### 10.2 集成测试

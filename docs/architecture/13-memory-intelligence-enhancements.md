@@ -1,5 +1,17 @@
 # 记忆智能增强机制架构设计
 
+## 实现对齐说明
+
+> **注意**: 本文档描述的是设计理论和概念模型。以下为文档术语与实际代码实现的对应关系：
+
+| 文档术语 | 实际代码类/方法 | 文件位置 |
+|---------|---------------|---------|
+| `ConflictDetector` / `ConflictResolver` | `MemoryConflictDetector` | `neurova/cognitive_layers/memory_layer/conflict_detector.py` |
+| `MemoryMerger` | `SleepConsolidation.merge_cluster()` | `neurova/cognitive_layers/memory_layer/sleep.py` |
+| `HierarchicalCompressionEngine` | `MemoryCompressor` | `neurova/cognitive_layers/memory_layer/compression.py` |
+
+实际实现以代码为准。
+
 ## 1. 概述
 
 ### 1.1 设计理念

@@ -9,15 +9,17 @@
 | 文档 | 描述 | 适合人群 |
 |------|------|----------|
 | [README.md](../README.md) | 项目概述、快速开始、核心特性 | 所有人 |
-| [DESIGN_SUMMARY.md](DESIGN_SUMMARY.md) | 设计总结、核心亮点、下一步行动 | 所有人 |
+| [CONTEXT.md](../CONTEXT.md) | 项目上下文、架构概览、技术栈 | 所有人 |
+| [API_REFERENCE.md](../API_REFERENCE.md) | API 端点参考、请求/响应格式 | 开发者 |
+| [PRODUCT_GUIDE.md](../PRODUCT_GUIDE.md) | 产品指南、使用场景、最佳实践 | 用户/开发者 |
 
 ### 架构设计文档 (按阅读顺序)
 
 | # | 文档 | 核心内容 | 建议阅读时间 |
 |---|------|----------|-------------|
 | 1 | [01-core-architecture.md](01-core-architecture.md) | 整体架构、分层设计、核心组件 | 30 分钟 |
-| 2 | [02-memory-system.md](02-memory-system.md) | 记忆系统、情感架构、SQLite 模型 | 40 分钟 |
-| 3 | [03-message-routing.md](03-message-routing.md) | 消息路由、渠道适配、事件总线 | 40 分钟 |
+| 2 | [02-memory-system.md](02-memory-system.md) | 记忆系统、17维分类、LSM-Tree存储 | 40 分钟 |
+| 3 | [03-message-routing.md](03-message-routing.md) | 消息路由、14种渠道适配、事件总线 | 40 分钟 |
 | 4 | [04-multi-agent-collaboration.md](04-multi-agent-collaboration.md) | 多 Agent 协作、任务分配、工作流 | 45 分钟 |
 | 5 | [05-skill-system.md](05-skill-system.md) | Skill 系统、协议兼容、沙箱执行 | 35 分钟 |
 | 6 | [06-plugin-cli-system.md](06-plugin-cli-system.md) | 插件系统、CLI 工具、插件开发 | 30 分钟 |
@@ -36,43 +38,45 @@
 | 18 | [18-memory-security-privacy.md](18-memory-security-privacy.md) | 敏感检测、AES加密、被遗忘权 | 35 分钟 |
 | 19 | [19-time-awareness-mechanism.md](19-time-awareness-mechanism.md) | 模式识别、事件预测、季节偏好 | 35 分钟 |
 | 20 | [20-retrieval-context-injection.md](20-retrieval-context-injection.md) | 语义理解、混合检索、上下文构建 | 45 分钟 |
-| 21 | [02-memory-system.md](02-memory-system.md) 第12章 | 意图图谱、反馈闭环、梦境整理、自我进化 | 50 分钟 |
+| 21 | [21-recursive-self-improvement.md](21-recursive-self-improvement.md) | 递归自我进化（RSI）、元参数优化、棘轮机制、递归剪枝、工具层RSI、集成矩阵、收敛性分析、监控体系、渐进部署 | 90 分钟 |
+| 22 | [02-memory-system.md](02-memory-system.md) 第12章 | 意图图谱、反馈闭环、梦境整理、自我进化 | 50 分钟 |
 
 ### 开发规范
 
 | 文档 | 内容 | 必读 |
 |------|------|------|
-| [../.trae/project_rules.md](../.trae/project_rules.md) | 项目规则、代码规范、开发流程 | ✅ 开发者必读 |
+| [../CONTEXT.md](../CONTEXT.md) | 项目上下文、架构概览、技术栈 | ✅ 开发者必读 |
+| [DOCS_ALIGNMENT_PLAN.md](../DOCS_ALIGNMENT_PLAN.md) | 文档对齐计划、更新策略 | 开发者参考 |
 
 ## 🎯 按角色推荐阅读
 
 ### 项目经理/产品负责人
 1. [README.md](../README.md) - 了解项目概况
-2. [DESIGN_SUMMARY.md](DESIGN_SUMMARY.md) - 理解核心设计
+2. [CONTEXT.md](../CONTEXT.md) - 理解核心架构
 3. [07-implementation-plan.md](07-implementation-plan.md) - 掌握实现计划
 
 ### 架构师/技术负责人
 1. [01-core-architecture.md](01-core-architecture.md) - 整体架构
-2. [02-memory-system.md](02-memory-system.md) - 记忆架构
-3. [03-message-routing.md](03-message-routing.md) - 通信架构
+2. [02-memory-system.md](02-memory-system.md) - 记忆架构（17维分类）
+3. [03-message-routing.md](03-message-routing.md) - 通信架构（14种渠道）
 4. [08-project-structure.md](08-project-structure.md) - 项目结构
 
 ### 后端开发工程师
 1. [01-core-architecture.md](01-core-architecture.md) - 核心架构
 2. [02-memory-system.md](02-memory-system.md) - 数据模型
 3. [04-multi-agent-collaboration.md](04-multi-agent-collaboration.md) - 业务逻辑
-4. [07-implementation-plan.md](07-implementation-plan.md) - API 规范
-5. [../.trae/project_rules.md](../.trae/project_rules.md) - 开发规范
+4. [API_REFERENCE.md](../API_REFERENCE.md) - API 规范
+5. [CONTEXT.md](../CONTEXT.md) - 开发规范
 
 ### 测试工程师
 1. [07-implementation-plan.md](07-implementation-plan.md) - 测试策略
 2. [01-core-architecture.md](01-core-architecture.md) - 了解架构
-3. [../.trae/project_rules.md](../.trae/project_rules.md) - 测试规范
+3. [CONTEXT.md](../CONTEXT.md) - 测试规范
 
 ### 插件/Skill 开发者
 1. [05-skill-system.md](05-skill-system.md) - Skill 开发指南
 2. [06-plugin-cli-system.md](06-plugin-cli-system.md) - 插件开发指南
-3. [07-implementation-plan.md](07-implementation-plan.md) - API 规范
+3. [API_REFERENCE.md](../API_REFERENCE.md) - API 规范
 
 ### 运维工程师
 1. [07-implementation-plan.md](07-implementation-plan.md) - 部署方案
@@ -87,7 +91,7 @@
 
 ### 核心系统
 - [02-memory-system.md](02-memory-system.md) - 记忆系统 (含温度机制、进阶增强)
-- [03-message-routing.md](03-message-routing.md) - 消息路由
+- [03-message-routing.md](03-message-routing.md) - 消息路由（14种渠道）
 - [04-multi-agent-collaboration.md](04-multi-agent-collaboration.md) - 多 Agent 协作
 - [09-context-processing.md](09-context-processing.md) - 上下文处理
 - [10-cache-mechanism.md](10-cache-mechanism.md) - 缓存机制
@@ -102,6 +106,7 @@
 - [18-memory-security-privacy.md](18-memory-security-privacy.md) - 安全隐私控制
 - [19-time-awareness-mechanism.md](19-time-awareness-mechanism.md) - 时间感知模块
 - [20-retrieval-context-injection.md](20-retrieval-context-injection.md) - 检索与上下文注入
+- [21-recursive-self-improvement.md](21-recursive-self-improvement.md) - 递归自我进化（RSI）架构设计
 
 ### 扩展系统
 - [05-skill-system.md](05-skill-system.md) - Skill 系统
@@ -112,18 +117,19 @@
 
 ### 规范指南
 - [../README.md](../README.md) - 项目概述
-- [../.trae/project_rules.md](../.trae/project_rules.md) - 开发规范
-- [DESIGN_SUMMARY.md](DESIGN_SUMMARY.md) - 设计总结
+- [../CONTEXT.md](../CONTEXT.md) - 项目上下文
+- [../API_REFERENCE.md](../API_REFERENCE.md) - API 参考
+- [../PRODUCT_GUIDE.md](../PRODUCT_GUIDE.md) - 产品指南
 
 ## 🔍 快速查找
 
 ### 想了解整体架构？
 👉 [01-core-architecture.md](01-core-architecture.md)
 
-### 想了解记忆系统（含温度机制）？
+### 想了解记忆系统（17维分类）？
 👉 [02-memory-system.md](02-memory-system.md) 或 👉 [12-memory-temperature-mechanism.md](12-memory-temperature-mechanism.md)
 
-### 想了解消息路由？
+### 想了解消息路由（14种渠道）？
 👉 [03-message-routing.md](03-message-routing.md)
 
 ### 想了解多 Agent 协作？
@@ -180,11 +186,14 @@
 ### 想了解检索与上下文注入？
 👉 [20-retrieval-context-injection.md](20-retrieval-context-injection.md)
 
+### 想了解递归自我进化（RSI）架构？
+👉 [21-recursive-self-improvement.md](21-recursive-self-improvement.md)
+
 ### 想了解进阶增强机制（意图图谱/反馈闭环/梦境整理/自我进化）？
 👉 [02-memory-system.md](02-memory-system.md) 第12章
 
 ### 想看开发规范？
-👉 [../.trae/project_rules.md](../.trae/project_rules.md)
+👉 [../CONTEXT.md](../CONTEXT.md)
 
 ### 想快速开始？
 👉 [../README.md](../README.md)
@@ -194,15 +203,23 @@
 | 类别 | 文档数 | 总字数 (约) |
 |------|--------|------------|
 | 架构设计 | 20 | 180,000+ |
-| 项目概述 | 2 | 5,000+ |
+| 项目概述 | 4 | 15,000+ |
 | 开发规范 | 1 | 10,000+ |
-| **总计** | **23** | **195,000+** |
+| **总计** | **25** | **205,000+** |
 
 ## 🔄 更新记录
 
 | 日期 | 文档 | 更新内容 |
 |------|------|----------|
+| 2026-06-07 | 03-message-routing.md | 更新为 14 种渠道支持，添加飞书/钉钉/企业微信适配器 |
+| 2026-06-07 | 02-memory-system.md | 更新为 17 维记忆分类，添加 LSM-Tree 存储架构 |
+| 2026-06-07 | 01-core-architecture.md | 更新为 v4.0，添加 6+ LLM 提供商支持 |
+| 2026-06-07 | 08-project-structure.md | 更新为当前项目结构，版本 v4.0 |
+| 2026-06-07 | INDEX.md | 更新版本为 v4.0，添加新文档链接 |
 | 2026-05-06 | 02-memory-system.md | 新增第12章：进阶增强机制（意图图谱/反馈闭环/梦境整理/自我进化） |
+| 2026-06-08 | 21-recursive-self-improvement.md | 新增：递归自我进化（RSI）架构设计 |
+| 2026-06-08 | 21-recursive-self-improvement.md | 更新：添加递归棘轮剪枝器和工具层RSI |
+| 2026-06-08 | 21-recursive-self-improvement.md | 更新v1.3：新增RSI集成矩阵、收敛性数学分析、监控可观测性、渐进式部署策略、综合架构总览 |
 | 2026-05-05 | 20-retrieval-context-injection.md | 新增：检索与上下文注入（六层架构） |
 | 2026-05-05 | 19-time-awareness-mechanism.md | 新增：时间感知模块 |
 | 2026-05-05 | 18-memory-security-privacy.md | 新增：安全隐私控制 |
@@ -225,6 +242,6 @@
 
 ---
 
-**最后更新**: 2026-05-06  
+**最后更新**: 2026-06-07  
 **维护者**: Neurova Team  
-**版本**: 2.0.0
+**版本**: 4.0
