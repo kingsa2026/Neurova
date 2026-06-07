@@ -207,19 +207,25 @@ class MemoryWriteQueue:
     提供批量写入和验证功能
     """
 
-    def __init__(self, storage=None, agent_id: str = None):
+    def __init__(self, storage=None, agent_id: str = None, memory_manager=None):
         """初始化写入队列
 
         Args:
-            storage: 内存存储实例
+            storage: 内存存储实例 (CognitiveStorageEngine)
             agent_id: 代理ID
+            memory_manager: 记忆管理器 (MemoryManager) 作为降级后端
         """
         self.storage = storage
         self.agent_id = agent_id
+        self._memory_manager = memory_manager
         self._queue: List[MemoryItem] = []
         self._lock = None
 
-        logger.debug(f"MemoryWriteQueue 初始化: agent_id={agent_id}")
+        logger.debug(f"MemoryWriteQueue 初始化: agent_id={agent_id}, storage={'有' if storage else '无'}, memory_manager={'有' if memory_manager else '无'}")
+
+    def __bool__(self) -> bool:
+        """检查队列是否非空"""
+        return len(self._queue) > 0
 
     def enqueue(self, item: MemoryItem) -> bool:
         """添加项目到队列
@@ -256,28 +262,93 @@ class MemoryWriteQueue:
             return False
 
     def flush_to_storage(self) -> int:
-        """刷新队列到存储
+        """刷新队列到存储（批量写入 SQLite）
 
         Returns:
             int: 成功写入的项目数量
         """
-        if not self.storage:
-            logger.warning("存储不可用，无法刷新队列")
-            return 0
-
         if not self._queue:
             return 0
 
-        try:
-            # 这里应该调用实际的存储写入逻辑
-            # 为了测试，我们假设所有项目都成功写入
-            count = len(self._queue)
-            logger.info(f"刷新 {count} 个项目到存储")
-            self._queue.clear()
-            return count
-        except Exception as e:
-            logger.error(f"刷新队列到存储失败: {e}")
+        # 优先使用 CognitiveStorageEngine，降级使用 MemoryManager
+        storage = self.storage
+        memory_manager = getattr(self, '_memory_manager', None)
+
+        if not storage and not memory_manager:
+            logger.warning("存储和记忆管理器均不可用，无法刷新队列")
             return 0
+
+        written = 0
+        errors = 0
+        items_to_write = list(self._queue)  # 复制一份，避免写入过程中修改
+
+        for item in items_to_write:
+            try:
+                content = item.content if hasattr(item, 'content') else str(item.get('content', ''))
+                if not content:
+                    continue
+
+                # 提取分类信息
+                classification = getattr(item, 'classification', None) or (
+                    item.get('classification', 'conversation') if isinstance(item, dict) else 'conversation'
+                )
+                categories = getattr(item, 'categories', None) or (
+                    item.get('categories', []) if isinstance(item, dict) else []
+                )
+                category = categories[0] if categories else classification or 'conversation'
+
+                # 提取元数据
+                metadata = {}
+                meta_trace = getattr(item, 'meta_trace', None) or (
+                    item.get('meta_trace', None) if isinstance(item, dict) else None
+                )
+                if meta_trace:
+                    metadata['meta_trace'] = meta_trace
+
+                # 添加时间戳
+                timestamp = getattr(item, 'timestamp', None) or (
+                    item.get('timestamp', None) if isinstance(item, dict) else None
+                )
+                if timestamp:
+                    if hasattr(timestamp, 'isoformat'):
+                        metadata['timestamp'] = timestamp.isoformat()
+                    else:
+                        metadata['timestamp'] = str(timestamp)
+
+                # 写入 CognitiveStorageEngine
+                if storage and hasattr(storage, 'save'):
+                    storage.save(
+                        content=content,
+                        memory_type=classification,
+                        owner=self.agent_id or "default",
+                        tags=categories,
+                        metadata=metadata,
+                        importance=0.5,
+                    )
+                    written += 1
+                # 降级写入 MemoryManager
+                elif memory_manager and hasattr(memory_manager, 'remember'):
+                    memory_manager.remember(
+                        content=content,
+                        memory_type=classification,
+                        category=category,
+                        metadata=metadata,
+                    )
+                    written += 1
+
+            except Exception as e:
+                errors += 1
+                logger.warning(f"写入单条记忆失败: {e}")
+
+        # 清空已写入的队列
+        self._queue.clear()
+
+        if written > 0:
+            logger.info(f"批量写入 {written} 条记忆到存储" + (f"，{errors} 条失败" if errors else ""))
+        elif errors > 0:
+            logger.warning(f"批量写入全部失败: {errors} 条")
+
+        return written
 
     def verify_write(self, item: MemoryItem) -> bool:
         """验证写入是否成功

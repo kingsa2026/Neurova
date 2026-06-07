@@ -14,9 +14,8 @@ import logging
 from pathlib import Path
 import shutil
 import sys
-import typing
+from typing import Any, Dict, List, Optional
 
-from fastapi import Path
 import importlib.util
 
 class SkillService:

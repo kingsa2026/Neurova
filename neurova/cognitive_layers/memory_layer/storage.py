@@ -39,6 +39,11 @@ class MemoryRecord:
     access_count: int = 0
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
+    # 三层隔离字段
+    agent_id: str = "default"
+    neuser_id: str = "default"
+    user_id: str = "default"
+    shared: bool = False  # 跨 agent 共享开关
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -48,6 +53,7 @@ class MemoryRecord:
         known = {
             "id", "content", "memory_type", "owner", "tags", "metadata",
             "importance", "access_count", "created_at", "updated_at",
+            "agent_id", "neuser_id", "user_id", "shared",
         }
         kwargs: Dict[str, Any] = {k: v for k, v in data.items() if k in known}
         if "tags" in kwargs and kwargs["tags"] is None:
@@ -62,6 +68,11 @@ class MemoryIndex:
     by_type: Dict[str, List[str]] = field(default_factory=dict)
     by_owner: Dict[str, List[str]] = field(default_factory=dict)
     by_tag: Dict[str, List[str]] = field(default_factory=dict)
+    # 三层隔离索引
+    by_agent: Dict[str, List[str]] = field(default_factory=dict)
+    by_neuser: Dict[str, List[str]] = field(default_factory=dict)
+    by_user: Dict[str, List[str]] = field(default_factory=dict)
+    by_isolation_key: Dict[str, List[str]] = field(default_factory=dict)
 
     def add(self, record: "MemoryRecord") -> None:
         self.by_type.setdefault(record.memory_type, [])
@@ -74,6 +85,25 @@ class MemoryIndex:
             self.by_tag.setdefault(tag, [])
             if record.id not in self.by_tag[tag]:
                 self.by_tag[tag].append(record.id)
+        
+        # 三层隔离索引
+        self.by_agent.setdefault(record.agent_id, [])
+        if record.id not in self.by_agent[record.agent_id]:
+            self.by_agent[record.agent_id].append(record.id)
+        
+        self.by_neuser.setdefault(record.neuser_id, [])
+        if record.id not in self.by_neuser[record.neuser_id]:
+            self.by_neuser[record.neuser_id].append(record.id)
+        
+        self.by_user.setdefault(record.user_id, [])
+        if record.id not in self.by_user[record.user_id]:
+            self.by_user[record.user_id].append(record.id)
+        
+        # 组合隔离键
+        isolation_key = f"{record.agent_id}:{record.neuser_id}:{record.user_id}"
+        self.by_isolation_key.setdefault(isolation_key, [])
+        if record.id not in self.by_isolation_key[isolation_key]:
+            self.by_isolation_key[isolation_key].append(record.id)
 
     def remove(self, record: "MemoryRecord") -> None:
         for bucket in (self.by_type, self.by_owner):
@@ -89,17 +119,45 @@ class MemoryIndex:
                 ids.remove(record.id)
             if ids is not None and not ids:
                 self.by_tag.pop(tag, None)
+        
+        # 三层隔离索引清理
+        for bucket, key in [
+            (self.by_agent, record.agent_id),
+            (self.by_neuser, record.neuser_id),
+            (self.by_user, record.user_id),
+        ]:
+            ids = bucket.get(key)
+            if ids and record.id in ids:
+                ids.remove(record.id)
+            if ids is not None and not ids:
+                bucket.pop(key, None)
+        
+        # 组合隔离键清理
+        isolation_key = f"{record.agent_id}:{record.neuser_id}:{record.user_id}"
+        ids = self.by_isolation_key.get(isolation_key)
+        if ids and record.id in ids:
+            ids.remove(record.id)
+        if ids is not None and not ids:
+            self.by_isolation_key.pop(isolation_key, None)
 
     def clear(self) -> None:
         self.by_type.clear()
         self.by_owner.clear()
         self.by_tag.clear()
+        self.by_agent.clear()
+        self.by_neuser.clear()
+        self.by_user.clear()
+        self.by_isolation_key.clear()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "by_type": self.by_type,
             "by_owner": self.by_owner,
             "by_tag": self.by_tag,
+            "by_agent": self.by_agent,
+            "by_neuser": self.by_neuser,
+            "by_user": self.by_user,
+            "by_isolation_key": self.by_isolation_key,
         }
 
     @classmethod
@@ -108,6 +166,10 @@ class MemoryIndex:
         idx.by_type.update(data.get("by_type", {}) or {})
         idx.by_owner.update(data.get("by_owner", {}) or {})
         idx.by_tag.update(data.get("by_tag", {}) or {})
+        idx.by_agent.update(data.get("by_agent", {}) or {})
+        idx.by_neuser.update(data.get("by_neuser", {}) or {})
+        idx.by_user.update(data.get("by_user", {}) or {})
+        idx.by_isolation_key.update(data.get("by_isolation_key", {}) or {})
         return idx
 
 
@@ -198,14 +260,22 @@ class MemoryStorage:
         self,
         content: str,
         memory_type: str,
-        owner: str,
+        owner: str = "default",
         tags: Optional[List[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         importance: float = 0.0,
+        isolation_context: Optional["IsolationContext"] = None,
     ) -> str:
         with self._lock:
             mid = _new_id("mem_")
             now = _now_iso()
+            
+            # 从隔离上下文获取隔离字段
+            agent_id = isolation_context.agent_id if isolation_context else "default"
+            neuser_id = isolation_context.neuser_id if isolation_context else "default"
+            user_id = isolation_context.user_id if isolation_context else "default"
+            shared = isolation_context.shared if isolation_context else False
+            
             rec = MemoryRecord(
                 id=mid,
                 content=content,
@@ -217,6 +287,10 @@ class MemoryStorage:
                 access_count=0,
                 created_at=now,
                 updated_at=now,
+                agent_id=agent_id,
+                neuser_id=neuser_id,
+                user_id=user_id,
+                shared=shared,
             )
             self._records[mid] = rec
             self._index.add(rec)
@@ -273,10 +347,31 @@ class MemoryStorage:
         end_time: Optional[str] = None,
         tags: Optional[List[str]] = None,
         limit: Optional[int] = None,
+        isolation_context: Optional["IsolationContext"] = None,
     ) -> List[Dict[str, Any]]:
         with self._lock:
             results: List[MemoryRecord] = []
             for rec in self._records.values():
+                # 三层隔离过滤
+                if isolation_context is not None:
+                    # agent_id 隔离：共享记忆跳过 agent 检查
+                    if not isolation_context.shared and not rec.shared:
+                        if rec.agent_id != isolation_context.agent_id:
+                            continue
+                    elif rec.shared:
+                        # 共享记忆可以被任何 agent 访问
+                        pass
+                    else:
+                        # isolation_context.shared=True，但记忆不共享，仍检查 agent_id
+                        if rec.agent_id != isolation_context.agent_id:
+                            continue
+                    
+                    # neuser_id 和 user_id 始终检查
+                    if isolation_context.neuser_id != "default" and rec.neuser_id != isolation_context.neuser_id:
+                        continue
+                    if isolation_context.user_id != "default" and rec.user_id != isolation_context.user_id:
+                        continue
+                
                 if memory_type is not None and rec.memory_type != memory_type:
                     continue
                 if owner is not None and rec.owner != owner:

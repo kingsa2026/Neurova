@@ -65,7 +65,11 @@ class BufferModule:
     def write_queue(self) -> List[Dict[str, Any]]:
         """写入队列"""
         with self._lock:
-            return list(self._write_queue)
+            # 如果 _write_queue 是 MemoryWriteQueue 实例，返回其队列内容
+            if hasattr(self._write_queue, '_queue'):
+                return list(self._write_queue._queue)
+            else:
+                return list(self._write_queue)
     
     def init(self) -> bool:
         """
@@ -154,8 +158,13 @@ class BufferModule:
             self._move_to_write_queue()
             
             # 执行写入队列
-            count = len(self._write_queue)
-            self._write_queue.clear()
+            if hasattr(self._write_queue, 'flush_to_storage'):
+                # 使用 MemoryWriteQueue 的批量写入
+                count = self._write_queue.flush_to_storage()
+            else:
+                # 旧模式：清空列表
+                count = len(self._write_queue)
+                self._write_queue.clear()
             
             # 触发回调
             for callback in self._on_flush_callbacks:
@@ -198,7 +207,49 @@ class BufferModule:
     
     def _move_to_write_queue(self) -> None:
         """将缓冲区内容移动到写入队列"""
-        self._write_queue.extend(self._buffer)
+        # 如果 _write_queue 是 MemoryWriteQueue 实例，需要转换格式
+        if hasattr(self._write_queue, 'enqueue_batch'):
+            # 将 Dict 转换为 MemoryItem 对象
+            from neurova.cognitive_layers.memory_layer.conversation_buffer import MemoryItem
+            from datetime import datetime
+            
+            items = []
+            for item_dict in self._buffer:
+                if isinstance(item_dict, dict):
+                    # 从字典创建 MemoryItem
+                    metadata = item_dict.get('metadata', {})
+                    classification = metadata.get('classification', 'conversation')
+                    categories = metadata.get('categories', ['conversation'])
+                    meta_trace = metadata.get('meta_trace')
+                    
+                    # 处理时间戳
+                    ts = item_dict.get('timestamp')
+                    if isinstance(ts, (int, float)):
+                        timestamp = datetime.fromtimestamp(ts)
+                    elif isinstance(ts, datetime):
+                        timestamp = ts
+                    else:
+                        timestamp = datetime.now()
+                    
+                    item = MemoryItem(
+                        id=item_dict.get('id', str(datetime.now().timestamp())),
+                        content=item_dict.get('content', ''),
+                        timestamp=timestamp,
+                        classification=classification,
+                        emotion_analysis=item_dict.get('emotion_analysis'),
+                        categories=categories,
+                        meta_trace=meta_trace,
+                    )
+                    items.append(item)
+                else:
+                    # 已经是 MemoryItem
+                    items.append(item_dict)
+            
+            self._write_queue.enqueue_batch(items)
+        else:
+            # 旧模式：直接扩展列表
+            self._write_queue.extend(self._buffer)
+        
         self._buffer.clear()
     
     def _flush_loop(self) -> None:

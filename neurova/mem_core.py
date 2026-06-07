@@ -214,7 +214,6 @@ class MemCore:
             self.memory_manager = MemoryManager(
                 db_path,
                 agent_id=self.config.agent_id,
-                neuser_id=neuser_id,
                 user_id=user_id,
             )
             self.storage = getattr(self.memory_manager, 'storage', None)
@@ -287,10 +286,12 @@ class MemCore:
             # 将对话缓冲区和写入队列注入到缓冲模块
             self.buffer_module._buffer = self.conversation_buffer
             from neurova.cognitive_layers.memory_layer.conversation_buffer import MemoryWriteQueue
+            # 始终创建 MemoryWriteQueue，传递 memory_manager 作为降级后端
             self.buffer_module._write_queue = MemoryWriteQueue(
-                self.storage,
-                self.config.agent_id,
-            ) if self.storage else None
+                storage=self.storage,
+                agent_id=self.config.agent_id,
+                memory_manager=self.memory_manager,
+            )
             logger.info(f"Agent {self.config.name}: BufferModule（缓冲模块）已启用")
 
             # 初始化肌肉记忆
@@ -412,6 +413,25 @@ class MemCore:
             logger.warning(f"记忆检索失败: {e}")
             return []
 
+    def get_memories(self, limit: int = 100, offset: int = 0) -> List[Dict]:
+        """获取记忆列表（用于 API 端点）
+
+        Args:
+            limit: 返回结果数量限制
+            offset: 偏移量
+
+        Returns:
+            记忆列表
+        """
+        if not self.memory_manager:
+            return []
+
+        try:
+            return self.memory_manager.get_memories(limit=limit, offset=offset)
+        except Exception as e:
+            logger.warning(f"获取记忆列表失败: {e}")
+            return []
+
     def moe_retrieve(self, query: str, limit: int = 10) -> List[Dict]:
         """MoE 路由检索
 
@@ -495,22 +515,38 @@ class MemCore:
     def save_conversation_memory(self, user_input: str, agent_response: str, metadata: Dict = None):
         """保存对话记忆
 
+        同时写入 memory_manager（持久化）和 conversation_buffer（快速检索）。
+
         Args:
             user_input: 用户输入
             agent_response: Agent 回复
             metadata: 元数据
         """
-        if not self.conversation_buffer:
-            return
-
         try:
-            # 添加到对话缓冲区
-            self.conversation_buffer.add_user_message(user_input)
-            self.conversation_buffer.add_agent_message(agent_response)
+            # 1. 写入 memory_manager（确保 API 端点可查询）
+            if self.memory_manager:
+                base_meta = metadata or {}
+                self.memory_manager.remember(
+                    content=f"用户: {user_input}",
+                    memory_type="episodic",
+                    category="conversation",
+                    metadata={**base_meta, "sender_type": "user"},
+                )
+                self.memory_manager.remember(
+                    content=f"助手: {agent_response}",
+                    memory_type="episodic",
+                    category="conversation",
+                    metadata={**base_meta, "sender_type": "agent"},
+                )
 
-            # 如果缓冲区满了，刷新到长期记忆
-            if self.conversation_buffer.is_full():
-                self.conversation_buffer.flush_to_long_term_memory()
+            # 2. 写入对话缓冲区（快速上下文检索）
+            if self.conversation_buffer:
+                self.conversation_buffer.add_user_message(user_input)
+                self.conversation_buffer.add_agent_message(agent_response)
+
+                # 如果缓冲区满了，刷新到长期记忆
+                if self.conversation_buffer.is_full():
+                    self.conversation_buffer.flush_to_long_term_memory()
 
             logger.debug(f"对话记忆已保存: user_input={user_input[:50]}...")
         except Exception as e:

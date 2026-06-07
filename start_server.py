@@ -31,8 +31,8 @@ def main():
 
         print(f"App: {app.title}")
         print(f"Version: {app.version}")
-        print(f"Docs: http://localhost:8000/docs")
-        print(f"Health: http://localhost:8000/health")
+        print(f"Docs: http://localhost:9527/docs")
+        print(f"Health: http://localhost:9527/health")
         print("=" * 60)
 
         # 启动服务器

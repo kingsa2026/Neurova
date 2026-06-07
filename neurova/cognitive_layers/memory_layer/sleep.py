@@ -44,6 +44,11 @@ class MemoryRecord:
     categories: List[str] = field(default_factory=list)
     is_archived: bool = False
     merged_from: List[str] = field(default_factory=list)
+    # 三层隔离字段
+    agent_id: str = "default"
+    neuser_id: str = "default"
+    user_id: str = "default"
+    shared: bool = False  # 跨 agent 共享开关
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MemoryRecord":
@@ -71,6 +76,10 @@ class MemoryRecord:
             categories=data.get("categories", []),
             is_archived=data.get("is_archived", False),
             merged_from=data.get("merged_from", []),
+            agent_id=data.get("agent_id", "default"),
+            neuser_id=data.get("neuser_id", "default"),
+            user_id=data.get("user_id", "default"),
+            shared=data.get("shared", False),
         )
     
     def to_dict(self) -> Dict[str, Any]:
@@ -87,6 +96,10 @@ class MemoryRecord:
             "categories": self.categories,
             "is_archived": self.is_archived,
             "merged_from": self.merged_from,
+            "agent_id": self.agent_id,
+            "neuser_id": self.neuser_id,
+            "user_id": self.user_id,
+            "shared": self.shared,
         }
 
 @dataclass
@@ -275,7 +288,8 @@ class SleepConsolidation:
 
         return memories
 
-    def consolidate(self, memories: List[MemoryRecord]) -> Tuple[List[MemoryRecord], List[MergeResult]]:
+    def consolidate(self, memories: List[MemoryRecord], 
+                    isolation_context: Optional["IsolationContext"] = None) -> Tuple[List[MemoryRecord], List[MergeResult]]:
         """执行完整的睡眠整合流程
 
         步骤：
@@ -286,6 +300,7 @@ class SleepConsolidation:
 
         Args:
             memories: 记忆列表
+            isolation_context: 隔离上下文（可选）
 
         Returns:
             Tuple[List[MemoryRecord], List[MergeResult]]:
@@ -313,6 +328,10 @@ class SleepConsolidation:
                 categories=merge_result.combined_categories,
                 merged_from=merge_result.source_ids,
                 created_at=datetime.now(),
+                # 继承隔离上下文
+                agent_id=isolation_context.agent_id if isolation_context else "default",
+                neuser_id=isolation_context.neuser_id if isolation_context else "default",
+                user_id=isolation_context.user_id if isolation_context else "default",
             )
 
             # 保留嵌入（使用第一个记忆的嵌入）

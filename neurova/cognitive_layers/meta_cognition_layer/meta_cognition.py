@@ -17,7 +17,7 @@ import datetime
 import logging
 import threading
 import time
-import typing
+from typing import Any, Dict, List, Optional
 
 from neurova.skills.models import ExperienceRecord
 

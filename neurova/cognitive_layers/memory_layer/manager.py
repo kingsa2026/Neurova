@@ -17,8 +17,10 @@ MemoryManager — 记忆管理器（CogArch 总线版）
   - 通过 emit(event) 发布事件
 """
 
+import json
 import logging
 import os
+import sqlite3
 import threading
 import time
 import uuid
@@ -72,14 +74,140 @@ class MemoryManager:
         self._emotion_module = EmotionModule(db_path=db_path)
         self._emotion_module.init()
 
+        # SQLite 持久化（记忆跨重启保留）
+        self._init_persistence_db()
+        self._load_from_db()
+
         # 统计
         self._stats = {
-            "total_memories": 0,
+            "total_memories": len(self._memories),
             "recall_count": 0,
             "remember_count": 0,
         }
 
-        logger.info(f"MemoryManager initialized: agent_id={agent_id}, user_id={user_id}")
+        logger.info(f"MemoryManager initialized: agent_id={agent_id}, user_id={user_id}, memories_loaded={len(self._memories)}")
+
+    def _init_persistence_db(self):
+        """初始化 SQLite 持久化数据库"""
+        try:
+            # 使用与 db_path 同目录的持久化文件
+            db_dir = os.path.dirname(self._db_path) or "."
+            self._persist_db_path = os.path.join(db_dir, "neurova_memories_persist.db")
+            conn = sqlite3.connect(self._persist_db_path)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS memories (
+                    id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    memory_type TEXT NOT NULL DEFAULT 'semantic',
+                    category TEXT NOT NULL DEFAULT 'general',
+                    lifecycle_stage TEXT NOT NULL DEFAULT 'active',
+                    perspective TEXT NOT NULL DEFAULT 'first_person',
+                    emotion TEXT NOT NULL DEFAULT 'neutral',
+                    temperature REAL NOT NULL DEFAULT 100.0,
+                    importance REAL NOT NULL DEFAULT 50.0,
+                    access_count INTEGER NOT NULL DEFAULT 0,
+                    metadata TEXT NOT NULL DEFAULT '{}',
+                    agent_id TEXT NOT NULL DEFAULT 'default',
+                    neuser_id TEXT NOT NULL DEFAULT 'default',
+                    user_id TEXT NOT NULL DEFAULT 'default',
+                    shared INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_accessed_at TEXT
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_agent ON memories(agent_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_category ON memories(category)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_type ON memories(memory_type)")
+            conn.commit()
+            conn.close()
+            logger.debug(f"Persistence DB initialized: {self._persist_db_path}")
+        except Exception as e:
+            logger.warning(f"Persistence DB init failed: {e}")
+            self._persist_db_path = None
+
+    def _load_from_db(self):
+        """从 SQLite 加载记忆到内存"""
+        if not getattr(self, '_persist_db_path', None):
+            return
+        try:
+            conn = sqlite3.connect(self._persist_db_path)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM memories WHERE agent_id = ? ORDER BY created_at DESC",
+                (self._agent_id,)
+            ).fetchall()
+            conn.close()
+
+            from datetime import datetime, timezone
+            for row in rows:
+                try:
+                    mem = Memory(
+                        id=row["id"],
+                        content=row["content"],
+                        memory_type=MemoryType(row["memory_type"]),
+                        category=MemoryCategory(row["category"]),
+                        lifecycle_stage=LifecycleStage(row["lifecycle_stage"]),
+                        emotion=EmotionType(row["emotion"]),
+                        temperature=row["temperature"],
+                        importance=row["importance"],
+                        access_count=row["access_count"],
+                        metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+                        agent_id=row["agent_id"],
+                        neuser_id=row["neuser_id"],
+                        user_id=row["user_id"],
+                        shared=bool(row["shared"]),
+                        created_at=datetime.fromisoformat(row["created_at"]),
+                        updated_at=datetime.fromisoformat(row["updated_at"]),
+                        last_accessed_at=datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None,
+                    )
+                    self._memories[mem.id] = mem
+                    self._counter = max(self._counter, int(mem.id.replace("mem_", "")) if mem.id.startswith("mem_") else 0)
+                except Exception as e:
+                    logger.debug(f"Skip invalid memory row {row['id']}: {e}")
+
+            logger.info(f"Loaded {len(self._memories)} memories from persistence DB")
+        except Exception as e:
+            logger.warning(f"Failed to load memories from DB: {e}")
+
+    def _persist_memory(self, mem: Memory):
+        """将单条记忆写入 SQLite 持久化"""
+        if not getattr(self, '_persist_db_path', None):
+            return
+        try:
+            conn = sqlite3.connect(self._persist_db_path)
+            conn.execute(
+                """INSERT OR REPLACE INTO memories
+                   (id, content, memory_type, category, lifecycle_stage, perspective, emotion,
+                    temperature, importance, access_count, metadata, agent_id, neuser_id, user_id,
+                    shared, created_at, updated_at, last_accessed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    mem.id, mem.content, mem.memory_type.value, mem.category.value,
+                    mem.lifecycle_stage.value, mem.perspective.value, mem.emotion.value,
+                    mem.temperature, mem.importance, mem.access_count,
+                    json.dumps(mem.metadata, ensure_ascii=False),
+                    mem.agent_id, mem.neuser_id, mem.user_id, int(mem.shared),
+                    mem.created_at.isoformat(), mem.updated_at.isoformat(),
+                    mem.last_accessed_at.isoformat() if mem.last_accessed_at else None,
+                )
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"Persist memory failed: {e}")
+
+    def _delete_persisted_memory(self, memory_id: str):
+        """从 SQLite 删除持久化记忆"""
+        if not getattr(self, '_persist_db_path', None):
+            return
+        try:
+            conn = sqlite3.connect(self._persist_db_path)
+            conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"Delete persisted memory failed: {e}")
 
     # ────── Properties ──────
 
@@ -124,11 +252,31 @@ class MemoryManager:
                 except (ValueError, KeyError):
                     emotion_val = EmotionType.NEUTRAL
 
+            # 安全解析 memory_type（防御无效枚举值）
+            if isinstance(memory_type, str):
+                try:
+                    parsed_memory_type = MemoryType(memory_type)
+                except (ValueError, KeyError):
+                    logger.warning(f"Invalid memory_type '{memory_type}', falling back to SEMANTIC")
+                    parsed_memory_type = MemoryType.SEMANTIC
+            else:
+                parsed_memory_type = memory_type
+
+            # 安全解析 category（防御无效枚举值）
+            if isinstance(category, str):
+                try:
+                    parsed_category = MemoryCategory(category)
+                except (ValueError, KeyError):
+                    logger.warning(f"Invalid category '{category}', falling back to GENERAL")
+                    parsed_category = MemoryCategory.GENERAL
+            else:
+                parsed_category = category
+
             mem = Memory(
                 id=mem_id,
                 content=content,
-                memory_type=MemoryType(memory_type) if isinstance(memory_type, str) else memory_type,
-                category=MemoryCategory(category) if isinstance(category, str) else category,
+                memory_type=parsed_memory_type,
+                category=parsed_category,
                 temperature=temperature,
                 importance=importance,
                 emotion=emotion_val,
@@ -139,6 +287,9 @@ class MemoryManager:
             self._memories[mem_id] = mem
             self._stats["remember_count"] += 1
             self._stats["total_memories"] = len(self._memories)
+
+            # 持久化到 SQLite（跨重启保留）
+            self._persist_memory(mem)
 
             # 自动情感标注（如果 content 包含情感关键词）
             if self._emotion_module and not emotion:
@@ -226,6 +377,7 @@ class MemoryManager:
             elif isinstance(stage_val, LifecycleStage):
                 mem.lifecycle_stage = stage_val
         mem.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        self._persist_memory(mem)  # 更新持久化
         self._bus.emit(MemoryEvent(
             type=MemoryEvent.MEMORY_UPDATED,
             source="memory_manager",
@@ -239,8 +391,10 @@ class MemoryManager:
             return False
         if soft:
             self._memories[memory_id].lifecycle_stage = LifecycleStage.FORGOTTEN
+            self._persist_memory(self._memories[memory_id])  # 更新持久化
         else:
             del self._memories[memory_id]
+            self._delete_persisted_memory(memory_id)  # 删除持久化
         self._stats["total_memories"] = len(self._memories)
         self._bus.emit(MemoryEvent(
             type=MemoryEvent.MEMORY_DELETED,

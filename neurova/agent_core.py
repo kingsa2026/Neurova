@@ -84,6 +84,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+def debug_log(msg: str) -> None:
+    """调试日志快捷函数"""
+    logger.debug(msg)
+
+
 from neurova.session_manager import get_session_manager
 from neurova.core.trace_recorder import get_trajectory_recorder
 from neurova.core.trace_models import TrajectoryEventType

@@ -207,7 +207,7 @@ class _DangerousNodeVisitor(ast.NodeVisitor):
         
         self.generic_visit(node)
     
-    def visit_Exec(self, node: ast.Exec):
+    def visit_Exec(self, node):
         """访问 exec 语句（Python 2 兼容）"""
         self.issues.append(SecurityIssue(
             level=SecurityLevel.CRITICAL,

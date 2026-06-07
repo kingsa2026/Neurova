@@ -191,7 +191,9 @@ def _initialize_components(app_state: AppState) -> None:
     # 初始化 Admin Service
     try:
         from neurova.admin.admin_service import AdminService
-        app_state.admin_service = AdminService()
+        import os as _os
+        admin_storage = _os.path.join(_os.getcwd(), "data", "admin")
+        app_state.admin_service = AdminService(storage_dir=admin_storage)
     except Exception as e:
         logger.warning(f"AdminService init failed: {e}")
 
@@ -205,7 +207,6 @@ def _initialize_components(app_state: AppState) -> None:
     # 初始化默认 Agent
     try:
         from neurova.agent_core import Agent, AgentConfig
-        import os
         default_workspace = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "agent_workspaces", "default")
         os.makedirs(default_workspace, exist_ok=True)
         config = AgentConfig(

@@ -77,7 +77,7 @@ def _get_agent(agent_id: str = "default"):
     return get_agent_instance(agent_id)
 
 
-@router.get("", response_model=List[MemoryItem])
+@router.get("")
 async def list_memories(
     request: Request,
     agent_id: str = Query(default="default"),
@@ -90,33 +90,80 @@ async def list_memories(
 
     agent = _get_agent(agent_id)
     if not agent:
-        return []
+        return {"code": 0, "data": {"count": 0, "memories": []}}
 
     memories = []
     try:
         if hasattr(agent, "memory_agent") and agent.memory_agent:
             mem_core = agent.memory_agent
-            if hasattr(mem_core, "search_memories"):
+            # 优先使用 get_memories 方法获取列表
+            if hasattr(mem_core, "get_memories"):
+                results = mem_core.get_memories(limit=limit, offset=offset)
+            elif hasattr(mem_core, "memory_manager") and mem_core.memory_manager:
+                # 降级到 memory_manager.get_memories()
+                results = mem_core.memory_manager.get_memories(limit=limit, offset=offset)
+            elif hasattr(mem_core, "search_memories"):
+                # 最后降级到 search_memories（但空查询会返回空）
                 results = mem_core.search_memories(
                     query="",
-                    memory_type=memory_type,
                     limit=limit,
-                    offset=offset,
                 )
-                for mem in results:
-                    memories.append(MemoryItem(
-                        memory_id=getattr(mem, "id", str(uuid.uuid4())),
-                        content=getattr(mem, "content", ""),
-                        memory_type=getattr(mem, "memory_type", "conversation"),
-                        importance=getattr(mem, "importance", 0.5),
-                        tags=getattr(mem, "tags", []),
-                        created_at=str(getattr(mem, "created_at", "")),
-                        metadata=getattr(mem, "metadata", {}),
-                    ))
+            else:
+                results = []
+            
+            for mem in results:
+                # get_memories() 返回 dict 列表，用 dict.get() 而非 getattr()
+                mem_dict = mem if isinstance(mem, dict) else getattr(mem, '__dict__', mem)
+
+                # 处理 memory_type 过滤
+                mem_type = mem_dict.get("memory_type", "semantic") if isinstance(mem_dict, dict) else getattr(mem, "memory_type", "semantic")
+                if hasattr(mem_type, 'value'):
+                    mem_type = mem_type.value
+                elif not isinstance(mem_type, str):
+                    mem_type = str(mem_type)
+
+                if memory_type and mem_type != memory_type:
+                    continue
+
+                # 处理 category 字段
+                mem_category = mem_dict.get("category", "general") if isinstance(mem_dict, dict) else getattr(mem, "category", "general")
+                if hasattr(mem_category, 'value'):
+                    mem_category = mem_category.value
+                elif not isinstance(mem_category, str):
+                    mem_category = str(mem_category)
+
+                # 处理时间戳
+                created_at = mem_dict.get("created_at", "") if isinstance(mem_dict, dict) else getattr(mem, "created_at", "")
+                if hasattr(created_at, 'isoformat'):
+                    created_at = created_at.isoformat()
+                else:
+                    created_at = str(created_at)
+
+                updated_at = mem_dict.get("updated_at", "") if isinstance(mem_dict, dict) else getattr(mem, "updated_at", "")
+                if hasattr(updated_at, 'isoformat'):
+                    updated_at = updated_at.isoformat()
+                else:
+                    updated_at = str(updated_at)
+
+                content = mem_dict.get("content", "") if isinstance(mem_dict, dict) else getattr(mem, "content", "")
+
+                memories.append({
+                    "id": mem_dict.get("id", str(uuid.uuid4())) if isinstance(mem_dict, dict) else getattr(mem, "id", str(uuid.uuid4())),
+                    "content": content,
+                    "type": mem_type,
+                    "category": mem_category,
+                    "importance": mem_dict.get("importance", 0.5) if isinstance(mem_dict, dict) else getattr(mem, "importance", 0.5),
+                    "tags": mem_dict.get("tags", []) if isinstance(mem_dict, dict) else getattr(mem, "tags", []),
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                    "summary": content[:100] if content else "",
+                    "timestamp": mem_dict.get("timestamp", time.time() * 1000) if isinstance(mem_dict, dict) else getattr(mem, "timestamp", time.time() * 1000),
+                    "metadata": mem_dict.get("metadata", {}) if isinstance(mem_dict, dict) else getattr(mem, "metadata", {}),
+                })
     except Exception as e:
         logger.warning(f"List memories error: {e}")
 
-    return memories
+    return {"data": {"total": len(memories), "memories": memories}}
 
 
 @router.get("/{memory_id}", response_model=MemoryItem)

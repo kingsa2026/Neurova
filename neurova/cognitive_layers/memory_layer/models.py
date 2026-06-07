@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from neurova.cognitive_layers.memory_layer.isolation import IsolationContext
+
 
 # ────── Enums ──────
 
@@ -248,10 +250,21 @@ class Memory:
     embedding: Optional[List[float]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     agent_id: str = ""
+    neuser_id: str = ""
     user_id: str = ""
+    shared: bool = False  # 跨 agent 共享开关
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_accessed_at: Optional[datetime] = None
+    isolation_context: Optional[IsolationContext] = None
+
+    def __post_init__(self):
+        """处理隔离上下文：从上下文设置三层隔离字段"""
+        if self.isolation_context is not None:
+            self.agent_id = self.isolation_context.agent_id
+            self.neuser_id = self.isolation_context.neuser_id
+            self.user_id = self.isolation_context.user_id
+            self.shared = self.isolation_context.shared
 
     def touch(self):
         """访问一次，温度升高"""
@@ -279,7 +292,9 @@ class Memory:
             "access_count": self.access_count,
             "metadata": self.metadata,
             "agent_id": self.agent_id,
+            "neuser_id": self.neuser_id,
             "user_id": self.user_id,
+            "shared": self.shared,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "last_accessed_at": self.last_accessed_at.isoformat() if self.last_accessed_at else None,
@@ -318,7 +333,9 @@ class Memory:
             access_count=data.get("access_count", 0),
             metadata=data.get("metadata", {}),
             agent_id=data.get("agent_id", ""),
+            neuser_id=data.get("neuser_id", ""),
             user_id=data.get("user_id", ""),
+            shared=data.get("shared", False),
             created_at=_parse_dt(data.get("created_at")),
             updated_at=_parse_dt(data.get("updated_at")),
         )
