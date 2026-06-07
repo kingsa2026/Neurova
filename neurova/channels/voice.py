@@ -158,6 +158,21 @@ class VoiceAdapter(ChannelAdapter):
     def get_call_status(self, call_id: str) -> Optional[Dict[str, Any]]:
         """获取通话状态"""
         return self._active_calls.get(call_id)
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        健康检查
+        
+        返回:
+            Dict: 包含 connected, channel_type, last_error, active_calls 等
+        """
+        base_health = await super().health_check()
+        base_health.update({
+            "active_calls_count": len(self._active_calls),
+            "has_client": self._client is not None,
+            "from_number": self.config.extra.get("from_number", ""),
+        })
+        return base_health
 
 
 def create_voice_adapter(config: ChannelConfig) -> VoiceAdapter:

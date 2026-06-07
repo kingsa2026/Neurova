@@ -31,7 +31,7 @@ class ChatContext:
     save_memory: bool = True
     session_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
-    enable_tts: Optional[bool] = None
+    enable_tts: bool = False
 
     # 中间状态
     tool_memory_result: Optional[Dict] = None
@@ -133,6 +133,15 @@ class ChatPipeline:
     def _trajectory_recorder(self):
         return getattr(self._agent, '_trajectory_recorder', None)
 
+    @property
+    def session_sync_manager(self):
+        """获取 SessionSyncManager（延迟导入）"""
+        try:
+            from neurova.sync.session_sync_manager import get_session_sync_manager
+            return get_session_sync_manager()
+        except Exception:
+            return None
+
     # ══════════════════════════════════════════════════════════════
     # 主入口
     # ══════════════════════════════════════════════════════════════
@@ -159,7 +168,60 @@ class ChatPipeline:
         # Step 4: 后处理
         await self._step_post_processing(ctx)
 
+        # Step 5: 广播最终回复到 SessionSyncManager
+        await self._sync_final_reply(ctx)
+
         return ctx.result
+
+    async def _sync_final_reply(self, ctx: ChatContext):
+        """广播最终回复到 SessionSyncManager"""
+        if not ctx.reply:
+            return
+
+        from neurova.sync.session_sync_manager import EventType as _ET
+        await self._sync_event(ctx, _ET.AGENT_REPLY, {
+            "content": ctx.reply,
+            "reasoning": getattr(self._agent, '_current_reasoning', None),
+            "tool_messages": self._collect_tool_messages(),
+            "metadata": ctx.metadata,
+        })
+
+    async def _sync_event(self, ctx: ChatContext, event_type: Any, payload: Dict[str, Any]):
+        """通用事件广播方法"""
+        sync_manager = self.session_sync_manager
+        if not sync_manager:
+            return
+
+        try:
+            from neurova.sync.session_sync_manager import EventType, SessionEvent
+
+            # 查找或创建会话
+            session_id = ctx.session_id or "default"
+            session = sync_manager.get_session(session_id)
+            
+            if not session:
+                # 创建新会话
+                user_id = (ctx.metadata or {}).get("user_id", "anonymous")
+                session = sync_manager.create_session(
+                    user_id=user_id,
+                    agent_id=self.config.agent_id,
+                    metadata={"source": "chat_pipeline"}
+                )
+                session_id = session.session_id
+
+            # 创建事件
+            event = SessionEvent(
+                event_type=event_type,
+                session_id=session_id,
+                source_channel="agent",
+                payload=payload
+            )
+
+            # 广播事件
+            await sync_manager.broadcast_event(session_id, event)
+
+        except Exception as e:
+            logger.debug(f"SessionSyncManager event sync failed: {e}")
 
     # ══════════════════════════════════════════════════════════════
     # Step 0: 初始化 Agent 状态
@@ -371,6 +433,11 @@ class ChatPipeline:
         await self._retrieve_crystallized_patterns(ctx)
 
         # 上下文构建（委托给 ContextOrchestrator）
+        # 从 metadata 中提取语音上下文
+        voice_context = None
+        if ctx.metadata and isinstance(ctx.metadata, dict):
+            voice_context = ctx.metadata.get("voice_context")
+        
         ctx.context = await self.context_orchestrator.build_context(
             user_input=ctx.user_input,
             tool_memory_result=ctx.tool_memory_result,
@@ -380,6 +447,7 @@ class ChatPipeline:
             relevant_memories=ctx.relevant_memories,
             crystallized_patterns=ctx.crystallized_patterns,
             session_context=ctx.session_context,
+            voice_context=voice_context,
         )
 
     async def _retrieve_memories(self, ctx: ChatContext):
@@ -455,6 +523,16 @@ class ChatPipeline:
             if len(tools_for_llm) < original_count:
                 logger.info(f"已从工具列表移除已执行工具: {executed_tool}")
 
+        # 广播 AGENT_THINKING 事件
+        try:
+            from neurova.sync.session_sync_manager import EventType
+            await self._sync_event(ctx, EventType.AGENT_THINKING, {
+                "stage": "llm_call",
+                "tools_count": len(tools_for_llm) if tools_for_llm else 0,
+            })
+        except ImportError:
+            logger.debug("EventType 导入失败，跳过事件广播")
+
         if self.loop:
             ctx.reply = await self._call_agent_loop(ctx, tools_for_llm)
         else:
@@ -462,6 +540,17 @@ class ChatPipeline:
 
         # 解析并执行文本中的工具调用
         ctx.reply = await self.tool_executor.execute_text_tool_calls(ctx.reply, ctx.user_input)
+
+        # 广播工具调用结果
+        tool_messages = self._collect_tool_messages()
+        if tool_messages:
+            try:
+                from neurova.sync.session_sync_manager import EventType
+                await self._sync_event(ctx, EventType.AGENT_TOOL_RESULT, {
+                    "tool_messages": tool_messages,
+                })
+            except ImportError:
+                logger.debug("EventType 导入失败，跳过事件广播")
 
     async def _call_agent_loop(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
         """通过 Agent Loop 调用 LLM"""
@@ -667,15 +756,49 @@ class ChatPipeline:
                 except Exception as e:
                     logger.warning(f"结晶器观察失败: {e}")
 
-        # PostChatPipeline
-        post_result = await self.post_chat_pipeline.process(
-            user_input=ctx.user_input,
-            reply=ctx.reply,
-            session_id=ctx.session_id,
-            save_memory=ctx.save_memory,
-            enable_tts=ctx.enable_tts,
-            metadata=ctx.metadata,
-        )
+        # PostChatPipeline - 优先使用 PipelineExecutor
+        pipeline_executor = getattr(self._agent, 'pipeline_executor', None)
+        if pipeline_executor:
+            try:
+                from neurova.pipeline_executor import PipelineRequest
+                request = PipelineRequest(
+                    user_input=ctx.user_input,
+                    reply=ctx.reply,
+                    session_id=ctx.session_id,
+                    save_memory=ctx.save_memory,
+                    enable_tts=ctx.enable_tts,
+                    metadata=ctx.metadata or {}
+                )
+                response = await pipeline_executor.execute(request)
+                # 转换为旧格式以保持兼容性
+                post_result = {
+                    "actual_session_id": response.session_id,
+                    "audio_path": response.audio_url,
+                    "audio_data": response.metadata.get("audio_data"),
+                    "cognitive_score": response.cognitive_score,
+                    "proactive_question": response.metadata.get("proactive_question"),
+                }
+            except Exception as e:
+                logger.warning(f"PipelineExecutor 执行失败，fallback 到 post_chat_pipeline: {e}")
+                # Fallback 到旧的 post_chat_pipeline
+                post_result = await self.post_chat_pipeline.process(
+                    user_input=ctx.user_input,
+                    reply=ctx.reply,
+                    session_id=ctx.session_id,
+                    save_memory=ctx.save_memory,
+                    enable_tts=ctx.enable_tts,
+                    metadata=ctx.metadata,
+                )
+        else:
+            # Fallback 到旧的 post_chat_pipeline
+            post_result = await self.post_chat_pipeline.process(
+                user_input=ctx.user_input,
+                reply=ctx.reply,
+                session_id=ctx.session_id,
+                save_memory=ctx.save_memory,
+                enable_tts=ctx.enable_tts,
+                metadata=ctx.metadata,
+            )
 
         # 组装结果
         ctx.result = {

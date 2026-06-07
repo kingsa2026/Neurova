@@ -371,13 +371,18 @@ class NeurovaCLI:
         print("  3. gemini      - Google Gemini")
         print("  4. ollama      - Ollama 本地模型")
         print("  5. openrouter  - OpenRouter")
+        print("  6. custom      - 自定义服务商")
 
-        type_choice = input("\n\033[1m选择服务商类型 (1-5):\033[0m ").strip()
-        type_map = {"1": "openai", "2": "anthropic", "3": "gemini", "4": "ollama", "5": "openrouter"}
+        type_choice = input("\n\033[1m选择服务商类型 (1-6):\033[0m ").strip()
+        type_map = {"1": "openai", "2": "anthropic", "3": "gemini", "4": "ollama", "5": "openrouter", "6": "custom"}
         provider_type = type_map.get(type_choice)
         if not provider_type:
             print("\033[91m[错误] 无效的选择\033[0m")
             return
+
+        # 自定义服务商流程
+        if provider_type == "custom":
+            return self._create_custom_provider()
 
         name = input("\033[1m服务商名称:\033[0m ").strip()
         if not name:
@@ -415,6 +420,101 @@ class NeurovaCLI:
         if result:
             provider_id = result.get("provider_id")
             print(f"\033[92m[✓] 服务商创建成功: {name} (ID: {provider_id})\033[0m")
+
+            # 询问是否立即测试连接
+            test = input("\033[1m是否测试连接? (Y/n):\033[0m ").strip().lower()
+            if test != "n":
+                test_result = self._post(f"/providers/{provider_id}/check-connection")
+                if test_result and test_result.get("connected"):
+                    print(f"\033[92m[✓] 连接成功\033[0m")
+                else:
+                    print(f"\033[91m[✗] 连接失败\033[0m")
+
+    def _create_custom_provider(self):
+        """交互式创建自定义服务商"""
+        print("\n\033[1m┌─────────────────────────────────────────────────────────────┐\033[0m")
+        print("\033[1m│  添加自定义服务商                                            │\033[0m")
+        print("\033[1m└─────────────────────────────────────────────────────────────┘\033[0m")
+
+        # 步骤 1：服务商 ID
+        provider_id = input("\n\033[1m步骤 1/4 - 服务商 ID:\033[0m ").strip()
+        if not provider_id:
+            print("\033[91m[错误] 服务商 ID 不能为空\033[0m")
+            return
+        # 验证 ID 格式（只允许字母、数字、下划线、连字符）
+        if not all(c.isalnum() or c in '_-' for c in provider_id):
+            print("\033[91m[错误] 服务商 ID 只能包含字母、数字、下划线和连字符\033[0m")
+            return
+
+        # 步骤 2：服务商名称
+        name = input("\033[1m步骤 2/4 - 服务商名称:\033[0m ").strip()
+        if not name:
+            print("\033[91m[错误] 服务商名称不能为空\033[0m")
+            return
+
+        # 步骤 3：选择协议
+        print("\n\033[1m步骤 3/4 - 选择协议:\033[0m")
+        print("  1. OpenAI 兼容  - 大多数 API 兼容此协议（OpenAI、DeepSeek、Moonshot 等）")
+        print("  2. Anthropic    - Anthropic Claude 协议")
+        print("  3. Gemini       - Google Gemini 协议")
+        print("  4. Ollama       - Ollama 本地模型协议")
+
+        protocol_choice = input("\n\033[1m选择协议 (1-4):\033[0m ").strip()
+        protocol_map = {
+            "1": ("openai", "https://api.openai.com/v1"),
+            "2": ("anthropic", "https://api.anthropic.com"),
+            "3": ("gemini", "https://generativelanguage.googleapis.com"),
+            "4": ("ollama", "http://localhost:11434"),
+        }
+
+        if protocol_choice not in protocol_map:
+            print("\033[91m[错误] 无效的协议选择\033[0m")
+            return
+
+        provider_type, default_url = protocol_map[protocol_choice]
+
+        # API URL（使用协议默认值，可自定义）
+        base_url = input(f"\033[1m  API URL [{default_url}]:\033[0m ").strip()
+        if not base_url:
+            base_url = default_url
+
+        # 步骤 4：API Key
+        api_key = ""
+        if provider_type != "ollama":
+            api_key = input("\033[1m步骤 4/4 - API Key:\033[0m ").strip()
+            if not api_key:
+                print("\033[93m[警告] 未提供 API Key，连接可能失败\033[0m")
+        else:
+            print("\033[1m步骤 4/4 - API Key:\033[0m (Ollama 无需 API Key)")
+
+        # 确认信息
+        print("\n\033[1m┌─────────────────────────────────────────────────────────────┐\033[0m")
+        print("\033[1m│  确认服务商信息                                              │\033[0m")
+        print("\033[1m├─────────────────────────────────────────────────────────────┤\033[0m")
+        print(f"\033[1m│\033[0m   服务商 ID:   {provider_id}")
+        print(f"\033[1m│\033[0m   服务商名称:  {name}")
+        print(f"\033[1m│\033[0m   协议类型:    {provider_type}")
+        print(f"\033[1m│\033[0m   API URL:     {base_url}")
+        print(f"\033[1m│\033[0m   API Key:     {'*' * len(api_key) if api_key else '(无)'}")
+        print("\033[1m└─────────────────────────────────────────────────────────────┘\033[0m")
+
+        confirm = input("\n\033[1m确认创建? (Y/n):\033[0m ").strip().lower()
+        if confirm == "n":
+            print("\033[90m[取消] 创建操作已取消\033[0m")
+            return
+
+        # 创建服务商
+        payload = {
+            "provider_id": provider_id,
+            "name": name,
+            "provider_type": provider_type,
+            "base_url": base_url,
+            "api_key": api_key,
+        }
+
+        result = self._post("/providers", json=payload)
+        if result:
+            print(f"\033[92m[✓] 自定义服务商创建成功: {name} (ID: {provider_id})\033[0m")
 
             # 询问是否立即测试连接
             test = input("\033[1m是否测试连接? (Y/n):\033[0m ").strip().lower()

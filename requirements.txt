@@ -28,11 +28,15 @@ psutil>=5.9.0
 numpy>=1.24.0
 tiktoken>=0.5.0
 
-# MOSS TTS/Audio (local inference)
+# MOSS TTS (local inference)
 onnxruntime>=1.16.0
 soundfile>=0.12.0
 huggingface_hub>=0.20.0
 sentencepiece>=0.2.0
+
+# ASR (optional, auto-fallback)
+# funasr>=1.0.0  # FunASR 语音识别引擎 (可选)
+# openai-whisper>=20231117  # Whisper 语音识别引擎 (可选)
 
 # Edge TTS (online fallback)
 edge-tts>=6.1.0

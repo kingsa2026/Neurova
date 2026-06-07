@@ -9,11 +9,13 @@ Neurova 是一个功能完整的 AI Agent 框架，核心特点是为每个 Agen
 | 维度 | 值 |
 |------|-----|
 | 后端语言 | Python 3.10+ |
-| 前端框架 | Vue 3 + TypeScript + Vite |
+| 前端框架 | Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue |
 | Python 文件数 | 550+ |
-| 测试文件数 | 364 |
-| 前端页面组件 | 61 |
-| 版本 | Agent v2.1.0 (MemCore 统一版本) |
+| 测试文件数 | 532 |
+| 前端页面组件 | 82 |
+| API 端点 | 77+ |
+| 通信渠道 | 14 种 |
+| 版本 | Agent v4.0 (CogArch 2.0) |
 
 ## 核心架构
 
@@ -22,12 +24,14 @@ Neurova 是一个功能完整的 AI Agent 框架，核心特点是为每个 Agen
 Agent 类是系统的心脏，通过深度模块化模式逐步拆分：
 
 ```
-Agent (1520 行, 39 方法)
+Agent (1621 行, 37 方法)
 ├── MemCore (mem_core.py)              — 记忆检索/保存/温度管理
 ├── ContextOrchestrator                — 上下文构建/系统提示/工具描述
 ├── ToolExecutor (tool_executor.py)    — 工具调用解析/执行/后处理钩子
 ├── ChatPipeline (chat_pipeline.py)    — 对话流程管线 (6步)
-└── PostChatPipeline                   — 后处理管线 (10+ 步骤)
+├── PostChatPipeline                   — 后处理管线 (10+ 步骤)
+├── MemoryAgent (memory_agent.py)      — 记忆管理深度模块
+└── LLMRouter (llm/llm_router.py)     — 多模态自适应路由
 ```
 
 **设计模式**: 所有深度模块通过 `agent_ref` 访问 Agent 属性，不反向导入 Agent，无循环依赖。
@@ -82,17 +86,21 @@ Agent (1520 行, 39 方法)
 
 ### 多通道通信 (`neurova/channels/`)
 
-支持 10+ 平台接入：微信、飞书、钉钉、企业微信、QQ、Telegram、Discord、SIP、MQTT、WebSocket、Mobile
+支持 14 种平台接入：飞书、钉钉、企业微信、微信、Telegram、Discord、QQ、MQTT、WebSocket、SIP、Webhook、移动设备（QR码配对）
 
 ### 前端 (`neuUI/`)
 
-Vue 3 + TypeScript + Vite，61 个页面组件：
+Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，82 个页面组件：
 
 - **核心**: ChatPage (47KB), DashboardPage, SettingPage, WorkflowPage (50KB)
 - **Agent 管理**: 15 个页面 (Form/List/Skill/Sleep/Channel/...)
 - **运维**: Monitor, Health, Audit, Security, Firewall
 - **知识**: Knowledge, KnowledgeGraph, ExperienceKnowledge
 - **协作**: Collaboration, CollaborationInitiate, CollaborationTemplate
+- **LLM 管理**: ModelPage, ProviderPage, ModelAdapterPage
+- **Computer Use**: ComputerUsePage, BrowserManagerPage
+- **移动设备**: MobilePairingPage, MobileDevicePage
+- **分析**: AnalyticsPage, StatisticsPage, BenchmarkPage
 
 ## 依赖关系图
 
@@ -149,6 +157,16 @@ Vue 3 + TypeScript + Vite，61 个页面组件：
 - [x] ChatPipeline 提取 (对话管线, 6步)
 - [x] 循环导入修复 (延迟导入)
 - [x] debug_log 清理
+- [x] Agent 类深度模块化重构 (2180→1621 行)
+- [x] 浏览器自动化集成 (browser-skill)
+- [x] 文档对齐 (README.md 更新)
+- [x] 安全增强 (P2 安全问题修复)
+- [x] 三层隔离机制统一 (IsolationContext)
+- [x] 经验闭环修复 (结晶经验注入)
+- [x] 情感闭环修复 (SQLite 持久化)
+- [x] 睡眠闭环修复 (MemoryRecord 转换)
+- [x] 工具记忆闭环修复 (match_by_query 接口)
+- [x] 骨架文件实现 (140+ 文件)
 
 ### 待办
 - [ ] Agent.__init__ 分解为 SubSystemContainer (P0)

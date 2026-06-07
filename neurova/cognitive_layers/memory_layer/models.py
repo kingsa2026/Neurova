@@ -253,6 +253,7 @@ class Memory:
     neuser_id: str = ""
     user_id: str = ""
     shared: bool = False  # 跨 agent 共享开关
+    share_group_ids: List[str] = field(default_factory=list)  # 共享组ID列表
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_accessed_at: Optional[datetime] = None
@@ -265,6 +266,8 @@ class Memory:
             self.neuser_id = self.isolation_context.neuser_id
             self.user_id = self.isolation_context.user_id
             self.shared = self.isolation_context.shared
+            if self.isolation_context.share_group_ids:
+                self.share_group_ids = list(self.isolation_context.share_group_ids)
 
     def touch(self):
         """访问一次，温度升高"""
@@ -295,6 +298,7 @@ class Memory:
             "neuser_id": self.neuser_id,
             "user_id": self.user_id,
             "shared": self.shared,
+            "share_group_ids": self.share_group_ids,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "last_accessed_at": self.last_accessed_at.isoformat() if self.last_accessed_at else None,
@@ -336,6 +340,7 @@ class Memory:
             neuser_id=data.get("neuser_id", ""),
             user_id=data.get("user_id", ""),
             shared=data.get("shared", False),
+            share_group_ids=data.get("share_group_ids", []),
             created_at=_parse_dt(data.get("created_at")),
             updated_at=_parse_dt(data.get("updated_at")),
         )

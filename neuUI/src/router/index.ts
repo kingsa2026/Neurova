@@ -61,6 +61,7 @@ const LogPage = () => import('@/pages/LogPage.vue')
 const GroupPage = () => import('@/pages/GroupPage.vue')
 const EnhancedUserPage = () => import('@/pages/EnhancedUserPage.vue')
 const PlaceholderPage = () => import('@/pages/PlaceholderPage.vue')
+const SessionSyncPage = () => import('@/pages/SessionSyncPage.vue')
 
 const routes: RouteRecordRaw[] = [
   // ========== 公开路由 ==========
@@ -372,6 +373,12 @@ const routes: RouteRecordRaw[] = [
         name: 'AgentChannelSharing',
         component: ContextChannelPage,
         meta: { title: '上下文共享', module: 'channels' },
+      },
+      {
+        path: 'session-sync',
+        name: 'SessionSync',
+        component: SessionSyncPage,
+        meta: { title: '跨渠道同步', module: 'channels' },
       },
       {
         path: 'webhooks',

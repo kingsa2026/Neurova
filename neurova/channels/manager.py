@@ -24,6 +24,21 @@ from neurova.channels.base import (
 
 logger = logging.getLogger(__name__)
 
+# 延迟导入 SessionSyncManager 避免循环导入
+_session_sync_manager = None
+
+
+def _get_session_sync_manager():
+    """获取 SessionSyncManager 单例（延迟导入）"""
+    global _session_sync_manager
+    if _session_sync_manager is None:
+        try:
+            from neurova.sync.session_sync_manager import get_session_sync_manager
+            _session_sync_manager = get_session_sync_manager()
+        except Exception as e:
+            logger.debug(f"SessionSyncManager not available: {e}")
+    return _session_sync_manager
+
 # ============================================================
 # 消息处理器类型
 # ============================================================
@@ -124,7 +139,50 @@ class ChannelManager:
             if not await adapter.connect():
                 logger.error(f"Failed to connect adapter: {channel_type}")
                 return None
-        return await adapter.send_message(chat_id, content, message_type, **kwargs)
+        
+        result = await adapter.send_message(chat_id, content, message_type, **kwargs)
+        
+        # 广播回复到 SessionSyncManager
+        await self._sync_reply_to_session(chat_id, content, channel_type)
+        
+        return result
+
+    async def _sync_reply_to_session(
+        self, chat_id: str, content: str, channel_type: str
+    ):
+        """同步回复消息到 SessionSyncManager"""
+        sync_manager = _get_session_sync_manager()
+        if not sync_manager:
+            return
+
+        try:
+            from neurova.sync.session_sync_manager import EventType, SessionEvent
+
+            # 查找会话
+            session = sync_manager.get_session_by_external_id(chat_id)
+            if not session:
+                return
+
+            # 创建回复事件
+            event = SessionEvent(
+                event_type=EventType.AGENT_REPLY,
+                session_id=session.session_id,
+                source_channel=channel_type,
+                payload={
+                    "content": content,
+                    "reply_to": chat_id,
+                }
+            )
+
+            # 广播到其他渠道
+            await sync_manager.broadcast_event(
+                session.session_id,
+                event,
+                exclude_channel=channel_type
+            )
+
+        except Exception as e:
+            logger.debug(f"SessionSyncManager reply sync failed: {e}")
 
     async def broadcast_message(
         self,
@@ -153,6 +211,9 @@ class ChannelManager:
             f"sender={message.sender_name}"
         )
 
+        # 广播到 SessionSyncManager
+        await self._sync_to_session_sync(event_type, message)
+
         if event_type == ChannelEventType.MESSAGE_RECEIVED and self._message_handler:
             try:
                 reply = await self._message_handler(message)
@@ -173,6 +234,64 @@ class ChannelManager:
                     )
                 except Exception:
                     pass
+
+    async def _sync_to_session_sync(
+        self, event_type: ChannelEventType, message: ChannelMessage
+    ):
+        """同步事件到 SessionSyncManager"""
+        sync_manager = _get_session_sync_manager()
+        if not sync_manager:
+            return
+
+        try:
+            from neurova.sync.session_sync_manager import EventType, SessionEvent
+
+            # 映射事件类型
+            event_type_map = {
+                ChannelEventType.MESSAGE_RECEIVED: EventType.USER_MESSAGE,
+                ChannelEventType.BOT_CONNECTED: EventType.CHANNEL_CONNECTED,
+                ChannelEventType.BOT_DISCONNECTED: EventType.CHANNEL_DISCONNECTED,
+            }
+
+            mapped_type = event_type_map.get(event_type)
+            if not mapped_type:
+                return
+
+            # 获取或创建会话
+            session = sync_manager.get_session_by_external_id(message.chat_id)
+            if not session:
+                # 尝试从元数据获取 user_id
+                user_id = getattr(message, 'sender_id', None) or "anonymous"
+                agent_id = "default"
+                session = sync_manager.create_session(
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    external_id=message.chat_id,
+                    metadata={"channel_type": message.channel_type}
+                )
+
+            # 创建事件
+            event = SessionEvent(
+                event_type=mapped_type,
+                session_id=session.session_id,
+                source_channel=message.channel_type,
+                payload={
+                    "content": message.content,
+                    "sender_name": message.sender_name,
+                    "sender_id": getattr(message, 'sender_id', None),
+                    "metadata": message.metadata,
+                }
+            )
+
+            # 广播到其他渠道
+            await sync_manager.broadcast_event(
+                session.session_id,
+                event,
+                exclude_channel=message.channel_type
+            )
+
+        except Exception as e:
+            logger.debug(f"SessionSyncManager sync failed: {e}")
 
     # ============================================================
     # 生命周期

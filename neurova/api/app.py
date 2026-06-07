@@ -56,7 +56,9 @@ class AppState:
         self.user_group_manager = None
         self.token_manager = None
         self.tts_manager = None
+        self.asr_manager = None
         self.audio_engine = None
+        self.voice_engines: Dict[str, Any] = {}  # engine_type -> VoiceEngine instance
         self.sleep_manager = None
         self.shutdown_guard = None
         self.start_time: float = time.time()
@@ -235,16 +237,18 @@ def _initialize_components(app_state: AppState) -> None:
     except Exception as e:
         logger.warning(f"TTSManager init failed: {e}")
 
-    # 初始化 MOSS Audio Engine（可选，需要 GPU）
+    # 初始化 ASR Manager（可选）
     try:
-        from neurova.tts.moss_audio import MOSSAudioEngine
-        app_state.audio_engine = MOSSAudioEngine(
-            model_dir=app_state.config.get("audio_model_path", "models/audio/moss-audio-4b"),
-            model_name=app_state.config.get("audio_model_name", "moss-audio-4b"),
-            auto_download=app_state.config.get("audio_auto_download", True),
+        from neurova.asr.manager import ASRManager, ASRConfig
+        asr_config = ASRConfig(
+            engine=app_state.config.get("asr_engine", "auto"),
+            model_path=app_state.config.get("asr_model_path", "models/asr"),
+            auto_download=app_state.config.get("asr_auto_download", True),
         )
+        app_state.asr_manager = ASRManager(asr_config)
+        logger.info(f"ASR Manager init success (engine={asr_config.engine})")
     except Exception as e:
-        logger.warning(f"MOSSAudioEngine init failed: {e}")
+        logger.warning(f"ASR Manager init failed: {e}")
 
     logger.info("Core components initialized")
 
@@ -300,6 +304,8 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
         "token_manager": app_state.token_manager,
         "tts_manager": app_state.tts_manager,
         "audio_engine": app_state.audio_engine,
+        "asr_manager": app_state.asr_manager,
+        "voice_engines": app_state.voice_engines,
     })
 
     # 注册主路由
@@ -348,6 +354,40 @@ def _register_metrics_endpoint(app: FastAPI) -> None:
         metrics.append(f'# TYPE neurova_agents_total gauge')
         agent_count = len(_app_state.agents) if _app_state else 0
         metrics.append(f'neurova_agents_total {agent_count}')
+
+        # P3: 语音性能指标
+        metrics.append(f'# HELP neurova_voice_engines_total Total number of voice engines')
+        metrics.append(f'# TYPE neurova_voice_engines_total gauge')
+        voice_count = len(_app_state.voice_engines) if _app_state else 0
+        metrics.append(f'neurova_voice_engines_total {voice_count}')
+
+        metrics.append(f'# HELP neurova_voice_tts_available TTS engine availability (1=available, 0=unavailable)')
+        metrics.append(f'# TYPE neurova_voice_tts_available gauge')
+        tts_available = 0
+        if _app_state and "tts" in _app_state.voice_engines:
+            try:
+                tts_available = 1 if _app_state.voice_engines["tts"].is_available() else 0
+            except Exception:
+                tts_available = 0
+        metrics.append(f'neurova_voice_tts_available {tts_available}')
+
+        metrics.append(f'# HELP neurova_voice_asr_available ASR engine availability (1=available, 0=unavailable)')
+        metrics.append(f'# TYPE neurova_voice_asr_available gauge')
+        asr_available = 0
+        if _app_state and "asr" in _app_state.voice_engines:
+            try:
+                asr_available = 1 if _app_state.voice_engines["asr"].is_available() else 0
+            except Exception:
+                asr_available = 0
+        metrics.append(f'neurova_voice_asr_available {asr_available}')
+
+        # 渠道指标
+        metrics.append(f'# HELP neurova_channels_total Total number of registered channels')
+        metrics.append(f'# TYPE neurova_channels_total gauge')
+        channel_count = 0
+        if _app_state and _app_state.channel_manager:
+            channel_count = len(_app_state.channel_manager._adapters)
+        metrics.append(f'neurova_channels_total {channel_count}')
 
         return PlainTextResponse("\n".join(metrics), media_type="text/plain")
 
@@ -416,7 +456,48 @@ async def _on_startup(app_state: AppState) -> None:
         except Exception as e:
             logger.warning(f"Audio engine init error: {e}")
 
-    # 更新全局应用状态（TTS/Audio 引擎已初始化）
+    # P2-5: 创建 VoiceEngine 统一接口实例，替代旧的 TTSManager/ASRManager 直接调用
+    try:
+        from neurova.voice_engine import VoiceEngine, VoiceEngineType
+
+        if app_state.tts_manager and getattr(app_state.tts_manager, "is_initialized", False):
+            app_state.voice_engines["tts"] = VoiceEngine(
+                engine_type=VoiceEngineType.TTS,
+                engine=app_state.tts_manager,
+            )
+            logger.info("VoiceEngine[TTS] created from TTSManager")
+
+        if app_state.asr_manager and getattr(app_state.asr_manager, "is_initialized", False):
+            app_state.voice_engines["asr"] = VoiceEngine(
+                engine_type=VoiceEngineType.ASR,
+                engine=app_state.asr_manager,
+            )
+            logger.info("VoiceEngine[ASR] created from ASRManager")
+    except Exception as e:
+        logger.debug(f"VoiceEngine creation skipped: {e}")
+
+    # P2-4: 注册 VoiceAdapter 到 ChannelManager（语音通话渠道）
+    try:
+        from neurova.channels.voice import VoiceAdapter, create_voice_adapter
+        from neurova.channels.base import ChannelConfig
+
+        voice_config = ChannelConfig(
+            channel_type="voice",
+            enabled=app_state.config.get("voice_enabled", False),
+            app_id=app_state.config.get("twilio_account_sid", ""),
+            app_secret=app_state.config.get("twilio_auth_token", ""),
+            extra={
+                "from_number": app_state.config.get("twilio_from_number", ""),
+            },
+        )
+        voice_adapter = create_voice_adapter(voice_config)
+        if app_state.channel_manager:
+            app_state.channel_manager.register_adapter(voice_adapter)
+            logger.info("VoiceAdapter registered to ChannelManager")
+    except Exception as e:
+        logger.debug(f"VoiceAdapter registration skipped: {e}")
+
+    # 更新全局应用状态（TTS/Audio/VoiceEngine 已初始化）
     from neurova.api.endpoints import set_app_state as _update_app_state
     _update_app_state({
         "startup_manager": app_state.startup_manager,
@@ -430,6 +511,8 @@ async def _on_startup(app_state: AppState) -> None:
         "token_manager": app_state.token_manager,
         "tts_manager": app_state.tts_manager,
         "audio_engine": app_state.audio_engine,
+        "asr_manager": app_state.asr_manager,
+        "voice_engines": app_state.voice_engines,
     })
 
     # 注册核心模块
@@ -443,10 +526,10 @@ async def _on_startup(app_state: AppState) -> None:
         else:
             logger.warning(f"Startup had errors: {result.errors}")
 
-    # 启动渠道管理器
+    # 启动渠道管理器（注意：start() 是 async 方法）
     if app_state.channel_manager:
         try:
-            app_state.channel_manager.start()
+            await app_state.channel_manager.start()
             logger.info("Channel manager started")
         except Exception as e:
             logger.warning(f"Channel manager start failed: {e}")
@@ -466,10 +549,10 @@ async def _on_shutdown(app_state: AppState) -> None:
     """
     logger.info("Neurova API Server shutting down...")
 
-    # 停止渠道管理器
+    # 停止渠道管理器（stop() 是 async 方法）
     if app_state.channel_manager:
         try:
-            app_state.channel_manager.stop()
+            await app_state.channel_manager.stop()
             logger.info("Channel manager stopped")
         except Exception as e:
             logger.warning(f"Channel manager stop error: {e}")

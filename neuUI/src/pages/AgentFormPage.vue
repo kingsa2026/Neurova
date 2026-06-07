@@ -97,6 +97,82 @@
           </a-col>
         </a-row>
 
+        <a-divider orientation="left">记忆共享组</a-divider>
+        <div class="share-group-section">
+          <p class="section-description">
+            将此 Agent 添加到共享组，与其他 Agent 共享记忆。同一共享组内的 Agent 可以访问彼此的记忆。
+          </p>
+          
+          <!-- 已加入的共享组 -->
+          <div v-if="agentGroups.length > 0" class="agent-groups">
+            <h4>已加入的共享组</h4>
+            <div v-for="group in agentGroups" :key="group.group_id" class="group-card">
+              <div class="group-info">
+                <span class="group-name">{{ group.name }}</span>
+                <span class="group-desc">{{ group.description || '无描述' }}</span>
+                <span class="group-agents">{{ group.agent_ids.length }} 个 Agent</span>
+              </div>
+              <a-button 
+                type="link" 
+                danger 
+                size="small"
+                @click="handleRemoveFromGroup(group.group_id)"
+                :loading="removingGroupId === group.group_id"
+              >
+                退出
+              </a-button>
+            </div>
+          </div>
+          
+          <div v-else class="no-groups">
+            <a-empty description="暂未加入任何共享组" :image-style="{ height: '60px' }">
+              <template #image>
+                <span style="font-size: 2rem; opacity: 0.3;">🔗</span>
+              </template>
+            </a-empty>
+          </div>
+          
+          <!-- 创建新共享组 -->
+          <a-divider dashed>或创建新共享组</a-divider>
+          
+          <a-form layout="vertical" class="create-group-form">
+            <a-row :gutter="16">
+              <a-col :span="12">
+                <a-form-item label="组名称" required>
+                  <a-input v-model:value="newGroup.name" placeholder="如：项目组A" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="描述">
+                  <a-input v-model:value="newGroup.description" placeholder="共享组用途说明" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            
+            <a-form-item label="选择要共享记忆的 Agent">
+              <a-select
+                v-model:value="newGroup.agentIds"
+                mode="multiple"
+                placeholder="选择 Agent（当前 Agent 会自动加入）"
+                :options="agentOptions"
+                :loading="agentsLoading"
+                show-search
+                :filter-option="filterAgentOption"
+                style="width: 100%"
+              />
+            </a-form-item>
+            
+            <a-button 
+              type="primary" 
+              @click="handleCreateGroup"
+              :loading="creatingGroup"
+              :disabled="!newGroup.name || newGroup.agentIds.length === 0"
+            >
+              创建共享组
+            </a-button>
+          </a-form>
+        </div>
+
         <a-divider />
         <a-space>
           <a-button type="primary" size="large" :loading="saving" @click="handleSave">保存</a-button>
@@ -113,6 +189,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useAgentStore } from '@/stores/agents'
 import { providerAPI } from '@/api/modules/providers'
+import { memoryShareGroupsAPI, type ShareGroup } from '@/api/modules/memory-share-groups'
 import type { Agent } from '@/types/agent'
 
 const route = useRoute()
@@ -154,6 +231,102 @@ const voiceOptions = [
   { label: '男声', value: 'male' },
   { label: '自定义', value: 'custom' },
 ]
+
+// 共享组相关
+const agentGroups = ref<ShareGroup[]>([])
+const agentsLoading = ref(false)
+const agentOptions = ref<{ label: string; value: string }[]>([])
+const creatingGroup = ref(false)
+const removingGroupId = ref<string | null>(null)
+
+const newGroup = reactive({
+  name: '',
+  description: '',
+  agentIds: [] as string[],
+})
+
+// 共享组相关函数
+function filterAgentOption(input: string, option: { label: string; value: string }) {
+  return option.label.toLowerCase().includes(input.toLowerCase())
+}
+
+async function loadAgentGroups() {
+  if (!form.agentId) return
+  
+  try {
+    const res = await memoryShareGroupsAPI.getGroupsForAgent(form.agentId)
+    agentGroups.value = res.groups || []
+  } catch (e) {
+    console.error('[AgentForm] 加载共享组失败:', e)
+    agentGroups.value = []
+  }
+}
+
+async function loadAllAgents() {
+  agentsLoading.value = true
+  try {
+    await agentStore.loadAgents()
+    // 排除当前 Agent
+    agentOptions.value = agentStore.agents
+      .filter(a => (a.agentId || a.id) !== form.agentId)
+      .map(a => ({
+        label: `${a.name} (${a.agentId || a.id})`,
+        value: a.agentId || a.id || '',
+      }))
+  } catch (e) {
+    console.error('[AgentForm] 加载 Agent 列表失败:', e)
+  } finally {
+    agentsLoading.value = false
+  }
+}
+
+async function handleCreateGroup() {
+  if (!newGroup.name || newGroup.agentIds.length === 0) {
+    message.warning('请填写组名称并选择至少一个 Agent')
+    return
+  }
+  
+  creatingGroup.value = true
+  try {
+    // 确保当前 Agent 在组中
+    const agentIds = [...new Set([form.agentId, ...newGroup.agentIds])]
+    
+    await memoryShareGroupsAPI.create({
+      name: newGroup.name,
+      description: newGroup.description,
+      agent_ids: agentIds,
+    })
+    
+    message.success('共享组创建成功')
+    
+    // 重置表单
+    newGroup.name = ''
+    newGroup.description = ''
+    newGroup.agentIds = []
+    
+    // 重新加载
+    await loadAgentGroups()
+  } catch (e) {
+    console.error('[AgentForm] 创建共享组失败:', e)
+    message.error('创建共享组失败')
+  } finally {
+    creatingGroup.value = false
+  }
+}
+
+async function handleRemoveFromGroup(groupId: string) {
+  removingGroupId.value = groupId
+  try {
+    await memoryShareGroupsAPI.removeAgent(groupId, form.agentId)
+    message.success('已退出共享组')
+    await loadAgentGroups()
+  } catch (e) {
+    console.error('[AgentForm] 退出共享组失败:', e)
+    message.error('退出共享组失败')
+  } finally {
+    removingGroupId.value = null
+  }
+}
 
 function onAutoChange(checked: boolean) {
   if (checked) {
@@ -409,6 +582,12 @@ onMounted(async () => {
         form.workingDirectory = (agent.workingDirectory as string) || ''
       }
     }
+    
+    // 加载共享组和 Agent 列表
+    await Promise.all([
+      loadAgentGroups(),
+      loadAllAgents(),
+    ])
   }
 
   // 初次加载
@@ -433,6 +612,13 @@ onMounted(async () => {
     modelOptions.value = []
     routeAuto.value = !isEdit.value
     
+    // 重置共享组数据
+    agentGroups.value = []
+    agentOptions.value = []
+    newGroup.name = ''
+    newGroup.description = ''
+    newGroup.agentIds = []
+    
     // 重新加载配置
     await loadConfig()
   })
@@ -447,4 +633,19 @@ onMounted(async () => {
 :deep(.settings-form .ant-form-item-label>label){ color:rgba(255,255,255,0.6)!important; }
 :deep(.settings-form .ant-input),:deep(.settings-form .ant-input-affix-wrapper),:deep(.settings-form textarea.ant-input){ background:rgba(255,255,255,0.05)!important;border:1px solid rgba(255,255,255,0.1)!important;color:#e2e8f0!important; }
 :deep(.ant-divider-inner-text){ color:rgba(255,255,255,0.4)!important;font-size:0.85rem; }
+
+.share-group-section { background:rgba(255,255,255,0.03);border-radius:8px;padding:20px;border:1px solid rgba(255,255,255,0.08); }
+.section-description { color:rgba(255,255,255,0.5);font-size:0.85rem;margin-bottom:16px; }
+.agent-groups { margin-bottom:20px; }
+.agent-groups h4 { color:rgba(255,255,255,0.7);font-size:0.9rem;margin-bottom:12px; }
+.group-card { display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:12px 16px;margin-bottom:8px; }
+.group-info { display:flex;flex-direction:column;gap:4px; }
+.group-name { color:#e2e8f0;font-weight:500; }
+.group-desc { color:rgba(255,255,255,0.4);font-size:0.8rem; }
+.group-agents { color:rgba(255,255,255,0.5);font-size:0.75rem; }
+.no-groups { margin-bottom:20px; }
+.create-group-form { margin-top:16px; }
+:deep(.create-group-form .ant-form-item-label>label){ color:rgba(255,255,255,0.6)!important; }
+:deep(.create-group-form .ant-input){ background:rgba(255,255,255,0.05)!important;border:1px solid rgba(255,255,255,0.1)!important;color:#e2e8f0!important; }
+:deep(.create-group-form .ant-select-selector){ background:rgba(255,255,255,0.05)!important;border:1px solid rgba(255,255,255,0.1)!important; }
 </style>

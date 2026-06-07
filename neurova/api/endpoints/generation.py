@@ -128,6 +128,40 @@ async def generate_audio(request: Request, body: AudioGenerationRequest):
     try:
         from neurova.api.endpoints import get_app_state
         state = get_app_state()
+
+        # 优先使用 VoiceEngine 统一接口
+        voice_engines = state.get("voice_engines", {}) if state else {}
+        tts_voice_engine = voice_engines.get("tts")
+
+        if tts_voice_engine and tts_voice_engine.is_available():
+            result = await tts_voice_engine.process(
+                input_data=body.text,
+                operation="synthesize",
+                voice=body.voice,
+                speed=body.speed,
+            )
+
+            if result.error:
+                return {
+                    "code": -1,
+                    "message": result.error,
+                    "data": {"request_id": request_id},
+                }
+
+            if not result.audio_data:
+                return {
+                    "code": -1,
+                    "message": "合成失败",
+                    "data": {"request_id": request_id},
+                }
+
+            return Response(
+                content=result.audio_data,
+                media_type="audio/wav",
+                headers={"X-Request-ID": request_id},
+            )
+
+        # 降级到旧的 TTSManager
         tts_manager = state.get("tts_manager") if state else None
 
         if not tts_manager or not tts_manager.is_initialized:
@@ -137,7 +171,11 @@ async def generate_audio(request: Request, body: AudioGenerationRequest):
                 "data": {"request_id": request_id},
             }
 
-        audio_bytes = await tts_manager.synthesize(body.text)
+        audio_bytes = await tts_manager.synthesize(
+            body.text,
+            voice=body.voice,
+            speed=body.speed
+        )
 
         if not audio_bytes:
             return {

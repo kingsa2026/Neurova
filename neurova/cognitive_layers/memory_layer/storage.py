@@ -43,7 +43,8 @@ class MemoryRecord:
     agent_id: str = "default"
     neuser_id: str = "default"
     user_id: str = "default"
-    shared: bool = False  # 跨 agent 共享开关
+    shared: bool = False  # 跨 agent 共享开关（旧模式）
+    share_group_ids: List[str] = field(default_factory=list)  # 共享组ID列表（新模式）
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -53,13 +54,15 @@ class MemoryRecord:
         known = {
             "id", "content", "memory_type", "owner", "tags", "metadata",
             "importance", "access_count", "created_at", "updated_at",
-            "agent_id", "neuser_id", "user_id", "shared",
+            "agent_id", "neuser_id", "user_id", "shared", "share_group_ids",
         }
         kwargs: Dict[str, Any] = {k: v for k, v in data.items() if k in known}
         if "tags" in kwargs and kwargs["tags"] is None:
             kwargs["tags"] = []
         if "metadata" in kwargs and kwargs["metadata"] is None:
             kwargs["metadata"] = {}
+        if "share_group_ids" in kwargs and kwargs["share_group_ids"] is None:
+            kwargs["share_group_ids"] = []
         return cls(**kwargs)
 
 
@@ -275,6 +278,7 @@ class MemoryStorage:
             neuser_id = isolation_context.neuser_id if isolation_context else "default"
             user_id = isolation_context.user_id if isolation_context else "default"
             shared = isolation_context.shared if isolation_context else False
+            share_group_ids = list(isolation_context.share_group_ids) if isolation_context else []
             
             rec = MemoryRecord(
                 id=mid,
@@ -291,6 +295,7 @@ class MemoryStorage:
                 neuser_id=neuser_id,
                 user_id=user_id,
                 shared=shared,
+                share_group_ids=share_group_ids,
             )
             self._records[mid] = rec
             self._index.add(rec)
@@ -357,14 +362,18 @@ class MemoryStorage:
                     # agent_id 隔离：共享记忆跳过 agent 检查
                     if not isolation_context.shared and not rec.shared:
                         if rec.agent_id != isolation_context.agent_id:
-                            continue
+                            # 检查共享组：如果请求者和记忆在同一共享组，允许访问
+                            if not self._in_same_share_group(isolation_context, rec):
+                                continue
                     elif rec.shared:
                         # 共享记忆可以被任何 agent 访问
                         pass
                     else:
                         # isolation_context.shared=True，但记忆不共享，仍检查 agent_id
                         if rec.agent_id != isolation_context.agent_id:
-                            continue
+                            # 检查共享组
+                            if not self._in_same_share_group(isolation_context, rec):
+                                continue
                     
                     # neuser_id 和 user_id 始终检查
                     if isolation_context.neuser_id != "default" and rec.neuser_id != isolation_context.neuser_id:
@@ -459,6 +468,32 @@ class MemoryStorage:
             if count:
                 self._save()
             return count
+
+    def _in_same_share_group(self, isolation_context: "IsolationContext", rec: MemoryRecord) -> bool:
+        """检查请求者和记忆记录是否在同一共享组中"""
+        try:
+            from .share_group import get_share_group_manager
+            manager = get_share_group_manager()
+            
+            # 获取请求者的 agent_id
+            requester_agent = isolation_context.agent_id
+            record_agent = rec.agent_id
+            
+            # 如果任一 agent_id 为空或 default，不共享
+            if not requester_agent or requester_agent == "default":
+                return False
+            if not record_agent or record_agent == "default":
+                return False
+            
+            # 如果请求者和记录的 agent_id 相同，允许访问
+            if requester_agent == record_agent:
+                return True
+            
+            # 检查是否在同一共享组
+            return manager.are_agents_shared(requester_agent, record_agent)
+        except Exception as e:
+            logger.warning(f"Share group check failed: {e}")
+            return False
 
     def storage_path(self) -> str:
         return str(self._path)

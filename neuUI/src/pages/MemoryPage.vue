@@ -59,6 +59,8 @@ interface MemoryItem {
   timestamp: number
   tags: string[]
   importance: number
+  shared: boolean
+  agent_id: string
 }
 
 const memories = ref<MemoryItem[]>([])
@@ -125,6 +127,8 @@ async function loadMemories() {
                   Date.now(),
         tags: (Array.isArray(m.tags) ? m.tags : []) as string[],
         importance: typeof m.importance === 'number' ? m.importance : 0.5,
+        shared: Boolean(m.shared),
+        agent_id: (m.agent_id as string) || '',
       }))
     } else {
       memError.value = (res as { message?: string })?.message || '获取记忆失败'

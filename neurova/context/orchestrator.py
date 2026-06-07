@@ -139,6 +139,7 @@ class ContextOrchestrator:
         relevant_memories: Optional[list] = None,
         session_context: Optional[list] = None,
         crystallized_patterns: Optional[list] = None,
+        voice_context: Optional[Dict] = None,
     ) -> List[Dict]:
         """构建完整的 LLM 上下文（Phase 2-5）
 
@@ -151,6 +152,7 @@ class ContextOrchestrator:
             relevant_memories: 记忆检索结果（Phase 1）
             session_context: Session 文件提取的最近对话上下文（B3修复）
             crystallized_patterns: 结晶经验检索结果（认知图谱 PatternCrystallizer）
+            voice_context: 语音上下文（ASR 元数据、情感分析等）
 
         Returns:
             上下文消息列表，可直接传给 LLM
@@ -288,6 +290,15 @@ class ContextOrchestrator:
                     priority=50
                 ))
             
+            # 添加语音上下文
+            if voice_context:
+                try:
+                    from neurova.voice_context_module import VoiceContextModule
+                    voice_module = VoiceContextModule()
+                    voice_module.inject_metadata(self.context_pool, voice_context)
+                except Exception as e:
+                    logger.debug(f"语音上下文注入跳过: {e}")
+            
             # 添加反思日志
             for log in reflection_logs:
                 self.context_pool.add_context(ContextInput(
@@ -406,6 +417,39 @@ class ContextOrchestrator:
                 priority=50,
                 metadata=agent_emotion
             ))
+        
+        # 添加语音上下文
+        if voice_context:
+            try:
+                from neurova.voice_context_module import VoiceContextModule
+                voice_module = VoiceContextModule()
+                # 将语音上下文转换为 ContextInput 并添加到候选池
+                content_parts = []
+                if voice_context.get("text"):
+                    content_parts.append(f"语音识别文本: {voice_context['text']}")
+                if voice_context.get("confidence", 0) > 0:
+                    content_parts.append(f"识别置信度: {voice_context['confidence']:.2f}")
+                if voice_context.get("language"):
+                    content_parts.append(f"语言: {voice_context['language']}")
+                if voice_context.get("engine"):
+                    content_parts.append(f"识别引擎: {voice_context['engine']}")
+                
+                emotion = voice_context.get("emotion")
+                if emotion and emotion.get("primary_emotion") != "neutral":
+                    content_parts.append(
+                        f"语音情感: {emotion['primary_emotion']} "
+                        f"(置信度: {emotion.get('confidence', 0):.2f})"
+                    )
+                
+                if content_parts:
+                    candidate_pool.append(ContextInput(
+                        source=ContextSource.MULTIMODAL,
+                        content="\n".join(content_parts),
+                        priority=70,
+                        metadata={"type": "voice_context"}
+                    ))
+            except Exception as e:
+                logger.debug(f"语音上下文注入跳过: {e}")
         
         # 添加反思日志
         for log in reflection_logs:

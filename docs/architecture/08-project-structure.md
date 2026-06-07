@@ -1,349 +1,290 @@
 # Neurova 项目结构
 
-## 当前文件结构
+## 项目概览
+
+Neurova 是一个功能完整的 AI Agent 框架，版本 v4.0 (CogArch 2.0)。
+
+| 维度 | 值 |
+|------|-----|
+| 后端语言 | Python 3.10+ |
+| 前端框架 | Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue |
+| Python 文件数 | 550+ |
+| 测试文件数 | 532 |
+| 前端页面组件 | 82 |
+| API 端点 | 77+ |
+| 通信渠道 | 14 种 |
+
+## 当前项目结构
 
 ```
-KingPolo/
-├── .trae/
-│   └── project_rules.md              # 项目规则和开发规范
+Neurova/
+├── neurova/                          # 后端核心代码
+│   ├── agent_core.py                 # Agent 核心类 (1621 行, 37 方法)
+│   ├── mem_core.py                   # 记忆检索/保存/温度管理
+│   ├── context_orchestrator.py       # 上下文构建/系统提示/工具描述
+│   ├── tool_executor.py              # 工具调用解析/执行/后处理钩子
+│   ├── post_chat_pipeline.py         # 后处理管线 (10+ 步骤)
+│   ├── router.py                     # 消息路由器
+│   ├── llm_client.py                 # LLM 客户端
+│   ├── builtin_tools.py              # 内置工具注册器
+│   ├── skill_system.py               # 技能系统
+│   └── ... (更多核心模块)
 │
-├── docs/
-│   └── architecture/
-│       ├── 01-core-architecture.md   # 核心架构设计
-│       ├── 02-memory-system.md       # 记忆系统架构
-│       ├── 03-message-routing.md     # 消息路由系统
-│       ├── 04-multi-agent-collaboration.md  # 多 Agent 协作
-│       ├── 05-skill-system.md        # Skill 系统设计
-│       ├── 06-plugin-cli-system.md   # 插件和 CLI 系统
-│       └── 07-implementation-plan.md # 实现计划和 API 规范
+├── neurova/agent/                    # Agent 深度模块
+│   ├── __init__.py                   # 统一导出入口
+│   ├── config.py                     # AgentConfig, AgentLLMClient
+│   ├── memory_agent.py               # MemoryAgent (563行, 30个方法)
+│   ├── context_orchestrator.py       # ContextOrchestrator (337行, 14个方法)
+│   ├── tool_executor.py              # ToolExecutor (485行, 12个方法)
+│   ├── chat_pipeline.py              # ChatPipeline (706行, 6步)
+│   ├── loops/                        # Agent Loop 系统
+│   ├── builder.py                    # Agent 构建器
+│   └── scheduler.py                  # Agent 调度器
 │
-└── README.md                         # 项目概述和快速开始
+├── neurova/cognitive_layers/         # 认知层
+│   ├── emotion_context_layer/        # 情感上下文注入 (17种情感分类)
+│   ├── growth_layer/                 # 成长分析
+│   ├── memory_layer/                 # 记忆层核心 (安全/向量/冲突/缓存/工作记忆)
+│   ├── meta_cognition_layer/         # 元认知
+│   └── model_adapter/                # 模型适配器
+│
+├── neurova/evolution/                # 进化系统
+│   ├── pattern_miner.py              # 序列模式挖掘
+│   ├── tool_genetic_engine.py        # 工具遗传编程
+│   ├── tool_lifecycle_manager.py     # 工具生命周期管理
+│   ├── nl_tool_synthesizer.py        # 自然语言工具合成
+│   └── closed_loop.py                # 统一进化引擎
+│
+├── neurova/channels/                 # 多通道通信 (14种渠道)
+│   ├── feishu.py                     # 飞书适配器
+│   ├── dingtalk.py                   # 钉钉适配器
+│   ├── wecom.py                      # 企业微信适配器
+│   ├── wechat.py                     # 微信适配器
+│   ├── telegram.py                   # Telegram 适配器
+│   ├── discord.py                    # Discord 适配器
+│   ├── qq.py                         # QQ 适配器
+│   ├── mqtt.py                       # MQTT 适配器
+│   ├── websocket.py                  # WebSocket 适配器
+│   ├── sip.py                        # SIP 适配器
+│   ├── webhook.py                    # Webhook 适配器
+│   └── mobile_pairing.py            # 移动设备配对 (QR码)
+│
+├── neurova/llm/                      # LLM 路由系统
+│   ├── llm_router.py                 # 多模态自适应路由器 (10种请求类型)
+│   ├── multi_model_client.py         # 多模型统一客户端
+│   ├── provider_manager.py           # 服务商管理器 (6+提供商)
+│   └── providers/                    # LLM 提供商实现
+│       ├── openai_provider.py        # OpenAI 提供商
+│       ├── anthropic_provider.py     # Anthropic 提供商
+│       ├── gemini_provider.py        # Gemini 提供商
+│       ├── ollama_provider.py        # Ollama 提供商
+│       ├── openrouter_provider.py    # OpenRouter 提供商
+│       └── ... (更多提供商)
+│
+├── neurova/plugins/                  # 插件系统
+├── neurova/skill_system/             # 技能系统
+├── neurova/skills/                   # 技能实现
+├── neurova/tts/                      # 语音合成 (Edge TTS / MOSS Nano / Mock)
+├── neurova/asr/                      # 语音识别
+├── neurova/computer_use/             # 计算机视觉/浏览器自动化
+├── neurova/benchmark/                # 基准测试框架
+├── neurova/execution_layers/         # 执行运行时和传输层
+├── neurova/image_pipeline/           # 镜像管道管理器
+├── neurova/tool_layers/              # 工具层模块
+├── neurova/collaborate/              # 协作模块
+├── neurova/knowledge/                # 知识管理
+├── neurova/analytics/                # 分析模块
+├── neurova/security/                 # 安全模块
+├── neurova/admin/                    # 管理模块
+├── neurova/auth/                     # 认证授权
+├── neurova/api/                      # RESTful API (77+ 端点)
+│   ├── app.py                        # FastAPI 应用
+│   └── endpoints/                    # API 端点实现
+│       ├── agent.py                  # Agent 管理
+│       ├── memory.py                 # 记忆管理
+│       ├── model.py                  # 模型管理
+│       ├── provider.py               # 提供商管理
+│       ├── channel.py                # 渠道管理
+│       ├── skill.py                  # 技能管理
+│       ├── plugin.py                 # 插件管理
+│       ├── collaboration.py          # 协作管理
+│       ├── security.py               # 安全管理
+│       └── ... (更多端点)
+│
+├── neuUI/                            # 前端 (Vue 3 + TypeScript)
+│   ├── src/
+│   │   ├── pages/                    # 82 个页面组件
+│   │   │   ├── ChatPage.vue          # 聊天页面 (47KB)
+│   │   │   ├── DashboardPage.vue     # 仪表盘
+│   │   │   ├── SettingPage.vue       # 设置页面
+│   │   │   ├── WorkflowPage.vue      # 工作流页面 (50KB)
+│   │   │   ├── ModelPage.vue         # 模型管理
+│   │   │   ├── ProviderPage.vue      # 提供商管理
+│   │   │   ├── AgentFormPage.vue     # Agent 表单
+│   │   │   ├── AgentListPage.vue     # Agent 列表
+│   │   │   ├── AgentSkillPage.vue    # Agent 技能
+│   │   │   ├── AgentSleepPage.vue    # Agent 睡眠
+│   │   │   ├── AgentChannelPage.vue  # Agent 渠道
+│   │   │   ├── MonitorPage.vue       # 监控页面
+│   │   │   ├── HealthPage.vue        # 健康检查
+│   │   │   ├── AuditPage.vue         # 审计日志
+│   │   │   ├── SecurityPage.vue      # 安全设置
+│   │   │   ├── FirewallPage.vue      # 防火墙
+│   │   │   ├── KnowledgePage.vue     # 知识管理
+│   │   │   ├── KnowledgeGraphPage.vue # 知识图谱
+│   │   │   ├── ExperienceKnowledgePage.vue # 经验知识
+│   │   │   ├── CollaborationPage.vue # 协作管理
+│   │   │   ├── CollaborationInitiatePage.vue # 发起协作
+│   │   │   ├── CollaborationTemplatePage.vue # 协作模板
+│   │   │   ├── ModelAdapterPage.vue  # 模型适配器
+│   │   │   ├── ComputerUsePage.vue   # 计算机使用
+│   │   │   ├── BrowserManagerPage.vue # 浏览器管理
+│   │   │   ├── MobilePairingPage.vue # 移动设备配对
+│   │   │   ├── MobileDevicePage.vue  # 移动设备管理
+│   │   │   ├── AnalyticsPage.vue     # 分析页面
+│   │   │   ├── StatisticsPage.vue    # 统计页面
+│   │   │   └── BenchmarkPage.vue     # 基准测试
+│   │   ├── components/               # 通用组件
+│   │   ├── api/                      # API 模块
+│   │   ├── stores/                   # Pinia 状态管理
+│   │   ├── router/                   # Vue Router
+│   │   └── utils/                    # 工具函数
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── tsconfig.json
+│
+├── tests/                            # 测试文件 (532 个)
+│   ├── unit/                         # 单元测试
+│   ├── integration/                  # 集成测试
+│   └── fixtures/                     # 测试数据
+│
+├── docs/                             # 文档
+│   ├── architecture/                 # 架构设计文档 (33 个)
+│   ├── api/                          # API 文档
+│   ├── dev_progress/                 # 开发进度
+│   ├── guides/                       # 用户指南
+│   └── ... (其他文档)
+│
+├── config/                           # 配置文件
+├── scripts/                          # 脚本工具
+├── deploy/                           # 部署配置
+├── start.py                          # 启动脚本
+├── requirements.txt                  # Python 依赖
+├── CONTEXT.md                        # 项目上下文文档
+└── README.md                         # 项目说明文档
 ```
 
-## 计划中的完整结构
+## 核心模块说明
 
-```
-neurova/
-├── .trae/
-│   └── project_rules.md              # ✓ 已完成
-│
-├── docs/
-│   ├── architecture/                 # ✓ 已完成
-│   │   ├── 01-core-architecture.md
-│   │   ├── 02-memory-system.md
-│   │   ├── 03-message-routing.md
-│   │   ├── 04-multi-agent-collaboration.md
-│   │   ├── 05-skill-system.md
-│   │   ├── 06-plugin-cli-system.md
-│   │   └── 07-implementation-plan.md
-│   ├── api/                          # 待创建
-│   │   └── api-reference.md
-│   └── guides/                       # 待创建
-│       ├── quickstart.md
-│       ├── user-guide.md
-│       └── developer-guide.md
-│
-├── neurova/
-│   ├── __init__.py
-│   ├── core/                     # 核心模块
-│   │   ├── __init__.py
-│   │   ├── agent.py
-│   │   ├── orchestrator.py
-│   │   ├── config.py
-│   │   └── events.py
-│   ├── memory/                   # 记忆系统
-│   │   ├── __init__.py
-│   │   ├── manager.py
-│   │   ├── models.py
-│   │   ├── storage.py
-│   │   └── core/
-│   │       ├── vector_search.py  # 向量检索系统
-│   │       ├── emotion.py        # 情感分析引擎
-│   │       ├── conflict.py       # 冲突检测系统
-│   │       └── sleep.py          # 睡眠整理系统
-│   ├── messaging/                # 消息系统
-│   │   ├── __init__.py
-│   │   ├── router.py
-│   │   ├── message.py
-│   │   ├── event_bus.py
-│   │   └── channels/
-│   │       ├── base.py
-│   │       ├── wechat.py
-│   │       ├── telegram.py
-│   │       └── webhook.py
-│   ├── llm/                      # LLM 提供商
-│   │   ├── __init__.py
-│   │   ├── base.py
-│   │   ├── openai_provider.py
-│   │   ├── presets.py            # LLM 预设配置管理器
-│   │   └── test_presets.py       # 预设配置测试脚本
-│   ├── skills/                   # Skill 系统
-│   │   ├── __init__.py
-│   │   ├── manager.py
-│   │   ├── base.py
-│   │   ├── context.py
-│   │   ├── public_library.py     # 公共技能库
-│   │   ├── agent_library.py      # Agent 技能库
-│   │   ├── skill_importer.py     # 技能导入器
-│   │   ├── market_adapters.py    # 技能市场适配器
-│   │   └── builtin/
-│   │       ├── search.py
-│   │       ├── calculator.py
-│   │       └── file_ops.py
-│   ├── plugins/                  # 插件系统
-│   │   ├── __init__.py
-│   │   ├── manager.py
-│   │   ├── models.py
-│   │   └── loader.py
-│   ├── cli/                      # CLI 工具
-│   │   ├── __init__.py
-│   │   └── commands.py
-│   ├── api/                      # RESTful API
-│   │   ├── __init__.py
-│   │   ├── server.py
-│   │   └── routes/
-│   │       ├── agents.py
-│   │       ├── skills.py
-│   │       └── plugins.py
-│   └── utils/                    # 工具函数
-│       ├── __init__.py
-│       ├── logging.py
-│       ├── helpers.py
-│       └── security.py
-│   ├── llm_client.py             # LLM 客户端（支持预设配置）
-│   ├── agent.py                  # Agent 核心
-│   ├── context.py                # 上下文处理
-│   ├── cli.py                    # CLI 入口
-│   ├── webui.py                  # Web UI
-│   ├── server.py                 # API 服务器
-│   └── test_agent.py             # Agent 测试
-│
-├── tests/                            # 待创建
-│   ├── unit/
-│   ├── integration/
-│   └── fixtures/
-│
-├── examples/                         # 待创建
-│   ├── basic_agent.py
-│   ├── multi_agent.py
-│   └── custom_skill.py
-│
-├── config/                           # 待创建
-│   ├── default.yaml
-│   ├── development.yaml
-│   └── production.yaml
-│
-├── requirements.txt                  # 待创建
-├── requirements-dev.txt              # 待创建
-├── setup.py                          # 待创建
-├── Dockerfile                        # 待创建
-└── docker-compose.yml                # 待创建
-```
+### Agent 核心 (`neurova/agent_core.py`)
+Agent 类是系统的心脏，通过深度模块化模式逐步拆分：
+- **MemCore** — 记忆检索/保存/温度管理
+- **ContextOrchestrator** — 上下文构建/系统提示/工具描述
+- **ToolExecutor** — 工具调用解析/执行/后处理钩子
+- **ChatPipeline** — 对话流程管线 (6步)
+- **PostChatPipeline** — 后处理管线 (10+ 步骤)
+- **MemoryAgent** — 记忆管理深度模块
+- **LLMRouter** — 多模态自适应路由
 
-## 文档完成状态
+### 记忆系统
+17 维记忆分类体系，核心组件：
+- **L1 肌肉记忆** — 工具使用模式自动执行
+- **L2 热缓存** — 高频访问记忆快速检索
+- **L3 工具记忆** — 工具使用经验闭环学习
+- **向量 UnifiedRetriever** — 多通道语义检索
+- **结晶 PatternCrystallizer** — 经验模式固化
+- **时序 TemporalKnowledgeGraph** — 时序事实管理
+- **Hebb NeuHebbManager** — 结构化推理记忆
 
-### ✅ 已完成
+### LLM 路由 (`neurova/llm/`)
+- **MultiModelLLMClient** — 多模型统一客户端
+- **LLMRouter** — 多模态自适应路由器 (10种请求类型)
+- **ProviderManager** — 服务商管理器 (OpenAI/Anthropic/Gemini/Ollama/OpenRouter)
+- **Agent Loop 系统** — 抽象 LLM 调用接口，支持热切换
 
-1. **README.md** - 项目概述和快速开始指南
-2. **01-core-architecture.md** - 核心架构设计文档
-   - 整体架构分层
-   - 核心组件设计
-   - 数据流设计
-   - 接口定义
-3. **02-memory-system.md** - 记忆系统架构
-   - SQLite 数据模型
-   - 记忆管理器
-   - 情感引擎
-   - 记忆巩固和遗忘机制
-4. **03-message-routing.md** - 消息路由系统
-   - 消息模型
-   - 路由规则引擎
-   - 限流器和重试机制
-   - 渠道适配器
-5. **04-multi-agent-collaboration.md** - 多 Agent 协作
-   - Agent 数据模型
-   - Agent 编排器
-   - 任务分配算法
-   - 群聊机制
-6. **05-skill-system.md** - Skill 系统设计
-   - Skill 接口定义
-   - Skill 管理器
-   - 内置 Skill 实现
-   - OpenClaw/Qwenpaw 兼容层
-7. **06-plugin-cli-system.md** - 插件和 CLI 系统
-   - 插件管理器
-   - CLI 命令设计
-   - 插件开发模板
-8. **07-implementation-plan.md** - 实现计划
-   - 12 周实现计划
-   - API 规范
-   - 数据库设计
-   - 测试策略
-   - 部署方案
-9. **project_rules.md** - 项目规则和开发规范
+### 认知层 (`neurova/cognitive_layers/`)
+- `emotion_context_layer/` — 情感上下文注入 (17种情感分类)
+- `growth_layer/` — 成长分析
+- `memory_layer/` — 记忆层核心 (安全/向量/冲突/缓存/工作记忆)
+- `meta_cognition_layer/` — 元认知
+- `model_adapter/` — 模型适配器
 
-### 📋 待创建文档
+### 进化系统 (`neurova/evolution/`)
+- **PatternMiner** — 序列模式挖掘
+- **ToolGeneticEngine** — 工具遗传编程
+- **ToolLifecycleManager** — 工具生命周期管理
+- **NLToolSynthesizer** — 自然语言工具合成
+- **EvolutionOrchestrator** — 统一进化引擎
 
-1. **docs/api/api-reference.md** - 完整 API 参考文档
-2. **docs/guides/quickstart.md** - 快速开始指南
-3. **docs/guides/user-guide.md** - 用户指南
-4. **docs/guides/developer-guide.md** - 开发者指南
-5. **CHANGELOG.md** - 变更日志
-6. **CONTRIBUTING.md** - 贡献指南
+### 多通道通信 (`neurova/channels/`)
+支持 14 种平台接入：飞书、钉钉、企业微信、微信、Telegram、Discord、QQ、MQTT、WebSocket、SIP、Webhook、移动设备（QR码配对）
 
-## 核心设计亮点
+### 前端 (`neuUI/`)
+Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，82 个页面组件：
+- **核心**: ChatPage (47KB), DashboardPage, SettingPage, WorkflowPage (50KB)
+- **Agent 管理**: 15 个页面 (Form/List/Skill/Sleep/Channel/...)
+- **运维**: Monitor, Health, Audit, Security, Firewall
+- **知识**: Knowledge, KnowledgeGraph, ExperienceKnowledge
+- **协作**: Collaboration, CollaborationInitiate, CollaborationTemplate
+- **LLM 管理**: ModelPage, ProviderPage, ModelAdapterPage
+- **Computer Use**: ComputerUsePage, BrowserManagerPage
+- **移动设备**: MobilePairingPage, MobileDevicePage
+- **分析**: AnalyticsPage, StatisticsPage, BenchmarkPage
 
-### 1. 分层架构
-```
-应用层 → Agent 层 → 通信层 → 核心层 → 基础设施层
-```
-- 清晰的职责分离
-- 易于维护和扩展
-- 支持独立测试
+## 技术栈
 
-### 2. 记忆系统
-- **短期记忆**: LRU 缓存，快速访问
-- **长期记忆**: SQLite 持久化
-- **情感关联**: 情感评分和标签
-- **记忆巩固**: 自动转化重要记忆
-- **遗忘机制**: 清理无用记忆
+### 后端
+- **Web 框架**: FastAPI
+- **数据库**: SQLite (threading.RLock 保护)
+- **LLM**: 多服务商支持 (OpenAI/Anthropic/Gemini/Ollama/OpenRouter)
+- **向量搜索**: TF-IDF / FAISS / ChromaDB
+- **TTS**: Edge TTS / MOSS Nano / Mock
 
-### 3. 消息路由
-- **规则引擎**: 正则表达式匹配
-- **智能路由**: 基于内容和上下文
-- **限流防刷**: 令牌桶算法
-- **重试机制**: 指数退避
+### 前端
+- **框架**: Vue 3 + Composition API
+- **状态管理**: Pinia
+- **构建**: Vite
+- **样式**: CSS + Liquid Glass UI
 
-### 4. 多 Agent 协作
-- **任务分解**: 协调 Agent 自动分解复杂任务
-- **智能分配**: 基于能力和负载分配
-- **群组讨论**: 避免信息风暴
-- **工作流引擎**: 支持复杂业务流程
+## 开发规范
 
-### 5. Skill 系统
-- **统一接口**: 标准化 Skill 实现
-- **协议兼容**: OpenClaw/Qwenpaw 兼容
-- **沙箱执行**: 安全隔离
-- **链式调用**: 支持 Skill 组合
+- **深度模块模式**: 小接口，深实现，通过 `agent_ref` 依赖注入
+- **线程安全**: 使用 `threading.RLock` 保护共享状态
+- **异步**: 使用 `async/await` 进行异步操作
+- **依赖检查**: 使用 `try/except` 处理可选依赖
+- **单例管理**: 使用 `get_*()` / `reset_*()` 工厂函数
+- **延迟导入**: `__getattr__` 避免循环依赖
 
-### 6. 插件系统
-- **热插拔**: 动态加载/卸载
-- **钩子机制**: 扩展点丰富
-- **依赖管理**: 自动处理依赖
-- **版本控制**: 语义化版本
+## 当前重构状态
 
-## 技术特色
+### 已完成
+- [x] MemCore 提取 (记忆核心)
+- [x] ContextOrchestrator 提取 (上下文构建)
+- [x] ToolExecutor 提取 (工具执行)
+- [x] PostChatPipeline 提取 (后处理管线)
+- [x] ChatPipeline 提取 (对话管线, 6步)
+- [x] 循环导入修复 (延迟导入)
+- [x] debug_log 清理
+- [x] Agent 类深度模块化重构 (2180→1621 行)
+- [x] 浏览器自动化集成 (browser-skill)
+- [x] 文档对齐 (README.md 更新)
+- [x] 安全增强 (P2 安全问题修复)
+- [x] 三层隔离机制统一 (IsolationContext)
+- [x] 经验闭环修复 (结晶经验注入)
+- [x] 情感闭环修复 (SQLite 持久化)
+- [x] 睡眠闭环修复 (MemoryRecord 转换)
+- [x] 工具记忆闭环修复 (match_by_query 接口)
+- [x] 骨架文件实现 (140+ 文件)
 
-### 异步优先
-- 全面使用 asyncio
-- 高并发支持
-- 非阻塞 I/O
-
-### 类型安全
-- 完整的类型注解
-- mypy 静态检查
-- 减少运行时错误
-
-### 测试驱动
-- 单元测试覆盖率 >85%
-- 集成测试覆盖核心流程
-- 性能测试确保指标
-
-### 安全设计
-- API 认证和授权
-- 输入验证
-- 沙箱隔离
-- 加密存储
-
-## 下一步行动
-
-### 阶段 1: 环境搭建 (1-2 天)
-- [ ] 创建 Git 仓库
-- [ ] 设置虚拟环境
-- [ ] 安装开发工具
-- [ ] 配置 pre-commit 钩子
-
-### 阶段 2: 核心框架实现 (2 周)
-- [ ] 实现配置系统
-- [ ] 实现日志系统
-- [ ] 实现事件总线
-- [ ] 实现 Agent 基类
-- [ ] 实现 LLM 提供商
-
-### 阶段 3: 记忆系统实现 (2 周)
-- [ ] 实现 SQLite 存储层
-- [ ] 实现记忆管理器
-- [ ] 实现情感引擎
-- [ ] 实现记忆巩固
-
-### 阶段 4: 消息系统实现 (2 周)
-- [ ] 实现消息路由器
-- [ ] 实现渠道适配器
-- [ ] 实现限流器
-- [ ] 实现重试机制
-
-### 阶段 5: Skill 系统实现 (2 周)
-- [ ] 实现 Skill 管理器
-- [ ] 实现内置 Skill
-- [ ] 实现协议兼容层
-
-### 阶段 6: 插件和 CLI 实现 (2 周)
-- [ ] 实现插件管理器
-- [ ] 实现 CLI 工具
-- [ ] 实现 RESTful API
-
-### 阶段 7: 测试和优化 (持续)
-- [ ] 编写单元测试
-- [ ] 编写集成测试
-- [ ] 性能优化
-- [ ] 文档完善
-
-## 资源需求
-
-### 人力资源
-- 后端开发：2-3 人
-- 测试工程师：1 人
-- 文档工程师：1 人 (可兼职)
-
-### 时间估算
-- MVP (v0.1.0): 4 周
-- Beta (v0.3.0): 12 周
-- GA (v1.0.0): 14 周
-
-### 基础设施
-- GitHub 仓库
-- CI/CD 流水线
-- 文档网站 (GitBook/ReadTheDocs)
-- PyPI 发布
-- Docker Hub
-
-## 风险和缓解
-
-### 技术风险
-- **LLM API 限制**: 实现本地模型支持作为备选
-- **性能瓶颈**: 早期性能测试，及时优化
-- **安全问题**: 安全审计，渗透测试
-
-### 管理风险
-- **范围蔓延**: 严格控制 MVP 范围
-- **依赖风险**: 关键依赖备选方案
-- **人员风险**: 知识共享，文档完善
-
-## 成功指标
-
-### 技术指标
-- 代码覆盖率 >85%
-- API 响应 <100ms (P95)
-- 系统可用性 >99.9%
-- 零严重安全漏洞
-
-### 采用指标
-- GitHub Stars >1000
-- PyPI 下载量 >10000/月
-- 活跃贡献者 >20
-- 社区插件 >50
+### 待办
+- [ ] Agent.__init__ 分解为 SubSystemContainer (P0)
+- [ ] 合并重复的 ContextOrchestrator (P2)
+- [ ] 合并重复的 AgentConfig (P3)
+- [ ] 移除过渡性委托方法 (P4)
+- [ ] 清理进化模块空文件 (P5)
 
 ---
 
-**最后更新**: 2026-05-05
-**版本**: 1.0.0
+**最后更新**: 2026-06-07
+**版本**: v4.0 (CogArch 2.0)
+**维护者**: Neurova Team

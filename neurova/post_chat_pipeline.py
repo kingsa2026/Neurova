@@ -216,7 +216,7 @@ class PostChatPipeline:
     ) -> tuple:
         """生成 TTS 语音"""
         config = self._agt.config
-        use_tts = enable_tts and getattr(config, "tts_enabled", False)
+        use_tts = enable_tts and getattr(config, "enable_tts", False)
 
         tts_manager = getattr(self._agt, "tts_manager", None)
         if not use_tts or not tts_manager:
@@ -231,9 +231,46 @@ class PostChatPipeline:
             audio_path = Path(config.attachment_dir) / audio_filename
             audio_path.parent.mkdir(parents=True, exist_ok=True)
 
-            audio_data = await tts_manager.synthesize(reply, str(audio_path))
-            logger.info(f"TTS语音已生成: {audio_path}")
-            return str(audio_path), audio_data
+            # TTSManager.synthesize() 只接受文本参数，返回音频字节数据
+            start_time = time.time()
+            audio_data = await tts_manager.synthesize(reply)
+            duration_ms = int((time.time() - start_time) * 1000)
+            
+            # 将音频数据保存到文件
+            if audio_data:
+                with open(audio_path, "wb") as f:
+                    f.write(audio_data)
+                logger.info(f"TTS语音已生成: {audio_path}")
+                
+                # 记录TTS使用统计到语音记忆桥接器
+                voice_memory_bridge = getattr(self._agt, "voice_memory_bridge", None)
+                if voice_memory_bridge:
+                    try:
+                        tts_result = {
+                            "text_length": len(reply),
+                            "engine": getattr(tts_manager, "engine_name", "unknown"),
+                            "voice": getattr(config, "tts_voice", "default"),
+                            "duration_ms": duration_ms,
+                            "success": True,
+                            "audio_size_bytes": len(audio_data),
+                        }
+                        # 获取用户和Agent ID
+                        user_id = getattr(config, "user_id", "default")
+                        agent_id = getattr(config, "agent_id", "default")
+                        
+                        await voice_memory_bridge.record_tts_usage(
+                            tts_result=tts_result,
+                            user_id=user_id,
+                            agent_id=agent_id,
+                        )
+                        logger.debug("TTS使用统计已记录到语音记忆桥接器")
+                    except Exception as e:
+                        logger.warning(f"记录TTS使用统计失败: {e}")
+                
+                return str(audio_path), audio_data
+            else:
+                logger.warning("TTS合成返回空数据")
+                return None, None
         except Exception as e:
             logger.warning(f"TTS语音生成失败: {e}")
             return None, None

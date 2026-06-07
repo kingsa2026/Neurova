@@ -98,6 +98,7 @@
           <template #icon><GlobalOutlined /></template>
           <a-menu-item key="channel">渠道管理</a-menu-item>
           <a-menu-item key="channel-sharing">上下文共享</a-menu-item>
+          <a-menu-item key="session-sync">跨渠道同步</a-menu-item>
         </a-sub-menu>
 
         <a-menu-item key="computer">

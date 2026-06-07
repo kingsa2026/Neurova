@@ -99,14 +99,37 @@ async def chat(request: Request, body: ChatRequest):
             session_id=body.session_id,
             metadata=body.metadata,
         )
+        
+        # 提取响应数据，适配前端期望格式
+        reply_text = ""
+        audio_info = None
+        
+        if isinstance(response, dict):
+            # Agent.chat() 返回字典格式：{"text": "...", "audio_path": "...", "audio_data": "..."}
+            reply_text = response.get("text", "")
+            audio_path = response.get("audio_path")
+            audio_data = response.get("audio_data")
+            
+            if audio_path or audio_data:
+                audio_info = {
+                    "url": audio_path,
+                    "data": audio_data,
+                    "filename": f"tts_{int(__import__('time').time())}.wav",
+                }
+        else:
+            # 如果返回字符串，直接作为回复文本
+            reply_text = str(response)
 
         return {
             "code": 0,
             "message": "success",
             "data": {
-                "response": response,
+                "reply": reply_text,
+                "audio": audio_info,
                 "agent_id": body.agent_id,
                 "session_id": body.session_id or "default",
+                "tool_messages": response.get("tool_messages", []) if isinstance(response, dict) else [],
+                "reasoning": response.get("reasoning", "") if isinstance(response, dict) else "",
             },
             "request_id": request_id,
         }

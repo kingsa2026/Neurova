@@ -28,13 +28,6 @@ MODEL_REGISTRY = {
         "required_files": ["model.onnx"],
         "size_hint": "~50MB",
     },
-    "moss-audio-4b": {
-        "repo_id": "OpenMOSS-Team/MOSS-Audio-4B-Instruct",
-        "local_dir": "models/audio/moss-audio-4b",
-        "description": "MOSS-Audio-4B 音频理解模型",
-        "required_files": ["config.json"],
-        "size_hint": "~8GB",
-    },
     "bge-small-zh-v1.5": {
         "repo_id": "BAAI/bge-small-zh-v1.5",
         "description": "中文文本嵌入向量模型 (512维)",

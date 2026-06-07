@@ -1,904 +1,310 @@
 # Neurova API 接口文档
 
-> **版本**: v1.0.0  
-> **基础路径**: `/api/v1`  
-> **协议**: HTTP/HTTPS  
-> **数据格式**: JSON  
-> **最后更新**: 2026-05-08
-
----
-
-## 目录
-
-1. [认证接口](#1-认证接口)
-2. [对话接口](#2-对话接口)
-3. [记忆管理接口](#3-记忆管理接口)
-4. [配置接口](#4-配置接口)
-5. [Agent 接口](#5-agent-接口)
-6. [技能接口](#6-技能接口)
-7. [渠道接口](#7-渠道接口)
-8. [心愿接口](#8-心愿接口)
-9. [协作接口](#9-协作接口)
-10. [任务调度接口](#10-任务调度接口)
-11. [日志接口](#11-日志接口)
-12. [系统接口](#12-系统接口)
-
----
+> **版本**: v2.0.0 | **基础路径**: `/api/v1` | **协议**: HTTP/HTTPS | **数据格式**: JSON  
+> **最后更新**: 2026-06-07 | **端点模块**: 75 个 | **端点总数**: 625+
 
 ## 通用说明
 
-### 响应格式
+**响应格式**: `{"code": 0, "data": {}, "message": "success", "request_id": "uuid"}`
 
-所有接口统一返回以下 JSON 格式：
+**认证**: `Authorization: Bearer <token>` (JWT Token, 部分端点支持 API Key)
 
-```json
-{
-  "success": true,
-  "data": {},
-  "error": null,
-  "message": "操作成功"
-}
-```
-
-**字段说明**:
-- `success` (boolean): 请求是否成功
-- `data` (any): 成功时返回的数据
-- `error` (string): 失败时的错误信息
-- `message` (string): 附加说明信息
-
-### HTTP 状态码
-
-| 状态码 | 说明 |
-|--------|------|
-| 200 | 请求成功 |
-| 400 | 请求参数错误 |
-| 401 | 未授权 |
-| 404 | 资源不存在 |
-| 500 | 服务器内部错误 |
-
-### 认证
-
-需要在请求头中添加 Token：
-
-```
-Authorization: Bearer <your_token>
-```
+**分页**: `limit` (默认50), `offset` (默认0)
 
 ---
 
-## 1. 认证接口
+## 一、核心功能 (15模块)
 
-### 1.1 用户登录
+### 1. `/api/v1/health` — `health.py` | 无认证
+- `GET` 系统健康检查
 
-**POST** `/api/v1/auth/login`
+### 2. `/api/v1/` — `home.py` | 无认证
+- `GET` 首页概览
 
-**请求体**:
-```json
-{
-  "username": "string",
-  "password": "string"
-}
-```
+### 3. `/api/v1/chat` — `chat.py` | 无认证
+- `POST` 发送消息 | `POST /stream` 流式SSE | `GET /history` 对话历史
 
-**响应**:
-```json
-{
-  "success": true,
-  "data": {
-    "token": "string",
-    "refresh_token": "string",
-    "expires_in": 3600
-  }
-}
-```
+### 4. `/api/v1/agents` — `agent.py` | 无认证
+- CRUD: `GET` 列表 | `GET /{id}` 详情 | `POST` 创建 | `DELETE /{id}` 删除
+- 扩展: `GET /{id}/stats` 统计 | `POST /{id}/switch` 切换 | `GET/PUT /{id}/constitution` 宪法 | `GET/PUT /{id}/personality` 性格 | `POST /{id}/decision` 决策
 
-### 1.2 刷新 Token
+### 5. `/api/v1/auth` — `auth.py` | 部分认证
+- `POST /login` 登录 | `POST /refresh` 刷新Token | `GET /me` 当前用户(需认证) | `POST /register` 注册 | `POST /register/send-code` 发验证码 | `POST /register/verify-code` 验证 | `POST /register/invite` 邀请注册
 
-**POST** `/api/v1/auth/refresh`
+### 6. `/api/v1/memory` — `memory.py` + `memory/` | 子模块需认证
+- **主CRUD**: `GET` 列表 | `GET /{id}` 详情 | `POST` 创建 | `PUT /{id}` 更新 | `DELETE /{id}` 删除 | `POST /search` 搜索 | `GET /stats` 统计
+- **子模块** (均需认证):
+  - `working_memory.py` -> `GET/POST /working` 工作记忆
+  - `emotion.py` -> `GET /emotion` | `POST /emotion/analyze` | `GET /emotion/stats`
+  - `reflection.py` -> `GET /reflection` | `POST /reflection/trigger`
+  - `profile.py` -> `GET/PUT /profile`
+  - `metacognition.py` -> `GET /metacognition/monitor` | `POST /metacognition/reflect` | `POST /metacognition/optimize` | `GET /metacognition/health`
+  - `questions.py` -> `GET/POST /questions` | `POST /questions/{qid}/answer`
+  - `tkg.py` -> `GET/POST /tkg/facts` | `GET /tkg/conflicts`
+  - `eki.py` -> `GET /eki` | `POST /eki/optimize`
 
-**请求体**:
-```json
-{
-  "refresh_token": "string"
-}
-```
+### 7. `/api/v1/models` — `model.py` | 无认证
+- CRUD + `POST /probe-multimodal` | `POST /check-connection`
 
----
+### 8. `/api/v1/providers` — `provider.py` | 无认证
+- CRUD + `POST /activate-model` | `GET /active-model` | `GET /{id}/models/discover` | `POST /{id}/models/{m}/probe-multimodal` | `POST /{id}/check-connection` | `POST /{id}/models/{m}/check-connection`
 
-## 2. 对话接口
+### 9. `/api/v1/skills` — `skill.py` | 无认证
+- `GET` 列表 | `GET /{id}` 详情 | `POST /{id}/execute` 执行 | `GET /stats` 统计 | `POST /learn` 学习 | `GET /tips` 提示
 
-### 2.1 发送消息
+### 10. `/api/v1/settings` — `settings.py` | 无认证
+- `GET/PUT` 系统设置 | `GET/PUT /llm` LLM配置 | `POST /llm/test` 测试
 
-**POST** `/api/chat`
+### 11. `/api/v1/logs` — `logs.py` | 无认证
+- `GET` 系统日志 (level, limit, start_time, end_time)
 
-**请求体**:
-```json
-{
-  "message": "string",
-  "agent_name": "string (可选)",
-  "agent_id": "string (可选)"
-}
-```
+### 12. `/api/v1/stats` — `stats.py` | 无认证
+- `GET` 总览 | `GET /agents` | `GET /memories` | `GET /skills`
 
-**响应**:
-```json
-{
-  "success": true,
-  "response": "string",
-  "agent_name": "string",
-  "timestamp": "2026-05-08T10:00:00"
-}
-```
+### 13. `/api/v1/monitor` — `monitor.py` | 无认证
+- `GET` 监控 | `GET /performance` | `GET /resources`
 
-### 2.2 获取对话历史
+### 14. `/api/v1/scheduler` — `scheduler.py` | 无认证
+- `GET/POST /tasks` | `PUT/DELETE /tasks/{id}` | `POST /tasks/{id}/toggle`
 
-**GET** `/api/chat/history?agent_id=xxx`
-
-**响应**:
-```json
-{
-  "success": true,
-  "messages": [
-    {
-      "role": "user|assistant",
-      "content": "string",
-      "timestamp": "2026-05-08T10:00:00"
-    }
-  ]
-}
-```
-
-### 2.3 流式对话 (SSE)
-
-**POST** `/api/chat/stream`
-
-**请求体**:
-```json
-{
-  "message": "string",
-  "agent_id": "string (可选)"
-}
-```
-
-**响应**: Server-Sent Events 流
+### 15. `/api/v1/trace` — `trace.py` | 无认证
+- `GET` 轨迹 | `GET /{id}` 详情 | `GET /agent/{agent_id}`
 
 ---
 
-## 3. 记忆管理接口
+## 二、生成与知识 (8模块)
 
-### 3.1 获取记忆列表
+### 16. `/api/v1/generation` — `generation.py`
+- `POST /text` | `POST /image` | `POST /video` | `POST /audio` | `GET /tasks/{id}`
 
-**GET** `/api/v1/memories`
+### 17. `/api/v1/image` — `image.py`
+- `POST /analyze` | `POST /edit` | `POST /convert`
 
-**查询参数**:
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| query | string | 否 | 搜索关键词 |
-| category | string | 否 | 分类筛选 |
-| min_temperature | int | 否 | 最低温度 |
-| limit | int | 否 | 返回数量 (默认 50) |
-| offset | int | 否 | 偏移量 (默认 0) |
+### 18. `/api/v1/media` — `media.py`
+- `POST /upload` | `GET` 列表 | `GET /{id}` | `DELETE /{id}`
 
-**响应**:
-```json
-{
-  "success": true,
-  "count": 10,
-  "total": 128,
-  "memories": [
-    {
-      "id": "mem_xxx",
-      "content": "string",
-      "category": "conversation|fact|profile|...",
-      "temperature": 85,
-      "source": "用户陈述|AI 推断|系统记录",
-      "created_at": "2026-05-08T10:00:00",
-      "updated_at": "2026-05-08T10:00:00"
-    }
-  ]
-}
-```
+### 19. `/api/v1/knowledge` — `knowledge.py`
+- CRUD: `GET` | `POST` | `GET/PUT/DELETE /{id}` | `POST /search`
 
-### 3.2 获取单个记忆
+### 20. `/api/v1/growth` — `growth.py`
+- `GET /logs` | `GET /reports` | `GET /metrics` | `POST /events`
 
-**GET** `/api/v1/memories/{memory_id}`
+### 21. `/api/v1/sleep` — `sleep.py`
+- `GET/POST /config` | `GET /status` | `POST /trigger` | `GET /dreams`
 
-**响应**:
-```json
-{
-  "success": true,
-  "memory": {
-    "id": "mem_xxx",
-    "content": "string",
-    "category": "conversation",
-    "temperature": 85,
-    "created_at": "2026-05-08T10:00:00"
-  }
-}
-```
+### 22. `/api/v1/runtime` — `runtime.py`
+- `GET` 列表 | `GET /{id}` | `POST /execute` | `GET /results/{id}`
 
-### 3.3 创建记忆
-
-**POST** `/api/v1/memories`
-
-**请求体**:
-```json
-{
-  "content": "string",
-  "category": "conversation (可选，默认 conversation)",
-  "source": "string (可选)",
-  "temperature": 50 (可选)
-}
-```
-
-**响应**:
-```json
-{
-  "success": true,
-  "memory_id": "mem_xxx",
-  "timestamp": "2026-05-08T10:00:00"
-}
-```
-
-### 3.4 删除记忆
-
-**DELETE** `/api/v1/memories/{memory_id}`
-
-**响应**:
-```json
-{
-  "success": true,
-  "message": "记忆已删除",
-  "memory_id": "mem_xxx"
-}
-```
-
-### 3.5 搜索记忆
-
-**GET** `/api/v1/memories/search?query=xxx&limit=10`
-
-**查询参数**:
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| query | string | 是 | 搜索关键词 |
-| limit | int | 否 | 返回数量 (默认 10) |
-
-**响应**:
-```json
-{
-  "success": true,
-  "count": 5,
-  "query": "xxx",
-  "memories": [...]
-}
-```
-
-### 3.6 获取记忆统计
-
-**GET** `/api/v1/memories/stats`
-
-**响应**:
-```json
-{
-  "success": true,
-  "stats": {
-    "total": 128,
-    "by_category": {
-      "conversation": 50,
-      "fact": 30,
-      "profile": 20
-    },
-    "by_temperature": {
-      "hot": 15,
-      "warm": 45,
-      "cold": 68
-    }
-  }
-}
-```
-
-### 3.7 获取记忆配置
-
-**GET** `/api/v1/memory/config`
-
-**响应**:
-```json
-{
-  "success": true,
-  "config": {
-    "decay_rate": 0.1,
-    "max_temperature": 100,
-    "consolidation_threshold": 80,
-    "hot_threshold": 50
-  }
-}
-```
-
-### 3.8 更新记忆配置
-
-**PUT** `/api/v1/memory/config`
-
-**请求体**:
-```json
-{
-  "decay_rate": 0.1,
-  "max_temperature": 100
-}
-```
-
-### 3.9 获取温度配置
-
-**GET** `/api/v1/memory/config/temperature`
-
-**响应**:
-```json
-{
-  "success": true,
-  "config": {
-    "decay_rate": 0.1,
-    "max_temperature": 100,
-    "consolidation_threshold": 80,
-    "hot_threshold": 50
-  }
-}
-```
-
-### 3.10 更新温度配置
-
-**POST** `/api/v1/memory/config/temperature`
-
-**请求体**:
-```json
-{
-  "decay_rate": 0.15,
-  "hot_threshold": 60
-}
-```
-
-### 3.11 获取记忆关联
-
-**GET** `/api/v1/memory/associations`
-
-**响应**:
-```json
-{
-  "success": true,
-  "associations": [
-    {
-      "memory_id": "mem_xxx",
-      "related_ids": ["mem_yyy", "mem_zzz"]
-    }
-  ]
-}
-```
-
-### 3.12 获取记忆版本
-
-**GET** `/api/v1/memory/versions/{memory_id}`
-
-**响应**:
-```json
-{
-  "success": true,
-  "memory_id": "mem_xxx",
-  "versions": [
-    {
-      "version": 1,
-      "content": "string",
-      "created_at": "2026-05-01T10:00:00",
-      "updated_at": "2026-05-01T10:00:00"
-    }
-  ]
-}
-```
-
-### 3.13 获取记忆流
-
-**GET** `/api/v1/memory/stream?limit=50&type=xxx`
-
-**查询参数**:
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| limit | int | 否 | 返回数量 (默认 50) |
-| type | string | 否 | 记忆类型 |
-
-### 3.14 获取记忆流统计
-
-**GET** `/api/v1/memory/stream/stats`
-
-### 3.15 元认知监控
-
-**GET** `/api/v1/memory/meta-cognition/monitor`
-
-### 3.16 元认知反思
-
-**POST** `/api/v1/memory/meta-cognition/reflect`
-
-### 3.17 元认知优化
-
-**POST** `/api/v1/memory/meta-cognition/optimize`
-
-### 3.18 元认知健康检查
-
-**GET** `/api/v1/memory/meta-cognition/health`
-
-### 3.19 旧版接口（向后兼容）
-
-**POST** `/api/remember` - 添加记忆  
-**GET** `/api/memories?query=xxx` - 搜索记忆
+### 23. `/api/v1/marketplace` — `marketplace.py`
+- `GET` 列表 | `GET /{id}` | `POST /publish` | `POST /install/{id}`
 
 ---
 
-## 4. 配置接口
+## 三、渠道与通知 (7模块)
 
-### 4.1 获取系统配置
+### 24. `/api/v1/channels` — `channel.py`
+- CRUD + `POST /{id}/toggle`
 
-**GET** `/api/v1/config/system`
+### 25. `/api/v1/channel-adapters` — `channels.py`
+- CRUD
 
-**响应**:
-```json
-{
-  "success": true,
-  "data": {
-    "host": "0.0.0.0",
-    "port": 9527,
-    "debug": true,
-    "cors_origins": "*",
-    "log_level": "INFO"
-  }
-}
-```
+### 26. `/api/v1/channel-configs` — `channel_config.py`
+- CRUD
 
-### 4.2 更新系统配置
+### 27. `/api/v1/channel-sharing` — `channel_sharing.py`
+- CRUD
 
-**PUT** `/api/v1/config/system`
+### 28. `/api/v1/notifications` — `notifications.py`
+- `GET` | `POST /{id}/read` | `POST /read-all` | `DELETE /{id}`
 
-**请求体**:
-```json
-{
-  "host": "0.0.0.0",
-  "port": 9527,
-  "debug": true,
-  "cors_origins": "*",
-  "log_level": "DEBUG"
-}
-```
+### 29. `/api/v1/audit` — `audit.py`
+- `GET` | `GET /stats` | `GET /export`
 
-### 4.3 获取 LLM 配置
-
-**GET** `/api/v1/config/llm`
-
-**响应**:
-```json
-{
-  "success": true,
-  "data": {
-    "provider": "OpenAI",
-    "model": "gpt-4",
-    "api_key": "***",
-    "temperature": 0.7,
-    "max_tokens": 4000
-  }
-}
-```
-
-### 4.4 更新 LLM 配置
-
-**POST** `/api/v1/config/llm`
-
-**请求体**:
-```json
-{
-  "provider": "OpenAI",
-  "model": "gpt-4",
-  "temperature": 0.7,
-  "max_tokens": 4000
-}
-```
-
-### 4.5 测试 LLM 配置
-
-**POST** `/api/v1/config/llm/test`
-
-**请求体**:
-```json
-{
-  "provider": "OpenAI",
-  "model": "gpt-4",
-  "api_key": "sk-xxx"
-}
-```
-
-**响应**:
-```json
-{
-  "success": true,
-  "message": "LLM 连接测试成功",
-  "response_time": 1.2
-}
-```
-
-### 4.6 获取心跳配置
-
-**GET** `/api/v1/config/heartbeat`
-
-### 4.7 保存心跳配置
-
-**POST** `/api/v1/config/heartbeat`
-
-### 4.8 获取睡眠配置
-
-**GET** `/api/v1/sleep/config`
-
-**响应**:
-```json
-{
-  "success": true,
-  "config": {
-    "auto_sleep": true,
-    "sleep_threshold": 30,
-    "wake_threshold": 70,
-    "sleep_interval": 3600
-  }
-}
-```
-
-### 4.9 保存睡眠配置
-
-**POST** `/api/v1/sleep/config`
+### 30. `/api/v1/firewall` — `firewall.py`
+- `GET/POST /rules` | `PUT/DELETE /rules/{id}` | `GET /status`
 
 ---
 
-## 5. Agent 接口
+## 四、协作与团队 (7模块)
 
-### 5.1 获取 Agent 列表
+### 31. `/api/v1/analytics` — `analytics.py`
+- `GET` | `GET /users` | `GET /agents` | `GET /conversations`
 
-**GET** `/api/v1/agents`
+### 32. `/api/v1/collaboration` — `collaboration_api.py`
+- tasks CRUD | workflows | team | discussions | records
 
-**响应**:
-```json
-{
-  "success": true,
-  "agents": [
-    {
-      "id": "Yiling",
-      "name": "一号",
-      "status": "active",
-      "description": "Neurova 核心 Agent",
-      "created_at": "2026-05-01"
-    }
-  ]
-}
-```
+### 33. `/api/v1/groups` — `groups_api.py`
+- CRUD + members
 
-### 5.2 获取单个 Agent
+### 34. `/api/v1/teams` — `teams_api.py`
+- CRUD + members
 
-**GET** `/api/v1/agents/{agent_id}`
+### 35. `/api/v1/workflows` — `workflows_api.py`
+- CRUD + execute + executions
 
-### 5.3 创建 Agent
+### 36. `/api/v1/tasks` — `tasks_api.py`
+- CRUD + status
 
-**POST** `/api/v1/agents`
-
-**请求体**:
-```json
-{
-  "id": "string",
-  "name": "string",
-  "description": "string (可选)",
-  "config": {} (可选)
-}
-```
-
-### 5.4 更新 Agent
-
-**PUT** `/api/v1/agents/{agent_id}`
-
-### 5.5 删除 Agent
-
-**DELETE** `/api/v1/agents/{agent_id}`
+### 37. `/api/v1/projects` — `projects_api.py`
+- CRUD
 
 ---
 
-## 6. 技能接口
+## 五、工具与技能 (12模块)
 
-### 6.1 获取技能列表
+### 38. `/api/v1/rules` — `rules_api.py`
+- CRUD
 
-**GET** `/api/v1/skills`
+### 39. `/api/v1/webhooks` — `webhooks.py`
+- CRUD + test
 
-**响应**:
-```json
-{
-  "success": true,
-  "skills": [
-    {
-      "id": "skill-1",
-      "name": "记忆检索",
-      "description": "从记忆库中检索相关信息"
-    }
-  ]
-}
-```
+### 40. `/api/v1/enhanced-users` — `enhanced_users_api.py`
+- CRUD
 
-### 6.2 获取单个技能
+### 41. `/api/v1/user-groups` — `user_group_api.py`
+- CRUD
 
-**GET** `/api/v1/skills/{skill_id}`
+### 42. `/api/v1/files` — `files_api.py`
+- `POST /upload` | `GET` | `GET /{id}` | `DELETE /{id}` | `GET /{id}/download`
 
-### 6.3 执行技能
+### 43. `/api/v1/file-flows` — `file_flows_api.py`
+- CRUD + process
 
-**POST** `/api/v1/skills/{skill_id}/execute`
+### 44. `/api/v1/tools` — `tool_schema.py`
+- `GET` | `GET /{id}` | `POST /{id}/validate`
 
-**请求体**:
-```json
-{
-  "params": {}
-}
-```
+### 45. `/api/v1/tool-layers` — `tool_layers.py`
+- `GET` | `GET /{id}` | `POST /{id}/activate`
 
-**响应**:
-```json
-{
-  "success": true,
-  "result": "string"
-}
-```
+### 46. `/api/v1/skill-pool` — `skill_pool_api.py`
+- `GET` | `POST` | `DELETE /{id}` | `POST /{id}/enable` | `POST /{id}/disable`
 
-### 6.4 导入技能
+### 47. `/api/v1/skills-market` — `skill_market.py` + `skills_market.py`
+- `GET` | `GET /{id}` | `POST /{id}/install` | `POST /publish` | `GET /categories`
 
-**POST** `/api/v1/skills/import`
+### 48. `/api/v1/skill-versions` — `skill_version_api.py`
+- `GET` | `GET /{id}` | `POST /{id}/rollback`
+
+### 49. `/api/v1/mobile` — `mobile_pairing.py` | 需认证
+- `POST /pairing/generate` | `GET /pairing/qrcode/{code}` | `POST /pairing/confirm` | `GET /pairing/status/{code}` | `GET /pairing/list` | `DELETE /pairing/{id}` | `WS /ws`
 
 ---
 
-## 7. 渠道接口
+## 六、记忆增强 (7模块)
 
-### 7.1 获取渠道列表
+### 50. `/api/v1/experience` — `experience_knowledge_api.py`
+- `GET` | `POST` | `GET /{id}` | `POST /search` | `GET /stats`
 
-**GET** `/api/v1/channels`
+### 51. `/api/v1/knowledge-graph` — `knowledge_graph_api.py`
+- `GET/POST /nodes` | `GET/POST /edges` | `GET /query` | `GET /visualize`
 
-### 7.2 获取单个渠道
+### 52. `/api/v1/knowledge-integration` — `knowledge_integration.py`
+- `POST /sync` | `GET /status` | `GET /sources` | `POST /sources`
 
-**GET** `/api/v1/channels/{channel_id}`
+### 53. `/api/v1/semantic-search` — `semantic_search_api.py`
+- `POST /search` | `GET /suggestions` | `POST /index` | `GET /index/status`
 
-### 7.3 创建渠道
+### 54. `/api/v1/enhanced-memory-search` — `enhanced_memory_search_api.py`
+- `POST /search` | `POST /search/multi` | `GET /filters` | `POST /reindex`
 
-**POST** `/api/v1/channels`
+### 55. `/api/v1/memory-timeline` — `memory_timeline_api.py`
+- `GET /timeline` | `GET /timeline/{memory_id}` | `GET /stats`
 
-### 7.4 更新渠道
-
-**PUT** `/api/v1/channels/{channel_id}`
-
-### 7.5 删除渠道
-
-**DELETE** `/api/v1/channels/{channel_id}`
-
-### 7.6 切换渠道状态
-
-**POST** `/api/v1/channels/{channel_id}/toggle`
+### 56. `/api/v1/synonyms` — `synonym_api.py`
+- `GET` | `POST` | `PUT /{id}` | `DELETE /{id}` | `POST /expand`
 
 ---
 
-## 8. 心愿接口
+## 七、扩展功能 (12模块)
 
-### 8.1 获取心愿列表
+### 57. `/api/v1/benchmark` — `benchmark.py`
+- `GET /suites` | `POST /run` | `GET /results/{id}` | `GET /history`
 
-**GET** `/api/v1/wishes`
+### 58. `/api/v1/console` — `console.py`
+- `GET /dashboard` | `GET /system` | `POST /command`
 
-**响应**:
-```json
-{
-  "success": true,
-  "wishes": [
-    {
-      "id": "wish-1",
-      "title": "string",
-      "status": "pending|in_progress|completed",
-      "created_at": "2026-05-08",
-      "completed_at": "2026-05-08 (可选)",
-      "progress": 0 (可选)
-    }
-  ]
-}
-```
+### 59. `/api/v1/plugins` — `plugin.py`
+- `GET` | `POST` | `GET /{id}` | `DELETE /{id}` | `POST /{id}/enable` | `POST /{id}/disable`
 
-### 8.2 创建心愿
+### 60. `/api/v1/sandbox` — `sandbox.py`
+- `POST /create` | `GET /{id}` | `POST /{id}/execute` | `DELETE /{id}`
 
-**POST** `/api/v1/wishes`
+### 61. `/api/v1/builder` — `builder.py`
+- `POST /build` | `GET /status/{id}` | `GET /history`
 
-**请求体**:
-```json
-{
-  "title": "string",
-  "description": "string (可选)"
-}
-```
+### 62. `/api/v1/computer` — `computer.py`
+- `POST /screenshot` | `POST /click` | `POST /type` | `POST /navigate` | `GET /snapshot`
 
-### 8.3 更新心愿
+### 63. `/api/v1/shared-config` — `shared_config.py`
+- `GET` | `PUT` | `GET /history`
 
-**PUT** `/api/v1/wishes/{wish_id}`
+### 64. `/api/v1/openplatform` — `openplatform_keys.py`
+- `GET/POST /keys` | `DELETE /keys/{id}` | `POST /keys/{id}/rotate`
 
-### 8.4 删除心愿
+### 65. `/api/v1/model-adapter` — `model_adapter.py`
+- CRUD
 
-**DELETE** `/api/v1/wishes/{wish_id}`
+### 66. `/api/v1/context` — `context.py` | 需认证
+- CRUD + `POST /{id}/compress` | `GET /{id}/tokens`
 
-### 8.5 完成心愿
+### 67. `/api/v1/context-pool` — `context_pool_settings.py` | 需认证
+- `GET/PUT /settings` | `GET/POST /pools` | `DELETE /pools/{id}` | `GET /stats`
 
-**POST** `/api/v1/wishes/{wish_id}/complete`
+### 68. `/api/v1/metacognition` — `metacognition_api.py` | 需认证
+- `GET` | `POST /evaluate` | `GET /insights` | `POST /reflect` | `GET /history` | `PUT /config`
 
 ---
 
-## 9. 协作接口
+## 八、其他模块 (8模块)
 
-### 9.1 获取任务列表
+### 69. `/api/v1/agent-enhancement` — `agent_enhancement.py` | 需认证
+- `GET` | `POST /apply` | `GET /{agent_id}` | `DELETE /{agent_id}/{enhancement_id}` | `GET /available`
 
-**GET** `/api/v1/collaboration/tasks`
+### 70. `/api/v1/agent-communication` — `agent_communication_api.py` | API Key认证
+- `POST /message` | `GET /messages` | `GET /channels` | `POST /broadcast` | `GET /status`
 
-**响应**:
-```json
-{
-  "success": true,
-  "tasks": [
-    {
-      "id": "task-1",
-      "title": "string",
-      "assignee": "string",
-      "status": "todo|doing|done",
-      "priority": "low|medium|high"
-    }
-  ]
-}
-```
+### 71. `/api/v1/logs-api` — `logs_api.py` | 需认证
+- `GET` | `GET /{id}` | `POST /query` | `GET /export` | `DELETE /purge` | `GET /stats`
 
-### 9.2 创建任务
+### 72. `/api/v1/memory-enhancement` — `memory_enhancement.py` | 需认证
+- `GET` | `POST /consolidate` | `POST /summarize` | `POST /forget` | `GET /suggestions` | `POST /auto-organize`
 
-**POST** `/api/v1/collaboration/tasks`
+### 73. `/api/v1/audio` — `audio.py` | 需认证
+- `POST /transcribe` | `POST /synthesize` | `GET /voices` | `POST /process` | `GET /tasks/{id}`
 
-### 9.3 更新任务
+### 74. `/api/v1/session-sync` — `session_sync.py` | 需认证
+- `POST /sync` | `GET /status` | `GET /devices` | `POST /conflicts/resolve` | `DELETE /reset`
 
-**PUT** `/api/v1/collaboration/tasks/{task_id}`
-
-### 9.4 删除任务
-
-**DELETE** `/api/v1/collaboration/tasks/{task_id}`
-
-### 9.5 获取工作流
-
-**GET** `/api/v1/collaboration/workflows`
-
-### 9.6 创建工作流
-
-**POST** `/api/v1/collaboration/workflows`
-
-### 9.7 获取团队信息
-
-**GET** `/api/v1/collaboration/team`
-
-### 9.8 获取讨论
-
-**GET** `/api/v1/collaboration/discussions`
-
-### 9.9 创建讨论
-
-**POST** `/api/v1/collaboration/discussions`
-
-### 9.10 获取协作记录
-
-**GET** `/api/v1/collaboration/records`
-
----
-
-## 10. 任务调度接口
-
-### 10.1 获取任务列表
-
-**GET** `/api/v1/scheduler/tasks`
-
-### 10.2 创建任务
-
-**POST** `/api/v1/scheduler/tasks`
-
-### 10.3 更新任务
-
-**PUT** `/api/v1/scheduler/tasks/{task_id}`
-
-### 10.4 删除任务
-
-**DELETE** `/api/v1/scheduler/tasks/{task_id}`
-
-### 10.5 切换任务状态
-
-**POST** `/api/v1/scheduler/tasks/{task_id}/toggle`
-
----
-
-## 11. 日志接口
-
-### 11.1 获取系统日志
-
-**GET** `/api/v1/logs?level=INFO&limit=50`
-
-**查询参数**:
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| level | string | 否 | 日志级别 (DEBUG/INFO/WARN/ERROR) |
-| limit | int | 否 | 返回数量 (默认 50) |
-
-**响应**:
-```json
-{
-  "success": true,
-  "logs": [
-    {
-      "level": "INFO",
-      "timestamp": "2026-05-08T10:00:00",
-      "message": "string"
-    }
-  ]
-}
-```
-
----
-
-## 12. 系统接口
-
-### 12.1 健康检查
-
-**GET** `/health`
-
-**响应**:
-```json
-{
-  "status": "healthy",
-  "timestamp": "2026-05-08T10:00:00",
-  "version": "1.0.0",
-  "uptime": 3600,
-  "memory_mb": 150.5
-}
-```
-
-### 12.2 系统统计
-
-**GET** `/api/v1/stats`
+### 75. `/api/v1/memory-share-groups` — `memory_share_groups.py` | 需认证
+- CRUD + members + `POST /{id}/memories`
 
 ---
 
 ## 附录
 
-### 记忆分类枚举
+### 认证需求总结
 
-| 值 | 说明 |
-|----|------|
-| conversation | 对话 |
-| fact | 事实 |
-| profile | 画像 |
-| relationship | 关系 |
-| skill | 技能 |
-| task | 任务 |
-| instruction | 指令 |
+| 认证类型 | 模块 |
+|----------|------|
+| **无需认证** | health, home, chat, agents, models, providers, skills, settings, logs, stats, monitor, scheduler, trace, generation, image, media, knowledge, growth, sleep, runtime, marketplace, channels, channel-adapters, channel-configs, channel-sharing, notifications, audit, firewall, analytics, collaboration, groups, teams, workflows, tasks, projects, rules, webhooks, enhanced-users, user-groups, files, file-flows, tools, tool-layers, skill-pool, skills-market, skill-versions, benchmark, console, plugins, sandbox, builder, computer, shared-config, openplatform, model-adapter, experience, knowledge-graph, knowledge-integration, semantic-search, enhanced-memory-search, memory-timeline, synonyms |
+| **JWT Token** | auth(me), memory子模块, context, context-pool, metacognition, agent-enhancement, logs-api, memory-enhancement, audio, session-sync, memory-share-groups |
+| **API Key** | agent-communication |
+| **HTTPBearer** | mobile |
 
-### 记忆来源枚举
+### 项目统计
 
-| 值 | 说明 |
-|----|------|
-| 用户陈述 | 用户直接提供 |
-| AI 推断 | AI 分析推断 |
-| 系统记录 | 系统自动生成 |
-
-### 错误码说明
-
-| 错误码 | 说明 |
-|--------|------|
-| 400 | 请求参数错误 |
-| 401 | 未授权访问 |
-| 403 | 权限不足 |
-| 404 | 资源不存在 |
-| 500 | 服务器内部错误 |
+| 指标 | 数值 |
+|------|------|
+| 后端API模块 | 75 |
+| 端点总数 | 625+ |
+| GET端点 | ~250 |
+| POST端点 | ~250 |
+| PUT端点 | ~50 |
+| DELETE端点 | ~50 |
+| 需认证端点 | ~100 |
+| 公开端点 | ~525 |
+| 前端覆盖 | 94.7% (71/75) |
 
 ---
 
-## 更新日志
-
-### v1.0.0 (2026-05-08)
-- 初始版本
-- 统一 RESTful API 规范
-- 添加所有核心模块接口
-- 添加 Mock 接口支持前端开发
-- 保持向后兼容旧版接口
+> **文档结束** — Neurova API Reference v2.0.0

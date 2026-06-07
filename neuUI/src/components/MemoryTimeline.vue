@@ -18,6 +18,10 @@
         <div class="memory-card glass-effect">
           <div class="memory-header">
             <span class="memory-type" :style="{ color: getMemoryColor(getMemoryCategory(memory)) }">{{ getMemoryTypeLabel(getMemoryCategory(memory)) }}</span>
+            <a-tag v-if="memory.shared" color="blue" class="shared-badge">共享</a-tag>
+            <a-tag v-for="groupId in (memory.share_group_ids || [])" :key="groupId" color="cyan" class="share-group-badge">
+              {{ groupId }}
+            </a-tag>
             <span class="memory-time">{{ formatTime(memory.timestamp) }}</span>
           </div>
           <div class="memory-content">{{ memory.content || memory.summary || '' }}</div>
@@ -67,6 +71,9 @@ interface Memory {
   summary?: string
   timestamp: number
   tags?: string[]
+  shared?: boolean
+  agent_id?: string
+  share_group_ids?: string[]
 }
 
 const props = defineProps<{
@@ -249,6 +256,17 @@ function formatTime(timestamp: number): string {
 .memory-type {
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+.shared-badge {
+  font-size: 0.75rem;
+  margin-left: 8px;
+}
+
+.share-group-badge {
+  font-size: 0.7rem;
+  margin-left: 4px;
+  opacity: 0.9;
 }
 
 .memory-time {

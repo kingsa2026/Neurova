@@ -34,29 +34,51 @@
 
 ---
 
-### 🧠 2. 17 维记忆分类体系 — 超越简单的短期/长期记忆
+### 🧠 2. 多维记忆分类体系 — 超越简单的短期/长期记忆
 
-不同于传统 Agent 框架只区分"短期/长期"记忆，Neurova 将记忆精细划分为 **17 种类型**：
+不同于传统 Agent 框架只区分"短期/长期"记忆，Neurova 将记忆精细划分为 **多种类型和分类**：
+
+#### 记忆类型（MemoryType）
 
 | 类型 | 说明 | 典型场景 |
 |------|------|----------|
+| `semantic` | 语义记忆 | 事实知识、概念理解 |
+| `episodic` | 情景记忆 | 事件经历、对话记录 |
+| `procedural` | 程序记忆 | 技能操作、工具使用 |
+| `pattern` | 模式记忆 | 行为模式、习惯规律 |
+| `emotional` | 情感记忆 | 情感状态、情绪变化 |
+| `working` | 工作记忆 | 临时任务、当前上下文 |
+
+#### 记忆分类（MemoryCategory）
+
+| 分类 | 说明 | 典型场景 |
+|------|------|----------|
+| `general` | 通用记忆 | 默认分类 |
 | `conversation` | 对话记忆 | 聊天记录、讨论内容 |
-| `fact` | 事实记忆 | 客观信息、常识、数据 |
-| `profile` | 用户画像 | 性格、偏好、习惯、生日 |
-| `relationship` | 人际关系 | 朋友、同事、家人 |
-| `skill` | 技能记忆 | 工具使用、操作方法 |
+| `knowledge` | 知识记忆 | 专业知识、学习内容 |
 | `experience` | 经验记忆 | 解决问题的过程、项目经历 |
-| `lesson` | 教训记忆 | 失败经验、踩过的坑 |
-| `task` | 任务记忆 | 正在进行的目标、待办 |
-| `creative` | 创意记忆 | 灵感、想法、脑暴结果 |
-| `emotional` | 情感记忆 | 触发强烈情感的事件 |
-| `identity` | 身份记忆 | 自我认知、身份标识 |
-| `reflection_log` | 反思日志 | 处理问题时用 |
-| `question_queue` | 问题队列 | 主动提问时用 |
-| `core_command` | 核心指令 | 重要命令和规则 |
-| `heartbeat_task` | 心跳任务 | 定期执行的任务 |
-| `context_snapshot` | 上下文快照 | 阶段二的上下文状态 |
-| `tool_usage` | 工具使用 | ToolMemory集成 |
+| `tool_usage` | 工具使用 | 工具调用经验、技能操作 |
+| `reflection` | 反思记忆 | 自我评价、经验教训 |
+| `user_preference` | 用户偏好 | 性格、习惯、喜好 |
+
+#### 记忆生命周期（LifecycleStage）
+
+| 阶段 | 说明 | 温度范围 |
+|------|------|----------|
+| `active` | 活跃记忆 | 50-100°C |
+| `consolidated` | 已巩固 | 30-50°C |
+| `archived` | 已归档 | 10-30°C |
+| `forgotten` | 已遗忘 | 0-10°C |
+| `crystallized` | 已结晶 | 永久保存 |
+
+#### 记忆视角（MemoryPerspective）
+
+| 视角 | 说明 | 应用场景 |
+|------|------|----------|
+| `first_person` | 第一人称 | 个人经历、主观感受 |
+| `second_person` | 第二人称 | 对话记录、交互历史 |
+| `third_person` | 第三人称 | 客观事实、外部信息 |
+| `system` | 系统视角 | 系统日志、技术记录 |
 
 ---
 
@@ -1011,7 +1033,7 @@ POST /api/v1/context/pool-settings/test-budget
 
 - [NeuCova 独特特点](#-neucova-独特特点)
   - [1. 每一颗 Agent 都是独特的星星](#1-每一颗-agent-都是独特的星星)
-  - [2. 17 维记忆分类体系](#2-17-维记忆分类体系)
+  - [2. 多维记忆分类体系](#2-多维记忆分类体系--超越简单的短期长期记忆)
   - [3. 记忆温度机制](#3-记忆温度机制)
   - [4. 情感中枢引擎](#4-情感中枢引擎-v30--四层17种情感体系)
   - [5. CogArch 2.0 认知架构](#5-cogarch-20-认知架构)
@@ -1051,21 +1073,11 @@ POST /api/v1/context/pool-settings/test-budget
 
 ### 测试覆盖率统计
 
-| 模块 | 测试数 | 状态 |
-|------|--------|------|
-| core | 68 | ✅ 全部通过 |
-| memory | 165 | ✅ 164通过, 1跳过 |
-| security | 41 | ✅ 全部通过 |
-| admin | 56 | ✅ 全部通过 |
-| api | 12 | ✅ 全部通过 |
-| auth | 12 | ✅ 全部通过 |
-| projects | 19 | ✅ 全部通过 |
-| channels | 11 | ✅ 全部通过 |
-| execution | 9 | ✅ 全部通过 |
-| skills | 9 | ✅ 全部通过 |
-| cognitive | 9 | ✅ 全部通过 |
-| llm | 7 | ✅ 全部通过 |
-| **总计** | **419** | **✅ 418 通过, 1 跳过 (99.8%)** |
+| 模块 | 测试文件数 | 状态 |
+|------|------------|------|
+| 后端单元测试 | 86 | ✅ 核心模块测试 |
+| 前端测试 | 446 | ✅ 组件和API测试 |
+| **总计** | **532** | **✅ 测试文件** |
 
 ### 已修复的 Bug
 
@@ -1117,23 +1129,21 @@ pytest tests/unit/ --cov=neurova --cov-report=html
 ### 测试目录结构
 
 ```
-tests/
-├── unit/                    # 单元测试层 (419 测试)
-│   ├── core/               # 核心模块测试 (68 测试)
-│   ├── memory/             # Memory 模块测试 (165 测试)
-│   ├── security/           # 安全模块测试
-│   ├── admin/              # 管理模块测试
-│   ├── api/               # API 模块测试
-│   ├── auth/              # 认证模块测试
-│   ├── projects/          # 项目模块测试
-│   ├── channels/          # 通道模块测试
-│   ├── execution/         # 执行模块测试
-│   ├── skills/            # 技能模块测试
-│   ├── cognitive/         # 认知模块测试
-│   └── llm/              # LLM 模块测试
-├── integration/            # 集成测试层
-├── e2e/                   # 端到端测试层
-└── performance/           # 性能测试层
+tests/                          # 前端测试（446个测试文件）
+├── unit/                       # 单元测试
+├── integration/                # 集成测试
+├── e2e/                        # 端到端测试
+└── performance/                # 性能测试
+
+neurova/tests/                  # 后端测试（86个测试文件）
+├── core/                       # 核心模块测试
+├── memory/                     # 记忆系统测试
+├── llm/                        # LLM 模块测试
+├── projects/                   # 项目管理测试
+├── media/                      # 媒体处理测试
+├── scripts/                    # 脚本测试
+├── test_agent_brain/           # Agent 大脑测试
+└── skills/                     # 技能测试
 ```
 
 详细文档请查看 [tests/README.md](tests/README.md)
@@ -1281,27 +1291,38 @@ Neurova 的**工作流引擎**让你可以搭建从简单到复杂的自动化�
 
 ## 安全守护
 
-Neurova 的每一颗星星都需要被守护。我们内置了三层安全防火墙：
+Neurova 的每一颗星星都需要被守护。我们内置了多层安全防护：
 
 | 层级 | 保护内容 |
 |------|---------|
 | **L0 入口守护** | JWT 认证、IP 黑白名单、速率限制、输入安全扫描 |
 | **L1 隔离守护** | 用户间硬隔离（不可关闭）、Agent 间可选隔离 |
 | **L2 输出守护** | API Key 脱敏、敏感路径拦截、文件类型保护 |
+| **L3 审计守护** | 操作审计日志、安全事件监控、异常行为检测 |
+| **L4 数据守护** | 数据加密存储、敏感信息匿名化、被遗忘权支持 |
 
 **你的每一颗星星都安全地属于你，任何人都无法窥探。**
 
 ### 用户隔离机制
 
-所有数据均按用户隔离：
+所有数据均按三层隔离机制保护：
 
-| 数据类型 | 隔离方式 |
-|----------|----------|
-| 记忆数据 | 按 `neuser_id` + `user_id` 隔离 |
-| API Key 配置 | 按 `user_id` 隔离 |
-| 知识库 | 按 `user_id` 隔离 |
-| 文档 | 按 `user_id` + 知识库隔离 |
-| 进化进度 | 按 `user_id` 隔离 |
+| 数据类型 | 隔离方式 | 说明 |
+|----------|----------|------|
+| 记忆数据 | `agent_id` + `neuser_id` + `user_id` | 三层隔离，支持跨Agent共享 |
+| API Key 配置 | `user_id` 隔离 | 用户独立配置 |
+| 知识库 | `user_id` 隔离 | 用户独立知识库 |
+| 文档 | `user_id` + 知识库隔离 | 文档与知识库关联 |
+| 进化进度 | `user_id` 隔离 | 用户独立进化轨迹 |
+| 协作数据 | `agent_id` + `user_id` 隔离 | 协作项目独立 |
+| 工具记忆 | `agent_id` + `user_id` 隔离 | 工具使用经验独立 |
+| 情感数据 | `agent_id` + `user_id` 隔离 | 情感状态独立 |
+
+**三层隔离机制**：
+- **Agent 隔离** (`agent_id`)：不同 Agent 的数据完全隔离
+- **系统用户隔离** (`neuser_id`)：不同系统用户的数据隔离
+- **对话用户隔离** (`user_id`)：同一 Agent 不同对话用户的数据隔离
+- **跨 Agent 共享** (`shared=True`)：可选的数据共享机制
 
 ---
 
@@ -1309,12 +1330,20 @@ Neurova 的每一颗星星都需要被守护。我们内置了三层安全防火
 
 Agent 星星可以连接到你使用的各种平台：
 
-- **Web 对话** — 内建对话界面
-- **REST API** — 标准接口集成
+- **Web 对话** — 内建对话界面（NeuUI）
+- **REST API** — 标准接口集成（77+ API 端点）
+- **飞书** — 企业通讯接入（WebSocket 长连接 + REST API + AI 机器人）
+- **钉钉** — 企业通讯接入（Stream 模式 + Access Token）
+- **企业微信** — 企业通讯接入（WebSocket 智能机器人 + 回调）
+- **微信** — 公众号/企业微信（AI 机器人 + 媒体处理）
 - **Telegram** — 即时通讯接入
-- **微信** — 公众号/企业微信
 - **Discord** — 社群平台
+- **QQ** — 即时通讯接入（QQ 机器人）
+- **MQTT** — 物联网协议接入
+- **WebSocket** — 实时双向通信
+- **SIP** — 语音通话接入
 - **Webhook** — 任意外部系统
+- **移动设备** — QR 码扫码配对（WebSocket 持久连接）
 
 ---
 
@@ -1406,7 +1435,7 @@ Agent 星星可以连接到你使用的各种平台：
 ### 💡 P2 - 能力级突破
 
 #### 6. Computer Use 能力
-- **功能**：让 Agent 能够操作计算机（截图、点击、输入、滚动、文件操作、Shell 命令）
+- **功能**：让 Agent 能够操作计算机（截图、点击、输入、滚动、文件操作、Shell 命令、浏览器自动化）
 - **隔离层级**：全局共享 + L1/L2 防火墙
 - **使用方式**：
   ```bash
@@ -1428,6 +1457,12 @@ Agent 星星可以连接到你使用的各种平台：
   
   # Shell 命令
   neurova computer shell "ls -la"
+  
+  # 浏览器自动化
+  neurova computer browser navigate --url "https://example.com"
+  neurova computer browser screenshot
+  neurova computer browser click --selector "#login-button"
+  neurova computer browser type --selector "#username" --text "user"
   ```
 
 #### 7. 运行时+传输层双抽象
@@ -1482,18 +1517,43 @@ Agent 星星可以连接到你使用的各种平台：
 
 ### API 端点
 
-所有 v4.0 功能都提供了完整的 RESTful API：
+所有功能都提供了完整的 RESTful API（77+ 端点模块）：
 
-| 功能 | 端点前缀 |
-|------|-----------|
-| MCP Client | `/api/v1/tool-layers/mcp` |
-| 模型适配器 | `/api/v1/model-adapter` |
-| Agent 构建器 | `/api/v1/builder` |
-| 思维沙箱 | `/api/v1/sandbox` |
-| Computer Use | `/api/v1/computer` |
-| 运行时管理 | `/api/v1/runtime` |
-| Image 管道 | `/api/v1/image` |
-| 基准测试 | `/api/v1/benchmark` |
+| 功能 | 端点前缀 | 说明 |
+|------|-----------|------|
+| MCP Client | `/api/v1/tool-layers/mcp` | MCP 工具管理 |
+| 模型适配器 | `/api/v1/model-adapter` | LLM 模型管理 |
+| Agent 构建器 | `/api/v1/builder` | Agent 声明式构建 |
+| 思维沙箱 | `/api/v1/sandbox` | 隔离思考空间 |
+| Computer Use | `/api/v1/computer` | 计算机操作和浏览器自动化 |
+| 运行时管理 | `/api/v1/runtime` | 执行运行时管理 |
+| Image 管道 | `/api/v1/image` | 镜像构建管理 |
+| 基准测试 | `/api/v1/benchmark` | Agent 评测框架 |
+| 记忆系统 | `/api/v1/memory` | 记忆管理（17种类型） |
+| 情感系统 | `/api/v1/emotion` | 情感分析和管理 |
+| 进化系统 | `/api/v1/evolution` | 人格、动机、宪法、反思 |
+| 协作系统 | `/api/v1/collaboration` | 多Agent协作和工作流 |
+| 知识库 | `/api/v1/knowledge` | 知识库管理和RAG |
+| 安全系统 | `/api/v1/security` | 认证、授权、审计 |
+| 插件系统 | `/api/v1/plugins` | 插件管理和执行 |
+| 移动设备 | `/api/v1/mobile` | QR码配对和WebSocket |
+| 分析系统 | `/api/v1/analytics` | 数据分析和统计 |
+| 通知系统 | `/api/v1/notifications` | 消息通知管理 |
+| 市场系统 | `/api/v1/marketplace` | 技能市场管理 |
+| 睡眠系统 | `/api/v1/sleep` | 记忆整理和梦境 |
+| 防火墙 | `/api/v1/firewall` | 安全防护管理 |
+| 审计日志 | `/api/v1/audit` | 操作审计记录 |
+| 统计信息 | `/api/v1/stats` | 系统统计信息 |
+| Webhook | `/api/v1/webhooks` | Webhook 管理 |
+| 渠道管理 | `/api/v1/channels` | 多渠道接入管理 |
+| 上下文管理 | `/api/v1/context` | 上下文池和缓存 |
+| 增强记忆搜索 | `/api/v1/enhanced-memory-search` | 高级记忆检索 |
+| 语义搜索 | `/api/v1/semantic-search` | 向量语义搜索 |
+| 记忆增强 | `/api/v1/memory-enhancement` | 记忆智能增强 |
+| Agent 增强 | `/api/v1/agent-enhancement` | Agent 能力增强 |
+| 共享配置 | `/api/v1/shared-config` | 跨Agent共享配置 |
+| 开放平台 | `/api/v1/openplatform` | 开放API平台 |
+| 调度器 | `/api/v1/scheduler` | 任务调度管理 |
 
 ---
 
@@ -1521,9 +1581,8 @@ Neurova
 │   └── 外部 API 集成
 │
 └── 接口层 (Interface Layer)
-    ├── Console 管理后台 (React + TypeScript + Vite)
-    ├── NeuUI (React + TypeScript + Vite)
-    └── 多渠道接入 (WeChat/Telegram/Email/Slack/Discord/Webhook)
+    ├── NeuUI (Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue)
+    └── 多渠道接入 (飞书/钉钉/企业微信/Telegram/Discord/Webhook)
 ```
 
 ### 上下文缓存与智能压缩
@@ -1660,17 +1719,13 @@ Neurova 支持连接**心流知识库**，为 AI 助手提供外部知识接入�
 ### 后端启动
 
 ```bash
-cd neurova
+# 安装依赖
 pip install -r requirements.txt
-python -m neurova.api.main
-```
 
-### 前端启动（Console 管理后台）
-
-```bash
-cd console
-npm install
-npm run dev
+# 启动后端服务（端口 9527）
+python start.py
+# 或者直接使用 uvicorn
+python -m uvicorn neurova.api.app:app --reload --host 0.0.0.0 --port 9527
 ```
 
 ### 前端启动（NeuUI）
@@ -1679,6 +1734,7 @@ npm run dev
 cd neuUI
 npm install
 npm run dev
+# 前端将运行在 http://localhost:8100
 ```
 
 ---
@@ -1687,39 +1743,68 @@ npm run dev
 
 ```
 Neurova/
-├── neurova/              # 后端核心（Python）
-│   ├── cognitive_layers/ # 认知层（记忆、情感、意图、进化）
-│   ├── execution_layers/ # 执行层（Agent、任务调度、协作）
-│   ├── tool_layers/      # 工具层（Skill、插件）
-│   ├── projects/         # 协作模块（项目管理、团队管理、工作流、群组聊天）
-│   ├── api/              # API 接口
-│   ├── agent/            # Agent核心实现
-│   ├── memory/           # 记忆系统
-│   ├── skills/           # Skill系统
-│   ├── knowledge/        # 知识库适配
-│   ├── channels/         # 多渠道接入
-│   ├── security/         # 安全守护
-│   └── utils/            # 工具函数
+├── neurova/                    # 后端核心（Python）
+│   ├── cognitive_layers/       # 认知层（记忆、情感、意图、进化、MoE路由）
+│   ├── execution_layers/       # 执行层（运行时、传输层）
+│   ├── tool_layers/            # 工具层（MCP、工具市场）
+│   ├── evolution/              # 进化系统（人格、动机、宪法、反思）
+│   ├── plugins/                # 插件系统
+│   ├── collaborate/            # 协作模块（项目管理、团队、工作流、群组聊天）
+│   ├── collaboration/          # 协作隔离和模板
+│   ├── api/                    # API 接口（77+ 端点模块）
+│   ├── agent/                  # Agent 核心实现（模块化重构）
+│   ├── llm/                    # LLM 管理（多模型客户端、路由器、Provider）
+│   ├── channels/               # 多渠道接入（飞书、钉钉、企业微信、Telegram等）
+│   ├── security/               # 安全守护（认证、授权、审计）
+│   ├── auth/                   # 认证系统
+│   ├── admin/                  # 管理后台
+│   ├── skills/                 # Skill 系统（内置技能、市场）
+│   ├── skill_system/           # 技能池管理
+│   ├── computer_use/           # Computer Use（视觉理解、浏览器自动化）
+│   ├── tts/                    # 语音合成（Edge TTS、MOSS Nano）
+│   ├── asr/                    # 语音识别
+│   ├── knowledge/              # 知识库适配
+│   ├── projects/               # 项目管理
+│   ├── builder/                # Agent 构建器
+│   ├── sandbox/                # 思维沙箱
+│   ├── benchmark/              # 基准测试框架
+│   ├── image_pipeline/         # 镜像管道管理
+│   ├── analytics/              # 数据分析
+│   ├── media/                  # 媒体处理
+│   ├── core/                   # 核心模块（模块系统、日志、配置）
+│   ├── shared_core/            # 共享核心（跨Agent共用组件）
+│   ├── context/                # 上下文管理
+│   ├── memory/                 # 记忆系统（核心实现）
+│   ├── embedding/              # 嵌入模型管理
+│   ├── utils/                  # 工具函数
+│   └── tests/                  # 后端测试（86个测试文件）
 │
-├── console/             # Console 管理后台 (React + TypeScript + Vite)
-├── neuUI/               # NeuUI 前端 (React + TypeScript + Vite)
+├── neuUI/                      # 前端（Vue 3 + TypeScript + Vite）
 │   ├── src/
-│   │   ├── api/         # API接口
-│   │   ├── components/  # 组件
-│   │   ├── pages/       # 页面（20个模块）
-│   │   ├── stores/      # 状态管理（Zustand）
-│   │   └── utils/       # 工具函数
-│   └── dist/           # 构建输出
+│   │   ├── api/                # API 接口模块
+│   │   ├── components/         # Vue 组件
+│   │   ├── pages/              # 页面（82个Vue页面）
+│   │   ├── stores/             # 状态管理（Pinia）
+│   │   ├── utils/              # 工具函数
+│   │   └── router/             # 路由配置
+│   └── dist/                   # 构建输出
 │
-├── docs/                # 架构设计文档（20+ 篇）
-│   ├── architecture/    # 架构设计文档
-│   ├── dev_progress/    # 开发进度文档
-│   ├── 用户指南/        # 用户使用指南
-│   └── api/             # API文档
+├── docs/                       # 项目文档
+│   ├── architecture/           # 架构设计文档（33篇）
+│   ├── dev_progress/           # 开发进度文档（74篇）
+│   ├── 用户指南/               # 用户使用指南
+│   ├── api/                    # API 文档
+│   ├── reports/                # 报告文档
+│   ├── plans/                  # 计划文档
+│   ├── i18n/                   # 国际化文档
+│   └── research/               # 研究文档
 │
-├── agents/              # Agent配置数据
-├── tests/               # 测试文件（419个测试）
-└── docs/                # 项目文档
+├── agents/                     # Agent 配置数据
+├── tests/                      # 前端测试
+├── docker-compose.yml          # Docker 编排配置
+├── requirements.txt            # Python 依赖
+├── start.py                    # 启动脚本
+└── install.ps1                 # Windows 安装脚本
 ```
 
 ---
@@ -1730,7 +1815,9 @@ Neurova/
 
 | 核心文档 | 内容 |
 |---------|------|
-| [PRODUCT_GUIDE.md](docs/PRODUCT_GUIDE.md) | 产品使用指南（本文档蓝本） |
+| [CONTEXT.md](CONTEXT.md) | 项目上下文文档（完整架构概览） |
+| [PRODUCT_GUIDE.md](docs/PRODUCT_GUIDE.md) | 产品使用指南 |
+| [API_REFERENCE.md](docs/API_REFERENCE.md) | API 参考文档（77+ 端点） |
 | [NEUROVA_CogArch_2.0.md](docs/NEUROVA_CogArch_2.0.md) | 认知增强架构设计 2.0 |
 | [02-memory-system.md](docs/architecture/02-memory-system.md) | 记忆系统完整设计 |
 | [12-memory-temperature-mechanism.md](docs/architecture/12-memory-temperature-mechanism.md) | 记忆温度机制 |
@@ -1740,7 +1827,10 @@ Neurova/
 | [17-memory-compression-mechanism.md](docs/architecture/17-memory-compression-mechanism.md) | 记忆压缩机制 |
 | [SKILL_VERSION_MANAGEMENT.md](docs/SKILL_VERSION_MANAGEMENT.md) | Skill 版本管理 |
 | [CONTEXT_CACHE_COMPRESSION.md](docs/CONTEXT_CACHE_COMPRESSION.md) | 上下文缓存与压缩 |
-| [协作模块完整性检查报告.md](docs/协作模块完整性检查报告.md) | 协作模块完成报告 |
+| [DOCS_ALIGNMENT_PLAN.md](docs/DOCS_ALIGNMENT_PLAN.md) | 文档对齐计划 |
+| [plugin-architecture-design.md](docs/plugin-architecture-design.md) | 插件架构设计 |
+| [cli_usage.md](docs/cli_usage.md) | CLI 使用指南 |
+| [BRAND_GUIDELINES.md](docs/BRAND_GUIDELINES.md) | 品牌指南 |
 | [心流知识库功能使用指南.md](docs/用户指南/心流知识库功能使用指南.md) | 心流知识库使用指南 |
 
 ---
@@ -1748,15 +1838,25 @@ Neurova/
 ## 技术栈
 
 ### 后端
-- **Python 3.10+**
-- **FastAPI** - API 框架
+- **Python 3.10+** - 主要编程语言
+- **FastAPI** - 高性能 API 框架
 - **SQLite** - 主数据库（支持 FTS5 全文检索）
-- **FAISS** - 向量检索
-- **Sentence Transformers** - 语义嵌入
+- **FAISS** - 向量检索引擎
+- **Sentence Transformers** - 语义嵌入模型
+- **Pydantic** - 数据验证和序列化
+- **uvicorn** - ASGI 服务器
+- **pytest** - 测试框架
 
 ### 前端
-- **Console**: React 18 + TypeScript + Vite
-- **NeuUI**: React 18 + TypeScript + Vite + Zustand + Ant Design 5
+- **Vue 3** - 渐进式 JavaScript 框架
+- **TypeScript** - 类型安全的 JavaScript 超集
+- **Vite** - 下一代前端构建工具
+- **Pinia** - Vue 状态管理库
+- **Ant Design Vue** - Vue 企业级 UI 组件库
+- **Vue Router** - Vue 路由管理
+- **Axios** - HTTP 客户端
+- **ECharts** - 数据可视化库
+- **Vitest** - 单元测试框架
 
 ---
 

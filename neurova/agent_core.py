@@ -171,6 +171,12 @@ class AgentConfig:
         tts_voice: str = "mock",  # 音色名称
         tts_auto_download: bool = True,  # 是否自动下载模型
         
+        # ASR 配置
+        enable_asr: bool = False,  # 是否启用 ASR
+        asr_engine: str = "mock",  # ASR 引擎类型 (funasr/whisper/mock)
+        asr_voice: str = "zh",  # 语言
+        asr_auto_download: bool = True,  # 是否自动下载模型
+        
         # 活水上下文池配置
         enable_context_pool: bool = True,  # 是否启用活水上下文池
         enable_auto_tagging: bool = False,  # 是否启用自动标签生成
@@ -227,6 +233,12 @@ class AgentConfig:
         self.tts_engine = tts_engine
         self.tts_voice = tts_voice
         self.tts_auto_download = tts_auto_download
+        
+        # ASR 配置
+        self.enable_asr = enable_asr
+        self.asr_engine = asr_engine
+        self.asr_voice = asr_voice
+        self.asr_auto_download = asr_auto_download
         
         # 活水上下文池配置
         self.enable_context_pool = enable_context_pool
@@ -406,8 +418,9 @@ class Agent:
                 tts_config = TTSConfig(
                     engine=self.config.tts_engine,
                     voice=self.config.tts_voice,
-                    moss_auto_download=self.config.tts_auto_download,
-                    model_cache_dir=str(self.config.workspace_path / "models" / "tts"),
+                    auto_download=self.config.tts_auto_download,
+                    model_path=str(self.config.workspace_path / "models" / "tts" / "moss-nano"),
+                    tokenizer_path=str(self.config.workspace_path / "models" / "tts" / "moss-tokenizer"),
                 )
 
                 self.tts_manager = TTSManager(tts_config)
@@ -415,6 +428,49 @@ class Agent:
 
             except Exception as e:
                 logger.warning(f"TTS管理器初始化失败: {e}")
+
+        # ASR 管理器（语音识别）
+        self.asr_manager = None
+        if self.config.enable_asr:
+            try:
+                from neurova.asr.manager import ASRManager, ASRConfig
+
+                asr_config = ASRConfig(
+                    engine=self.config.asr_engine,
+                    voice=self.config.asr_voice,
+                    model_path=str(self.config.workspace_path / "models" / "asr"),
+                    auto_download=self.config.asr_auto_download,
+                )
+
+                self.asr_manager = ASRManager(asr_config)
+                logger.info(f"Agent {self.config.name}: ASR管理器已初始化 (engine={self.config.asr_engine})")
+
+            except Exception as e:
+                logger.warning(f"ASR管理器初始化失败: {e}")
+
+        # 语音记忆桥接器（连接语音系统与记忆系统）
+        self.voice_memory_bridge = None
+        if (self.config.enable_tts or self.config.enable_asr) and self.memory_manager:
+            try:
+                from neurova.voice_memory_bridge import VoiceMemoryBridge, VoiceMemoryConfig
+                
+                voice_config = VoiceMemoryConfig(
+                    enable_asr_memory=self.config.enable_asr,
+                    enable_tts_stats=self.config.enable_tts,
+                    enable_emotion_analysis=True,
+                    min_confidence_threshold=0.5,
+                )
+                
+                self.voice_memory_bridge = VoiceMemoryBridge(
+                    config=voice_config,
+                    memory_manager=self.memory_manager,
+                    emotion_module=getattr(self.memory_manager, "_emotion_module", None),
+                    evolution_orchestrator=self.evolution,
+                )
+                logger.info(f"Agent {self.config.name}: 语音记忆桥接器已初始化")
+                
+            except Exception as e:
+                logger.warning(f"语音记忆桥接器初始化失败: {e}")
 
         # 审批管理器（危险命令审批）
         self.approval_manager = None
@@ -773,6 +829,7 @@ class Agent:
         media_url = metadata.get("media_url", "")
         filename = metadata.get("filename", "")
         mime_type = metadata.get("mime_type", "")
+        audio_bytes = metadata.get("audio_bytes")  # 语音消息可能包含音频数据
 
         media_descriptions = {
             "image": f"[用户发送了一张图片{': ' + filename if filename else ''}]",
@@ -781,12 +838,92 @@ class Agent:
             "document": f"[用户发送了一个文档{': ' + filename if filename else ''}]",
         }
         media_desc = media_descriptions.get(media_type, f"[用户发送了媒体文件: {media_type}]")
+        
+        # 语音消息：调用 ASR 引擎转写
+        if media_type == "voice" and audio_bytes and self.asr_manager:
+            try:
+                start_time = time.time()
+                asr_result = await self.asr_manager.transcribe(audio_bytes)
+                duration_ms = int((time.time() - start_time) * 1000)
+                
+                if asr_result and "text" in asr_result:
+                    transcribed_text = asr_result["text"]
+                    logger.info(f"ASR 转写结果: {transcribed_text[:100]}...")
+                    # 将转写结果作为用户输入，而不是仅注入描述
+                    media_desc = f"[语音识别结果: {transcribed_text}]"
+                    
+                    # 记录ASR结果到语音记忆桥接器
+                    voice_memory_bridge = getattr(self, "voice_memory_bridge", None)
+                    if voice_memory_bridge:
+                        try:
+                            # 提取ASR结果中的元数据
+                            confidence = asr_result.get("confidence", 0.0)
+                            language = asr_result.get("language", "zh")
+                            engine = asr_result.get("engine", "unknown")
+                            
+                            asr_memory_result = {
+                                "text": transcribed_text,
+                                "confidence": confidence,
+                                "language": language,
+                                "engine": engine,
+                                "duration_ms": duration_ms,
+                            }
+                            
+                            # 获取用户和Agent ID
+                            user_id = getattr(self.config, "user_id", "default")
+                            agent_id = getattr(self.config, "agent_id", "default")
+                            
+                            # 构建音频元数据
+                            audio_metadata = {
+                                "filename": metadata.get("filename", ""),
+                                "mime_type": metadata.get("mime_type", ""),
+                                "file_size": len(audio_bytes),
+                            }
+                            
+                            await voice_memory_bridge.record_asr_result(
+                                asr_result=asr_memory_result,
+                                user_id=user_id,
+                                agent_id=agent_id,
+                                audio_metadata=audio_metadata,
+                            )
+                            logger.debug("ASR结果已记录到语音记忆桥接器")
+                        except Exception as e:
+                            logger.warning(f"记录ASR结果到语音记忆桥接器失败: {e}")
+                    
+                    # 构建语音上下文，传递给上下文构建
+                    voice_context = {
+                        "text": transcribed_text,
+                        "confidence": confidence,
+                        "language": language,
+                        "engine": engine,
+                        "duration_ms": duration_ms,
+                        "audio_metadata": {
+                            "filename": metadata.get("filename", ""),
+                            "mime_type": metadata.get("mime_type", ""),
+                            "file_size": len(audio_bytes),
+                        },
+                    }
+                    
+                    # 分析语音情感
+                    try:
+                        from neurova.voice_context_module import VoiceContextModule
+                        voice_module = VoiceContextModule()
+                        emotion_context = voice_module.analyze_emotion(transcribed_text)
+                        voice_context["emotion"] = emotion_context
+                    except Exception as e:
+                        logger.debug(f"语音情感分析跳过: {e}")
+            except Exception as e:
+                logger.warning(f"ASR 转写失败: {e}")
 
         # 3. 将媒体描述注入用户输入，调用 chat()
         enriched_input = f"{media_desc}\n{content}" if content else media_desc
 
         # 附加原始 metadata（含 attachment_ids 供附件管理器使用）
         chat_metadata = dict(metadata)
+        
+        # 如果有语音上下文，添加到 metadata
+        if voice_context:
+            chat_metadata["voice_context"] = voice_context
 
         response = await self.chat(
             enriched_input,
@@ -1523,6 +1660,33 @@ class Agent:
                     logger.info(f"💤 睡眠整理完成: {result}")
             except Exception as e:
                 logger.warning(f"睡眠整理失败: {e}")
+
+        # P1: 关闭语音记忆桥接器（刷新缓冲区、清理引用）
+        voice_memory_bridge = getattr(self, 'voice_memory_bridge', None)
+        if voice_memory_bridge:
+            try:
+                voice_memory_bridge.shutdown()
+                logger.debug("语音记忆桥接器已关闭")
+            except Exception as e:
+                logger.warning(f"语音记忆桥接器关闭失败: {e}")
+
+        # P1: 关闭 TTS 管理器（释放模型资源）
+        tts_manager = getattr(self, 'tts_manager', None)
+        if tts_manager and hasattr(tts_manager, 'shutdown'):
+            try:
+                await tts_manager.shutdown()
+                logger.debug("TTS 管理器已关闭")
+            except Exception as e:
+                logger.warning(f"TTS 管理器关闭失败: {e}")
+
+        # P1: 关闭 ASR 管理器（释放模型资源）
+        asr_manager = getattr(self, 'asr_manager', None)
+        if asr_manager and hasattr(asr_manager, 'shutdown'):
+            try:
+                await asr_manager.shutdown()
+                logger.debug("ASR 管理器已关闭")
+            except Exception as e:
+                logger.warning(f"ASR 管理器关闭失败: {e}")
 
         # 刷新对话历史缓冲（如果使用 ConversationBuffer）
         conversation_buffer = getattr(self, '_conversation_buffer', None)

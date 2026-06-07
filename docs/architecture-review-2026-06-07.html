@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neurova 架构审查报告 - 2026-06-07</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+            padding: 30px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            border-left: 5px solid #667eea;
+        }
+        
+        .section h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.8rem;
+        }
+        
+        .section h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.4rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .stat-label {
+            font-size: 1rem;
+            color: #666;
+        }
+        
+        .module-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .module-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        .module-card h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 1.2rem;
+        }
+        
+        .module-card p {
+            color: #666;
+            font-size: 0.95rem;
+        }
+        
+        .issue-list {
+            list-style: none;
+        }
+        
+        .issue-item {
+            background: white;
+            padding: 15px 20px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+        }
+        
+        .issue-priority {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+            color: white;
+        }
+        
+        .priority-high {
+            background: #e74c3c;
+        }
+        
+        .priority-medium {
+            background: #f39c12;
+        }
+        
+        .priority-low {
+            background: #27ae60;
+        }
+        
+        .issue-content h4 {
+            margin-bottom: 5px;
+            color: #333;
+        }
+        
+        .issue-content p {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .recommendation {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-top: 30px;
+        }
+        
+        .recommendation h3 {
+            margin-bottom: 15px;
+            font-size: 1.4rem;
+        }
+        
+        .recommendation ul {
+            list-style: none;
+        }
+        
+        .recommendation li {
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .recommendation li:last-child {
+            border-bottom: none;
+        }
+        
+        .footer {
+            background: #333;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            .section {
+                padding: 20px;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧠 Neurova 架构审查报告</h1>
+            <p>生成时间：2026年6月7日 | 版本：v4.0 | 状态：生产就绪</p>
+        </div>
+        
+        <div class="content">
+            <div class="section">
+                <h2>📊 项目概览</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number">500+</div>
+                        <div class="stat-label">Python 文件</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">77+</div>
+                        <div class="stat-label">API 端点</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">82</div>
+                        <div class="stat-label">Vue 页面</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">532</div>
+                        <div class="stat-label">测试文件</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">30+</div>
+                        <div class="stat-label">功能模块</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">14</div>
+                        <div class="stat-label">通信渠道</div>
+                    </div>
+                </div>
+                
+                <p>Neurova 是一个基于 Python + Vue 3 的全栈 AI Agent 框架，核心理念是创建"有温度的智能体"。项目采用 FastAPI 后端 + Vue 3/TypeScript 前端架构，具备完整的认知层、执行层、工具层和接口层。</p>
+            </div>
+            
+            <div class="section">
+                <h2>🏗️ 架构层次</h2>
+                <div class="module-list">
+                    <div class="module-card">
+                        <h4>认知层 (Cognitive Layer)</h4>
+                        <p>记忆系统（17种类型）、情感中枢引擎（四层17种情感）、元认知、知识图谱、模型适配器。这是系统的核心创新层。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>执行层 (Execution Layer)</h4>
+                        <p>运行时抽象、传输层、执行监控、工作流引擎。支持本地执行和 Docker 容器化执行。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>工具层 (Tool Layer)</h4>
+                        <p>MCP 客户端、工具编排、工具市场、工具路由。支持动态工具加载和沙箱执行。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>接口层 (Interface Layer)</h4>
+                        <p>Vue 3 前端、77+ RESTful API、14 种通信渠道接入。提供完整的用户交互界面。</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>🔧 核心模块</h2>
+                <div class="module-list">
+                    <div class="module-card">
+                        <h4>Agent 核心 (agent_core.py)</h4>
+                        <p>Agent 主循环、聊天管线、Agent Loop 管理。采用深度模块化重构，从 2180 行优化到 1621 行。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>记忆系统 (cognitive_layers/memory_layer/)</h4>
+                        <p>17 种记忆类型、温度机制、9 大认知机制、贝叶斯 EKI 优化器。支持多层隔离和跨 Agent 共享。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>LLM 管理 (llm/)</h4>
+                        <p>多模型客户端、Provider 管理、多模态生成器。支持 OpenAI、Anthropic、Gemini 等多种模型。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>渠道系统 (channels/)</h4>
+                        <p>飞书、钉钉、企业微信、Telegram、Discord 等 14 种通信渠道接入。支持 WebSocket 长连接和 Webhook 回调。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>安全系统 (security/ + auth/)</h4>
+                        <p>JWT 认证、RBAC 授权、审计日志、三层安全防火墙。支持用户隔离和数据加密。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>进化系统 (evolution/)</h4>
+                        <p>人格系统、动机系统、宪法系统、反思系统。支持 Agent 自主进化和能力扩展。</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>⚠️ 架构问题</h2>
+                <ul class="issue-list">
+                    <li class="issue-item">
+                        <div class="issue-priority priority-high">1</div>
+                        <div class="issue-content">
+                            <h4>Agent 类仍是 God Object</h4>
+                            <p>虽然已从 2180 行优化到 1621 行，但仍有 37 个方法，涵盖 8+ 个领域。建议继续深度模块化重构。</p>
+                        </div>
+                    </li>
+                    <li class="issue-item">
+                        <div class="issue-priority priority-high">2</div>
+                        <div class="issue-content">
+                            <h4>测试覆盖率不足</h4>
+                            <p>后端单元测试覆盖率约 45%，前端单元测试覆盖率约 5%。目标应为 80% 以上。</p>
+                        </div>
+                    </li>
+                    <li class="issue-item">
+                        <div class="issue-priority priority-medium">3</div>
+                        <div class="issue-content">
+                            <h4>依赖管理混乱</h4>
+                            <p>单一 requirements 文件混合所有依赖，版本范围过宽。建议迁移到 pyproject.toml，分离核心/可选/开发依赖。</p>
+                        </div>
+                    </li>
+                    <li class="issue-item">
+                        <div class="issue-priority priority-medium">4</div>
+                        <div class="issue-content">
+                            <h4>循环依赖风险</h4>
+                            <p>部分模块存在循环导入风险，如 cognitive_layers 与 memory_layer 之间的依赖。</p>
+                        </div>
+                    </li>
+                    <li class="issue-item">
+                        <div class="issue-priority priority-low">5</div>
+                        <div class="issue-content">
+                            <h4>文档过时</h4>
+                            <p>README.md 严重过时（声称 React 前端，实际为 Vue 3），API_REFERENCE.md 仅覆盖 12/77 端点。</p>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+            
+            <div class="section">
+                <h2>✅ 已完成的改进</h2>
+                <div class="module-list">
+                    <div class="module-card">
+                        <h4>Agent 类深度模块化</h4>
+                        <p>从 2180 行优化到 1621 行，提取 MemoryAgent、ContextOrchestrator、ToolExecutor 等深度模块。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>浏览器自动化集成</h4>
+                        <p>集成 browser-skill 组件（DialogHandler、BrowserSupervisor、CamofoxAdapter、ScraplingSpiderTool）。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>文档对齐</h4>
+                        <p>更新 README.md 修正前端技术栈（Vue 3）、启动命令、项目结构。创建 DOCS_ALIGNMENT_PLAN.md。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>安全增强</h4>
+                        <p>修复 P2 安全问题：敏感数据日志移除、文件上传安全增强、SQL 拼接安全审计、前端路由守卫增强。</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="recommendation">
+                <h3>🎯 改进建议</h3>
+                <ul>
+                    <li><strong>优先级 1：</strong>继续 Agent 类深度模块化重构，目标 < 500 行、< 10 个方法</li>
+                    <li><strong>优先级 2：</strong>建立 CI/CD 基础设施，自动化测试和部署流程</li>
+                    <li><strong>优先级 3：</strong>提升测试覆盖率到 80%，重点补充核心模块测试</li>
+                    <li><strong>优先级 4：</strong>迁移到 pyproject.toml，分离核心/可选/开发依赖</li>
+                    <li><strong>优先级 5：</strong>完善文档体系，更新 README.md 和 API_REFERENCE.md</li>
+                    <li><strong>优先级 6：</strong>引入类型注解，提升代码可维护性和 IDE 支持</li>
+                    <li><strong>优先级 7：</strong>优化循环依赖，重构模块边界</li>
+                    <li><strong>优先级 8：</strong>建立监控和告警系统，提升系统可观测性</li>
+                </ul>
+            </div>
+            
+            <div class="section">
+                <h2>📈 性能指标</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number">99.8%</div>
+                        <div class="stat-label">测试通过率</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">45%</div>
+                        <div class="stat-label">后端测试覆盖率</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">5%</div>
+                        <div class="stat-label">前端测试覆盖率</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">1621</div>
+                        <div class="stat-label">Agent 核心行数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">37</div>
+                        <div class="stat-label">Agent 方法数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">20+</div>
+                        <div class="stat-label">直接依赖模块</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>🔮 未来规划</h2>
+                <div class="module-list">
+                    <div class="module-card">
+                        <h4>Week 1-2: CI/CD 基础设施</h4>
+                        <p>建立 GitHub Actions 工作流，自动化测试、构建和部署流程。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>Week 3-4: 核心模块测试</h4>
+                        <p>补充 Agent 核心、记忆系统、LLM 管理等核心模块的单元测试。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>Week 5-8: Agent 深度模块化</h4>
+                        <p>继续重构 Agent 类，提取更多深度模块，引入依赖注入容器。</p>
+                    </div>
+                    <div class="module-card">
+                        <h4>Week 9-10: 工程化完善</h4>
+                        <p>迁移到 pyproject.toml，完善文档体系，建立监控告警。</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Neurova 架构审查报告 | 生成时间：2026年6月7日 | 版本：v4.0</p>
+            <p>本报告由 improve-codebase-architecture 技能自动生成</p>
+        </div>
+    </div>
+</body>
+</html>

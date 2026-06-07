@@ -27,7 +27,14 @@ except ImportError:
     class RequestType(Enum):
         CHAT = "chat"
         IMAGE_UNDERSTANDING = "image_understanding"
+        AUDIO_UNDERSTANDING = "audio_understanding"
+        VIDEO_UNDERSTANDING = "video_understanding"
         TEXT_TO_IMAGE = "text_to_image"
+        IMAGE_TO_IMAGE = "image_to_image"
+        TEXT_TO_VIDEO = "text_to_video"
+        IMAGE_TO_VIDEO = "image_to_video"
+        TEXT_TO_SPEECH = "text_to_speech"
+        SPEECH_TO_TEXT = "speech_to_text"
 
     def get_llm_router():
         return None
@@ -269,8 +276,21 @@ class MessageRouter:
             )
 
         try:
-            # 使用 Agent 处理聊天
-            response = await self._agent.chat(message.content, message.metadata)
+            # 检查是否是语音消息（通过 metadata 中的 media_type）
+            metadata = message.metadata or {}
+            media_type = metadata.get("media_type")
+            
+            if media_type == "voice":
+                # 语音消息：调用 process_multimodal 处理
+                response = await self._agent.process_multimodal(
+                    content=message.content,
+                    media_type="voice",
+                    metadata=metadata,
+                )
+            else:
+                # 普通文本消息：使用 Agent 处理聊天
+                response = await self._agent.chat(message.content, message.metadata)
+            
             return RouteResult(
                 success=True,
                 response=response,
