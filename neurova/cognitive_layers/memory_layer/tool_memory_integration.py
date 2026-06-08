@@ -49,6 +49,11 @@ class ToolMemoryIntegration:
         self.tool_lifecycle = tool_lifecycle
         self.usage_history: List[ToolUsageRecord] = []
         self.tool_stats: Dict[str, Dict[str, Any]] = {}
+        # RSI 可优化参数
+        self.success_bonus: float = 0.1
+        self.failure_penalty: float = 0.05
+        self.decay_rate: float = 0.01
+        self.muscle_memory_threshold: float = 0.8
         logger.info("ToolMemoryIntegration initialized")
 
     def record_tool_usage(
@@ -135,6 +140,29 @@ class ToolMemoryIntegration:
             reverse=True,
         )
         return [tool_name for tool_name, _ in sorted_tools[:5]]
+
+    def get_feedback(self) -> Dict[str, Any]:
+        """
+        获取工具记忆集成的反馈信号，供 RSI 系统使用。
+
+        Returns:
+            Dict[str, Any]: 包含 total_usages, success_rate, muscle_memory_hits
+        """
+        total_usages = len(self.usage_history)
+        success_count = sum(1 for r in self.usage_history if r.success)
+        success_rate = success_count / total_usages if total_usages > 0 else 0.0
+
+        # 肌肉记忆命中数：从 usage_history 中统计有 muscle_memory 匹配的记录
+        muscle_memory_hits = sum(
+            1 for r in self.usage_history
+            if r.context.get('tool_source') == 'muscle_memory'
+        )
+
+        return {
+            'total_usages': total_usages,
+            'success_rate': success_rate,
+            'muscle_memory_hits': muscle_memory_hits,
+        }
 
     def check_tool_memory(self, user_input: str) -> tuple:
         """

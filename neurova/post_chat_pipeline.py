@@ -110,12 +110,16 @@ class PostChatPipeline:
         # 步骤 10: 主动提问决策
         proactive_question = await self._step_proactive_question(user_input, reply)
 
+        # 步骤 11: RSI 迭代（递归自我改进）
+        rsi_result = await self._step_rsi_iteration()
+
         return {
             "actual_session_id": actual_session_id,
             "audio_path": audio_path,
             "audio_data": audio_data,
             "cognitive_score": cognitive_score,
             "proactive_question": proactive_question,
+            "rsi_result": rsi_result,
         }
 
     async def _step_save_session(
@@ -712,5 +716,27 @@ class PostChatPipeline:
                         logger.debug(f"主动提问条件满足但未生成问题: {reason}")
         except Exception as e:
             logger.warning(f"Step 10 主动提问决策失败: {e}")
+
+        return None
+
+    async def _step_rsi_iteration(self) -> Optional[Dict[str, Any]]:
+        """Step 11: RSI 迭代（递归自我改进）
+
+        如果 RSI 编排器可用且应该继续迭代，执行一次 RSI 迭代。
+
+        Returns:
+            RSI 迭代结果（如果执行了），否则 None
+        """
+        rsi = getattr(self._agt, 'rsi_orchestrator', None)
+        if not rsi:
+            return None
+
+        try:
+            if rsi.should_continue():
+                result = rsi.run_iteration()
+                logger.info(f"RSI 迭代完成: {result.get('convergence', {}).get('status', 'unknown')}")
+                return result
+        except Exception as e:
+            logger.warning(f"Step 11 RSI 迭代失败: {e}")
 
         return None

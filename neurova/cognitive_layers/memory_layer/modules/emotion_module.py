@@ -85,6 +85,11 @@ class EmotionModule:
         self._initialized = False
         self._db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+        # 情感保护计数器（高强度情感触发保护机制时递增）
+        self._protection_triggered: int = 0
+        self._emotional_protection_threshold: float = 0.8
+        self.emotional_protection_threshold: float = 0.5  # RSI 可优化参数
+        self.emotional_protection_factor: float = 0.3     # RSI 可优化参数
         
         if db_path:
             self._init_db()
@@ -176,6 +181,11 @@ class EmotionModule:
             emotion: 情感状态
         """
         with self._lock:
+            # 检查是否触发情感保护（高强度负面情感）
+            if (emotion.intensity >= self._emotional_protection_threshold and
+                emotion.valence < 0):
+                self._protection_triggered += 1
+            
             self._memory_emotions[memory_id] = emotion
             self._save_to_db(memory_id, emotion)
     
@@ -328,4 +338,26 @@ class EmotionModule:
                 "total_annotated": len(self._memory_emotions),
                 "emotion_distribution": distribution,
                 "emotion_weight": self._emotion_weight,
+            }
+
+    def get_feedback(self) -> Dict[str, Any]:
+        """
+        获取情感模块的反馈信号，供 RSI 系统使用。
+
+        Returns:
+            Dict[str, Any]: 包含 emotional_memories, avg_intensity, protection_triggered
+        """
+        with self._lock:
+            emotional_memories = len(self._memory_emotions)
+            if emotional_memories > 0:
+                avg_intensity = sum(
+                    e.intensity for e in self._memory_emotions.values()
+                ) / emotional_memories
+            else:
+                avg_intensity = 0.0
+
+            return {
+                'emotional_memories': emotional_memories,
+                'avg_intensity': avg_intensity,
+                'protection_triggered': self._protection_triggered,
             }

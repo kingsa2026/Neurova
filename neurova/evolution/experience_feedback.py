@@ -103,6 +103,11 @@ class ExperienceFeedback:
         # 洞察历史
         self._insights: List[ToolInsight] = []
         
+        # RSI 可优化参数
+        self.crystallize_min_observations: int = 3
+        self.crystallize_min_success_rate: float = 0.6
+        self.pattern_min_support: float = 0.3
+        
         logger.debug("ExperienceFeedback initialized")
     
     def extract_tool_mentions(self, text: str) -> List[str]:
@@ -313,3 +318,30 @@ class ExperienceFeedback:
         patterns.sort(key=lambda x: x["success_rate"], reverse=True)
         
         return patterns
+    
+    def get_feedback(self) -> Dict[str, Any]:
+        """
+        获取经验反哺系统的反馈信号，供 RSI 系统使用。
+
+        Returns:
+            Dict[str, Any]: 包含 crystallized_patterns, success_rate, total_experiences
+        """
+        # 统计所有关联的总成功数和总数
+        total_success = 0
+        total_count = 0
+        crystallized = 0  # 已结晶的模式数（观察次数>=3且成功率>60%）
+        
+        for task_assocs in self._associations.values():
+            for assoc in task_assocs.values():
+                total_success += assoc.success_count
+                total_count += assoc.total_count
+                if assoc.total_count >= 3 and assoc.success_rate > 0.6:
+                    crystallized += 1
+        
+        success_rate = total_success / total_count if total_count > 0 else 0.0
+        
+        return {
+            'crystallized_patterns': crystallized,
+            'success_rate': success_rate,
+            'total_experiences': len(self._insights),
+        }

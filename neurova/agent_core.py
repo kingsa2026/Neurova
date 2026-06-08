@@ -257,6 +257,13 @@ class AgentConfig:
             "- 如果发现用户的问题需要搜索或文件操作，使用 [TOOL_CALL:工具名(参数)] 格式调用工具",
         ]
 
+
+class _NullSystem:
+    """空系统占位符 — 当闭环系统不可用时用作 fallback"""
+    def get_feedback(self):
+        return {}
+
+
 class Agent:
     """
     Agent 核心
@@ -1034,7 +1041,33 @@ class Agent:
             evolution.crystallizer = self.crystallizer
             logger.info("PatternCrystallizer 已注入到 EvolutionOrchestrator")
         
-        # 4. 初始化 ReasoningTraceManager
+        # 4. 初始化 RSI（递归自我改进）编排器
+        self.rsi_orchestrator = None
+        try:
+            from neurova.evolution.rsi.orchestrator import RSIOrchestrator
+            
+            # 获取四大闭环系统
+            sleep_system = getattr(self, 'sleep_consolidation', None)
+            emotion_system = getattr(self.memory_manager, '_emotion_module', None) if self.memory_manager else None
+            experience_system = getattr(evolution, 'experience_feedback', None) if evolution else None
+            tool_memory_system = getattr(self, 'tool_memory', None)
+            
+            # 只有当至少一个闭环系统可用时才初始化 RSI
+            available_systems = [s for s in [sleep_system, emotion_system, experience_system, tool_memory_system] if s is not None]
+            if available_systems:
+                self.rsi_orchestrator = RSIOrchestrator(
+                    sleep_system=sleep_system or _NullSystem(),
+                    emotion_system=emotion_system or _NullSystem(),
+                    experience_system=experience_system or _NullSystem(),
+                    tool_memory_system=tool_memory_system or _NullSystem(),
+                )
+                logger.info(f"Agent {self.config.name}: RSI 编排器已初始化 ({len(available_systems)}/4 闭环系统可用)")
+            else:
+                logger.info(f"Agent {self.config.name}: RSI 未初始化（无可用闭环系统）")
+        except Exception as e:
+            logger.warning(f"Agent {self.config.name}: RSI 初始化失败: {e}")
+        
+        # 5. 初始化 ReasoningTraceManager
         self.trace_manager = ReasoningTraceManager(
             engine=self.cognitive_engine,
         )

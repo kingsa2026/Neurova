@@ -140,9 +140,16 @@ class SleepConsolidation:
         self.similarity_threshold = similarity_threshold
         self.archive_threshold = archive_threshold
         self.decay_rate = decay_rate
+        self.base_decay_rate = decay_rate  # RSI 可优化参数别名
+        self.merge_threshold = similarity_threshold  # RSI 可优化参数别名
         self.memory_manager = memory_manager
         self.storage = storage
         self._state: Dict[str, Any] = {}
+        # RSI 反馈统计
+        self._consolidation_count: int = 0
+        self._total_memories_processed: int = 0
+        self._total_merged: int = 0
+        self._temperature_sum: float = 0.0
 
         logger.debug(f"SleepConsolidation 初始化: "
                     f"similarity={similarity_threshold}, "
@@ -351,7 +358,33 @@ class SleepConsolidation:
                    f"合并 {len(memories)} → {len(merged_memories)} 条记忆, "
                    f"活跃 {active_count}, 归档 {archived_count}")
 
+        # 更新 RSI 反馈统计
+        self._consolidation_count += 1
+        self._total_memories_processed += len(memories)
+        self._total_merged += len(merge_results)
+        self._temperature_sum += sum(m.temperature for m in merged_memories)
+
         return merged_memories, merge_results
+
+    def get_feedback(self) -> Dict[str, Any]:
+        """
+        获取睡眠整合模块的反馈信号，供 RSI 系统使用。
+
+        Returns:
+            Dict[str, Any]: 包含 consolidation_count, merge_rate, avg_temperature
+        """
+        total_memories = self._total_memories_processed
+        merge_rate = self._total_merged / total_memories if total_memories > 0 else 0.0
+        total_merged_memories = self._consolidation_count  # 每次整合产出的记忆数
+        avg_temperature = (
+            self._temperature_sum / total_merged_memories if total_merged_memories > 0 else 50.0
+        )
+
+        return {
+            'consolidation_count': self._consolidation_count,
+            'merge_rate': merge_rate,
+            'avg_temperature': avg_temperature,
+        }
 
     def run_sleep_cycle(self, memories: List[MemoryRecord], phase: str = "sleep") -> Dict[str, Any]:
         """执行睡眠周期（向后兼容包装）
