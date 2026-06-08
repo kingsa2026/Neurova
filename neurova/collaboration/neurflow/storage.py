@@ -276,6 +276,39 @@ class NeurflowStorage:
             
             return [self._row_to_workflow(row) for row in rows]
     
+    def list_templates(
+        self,
+        category: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[WorkflowDefinition]:
+        """
+        列出工作流模板
+        
+        Args:
+            category: 按分类过滤
+            limit: 返回数量限制
+            offset: 偏移量
+            
+        Returns:
+            模板列表
+        """
+        with self._lock:
+            query = "SELECT * FROM workflows WHERE template = 1"
+            params = []
+            
+            if category:
+                query += " AND category = ?"
+                params.append(category)
+            
+            query += " ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            
+            cursor = self._conn.execute(query, params)
+            rows = cursor.fetchall()
+            
+            return [self._row_to_workflow(row) for row in rows]
+    
     def search_workflows(self, query: str) -> List[WorkflowDefinition]:
         """
         搜索工作流定义

@@ -43,8 +43,10 @@ class ResolvedValue:
     error: Optional[str] = None
 
 
-# 变量引用正则：$prefix.path（支持 Unicode 字符，包括中文）
-_VAR_PATTERN = re.compile(r'\$([a-zA-Z_]\w*)(?:\.([\w.]+))?')
+# 变量引用正则：$prefix.path
+# 使用 ASCII 模式避免匹配中文字符
+# 路径部分支持字母数字下划线和点号分隔
+_VAR_PATTERN = re.compile(r'\$([a-zA-Z_]\w*)(?:\.([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)*))?')
 
 
 class VariableResolver:
@@ -174,7 +176,7 @@ class VariableResolver:
                     error=f"变量 ${prefix}.{path} 未找到"
                 )
             return ResolvedValue(success=True, value=value)
-        except (KeyError, IndexError, AttributeError) as e:
+        except Exception as e:
             return ResolvedValue(
                 success=False,
                 error=f"解析 ${prefix}.{path} 失败: {str(e)}"
@@ -230,7 +232,8 @@ class VariableResolver:
         - $memory — 返回 memory_manager 对象
         """
         if context.memory_manager is None:
-            raise ValueError("memory_manager 未注入，无法使用 $memory 前缀")
+            logger.warning("memory_manager 未注入，无法使用 $memory 前缀")
+            return None
         
         if not path:
             return context.memory_manager
@@ -257,7 +260,8 @@ class VariableResolver:
         - $context.recent_messages.0 — 获取第一条最近消息
         """
         if context.context_pool is None:
-            raise ValueError("context_pool 未注入，无法使用 $context 前缀")
+            logger.warning("context_pool 未注入，无法使用 $context 前缀")
+            return None
         
         ctx_data = context.context_pool.get_context()
         
@@ -276,7 +280,8 @@ class VariableResolver:
         - $emotion.primary_emotion — 获取主要情感
         """
         if context.emotion_module is None:
-            raise ValueError("emotion_module 未注入，无法使用 $emotion 前缀")
+            logger.warning("emotion_module 未注入，无法使用 $emotion 前缀")
+            return None
         
         emotion_data = context.emotion_module.current()
         
@@ -294,7 +299,8 @@ class VariableResolver:
         - $crystal — 返回 crystallizer 对象
         """
         if context.crystallizer is None:
-            raise ValueError("crystallizer 未注入，无法使用 $crystal 前缀")
+            logger.warning("crystallizer 未注入，无法使用 $crystal 前缀")
+            return None
         
         if not path:
             return context.crystallizer

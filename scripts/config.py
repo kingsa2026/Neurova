@@ -28,7 +28,7 @@ HEALTH_CHECK_TIMEOUT = 60  # 秒
 HEALTH_CHECK_INTERVAL = 2  # 秒
 
 # 日志配置
-LOG_FILE = ROOT_DIR / "server.log"
+LOG_FILE = LOGS_DIR / "server.log"
 
 
 def get_venv_python() -> Path:

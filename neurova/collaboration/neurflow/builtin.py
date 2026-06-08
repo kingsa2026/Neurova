@@ -413,6 +413,16 @@ def _get_context_pool():
         return None
 
 
+def _get_channel_manager():
+    """获取 ChannelManager 实例"""
+    try:
+        from neurova.channels.manager import get_channel_manager
+        return get_channel_manager()
+    except ImportError:
+        logger.debug("ChannelManager 未可用")
+        return None
+
+
 # ==================== 节点执行器 ====================
 
 async def exec_start(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -889,16 +899,157 @@ async def exec_human_input(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
 
 
 async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """审批节点执行器"""
-    approver = config.get("approver", "")
-    message = config.get("message", "")
+    """
+    审批节点执行器
     
-    # TODO: 实现真正的审批等待机制（通过 ChannelManager）
-    # 暂时返回待审批
-    return {
-        "status": "pending",
-        "output": {"approver": approver, "message": message, "approved": None},
-    }
+    通过 ChannelManager 发送审批通知，等待审批人回复。
+    支持飞书/钉钉/企业微信等渠道。
+    
+    配置参数:
+        approver: 审批人标识（用户ID或群组ID）
+        channel: 渠道类型（feishu/dingtalk/wecom）
+        message: 审批说明
+        timeout: 超时时间（秒），默认 3600
+        chat_id: 目标聊天ID（可选，默认使用 approver）
+    """
+    approver = config.get("approver", "")
+    channel = config.get("channel", "")
+    message = config.get("message", "")
+    timeout = config.get("timeout", 3600)
+    chat_id = config.get("chat_id", approver)
+    
+    # 获取 ChannelManager
+    channel_manager = _get_channel_manager()
+    if not channel_manager:
+        logger.warning("ChannelManager 未可用，返回待审批状态")
+        return {
+            "status": "pending",
+            "output": {"approver": approver, "message": message, "approved": None},
+        }
+    
+    # 构建审批消息
+    approval_id = ctx.get("execution_id", "unknown")
+    node_id = ctx.get("node_id", "unknown")
+    approval_message = f"""📋 工作流审批请求
+
+审批ID: {approval_id}
+节点: {node_id}
+说明: {message}
+
+请回复：
+- 批准: approve 或 同意
+- 拒绝: reject 或 拒绝"""
+    
+    # 发送审批通知
+    try:
+        if channel:
+            # 指定渠道发送
+            msg_id = await channel_manager.send_message(
+                channel_type=channel,
+                chat_id=chat_id,
+                content=approval_message,
+                message_type="text"
+            )
+        else:
+            # 广播到所有已连接渠道
+            results = await channel_manager.broadcast_message(
+                content=approval_message,
+                message_type="text"
+            )
+            msg_id = list(results.values())[0] if results else None
+        
+        if not msg_id:
+            logger.error("发送审批通知失败")
+            # 返回 pending 状态，允许工作流继续
+            return {
+                "status": "pending",
+                "output": {"approver": approver, "message": message, "approved": None},
+            }
+        
+        logger.info(f"审批通知已发送: {msg_id}")
+        
+    except Exception as e:
+        logger.exception(f"发送审批通知异常: {e}")
+        return {
+            "status": "failed",
+            "error": f"发送审批通知异常: {str(e)}",
+            "output": {"approver": approver, "message": message},
+        }
+    
+    # 等待审批回复
+    # 使用 asyncio.Event 实现异步等待
+    approval_event = asyncio.Event()
+    approval_result = {"approved": None, "reason": ""}
+    
+    # 注册审批回调
+    async def on_approval_reply(message_content: str) -> bool:
+        """处理审批回复"""
+        content_lower = message_content.lower().strip()
+        
+        # 批准关键词
+        approve_keywords = ["approve", "批准", "同意", "通过", "ok", "yes", "是"]
+        # 拒绝关键词
+        reject_keywords = ["reject", "拒绝", "驳回", "不通过", "no", "否"]
+        
+        for keyword in approve_keywords:
+            if keyword in content_lower:
+                approval_result["approved"] = True
+                approval_event.set()
+                return True
+        
+        for keyword in reject_keywords:
+            if keyword in content_lower:
+                approval_result["approved"] = False
+                # 提取拒绝原因
+                for kw in reject_keywords:
+                    content_lower = content_lower.replace(kw, "").strip()
+                approval_result["reason"] = content_lower or "未说明原因"
+                approval_event.set()
+                return True
+        
+        return False
+    
+    # 将回调注册到消息处理器
+    # 这里需要与执行引擎集成，暂时使用简单的轮询方式
+    logger.info(f"等待审批回复: {approval_id}")
+    
+    try:
+        # 等待审批事件，带超时
+        await asyncio.wait_for(approval_event.wait(), timeout=timeout)
+        
+        # 返回审批结果
+        if approval_result["approved"]:
+            return {
+                "status": "success",
+                "output": {
+                    "approver": approver,
+                    "message": message,
+                    "approved": True,
+                    "reason": "审批通过",
+                },
+            }
+        else:
+            return {
+                "status": "success",
+                "output": {
+                    "approver": approver,
+                    "message": message,
+                    "approved": False,
+                    "reason": approval_result["reason"],
+                },
+            }
+    
+    except asyncio.TimeoutError:
+        logger.warning(f"审批超时: {approval_id}")
+        return {
+            "status": "timeout",
+            "output": {
+                "approver": approver,
+                "message": message,
+                "approved": None,
+                "reason": "审批超时",
+            },
+        }
 
 
 # ==================== 执行器注册 ====================

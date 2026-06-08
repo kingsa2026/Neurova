@@ -205,7 +205,7 @@ class WorkflowExecutor:
         instance.status = WorkflowStatus.RUNNING
         
         self._emit(ExecutionEvent(
-            type=ExecutionEvent.WORKFLOW_STARTED,
+            type=ExecutionEventType.WORKFLOW_STARTED,
             workflow_id=workflow.id,
             execution_id=execution_id,
             data={"inputs": inputs}
@@ -218,7 +218,7 @@ class WorkflowExecutor:
                 
                 # 发送节点开始事件
                 self._emit(ExecutionEvent(
-                    type=ExecutionEvent.NODE_STARTED,
+                    type=ExecutionEventType.NODE_STARTED,
                     workflow_id=workflow.id,
                     execution_id=execution_id,
                     node_id=node_id
@@ -265,7 +265,7 @@ class WorkflowExecutor:
                     
                     # 发送节点完成事件
                     self._emit(ExecutionEvent(
-                        type=ExecutionEvent.NODE_COMPLETED,
+                        type=ExecutionEventType.NODE_COMPLETED,
                         workflow_id=workflow.id,
                         execution_id=execution_id,
                         node_id=node_id,
@@ -289,7 +289,7 @@ class WorkflowExecutor:
                     
                     # 发送节点失败事件
                     self._emit(ExecutionEvent(
-                        type=ExecutionEvent.NODE_FAILED,
+                        type=ExecutionEventType.NODE_FAILED,
                         workflow_id=workflow.id,
                         execution_id=execution_id,
                         node_id=node_id,
@@ -304,7 +304,7 @@ class WorkflowExecutor:
                     self._statuses[execution_id] = ExecutionStatus.FAILED
                     
                     self._emit(ExecutionEvent(
-                        type=ExecutionEvent.WORKFLOW_FAILED,
+                        type=ExecutionEventType.WORKFLOW_FAILED,
                         workflow_id=workflow.id,
                         execution_id=execution_id,
                         data={"error": instance.error}
@@ -327,7 +327,7 @@ class WorkflowExecutor:
                     }
             
             self._emit(ExecutionEvent(
-                type=ExecutionEvent.WORKFLOW_COMPLETED,
+                type=ExecutionEventType.WORKFLOW_COMPLETED,
                 workflow_id=workflow.id,
                 execution_id=execution_id,
                 data={"outputs": instance.outputs}
@@ -341,7 +341,7 @@ class WorkflowExecutor:
             self._statuses[execution_id] = ExecutionStatus.FAILED
             
             self._emit(ExecutionEvent(
-                type=ExecutionEvent.WORKFLOW_FAILED,
+                type=ExecutionEventType.WORKFLOW_FAILED,
                 workflow_id=workflow.id,
                 execution_id=execution_id,
                 data={"error": str(e)}
@@ -400,6 +400,72 @@ class WorkflowExecutor:
         
         # 默认返回
         return {"output": None}
+    
+    def cancel(self, execution_id: str) -> bool:
+        """
+        取消执行
+        
+        Args:
+            execution_id: 执行 ID
+            
+        Returns:
+            是否成功取消
+        """
+        if execution_id not in self._instances:
+            return False
+        
+        instance = self._instances[execution_id]
+        status = self._statuses.get(execution_id)
+        
+        # 只能取消运行中的执行
+        if status not in [ExecutionStatus.RUNNING, ExecutionStatus.PAUSED]:
+            return False
+        
+        instance.status = WorkflowStatus.CANCELLED
+        instance.finished_at = time.time()
+        instance.duration = instance.finished_at - instance.started_at
+        instance.error = "执行已取消"
+        self._statuses[execution_id] = ExecutionStatus.CANCELLED
+        
+        self._emit(ExecutionEvent(
+            type=ExecutionEventType.WORKFLOW_FAILED,
+            workflow_id=instance.workflow_id,
+            execution_id=execution_id,
+            data={"error": "执行已取消"}
+        ))
+        
+        return True
+    
+    def resume(self, execution_id: str) -> bool:
+        """
+        恢复执行（人工审批后）
+        
+        Args:
+            execution_id: 执行 ID
+            
+        Returns:
+            是否成功恢复
+        """
+        if execution_id not in self._instances:
+            return False
+        
+        instance = self._instances[execution_id]
+        status = self._statuses.get(execution_id)
+        
+        # 只能恢复暂停的执行
+        if status != ExecutionStatus.PAUSED:
+            return False
+        
+        instance.status = WorkflowStatus.RUNNING
+        self._statuses[execution_id] = ExecutionStatus.RUNNING
+        
+        self._emit(ExecutionEvent(
+            type=ExecutionEventType.RESUMED,
+            workflow_id=instance.workflow_id,
+            execution_id=execution_id
+        ))
+        
+        return True
 
 
 # 单例
