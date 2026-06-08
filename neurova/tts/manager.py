@@ -16,8 +16,12 @@ from pydantic import BaseModel, Field
 
 from neurova.tts.base import TTSBase
 from neurova.tts.edge_tts import EdgeTTS
-from neurova.tts.moss_nano import MOSSNanTTS
 from neurova.tts.mock_tts_simple import MockTTSSimple
+
+try:
+    from neurova.tts.moss_nano import MOSSNanTTS
+except ImportError:
+    MOSSNanTTS = None
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +108,9 @@ class TTSManager:
         """初始化指定引擎"""
         try:
             if engine_name == "moss-nano":
+                if MOSSNanTTS is None:
+                    logger.warning("MOSSNanTTS 不可用（缺少 numpy 或 onnxruntime）")
+                    return False
                 engine = MOSSNanTTS(
                     model_dir=self._config.model_path,
                     tokenizer_dir=self._config.tokenizer_path,

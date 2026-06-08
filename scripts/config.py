@@ -17,7 +17,7 @@ MODELS_DIR = ROOT_DIR / "models"
 LOGS_DIR = ROOT_DIR / "logs"
 
 # Python 版本要求
-MIN_PYTHON_VERSION = (3, 10)
+MIN_PYTHON_VERSION = (3, 12)
 
 # 端口配置
 BACKEND_PORT = 9527

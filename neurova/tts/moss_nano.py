@@ -18,7 +18,10 @@ import time
 from pathlib import Path
 from typing import Optional, AsyncGenerator
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 from neurova.tts.base import TTSBase
 from neurova.tts.model_downloader import ModelDownloader, get_model_downloader

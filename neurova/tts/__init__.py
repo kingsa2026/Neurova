@@ -10,16 +10,24 @@ TTS Module - 语音合成模块
 import neurova.tts.base
 import neurova.tts.edge_tts
 import neurova.tts.manager
-import neurova.tts.moss_nano
 import neurova.tts.model_downloader
 import neurova.tts.mock_tts_simple
 
+try:
+    import neurova.tts.moss_nano
+except ImportError:
+    pass
+
 from neurova.tts.base import TTSBase
 from neurova.tts.edge_tts import EdgeTTS
-from neurova.tts.moss_nano import MOSSNanTTS
 from neurova.tts.model_downloader import ModelDownloader, get_model_downloader
 from neurova.tts.mock_tts_simple import MockTTSSimple
 from neurova.tts.manager import TTSManager, TTSConfig
+
+try:
+    from neurova.tts.moss_nano import MOSSNanTTS
+except ImportError:
+    MOSSNanTTS = None
 
 __all__ = [
     "TTSBase",
