@@ -191,6 +191,18 @@ token.txt
 # Agent 工作区
 /agents/
 
+# 临时/生成/测试目录
+/examples/
+/generated_skills/
+/MagicMock/
+/embedding/
+/session/
+/test_integration/
+/test_storage/
+/test_ws/
+/thought-retriever-src/
+/trajectories/
+
 # 大型第三方项目
 /QwenPaw-main/
 /QwenPaw-1.1.6/
