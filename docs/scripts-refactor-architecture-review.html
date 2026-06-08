@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neurova 安装/启动脚本重构架构审查</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .card { @apply bg-white rounded-lg shadow-md p-6 mb-6 border border-gray-200; }
+        .before-after { @apply grid grid-cols-1 md:grid-cols-2 gap-6 mt-4; }
+        .diagram { @apply bg-gray-50 p-4 rounded-lg border border-gray-200; }
+        .problem { @apply bg-red-50 border-red-200; }
+        .solution { @apply bg-green-50 border-green-200; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- 标题 -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">Neurova 安装/启动脚本重构架构审查</h1>
+            <p class="text-gray-600">基于深度模块原则和TDD方法的脚本重构方案</p>
+            <p class="text-sm text-gray-500 mt-2">生成时间: 2026-06-08 09:09</p>
+        </div>
+
+        <!-- 问题总结 -->
+        <div class="card problem">
+            <h2 class="text-xl font-bold text-red-800 mb-4">当前问题分析</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">代码重复问题</h3>
+                    <ul class="list-disc list-inside text-sm text-gray-600 space-y-1">
+                        <li><code>Colors</code> 类在 <code>install.py</code> 和 <code>start.py</code> 中重复</li>
+                        <li><code>ProgressBar</code> 类在 <code>install.py</code> 中定义，其他脚本无法使用</li>
+                        <li><code>print_logo()</code> 函数在三个脚本中重复实现</li>
+                        <li><code>_supports_color()</code> 函数在三个脚本中重复实现</li>
+                        <li>端口检查逻辑在 <code>start_oneclick.py</code> 和 <code>check_and_start.py</code> 中不同</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">架构问题</h3>
+                    <ul class="list-disc list-inside text-sm text-gray-600 space-y-1">
+                        <li>Windows-only 代码（PowerShell、netstat、taskkill）</li>
+                        <li>端口检测方法不一致（PowerShell vs socket vs netstat）</li>
+                        <li>缺少统一配置管理（端口、路径硬编码）</li>
+                        <li>缺少错误处理标准化</li>
+                        <li>缺少日志记录标准化</li>
+                        <li>缺少测试覆盖</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- 重构方案 -->
+        <div class="card solution">
+            <h2 class="text-xl font-bold text-green-800 mb-4">重构方案</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">1. 创建共享工具模块</h3>
+                    <ul class="list-disc list-inside text-sm text-gray-600 space-y-1">
+                        <li><code>scripts/common.py</code> - 统一颜色、Logo、进度条</li>
+                        <li><code>scripts/config.py</code> - 统一配置管理</li>
+                        <li><code>scripts/port_utils.py</code> - 跨平台端口工具</li>
+                        <li><code>scripts/health_check.py</code> - 统一健康检查</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">2. 脚本合并与重构</h3>
+                    <ul class="list-disc list-inside text-sm text-gray-600 space-y-1">
+                        <li>合并 <code>start.py</code>、<code>start_oneclick.py</code>、<code>check_and_start.py</code></li>
+                        <li>创建统一的 <code>start.py</code> 支持多种模式</li>
+                        <li>添加跨平台支持（Windows/Linux/Mac）</li>
+                        <li>添加 <code>install.sh</code> 支持 Linux/Mac</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- 前后对比 -->
+        <div class="card">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">前后对比</h2>
+            <div class="before-after">
+                <div class="diagram problem">
+                    <h4 class="font-medium text-gray-700 mb-2">当前状态（重复代码）</h4>
+                    <div class="font-mono text-xs text-gray-600">
+                        <div class="mb-2">install.py</div>
+                        <div class="ml-4">├── Colors 类 (50行)</div>
+                        <div class="ml-4">├── ProgressBar 类 (200行)</div>
+                        <div class="ml-4">├── print_logo() (30行)</div>
+                        <div class="ml-4">└── _supports_color() (20行)</div>
+                        <div class="mt-2">start.py</div>
+                        <div class="ml-4">├── Colors 类 (重复)</div>
+                        <div class="ml-4">├── print_logo() (重复)</div>
+                        <div class="ml-4">└── _supports_color() (重复)</div>
+                        <div class="mt-2">start_oneclick.py</div>
+                        <div class="ml-4">├── BANNER 常量 (重复)</div>
+                        <div class="ml-4">└── check_port() (PowerShell)</div>
+                        <div class="mt-2">check_and_start.py</div>
+                        <div class="ml-4">├── check_port() (netstat)</div>
+                        <div class="ml-4">└── get_process_by_port() (netstat)</div>
+                    </div>
+                </div>
+
+                <div class="diagram solution">
+                    <h4 class="font-medium text-gray-700 mb-2">目标状态（共享模块）</h4>
+                    <div class="font-mono text-xs text-gray-600">
+                        <div class="mb-2">scripts/common.py</div>
+                        <div class="ml-4">├── Colors 类 (单一实现)</div>
+                        <div class="ml-4">├── ProgressBar 类 (共享)</div>
+                        <div class="ml-4">├── print_logo() (单一实现)</div>
+                        <div class="ml-4">└── _supports_color() (单一实现)</div>
+                        <div class="mt-2">scripts/config.py</div>
+                        <div class="ml-4">├── 项目路径配置</div>
+                        <div class="ml-4">├── 端口配置</div>
+                        <div class="ml-4">└── 环境配置</div>
+                        <div class="mt-2">scripts/port_utils.py</div>
+                        <div class="ml-4">├── check_port() (跨平台)</div>
+                        <div class="ml-4">├── kill_port() (跨平台)</div>
+                        <div class="ml-4">└── get_process_by_port() (跨平台)</div>
+                        <div class="mt-2">start.py (统一入口)</div>
+                        <div class="ml-4">├── --backend 模式</div>
+                        <div class="ml-4">├── --frontend 模式</div>
+                        <div class="ml-4">├── --prod 模式</div>
+                        <div class="ml-4">└── --oneclick 模式</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 实施计划 -->
+        <div class="card">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">实施计划</h2>
+            <div class="space-y-4">
+                <div class="flex items-start">
+                    <div class="flex-shrink-0 h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm mr-3">1</div>
+                    <div>
+                        <h3 class="font-semibold text-gray-700">创建共享工具模块</h3>
+                        <p class="text-sm text-gray-600">创建 <code>scripts/</code> 目录，实现 <code>common.py</code>、<code>config.py</code>、<code>port_utils.py</code>、<code>health_check.py</code></p>
+                    </div>
+                </div>
+                <div class="flex items-start">
+                    <div class="flex-shrink-0 h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm mr-3">2</div>
+                    <div>
+                        <h3 class="font-semibold text-gray-700">编写测试</h3>
+                        <p class="text-sm text-gray-600">使用TDD方法，先为共享工具模块编写测试，确保功能正确</p>
+                    </div>
+                </div>
+                <div class="flex items-start">
+                    <div class="flex-shrink-0 h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm mr-3">3</div>
+                    <div>
+                        <h3 class="font-semibold text-gray-700">重构脚本</h3>
+                        <p class="text-sm text-gray-600">合并 <code>start.py</code>、<code>start_oneclick.py</code>、<code>check_and_start.py</code> 为统一的 <code>start.py</code></p>
+                    </div>
+                </div>
+                <div class="flex items-start">
+                    <div class="flex-shrink-0 h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm mr-3">4</div>
+                    <div>
+                        <h3 class="font-semibold text-gray-700">添加跨平台支持</h3>
+                        <p class="text-sm text-gray-600">替换 Windows-only 代码，使用跨平台库（如 <code>psutil</code>）</p>
+                    </div>
+                </div>
+                <div class="flex items-start">
+                    <div class="flex-shrink-0 h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm mr-3">5</div>
+                    <div>
+                        <h3 class="font-semibold text-gray-700">更新安装脚本</h3>
+                        <p class="text-sm text-gray-600">更新 <code>install.py</code> 使用共享模块，添加 <code>install.sh</code> 支持 Linux/Mac</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 预期收益 -->
+        <div class="card solution">
+            <h2 class="text-xl font-bold text-green-800 mb-4">预期收益</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="text-center">
+                    <div class="text-3xl font-bold text-green-600">70%</div>
+                    <div class="text-sm text-gray-600">代码重复减少</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-3xl font-bold text-green-600">100%</div>
+                    <div class="text-sm text-gray-600">跨平台支持</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-3xl font-bold text-green-600">80%</div>
+                    <div class="text-sm text-gray-600">测试覆盖率</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 依赖关系 -->
+        <div class="card">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">依赖关系图</h2>
+            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <div class="font-mono text-xs text-gray-600">
+                    <div class="mb-2">start.py (统一入口)</div>
+                    <div class="ml-4">├── 导入 scripts/common.py</div>
+                    <div class="ml-4">├── 导入 scripts/config.py</div>
+                    <div class="ml-4">├── 导入 scripts/port_utils.py</div>
+                    <div class="ml-4">└── 导入 scripts/health_check.py</div>
+                    <div class="mt-2">install.py</div>
+                    <div class="ml-4">├── 导入 scripts/common.py</div>
+                    <div class="ml-4">└── 导入 scripts/config.py</div>
+                    <div class="mt-2">scripts/common.py</div>
+                    <div class="ml-4">├── Colors 类</div>
+                    <div class="ml-4">├── ProgressBar 类</div>
+                    <div class="ml-4">├── print_logo()</div>
+                    <div class="ml-4">└── _supports_color()</div>
+                    <div class="mt-2">scripts/config.py</div>
+                    <div class="ml-4">├── 项目路径配置</div>
+                    <div class="ml-4">├── 端口配置</div>
+                    <div class="ml-4">└── 环境配置</div>
+                    <div class="mt-2">scripts/port_utils.py</div>
+                    <div class="ml-4">├── check_port() (跨平台)</div>
+                    <div class="ml-4">├── kill_port() (跨平台)</div>
+                    <div class="ml-4">└── get_process_by_port() (跨平台)</div>
+                    <div class="mt-2">scripts/health_check.py</div>
+                    <div class="ml-4">├── health_check() (HTTP)</div>
+                    <div class="ml-4">└── wait_for_server() (轮询)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 风险评估 -->
+        <div class="card problem">
+            <h2 class="text-xl font-bold text-red-800 mb-4">风险评估</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">技术风险</h3>
+                    <ul class="list-disc list-inside text-sm text-gray-600 space-y-1">
+                        <li><strong>中等</strong>: 跨平台兼容性问题</li>
+                        <li><strong>低</strong>: 现有脚本功能破坏</li>
+                        <li><strong>低</strong>: 测试覆盖不足</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">缓解措施</h3>
+                    <ul class="list-disc list-inside text-sm text-gray-600 space-y-1">
+                        <li>使用 <code>psutil</code> 库确保跨平台兼容</li>
+                        <li>保留旧脚本作为备份，逐步迁移</li>
+                        <li>TDD 方法确保功能正确性</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- 总结 -->
+        <div class="card solution">
+            <h2 class="text-xl font-bold text-green-800 mb-4">总结</h2>
+            <p class="text-gray-600 mb-4">
+                通过重构安装/启动脚本，可以显著提高代码质量、可维护性和跨平台支持。使用TDD方法确保功能正确性，
+                通过共享模块减少代码重复，提高开发效率。
+            </p>
+            <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                <p class="text-sm text-green-700">
+                    <strong>下一步行动:</strong>
+                    <br>1. 创建 <code>scripts/</code> 目录和共享模块
+                    <br>2. 编写测试用例
+                    <br>3. 实施重构
+                    <br>4. 验证功能正确性
+                </p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

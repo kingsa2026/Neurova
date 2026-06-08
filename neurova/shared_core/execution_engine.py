@@ -41,7 +41,7 @@ class ExecutionStatus(Enum):
 class ExecutionResult:
     """执行结果"""
     execution_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    status: ExecutionStatus = ExecutionStatus.PENDING
+    status: ExecutionStatus = field(default_factory=lambda: ExecutionStatus.PENDING)
     result: typing.Any = None
     error: typing.Optional[str] = None
     start_time: typing.Optional[datetime.datetime] = None

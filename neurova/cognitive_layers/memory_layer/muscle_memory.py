@@ -133,7 +133,7 @@ class MuscleMemory:
         self._tool_index: Dict[str, set] = {}
 
         # 加载持久化数据
-        if storage_path:
+        if self._storage_path:
             self._load_all()
 
     def match(
@@ -310,6 +310,7 @@ class MuscleMemory:
         success: bool,
         result_summary: str = "",
         metadata: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> MuscleMemoryItem:
         """
         记录工具使用
@@ -321,10 +322,15 @@ class MuscleMemory:
             success: 是否成功
             result_summary: 结果摘要
             metadata: 额外元数据
+            **kwargs: 额外关键字参数，将被合并到 metadata 中
 
         Returns:
             记忆条目
         """
+        # 将额外的关键字参数合并到 metadata 中
+        if metadata is None:
+            metadata = {}
+        metadata.update(kwargs)
         fingerprint = self._extract_keywords(query)
         vector_fp = self._text_to_embedding_hash(query)
 
@@ -354,6 +360,7 @@ class MuscleMemory:
             self._l3[item_id] = item
             self._add_to_keyword_index(item)
             self._add_to_tool_index(item)
+            self._save_all()
 
             logger.debug(f"New muscle memory item: {item_id[:8]}... (L3)")
             return item

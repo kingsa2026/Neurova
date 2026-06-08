@@ -95,10 +95,8 @@ class ToolRouter:
             MCP 客户端实例
         """
         if server_id not in self._mcp_clients:
-            # 这里应该创建实际的 MCP 客户端
-            # 暂时使用占位符
-            from neurova.tool_layers.mcp_client import MCPClient
-            client = MCPClient(server_id, config)
+            from neurova.tool_layers.mcp_client import MCPToolClient
+            client = MCPToolClient()
             self._mcp_clients[server_id] = client
             self._mcp_configs[server_id] = config
             logger.debug(f"Created MCP client for server: {server_id}")
@@ -160,7 +158,8 @@ class ToolRouter:
             raise ValueError(f"MCP client not found for server: {server_id}")
         
         client = self._mcp_clients[server_id]
-        return await client.call_tool(tool.name, params)
+        # MCPToolClient 使用 execute_tool(server_id, tool_name, params)
+        return await client.execute_tool(server_id, tool.name, params)
     
     async def _execute_skill(self, tool: typing.Any, params: typing.Dict[str, typing.Any]) -> typing.Any:
         """

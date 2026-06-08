@@ -270,3 +270,204 @@ ExperienceRecord = SkillExecutionLog
 SkillManifest = Skill
 PluginEntryPoints = Dict[str, Any]
 SkillRecord = Skill
+
+
+# Meta-skill 集成数据模型
+
+class OptimizationGoal(Enum):
+    """优化目标"""
+    CLARITY = "clarity"
+    SPECIFICITY = "specificity"
+    CONCISENESS = "conciseness"
+    COMPLETENESS = "completeness"
+    PERFORMANCE = "performance"
+    SECURITY = "security"
+
+
+class ChainStatus(Enum):
+    """技能链状态"""
+    PENDING = "pending"
+    RUNNING = "running"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class StepStatus(Enum):
+    """步骤状态"""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+@dataclass
+class SkillGenerationResult:
+    """技能生成结果"""
+    success: bool = False
+    skill_code: str = ""
+    skill_config: Dict[str, Any] = field(default_factory=dict)
+    skill_name: str = ""
+    error: str = ""
+    warnings: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SkillRefinementResult:
+    """技能优化结果"""
+    success: bool = False
+    improved: bool = False
+    original_skill_id: str = ""
+    refined_code: str = ""
+    changes: List[str] = field(default_factory=list)
+    error: str = ""
+
+
+@dataclass
+class SkillValidationResult:
+    """技能验证结果"""
+    valid: bool = False
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    suggestions: List[str] = field(default_factory=list)
+    complexity_score: float = 0.0
+    security_score: float = 0.0
+
+
+@dataclass
+class ProjectAnalysisResult:
+    """项目分析结果"""
+    project_path: str = ""
+    files: List[str] = field(default_factory=list)
+    dependencies: List[str] = field(default_factory=list)
+    main_function: str = ""
+    complexity_score: float = 0.0
+    entry_points: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ExtractedSkill:
+    """提取的技能"""
+    skill_name: str = ""
+    code: str = ""
+    config: Dict[str, Any] = field(default_factory=dict)
+    dependencies: List[str] = field(default_factory=list)
+    entry_point: str = ""
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SkillPackage:
+    """技能包"""
+    success: bool = False
+    skill_path: Optional[Path] = None
+    skill_name: str = ""
+    version: str = "1.0.0"
+    error: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SkillChainStep:
+    """技能链步骤"""
+    step_id: str = ""
+    skill_id: str = ""
+    input_mapping: Dict[str, str] = field(default_factory=dict)
+    output_mapping: Dict[str, str] = field(default_factory=dict)
+    condition: Optional[str] = None
+    timeout: float = 30.0
+    retry_count: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SkillChain:
+    """技能链"""
+    chain_id: str = ""
+    name: str = ""
+    description: str = ""
+    steps: List[SkillChainStep] = field(default_factory=list)
+    variables: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class StepExecutionResult:
+    """步骤执行结果"""
+    step_id: str = ""
+    skill_id: str = ""
+    status: StepStatus = StepStatus.PENDING
+    input_data: Dict[str, Any] = field(default_factory=dict)
+    output_data: Dict[str, Any] = field(default_factory=dict)
+    error: str = ""
+    duration: float = 0.0
+    retries: int = 0
+
+
+@dataclass
+class ChainExecutionResult:
+    """技能链执行结果"""
+    chain_id: str = ""
+    status: ChainStatus = ChainStatus.PENDING
+    success: bool = False
+    results: List[StepExecutionResult] = field(default_factory=list)
+    final_output: Dict[str, Any] = field(default_factory=dict)
+    error: str = ""
+    total_duration: float = 0.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ChainStatusInfo:
+    """技能链状态信息"""
+    chain_id: str = ""
+    status: ChainStatus = ChainStatus.PENDING
+    progress: float = 0.0
+    current_step: int = 0
+    total_steps: int = 0
+    started_at: Optional[str] = None
+    estimated_remaining: Optional[float] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PromptAnalysis:
+    """提示词分析结果"""
+    clarity_score: float = 0.0
+    specificity_score: float = 0.0
+    completeness_score: float = 0.0
+    conciseness_score: float = 0.0
+    overall_score: float = 0.0
+    suggestions: List[str] = field(default_factory=list)
+    issues: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class OptimizedPrompt:
+    """优化后的提示词"""
+    success: bool = False
+    original_prompt: str = ""
+    optimized_prompt: str = ""
+    improvements: List[str] = field(default_factory=list)
+    score_before: float = 0.0
+    score_after: float = 0.0
+    optimization_type: OptimizationGoal = OptimizationGoal.CLARITY
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class VariantTestResults:
+    """变体测试结果"""
+    variants: List[str] = field(default_factory=list)
+    variant_scores: List[float] = field(default_factory=list)
+    best_variant_index: int = 0
+    best_variant: str = ""
+    test_cases: List[Dict[str, Any]] = field(default_factory=list)
+    detailed_results: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)

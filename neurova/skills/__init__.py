@@ -43,4 +43,10 @@ import neurova.skills.skill_packager
 import neurova.skills.skill_service
 import neurova.skills.task_decomposer
 
+# Meta-skill 集成模块
+import neurova.skills.skill_generator
+import neurova.skills.project_to_skill
+import neurova.skills.skill_chain_executor
+import neurova.skills.prompt_optimizer
+
 pass

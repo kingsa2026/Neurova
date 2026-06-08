@@ -73,6 +73,7 @@ class ToolParameter:
     required: bool = False
     default: typing.Any = None
     enum_values: typing.Optional[typing.List[str]] = None
+    constraints: typing.Optional[typing.Dict[str, typing.Any]] = None
     
     def to_dict(self) -> typing.Dict[str, typing.Any]:
         d = {"name": self.name, "type": self.type, "description": self.description, "required": self.required}
@@ -117,6 +118,8 @@ class ToolInvocation:
     end_time: typing.Optional[datetime.datetime] = None
     duration: typing.Optional[float] = None
     success: bool = True
+    user_id: typing.Optional[str] = None
+    agent_id: typing.Optional[str] = None
     
     def to_dict(self) -> typing.Dict[str, typing.Any]:
         return {
@@ -124,7 +127,8 @@ class ToolInvocation:
             "arguments": self.arguments, "error": self.error,
             "start_time": self.start_time.isoformat() if self.start_time else None,
             "end_time": self.end_time.isoformat() if self.end_time else None,
-            "duration": self.duration, "success": self.success
+            "duration": self.duration, "success": self.success,
+            "user_id": self.user_id, "agent_id": self.agent_id
         }
 
 
@@ -172,9 +176,10 @@ class ToolEngine:
     管理工具注册、执行、版本控制、共享和发现。
     """
     
-    def __init__(self, config: typing.Dict[str, typing.Any] = None):
+    def __init__(self, config: typing.Dict[str, typing.Any] = None, tool_guard: typing.Any = None):
         self._config = config or {}
         self._lock = __import__('threading').RLock()
+        self.tool_guard = tool_guard or self._create_default_guard()
         
         # 工具注册表
         self._tools: typing.Dict[str, ToolDefinition] = {}
@@ -188,12 +193,31 @@ class ToolEngine:
         
         # 共享记录
         self._shared_tools: typing.Dict[str, typing.List[str]] = {}  # tool_name -> [user_ids]
+    
+    def _create_default_guard(self):
+        """创建默认的工具守卫"""
+        class DefaultGuard:
+            def guard(self, **kwargs):
+                return type('GuardResult', (), {'is_safe': True, 'findings': []})()
+        return DefaultGuard()
         
         logger.info("ToolEngine 初始化完成")
     
     def register_tool(self, tool_name: str, tool_func: typing.Callable, description: str = "", 
-                      parameters: typing.List[ToolParameter] = None, tags: typing.List[str] = None) -> None:
-        """注册工具"""
+                      parameters: typing.List[ToolParameter] = None, tags: typing.List[str] = None,
+                      status: ToolStatus = None, owner: str = "", is_public: bool = False) -> None:
+        """注册工具
+        
+        Args:
+            tool_name: 工具名称
+            tool_func: 工具函数
+            description: 工具描述
+            parameters: 参数定义列表
+            tags: 标签列表
+            status: 工具状态
+            owner: 工具所有者（用于多租户隔离）
+            is_public: 是否公开
+        """
         with self._lock:
             # 提取参数信息
             if parameters is None:
@@ -203,7 +227,10 @@ class ToolEngine:
                 name=tool_name,
                 description=description or (tool_func.__doc__ or "").strip(),
                 parameters=parameters,
-                tags=tags or []
+                tags=tags or [],
+                status=status or ToolStatus.AVAILABLE,
+                owner=owner,
+                is_public=is_public
             )
             
             self._tools[tool_name] = definition
@@ -361,21 +388,72 @@ class ToolEngine:
         return results[:top_k]
     
     def prepare_arguments(self, tool_name: str, raw_args: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
-        """准备工具参数"""
+        """准备工具参数
+        
+        对于没有定义参数的工具（如 MCP 动态工具），直接透传原始参数。
+        """
         defn = self._tools.get(tool_name)
         if not defn:
             return raw_args
         
+        # 无显式参数定义时，直接透传原始参数（支持 **kwargs 动态工具如 MCP）
+        if not defn.parameters:
+            return raw_args
+        
         prepared = {}
+        missing_required = []
         for param in defn.parameters:
             if param.name in raw_args:
                 prepared[param.name] = raw_args[param.name]
             elif param.default is not None:
                 prepared[param.name] = param.default
             elif param.required:
-                logger.warning(f"缺少必需参数: {param.name}")
+                missing_required.append(param.name)
+        
+        if missing_required:
+            raise ValueError(f"缺少必需参数: {', '.join(missing_required)}")
         
         return prepared
+    
+    async def _validate_parameters(self, tool_def: typing.Union[str, ToolDefinition], 
+                                   parameters: typing.Dict[str, typing.Any]) -> None:
+        """验证参数类型和约束"""
+        if isinstance(tool_def, str):
+            defn = self._tools.get(tool_def)
+        else:
+            defn = tool_def
+        
+        if not defn:
+            return
+        
+        for param in defn.parameters:
+            if param.name not in parameters:
+                if param.required:
+                    raise ValueError(f"缺少必需参数: {param.name}")
+                continue
+            
+            value = parameters[param.name]
+            
+            # 类型验证
+            type_checks = {
+                "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+                "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+                "string": lambda v: isinstance(v, str),
+                "boolean": lambda v: isinstance(v, bool),
+                "array": lambda v: isinstance(v, list),
+                "object": lambda v: isinstance(v, dict),
+            }
+            
+            if param.type in type_checks and not type_checks[param.type](value):
+                raise ValueError(f"参数 {param.name} 类型错误: 期望 {param.type}, 实际 {type(value).__name__}")
+            
+            # 约束验证
+            if param.constraints:
+                if param.type in ("integer", "number"):
+                    if "min" in param.constraints and value < param.constraints["min"]:
+                        raise ValueError(f"参数 {param.name} 小于最小值 {param.constraints['min']}")
+                    if "max" in param.constraints and value > param.constraints["max"]:
+                        raise ValueError(f"参数 {param.name} 大于最大值 {param.constraints['max']}")
     
     async def execute(self, tool_name: str, parameters: typing.Dict[str, typing.Any] = None,
                       timeout: float = None, context: ToolCallingContext = None) -> typing.Any:
@@ -395,7 +473,7 @@ class ToolEngine:
             prepared = self.prepare_arguments(tool_name, parameters or {})
             
             # 执行
-            if asyncio.iscoroutinefunction(func):
+            if inspect.iscoroutinefunction(func):
                 if timeout:
                     result = await asyncio.wait_for(func(**prepared), timeout=timeout)
                 else:
@@ -419,7 +497,8 @@ class ToolEngine:
         return invocation.result
     
     async def execute_with_safeguards(self, tool_name: str, parameters: typing.Dict[str, typing.Any] = None,
-                                       timeout: float = 30, context: ToolCallingContext = None) -> typing.Any:
+                                       timeout: float = 30, context: ToolCallingContext = None,
+                                       user_id: str = None, agent_id: str = None) -> typing.Any:
         """安全执行工具（带防护）"""
         # 检查工具状态
         defn = self._tools.get(tool_name)
@@ -428,7 +507,17 @@ class ToolEngine:
         if defn.status != ToolStatus.AVAILABLE:
             raise ValueError(f"工具不可用: {tool_name}, 状态: {defn.status.value}")
         
-        return await self.execute(tool_name, parameters, timeout, context)
+        # 执行工具
+        result = await self.execute(tool_name, parameters, timeout, context)
+        
+        # 更新调用记录的用户信息
+        if self._invocations:
+            last_invocation = self._invocations[-1]
+            if last_invocation.tool_name == tool_name:
+                last_invocation.user_id = user_id
+                last_invocation.agent_id = agent_id
+        
+        return result
     
     async def chain_tools(self, chain: typing.List[typing.Dict[str, typing.Any]], 
                           initial_input: typing.Any = None) -> typing.Any:
@@ -455,6 +544,9 @@ class ToolEngine:
             for name, param in sig.parameters.items():
                 if name in ('self', 'cls'):
                     continue
+                # 跳过 *args 和 **kwargs
+                if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                    continue
                 p = ToolParameter(
                     name=name,
                     type="string",
@@ -469,6 +561,34 @@ class ToolEngine:
     def _is_skill_tool(self, tool_name: str) -> bool:
         """检查是否为技能工具"""
         return tool_name.startswith("skill.")
+    
+    def get_tool_history(self, tool_name: str, user_id: str = None, limit: int = 100) -> typing.List[ToolInvocation]:
+        """获取工具调用历史"""
+        invocations = list(self._invocations)
+        
+        # 按工具名过滤
+        invocations = [i for i in invocations if i.tool_name == tool_name]
+        
+        # 按用户ID过滤（如果提供）
+        if user_id is not None:
+            invocations = [i for i in invocations if getattr(i, 'user_id', None) == user_id]
+        
+        # 按时间倒序排序
+        invocations.sort(key=lambda x: x.start_time or datetime.datetime.min, reverse=True)
+        
+        return invocations[:limit]
+    
+    def get_invocation(self, invocation_id: str, user_id: str = None) -> typing.Optional[ToolInvocation]:
+        """获取特定的调用记录"""
+        for invocation in self._invocations:
+            if invocation.invocation_id == invocation_id:
+                # 如果指定了用户ID，检查权限
+                if user_id is not None:
+                    # 检查调用记录是否属于该用户
+                    if getattr(invocation, 'user_id', None) != user_id:
+                        return None
+                return invocation
+        return None
     
     def get_statistics(self) -> typing.Dict[str, typing.Any]:
         """获取统计信息"""

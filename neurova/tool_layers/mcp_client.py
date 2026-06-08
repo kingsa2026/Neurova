@@ -307,11 +307,55 @@ class MCPToolClient:
             self._tool_cache[server_id] = tools
             server["tools"] = tools
             
+            # 同步 MCP 工具到 ToolEngine
+            self._sync_tools_to_engine(server_id, tools)
+            
             return tools
             
         except Exception as e:
             logger.error(f"Failed to get tools from server {server_id}: {e}")
             return []
+    
+    def _sync_tools_to_engine(self, server_id: str, tools: typing.List[typing.Dict[str, typing.Any]], 
+                              engine: typing.Optional[typing.Any] = None) -> None:
+        """将 MCP 工具同步注册到 ToolEngine
+        
+        Args:
+            server_id: MCP 服务器 ID
+            tools: 工具定义列表
+            engine: 可选的 ToolEngine 实例，为 None 时自动创建
+        """
+        try:
+            from neurova.execution_engine.tool_engine import ToolEngine, ToolStatus
+            if engine is None:
+                engine = ToolEngine()
+            for tool_def in tools:
+                tool_name = f"mcp.{server_id}.{tool_def.get('name', '')}"
+                if not engine.get_tool(tool_name):
+                    # 创建一个闭包函数作为 MCP 工具的执行函数
+                    _server_id = server_id
+                    _tool_name = tool_def.get('name', '')
+                    
+                    # 使用 **kwargs 接收任意参数
+                    # ToolEngine 会自动从函数签名推断参数定义
+                    # 由于 MCP 工具的参数是动态的，我们使用 **kwargs 来接收所有参数
+                    async def _mcp_executor(**kwargs) -> typing.Any:
+                        # kwargs 包含 ToolEngine 准备的参数
+                        # 对于 MCP 工具，我们将所有参数传递给 execute_tool
+                        # 注意：如果 kwargs 为空，说明 ToolEngine 没有匹配到任何参数
+                        # 这种情况下，我们传递空字典给 execute_tool
+                        return await self.execute_tool(_server_id, _tool_name, kwargs)
+                    
+                    engine.register_tool(
+                        tool_name=tool_name,
+                        tool_func=_mcp_executor,
+                        description=tool_def.get('description', f"MCP tool: {_tool_name}"),
+                        tags=["mcp", server_id],
+                        status=ToolStatus.AVAILABLE,
+                    )
+                    logger.debug(f"Synced MCP tool to ToolEngine: {tool_name}")
+        except Exception as e:
+            logger.debug(f"Failed to sync MCP tools to ToolEngine: {e}")
     
     def list_servers(self) -> typing.List[str]:
         """

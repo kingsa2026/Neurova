@@ -21,6 +21,22 @@ from typing import List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
+# ToolEngine 延迟导入（避免循环依赖）
+_TOOL_ENGINE_AVAILABLE = False
+_ToolEngine = None
+
+def _get_tool_engine_class():
+    """延迟导入 ToolEngine 类"""
+    global _TOOL_ENGINE_AVAILABLE, _ToolEngine
+    if _ToolEngine is None:
+        try:
+            from neurova.execution_engine.tool_engine import ToolEngine
+            _ToolEngine = ToolEngine
+            _TOOL_ENGINE_AVAILABLE = True
+        except ImportError:
+            _TOOL_ENGINE_AVAILABLE = False
+    return _ToolEngine
+
 class ToolExecutor:
     """统一工具执行器
 
@@ -38,6 +54,32 @@ class ToolExecutor:
         """
         self._agent = agent_ref
         self._messages_list: List[Dict] = []
+        self._tool_engine = None  # ToolEngine 实例（延迟初始化）
+
+    @property
+    def tool_engine(self):
+        """获取 ToolEngine 实例（延迟初始化）"""
+        if self._tool_engine is None:
+            # 首先尝试从 ExecutionEngine 获取
+            try:
+                from neurova.shared_core.execution_engine import ExecutionEngine
+                engine = ExecutionEngine()
+                if hasattr(engine, '_tool_engine') and engine._tool_engine is not None:
+                    self._tool_engine = engine._tool_engine
+                    logger.debug("从 ExecutionEngine 获取 ToolEngine")
+                    return self._tool_engine
+            except Exception as e:
+                logger.debug(f"从 ExecutionEngine 获取 ToolEngine 失败: {e}")
+            
+            # 如果 ExecutionEngine 不可用，创建新的 ToolEngine
+            ToolEngineClass = _get_tool_engine_class()
+            if ToolEngineClass:
+                try:
+                    self._tool_engine = ToolEngineClass()
+                    logger.debug("创建新的 ToolEngine 实例")
+                except Exception as e:
+                    logger.warning(f"创建 ToolEngine 失败: {e}")
+        return self._tool_engine
 
     @property
     def _skill_registry(self):
@@ -285,6 +327,28 @@ class ToolExecutor:
         Returns:
             执行结果
         """
+        # 优先使用 ToolEngine（如果可用）
+        if self.tool_engine:
+            try:
+                # 获取 user_id 和 agent_id（如果可用）
+                user_id = getattr(self._agent, 'user_id', None)
+                agent_id = getattr(self._agent, 'agent_id', None)
+                
+                result = await self.tool_engine.execute_with_safeguards(
+                    tool_name=tool_name,
+                    parameters=params,
+                    user_id=user_id,
+                    agent_id=agent_id
+                )
+                logger.debug(f"ToolEngine 执行成功: {tool_name}")
+                return result
+            except ValueError as e:
+                # 工具未注册或不可用，回退到其他方式
+                logger.debug(f"ToolEngine 工具 {tool_name} 未注册或不可用: {e}")
+            except Exception as e:
+                logger.warning(f"ToolEngine 执行失败: {tool_name}, {e}")
+        
+        # 回退到原有逻辑
         # 内置工具
         builtin_tools = [
             "memory_search", "file_read", "file_write", "file_create",

@@ -341,6 +341,7 @@ class EvolutionOrchestrator:
             "outcome": result.get("outcome", outcome),
             "task": task,
             "success": success,
+            "association": result.get("associations_updated", 0),
         }
 
     def _maybe_evaluate_lifecycle(self) -> None:

@@ -457,3 +457,240 @@ class TaskDecomposer:
             "task_types": list(set(s.task_type for s in result.subtasks)),
             "confidence": result.confidence
         }
+    
+    async def plan_skill_chain(self, task: str) -> 'SkillChain':
+        """
+        规划技能链
+        
+        Args:
+            task: 任务描述
+            
+        Returns:
+            SkillChain: 技能链规划结果
+        """
+        from .models import SkillChain, SkillChainStep
+        
+        # 分解任务
+        decomposition = self.decompose(task)
+        
+        # 创建技能链步骤
+        steps = []
+        for i, subtask in enumerate(decomposition.subtasks):
+            # 确定技能 ID
+            skill_id = self._map_subtask_to_skill(subtask)
+            
+            # 创建输入输出映射
+            input_mapping = {}
+            output_mapping = {}
+            
+            # 如果有依赖，设置输入映射
+            if subtask.dependencies:
+                for dep_id in subtask.dependencies:
+                    input_mapping[f"input_from_{dep_id}"] = f"output_of_{dep_id}"
+            
+            # 设置输出映射
+            output_mapping[f"output_of_{subtask.id}"] = "result"
+            
+            step = SkillChainStep(
+                step_id=subtask.id,
+                skill_id=skill_id,
+                input_mapping=input_mapping,
+                output_mapping=output_mapping,
+                timeout=30.0,
+                retry_count=1,
+                metadata={
+                    "description": subtask.description,
+                    "task_type": subtask.task_type,
+                    "priority": subtask.priority
+                }
+            )
+            steps.append(step)
+        
+        # 创建技能链
+        chain = SkillChain(
+            chain_id=f"chain_{hash(task) % 10000:04d}",
+            name=f"任务链: {task[:50]}",
+            description=f"自动生成的技能链: {task}",
+            steps=steps,
+            variables={
+                "original_task": task,
+                "required_skills": decomposition.required_skills
+            },
+            metadata={
+                "generated_by": "TaskDecomposer",
+                "complexity": self.get_task_complexity(task)
+            }
+        )
+        
+        return chain
+    
+    async def optimize_chain(self, steps: List['SkillChainStep']) -> List['SkillChainStep']:
+        """
+        优化技能链顺序
+        
+        Args:
+            steps: 技能链步骤列表
+            
+        Returns:
+            List[SkillChainStep]: 优化后的步骤列表
+        """
+        from .models import SkillChainStep
+        
+        # 构建依赖图
+        dependency_graph = {}
+        step_map = {}
+        
+        for step in steps:
+            step_map[step.step_id] = step
+            dependency_graph[step.step_id] = []
+            
+            # 从输入映射中提取依赖
+            for input_key in step.input_mapping.values():
+                if input_key.startswith("output_of_"):
+                    dep_id = input_key[10:]  # 移除 "output_of_" 前缀 (10字符)
+                    dependency_graph[step.step_id].append(dep_id)
+        
+        # 拓扑排序
+        sorted_steps = self._topological_sort(dependency_graph, step_map)
+        
+        # 优化：将低优先级任务移到后面
+        optimized = self._prioritize_steps(sorted_steps)
+        
+        return optimized
+    
+    async def estimate_chain_cost(self, chain_plan: 'SkillChain') -> Dict[str, Any]:
+        """
+        估算技能链执行成本
+        
+        Args:
+            chain_plan: 技能链计划
+            
+        Returns:
+            Dict[str, Any]: 成本估算结果
+        """
+        total_time = 0.0
+        resource_levels = []
+        
+        for step in chain_plan.steps:
+            # 估算时间
+            estimated_time = step.metadata.get("estimated_time", 1.0)
+            total_time += estimated_time
+            
+            # 评估资源强度
+            resource_intensity = step.metadata.get("resource_intensity", "medium")
+            resource_levels.append(resource_intensity)
+        
+        # 确定总体资源级别
+        resource_mapping = {"low": 1, "medium": 2, "high": 3}
+        avg_resource = sum(resource_mapping.get(r, 2) for r in resource_levels) / len(resource_levels)
+        
+        if avg_resource < 1.5:
+            overall_resource = "low"
+        elif avg_resource < 2.5:
+            overall_resource = "medium"
+        else:
+            overall_resource = "high"
+        
+        return {
+            "total_time": total_time,
+            "resource_level": overall_resource,
+            "step_count": len(chain_plan.steps),
+            "estimated_complexity": self._estimate_chain_complexity(chain_plan),
+            "parallelizable": self._check_parallelizable(chain_plan)
+        }
+    
+    def _map_subtask_to_skill(self, subtask: 'SubTask') -> str:
+        """将子任务映射到技能 ID"""
+        # 基于任务类型和技能需求映射
+        task_type = subtask.task_type
+        required_skills = subtask.required_skills
+        
+        # 映射逻辑
+        if "web-development" in required_skills:
+            return "web_crawler"
+        elif "database" in required_skills:
+            return "database_manager"
+        elif "ai-ml" in required_skills:
+            return "ai_analyzer"
+        elif "data-analysis" in required_skills:
+            return "data_processor"
+        elif "file-management" in required_skills:
+            return "file_manager"
+        elif "network" in required_skills:
+            return "network_requester"
+        elif "security" in required_skills:
+            return "security_scanner"
+        else:
+            # 基于任务类型
+            type_to_skill = {
+                "analysis": "analyzer",
+                "creation": "creator",
+                "modification": "modifier",
+                "deletion": "deleter",
+                "search": "searcher",
+                "communication": "communicator",
+                "automation": "automator"
+            }
+            return type_to_skill.get(task_type, "general_executor")
+    
+    def _topological_sort(self, dependency_graph: Dict[str, List[str]], step_map: Dict[str, 'SkillChainStep']) -> List['SkillChainStep']:
+        """拓扑排序"""
+        visited = set()
+        temp_visited = set()
+        order = []
+        
+        def dfs(node):
+            if node in temp_visited:
+                raise ValueError(f"检测到循环依赖: {node}")
+            if node in visited:
+                return
+            
+            temp_visited.add(node)
+            
+            for dependency in dependency_graph.get(node, []):
+                dfs(dependency)
+            
+            temp_visited.remove(node)
+            visited.add(node)
+            order.append(node)
+        
+        for node in dependency_graph:
+            if node not in visited:
+                dfs(node)
+        
+        # order 已经是依赖在前的正确顺序（DFS 后序遍历），无需反转
+        return [step_map[node] for node in order if node in step_map]
+    
+    def _prioritize_steps(self, steps: List['SkillChainStep']) -> List['SkillChainStep']:
+        """按优先级排序步骤"""
+        # 按优先级排序（高优先级先执行）
+        return sorted(steps, key=lambda s: s.metadata.get("priority", 0), reverse=True)
+    
+    def _estimate_chain_complexity(self, chain_plan: 'SkillChain') -> str:
+        """估算技能链复杂度"""
+        step_count = len(chain_plan.steps)
+        
+        if step_count <= 3:
+            return "low"
+        elif step_count <= 6:
+            return "medium"
+        else:
+            return "high"
+    
+    def _check_parallelizable(self, chain_plan: 'SkillChain') -> bool:
+        """检查技能链是否可以并行执行"""
+        # 检查是否有步骤没有依赖关系
+        independent_steps = 0
+        
+        for step in chain_plan.steps:
+            has_dependencies = False
+            for input_key in step.input_mapping.values():
+                if input_key.startswith("output_of_"):
+                    has_dependencies = True
+                    break
+            
+            if not has_dependencies:
+                independent_steps += 1
+        
+        # 如果有多个独立步骤，可以考虑并行执行
+        return independent_steps >= 2
