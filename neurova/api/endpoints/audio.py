@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 模块级导入（避免重复导入）
+from neurova.api.endpoints import get_app_state
+
 
 class SynthesizeRequest(BaseModel):
     """TTS 合成请求"""
@@ -62,7 +65,6 @@ def _get_voice_engine(engine_type: str):
     Returns:
         VoiceEngine 或 None
     """
-    from neurova.api.endpoints import get_app_state
     state = get_app_state()
     if state and isinstance(state, dict):
         voice_engines = state.get("voice_engines", {})
@@ -79,7 +81,6 @@ def _get_tts_manager():
         return voice_engine
     
     # 降级到旧的 TTSManager
-    from neurova.api.endpoints import get_app_state
     state = get_app_state()
     if state:
         return state.get("tts_manager")
@@ -94,7 +95,6 @@ def _get_asr_manager():
         return voice_engine
     
     # 降级到旧的 ASRManager
-    from neurova.api.endpoints import get_app_state
     state = get_app_state()
     if state:
         return state.get("asr_manager")

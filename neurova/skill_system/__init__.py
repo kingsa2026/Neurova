@@ -101,8 +101,6 @@ except ImportError as e:
 try:
     from neurova.skill_system.skill_pool_manager import Skill as _PoolSkill
     Skill = _PoolSkill
-    SkillResult = type('SkillResult', (), {'success': True, 'data': None, 'error': None})
-    SkillInfo = type('SkillInfo', (), {})
 except ImportError as e:
     logger.debug(f"Skill 从 skill_pool_manager 导入失败，使用占位: {e}")
 
@@ -111,18 +109,20 @@ except ImportError as e:
             self.name = name
             self.description = description
 
-    class SkillResult:  # type: ignore[no-redef]
-        def __init__(self, success=True, data=None, error=None, execution_time=0.0):
-            self.success = success
-            self.data = data
-            self.error = error
-            self.execution_time = execution_time
 
-    class SkillInfo:  # type: ignore[no-redef]
-        def __init__(self, name, description="", status=None):
-            self.name = name
-            self.description = description
-            self.status = status
+class SkillResult:
+    def __init__(self, success=True, data=None, error=None, execution_time=0.0):
+        self.success = success
+        self.data = data
+        self.error = error
+        self.execution_time = execution_time
+
+
+class SkillInfo:
+    def __init__(self, name, description="", status=None):
+        self.name = name
+        self.description = description
+        self.status = status
 
 
 __all__ = [

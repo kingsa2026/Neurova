@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 # HTTP Bearer scheme
 security = HTTPBearer(auto_error=False)
 
+# 模块级导入（避免重复导入）
+from neurova.api.auth import verify_access_token
+from neurova.api.endpoints import get_app_state
+
 
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
@@ -40,7 +44,6 @@ async def get_current_user(
 
     token = credentials.credentials
     try:
-        from neurova.api.auth import verify_access_token
         payload = verify_access_token(token)
     except Exception as e:
         logger.warning(f"Token verification failed: {e}")
@@ -77,7 +80,6 @@ async def get_optional_user(
 
     token = credentials.credentials
     try:
-        from neurova.api.auth import verify_access_token
         payload = verify_access_token(token)
     except Exception:
         return None
@@ -106,7 +108,6 @@ def get_agent_instance(agent_id: str = "default"):
         HTTPException: Agent 不存在
     """
     try:
-        from neurova.api.endpoints import get_app_state
         app_state = get_app_state()
         if app_state:
             agents = app_state.get("agents", {})
@@ -140,7 +141,6 @@ def get_memory_manager(
         HTTPException: Agent 或记忆系统不存在
     """
     try:
-        from neurova.api.endpoints import get_app_state
         app_state = get_app_state()
 
         if agent_id:
@@ -192,7 +192,6 @@ def get_provider_manager():
         HTTPException: Provider 管理器不存在
     """
     try:
-        from neurova.api.endpoints import get_app_state
         app_state = get_app_state()
         if app_state:
             provider_manager = app_state.get("provider_manager")

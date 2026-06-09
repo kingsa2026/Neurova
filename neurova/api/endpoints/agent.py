@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 模块级导入（避免重复导入）
+from neurova.api.endpoints import get_app_state
+
 
 class AgentInfo(BaseModel):
     """Agent 信息"""
@@ -80,7 +83,6 @@ def _get_request_id(request: Request) -> str:
 
 def _get_app_state():
     """获取应用状态"""
-    from neurova.api.endpoints import get_app_state
     return get_app_state()
 
 

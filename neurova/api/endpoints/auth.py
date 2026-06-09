@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 模块级导入（避免重复导入）
+from neurova.api.auth import create_access_token, create_refresh_token, decode_token
+
 
 class LoginRequest(BaseModel):
     """登录请求"""
@@ -87,9 +90,6 @@ async def login(request: Request, body: LoginRequest):
     request_id = _get_request_id(request)
 
     try:
-        # 获取认证协议
-        from neurova.api.auth import create_access_token, create_refresh_token
-
         # TODO: 实际的用户验证逻辑
         # 这里简化处理，实际应该查询数据库
         if body.username and body.password:
@@ -124,8 +124,6 @@ async def refresh_token(request: Request, body: RefreshRequest):
     request_id = _get_request_id(request)
 
     try:
-        from neurova.api.auth import decode_token, create_access_token, create_refresh_token
-
         # 解码 refresh token
         payload = decode_token(body.refresh_token)
         if not payload:
@@ -168,7 +166,6 @@ async def get_current_user(request: Request):
             auth_header = request.headers.get("Authorization", "")
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:]
-                from neurova.api.auth import decode_token
                 payload = decode_token(token)
                 if payload:
                     user = {
@@ -206,8 +203,6 @@ async def register(request: Request, body: RegisterRequest):
         # 4. 返回 token
 
         user_id = str(uuid.uuid4())
-
-        from neurova.api.auth import create_access_token, create_refresh_token
 
         access_token = create_access_token(
             data={"sub": user_id, "username": body.username}

@@ -335,11 +335,6 @@ class Agent:
                     logger.warning(f"认知图谱初始化失败: {e}")
         debug_log("步骤2: 完成")
 
-        # Phase 5: 工作记忆和对话缓冲区由 MemCore 管理
-        self.working_memory: Optional[WorkingMemoryAugmenter] = None
-        self.conversation_buffer: Optional[ConversationMemoryBuffer] = None
-        self.buffer_module: Optional[BufferModule] = None
-
         debug_log("步骤3: 创建上下文构建器和 LLM 客户端...")
 
         # P2: 委托给 ContextOrchestrator 初始化上下文系统
@@ -380,7 +375,7 @@ class Agent:
 
         # ToolMemory 集成：闭环学习系统（Neurova 2.0 核心特性）
         # 工具运用 → 工具记忆 → 经验总结 → 相似问题检索 → 工具运用
-        self.tool_memory: Optional[ToolMemoryIntegration] = None
+        self.tool_memory = None
         if self.memory_manager:
             from neurova.cognitive_layers.memory_layer.muscle_memory import MuscleMemory
             from neurova.cognitive_layers.memory_layer.tool_memory_integration import ToolMemoryIntegration
@@ -390,7 +385,6 @@ class Agent:
                 storage_dir=str(self.config.workspace_path / "memory" / "muscle_memory"),
             )
 
-            from neurova.cognitive_layers.memory_layer.tool_memory_integration import ToolMemoryIntegration
             # 初始化ToolMemoryIntegration，接入肌肉记忆
             self.tool_memory = ToolMemoryIntegration(
                 memory_layer=self.memory_manager,
@@ -399,9 +393,6 @@ class Agent:
                 temperature_threshold=30.0,
             )
             logger.info(f"Agent {self.config.name}: ToolMemory（闭环学习）+ 肌肉记忆已启用")
-
-        # Neurova 统一记忆检索引擎（多维融合 + 意图钻取）
-        self.recall_engine: Optional[NeurovaRecallEngine] = None
 
         # Neurova-Evocate: Neurova Hebb 记忆系统（结构化推理记忆）
         self.neuHebb_manager = None

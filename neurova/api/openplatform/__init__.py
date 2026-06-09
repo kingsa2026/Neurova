@@ -10,8 +10,6 @@ Neurova API 开放平台模块
 """
 
 from asyncio import Event
-from asyncio import Event
-from asyncio import Event
 
 # api imports
 import neurova.api.openplatform.events

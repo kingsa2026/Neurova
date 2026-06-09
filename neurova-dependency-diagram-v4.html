@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Neurova 模块依赖关系图 V4 — 第四轮复审</title>
+<style>
+:root {
+  --c-bg: #f8fafc;
+  --c-canvas: #ffffff;
+  --c-border: #cbd5e1;
+  --c-text-main: #0f172a;
+  --c-text-sub: #64748b;
+  --c-fixed: #059669;
+  --c-fixed-bg: #ecfdf5;
+  --c-new: #d97706;
+  --c-new-bg: #fffbeb;
+  --c-new-border: #fcd34d;
+  --c-bug: #dc2626;
+  --c-bug-bg: #fef2f2;
+  --c-bug-border: #fca5a5;
+  --c-ok: #059669;
+  --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'SF Mono', Monaco, Consolas, monospace;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--c-bg); font-family:var(--font-ui); color:var(--c-text-main); padding:20px; }
+
+.canvas {
+  background:var(--c-canvas); border:2px solid var(--c-border);
+  padding:24px 28px; max-width:1360px; margin:0 auto;
+}
+.hdr { border-bottom:1px solid var(--c-border); padding-bottom:12px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:flex-end; }
+.hdr h1 { font-size:20px; font-weight:700; }
+.hdr .sub { font-size:11px; font-weight:500; color:var(--c-text-sub); text-transform:uppercase; letter-spacing:.5px; margin-top:2px; }
+.hdr .meta { font-size:10px; color:var(--c-text-sub); font-family:var(--font-mono); text-align:right; line-height:1.6; }
+
+.legend { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:16px; padding:8px 12px; border:1px solid var(--c-border); background:var(--c-bg); }
+.legend-i { display:flex; align-items:center; gap:5px; font-size:10px; }
+.sw { width:12px; height:12px; border:1px solid; display:inline-block; flex-shrink:0; }
+.sw--fixed { background:var(--c-fixed-bg); border-color:var(--c-fixed); }
+.sw--bug { background:var(--c-bug-bg); border-color:var(--c-bug); }
+.sw--new { background:var(--c-new-bg); border-color:var(--c-new); }
+
+.b { display:inline-block; font-size:8px; font-family:var(--font-mono); padding:1px 4px; border:1px solid; text-transform:uppercase; letter-spacing:.3px; vertical-align:middle; }
+.b--fixed { background:var(--c-fixed); color:#fff; border-color:var(--c-fixed); }
+.b--bug { background:var(--c-bug); color:#fff; border-color:var(--c-bug); }
+.b--new { background:var(--c-new); color:#fff; border-color:var(--c-new); }
+.b--low { background:transparent; color:var(--c-text-sub); border-color:var(--c-border); }
+
+.sec { margin-bottom:12px; }
+.sec-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; padding-bottom:4px; border-bottom:1px dashed var(--c-border); display:flex; align-items:center; gap:8px; }
+.sec-title .count { font-size:9px; font-weight:400; color:var(--c-text-sub); font-family:var(--font-mono); }
+
+/* Banner */
+.banner { display:flex; gap:10px; margin-bottom:16px; }
+.bc { flex:1; padding:10px 12px; border:1px solid var(--c-border); text-align:center; }
+.bc .n { font-size:26px; font-weight:700; font-family:var(--font-mono); }
+.bc .l { font-size:9px; color:var(--c-text-sub); text-transform:uppercase; letter-spacing:.5px; margin-top:2px; }
+.bc--g .n { color:var(--c-fixed); }
+.bc--r .n { color:var(--c-bug); }
+.bc--y .n { color:var(--c-new); }
+
+/* Row */
+.row { display:flex; align-items:flex-start; gap:8px; padding:4px 8px; margin-bottom:2px; border:1px solid var(--c-border); background:var(--c-canvas); font-size:10px; }
+.row--g { border-left:3px solid var(--c-fixed); }
+.row--r { border-left:3px solid var(--c-bug); background:var(--c-bug-bg); }
+.row--y { border-left:3px solid var(--c-new); background:var(--c-new-bg); }
+.rid { font-family:var(--font-mono); font-weight:700; min-width:46px; font-size:10px; }
+.rdesc { font-family:var(--font-mono); line-height:1.4; flex:1; font-size:10px; }
+.rst { font-size:9px; font-weight:600; min-width:56px; text-align:right; }
+
+/* Health cards */
+.hgrid { display:flex; gap:5px; flex-wrap:wrap; }
+.hcard { border:1px solid var(--c-border); padding:5px 8px; background:var(--c-canvas); border-left:3px solid var(--c-ok); display:inline-block; }
+.hcard .hn { font-weight:600; font-family:var(--font-mono); font-size:10px; margin-bottom:1px; }
+.hcard .hd { font-size:9px; color:var(--c-text-sub); line-height:1.3; }
+
+/* Table */
+table { width:100%; border-collapse:collapse; font-size:9px; margin-top:8px; }
+th, td { border:1px solid var(--c-border); padding:4px 6px; text-align:left; vertical-align:top; }
+th { background:var(--c-bg); font-weight:600; font-size:9px; text-transform:uppercase; letter-spacing:.3px; }
+td { font-family:var(--font-mono); font-size:9px; line-height:1.4; }
+.rg { background:var(--c-fixed-bg); }
+.ry { background:var(--c-new-bg); }
+.rr { background:var(--c-bug-bg); }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<div class="hdr">
+  <div>
+    <h1>Neurova 模块依赖关系图 V4</h1>
+    <p class="sub">MODULE DEPENDENCY AUDIT &mdash; REVISION 4 (FOURTH PASS)</p>
+  </div>
+  <div class="meta">REV 4.0 &mdash; 2026-06-09<br/>677 .py files &middot; 1052 .pyc verified &middot; 4 rounds</div>
+</div>
+
+<div class="legend">
+  <div class="legend-i"><span class="sw sw--fixed"></span>已修复 Fixed</div>
+  <div class="legend-i"><span class="sw sw--bug"></span>新发现 BUG</div>
+  <div class="legend-i"><span class="sw sw--new"></span>新模式 Pattern</div>
+</div>
+
+<!-- ================ BANNER ================ -->
+<div class="banner">
+  <div class="bc bc--g"><div class="n">24</div><div class="l">累计已修复 FIXED</div></div>
+  <div class="bc bc--r"><div class="n">5</div><div class="l">新 BUG</div></div>
+  <div class="bc bc--y"><div class="n">1</div><div class="l">新模式 PATTERN</div></div>
+  <div class="bc"><div class="n" style="color:var(--c-fixed);">0</div><div class="l">严重断路 CRITICAL</div></div>
+  <div class="bc"><div class="n" style="color:var(--c-fixed);">0</div><div class="l">孤立 .pyc / 缺失 __init__</div></div>
+</div>
+
+<!-- ================ FIXED: V1 ISSUES ================ -->
+<div class="sec">
+  <div class="sec-title" style="color:var(--c-fixed);">V1 修复确认 &mdash; 14/14 <span class="count">ALL V1 ISSUES FIXED (SINCE V2)</span></div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px;">
+    <div class="row row--g"><span class="rid">BC-01</span><span class="rdesc">10 孤立 .pyc 已清理</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">BC-02</span><span class="rdesc">analytics/__init__.py 已创建</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">BC-03</span><span class="rdesc">skill/__init__.py 重写为 __getattr__</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">BC-04</span><span class="rdesc">session_manager.py 补入 import fcntl</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">BC-05</span><span class="rdesc">neurova/neurova/ 嵌套目录已删除</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">BC-06</span><span class="rdesc">utils/builder/capabilities/ __init__ 已补</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">FD-01</span><span class="rdesc">memory/__init__ 7 核心类 = None</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">FD-02</span><span class="rdesc">tool_layers stub 条件化 not in dir()</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">FD-03</span><span class="rdesc">cognitive_layers 15 块全改 logger.debug</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">FD-04</span><span class="rdesc">tool_executor 延迟导入加 try/except</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">FD-05</span><span class="rdesc">context_pool ModelCapability 加保护</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">FD-06</span><span class="rdesc">telegram.py 正确导入 requests/httpx</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">FD-07</span><span class="rdesc">skill_system 移除 sys.modules hack</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">FD-08</span><span class="rdesc">memory 16 别名映射加 logger.debug</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+  </div>
+</div>
+
+<!-- ================ FIXED: V2 ISSUES ================ -->
+<div class="sec">
+  <div class="sec-title" style="color:var(--c-fixed);">V2 修复确认 &mdash; 8/8 ALL FIXED <span class="count">NF-07 NOW FULLY FIXED IN V4</span></div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px;">
+    <div class="row row--g"><span class="rid">NF-01</span><span class="rdesc">projects/ 7x 重复已去重 + 加保护</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">NF-02</span><span class="rdesc">neurflow/ 9 相对导入逐个保护</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">NF-03</span><span class="rdesc">auth/ fastapi.Path 加 try/except</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">NF-04</span><span class="rdesc">interfaces/ 3 fastapi 导入加保护</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">NF-05</span><span class="rdesc">model_adapter/ pydantic 加保护</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">NF-06</span><span class="rdesc">evolution/rsi/ 8 导入逐个保护</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">NF-07</span><span class="rdesc">skill_system/ SkillResult/SkillInfo 改为正式 class 定义, 移除 type() 代理</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">NF-08</span><span class="rdesc">skill/ ExperienceRecord 已有别名定义</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+  </div>
+</div>
+
+<!-- ================ FIXED: V3 ISSUES ================ -->
+<div class="sec">
+  <div class="sec-title" style="color:var(--c-fixed);">V3 修复确认 &mdash; 2/2 ALL FIXED <span class="count">COSMETIC DUPLICATES REMOVED</span></div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px;">
+    <div class="row row--g"><span class="rid">V3-01</span><span class="rdesc">api/openplatform/__init__.py: asyncio.Event 重复 3 行 &rarr; 仅保留 1 行</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+    <div class="row row--g"><span class="rid">V3-02</span><span class="rdesc">llm/generators/__init__.py: typing.Generator 重复 2 行 &rarr; 仅保留 1 行</span><span class="rst" style="color:var(--c-fixed);">FIXED</span></div>
+  </div>
+</div>
+
+<!-- ================ NEW BUGS V4 ================ -->
+<div class="sec">
+  <div class="sec-title" style="color:var(--c-bug);">V4 新发现 &mdash; 5 个幽灵类型注解 <span class="count">5 PHANTOM TYPE ANNOTATIONS IN agent_core.py</span></div>
+  <div class="row row--r">
+    <span class="rid">V4-01</span>
+    <span class="rdesc"><strong>agent_core.py:339</strong> &mdash; self.working_memory: Optional[<span style="color:var(--c-bug);">WorkingMemoryAugmenter</span>] = None &mdash; 从未导入, NameError 风险</span>
+    <span class="b b--bug">BUG</span>
+  </div>
+  <div class="row row--r">
+    <span class="rid">V4-02</span>
+    <span class="rdesc"><strong>agent_core.py:340</strong> &mdash; self.conversation_buffer: Optional[<span style="color:var(--c-bug);">ConversationMemoryBuffer</span>] = None &mdash; 从未导入, NameError 风险</span>
+    <span class="b b--bug">BUG</span>
+  </div>
+  <div class="row row--r">
+    <span class="rid">V4-03</span>
+    <span class="rdesc"><strong>agent_core.py:341</strong> &mdash; self.buffer_module: Optional[<span style="color:var(--c-bug);">BufferModule</span>] = None &mdash; 从未导入, NameError 风险</span>
+    <span class="b b--bug">BUG</span>
+  </div>
+  <div class="row row--r">
+    <span class="rid">V4-04</span>
+    <span class="rdesc"><strong>agent_core.py:383</strong> &mdash; self.tool_memory: Optional[<span style="color:var(--c-bug);">ToolMemoryIntegration</span>] = None &mdash; 注解在 L383 求值, 但 import 在 L386, 执行顺序错误</span>
+    <span class="b b--bug">BUG</span>
+  </div>
+  <div class="row row--r">
+    <span class="rid">V4-05</span>
+    <span class="rdesc"><strong>agent_core.py:404</strong> &mdash; self.recall_engine: Optional[<span style="color:var(--c-bug);">NeurovaRecallEngine</span>] = None &mdash; 从未导入, NameError 风险</span>
+    <span class="b b--bug">BUG</span>
+  </div>
+  <div style="margin-top:6px; padding:6px 10px; border:1px solid var(--c-bug-border); background:var(--c-bug-bg); font-size:10px; font-family:var(--font-mono); color:var(--c-text-main); line-height:1.5;">
+    <strong>根因:</strong> agent_core.py 未启用 <code>from __future__ import annotations</code>, 所有 __init__ 内的类型注解在运行时即时求值. 5 个符号中 4 个从未导入 (V4-01/02/03/05), 1 个先使用后导入 (V4-04). 符号在 mem_core.py 中有正确导入, 但 agent_core.py 未做相应 TYPE_CHECKING 声明.<br/>
+    <strong>修复建议:</strong> (1) 在文件顶部加入 <code>from __future__ import annotations</code> 使所有注解延迟求值; 或 (2) 在 <code>if TYPE_CHECKING:</code> 块中补入 5 个符号的导入路径.
+  </div>
+</div>
+
+<!-- ================ NEW PATTERN V4 ================ -->
+<div class="sec">
+  <div class="sec-title" style="color:var(--c-new);">V4 新模式 &mdash; 函数级重复导入 <span class="count">152 DUPLICATE IMPORTS ACROSS 70 FILES</span></div>
+  <div class="row row--y">
+    <span class="rid">V4-P1</span>
+    <span class="rdesc"><strong>系统性模式:</strong> 70 个 .py 文件共包含 152 处重复 import 行. 其中 __init__.py 3 文件 5 处, 其余为函数体内重复导入. 典型: channels/ 模块在多个 handler 函数中重复导入 get_generator_manager (x5/文件).</span>
+    <span class="b b--new">模式</span>
+  </div>
+  <div style="margin-top:6px; padding:6px 10px; border:1px solid var(--c-new-border); background:var(--c-new-bg); font-size:10px; font-family:var(--font-mono); color:var(--c-text-main); line-height:1.5;">
+    <strong>影响:</strong> 功能无影响 (Python 允许重复 import), 但增加认知负担和维护成本.<br/>
+    <strong>Top 3:</strong> tests/test_model_route_config.py (12次), channels/qqbot.py (6次), channels/wechat.py (6次)<br/>
+    <strong>建议:</strong> 将函数体内重复导入提取至模块顶层, 或用 __getattr__ 延迟加载模式.
+  </div>
+</div>
+
+<!-- ================ HEALTH CHECKS ================ -->
+<div class="sec">
+  <div class="sec-title" style="color:var(--c-ok);">全量健康检查 &mdash; 全部通过 <span class="count">ALL CLEAN</span></div>
+  <div class="hgrid">
+    <div class="hcard"><div class="hn">.pyc 完整性</div><div class="hd">1052 文件, 0 孤立</div></div>
+    <div class="hcard"><div class="hn">__init__.py 覆盖</div><div class="hd">所有目录, 0 缺失</div></div>
+    <div class="hcard"><div class="hn">包根 neurova/__init__</div><div class="hd">零导入, 仅 docstring + version</div></div>
+    <div class="hcard"><div class="hn">死引用检测</div><div class="hd">_LAZY_MAP + __getattr__ 全 OK</div></div>
+    <div class="hcard"><div class="hn">TYPE_CHECKING</div><div class="hd">15 文件使用, 全部正确</div></div>
+    <div class="hcard"><div class="hn">硬导入 (第三方)</div><div class="hd">仅 1 处: api/endpoints fastapi (核心依赖, 合理)</div></div>
+    <div class="hcard"><div class="hn">.py 文件总数</div><div class="hd">677 文件, 2385 except 子句</div></div>
+    <div class="hcard"><div class="hn">循环依赖风险</div><div class="hd">agent_core.py 47 引用 (17 eager + 30 lazy), 当前安全</div></div>
+  </div>
+</div>
+
+<!-- ================ EVOLUTION TABLE ================ -->
+<div class="sec" style="margin-top:14px; border-top:1px solid var(--c-border); padding-top:12px;">
+  <div class="sec-title">四轮审计演进 <span class="count">V1 &rarr; V2 &rarr; V3 &rarr; V4 COMPARISON</span></div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:180px;">指标</th>
+        <th style="width:70px;">V1 首轮</th>
+        <th style="width:70px;">V2 复审</th>
+        <th style="width:70px;">V3 三轮</th>
+        <th style="width:70px;">V4 四轮</th>
+        <th>趋势</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>严重断路 (Critical)</td>
+        <td style="color:#dc2626; font-weight:700;">6</td>
+        <td style="color:var(--c-fixed); font-weight:700;">0</td>
+        <td style="color:var(--c-fixed); font-weight:700;">0</td>
+        <td style="color:var(--c-fixed); font-weight:700;">0</td>
+        <td class="rg">清零后保持</td>
+      </tr>
+      <tr>
+        <td>脆弱依赖 (Warning)</td>
+        <td style="color:var(--c-new); font-weight:700;">8</td>
+        <td style="color:var(--c-fixed); font-weight:700;">0</td>
+        <td style="color:var(--c-fixed); font-weight:700;">0</td>
+        <td style="color:var(--c-fixed); font-weight:700;">0</td>
+        <td class="rg">清零后保持</td>
+      </tr>
+      <tr>
+        <td>中等问题 (Medium)</td>
+        <td>&mdash;</td>
+        <td style="color:var(--c-new);">6</td>
+        <td style="color:var(--c-fixed); font-weight:700;">0</td>
+        <td style="color:var(--c-fixed); font-weight:700;">0</td>
+        <td class="rg">全部修复</td>
+      </tr>
+      <tr>
+        <td>微小问题 (Minor)</td>
+        <td>&mdash;</td>
+        <td>2</td>
+        <td>1 partial + 2 cosmetic</td>
+        <td style="color:var(--c-fixed); font-weight:700;">0</td>
+        <td class="rg">全部修复</td>
+      </tr>
+      <tr>
+        <td>新 BUG (V4)</td>
+        <td>&mdash;</td>
+        <td>&mdash;</td>
+        <td>&mdash;</td>
+        <td style="color:var(--c-bug); font-weight:700;">5</td>
+        <td class="rr">幽灵类型注解</td>
+      </tr>
+      <tr>
+        <td>新模式 (V4)</td>
+        <td>&mdash;</td>
+        <td>&mdash;</td>
+        <td>&mdash;</td>
+        <td style="color:var(--c-new);">152 dup / 70 files</td>
+        <td class="ry">函数级重复导入</td>
+      </tr>
+      <tr>
+        <td>孤立 .pyc</td>
+        <td style="color:#dc2626;">10</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td class="rg">清零后保持</td>
+      </tr>
+      <tr>
+        <td>缺失 __init__.py</td>
+        <td style="color:#dc2626;">4</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td class="rg">清零后保持</td>
+      </tr>
+      <tr>
+        <td>TYPE_CHECKING 文件数</td>
+        <td>3</td>
+        <td>3</td>
+        <td>3</td>
+        <td style="font-weight:700;">15</td>
+        <td class="rg">+12 (+400%)</td>
+      </tr>
+      <tr>
+        <td>.py 文件总数</td>
+        <td>&mdash;</td>
+        <td>&mdash;</td>
+        <td>&mdash;</td>
+        <td style="font-weight:700;">677</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td>except 子句总数</td>
+        <td>&mdash;</td>
+        <td>&mdash;</td>
+        <td>&mdash;</td>
+        <td style="font-weight:700;">2385</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td>累计修复项</td>
+        <td>14</td>
+        <td>21</td>
+        <td>22</td>
+        <td style="font-weight:700; color:var(--c-fixed);">24</td>
+        <td class="rg">持续改善</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ================ REMAINING ITEMS ================ -->
+<div class="sec" style="margin-top:14px; border-top:1px solid var(--c-border); padding-top:12px;">
+  <div class="sec-title">剩余待处理项 <span class="count">REMAINING ITEMS (6 TOTAL)</span></div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:50px;">编号</th>
+        <th style="width:50px;">级别</th>
+        <th style="width:200px;">位置</th>
+        <th>描述</th>
+        <th style="width:130px;">建议</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="rr">
+        <td>V4-01</td>
+        <td><span class="b b--bug">BUG</span></td>
+        <td>agent_core.py:339</td>
+        <td>Optional[WorkingMemoryAugmenter] 从未导入</td>
+        <td>加入 TYPE_CHECKING 或 __future__.annotations</td>
+      </tr>
+      <tr class="rr">
+        <td>V4-02</td>
+        <td><span class="b b--bug">BUG</span></td>
+        <td>agent_core.py:340</td>
+        <td>Optional[ConversationMemoryBuffer] 从未导入</td>
+        <td>同上</td>
+      </tr>
+      <tr class="rr">
+        <td>V4-03</td>
+        <td><span class="b b--bug">BUG</span></td>
+        <td>agent_core.py:341</td>
+        <td>Optional[BufferModule] 从未导入</td>
+        <td>同上</td>
+      </tr>
+      <tr class="rr">
+        <td>V4-04</td>
+        <td><span class="b b--bug">BUG</span></td>
+        <td>agent_core.py:383</td>
+        <td>Optional[ToolMemoryIntegration] 注解先于 import (L386)</td>
+        <td>同上</td>
+      </tr>
+      <tr class="rr">
+        <td>V4-05</td>
+        <td><span class="b b--bug">BUG</span></td>
+        <td>agent_core.py:404</td>
+        <td>Optional[NeurovaRecallEngine] 从未导入</td>
+        <td>同上</td>
+      </tr>
+      <tr class="ry">
+        <td>V4-P1</td>
+        <td><span class="b b--new">模式</span></td>
+        <td>70 文件 / 152 处</td>
+        <td>函数体内重复 import 同一符号, 无功能影响但增加维护负担. Top: channels/qqbot.py(6), channels/wechat.py(6), tests/test_model_route_config.py(12)</td>
+        <td>提取至模块顶层或 __getattr__</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ================ ARCHITECTURE HUB ================ -->
+<div class="sec" style="margin-top:14px; border-top:1px solid var(--c-border); padding-top:12px;">
+  <div class="sec-title">核心依赖枢纽 <span class="count">TOP 5 MODULES BY INTERNAL IMPORT COUNT</span></div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:40px;">#</th>
+        <th style="width:200px;">模块</th>
+        <th style="width:60px;">总引用</th>
+        <th style="width:60px;">顶层</th>
+        <th style="width:60px;">延迟</th>
+        <th>备注</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td>agent_core.py</td>
+        <td style="font-weight:700;">47</td>
+        <td>17</td>
+        <td>30</td>
+        <td>主 HUB, 循环风险点 meta_cognition_layer &rarr; agent_core</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>mem_core.py</td>
+        <td style="font-weight:700;">14</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td>14</td>
+        <td>全延迟导入, 优秀模式</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>agent/context_orchestrator.py</td>
+        <td style="font-weight:700;">6</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td>6</td>
+        <td>全延迟导入</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>post_chat_pipeline.py</td>
+        <td style="font-weight:700;">4</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td>4</td>
+        <td>全延迟导入</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>tool_executor.py</td>
+        <td style="font-weight:700;">3</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td>3</td>
+        <td>全延迟导入</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ================ VERDICT ================ -->
+<div style="margin-top:16px; padding:12px 16px; border:2px solid var(--c-fixed); background:var(--c-fixed-bg);">
+  <div style="font-size:14px; font-weight:700; color:var(--c-fixed); margin-bottom:4px;">综合评估: 依赖健康度 优秀</div>
+  <div style="font-size:11px; line-height:1.6; color:var(--c-text-main);">
+    经过四轮迭代审计, Neurova 项目累计修复 <strong>24 项</strong> 依赖问题, 所有历史遗留 (V1: 14项, V2: 8项, V3: 2项) 均已确认修复完毕, 包括本轮修复的 NF-07 (type() 代理) 和 V3-01/V3-02 (重复 import)。
+    包结构完整性 (0 孤立 .pyc, 0 缺失 __init__.py)、循环依赖防护 (TYPE_CHECKING 从 3 文件增至 15 文件)、import 守卫体系均处于健康状态。
+    本轮新发现 <strong>5 个幽灵类型注解 BUG</strong> (V4-01~05, 均在 agent_core.py __init__ 中) 和 1 个系统性重复导入模式 (V4-P1, 152 处/70 文件)。最简修复方案: 在 agent_core.py 首行加入 <code>from __future__ import annotations</code>。
+  </div>
+</div>
+
+<div style="margin-top:12px; padding-top:8px; border-top:1px solid var(--c-border); display:flex; justify-content:space-between;">
+  <div style="font-size:9px; color:var(--c-text-sub); font-family:var(--font-mono);">
+    GENERATED BY QODERWORK &mdash; DRAFTER-DIAGRAM &mdash; FLAT ENGINEERING BLUEPRINT STYLE &mdash; V4
+  </div>
+  <div style="font-size:9px; color:var(--c-text-sub); font-family:var(--font-mono);">
+    TOTAL: 24 FIXED + 5 BUG + 1 PATTERN &middot; 0 CRITICAL BREAKS &middot; 677 FILES &middot; 4 ROUNDS
+  </div>
+</div>
+
+</div>
+</body>
+</html>

@@ -25,6 +25,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pydantic import Field
 
+from neurova.api.endpoints import get_agent_instance
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -120,7 +122,6 @@ async def post_console_chat(body: ChatRequest, request: Request):
 
     # Try to get agent for real response
     try:
-        from neurova.api.endpoints import get_agent_instance
         agent = get_agent_instance()
         if agent:
             response = await agent.chat(body.message)
@@ -310,7 +311,6 @@ async def websocket_console(websocket: WebSocket, client_id: str):
             elif msg_type == "chat":
                 message = data.get("message", "")
                 try:
-                    from neurova.api.endpoints import get_agent_instance
                     agent = get_agent_instance()
                     reply = await agent.chat(message) if agent else f"Echo: {message}"
                 except Exception:

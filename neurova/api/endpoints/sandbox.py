@@ -12,6 +12,8 @@ from fastapi import Query
 from pydantic import BaseModel
 from pydantic import Field
 
+from neurova.api.endpoints import get_agent_instance
+
 router = APIRouter()
 
 
@@ -91,7 +93,6 @@ async def execute_step(sandbox_id: str, body: StepRequest):
     # Try to use agent for real thinking
     thought = f"Step {sandbox['current_step'] + 1}: Analyzing '{body.input}'"
     try:
-        from neurova.api.endpoints import get_agent_instance
         agent = get_agent_instance()
         if agent:
             prompt = f"[Sandbox: {sandbox['topic']}]\nStep {sandbox['current_step'] + 1}\nInput: {body.input}"
@@ -130,7 +131,6 @@ async def commit_sandbox(sandbox_id: str, body: SandboxCommitRequest):
     # Try to save to memory
     if body.save_to_memory:
         try:
-            from neurova.api.endpoints import get_agent_instance
             agent = get_agent_instance()
             if agent and hasattr(agent, "memory_manager"):
                 memory_content = f"[Sandbox Conclusion] Topic: {sandbox['topic']}\nConclusion: {body.conclusion}"

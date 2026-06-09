@@ -19,6 +19,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from neurova.api.endpoints import get_agent_instance, get_app_state
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -65,7 +67,6 @@ def _get_request_id(request: Request) -> str:
 
 def _get_agent(agent_id: str = "default"):
     """获取 Agent 实例"""
-    from neurova.api.endpoints import get_agent_instance
     return get_agent_instance(agent_id)
 
 
@@ -126,7 +127,6 @@ async def generate_audio(request: Request, body: AudioGenerationRequest):
     request_id = _get_request_id(request)
 
     try:
-        from neurova.api.endpoints import get_app_state
         state = get_app_state()
 
         # 优先使用 VoiceEngine 统一接口

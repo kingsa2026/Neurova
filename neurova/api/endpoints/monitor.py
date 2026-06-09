@@ -19,6 +19,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from neurova.api.endpoints import get_app_state
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -69,7 +71,6 @@ def _get_request_id(request: Request) -> str:
 
 def _get_app_state():
     """获取应用状态"""
-    from neurova.api.endpoints import get_app_state
     return get_app_state()
 
 
