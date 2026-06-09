@@ -228,8 +228,8 @@ def _initialize_components(app_state: AppState) -> None:
         from neurova.tts.manager import TTSManager, TTSConfig
         tts_config = TTSConfig(
             engine=app_state.config.get("tts_engine", "edge-tts"),
-            model_path=app_state.config.get("tts_model_path", "models/tts/moss-nano"),
-            tokenizer_path=app_state.config.get("tts_tokenizer_path", "models/tts/moss-tokenizer"),
+            model_path=app_state.config.get("tts_model_path"),  # None = 自动检测
+            tokenizer_path=app_state.config.get("tts_tokenizer_path"),  # None = 自动检测
             auto_download=app_state.config.get("tts_auto_download", False),
             voice=app_state.config.get("tts_voice", "zh-CN-XiaoxiaoNeural"),
         )
@@ -242,7 +242,7 @@ def _initialize_components(app_state: AppState) -> None:
         from neurova.asr.manager import ASRManager, ASRConfig
         asr_config = ASRConfig(
             engine=app_state.config.get("asr_engine", "auto"),
-            model_path=app_state.config.get("asr_model_path", "models/asr"),
+            model_path=app_state.config.get("asr_model_path"),  # None = 自动检测
             auto_download=app_state.config.get("asr_auto_download", True),
         )
         app_state.asr_manager = ASRManager(asr_config)

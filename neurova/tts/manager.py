@@ -35,8 +35,8 @@ class TTSConfig(BaseModel):
     voice: str = "zh-CN-XiaoxiaoNeural"
     rate: str = "+0%"
     volume: str = "+0%"
-    model_path: str = "models/tts/moss-nano"
-    tokenizer_path: str = "models/tts/moss-tokenizer"
+    model_path: Optional[str] = None
+    tokenizer_path: Optional[str] = None
     auto_download: bool = True
     fallback_enabled: bool = True
 

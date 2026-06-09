@@ -14,6 +14,7 @@ from threading import Lock
 from dataclasses import dataclass, field, asdict
 
 try:
+    import fcntl  # type: ignore[import-not-found]  # Unix only
     HAS_FCNTL = True
 except ImportError:
     HAS_FCNTL = False

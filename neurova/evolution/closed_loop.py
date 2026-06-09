@@ -389,3 +389,32 @@ class EvolutionOrchestrator:
         stats["tools"] = tool_stats
         
         return stats
+
+
+# 单例管理
+_evolution_orchestrator: Optional[EvolutionOrchestrator] = None
+_orchestrator_lock = threading.Lock()
+
+
+def get_evolution_orchestrator() -> EvolutionOrchestrator:
+    """
+    获取 EvolutionOrchestrator 单例
+    
+    Returns:
+        EvolutionOrchestrator 实例
+    """
+    global _evolution_orchestrator
+    if _evolution_orchestrator is None:
+        with _orchestrator_lock:
+            if _evolution_orchestrator is None:
+                _evolution_orchestrator = EvolutionOrchestrator()
+    return _evolution_orchestrator
+
+
+def reset_evolution_orchestrator() -> None:
+    """
+    重置 EvolutionOrchestrator 单例（用于测试）
+    """
+    global _evolution_orchestrator
+    with _orchestrator_lock:
+        _evolution_orchestrator = None

@@ -155,15 +155,25 @@ def _open_chat_browser(port: int = FRONTEND_PORT):
     url = f"http://localhost:{port}"
     print(f"  {c('▸', Colors.CYAN)} 等待前端就绪...")
     
-    # 等待前端服务启动（最多 30 秒）
-    for i in range(30):
+    # 等待前端服务启动（最多 60 秒）
+    # 同时尝试 IPv4 和 IPv6，因为 Vite 可能只监听其中一个
+    for i in range(60):
         try:
             import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1)
-            result = sock.connect_ex(('localhost', port))
-            sock.close()
-            if result == 0:
+            connected = False
+            for family in (socket.AF_INET, socket.AF_INET6):
+                try:
+                    sock = socket.socket(family, socket.SOCK_STREAM)
+                    sock.settimeout(1)
+                    host = '127.0.0.1' if family == socket.AF_INET else '::1'
+                    result = sock.connect_ex((host, port))
+                    sock.close()
+                    if result == 0:
+                        connected = True
+                        break
+                except OSError:
+                    pass
+            if connected:
                 print(f"  {c('✓', Colors.GREEN)} 前端已就绪，正在打开浏览器...")
                 webbrowser.open(url)
                 return
@@ -515,7 +525,20 @@ def main():
         if not processes:
             print(f"\n  {c('✓', Colors.GREEN)} 所有服务已在运行")
             print_status()
-            return 0
+            
+            # Chat 模式下即使所有服务都已运行，也要保持脚本运行
+            if args.chat:
+                print(f"\n  {c('▸', Colors.CYAN)} Chat 模式：保持脚本运行")
+                print(f"  按 {c('Ctrl+C', Colors.YELLOW)} 停止所有服务\n")
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    print(f"\n\n  正在停止所有服务...")
+                    print(f"\n  所有服务已停止。再见！")
+                return 0
+            else:
+                return 0
 
         print(f"\n  {c('✓', Colors.GREEN)} 所有服务已启动")
         print(f"\n  按 {c('Ctrl+C', Colors.YELLOW)} 停止所有服务\n")
@@ -560,4 +583,13 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print(f"\n\n  用户中断，正在退出...")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n\n  {c('✗', Colors.RED)} 发生未预期的错误: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

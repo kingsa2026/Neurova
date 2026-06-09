@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neurova - 技术架构图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', sans-serif;
+    background: #0a0e1a;
+    color: #e0e6ed;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  .bg-grid {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background-image:
+      linear-gradient(rgba(59,130,246,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(59,130,246,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+  .container { position: relative; z-index: 1; max-width: 1400px; margin: 0 auto; padding: 30px 20px; }
+
+  /* Title */
+  .main-title {
+    text-align: center; margin-bottom: 6px;
+    font-size: 42px; font-weight: 700;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    letter-spacing: 2px;
+  }
+  .subtitle {
+    text-align: center; color: #64748b; font-size: 14px;
+    margin-bottom: 40px; letter-spacing: 1px;
+  }
+  .subtitle span { color: #3b82f6; font-weight: 600; }
+
+  /* Layer styles */
+  .layer {
+    margin-bottom: 16px; border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.06);
+    overflow: hidden;
+    background: rgba(15,23,42,0.6);
+    backdrop-filter: blur(10px);
+  }
+  .layer-header {
+    padding: 14px 24px;
+    display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .layer-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 28px; height: 28px; border-radius: 8px;
+    font-size: 11px; font-weight: 700; color: #fff;
+    padding: 0 10px; white-space: nowrap;
+  }
+  .layer-title {
+    font-size: 17px; font-weight: 700; letter-spacing: 0.5px;
+  }
+  .layer-desc {
+    font-size: 12px; color: #64748b; margin-left: auto;
+  }
+  .layer-body { padding: 16px 20px; }
+
+  /* Module cards */
+  .modules {
+    display: grid; gap: 10px;
+  }
+  .mod {
+    background: rgba(30,41,59,0.7);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px; padding: 12px 16px;
+    transition: all 0.2s;
+  }
+  .mod:hover {
+    border-color: rgba(59,130,246,0.3);
+    box-shadow: 0 0 20px rgba(59,130,246,0.08);
+  }
+  .mod-title {
+    font-size: 13px; font-weight: 700; margin-bottom: 6px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .mod-title .icon {
+    width: 22px; height: 22px; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; flex-shrink: 0;
+  }
+  .mod-tags {
+    display: flex; flex-wrap: wrap; gap: 5px;
+  }
+  .tag {
+    font-size: 10px; padding: 2px 8px; border-radius: 4px;
+    background: rgba(59,130,246,0.1); color: #93c5fd;
+    border: 1px solid rgba(59,130,246,0.15);
+    white-space: nowrap;
+  }
+
+  /* Color themes per layer */
+  .l-frontend .layer-badge { background: linear-gradient(135deg, #10b981, #059669); }
+  .l-frontend .layer-title { color: #6ee7b7; }
+  .l-frontend .icon { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+  .l-frontend .tag { background: rgba(16,185,129,0.08); color: #6ee7b7; border-color: rgba(16,185,129,0.15); }
+
+  .l-api .layer-badge { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+  .l-api .layer-title { color: #93c5fd; }
+  .l-api .icon { background: rgba(59,130,246,0.15); color: #93c5fd; }
+
+  .l-core .layer-badge { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+  .l-core .layer-title { color: #c4b5fd; }
+  .l-core .icon { background: rgba(139,92,246,0.15); color: #c4b5fd; }
+  .l-core .tag { background: rgba(139,92,246,0.08); color: #c4b5fd; border-color: rgba(139,92,246,0.15); }
+
+  .l-cognitive .layer-badge { background: linear-gradient(135deg, #ec4899, #db2777); }
+  .l-cognitive .layer-title { color: #f9a8d4; }
+  .l-cognitive .icon { background: rgba(236,72,153,0.15); color: #f9a8d4; }
+  .l-cognitive .tag { background: rgba(236,72,153,0.08); color: #f9a8d4; border-color: rgba(236,72,153,0.15); }
+
+  .l-llm .layer-badge { background: linear-gradient(135deg, #f59e0b, #d97706); }
+  .l-llm .layer-title { color: #fcd34d; }
+  .l-llm .icon { background: rgba(245,158,11,0.15); color: #fcd34d; }
+  .l-llm .tag { background: rgba(245,158,11,0.08); color: #fcd34d; border-color: rgba(245,158,11,0.15); }
+
+  .l-skill .layer-badge { background: linear-gradient(135deg, #06b6d4, #0891b2); }
+  .l-skill .layer-title { color: #67e8f9; }
+  .l-skill .icon { background: rgba(6,182,212,0.15); color: #67e8f9; }
+  .l-skill .tag { background: rgba(6,182,212,0.08); color: #67e8f9; border-color: rgba(6,182,212,0.15); }
+
+  .l-channel .layer-badge { background: linear-gradient(135deg, #f97316, #ea580c); }
+  .l-channel .layer-title { color: #fdba74; }
+  .l-channel .icon { background: rgba(249,115,22,0.15); color: #fdba74; }
+  .l-channel .tag { background: rgba(249,115,22,0.08); color: #fdba74; border-color: rgba(249,115,22,0.15); }
+
+  .l-voice .layer-badge { background: linear-gradient(135deg, #14b8a6, #0d9488); }
+  .l-voice .layer-title { color: #5eead4; }
+  .l-voice .icon { background: rgba(20,184,166,0.15); color: #5eead4; }
+  .l-voice .tag { background: rgba(20,184,166,0.08); color: #5eead4; border-color: rgba(20,184,166,0.15); }
+
+  .l-security .layer-badge { background: linear-gradient(135deg, #ef4444, #dc2626); }
+  .l-security .layer-title { color: #fca5a5; }
+  .l-security .icon { background: rgba(239,68,68,0.15); color: #fca5a5; }
+  .l-security .tag { background: rgba(239,68,68,0.08); color: #fca5a5; border-color: rgba(239,68,68,0.15); }
+
+  .l-evolution .layer-badge { background: linear-gradient(135deg, #a855f7, #9333ea); }
+  .l-evolution .layer-title { color: #d8b4fe; }
+  .l-evolution .icon { background: rgba(168,85,247,0.15); color: #d8b4fe; }
+  .l-evolution .tag { background: rgba(168,85,247,0.08); color: #d8b4fe; border-color: rgba(168,85,247,0.15); }
+
+  .l-data .layer-badge { background: linear-gradient(135deg, #64748b, #475569); }
+  .l-data .layer-title { color: #cbd5e1; }
+  .l-data .icon { background: rgba(100,116,139,0.15); color: #cbd5e1; }
+  .l-data .tag { background: rgba(100,116,139,0.08); color: #cbd5e1; border-color: rgba(100,116,139,0.15); }
+
+  .l-infra .layer-badge { background: linear-gradient(135deg, #78716c, #57534e); }
+  .l-infra .layer-title { color: #d6d3d1; }
+  .l-infra .icon { background: rgba(120,113,108,0.15); color: #d6d3d1; }
+  .l-infra .tag { background: rgba(120,113,108,0.08); color: #d6d3d1; border-color: rgba(120,113,108,0.15); }
+
+  /* Grid columns */
+  .g2 { grid-template-columns: repeat(2, 1fr); }
+  .g3 { grid-template-columns: repeat(3, 1fr); }
+  .g4 { grid-template-columns: repeat(4, 1fr); }
+  .g5 { grid-template-columns: repeat(5, 1fr); }
+  .g6 { grid-template-columns: repeat(6, 1fr); }
+
+  /* Arrows between layers */
+  .arrow-row {
+    display: flex; justify-content: center; padding: 4px 0;
+    color: #334155; font-size: 20px; gap: 60px;
+  }
+  .arrow-row span { animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 0.8; } }
+
+  /* Two-column layout */
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .split3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  /* Stats bar */
+  .stats-bar {
+    display: flex; justify-content: center; gap: 40px;
+    margin-bottom: 36px; flex-wrap: wrap;
+  }
+  .stat-item { text-align: center; }
+  .stat-num {
+    font-size: 28px; font-weight: 800;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .stat-label { font-size: 11px; color: #64748b; margin-top: 2px; }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .split, .split3 { grid-template-columns: 1fr; }
+    .g4, .g5, .g6 { grid-template-columns: repeat(2, 1fr); }
+    .g3 { grid-template-columns: 1fr; }
+  }
+
+  /* Provider mini tags */
+  .provider-row {
+    display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+  }
+  .ptag {
+    font-size: 9px; padding: 1px 6px; border-radius: 3px;
+    background: rgba(245,158,11,0.08); color: #fbbf24;
+    border: 1px solid rgba(245,158,11,0.12);
+  }
+
+  /* Channel mini tags */
+  .ch-tag {
+    font-size: 9px; padding: 1px 6px; border-radius: 3px;
+    background: rgba(249,115,22,0.08); color: #fb923c;
+    border: 1px solid rgba(249,115,22,0.12);
+  }
+
+  .section-divider {
+    display: flex; align-items: center; gap: 12px;
+    margin: 24px 0 14px; color: #475569; font-size: 12px;
+    letter-spacing: 2px;
+  }
+  .section-divider::before, .section-divider::after {
+    content: ''; flex: 1; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(71,85,105,0.4), transparent);
+  }
+
+  .footer {
+    text-align: center; padding: 30px 0 10px;
+    color: #334155; font-size: 11px;
+  }
+</style>
+</head>
+<body>
+<div class="bg-grid"></div>
+<div class="container">
+
+  <div class="main-title">NEUROVA</div>
+  <div class="subtitle">CogArch 2.0 &mdash; <span>类脑智能 AI Agent 平台</span> &mdash; 技术架构图</div>
+
+  <div class="stats-bar">
+    <div class="stat-item"><div class="stat-num">70+</div><div class="stat-label">API 接口</div></div>
+    <div class="stat-item"><div class="stat-num">55+</div><div class="stat-label">前端页面</div></div>
+    <div class="stat-item"><div class="stat-num">18+</div><div class="stat-label">大模型供应商</div></div>
+    <div class="stat-item"><div class="stat-num">15+</div><div class="stat-label">渠道适配器</div></div>
+    <div class="stat-item"><div class="stat-num">10</div><div class="stat-label">SQLite 数据库</div></div>
+    <div class="stat-item"><div class="stat-num">6</div><div class="stat-label">认知层级</div></div>
+  </div>
+
+  <!-- ============ 前端层 ============ -->
+  <div class="layer l-frontend">
+    <div class="layer-header">
+      <span class="layer-badge">前端</span>
+      <span class="layer-title">Vue 3 + TypeScript 单页应用</span>
+      <span class="layer-desc">neuUI/ &bull; Vite 5 &bull; 端口 8100</span>
+    </div>
+    <div class="layer-body">
+      <div class="modules g5">
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9672;</span> UI 框架</div>
+          <div class="mod-tags">
+            <span class="tag">Vue 3.4 组合式 API</span>
+            <span class="tag">Ant Design Vue 4 组件库</span>
+            <span class="tag">暗色毛玻璃主题</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9733;</span> 状态与路由</div>
+          <div class="mod-tags">
+            <span class="tag">Pinia (3 个 Store)</span>
+            <span class="tag">Vue Router 4</span>
+            <span class="tag">JWT 路由守卫</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9881;</span> 实时通信</div>
+          <div class="mod-tags">
+            <span class="tag">SSE 聊天流式输出</span>
+            <span class="tag">WebSocket 会话同步</span>
+            <span class="tag">日志实时推送</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9998;</span> 可视化设计器</div>
+          <div class="mod-tags">
+            <span class="tag">Vue Flow 工作流</span>
+            <span class="tag">节点图编辑器</span>
+            <span class="tag">拖拽交互</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#10022;</span> API 集成层</div>
+          <div class="mod-tags">
+            <span class="tag">Axios HTTP 客户端</span>
+            <span class="tag">68 个 API 模块</span>
+            <span class="tag">OpenAPI 代码生成</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span>&#9660;</span><span>&#9660;</span><span>&#9660;</span></div>
+
+  <!-- ============ API 网关层 ============ -->
+  <div class="layer l-api">
+    <div class="layer-header">
+      <span class="layer-badge">API</span>
+      <span class="layer-title">API 网关 &amp; 中间件</span>
+      <span class="layer-desc">FastAPI + Uvicorn &bull; 端口 9527 &bull; 70+ 路由</span>
+    </div>
+    <div class="layer-body">
+      <div class="modules g6">
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9889;</span> 核心接口</div>
+          <div class="mod-tags">
+            <span class="tag">对话 (SSE)</span>
+            <span class="tag">Agent 管理</span>
+            <span class="tag">认证鉴权</span>
+            <span class="tag">模型管理</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9734;</span> 认知接口</div>
+          <div class="mod-tags">
+            <span class="tag">记忆系统</span>
+            <span class="tag">知识库</span>
+            <span class="tag">成长系统</span>
+            <span class="tag">睡眠系统</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9881;</span> 技能/工具</div>
+          <div class="mod-tags">
+            <span class="tag">技能管理</span>
+            <span class="tag">技能市场</span>
+            <span class="tag">工具层</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#10023;</span> 渠道接口</div>
+          <div class="mod-tags">
+            <span class="tag">渠道适配器</span>
+            <span class="tag">Webhooks</span>
+            <span class="tag">会话同步</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9730;</span> 管理接口</div>
+          <div class="mod-tags">
+            <span class="tag">审计日志</span>
+            <span class="tag">防火墙</span>
+            <span class="tag">系统监控</span>
+            <span class="tag">运行日志</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9727;</span> 协作接口</div>
+          <div class="mod-tags">
+            <span class="tag">工作流</span>
+            <span class="tag">团队管理</span>
+            <span class="tag">项目管理</span>
+            <span class="tag">NeurFlow 引擎</span>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9881;</span> 中间件栈</div>
+          <div class="mod-tags">
+            <span class="tag">跨域 CORS</span>
+            <span class="tag">安全响应头</span>
+            <span class="tag">请求 ID (UUID)</span>
+            <span class="tag">请求日志</span>
+            <span class="tag">限流 (60次/分钟)</span>
+            <span class="tag">JWT 鉴权</span>
+            <span class="tag">异常处理</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span>&#9660;</span><span>&#9660;</span><span>&#9660;</span></div>
+
+  <!-- ============ 安全层 ============ -->
+  <div class="layer l-security">
+    <div class="layer-header">
+      <span class="layer-badge">安全</span>
+      <span class="layer-title">安全防护 &amp; 访问控制</span>
+      <span class="layer-desc">三层纵深防御体系</span>
+    </div>
+    <div class="layer-body">
+      <div class="modules g5">
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9951;</span> 身份认证</div>
+          <div class="mod-tags">
+            <span class="tag">JWT 令牌 (PyJWT)</span>
+            <span class="tag">SHA-256 + 盐值哈希</span>
+            <span class="tag">访问令牌 + 刷新令牌</span>
+            <span class="tag">HTTP Bearer 方案</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9888;</span> 角色权限 (RBAC)</div>
+          <div class="mod-tags">
+            <span class="tag">管理员/运维/用户/访客</span>
+            <span class="tag">24 项细粒度权限</span>
+            <span class="tag">8 个权限域</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9730;</span> 三层防火墙</div>
+          <div class="mod-tags">
+            <span class="tag">L0: 网关层 + 限流</span>
+            <span class="tag">L1: 用户/Agent 隔离</span>
+            <span class="tag">L2: 路径白名单</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9888;</span> 工具执行守卫</div>
+          <div class="mod-tags">
+            <span class="tag">命令注入检测</span>
+            <span class="tag">路径穿越防护</span>
+            <span class="tag">数据泄露拦截</span>
+            <span class="tag">权限提升检测</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9878;</span> 宪法 AI 系统</div>
+          <div class="mod-tags">
+            <span class="tag">安全/伦理规则引擎</span>
+            <span class="tag">敏感数据脱敏 (PII)</span>
+            <span class="tag">技能安全扫描器</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span>&#9660;</span><span>&#9660;</span><span>&#9660;</span></div>
+
+  <div class="section-divider">核心引擎</div>
+
+  <!-- ============ Agent 核心层 ============ -->
+  <div class="layer l-core">
+    <div class="layer-header">
+      <span class="layer-badge">核心</span>
+      <span class="layer-title">Agent 核心 &amp; 编排调度</span>
+      <span class="layer-desc">neurova/agent_core.py &bull; CogArch 2.0</span>
+    </div>
+    <div class="layer-body">
+      <div class="split">
+        <div class="modules" style="gap:10px;">
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9673;</span> Agent 生命周期</div>
+            <div class="mod-tags">
+              <span class="tag">AgentConfig 配置</span>
+              <span class="tag">MessageRouter 消息路由</span>
+              <span class="tag">ChatPipeline 对话管线</span>
+              <span class="tag">PostChatPipeline 后处理</span>
+              <span class="tag">AgentLoop 注册表</span>
+              <span class="tag">ContextOrchestrator 上下文编排</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9733;</span> 多 Agent 管理器</div>
+            <div class="mod-tags">
+              <span class="tag">共享小脑 (计划编排器)</span>
+              <span class="tag">共享脑干 (执行引擎)</span>
+              <span class="tag">独立大脑 (每Agent独立SQLite)</span>
+              <span class="tag">独立工作空间 (每Agent独立目录)</span>
+            </div>
+          </div>
+        </div>
+        <div class="modules" style="gap:10px;">
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9881;</span> 上下文系统</div>
+            <div class="mod-tags">
+              <span class="tag">活水上下文池</span>
+              <span class="tag">语义匹配</span>
+              <span class="tag">多级去重 (精确/模式/语义)</span>
+              <span class="tag">Token 预算管理</span>
+              <span class="tag">反漂移机制</span>
+              <span class="tag">上下文压缩器</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#10022;</span> 多 Agent 协作</div>
+            <div class="mod-tags">
+              <span class="tag">NeurFlow 工作流引擎</span>
+              <span class="tag">顺序模式</span>
+              <span class="tag">并行模式</span>
+              <span class="tag">主从模式</span>
+              <span class="tag">共识模式</span>
+              <span class="tag">ACP 通信协议</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span>&#9660;</span><span>&#9660;</span><span>&#9660;</span></div>
+
+  <!-- ============ 认知架构层 ============ -->
+  <div class="layer l-cognitive">
+    <div class="layer-header">
+      <span class="layer-badge">认知</span>
+      <span class="layer-title">认知架构 &mdash; 6 层类脑认知系统</span>
+    </div>
+    <div class="layer-body">
+      <div class="modules g3">
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9829;</span> 记忆层 (60+ 文件)</div>
+          <div class="mod-tags">
+            <span class="tag">温度引擎 (艾宾浩斯遗忘曲线)</span>
+            <span class="tag">6 种记忆类型</span>
+            <span class="tag">5 个生命周期阶段</span>
+            <span class="tag">肌肉记忆 (L1/L2/L3 三级缓存)</span>
+            <span class="tag">MoE 混合专家路由</span>
+            <span class="tag">BM25 + 向量检索</span>
+            <span class="tag">认知图谱</span>
+            <span class="tag">时序知识图谱</span>
+            <span class="tag">贝叶斯 EKI 优化器</span>
+            <span class="tag">赫布学习机制</span>
+            <span class="tag">记忆冲突检测</span>
+            <span class="tag">模式结晶器</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9786;</span> 情感上下文层</div>
+          <div class="mod-tags">
+            <span class="tag">4 层 17 种情感系统</span>
+            <span class="tag">情感传导引擎</span>
+            <span class="tag">上下文注入器</span>
+            <span class="tag">时间感知衰减</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9782;</span> 元认知层</div>
+          <div class="mod-tags">
+            <span class="tag">自我反思引擎</span>
+            <span class="tag">自我优化</span>
+            <span class="tag">大五人格模型</span>
+            <span class="tag">行为宪法</span>
+            <span class="tag">自主决策系统</span>
+            <span class="tag">根因分析器</span>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        <div class="modules g3">
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9734;</span> 成长层</div>
+            <div class="mod-tags">
+              <span class="tag">成长模式分析</span>
+              <span class="tag">成长轨迹追踪</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9711;</span> 知识图谱</div>
+            <div class="mod-tags">
+              <span class="tag">实体关系管理</span>
+              <span class="tag">图遍历查询</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9790;</span> 睡眠 &amp; 梦境</div>
+            <div class="mod-tags">
+              <span class="tag">记忆巩固</span>
+              <span class="tag">梦境处理</span>
+              <span class="tag">睡眠阶段管理</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span>&#9660;</span><span>&#9660;</span><span>&#9660;</span></div>
+
+  <div class="section-divider">能力系统</div>
+
+  <!-- ============ 大模型 + 技能 + 工具 ============ -->
+  <div class="split3">
+    <!-- 大模型系统 -->
+    <div class="layer l-llm">
+      <div class="layer-header">
+        <span class="layer-badge">大模型</span>
+        <span class="layer-title">大模型系统</span>
+      </div>
+      <div class="layer-body">
+        <div class="modules" style="gap:8px;">
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9733;</span> 多模态路由器</div>
+            <div class="mod-tags">
+              <span class="tag">10 种请求类型</span>
+              <span class="tag">10 种模型能力</span>
+              <span class="tag">自动选优</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9881;</span> 供应商管理器</div>
+            <div class="mod-tags">
+              <span class="tag">健康检查</span>
+              <span class="tag">负载均衡</span>
+              <span class="tag">密钥加密存储</span>
+              <span class="tag">模型预设</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9729;</span> 模型格式适配</div>
+            <div class="mod-tags">
+              <span class="tag">OpenAI 格式</span>
+              <span class="tag">Anthropic 格式</span>
+              <span class="tag">Gemini 格式</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9672;</span> 供应商 (18+)</div>
+            <div class="provider-row">
+              <span class="ptag">OpenAI</span>
+              <span class="ptag">Anthropic</span>
+              <span class="ptag">Google</span>
+              <span class="ptag">DeepSeek</span>
+              <span class="ptag">阿里通义/千问</span>
+              <span class="ptag">Moonshot/Kimi</span>
+              <span class="ptag">智谱 AI</span>
+              <span class="ptag">SiliconFlow</span>
+              <span class="ptag">MiniMax</span>
+              <span class="ptag">SambaNova</span>
+              <span class="ptag">Ollama</span>
+              <span class="ptag">LM Studio</span>
+              <span class="ptag">Azure</span>
+              <span class="ptag">火山引擎</span>
+              <span class="ptag">OpenRouter</span>
+              <span class="ptag">ModelScope</span>
+              <span class="ptag">LiteLLM</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 技能系统 -->
+    <div class="layer l-skill">
+      <div class="layer-header">
+        <span class="layer-badge">技能</span>
+        <span class="layer-title">技能系统</span>
+      </div>
+      <div class="layer-body">
+        <div class="modules" style="gap:8px;">
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9733;</span> 技能注册表</div>
+            <div class="mod-tags">
+              <span class="tag">单例模式</span>
+              <span class="tag">钩子系统</span>
+              <span class="tag">事件总线</span>
+              <span class="tag">使用量追踪</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9881;</span> 技能生命周期</div>
+            <div class="mod-tags">
+              <span class="tag">注册 &rarr; 预执行 &rarr; 执行</span>
+              <span class="tag">统计收集</span>
+              <span class="tag">工具记忆记录</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#10022;</span> 技能进化</div>
+            <div class="mod-tags">
+              <span class="tag">自动生成技能</span>
+              <span class="tag">链式/并行执行</span>
+              <span class="tag">技能打包 (.zip)</span>
+              <span class="tag">提示词优化器</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9730;</span> 技能市场</div>
+            <div class="mod-tags">
+              <span class="tag">Hub 客户端</span>
+              <span class="tag">市场搜索</span>
+              <span class="tag">技能池</span>
+              <span class="tag">版本管理</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 工具系统 -->
+    <div class="layer l-skill">
+      <div class="layer-header">
+        <span class="layer-badge">工具</span>
+        <span class="layer-title">工具系统</span>
+      </div>
+      <div class="layer-body">
+        <div class="modules" style="gap:8px;">
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9881;</span> 工具编排器</div>
+            <div class="mod-tags">
+              <span class="tag">DAG 有向无环图执行</span>
+              <span class="tag">拓扑排序</span>
+              <span class="tag">并行执行</span>
+              <span class="tag">失败回退</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9672;</span> 12 个内置工具</div>
+            <div class="mod-tags">
+              <span class="tag">memory_search 记忆搜索</span>
+              <span class="tag">file_read/write/edit 文件操作</span>
+              <span class="tag">computer_* 桌面操控</span>
+              <span class="tag">emotion_analyze 情感分析</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9729;</span> MCP 客户端</div>
+            <div class="mod-tags">
+              <span class="tag">外部工具服务器</span>
+              <span class="tag">OpenAI 函数调用协议</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#10022;</span> 工具执行器</div>
+            <div class="mod-tags">
+              <span class="tag">文本工具解析</span>
+              <span class="tag">肌肉记忆驱动执行</span>
+              <span class="tag">结果分页 (8000字)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span>&#9660;</span><span>&#9660;</span><span>&#9660;</span></div>
+
+  <!-- ============ 渠道 + 语音 + 视觉 ============ -->
+  <div class="split3">
+    <!-- 渠道适配器 -->
+    <div class="layer l-channel">
+      <div class="layer-header">
+        <span class="layer-badge">渠道</span>
+        <span class="layer-title">渠道适配器 (15+)</span>
+      </div>
+      <div class="layer-body">
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9742;</span> 消息平台</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">
+            <span class="ch-tag">钉钉</span>
+            <span class="ch-tag">飞书/Lark</span>
+            <span class="ch-tag">微信</span>
+            <span class="ch-tag">企业微信</span>
+            <span class="ch-tag">Telegram</span>
+            <span class="ch-tag">Discord</span>
+            <span class="ch-tag">QQ/QQBot</span>
+            <span class="ch-tag">WebSocket</span>
+            <span class="ch-tag">MQTT</span>
+            <span class="ch-tag">SIP 语音</span>
+            <span class="ch-tag">QClaw</span>
+            <span class="ch-tag">小译</span>
+            <span class="ch-tag">手机配对</span>
+            <span class="ch-tag">语音通话 (Twilio)</span>
+          </div>
+        </div>
+        <div class="mod" style="margin-top:8px;">
+          <div class="mod-title"><span class="icon">&#9881;</span> 渠道管理器</div>
+          <div class="mod-tags">
+            <span class="tag">适配器生命周期</span>
+            <span class="tag">消息路由分发</span>
+            <span class="tag">健康监控</span>
+            <span class="tag">跨渠道会话同步</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 语音系统 -->
+    <div class="layer l-voice">
+      <div class="layer-header">
+        <span class="layer-badge">语音</span>
+        <span class="layer-title">语音 &amp; 音频系统</span>
+      </div>
+      <div class="layer-body">
+        <div class="modules" style="gap:8px;">
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9835;</span> TTS 语音合成</div>
+            <div class="mod-tags">
+              <span class="tag">Edge TTS (在线)</span>
+              <span class="tag">MOSS Nano (本地 ONNX)</span>
+              <span class="tag">Mock 降级</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9834;</span> ASR 语音识别</div>
+            <div class="mod-tags">
+              <span class="tag">FunASR (中文优化)</span>
+              <span class="tag">Whisper (OpenAI)</span>
+              <span class="tag">Mock 降级</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9881;</span> 语音管线</div>
+            <div class="mod-tags">
+              <span class="tag">统一语音引擎</span>
+              <span class="tag">语音上下文</span>
+              <span class="tag">记忆桥接</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 桌面操控 & 视觉 -->
+    <div class="layer l-voice">
+      <div class="layer-header">
+        <span class="layer-badge">视觉</span>
+        <span class="layer-title">桌面操控 &amp; 视觉系统</span>
+      </div>
+      <div class="layer-body">
+        <div class="modules" style="gap:8px;">
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9635;</span> 桌面自动化</div>
+            <div class="mod-tags">
+              <span class="tag">浏览器管理器</span>
+              <span class="tag">智能点击</span>
+              <span class="tag">沙箱执行</span>
+            </div>
+          </div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9673;</span> 视觉识别系统</div>
+            <div class="mod-tags">
+              <span class="tag">YOLOv8 目标检测</span>
+              <span class="tag">EasyOCR 文字识别</span>
+              <span class="tag">UI 元素解析</span>
+              <span class="tag">截图智能分析</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span>&#9660;</span><span>&#9660;</span><span>&#9660;</span></div>
+
+  <div class="section-divider">智能 &amp; 数据</div>
+
+  <!-- ============ 进化系统 ============ -->
+  <div class="layer l-evolution">
+    <div class="layer-header">
+      <span class="layer-badge">进化</span>
+      <span class="layer-title">进化 &amp; 自我改进系统</span>
+      <span class="layer-desc">闭环学习</span>
+    </div>
+    <div class="layer-body">
+      <div class="modules g6">
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9881;</span> 模式挖掘器</div>
+          <div class="mod-tags">
+            <span class="tag">使用模式发现</span>
+            <span class="tag">频率分析</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9734;</span> 遗传引擎</div>
+          <div class="mod-tags">
+            <span class="tag">工具自动生成</span>
+            <span class="tag">遗传编程进化</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#10022;</span> 自然语言合成器</div>
+          <div class="mod-tags">
+            <span class="tag">自然语言工具生成</span>
+            <span class="tag">自动合成</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#8634;</span> 递归自改进</div>
+          <div class="mod-tags">
+            <span class="tag">RSI 递归自改进</span>
+            <span class="tag">棘轮剪枝器</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9889;</span> 工具生命周期</div>
+          <div class="mod-tags">
+            <span class="tag">自适应权重调整</span>
+            <span class="tag">生命周期管理器</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9829;</span> 反馈闭环</div>
+          <div class="mod-tags">
+            <span class="tag">经验反馈循环</span>
+            <span class="tag">技能自动封装</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span>&#9660;</span><span>&#9660;</span><span>&#9660;</span></div>
+
+  <!-- ============ 数据层 ============ -->
+  <div class="layer l-data">
+    <div class="layer-header">
+      <span class="layer-badge">数据</span>
+      <span class="layer-title">数据 &amp; 存储层</span>
+      <span class="layer-desc">10 个 SQLite 数据库 + 向量存储 + 文件系统</span>
+    </div>
+    <div class="layer-body">
+      <div class="split">
+        <div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9632;</span> SQLite 数据库集群</div>
+            <div class="mod-tags">
+              <span class="tag">neurova.db (核心库)</span>
+              <span class="tag">users.db (用户认证)</span>
+              <span class="tag">neurflow.db (工作流)</span>
+              <span class="tag">collaboration.db (协作, 15张表)</span>
+              <span class="tag">knowledge.db (知识库配置)</span>
+              <span class="tag">experience_knowledge.db (经验知识)</span>
+              <span class="tag">rbac.db (角色权限)</span>
+              <span class="tag">memory_links.db (记忆关联)</span>
+              <span class="tag">neurova_memory.db (情感记忆)</span>
+              <span class="tag">neurova_memories_persist.db (持久记忆)</span>
+              <span class="tag">每 Agent 独立记忆数据库 (WAL)</span>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="mod">
+            <div class="mod-title"><span class="icon">&#9670;</span> 向量嵌入引擎</div>
+            <div class="mod-tags">
+              <span class="tag">ONNX Runtime 推理</span>
+              <span class="tag">BAAI/bge-small-zh-v1.5 (中文优化)</span>
+              <span class="tag">CPU 推理 (无需GPU)</span>
+              <span class="tag">L2 归一化向量</span>
+            </div>
+          </div>
+          <div class="mod" style="margin-top:8px;">
+            <div class="mod-title"><span class="icon">&#9670;</span> RAG 检索增强生成</div>
+            <div class="mod-tags">
+              <span class="tag">向量相似度检索</span>
+              <span class="tag">BM25 关键词检索</span>
+              <span class="tag">认知图谱遍历</span>
+              <span class="tag">时序知识图谱查询</span>
+              <span class="tag">Thought-Retriever (FAISS)</span>
+              <span class="tag">iflow 知识库 SDK</span>
+            </div>
+          </div>
+          <div class="mod" style="margin-top:8px;">
+            <div class="mod-title"><span class="icon">&#9670;</span> 会话 &amp; 文件存储</div>
+            <div class="mod-tags">
+              <span class="tag">JSON 会话文件</span>
+              <span class="tag">Agent 工作空间</span>
+              <span class="tag">上传/媒体文件</span>
+              <span class="tag">技能包 (.zip)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span>&#9660;</span></div>
+
+  <!-- ============ 基础设施层 ============ -->
+  <div class="layer l-infra">
+    <div class="layer-header">
+      <span class="layer-badge">基础</span>
+      <span class="layer-title">基础设施 &amp; 运行时</span>
+    </div>
+    <div class="layer-body">
+      <div class="modules g5">
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9889;</span> 后端运行时</div>
+          <div class="mod-tags">
+            <span class="tag">Python 3.10+</span>
+            <span class="tag">FastAPI + Uvicorn ASGI</span>
+            <span class="tag">aiosqlite 异步数据库</span>
+            <span class="tag">httpx / aiohttp 异步HTTP</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9881;</span> 核心服务</div>
+          <div class="mod-tags">
+            <span class="tag">事件总线 (发布/订阅)</span>
+            <span class="tag">启动管理器</span>
+            <span class="tag">健康检查器</span>
+            <span class="tag">轨迹记录器</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9632;</span> 插件系统</div>
+          <div class="mod-tags">
+            <span class="tag">插件管理器</span>
+            <span class="tag">生命周期钩子</span>
+            <span class="tag">清单格式规范</span>
+            <span class="tag">API 注册表</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9730;</span> 部署方式</div>
+          <div class="mod-tags">
+            <span class="tag">原生部署 (无Docker)</span>
+            <span class="tag">start.py 统一启动器</span>
+            <span class="tag">PHP 组件</span>
+            <span class="tag">远程上传脚本</span>
+          </div>
+        </div>
+        <div class="mod">
+          <div class="mod-title"><span class="icon">&#9733;</span> 核心依赖库</div>
+          <div class="mod-tags">
+            <span class="tag">Pydantic 数据校验</span>
+            <span class="tag">PyJWT 令牌</span>
+            <span class="tag">litellm 模型适配</span>
+            <span class="tag">ONNX Runtime 推理</span>
+            <span class="tag">sentence-transformers 嵌入</span>
+            <span class="tag">edge-tts 语音合成</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Neurova CogArch 2.0 &mdash; 技术架构图 &bull; 生成于 2026-06-09 &bull; 基于实际代码库分析
+  </div>
+
+</div>
+</body>
+</html>

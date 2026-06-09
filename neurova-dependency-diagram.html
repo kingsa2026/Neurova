@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Neurova 模块依赖关系图 — 断路标注</title>
+<style>
+:root {
+  --c-bg: #f8fafc;
+  --c-canvas: #ffffff;
+  --c-border: #cbd5e1;
+  --c-text-main: #0f172a;
+  --c-text-sub: #64748b;
+  --c-break: #dc2626;
+  --c-break-bg: #fef2f2;
+  --c-break-border: #fca5a5;
+  --c-warn: #d97706;
+  --c-warn-bg: #fffbeb;
+  --c-warn-border: #fcd34d;
+  --c-ok: #059669;
+  --c-ok-bg: #ecfdf5;
+  --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'SF Mono', Monaco, Consolas, monospace;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--c-bg); font-family:var(--font-ui); color:var(--c-text-main); padding:20px; }
+
+.canvas {
+  background:var(--c-canvas); border:2px solid var(--c-border);
+  padding:24px 28px; max-width:1320px; margin:0 auto;
+}
+.hdr { border-bottom:1px solid var(--c-border); padding-bottom:12px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:flex-end; }
+.hdr h1 { font-size:20px; font-weight:700; }
+.hdr .sub { font-size:11px; font-weight:500; color:var(--c-text-sub); text-transform:uppercase; letter-spacing:.5px; margin-top:2px; }
+.hdr .meta { font-size:10px; color:var(--c-text-sub); font-family:var(--font-mono); text-align:right; line-height:1.6; }
+
+/* Legend */
+.legend { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:16px; padding:8px 12px; border:1px solid var(--c-border); background:var(--c-bg); }
+.legend-i { display:flex; align-items:center; gap:5px; font-size:10px; }
+.sw { width:12px; height:12px; border:1px solid; display:inline-block; flex-shrink:0; }
+.sw--break { background:var(--c-break-bg); border-color:var(--c-break); }
+.sw--warn { background:var(--c-warn-bg); border-color:var(--c-warn); }
+.sw--ok { background:var(--c-ok-bg); border-color:var(--c-ok); }
+.sw--hard { background:var(--c-canvas); border-color:var(--c-text-main); }
+.ln { width:20px; border-top:1.5px solid var(--c-border); }
+.ln--dashed { border-top-style:dashed; }
+.ln--red { border-top-color:var(--c-break); border-top-style:dashed; }
+
+/* Badge */
+.b { display:inline-block; font-size:8px; font-family:var(--font-mono); padding:1px 4px; border:1px solid; text-transform:uppercase; letter-spacing:.3px; vertical-align:middle; }
+.b--break { background:var(--c-break); color:#fff; border-color:var(--c-break); }
+.b--warn { background:var(--c-warn); color:#fff; border-color:var(--c-warn); }
+.b--ok { background:var(--c-ok); color:#fff; border-color:var(--c-ok); }
+.b--leaf { background:transparent; color:var(--c-text-sub); border-color:var(--c-border); }
+.b--hub { background:var(--c-text-main); color:#fff; border-color:var(--c-text-main); }
+
+/* Section */
+.sec { margin-bottom:10px; }
+.sec-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--c-text-sub); margin-bottom:6px; padding-bottom:4px; border-bottom:1px dashed var(--c-border); display:flex; align-items:center; gap:8px; }
+.sec-title .count { font-size:9px; font-weight:400; color:var(--c-text-sub); font-family:var(--font-mono); }
+
+/* Module boxes */
+.mods { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:6px; }
+.mod {
+  border:1px solid var(--c-border); padding:5px 8px; background:var(--c-canvas);
+  font-size:10px; min-width:80px; position:relative;
+}
+.mod--leaf { border-left:3px solid var(--c-ok); }
+.mod--hub { border-left:3px solid var(--c-text-main); }
+.mod--break { border:1px solid var(--c-break); background:var(--c-break-bg); }
+.mod--warn { border:1px solid var(--c-warn); background:var(--c-warn-bg); }
+.mod-name { font-weight:600; font-family:var(--font-mono); font-size:10px; margin-bottom:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:160px; }
+.mod-desc { font-size:9px; color:var(--c-text-sub); line-height:1.3; }
+.mod-note { font-size:8px; color:var(--c-break); font-family:var(--font-mono); margin-top:2px; line-height:1.3; }
+.mod-warn { font-size:8px; color:var(--c-warn); font-family:var(--font-mono); margin-top:2px; line-height:1.3; }
+
+/* Dependency arrow section */
+.dep-section { margin-bottom:12px; padding:8px 10px; border:1px solid var(--c-border); }
+.dep-title { font-size:11px; font-weight:600; margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+
+/* Grid layout for main dependency map */
+.dep-grid { display:grid; grid-template-columns:200px 1fr 200px; gap:8px; align-items:start; }
+.dep-col-title { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--c-text-sub); margin-bottom:4px; text-align:center; }
+
+/* Dependency flow visualization */
+.flow-row { display:flex; align-items:center; gap:4px; margin-bottom:3px; font-size:10px; font-family:var(--font-mono); }
+.flow-from { text-align:right; min-width:140px; font-weight:500; }
+.flow-arrow { color:var(--c-text-sub); min-width:20px; text-align:center; font-size:12px; }
+.flow-to { font-weight:500; }
+.flow-arrow--break { color:var(--c-break); }
+.flow-arrow--warn { color:var(--c-warn); }
+.flow-arrow--opt { color:var(--c-text-sub); font-style:italic; }
+
+/* Break detail box */
+.break-box {
+  border:1px solid var(--c-break-border); background:var(--c-break-bg);
+  padding:8px 10px; margin-bottom:6px;
+}
+.break-box-title { font-size:11px; font-weight:700; color:var(--c-break); margin-bottom:4px; display:flex; align-items:center; gap:6px; }
+.break-box-body { font-size:10px; font-family:var(--font-mono); color:var(--c-break); line-height:1.5; }
+
+.warn-box {
+  border:1px solid var(--c-warn-border); background:var(--c-warn-bg);
+  padding:8px 10px; margin-bottom:6px;
+}
+.warn-box-title { font-size:11px; font-weight:700; color:var(--c-warn); margin-bottom:4px; display:flex; align-items:center; gap:6px; }
+.warn-box-body { font-size:10px; font-family:var(--font-mono); color:var(--c-warn); line-height:1.5; }
+
+/* Summary table */
+table { width:100%; border-collapse:collapse; font-size:9px; margin-top:10px; }
+th, td { border:1px solid var(--c-border); padding:4px 6px; text-align:left; vertical-align:top; }
+th { background:var(--c-bg); font-weight:600; font-size:9px; text-transform:uppercase; letter-spacing:.3px; }
+td { font-family:var(--font-mono); font-size:9px; line-height:1.4; }
+.row-break { background:var(--c-break-bg); }
+.row-warn { background:var(--c-warn-bg); }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<div class="hdr">
+  <div>
+    <h1>Neurova 模块依赖关系图</h1>
+    <p class="sub">MODULE DEPENDENCY GRAPH WITH BROKEN CONNECTION ANNOTATIONS</p>
+  </div>
+  <div class="meta">REV 1.0 &mdash; 2026-06-09<br/>234 try/except blocks &middot; 67 endpoint modules</div>
+</div>
+
+<div class="legend">
+  <div class="legend-i"><span class="sw sw--hard"></span>硬依赖 Hard Dep</div>
+  <div class="legend-i"><span class="sw sw--ok"></span>叶子节点 Leaf (0 deps)</div>
+  <div class="legend-i"><span class="sw sw--warn"></span>脆弱依赖 Fragile (try/except)</div>
+  <div class="legend-i"><span class="sw sw--break"></span>断路 Broken Connection</div>
+  <div class="legend-i"><span class="ln"></span>正常依赖</div>
+  <div class="legend-i"><span class="ln ln--dashed"></span>可选依赖</div>
+  <div class="legend-i"><span class="ln ln--red"></span>断路</div>
+</div>
+
+<!-- ================ SECTION 1: ARCHITECTURE LAYERS ================ -->
+<div class="sec">
+  <div class="sec-title">模块分层架构 <span class="count">MODULE LAYER ARCHITECTURE</span></div>
+
+  <!-- Layer 0: Leaf modules -->
+  <div style="margin-bottom:8px;">
+    <div style="font-size:9px; font-weight:600; color:var(--c-ok); margin-bottom:4px; font-family:var(--font-mono);">LAYER 0 &mdash; 叶子模块 (零内部依赖)</div>
+    <div class="mods">
+      <div class="mod mod--leaf"><div class="mod-name">llm_client.py</div><div class="mod-desc">LLM API 客户端</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">llm_router.py</div><div class="mod-desc">多模态路由</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">rate_limiter.py</div><div class="mod-desc">熔断器+限流</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">session_mgr.py</div><div class="mod-desc">会话持久化</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">capability_graph.py</div><div class="mod-desc">工具能力图</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">tool_engine.py</div><div class="mod-desc">工具执行引擎</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">plan_orch.py</div><div class="mod-desc">计划编排器</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">unified_vector.py</div><div class="mod-desc">向量存储</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">temperature.py</div><div class="mod-desc">温度衰减引擎</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">muscle_memory.py</div><div class="mod-desc">肌肉记忆</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">working_memory.py</div><div class="mod-desc">工作记忆</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">root_cause.py</div><div class="mod-desc">根因分析器</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">skill_system.py</div><div class="mod-desc">技能注册表</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">voice_engine.py</div><div class="mod-desc">语音引擎接口</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">api/middleware.py</div><div class="mod-desc">HTTP 中间件</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">api/deps.py</div><div class="mod-desc">依赖注入</div></div>
+      <div class="mod mod--leaf"><div class="mod-name">channels/base.py</div><div class="mod-desc">通道抽象基类</div></div>
+    </div>
+  </div>
+
+  <!-- Layer 1 -->
+  <div style="margin-bottom:8px;">
+    <div style="font-size:9px; font-weight:600; color:var(--c-text-sub); margin-bottom:4px; font-family:var(--font-mono);">LAYER 1 &mdash; 基础服务层 (依赖 Layer 0)</div>
+    <div class="mods">
+      <div class="mod"><div class="mod-name">provider_manager.py</div><div class="mod-desc">Provider 管理 <span class="b b--warn">11x 全 try/except</span></div></div>
+      <div class="mod"><div class="mod-name">multi_model_client.py</div><div class="mod-desc">多模型客户端</div></div>
+      <div class="mod"><div class="mod-name">channels/manager.py</div><div class="mod-desc">通道管理器</div></div>
+      <div class="mod"><div class="mod-name">tool_orchestrator.py</div><div class="mod-desc">工具编排器</div></div>
+      <div class="mod"><div class="mod-name">tool_cache.py</div><div class="mod-desc">三级缓存</div></div>
+      <div class="mod"><div class="mod-name">moe_router.py</div><div class="mod-desc">MoE 记忆路由</div></div>
+      <div class="mod"><div class="mod-name">memory/manager.py</div><div class="mod-desc">记忆管理器</div></div>
+      <div class="mod"><div class="mod-name">openai_loop.py</div><div class="mod-desc">OpenAI Agent 循环</div></div>
+      <div class="mod"><div class="mod-name">anthropic_loop.py</div><div class="mod-desc">Anthropic Agent 循环</div></div>
+    </div>
+  </div>
+
+  <!-- Layer 2 -->
+  <div style="margin-bottom:8px;">
+    <div style="font-size:9px; font-weight:600; color:var(--c-text-sub); margin-bottom:4px; font-family:var(--font-mono);">LAYER 2 &mdash; 业务编排层</div>
+    <div class="mods">
+      <div class="mod"><div class="mod-name">chat_pipeline.py</div><div class="mod-desc">Chat 五步流水线 <span class="b b--warn">6x 可选</span></div></div>
+      <div class="mod"><div class="mod-name">context_pool.py</div><div class="mod-desc">活水上下文池 <span class="b b--warn">3x 延迟</span></div></div>
+      <div class="mod"><div class="mod-name">mem_core.py</div><div class="mod-desc">记忆核心门面 <span class="b b--warn">13x 延迟</span></div></div>
+      <div class="mod"><div class="mod-name">tool_executor.py</div><div class="mod-desc">工具执行器 <span class="b b--warn">3x 延迟</span></div></div>
+      <div class="mod"><div class="mod-name">router.py</div><div class="mod-desc">消息路由器 <span class="b b--warn">1x 可选</span></div></div>
+      <div class="mod"><div class="mod-name">voice_pipeline.py</div><div class="mod-desc">统一语音管线 <span class="b b--warn">4x 可选</span></div></div>
+      <div class="mod"><div class="mod-name">pipeline_executor.py</div><div class="mod-desc">管线执行器</div></div>
+      <div class="mod"><div class="mod-name">context_compressor.py</div><div class="mod-desc">智能压缩器</div></div>
+    </div>
+  </div>
+
+  <!-- Layer 3: Hub -->
+  <div style="margin-bottom:8px;">
+    <div style="font-size:9px; font-weight:600; color:var(--c-text-main); margin-bottom:4px; font-family:var(--font-mono);">LAYER 3 &mdash; 核心调度中枢</div>
+    <div class="mods">
+      <div class="mod mod--hub" style="min-width:280px;">
+        <div class="mod-name" style="font-size:12px;">agent_core.py <span class="b b--hub">HUB</span></div>
+        <div class="mod-desc">Agent 核心 &mdash; 25 个内部依赖, 跨 10+ 子包</div>
+        <div style="font-size:9px; color:var(--c-text-sub); margin-top:3px; line-height:1.5; font-family:var(--font-mono);">
+          mem_core + context + llm_client + router + skills<br/>
+          + cognitive_layers + evolution + tool_layers<br/>
+          + tool_executor + chat_pipeline + session_manager<br/>
+          <strong>8 个可选 (try/except):</strong> NeuHebb, CognitiveGraph, AgentLoop
+        </div>
+      </div>
+      <div class="mod" style="min-width:200px;">
+        <div class="mod-name" style="font-size:12px;">api/endpoints/__init__.py</div>
+        <div class="mod-desc">API 端点注册 &mdash; 67 个动态模块</div>
+        <div style="font-size:9px; color:var(--c-text-sub); margin-top:3px; line-height:1.5; font-family:var(--font-mono);">
+          importlib.import_module() 动态加载<br/>
+          全部 try/except 优雅降级<br/>
+          5 个函数内延迟导入
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================ SECTION 2: DEPENDENCY FLOWS ================ -->
+<div class="sec">
+  <div class="sec-title">核心依赖链 <span class="count">KEY DEPENDENCY CHAINS</span></div>
+  <div class="dep-grid" style="grid-template-columns:1fr;">
+
+    <!-- Chain: Agent Core -->
+    <div class="dep-section">
+      <div class="dep-title">agent_core.py 依赖扇出 <span class="b b--hub">25 deps</span></div>
+      <div style="columns:2; column-gap:20px;">
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">mem_core</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">context (orchestrator)</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">llm_client</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">router</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">skills.registry</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">tool_executor</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">tool_layers (orchestrator)</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">evolution</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">agent.chat_pipeline</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">post_chat_pipeline</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">builtin_tools</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">session_manager</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow--opt">~~&rarr;</span><span class="flow-to">cognitive_layers (NeuHebb)</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow--opt">~~&rarr;</span><span class="flow-to">cognitive_layers (Graph)</span></div>
+        <div class="flow-row"><span class="flow-from">agent_core</span><span class="flow-arrow--opt">~~&rarr;</span><span class="flow-to">agent.loops (registry)</span></div>
+      </div>
+    </div>
+
+    <!-- Chain: LLM Call -->
+    <div class="dep-section">
+      <div class="dep-title">LLM 调用链 <span class="b b--leaf">CHAIN</span></div>
+      <div class="flow-row"><span class="flow-from">multi_model_client</span><span class="flow-arrow">&rarr;</span><span class="flow-to">llm_client &rarr; openai SDK</span></div>
+      <div class="flow-row"><span class="flow-from">multi_model_client</span><span class="flow-arrow">&rarr;</span><span class="flow-to">provider_manager</span></div>
+      <div class="flow-row"><span class="flow-from">provider_manager</span><span class="flow-arrow--opt">~~&rarr;</span><span class="flow-to">core.module_system, core.logger</span></div>
+      <div class="flow-row"><span class="flow-from">provider_manager</span><span class="flow-arrow--opt">~~&rarr;</span><span class="flow-to">llm.presets, providers.secret_store</span></div>
+      <div class="flow-row"><span class="flow-from">provider_manager</span><span class="flow-arrow--opt">~~&rarr;</span><span class="flow-to">providers.{OpenAI,Anthropic,Gemini,Ollama}</span></div>
+    </div>
+
+    <!-- Chain: Memory -->
+    <div class="dep-section">
+      <div class="dep-title">记忆系统链 <span class="b b--leaf">CHAIN</span></div>
+      <div class="flow-row"><span class="flow-from">mem_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">cognitive_layers.memory_layer.manager</span></div>
+      <div class="flow-row"><span class="flow-from">mem_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">cognitive_layers.memory_layer.moe_router</span></div>
+      <div class="flow-row"><span class="flow-from">mem_core</span><span class="flow-arrow">&rarr;</span><span class="flow-to">cognitive_layers.memory_layer.{13 modules}</span></div>
+      <div class="flow-row"><span class="flow-from">moe_router</span><span class="flow-arrow">&rarr;</span><span class="flow-to">unified_vector_store</span></div>
+      <div class="flow-row"><span class="flow-from">memory/__init__</span><span class="flow-arrow--opt">~~&rarr;</span><span class="flow-to">cognitive_layers.memory_layer.* (兼容层)</span></div>
+    </div>
+
+    <!-- Chain: Tool -->
+    <div class="dep-section">
+      <div class="dep-title">工具系统链 <span class="b b--leaf">CHAIN</span></div>
+      <div class="flow-row"><span class="flow-from">tool_orchestrator</span><span class="flow-arrow">&rarr;</span><span class="flow-to">capability_graph</span></div>
+      <div class="flow-row"><span class="flow-from">tool_cache</span><span class="flow-arrow">&rarr;</span><span class="flow-to">capability_graph</span></div>
+      <div class="flow-row"><span class="flow-from">tool_executor</span><span class="flow-arrow--opt">~~&rarr;</span><span class="flow-to">execution_engine.tool_engine</span></div>
+      <div class="flow-row"><span class="flow-from">tool_layers/__init__</span><span class="flow-arrow--opt">~~&rarr;</span><span class="flow-to">{12 sub-modules} 全部 try/except</span></div>
+    </div>
+
+    <!-- Chain: Channel -->
+    <div class="dep-section">
+      <div class="dep-title">通道系统链 <span class="b b--leaf">CHAIN</span></div>
+      <div class="flow-row"><span class="flow-from">channels/manager</span><span class="flow-arrow">&rarr;</span><span class="flow-to">channels.base</span></div>
+      <div class="flow-row"><span class="flow-from">channels/manager</span><span class="flow-arrow--opt">~~&rarr;</span><span class="flow-to">sync.session_sync_manager</span></div>
+      <div class="flow-row"><span class="flow-from">channels/websocket</span><span class="flow-arrow">&rarr;</span><span class="flow-to">channels.__init__</span></div>
+      <div class="flow-row"><span class="flow-from">channels/feishu</span><span class="flow-arrow">&rarr;</span><span class="flow-to">channels.base</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================ SECTION 3: BROKEN CONNECTIONS ================ -->
+<div class="sec">
+  <div class="sec-title" style="color:var(--c-break);">断路点 &mdash; 严重问题 <span class="count">CRITICAL BROKEN CONNECTIONS (6)</span></div>
+
+  <div class="break-box">
+    <div class="break-box-title"><span class="b b--break">BC-01</span> 孤立 .pyc 文件 &mdash; 源码已删除 (10个)</div>
+    <div class="break-box-body">
+      bayesian_eki/: ensemble_kalman_inversion, information_gain, memory_state, representative_sampler, surrogate_model<br/>
+      evolution/: experience_caller.py (已删除)<br/>
+      skills/: experience_caller.py (已删除)<br/>
+      tts/: moss_audio.py (已删除, 迁移到 moss_nano.py)<br/>
+      <strong>影响:</strong> import 这些模块将触发 ModuleNotFoundError
+    </div>
+  </div>
+
+  <div class="break-box">
+    <div class="break-box-title"><span class="b b--break">BC-02</span> analytics/ 缺少 __init__.py</div>
+    <div class="break-box-body">
+      neurova/analytics/ 目录包含 collector.py 和 models.py 但缺少 __init__.py<br/>
+      collector.py:21 &rarr; from neurova.analytics.models import ... (无 try/except 保护)<br/>
+      <strong>影响:</strong> 在某些部署场景下 namespace package 解析失败, collector 内部自引用崩溃
+    </div>
+  </div>
+
+  <div class="break-box">
+    <div class="break-box-title"><span class="b b--break">BC-03</span> skill/__init__.py &mdash; 21 行重复导入 + 硬依赖</div>
+    <div class="break-box-body">
+      neurova/skill/__init__.py 中 "from neurova.skills.models import Skill" 重复 21 次 (代码生成 bug)<br/>
+      from neurova.mem_core import Memory (无 try/except 保护)<br/>
+      import neurova.evolution, neurova.skill.skill_packer 等 8+ 模块全部无保护<br/>
+      <strong>影响:</strong> 任一依赖失败将导致整个 neurova.skill 命名空间崩溃, 级联影响所有引用方
+    </div>
+  </div>
+
+  <div class="break-box">
+    <div class="break-box-title"><span class="b b--break">BC-04</span> session_manager.py &mdash; 空 try/except (无效保护)</div>
+    <div class="break-box-body">
+      session_manager.py:16-19 &mdash; try 块内无 import 语句, 直接赋值 HAS_FCNTL=True<br/>
+      except ImportError 永远不会触发. 应为: try: import fcntl; HAS_FCNTL=True<br/>
+      <strong>影响:</strong> Windows 上 HAS_FCNTL 恒为 True, 使用 fcntl 时触发 NameError
+    </div>
+  </div>
+
+  <div class="break-box">
+    <div class="break-box-title"><span class="b b--break">BC-05</span> neurova/neurova/ 嵌套重复目录</div>
+    <div class="break-box-body">
+      neurova/neurova/ 包内存在嵌套的 neurova 目录, 包含 agents/kai/ 和 agents/Yiling/ 工作区数据<br/>
+      <strong>影响:</strong> Python 模块解析可能误选错误的 neurova 包, 导致 import 混乱
+    </div>
+  </div>
+
+  <div class="break-box">
+    <div class="break-box-title"><span class="b b--break">BC-06</span> utils/ 空目录, builder/ capabilities/ 缺少 __init__.py</div>
+    <div class="break-box-body">
+      neurova/utils/ 完全为空 (无任何 .py 文件)<br/>
+      neurova/builder/ 和 neurova/capabilities/ 缺少 __init__.py<br/>
+      <strong>影响:</strong> 如果未来代码尝试 import 这些包将失败
+    </div>
+  </div>
+</div>
+
+<!-- ================ SECTION 4: FRAGILE DEPENDENCIES ================ -->
+<div class="sec">
+  <div class="sec-title" style="color:var(--c-warn);">脆弱依赖 &mdash; 降级风险 <span class="count">FRAGILE DEPENDENCIES (8)</span></div>
+
+  <div class="warn-box">
+    <div class="warn-box-title"><span class="b b--warn">FD-01</span> memory/__init__.py &mdash; 核心类无回退值</div>
+    <div class="warn-box-body">
+      第 15-26 行: MoEMemoryRouter, UnifiedVectorStore, ConflictDetector, TemperatureEngine,<br/>
+      ConversationMemoryBuffer, SleepConsolidation, GraphTraversal &mdash; 失败时仅 logger.debug<br/>
+      这些名称将处于 undefined 状态 &rarr; 访问时触发 NameError<br/>
+      其余 17 个导入失败时赋 None, 相对安全
+    </div>
+  </div>
+
+  <div class="warn-box">
+    <div class="warn-box-title"><span class="b b--warn">FD-02</span> tool_layers/__init__.py &mdash; 重复类定义冲突</div>
+    <div class="warn-box-body">
+      12 个 try/except 导入 + 本地定义 MarketplaceTool 和 ToolOrchestrator "兼容"类<br/>
+      导入成功时: 两个版本的类共存, 真实类遮蔽本地类<br/>
+      导入失败时: 本地 stub 类的行为与真实实现不一致
+    </div>
+  </div>
+
+  <div class="warn-box">
+    <div class="warn-box-title"><span class="b b--warn">FD-03</span> cognitive_layers/memory_layer/__init__.py &mdash; 静默失败</div>
+    <div class="warn-box-body">
+      15 个导入全部使用 try/except ImportError: pass (完全无日志)<br/>
+      包含: MoEMemoryRouter, UnifiedVectorStore, MemoryCategory, ConflictDetector,<br/>
+      TemperatureEngine, ConversationBuffer, SleepConsolidation, CognitiveStorageEngine 等<br/>
+      失败时名称不存在 &rarr; 后续访问触发 NameError, 难以定位原因
+    </div>
+  </div>
+
+  <div class="warn-box">
+    <div class="warn-box-title"><span class="b b--warn">FD-04</span> tool_executor.py &mdash; 裸延迟导入无保护</div>
+    <div class="warn-box-body">
+      get_builtin_tool_params (line 569) &mdash; 无 try/except 保护的延迟导入<br/>
+      如果 builtin_tools 模块缺失, 将触发未处理的 ImportError
+    </div>
+  </div>
+
+  <div class="warn-box">
+    <div class="warn-box-title"><span class="b b--warn">FD-05</span> context_pool.py &mdash; 裸延迟导入</div>
+    <div class="warn-box-body">
+      ModelCapability from neurova.llm.llm_router (line 679) &mdash; 无 try/except<br/>
+      如果 llm_router 不可用, 运行到此处时崩溃
+    </div>
+  </div>
+
+  <div class="warn-box">
+    <div class="warn-box-title"><span class="b b--warn">FD-06</span> telegram.py &mdash; 错误的可用性检测</div>
+    <div class="warn-box-body">
+      lines 25-30: 声称 import requests 实际 import re<br/>
+      lines 32-37: 声称 import httpx 实际 import http<br/>
+      REQUESTS_AVAILABLE 和 HTTPX_AVAILABLE 恒为 True, 不反映真实安装状态
+    </div>
+  </div>
+
+  <div class="warn-box">
+    <div class="warn-box-title"><span class="b b--warn">FD-07</span> skill_system/__init__.py &mdash; sys.modules 弹出重导入</div>
+    <div class="warn-box-body">
+      lines 103-112: 弹出 neurova.skill_system 后重新 import, 避免循环依赖<br/>
+      非常规手段, 在特殊部署场景下可能失败
+    </div>
+  </div>
+
+  <div class="warn-box">
+    <div class="warn-box-title"><span class="b b--warn">FD-08</span> 双命名空间风险 &mdash; memory/* vs cognitive_layers/memory_layer/*</div>
+    <div class="warn-box-body">
+      两套平行导入路径: neurova.memory.* (兼容层) 和 neurova.cognitive_layers.memory_layer.* (实际实现)<br/>
+      memory/__init__.py 通过 importlib 别名映射 16 个子模块<br/>
+      别名映射失败时完全静默 (pass), 导致 import 路径困惑
+    </div>
+  </div>
+</div>
+
+<!-- ================ SECTION 5: CIRCULAR DEPENDENCY GUARDS ================ -->
+<div class="sec">
+  <div class="sec-title">循环依赖防护 <span class="count">CIRCULAR DEPENDENCY GUARDS</span></div>
+  <div class="mods">
+    <div class="mod" style="border-left:3px solid var(--c-text-sub);">
+      <div class="mod-name">TYPE_CHECKING x8</div>
+      <div class="mod-desc">context_legacy, context/injector,<br/>security/__init__, provider_manager,<br/>providers/base + 5 provider impls</div>
+    </div>
+    <div class="mod" style="border-left:3px solid var(--c-text-sub);">
+      <div class="mod-name">延迟导入 x15+</div>
+      <div class="mod-desc">mem_core (13x), tool_executor (3x),<br/>chat_pipeline (6x), context_pool (3x),<br/>voice_pipeline (4x), channels/mgr (1x)</div>
+    </div>
+    <div class="mod" style="border-left:3px solid var(--c-text-sub);">
+      <div class="mod-name">可用性标志 x15+</div>
+      <div class="mod-desc">NEUHEBB_AVAILABLE, COGNITIVE_GRAPH,<br/>AGENT_LOOP, OPENAI_AVAILABLE,<br/>LLM_ROUTER, TOOL_ENGINE, WEBSOCKETS...<br/>_AVAILABLE 模式遍布全项目</div>
+    </div>
+    <div class="mod" style="border-left:3px solid var(--c-text-sub);">
+      <div class="mod-name">sys.modules hack x1</div>
+      <div class="mod-desc">skill_system/__init__.py<br/>弹出后重新导入</div>
+    </div>
+  </div>
+</div>
+
+<!-- ================ SECTION 6: STATISTICS ================ -->
+<div class="sec" style="margin-top:14px; border-top:1px solid var(--c-border); padding-top:12px;">
+  <div class="sec-title">依赖健康度统计 <span class="count">DEPENDENCY HEALTH METRICS</span></div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:200px;">指标</th>
+        <th style="width:80px;">数量</th>
+        <th>说明</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>try/except ImportError</td>
+        <td><strong>234</strong></td>
+        <td>全部使用 ImportError (父类), 未使用 ModuleNotFoundError (更精确)</td>
+      </tr>
+      <tr>
+        <td>TYPE_CHECKING 守卫</td>
+        <td><strong>8</strong></td>
+        <td>分布在 context_legacy, security, provider_manager 及 5 个 provider 实现</td>
+      </tr>
+      <tr class="row-break">
+        <td>严重断路 (Critical)</td>
+        <td><strong>6</strong></td>
+        <td>孤立 .pyc(10), 缺少 __init__.py, skill/__init__ 重复导入, session_manager 空 try, 嵌套目录, 空包</td>
+      </tr>
+      <tr class="row-warn">
+        <td>脆弱依赖 (Warning)</td>
+        <td><strong>8</strong></td>
+        <td>memory/__init__ 核心类无回退, tool_layers 重复类, cognitive_layers 静默失败, 裸延迟导入, telegram 误检</td>
+      </tr>
+      <tr>
+        <td>叶子模块 (0 依赖)</td>
+        <td><strong>17</strong></td>
+        <td>llm_client, rate_limiter, session_manager, tool_engine, vector_store 等, 良好的隔离设计</td>
+      </tr>
+      <tr>
+        <td>最大扇出 (Hub)</td>
+        <td><strong>25</strong></td>
+        <td>agent_core.py &mdash; 跨 10+ 子包, 其中 8 个可选依赖</td>
+      </tr>
+      <tr>
+        <td>动态加载端点</td>
+        <td><strong>67</strong></td>
+        <td>API endpoints 全部通过 importlib 动态加载, 失败时优雅跳过</td>
+      </tr>
+      <tr>
+        <td>孤立 .pyc 缓存</td>
+        <td><strong>10</strong></td>
+        <td>bayesian_eki(5), experience_caller(3), moss_audio(2) &mdash; 源码已删除但缓存残留</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ================ SECTION 7: COMPLETE BREAK TABLE ================ -->
+<div class="sec" style="margin-top:14px; border-top:1px solid var(--c-border); padding-top:12px;">
+  <div class="sec-title">断路 / 脆弱依赖完整清单 <span class="count">FULL BREAK &amp; FRAGILE INVENTORY</span></div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:50px;">编号</th>
+        <th style="width:60px;">级别</th>
+        <th style="width:180px;">位置</th>
+        <th>问题描述</th>
+        <th style="width:180px;">影响</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="row-break"><td>BC-01</td><td><span class="b b--break">严重</span></td><td>bayesian_eki/__pycache__/<br/>evolution/__pycache__/<br/>skills/__pycache__/<br/>tts/__pycache__/</td><td>10 个 .pyc 文件无对应 .py 源码</td><td>import 时 ModuleNotFoundError</td></tr>
+      <tr class="row-break"><td>BC-02</td><td><span class="b b--break">严重</span></td><td>neurova/analytics/</td><td>缺少 __init__.py, collector.py 内部自引用无保护</td><td>namespace 解析失败</td></tr>
+      <tr class="row-break"><td>BC-03</td><td><span class="b b--break">严重</span></td><td>neurova/skill/__init__.py</td><td>21 行重复 Skill 导入 + mem_core 等硬依赖无保护</td><td>整个 skill 命名空间崩溃</td></tr>
+      <tr class="row-break"><td>BC-04</td><td><span class="b b--break">严重</span></td><td>neurova/session_manager.py:16</td><td>try 块内无 import, HAS_FCNTL 恒 True</td><td>Windows 上 fcntl NameError</td></tr>
+      <tr class="row-break"><td>BC-05</td><td><span class="b b--break">严重</span></td><td>neurova/neurova/</td><td>嵌套重复目录含 agent workspace 数据</td><td>模块解析混乱</td></tr>
+      <tr class="row-break"><td>BC-06</td><td><span class="b b--break">严重</span></td><td>neurova/utils/<br/>neurova/builder/<br/>neurova/capabilities/</td><td>空目录 / 缺少 __init__.py</td><td>包导入失败</td></tr>
+      <tr class="row-warn"><td>FD-01</td><td><span class="b b--warn">警告</span></td><td>neurova/memory/__init__.py:15</td><td>7 个核心类导入失败时 undefined (无回退值)</td><td>运行时 NameError</td></tr>
+      <tr class="row-warn"><td>FD-02</td><td><span class="b b--warn">警告</span></td><td>neurova/tool_layers/__init__.py</td><td>本地 stub 类与真实类共存, 行为不一致</td><td>类身份混淆</td></tr>
+      <tr class="row-warn"><td>FD-03</td><td><span class="b b--warn">警告</span></td><td>cognitive_layers/memory_layer/__init__.py</td><td>15 个导入全静默失败 (pass), 无日志</td><td>难以定位的 NameError</td></tr>
+      <tr class="row-warn"><td>FD-04</td><td><span class="b b--warn">警告</span></td><td>tool_executor.py:569</td><td>get_builtin_tool_params 裸延迟导入</td><td>未处理 ImportError</td></tr>
+      <tr class="row-warn"><td>FD-05</td><td><span class="b b--warn">警告</span></td><td>context_pool.py:679</td><td>ModelCapability 裸延迟导入</td><td>未处理 ImportError</td></tr>
+      <tr class="row-warn"><td>FD-06</td><td><span class="b b--warn">警告</span></td><td>channels/telegram.py:25-37</td><td>错误 import (re 当 requests, http 当 httpx)</td><td>可用性标志失真</td></tr>
+      <tr class="row-warn"><td>FD-07</td><td><span class="b b--warn">警告</span></td><td>skill_system/__init__.py:103</td><td>sys.modules 弹出重导入 hack</td><td>特殊场景下失败</td></tr>
+      <tr class="row-warn"><td>FD-08</td><td><span class="b b--warn">警告</span></td><td>memory/__init__.py:160</td><td>双命名空间 memory/* vs cognitive_layers/*, 别名静默失败</td><td>import 路径困惑</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div style="margin-top:12px; padding-top:8px; border-top:1px solid var(--c-border); display:flex; justify-content:space-between;">
+  <div style="font-size:9px; color:var(--c-text-sub); font-family:var(--font-mono);">
+    GENERATED BY QODERWORK &mdash; DRAFTER-DIAGRAM &mdash; FLAT ENGINEERING BLUEPRINT STYLE
+  </div>
+  <div style="font-size:9px; color:var(--c-text-sub); font-family:var(--font-mono);">
+    TOTAL: 6 CRITICAL BREAKS + 8 FRAGILE DEPS + 17 LEAF MODULES + 234 TRY/EXCEPT BLOCKS
+  </div>
+</div>
+
+</div>
+</body>
+</html>

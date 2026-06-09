@@ -331,191 +331,50 @@ class NodeRegistry:
                 del self._sources[definition.source]
     
     def _register_builtin_nodes(self) -> None:
-        """注册内置节点"""
-        builtin_nodes = [
-            # 流程控制节点
-            NodeDefinition(
-                type="builtin:start",
-                label="开始",
-                icon="▶️",
-                category="flow",
-                description="工作流开始节点",
-                sub_blocks=[],
-                inputs=[],
-                outputs=[{"id": "output", "label": "输出"}],
-                source="builtin"
-            ),
-            NodeDefinition(
-                type="builtin:end",
-                label="结束",
-                icon="⏹️",
-                category="flow",
-                description="工作流结束节点",
-                sub_blocks=[],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[],
-                source="builtin"
-            ),
-            NodeDefinition(
-                type="builtin:condition",
-                label="条件分支",
-                icon="🔀",
-                category="flow",
-                description="根据条件选择分支",
-                sub_blocks=[
-                    {"id": "condition", "title": "条件表达式", "type": "input", "required": True}
-                ],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[
-                    {"id": "true", "label": "真"},
-                    {"id": "false", "label": "假"}
-                ],
-                source="builtin"
-            ),
-            NodeDefinition(
-                type="builtin:loop",
-                label="循环",
-                icon="🔄",
-                category="flow",
-                description="循环执行节点",
-                sub_blocks=[
-                    {"id": "max_iterations", "title": "最大迭代次数", "type": "input", "default_value": 10}
-                ],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[
-                    {"id": "body", "label": "循环体"},
-                    {"id": "done", "label": "完成"}
-                ],
-                source="builtin"
-            ),
-            NodeDefinition(
-                type="builtin:parallel",
-                label="并行执行",
-                icon="⚡",
-                category="flow",
-                description="并行执行多个分支",
-                sub_blocks=[],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[
-                    {"id": "branch_1", "label": "分支 1"},
-                    {"id": "branch_2", "label": "分支 2"},
-                    {"id": "branch_3", "label": "分支 3"}
-                ],
-                source="builtin"
-            ),
-            NodeDefinition(
-                type="builtin:merge",
-                label="合并",
-                icon="🔗",
-                category="flow",
-                description="合并多个分支结果",
-                sub_blocks=[],
-                inputs=[
-                    {"id": "input_1", "label": "输入 1"},
-                    {"id": "input_2", "label": "输入 2"},
-                    {"id": "input_3", "label": "输入 3"}
-                ],
-                outputs=[{"id": "output", "label": "输出"}],
-                source="builtin"
-            ),
+        """注册内置节点定义和执行器"""
+        try:
+            from .builtin import BUILTIN_NODES, get_builtin_executors
+            executors = get_builtin_executors()
             
-            # AI 节点
-            NodeDefinition(
-                type="builtin:llm",
-                label="LLM 调用",
-                icon="🤖",
-                category="ai",
-                description="调用大语言模型",
-                sub_blocks=[
-                    {"id": "model", "title": "模型", "type": "model-selector", "provider_capability": "text"},
-                    {"id": "prompt", "title": "提示词", "type": "textarea", "required": True},
-                    {"id": "temperature", "title": "温度", "type": "slider", "min": 0, "max": 2, "default_value": 0.7},
-                    {"id": "max_tokens", "title": "最大 Token", "type": "input", "default_value": 2048}
-                ],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[{"id": "output", "label": "输出"}],
-                source="builtin"
-            ),
-            NodeDefinition(
-                type="builtin:agent",
-                label="Agent 调用",
-                icon="🧑‍💻",
-                category="ai",
-                description="调用 Agent 执行任务",
-                sub_blocks=[
-                    {"id": "agent_id", "title": "Agent ID", "type": "input", "required": True},
-                    {"id": "task", "title": "任务描述", "type": "textarea", "required": True}
-                ],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[{"id": "output", "label": "输出"}],
-                source="builtin"
-            ),
-            
-            # 数据节点
-            NodeDefinition(
-                type="builtin:variable",
-                label="变量",
-                icon="📦",
-                category="data",
-                description="定义或修改变量",
-                sub_blocks=[
-                    {"id": "name", "title": "变量名", "type": "input", "required": True},
-                    {"id": "value", "title": "变量值", "type": "json"}
-                ],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[{"id": "output", "label": "输出"}],
-                source="builtin"
-            ),
-            NodeDefinition(
-                type="builtin:transform",
-                label="数据转换",
-                icon="🔧",
-                category="data",
-                description="转换数据格式",
-                sub_blocks=[
-                    {"id": "expression", "title": "转换表达式", "type": "code", "language": "python"}
-                ],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[{"id": "output", "label": "输出"}],
-                source="builtin"
-            ),
-            
-            # 人工节点
-            NodeDefinition(
-                type="builtin:human_input",
-                label="人工输入",
-                icon="👤",
-                category="input",
-                description="等待人工输入",
-                sub_blocks=[
-                    {"id": "prompt", "title": "提示信息", "type": "textarea", "required": True},
-                    {"id": "timeout", "title": "超时时间（秒）", "type": "input", "default_value": 300}
-                ],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[{"id": "output", "label": "输出"}],
-                source="builtin"
-            ),
-            NodeDefinition(
-                type="builtin:approval",
-                label="人工审批",
-                icon="✅",
-                category="input",
-                description="等待人工审批",
-                sub_blocks=[
-                    {"id": "approver", "title": "审批人", "type": "input", "required": True},
-                    {"id": "message", "title": "审批说明", "type": "textarea"}
-                ],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[
-                    {"id": "approved", "label": "通过"},
-                    {"id": "rejected", "label": "拒绝"}
-                ],
-                source="builtin"
-            ),
-        ]
-        
-        for node in builtin_nodes:
-            self.register(node)
+            for node_dict in BUILTIN_NODES:
+                node_type = node_dict["type"]
+                definition = NodeDefinition(
+                    type=node_type,
+                    label=node_dict["label"],
+                    icon=node_dict["icon"],
+                    category=node_dict["category"],
+                    description=node_dict["description"],
+                    sub_blocks=node_dict.get("sub_blocks", []),
+                    inputs=node_dict.get("inputs", []),
+                    outputs=node_dict.get("outputs", []),
+                    source=node_dict.get("source", "builtin"),
+                )
+                executor = executors.get(node_type)
+                self.register(definition, executor=executor)
+        except ImportError:
+            # 后备：硬编码最小节点集
+            builtin_nodes = [
+                NodeDefinition(
+                    type="builtin:start",
+                    label="开始", icon="▶️",
+                    category="flow",
+                    description="工作流开始节点",
+                    sub_blocks=[], inputs=[],
+                    outputs=[{"id": "output", "label": "输出"}],
+                    source="builtin"
+                ),
+                NodeDefinition(
+                    type="builtin:end",
+                    label="结束", icon="⏹️",
+                    category="flow",
+                    description="工作流结束节点",
+                    sub_blocks=[],
+                    inputs=[{"id": "input", "label": "输入"}],
+                    outputs=[], source="builtin"
+                ),
+            ]
+            for node in builtin_nodes:
+                self.register(node)
 
 
 # ==================== 自动发现适配器 ====================

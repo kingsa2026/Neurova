@@ -9,8 +9,18 @@ Model Adapter v1.0.0 — 多 LLM 自适应推理循环
 隔离层级: 全局（无状态路由，无数据残留）
 """
 
-from pydantic import BaseModel
-import re
-import re
+import logging
 
-pass
+logger = logging.getLogger(__name__)
+
+try:
+    from pydantic import BaseModel
+except ImportError:
+    BaseModel = None  # type: ignore[assignment,misc]
+
+try:
+    import re
+except ImportError:
+    re = None  # type: ignore[assignment]
+
+__all__ = ["BaseModel"]

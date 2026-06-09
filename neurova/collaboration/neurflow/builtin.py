@@ -18,6 +18,7 @@ import logging
 from typing import Dict, List, Any, Optional, Callable
 
 from .models import NodeDefinition
+from .agent_manager import get_agent_manager
 
 logger = logging.getLogger(__name__)
 
@@ -566,10 +567,8 @@ async def exec_llm(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
     max_tokens = config.get("max_tokens", 4096)
     system_prompt = config.get("system_prompt", "")
     
-    # 注入变量到 prompt
-    var_resolver = ctx.get("variable_resolver")
-    if var_resolver:
-        prompt = var_resolver.resolve_string(prompt, ctx.get("node_results", {}))
+    # 注意：变量解析已在执行引擎层完成（resolve_config），
+    # 这里的 prompt 已经是解析后的值，无需再次解析
     
     try:
         response = await agent.chat(
@@ -596,9 +595,20 @@ async def exec_llm(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
 
 
 async def exec_agent(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """Agent 调用节点执行器"""
+    """Agent 调用节点执行器
+    
+    通过 NeurflowAgentManager 验证 agent_id，然后调用 Agent.chat() 执行任务。
+    
+    配置参数:
+        agent_id: Agent ID（必需）
+        task: 任务描述（必需）
+        temperature: 温度参数（可选，默认 0.7）
+        max_tokens: 最大 token 数（可选，默认 4096）
+    """
     agent_id = config.get("agent_id", "")
     task = config.get("task", "")
+    temperature = config.get("temperature", 0.7)
+    max_tokens = config.get("max_tokens", 4096)
     
     if not agent_id:
         return {
@@ -607,16 +617,66 @@ async def exec_agent(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, A
             "output": None,
         }
     
-    # TODO: 通过 agent_manager 获取或创建 Agent
-    # 暂时返回模拟结果
-    return {
-        "status": "success",
-        "output": {
-            "agent_id": agent_id,
-            "task": task,
-            "result": "Agent 执行完成（模拟）",
-        },
-    }
+    if not task:
+        return {
+            "status": "failed",
+            "error": "缺少 task",
+            "output": None,
+        }
+    
+    # 验证 agent_id 是否存在于 NeurflowAgentManager
+    agent_manager = get_agent_manager()
+    agent_info = agent_manager.get_agent(agent_id)
+    
+    if agent_info is None:
+        logger.warning(f"Agent {agent_id} 不存在于 NeurflowAgentManager")
+        # 即使不存在，也尝试使用全局 Agent 执行
+        # 这允许使用系统 Agent 而不仅仅是团队 Agent
+    
+    # 获取实际的 Agent 实例
+    agent = _get_agent()
+    if agent is None:
+        return {
+            "status": "failed",
+            "error": "Agent 未初始化",
+            "output": None,
+        }
+    
+    try:
+        # 调用 Agent.chat() 执行任务
+        response = await agent.chat(
+            task,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        
+        # 提取响应内容
+        if hasattr(response, 'content'):
+            result = response.content
+        elif isinstance(response, str):
+            result = response
+        else:
+            result = str(response)
+        
+        return {
+            "status": "success",
+            "output": {
+                "agent_id": agent_id,
+                "task": task,
+                "result": result,
+                "agent_info": {
+                    "name": agent_info.name if agent_info else "系统 Agent",
+                    "role": agent_info.role if agent_info else "assistant",
+                },
+            },
+        }
+    except Exception as e:
+        logger.error(f"Agent 调用失败: {e}")
+        return {
+            "status": "failed",
+            "error": str(e),
+            "output": None,
+        }
 
 
 async def exec_evolution(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -635,7 +695,18 @@ async def exec_evolution(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[st
     
     try:
         if mode == "learn":
-            evolution.on_experience_recorded(feedback_data)
+            # 解包 feedback_data 为4个独立参数
+            text = feedback_data.get("text", "")
+            task = feedback_data.get("task", "")
+            tools = feedback_data.get("tools", [])
+            success = feedback_data.get("success", False)
+            
+            evolution.on_experience_recorded(
+                text=text,
+                task=task,
+                tools=tools,
+                success=success
+            )
             return {
                 "status": "success",
                 "output": {"status": "learned", "mode": mode},
@@ -771,10 +842,15 @@ async def exec_context(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str,
     token_budget = config.get("token_budget", 4096)
     
     try:
-        # TODO: 实现上下文获取
+        # 调用 ContextPool 获取上下文
+        context_data = context_pool.get_context(
+            sources=sources,
+            token_budget=token_budget
+        )
+        
         return {
             "status": "success",
-            "output": {"sources": sources, "token_budget": token_budget},
+            "output": context_data,
         }
     except Exception as e:
         logger.error(f"获取上下文失败: {e}")
@@ -800,16 +876,18 @@ async def exec_emotion(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str,
     
     try:
         if mode == "analyze":
-            # TODO: 实现情感分析
+            # 调用 EmotionModule 分析情感
+            emotion_result = emotion_module.analyze(text)
             return {
                 "status": "success",
-                "output": {"text": text, "emotion": "neutral", "confidence": 0.5},
+                "output": emotion_result,
             }
         elif mode == "express":
-            # TODO: 实现情感表达
+            # 调用 EmotionModule 表达情感
+            emotion_result = emotion_module.express(text)
             return {
                 "status": "success",
-                "output": {"text": text, "expressed": True},
+                "output": emotion_result,
             }
         else:
             return {
@@ -1010,7 +1088,16 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
         return False
     
     # 将回调注册到消息处理器
-    # 这里需要与执行引擎集成，暂时使用简单的轮询方式
+    async def message_handler(message):
+        """消息处理器 — 过滤审批回复"""
+        # 只处理来自审批人的消息
+        if hasattr(message, 'sender_id') and message.sender_id == approver:
+            # 尝试解析审批回复
+            content = message.content if hasattr(message, 'content') else str(message)
+            await on_approval_reply(content)
+        return None  # 不自动回复
+    
+    channel_manager.set_message_handler(message_handler)
     logger.info(f"等待审批回复: {approval_id}")
     
     try:

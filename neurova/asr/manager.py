@@ -18,6 +18,9 @@ from neurova.asr.base import ASRBase
 
 logger = logging.getLogger(__name__)
 
+# 项目根目录（neurova/asr/manager.py -> neurova/asr/ -> neurova/ -> ROOT）
+_ROOT_DIR = Path(__file__).parent.parent.parent.resolve()
+
 # Fallback 引擎优先级
 FALLBACK_CHAIN = ["funasr", "whisper", "mock"]
 
@@ -26,7 +29,7 @@ class ASRConfig(BaseModel):
     """ASR 配置"""
     engine: Literal["funasr", "whisper", "mock", "auto"] = "auto"
     voice: str = "zh"
-    model_path: str = "models/asr/funasr"
+    model_path: Optional[str] = None
     auto_download: bool = True
     fallback_enabled: bool = True
 
@@ -97,17 +100,27 @@ class ASRManager:
     async def _initialize_engine(self, engine_name: str) -> bool:
         """初始化指定引擎"""
         try:
+            # 解析模型路径：None 使用项目根目录下的默认路径
+            model_path = self._config.model_path
+            if model_path is None:
+                if engine_name == "funasr":
+                    model_path = str(_ROOT_DIR / "models" / "asr" / "funasr")
+                elif engine_name == "whisper":
+                    model_path = str(_ROOT_DIR / "models" / "asr" / "whisper")
+                else:
+                    model_path = str(_ROOT_DIR / "models" / "asr")
+
             if engine_name == "funasr":
                 # 延迟导入，避免循环依赖
                 from neurova.asr.funasr_engine import FunASREngine
                 engine = FunASREngine(
-                    model_dir=self._config.model_path,
+                    model_dir=model_path,
                     auto_download=self._config.auto_download,
                 )
             elif engine_name == "whisper":
                 from neurova.asr.whisper_engine import WhisperEngine
                 engine = WhisperEngine(
-                    model_dir=self._config.model_path,
+                    model_dir=model_path,
                     auto_download=self._config.auto_download,
                 )
             elif engine_name == "mock":

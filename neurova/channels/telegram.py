@@ -23,14 +23,14 @@ from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime
 
 try:
-    import re
+    import requests  # type: ignore[import-not-found]
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
     logging.warning("requests 库未安装，Telegram 适配器将使用模拟模式")
 
 try:
-    import http
+    import httpx  # type: ignore[import-not-found]
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False

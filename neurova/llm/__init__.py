@@ -7,14 +7,27 @@ LLM 模块
 - Generators: 文本生成器
 """
 
-from .llm_router import (
-    RequestType,
-    ModelCapability,
-    ModelSelectionResult,
-    LLMRouter,
-    select_model_for_request,
-    detect_request_type,
-)
+import logging
+
+_logger = logging.getLogger(__name__)
+
+try:
+    from .llm_router import (
+        RequestType,
+        ModelCapability,
+        ModelSelectionResult,
+        LLMRouter,
+        select_model_for_request,
+        detect_request_type,
+    )
+except ImportError as _e:
+    _logger.debug(f"llm_router 模块未可用: {_e}")
+    RequestType = None
+    ModelCapability = None
+    ModelSelectionResult = None
+    LLMRouter = None
+    select_model_for_request = None
+    detect_request_type = None
 
 __all__ = [
     "RequestType",

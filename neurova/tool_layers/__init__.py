@@ -98,51 +98,54 @@ except ImportError as e:
     logger.warning(f"Failed to import openai_schema: {e}")
 
 
-# 向后兼容的简单实现
-class MarketplaceTool:
-    """市场工具（向后兼容）"""
-    def __init__(self, name: str = "", description: str = "", version: str = "1.0.0", **kwargs):
-        self.name = name
-        self.description = description
-        self.version = version
-        self.metadata = kwargs
+# 向后兼容的简单实现（仅在真实类导入失败时定义，避免覆盖）
+if "MarketplaceTool" not in dir() or MarketplaceTool is None:  # type: ignore[possibly-undefined]
+    class MarketplaceTool:
+        """市场工具（向后兼容）"""
+        def __init__(self, name: str = "", description: str = "", version: str = "1.0.0", **kwargs):
+            self.name = name
+            self.description = description
+            self.version = version
+            self.metadata = kwargs
 
-class ToolOrchestrator:
-    """DAG 工具编排器（向后兼容）"""
-    def __init__(self):
-        self._tools: Dict[str, Any] = {}
-        self._dag: Dict[str, List[str]] = {}
+if "ToolOrchestrator" not in dir() or ToolOrchestrator is None:  # type: ignore[possibly-undefined]
+    class ToolOrchestrator:
+        """DAG 工具编排器（向后兼容）"""
+        def __init__(self):
+            self._tools: Dict[str, Any] = {}
+            self._dag: Dict[str, List[str]] = {}
 
-    def register_tool(self, name: str, tool: Any) -> None:
-        self._tools[name] = tool
+        def register_tool(self, name: str, tool: Any) -> None:
+            self._tools[name] = tool
 
-    def add_dependency(self, tool: str, depends_on: str) -> None:
-        if tool not in self._dag:
-            self._dag[tool] = []
-        self._dag[tool].append(depends_on)
+        def add_dependency(self, tool: str, depends_on: str) -> None:
+            if tool not in self._dag:
+                self._dag[tool] = []
+            self._dag[tool].append(depends_on)
 
-    def get_execution_order(self) -> List[str]:
-        return list(self._tools.keys())
+        def get_execution_order(self) -> List[str]:
+            return list(self._tools.keys())
 
-    async def execute(self, task: str, context: Optional[Dict] = None) -> Dict[str, Any]:
-        return {'success': True, 'result': f"Executed: {task}"}
+        async def execute(self, task: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+            return {'success': True, 'result': f"Executed: {task}"}
 
-class ToolMarketplace:
-    """工具市场（向后兼容）"""
-    def __init__(self):
-        self._tools: Dict[str, MarketplaceTool] = {}
+if "ToolMarketplace" not in dir() or ToolMarketplace is None:  # type: ignore[possibly-undefined]
+    class ToolMarketplace:
+        """工具市场（向后兼容）"""
+        def __init__(self):
+            self._tools: Dict[str, MarketplaceTool] = {}
 
-    def list_tools(self) -> List[MarketplaceTool]:
-        return list(self._tools.values())
+        def list_tools(self) -> List[MarketplaceTool]:
+            return list(self._tools.values())
 
-    def get_tool(self, name: str) -> Optional[MarketplaceTool]:
-        return self._tools.get(name)
+        def get_tool(self, name: str) -> Optional[MarketplaceTool]:
+            return self._tools.get(name)
 
-    def register_tool(self, tool: MarketplaceTool) -> None:
-        self._tools[tool.name] = tool
+        def register_tool(self, tool: MarketplaceTool) -> None:
+            self._tools[tool.name] = tool
 
-    async def search(self, query: str) -> List[MarketplaceTool]:
-        return [t for t in self._tools.values() if query.lower() in t.name.lower()]
+        async def search(self, query: str) -> List[MarketplaceTool]:
+            return [t for t in self._tools.values() if query.lower() in t.name.lower()]
 
 
 __all__ = [

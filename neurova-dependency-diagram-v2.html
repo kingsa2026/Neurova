@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Neurova 模块依赖关系图 V2 — 复审报告</title>
+<style>
+:root {
+  --c-bg: #f8fafc;
+  --c-canvas: #ffffff;
+  --c-border: #cbd5e1;
+  --c-text-main: #0f172a;
+  --c-text-sub: #64748b;
+  --c-break: #dc2626;
+  --c-break-bg: #fef2f2;
+  --c-break-border: #fca5a5;
+  --c-fixed: #059669;
+  --c-fixed-bg: #ecfdf5;
+  --c-new: #d97706;
+  --c-new-bg: #fffbeb;
+  --c-new-border: #fcd34d;
+  --c-ok: #059669;
+  --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'SF Mono', Monaco, Consolas, monospace;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--c-bg); font-family:var(--font-ui); color:var(--c-text-main); padding:20px; }
+
+.canvas {
+  background:var(--c-canvas); border:2px solid var(--c-border);
+  padding:24px 28px; max-width:1320px; margin:0 auto;
+}
+.hdr { border-bottom:1px solid var(--c-border); padding-bottom:12px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:flex-end; }
+.hdr h1 { font-size:20px; font-weight:700; }
+.hdr .sub { font-size:11px; font-weight:500; color:var(--c-text-sub); text-transform:uppercase; letter-spacing:.5px; margin-top:2px; }
+.hdr .meta { font-size:10px; color:var(--c-text-sub); font-family:var(--font-mono); text-align:right; line-height:1.6; }
+
+.legend { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:16px; padding:8px 12px; border:1px solid var(--c-border); background:var(--c-bg); }
+.legend-i { display:flex; align-items:center; gap:5px; font-size:10px; }
+.sw { width:12px; height:12px; border:1px solid; display:inline-block; flex-shrink:0; }
+.sw--fixed { background:var(--c-fixed-bg); border-color:var(--c-fixed); }
+.sw--new { background:var(--c-new-bg); border-color:var(--c-new); }
+.sw--ok { background:var(--c-fixed-bg); border-color:var(--c-ok); }
+
+.b { display:inline-block; font-size:8px; font-family:var(--font-mono); padding:1px 4px; border:1px solid; text-transform:uppercase; letter-spacing:.3px; vertical-align:middle; }
+.b--fixed { background:var(--c-fixed); color:#fff; border-color:var(--c-fixed); }
+.b--new { background:var(--c-new); color:#fff; border-color:var(--c-new); }
+.b--ok { background:var(--c-ok); color:#fff; border-color:var(--c-ok); }
+.b--low { background:transparent; color:var(--c-text-sub); border-color:var(--c-border); }
+
+.sec { margin-bottom:12px; }
+.sec-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; padding-bottom:4px; border-bottom:1px dashed var(--c-border); display:flex; align-items:center; gap:8px; }
+.sec-title .count { font-size:9px; font-weight:400; color:var(--c-text-sub); font-family:var(--font-mono); }
+
+/* Fixed item row */
+.fix-row { display:flex; align-items:flex-start; gap:8px; padding:5px 8px; margin-bottom:3px; border:1px solid var(--c-border); background:var(--c-canvas); }
+.fix-row--fixed { border-left:3px solid var(--c-fixed); }
+.fix-row--new { border-left:3px solid var(--c-new); background:var(--c-new-bg); }
+.fix-row--new-critical { border-left:3px solid var(--c-break); background:var(--c-break-bg); }
+.fix-id { font-family:var(--font-mono); font-size:10px; font-weight:700; min-width:50px; }
+.fix-desc { font-size:10px; font-family:var(--font-mono); line-height:1.5; flex:1; }
+.fix-status { font-size:9px; font-weight:600; min-width:60px; text-align:right; }
+
+/* Summary banner */
+.banner { display:flex; gap:12px; margin-bottom:16px; }
+.banner-card { flex:1; padding:10px 14px; border:1px solid var(--c-border); text-align:center; }
+.banner-card .num { font-size:28px; font-weight:700; font-family:var(--font-mono); }
+.banner-card .label { font-size:9px; color:var(--c-text-sub); text-transform:uppercase; letter-spacing:.5px; margin-top:2px; }
+.banner-card--fixed .num { color:var(--c-fixed); }
+.banner-card--new .num { color:var(--c-new); }
+.banner-card--ok .num { color:var(--c-ok); }
+
+/* Table */
+table { width:100%; border-collapse:collapse; font-size:9px; margin-top:10px; }
+th, td { border:1px solid var(--c-border); padding:4px 6px; text-align:left; vertical-align:top; }
+th { background:var(--c-bg); font-weight:600; font-size:9px; text-transform:uppercase; letter-spacing:.3px; }
+td { font-family:var(--font-mono); font-size:9px; line-height:1.4; }
+.row-fixed { background:var(--c-fixed-bg); }
+.row-new { background:var(--c-new-bg); }
+
+/* Module box */
+.mod { border:1px solid var(--c-border); padding:5px 8px; background:var(--c-canvas); font-size:10px; display:inline-block; margin:2px; }
+.mod--ok { border-left:3px solid var(--c-ok); }
+.mod--warn { border-left:3px solid var(--c-new); background:var(--c-new-bg); }
+.mod-name { font-weight:600; font-family:var(--font-mono); font-size:10px; margin-bottom:1px; }
+.mod-desc { font-size:9px; color:var(--c-text-sub); line-height:1.3; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<div class="hdr">
+  <div>
+    <h1>Neurova 模块依赖关系图 V2</h1>
+    <p class="sub">MODULE DEPENDENCY AUDIT &mdash; REVISION 2 (POST-FIX)</p>
+  </div>
+  <div class="meta">REV 2.0 &mdash; 2026-06-09<br/>244 try/except blocks &middot; 99 files &middot; 1050 .pyc verified</div>
+</div>
+
+<div class="legend">
+  <div class="legend-i"><span class="sw sw--fixed"></span>已修复 Fixed</div>
+  <div class="legend-i"><span class="sw sw--new"></span>新发现 New Finding</div>
+  <div class="legend-i"><span class="sw sw--ok"></span>健康 Healthy</div>
+</div>
+
+<!-- ================ SUMMARY BANNER ================ -->
+<div class="banner">
+  <div class="banner-card banner-card--fixed">
+    <div class="num">14</div>
+    <div class="label">已修复问题 FIXED</div>
+  </div>
+  <div class="banner-card banner-card--new">
+    <div class="num">8</div>
+    <div class="label">新发现 NEW</div>
+  </div>
+  <div class="banner-card banner-card--ok">
+    <div class="num">0</div>
+    <div class="label">严重断路 CRITICAL BREAKS</div>
+  </div>
+  <div class="banner-card">
+    <div class="num">244</div>
+    <div class="label">import 守卫 (+10)</div>
+  </div>
+  <div class="banner-card">
+    <div class="num">1050</div>
+    <div class="label">.pyc 全部对齐</div>
+  </div>
+</div>
+
+<!-- ================ SECTION 1: FIXED ISSUES ================ -->
+<div class="sec">
+  <div class="sec-title" style="color:var(--c-fixed);">已修复 &mdash; 上轮审计 14 项全部通过 <span class="count">ALL 14 PREVIOUS ISSUES FIXED</span></div>
+
+  <div style="font-size:9px; font-weight:600; color:var(--c-text-sub); margin-bottom:4px; font-family:var(--font-mono);">严重断路 (6/6 FIXED)</div>
+
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">BC-01</span>
+    <span class="fix-desc">孤立 .pyc 文件 (10个) &mdash; 全部删除, 1050 个 .pyc 全部有对应 .py 源码</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">BC-02</span>
+    <span class="fix-desc">analytics/ 缺少 __init__.py &mdash; 已创建, 含 docstring + __all__ + lazy import</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">BC-03</span>
+    <span class="fix-desc">skill/__init__.py 21行重复+26个硬导入 &mdash; 完全重写为 __getattr__ + _LAZY_MAP 模式</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">BC-04</span>
+    <span class="fix-desc">session_manager.py 空 try/except &mdash; 已补入 import fcntl, Windows 正确降级</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">BC-05</span>
+    <span class="fix-desc">neurova/neurova/ 嵌套重复目录 &mdash; 已删除</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">BC-06</span>
+    <span class="fix-desc">utils/, builder/, capabilities/ 缺少 __init__.py &mdash; 全部已创建</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+
+  <div style="font-size:9px; font-weight:600; color:var(--c-text-sub); margin:8px 0 4px; font-family:var(--font-mono);">脆弱依赖 (8/8 FIXED)</div>
+
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">FD-01</span>
+    <span class="fix-desc">memory/__init__.py 7 个核心类无回退 &mdash; 已全部补入 = None + logger.debug</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">FD-02</span>
+    <span class="fix-desc">tool_layers/__init__.py 重复类 &mdash; stub 现在用 if "X" not in dir() 条件保护</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">FD-03</span>
+    <span class="fix-desc">cognitive_layers/memory_layer/__init__.py 静默失败 &mdash; 15 个块全部改为 logger.debug, 零 pass</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">FD-04</span>
+    <span class="fix-desc">tool_executor.py 裸延迟导入 &mdash; get_builtin_tool_params 已包 try/except, 失败返回 {}</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">FD-05</span>
+    <span class="fix-desc">context_pool.py 裸延迟导入 &mdash; ModelCapability 已包 try/except, 失败返回 16000</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">FD-06</span>
+    <span class="fix-desc">telegram.py 错误可用性检测 &mdash; 现已正确 import requests / httpx + logging.warning</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">FD-07</span>
+    <span class="fix-desc">skill_system/__init__.py sys.modules hack &mdash; 已移除, 改用 __getattr__ 惰性加载</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+  <div class="fix-row fix-row--fixed">
+    <span class="fix-id">FD-08</span>
+    <span class="fix-desc">memory/__init__.py 双命名空间静默失败 &mdash; 16 个别名映射已补 logger.debug</span>
+    <span class="fix-status" style="color:var(--c-fixed);">FIXED</span>
+  </div>
+</div>
+
+<!-- ================ SECTION 2: NEW FINDINGS ================ -->
+<div class="sec">
+  <div class="sec-title" style="color:var(--c-new);">新发现 &mdash; 本轮扫描新增问题 <span class="count">8 NEW FINDINGS (NF-01 ~ NF-08)</span></div>
+
+  <div class="fix-row fix-row--new">
+    <span class="fix-id">NF-01</span>
+    <span class="fix-desc">
+      <strong>projects/__init__.py</strong> &mdash; 7 行重复 from fastapi import File (代码生成产物)<br/>
+      + 无 try/except 保护. FastAPI 缺失时整个 projects 包不可用
+    </span>
+    <span class="b b--new">中</span>
+  </div>
+
+  <div class="fix-row fix-row--new">
+    <span class="fix-id">NF-02</span>
+    <span class="fix-desc">
+      <strong>collaboration/neurflow/__init__.py</strong> &mdash; 11 个无保护相对导入 (8 个子模块)<br/>
+      .models, .storage, .node_registry, .dag, .variable_resolver, .execution_engine, .adapters, .agent_manager, .templates<br/>
+      任一子模块失败 &rarr; 整个 neurflow 包不可用 (最近修改: 2026-06-08)
+    </span>
+    <span class="b b--new">中</span>
+  </div>
+
+  <div class="fix-row fix-row--new">
+    <span class="fix-id">NF-03</span>
+    <span class="fix-desc">
+      <strong>auth/__init__.py</strong> &mdash; from fastapi import Path 无保护<br/>
+      FastAPI 缺失时 auth 包级联崩溃
+    </span>
+    <span class="b b--new">中</span>
+  </div>
+
+  <div class="fix-row fix-row--new">
+    <span class="fix-id">NF-04</span>
+    <span class="fix-desc">
+      <strong>interfaces/__init__.py</strong> &mdash; 3 个无保护 fastapi 导入<br/>
+      HTTPException, JSONResponse, FastAPI
+    </span>
+    <span class="b b--new">中</span>
+  </div>
+
+  <div class="fix-row fix-row--new">
+    <span class="fix-id">NF-05</span>
+    <span class="fix-desc">
+      <strong>cognitive_layers/model_adapter/__init__.py</strong> &mdash; from pydantic import BaseModel 无保护<br/>
+      pydantic 缺失时 model_adapter 包崩溃
+    </span>
+    <span class="b b--new">中</span>
+  </div>
+
+  <div class="fix-row fix-row--new">
+    <span class="fix-id">NF-06</span>
+    <span class="fix-desc">
+      <strong>evolution/rsi/__init__.py</strong> &mdash; 8 个无保护相对导入 (8 个子模块)<br/>
+      任一子模块失败 &rarr; rsi 包不可用
+    </span>
+    <span class="b b--new">中</span>
+  </div>
+
+  <div class="fix-row fix-row--new">
+    <span class="fix-id">NF-07</span>
+    <span class="fix-desc">
+      <strong>skill_system/__init__.py</strong> &mdash; SkillResult 和 SkillInfo 在 except 块中重复定义 2 次 (死代码)<br/>
+      非运行时风险, 但应清理
+    </span>
+    <span class="b b--low">低</span>
+  </div>
+
+  <div class="fix-row fix-row--new">
+    <span class="fix-id">NF-08</span>
+    <span class="fix-desc">
+      <strong>skill/__init__.py</strong> &mdash; ExperienceRecord 类在整个代码库中不存在 (死引用)<br/>
+      在 _LAZY_MAP 和 try/except 块中均被引用, __getattr__ 访问时触发 AttributeError
+    </span>
+    <span class="b b--low">低</span>
+  </div>
+</div>
+
+<!-- ================ SECTION 3: HEALTH CHECK ================ -->
+<div class="sec">
+  <div class="sec-title" style="color:var(--c-ok);">健康检查通过项 <span class="count">CLEAN CHECKS</span></div>
+  <div style="display:flex; gap:6px; flex-wrap:wrap;">
+    <div class="mod mod--ok"><div class="mod-name">.pyc 完整性</div><div class="mod-desc">1050 文件, 0 孤立</div></div>
+    <div class="mod mod--ok"><div class="mod-name">__init__.py 覆盖</div><div class="mod-desc">全部代码目录已覆盖</div></div>
+    <div class="mod mod--ok"><div class="mod-name">包根 __init__.py</div><div class="mod-desc">零导入, 安全</div></div>
+    <div class="mod mod--ok"><div class="mod-name">循环导入防护</div><div class="mod-desc">TYPE_CHECKING x3, 无新增</div></div>
+    <div class="mod mod--ok"><div class="mod-name">ModuleNotFoundError</div><div class="mod-desc">新增 4 处使用 (+)</div></div>
+    <div class="mod mod--ok"><div class="mod-name">import 守卫总数</div><div class="mod-desc">244 (增 +10, 净增健康)</div></div>
+  </div>
+</div>
+
+<!-- ================ SECTION 4: NEW FINDINGS TABLE ================ -->
+<div class="sec" style="margin-top:14px; border-top:1px solid var(--c-border); padding-top:12px;">
+  <div class="sec-title">新问题完整清单 <span class="count">NEW FINDINGS INVENTORY</span></div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:50px;">编号</th>
+        <th style="width:50px;">级别</th>
+        <th style="width:220px;">位置</th>
+        <th>问题描述</th>
+        <th style="width:130px;">建议修复</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="row-new">
+        <td>NF-01</td>
+        <td><span class="b b--new">中</span></td>
+        <td>neurova/projects/__init__.py</td>
+        <td>7x 重复 from fastapi import File + 无保护</td>
+        <td>去重 + try/except</td>
+      </tr>
+      <tr class="row-new">
+        <td>NF-02</td>
+        <td><span class="b b--new">中</span></td>
+        <td>neurova/collaboration/neurflow/__init__.py</td>
+        <td>11 个无保护相对导入, 任一失败则整包崩溃</td>
+        <td>改为 try/except + stub</td>
+      </tr>
+      <tr class="row-new">
+        <td>NF-03</td>
+        <td><span class="b b--new">中</span></td>
+        <td>neurova/auth/__init__.py</td>
+        <td>from fastapi import Path 无保护</td>
+        <td>try/except 保护</td>
+      </tr>
+      <tr class="row-new">
+        <td>NF-04</td>
+        <td><span class="b b--new">中</span></td>
+        <td>neurova/interfaces/__init__.py</td>
+        <td>3 个无保护 fastapi 导入</td>
+        <td>try/except 保护</td>
+      </tr>
+      <tr class="row-new">
+        <td>NF-05</td>
+        <td><span class="b b--new">中</span></td>
+        <td>neurova/cognitive_layers/model_adapter/__init__.py</td>
+        <td>from pydantic import BaseModel 无保护</td>
+        <td>try/except 保护</td>
+      </tr>
+      <tr class="row-new">
+        <td>NF-06</td>
+        <td><span class="b b--new">中</span></td>
+        <td>neurova/evolution/rsi/__init__.py</td>
+        <td>8 个无保护相对导入</td>
+        <td>改为 try/except + stub</td>
+      </tr>
+      <tr class="row-new">
+        <td>NF-07</td>
+        <td><span class="b b--low">低</span></td>
+        <td>neurova/skill_system/__init__.py</td>
+        <td>SkillResult / SkillInfo 在 except 块中重复定义</td>
+        <td>删除重复行</td>
+      </tr>
+      <tr class="row-new">
+        <td>NF-08</td>
+        <td><span class="b b--low">低</span></td>
+        <td>neurova/skill/__init__.py</td>
+        <td>ExperienceRecord 类不存在 (死引用)</td>
+        <td>移除引用或创建类</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ================ SECTION 5: COMPARISON ================ -->
+<div class="sec" style="margin-top:14px; border-top:1px solid var(--c-border); padding-top:12px;">
+  <div class="sec-title">V1 vs V2 对比 <span class="count">AUDIT COMPARISON</span></div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:200px;">指标</th>
+        <th style="width:100px;">V1 (首轮)</th>
+        <th style="width:100px;">V2 (复审)</th>
+        <th>变化</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>严重断路 (Critical)</td>
+        <td style="color:var(--c-break); font-weight:700;">6</td>
+        <td style="color:var(--c-fixed); font-weight:700;">0</td>
+        <td style="color:var(--c-fixed);">-6 全部修复</td>
+      </tr>
+      <tr>
+        <td>脆弱依赖 (Warning)</td>
+        <td style="color:var(--c-new); font-weight:700;">8</td>
+        <td style="color:var(--c-fixed); font-weight:700;">0</td>
+        <td style="color:var(--c-fixed);">-8 全部修复</td>
+      </tr>
+      <tr class="row-new">
+        <td>新发现问题</td>
+        <td>&mdash;</td>
+        <td style="color:var(--c-new); font-weight:700;">8</td>
+        <td>6 中 + 2 低</td>
+      </tr>
+      <tr>
+        <td>import 守卫总数</td>
+        <td>234</td>
+        <td>244</td>
+        <td style="color:var(--c-fixed);">+10 (更健壮)</td>
+      </tr>
+      <tr>
+        <td>ModuleNotFoundError 使用</td>
+        <td>0</td>
+        <td>4</td>
+        <td style="color:var(--c-fixed);">+4 (更精确)</td>
+      </tr>
+      <tr>
+        <td>孤立 .pyc 文件</td>
+        <td style="color:var(--c-break);">10</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td style="color:var(--c-fixed);">-10 全部清理</td>
+      </tr>
+      <tr>
+        <td>缺少 __init__.py</td>
+        <td style="color:var(--c-break);">4</td>
+        <td style="color:var(--c-fixed);">0</td>
+        <td style="color:var(--c-fixed);">-4 全部补全</td>
+      </tr>
+      <tr>
+        <td>TYPE_CHECKING 守卫</td>
+        <td>8</td>
+        <td>3</td>
+        <td>-5 (简化)</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div style="margin-top:12px; padding-top:8px; border-top:1px solid var(--c-border); display:flex; justify-content:space-between;">
+  <div style="font-size:9px; color:var(--c-text-sub); font-family:var(--font-mono);">
+    GENERATED BY QODERWORK &mdash; DRAFTER-DIAGRAM &mdash; FLAT ENGINEERING BLUEPRINT STYLE &mdash; V2
+  </div>
+  <div style="font-size:9px; color:var(--c-text-sub); font-family:var(--font-mono);">
+    RESULT: 14/14 FIXED &middot; 8 NEW (6 MED + 2 LOW) &middot; 0 CRITICAL BREAKS REMAINING
+  </div>
+</div>
+
+</div>
+</body>
+</html>

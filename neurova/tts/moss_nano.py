@@ -97,8 +97,8 @@ class MOSSNanTTS(TTSBase):
 
     def __init__(
         self,
-        model_dir: str = "models/tts/moss-nano",
-        tokenizer_dir: str = "models/tts/moss-tokenizer",
+        model_dir: str = None,
+        tokenizer_dir: str = None,
         sample_rate: int = 48000,
         channels: int = 2,
         auto_download: bool = True,
@@ -114,8 +114,8 @@ class MOSSNanTTS(TTSBase):
             auto_download: 是否自动下载模型
         """
         super().__init__()
-        self._model_dir = Path(model_dir)
-        self._tokenizer_dir = Path(tokenizer_dir)
+        self._model_dir = Path(model_dir) if model_dir else None
+        self._tokenizer_dir = Path(tokenizer_dir) if tokenizer_dir else None
         self._sample_rate = sample_rate
         self._channels = channels
         self._auto_download = auto_download
@@ -158,6 +158,12 @@ class MOSSNanTTS(TTSBase):
         """
         try:
             self._downloader = get_model_downloader()
+
+            # 设置默认模型路径（如果未指定）
+            if self._model_dir is None:
+                self._model_dir = self._downloader.get_model_dir("moss-tts-nano")
+            if self._tokenizer_dir is None:
+                self._tokenizer_dir = self._downloader.get_model_dir("moss-audio-tokenizer")
 
             # 自动下载 TTS 模型
             if self._auto_download:

@@ -9,5 +9,5 @@ Neurova - 神经感知记忆系统
 - 图遍历检索
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __author__ = "Neurova Team"

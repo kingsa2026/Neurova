@@ -11,17 +11,55 @@ Neurova 渠道集成模块
     manager.start()
 """
 
-from neurova.channels.base import (
-    ChannelAdapter,
-    ChannelConfig,
-    ChannelMessage,
-    ChannelEventType,
-    MessageChannel,
-)
-from neurova.channels.manager import ChannelManager, get_channel_manager
-from neurova.channels.xiaoyi import XiaoYiAdapter, create_xiaoyi_adapter
-from neurova.channels.voice import VoiceAdapter, create_voice_adapter
-from neurova.session_manager import SessionManager, SessionMessage, SessionRecord, get_session_manager
+import logging
+
+_logger = logging.getLogger(__name__)
+
+try:
+    from neurova.channels.base import (
+        ChannelAdapter,
+        ChannelConfig,
+        ChannelMessage,
+        ChannelEventType,
+        MessageChannel,
+    )
+except ImportError as _e:
+    _logger.debug(f"channels.base 未可用: {_e}")
+    ChannelAdapter = None
+    ChannelConfig = None
+    ChannelMessage = None
+    ChannelEventType = None
+    MessageChannel = None
+
+try:
+    from neurova.channels.manager import ChannelManager, get_channel_manager
+except ImportError as _e:
+    _logger.debug(f"channels.manager 未可用: {_e}")
+    ChannelManager = None
+    get_channel_manager = None
+
+try:
+    from neurova.channels.xiaoyi import XiaoYiAdapter, create_xiaoyi_adapter
+except ImportError as _e:
+    _logger.debug(f"channels.xiaoyi 未可用: {_e}")
+    XiaoYiAdapter = None
+    create_xiaoyi_adapter = None
+
+try:
+    from neurova.channels.voice import VoiceAdapter, create_voice_adapter
+except ImportError as _e:
+    _logger.debug(f"channels.voice 未可用: {_e}")
+    VoiceAdapter = None
+    create_voice_adapter = None
+
+try:
+    from neurova.session_manager import SessionManager, SessionMessage, SessionRecord, get_session_manager
+except ImportError as _e:
+    _logger.debug(f"session_manager 未可用: {_e}")
+    SessionManager = None
+    SessionMessage = None
+    SessionRecord = None
+    get_session_manager = None
 
 __all__ = [
     "ChannelAdapter",

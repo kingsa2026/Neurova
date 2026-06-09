@@ -78,6 +78,8 @@ class WorkflowExecutor:
         self._dag_validator = get_dag_validator()
         self._variable_resolver = get_variable_resolver()
         self._node_registry = get_node_registry()
+        # 确保内置节点已注册
+        self._node_registry.ensure_builtin()
         self._event_handlers: List[Callable] = []
         self._instances: Dict[str, ExecutionInstance] = {}
         self._statuses: Dict[str, ExecutionStatus] = {}
@@ -149,7 +151,11 @@ class WorkflowExecutor:
         workflow: WorkflowDefinition,
         inputs: Dict[str, Any],
         user_id: Optional[str] = None,
-        agent_id: Optional[str] = None
+        agent_id: Optional[str] = None,
+        memory_manager: Optional[Any] = None,
+        context_pool: Optional[Any] = None,
+        emotion_module: Optional[Any] = None,
+        crystallizer: Optional[Any] = None
     ) -> ExecutionInstance:
         """
         执行工作流
@@ -159,6 +165,10 @@ class WorkflowExecutor:
             inputs: 输入变量
             user_id: 用户 ID
             agent_id: Agent ID
+            memory_manager: 记忆管理器（可选）
+            context_pool: 上下文池（可选）
+            emotion_module: 情感模块（可选）
+            crystallizer: 结晶器（可选）
             
         Returns:
             ExecutionInstance 执行实例
@@ -197,7 +207,11 @@ class WorkflowExecutor:
             inputs=inputs,
             variables=dict(instance.variables),
             agent_id=agent_id,
-            user_id=user_id
+            user_id=user_id,
+            memory_manager=memory_manager,
+            context_pool=context_pool,
+            emotion_module=emotion_module,
+            crystallizer=crystallizer
         )
         
         # 发送工作流开始事件

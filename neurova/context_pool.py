@@ -676,7 +676,11 @@ class ContextPool:
         Returns:
             Token 预算
         """
-        from neurova.llm.llm_router import ModelCapability
+        try:
+            from neurova.llm.llm_router import ModelCapability
+        except ImportError:
+            logger.debug("ModelCapability 延迟导入失败，使用默认预算")
+            return 16000
         
         base_budget = 16000
         

@@ -31,7 +31,7 @@ MODEL_REGISTRY = {
     "bge-small-zh-v1.5": {
         "repo_id": "BAAI/bge-small-zh-v1.5",
         "description": "中文文本嵌入向量模型 (512维)",
-        "local_dir": "embedding/bge-small-zh-v1.5",
+        "local_dir": "models/embedding/bge-small-zh-v1.5",
         "size_hint": "~130MB",
         "files": [
             "model.safetensors",
@@ -331,9 +331,16 @@ def _dir_size(path: Path) -> int:
     return total
 
 
-def get_model_downloader(base_dir: str = ".") -> ModelDownloader:
-    """获取全局 ModelDownloader 实例"""
+def get_model_downloader(base_dir: str = None) -> ModelDownloader:
+    """获取全局 ModelDownloader 实例
+    
+    Args:
+        base_dir: 模型存储的基础目录。如果为 None，则自动使用项目根目录。
+    """
     global _downloader
     if _downloader is None:
+        if base_dir is None:
+            # 自动检测项目根目录：从 neurova/tts/model_downloader.py 向上两级
+            base_dir = Path(__file__).parent.parent.parent.resolve()
         _downloader = ModelDownloader(base_dir=base_dir)
     return _downloader

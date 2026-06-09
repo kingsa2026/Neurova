@@ -14,7 +14,7 @@ from typing import List, Optional, Tuple
 
 def check_port(port: int) -> bool:
     """
-    检查端口是否被占用（跨平台）
+    检查端口是否被占用（跨平台，同时检测 IPv4 和 IPv6）
     
     Args:
         port: 端口号
@@ -22,13 +22,16 @@ def check_port(port: int) -> bool:
     Returns:
         bool: 端口是否被占用
     """
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(1)
-            result = s.connect_ex(('localhost', port))
-            return result == 0
-    except Exception:
-        return False
+    # 同时尝试 IPv4 和 IPv6，因为服务可能只监听其中一个
+    for family, host in ((socket.AF_INET, '127.0.0.1'), (socket.AF_INET6, '::1')):
+        try:
+            with socket.socket(family, socket.SOCK_STREAM) as s:
+                s.settimeout(1)
+                if s.connect_ex((host, port)) == 0:
+                    return True
+        except OSError:
+            pass
+    return False
 
 
 def get_process_by_port(port: int) -> Optional[int]:

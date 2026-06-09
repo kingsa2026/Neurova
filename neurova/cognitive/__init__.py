@@ -5,10 +5,18 @@ Cognitive Module - 认知模块
 包括认知状态管理、注意力管理、记忆管理和认知编排器。
 """
 
-from neurova.mem_core import Memory
-from neurova.mem_core import Memory
+import logging
+
+_logger = logging.getLogger(__name__)
+
+try:
+    from neurova.mem_core import Memory
+except ImportError as _e:
+    _logger.debug(f"Memory 未可用: {_e}")
+    Memory = None
 
 # cognitive imports
-import neurova.cognitive.orchestrator
-
-pass
+try:
+    import neurova.cognitive.orchestrator
+except ImportError as _e:
+    _logger.debug(f"cognitive.orchestrator 模块未可用: {_e}")

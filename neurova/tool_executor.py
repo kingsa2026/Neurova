@@ -566,8 +566,12 @@ class ToolExecutor:
         Returns:
             工具参数 schema
         """
-        from neurova.builtin_tools import get_builtin_tool_params
-        return get_builtin_tool_params(tool_name)
+        try:
+            from neurova.builtin_tools import get_builtin_tool_params
+            return get_builtin_tool_params(tool_name)
+        except ImportError as e:
+            logger.debug(f"get_builtin_tool_params 延迟导入失败: {e}")
+            return {}
 
     def get_tool_messages(self) -> List[Dict]:
         """获取工具消息列表"""

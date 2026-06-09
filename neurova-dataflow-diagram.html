@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Neurova 数据流程图 — 熔断机制标注</title>
+<style>
+:root {
+  --c-bg: #f8fafc;
+  --c-canvas: #ffffff;
+  --c-border: #cbd5e1;
+  --c-text-main: #0f172a;
+  --c-text-sub: #64748b;
+  --c-accent: #dc2626;
+  --c-accent-bg: #fef2f2;
+  --c-accent-border: #fca5a5;
+  --c-warn: #d97706;
+  --c-warn-bg: #fffbeb;
+  --c-warn-border: #fcd34d;
+  --c-safe: #059669;
+  --c-safe-bg: #ecfdf5;
+  --c-flow: #2563eb;
+  --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'SF Mono', Monaco, Consolas, monospace;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--c-bg); font-family:var(--font-ui); color:var(--c-text-main); padding:24px; }
+
+.diagram-canvas {
+  background:var(--c-canvas);
+  border:2px solid var(--c-border);
+  padding:28px 32px;
+  max-width:1280px;
+  margin:0 auto;
+}
+.diagram-header {
+  border-bottom:1px solid var(--c-border);
+  padding-bottom:14px;
+  margin-bottom:20px;
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+}
+.diagram-title { font-size:22px; font-weight:700; }
+.diagram-subtitle {
+  font-size:11px; font-weight:500; color:var(--c-text-sub);
+  text-transform:uppercase; letter-spacing:.5px;
+}
+.diagram-meta {
+  font-size:10px; color:var(--c-text-sub); font-family:var(--font-mono);
+  text-align:right; line-height:1.6;
+}
+
+/* Legend */
+.legend {
+  display:flex; gap:16px; flex-wrap:wrap;
+  margin-bottom:20px; padding:10px 14px;
+  border:1px solid var(--c-border); background:var(--c-bg);
+}
+.legend-item { display:flex; align-items:center; gap:6px; font-size:11px; }
+.legend-swatch {
+  width:14px; height:14px; border:1px solid;
+  display:inline-block; flex-shrink:0;
+}
+.legend-swatch--breaker { background:var(--c-accent-bg); border-color:var(--c-accent); }
+.legend-swatch--fallback { background:var(--c-warn-bg); border-color:var(--c-warn); }
+.legend-swatch--safe { background:var(--c-safe-bg); border-color:var(--c-safe); }
+.legend-swatch--flow { background:#eff6ff; border-color:var(--c-flow); }
+.legend-line { width:24px; border-top:2px solid var(--c-border); }
+.legend-line--dashed { border-top-style:dashed; }
+
+/* Layers */
+.layer {
+  position:relative;
+  margin-bottom:6px;
+  border:1px solid var(--c-border);
+  background:var(--c-canvas);
+}
+.layer-header {
+  display:flex; align-items:center; gap:10px;
+  padding:8px 14px;
+  border-bottom:1px solid var(--c-border);
+  background:var(--c-bg);
+}
+.layer-num {
+  font-family:var(--font-mono); font-size:10px; font-weight:700;
+  width:20px; height:20px; display:flex; align-items:center; justify-content:center;
+  border:1px solid var(--c-text-main); color:var(--c-text-main);
+}
+.layer-name { font-size:13px; font-weight:600; }
+.layer-desc { font-size:10px; color:var(--c-text-sub); margin-left:auto; font-family:var(--font-mono); }
+.layer-body { padding:12px 14px; }
+
+/* Nodes */
+.nodes-row { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start; }
+.node {
+  border:1px solid var(--c-border);
+  padding:8px 12px;
+  min-width:120px;
+  background:var(--c-canvas);
+  position:relative;
+}
+.node--wide { flex:1; min-width:180px; }
+.node--center { text-align:center; }
+.node-title {
+  font-size:11px; font-weight:600; margin-bottom:3px;
+  display:flex; align-items:center; gap:5px;
+}
+.node-detail {
+  font-size:10px; color:var(--c-text-sub); line-height:1.5;
+  font-family:var(--font-mono);
+}
+
+/* Badges */
+.badge {
+  display:inline-block; font-size:9px; font-family:var(--font-mono);
+  padding:1px 5px; border:1px solid var(--c-text-main);
+  text-transform:uppercase; vertical-align:middle; letter-spacing:.3px;
+}
+.badge--breaker {
+  background:var(--c-accent); color:#fff; border-color:var(--c-accent);
+  animation: none;
+}
+.badge--fallback {
+  background:var(--c-warn); color:#fff; border-color:var(--c-warn);
+}
+.badge--safe {
+  background:var(--c-safe); color:#fff; border-color:var(--c-safe);
+}
+.badge--flow {
+  background:var(--c-flow); color:#fff; border-color:var(--c-flow);
+}
+.badge--outline {
+  background:transparent; color:var(--c-text-main);
+}
+
+/* Circuit Breaker Annotation Box */
+.breaker-note {
+  border:1px solid var(--c-accent-border);
+  background:var(--c-accent-bg);
+  padding:6px 10px;
+  margin-top:6px;
+  font-size:10px;
+  line-height:1.5;
+  color:var(--c-accent);
+  font-family:var(--font-mono);
+}
+.breaker-note strong { font-weight:700; }
+
+.fallback-note {
+  border:1px solid var(--c-warn-border);
+  background:var(--c-warn-bg);
+  padding:6px 10px;
+  margin-top:6px;
+  font-size:10px;
+  line-height:1.5;
+  color:var(--c-warn);
+  font-family:var(--font-mono);
+}
+
+/* Arrow connectors */
+.arrow-down {
+  display:flex; justify-content:center; padding:2px 0;
+}
+.arrow-down svg { display:block; }
+.arrow-label {
+  text-align:center; font-size:9px; color:var(--c-text-sub);
+  font-family:var(--font-mono); padding:1px 0;
+  letter-spacing:.3px;
+}
+
+/* Pipeline steps */
+.pipeline {
+  display:flex; gap:4px; align-items:stretch;
+}
+.pipeline-step {
+  flex:1; border:1px solid var(--c-border); padding:7px 9px;
+  background:var(--c-canvas); min-width:0;
+}
+.pipeline-step .step-num {
+  font-family:var(--font-mono); font-size:9px; font-weight:700;
+  color:var(--c-text-sub); margin-bottom:2px;
+}
+.pipeline-step .step-title {
+  font-size:10px; font-weight:600; margin-bottom:2px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis;
+}
+.pipeline-step .step-desc {
+  font-size:9px; color:var(--c-text-sub); line-height:1.4;
+}
+
+/* Channel grid */
+.channel-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(90px, 1fr));
+  gap:4px;
+}
+.channel-chip {
+  border:1px solid var(--c-border); padding:4px 8px;
+  font-size:10px; text-align:center; font-family:var(--font-mono);
+  background:var(--c-canvas);
+}
+
+/* Summary table */
+.summary-table {
+  width:100%; border-collapse:collapse; font-size:10px;
+  margin-top:12px;
+}
+.summary-table th, .summary-table td {
+  border:1px solid var(--c-border);
+  padding:5px 8px;
+  text-align:left;
+  vertical-align:top;
+}
+.summary-table th {
+  background:var(--c-bg); font-weight:600;
+  font-size:10px; text-transform:uppercase; letter-spacing:.3px;
+}
+.summary-table td { font-family:var(--font-mono); font-size:10px; line-height:1.4; }
+.summary-table .col-type { width:80px; }
+.summary-table .col-loc { width:220px; }
+
+/* Two-col layout inside layer body */
+.two-col { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.three-col { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+</style>
+</head>
+<body>
+<div class="diagram-canvas">
+
+  <!-- HEADER -->
+  <div class="diagram-header">
+    <div>
+      <h1 class="diagram-title">Neurova 系统数据流程图</h1>
+      <p class="diagram-subtitle">DATA FLOW DIAGRAM WITH CIRCUIT BREAKER ANNOTATIONS</p>
+    </div>
+    <div class="diagram-meta">
+      REV 1.0 &mdash; 2026-06-09<br/>
+      neurova v5.0.0 &mdash; port 9527
+    </div>
+  </div>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="legend-item"><span class="legend-swatch legend-swatch--breaker"></span>熔断器 Circuit Breaker</div>
+    <div class="legend-item"><span class="legend-swatch legend-swatch--fallback"></span>降级/回退 Fallback</div>
+    <div class="legend-item"><span class="legend-swatch legend-swatch--safe"></span>容错守卫 Safeguard</div>
+    <div class="legend-item"><span class="legend-swatch legend-swatch--flow"></span>数据流 Data Flow</div>
+    <div class="legend-item"><span class="legend-line"></span>主路径</div>
+    <div class="legend-item"><span class="legend-line legend-line--dashed"></span>回退路径</div>
+  </div>
+
+  <!-- ============ LAYER 1: CHANNEL ENTRY ============ -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-num">01</span>
+      <span class="layer-name">外部通道入口</span>
+      <span class="layer-desc">CHANNEL ADAPTERS &mdash; 16 PLATFORMS</span>
+    </div>
+    <div class="layer-body">
+      <div class="channel-grid">
+        <div class="channel-chip">飞书</div>
+        <div class="channel-chip">微信</div>
+        <div class="channel-chip">钉钉</div>
+        <div class="channel-chip">企微</div>
+        <div class="channel-chip">Telegram</div>
+        <div class="channel-chip">Discord</div>
+        <div class="channel-chip">QQ</div>
+        <div class="channel-chip">WebSocket</div>
+        <div class="channel-chip">SIP/VoIP</div>
+        <div class="channel-chip">MQTT</div>
+        <div class="channel-chip">Webhook</div>
+        <div class="channel-chip">Mobile</div>
+        <div class="channel-chip">QClaw</div>
+        <div class="channel-chip">小译</div>
+        <div class="channel-chip">Web/API</div>
+        <div class="channel-chip">CLI</div>
+      </div>
+      <div style="margin-top:8px;">
+        <div class="nodes-row">
+          <div class="node node--wide">
+            <div class="node-title">ChannelAdapter <span class="badge badge--outline">ABC</span></div>
+            <div class="node-detail">connect() &rarr; _emit_event(MESSAGE_RECEIVED)<br/>统一为 ChannelMessage 格式</div>
+          </div>
+          <div class="node node--wide">
+            <div class="node-title">ChannelManager <span class="badge badge--outline">singleton</span></div>
+            <div class="node-detail">_on_channel_event() &rarr; message_handler()<br/>send_message() &rarr; adapter.send_message()</div>
+          </div>
+          <div class="node" style="border-color:var(--c-safe);">
+            <div class="node-title"><span class="badge badge--safe">容错</span></div>
+            <div class="node-detail">
+              WebSocket 自动重连<br/>
+              interval=5s, 无限重试<br/>
+              ping/pong 心跳 20s
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <svg width="20" height="18"><line x1="10" y1="0" x2="10" y2="14" stroke="#cbd5e1" stroke-width="1.5"/><polygon points="5,12 10,18 15,12" fill="#cbd5e1"/></svg>
+  </div>
+
+  <!-- ============ LAYER 2: HTTP/WS + MIDDLEWARE ============ -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-num">02</span>
+      <span class="layer-name">HTTP 中间件栈</span>
+      <span class="layer-desc">MIDDLEWARE &mdash; uvicorn :9527</span>
+    </div>
+    <div class="layer-body">
+      <div class="pipeline">
+        <div class="pipeline-step">
+          <div class="step-num">M1</div>
+          <div class="step-title">CORS</div>
+          <div class="step-desc">allow all origins</div>
+        </div>
+        <div class="pipeline-step" style="border-color:var(--c-accent); background:var(--c-accent-bg);">
+          <div class="step-num">M2</div>
+          <div class="step-title">RateLimit <span class="badge badge--breaker">熔断</span></div>
+          <div class="step-desc">IP 滑窗 120 req/min<br/>超限 &rarr; HTTP 429</div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-num">M3</div>
+          <div class="step-title">Logging</div>
+          <div class="step-desc">method, path, duration</div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-num">M4</div>
+          <div class="step-title">RequestID</div>
+          <div class="step-desc">X-Request-ID UUID4</div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-num">M5</div>
+          <div class="step-title">Security</div>
+          <div class="step-desc">X-Content-Type, X-Frame</div>
+        </div>
+      </div>
+      <div class="breaker-note" style="margin-top:8px;">
+        <strong>[CB-01] HTTP 限流熔断</strong> &mdash; RateLimitMiddleware: 滑动窗口算法, 每 IP 120次/分, 超限直接拒绝 (429), 60s 清理过期条目
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <svg width="20" height="18"><line x1="10" y1="0" x2="10" y2="14" stroke="#cbd5e1" stroke-width="1.5"/><polygon points="5,12 10,18 15,12" fill="#cbd5e1"/></svg>
+  </div>
+
+  <!-- ============ LAYER 3: API ROUTER ============ -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-num">03</span>
+      <span class="layer-name">API 路由 + JWT 认证</span>
+      <span class="layer-desc">67+ ENDPOINT MODULES &mdash; /api/v1/*</span>
+    </div>
+    <div class="layer-body">
+      <div class="two-col">
+        <div>
+          <div class="node-title" style="margin-bottom:6px;">路由分发</div>
+          <div class="node-detail" style="line-height:1.8;">
+            /api/v1/chat &rarr; chat endpoint<br/>
+            /api/v1/agents &rarr; agent CRUD<br/>
+            /api/v1/memory &rarr; memory ops<br/>
+            /api/v1/skills &rarr; skill execution<br/>
+            /api/v1/audio &rarr; TTS/ASR<br/>
+            /api/v1/console/ws &rarr; WebSocket<br/>
+            /api/acp, /api/evolution, /api/rag<br/>
+            <span style="color:var(--c-text-sub);">... +60 more modules</span>
+          </div>
+        </div>
+        <div>
+          <div class="node-title" style="margin-bottom:6px;">认证层 <span class="badge badge--outline">JWT HS256</span></div>
+          <div class="node-detail" style="line-height:1.8;">
+            get_current_user() &rarr; 强制认证<br/>
+            get_optional_user() &rarr; 可选认证<br/>
+            require_admin() &rarr; 角色控制<br/>
+            AccessToken 60min / RefreshToken 7d<br/>
+            API Key Manager (36-char, SHA-256)
+          </div>
+          <div class="fallback-note" style="margin-top:6px;">
+            <strong>[FB-01] 注册限流</strong> &mdash; 10次/小时/IP, 验证码冷却 60s
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <svg width="20" height="18"><line x1="10" y1="0" x2="10" y2="14" stroke="#cbd5e1" stroke-width="1.5"/><polygon points="5,12 10,18 15,12" fill="#cbd5e1"/></svg>
+  </div>
+
+  <!-- ============ LAYER 4: MESSAGE ROUTER ============ -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-num">04</span>
+      <span class="layer-name">消息路由器</span>
+      <span class="layer-desc">MessageRouter &mdash; neurova/router.py</span>
+    </div>
+    <div class="layer-body">
+      <div class="nodes-row">
+        <div class="node node--center" style="flex:1;">
+          <div class="node-title" style="justify-content:center;">route(message)</div>
+          <div class="node-detail">分类 &rarr; 分发</div>
+        </div>
+        <div class="node node--center" style="flex:1; border-left:2px solid var(--c-border);">
+          <div class="node-title" style="justify-content:center;"><span class="badge badge--flow">CHAT</span></div>
+          <div class="node-detail">agent.chat()<br/>/ agent.process_multimodal()</div>
+        </div>
+        <div class="node node--center" style="flex:1;">
+          <div class="node-title" style="justify-content:center;"><span class="badge badge--outline">COMMAND</span></div>
+          <div class="node-detail">/help /stats /clear<br/>/skills /memory</div>
+        </div>
+        <div class="node node--center" style="flex:1;">
+          <div class="node-title" style="justify-content:center;"><span class="badge badge--outline">SKILL</span></div>
+          <div class="node-detail">skill_registry<br/>.execute_skill()</div>
+        </div>
+        <div class="node node--center" style="flex:1;">
+          <div class="node-title" style="justify-content:center;"><span class="badge badge--outline">MEMORY</span></div>
+          <div class="node-detail">memory_manager<br/>.search() / .get_stats()</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <svg width="20" height="18"><line x1="10" y1="0" x2="10" y2="14" stroke="#cbd5e1" stroke-width="1.5"/><polygon points="5,12 10,18 15,12" fill="#cbd5e1"/></svg>
+  </div>
+  <div class="arrow-label">ChatContext &rarr; ChatPipeline.execute()</div>
+
+  <!-- ============ LAYER 5: CHAT PIPELINE ============ -->
+  <div class="layer" style="border-color:var(--c-flow);">
+    <div class="layer-header" style="background:#eff6ff;">
+      <span class="layer-num" style="border-color:var(--c-flow); color:var(--c-flow);">05</span>
+      <span class="layer-name">ChatPipeline 五步流水线</span>
+      <span class="layer-desc">agent/chat_pipeline.py &mdash; CORE PIPELINE</span>
+    </div>
+    <div class="layer-body">
+      <div class="pipeline">
+        <div class="pipeline-step">
+          <div class="step-num">STEP 0</div>
+          <div class="step-title">活动追踪</div>
+          <div class="step-desc">Turn计数<br/>Session恢复<br/>Trajectory启动</div>
+        </div>
+        <div class="pipeline-step" style="border-color:var(--c-warn);">
+          <div class="step-num">STEP 0.5</div>
+          <div class="step-title">Pre-LLM 检查 <span class="badge badge--fallback">降级</span></div>
+          <div class="step-desc">ToolMemory 肌肉记忆<br/>置信度&gt;0.8 自动执行<br/><strong>timeout=5s</strong></div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-num">STEP 1</div>
+          <div class="step-title">记忆检索+上下文</div>
+          <div class="step-desc">MoE检索 &rarr; 结晶模式<br/>ContextOrchestrator<br/>构建系统提示词</div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-num">STEP 2</div>
+          <div class="step-title">Evocate 注入</div>
+          <div class="step-desc">NeuHebb 结构化推理<br/>注入 system prompt</div>
+        </div>
+        <div class="pipeline-step" style="border-color:var(--c-accent); background:var(--c-accent-bg);">
+          <div class="step-num">STEP 3</div>
+          <div class="step-title">LLM 调用 <span class="badge badge--breaker">熔断</span></div>
+          <div class="step-desc">Agent Loop &rarr; 递归<br/>工具调用 (max 10轮)<br/>自动续写 (max 100轮)</div>
+        </div>
+        <div class="pipeline-step" style="border-color:var(--c-warn);">
+          <div class="step-num">STEP 4</div>
+          <div class="step-title">后处理 <span class="badge badge--fallback">降级</span></div>
+          <div class="step-desc">历史更新<br/>Trajectory记录<br/>PostChatPipeline</div>
+        </div>
+      </div>
+
+      <div style="margin-top:10px;" class="two-col">
+        <div class="breaker-note">
+          <strong>[CB-02] Agent Loop 熔断</strong> &mdash; 如果 Loop 调用失败(非配置错误400/401/403), 降级到 Legacy 模式 (_chat_normal / _chat_stream)
+        </div>
+        <div class="fallback-note">
+          <strong>[FB-02] 续写护栏</strong> &mdash; 重叠检测 60%, 语义循环检测 80% 相似度, 最小长度 10字符, 工具轮次上限 5
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <svg width="20" height="18"><line x1="10" y1="0" x2="10" y2="14" stroke="#cbd5e1" stroke-width="1.5"/><polygon points="5,12 10,18 15,12" fill="#cbd5e1"/></svg>
+  </div>
+
+  <!-- ============ LAYER 6: CONTEXT BUILDING ============ -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-num">06</span>
+      <span class="layer-name">上下文构建 + 记忆系统</span>
+      <span class="layer-desc">CONTEXT ORCHESTRATOR + MEMORY LAYER</span>
+    </div>
+    <div class="layer-body">
+      <div class="three-col">
+        <div class="node" style="border-color:var(--c-warn);">
+          <div class="node-title">记忆检索 <span class="badge badge--fallback">降级</span></div>
+          <div class="node-detail" style="line-height:1.6;">
+            MoE Router (4 Expert)<br/>
+            &darr; 失败时降级<br/>
+            Basic Recall<br/>
+            &darr; 不可用时<br/>
+            返回空 []
+          </div>
+          <div class="fallback-note" style="margin-top:4px;">
+            <strong>[FB-03]</strong> MoE &rarr; Basic &rarr; Empty
+          </div>
+        </div>
+        <div class="node" style="border-color:var(--c-warn);">
+          <div class="node-title">上下文组装 <span class="badge badge--fallback">降级</span></div>
+          <div class="node-detail" style="line-height:1.6;">
+            ContextPool (活水)<br/>
+            SemanticMatchDrawer<br/>
+            DriftSafeDedup<br/>
+            &darr; 向量不可用时<br/>
+            关键词匹配降级
+          </div>
+          <div class="fallback-note" style="margin-top:4px;">
+            <strong>[FB-04]</strong> Vector &rarr; Keyword match
+          </div>
+        </div>
+        <div class="node" style="border-color:var(--c-warn);">
+          <div class="node-title">上下文压缩 <span class="badge badge--fallback">降级</span></div>
+          <div class="node-detail" style="line-height:1.6;">
+            SmartCompressor<br/>
+            (渐进式压缩)<br/>
+            &darr; 不可用时<br/>
+            SimpleCompress<br/>
+            (截断+摘要占位)
+          </div>
+          <div class="fallback-note" style="margin-top:4px;">
+            <strong>[FB-05]</strong> Smart &rarr; Simple truncate
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:8px;" class="nodes-row">
+        <div class="node" style="flex:1;">
+          <div class="node-title">TokenBudget 分配</div>
+          <div class="node-detail">
+            system: 1500 | reflection: 1000 | memories: 4000 | history: 6000 | experience: 1500 | emotion: 500 | TOTAL: 16000
+          </div>
+        </div>
+        <div class="node" style="border-color:var(--c-safe);">
+          <div class="node-title"><span class="badge badge--safe">容错</span> 缓存</div>
+          <div class="node-detail">
+            MemoryCache LRU+TTL<br/>
+            ContextCache 后台写盘<br/>
+            capacity=10000
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <svg width="20" height="18"><line x1="10" y1="0" x2="10" y2="14" stroke="#cbd5e1" stroke-width="1.5"/><polygon points="5,12 10,18 15,12" fill="#cbd5e1"/></svg>
+  </div>
+
+  <!-- ============ LAYER 7: LLM CALL ============ -->
+  <div class="layer" style="border-color:var(--c-accent);">
+    <div class="layer-header" style="background:var(--c-accent-bg);">
+      <span class="layer-num" style="border-color:var(--c-accent); color:var(--c-accent);">07</span>
+      <span class="layer-name">LLM 调用层</span>
+      <span class="layer-desc">MULTI-MODEL CLIENT + PROVIDER MANAGER + CIRCUIT BREAKER</span>
+    </div>
+    <div class="layer-body">
+      <div class="nodes-row" style="margin-bottom:10px;">
+        <div class="node node--wide">
+          <div class="node-title">Agent Loop</div>
+          <div class="node-detail">
+            OpenAILoop (priority=10)<br/>
+            AnthropicLoop (priority=20)<br/>
+            Registry 自动匹配模型
+          </div>
+        </div>
+        <div class="node node--wide" style="border-color:var(--c-accent);">
+          <div class="node-title">MultiModelLLMClient <span class="badge badge--breaker">熔断</span></div>
+          <div class="node-detail">
+            负载均衡: RR / Weighted / Priority<br/>
+            模型追踪: success_rate, error_count<br/>
+            switch_to_next_model() 故障切换
+          </div>
+        </div>
+        <div class="node node--wide" style="border-color:var(--c-accent);">
+          <div class="node-title">LLMRouter</div>
+          <div class="node-detail">
+            按 RequestType 路由<br/>
+            CHAT / VISION / AUDIO / VIDEO<br/>
+            能力匹配 &rarr; 健康过滤 &rarr; 优先级
+          </div>
+        </div>
+      </div>
+
+      <div class="nodes-row">
+        <div class="node" style="flex:2; border-color:var(--c-accent); background:var(--c-accent-bg);">
+          <div class="node-title"><span class="badge badge--breaker">熔断</span> CircuitBreaker (三态)</div>
+          <div class="node-detail" style="line-height:1.6;">
+            CLOSED &rarr; 5次连续失败 &rarr; OPEN<br/>
+            OPEN &rarr; 60s 恢复超时 &rarr; HALF_OPEN<br/>
+            HALF_OPEN &rarr; 1次成功 &rarr; CLOSED<br/>
+            HALF_OPEN &rarr; 1次失败 &rarr; OPEN<br/>
+            线程安全 (RLock), 统计: success/failure/rejected
+          </div>
+          <div class="breaker-note">
+            <strong>[CB-03] 经典三态熔断器</strong> &mdash; rate_limiter.py, failure_threshold=5, recovery_timeout=60s, @with_retry_and_circuit_breaker 装饰器
+          </div>
+        </div>
+        <div class="node" style="flex:1; border-color:var(--c-accent);">
+          <div class="node-title"><span class="badge badge--breaker">限流</span> LLM RateLimiter</div>
+          <div class="node-detail" style="line-height:1.6;">
+            滑动窗口算法<br/>
+            60 req / 60s<br/>
+            wait_for_slot(timeout)
+          </div>
+          <div class="breaker-note">
+            <strong>[CB-04]</strong> LLM API 调用限流
+          </div>
+        </div>
+        <div class="node" style="flex:1; border-color:var(--c-accent);">
+          <div class="node-title"><span class="badge badge--breaker">重试</span> ExponentialBackoff</div>
+          <div class="node-detail" style="line-height:1.6;">
+            max_attempts=3<br/>
+            initial=1.0s, max=60s<br/>
+            multiplier=2.0, jitter=0.1
+          </div>
+          <div class="breaker-note">
+            <strong>[CB-05]</strong> 指数退避 + 抖动
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:8px;" class="nodes-row">
+        <div class="node" style="flex:1; border-color:var(--c-accent);">
+          <div class="node-title"><span class="badge badge--breaker">熔断</span> Provider Failover</div>
+          <div class="node-detail">
+            连续3次失败 &rarr; 标记 unhealthy<br/>
+            auto_failover() &rarr; 下一个健康 Provider<br/>
+            健康过滤 + PRIORITY_FIRST 选择
+          </div>
+          <div class="breaker-note">
+            <strong>[CB-06] Provider 自动故障切换</strong> &mdash; provider_manager.py, consecutive_failures 追踪
+          </div>
+        </div>
+        <div class="node" style="flex:1;">
+          <div class="node-title">LLMClient 配置</div>
+          <div class="node-detail">
+            OpenAI SDK 内置: max_retries=3<br/>
+            timeout=120s<br/>
+            错误分类: Connection / RateLimit / Auth / API<br/>
+            Mock 回退: SDK 不可用时返回模拟响应
+          </div>
+        </div>
+        <div class="node" style="flex:1; border-color:var(--c-safe);">
+          <div class="node-title"><span class="badge badge--safe">容错</span> 工具降级</div>
+          <div class="node-detail">
+            首次工具调用 400 错误<br/>
+            &rarr; _tools_supported=False<br/>
+            &rarr; 去掉 tools 参数重试
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <svg width="20" height="18"><line x1="10" y1="0" x2="10" y2="14" stroke="#cbd5e1" stroke-width="1.5"/><polygon points="5,12 10,18 15,12" fill="#cbd5e1"/></svg>
+  </div>
+  <div class="arrow-label">tool_calls &rarr; ToolExecutor</div>
+
+  <!-- ============ LAYER 8: TOOL EXECUTION ============ -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-num">08</span>
+      <span class="layer-name">工具执行层</span>
+      <span class="layer-desc">TOOL EXECUTOR + ENGINE + ORCHESTRATOR</span>
+    </div>
+    <div class="layer-body">
+      <div class="nodes-row" style="margin-bottom:8px;">
+        <div class="node" style="flex:1; border-color:var(--c-warn);">
+          <div class="node-title">执行优先级链 <span class="badge badge--fallback">降级</span></div>
+          <div class="node-detail" style="line-height:1.8;">
+            1. ToolEngine (注册工具)<br/>
+            2. Builtin Tools (内置12种)<br/>
+            3. SkillRegistry (技能系统)<br/>
+            4. ToolRouter (路由兜底)
+          </div>
+          <div class="fallback-note">
+            <strong>[FB-06]</strong> 四级降级执行链
+          </div>
+        </div>
+        <div class="node" style="flex:1; border-color:var(--c-accent);">
+          <div class="node-title">超时保护 <span class="badge badge--breaker">熔断</span></div>
+          <div class="node-detail" style="line-height:1.8;">
+            ToolOrchestrator: 30s/step<br/>
+            ToolEngine: asyncio.wait_for<br/>
+            PlanOrchestrator: max_retries=3<br/>
+            线性退避: sleep(1*(n+1))
+          </div>
+          <div class="breaker-note">
+            <strong>[CB-07] 工具超时熔断</strong> &mdash; 超时 &rarr; ExecutionStatus.TIMEOUT &rarr; _try_fallback()
+          </div>
+        </div>
+        <div class="node" style="flex:1; border-color:var(--c-safe);">
+          <div class="node-title">三级缓存 <span class="badge badge--safe">容错</span></div>
+          <div class="node-detail" style="line-height:1.8;">
+            L1: 精确匹配 (参数hash)<br/>
+            L2: 语义相似度 (向量)<br/>
+            L3: 预测预加载 (能力图)<br/>
+            TTL=300s, max_size=1000
+          </div>
+        </div>
+      </div>
+      <div class="nodes-row">
+        <div class="node" style="flex:1; border-color:var(--c-warn);">
+          <div class="node-title">能力图回退 <span class="badge badge--fallback">降级</span></div>
+          <div class="node-detail">
+            code_execute &rarr; code_analyze<br/>
+            data_process &rarr; memory_search<br/>
+            ToolCapabilityGraph.suggest_fallback()
+          </div>
+        </div>
+        <div class="node" style="flex:1; border-color:var(--c-safe);">
+          <div class="node-title"><span class="badge badge--safe">容错</span> 根因分析</div>
+          <div class="node-detail">
+            ToolRootCauseAnalyzer: 10类故障<br/>
+            系统性模式检测 (Jaccard&ge;0.7)<br/>
+            降级工具检测 (success_rate&lt;0.7)
+          </div>
+        </div>
+        <div class="node" style="flex:1; border-color:var(--c-safe);">
+          <div class="node-title"><span class="badge badge--safe">容错</span> 死信队列</div>
+          <div class="node-detail">
+            DeadLetterQueue<br/>
+            max_retries=3, 指数退避<br/>
+            max_age=24h, 磁盘持久化
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <svg width="20" height="18"><line x1="10" y1="0" x2="10" y2="14" stroke="#cbd5e1" stroke-width="1.5"/><polygon points="5,12 10,18 15,12" fill="#cbd5e1"/></svg>
+  </div>
+
+  <!-- ============ LAYER 9: VOICE PIPELINE ============ -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-num">09</span>
+      <span class="layer-name">语音处理管线</span>
+      <span class="layer-desc">VOICE PIPELINE &mdash; ASR / TTS / EMOTION</span>
+    </div>
+    <div class="layer-body">
+      <div class="two-col">
+        <div class="nodes-row">
+          <div class="node" style="flex:1;">
+            <div class="node-title">ASR 入站</div>
+            <div class="node-detail">
+              Audio &rarr; transcribe()<br/>
+              &rarr; 情感分析<br/>
+              &rarr; 上下文注入 ContextPool<br/>
+              &rarr; 记忆写入 VoiceMemoryBridge
+            </div>
+          </div>
+          <div class="node" style="flex:1;">
+            <div class="node-title">TTS 出站</div>
+            <div class="node-detail">
+              Text &rarr; synthesize()<br/>
+              &rarr; 上下文注入<br/>
+              &rarr; 记忆写入
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="node" style="border-color:var(--c-warn); height:100%;">
+            <div class="node-title">引擎回退链 <span class="badge badge--fallback">降级</span></div>
+            <div class="node-detail" style="line-height:1.8;">
+              <strong>TTS:</strong> moss-nano &rarr; edge-tts &rarr; mock<br/>
+              <strong>ASR:</strong> funasr &rarr; whisper &rarr; mock<br/>
+              <strong>SIP:</strong> DashScope TTS/STT 独立通道<br/>
+              AutoVoiceEngine: 顺序尝试, 记住可用引擎
+            </div>
+            <div class="fallback-note" style="margin-top:4px;">
+              <strong>[FB-07] 语音引擎自动故障切换</strong> &mdash; voice_engine.py
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <svg width="20" height="18"><line x1="10" y1="0" x2="10" y2="14" stroke="#cbd5e1" stroke-width="1.5"/><polygon points="5,12 10,18 15,12" fill="#cbd5e1"/></svg>
+  </div>
+
+  <!-- ============ LAYER 10: POST PROCESSING ============ -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-num">10</span>
+      <span class="layer-name">后处理 + 记忆回写 + 输出</span>
+      <span class="layer-desc">POST-PROCESSING + MEMORY WRITE-BACK + CHANNEL OUTPUT</span>
+    </div>
+    <div class="layer-body">
+      <div class="pipeline">
+        <div class="pipeline-step">
+          <div class="step-num">P1</div>
+          <div class="step-title">历史更新</div>
+          <div class="step-desc">conversation_history<br/>cap 100 entries</div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-num">P2</div>
+          <div class="step-title">记忆回写</div>
+          <div class="step-desc">save_conversation_memory<br/>episodic/conversation<br/>buffer auto-flush</div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-num">P3</div>
+          <div class="step-title">Session 持久化</div>
+          <div class="step-desc">SessionManager<br/>JSON 文件写入<br/>sessions/{agent_id}/</div>
+        </div>
+        <div class="pipeline-step" style="border-color:var(--c-warn);">
+          <div class="step-num">P4</div>
+          <div class="step-title">PostChatPipeline <span class="badge badge--fallback">降级</span></div>
+          <div class="step-desc">PipelineExecutor<br/>失败时返回<br/>degraded response</div>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-num">P5</div>
+          <div class="step-title">SessionSync</div>
+          <div class="step-desc">广播到<br/>SessionSyncManager<br/>跨通道同步</div>
+        </div>
+      </div>
+      <div class="fallback-note" style="margin-top:8px;">
+        <strong>[FB-08]</strong> PipelineExecutor 降级 &mdash; 如果 PostChatPipeline 失败, 返回原始回复 + 错误元数据, 不影响用户体验
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down">
+    <svg width="20" height="18"><line x1="10" y1="0" x2="10" y2="14" stroke="#cbd5e1" stroke-width="1.5"/><polygon points="5,12 10,18 15,12" fill="#cbd5e1"/></svg>
+  </div>
+  <div class="arrow-label">JSON Response {code, message, data, request_id} &rarr; Channel Adapter &rarr; User</div>
+
+  <!-- ============ LAYER 11: SYSTEM-LEVEL GUARDS ============ -->
+  <div class="layer" style="border-color:var(--c-safe);">
+    <div class="layer-header" style="background:var(--c-safe-bg);">
+      <span class="layer-num" style="border-color:var(--c-safe); color:var(--c-safe);">11</span>
+      <span class="layer-name">系统级容错守卫</span>
+      <span class="layer-desc">SYSTEM-WIDE SAFEGUARDS &mdash; RECOVERY / HEALTH / COOLDOWN</span>
+    </div>
+    <div class="layer-body">
+      <div class="nodes-row">
+        <div class="node" style="flex:1; border-color:var(--c-safe);">
+          <div class="node-title"><span class="badge badge--safe">容错</span> 崩溃恢复</div>
+          <div class="node-detail">
+            ShutdownGuard<br/>
+            哨兵文件检测异常关机<br/>
+            recover_from_sessions()<br/>
+            graceful_shutdown(timeout=30s)
+          </div>
+        </div>
+        <div class="node" style="flex:1; border-color:var(--c-safe);">
+          <div class="node-title"><span class="badge badge--safe">容错</span> 健康检查</div>
+          <div class="node-detail">
+            HealthChecker: 4种检查类型<br/>
+            LIVENESS / READINESS<br/>
+            DEPENDENCY / CUSTOM<br/>
+            状态: HEALTHY &rarr; DEGRADED &rarr; UNHEALTHY
+          </div>
+        </div>
+        <div class="node" style="flex:1; border-color:var(--c-safe);">
+          <div class="node-title"><span class="badge badge--safe">容错</span> 错误处理</div>
+          <div class="node-detail">
+            ErrorHandler: 集中式<br/>
+            ErrorCode 分类体系<br/>
+            safe_execute() 安全执行<br/>
+            恢复策略注册
+          </div>
+        </div>
+        <div class="node" style="flex:1; border-color:var(--c-accent);">
+          <div class="node-title"><span class="badge badge--breaker">冷却</span> 认知冷却</div>
+          <div class="node-detail">
+            QuestionQueue: 300-600s<br/>
+            ProactiveQuestion: 300-600s<br/>
+            防止认知过载<br/>
+            按优先级倍增冷却时间
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SUMMARY TABLE ============ -->
+  <div style="margin-top:20px; border-top:1px solid var(--c-border); padding-top:16px;">
+    <div style="font-size:14px; font-weight:600; margin-bottom:10px;">熔断 / 降级 / 容错机制完整清单</div>
+    <table class="summary-table">
+      <thead>
+        <tr>
+          <th class="col-type">编号</th>
+          <th>类型</th>
+          <th class="col-loc">位置</th>
+          <th>保护目标</th>
+          <th>触发条件</th>
+          <th>行为</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>CB-01</td>
+          <td><span class="badge badge--breaker">熔断</span></td>
+          <td>api/middleware.py</td>
+          <td>HTTP API 入口</td>
+          <td>120 req/min/IP</td>
+          <td>返回 HTTP 429</td>
+        </tr>
+        <tr>
+          <td>CB-02</td>
+          <td><span class="badge badge--breaker">熔断</span></td>
+          <td>agent/chat_pipeline.py</td>
+          <td>Agent Loop 调用</td>
+          <td>Loop 执行异常 (非配置错误)</td>
+          <td>降级到 Legacy _chat_normal</td>
+        </tr>
+        <tr>
+          <td>CB-03</td>
+          <td><span class="badge badge--breaker">熔断</span></td>
+          <td>llm/providers/rate_limiter.py</td>
+          <td>LLM API 调用</td>
+          <td>5次连续失败</td>
+          <td>CLOSED&rarr;OPEN(60s)&rarr;HALF_OPEN</td>
+        </tr>
+        <tr>
+          <td>CB-04</td>
+          <td><span class="badge badge--breaker">限流</span></td>
+          <td>llm/providers/rate_limiter.py</td>
+          <td>LLM API 调用频率</td>
+          <td>60 req / 60s</td>
+          <td>滑动窗口阻塞等待</td>
+        </tr>
+        <tr>
+          <td>CB-05</td>
+          <td><span class="badge badge--breaker">重试</span></td>
+          <td>llm/providers/rate_limiter.py</td>
+          <td>LLM API 可重试错误</td>
+          <td>可重试异常</td>
+          <td>指数退避 1s&rarr;60s, 3次</td>
+        </tr>
+        <tr>
+          <td>CB-06</td>
+          <td><span class="badge badge--breaker">熔断</span></td>
+          <td>llm/provider_manager.py</td>
+          <td>LLM Provider 可用性</td>
+          <td>3次连续失败</td>
+          <td>标记 unhealthy, 自动切换下一个</td>
+        </tr>
+        <tr>
+          <td>CB-07</td>
+          <td><span class="badge badge--breaker">熔断</span></td>
+          <td>tool_layers/tool_orchestrator.py</td>
+          <td>工具执行</td>
+          <td>timeout=30s</td>
+          <td>TIMEOUT &rarr; _try_fallback()</td>
+        </tr>
+        <tr>
+          <td>FB-01</td>
+          <td><span class="badge badge--fallback">降级</span></td>
+          <td>auth/verification_code.py</td>
+          <td>注册接口</td>
+          <td>10次/小时/IP</td>
+          <td>拒绝发送, 冷却60s</td>
+        </tr>
+        <tr>
+          <td>FB-02</td>
+          <td><span class="badge badge--fallback">降级</span></td>
+          <td>agent/chat_pipeline.py</td>
+          <td>自动续写</td>
+          <td>重叠60% / 循环80%</td>
+          <td>终止续写, 返回当前结果</td>
+        </tr>
+        <tr>
+          <td>FB-03</td>
+          <td><span class="badge badge--fallback">降级</span></td>
+          <td>mem_core.py</td>
+          <td>记忆检索</td>
+          <td>MoE 不可用/空结果</td>
+          <td>MoE &rarr; Basic Recall &rarr; []</td>
+        </tr>
+        <tr>
+          <td>FB-04</td>
+          <td><span class="badge badge--fallback">降级</span></td>
+          <td>context_pool.py</td>
+          <td>语义匹配</td>
+          <td>向量存储不可用</td>
+          <td>Vector &rarr; Keyword matching</td>
+        </tr>
+        <tr>
+          <td>FB-05</td>
+          <td><span class="badge badge--fallback">降级</span></td>
+          <td>context/injector.py</td>
+          <td>上下文压缩</td>
+          <td>SmartCompressor 失败</td>
+          <td>Smart &rarr; Simple truncate</td>
+        </tr>
+        <tr>
+          <td>FB-06</td>
+          <td><span class="badge badge--fallback">降级</span></td>
+          <td>tool_executor.py</td>
+          <td>工具执行</td>
+          <td>上层引擎失败</td>
+          <td>Engine&rarr;Builtin&rarr;Skill&rarr;Router</td>
+        </tr>
+        <tr>
+          <td>FB-07</td>
+          <td><span class="badge badge--fallback">降级</span></td>
+          <td>voice_engine.py</td>
+          <td>语音引擎</td>
+          <td>当前引擎失败</td>
+          <td>TTS: moss&rarr;edge&rarr;mock</td>
+        </tr>
+        <tr>
+          <td>FB-08</td>
+          <td><span class="badge badge--fallback">降级</span></td>
+          <td>pipeline_executor.py</td>
+          <td>PostChatPipeline</td>
+          <td>Pipeline 执行失败</td>
+          <td>返回原始回复 + 错误元数据</td>
+        </tr>
+        <tr>
+          <td>SG-01</td>
+          <td><span class="badge badge--safe">容错</span></td>
+          <td>recovery/shutdown_guard.py</td>
+          <td>系统崩溃恢复</td>
+          <td>异常关机检测</td>
+          <td>从 Session 恢复记忆</td>
+        </tr>
+        <tr>
+          <td>SG-02</td>
+          <td><span class="badge badge--safe">容错</span></td>
+          <td>core/health_checker.py</td>
+          <td>系统健康</td>
+          <td>周期性检查 30s</td>
+          <td>HEALTHY/DEGRADED/UNHEALTHY</td>
+        </tr>
+        <tr>
+          <td>SG-03</td>
+          <td><span class="badge badge--safe">容错</span></td>
+          <td>channels/websocket.py</td>
+          <td>WebSocket 连接</td>
+          <td>连接断开</td>
+          <td>5s 间隔无限重连</td>
+        </tr>
+        <tr>
+          <td>SG-04</td>
+          <td><span class="badge badge--safe">容错</span></td>
+          <td>protocols/dead_letter_queue.py</td>
+          <td>消息投递</td>
+          <td>处理失败</td>
+          <td>指数退避重试, 24h 过期</td>
+        </tr>
+        <tr>
+          <td>SG-05</td>
+          <td><span class="badge badge--safe">容错</span></td>
+          <td>plan_orchestrator.py</td>
+          <td>计划步骤执行</td>
+          <td>步骤失败</td>
+          <td>线性退避重试 3次</td>
+        </tr>
+        <tr>
+          <td>CD-01</td>
+          <td><span class="badge badge--breaker">冷却</span></td>
+          <td>question_queue.py / proactive_question.py</td>
+          <td>认知负载</td>
+          <td>问题过于频繁</td>
+          <td>300-600s 冷却期</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:14px; padding-top:10px; border-top:1px solid var(--c-border); display:flex; justify-content:space-between;">
+    <div style="font-size:9px; color:var(--c-text-sub); font-family:var(--font-mono);">
+      GENERATED BY QODERWORK &mdash; DRAFTER-DIAGRAM &mdash; FLAT ENGINEERING BLUEPRINT STYLE
+    </div>
+    <div style="font-size:9px; color:var(--c-text-sub); font-family:var(--font-mono);">
+      TOTAL: 7 CIRCUIT BREAKERS + 8 FALLBACKS + 5 SAFEGUARDS + 1 COOLDOWN = 21 FAULT TOLERANCE MECHANISMS
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

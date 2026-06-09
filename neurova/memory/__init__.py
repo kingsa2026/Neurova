@@ -11,7 +11,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 从 neurova.cognitive_layers.memory_layer 重新导出主要类（全部用 try/except 保护）
+# 从 neurova.cognitive_layers.memory_layer 重新导出主要类（全部用 try/except 保护 + 回退值）
 try:
     from neurova.cognitive_layers.memory_layer import (
         MoEMemoryRouter,
@@ -24,6 +24,13 @@ try:
     )
 except ImportError as e:
     logger.debug(f"部分 cognitive_layers.memory_layer 导入失败: {e}")
+    MoEMemoryRouter = None
+    UnifiedVectorStore = None
+    ConflictDetector = None
+    TemperatureEngine = None
+    ConversationMemoryBuffer = None
+    SleepConsolidation = None
+    GraphTraversal = None
 
 # 可能不存在的类，用占位
 try:
@@ -160,8 +167,8 @@ _MODULE_MAP = {
 for alias, target in _MODULE_MAP.items():
     try:
         sys.modules[__name__ + "." + alias] = importlib.import_module(target)
-    except ImportError:
-        pass
+    except ImportError as _e:
+        logger.debug(f"memory 子模块别名 {alias} -> {target} 映射失败: {_e}")
 
 __all__ = [
     "WorkingMemoryAugmenter",
