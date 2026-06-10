@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neurova 数据流程图 & 断点分析</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    background: #0a0e1a;
+    color: #c8d6e5;
+    overflow-x: hidden;
+  }
+  .header {
+    text-align: center;
+    padding: 32px 20px 16px;
+    background: linear-gradient(180deg, #111827 0%, #0a0e1a 100%);
+    border-bottom: 1px solid #1e293b;
+  }
+  .header h1 { font-size: 28px; color: #e2e8f0; letter-spacing: 2px; }
+  .header p { font-size: 14px; color: #64748b; margin-top: 8px; }
+  .legend {
+    display: flex; gap: 24px; justify-content: center; padding: 16px;
+    flex-wrap: wrap; background: #111827; border-bottom: 1px solid #1e293b;
+  }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .legend-dot {
+    width: 14px; height: 14px; border-radius: 50%;
+    display: inline-block; border: 2px solid transparent;
+  }
+  .legend-dot.normal { background: #3b82f6; }
+  .legend-dot.breakpoint { background: #ef4444; border-color: #fca5a5; }
+  .legend-dot.warning { background: #f59e0b; border-color: #fde68a; }
+  .legend-dot.stub { background: #6b7280; border-color: #9ca3af; }
+  .legend-line { width: 32px; height: 3px; display: inline-block; border-radius: 2px; }
+  .legend-line.flow { background: #3b82f6; }
+  .legend-line.broken { background: repeating-linear-gradient(90deg, #ef4444 0 6px, transparent 6px 10px); }
+
+  .canvas-wrap {
+    width: 100%; overflow: auto; padding: 20px;
+  }
+  svg { display: block; margin: 0 auto; }
+  /* Node styles */
+  .node-box {
+    rx: 10; ry: 10;
+    stroke-width: 2;
+    cursor: pointer;
+    transition: filter 0.2s;
+  }
+  .node-box:hover { filter: brightness(1.3); }
+  .node-normal { fill: #1e3a5f; stroke: #3b82f6; }
+  .node-breakpoint { fill: #3b1111; stroke: #ef4444; }
+  .node-warning { fill: #3b2f0a; stroke: #f59e0b; }
+  .node-stub { fill: #1f2937; stroke: #6b7280; }
+  .node-entry { fill: #0f3b2e; stroke: #10b981; }
+
+  .node-label {
+    font-size: 13px; fill: #e2e8f0; text-anchor: middle;
+    dominant-baseline: central; pointer-events: none;
+    font-weight: 600;
+  }
+  .node-sublabel {
+    font-size: 10px; fill: #94a3b8; text-anchor: middle;
+    dominant-baseline: central; pointer-events: none;
+  }
+  .flow-arrow {
+    stroke: #3b82f6; stroke-width: 2; fill: none;
+    marker-end: url(#arrowBlue);
+  }
+  .flow-arrow-broken {
+    stroke: #ef4444; stroke-width: 2; fill: none;
+    stroke-dasharray: 6 4;
+    marker-end: url(#arrowRed);
+  }
+  .flow-arrow-warn {
+    stroke: #f59e0b; stroke-width: 2; fill: none;
+    stroke-dasharray: 6 4;
+    marker-end: url(#arrowYellow);
+  }
+
+  /* Breakpoint badge */
+  .bp-badge {
+    cursor: pointer;
+  }
+  .bp-badge circle {
+    fill: #ef4444; stroke: #fca5a5; stroke-width: 1.5;
+  }
+  .bp-badge text {
+    fill: #fff; font-size: 10px; font-weight: 700;
+    text-anchor: middle; dominant-baseline: central;
+  }
+
+  /* Tooltip */
+  .tooltip-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 999; display: none;
+  }
+  .tooltip {
+    position: fixed; z-index: 1000;
+    background: #1e293b; border: 1px solid #475569;
+    border-radius: 10px; padding: 16px 20px;
+    max-width: 420px; min-width: 280px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    display: none; font-size: 13px; line-height: 1.6;
+  }
+  .tooltip .tt-title {
+    font-size: 15px; font-weight: 700; margin-bottom: 8px;
+    padding-bottom: 8px; border-bottom: 1px solid #334155;
+  }
+  .tooltip .tt-title.critical { color: #f87171; }
+  .tooltip .tt-title.warn { color: #fbbf24; }
+  .tooltip .tt-title.info { color: #60a5fa; }
+  .tooltip .tt-file { color: #94a3b8; font-size: 11px; margin-bottom: 6px; }
+  .tooltip .tt-desc { color: #cbd5e1; }
+  .tooltip .tt-impact { color: #f87171; font-weight: 600; margin-top: 6px; }
+
+  /* Section headers in SVG */
+  .section-label {
+    font-size: 16px; fill: #475569; font-weight: 700;
+    letter-spacing: 3px; text-transform: uppercase;
+  }
+  .section-bg {
+    fill: #111827; stroke: #1e293b; stroke-width: 1;
+    rx: 12; ry: 12; opacity: 0.6;
+  }
+
+  /* Stats bar */
+  .stats-bar {
+    display: flex; gap: 32px; justify-content: center;
+    padding: 16px; background: #111827; border-top: 1px solid #1e293b;
+    flex-wrap: wrap;
+  }
+  .stat { text-align: center; }
+  .stat-num { font-size: 28px; font-weight: 700; }
+  .stat-num.blue { color: #3b82f6; }
+  .stat-num.red { color: #ef4444; }
+  .stat-num.yellow { color: #f59e0b; }
+  .stat-num.gray { color: #6b7280; }
+  .stat-label { font-size: 12px; color: #64748b; margin-top: 4px; }
+
+  /* Breakpoint list */
+  .bp-list-section {
+    max-width: 1200px; margin: 0 auto; padding: 32px 20px;
+  }
+  .bp-list-section h2 {
+    font-size: 22px; color: #e2e8f0; margin-bottom: 20px;
+    padding-bottom: 12px; border-bottom: 2px solid #1e293b;
+  }
+  .bp-category {
+    margin-bottom: 24px;
+  }
+  .bp-category h3 {
+    font-size: 16px; color: #94a3b8; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .bp-category h3 .cat-dot {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  }
+  .bp-card {
+    background: #1e293b; border-radius: 8px; padding: 14px 18px;
+    margin-bottom: 8px; border-left: 4px solid #ef4444;
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .bp-card.warn { border-left-color: #f59e0b; }
+  .bp-card .bp-id {
+    background: #ef4444; color: #fff; font-size: 11px; font-weight: 700;
+    padding: 2px 8px; border-radius: 10px; white-space: nowrap;
+    min-width: 36px; text-align: center;
+  }
+  .bp-card.warn .bp-id { background: #f59e0b; color: #1e293b; }
+  .bp-card.fixed { border-left-color: #22c55e; }
+  .bp-card.fixed .bp-id { background: #22c55e; color: #fff; }
+  .bp-card.fixed .bp-fix { background: rgba(34,197,94,0.1); border-left: 3px solid #22c55e; padding: 8px 12px; margin-top: 8px; font-size: 12px; color: #86efac; border-radius: 4px; }
+  .bp-badge.bp-fixed circle { fill: #22c55e; stroke: #86efac; }
+  .bp-card .bp-body { flex: 1; }
+  .bp-card .bp-title { font-weight: 600; color: #e2e8f0; font-size: 14px; }
+  .bp-card .bp-location { color: #64748b; font-size: 11px; margin: 4px 0; }
+  .bp-card .bp-desc { color: #94a3b8; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Neurova 数据流程图</h1>
+  <p>Data Flow Diagram &amp; Breakpoint Analysis | 基于项目代码实际实现</p>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><span class="legend-dot normal"></span> 正常节点</div>
+  <div class="legend-item"><span class="legend-dot breakpoint"></span> 严重断点</div>
+  <div class="legend-item"><span class="legend-dot warning"></span> 警告/部分实现</div>
+  <div class="legend-item"><span class="legend-dot stub"></span> 桩/未集成</div>
+  <div class="legend-item"><span class="legend-line flow"></span> 正常数据流</div>
+  <div class="legend-item"><span class="legend-line broken"></span> 断裂数据流</div>
+</div>
+
+<div class="canvas-wrap">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 2400" width="1400" height="2400">
+<defs>
+  <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/>
+  </marker>
+  <marker id="arrowRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444"/>
+  </marker>
+  <marker id="arrowYellow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/>
+  </marker>
+  <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981"/>
+  </marker>
+  <filter id="glow">
+    <feGaussianBlur stdDeviation="3" result="blur"/>
+    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+</defs>
+
+<!-- ===== SECTION 1: INPUT LAYER ===== -->
+<rect class="section-bg" x="20" y="20" width="1360" height="200"/>
+<text class="section-label" x="50" y="52">① 输入层 INPUT LAYER</text>
+
+<!-- Web Frontend -->
+<rect class="node-box node-entry" x="80" y="80" width="160" height="56" data-bp="entry-web"/>
+<text class="node-label" x="160" y="100">Web 前端</text>
+<text class="node-sublabel" x="160" y="118">neuUI / Vite :8100</text>
+
+<!-- CLI -->
+<rect class="node-box node-entry" x="280" y="80" width="130" height="56" data-bp="entry-cli"/>
+<text class="node-label" x="345" y="100">CLI 终端</text>
+<text class="node-sublabel" x="345" y="118">cli.py</text>
+
+<!-- Channel Adapters -->
+<rect class="node-box node-normal" x="450" y="70" width="340" height="76" data-bp="channels"/>
+<text class="node-label" x="620" y="95">渠道适配器 (16种)</text>
+<text class="node-sublabel" x="620" y="115">微信/飞书/钉钉/Telegram/Discord/QQ...</text>
+<text class="node-sublabel" x="620" y="130">ChannelAdapter → ChannelManager</text>
+
+<!-- QClaw / External -->
+<rect class="node-box node-entry" x="830" y="80" width="170" height="56" data-bp="entry-ext"/>
+<text class="node-label" x="915" y="100">外部框架接入</text>
+<text class="node-sublabel" x="915" y="118">QClaw / Hermes / MCP</text>
+
+<!-- API Gateway -->
+<rect class="node-box node-normal" x="1060" y="70" width="280" height="76"/>
+<text class="node-label" x="1200" y="92">FastAPI 网关 :9527</text>
+<text class="node-sublabel" x="1200" y="112">中间件链: CORS → Security → RateLimit</text>
+<text class="node-sublabel" x="1200" y="127">70+ 路由模块动态注册</text>
+
+<!-- BP badge: CORS -->
+<g class="bp-badge" data-bp="bp-cors" transform="translate(1330,72)">
+  <circle r="10"/><text>1</text>
+</g>
+
+<!-- Arrows: inputs to API -->
+<path class="flow-arrow" d="M240,108 L440,96"/>
+<path class="flow-arrow" d="M410,108 L440,100"/>
+<path class="flow-arrow" d="M790,108 L830,100"/>
+<path class="flow-arrow" d="M1000,108 L1060,100"/>
+<path class="flow-arrow" d="M790,115 Q900,140 1060,120"/>
+
+<!-- ===== SECTION 2: ROUTING LAYER ===== -->
+<rect class="section-bg" x="20" y="240" width="1360" height="200"/>
+<text class="section-label" x="50" y="272">② 路由层 ROUTING LAYER</text>
+
+<!-- Chat Endpoint -->
+<rect class="node-box node-normal" x="80" y="300" width="180" height="56"/>
+<text class="node-label" x="170" y="320">Chat Endpoint</text>
+<text class="node-sublabel" x="170" y="338">POST /api/v1/chat</text>
+
+<!-- Auth Endpoint -->
+<rect class="node-box node-breakpoint" x="300" y="300" width="160" height="56" data-bp="bp-auth"/>
+<text class="node-label" x="380" y="320">Auth 认证</text>
+<text class="node-sublabel" x="380" y="338">/api/v1/auth</text>
+<g class="bp-badge" data-bp="bp-auth" transform="translate(452,302)">
+  <circle r="10"/><text>2</text>
+</g>
+
+<!-- MessageRouter -->
+<rect class="node-box node-normal" x="540" y="290" width="260" height="76"/>
+<text class="node-label" x="670" y="312">MessageRouter</text>
+<text class="node-sublabel" x="670" y="332">消息分类: COMMAND / SKILL /</text>
+<text class="node-sublabel" x="670" y="347">MEMORY / CHAT</text>
+
+<!-- BP: eval() -->
+<g class="bp-badge" data-bp="bp-eval" transform="translate(793,292)">
+  <circle r="10"/><text>3</text>
+</g>
+
+<!-- Permission Check -->
+<rect class="node-box node-breakpoint" x="880" y="300" width="200" height="56" data-bp="bp-perm"/>
+<text class="node-label" x="980" y="320">权限检查</text>
+<text class="node-sublabel" x="980" y="338">_user_can_access_agent()</text>
+<g class="bp-badge" data-bp="bp-perm" transform="translate(1072,302)">
+  <circle r="10"/><text>4</text>
+</g>
+
+<!-- Agent Instance -->
+<rect class="node-box node-normal" x="1140" y="300" width="200" height="56"/>
+<text class="node-label" x="1240" y="320">Agent 实例</text>
+<text class="node-sublabel" x="1240" y="338">agent_core.py</text>
+
+<!-- Arrows -->
+<path class="flow-arrow" d="M1200,146 L1200,180 Q1200,200 1100,220 Q400,250 170,300" />
+<path class="flow-arrow" d="M170,356 L170,380 Q170,400 300,410 L540,330"/>
+<path class="flow-arrow" d="M800,330 L880,330"/>
+<path class="flow-arrow" d="M1080,330 L1140,330"/>
+
+<!-- ===== SECTION 3: AGENT CORE / CHAT PIPELINE ===== -->
+<rect class="section-bg" x="20" y="460" width="1360" height="360"/>
+<text class="section-label" x="50" y="492">③ Agent核心 · ChatPipeline 六步管线</text>
+
+<!-- Step 0 -->
+<rect class="node-box node-normal" x="60" y="520" width="170" height="66"/>
+<text class="node-label" x="145" y="540">Step 0: 初始化</text>
+<text class="node-sublabel" x="145" y="558">会话恢复 / 轨迹记录</text>
+<text class="node-sublabel" x="145" y="573">轮次计数 / 空闲追踪</text>
+
+<!-- Step 0.5 -->
+<rect class="node-box node-warning" x="270" y="520" width="190" height="66" data-bp="bp-toolmem"/>
+<text class="node-label" x="365" y="540">Step 0.5: 预检查</text>
+<text class="node-sublabel" x="365" y="558">ToolMemory 条件反射</text>
+<text class="node-sublabel" x="365" y="573">NL工具合成 / 技能获取</text>
+<g class="bp-badge" data-bp="bp-toolmem" transform="translate(452,522)">
+  <circle r="10"/><text>5</text>
+</g>
+
+<!-- Step 1 -->
+<rect class="node-box node-normal" x="500" y="520" width="200" height="66"/>
+<text class="node-label" x="600" y="540">Step 1: 检索+构建</text>
+<text class="node-sublabel" x="600" y="558">UnifiedRetriever / MoE</text>
+<text class="node-sublabel" x="600" y="573">ContextOrchestrator</text>
+
+<!-- Step 2 -->
+<rect class="node-box node-normal" x="740" y="520" width="170" height="66"/>
+<text class="node-label" x="825" y="540">Step 2: 注入</text>
+<text class="node-sublabel" x="825" y="558">NeuHebbManager</text>
+<text class="node-sublabel" x="825" y="573">结构化推理记忆</text>
+
+<!-- Step 3 -->
+<rect class="node-box node-normal" x="950" y="510" width="190" height="76"/>
+<text class="node-label" x="1045" y="535">Step 3: LLM 调用</text>
+<text class="node-sublabel" x="1045" y="555">AgentLoop → MultiModel</text>
+<text class="node-sublabel" x="1045" y="570">→ OpenAI API 调用</text>
+
+<!-- Step 4 -->
+<rect class="node-box node-normal" x="1180" y="520" width="180" height="66"/>
+<text class="node-label" x="1270" y="540">Step 4: 后处理</text>
+<text class="node-sublabel" x="1270" y="558">PostChatPipeline</text>
+<text class="node-sublabel" x="1270" y="573">13步后处理管线</text>
+
+<!-- Step 5 -->
+<rect class="node-box node-normal" x="700" y="680" width="180" height="56"/>
+<text class="node-label" x="790" y="700">Step 5: 同步</text>
+<text class="node-sublabel" x="790" y="718">SessionSync 广播</text>
+
+<!-- ChatPipeline flow arrows -->
+<path class="flow-arrow" d="M230,553 L270,553"/>
+<path class="flow-arrow" d="M460,553 L500,553"/>
+<path class="flow-arrow" d="M700,553 L740,553"/>
+<path class="flow-arrow" d="M910,553 L950,548"/>
+<path class="flow-arrow" d="M1140,548 L1180,548"/>
+<path class="flow-arrow" d="M1270,586 L1270,640 Q1270,660 1100,680 L880,700"/>
+
+<!-- Continuation write loop -->
+<rect class="node-box node-normal" x="950" y="680" width="200" height="56"/>
+<text class="node-label" x="1050" y="700">自动续写循环</text>
+<text class="node-sublabel" x="1050" y="718">finish_reason=length 时</text>
+<path class="flow-arrow" d="M1045,586 L1045,640 Q1045,660 1050,680"/>
+
+<!-- ===== SECTION 4: LLM CALL CHAIN ===== -->
+<rect class="section-bg" x="20" y="840" width="1360" height="240"/>
+<text class="section-label" x="50" y="872">④ LLM 调用链 CALL CHAIN</text>
+
+<!-- Agent Loop -->
+<rect class="node-box node-normal" x="80" y="900" width="200" height="66"/>
+<text class="node-label" x="180" y="920">AgentLoop</text>
+<text class="node-sublabel" x="180" y="938">OpenAILoop / 模型自动匹配</text>
+<text class="node-sublabel" x="180" y="953">递归工具调用 (最多10轮)</text>
+
+<!-- AgentLLMClient -->
+<rect class="node-box node-normal" x="340" y="910" width="180" height="50"/>
+<text class="node-label" x="430" y="930">AgentLLMClient</text>
+<text class="node-sublabel" x="430" y="945">代理模式, 无API Key</text>
+
+<!-- MultiModelClient -->
+<rect class="node-box node-normal" x="580" y="900" width="220" height="66"/>
+<text class="node-label" x="690" y="920">MultiModelLLMClient</text>
+<text class="node-sublabel" x="690" y="938">单例 · 多Provider路由</text>
+<text class="node-sublabel" x="690" y="953">模型名精确/模糊匹配</text>
+
+<!-- LLMClient -->
+<rect class="node-box node-normal" x="860" y="910" width="170" height="50"/>
+<text class="node-label" x="945" y="930">LLMClient</text>
+<text class="node-sublabel" x="945" y="945">OpenAI / AsyncOpenAI</text>
+
+<!-- Provider -->
+<rect class="node-box node-entry" x="1090" y="900" width="260" height="66"/>
+<text class="node-label" x="1220" y="920">LLM Provider</text>
+<text class="node-sublabel" x="1220" y="938">OpenAI / Anthropic / 本地模型</text>
+<text class="node-sublabel" x="1220" y="953">DeepSeek / GLM / Qwen / Kimi...</text>
+
+<!-- BP: Token estimation -->
+<g class="bp-badge" data-bp="bp-token" transform="translate(570,900)">
+  <circle r="10"/><text>6</text>
+</g>
+
+<!-- LLM Arrows -->
+<path class="flow-arrow" d="M280,933 L340,933"/>
+<path class="flow-arrow" d="M520,935 L580,935"/>
+<path class="flow-arrow" d="M800,935 L860,935"/>
+<path class="flow-arrow" d="M1030,935 L1090,933"/>
+
+<!-- Deprecated path -->
+<rect class="node-box node-stub" x="80" y="1000" width="200" height="50" data-bp="bp-deprecated"/>
+<text class="node-label" x="180" y="1020" style="fill:#9ca3af">_chat_normal/stream</text>
+<text class="node-sublabel" x="180" y="1035">DEPRECATED v5.0 fallback</text>
+<g class="bp-badge" data-bp="bp-deprecated" transform="translate(272,1002)">
+  <circle r="10"/><text>7</text>
+</g>
+<path class="flow-arrow-warn" d="M180,966 L180,1000"/>
+
+<!-- ===== SECTION 5: TOOL EXECUTION ===== -->
+<rect class="section-bg" x="20" y="1100" width="1360" height="320"/>
+<text class="section-label" x="50" y="1132">⑤ 工具执行层 TOOL EXECUTION</text>
+
+<!-- Function Calling -->
+<rect class="node-box node-normal" x="80" y="1160" width="200" height="66"/>
+<text class="node-label" x="180" y="1180">Function Calling</text>
+<text class="node-sublabel" x="180" y="1198">LLM 原生工具调用</text>
+<text class="node-sublabel" x="180" y="1213">response.tool_calls</text>
+
+<!-- Text Tool Parse -->
+<rect class="node-box node-warning" x="80" y="1260" width="200" height="56" data-bp="bp-texttool"/>
+<text class="node-label" x="180" y="1280">文本工具解析</text>
+<text class="node-sublabel" x="180" y="1298">从 ```json 块解析</text>
+<g class="bp-badge" data-bp="bp-texttool" transform="translate(272,1262)">
+  <circle r="10"/><text>8</text>
+</g>
+
+<!-- ToolExecutor -->
+<rect class="node-box node-normal" x="360" y="1180" width="200" height="66"/>
+<text class="node-label" x="460" y="1200">ToolExecutor</text>
+<text class="node-sublabel" x="460" y="1218">统一工具执行器</text>
+<text class="node-sublabel" x="460" y="1233">分发 + 超时 + 安全</text>
+
+<!-- ToolEngine -->
+<rect class="node-box node-normal" x="640" y="1160" width="190" height="56"/>
+<text class="node-label" x="735" y="1180">ToolEngine</text>
+<text class="node-sublabel" x="735" y="1198">注册表 + 版本控制</text>
+
+<!-- BuiltinTools -->
+<rect class="node-box node-breakpoint" x="640" y="1240" width="190" height="66" data-bp="bp-builtin"/>
+<text class="node-label" x="735" y="1260">内置工具 (12种)</text>
+<text class="node-sublabel" x="735" y="1278">file/memory/computer/emotion</text>
+<text class="node-sublabel" x="735" y="1293">多个桩实现</text>
+<g class="bp-badge" data-bp="bp-builtin" transform="translate(822,1242)">
+  <circle r="10"/><text>9</text>
+</g>
+
+<!-- SkillRegistry -->
+<rect class="node-box node-normal" x="900" y="1160" width="170" height="56"/>
+<text class="node-label" x="985" y="1180">SkillRegistry</text>
+<text class="node-sublabel" x="985" y="1198">技能加载+执行</text>
+
+<!-- ToolRouter -->
+<rect class="node-box node-breakpoint" x="900" y="1240" width="170" height="56" data-bp="bp-toolrouter"/>
+<text class="node-label" x="985" y="1260">ToolRouter</text>
+<text class="node-sublabel" x="985" y="1278">统一路由器 (fallback)</text>
+<g class="bp-badge" data-bp="bp-toolrouter" transform="translate(1062,1242)">
+  <circle r="10"/><text>10</text>
+</g>
+
+<!-- ToolOrchestrator -->
+<rect class="node-box node-warning" x="1130" y="1180" width="210" height="66" data-bp="bp-orchestrator"/>
+<text class="node-label" x="1235" y="1200">ToolOrchestrator</text>
+<text class="node-sublabel" x="1235" y="1218">DAG 编排 (实际顺序执行)</text>
+<text class="node-sublabel" x="1235" y="1233">目标→能力: 关键词匹配</text>
+<g class="bp-badge" data-bp="bp-orchestrator" transform="translate(1332,1182)">
+  <circle r="10"/><text>11</text>
+</g>
+
+<!-- ExecutionLayers -->
+<rect class="node-box node-stub" x="1130" y="1280" width="210" height="56" data-bp="bp-execlayer"/>
+<text class="node-label" x="1235" y="1300" style="fill:#9ca3af">ExecutionLayers</text>
+<text class="node-sublabel" x="1235" y="1318">Runtime + Transport 双抽象</text>
+<g class="bp-badge" data-bp="bp-execlayer" transform="translate(1332,1282)">
+  <circle r="10"/><text>12</text>
+</g>
+
+<!-- Tool Arrows -->
+<path class="flow-arrow" d="M280,1193 L360,1200"/>
+<path class="flow-arrow" d="M280,1288 L360,1230"/>
+<path class="flow-arrow" d="M560,1200 L640,1188"/>
+<path class="flow-arrow" d="M560,1220 L640,1260"/>
+<path class="flow-arrow" d="M560,1210 L900,1188"/>
+<path class="flow-arrow" d="M560,1230 L900,1260"/>
+<path class="flow-arrow-broken" d="M1070,1268 L1130,1220"/>
+<path class="flow-arrow-broken" d="M1235,1246 L1235,1280"/>
+
+<!-- ===== SECTION 6: MEMORY & CONTEXT ===== -->
+<rect class="section-bg" x="20" y="1440" width="1360" height="340"/>
+<text class="section-label" x="50" y="1472">⑥ 记忆与上下文 MEMORY &amp; CONTEXT</text>
+
+<!-- MemCore -->
+<rect class="node-box node-normal" x="80" y="1510" width="180" height="66"/>
+<text class="node-label" x="170" y="1530">MemCore</text>
+<text class="node-sublabel" x="170" y="1548">记忆核心 (神经隐喻)</text>
+<text class="node-sublabel" x="170" y="1563">检索 / 保存 / 温度</text>
+
+<!-- MemoryManager -->
+<rect class="node-box node-normal" x="80" y="1610" width="180" height="56"/>
+<text class="node-label" x="170" y="1630">MemoryManager</text>
+<text class="node-sublabel" x="170" y="1648">SQLite 持久化</text>
+
+<!-- MoE Router -->
+<rect class="node-box node-warning" x="310" y="1510" width="180" height="56"/>
+<text class="node-label" x="400" y="1530">MoE Router</text>
+<text class="node-sublabel" x="400" y="1548">混合专家记忆路由</text>
+
+<!-- ContextOrchestrator -->
+<rect class="node-box node-normal" x="540" y="1500" width="220" height="76"/>
+<text class="node-label" x="650" y="1522">ContextOrchestrator</text>
+<text class="node-sublabel" x="650" y="1542">上下文编排器</text>
+<text class="node-sublabel" x="650" y="1557">Phase 2→3→3.5→4</text>
+
+<!-- ContextPool -->
+<rect class="node-box node-warning" x="540" y="1610" width="220" height="56" data-bp="bp-ctxpool"/>
+<text class="node-label" x="650" y="1630">ContextPool 活水上下文池</text>
+<text class="node-sublabel" x="650" y="1648">语义取水 / 去重 / 预算裁剪</text>
+<g class="bp-badge" data-bp="bp-ctxpool" transform="translate(752,1612)">
+  <circle r="10"/><text>13</text>
+</g>
+
+<!-- ContextBuilder -->
+<rect class="node-box node-breakpoint" x="810" y="1500" width="200" height="66" data-bp="bp-ctxbuilder"/>
+<text class="node-label" x="910" y="1520">ContextBuilder</text>
+<text class="node-sublabel" x="910" y="1538">UnifiedContextInjector</text>
+<text class="node-sublabel" x="910" y="1553">动态预算 / 压缩</text>
+<g class="bp-badge" data-bp="bp-ctxbuilder" transform="translate(1002,1502)">
+  <circle r="10"/><text>14</text>
+</g>
+
+<!-- SessionManager -->
+<rect class="node-box node-normal" x="810" y="1600" width="200" height="56"/>
+<text class="node-label" x="910" y="1620">SessionManager</text>
+<text class="node-sublabel" x="910" y="1638">JSON 文件即时写入</text>
+
+<!-- ContextPersistence -->
+<rect class="node-box node-warning" x="1060" y="1510" width="180" height="56" data-bp="bp-ctxpersist"/>
+<text class="node-label" x="1150" y="1530">ContextPersistence</text>
+<text class="node-sublabel" x="1150" y="1548">JSON 持久化 + 缓存</text>
+<g class="bp-badge" data-bp="bp-ctxpersist" transform="translate(1232,1512)">
+  <circle r="10"/><text>15</text>
+</g>
+
+<!-- Embedding -->
+<rect class="node-box node-normal" x="1060" y="1600" width="180" height="56"/>
+<text class="node-label" x="1150" y="1620">ONNXEmbedding</text>
+<text class="node-sublabel" x="1150" y="1638">bge-small-zh-v1.5</text>
+
+<!-- Memory flow arrows -->
+<path class="flow-arrow" d="M260,1543 L310,1538"/>
+<path class="flow-arrow" d="M170,1576 L170,1610"/>
+<path class="flow-arrow" d="M490,1538 L540,1538"/>
+<path class="flow-arrow" d="M760,1538 L810,1530"/>
+<path class="flow-arrow" d="M760,1545 L810,1620"/>
+<path class="flow-arrow" d="M650,1576 L650,1610"/>
+<path class="flow-arrow" d="M1010,1530 L1060,1538"/>
+<path class="flow-arrow" d="M1010,1628 L1060,1628"/>
+
+<!-- Temperature -->
+<rect class="node-box node-warning" x="310" y="1610" width="180" height="56" data-bp="bp-temp">
+  <text class="node-label" x="400" y="1630">TemperatureEngine</text>
+  <text class="node-sublabel" x="400" y="1648">记忆温度管理</text>
+</rect>
+<g class="bp-badge" data-bp="bp-temp" transform="translate(482,1612)">
+  <circle r="10"/><text>16</text>
+</g>
+<path class="flow-arrow" d="M260,1638 L310,1638"/>
+
+<!-- ===== SECTION 7: KNOWLEDGE LAYER ===== -->
+<rect class="section-bg" x="20" y="1800" width="1360" height="250"/>
+<text class="section-label" x="50" y="1832">⑦ 知识层 KNOWLEDGE LAYER</text>
+
+<!-- CognitiveLoop -->
+<rect class="node-box node-normal" x="80" y="1870" width="240" height="66"/>
+<text class="node-label" x="200" y="1890">CognitiveLoopCoordinator</text>
+<text class="node-sublabel" x="200" y="1908">6核心闭环 + 依赖注入</text>
+<text class="node-sublabel" x="200" y="1923">知识→记忆/进化/缺口/反思/反馈</text>
+
+<!-- MemorySync -->
+<rect class="node-box node-normal" x="380" y="1870" width="200" height="66"/>
+<text class="node-label" x="480" y="1890">MemorySync</text>
+<text class="node-sublabel" x="480" y="1908">双向同步 + LCS相似度</text>
+<text class="node-sublabel" x="480" y="1923">批量同步 + 持久化link</text>
+
+<!-- EvolutionHub -->
+<rect class="node-box node-normal" x="640" y="1870" width="220" height="66"/>
+<text class="node-label" x="750" y="1890">EvolutionHub</text>
+<text class="node-sublabel" x="750" y="1908">知识差距分析 + 学习记录</text>
+<text class="node-sublabel" x="750" y="1923">进化进度跟踪</text>
+
+<!-- FlowKB -->
+<rect class="node-box node-normal" x="920" y="1870" width="180" height="66"/>
+<text class="node-label" x="1010" y="1890">FlowKB Adapter</text>
+<text class="node-sublabel" x="1010" y="1908">外部知识库 (iFlow API)</text>
+<text class="node-sublabel" x="1010" y="1923">集合/文档/搜索管理</text>
+
+<!-- KnowledgeStorage -->
+<rect class="node-box node-normal" x="1160" y="1870" width="180" height="66"/>
+<text class="node-label" x="1250" y="1890">KnowledgeStorage</text>
+<text class="node-sublabel" x="1250" y="1908">JSON 配置 + 集合映射</text>
+<text class="node-sublabel" x="1250" y="1923">API密钥 + 配置持久化</text>
+
+<!-- KnowledgeBaseConfig -->
+<rect class="node-box node-normal" x="200" y="1960" width="300" height="50"/>
+<text class="node-label" x="350" y="1980">KnowledgeBaseConfig</text>
+<text class="node-sublabel" x="350" y="1995">向量存储 + 缓存 + 备份 + 加密配置</text>
+
+<!-- Knowledge Arrows (horizontal flow within knowledge layer) -->
+<path class="flow-arrow-broken" d="M30,1903 L80,1903"/>
+<path class="flow-arrow-broken" d="M320,1903 L380,1903"/>
+<path class="flow-arrow" d="M580,1903 L640,1903"/>
+<path class="flow-arrow" d="M860,1903 L920,1903"/>
+<path class="flow-arrow" d="M1100,1903 L1160,1903"/>
+
+<!-- Config arrows (KnowledgeBaseConfig → nodes) -->
+<path class="flow-arrow" d="M350,1960 L350,1936"/>
+<path class="flow-arrow" d="M350,1960 Q350,1980 1010,1936"/>
+<path class="flow-arrow" d="M350,1960 Q350,1980 1250,1936"/>
+
+<!-- Cross-section: EvolutionHub → ContextOrchestrator -->
+<path class="flow-arrow" d="M750,1870 Q750,1750 650,1576"/>
+<!-- Cross-section: EvolutionHub → MemoryManager -->
+<path class="flow-arrow" d="M750,1870 Q750,1750 170,1666"/>
+<!-- Cross-section: Knowledge → PostChat -->
+<path class="flow-arrow" d="M750,1936 Q750,2050 205,2090"/>
+
+<!-- ===== SECTION 8: POST-CHAT & OUTPUT ===== -->
+<rect class="section-bg" x="20" y="2020" width="1360" height="200"/>
+<text class="section-label" x="50" y="2052">⑧ 后处理与输出 POST-PROCESSING &amp; OUTPUT</text>
+
+<!-- PostChatPipeline -->
+<rect class="node-box node-normal" x="80" y="2090" width="250" height="76" data-bp="bp-postchat"/>
+<text class="node-label" x="205" y="2110">PostChatPipeline (13步)</text>
+<text class="node-sublabel" x="205" y="2128">记忆保存 / 认知分析 / 反思</text>
+<text class="node-sublabel" x="205" y="2143">经验记录 / 冲突检测 / 主动提问</text>
+<text class="node-sublabel" x="205" y="2158">版本快照 / RSI 迭代</text>
+<g class="bp-badge bp-fixed" data-bp="bp-postchat" transform="translate(322,2092)">
+  <circle r="10"/><text>20</text>
+</g>
+
+<!-- Voice Pipeline -->
+<rect class="node-box node-normal" x="390" y="2090" width="190" height="66" data-bp="bp-voice">
+  <text class="node-label" x="485" y="2110">Voice Pipeline</text>
+  <text class="node-sublabel" x="485" y="2128">ASR → 情感 → 上下文</text>
+  <text class="node-sublabel" x="485" y="2143">内部模块，无外部依赖</text>
+</rect>
+<g class="bp-badge bp-fixed" data-bp="bp-voice" transform="translate(572,2092)">
+  <circle r="10"/><text>21</text>
+</g>
+
+<!-- Image Pipeline -->
+<rect class="node-box node-stub" x="630" y="2100" width="160" height="50">
+  <text class="node-label" x="710" y="2120" style="fill:#9ca3af">Image Pipeline</text>
+  <text class="node-sublabel" x="710" y="2135">图像处理 (桩)</text>
+</rect>
+
+<!-- Response -->
+<rect class="node-box node-entry" x="850" y="2090" width="230" height="76"/>
+<text class="node-label" x="965" y="2110">响应输出</text>
+<text class="node-sublabel" x="965" y="2128">{ text, audio, reasoning,</text>
+<text class="node-sublabel" x="965" y="2143">tool_messages, cognitive_score,</text>
+<text class="node-sublabel" x="965" y="2158">proactive_question }</text>
+
+<!-- SSE Stream -->
+<rect class="node-box node-entry" x="1130" y="2090" width="210" height="66"/>
+<text class="node-label" x="1235" y="2110">SSE 流式输出</text>
+<text class="node-sublabel" x="1235" y="2128">event: start → message</text>
+<text class="node-sublabel" x="1235" y="2143">→ done / error</text>
+
+<!-- Output Arrows -->
+<path class="flow-arrow" d="M330,2128 L390,2123"/>
+<path class="flow-arrow" d="M580,2123 L630,2125"/>
+<path class="flow-arrow" d="M790,2125 L850,2120"/>
+<path class="flow-arrow" d="M1080,2120 L1130,2120"/>
+
+<!-- Cross-section connection: Step 3 to LLM chain -->
+<path class="flow-arrow" d="M1045,586 Q1045,750 500,820 Q180,850 180,900" style="stroke:#3b82f6;stroke-width:2.5"/>
+<!-- Cross-section: ToolExecutor to Step 3 -->
+<path class="flow-arrow-broken" d="M460,1180 Q460,800 950,560" style="stroke:#ef4444;stroke-width:1.5;stroke-dasharray:8 4"/>
+
+<!-- Connection from Memory section to ChatPipeline -->
+<path class="flow-arrow" d="M650,1500 Q650,800 600,586" style="stroke:#3b82f6;stroke-width:1.5"/>
+
+<!-- Connection from Knowledge to Memory -->
+<path class="flow-arrow-broken" d="M80,1903 Q80,1750 170,1530" style="stroke:#ef4444;stroke-width:1.5;stroke-dasharray:8 4"/>
+
+</svg>
+</div>
+
+<div class="tooltip-overlay" id="tooltipOverlay"></div>
+<div class="tooltip" id="tooltip"></div>
+
+<div class="stats-bar">
+  <div class="stat"><div class="stat-num blue">8</div><div class="stat-label">核心数据流层</div></div>
+  <div class="stat"><div class="stat-num red">12</div><div class="stat-label">严重断点</div></div>
+  <div class="stat"><div class="stat-num yellow">9</div><div class="stat-label">警告/部分实现</div></div>
+  <div class="stat"><div class="stat-num gray">3</div><div class="stat-label">未集成模块</div></div>
+</div>
+
+<div class="bp-list-section">
+  <h2>断点详细列表</h2>
+
+  <div class="bp-category">
+    <h3><span class="cat-dot" style="background:#ef4444"></span> 严重断点 — 数据流完全中断</h3>
+
+    <div class="bp-card">
+      <div class="bp-id">#2</div>
+      <div class="bp-body">
+        <div class="bp-title">Auth 认证系统未实现</div>
+        <div class="bp-location">neurova/api/endpoints/auth.py — 多处 TODO</div>
+        <div class="bp-desc">登录验证、用户注册、验证码发送、验证逻辑、登出(Token黑名单)全部标记为 TODO，直接返回成功。任何人可以访问系统。</div>
+      </div>
+    </div>
+
+    <div class="bp-card">
+      <div class="bp-id">#4</div>
+      <div class="bp-body">
+        <div class="bp-title">Agent 权限检查缺失</div>
+        <div class="bp-location">neurova/api/endpoints/chat.py:75 — _user_can_access_agent() 直接返回 True</div>
+        <div class="bp-desc">任何经过认证的用户都可以访问任何 Agent，没有所有权或角色检查。</div>
+      </div>
+    </div>
+
+    <div class="bp-card">
+      <div class="bp-id">#9</div>
+      <div class="bp-body">
+        <div class="bp-title">内置工具多个桩实现</div>
+        <div class="bp-location">neurova/tool_executor.py:497-530</div>
+        <div class="bp-desc">Computer Use 的 5 个方法 (screenshot/click/type/scroll/shell) 全部返回"未初始化"。memory_search 返回模拟空列表。emotion_analyze 固定返回 neutral。CLI 工具返回"未实现"。</div>
+      </div>
+    </div>
+
+    <div class="bp-card">
+      <div class="bp-id">#10</div>
+      <div class="bp-body">
+        <div class="bp-title">ToolRouter 签名不匹配 (运行时 TypeError)</div>
+        <div class="bp-location">agent/loops/base.py:113 → tool_layers/tool_router.py:115</div>
+        <div class="bp-desc">BaseAgentLoop 传入 (tool_name, params, agent_id, user_id) 四个参数，但 ToolRouter.execute 只接受 (tool_name, params)。导致 TypeError，ToolRouter fallback 路径永远失败。</div>
+      </div>
+    </div>
+
+    <div class="bp-card">
+      <div class="bp-id">#14</div>
+      <div class="bp-body">
+        <div class="bp-title">ContextBuilder.compress_if_needed() 方法不存在</div>
+        <div class="bp-location">neurova/context/orchestrator.py:474</div>
+        <div class="bp-desc">当 ContextPool 未启用时，调用 context_builder.compress_if_needed(context) 会抛出 AttributeError。非 ContextPool 路径完全断裂。</div>
+      </div>
+    </div>
+
+    <div class="bp-card">
+      <div class="bp-id">#17</div>
+      <div class="bp-body">
+        <div class="bp-title">认知闭环协调器所有核心方法为空</div>
+        <div class="bp-location">neurova/knowledge/integration/cognitive_loop.py:382-428</div>
+        <div class="bp-desc">_knowledge_to_memory / _knowledge_to_evolution / _handle_memory_miss / _check_gap_discovery / _execute_reflection / _evolution_feedback 全部只有 pass + 日志。</div>
+      </div>
+    </div>
+
+    <div class="bp-card">
+      <div class="bp-id">#19</div>
+      <div class="bp-body">
+        <div class="bp-title">记忆-知识库双向同步为空壳</div>
+        <div class="bp-location">neurova/knowledge/integration/memory_sync.py:66-90</div>
+        <div class="bp-desc">sync_memory_to_knowledge() 和 sync_knowledge_to_memory() 只记录日志，synced_count 始终为 0。</div>
+      </div>
+    </div>
+
+    <div class="bp-card">
+      <div class="bp-id">#3</div>
+      <div class="bp-body">
+        <div class="bp-title">eval() 代码注入风险</div>
+        <div class="bp-location">neurova/router.py:218</div>
+        <div class="bp-desc">Skill 请求路由中使用 eval(params_str) 解析用户输入参数，存在严重的代码注入安全风险。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bp-category">
+    <h3><span class="cat-dot" style="background:#f59e0b"></span> 警告 — 部分实现或潜在问题</h3>
+
+    <div class="bp-card warn">
+      <div class="bp-id">#1</div>
+      <div class="bp-body">
+        <div class="bp-title">CORS 配置过于宽松</div>
+        <div class="bp-location">neurova/api/middleware.py:164 — allow_origins=["*"]</div>
+        <div class="bp-desc">允许所有来源的跨域请求，生产环境应限制。同时 JWT Secret 使用硬编码默认值。</div>
+      </div>
+    </div>
+
+    <div class="bp-card warn">
+      <div class="bp-id">#5</div>
+      <div class="bp-body">
+        <div class="bp-title">ToolMemory 条件反射异常静默</div>
+        <div class="bp-location">neurova/agent/chat_pipeline.py:364</div>
+        <div class="bp-desc">_record_tool_failure() 中 except Exception: pass 完全静默。Agent 关闭异常也被 pass 吞没。</div>
+      </div>
+    </div>
+
+    <div class="bp-card warn">
+      <div class="bp-id">#6</div>
+      <div class="bp-body">
+        <div class="bp-title">Token 估算不一致 (4种实现)</div>
+        <div class="bp-location">分散在 UnifiedContextInjector / ContextPoolUtils / Message / SmartContextCompressor</div>
+        <div class="bp-desc">同一段文本在不同模块的 Token 估算差异可达 4-8 倍，导致预算控制和压缩行为不一致。</div>
+      </div>
+    </div>
+
+    <div class="bp-card warn">
+      <div class="bp-id">#7</div>
+      <div class="bp-body">
+        <div class="bp-title">Deprecated 方法仍在使用路径中</div>
+        <div class="bp-location">agent_core.py — _chat_normal() / _chat_stream() 标记 DEPRECATED v5.0</div>
+        <div class="bp-desc">ChatPipeline 的 _call_legacy() 仍然调用这些方法作为 fallback，但方法可能不完全兼容新架构。</div>
+      </div>
+    </div>
+
+    <div class="bp-card warn">
+      <div class="bp-id">#11</div>
+      <div class="bp-body">
+        <div class="bp-title">ToolOrchestrator "并行执行"实际为顺序</div>
+        <div class="bp-location">neurova/tool_layers/tool_orchestrator.py:152-158</div>
+        <div class="bp-desc">注释承认 "简化为顺序执行"。目标解析使用简单关键词匹配而非 LLM。</div>
+      </div>
+    </div>
+
+    <div class="bp-card warn">
+      <div class="bp-id">#13</div>
+      <div class="bp-body">
+        <div class="bp-title">ContextPool SemanticMatchDrawer 截断参数错误</div>
+        <div class="bp-location">neurova/context_pool.py:1183</div>
+        <div class="bp-desc">传入不存在的 id 参数给 ContextInput，导致 TypeError。仅在 Token 超预算截断时触发。</div>
+      </div>
+    </div>
+
+    <div class="bp-card warn">
+      <div class="bp-id">#15</div>
+      <div class="bp-body">
+        <div class="bp-title">ContextCacheManager 与 ContextPersistence 接口不匹配</div>
+        <div class="bp-location">neurova/context_cache.py:668-673</div>
+        <div class="bp-desc">调用 save_context_from_data() 缺少 session_id 参数，缓存脏数据写入磁盘会异常。</div>
+      </div>
+    </div>
+
+    <div class="bp-card warn">
+      <div class="bp-id">#16</div>
+      <div class="bp-body">
+        <div class="bp-title">记忆温度更新机制失效</div>
+        <div class="bp-location">neurova/agent_core.py:1465-1471</div>
+        <div class="bp-desc">_update_memory_temperature() 为空方法，try/except 中只有 pass。记忆温度不会实际更新。</div>
+      </div>
+    </div>
+
+    <div class="bp-card fixed">
+      <div class="bp-id">#21</div>
+      <div class="bp-body">
+        <div class="bp-title">Voice Pipeline 部分依赖外部</div>
+        <div class="bp-location">neurova/voice_pipeline.py</div>
+        <div class="bp-desc">架构完整但部分环节依赖 Twilio 等外部服务。</div>
+        <div class="bp-fix"><strong>✅ 已诊断:</strong> voice_pipeline.py <strong>不依赖 Twilio</strong>，所有 4 个依赖均为内部模块 (ASR/TTS Manager, VoiceContextModule, VoiceMemoryBridge)。Twilio 依赖在 channels/voice.py（独立通道适配器），不影响 voice_pipeline。该模块仍在 agent_core.py 中活跃使用（ASR 处理）。断点描述不准确，已修正。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bp-category">
+    <h3><span class="cat-dot" style="background:#6b7280"></span> 未集成 — 已设计但未接入主流程</h3>
+
+    <div class="bp-card warn">
+      <div class="bp-id">#12</div>
+      <div class="bp-body">
+        <div class="bp-title">ExecutionLayers 完全未集成</div>
+        <div class="bp-location">neurova/execution_layers/__init__.py</div>
+        <div class="bp-desc">定义了完整的 Runtime (Local/Docker) + Transport (HTTP/WebSocket) 双抽象层，但在 Agent 核心的任何执行路径中都没有被引用。</div>
+      </div>
+    </div>
+
+    <div class="bp-card warn">
+      <div class="bp-id">#8</div>
+      <div class="bp-body">
+        <div class="bp-title">文本工具调用降级路径脆弱</div>
+        <div class="bp-location">neurova/tool_executor.py — execute_text_tool_calls()</div>
+        <div class="bp-desc">从 LLM 回复中的 ```json 块解析工具调用，如果 LLM 不按格式输出会完全失效。</div>
+      </div>
+    </div>
+
+    <div class="bp-card fixed">
+      <div class="bp-id">#20</div>
+      <div class="bp-body">
+        <div class="bp-title">PostChatPipeline 部分步骤为空操作</div>
+        <div class="bp-location">neurova/post_chat_pipeline.py</div>
+        <div class="bp-desc">13步后处理管线中，部分步骤 (如认知分析、冲突检测、RSI 迭代) 的具体实现依赖可选模块，当模块不可用时静默跳过。</div>
+        <div class="bp-fix"><strong>✅ 已修复:</strong> 添加依赖注入 configure() 方法 + StepStatus 状态跟踪 + 13步全量覆盖。不可用时显式 SKIPPED 而非静默跳过。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BP_DATA = {
+  "bp-cors": { title: "CORS 配置过于宽松 + JWT 默认密钥", severity: "warn", file: "neurova/api/middleware.py:164, neurova/api/auth.py:30", desc: "allow_origins=[\"*\"] 允许所有来源跨域。JWT Secret 使用硬编码默认值 'neurova-default-secret-key-change-in-production'。bcrypt 不可用时降级为无盐 SHA-256。", impact: "生产环境安全风险" },
+  "bp-auth": { title: "Auth 认证系统未实现", severity: "critical", file: "neurova/api/endpoints/auth.py", desc: "登录验证、注册、验证码、登出全部标记 TODO。任何人可访问系统。", impact: "认证系统完全不可用" },
+  "bp-eval": { title: "eval() 代码注入风险", severity: "critical", file: "neurova/router.py:218", desc: "Skill 请求路由中使用 eval(params_str) 解析用户输入参数。恶意用户可注入任意 Python 代码。", impact: "严重安全漏洞" },
+  "bp-perm": { title: "Agent 权限检查缺失", severity: "critical", file: "neurova/api/endpoints/chat.py:75", desc: "_user_can_access_agent() 直接返回 True，无所有权或角色检查。", impact: "越权访问" },
+  "bp-toolmem": { title: "ToolMemory 异常静默", severity: "warn", file: "neurova/agent/chat_pipeline.py:364", desc: "_record_tool_failure() 中 except Exception: pass 完全静默，工具失败信息丢失。", impact: "调试困难，失败不可追踪" },
+  "bp-token": { title: "Token 估算不一致", severity: "warn", file: "4个文件: injector.py / context_pool.py / compressor.py / message.py", desc: "4 种不同的 Token 估算实现，同一段文本估算差异 4-8 倍。中文 1.5~2 token/字，英文 0.25~1 token/word，或 len//4。", impact: "预算控制和压缩行为不可预测" },
+  "bp-deprecated": { title: "Deprecated 方法仍在 fallback 路径", severity: "warn", file: "neurova/agent_core.py — _chat_normal/_chat_stream", desc: "标记 DEPRECATED v5.0，但 ChatPipeline._call_legacy() 仍调用。", impact: "新旧架构混用风险" },
+  "bp-texttool": { title: "文本工具解析脆弱", severity: "warn", file: "neurova/tool_executor.py — execute_text_tool_calls()", desc: "从 ```json 块解析，LLM 不按格式输出则完全失效。", impact: "降级路径不可靠" },
+  "bp-builtin": { title: "内置工具多个桩实现", severity: "critical", file: "neurova/tool_executor.py:497-530", desc: "Computer Use 5 个方法返回'未初始化'。memory_search 返回模拟空列表。emotion_analyze 固定返回 neutral。CLI 工具'未实现'。", impact: "12 种内置工具中约半数不可用" },
+  "bp-toolrouter": { title: "ToolRouter 签名不匹配", severity: "critical", file: "agent/loops/base.py:113 vs tool_router.py:115", desc: "BaseAgentLoop 传 4 个参数，ToolRouter.execute 只接受 2 个。运行时 TypeError，fallback 路径永远失败。", impact: "工具路由 fallback 完全不可用" },
+  "bp-orchestrator": { title: "ToolOrchestrator 名不副实", severity: "warn", file: "neurova/tool_layers/tool_orchestrator.py:152", desc: "'并行执行'实际为顺序。目标解析使用简单关键词匹配。", impact: "DAG 编排能力受限" },
+  "bp-execlayer": { title: "ExecutionLayers 完全未集成", severity: "info", file: "neurova/execution_layers/__init__.py", desc: "Runtime (Local/Docker) + Transport (HTTP/WebSocket) 双抽象层已定义，但在核心流程中零引用。", impact: "已设计但未接线" },
+  "bp-ctxpool": { title: "ContextPool 截断参数错误", severity: "warn", file: "neurova/context_pool.py:1183", desc: "SemanticMatchDrawer._truncate_drop() 传入不存在的 id 参数，Token 超预算截断时 TypeError。", impact: "上下文裁剪崩溃" },
+  "bp-ctxbuilder": { title: "compress_if_needed() 方法不存在", severity: "critical", file: "neurova/context/orchestrator.py:474", desc: "非 ContextPool 路径调用 context_builder.compress_if_needed() 抛 AttributeError。", impact: "非 ContextPool 路径完全断裂" },
+  "bp-ctxpersist": { title: "ContextCache 持久化接口不匹配", severity: "warn", file: "neurova/context_cache.py:668", desc: "调用 save_context_from_data() 缺少 session_id 参数。", impact: "缓存写入磁盘异常" },
+  "bp-temp": { title: "记忆温度更新失效", severity: "warn", file: "neurova/agent_core.py:1465", desc: "_update_memory_temperature() 空方法，try/except 中只有 pass。", impact: "记忆温度永不更新" },
+  "bp-cogloop": { title: "认知闭环全部空方法", severity: "critical", file: "neurova/knowledge/integration/cognitive_loop.py:382", desc: "6 个核心方法全部 pass + 日志。", impact: "认知闭环系统完全不工作" },
+  "bp-memsync": { title: "记忆同步为空壳", severity: "critical", file: "neurova/knowledge/integration/memory_sync.py:66", desc: "sync 方法只记日志，synced_count=0。", impact: "记忆↔知识不同步" },
+  "bp-postchat": { title: "PostChatPipeline 部分步骤空操作", severity: "fixed", file: "neurova/post_chat_pipeline.py", desc: "13 步中部分依赖可选模块，不可用时静默跳过。", impact: "后处理功能不稳定", fix: "添加依赖注入 + StepStatus 状态跟踪 + _get_dependency() 双重解析" },
+  "bp-voice": { title: "Voice Pipeline 部分依赖外部", severity: "fixed", file: "neurova/voice_pipeline.py", desc: "voice_pipeline.py 不依赖 Twilio，所有依赖为内部模块。Twilio 在 channels/voice.py（独立通道）。", impact: "诊断结论：断点描述不准确", fix: "voice_pipeline.py 无外部依赖，仍活跃使用于 ASR 处理。Twilio 依赖在独立通道适配器中。" },
+};
+
+// Tooltip logic
+const tooltip = document.getElementById('tooltip');
+const overlay = document.getElementById('tooltipOverlay');
+
+document.querySelectorAll('[data-bp]').forEach(el => {
+  el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const bpId = el.getAttribute('data-bp');
+    const data = BP_DATA[bpId];
+    if (!data) return;
+    const severityClass = data.severity === 'critical' ? 'critical' : data.severity === 'warn' ? 'warn' : 'info';
+    tooltip.innerHTML = `
+      <div class="tt-title ${severityClass}">${data.title}</div>
+      <div class="tt-file">${data.file}</div>
+      <div class="tt-desc">${data.desc}</div>
+      <div class="tt-impact">影响: ${data.impact}</div>
+    `;
+    const rect = el.getBoundingClientRect();
+    let left = rect.right + 12;
+    let top = rect.top;
+    if (left + 420 > window.innerWidth) left = rect.left - 430;
+    if (left < 10) left = 10;
+    if (top + 200 > window.innerHeight) top = window.innerHeight - 220;
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
+    tooltip.style.display = 'block';
+    overlay.style.display = 'block';
+  });
+});
+
+overlay.addEventListener('click', () => {
+  tooltip.style.display = 'none';
+  overlay.style.display = 'none';
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    tooltip.style.display = 'none';
+    overlay.style.display = 'none';
+  }
+});
+</script>
+</body>
+</html>

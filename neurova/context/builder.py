@@ -80,7 +80,7 @@ class ContextBuilder:
 
         Phase 6: 统一委托给 UnifiedContextInjector。
         """
-        from neurova.context_pool import ContextPoolUtils, ContextSource
+        from neurova.context_pool import ContextSource
 
         if self._unified_injector:
             # 有 injector 时：从候选池提取信息，委托给 injector
@@ -106,8 +106,8 @@ class ContextBuilder:
         # 降级模式：从候选池直接构建
         budget = token_budget or TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)
 
-        # 按优先级排序
-        sorted_pool = ContextPoolUtils.sort_by_priority(candidate_pool)
+        # 按优先级降序排序
+        sorted_pool = sorted(candidate_pool, key=lambda x: getattr(x, 'priority', 50), reverse=True)
 
         # 分离 system 内容和 history
         system_parts: list[str] = []
@@ -119,14 +119,14 @@ class ContextBuilder:
                 ContextSource.DEVELOPER_INSTRUCTION,
                 ContextSource.MEMORY,
                 ContextSource.EXPERIENCE,
-                ContextSource.REFLECTION_LOG,
+                ContextSource.REFLECTION,
                 ContextSource.EMOTION,
-                ContextSource.TOOL_MEMORY,
-                ContextSource.RUNTIME_METADATA,
+                ContextSource.TOOL_CALL,
+                ContextSource.MULTIMODAL,
             ):
                 section_name = self._source_to_section_name(item.source)
                 system_parts.append(f"\n## {section_name}\n{item.content}")
-            elif item.source == ContextSource.CONVERSATION_HISTORY:
+            elif item.source == ContextSource.CONVERSATION:
                 history_items.append(item.content)
 
         system_content = "\n".join(system_parts)
@@ -203,10 +203,12 @@ class ContextBuilder:
             ContextSource.DEVELOPER_INSTRUCTION: "行为规则",
             ContextSource.MEMORY: "相关记忆",
             ContextSource.EXPERIENCE: "相关经验",
-            ContextSource.REFLECTION_LOG: "反思日志",
+            ContextSource.REFLECTION: "反思日志",
             ContextSource.EMOTION: "当前情感状态",
-            ContextSource.TOOL_MEMORY: "工具记忆",
-            ContextSource.RUNTIME_METADATA: "运行时信息",
+            ContextSource.TOOL_CALL: "工具记忆",
+            ContextSource.MULTIMODAL: "多模态内容",
+            ContextSource.CONVERSATION: "对话历史",
+            ContextSource.USER_INPUT: "用户输入",
         }
         return mapping.get(source, source.value)
 
@@ -237,6 +239,52 @@ class ContextBuilder:
             agent_emotion=agent_emotion,
         )
         return result.context
+
+    def compress_if_needed(self, context: List[Dict]) -> List[Dict]:
+        """
+        压缩上下文（如果超过 token 预算）。
+
+        Phase 4: 当上下文超过 token 预算时，使用压缩策略。
+
+        Args:
+            context: 上下文消息列表
+
+        Returns:
+            压缩后的上下文消息列表
+        """
+        if self._unified_injector:
+            # 使用 injector 的压缩逻辑
+            try:
+                # 计算总 tokens
+                total_tokens = sum(
+                    self._unified_injector._count_tokens(msg.get('content', ''))
+                    for msg in context
+                )
+
+                if total_tokens <= self.MAX_CONTEXT_TOKENS:
+                    return context
+
+                # 需要压缩：提取系统消息和历史
+                system_msg = context[0] if context else {'role': 'system', 'content': ''}
+                user_msg = context[-1] if len(context) > 1 else {'role': 'user', 'content': ''}
+                history = context[1:-1] if len(context) > 2 else []
+
+                # 使用 injector 的压缩方法
+                system_content, compressed_history, _ = self._unified_injector._compress_context(
+                    system_content=system_msg.get('content', ''),
+                    history=history,
+                    user_tokens=self._unified_injector._count_tokens(user_msg.get('content', ''))
+                )
+
+                # 重建上下文
+                compressed_system_msg = {'role': 'system', 'content': system_content}
+                return [compressed_system_msg] + compressed_history + [user_msg]
+            except Exception as e:
+                logger.warning(f"UnifiedContextInjector 压缩失败，使用降级模式: {e}")
+                return self._fallback_compress(context)
+
+        # 降级模式：使用简单的压缩逻辑
+        return self._fallback_compress(context)
 
     def _fallback_compress(self, context: List[Dict]) -> List[Dict]:
         """

@@ -19,6 +19,10 @@ ChatPipeline — 对话流程管线
 import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
+from neurova.agent.tool_execution_manager import ToolExecutionManager, TimeoutStrategy, ExecutionStatus
+from neurova.agent.memory_retrieval_chain import MemoryRetrievalChain, RetrievalContext, RetrievalStrategy
+from neurova.agent.retriever_adapters import UnifiedRetrieverAdapter, MoERetrieverAdapter, CacheRetrieverAdapter, FallbackRetrieverAdapter
+from neurova.agent.crystallized_experience_manager import CrystallizedExperienceManager, RetrievalStatus
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +67,48 @@ class ChatPipeline:
 
     def __init__(self, agent_ref):
         self._agent = agent_ref
+        # 初始化 ToolExecutionManager（深度模块）
+        self._tool_execution_manager = ToolExecutionManager()
+        # 初始化 MemoryRetrievalChain（深度模块）
+        self._memory_retrieval_chain = MemoryRetrievalChain()
+        self._init_memory_retrieval_chain()
+        # 初始化 CrystallizedExperienceManager（深度模块）
+        self._crystallized_experience_manager = CrystallizedExperienceManager(
+            crystallizer=self.crystallizer,
+            memory_manager=getattr(self._agent, 'memory_agent', None),
+        )
+        logger.debug("ChatPipeline initialized with ToolExecutionManager, MemoryRetrievalChain, and CrystallizedExperienceManager")
+    
+    def _init_memory_retrieval_chain(self):
+        """初始化记忆检索责任链"""
+        # 添加检索器（按优先级排序）
+        
+        # 1. UnifiedRetriever（最高优先级）
+        if self.unified_retriever:
+            adapter = UnifiedRetrieverAdapter(self.unified_retriever)
+            self._memory_retrieval_chain.add_retriever(adapter)
+            logger.debug("Added UnifiedRetrieverAdapter to retrieval chain")
+        
+        # 2. MoERetriever（中等优先级）
+        if hasattr(self._agent, 'memory_agent') and self._agent.memory_agent:
+            moe_router = getattr(self._agent.memory_agent, 'moe_router', None)
+            if moe_router:
+                adapter = MoERetrieverAdapter(moe_router)
+                self._memory_retrieval_chain.add_retriever(adapter)
+                logger.debug("Added MoERetrieverAdapter to retrieval chain")
+        
+        # 3. CacheRetriever（低优先级）
+        cache_adapter = CacheRetrieverAdapter()
+        self._memory_retrieval_chain.add_retriever(cache_adapter)
+        logger.debug("Added CacheRetrieverAdapter to retrieval chain")
+        
+        # 4. FallbackRetriever（最低优先级）
+        if hasattr(self._agent, 'memory_agent') and self._agent.memory_agent:
+            adapter = FallbackRetrieverAdapter(self._agent.memory_agent)
+            self._memory_retrieval_chain.add_retriever(adapter)
+            logger.debug("Added FallbackRetrieverAdapter to retrieval chain")
+        
+        logger.info(f"MemoryRetrievalChain initialized with {len(self._memory_retrieval_chain.get_retrievers())} retrievers")
 
     # ---- 属性代理 ----
     @property
@@ -98,6 +144,10 @@ class ChatPipeline:
         return getattr(self._agent, 'crystallizer', None)
 
     @property
+    def crystallized_experience_manager(self):
+        return self._crystallized_experience_manager
+
+    @property
     def trace_manager(self):
         return getattr(self._agent, 'trace_manager', None)
 
@@ -116,6 +166,16 @@ class ChatPipeline:
     @property
     def tool_executor(self):
         return getattr(self._agent, 'tool_executor', None)
+
+    @property
+    def tool_execution_manager(self):
+        """工具执行管理器（深度模块）"""
+        return self._tool_execution_manager
+
+    @property
+    def memory_retrieval_chain(self):
+        """记忆检索责任链（深度模块）"""
+        return self._memory_retrieval_chain
 
     @property
     def post_chat_pipeline(self):
@@ -139,7 +199,8 @@ class ChatPipeline:
         try:
             from neurova.sync.session_sync_manager import get_session_sync_manager
             return get_session_sync_manager()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"SessionSyncManager 导入失败: {e}")
             return None
 
     # ══════════════════════════════════════════════════════════════
@@ -323,9 +384,7 @@ class ChatPipeline:
             logger.warning(f"ToolMemory 检查失败: {e}")
 
     async def _auto_execute_tool(self, ctx: ChatContext):
-        """自动执行肌肉记忆工具"""
-        import asyncio as _asyncio
-
+        """自动执行肌肉记忆工具（使用 ToolExecutionManager 深度模块）"""
         tool_name = ctx.tool_memory_result.get('tool_name')
         confidence = ctx.tool_memory_result.get('confidence', 0)
 
@@ -334,35 +393,75 @@ class ChatPipeline:
             ctx.tool_decision = "suggest"
             return
 
-        MUSCLE_TIMEOUT = 5.0
-        logger.info(f"自动执行工具: {tool_name} (超时={MUSCLE_TIMEOUT}s)")
-
+        # 使用 ToolExecutionManager 执行工具（支持超时策略、优雅取消、状态回调）
+        logger.info(f"自动执行工具: {tool_name} (使用 ToolExecutionManager)")
+        
         try:
-            ctx.auto_execute_result = await _asyncio.wait_for(
-                self.tool_executor.execute_from_memory_async(ctx.tool_memory_result, ctx.user_input),
-                timeout=MUSCLE_TIMEOUT,
+            # 通过 ToolExecutionManager 执行工具
+            execution_context = await self.tool_execution_manager.execute(
+                tool_name=tool_name,
+                params=ctx.tool_memory_result.get('params', {}),
+                user_input=ctx.user_input,
+                executor=self.tool_executor,
+                timeout=5.0,  # 默认5秒超时
+                strategy=TimeoutStrategy.STRICT,
+                max_retries=3,
+                metadata={
+                    'source': 'muscle_memory',
+                    'confidence': confidence,
+                    'session_id': ctx.session_id,
+                },
+                callback=self._on_tool_execution_status_change,
             )
-            exec_status = ctx.auto_execute_result.get("status")
-            if exec_status == "success":
-                logger.info(f"工具自动执行成功: {tool_name}")
-                ctx.tool_decision = "auto_executed"
-            elif exec_status == "failure":
-                error_msg = ctx.auto_execute_result.get("error", "未知错误")
+            
+            # 检查执行结果
+            if execution_context.status == ExecutionStatus.COMPLETED:
+                ctx.auto_execute_result = execution_context.result
+                exec_status = ctx.auto_execute_result.get("status") if ctx.auto_execute_result else None
+                if exec_status == "success":
+                    logger.info(f"工具自动执行成功: {tool_name}")
+                    ctx.tool_decision = "auto_executed"
+                elif exec_status == "failure":
+                    error_msg = ctx.auto_execute_result.get("error", "未知错误")
+                    logger.warning(f"工具自动执行失败: {tool_name}, 错误: {error_msg}")
+                    ctx.tool_decision = "failed"
+                    await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
+            elif execution_context.status == ExecutionStatus.TIMEOUT:
+                logger.warning(f"工具自动执行超时: {tool_name} (>{execution_context.timeout}s)")
+                ctx.tool_decision = "timeout"
+                ctx.auto_execute_result = None
+            elif execution_context.status == ExecutionStatus.CANCELLED:
+                logger.warning(f"工具自动执行被取消: {tool_name}")
+                ctx.tool_decision = "cancelled"
+                ctx.auto_execute_result = None
+            elif execution_context.status == ExecutionStatus.FAILED:
+                error_msg = execution_context.error or "未知错误"
                 logger.warning(f"工具自动执行失败: {tool_name}, 错误: {error_msg}")
                 ctx.tool_decision = "failed"
+                ctx.auto_execute_result = {"status": "failure", "error": error_msg}
                 await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
-        except _asyncio.TimeoutError:
-            logger.warning(f"工具自动执行超时: {tool_name} (>{MUSCLE_TIMEOUT}s)")
-            ctx.tool_decision = "timeout"
-            ctx.auto_execute_result = None
+            else:
+                logger.warning(f"工具自动执行未知状态: {tool_name}, 状态: {execution_context.status}")
+                ctx.tool_decision = "failed"
+                ctx.auto_execute_result = None
+                
+        except Exception as e:
+            logger.error(f"工具自动执行异常: {tool_name}, 错误: {e}")
+            ctx.tool_decision = "failed"
+            ctx.auto_execute_result = {"status": "failure", "error": str(e)}
+
+    def _on_tool_execution_status_change(self, event):
+        """工具执行状态变更回调"""
+        logger.debug(f"工具执行状态变更: {event.context_id} {event.old_status.value} -> {event.new_status.value}")
+        # 可以在这里添加状态变更日志、指标收集等
 
     async def _record_tool_failure(self, tool_name: str, user_input: str, error_msg: str):
         """记录工具失败教训"""
         try:
             if hasattr(self._agent, '_record_tool_failure_lesson'):
                 await self._agent._record_tool_failure_lesson(tool_name, user_input, error_msg)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"记录工具失败教训时出错: {tool_name}, 错误: {e}", exc_info=True)
 
     async def _check_skill_acquisition(self, ctx: ChatContext):
         """主动技能获取检查"""
@@ -451,33 +550,78 @@ class ChatPipeline:
         )
 
     async def _retrieve_memories(self, ctx: ChatContext):
-        """统一检索（UnifiedRetriever 或 MoE 降级）"""
-        if self.unified_retriever:
-            ctx.relevant_memories = self.unified_retriever.retrieve(
-                ctx.user_input, limit=10, include_patterns=True
+        """统一检索（使用 MemoryRetrievalChain 深度模块）"""
+        # 创建检索上下文
+        retrieval_context = RetrievalContext(
+            query=ctx.user_input,
+            limit=10,
+            user_id=getattr(ctx, 'user_id', None),
+            session_id=ctx.session_id,
+            strategy=RetrievalStrategy.CHAIN,  # 责任链策略（按优先级降级）
+            min_quality=0.3,  # 最低质量要求
+            metadata={
+                "session_id": ctx.session_id,
+                "trace_id": ctx.trace_id,
+            },
+        )
+        
+        # 使用 MemoryRetrievalChain 执行检索
+        result = await self.memory_retrieval_chain.retrieve(retrieval_context)
+        
+        # 提取记忆内容
+        ctx.relevant_memories = result.memories
+        
+        # 记录检索统计
+        logger.info(f"Memory retrieval completed: source={result.source}, quality={result.quality_level.value}, memories={len(result.memories)}")
+        
+        # 记录到追踪系统
+        if ctx.trace_id and self.trace_manager:
+            self.trace_manager.add_step(
+                ctx.trace_id, "retrieve",
+                ctx.user_input, f"找到 {len(ctx.relevant_memories)} 条记忆 (质量: {result.quality_level.value})"
             )
-            if ctx.trace_id and self.trace_manager:
-                self.trace_manager.add_step(
-                    ctx.trace_id, "retrieve",
-                    ctx.user_input, f"找到 {len(ctx.relevant_memories)} 条记忆"
-                )
-        else:
-            ctx.relevant_memories = self.memory_agent.moe_retrieve(ctx.user_input)
 
     async def _retrieve_crystallized_patterns(self, ctx: ChatContext):
-        """结晶经验检索"""
-        if not self.crystallizer:
+        """结晶经验检索（使用 CrystallizedExperienceManager 深度模块）"""
+        if not self.crystallized_experience_manager:
             return
 
-        try:
-            ctx.crystallized_patterns = self.crystallizer.retrieve(ctx.user_input, limit=3)
-            if ctx.trace_id and self.trace_manager:
-                self.trace_manager.add_step(
-                    ctx.trace_id, "crystallize",
-                    ctx.user_input, f"检索到 {len(ctx.crystallized_patterns)} 条结晶经验"
-                )
-        except Exception as e:
-            logger.warning(f"结晶经验检索失败: {e}")
+        # 使用 CrystallizedExperienceManager 检索（支持重试、降级、缓存）
+        result = await self.crystallized_experience_manager.retrieve(
+            query=ctx.user_input,
+            limit=3,
+            use_cache=True,
+            fallback_to_memory=True,
+        )
+
+        # 转换结果格式
+        if result.experiences:
+            ctx.crystallized_patterns = [
+                {
+                    'id': exp.id,
+                    'content': exp.content,
+                    'method': exp.method,
+                    'confidence': exp.confidence,
+                    'score': exp.score,
+                    'source': exp.source,
+                }
+                for exp in result.experiences
+            ]
+
+        # 记录检索统计
+        logger.info(
+            f"Crystallized experience retrieval completed: "
+            f"status={result.status.value}, source={result.source}, "
+            f"experiences={len(result.experiences)}, latency={result.latency_ms:.1f}ms"
+        )
+
+        # 记录到追踪系统
+        if ctx.trace_id and self.trace_manager:
+            self.trace_manager.add_step(
+                ctx.trace_id, "crystallize",
+                ctx.user_input,
+                f"检索到 {len(ctx.crystallized_patterns)} 条结晶经验 (状态: {result.status.value})"
+            )
 
     # ══════════════════════════════════════════════════════════════
     # Step 2: Evocate 注入
@@ -701,11 +845,43 @@ class ChatPipeline:
             )
 
     async def _call_legacy(self, ctx: ChatContext) -> str:
-        """传统方法 fallback"""
+        """传统 fallback — 直接通过 llm_client 调用 LLM
+
+        注意: 此方法仅在 Agent Loop 不可用时使用。
+        历史更新和记忆保存由 _step_post_processing() 统一处理，
+        此处不再重复。
+        """
         if ctx.stream:
-            return await self._agent._chat_stream(ctx.user_input, ctx.context, ctx.save_memory)
+            return await self._call_legacy_stream(ctx)
         else:
-            return await self._agent._chat_normal(ctx.user_input, ctx.context, ctx.save_memory)
+            return await self._call_legacy_normal(ctx)
+
+    async def _call_legacy_normal(self, ctx: ChatContext) -> str:
+        """非流式 fallback"""
+        response = await self.llm_client.chat(ctx.context)
+        if isinstance(response, dict):
+            if response.get('success'):
+                raw = response.get('response', '')
+                if hasattr(raw, 'content'):
+                    reply = raw.content
+                elif isinstance(raw, dict):
+                    reply = raw.get('content', raw.get('text', str(raw)))
+                else:
+                    reply = str(raw)
+            else:
+                reply = f"[LLM Error] {response.get('error', 'Unknown error')}"
+        elif hasattr(response, 'content'):
+            reply = response.content
+        else:
+            reply = str(response)
+        return reply
+
+    async def _call_legacy_stream(self, ctx: ChatContext) -> str:
+        """流式 fallback"""
+        reply_parts = []
+        async for chunk in self.llm_client.chat_stream(ctx.context):
+            reply_parts.append(chunk)
+        return "".join(reply_parts)
 
     @staticmethod
     def _is_api_config_error(exc: Exception) -> bool:

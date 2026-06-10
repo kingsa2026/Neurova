@@ -33,6 +33,14 @@ from neurova.mem_core import MemCore
 from neurova.agent.context_orchestrator import ContextOrchestrator
 from neurova.agent.tool_executor import ToolExecutor
 from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
+from neurova.agent.loop_manager import LoopManager, LoopState, LoopEvent
+from neurova.agent.tool_execution_manager import (
+    ToolExecutionManager,
+    ToolExecutionContext,
+    TimeoutStrategy,
+    ExecutionStatus,
+    ExecutionEvent,
+)
 
 # 从 loops 子包导入
 from neurova.agent.loops.registry import register_loop, find_agent_loop
@@ -56,6 +64,14 @@ __all__ = [
     "ToolExecutor",
     "ChatPipeline",
     "ChatContext",
+    "LoopManager",
+    "LoopState",
+    "LoopEvent",
+    "ToolExecutionManager",
+    "ToolExecutionContext",
+    "TimeoutStrategy",
+    "ExecutionStatus",
+    "ExecutionEvent",
 
     # Loop 系统
     "register_loop",

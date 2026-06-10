@@ -463,6 +463,11 @@ class ContextOrchestrator:
         logger.debug(f"候选池构建完成，共 {len(candidate_pool)} 个候选项")
 
         # Phase 3.5: 从候选池构建上下文
+        if not hasattr(self._agent, 'context_builder') or self._agent.context_builder is None:
+            logger.warning("context_builder 不可用，降级为简单上下文构建")
+            return [{'role': 'system', 'content': self.soul or 'You are a helpful assistant.'},
+                    {'role': 'user', 'content': user_input}]
+
         context = self.context_builder.build_from_pool(
             candidate_pool,
             token_budget=TokenBudget(max_total=16000),

@@ -1,0 +1,18 @@
+apiVersion: v2
+name: neurova
+description: Neurova AI Agent 框架 Helm Chart
+type: application
+version: 0.1.0
+appVersion: "4.0.0"
+keywords:
+  - ai
+  - agent
+  - llm
+  - neurova
+maintainers:
+  - name: Neurova Team
+    email: team@neurova.ai
+home: https://github.com/neurova/neurova
+sources:
+  - https://github.com/neurova/neurova
+dependencies: []

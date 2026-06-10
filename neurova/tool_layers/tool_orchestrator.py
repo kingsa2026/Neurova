@@ -119,13 +119,17 @@ class ToolOrchestrator:
         # 如果无法解析，返回默认计划
         return []
     
-    async def orchestrate(self, goal: str, context: typing.Optional[typing.Dict] = None) -> OrchestrationResult:
+    async def orchestrate(
+        self, goal: str, context: typing.Optional[typing.Dict] = None,
+        tool_plan: typing.Optional[typing.List[str]] = None,
+    ) -> OrchestrationResult:
         """
         编排执行
         
         参数:
             goal: 用户目标
             context: 执行上下文
+            tool_plan: 直接传入的工具执行计划（跳过 goal 解析）
             
         返回:
             编排结果
@@ -133,8 +137,8 @@ class ToolOrchestrator:
         start_time = time.time()
         
         try:
-            # 构建执行计划
-            plan = self.build_plan_from_goal(goal)
+            # 构建执行计划：优先使用直接传入的 plan，否则从 goal 解析
+            plan = tool_plan if tool_plan is not None else self.build_plan_from_goal(goal)
             
             if not plan:
                 return OrchestrationResult(
@@ -144,38 +148,32 @@ class ToolOrchestrator:
                     total_duration_ms=(time.time() - start_time) * 1000
                 )
             
-            # 执行计划
+            # 将 plan 分成可并行执行的层
+            layers = self._partition_plan_into_layers(plan)
+            
             step_results = []
-            for i, tool_name in enumerate(plan):
-                step_id = f"step_{i}"
+            step_counter = 0
+            
+            for layer in layers:
+                layer_results = await self._execute_layer(
+                    layer, step_counter, context or {}
+                )
+                step_results.extend(layer_results)
+                step_counter += len(layer)
                 
-                # 检查是否可以并行执行
-                if self._can_run_in_parallel(tool_name, plan[:i], step_results):
-                    # 并行执行（这里简化为顺序执行）
-                    result = await self._execute_step(step_id, tool_name, context or {})
-                else:
-                    # 顺序执行
-                    result = await self._execute_step(step_id, tool_name, context or {})
-                
-                step_results.append(result)
-                
-                # 如果步骤失败，尝试降级
-                if result.status == ExecutionStatus.FAILED:
-                    fallback_result = await self._try_fallback(
-                        step_id, tool_name, context or {}, result.error
-                    )
-                    if fallback_result.status == ExecutionStatus.SUCCESS:
-                        # 替换失败结果
-                        step_results[-1] = fallback_result
-                    else:
-                        # 降级也失败，整个编排失败
-                        return OrchestrationResult(
-                            goal=goal,
-                            status=ExecutionStatus.FAILED,
-                            steps=step_results,
-                            total_duration_ms=(time.time() - start_time) * 1000,
-                            error=f"Step {step_id} failed and fallback also failed"
-                        )
+                # 检查本层是否有失败且降级也失败的步骤
+                for result in layer_results:
+                    if result.status == ExecutionStatus.FAILED:
+                        # 降级已在 _execute_layer 内部处理
+                        # 如果仍然失败，整个编排失败
+                        if result.error and "fallback also failed" in result.error:
+                            return OrchestrationResult(
+                                goal=goal,
+                                status=ExecutionStatus.FAILED,
+                                steps=step_results,
+                                total_duration_ms=(time.time() - start_time) * 1000,
+                                error=f"Step {result.step_id} failed and fallback also failed"
+                            )
             
             # 检查所有步骤是否成功
             all_success = all(s.status == ExecutionStatus.SUCCESS for s in step_results)
@@ -197,9 +195,140 @@ class ToolOrchestrator:
                 error=str(e)
             )
     
+    def _partition_plan_into_layers(self, plan: typing.List[str]) -> typing.List[typing.List[str]]:
+        """
+        将执行计划分层：同一层内的工具无相互依赖，可以并行执行
+        
+        参数:
+            plan: 拓扑排序后的工具计划
+            
+        返回:
+            分层列表，每层包含可并行执行的工具
+        """
+        layers = []
+        remaining = list(plan)
+        
+        while remaining:
+            # 找出当前所有依赖都已在前面层中完成的工具
+            current_layer = []
+            executed = set()
+            for layer in layers:
+                executed.update(layer)
+            
+            for tool in remaining:
+                node = self._capability_graph.get_node(tool)
+                if not node:
+                    # 未知工具放在当前层（无法解析依赖）
+                    current_layer.append(tool)
+                    continue
+                
+                # 检查所有依赖是否都已执行
+                deps_met = all(dep in executed for dep in node.dependencies)
+                if deps_met:
+                    current_layer.append(tool)
+            
+            if not current_layer:
+                # 防止无限循环：如果无法找到可执行的工具，剩余全部放入下一层
+                logger.warning(f"Cannot resolve dependencies for: {remaining}")
+                current_layer = remaining[:]
+            
+            layers.append(current_layer)
+            # 从 remaining 中移除当前层的工具
+            for tool in current_layer:
+                if tool in remaining:
+                    remaining.remove(tool)
+        
+        return layers
+    
+    async def _execute_layer(
+        self,
+        layer: typing.List[str],
+        step_offset: int,
+        context: typing.Dict[str, typing.Any]
+    ) -> typing.List[StepResult]:
+        """
+        执行一层工具（层内并行）
+        
+        参数:
+            layer: 本层工具列表
+            step_offset: 步骤 ID 偏移
+            context: 执行上下文
+            
+        返回:
+            本层所有工具的执行结果
+        """
+        if len(layer) == 1:
+            # 单个工具直接执行
+            result = await self._execute_step(
+                f"step_{step_offset}", layer[0], context
+            )
+            
+            # 失败降级
+            if result.status == ExecutionStatus.FAILED:
+                fallback_result = await self._try_fallback(
+                    f"step_{step_offset}", layer[0], context, result.error
+                )
+                if fallback_result.status == ExecutionStatus.SUCCESS:
+                    return [fallback_result]
+                else:
+                    return [StepResult(
+                        step_id=result.step_id,
+                        tool_name=result.tool_name,
+                        status=ExecutionStatus.FAILED,
+                        error=f"{result.error} | fallback also failed: {fallback_result.error}"
+                    )]
+            
+            return [result]
+        
+        # 多个工具并行执行
+        parallel_limit = min(len(layer), self._max_parallel)
+        
+        # 构建所有任务
+        tasks = []
+        for i, tool_name in enumerate(layer):
+            step_id = f"step_{step_offset + i}"
+            tasks.append(self._execute_step(step_id, tool_name, context))
+        
+        # 使用 asyncio.gather 并行执行
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 处理结果和异常
+        final_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                step_id = f"step_{step_offset + i}"
+                final_results.append(StepResult(
+                    step_id=step_id,
+                    tool_name=layer[i],
+                    status=ExecutionStatus.FAILED,
+                    error=str(result)
+                ))
+            else:
+                # 失败降级
+                if result.status == ExecutionStatus.FAILED:
+                    fallback_result = await self._try_fallback(
+                        result.step_id, result.tool_name, context, result.error
+                    )
+                    if fallback_result.status == ExecutionStatus.SUCCESS:
+                        final_results.append(fallback_result)
+                    else:
+                        final_results.append(StepResult(
+                            step_id=result.step_id,
+                            tool_name=result.tool_name,
+                            status=ExecutionStatus.FAILED,
+                            error=f"{result.error} | fallback also failed: {fallback_result.error}"
+                        ))
+                else:
+                    final_results.append(result)
+        
+        return final_results
+    
     def _resolve_goal_to_capabilities_sync(self, goal: str) -> typing.List[str]:
         """
         同步版本：解析目标为能力列表
+        
+        使用词边界匹配避免子串误匹配（如 "search" 中包含 "read"）。
+        多个匹配规则之间按优先级排列，独立检测。
         
         参数:
             goal: 用户目标
@@ -207,24 +336,48 @@ class ToolOrchestrator:
         返回:
             能力列表
         """
-        # 简单的关键词匹配（实际实现可能使用 LLM）
+        import re
+        
         goal_lower = goal.lower()
         capabilities = []
         
-        if "read" in goal_lower or "file" in goal_lower:
-            capabilities.append("read_file")
-        if "write" in goal_lower or "save" in goal_lower:
-            capabilities.append("write_file")
-        if "search" in goal_lower or "find" in goal_lower:
-            capabilities.append("search_files")
-        if "memory" in goal_lower or "remember" in goal_lower:
-            capabilities.append("search_memory")
-        if "web" in goal_lower or "internet" in goal_lower:
-            capabilities.append("search_web")
-        if "code" in goal_lower or "execute" in goal_lower:
-            capabilities.append("run_code")
+        # 使用 word-boundary 正则避免子串误匹配
+        # 每个模式独立匹配，支持多个能力共存
+        patterns = [
+            (r'\bread\b', "read_file"),
+            (r'\bwrite\b', "write_file"),
+            (r'\bsave\b', "write_file"),
+            (r'\bsearch\b.*\b(file|files|directory|directories)\b', "search_files"),
+            (r'\bfind\b.*\b(file|files)\b', "search_files"),
+            (r'\bsearch\b.*\b(memory|memories)\b', "search_memory"),
+            (r'\bremember\b', "search_memory"),
+            (r'\brecall\b', "search_memory"),
+            (r'\bsearch\b.*\b(web|internet|online)\b', "search_web"),
+            (r'\bfetch\b.*\burl\b', "search_web"),
+            (r'\bexecute\b.*\bcode\b', "run_code"),
+            (r'\brun\b.*\b(code|script)\b', "run_code"),
+        ]
         
-        # 如果没有匹配到，返回通用能力
+        seen = set()
+        for pattern, capability in patterns:
+            if re.search(pattern, goal_lower) and capability not in seen:
+                capabilities.append(capability)
+                seen.add(capability)
+        
+        # 宽泛回退：如果上面精确匹配没有命中
+        if not capabilities:
+            fallback_patterns = [
+                (r'\bsearch\b', "search_files"),
+                (r'\bfind\b', "search_files"),
+                (r'\bmemory\b', "search_memory"),
+                (r'\bcode\b', "run_code"),
+            ]
+            for pattern, capability in fallback_patterns:
+                if re.search(pattern, goal_lower) and capability not in seen:
+                    capabilities.append(capability)
+                    seen.add(capability)
+        
+        # 最终兜底
         if not capabilities:
             capabilities = ["process_data"]
         

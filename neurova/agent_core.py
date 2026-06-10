@@ -39,6 +39,14 @@ try:
 except ImportError:
     NEUHEBB_AVAILABLE = False
 
+# 温度引擎
+try:
+    from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
+    TEMPERATURE_ENGINE_AVAILABLE = True
+except ImportError:
+    TEMPERATURE_ENGINE_AVAILABLE = False
+    logging.warning("TemperatureEngine not available")
+
 # 认知图谱存储架构 — 一步到位替换
 try:
     from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
@@ -69,6 +77,9 @@ from neurova.post_chat_pipeline import PostChatPipeline
 
 # P5: 对话管线（从 chat() 提取）
 from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
+
+# LoopManager 深度模块
+from neurova.agent.loop_manager import LoopManager
 
 # P3: 内置工具注册器（替代 _init_file_operation_wrappers 的 15 个闭包）
 from neurova.builtin_tools import BuiltinToolRegistry, get_builtin_tool_params
@@ -180,9 +191,13 @@ class AgentConfig:
         # 活水上下文池配置
         enable_context_pool: bool = True,  # 是否启用活水上下文池
         enable_auto_tagging: bool = False,  # 是否启用自动标签生成
+
+        # 所有权配置
+        owner_user_id: Optional[str] = None,  # 创建者用户 ID
     ):
         self.name = name
         self.agent_id = agent_id
+        self.owner_user_id = owner_user_id
 
         # 工作目录路径 - 必须由调用者提供，不使用硬编码
         if not workspace_path:
@@ -297,7 +312,7 @@ class Agent:
         logger.debug("步骤2: 初始化记忆模块...")
         self.memory_manager = None
         self.storage = None
-        self.temperature_engine = None
+        self.temperature_engine = TemperatureEngine() if TEMPERATURE_ENGINE_AVAILABLE else None
 
         # P2: 初始化 MemCore 深度模块（保留兼容性）
         self.memory_agent = MemCore(self)
@@ -695,8 +710,9 @@ class Agent:
             logger.warning("[DEBUG] llm_provider 为空，无法加载 API Key")
 
         # ===== Agent Loop 初始化 (v5.0) =====
-        self.loop = None
-        self._init_agent_loop()
+        self.loop_manager = LoopManager(self)
+        self.loop_manager.initialize_sync()
+        self.loop = self.loop_manager.get_loop()  # 向后兼容
 
     def _init_file_operation_wrappers(self):
         """P3: 委托给 BuiltinToolRegistry（已移至 __init__ 中直接初始化）"""
@@ -706,32 +722,11 @@ class Agent:
         """
         初始化 Agent Loop (v5.0)
 
-        根据配置的模型自动选择合适的 Loop。
-        如果 Agent Loop 系统不可用，则使用传统方法。
+        委托给 LoopManager（保留向后兼容接口）。
         """
-        if not AGENT_LOOP_AVAILABLE:
-            logger.warning("Agent Loop system not available, using legacy chat methods")
-            return
-
-        try:
-            # 获取模型名称
-            model_name = self.config.llm_config.model
-
-            # 查找合适的 Loop 类
-            loop_class = find_agent_loop(model_name)
-
-            if loop_class:
-                self.loop = loop_class(self)
-                logger.info(
-                    f"Agent Loop initialized: {loop_class.__name__} "
-                    f"(model={model_name})"
-                )
-            else:
-                logger.warning(f"No suitable Loop found for model: {model_name}")
-
-        except Exception as e:
-            logger.warning(f"Agent Loop initialization failed: {e}")
-            self.loop = None
+        if hasattr(self, 'loop_manager'):
+            self.loop_manager.initialize_sync()
+            self.loop = self.loop_manager.get_loop()
 
     def rebuild_loop(self, model_name: str) -> bool:
         """
@@ -750,31 +745,11 @@ class Agent:
             logger.warning("Agent Loop 系统不可用，无法重建")
             return False
 
-        # 更新 config 中的模型名
-        self.config.llm_config.model = model_name
-
-        # 查找新模型对应的 Loop 类
-        loop_class = find_agent_loop(model_name)
-
-        if loop_class:
-            old_loop_name = type(self.loop).__name__ if self.loop else "None"
-            try:
-                new_loop = loop_class(self)
-                self.loop = new_loop
-                logger.info(
-                    f"Agent Loop rebuilt: {old_loop_name} → {loop_class.__name__} "
-                    f"(model={model_name})"
-                )
-                return True
-            except Exception as e:
-                logger.error(
-                    f"Agent Loop 实例化失败: {old_loop_name} → {loop_class.__name__}: {e}"
-                )
-                # 保留旧 Loop，不覆盖
-                return False
-        else:
-            logger.warning(f"No suitable Loop found for model: {model_name}")
-            return False
+        # 委托给 LoopManager
+        result = self.loop_manager.rebuild(model_name)
+        # 同步 self.loop 引用
+        self.loop = self.loop_manager.get_loop()
+        return result
 
     async def process_multimodal(
         self,
@@ -1348,27 +1323,26 @@ class Agent:
         save_memory: bool,
     ) -> str:
         """
-        普通对话模式
+        普通对话模式（仅外部向后兼容）
 
-        ⚠️ DEPRECATED (v5.0): 此方法已废弃，请使用 Agent Loop 系统。
+        ⚠️ DEPRECATED (v5.0): 内部调用已迁移至 ChatPipeline._call_legacy()。
 
-        新的代码应该通过 `self.loop.predict_step()` 调用 LLM。
-        此方法仅作为 Agent Loop 不可用时的 fallback。
+        新代码不应调用此方法。
+        Agent 内部对话统一走 ChatPipeline → Agent Loop 路径。
         """
         import warnings
         warnings.warn(
-            "Agent._chat_normal() is deprecated, use Agent Loop instead",
+            "Agent._chat_normal() is deprecated, use ChatPipeline or Agent Loop instead",
             DeprecationWarning,
             stacklevel=2
         )
-        logger.warning("Using deprecated _chat_normal(), please migrate to Agent Loop")
+        logger.warning("Using deprecated _chat_normal(), please migrate to ChatPipeline/Agent Loop")
 
         response = await self.llm_client.chat(context)
         # MultiModelLLMClient.chat() 返回 dict: {success, response, error, ...}
         if isinstance(response, dict):
             if response.get('success'):
                 raw = response.get('response', '')
-                # response 可能是字符串、LLMResponse 对象、或 dict
                 if hasattr(raw, 'content'):
                     reply = raw.content
                 elif isinstance(raw, dict):
@@ -1382,17 +1356,6 @@ class Agent:
         else:
             reply = str(response)
 
-        # 更新对话历史
-        self._update_history(user_input, reply)
-
-        # 保存记忆
-        if save_memory and self.memory_manager:
-            self._save_conversation_memory(user_input, reply)
-
-        # 更新记忆温度
-        if self.temperature_engine:
-            self._update_memory_temperature()
-
         return reply
 
     async def _chat_stream(
@@ -1402,41 +1365,26 @@ class Agent:
         save_memory: bool,
     ) -> str:
         """
-        流式对话模式
+        流式对话模式（仅外部向后兼容）
 
-        ⚠️ DEPRECATED (v5.0): 此方法已废弃，请使用 Agent Loop 系统。
+        ⚠️ DEPRECATED (v5.0): 内部调用已迁移至 ChatPipeline._call_legacy()。
 
-        新的代码应该通过 `self.loop.predict_step()` 调用 LLM。
-        此方法仅作为 Agent Loop 不可用时的 fallback。
+        新代码不应调用此方法。
+        Agent 内部对话统一走 ChatPipeline → Agent Loop 路径。
         """
         import warnings
         warnings.warn(
-            "Agent._chat_stream() is deprecated, use Agent Loop instead",
+            "Agent._chat_stream() is deprecated, use ChatPipeline or Agent Loop instead",
             DeprecationWarning,
             stacklevel=2
         )
-        logger.warning("Using deprecated _chat_stream(), please migrate to Agent Loop")
+        logger.warning("Using deprecated _chat_stream(), please migrate to ChatPipeline/Agent Loop")
 
         reply_parts = []
-
         async for chunk in self.llm_client.chat_stream(context):
             reply_parts.append(chunk)
-            logger.debug(chunk)
 
-        reply = "".join(reply_parts)
-
-        # 更新对话历史
-        self._update_history(user_input, reply)
-
-        # 保存记忆
-        if save_memory and self.memory_manager:
-            self._save_conversation_memory(user_input, reply)
-
-        # 更新记忆温度
-        if self.temperature_engine:
-            self._update_memory_temperature()
-
-        return reply
+        return "".join(reply_parts)
 
     def _get_builtin_tool_params(self, tool_name: str) -> Dict[str, Any]:
         """P3: 委托给 builtin_tools 模块"""
@@ -1463,12 +1411,19 @@ class Agent:
         return self.memory_agent.save_to_session(user_input, reply, session_id, metadata, assistant_metadata)
 
     def _update_memory_temperature(self):
-        """更新记忆温度（委托给 MemCore）"""
+        """更新记忆温度（批量衰减）"""
         try:
-            # update_memory_temperature 需要 memory_id，跳过批量更新
-            pass
-        except Exception:
-            pass
+            if not self.memory_manager:
+                logger.debug("memory_manager 未初始化，跳过温度更新")
+                return
+            
+            # 使用 MemoryManager.run_decay_cycle() 批量衰减所有记忆温度
+            # 衰减参数：hours=1.0 表示每小时衰减一次，rate=1.0 使用默认衰减率
+            count = self.memory_manager.run_decay_cycle(hours=1.0, rate=1.0)
+            if count > 0:
+                logger.debug(f"记忆温度已更新: {count} 条记忆")
+        except Exception as e:
+            logger.warning(f"记忆温度更新失败: {e}")
 
     def get_memory_stats(self) -> Dict[str, Any]:
         """获取记忆统计信息（委托给 MemCore）"""
@@ -1610,44 +1565,23 @@ class Agent:
         return await self.context_orchestrator.build_tools_for_llm()
 
     async def _execute_text_tool_calls(self, reply: str, user_input: str) -> str:
-        """P1: 解析回复中的文本工具调用并执行"""
+        """解析回复中的文本工具调用并执行（委托给 ToolExecutor 多策略解析器）
+
+        ⚠️ DEPRECATED: 此方法已废弃，请直接使用 tool_executor.execute_text_tool_calls()。
+        """
+        import warnings
+        warnings.warn(
+            "Agent._execute_text_tool_calls() is deprecated, use ToolExecutor directly",
+            DeprecationWarning,
+            stacklevel=2
+        )
         if not reply or not isinstance(reply, str):
             return reply
         try:
-            # 尝试解析回复中的工具调用 JSON
-            tool_calls = self._parse_tool_calls_from_text(reply)
-            if tool_calls:
-                results = await self.tool_executor.execute_text_tool_calls(tool_calls)
-                if results:
-                    # 将工具结果附加到回复
-                    tool_summary = "\n".join(
-                        f"[Tool: {r.get('name', '?')}] {json.dumps(r.get('result', r.get('error', '')), ensure_ascii=False)}"
-                        for r in results if r.get('success') or r.get('error')
-                    )
-                    if tool_summary:
-                        reply = reply + "\n\n" + tool_summary
+            return await self.tool_executor.execute_text_tool_calls(reply, user_input)
         except Exception as e:
             logger.debug(f"文本工具调用解析跳过: {e}")
         return reply
-
-    def _parse_tool_calls_from_text(self, text: str) -> List[Dict]:
-        """从文本中解析工具调用（降级模式：LLM 不支持 function calling 时）"""
-        tool_calls = []
-        # 匹配 ```json ... ``` 块中的工具调用
-        import re
-        json_blocks = re.findall(r'```json\s*(.*?)\s*```', text, re.DOTALL)
-        for block in json_blocks:
-            try:
-                data = json.loads(block)
-                if isinstance(data, dict) and "function" in data:
-                    tool_calls.append(data)
-                elif isinstance(data, list):
-                    for item in data:
-                        if isinstance(item, dict) and "function" in item:
-                            tool_calls.append(item)
-            except json.JSONDecodeError:
-                continue
-        return tool_calls
 
     def _set_reasoning(self, reasoning: str):
         """设置当前思考过程（由 LLM 客户端调用）"""

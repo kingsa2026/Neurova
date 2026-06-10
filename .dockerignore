@@ -1,96 +1,85 @@
-# Python相关
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+# 版本控制
+.git
+.gitignore
 
 # 虚拟环境
-venv/
-ENV/
-env/
 .venv
+venv
+ENV
 
 # IDE
-.vscode/
-.idea/
+.vscode
+.idea
 *.swp
 *.swo
-*~
-.DS_Store
 
-# 测试和覆盖率
-.pytest_cache/
+# 测试
+tests
+test_*.py
+*_test.py
+pytest_output.txt
 .coverage
 htmlcov/
-*.cover
-.coverage.*
-coverage.xml
-*.cover
 
-# 日志文件
-*.log
+# 文档
+docs
+*.md
+!README.md
+
+# 日志
 logs/
+*.log
 
-# 数据库文件
+# 临时文件
+temp/
+tmp/
+*.tmp
+*.bak
+
+# 数据文件
+data/
 *.db
 *.db-shm
 *.db-wal
 
-# 临时文件
-tmp/
-temp/
-*.tmp
-*.bak
-*.backup
+# 会话文件
+sessions/
+session/
 
-# 文档和报告（不需要打包到镜像）
-docs/
-*.md
-!requirements*.txt
-AUDIT_*.md
-BUG_*.md
-IMPLEMENTATION_*.md
-SCAN_*.md
-REPORT_*.md
+# 上传文件
+uploads/
 
-# 备份和归档
-backups/
-archive/
-other/
-code_patches/
+# 模型文件
+models/*.bin
+models/*.onnx
+models/*.safetensors
 
-# 前端构建产物（如果有单独的前端构建过程）
+# 前端文件（生产模式下由后端服务静态文件）
+neuUI/
+NeurUI/
 node_modules/
-dist/
-build/
+
+# 部署脚本
+deploy/
+scripts/
+
+# 配置文件（保留 config/ 目录）
+config/*.json
+!config/llm_presets/
+
+# 开发文件
+.dockerignore
+Dockerfile
+docker-compose*.yml
+*.yaml
+!requirements.txt
+
+# 测试输出
+test_output.wav
+test_api_output.wav
 
 # 其他
-.monitoring/
-.flow-kb-sdk/
-.QwenPaw-1.1.6/
-
-# Git相关
-.git/
-.gitignore
-.gitattributes
-
-# Docker相关
-Dockerfile*
-docker-compose*.yml
-.dockerignore
+missing
+nul
+*.pyc
+__pycache__

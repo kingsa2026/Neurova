@@ -27,7 +27,6 @@ import jwt
 logger = logging.getLogger(__name__)
 
 # JWT 配置
-JWT_SECRET_KEY = os.getenv("NEUROVA_JWT_SECRET", "neurova-default-secret-key-change-in-production")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 7
@@ -74,6 +73,11 @@ def _load_or_create_secret_key() -> str:
         logger.warning(f"Failed to save JWT secret: {e}")
 
     return secret
+
+
+# JWT Secret Key — 从环境变量或自动生成的文件加载
+# 优先级: 环境变量 NEUROVA_JWT_SECRET > .jwt_secret 文件 > 自动生成
+JWT_SECRET_KEY = _load_or_create_secret_key()
 
 
 def create_access_token(
@@ -233,22 +237,29 @@ def get_token_subject(token: str) -> Optional[str]:
 
 def hash_password(password: str) -> str:
     """
-    使用 bcrypt 安全哈希密码
+    安全哈希密码
+
+    优先使用 bcrypt，回退到 PBKDF2-SHA256（带随机盐）。
+    绝不使用无盐哈希。
 
     Args:
         password: 明文密码
 
     Returns:
-        bcrypt 哈希字符串
+        哈希字符串（bcrypt 或 PBKDF2 格式）
     """
     try:
         import bcrypt
         salt = bcrypt.gensalt()
         return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
     except ImportError:
-        # 如果 bcrypt 不可用，使用简单哈希（不推荐用于生产）
+        # bcrypt 不可用时，使用 PBKDF2-SHA256（NIST 推荐的 KDF）
         import hashlib
-        return hashlib.sha256(password.encode("utf-8")).hexdigest()
+        import base64
+        salt = secrets.token_bytes(16)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations=260000)
+        # 格式: pbkdf2:sha256:260000:<salt_b64>:<dk_b64>
+        return f"pbkdf2:sha256:260000:{base64.b64encode(salt).decode()}:{base64.b64encode(dk).decode()}"
 
 
 def verify_password(password: str, hashed: str) -> bool:
@@ -266,9 +277,20 @@ def verify_password(password: str, hashed: str) -> bool:
         import bcrypt
         return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
     except ImportError:
-        # 如果 bcrypt 不可用，使用简单哈希比较
+        # bcrypt 不可用时，使用 PBKDF2-SHA256 验证
         import hashlib
-        return hashlib.sha256(password.encode("utf-8")).hexdigest() == hashed
+        import base64
+        if not hashed.startswith("pbkdf2:sha256:"):
+            # 兼容旧的无盐 SHA-256 哈希（仅用于验证已有密码）
+            return hashlib.sha256(password.encode("utf-8")).hexdigest() == hashed
+        parts = hashed.split(":")
+        if len(parts) != 5:
+            return False
+        _, _, iterations_b64, salt_b64, dk_b64 = parts
+        salt = base64.b64decode(salt_b64)
+        iterations = int(iterations_b64)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations=iterations)
+        return base64.b64encode(dk).decode() == dk_b64
 
 
 async def get_current_user(

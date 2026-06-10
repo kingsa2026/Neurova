@@ -1,0 +1,251 @@
+@import './variables.css';
+
+/* ─── Reset ─── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--nr-font-body);
+  background: var(--nr-bg-deep);
+  color: var(--nr-text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* ─── Star Background ─── */
+.star-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(ellipse at 20% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(34, 211, 238, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 80%, rgba(167, 139, 250, 0.05) 0%, transparent 50%),
+    var(--nr-bg-deep);
+}
+.star-bg::before,
+.star-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(1px 1px at 20px 30px, rgba(255, 255, 255, 0.3), transparent),
+    radial-gradient(1px 1px at 40px 70px, rgba(255, 255, 255, 0.2), transparent),
+    radial-gradient(1px 1px at 50px 160px, rgba(255, 255, 255, 0.15), transparent),
+    radial-gradient(1px 1px at 90px 40px, rgba(255, 255, 255, 0.25), transparent),
+    radial-gradient(1px 1px at 130px 80px, rgba(255, 255, 255, 0.2), transparent),
+    radial-gradient(1.5px 1.5px at 160px 120px, rgba(255, 255, 255, 0.35), transparent);
+  background-size: 200px 200px;
+  animation: starDrift 120s linear infinite;
+}
+.star-bg::after {
+  background-size: 300px 300px;
+  opacity: 0.6;
+  animation-duration: 200s;
+  animation-direction: reverse;
+}
+@keyframes starDrift {
+  from { transform: translateY(0); }
+  to { transform: translateY(-200px); }
+}
+
+/* ─── Glass Card ─── */
+.glass-card {
+  background: var(--nr-glass-bg);
+  backdrop-filter: blur(var(--nr-glass-blur));
+  -webkit-backdrop-filter: blur(var(--nr-glass-blur));
+  border: 1px solid var(--nr-glass-border);
+  border-radius: var(--nr-radius-lg);
+  transition: all var(--nr-transition);
+}
+.glass-card:hover {
+  background: var(--nr-glass-bg-hover);
+  border-color: var(--nr-glass-border-hover);
+}
+
+/* ─── Gradient Text ─── */
+.gradient-text {
+  background: var(--nr-gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Transitions ─── */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: all var(--nr-transition);
+}
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-12px);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity var(--nr-transition);
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.scale-enter-active,
+.scale-leave-active {
+  transition: all var(--nr-transition-fast);
+}
+.scale-enter-from,
+.scale-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+/* ─── Ant Design Vue Dark Overrides ─── */
+.ant-layout {
+  background: transparent !important;
+}
+.ant-btn-primary {
+  background: var(--nr-gradient-primary) !important;
+  border: none !important;
+  box-shadow: var(--nr-shadow-glow) !important;
+}
+.ant-input,
+.ant-select-selector,
+.ant-input-number,
+.ant-picker {
+  background: var(--nr-glass-bg) !important;
+  border-color: var(--nr-glass-border) !important;
+  color: var(--nr-text-primary) !important;
+}
+.ant-input:focus,
+.ant-select-focused .ant-select-selector {
+  border-color: var(--nr-primary) !important;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15) !important;
+}
+.ant-table {
+  background: transparent !important;
+}
+.ant-table-thead > tr > th {
+  background: var(--nr-glass-bg) !important;
+  border-bottom: 1px solid var(--nr-glass-border) !important;
+  color: var(--nr-text-secondary) !important;
+}
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--nr-border-light) !important;
+}
+.ant-table-tbody > tr:hover > td {
+  background: var(--nr-glass-bg-hover) !important;
+}
+.ant-modal-content,
+.ant-drawer-content {
+  background: var(--nr-bg-surface) !important;
+  border: 1px solid var(--nr-glass-border) !important;
+}
+.ant-modal-header,
+.ant-drawer-header {
+  background: transparent !important;
+  border-bottom: 1px solid var(--nr-glass-border) !important;
+}
+.ant-tabs-nav::before {
+  border-bottom: 1px solid var(--nr-glass-border) !important;
+}
+.ant-dropdown-menu {
+  background: var(--nr-bg-elevated) !important;
+  border: 1px solid var(--nr-glass-border) !important;
+}
+.ant-dropdown-menu-item {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-dropdown-menu-item:hover {
+  background: var(--nr-glass-bg-hover) !important;
+  color: var(--nr-text-primary) !important;
+}
+.ant-tag {
+  border-color: var(--nr-glass-border) !important;
+  background: var(--nr-glass-bg) !important;
+}
+.ant-switch-checked {
+  background: var(--nr-primary) !important;
+}
+.ant-pagination .ant-pagination-item {
+  background: var(--nr-glass-bg) !important;
+  border-color: var(--nr-glass-border) !important;
+}
+.ant-pagination .ant-pagination-item-active {
+  border-color: var(--nr-primary) !important;
+}
+.ant-pagination .ant-pagination-item a {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-pagination .ant-pagination-item-active a {
+  color: var(--nr-primary-light) !important;
+}
+.ant-tooltip-inner {
+  background: var(--nr-bg-elevated) !important;
+  border: 1px solid var(--nr-glass-border) !important;
+}
+.ant-badge-status-dot {
+  border: 2px solid var(--nr-bg-surface);
+}
+.ant-alert {
+  background: var(--nr-glass-bg) !important;
+  border: 1px solid var(--nr-glass-border) !important;
+}
+.ant-checkbox-wrapper {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-radio-wrapper {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-form-item-label > label {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-empty-description {
+  color: var(--nr-text-tertiary) !important;
+}
+
+/* ─── Utility ─── */
+.text-gradient { background: var(--nr-gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.text-accent { color: var(--nr-accent); }
+.text-muted { color: var(--nr-text-tertiary); }
+.flex-center { display: flex; align-items: center; justify-content: center; }
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[dir="rtl"] .rtl-flip { transform: scaleX(-1); }

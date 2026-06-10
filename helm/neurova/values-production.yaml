@@ -1,0 +1,76 @@
+# Neurova 生产环境配置
+
+# 后端配置
+backend:
+  replicaCount: 2
+  
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+  
+  healthCheck:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# 数据库配置
+database:
+  persistence:
+    enabled: true
+    storageClass: "standard"
+    accessMode: ReadWriteOnce
+    size: 50Gi
+    mountPath: /app/data
+
+# Ingress 配置
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+  hosts:
+    - host: neurova.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: neurova-tls
+      hosts:
+        - neurova.example.com
+
+# 自动扩缩容
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# PodDisruptionBudget
+pdb:
+  enabled: true
+  minAvailable: 1
+
+# 监控配置
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    interval: 30s
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "json"
+  file: "/app/logs/neurova.log"

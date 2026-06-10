@@ -245,10 +245,24 @@ class VariableResolver:
         
         if action == "get" and query:
             # 获取特定记忆
-            return context.memory_manager.get(query)
+            # 尝试调用 get_memory 方法，如果不存在则回退到 get 方法
+            if hasattr(context.memory_manager, 'get_memory'):
+                return context.memory_manager.get_memory(query)
+            elif hasattr(context.memory_manager, 'get'):
+                return context.memory_manager.get(query)
+            else:
+                logger.warning("memory_manager 没有 get_memory 或 get 方法")
+                return None
         else:
             # 默认为搜索
-            return context.memory_manager.search(path)
+            # 尝试调用 search_memories 方法，如果不存在则回退到 search 方法
+            if hasattr(context.memory_manager, 'search_memories'):
+                return context.memory_manager.search_memories(path)
+            elif hasattr(context.memory_manager, 'search'):
+                return context.memory_manager.search(path)
+            else:
+                logger.warning("memory_manager 没有 search_memories 或 search 方法")
+                return None
     
     def _resolve_context(self, path: Optional[str], context: ResolutionContext) -> Any:
         """
@@ -263,7 +277,24 @@ class VariableResolver:
             logger.warning("context_pool 未注入，无法使用 $context 前缀")
             return None
         
-        ctx_data = context.context_pool.get_context()
+        # 获取上下文数据
+        ctx_data = None
+        if hasattr(context.context_pool, 'get_context'):
+            ctx_data = context.context_pool.get_context()
+        elif hasattr(context.context_pool, 'get_contexts'):
+            # get_contexts 返回列表，取第一个元素的字典
+            contexts = context.context_pool.get_contexts()
+            if contexts:
+                # 假设 ContextInput 有 to_dict 方法
+                if hasattr(contexts[0], 'to_dict'):
+                    ctx_data = contexts[0].to_dict()
+                else:
+                    ctx_data = contexts[0]
+            else:
+                ctx_data = {}
+        else:
+            logger.warning("context_pool 没有 get_context 或 get_contexts 方法")
+            return None
         
         if not path:
             return ctx_data
@@ -283,7 +314,48 @@ class VariableResolver:
             logger.warning("emotion_module 未注入，无法使用 $emotion 前缀")
             return None
         
-        emotion_data = context.emotion_module.current()
+        # 获取情感数据
+        emotion_data = None
+        if hasattr(context.emotion_module, 'current'):
+            emotion_data = context.emotion_module.current()
+        elif hasattr(context.emotion_module, 'get_emotional_memories'):
+            # 获取情感记忆，返回记忆ID列表
+            memory_ids = context.emotion_module.get_emotional_memories(limit=1)
+            if memory_ids and len(memory_ids) > 0:
+                memory_id = memory_ids[0]
+                # 如果返回的是字符串（记忆ID），尝试获取情感状态
+                if isinstance(memory_id, str) and hasattr(context.emotion_module, 'get_emotion'):
+                    emotion_state = context.emotion_module.get_emotion(memory_id)
+                    if emotion_state and hasattr(emotion_state, 'to_dict'):
+                        emotion_data = emotion_state.to_dict()
+                    elif isinstance(emotion_state, dict):
+                        emotion_data = emotion_state
+                    else:
+                        emotion_data = {"primary_emotion": "neutral", "valence": 0.0}
+                else:
+                    # 假设返回的是字典列表
+                    emotion_state = memory_id.get('emotion', {}) if isinstance(memory_id, dict) else {}
+                    if hasattr(emotion_state, 'to_dict'):
+                        emotion_data = emotion_state.to_dict()
+                    elif isinstance(emotion_state, dict):
+                        emotion_data = emotion_state
+                    else:
+                        emotion_data = {"primary_emotion": "neutral", "valence": 0.0}
+            else:
+                emotion_data = {"primary_emotion": "neutral", "valence": 0.0}
+        elif hasattr(context.emotion_module, 'get_stats'):
+            stats = context.emotion_module.get_stats()
+            # 从统计信息中构建情感数据
+            distribution = stats.get('emotion_distribution', {})
+            if distribution:
+                # 选择最常见的 emotion
+                primary_emotion = max(distribution.items(), key=lambda x: x[1])[0] if distribution else "neutral"
+                emotion_data = {"primary_emotion": primary_emotion, "valence": 0.0}
+            else:
+                emotion_data = {"primary_emotion": "neutral", "valence": 0.0}
+        else:
+            logger.warning("emotion_module 没有 current、get_emotional_memories 或 get_stats 方法")
+            return None
         
         if not path:
             return emotion_data

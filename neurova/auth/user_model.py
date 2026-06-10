@@ -14,11 +14,15 @@ Neurova 用户数据库模型
 
 import datetime
 import json
+import logging
 import os
 from pathlib import Path
 import sqlite3
 import time
 import typing
+from typing import Optional, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 class User:
     """User data model - represents a user record"""
@@ -584,3 +588,43 @@ class UserModel:
         except Exception as e:
             logger.error("Failed to get login logs: %s", e)
             return []
+    
+    def authenticate_user(self, username: str, password: str) -> Optional[Dict[str, Any]]:
+        """
+        认证用户
+        
+        Args:
+            username: 用户名
+            password: 密码（明文）
+            
+        Returns:
+            用户信息字典，如果认证失败返回 None
+        """
+        try:
+            user = self.get_user_by_username(username)
+            if not user:
+                return None
+            
+            # 检查用户状态
+            if user.status != "active":
+                return None
+            
+            # 验证密码
+            from neurova.api.auth import verify_password
+            if not verify_password(password, user.password_hash):
+                return None
+            
+            # 返回用户信息字典
+            return {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "role": user.role,
+                "status": user.status,
+                "created_at": user.created_at,
+                "password_hash": user.password_hash
+            }
+            
+        except Exception as e:
+            logger.error("Failed to authenticate user: %s", e)
+            return None

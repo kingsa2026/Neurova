@@ -8,12 +8,17 @@ from __future__ import annotations
 2. 更新全局设置 (PUT /api/v1/settings)
 3. 获取特定设置 (GET /api/v1/settings/{key})
 4. 更新特定设置 (PUT /api/v1/settings/{key})
+5. 获取 CORS 配置 (GET /api/v1/settings/cors)
+6. 更新 CORS 配置 (PUT /api/v1/settings/cors)
 """
 
+import json
 import logging
+import os
 import time
 import uuid
-from typing import Any, Dict, Optional
+from pathlib import Path as FilePath
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
@@ -33,6 +38,19 @@ _default_settings = {
     "temperature": 0.7,
     "stream_mode": True,
 }
+
+# CORS 配置文件路径
+_CORS_CONFIG_FILE = FilePath(__file__).parent.parent.parent.parent / "config" / "cors.json"
+
+# 默认 CORS origins
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:8100",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:8100",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
 
 
 class SettingsResponse(BaseModel):
@@ -111,3 +129,112 @@ async def update_setting(request: Request, key: str = Path(...), value: Any = Bo
             "value": value,
         },
     }
+
+
+# ─── CORS 配置管理 ───
+
+
+class CorsConfigResponse(BaseModel):
+    """CORS 配置响应"""
+    origins: List[str]
+    allow_credentials: bool = True
+    allow_methods: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+    allow_headers: List[str] = ["Authorization", "Content-Type", "Accept", "X-Request-ID"]
+    updated_at: Optional[str] = None
+
+
+class UpdateCorsConfigRequest(BaseModel):
+    """更新 CORS 配置请求"""
+    origins: List[str] = Field(..., description="允许的来源列表")
+    allow_credentials: Optional[bool] = Field(None, description="是否允许凭证")
+    allow_methods: Optional[List[str]] = Field(None, description="允许的 HTTP 方法")
+    allow_headers: Optional[List[str]] = Field(None, description="允许的请求头")
+
+
+def _load_cors_config() -> Dict[str, Any]:
+    """从文件加载 CORS 配置"""
+    if _CORS_CONFIG_FILE.exists():
+        try:
+            with open(_CORS_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load CORS config: {e}")
+    return {
+        "origins": _DEFAULT_CORS_ORIGINS,
+        "allow_credentials": True,
+        "allow_methods": ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        "allow_headers": ["Authorization", "Content-Type", "Accept", "X-Request-ID"],
+    }
+
+
+def _save_cors_config(config: Dict[str, Any]) -> bool:
+    """保存 CORS 配置到文件"""
+    try:
+        _CORS_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(_CORS_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save CORS config: {e}")
+        return False
+
+
+@router.get("/cors", response_model=CorsConfigResponse)
+async def get_cors_config(request: Request):
+    """获取 CORS 配置"""
+    request_id = _get_request_id(request)
+    config = _load_cors_config()
+
+    return CorsConfigResponse(
+        origins=config.get("origins", _DEFAULT_CORS_ORIGINS),
+        allow_credentials=config.get("allow_credentials", True),
+        allow_methods=config.get("allow_methods", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]),
+        allow_headers=config.get("allow_headers", ["Authorization", "Content-Type", "Accept", "X-Request-ID"]),
+        updated_at=str(time.time()),
+    )
+
+
+@router.put("/cors", response_model=CorsConfigResponse)
+async def update_cors_config(request: Request, body: UpdateCorsConfigRequest):
+    """更新 CORS 配置（管理员）"""
+    request_id = _get_request_id(request)
+
+    # 验证 origins 格式
+    validated_origins = []
+    for origin in body.origins:
+        origin = origin.strip()
+        if not origin:
+            continue
+        # 验证 URL 格式
+        if not origin.startswith("http://") and not origin.startswith("https://"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid origin format: {origin}. Must start with http:// or https://"
+            )
+        validated_origins.append(origin)
+
+    if not validated_origins:
+        raise HTTPException(status_code=400, detail="At least one origin is required")
+
+    config = _load_cors_config()
+    config["origins"] = validated_origins
+
+    if body.allow_credentials is not None:
+        config["allow_credentials"] = body.allow_credentials
+    if body.allow_methods is not None:
+        config["allow_methods"] = body.allow_methods
+    if body.allow_headers is not None:
+        config["allow_headers"] = body.allow_headers
+
+    if not _save_cors_config(config):
+        raise HTTPException(status_code=500, detail="Failed to save CORS config")
+
+    logger.info(f"CORS config updated by user, origins: {validated_origins}")
+
+    return CorsConfigResponse(
+        origins=config["origins"],
+        allow_credentials=config.get("allow_credentials", True),
+        allow_methods=config.get("allow_methods", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]),
+        allow_headers=config.get("allow_headers", ["Authorization", "Content-Type", "Accept", "X-Request-ID"]),
+        updated_at=str(time.time()),
+    )

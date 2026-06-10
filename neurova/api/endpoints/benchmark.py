@@ -125,6 +125,12 @@ async def list_runs(request, agent_id: typing.Optional[str] = None, suite_id: ty
     return {"code": 0, "message": "success", "data": {"items": items, "total": total, "page": page, "size": size}}
 
 
+@router.get("/results")
+async def list_results(request, agent_id: typing.Optional[str] = None, suite_id: typing.Optional[str] = None, page: int = 1, size: int = 20):
+    """查询测试结果（别名）"""
+    return await list_runs(request, agent_id, suite_id, page, size)
+
+
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str, request):
     """查看某次运行详情"""

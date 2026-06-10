@@ -13,8 +13,21 @@ import asyncio
 import datetime
 import logging
 import typing
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolResult:
+    """工具执行结果"""
+    success: bool
+    result: typing.Any = None
+    error: typing.Optional[str] = None
+    metadata: typing.Dict[str, typing.Any] = field(default_factory=dict)
+    
+    def __bool__(self) -> bool:
+        return self.success
 
 
 class ToolRouter:
@@ -112,35 +125,78 @@ class ToolRouter:
         """
         return self._builtin_tools.copy()
     
-    async def execute(self, tool_name: str, params: typing.Dict[str, typing.Any]) -> typing.Any:
+    async def execute(
+        self, 
+        tool_name: str, 
+        params: typing.Dict[str, typing.Any],
+        agent_id: typing.Optional[str] = None,
+        user_id: typing.Optional[str] = None,
+    ) -> typing.Any:
         """
         执行工具
         
         Args:
             tool_name: 工具名称
             params: 工具参数
+            agent_id: Agent ID（用于多租户隔离，可选）
+            user_id: 用户 ID（用于多租户隔离，可选）
             
         Returns:
             工具执行结果
             
-        Raises:
-            KeyError: 工具不存在
-            Exception: 执行失败
+        Returns:
+            ToolResult: 执行结果
         """
+        logger.debug(f"Executing tool: {tool_name} (agent_id={agent_id}, user_id={user_id})")
+        
+        # 检查工具是否存在
         if tool_name not in self._builtin_tools:
-            raise KeyError(f"Tool not found: {tool_name}")
+            return ToolResult(
+                success=False,
+                error=f"Tool not found: {tool_name}",
+                metadata={"tool_name": tool_name, "agent_id": agent_id, "user_id": user_id},
+            )
         
         tool = self._builtin_tools[tool_name]
         
-        # 根据工具类型选择执行方式
-        if hasattr(tool, 'is_mcp') and tool.is_mcp:
-            return await self._execute_mcp(tool, params)
-        elif hasattr(tool, 'is_skill') and tool.is_skill:
-            return await self._execute_skill(tool, params)
-        elif self._execution_engine:
-            return await self._execute_engine(tool, params)
-        else:
-            return await self._execute_builtin(tool, params)
+        # 注入隔离上下文到参数（如果工具支持）
+        if agent_id or user_id:
+            params = params.copy()
+            if agent_id:
+                params["_agent_id"] = agent_id
+            if user_id:
+                params["_user_id"] = user_id
+        
+        try:
+            # 根据工具类型选择执行方式
+            if hasattr(tool, 'is_mcp') and tool.is_mcp:
+                result = await self._execute_mcp(tool, params)
+            elif hasattr(tool, 'is_skill') and tool.is_skill:
+                result = await self._execute_skill(tool, params)
+            elif self._execution_engine:
+                result = await self._execute_engine(tool, params)
+            else:
+                result = await self._execute_builtin(tool, params)
+            
+            return ToolResult(
+                success=True,
+                result=result,
+                metadata={"tool_name": tool_name, "agent_id": agent_id, "user_id": user_id},
+            )
+        except KeyError as e:
+            logger.error(f"Tool not found: {tool_name}")
+            return ToolResult(
+                success=False,
+                error=f"Tool not found: {tool_name}",
+                metadata={"tool_name": tool_name, "agent_id": agent_id, "user_id": user_id},
+            )
+        except Exception as e:
+            logger.error(f"Tool execution failed: {tool_name}, {e}")
+            return ToolResult(
+                success=False,
+                error=str(e),
+                metadata={"tool_name": tool_name, "agent_id": agent_id, "user_id": user_id},
+            )
     
     async def _execute_mcp(self, tool: typing.Any, params: typing.Dict[str, typing.Any]) -> typing.Any:
         """

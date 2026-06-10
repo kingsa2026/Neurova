@@ -153,6 +153,46 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             del self._requests[ip]
 
 
+def _load_cors_origins_from_config() -> list:
+    """
+    从配置文件加载 CORS origins
+    
+    优先级:
+    1. 环境变量 NEUROVA_CORS_ORIGINS
+    2. 配置文件 config/cors.json
+    3. 默认值
+    """
+    import os as _os
+    import json as _json
+    from pathlib import Path
+
+    # 1. 检查环境变量
+    cors_origins_env = _os.getenv("NEUROVA_CORS_ORIGINS", "")
+    if cors_origins_env:
+        return [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+
+    # 2. 检查配置文件
+    config_file = Path(__file__).parent.parent.parent / "config" / "cors.json"
+    if config_file.exists():
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                config = _json.load(f)
+                if "origins" in config and config["origins"]:
+                    return config["origins"]
+        except Exception as e:
+            logger.warning(f"Failed to load CORS config from file: {e}")
+
+    # 3. 默认值（包含前端 dev server 端口 8100）
+    return [
+        "http://localhost:8100",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:8100",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
+
+
 def setup_middleware(app: FastAPI) -> None:
     """
     设置所有中间件
@@ -160,13 +200,16 @@ def setup_middleware(app: FastAPI) -> None:
     Args:
         app: FastAPI 应用实例
     """
+    # CORS 配置 — 支持环境变量、配置文件、默认值三种方式
+    cors_origins = _load_cors_origins_from_config()
+
     # CORS 中间件
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
     )
 
     # 安全响应头

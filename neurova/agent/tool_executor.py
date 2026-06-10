@@ -68,22 +68,27 @@ class ToolExecutor:
 
     async def execute_text_tool_calls(self, reply: str, user_input: str) -> str:
         """
-        解析 LLM 回复中的 [TOOL_CALL:name(params)] 格式并执行工具
-        API 不支持原生 function calling 的降级通路
+        解析 LLM 回复中的文本工具调用并执行
+
+        支持多种格式（按优先级尝试）:
+        1. [TOOL_CALL:name(params)] — 系统指令格式
+        2. ```json\n{"function": ...}\n``` — JSON 代码块格式
+        3. ```\nTOOL_CALL:name(params)\n``` — 代码块中的系统格式
+        4. function_name(arg1, arg2) — 自然函数调用格式
         """
-        pattern = r'\[TOOL_CALL:([\w:.\-]+)\((.+?)\)\]'
-        matches = re.findall(pattern, reply)
+        tool_calls = self._parse_tool_calls_multi_strategy(reply)
         logger.info(
-            f"[TOOL_PARSE] 检查回复中是否有工具调用: {len(matches)} 个匹配, "
+            f"[TOOL_PARSE] 检查回复中是否有工具调用: {len(tool_calls)} 个匹配, "
             f"回复前100字: {reply[:100]}"
         )
-        if not matches:
+        if not tool_calls:
             return reply
 
         results = []
-        for tool_name, params_str in matches:
-            logger.info(f"🔧 解析到文本工具调用: {tool_name}({params_str})")
-            params = self._parse_params(params_str)
+        for tc in tool_calls:
+            tool_name = tc["name"]
+            params = tc.get("params", {})
+            logger.info(f"🔧 解析到文本工具调用: {tool_name}({params})")
 
             # 记录工具调用
             self._ensure_messages_list().append({
@@ -165,7 +170,7 @@ class ToolExecutor:
                 results.append(f"\n\n**{tool_name} 结果**: 执行出错: {e}")
 
         # 移除原文中的工具调用标记，追加结果
-        clean_reply = re.sub(pattern, '', reply).strip()
+        clean_reply = self._strip_tool_calls_from_text(reply).strip()
         if results:
             clean_reply += "\n".join(results)
         return clean_reply
@@ -466,6 +471,128 @@ class ToolExecutor:
                 )
             except Exception as e:
                 logger.warning(f"进化系统反馈失败: {e}")
+
+    # ================================================================
+    # 多策略文本工具调用解析
+    # ================================================================
+
+    def _parse_tool_calls_multi_strategy(self, text: str) -> List[Dict[str, Any]]:
+        """多策略解析 LLM 回复中的工具调用
+
+        按优先级尝试:
+        1. [TOOL_CALL:name(params)] — 系统指令格式
+        2. ```json\n{"function": ...}\n``` — JSON 代码块
+        3. ```\nTOOL_CALL:name(params)\n``` — 代码块中的系统格式
+        4. function_name(arg1, arg2) — 自然函数调用
+
+        Returns:
+            [{"name": "tool_name", "params": {...}}, ...]
+        """
+        results = []
+        seen_names = set()
+
+        # Strategy 1: [TOOL_CALL:name(params)]
+        pattern1 = r'\[TOOL_CALL:([\w:.\-]+)\((.+?)\)\]'
+        for m in re.finditer(pattern1, text):
+            name, params_str = m.group(1), m.group(2)
+            if name not in seen_names:
+                results.append({"name": name, "params": self._parse_params(params_str)})
+                seen_names.add(name)
+
+        if results:
+            return results
+
+        # Strategy 2: ```json ... ``` blocks with {"function": ...}
+        json_blocks = re.findall(r'```(?:json)?\s*(.*?)\s*```', text, re.DOTALL)
+        for block in json_blocks:
+            try:
+                data = json.loads(block)
+                items = data if isinstance(data, list) else [data]
+                for item in items:
+                    if isinstance(item, dict):
+                        # {"function": "name", "arguments": {...}}
+                        if "function" in item:
+                            func = item["function"]
+                            if isinstance(func, str):
+                                name = func
+                                params = item.get("arguments", item.get("params", {}))
+                            elif isinstance(func, dict):
+                                name = func.get("name", "")
+                                params = func.get("arguments", func.get("params", {}))
+                            else:
+                                continue
+                            if name and name not in seen_names:
+                                if isinstance(params, str):
+                                    params = self._parse_params(params)
+                                results.append({"name": name, "params": params or {}})
+                                seen_names.add(name)
+                        # {"tool": "name", "args": {...}}
+                        elif "tool" in item:
+                            name = item["tool"]
+                            params = item.get("args", item.get("arguments", {}))
+                            if name and name not in seen_names:
+                                if isinstance(params, str):
+                                    params = self._parse_params(params)
+                                results.append({"name": name, "params": params or {}})
+                                seen_names.add(name)
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        if results:
+            return results
+
+        # Strategy 3: ``` ... TOOL_CALL:name(params) ... ``` (code blocks)
+        code_blocks = re.findall(r'```\s*(.*?)\s*```', text, re.DOTALL)
+        for block in code_blocks:
+            for m in re.finditer(pattern1, block):
+                name, params_str = m.group(1), m.group(2)
+                if name not in seen_names:
+                    results.append({"name": name, "params": self._parse_params(params_str)})
+                    seen_names.add(name)
+
+        if results:
+            return results
+
+        # Strategy 4: Natural function call — tool_name(arg1, arg2)
+        # Only match known tool names to avoid false positives
+        known_tools = self._get_known_tool_names()
+        if known_tools:
+            pattern4 = r'(?:^|\s)(' + '|'.join(re.escape(t) for t in known_tools) + r')\(([^)]*)\)'
+            for m in re.finditer(pattern4, text):
+                name, params_str = m.group(1), m.group(2)
+                if name not in seen_names:
+                    results.append({"name": name, "params": self._parse_params(params_str)})
+                    seen_names.add(name)
+
+        return results
+
+    def _strip_tool_calls_from_text(self, text: str) -> str:
+        """从文本中移除所有已识别的工具调用标记"""
+        # Remove [TOOL_CALL:...] patterns
+        text = re.sub(r'\[TOOL_CALL:[\w:.\-]+\([^)]*\)\]', '', text)
+        # Remove ```json ... ``` blocks that contained tool calls
+        text = re.sub(r'```(?:json)?\s*\{[^`]*"function"[^`]*\}\s*```', '', text, flags=re.DOTALL)
+        text = re.sub(r'```(?:json)?\s*\[[^`]*"function"[^`]*\]\s*```', '', text, flags=re.DOTALL)
+        return text.strip()
+
+    def _get_known_tool_names(self) -> List[str]:
+        """获取已知工具名称列表（用于自然函数调用匹配）"""
+        names = set()
+        # SkillRegistry
+        if self._skill_registry:
+            try:
+                for skill in self._skill_registry.list_skills():
+                    names.add(skill.name)
+            except Exception:
+                pass
+        # Built-in tools
+        builtin = [
+            "memory_search", "file_read", "file_write", "file_create",
+            "file_delete", "file_edit", "computer_screenshot", "computer_click",
+            "computer_type", "computer_scroll", "computer_shell", "emotion_analyze",
+        ]
+        names.update(builtin)
+        return sorted(names)
 
     # ================================================================
     # 辅助方法

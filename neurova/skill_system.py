@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
+
 class SkillStatus(Enum):
     """Skill 状态"""
     ACTIVE = "active"
@@ -256,9 +258,10 @@ class FileOperationSkill(Skill):
 class SkillRegistry:
     """Skill 注册表"""
 
-    def __init__(self):
+    def __init__(self, runtime_manager=None):
         self._skills: Dict[str, Skill] = {}
         self._event_handlers: List[Callable] = []
+        self._runtime_manager = runtime_manager
 
     def register(self, skill: Skill):
         """注册 Skill"""
@@ -306,6 +309,99 @@ class SkillRegistry:
             # 触发错误事件
             self._emit_event("error", skill_name, {"error": str(e)})
             return SkillResult(success=False, error=str(e))
+
+    @property
+    def runtime_manager(self):
+        """获取 RuntimeManager（延迟初始化）"""
+        if self._runtime_manager is None:
+            try:
+                from neurova.execution_layers import get_runtime_manager
+                self._runtime_manager = get_runtime_manager()
+            except ImportError:
+                logger.debug("execution_layers 模块不可用")
+        return self._runtime_manager
+
+    async def execute_skill_isolated(
+        self,
+        skill_name: str,
+        params: Dict[str, Any],
+        context: Optional[Dict] = None,
+        runtime_type: str = "local",
+    ) -> SkillResult:
+        """
+        在隔离运行时中执行 Skill
+
+        通过 RuntimeManager 在独立运行时（Local/Docker）中执行技能，
+        提供进程级隔离，防止技能崩溃影响主进程。
+
+        Args:
+            skill_name: 技能名称
+            params: 技能参数
+            context: 执行上下文
+            runtime_type: 运行时类型（local / docker）
+        """
+        start_time = time.time()
+
+        skill = self.get_skill(skill_name)
+        if not skill:
+            return SkillResult(success=False, error=f"Skill {skill_name} 不存在")
+
+        rm = self.runtime_manager
+        if rm is None:
+            logger.debug("RuntimeManager 不可用，降级为普通执行")
+            return await self.execute_skill(skill_name, params, context)
+
+        try:
+            from neurova.execution_layers import RuntimeType, RuntimeFactory
+
+            rt = RuntimeType.DOCKER if runtime_type == "docker" else RuntimeType.LOCAL
+            runtime = RuntimeFactory.create(rt, runtime_id=f"skill_{skill_name}_{int(time.time())}")
+            await runtime.start()
+
+            try:
+                import json as _json
+                import os as _os
+                exec_env = {
+                    "NEUROVA_SKILL_NAME": skill_name,
+                    "NEUROVA_SKILL_ARGS": _json.dumps(params),
+                }
+                if context:
+                    exec_env["NEUROVA_SKILL_CONTEXT"] = _json.dumps(context)
+
+                exec_result = await runtime.exec(
+                    command="python",
+                    args=["-c", (
+                        "import asyncio, json, os; "
+                        f"from neurova.skill_system import SkillRegistry; "
+                        f"args = json.loads(os.environ.get('NEUROVA_SKILL_ARGS', '{{}}')); "
+                        f"result = asyncio.run(SkillRegistry().execute_skill('{skill_name}', args)); "
+                        "print(json.dumps({'success': result.success, 'data': result.data}))"
+                    )],
+                    env=exec_env,
+                    timeout=params.get("timeout", 60),
+                )
+
+                duration_ms = (time.time() - start_time) * 1000
+
+                if exec_result.success:
+                    return SkillResult(
+                        success=True,
+                        data={"stdout": exec_result.stdout, "runtime_type": runtime_type},
+                        execution_time=duration_ms,
+                    )
+                else:
+                    return SkillResult(
+                        success=False,
+                        error=exec_result.stderr or exec_result.error or "Isolated execution failed",
+                        execution_time=duration_ms,
+                    )
+            finally:
+                await runtime.stop()
+
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            logger.error(f"隔离执行 Skill 失败: {e}")
+            return await self.execute_skill(skill_name, params, context)
 
     def add_event_handler(self, handler: Callable):
         """添加事件处理器"""

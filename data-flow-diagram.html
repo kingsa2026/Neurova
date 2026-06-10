@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neurova 数据流程图</title>
+    <style>
+      :root {
+        --c-bg: #f8fafc;
+        --c-canvas: #ffffff;
+        --c-border: #cbd5e1;
+        --c-text-main: #0f172a;
+        --c-text-sub: #64748b;
+        --c-red: #ef4444;
+        --c-green: #22c55e;
+        --c-yellow: #eab308;
+        --c-blue: #3b82f6;
+        --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        --font-mono: 'SF Mono', Monaco, Consolas, monospace;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background: var(--c-bg);
+        font-family: var(--font-ui);
+        color: var(--c-text-main);
+        padding: 40px;
+        line-height: 1.5;
+      }
+
+      .diagram-canvas {
+        background: var(--c-canvas);
+        border: 2px solid var(--c-border);
+        padding: 32px;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+
+      .diagram-header {
+        border-bottom: 1px solid var(--c-border);
+        padding-bottom: 16px;
+        margin-bottom: 24px;
+      }
+
+      .diagram-title {
+        font-size: 24px;
+        font-weight: 600;
+        color: var(--c-text-main);
+      }
+
+      .diagram-subtitle {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--c-text-sub);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-top: 4px;
+      }
+
+      .flow-container {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      .flow-section {
+        border: 1px solid var(--c-border);
+        padding: 16px;
+        background: var(--c-canvas);
+      }
+
+      .section-header {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--c-text-main);
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--c-border);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .flow-steps {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .step-node {
+        background: var(--c-canvas);
+        border: 1px solid var(--c-border);
+        padding: 8px 12px;
+        font-size: 12px;
+        min-width: 120px;
+        position: relative;
+      }
+
+      .step-node.active {
+        border-color: var(--c-blue);
+        background: #eff6ff;
+      }
+
+      .step-node.error {
+        border-color: var(--c-red);
+        background: #fef2f2;
+      }
+
+      .step-node.warning {
+        border-color: var(--c-yellow);
+        background: #fefce8;
+      }
+
+      .step-title {
+        font-weight: 600;
+        margin-bottom: 4px;
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--c-text-sub);
+      }
+
+      .step-content {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--c-text-main);
+      }
+
+      .connector {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--c-text-sub);
+        font-size: 20px;
+        margin: 4px 0;
+      }
+
+      .connector.dashed {
+        border-top: 1px dashed var(--c-border);
+        width: 100%;
+        margin: 8px 0;
+      }
+
+      .badge {
+        display: inline-block;
+        font-size: 10px;
+        font-family: var(--font-mono);
+        padding: 2px 6px;
+        border: 1px solid var(--c-text-main);
+        text-transform: uppercase;
+      }
+
+      .badge--filled {
+        background: var(--c-text-main);
+        color: var(--c-canvas);
+      }
+
+      .badge--error {
+        background: var(--c-red);
+        color: var(--c-canvas);
+        border-color: var(--c-red);
+      }
+
+      .badge--warning {
+        background: var(--c-yellow);
+        color: var(--c-text-main);
+        border-color: var(--c-yellow);
+      }
+
+      .badge--success {
+        background: var(--c-green);
+        color: var(--c-canvas);
+        border-color: var(--c-green);
+      }
+
+      .breakpoint-list {
+        margin-top: 16px;
+        padding: 12px;
+        border: 1px solid var(--c-red);
+        background: #fef2f2;
+      }
+
+      .breakpoint-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--c-red);
+        margin-bottom: 8px;
+        text-transform: uppercase;
+      }
+
+      .breakpoint-item {
+        font-size: 11px;
+        margin-bottom: 4px;
+        padding-left: 8px;
+        border-left: 2px solid var(--c-red);
+      }
+
+      .fixed-item {
+        border-left-color: var(--c-green);
+      }
+
+      .data-flow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        margin: 4px 0;
+        padding: 4px 8px;
+        background: #f8fafc;
+        border: 1px solid var(--c-border);
+      }
+
+      .data-flow .arrow {
+        color: var(--c-text-sub);
+      }
+
+      .mono {
+        font-family: var(--font-mono);
+        font-size: 12px;
+      }
+
+      .legend {
+        display: flex;
+        gap: 16px;
+        margin-top: 24px;
+        padding: 12px;
+        border: 1px solid var(--c-border);
+        font-size: 11px;
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .legend-color {
+        width: 12px;
+        height: 12px;
+        border: 1px solid var(--c-border);
+      }
+
+      .grid-layout {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 16px;
+        margin-top: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="diagram-canvas">
+      <div class="diagram-header">
+        <h1 class="diagram-title">Neurova 数据流程图</h1>
+        <p class="diagram-subtitle">AGENT CHAT PIPELINE DATA FLOW & BREAKPOINT ANALYSIS</p>
+      </div>
+
+      <div class="flow-container">
+        <!-- 主流程 -->
+        <div class="flow-section">
+          <div class="section-header">1. 主对话流程 (ChatPipeline)</div>
+          <div class="flow-steps">
+            <div class="step-node active">
+              <div class="step-title">用户输入</div>
+              <div class="step-content">user_input</div>
+            </div>
+            <div class="connector">→</div>
+            <div class="step-node active">
+              <div class="step-title">Agent.chat()</div>
+              <div class="step-content">ChatContext</div>
+            </div>
+            <div class="connector">→</div>
+            <div class="step-node active">
+              <div class="step-title">ChatPipeline</div>
+              <div class="step-content">execute()</div>
+            </div>
+            <div class="connector">→</div>
+            <div class="step-node">
+              <div class="step-title">Step 0</div>
+              <div class="step-content">活动追踪</div>
+            </div>
+            <div class="connector">→</div>
+            <div class="step-node">
+              <div class="step-title">Step 0.5</div>
+              <div class="step-content">Pre-LLM检查</div>
+            </div>
+            <div class="connector">→</div>
+            <div class="step-node active">
+              <div class="step-title">Step 1</div>
+              <div class="step-content">检索+上下文</div>
+            </div>
+            <div class="connector">→</div>
+            <div class="step-node">
+              <div class="step-title">Step 2</div>
+              <div class="step-content">Evocate注入</div>
+            </div>
+            <div class="connector">→</div>
+            <div class="step-node active">
+              <div class="step-title">Step 3</div>
+              <div class="step-content">LLM调用</div>
+            </div>
+            <div class="connector">→</div>
+            <div class="step-node">
+              <div class="step-title">Step 4</div>
+              <div class="step-content">后处理</div>
+            </div>
+            <div class="connector">→</div>
+            <div class="step-node active">
+              <div class="step-title">结果</div>
+              <div class="step-content">Dict[str, Any]</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 1 详细流程 -->
+        <div class="flow-section">
+          <div class="section-header">2. 检索与上下文构建 (Step 1)</div>
+          <div class="grid-layout">
+            <div class="step-node active">
+              <div class="step-title">统一检索</div>
+              <div class="step-content">UnifiedRetriever<br/>或 MoE 降级</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">结晶经验检索</div>
+              <div class="step-content">PatternCrystallizer</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">上下文构建</div>
+              <div class="step-content">ContextOrchestrator</div>
+            </div>
+          </div>
+
+          <div class="data-flow">
+            <span class="mono">UnifiedRetriever.retrieve()</span>
+            <span class="arrow">→</span>
+            <span class="mono">relevant_memories: List[Dict]</span>
+            <span class="arrow">→</span>
+            <span class="mono">ContextOrchestrator.build_context()</span>
+            <span class="arrow">→</span>
+            <span class="mono">context: List[Dict]</span>
+          </div>
+
+          <div class="data-flow">
+            <span class="mono">PatternCrystallizer.retrieve()</span>
+            <span class="arrow">→</span>
+            <span class="mono">crystallized_patterns: List[Dict]</span>
+            <span class="arrow">→</span>
+            <span class="mono">注入系统提示</span>
+          </div>
+        </div>
+
+        <!-- Step 3 详细流程 -->
+        <div class="flow-section">
+          <div class="section-header">3. LLM 调用流程 (Step 3)</div>
+          <div class="grid-layout">
+            <div class="step-node active">
+              <div class="step-title">构建工具列表</div>
+              <div class="step-content">ContextOrchestrator<br/>build_tools_for_llm()</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">Agent Loop</div>
+              <div class="step-content">predict_step()<br/>或 Legacy fallback</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">工具执行</div>
+              <div class="step-content">ToolExecutor<br/>execute_text_tool_calls()</div>
+            </div>
+          </div>
+
+          <div class="data-flow">
+            <span class="mono">tools_for_llm: List[Dict]</span>
+            <span class="arrow">→</span>
+            <span class="mono">loop.predict_step(context, tools)</span>
+            <span class="arrow">→</span>
+            <span class="mono">response.content</span>
+            <span class="arrow">→</span>
+            <span class="mono">tool_executor.execute_text_tool_calls()</span>
+          </div>
+        </div>
+
+        <!-- 记忆系统流程 -->
+        <div class="flow-section">
+          <div class="section-header">4. 记忆系统数据流</div>
+          <div class="grid-layout">
+            <div class="step-node active">
+              <div class="step-title">记忆检索</div>
+              <div class="step-content">UnifiedRetriever<br/>多通道语义检索</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">记忆保存</div>
+              <div class="step-content">MemoryAgent<br/>remember()</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">工具记忆</div>
+              <div class="step-content">ToolMemoryIntegration<br/>肌肉记忆闭环</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">结晶经验</div>
+              <div class="step-content">PatternCrystallizer<br/>模式固化</div>
+            </div>
+          </div>
+
+          <div class="data-flow">
+            <span class="mono">用户输入</span>
+            <span class="arrow">→</span>
+            <span class="mono">UnifiedRetriever.retrieve()</span>
+            <span class="arrow">→</span>
+            <span class="mono">relevant_memories</span>
+            <span class="arrow">→</span>
+            <span class="mono">注入上下文</span>
+          </div>
+
+          <div class="data-flow">
+            <span class="mono">对话完成</span>
+            <span class="arrow">→</span>
+            <span class="mono">MemoryAgent.remember()</span>
+            <span class="arrow">→</span>
+            <span class="mono">MemoryManager</span>
+            <span class="arrow">→</span>
+            <span class="mono">SQLite/向量存储</span>
+          </div>
+        </div>
+
+        <!-- 工具执行流程 -->
+        <div class="flow-section">
+          <div class="section-header">5. 工具执行流程</div>
+          <div class="grid-layout">
+            <div class="step-node active">
+              <div class="step-title">工具记忆检查</div>
+              <div class="step-content">ToolMemoryIntegration<br/>check_tool_memory()</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">自动执行</div>
+              <div class="step-content">ToolExecutor<br/>execute_from_memory_async()</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">文本工具调用</div>
+              <div class="step-content">ToolExecutor<br/>execute_text_tool_calls()</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">工具记录</div>
+              <div class="step-content">record_tool_usage()</div>
+            </div>
+          </div>
+
+          <div class="data-flow">
+            <span class="mono">user_input</span>
+            <span class="arrow">→</span>
+            <span class="mono">check_tool_memory()</span>
+            <span class="arrow">→</span>
+            <span class="mono">match_by_query()</span>
+            <span class="arrow">→</span>
+            <span class="mono">auto_execute (if confidence > 0.7)</span>
+          </div>
+        </div>
+
+        <!-- 后处理流程 -->
+        <div class="flow-section">
+          <div class="section-header">6. 后处理流程 (Step 4)</div>
+          <div class="grid-layout">
+            <div class="step-node active">
+              <div class="step-title">对话历史更新</div>
+              <div class="step-content">MemoryAgent<br/>update_history()</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">轨迹记录</div>
+              <div class="step-content">TrajectoryRecorder<br/>record_event()</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">经验记录</div>
+              <div class="step-content">EvolutionOrchestrator<br/>on_experience_recorded()</div>
+            </div>
+            <div class="step-node active">
+              <div class="step-title">记忆保存</div>
+              <div class="step-content">PostChatPipeline<br/>process()</div>
+            </div>
+          </div>
+
+          <div class="data-flow">
+            <span class="mono">ctx.reply</span>
+            <span class="arrow">→</span>
+            <span class="mono">update_history()</span>
+            <span class="arrow">→</span>
+            <span class="mono">PostChatPipeline.process()</span>
+            <span class="arrow">→</span>
+            <span class="mono">ctx.result</span>
+          </div>
+        </div>
+
+        <!-- 断点分析 -->
+        <div class="flow-section">
+          <div class="section-header">7. 断点分析与修复状态</div>
+          
+          <div class="breakpoint-list">
+            <div class="breakpoint-title">已修复的断裂点</div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>对话记忆保存断裂点</strong> - agent_core.py chat() 方法中未保存对话记忆
+              <br/>修复：添加 conversation_buffer.add_user_message()/add_agent_message() 调用
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>BufferModule._on_flush 回调断裂点</strong> - 只发事件不写入存储
+              <br/>修复：添加 write_queue.enqueue_batch() + flush_to_storage() 调用
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>方法名不匹配断裂点</strong> - flush() vs flush_to_storage()
+              <br/>修复：统一使用 flush_to_storage() 方法名
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>工具记忆闭环断裂点</strong> - match() 接口对齐问题
+              <br/>修复：添加 match_by_query() 方法支持跨工具搜索
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>经验闭环断裂点</strong> - crystallizer 未注入到 EvolutionOrchestrator
+              <br/>修复：添加 crystallizer 参数 + observe() 调用
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>情感闭环断裂点</strong> - EmotionModule 缺少持久化
+              <br/>修复：添加 SQLite 持久化 + get_memories_by_emotion() 实现
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>睡眠闭环断裂点</strong> - MemoryRecord 类型转换问题
+              <br/>修复：添加 from_dict()/to_dict() 方法 + 类型转换层
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>工具层集成断裂点</strong> - ToolExecutor ↔ ToolEngine 接口不匹配
+              <br/>修复：添加 owner 参数支持多租户隔离
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 潜在风险点 -->
+        <div class="flow-section">
+          <div class="section-header">8. 潜在风险点（需监控）</div>
+          
+          <div class="breakpoint-list">
+            <div class="breakpoint-title">当前风险点</div>
+            
+            <div class="breakpoint-item warning">
+              <strong>Agent Loop 可用性</strong> - Agent Loop 系统不可用时的 fallback 逻辑
+              <br/>风险：Legacy fallback 可能丢失功能（如工具调用、思考过程）
+              <br/>状态：<span class="badge badge--warning">需监控</span>
+            </div>
+            
+            <div class="breakpoint-item warning">
+              <strong>异步操作超时</strong> - 工具自动执行超时处理
+              <br/>风险：超时后状态可能不一致（tool_decision="timeout"）
+              <br/>状态：<span class="badge badge--warning">需监控</span>
+            </div>
+            
+            <div class="breakpoint-item warning">
+              <strong>记忆检索降级</strong> - UnifiedRetriever 不可用时的 MoE 降级
+              <br/>风险：降级路径可能影响检索质量
+              <br/>状态：<span class="badge badge--warning">需监控</span>
+            </div>
+            
+            <div class="breakpoint-item warning">
+              <strong>结晶经验检索失败</strong> - PatternCrystallizer 异常处理
+              <br/>风险：异常时跳过结晶经验注入，可能影响回复质量
+              <br/>状态：<span class="badge badge--warning">需监控</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 图例 -->
+        <div class="legend">
+          <div class="legend-item">
+            <div class="legend-color" style="background: #eff6ff; border-color: var(--c-blue);"></div>
+            <span>核心流程节点</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #fef2f2; border-color: var(--c-red);"></div>
+            <span>错误状态</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #fefce8; border-color: var(--c-yellow);"></div>
+            <span>警告状态</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #f0fdf4; border-color: var(--c-green);"></div>
+            <span>已修复</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

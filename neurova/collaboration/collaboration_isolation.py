@@ -961,6 +961,38 @@ class CollaborationIsolationManager:
             logger.info(f"Added workflow {workflow.workflow_id} to project {project_id}")
             return True
     
+    def list_projects(self, limit: Optional[int] = None, offset: int = 0,
+                      include_deleted: bool = False) -> List[Project]:
+        """
+        列出所有项目（简化接口，用于模板列表等场景）
+        
+        Args:
+            limit: 返回数量限制，None表示不限制
+            offset: 偏移量
+            include_deleted: 是否包含已删除项目
+            
+        Returns:
+            项目列表
+        """
+        projects = []
+        
+        with self._lock:
+            for project in self._projects.values():
+                if not include_deleted and project.status == ProjectStatus.DELETED:
+                    continue
+                projects.append(project)
+        
+        # 按创建时间倒序排列
+        projects.sort(key=lambda p: p.created_at or 0, reverse=True)
+        
+        # 应用分页
+        if offset > 0:
+            projects = projects[offset:]
+        if limit is not None:
+            projects = projects[:limit]
+        
+        return projects
+    
     def admin_list_all_projects(self, admin_id: str,
                                include_deleted: bool = False) -> List[Project]:
         """

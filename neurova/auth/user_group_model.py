@@ -503,13 +503,16 @@ class UserGroupManager:
                 return group
         return None
     
-    def list_groups(self, include_system: bool = True, include_inactive: bool = False) -> List[UserGroup]:
+    def list_groups(self, include_system: bool = True, include_inactive: bool = False,
+                    limit: Optional[int] = None, offset: int = 0) -> List[UserGroup]:
         """
         列出用户组
         
         Args:
             include_system: 是否包含系统组
             include_inactive: 是否包含非活跃组
+            limit: 返回数量限制，None表示不限制
+            offset: 偏移量
             
         Returns:
             用户组列表
@@ -522,7 +525,15 @@ class UserGroupManager:
                 continue
             groups.append(group)
         
-        return sorted(groups, key=lambda g: g.metadata.get('priority', 100) if g.metadata else 100)
+        groups = sorted(groups, key=lambda g: g.metadata.get('priority', 100) if g.metadata else 100)
+        
+        # 应用分页
+        if offset > 0:
+            groups = groups[offset:]
+        if limit is not None:
+            groups = groups[:limit]
+        
+        return groups
     
     def create_group(
         self,

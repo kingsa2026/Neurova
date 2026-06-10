@@ -46,9 +46,13 @@ class AgentConfig:
         tts_engine: str = "mock",  # TTS 引擎类型 (edge/moss_nano/mock)
         tts_voice: str = "mock",  # 音色名称
         tts_auto_download: bool = True,  # 是否自动下载模型
+
+        # 所有权配置
+        owner_user_id: Optional[str] = None,  # 创建者用户 ID
     ):
         self.name = name
         self.agent_id = agent_id
+        self.owner_user_id = owner_user_id
 
         # 工作目录路径 - 必须由调用者提供，不使用硬编码
         if not workspace_path:

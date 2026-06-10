@@ -131,7 +131,7 @@
 - `language/models.py`
 - `language/manager.py`
 - `knowledge/storage.py`
-- `knowledge/rag/enhanced_retrieval.py`
+- ~~`knowledge/rag/enhanced_retrieval.py`~~ ✅ 已清理
 - `analytics/models.py`
 - `analytics/collector.py`
 - `computer_use/vision_lite.py`

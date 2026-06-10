@@ -18,6 +18,7 @@ import inspect
 import logging
 from pathlib import Path
 import threading
+import time
 import typing
 
 from neurova.skills.models import Skill
@@ -383,3 +384,84 @@ class SkillRegistry:
             bool: 是否已注册
         """
         return skill_id in self._skills
+
+    async def execute_skill_isolated(
+        self,
+        skill_id: str,
+        params: typing.Dict[str, typing.Any],
+        runtime_type: str = "local",
+    ) -> typing.Dict[str, typing.Any]:
+        """
+        在隔离运行时中执行技能
+
+        通过 ExecutionLayers RuntimeManager 在独立运行时中执行技能，
+        提供进程级隔离，防止技能崩溃影响主进程。
+
+        Args:
+            skill_id: 技能ID
+            params: 技能参数
+            runtime_type: 运行时类型（local / docker）
+
+        Returns:
+            执行结果字典
+        """
+        start_time = time.time()
+
+        skill_info = self.get_skill(skill_id)
+        if skill_info is None:
+            return {"success": False, "error": f"技能 {skill_id} 未注册"}
+
+        try:
+            from neurova.execution_layers import RuntimeType, RuntimeFactory
+
+            rt = RuntimeType.DOCKER if runtime_type == "docker" else RuntimeType.LOCAL
+            runtime = RuntimeFactory.create(rt, runtime_id=f"skill_{skill_id}_{int(time.time())}")
+            await runtime.start()
+
+            try:
+                import json as _json
+                import os as _os
+                exec_env = {
+                    "NEUROVA_SKILL_ID": skill_id,
+                    "NEUROVA_SKILL_ARGS": _json.dumps(params),
+                }
+
+                exec_result = await runtime.exec(
+                    command="python",
+                    args=["-c", (
+                        "import asyncio, json, os; "
+                        f"from neurova.skills.registry import SkillRegistry; "
+                        f"args = json.loads(os.environ.get('NEUROVA_SKILL_ARGS', '{{}}')); "
+                        f"result = SkillRegistry().execute_skill('{skill_id}', args); "
+                        "print(json.dumps({'success': True, 'data': result}))"
+                    )],
+                    env=exec_env,
+                    timeout=params.get("timeout", 60),
+                )
+
+                duration_ms = (time.time() - start_time) * 1000
+
+                if exec_result.success:
+                    return {
+                        "success": True,
+                        "data": {"stdout": exec_result.stdout, "runtime_type": runtime_type},
+                        "execution_time": duration_ms,
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": exec_result.stderr or exec_result.error or "隔离执行失败",
+                        "execution_time": duration_ms,
+                    }
+            finally:
+                await runtime.stop()
+
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            self._logger.error(f"隔离执行技能失败: {e}")
+            # 降级为普通执行
+            try:
+                result = self.execute_skill(skill_id, params)
+                return {"success": True, "data": result, "execution_time": duration_ms}
+            except Exception as inner_e:
+                return {"success": False, "error": str(inner_e), "execution_time": duration_ms}

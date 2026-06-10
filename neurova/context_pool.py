@@ -1181,7 +1181,6 @@ class SemanticMatchDrawer:
         
         # 创建截断后的副本
         return ContextInput(
-            id=drop.id if hasattr(drop, 'id') else None,
             source=drop.source,
             content=truncated_content + "...",
             priority=drop.priority,

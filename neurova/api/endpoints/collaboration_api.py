@@ -327,3 +327,48 @@ async def start_collaboration(
     except Exception as e:
         logger.exception(f"Error starting collaboration: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to start collaboration: {str(e)}")
+
+
+@router.get("/history")
+async def get_collaboration_history(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    """获取协作历史"""
+    if get_collaboration_manager is None:
+        raise HTTPException(status_code=503, detail="Collaboration service not available")
+    
+    try:
+        manager = get_collaboration_manager()
+        
+        # 获取所有项目作为历史记录
+        projects = manager.list_projects(limit=limit, offset=offset)
+        
+        # 转换为历史记录格式
+        history = []
+        for project in projects:
+            history.append({
+                "id": project.project_id,
+                "name": project.name,
+                "description": project.description,
+                "status": project.status.value if hasattr(project.status, 'value') else str(project.status),
+                "created_at": project.created_at,
+                "updated_at": project.updated_at,
+                "members": list(project.members.keys()),
+                "owner_id": project.owner_id,
+            })
+        
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "history": history,
+                "total": len(history),
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting collaboration history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get collaboration history: {str(e)}")

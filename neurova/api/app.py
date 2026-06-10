@@ -227,7 +227,7 @@ def _initialize_components(app_state: AppState) -> None:
     try:
         from neurova.tts.manager import TTSManager, TTSConfig
         tts_config = TTSConfig(
-            engine=app_state.config.get("tts_engine", "edge-tts"),
+            engine=app_state.config.get("tts_engine", "auto"),
             model_path=app_state.config.get("tts_model_path"),  # None = 自动检测
             tokenizer_path=app_state.config.get("tts_tokenizer_path"),  # None = 自动检测
             auto_download=app_state.config.get("tts_auto_download", False),

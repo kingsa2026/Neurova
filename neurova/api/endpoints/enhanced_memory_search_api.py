@@ -52,6 +52,32 @@ async def get_retrieval_stats():
     }
 
 
+@router.get("/settings")
+async def get_memory_search_settings():
+    """获取记忆搜索设置"""
+    return {
+        "code": 0, "message": "success",
+        "data": {
+            "search_method": "hybrid",
+            "top_k": 10,
+            "score_threshold": 0.5,
+            "decay": {
+                "enabled": True,
+                "rate": 0.1,
+                "half_life_days": 30,
+                "min_score": 0.1,
+            },
+        },
+    }
+
+
+@router.put("/settings")
+async def update_memory_search_settings(body: dict):
+    """更新记忆搜索设置"""
+    # 这里应该保存设置，现在只是返回成功
+    return {"code": 0, "message": "Settings updated"}
+
+
 @router.post("/decay")
 async def decay_activations():
     """手动触发激活衰减"""

@@ -31,7 +31,42 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 模块级导入（避免重复导入）
-from neurova.api.auth import create_access_token, create_refresh_token, decode_token
+from neurova.api.auth import create_access_token, create_refresh_token, decode_token, hash_password, verify_password, get_current_user as auth_get_current_user, get_optional_user
+from neurova.auth.user_model import UserModel
+from neurova.auth.verification_code import VerificationCodeModel, VerificationType
+from neurova.auth.invitation_code import InvitationCodeModel, InvitationCodeType
+
+# Token 黑名单（生产环境应使用 Redis 或数据库）
+_token_blacklist: set = set()
+
+# 用户模型实例（单例）
+_user_model: Optional[UserModel] = None
+_verification_code_model: Optional[VerificationCodeModel] = None
+_invitation_code_model: Optional[InvitationCodeModel] = None
+
+
+def _get_user_model() -> UserModel:
+    """获取用户模型实例"""
+    global _user_model
+    if _user_model is None:
+        _user_model = UserModel()
+    return _user_model
+
+
+def _get_verification_code_model() -> VerificationCodeModel:
+    """获取验证码模型实例"""
+    global _verification_code_model
+    if _verification_code_model is None:
+        _verification_code_model = VerificationCodeModel()
+    return _verification_code_model
+
+
+def _get_invitation_code_model() -> InvitationCodeModel:
+    """获取邀请码模型实例"""
+    global _invitation_code_model
+    if _invitation_code_model is None:
+        _invitation_code_model = InvitationCodeModel()
+    return _invitation_code_model
 
 
 class LoginRequest(BaseModel):
@@ -50,11 +85,19 @@ class TokenResponse(BaseModel):
 
 class UserInfo(BaseModel):
     """用户信息"""
-    user_id: str
+    id: str = ""
+    user_id: str = ""
     username: str
     email: str = ""
     role: str = "user"
     created_at: Optional[str] = None
+
+    def model_post_init(self, __context) -> None:
+        # 确保 id 和 user_id 一致（向后兼容）
+        if not self.id and self.user_id:
+            self.id = self.user_id
+        elif not self.user_id and self.id:
+            self.user_id = self.id
 
 
 class RegisterRequest(BaseModel):
@@ -90,26 +133,54 @@ async def login(request: Request, body: LoginRequest):
     request_id = _get_request_id(request)
 
     try:
-        # TODO: 实际的用户验证逻辑
-        # 这里简化处理，实际应该查询数据库
-        if body.username and body.password:
-            user_id = str(uuid.uuid4())
-
-            # 生成 token
-            access_token = create_access_token(
-                data={"sub": user_id, "username": body.username}
-            )
-            refresh_token = create_refresh_token(
-                data={"sub": user_id, "username": body.username}
-            )
-
-            return TokenResponse(
-                access_token=access_token,
-                refresh_token=refresh_token,
-                expires_in=3600,
-            )
-        else:
+        # 获取用户模型
+        user_model = _get_user_model()
+        
+        # 查找用户（用于记录失败尝试）
+        user_obj = user_model.get_user_by_username(body.username)
+        
+        # 验证用户
+        user = user_model.authenticate_user(body.username, body.password)
+        if not user:
+            logger.warning(f"Login failed for user: {body.username}")
+            
+            # 如果用户存在，增加失败尝试次数
+            if user_obj:
+                user_model.increment_failed_attempts(user_obj.id)
+            
             raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # 检查用户状态
+        if user.get("status") != "active":
+            logger.warning(f"Login attempt for inactive user: {body.username}")
+            raise HTTPException(status_code=403, detail="Account is inactive")
+        
+        # 检查失败尝试次数（可选：如果超过5次则锁定账户）
+        if user.get("failed_attempts", 0) >= 5:
+            logger.warning(f"Login attempt for locked user: {body.username}")
+            raise HTTPException(status_code=403, detail="Account is locked due to too many failed attempts")
+        
+        # 生成 token
+        access_token = create_access_token(
+            data={"sub": str(user["id"]), "username": user["username"], "role": user.get("role", "user")}
+        )
+        refresh_token = create_refresh_token(
+            data={"sub": str(user["id"]), "username": user["username"]}
+        )
+
+        # 记录登录日志
+        user_model.log_login(
+            user_id=user["id"],
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            success=True
+        )
+
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=3600,
+        )
 
     except HTTPException:
         raise
@@ -118,23 +189,46 @@ async def login(request: Request, body: LoginRequest):
         raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
 
 
+def is_token_blacklisted(token: str) -> bool:
+    """检查token是否在黑名单中"""
+    return token in _token_blacklist
+
+
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(request: Request, body: RefreshRequest):
     """刷新 Token"""
     request_id = _get_request_id(request)
 
     try:
+        # 检查 token 是否在黑名单中
+        if is_token_blacklisted(body.refresh_token):
+            raise HTTPException(status_code=401, detail="Token has been revoked")
+        
         # 解码 refresh token
         payload = decode_token(body.refresh_token)
         if not payload:
             raise HTTPException(status_code=401, detail="Invalid refresh token")
 
+        # 验证 token 类型
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+
         user_id = payload.get("sub")
         username = payload.get("username", "")
 
+        # 检查用户是否存在
+        user_model = _get_user_model()
+        user = user_model.get_user_by_id(int(user_id))
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        
+        # 检查用户状态
+        if user.status != "active":
+            raise HTTPException(status_code=403, detail="Account is inactive")
+
         # 生成新 token
         access_token = create_access_token(
-            data={"sub": user_id, "username": username}
+            data={"sub": user_id, "username": username, "role": user.role}
         )
         refresh_token = create_refresh_token(
             data={"sub": user_id, "username": username}
@@ -166,18 +260,30 @@ async def get_current_user(request: Request):
             auth_header = request.headers.get("Authorization", "")
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:]
+                
+                # 检查 token 是否在黑名单中
+                if is_token_blacklisted(token):
+                    raise HTTPException(status_code=401, detail="Token has been revoked")
+                
                 payload = decode_token(token)
                 if payload:
+                    # 验证 token 类型
+                    if payload.get("type") != "access":
+                        raise HTTPException(status_code=401, detail="Invalid token type")
+                    
                     user = {
                         "user_id": payload.get("sub", "unknown"),
                         "username": payload.get("username", "unknown"),
+                        "role": payload.get("role", "user"),
                     }
 
         if not user:
             raise HTTPException(status_code=401, detail="Not authenticated")
 
+        user_id = user.get("user_id", "unknown")
         return UserInfo(
-            user_id=user.get("user_id", "unknown"),
+            id=user_id,
+            user_id=user_id,
             username=user.get("username", "unknown"),
             email=user.get("email", ""),
             role=user.get("role", "user"),
@@ -196,32 +302,67 @@ async def register(request: Request, body: RegisterRequest):
     request_id = _get_request_id(request)
 
     try:
-        # TODO: 实际的注册逻辑
-        # 1. 验证邀请码（如果需要）
-        # 2. 检查用户名是否已存在
-        # 3. 创建用户
-        # 4. 返回 token
-
-        user_id = str(uuid.uuid4())
-
+        # 获取模型实例
+        user_model = _get_user_model()
+        verification_model = _get_verification_code_model()
+        
+        # 检查注册限流
+        ip_address = request.client.host if request.client else "unknown"
+        rate_limit_info = verification_model.check_register_rate_limit(ip_address)
+        if rate_limit_info.get("is_limited", False):
+            logger.warning(f"Register rate limited for IP: {ip_address}")
+            raise HTTPException(status_code=429, detail="Too many registration attempts. Please try again later.")
+        
+        # 1. 检查用户名是否已存在
+        existing_user = user_model.get_user_by_username(body.username)
+        if existing_user:
+            logger.warning(f"Username already exists: {body.username}")
+            # 记录注册尝试
+            verification_model.record_register_attempt(ip_address, success=False)
+            raise HTTPException(status_code=400, detail="Username already exists")
+        
+        # 3. 检查邮箱是否已存在（如果提供）
+        if body.email:
+            existing_email = user_model.get_user_by_email(body.email)
+            if existing_email:
+                logger.warning(f"Email already exists: {body.email}")
+                # 记录注册尝试
+                verification_model.record_register_attempt(ip_address, success=False)
+                raise HTTPException(status_code=400, detail="Email already exists")
+        
+        # 4. 创建用户
+        password_hash = hash_password(body.password)
+        user = user_model.create_user(
+            username=body.username,
+            password_hash=password_hash,
+            email=body.email,
+            role="user"
+        )
+        
+        # 5. 生成 token
         access_token = create_access_token(
-            data={"sub": user_id, "username": body.username}
+            data={"sub": str(user.id), "username": user.username, "role": user.role}
         )
         refresh_token = create_refresh_token(
-            data={"sub": user_id, "username": body.username}
+            data={"sub": str(user.id), "username": user.username}
         )
+        
+        # 记录成功的注册尝试
+        verification_model.record_register_attempt(ip_address, success=True)
 
         return {
             "code": 0,
             "message": "Registration successful",
             "data": {
-                "user_id": user_id,
-                "username": body.username,
+                "user_id": user.id,
+                "username": user.username,
                 "access_token": access_token,
                 "refresh_token": refresh_token,
             },
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Register error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
@@ -232,14 +373,49 @@ async def send_verification_code(request: Request, email: str = Query(...)):
     """发送注册验证码"""
     request_id = _get_request_id(request)
 
-    # TODO: 实际发送验证码逻辑
-    code = "123456"  # 测试用
-
-    return {
-        "code": 0,
-        "message": "Verification code sent",
-        "data": {"email": email},
-    }
+    try:
+        # 获取验证码模型
+        verification_model = _get_verification_code_model()
+        
+        # 检查是否可以发送验证码（限流）
+        can_send_info = verification_model.can_send_code(
+            target=email,
+            code_type=VerificationType.REGISTER,
+            cooldown=60  # 60秒冷却期
+        )
+        
+        if not can_send_info["can_send"]:
+            raise HTTPException(
+                status_code=429, 
+                detail=can_send_info["message"]
+            )
+        
+        # 生成验证码
+        code = verification_model.create_code(
+            target=email,
+            code_type=VerificationType.REGISTER,
+            expires_in=300,  # 5分钟过期
+            max_attempts=3,  # 最多尝试3次
+            length=6  # 6位验证码
+        )
+        
+        # 实际发送验证码（这里只是模拟，实际应该调用邮件服务）
+        logger.info(f"Verification code generated for {email}: {code}")
+        
+        # TODO: 实际发送邮件逻辑
+        # 例如：send_email(email, "Neurova 验证码", f"您的验证码是: {code}")
+        
+        return {
+            "code": 0,
+            "message": "Verification code sent",
+            "data": {"email": email},
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Send verification code error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to send verification code: {str(e)}")
 
 
 @router.post("/register/verify-code")
@@ -247,15 +423,49 @@ async def verify_code(request: Request, email: str = Query(...), code: str = Que
     """验证注册验证码"""
     request_id = _get_request_id(request)
 
-    # TODO: 实际验证逻辑
-    if code == "123456":
-        return {
-            "code": 0,
-            "message": "Code verified",
-            "data": {"email": email, "verified": True},
-        }
-    else:
-        raise HTTPException(status_code=400, detail="Invalid verification code")
+    try:
+        # 获取验证码模型
+        verification_model = _get_verification_code_model()
+        
+        # 验证验证码
+        is_valid = verification_model.verify_code(
+            target=email,
+            code=code,
+            code_type=VerificationType.REGISTER,
+            mark_as_used=True  # 验证成功后标记为已使用
+        )
+        
+        if is_valid:
+            return {
+                "code": 0,
+                "message": "Code verified",
+                "data": {"email": email, "verified": True},
+            }
+        else:
+            # 获取尝试次数信息
+            code_info = verification_model.get_code_info(
+                target=email,
+                code_type=VerificationType.REGISTER
+            )
+            
+            if code_info and code_info.is_used_up:
+                raise HTTPException(
+                    status_code=429, 
+                    detail="Too many failed attempts. Please request a new code."
+                )
+            elif code_info and code_info.is_expired:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Verification code has expired. Please request a new one."
+                )
+            else:
+                raise HTTPException(status_code=400, detail="Invalid verification code")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Verify code error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to verify code: {str(e)}")
 
 
 @router.post("/logout")
@@ -263,9 +473,40 @@ async def logout(request: Request):
     """用户登出"""
     request_id = _get_request_id(request)
 
-    # TODO: 实际登出逻辑（如将 token 加入黑名单）
+    try:
+        # 获取当前用户的 token
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            
+            # 将 token 加入黑名单
+            if token:
+                _token_blacklist.add(token)
+                logger.info("Token added to blacklist")
+        
+        return {
+            "code": 0,
+            "message": "Logged out successfully",
+        }
+    
+    except Exception as e:
+        logger.error(f"Logout error: {e}", exc_info=True)
+        # 即使出错也返回成功，因为登出是幂等操作
+        return {
+            "code": 0,
+            "message": "Logged out successfully",
+        }
 
-    return {
-        "code": 0,
-        "message": "Logged out successfully",
-    }
+
+class InviteRegisterRequest(BaseModel):
+    """邀请注册请求"""
+    username: str = Field(..., description="用户名")
+    password: str = Field(..., description="密码")
+    email: Optional[str] = Field(default=None, description="邮箱")
+    invite_code: str = Field(..., description="邀请码")
+
+
+@router.post("/register/invite")
+async def register_with_invite(request: Request, body: InviteRegisterRequest):
+    """邀请注册（暂未启用）"""
+    raise HTTPException(status_code=501, detail="Invitation registration is not enabled yet")

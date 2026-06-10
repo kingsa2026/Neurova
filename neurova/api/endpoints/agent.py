@@ -29,6 +29,8 @@ from fastapi import Path as FastAPIPath
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from neurova.api.auth import get_current_user
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -203,7 +205,7 @@ async def get_agent(request: Request, agent_id: str = FastAPIPath(...)):
 
 
 @router.post("", response_model=AgentInfo)
-async def create_agent(request: Request, body: CreateAgentRequest):
+async def create_agent(request: Request, body: CreateAgentRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     """创建 Agent"""
     request_id = _get_request_id(request)
 
@@ -218,6 +220,7 @@ async def create_agent(request: Request, body: CreateAgentRequest):
             agent_id=agent_id,
             enable_memory=body.enable_memory,
             workspace_path=workspace_path,
+            owner_user_id=current_user.get("user_id"),
         )
 
         agent = Agent(config=config)

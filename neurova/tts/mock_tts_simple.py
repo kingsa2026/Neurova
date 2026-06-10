@@ -44,7 +44,7 @@ class MockTTSSimple(TTSBase):
         self._logger.info("MockTTS 初始化完成")
         return True
     
-    async def synthesize(self, text: str) -> bytes:
+    async def synthesize(self, text: str, **kwargs) -> bytes:
         """
         合成语音（生成正弦波）
         

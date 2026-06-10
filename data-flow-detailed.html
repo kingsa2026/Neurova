@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neurova 详细数据流程图</title>
+    <style>
+      :root {
+        --c-bg: #f8fafc;
+        --c-canvas: #ffffff;
+        --c-border: #cbd5e1;
+        --c-text-main: #0f172a;
+        --c-text-sub: #64748b;
+        --c-red: #ef4444;
+        --c-green: #22c55e;
+        --c-yellow: #eab308;
+        --c-blue: #3b82f6;
+        --c-purple: #a855f7;
+        --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        --font-mono: 'SF Mono', Monaco, Consolas, monospace;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background: var(--c-bg);
+        font-family: var(--font-ui);
+        color: var(--c-text-main);
+        padding: 40px;
+        line-height: 1.5;
+      }
+
+      .diagram-canvas {
+        background: var(--c-canvas);
+        border: 2px solid var(--c-border);
+        padding: 32px;
+        max-width: 1600px;
+        margin: 0 auto;
+      }
+
+      .diagram-header {
+        border-bottom: 1px solid var(--c-border);
+        padding-bottom: 16px;
+        margin-bottom: 24px;
+      }
+
+      .diagram-title {
+        font-size: 24px;
+        font-weight: 600;
+        color: var(--c-text-main);
+      }
+
+      .diagram-subtitle {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--c-text-sub);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-top: 4px;
+      }
+
+      .flow-container {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      .flow-section {
+        border: 1px solid var(--c-border);
+        padding: 16px;
+        background: var(--c-canvas);
+      }
+
+      .section-header {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--c-text-main);
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--c-border);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .flow-steps {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .flow-step {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .step-number {
+        width: 24px;
+        height: 24px;
+        background: var(--c-text-main);
+        color: var(--c-canvas);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+
+      .step-content {
+        flex: 1;
+        background: var(--c-canvas);
+        border: 1px solid var(--c-border);
+        padding: 12px 16px;
+      }
+
+      .step-title {
+        font-weight: 600;
+        margin-bottom: 4px;
+        font-size: 13px;
+      }
+
+      .step-description {
+        font-size: 12px;
+        color: var(--c-text-sub);
+        margin-bottom: 8px;
+      }
+
+      .step-details {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .detail-item {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        background: #f8fafc;
+        border: 1px solid var(--c-border);
+        padding: 4px 8px;
+      }
+
+      .step-arrow {
+        color: var(--c-text-sub);
+        font-size: 20px;
+        flex-shrink: 0;
+      }
+
+      .breakpoint-list {
+        margin-top: 16px;
+        padding: 12px;
+        border: 1px solid var(--c-red);
+        background: #fef2f2;
+      }
+
+      .breakpoint-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--c-red);
+        margin-bottom: 8px;
+        text-transform: uppercase;
+      }
+
+      .breakpoint-item {
+        font-size: 11px;
+        margin-bottom: 4px;
+        padding-left: 8px;
+        border-left: 2px solid var(--c-red);
+      }
+
+      .fixed-item {
+        border-left-color: var(--c-green);
+      }
+
+      .badge {
+        display: inline-block;
+        font-size: 10px;
+        font-family: var(--font-mono);
+        padding: 2px 6px;
+        border: 1px solid var(--c-text-main);
+        text-transform: uppercase;
+      }
+
+      .badge--filled {
+        background: var(--c-text-main);
+        color: var(--c-canvas);
+      }
+
+      .badge--error {
+        background: var(--c-red);
+        color: var(--c-canvas);
+        border-color: var(--c-red);
+      }
+
+      .badge--warning {
+        background: var(--c-yellow);
+        color: var(--c-text-main);
+        border-color: var(--c-yellow);
+      }
+
+      .badge--success {
+        background: var(--c-green);
+        color: var(--c-canvas);
+        border-color: var(--c-green);
+      }
+
+      .badge--info {
+        background: var(--c-blue);
+        color: var(--c-canvas);
+        border-color: var(--c-blue);
+      }
+
+      .data-flow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        margin: 4px 0;
+        padding: 4px 8px;
+        background: #f8fafc;
+        border: 1px solid var(--c-border);
+      }
+
+      .data-flow .arrow {
+        color: var(--c-text-sub);
+      }
+
+      .mono {
+        font-family: var(--font-mono);
+        font-size: 12px;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-top: 24px;
+        padding: 12px;
+        border: 1px solid var(--c-border);
+        font-size: 11px;
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .legend-color {
+        width: 12px;
+        height: 12px;
+        border: 1px solid var(--c-border);
+      }
+
+      .grid-layout {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        gap: 16px;
+        margin-top: 16px;
+      }
+
+      .flow-diagram {
+        border: 1px solid var(--c-border);
+        padding: 16px;
+        background: var(--c-canvas);
+      }
+
+      .diagram-title {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        color: var(--c-text-main);
+      }
+
+      .flow-node {
+        background: var(--c-canvas);
+        border: 1px solid var(--c-border);
+        padding: 8px 12px;
+        margin: 4px 0;
+        font-size: 12px;
+      }
+
+      .flow-node.active {
+        border-color: var(--c-blue);
+        background: #eff6ff;
+      }
+
+      .flow-node.error {
+        border-color: var(--c-red);
+        background: #fef2f2;
+      }
+
+      .flow-node.warning {
+        border-color: var(--c-yellow);
+        background: #fefce8;
+      }
+
+      .flow-node.success {
+        border-color: var(--c-green);
+        background: #f0fdf4;
+      }
+
+      .flow-connector {
+        text-align: center;
+        color: var(--c-text-sub);
+        font-size: 16px;
+        margin: 4px 0;
+      }
+
+      .subflow {
+        border-left: 2px solid var(--c-border);
+        margin-left: 12px;
+        padding-left: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="diagram-canvas">
+      <div class="diagram-header">
+        <h1 class="diagram-title">Neurova 详细数据流程图</h1>
+        <p class="diagram-subtitle">AGENT CHAT PIPELINE DETAILED DATA FLOW & BREAKPOINT ANALYSIS</p>
+      </div>
+
+      <div class="flow-container">
+        <!-- 主流程 -->
+        <div class="flow-section">
+          <div class="section-header">1. 主对话流程 (ChatPipeline.execute)</div>
+          
+          <div class="flow-step">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <div class="step-title">用户输入</div>
+              <div class="step-description">用户通过 API 或 WebSocket 发送消息</div>
+              <div class="step-details">
+                <div class="detail-item">输入: user_input (str)</div>
+                <div class="detail-item">参数: stream, save_memory, session_id, metadata, enable_tts</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <div class="step-title">Agent.chat()</div>
+              <div class="step-description">创建 ChatContext 并委托给 ChatPipeline</div>
+              <div class="step-details">
+                <div class="detail-item">创建 ChatContext 数据类</div>
+                <div class="detail-item">调用 chat_pipeline.execute(ctx)</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <div class="step-title">Step 0: 活动追踪</div>
+              <div class="step-description">记录用户活动，恢复会话历史，启动轨迹</div>
+              <div class="step-details">
+                <div class="detail-item">_step_activity_tracking()</div>
+                <div class="detail-item">空闲追踪 idle_tracker.record_activity()</div>
+                <div class="detail-item">会话恢复 _restore_session_history()</div>
+                <div class="detail-item">轨迹启动 trajectory_recorder.start_trace()</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">4</div>
+            <div class="step-content">
+              <div class="step-title">Step 0.5: Pre-LLM 检查</div>
+              <div class="step-description">工具记忆检查、技能获取、NL 合成</div>
+              <div class="step-details">
+                <div class="detail-item">_step_pre_llm_checks()</div>
+                <div class="detail-item">_check_tool_memory() → tool_memory.check_tool_memory()</div>
+                <div class="detail-item">_check_skill_acquisition() → skill_manager.analyze_task()</div>
+                <div class="detail-item">_check_nl_synthesis() → tool_synthesizer.synthesize()</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">5</div>
+            <div class="step-content">
+              <div class="step-title">Step 1: 检索与上下文构建</div>
+              <div class="step-description">统一检索、结晶经验检索、上下文构建</div>
+              <div class="step-details">
+                <div class="detail-item">_step_retrieve_and_build_context()</div>
+                <div class="detail-item">_retrieve_memories() → unified_retriever.retrieve()</div>
+                <div class="detail-item">_retrieve_crystallized_patterns() → crystallizer.retrieve()</div>
+                <div class="detail-item">context_orchestrator.build_context()</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">6</div>
+            <div class="step-content">
+              <div class="step-title">Step 2: Evocate 注入</div>
+              <div class="step-description">检索相关 Neurova Hebb 注入上下文</div>
+              <div class="step-details">
+                <div class="detail-item">_step_evocate_injection()</div>
+                <div class="detail-item">neuHebb_manager.retrieve_neurova_hebb()</div>
+                <div class="detail-item">注入到系统提示 "## Retrieved Knowledge" 区域</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">7</div>
+            <div class="step-content">
+              <div class="step-title">Step 3: LLM 调用</div>
+              <div class="step-description">Agent Loop 调用 + 自动续写 + 工具执行</div>
+              <div class="step-details">
+                <div class="detail-item">_step_llm_call()</div>
+                <div class="detail-item">build_tools_for_llm() → 工具列表构建</div>
+                <div class="detail-item">loop.predict_step() 或 legacy fallback</div>
+                <div class="detail-item">_auto_continue() → 截断自动续写</div>
+                <div class="detail-item">execute_text_tool_calls() → 文本工具调用</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">8</div>
+            <div class="step-content">
+              <div class="step-title">Step 4: 后处理</div>
+              <div class="step-description">对话历史更新、轨迹记录、PostChatPipeline</div>
+              <div class="step-details">
+                <div class="detail-item">_step_post_processing()</div>
+                <div class="detail-item">update_history() → 对话历史更新</div>
+                <div class="detail-item">trajectory_recorder.record_event()</div>
+                <div class="detail-item">crystallizer.observe() → 结晶器观察</div>
+                <div class="detail-item">PostChatPipeline.process() → 后处理管线</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">9</div>
+            <div class="step-content">
+              <div class="step-title">Step 5: 广播最终回复</div>
+              <div class="step-description">广播最终回复到 SessionSyncManager</div>
+              <div class="step-details">
+                <div class="detail-item">_sync_final_reply()</div>
+                <div class="detail-item">EventType.AGENT_REPLY 事件</div>
+                <div class="detail-item">包含 content, reasoning, tool_messages, metadata</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 1 详细流程 -->
+        <div class="flow-section">
+          <div class="section-header">2. 检索与上下文构建详细流程 (Step 1)</div>
+          
+          <div class="grid-layout">
+            <div class="flow-diagram">
+              <div class="diagram-title">统一检索流程</div>
+              <div class="flow-node active">用户输入: user_input</div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node active">UnifiedRetriever.retrieve()</div>
+              <div class="subflow">
+                <div class="flow-node">L0: 肌肉记忆 (ToolMemory)</div>
+                <div class="flow-node">L1: 热缓存 (HotCache)</div>
+                <div class="flow-node">L2: 工具记忆 (ToolMemory)</div>
+                <div class="flow-node">L3: 向量检索 (VectorStore)</div>
+                <div class="flow-node">L4: 结晶经验 (PatternCrystallizer)</div>
+                <div class="flow-node">L5: 时序知识图谱 (TemporalKG)</div>
+              </div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node success">输出: relevant_memories (List[Dict])</div>
+            </div>
+            
+            <div class="flow-diagram">
+              <div class="diagram-title">上下文构建流程</div>
+              <div class="flow-node active">relevant_memories</div>
+              <div class="flow-node active">crystallized_patterns</div>
+              <div class="flow-node active">session_context</div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node active">ContextOrchestrator.build_context()</div>
+              <div class="subflow">
+                <div class="flow-node">Phase 2: 系统提示构建</div>
+                <div class="flow-node">Phase 2.1: 记忆注入</div>
+                <div class="flow-node">Phase 2.2: 工具记忆注入</div>
+                <div class="flow-node">Phase 2.3: 结晶经验注入</div>
+                <div class="flow-node">Phase 2.4: 会话上下文注入</div>
+                <div class="flow-node">Phase 3: Token 预算分配</div>
+                <div class="flow-node">Phase 4: 格式转换 (OpenAI ↔ Anthropic)</div>
+              </div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node success">输出: context (List[Dict])</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3 详细流程 -->
+        <div class="flow-section">
+          <div class="section-header">3. LLM 调用详细流程 (Step 3)</div>
+          
+          <div class="flow-step">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <div class="step-title">构建工具列表</div>
+              <div class="step-description">ContextOrchestrator.build_tools_for_llm()</div>
+              <div class="step-details">
+                <div class="detail-item">内置工具: memory_search, file_read, web_search, etc.</div>
+                <div class="detail-item">Skill 工具: 动态获取的技能</div>
+                <div class="detail-item">MCP 工具: 外部工具连接</div>
+                <div class="detail-item">格式: OpenAI function calling schema</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <div class="step-title">移除已自动执行工具</div>
+              <div class="step-description">如果工具已自动执行，从列表中移除</div>
+              <div class="step-details">
+                <div class="detail-item">条件: tool_decision == "auto_executed"</div>
+                <div class="detail-item">过滤: tools_for_llm = [t for t if name != executed_tool]</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <div class="step-title">LLM 调用</div>
+              <div class="step-description">Agent Loop 或 Legacy fallback</div>
+              <div class="step-details">
+                <div class="detail-item">流式: loop.predict_step(context, tools, stream=True)</div>
+                <div class="detail-item">非流式: loop.predict_step(context, tools, stream=False)</div>
+                <div class="detail-item">Legacy: llm_client.chat(context)</div>
+                <div class="detail-item">失败时 fallback 到 legacy</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">4</div>
+            <div class="step-content">
+              <div class="step-title">自动续写</div>
+              <div class="step-description">_auto_continue() 处理截断续写</div>
+              <div class="step-details">
+                <div class="detail-item">条件: finish_reason == 'length'</div>
+                <div class="detail-item">续写提示: _build_continue_hint()</div>
+                <div class="detail-item">护栏: 重叠检测、语义循环检测、工具调用循环</div>
+                <div class="detail-item">最大轮次: 100 轮</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flow-connector">↓</div>
+          
+          <div class="flow-step">
+            <div class="step-number">5</div>
+            <div class="step-content">
+              <div class="step-title">文本工具调用</div>
+              <div class="step-description">ToolExecutor.execute_text_tool_calls()</div>
+              <div class="step-details">
+                <div class="detail-item">解析文本中的工具调用格式</div>
+                <div class="detail-item">执行工具并返回结果</div>
+                <div class="detail-item">记录工具调用消息到 _tool_messages_list</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 记忆系统流程 -->
+        <div class="flow-section">
+          <div class="section-header">4. 记忆系统数据流详细</div>
+          
+          <div class="grid-layout">
+            <div class="flow-diagram">
+              <div class="diagram-title">记忆检索流程</div>
+              <div class="flow-node active">用户输入: user_input</div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node active">UnifiedRetriever.retrieve()</div>
+              <div class="subflow">
+                <div class="flow-node">1. 肌肉记忆匹配 (match_by_query)</div>
+                <div class="flow-node">2. 热缓存检索 (HotCache)</div>
+                <div class="flow-node">3. 向量相似度搜索 (VectorStore)</div>
+                <div class="flow-node">4. 结晶经验检索 (PatternCrystallizer)</div>
+                <div class="flow-node">5. 时序事实查询 (TemporalKG)</div>
+              </div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node success">输出: relevant_memories (List[Dict])</div>
+            </div>
+            
+            <div class="flow-diagram">
+              <div class="diagram-title">记忆保存流程</div>
+              <div class="flow-node active">对话完成</div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node active">PostChatPipeline.process()</div>
+              <div class="subflow">
+                <div class="flow-node">1. 保存到 Session 文件</div>
+                <div class="flow-node">2. 保存对话记忆到数据库</div>
+                <div class="flow-node">3. TTS 语音生成</div>
+                <div class="flow-node">4. 认知能力分析</div>
+                <div class="flow-node">5. 反思日志生成</div>
+                <div class="flow-node">6. 经验记录</div>
+              </div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node success">输出: ctx.result</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 工具执行流程 -->
+        <div class="flow-section">
+          <div class="section-header">5. 工具执行流程详细</div>
+          
+          <div class="grid-layout">
+            <div class="flow-diagram">
+              <div class="diagram-title">工具记忆检查流程</div>
+              <div class="flow-node active">user_input</div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node active">ToolMemoryIntegration.check_tool_memory()</div>
+              <div class="subflow">
+                <div class="flow-node">1. 肌肉记忆匹配 (match_by_query)</div>
+                <div class="flow-node">2. 置信度评估 (get_dynamic_threshold)</div>
+                <div class="flow-node">3. 决策: auto_execute / suggest / do_not_execute</div>
+              </div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node success">输出: (tool_memory_result, tool_decision)</div>
+            </div>
+            
+            <div class="flow-diagram">
+              <div class="diagram-title">工具自动执行流程</div>
+              <div class="flow-node active">tool_memory_result</div>
+              <div class="flow-node active">confidence > 0.7</div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node active">ToolExecutor.execute_from_memory_async()</div>
+              <div class="subflow">
+                <div class="flow-node">1. 工具执行 (带超时控制)</div>
+                <div class="flow-node">2. 结果验证</div>
+                <div class="flow-node">3. 失败教训记录</div>
+              </div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node success">输出: auto_execute_result</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 断点分析 -->
+        <div class="flow-section">
+          <div class="section-header">6. 断点分析与修复状态</div>
+          
+          <div class="breakpoint-list">
+            <div class="breakpoint-title">已修复的断裂点（8个）</div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>1. 对话记忆保存断裂点</strong> - agent_core.py chat() 方法中未保存对话记忆
+              <br/>修复：添加 conversation_buffer.add_user_message()/add_agent_message() 调用
+              <br/>文件：agent_core.py, buffer_module.py, conversation_buffer.py
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>2. BufferModule._on_flush 回调断裂点</strong> - 只发事件不写入存储
+              <br/>修复：添加 write_queue.enqueue_batch() + flush_to_storage() 调用
+              <br/>文件：buffer_module.py
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>3. 方法名不匹配断裂点</strong> - flush() vs flush_to_storage()
+              <br/>修复：统一使用 flush_to_storage() 方法名
+              <br/>文件：buffer_module.py, conversation_buffer.py
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>4. 工具记忆闭环断裂点</strong> - match() 接口对齐问题
+              <br/>修复：添加 match_by_query() 方法支持跨工具搜索
+              <br/>文件：muscle_memory.py, tool_memory_integration.py
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>5. 经验闭环断裂点</strong> - crystallizer 未注入到 EvolutionOrchestrator
+              <br/>修复：添加 crystallizer 参数 + observe() 调用
+              <br/>文件：closed_loop.py, agent_core.py
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>6. 情感闭环断裂点</strong> - EmotionModule 缺少持久化
+              <br/>修复：添加 SQLite 持久化 + get_memories_by_emotion() 实现
+              <br/>文件：emotion_module.py, models.py, neurova_recall.py, manager.py
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>7. 睡眠闭环断裂点</strong> - MemoryRecord 类型转换问题
+              <br/>修复：添加 from_dict()/to_dict() 方法 + 类型转换层
+              <br/>文件：sleep.py, manager.py, idle_tracker.py, agent_core.py
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+            
+            <div class="breakpoint-item fixed-item">
+              <strong>8. 工具层集成断裂点</strong> - ToolExecutor ↔ ToolEngine 接口不匹配
+              <br/>修复：添加 owner 参数支持多租户隔离
+              <br/>文件：tool_engine.py, tool_layers.py, execution_engine.py
+              <br/>状态：<span class="badge badge--success">已修复</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 潜在风险点 -->
+        <div class="flow-section">
+          <div class="section-header">7. 潜在风险点（需监控）</div>
+          
+          <div class="breakpoint-list">
+            <div class="breakpoint-title">当前风险点（4个）</div>
+            
+            <div class="breakpoint-item warning">
+              <strong>1. Agent Loop 可用性</strong> - Agent Loop 系统不可用时的 fallback 逻辑
+              <br/>风险：Legacy fallback 可能丢失功能（如工具调用、思考过程）
+              <br/>影响：LLM 调用失败时降级到传统模式
+              <br/>状态：<span class="badge badge--warning">需监控</span>
+            </div>
+            
+            <div class="breakpoint-item warning">
+              <strong>2. 异步操作超时</strong> - 工具自动执行超时处理
+              <br/>风险：超时后状态可能不一致（tool_decision="timeout"）
+              <br/>影响：工具执行超时，用户可能收到不完整回复
+              <br/>状态：<span class="badge badge--warning">需监控</span>
+            </div>
+            
+            <div class="breakpoint-item warning">
+              <strong>3. 记忆检索降级</strong> - UnifiedRetriever 不可用时的 MoE 降级
+              <br/>风险：降级路径可能影响检索质量
+              <br/>影响：记忆检索可能不完整
+              <br/>状态：<span class="badge badge--warning">需监控</span>
+            </div>
+            
+            <div class="breakpoint-item warning">
+              <strong>4. 结晶经验检索失败</strong> - PatternCrystallizer 异常处理
+              <br/>风险：异常时跳过结晶经验注入，可能影响回复质量
+              <br/>影响：缺少结晶经验注入，回复可能不够精准
+              <br/>状态：<span class="badge badge--warning">需监控</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 数据流完整性检查 -->
+        <div class="flow-section">
+          <div class="section-header">8. 数据流完整性检查</div>
+          
+          <div class="grid-layout">
+            <div class="flow-diagram">
+              <div class="diagram-title">输入 → 处理 → 输出 完整性</div>
+              <div class="flow-node active">输入: user_input</div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node active">ChatPipeline.execute()</div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node success">输出: ctx.result (Dict)</div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node">返回: {"text", "audio_path", "audio_data", "cognitive_score", ...}</div>
+            </div>
+            
+            <div class="flow-diagram">
+              <div class="diagram-title">记忆系统完整性</div>
+              <div class="flow-node active">记忆检索</div>
+              <div class="flow-node active">记忆保存</div>
+              <div class="flow-node active">记忆更新</div>
+              <div class="flow-connector">↓</div>
+              <div class="flow-node success">闭环: 检索 → 使用 → 保存 → 再检索</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 图例 -->
+        <div class="legend">
+          <div class="legend-item">
+            <div class="legend-color" style="background: #eff6ff; border-color: var(--c-blue);"></div>
+            <span>核心流程节点</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #fef2f2; border-color: var(--c-red);"></div>
+            <span>错误状态</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #fefce8; border-color: var(--c-yellow);"></div>
+            <span>警告状态</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #f0fdf4; border-color: var(--c-green);"></div>
+            <span>已修复</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #f8fafc; border-color: var(--c-border);"></div>
+            <span>普通节点</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

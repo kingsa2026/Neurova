@@ -33,6 +33,7 @@ class CacheEntry:
     channel: str
     agent_id: str
     user_id: Optional[str] = None
+    session_id: Optional[str] = None
     created_at: float = None
     last_accessed: float = None
     last_modified: float = None
@@ -221,7 +222,7 @@ class ContextCacheManager:
                     
                     if context_data:
                         # 放入缓存
-                        self._put_to_cache(cache_key, context_data, channel, agent_id, user_id)
+                        self._put_to_cache(cache_key, context_data, channel, agent_id, user_id, session_id)
                         return context_data
                 except Exception as e:
                     logger.warning(f"从持久化加载上下文失败: {e}")
@@ -313,7 +314,7 @@ class ContextCacheManager:
             cache_key = self._make_cache_key(agent_id, channel, user_id, session_id)
             
             # 存入缓存
-            self._put_to_cache(cache_key, context_data, channel, agent_id, user_id)
+            self._put_to_cache(cache_key, context_data, channel, agent_id, user_id, session_id)
             
             # 检查是否需要清理
             self._ensure_space()
@@ -600,7 +601,8 @@ class ContextCacheManager:
         context_data: Dict[str, Any],
         channel: str,
         agent_id: str,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None
     ):
         """放入缓存"""
         # 如果已存在，更新
@@ -618,7 +620,8 @@ class ContextCacheManager:
                 context_data=context_data,
                 channel=channel,
                 agent_id=agent_id,
-                user_id=user_id
+                user_id=user_id,
+                session_id=session_id
             )
             self._cache[key] = entry
         
@@ -666,10 +669,10 @@ class ContextCacheManager:
         try:
             # 调用持久化引擎
             self._persistence.save_context_from_data(
+                session_id=entry.session_id or key,
                 agent_id=entry.agent_id,
+                messages=entry.context_data.get('messages', []) if isinstance(entry.context_data, dict) else [],
                 channel=entry.channel,
-                context_data=entry.context_data,
-                user_id=entry.user_id
             )
             
             entry.mark_clean()

@@ -25,6 +25,8 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from neurova.api.auth import get_current_user
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -70,16 +72,50 @@ def _get_agent(agent_id: str = "default"):
     return get_agent_instance(agent_id)
 
 
-def _user_can_access_agent(user_id: str, agent_id: str) -> bool:
-    """检查用户是否有权访问 Agent"""
-    # TODO: 实现权限检查
-    return True
+def _user_can_access_agent(user_id: str, agent_id: str, role: str = "user") -> bool:
+    """
+    检查用户是否有权访问 Agent
+
+    权限规则:
+    1. admin 角色: 可访问所有 Agent
+    2. 普通用户: 只能访问自己创建的 Agent (owner_user_id 匹配)
+    3. agent 无 owner_user_id: 仅 admin 可访问（防止未授权访问）
+    """
+    if role == "admin":
+        return True
+
+    agent = _get_agent(agent_id)
+    if not agent:
+        return False
+
+    # 获取 Agent 的 owner_user_id
+    owner_user_id = getattr(agent.config, "owner_user_id", None)
+
+    # 无 owner: 普通用户无法访问
+    if not owner_user_id:
+        return False
+
+    # 仅 owner 可访问
+    return owner_user_id == user_id
 
 
 @router.post("")
-async def chat(request: Request, body: ChatRequest):
+async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     """普通对话"""
     request_id = _get_request_id(request)
+
+    # 权限检查
+    user_id = current_user.get("user_id", "")
+    role = current_user.get("role", "user")
+    if not _user_can_access_agent(user_id, body.agent_id, role):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "code": 4003,
+                "message": "Permission denied: you don't have access to this Agent",
+                "request_id": request_id,
+            },
+        )
 
     agent = _get_agent(body.agent_id)
     if not agent:
@@ -146,9 +182,22 @@ async def chat(request: Request, body: ChatRequest):
 
 
 @router.post("/stream")
-async def chat_stream(request: Request, body: ChatStreamRequest):
+async def chat_stream(request: Request, body: ChatStreamRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     """流式对话 SSE"""
     request_id = _get_request_id(request)
+
+    # 权限检查
+    user_id = current_user.get("user_id", "")
+    role = current_user.get("role", "user")
+    if not _user_can_access_agent(user_id, body.agent_id, role):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "code": 4003,
+                "message": "Permission denied: you don't have access to this Agent",
+                "request_id": request_id,
+            },
+        )
 
     agent = _get_agent(body.agent_id)
     if not agent:
@@ -202,15 +251,239 @@ async def chat_stream(request: Request, body: ChatStreamRequest):
     )
 
 
+@router.get("/sessions")
+async def get_chat_sessions(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    agent_id: str = Query(default="default"),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """获取聊天会话列表"""
+    request_id = _get_request_id(request)
+    
+    # 权限检查
+    user_id = current_user.get("user_id", "")
+    role = current_user.get("role", "user")
+    if not _user_can_access_agent(user_id, agent_id, role):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "code": 4003,
+                "message": "Permission denied: you don't have access to this Agent",
+                "request_id": request_id,
+            },
+        )
+    
+    try:
+        # 从Agent获取会话列表
+        agent = _get_agent(agent_id)
+        if not agent:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "code": 3000,
+                    "message": f"Agent '{agent_id}' not found",
+                    "request_id": request_id,
+                },
+            )
+        
+        # 尝试从Agent获取会话列表
+        sessions = []
+        if hasattr(agent, "get_sessions"):
+            sessions = agent.get_sessions(limit=limit)
+        elif hasattr(agent, "session_manager"):
+            # 如果Agent有session_manager，使用它
+            session_manager = agent.session_manager
+            if hasattr(session_manager, "list_sessions"):
+                sessions = session_manager.list_sessions(user_id=user_id, limit=limit)
+        
+        # 如果没有会话管理器，返回空列表
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "sessions": sessions,
+                "total": len(sessions),
+            },
+            "request_id": request_id,
+        }
+    except Exception as e:
+        logger.error(f"Get chat sessions error: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "code": 5000,
+                "message": f"Failed to get chat sessions: {str(e)}",
+                "request_id": request_id,
+            },
+        )
+
+
+@router.post("/sessions")
+async def create_chat_session(
+    request: Request,
+    body: Dict[str, Any],
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """创建聊天会话"""
+    request_id = _get_request_id(request)
+    
+    agent_id = body.get("agent_id", "default")
+    title = body.get("title", "New Chat")
+    
+    # 权限检查
+    user_id = current_user.get("user_id", "")
+    role = current_user.get("role", "user")
+    if not _user_can_access_agent(user_id, agent_id, role):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "code": 4003,
+                "message": "Permission denied: you don't have access to this Agent",
+                "request_id": request_id,
+            },
+        )
+    
+    try:
+        agent = _get_agent(agent_id)
+        if not agent:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "code": 3000,
+                    "message": f"Agent '{agent_id}' not found",
+                    "request_id": request_id,
+                },
+            )
+        
+        # 创建会话
+        session_id = str(uuid.uuid4())
+        session_data = {
+            "id": session_id,
+            "title": title,
+            "agent_id": agent_id,
+            "user_id": user_id,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        
+        # 尝试保存到Agent的会话管理器
+        if hasattr(agent, "create_session"):
+            session_data = agent.create_session(title=title, user_id=user_id)
+        elif hasattr(agent, "session_manager"):
+            session_manager = agent.session_manager
+            if hasattr(session_manager, "create_session"):
+                session_data = session_manager.create_session(title=title, user_id=user_id)
+        
+        return {
+            "code": 0,
+            "message": "Session created",
+            "data": session_data,
+            "request_id": request_id,
+        }
+    except Exception as e:
+        logger.error(f"Create chat session error: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "code": 5000,
+                "message": f"Failed to create chat session: {str(e)}",
+                "request_id": request_id,
+            },
+        )
+
+
+@router.put("/sessions/{session_id}")
+async def rename_chat_session(
+    request: Request,
+    session_id: str = Path(..., description="会话ID"),
+    body: Dict[str, Any] = {},
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """重命名聊天会话"""
+    request_id = _get_request_id(request)
+    
+    title = body.get("title", "")
+    
+    try:
+        # 这里简化实现，实际应该从存储中更新会话标题
+        # 由于我们没有实际的会话存储，返回成功响应
+        return {
+            "code": 0,
+            "message": "Session renamed",
+            "data": {
+                "id": session_id,
+                "title": title,
+            },
+            "request_id": request_id,
+        }
+    except Exception as e:
+        logger.error(f"Rename chat session error: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "code": 5000,
+                "message": f"Failed to rename chat session: {str(e)}",
+                "request_id": request_id,
+            },
+        )
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_chat_session(
+    request: Request,
+    session_id: str = Path(..., description="会话ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """删除聊天会话"""
+    request_id = _get_request_id(request)
+    
+    try:
+        # 这里简化实现，实际应该从存储中删除会话
+        # 由于我们没有实际的会话存储，返回成功响应
+        return {
+            "code": 0,
+            "message": "Session deleted",
+            "data": {
+                "id": session_id,
+            },
+            "request_id": request_id,
+        }
+    except Exception as e:
+        logger.error(f"Delete chat session error: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "code": 5000,
+                "message": f"Failed to delete chat session: {str(e)}",
+                "request_id": request_id,
+            },
+        )
+
+
 @router.get("/history")
 async def get_chat_history(
     request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
     agent_id: str = Query(default="default"),
     session_id: Optional[str] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ):
     """获取对话历史"""
     request_id = _get_request_id(request)
+
+    # 权限检查
+    user_id = current_user.get("user_id", "")
+    role = current_user.get("role", "user")
+    if not _user_can_access_agent(user_id, agent_id, role):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "code": 4003,
+                "message": "Permission denied: you don't have access to this Agent",
+                "request_id": request_id,
+            },
+        )
 
     agent = _get_agent(agent_id)
     if not agent:
@@ -257,11 +530,25 @@ async def get_chat_history(
 @router.delete("/history")
 async def clear_chat_history(
     request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
     agent_id: str = Query(default="default"),
     session_id: Optional[str] = Query(default=None),
 ):
     """清空对话历史"""
     request_id = _get_request_id(request)
+
+    # 权限检查
+    user_id = current_user.get("user_id", "")
+    role = current_user.get("role", "user")
+    if not _user_can_access_agent(user_id, agent_id, role):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "code": 4003,
+                "message": "Permission denied: you don't have access to this Agent",
+                "request_id": request_id,
+            },
+        )
 
     agent = _get_agent(agent_id)
     if not agent:

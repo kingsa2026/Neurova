@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # 后端服务
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neurova-backend
+    ports:
+      - "9527:9527"
+    environment:
+      - NEUROVA_PORT=9527
+      - NEUROVA_HOST=0.0.0.0
+      - NEUROVA_ENV=production
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - DATABASE_PATH=/app/data/neurova.db
+    volumes:
+      - neurova-data:/app/data
+      - neurova-logs:/app/logs
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9527/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - neurova-network
+
+  # 前端服务（可选，生产模式下不需要）
+  frontend:
+    image: node:18-alpine
+    container_name: neurova-frontend
+    working_dir: /app
+    volumes:
+      - ./neuUI:/app
+    ports:
+      - "8100:8100"
+    command: ["npm", "run", "dev", "--", "--port", "8100", "--host"]
+    environment:
+      - VITE_API_BASE_URL=http://localhost:9527
+    depends_on:
+      - backend
+    networks:
+      - neurova-network
+    profiles:
+      - development
+
+volumes:
+  neurova-data:
+    driver: local
+  neurova-logs:
+    driver: local
+
+networks:
+  neurova-network:
+    driver: bridge

@@ -224,11 +224,41 @@ class CognitiveLoopCoordinator:
         self._task: Optional[asyncio.Task] = None
         
         # 依赖组件（延迟初始化）
-        self._memory_system = None
-        self._knowledge_base = None
-        self._evolution_hub = None
+        self._memory_system: Any = None   # MemCore 实例
+        self._knowledge_base: Any = None  # FlowKBAdapter 实例
+        self._evolution_hub: Any = None   # EvolutionHub 实例
+        
+        # 反思历史缓存（闭环内部使用）
+        self._recent_reflections: List[str] = []
         
         logger.info(f"CognitiveLoopCoordinator initialized: mode={self.config.mode.value}")
+
+    def configure(
+        self,
+        memory_system: Any = None,
+        knowledge_base: Any = None,
+        evolution_hub: Any = None,
+    ) -> None:
+        """注入依赖组件（延迟绑定）
+
+        Args:
+            memory_system: MemCore 实例，提供 retrieve_memories / save_conversation_memory
+            knowledge_base: FlowKBAdapter 实例，提供 search / search_multi_collection
+            evolution_hub: EvolutionHub 实例，提供 analyze_knowledge_gaps / learn_from_knowledge 等
+        """
+        if memory_system is not None:
+            self._memory_system = memory_system
+        if knowledge_base is not None:
+            self._knowledge_base = knowledge_base
+        if evolution_hub is not None:
+            self._evolution_hub = evolution_hub
+        logger.info(
+            "CognitiveLoopCoordinator dependencies configured: "
+            "memory=%s, knowledge=%s, evolution=%s",
+            self._memory_system is not None,
+            self._knowledge_base is not None,
+            self._evolution_hub is not None,
+        )
     
     def register_callback(self, event: str, callback: Callable) -> None:
         """注册回调函数"""
@@ -380,52 +410,414 @@ class CognitiveLoopCoordinator:
             await self._safe_callback("on_error", event, str(e))
     
     async def _knowledge_to_memory(self, event: LoopEvent) -> None:
-        """知识到记忆的闭环"""
+        """知识到记忆的闭环
+
+        流程:
+        1. 从事件或最近对话中提取主题
+        2. 用主题查询 FlowKB 知识库
+        3. 将命中的知识条目作为记忆存入 MemCore
+        """
         logger.debug("Executing knowledge_to_memory loop")
-        
-        # 这里应该调用知识库和记忆系统的接口
-        # 简化实现：记录日志
-        pass
-    
+
+        if not self._knowledge_base or not self._memory_system:
+            logger.warning("knowledge_to_memory skipped: missing knowledge_base or memory_system")
+            return
+
+        # 1. 提取查询主题
+        topic = event.data.get("topic") or event.data.get("query", "")
+        if not topic:
+            # 尝试从最近记忆推断主题
+            try:
+                recent = await asyncio.to_thread(
+                    self._memory_system.retrieve_memories,
+                    "最近讨论话题",
+                    limit=3,
+                )
+                if recent:
+                    topic = " ".join(
+                        str(item.get("content", ""))[:80] for item in recent[:2]
+                    )
+            except Exception as exc:
+                logger.debug("Failed to infer topic from memory: %s", exc)
+
+        if not topic:
+            logger.debug("knowledge_to_memory: no topic available, skipping")
+            return
+
+        # 2. 查询知识库
+        try:
+            results = await self._knowledge_base.search(
+                query=topic,
+                limit=self.config.knowledge_search_limit,
+            )
+        except Exception as exc:
+            logger.warning("FlowKB search failed: %s", exc)
+            results = []
+
+        if not results:
+            logger.debug("knowledge_to_memory: no knowledge results for '%s'", topic[:60])
+            return
+
+        # 3. 将高分结果存入记忆
+        stored_count = 0
+        for result in results:
+            score = getattr(result, "score", 0)
+            if score < self.config.knowledge_confidence_threshold:
+                continue
+            content = getattr(result, "content", "") or ""
+            title = getattr(result, "title", "") or ""
+            if not content:
+                continue
+            memory_text = f"[知识同步] {title}: {content}" if title else f"[知识同步] {content}"
+            try:
+                await asyncio.to_thread(
+                    self._memory_system.save_conversation_memory,
+                    user_input=f"knowledge_sync:{topic[:50]}",
+                    agent_response=memory_text,
+                    metadata={
+                        "source": "cognitive_loop_knowledge_to_memory",
+                        "knowledge_score": score,
+                        "topic": topic[:100],
+                    },
+                )
+                stored_count += 1
+            except Exception as exc:
+                logger.warning("Failed to store knowledge as memory: %s", exc)
+
+        logger.info(
+            "knowledge_to_memory: topic='%s', results=%d, stored=%d",
+            topic[:60], len(results), stored_count,
+        )
+
     async def _knowledge_to_evolution(self, event: LoopEvent) -> None:
-        """知识到成长的闭环"""
+        """知识到成长的闭环
+
+        流程:
+        1. 从 EvolutionHub 获取当前知识缺口
+        2. 针对每个缺口主题查询知识库
+        3. 将找到的知识喂给 EvolutionHub.learn_from_knowledge
+        """
         logger.debug("Executing knowledge_to_evolution loop")
-        
-        # 这里应该调用知识库和成长系统的接口
-        # 简化实现：记录日志
-        pass
-    
+
+        if not self._evolution_hub:
+            logger.warning("knowledge_to_evolution skipped: missing evolution_hub")
+            return
+
+        # 1. 获取知识缺口
+        try:
+            gaps = await asyncio.to_thread(self._evolution_hub.get_gaps)
+        except Exception as exc:
+            logger.warning("Failed to get evolution gaps: %s", exc)
+            gaps = []
+
+        if not gaps:
+            logger.debug("knowledge_to_evolution: no gaps to address")
+            return
+
+        total_insights = 0
+        total_records = 0
+
+        for gap in gaps:
+            topic = gap.get("topic", "")
+            if not topic:
+                continue
+
+            # 2. 如果有知识库，先尝试搜索
+            knowledge_source = "knowledge_base"
+            if self._knowledge_base:
+                try:
+                    search_results = await self._knowledge_base.search(
+                        query=topic,
+                        limit=self.config.knowledge_search_limit,
+                    )
+                    if not search_results:
+                        # 搜索网络
+                        try:
+                            web_results = await self._knowledge_base.web_search(
+                                query=topic,
+                                max_results=5,
+                            )
+                            if web_results:
+                                knowledge_source = "web_search"
+                            else:
+                                continue
+                        except Exception:
+                            continue
+                except Exception as exc:
+                    logger.debug("Knowledge search for gap '%s' failed: %s", topic, exc)
+                    continue
+            else:
+                logger.debug("No knowledge_base, using default source for gap '%s'", topic)
+
+            # 3. 喂给 EvolutionHub
+            try:
+                result = await asyncio.to_thread(
+                    self._evolution_hub.learn_from_knowledge,
+                    topic=topic,
+                    source=knowledge_source,
+                    depth=1,
+                )
+                total_records += result.get("records_created", 0)
+                total_insights += result.get("insights_generated", 0)
+            except Exception as exc:
+                logger.warning("EvolutionHub.learn_from_knowledge failed for '%s': %s", topic, exc)
+
+        logger.info(
+            "knowledge_to_evolution: gaps=%d, records=%d, insights=%d",
+            len(gaps), total_records, total_insights,
+        )
+
     async def _handle_memory_miss(self, event: LoopEvent) -> None:
-        """处理记忆缺失"""
+        """处理记忆缺失
+
+        当记忆系统未命中时:
+        1. 从事件中提取缺失的主题
+        2. 查询知识库尝试补充
+        3. 如知识库也未命中，在 EvolutionHub 中注册知识缺口
+        """
         logger.debug("Handling memory miss")
-        
-        # 这里应该调用记忆系统和知识库的接口
-        # 简化实现：记录日志
-        pass
-    
+
+        missing_topic = event.data.get("topic") or event.data.get("query", "")
+        if not missing_topic:
+            logger.debug("handle_memory_miss: no topic in event, skipping")
+            return
+
+        knowledge_found = False
+
+        # 1. 尝试从知识库补充
+        if self._knowledge_base:
+            try:
+                results = await self._knowledge_base.search(
+                    query=missing_topic,
+                    limit=self.config.knowledge_search_limit,
+                )
+                if results:
+                    knowledge_found = True
+                    # 存入记忆
+                    if self._memory_system:
+                        best = results[0]
+                        content = getattr(best, "content", "") or ""
+                        if content:
+                            memory_text = f"[缺口补充] {missing_topic}: {content}"
+                            await asyncio.to_thread(
+                                self._memory_system.save_conversation_memory,
+                                user_input=f"gap_fill:{missing_topic[:50]}",
+                                agent_response=memory_text,
+                                metadata={
+                                    "source": "cognitive_loop_memory_miss",
+                                    "topic": missing_topic[:100],
+                                },
+                            )
+            except Exception as exc:
+                logger.warning("Knowledge search for memory miss failed: %s", exc)
+
+        # 2. 知识库也未命中 → 注册缺口
+        if not knowledge_found and self._evolution_hub:
+            try:
+                priority = event.data.get("priority", "medium")
+                await asyncio.to_thread(
+                    self._evolution_hub.on_knowledge_gap_detected,
+                    topic=missing_topic,
+                    priority=priority,
+                )
+                logger.info(
+                    "Registered knowledge gap: topic='%s', priority=%s",
+                    missing_topic[:60], priority,
+                )
+            except Exception as exc:
+                logger.warning("Failed to register knowledge gap: %s", exc)
+
     async def _check_gap_discovery(self, event: LoopEvent) -> None:
-        """检查知识缺口"""
+        """检查知识缺口
+
+        流程:
+        1. 调用 EvolutionHub.analyze_knowledge_gaps() 扫描候选主题
+        2. 对每个新发现的缺口查询知识库
+        3. 标记已有知识的缺口为 knowledge_available
+        """
         logger.debug("Checking knowledge gaps")
-        
-        # 这里应该调用知识库的接口
-        # 简化实现：记录日志
-        pass
-    
+
+        if not self._evolution_hub:
+            logger.warning("check_gap_discovery skipped: missing evolution_hub")
+            return
+
+        # 1. 扫描知识缺口
+        try:
+            gaps = await asyncio.to_thread(self._evolution_hub.analyze_knowledge_gaps)
+        except Exception as exc:
+            logger.warning("Failed to analyze knowledge gaps: %s", exc)
+            return
+
+        if not gaps:
+            logger.debug("check_gap_discovery: no gaps found")
+            return
+
+        # 2. 对每个缺口检查知识可用性
+        gaps_with_knowledge = 0
+        if self._knowledge_base:
+            for gap in gaps:
+                topic = gap.get("topic", "")
+                if not topic:
+                    continue
+                knowledge_available = gap.get("knowledge_available", False)
+                if knowledge_available:
+                    gaps_with_knowledge += 1
+                    continue
+                try:
+                    results = await self._knowledge_base.search(
+                        query=topic,
+                        limit=3,
+                    )
+                    if results:
+                        gaps_with_knowledge += 1
+                        # 学习已有的知识
+                        await asyncio.to_thread(
+                            self._evolution_hub.learn_from_knowledge,
+                            topic=topic,
+                            source="knowledge_base",
+                            depth=1,
+                        )
+                except Exception as exc:
+                    logger.debug("Gap check search failed for '%s': %s", topic, exc)
+
+        logger.info(
+            "check_gap_discovery: total_gaps=%d, with_knowledge=%d",
+            len(gaps), gaps_with_knowledge,
+        )
+
     async def _execute_reflection(self, event: LoopEvent) -> None:
-        """执行反思"""
+        """执行反思
+
+        流程:
+        1. 从记忆系统收集最近交互摘要
+        2. 生成结构化反思报告
+        3. 将反思结果传给 EvolutionHub 提取改进项
+        """
         logger.debug("Executing reflection")
-        
-        # 这里应该调用成长系统的接口
-        # 简化实现：记录日志
-        pass
-    
+
+        # 1. 收集反思素材
+        reflection_parts: List[str] = []
+
+        # 从记忆系统获取最近内容
+        if self._memory_system:
+            try:
+                recent = await asyncio.to_thread(
+                    self._memory_system.retrieve_memories,
+                    "最近对话和交互",
+                    limit=self.config.memory_retrieval_limit,
+                )
+                if recent:
+                    for item in recent[:5]:
+                        content = str(item.get("content", ""))[:200]
+                        if content:
+                            reflection_parts.append(content)
+            except Exception as exc:
+                logger.debug("Failed to retrieve memories for reflection: %s", exc)
+
+        # 从 EvolutionHub 获取进度信息
+        if self._evolution_hub:
+            try:
+                progress = await asyncio.to_thread(self._evolution_hub.get_evolution_progress)
+                if progress:
+                    total_gaps = progress.get("total_gaps", 0)
+                    completion_rate = progress.get("completion_rate", 0)
+                    reflection_parts.append(
+                        f"进化进度: 缺口总数={total_gaps}, 完成率={completion_rate:.1%}"
+                    )
+            except Exception as exc:
+                logger.debug("Failed to get evolution progress for reflection: %s", exc)
+
+        if not reflection_parts:
+            logger.debug("execute_reflection: no material to reflect on")
+            return
+
+        # 2. 生成反思报告
+        reflection_text = (
+            "=== 认知闭环反思报告 ===\n"
+            + "\n".join(f"- {p}" for p in reflection_parts)
+            + f"\n反思时间: {datetime.datetime.now(datetime.timezone.utc).isoformat()}"
+        )
+
+        # 缓存反思
+        self._recent_reflections.append(reflection_text)
+        if len(self._recent_reflections) > 20:
+            self._recent_reflections = self._recent_reflections[-20:]
+
+        # 3. 传给 EvolutionHub
+        if self._evolution_hub:
+            try:
+                result = await asyncio.to_thread(
+                    self._evolution_hub.on_reflection_completed,
+                    reflection=reflection_text,
+                )
+                records = result.get("records_created", 0)
+                insights = result.get("insights_generated", 0)
+                improvements = result.get("improvements", [])
+                logger.info(
+                    "execute_reflection: records=%d, insights=%d, improvements=%d",
+                    records, insights, len(improvements),
+                )
+            except Exception as exc:
+                logger.warning("EvolutionHub.on_reflection_completed failed: %s", exc)
+
     async def _evolution_feedback(self, event: LoopEvent) -> None:
-        """成长反馈"""
+        """成长反馈
+
+        流程:
+        1. 从 EvolutionHub 获取进化进度
+        2. 将进度摘要反馈到记忆系统（作为元认知记忆）
+        3. 触发 EvolutionHub 空闲周期维护
+        """
         logger.debug("Executing evolution feedback")
-        
-        # 这里应该调用成长系统的接口
-        # 简化实现：记录日志
-        pass
+
+        if not self._evolution_hub:
+            logger.warning("evolution_feedback skipped: missing evolution_hub")
+            return
+
+        # 1. 获取进化进度
+        try:
+            progress = await asyncio.to_thread(self._evolution_hub.get_evolution_progress)
+        except Exception as exc:
+            logger.warning("Failed to get evolution progress: %s", exc)
+            return
+
+        if not progress:
+            logger.debug("evolution_feedback: no progress data")
+            return
+
+        # 2. 反馈到记忆系统
+        if self._memory_system:
+            try:
+                total_gaps = progress.get("total_gaps", 0)
+                completed = progress.get("completed_records", 0)
+                completion_rate = progress.get("completion_rate", 0)
+                feedback_text = (
+                    f"[进化反馈] 知识缺口: {total_gaps}, "
+                    f"已完成学习: {completed}, "
+                    f"完成率: {completion_rate:.1%}"
+                )
+                await asyncio.to_thread(
+                    self._memory_system.save_conversation_memory,
+                    user_input="evolution_feedback",
+                    agent_response=feedback_text,
+                    metadata={
+                        "source": "cognitive_loop_evolution_feedback",
+                        "progress": progress,
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Failed to save evolution feedback to memory: %s", exc)
+
+        # 3. 触发空闲周期维护
+        try:
+            idle_result = await asyncio.to_thread(self._evolution_hub.on_idle_cycle)
+            logger.info(
+                "evolution_feedback: idle_cycle gaps=%s, records=%s",
+                idle_result.get("gaps_analyzed", 0),
+                idle_result.get("total_records", 0),
+            )
+        except Exception as exc:
+            logger.warning("EvolutionHub.on_idle_cycle failed: %s", exc)
     
     async def _safe_callback(self, event_name: str, *args) -> None:
         """安全执行回调"""

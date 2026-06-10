@@ -1,0 +1,59 @@
+# Neurova 开发环境配置
+
+# 后端配置
+backend:
+  replicaCount: 1
+  
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  
+  healthCheck:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# 前端配置（开发模式）
+frontend:
+  enabled: true
+  replicaCount: 1
+  
+  service:
+    type: NodePort
+    port: 8100
+    targetPort: 8100
+    nodePort: 30810
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# 数据库配置
+database:
+  persistence:
+    enabled: false # 开发环境使用 emptyDir
+
+# Ingress 配置
+ingress:
+  enabled: false
+
+# 自动扩缩容
+hpa:
+  enabled: false
+
+# 日志配置
+logging:
+  level: "DEBUG"
+  format: "text"
+  file: "/app/logs/neurova.log"

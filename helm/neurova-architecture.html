@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neurova Helm Chart 架构图</title>
+    <style>
+        :root {
+            --c-bg: #f8fafc;
+            --c-canvas: #ffffff;
+            --c-border: #cbd5e1;
+            --c-text-main: #0f172a;
+            --c-text-sub: #64748b;
+            --c-accent: #0ea5e9;
+            --c-success: #22c55e;
+            --c-warning: #f59e0b;
+            --c-error: #ef4444;
+            --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+            --font-mono: 'SF Mono', Monaco, Consolas, monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--c-bg);
+            font-family: var(--font-ui);
+            color: var(--c-text-main);
+            padding: 40px;
+        }
+
+        .diagram-canvas {
+            background: var(--c-canvas);
+            border: 2px solid var(--c-border);
+            padding: 32px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .diagram-header {
+            border-bottom: 1px solid var(--c-border);
+            padding-bottom: 16px;
+            margin-bottom: 24px;
+        }
+
+        .diagram-title {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--c-text-main);
+        }
+
+        .diagram-subtitle {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--c-text-sub);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+
+        .section {
+            margin-bottom: 32px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--c-text-main);
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--c-border);
+        }
+
+        .grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .grid-2 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .grid-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .grid-4 {
+            grid-template-columns: repeat(4, 1fr);
+        }
+
+        .node {
+            background: var(--c-canvas);
+            border: 1px solid var(--c-border);
+            padding: 16px;
+        }
+
+        .node-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .node-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--c-text-main);
+        }
+
+        .node-subtitle {
+            font-size: 12px;
+            color: var(--c-text-sub);
+            margin-top: 4px;
+        }
+
+        .badge {
+            display: inline-block;
+            font-size: 10px;
+            font-family: var(--font-mono);
+            padding: 2px 6px;
+            border: 1px solid var(--c-text-main);
+            text-transform: uppercase;
+        }
+
+        .badge--filled {
+            background: var(--c-text-main);
+            color: var(--c-canvas);
+        }
+
+        .badge--success {
+            background: var(--c-success);
+            color: white;
+            border-color: var(--c-success);
+        }
+
+        .badge--warning {
+            background: var(--c-warning);
+            color: white;
+            border-color: var(--c-warning);
+        }
+
+        .badge--error {
+            background: var(--c-error);
+            color: white;
+            border-color: var(--c-error);
+        }
+
+        .badge--accent {
+            background: var(--c-accent);
+            color: white;
+            border-color: var(--c-accent);
+        }
+
+        .mono {
+            font-family: var(--font-mono);
+            font-size: 13px;
+        }
+
+        .list {
+            list-style: none;
+            margin-top: 8px;
+        }
+
+        .list-item {
+            font-size: 12px;
+            color: var(--c-text-sub);
+            padding: 4px 0;
+            border-bottom: 1px dashed var(--c-border);
+        }
+
+        .list-item:last-child {
+            border-bottom: none;
+        }
+
+        .list-item::before {
+            content: "•";
+            color: var(--c-text-sub);
+            margin-right: 8px;
+        }
+
+        .connector {
+            border-top: 1px solid var(--c-border);
+            margin: 16px 0;
+        }
+
+        .connector--dashed {
+            border-top-style: dashed;
+        }
+
+        .flow {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 16px 0;
+        }
+
+        .flow-step {
+            background: var(--c-canvas);
+            border: 1px solid var(--c-border);
+            padding: 8px 16px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .flow-arrow {
+            color: var(--c-text-sub);
+            font-size: 16px;
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .table th {
+            background: var(--c-bg);
+            border: 1px solid var(--c-border);
+            padding: 8px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--c-text-main);
+        }
+
+        .table td {
+            border: 1px solid var(--c-border);
+            padding: 8px 12px;
+            color: var(--c-text-sub);
+        }
+
+        .table tr:nth-child(even) {
+            background: var(--c-bg);
+        }
+
+        .architecture {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .layer {
+            border: 1px solid var(--c-border);
+            padding: 16px;
+        }
+
+        .layer-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--c-text-main);
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--c-border);
+        }
+
+        .component {
+            background: var(--c-canvas);
+            border: 1px solid var(--c-border);
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+
+        .component:last-child {
+            margin-bottom: 0;
+        }
+
+        .component-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--c-text-main);
+            margin-bottom: 4px;
+        }
+
+        .component-desc {
+            font-size: 11px;
+            color: var(--c-text-sub);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-indicator--success {
+            background: var(--c-success);
+        }
+
+        .status-indicator--warning {
+            background: var(--c-warning);
+        }
+
+        .status-indicator--error {
+            background: var(--c-error);
+        }
+    </style>
+</head>
+<body>
+    <div class="diagram-canvas">
+        <div class="diagram-header">
+            <h1 class="diagram-title">Neurova Helm Chart 架构图</h1>
+            <p class="diagram-subtitle">KUBERNETES DEPLOYMENT ARCHITECTURE</p>
+        </div>
+
+        <!-- 部署架构 -->
+        <div class="section">
+            <h2 class="section-title">部署架构</h2>
+            <div class="architecture">
+                <div class="layer">
+                    <h3 class="layer-title">外部访问层</h3>
+                    <div class="grid grid-2">
+                        <div class="component">
+                            <div class="component-title">Ingress Controller</div>
+                            <div class="component-desc">Nginx Ingress 控制器，处理外部 HTTP/HTTPS 流量</div>
+                            <div class="list">
+                                <div class="list-item">TLS 终止</div>
+                                <div class="list-item">路径路由</div>
+                                <div class="list-item">负载均衡</div>
+                            </div>
+                        </div>
+                        <div class="component">
+                            <div class="component-title">Load Balancer</div>
+                            <div class="component-desc">云厂商负载均衡器（可选）</div>
+                            <div class="list">
+                                <div class="list-item">外部 IP 分配</div>
+                                <div class="list-item">健康检查</div>
+                                <div class="list-item">会话保持</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="layer">
+                    <h3 class="layer-title">服务层</h3>
+                    <div class="grid grid-3">
+                        <div class="component">
+                            <div class="component-title">Backend Service</div>
+                            <div class="component-desc">FastAPI 应用服务</div>
+                            <div class="list">
+                                <div class="list-item">端口: 9527</div>
+                                <div class="list-item">类型: ClusterIP</div>
+                                <div class="list-item">协议: HTTP</div>
+                            </div>
+                        </div>
+                        <div class="component">
+                            <div class="component-title">Frontend Service</div>
+                            <div class="component-desc">Vue 3 前端服务（可选）</div>
+                            <div class="list">
+                                <div class="list-item">端口: 8100</div>
+                                <div class="list-item">类型: ClusterIP</div>
+                                <div class="list-item">协议: HTTP</div>
+                            </div>
+                        </div>
+                        <div class="component">
+                            <div class="component-title">ConfigMap</div>
+                            <div class="component-desc">应用配置存储</div>
+                            <div class="list">
+                                <div class="list-item">环境变量</div>
+                                <div class="list-item">配置文件</div>
+                                <div class="list-item">热重载支持</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="layer">
+                    <h3 class="layer-title">应用层</h3>
+                    <div class="grid grid-2">
+                        <div class="component">
+                            <div class="component-title">Backend Deployment</div>
+                            <div class="component-desc">FastAPI 后端部署</div>
+                            <div class="list">
+                                <div class="list-item">副本数: 1-10</div>
+                                <div class="list-item">健康检查: /health</div>
+                                <div class="list-item">资源限制: CPU/Memory</div>
+                            </div>
+                        </div>
+                        <div class="component">
+                            <div class="component-title">Frontend Deployment</div>
+                            <div class="component-desc">Vue 3 前端部署（可选）</div>
+                            <div class="list">
+                                <div class="list-item">副本数: 1-5</div>
+                                <div class="list-item">健康检查: /</div>
+                                <div class="list-item">静态文件服务</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="layer">
+                    <h3 class="layer-title">数据层</h3>
+                    <div class="grid grid-3">
+                        <div class="component">
+                            <div class="component-title">PersistentVolume</div>
+                            <div class="component-desc">持久化存储卷</div>
+                            <div class="list">
+                                <div class="list-item">SQLite 数据库</div>
+                                <div class="list-item">用户数据</div>
+                                <div class="list-item">会话文件</div>
+                            </div>
+                        </div>
+                        <div class="component">
+                            <div class="component-title">Secret</div>
+                            <div class="component-desc">敏感信息存储</div>
+                            <div class="list">
+                                <div class="list-item">LLM API 密钥</div>
+                                <div class="list-item">JWT 密钥</div>
+                                <div class="list-item">数据库密码</div>
+                            </div>
+                        </div>
+                        <div class="component">
+                            <div class="component-title">EmptyDir</div>
+                            <div class="component-desc">临时存储</div>
+                            <div class="list">
+                                <div class="list-item">日志文件</div>
+                                <div class="list-item">缓存文件</div>
+                                <div class="list-item">临时数据</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 请求流程 -->
+        <div class="section">
+            <h2 class="section-title">请求流程</h2>
+            <div class="flow">
+                <div class="flow-step">客户端请求</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">Ingress Controller</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">Backend Service</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">FastAPI 应用</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">SQLite 数据库</div>
+            </div>
+            <div class="connector connector--dashed"></div>
+            <div class="flow">
+                <div class="flow-step">前端构建</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">静态文件</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">后端服务</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">客户端</div>
+            </div>
+        </div>
+
+        <!-- 配置参数 -->
+        <div class="section">
+            <h2 class="section-title">配置参数</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>参数</th>
+                        <th>描述</th>
+                        <th>默认值</th>
+                        <th>类型</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="mono">backend.replicaCount</td>
+                        <td>后端副本数</td>
+                        <td class="mono">1</td>
+                        <td>整数</td>
+                    </tr>
+                    <tr>
+                        <td class="mono">backend.image.repository</td>
+                        <td>后端镜像仓库</td>
+                        <td class="mono">neurova/backend</td>
+                        <td>字符串</td>
+                    </tr>
+                    <tr>
+                        <td class="mono">backend.service.port</td>
+                        <td>后端服务端口</td>
+                        <td class="mono">9527</td>
+                        <td>整数</td>
+                    </tr>
+                    <tr>
+                        <td class="mono">backend.resources.requests.cpu</td>
+                        <td>CPU 请求</td>
+                        <td class="mono">500m</td>
+                        <td>字符串</td>
+                    </tr>
+                    <tr>
+                        <td class="mono">backend.resources.requests.memory</td>
+                        <td>内存请求</td>
+                        <td class="mono">1Gi</td>
+                        <td>字符串</td>
+                    </tr>
+                    <tr>
+                        <td class="mono">database.persistence.enabled</td>
+                        <td>启用持久化存储</td>
+                        <td class="mono">true</td>
+                        <td>布尔值</td>
+                    </tr>
+                    <tr>
+                        <td class="mono">database.persistence.size</td>
+                        <td>存储大小</td>
+                        <td class="mono">10Gi</td>
+                        <td>字符串</td>
+                    </tr>
+                    <tr>
+                        <td class="mono">llm.apiKeySecret</td>
+                        <td>LLM API 密钥 Secret</td>
+                        <td class="mono">neurova-llm-secret</td>
+                        <td>字符串</td>
+                    </tr>
+                    <tr>
+                        <td class="mono">ingress.enabled</td>
+                        <td>启用 Ingress</td>
+                        <td class="mono">false</td>
+                        <td>布尔值</td>
+                    </tr>
+                    <tr>
+                        <td class="mono">hpa.enabled</td>
+                        <td>启用自动扩缩容</td>
+                        <td class="mono">false</td>
+                        <td>布尔值</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 文件结构 -->
+        <div class="section">
+            <h2 class="section-title">Helm Chart 文件结构</h2>
+            <div class="grid grid-2">
+                <div class="node">
+                    <div class="node-header">
+                        <div class="node-title">Chart 核心文件</div>
+                        <span class="badge badge--filled">必须</span>
+                    </div>
+                    <div class="list">
+                        <div class="list-item"><span class="mono">Chart.yaml</span> - Chart 元数据</div>
+                        <div class="list-item"><span class="mono">values.yaml</span> - 默认配置</div>
+                        <div class="list-item"><span class="mono">templates/_helpers.tpl</span> - 辅助模板</div>
+                        <div class="list-item"><span class="mono">templates/NOTES.txt</span> - 安装说明</div>
+                    </div>
+                </div>
+                <div class="node">
+                    <div class="node-header">
+                        <div class="node-title">部署模板文件</div>
+                        <span class="badge badge--accent">模板</span>
+                    </div>
+                    <div class="list">
+                        <div class="list-item"><span class="mono">templates/deployment-backend.yaml</span></div>
+                        <div class="list-item"><span class="mono">templates/deployment-frontend.yaml</span></div>
+                        <div class="list-item"><span class="mono">templates/service-backend.yaml</span></div>
+                        <div class="list-item"><span class="mono">templates/service-frontend.yaml</span></div>
+                        <div class="list-item"><span class="mono">templates/configmap.yaml</span></div>
+                        <div class="list-item"><span class="mono">templates/secret.yaml</span></div>
+                        <div class="list-item"><span class="mono">templates/pvc.yaml</span></div>
+                        <div class="list-item"><span class="mono">templates/ingress.yaml</span></div>
+                        <div class="list-item"><span class="mono">templates/hpa.yaml</span></div>
+                        <div class="list-item"><span class="mono">templates/serviceaccount.yaml</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 环境配置 -->
+        <div class="section">
+            <h2 class="section-title">环境配置</h2>
+            <div class="grid grid-3">
+                <div class="node">
+                    <div class="node-header">
+                        <div class="node-title">开发环境</div>
+                        <span class="badge badge--success">development</span>
+                    </div>
+                    <div class="list">
+                        <div class="list-item">副本数: 1</div>
+                        <div class="list-item">CPU: 250m - 1000m</div>
+                        <div class="list-item">内存: 512Mi - 2Gi</div>
+                        <div class="list-item">持久化: 禁用</div>
+                        <div class="list-item">Ingress: 禁用</div>
+                        <div class="list-item">HPA: 禁用</div>
+                    </div>
+                </div>
+                <div class="node">
+                    <div class="node-header">
+                        <div class="node-title">测试环境</div>
+                        <span class="badge badge--warning">staging</span>
+                    </div>
+                    <div class="list">
+                        <div class="list-item">副本数: 2</div>
+                        <div class="list-item">CPU: 500m - 2000m</div>
+                        <div class="list-item">内存: 1Gi - 4Gi</div>
+                        <div class="list-item">持久化: 启用 (20Gi)</div>
+                        <div class="list-item">Ingress: 启用</div>
+                        <div class="list-item">HPA: 禁用</div>
+                    </div>
+                </div>
+                <div class="node">
+                    <div class="node-header">
+                        <div class="node-title">生产环境</div>
+                        <span class="badge badge--error">production</span>
+                    </div>
+                    <div class="list">
+                        <div class="list-item">副本数: 2-10</div>
+                        <div class="list-item">CPU: 1000m - 4000m</div>
+                        <div class="list-item">内存: 2Gi - 8Gi</div>
+                        <div class="list-item">持久化: 启用 (50Gi)</div>
+                        <div class="list-item">Ingress: 启用 (TLS)</div>
+                        <div class="list-item">HPA: 启用</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 监控和日志 -->
+        <div class="section">
+            <h2 class="section-title">监控和日志</h2>
+            <div class="grid grid-2">
+                <div class="node">
+                    <div class="node-header">
+                        <div class="node-title">健康检查</div>
+                        <span class="badge badge--success">必需</span>
+                    </div>
+                    <div class="list">
+                        <div class="list-item">Liveness Probe: /health</div>
+                        <div class="list-item">Readiness Probe: /health</div>
+                        <div class="list-item">启动延迟: 30秒</div>
+                        <div class="list-item">检查间隔: 10秒</div>
+                        <div class="list-item">超时时间: 5秒</div>
+                    </div>
+                </div>
+                <div class="node">
+                    <div class="node-header">
+                        <div class="node-title">日志配置</div>
+                        <span class="badge badge--accent">可选</span>
+                    </div>
+                    <div class="list">
+                        <div class="list-item">日志级别: INFO</div>
+                        <div class="list-item">日志格式: JSON</div>
+                        <div class="list-item">日志文件: /app/logs/neurova.log</div>
+                        <div class="list-item">日志轮转: 7天</div>
+                        <div class="list-item">日志压缩: 启用</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 安全配置 -->
+        <div class="section">
+            <h2 class="section-title">安全配置</h2>
+            <div class="grid grid-3">
+                <div class="node">
+                    <div class="node-header">
+                        <div class="node-title">Pod 安全</div>
+                        <span class="badge badge--filled">安全</span>
+                    </div>
+                    <div class="list">
+                        <div class="list-item">运行用户: 1000</div>
+                        <div class="list-item">运行组: 1000</div>
+                        <div class="list-item">非 root 运行</div>
+                        <div class="list-item">只读文件系统</div>
+                    </div>
+                </div>
+                <div class="node">
+                    <div class="node-header">
+                        <div class="node-title">网络策略</div>
+                        <span class="badge badge--accent">可选</span>
+                    </div>
+                    <div class="list">
+                        <div class="list-item">入口规则</div>
+                        <div class="list-item">出口规则</div>
+                        <div class="list-item">命名空间隔离</div>
+                        <div class="list-item">TLS 加密</div>
+                    </div>
+                </div>
+                <div class="node">
+                    <div class="node-header">
+                        <div class="node-title">密钥管理</div>
+                        <span class="badge badge--warning">重要</span>
+                    </div>
+                    <div class="list">
+                        <div class="list-item">LLM API 密钥</div>
+                        <div class="list-item">JWT 签名密钥</div>
+                        <div class="list-item">数据库密码</div>
+                        <div class="list-item">TLS 证书</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

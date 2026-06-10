@@ -51,6 +51,32 @@ class ToolCapabilityGraph:
         # 构建默认图
         self._build_default_graph()
     
+    def register_tool(
+        self,
+        tool_name: str,
+        capabilities: typing.Optional[typing.List[str]] = None,
+        dependencies: typing.Optional[typing.List[str]] = None,
+        fallbacks: typing.Optional[typing.List[str]] = None,
+        companions: typing.Optional[typing.List[str]] = None,
+        metadata: typing.Optional[typing.Dict[str, typing.Any]] = None,
+    ) -> ToolCapabilityNode:
+        """
+        便捷方法：注册工具节点（自动创建 ToolCapabilityNode）
+        
+        返回:
+            创建的节点
+        """
+        node = ToolCapabilityNode(
+            tool_name=tool_name,
+            capabilities=capabilities or [],
+            dependencies=dependencies or [],
+            fallbacks=fallbacks or [],
+            companions=companions or [],
+            metadata=metadata or {},
+        )
+        self.add_node(node)
+        return node
+
     def add_node(self, node: ToolCapabilityNode) -> None:
         """添加节点到图"""
         self._nodes[node.tool_name] = node

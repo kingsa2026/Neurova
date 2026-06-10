@@ -15,6 +15,7 @@ ToolExecutor — 统一工具执行器
 
 import re
 import json
+import time
 import logging
 from datetime import datetime
 from typing import List, Dict, Optional, Any
@@ -313,8 +314,37 @@ class ToolExecutor:
         Returns:
             执行结果
         """
-        # 这里可以实现 CLI 工具执行逻辑
-        return {"error": "CLI 工具执行未实现"}
+        try:
+            # 构建完整命令
+            if args:
+                # 将参数字典转换为命令行参数
+                arg_parts = []
+                for key, value in args.items():
+                    if isinstance(value, bool):
+                        if value:
+                            arg_parts.append(f"--{key}")
+                    else:
+                        arg_parts.append(f"--{key}={value}")
+                full_command = f"{command} {' '.join(arg_parts)}"
+            else:
+                full_command = command
+            
+            # 使用 ComputerUseManager 执行命令
+            from neurova.computer_use import get_computer_use_manager
+            manager = get_computer_use_manager()
+            result = manager.shell(full_command)
+            
+            return {
+                "success": result.get("returncode", -1) == 0,
+                "returncode": result.get("returncode", -1),
+                "stdout": result.get("stdout", ""),
+                "stderr": result.get("stderr", ""),
+                "command": full_command,
+                "tool_name": command,
+            }
+        except Exception as e:
+            logger.error(f"CLI 工具执行失败: {e}")
+            return {"error": f"CLI 工具执行失败: {str(e)}"}
 
     async def _execute_single_tool(self, tool_name: str, params: Dict) -> Dict:
         """
@@ -353,7 +383,8 @@ class ToolExecutor:
         builtin_tools = [
             "memory_search", "file_read", "file_write", "file_create",
             "file_delete", "file_edit", "computer_screenshot", "computer_click",
-            "computer_type", "computer_scroll", "computer_shell", "emotion_analyze"
+            "computer_type", "computer_scroll", "computer_shell", "emotion_analyze",
+            "voice_memory_search", "run_code", "execute_code",
         ]
 
         if tool_name in builtin_tools:
@@ -400,24 +431,61 @@ class ToolExecutor:
             return await self._execute_computer_shell(params)
         elif tool_name == "emotion_analyze":
             return await self._execute_emotion_analyze(params)
+        elif tool_name == "voice_memory_search":
+            return await self._execute_voice_memory_search(params)
+        elif tool_name in ("run_code", "execute_code"):
+            return await self._execute_run_code(params)
         else:
             return {"error": f"未知内置工具: {tool_name}"}
 
     async def _execute_memory_search(self, params: Dict) -> Dict:
         """执行记忆搜索"""
-        query = params.get("query", "")
-        category = params.get("category")
-        limit = params.get("limit", 5)
-
-        # 这里应该调用记忆管理器
-        # 暂时返回模拟结果
-        return {
-            "results": [],
-            "query": query,
-            "category": category,
-            "limit": limit,
-            "count": 0,
-        }
+        try:
+            query = params.get("query", "")
+            category = params.get("category")
+            limit = params.get("limit", 5)
+            
+            if not query:
+                return {"error": "缺少搜索查询"}
+            
+            # 获取 MemoryManager
+            memory_manager = None
+            if hasattr(self._agent, 'memory_manager') and self._agent.memory_manager:
+                memory_manager = self._agent.memory_manager
+            else:
+                # 创建临时 MemoryManager（降级模式）
+                from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+                memory_manager = MemoryManager()
+            
+            # 执行搜索
+            memories = memory_manager.recall(
+                query=query,
+                category=category,
+                limit=limit,
+            )
+            
+            # 格式化结果
+            results = []
+            for memory in memories:
+                results.append({
+                    "id": memory.get("id", ""),
+                    "content": memory.get("content", ""),
+                    "category": memory.get("category", ""),
+                    "temperature": memory.get("temperature", 0.0),
+                    "created_at": memory.get("created_at", ""),
+                })
+            
+            return {
+                "success": True,
+                "results": results,
+                "query": query,
+                "category": category,
+                "limit": limit,
+                "count": len(results),
+            }
+        except Exception as e:
+            logger.error(f"记忆搜索执行失败: {e}")
+            return {"error": f"记忆搜索执行失败: {str(e)}"}
 
     async def _execute_file_read(self, params: Dict) -> Dict:
         """执行文件读取"""
@@ -496,38 +564,339 @@ class ToolExecutor:
 
     async def _execute_computer_screenshot(self, params: Dict) -> Dict:
         """执行屏幕截图"""
-        # 这里需要 Computer Use 模块
-        return {"error": "Computer Use 未初始化"}
+        try:
+            from neurova.computer_use import get_computer_use_manager
+            manager = get_computer_use_manager()
+            screenshot_data = manager.screenshot()
+            if screenshot_data:
+                import base64
+                b64_str = base64.b64encode(screenshot_data).decode('utf-8')
+                return {"success": True, "image_base64": b64_str, "format": "png"}
+            else:
+                return {"error": "截图失败：无可用后端"}
+        except Exception as e:
+            logger.error(f"截图执行失败: {e}")
+            return {"error": f"截图执行失败: {str(e)}"}
 
     async def _execute_computer_click(self, params: Dict) -> Dict:
         """执行鼠标点击"""
-        # 这里需要 Computer Use 模块
-        return {"error": "Computer Use 未初始化"}
+        try:
+            x = params.get("x")
+            y = params.get("y")
+            button = params.get("button", "left")
+            
+            if x is None or y is None:
+                return {"error": "缺少必要的坐标参数 x, y"}
+            
+            from neurova.computer_use import get_computer_use_manager
+            manager = get_computer_use_manager()
+            success = manager.click(int(x), int(y), button)
+            
+            if success:
+                return {"success": True, "x": x, "y": y, "button": button}
+            else:
+                return {"error": "点击操作失败"}
+        except Exception as e:
+            logger.error(f"点击执行失败: {e}")
+            return {"error": f"点击执行失败: {str(e)}"}
 
     async def _execute_computer_type(self, params: Dict) -> Dict:
         """执行键盘输入"""
-        # 这里需要 Computer Use 模块
-        return {"error": "Computer Use 未初始化"}
+        try:
+            text = params.get("text", "")
+            if not text:
+                return {"error": "缺少输入文本"}
+            
+            from neurova.computer_use import get_computer_use_manager
+            manager = get_computer_use_manager()
+            success = manager.type_text(text)
+            
+            if success:
+                return {"success": True, "text": text, "length": len(text)}
+            else:
+                return {"error": "输入操作失败"}
+        except Exception as e:
+            logger.error(f"输入执行失败: {e}")
+            return {"error": f"输入执行失败: {str(e)}"}
 
     async def _execute_computer_scroll(self, params: Dict) -> Dict:
         """执行屏幕滚动"""
-        # 这里需要 Computer Use 模块
-        return {"error": "Computer Use 未初始化"}
+        try:
+            scroll_x = params.get("scroll_x", 0)
+            scroll_y = params.get("scroll_y", 0)
+            
+            # 计算点击位置（默认屏幕中心）
+            import pyautogui
+            screen_width, screen_height = pyautogui.size()
+            x = screen_width // 2
+            y = screen_height // 2
+            
+            from neurova.computer_use import get_computer_use_manager
+            manager = get_computer_use_manager()
+            # ComputerUseManager.scroll 只支持垂直滚动，这里我们简化实现
+            success = manager.scroll(x, y, scroll_y)
+            
+            if success:
+                return {"success": True, "scroll_x": scroll_x, "scroll_y": scroll_y}
+            else:
+                return {"error": "滚动操作失败"}
+        except Exception as e:
+            logger.error(f"滚动执行失败: {e}")
+            return {"error": f"滚动执行失败: {str(e)}"}
 
     async def _execute_computer_shell(self, params: Dict) -> Dict:
         """执行 shell 命令"""
-        # 这里需要 Computer Use 模块
-        return {"error": "Computer Use 未初始化"}
+        try:
+            command = params.get("command", "")
+            if not command:
+                return {"error": "缺少命令参数"}
+            
+            from neurova.computer_use import get_computer_use_manager
+            manager = get_computer_use_manager()
+            result = manager.shell(command)
+            
+            return {
+                "success": result.get("returncode", -1) == 0,
+                "returncode": result.get("returncode", -1),
+                "stdout": result.get("stdout", ""),
+                "stderr": result.get("stderr", ""),
+                "command": command,
+            }
+        except Exception as e:
+            logger.error(f"Shell 命令执行失败: {e}")
+            return {"error": f"Shell 命令执行失败: {str(e)}"}
 
     async def _execute_emotion_analyze(self, params: Dict) -> Dict:
         """执行情感分析"""
-        text = params.get("text", "")
-        # 简单的情感分析
-        return {
-            "emotion": "neutral",
-            "confidence": 0.5,
-            "raw": text,
+        try:
+            text = params.get("text", "")
+            if not text:
+                return {"error": "缺少分析文本"}
+            
+            # 优先使用 Agent 的 memory_manager 中的情感分析器
+            emotion_analyzer = None
+            if hasattr(self._agent, 'memory_manager') and self._agent.memory_manager:
+                emotion_analyzer = getattr(self._agent.memory_manager, '_emotion_analyzer', None)
+            
+            # 如果没有，使用全局实例
+            if not emotion_analyzer:
+                try:
+                    from neurova.cognitive_layers.memory_layer.emotion import get_emotion_analyzer_instance
+                    emotion_analyzer = get_emotion_analyzer_instance()
+                except ImportError:
+                    logger.warning("情感分析器模块不可用，使用简化实现")
+                    return self._fallback_emotion_analyze(text)
+            
+            # 执行情感分析
+            result = emotion_analyzer.analyze(text)
+            
+            return {
+                "success": True,
+                "primary_emotion": result.get("primary_emotion", "neutral"),
+                "confidence": result.get("confidence", 0.0),
+                "emotions": result.get("emotions", {}),
+                "tags": result.get("tags", []),
+                "score": result.get("score", 0.0),
+                "text": text,
+            }
+        except Exception as e:
+            logger.error(f"情感分析执行失败: {e}")
+            return self._fallback_emotion_analyze(text)
+    
+    def _fallback_emotion_analyze(self, text: str) -> Dict:
+        """简化情感分析回退实现"""
+        text_lower = text.lower()
+        
+        # 简单关键词匹配
+        emotion_keywords = {
+            "happy": ["开心", "高兴", "快乐", "愉快", "欣喜", "happy", "joy", "glad"],
+            "sad": ["伤心", "难过", "悲伤", "忧伤", "sad", "sorrow", "unhappy"],
+            "angry": ["生气", "愤怒", "恼火", "angry", "furious", "mad"],
+            "surprise": ["惊讶", "惊喜", "意外", "surprise", "amazed"],
+            "fear": ["害怕", "恐惧", "担心", "afraid", "fear", "scared"],
+            "disgust": ["厌恶", "讨厌", "恶心", "disgust", "dislike"],
         }
+        
+        detected_emotion = "neutral"
+        max_score = 0.0
+        
+        for emotion, keywords in emotion_keywords.items():
+            for keyword in keywords:
+                if keyword in text_lower:
+                    score = 0.7 + (0.3 * (1.0 / (len(text) + 1)))
+                    if score > max_score:
+                        max_score = score
+                        detected_emotion = emotion
+        
+        if detected_emotion == "neutral":
+            return {
+                "success": True,
+                "primary_emotion": "neutral",
+                "confidence": 0.5,
+                "emotions": {"neutral": 1.0},
+                "tags": ["neutral"],
+                "score": 0.0,
+                "text": text,
+            }
+        
+        return {
+            "success": True,
+            "primary_emotion": detected_emotion,
+            "confidence": max_score,
+            "emotions": {detected_emotion: max_score, "neutral": 1.0 - max_score},
+            "tags": [detected_emotion],
+            "score": max_score - 0.5,
+            "text": text,
+        }
+    
+    async def _execute_voice_memory_search(self, params: Dict) -> Dict:
+        """执行语音转写记忆搜索"""
+        try:
+            query = params.get("query", "")
+            limit = params.get("limit", 5)
+            
+            if not query:
+                return {"error": "缺少搜索查询"}
+            
+            # 获取 MemoryManager
+            memory_manager = None
+            if hasattr(self._agent, 'memory_manager') and self._agent.memory_manager:
+                memory_manager = self._agent.memory_manager
+            else:
+                try:
+                    from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+                    memory_manager = MemoryManager()
+                except ImportError:
+                    logger.warning("MemoryManager 模块不可用")
+                    return {"results": [], "query": query, "count": 0}
+            
+            # 搜索语音转写记忆（使用 category 过滤）
+            memories = memory_manager.recall(
+                query=query,
+                category="voice_transcription",  # 语音转写类别
+                limit=limit,
+            )
+            
+            # 格式化结果
+            results = []
+            for memory in memories:
+                results.append({
+                    "id": memory.get("id", ""),
+                    "content": memory.get("content", ""),
+                    "category": memory.get("category", ""),
+                    "transcription": memory.get("metadata", {}).get("transcription", ""),
+                    "timestamp": memory.get("created_at", ""),
+                })
+            
+            return {
+                "success": True,
+                "results": results,
+                "query": query,
+                "count": len(results),
+            }
+        except Exception as e:
+            logger.error(f"语音记忆搜索执行失败: {e}")
+            return {"error": f"语音记忆搜索执行失败: {str(e)}", "results": [], "count": 0}
+
+    async def _execute_run_code(self, params: Dict) -> Dict:
+        """
+        执行代码（使用 ExecutionLayers Runtime 抽象）
+
+        支持参数:
+            code: 要执行的代码字符串
+            language: 代码语言（python / shell），默认 python
+            runtime_type: 运行时类型（local / docker），默认从 Agent 配置读取
+            timeout: 超时秒数，默认 60
+            env: 环境变量字典
+            cwd: 工作目录
+        """
+        code = params.get("code", "")
+        language = params.get("language", "python")
+        timeout = params.get("timeout", 60)
+        env = params.get("env")
+        cwd = params.get("cwd")
+
+        if not code:
+            return {"error": "缺少 code 参数"}
+
+        start_time = time.time()
+
+        try:
+            # 延迟导入避免循环依赖
+            from neurova.execution_layers import (
+                LocalExecutor,
+                RuntimeManager,
+                get_runtime_manager,
+                RuntimeType,
+            )
+
+            # 确定运行时类型
+            runtime_type_str = params.get("runtime_type", "local")
+            runtime_type = RuntimeType.DOCKER if runtime_type_str == "docker" else RuntimeType.LOCAL
+
+            # 尝试从 RuntimeManager 获取已有运行时，否则创建临时的
+            runtime_manager = get_runtime_manager()
+            runtime = None
+
+            # 查找同类型且空闲的运行时
+            for info_dict in runtime_manager.list_active():
+                if info_dict.get("runtime_type") == runtime_type.value and info_dict.get("status") == "running":
+                    runtime = runtime_manager.get_runtime(info_dict["runtime_id"])
+                    break
+
+            # 没有可用运行时，创建临时 LocalExecutor
+            owns_runtime = False
+            if runtime is None:
+                if runtime_type == RuntimeType.DOCKER:
+                    runtime = RuntimeManager.create_runtime_class(RuntimeType.DOCKER) if hasattr(RuntimeManager, 'create_runtime_class') else None
+                if runtime is None:
+                    runtime = LocalExecutor(runtime_id=f"run_code_{int(time.time())}")
+                owns_runtime = True
+                await runtime.start()
+
+            try:
+                # 构建执行命令
+                if language == "python":
+                    command = "python"
+                    args = ["-c", code]
+                elif language in ("shell", "bash", "sh"):
+                    command = "sh"
+                    args = ["-c", code]
+                else:
+                    command = language
+                    args = [code]
+
+                exec_result = await runtime.exec(
+                    command=command,
+                    args=args,
+                    env=env,
+                    cwd=cwd,
+                    timeout=timeout,
+                )
+
+                duration_ms = (time.time() - start_time) * 1000
+
+                return {
+                    "success": exec_result.success,
+                    "stdout": exec_result.stdout,
+                    "stderr": exec_result.stderr,
+                    "exit_code": exec_result.exit_code,
+                    "duration_ms": duration_ms,
+                    "runtime_type": runtime_type.value,
+                    "error": exec_result.error,
+                }
+            finally:
+                if owns_runtime:
+                    await runtime.stop()
+
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            logger.error(f"代码执行失败: {e}")
+            return {
+                "success": False,
+                "error": f"代码执行失败: {str(e)}",
+                "duration_ms": duration_ms,
+            }
 
     def _on_tool_executed(self, tool_name: str, result: Dict, success: bool):
         """

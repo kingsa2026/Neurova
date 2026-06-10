@@ -17,6 +17,7 @@ from neurova.collaboration.neurflow.storage import NeurflowStorage
 from neurova.collaboration.neurflow.node_registry import get_node_registry
 from neurova.collaboration.neurflow.dag import get_dag_validator
 from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
+from neurova.api.endpoints import get_agent_instance
 
 logger = logging.getLogger(__name__)
 
@@ -144,12 +145,53 @@ async def execute_workflow(
     if not workflow:
         raise HTTPException(status_code=404, detail="工作流不存在")
     
+    # 获取外部系统引用（从 Agent 实例）
+    memory_manager = None
+    context_pool = None
+    emotion_module = None
+    crystallizer = None
+    
+    # 尝试获取 Agent 实例：优先使用指定的 agent_id，否则尝试默认
+    agent = None
+    if agent_id:
+        agent = get_agent_instance(agent_id)
+    if agent is None:
+        # 尝试获取默认 Agent
+        agent = get_agent_instance("default")
+    
+    if agent:
+        memory_manager = getattr(agent, 'memory_manager', None)
+        # context_pool: 尝试从 context_orchestrator 获取，或使用 Agent 的 context_pool 属性
+        context_pool = getattr(agent, 'context_pool', None)
+        if context_pool is None and hasattr(agent, 'context_orchestrator'):
+            # context_orchestrator 可能有 pool 属性
+            context_pool = getattr(agent.context_orchestrator, 'pool', None)
+        # emotion_module: 从 memory_manager 获取
+        if memory_manager:
+            emotion_module = getattr(memory_manager, '_emotion_module', None)
+        crystallizer = getattr(agent, 'crystallizer', None)
+    
+    # 如果 context_pool 仍然为 None，创建一个默认的 ContextPool 实例
+    if context_pool is None:
+        try:
+            from neurova.context_pool import ContextPool
+            context_pool = ContextPool(
+                user_id=user_id or "default",
+                agent_id=agent_id or "default"
+            )
+        except Exception as e:
+            logger.warning(f"创建默认 ContextPool 失败: {e}")
+    
     executor = get_workflow_executor()
     instance = await executor.execute(
         workflow=workflow,
         inputs=inputs,
         user_id=user_id,
-        agent_id=agent_id
+        agent_id=agent_id,
+        memory_manager=memory_manager,
+        context_pool=context_pool,
+        emotion_module=emotion_module,
+        crystallizer=crystallizer
     )
     
     # 保存执行实例

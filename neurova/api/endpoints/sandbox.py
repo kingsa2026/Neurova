@@ -45,6 +45,26 @@ _SANDBOXES: typing.Dict[str, dict] = {}  # sandbox_id -> sandbox data
 
 # ── Endpoints ──────────────────────────────────────────
 
+@router.get("")
+async def list_all_sandboxes(status: typing.Optional[str] = None):
+    """列出所有沙箱"""
+    results = list(_SANDBOXES.values())
+    if status:
+        results = [s for s in results if s.get("status") == status]
+    results.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return {"code": 0, "message": "success", "data": {"sandboxes": results, "total": len(results)}}
+
+
+@router.get("/agent/{agent_id}")
+async def list_sandboxes(agent_id: str, status: typing.Optional[str] = None):
+    """列出某 Agent 的所有沙箱"""
+    results = [s for s in _SANDBOXES.values() if s.get("agent_id") == agent_id]
+    if status:
+        results = [s for s in results if s.get("status") == status]
+    results.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return {"code": 0, "message": "success", "data": {"sandboxes": results, "total": len(results)}}
+
+
 @router.post("/start")
 async def start_thought_sandbox(body: SandboxStartRequest):
     """为 Agent 开启思维沙箱"""
@@ -153,13 +173,3 @@ async def destroy_sandbox(sandbox_id: str):
     if not sandbox:
         raise HTTPException(status_code=404, detail=f"Sandbox '{sandbox_id}' not found")
     return {"code": 0, "message": "Sandbox destroyed", "data": {"sandbox_id": sandbox_id}}
-
-
-@router.get("/agent/{agent_id}")
-async def list_sandboxes(agent_id: str, status: typing.Optional[str] = None):
-    """列出某 Agent 的所有沙箱"""
-    results = [s for s in _SANDBOXES.values() if s.get("agent_id") == agent_id]
-    if status:
-        results = [s for s in results if s.get("status") == status]
-    results.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-    return {"code": 0, "message": "success", "data": {"sandboxes": results, "total": len(results)}}
