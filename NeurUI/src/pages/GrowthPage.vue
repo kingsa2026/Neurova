@@ -69,13 +69,13 @@
                 <div class="question-header">
                   <h4>{{ q.question }}</h4>
                   <a-tag :color="q.answered ? 'green' : 'orange'">
-                    {{ q.answered ? 'Answered' : 'Pending' }}
+                    {{ q.answered ? t('growth.answered') : t('growth.pending') }}
                   </a-tag>
                 </div>
                 <div v-if="q.answer" class="question-answer">{{ q.answer }}</div>
                 <div class="question-actions">
                   <GlassButton v-if="!q.answered" size="sm" variant="ghost" @click="answerQuestion(q)">
-                    Answer
+                    {{ t('growth.answer') }}
                   </GlassButton>
                 </div>
               </div>
@@ -162,7 +162,7 @@
     <a-modal v-model:open="showAnswerModal" :title="t('growth.questions')" @ok="submitAnswer" :confirm-loading="submittingAnswer">
       <p v-if="questionToAnswer" class="modal-question">{{ questionToAnswer.question }}</p>
       <a-form layout="vertical">
-        <a-form-item label="Answer">
+        <a-form-item :label="t('growth.answer')">
           <a-textarea v-model:value="answerText" :rows="4" />
         </a-form-item>
       </a-form>
@@ -174,11 +174,11 @@
         <a-form-item :label="t('common.description')">
           <a-textarea v-model:value="newAction.description" :rows="3" />
         </a-form-item>
-        <a-form-item label="Priority">
+        <a-form-item :label="t('growth.priority')">
           <a-select v-model:value="newAction.priority" style="width: 100%">
-            <a-select-option value="low">Low</a-select-option>
-            <a-select-option value="medium">Medium</a-select-option>
-            <a-select-option value="high">High</a-select-option>
+            <a-select-option value="low">{{ t('growth.low') }}</a-select-option>
+            <a-select-option value="medium">{{ t('growth.medium') }}</a-select-option>
+            <a-select-option value="high">{{ t('growth.high') }}</a-select-option>
           </a-select>
         </a-form-item>
       </a-form>
@@ -188,7 +188,7 @@
     <a-modal v-model:open="showEditConstitution" :title="t('growth.constitution')" @ok="saveConstitution" :confirm-loading="savingConstitution" width="640px">
       <a-form layout="vertical">
         <a-form-item :label="t('growth.rules')">
-          <a-textarea v-model:value="constitutionText" :rows="10" placeholder="One rule per line..." />
+          <a-textarea v-model:value="constitutionText" :rows="10" :placeholder="t('growth.oneRulePerLine')" />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -253,7 +253,7 @@ const traitColor = (val: number) => {
 const actionColumns = computed(() => [
   { title: t('common.description'), dataIndex: 'description', key: 'description', ellipsis: true },
   { title: t('common.status'), key: 'status', width: 140 },
-  { title: 'Priority', key: 'priority', width: 100 },
+  { title: t('growth.priority'), key: 'priority', width: 100 },
   { title: t('common.createdAt'), dataIndex: 'created_at', width: 180 },
 ])
 

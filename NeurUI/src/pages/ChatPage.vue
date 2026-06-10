@@ -68,7 +68,7 @@
       <div class="nr-chat-messages" ref="messagesRef">
         <div v-if="messages.length === 0" class="nr-chat-empty">
           <div class="nr-chat-empty-icon">🤖</div>
-          <h3>{{ currentAgent?.name || 'Agent' }}</h3>
+          <h3>{{ currentAgent?.name || t('agent.title') }}</h3>
           <p>{{ t('chat.placeholder') }}</p>
         </div>
 

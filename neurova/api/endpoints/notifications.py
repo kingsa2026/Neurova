@@ -180,6 +180,30 @@ class NotificationManager:
             
             return count
 
+    def get_push_statistics(self, user_id: str) -> Dict[str, Any]:
+        """获取推送统计"""
+        with self._lock:
+            notification_ids = self._user_notifications.get(user_id, [])
+            
+            total = 0
+            pushed = 0
+            failed = 0
+            
+            for nid in notification_ids:
+                if nid in self._notifications:
+                    notification = self._notifications[nid]
+                    if notification.notification_type == "task_completed":
+                        total += 1
+                        # 内存管理器无推送状态，默认未推送
+                        failed += 1
+            
+            return {
+                "total_task_notifications": total,
+                "pushed_to_negative_screen": pushed,
+                "push_failed": failed,
+                "push_rate": pushed / total if total > 0 else 0.0,
+            }
+
 
 # 全局通知管理器单例
 _notification_manager: Optional[NotificationManager] = None
@@ -411,4 +435,35 @@ async def delete_notification(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete notification: {str(e)}"
+        )
+
+
+@router.get("/push-statistics")
+async def get_push_statistics(request: Request):
+    """获取推送统计"""
+    request_id = _get_request_id(request)
+    
+    try:
+        # 获取当前用户（从依赖注入）
+        # 这里简化处理，实际应该从请求中获取用户ID
+        user_id = "default_user"  # TODO: 从认证中获取实际用户ID
+        
+        # 获取通知管理器
+        manager = get_notification_manager()
+        
+        # 获取推送统计
+        statistics = manager.get_push_statistics(user_id)
+        
+        return {
+            "code": 0,
+            "message": "success",
+            "data": statistics,
+            "request_id": request_id,
+        }
+        
+    except Exception as e:
+        logger.exception(f"Failed to get push statistics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get push statistics: {str(e)}"
         )

@@ -41,19 +41,19 @@
         </a-form-item>
         <a-form-item :label="t('common.type')">
           <a-select v-model:value="form.type" :placeholder="t('common.type')">
-            <a-select-option value="telegram">Telegram</a-select-option>
-            <a-select-option value="discord">Discord</a-select-option>
-            <a-select-option value="slack">Slack</a-select-option>
-            <a-select-option value="wechat">WeChat</a-select-option>
-            <a-select-option value="dingtalk">DingTalk</a-select-option>
-            <a-select-option value="feishu">Feishu</a-select-option>
-            <a-select-option value="custom">Custom</a-select-option>
+            <a-select-option value="telegram">{{ t('channel.telegram') }}</a-select-option>
+            <a-select-option value="discord">{{ t('channel.discord') }}</a-select-option>
+            <a-select-option value="slack">{{ t('channel.slack') }}</a-select-option>
+            <a-select-option value="wechat">{{ t('channel.wechat') }}</a-select-option>
+            <a-select-option value="dingtalk">{{ t('channel.dingtalk') }}</a-select-option>
+            <a-select-option value="feishu">{{ t('channel.feishu') }}</a-select-option>
+            <a-select-option value="custom">{{ t('channel.custom') }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="Token / API Key">
-          <a-input v-model:value="form.token" type="password" placeholder="Token / API Key" />
+        <a-form-item :label="t('channel.tokenApiKey')">
+          <a-input v-model:value="form.token" type="password" :placeholder="t('channel.tokenApiKey')" />
         </a-form-item>
-        <a-form-item label="Webhook URL">
+        <a-form-item :label="t('channel.webhookUrl')">
           <a-input v-model:value="form.webhookUrl" placeholder="https://..." />
         </a-form-item>
         <a-form-item :label="t('common.description')">

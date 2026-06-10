@@ -13,15 +13,15 @@
             <div class="suite-header">
               <span class="suite-name">{{ suite.name }}</span>
               <a-tag :color="suite.status === 'completed' ? 'green' : suite.status === 'running' ? 'blue' : 'default'">
-                {{ suite.status || 'idle' }}
+                {{ suite.status || t('benchmark.idle') }}
               </a-tag>
             </div>
           </template>
           <div class="suite-body">
             <p class="suite-desc">{{ suite.description || '-' }}</p>
             <div class="suite-meta">
-              <span>{{ suite.tests_count || 0 }} tests</span>
-              <span v-if="suite.last_run">Last: {{ formatTime(suite.last_run) }}</span>
+              <span>{{ suite.tests_count || 0 }} {{ t('benchmark.tests') }}</span>
+              <span v-if="suite.last_run">{{ t('benchmark.lastRun') }}{{ formatTime(suite.last_run) }}</span>
             </div>
           </div>
           <template #footer>
@@ -36,7 +36,7 @@
     </a-spin>
 
     <!-- Results comparison table -->
-    <GlassCard title="Results Comparison" style="margin-top: 20px">
+    <GlassCard :title="t('benchmark.resultsComparison')" style="margin-top: 20px">
       <a-table
         :columns="resultColumns"
         :data-source="results"
@@ -53,14 +53,14 @@
             <a-progress :percent="record.score ?? 0" :stroke-color="record.score >= 80 ? '#10b981' : record.score >= 50 ? '#f59e0b' : '#ef4444'" size="small" />
           </template>
           <template v-if="column.key === 'status'">
-            <a-tag :color="record.passed ? 'green' : 'red'">{{ record.passed ? 'Pass' : 'Fail' }}</a-tag>
+            <a-tag :color="record.passed ? 'green' : 'red'">{{ record.passed ? t('benchmark.pass') : t('benchmark.fail') }}</a-tag>
           </template>
         </template>
       </a-table>
     </GlassCard>
 
     <!-- Per-agent results -->
-    <GlassCard title="Per-Agent Results" style="margin-top: 20px">
+    <GlassCard :title="t('benchmark.perAgentResults')" style="margin-top: 20px">
       <a-table :columns="agentResultColumns" :data-source="agentResults" row-key="agent_id" :pagination="false" size="small">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'avg_score'">
@@ -93,19 +93,19 @@ const selectedSuite = ref<any>(null)
 const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 
 const resultColumns = computed(() => [
-  { title: 'Agent', key: 'agent' },
-  { title: 'Test', dataIndex: 'test_name', key: 'test_name' },
-  { title: 'Score', key: 'score', width: 180 },
-  { title: 'Duration', dataIndex: 'duration_ms', key: 'duration' },
+  { title: t('benchmark.agent'), key: 'agent' },
+  { title: t('benchmark.test'), dataIndex: 'test_name', key: 'test_name' },
+  { title: t('benchmark.score'), key: 'score', width: 180 },
+  { title: t('benchmark.duration'), dataIndex: 'duration_ms', key: 'duration' },
   { title: t('common.status'), key: 'status', width: 80 },
 ])
 
 const agentResultColumns = computed(() => [
-  { title: 'Agent', dataIndex: 'agent_name', key: 'agent_name' },
-  { title: 'Tests Run', dataIndex: 'tests_run', key: 'tests_run' },
-  { title: 'Passed', dataIndex: 'passed', key: 'passed' },
-  { title: 'Failed', dataIndex: 'failed', key: 'failed' },
-  { title: 'Avg Score', key: 'avg_score' },
+  { title: t('benchmark.agent'), dataIndex: 'agent_name', key: 'agent_name' },
+  { title: t('benchmark.testsRun'), dataIndex: 'tests_run', key: 'tests_run' },
+  { title: t('benchmark.passed'), dataIndex: 'passed', key: 'passed' },
+  { title: t('benchmark.failed'), dataIndex: 'failed', key: 'failed' },
+  { title: t('benchmark.avgScore'), key: 'avg_score' },
 ])
 
 const fetchSuites = async () => {

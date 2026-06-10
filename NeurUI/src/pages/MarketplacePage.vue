@@ -7,7 +7,7 @@
 
     <a-tabs v-model:activeKey="activeTab" @change="fetchMarketplace">
       <!-- Browse tab -->
-      <a-tab-pane key="browse" tab="Browse">
+      <a-tab-pane key="browse" :tab="t('marketplace.browse')">
         <a-spin :spinning="loading">
           <div class="items-grid">
             <GlassCard v-for="item in items" :key="item.id" :title="item.name" variant="default">
@@ -36,7 +36,7 @@
                   >
                     {{ t('skill.install') }}
                   </GlassButton>
-                  <GlassButton v-else variant="ghost" size="sm" disabled>Installed</GlassButton>
+                  <GlassButton v-else variant="ghost" size="sm" disabled>{{ t('marketplace.installed') }}</GlassButton>
                   <GlassButton variant="ghost" size="sm" @click="viewDetails(item)">{{ t('common.open') }}</GlassButton>
                 </div>
               </template>
@@ -47,14 +47,14 @@
       </a-tab-pane>
 
       <!-- Installed tab -->
-      <a-tab-pane key="installed" tab="Installed">
+      <a-tab-pane key="installed" :tab="t('marketplace.installed')">
         <a-spin :spinning="loading">
           <div class="items-grid">
             <GlassCard v-for="item in installedItems" :key="item.id" :title="item.name" variant="default">
               <template #header>
                 <div class="item-header">
                   <span class="item-name">{{ item.name }}</span>
-                  <a-tag color="green">Installed</a-tag>
+                  <a-tag color="green">{{ t('marketplace.installed') }}</a-tag>
                 </div>
               </template>
               <p class="item-desc">{{ item.description }}</p>
@@ -78,10 +78,10 @@
       <div v-if="detailItem" class="detail-content">
         <p>{{ detailItem.description }}</p>
         <a-descriptions :column="1" size="small" bordered>
-          <a-descriptions-item label="Author">{{ detailItem.author }}</a-descriptions-item>
-          <a-descriptions-item label="Version">{{ detailItem.version }}</a-descriptions-item>
-          <a-descriptions-item label="Type">{{ detailItem.type }}</a-descriptions-item>
-          <a-descriptions-item label="Downloads">{{ detailItem.downloads ?? 0 }}</a-descriptions-item>
+          <a-descriptions-item :label="t('marketplace.author')">{{ detailItem.author }}</a-descriptions-item>
+          <a-descriptions-item :label="t('marketplace.version')">{{ detailItem.version }}</a-descriptions-item>
+          <a-descriptions-item :label="t('marketplace.type')">{{ detailItem.type }}</a-descriptions-item>
+          <a-descriptions-item :label="t('marketplace.downloads')">{{ detailItem.downloads ?? 0 }}</a-descriptions-item>
         </a-descriptions>
       </div>
     </a-modal>

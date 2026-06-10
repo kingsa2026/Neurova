@@ -461,29 +461,7 @@ class Agent:
             except Exception as e:
                 logger.warning(f"ASR管理器初始化失败: {e}")
 
-        # 语音记忆桥接器（连接语音系统与记忆系统）
-        self.voice_memory_bridge = None
-        if (self.config.enable_tts or self.config.enable_asr) and self.memory_manager:
-            try:
-                from neurova.voice_memory_bridge import VoiceMemoryBridge, VoiceMemoryConfig
-                
-                voice_config = VoiceMemoryConfig(
-                    enable_asr_memory=self.config.enable_asr,
-                    enable_tts_stats=self.config.enable_tts,
-                    enable_emotion_analysis=True,
-                    min_confidence_threshold=0.5,
-                )
-                
-                self.voice_memory_bridge = VoiceMemoryBridge(
-                    config=voice_config,
-                    memory_manager=self.memory_manager,
-                    emotion_module=getattr(self.memory_manager, "_emotion_module", None),
-                    evolution_orchestrator=self.evolution,
-                )
-                logger.info(f"Agent {self.config.name}: 语音记忆桥接器已初始化")
-                
-            except Exception as e:
-                logger.warning(f"语音记忆桥接器初始化失败: {e}")
+
 
         # 统一语音管线（ASR→上下文→记忆 的单一入口）
         self.voice_pipeline = None
@@ -552,6 +530,30 @@ class Agent:
 
             except Exception as e:
                 logger.warning(f"统一进化引擎初始化失败: {e}")
+
+        # 语音记忆桥接器（连接语音系统与记忆系统）
+        self.voice_memory_bridge = None
+        if (self.config.enable_tts or self.config.enable_asr) and self.memory_manager:
+            try:
+                from neurova.voice_memory_bridge import VoiceMemoryBridge, VoiceMemoryConfig
+                
+                voice_config = VoiceMemoryConfig(
+                    enable_asr_memory=self.config.enable_asr,
+                    enable_tts_stats=self.config.enable_tts,
+                    enable_emotion_analysis=True,
+                    min_confidence_threshold=0.5,
+                )
+                
+                self.voice_memory_bridge = VoiceMemoryBridge(
+                    config=voice_config,
+                    memory_manager=self.memory_manager,
+                    emotion_module=getattr(self.memory_manager, "_emotion_module", None),
+                    evolution_orchestrator=self.evolution,
+                )
+                logger.info(f"Agent {self.config.name}: 语音记忆桥接器已初始化")
+                
+            except Exception as e:
+                logger.warning(f"语音记忆桥接器初始化失败: {e}")
 
         # 向后兼容别名 (用于 API 端点 get_skill_modules())
         self.evolution_engine = self.evolution  # type: ignore

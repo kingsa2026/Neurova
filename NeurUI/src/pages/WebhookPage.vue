@@ -39,16 +39,16 @@
     <!-- Create/Edit modal -->
     <a-modal v-model:open="showModal" :title="editingId ? t('common.edit') : t('common.create')" @ok="handleSave" :confirm-loading="saving" width="560px">
       <a-form layout="vertical">
-        <a-form-item label="URL">
+        <a-form-item :label="t('system.url')">
           <a-input v-model:value="form.url" placeholder="https://example.com/webhook" />
         </a-form-item>
-        <a-form-item label="Events">
+        <a-form-item :label="t('system.events')">
           <a-select v-model:value="form.events" mode="multiple" :placeholder="t('common.type')" style="width: 100%">
             <a-select-option v-for="evt in availableEvents" :key="evt" :value="evt">{{ evt }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="Secret">
-          <a-input v-model:value="form.secret" type="password" placeholder="Secret key" />
+        <a-form-item :label="t('system.secret')">
+          <a-input v-model:value="form.secret" type="password" :placeholder="t('system.secret')" />
         </a-form-item>
         <a-form-item :label="t('common.description')">
           <a-input v-model:value="form.description" type="textarea" :rows="2" :placeholder="t('common.description')" />
@@ -119,10 +119,10 @@ const availableEvents = [
 ]
 
 const logColumns = [
-  { title: 'Event', dataIndex: 'event', key: 'event' },
+  { title: t('system.event'), dataIndex: 'event', key: 'event' },
   { title: t('common.status'), dataIndex: 'statusCode', key: 'status' },
   { title: t('common.createdAt'), dataIndex: 'timestamp', key: 'timestamp' },
-  { title: 'Duration', dataIndex: 'duration', key: 'duration' },
+  { title: t('system.duration'), dataIndex: 'duration', key: 'duration' },
 ]
 
 const form = reactive({ url: '', events: [] as string[], secret: '', description: '' })

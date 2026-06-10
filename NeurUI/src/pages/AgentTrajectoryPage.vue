@@ -1,7 +1,7 @@
 <template>
   <div class="trajectory-page">
     <div class="page-header">
-      <h2 class="page-title">Agent Trajectory</h2>
+      <h2 class="page-title">{{ t('trajectory.title') }}</h2>
       <div class="header-actions">
         <GlassButton variant="ghost" size="sm" :loading="loading" @click="fetchTraces">{{ t('common.refresh') }}</GlassButton>
       </div>
@@ -29,23 +29,23 @@
         </GlassCard>
 
         <!-- Trace detail -->
-        <GlassCard :title="selectedTrace ? `Trace: ${selectedTrace.name || selectedTrace.id}` : 'Select a trace'">
+        <GlassCard :title="selectedTrace ? `${t('trajectory.tracePrefix')}${selectedTrace.name || selectedTrace.id}` : t('trajectory.selectTrace')">
           <template v-if="detailLoading" #default>
             <a-spin />
           </template>
           <template v-if="selectedTrace && !detailLoading">
             <div class="trace-detail">
               <a-descriptions :column="1" size="small" bordered>
-                <a-descriptions-item label="ID">{{ selectedTrace.id }}</a-descriptions-item>
+                <a-descriptions-item :label="t('trace.id')">{{ selectedTrace.id }}</a-descriptions-item>
                 <a-descriptions-item :label="t('common.status')">
                   <a-tag :color="statusColor(selectedTrace.status)">{{ selectedTrace.status }}</a-tag>
                 </a-descriptions-item>
-                <a-descriptions-item label="Duration">{{ selectedTrace.duration_ms ?? 0 }}ms</a-descriptions-item>
-                <a-descriptions-item label="Steps">{{ selectedTrace.steps_count ?? 0 }}</a-descriptions-item>
-                <a-descriptions-item label="Started">{{ formatTime(selectedTrace.started_at) }}</a-descriptions-item>
+                <a-descriptions-item :label="t('trajectory.duration')">{{ selectedTrace.duration_ms ?? 0 }}ms</a-descriptions-item>
+                <a-descriptions-item :label="t('trajectory.steps')">{{ selectedTrace.steps_count ?? 0 }}</a-descriptions-item>
+                <a-descriptions-item :label="t('trajectory.started')">{{ formatTime(selectedTrace.started_at) }}</a-descriptions-item>
               </a-descriptions>
 
-              <h4 class="detail-section-title">Events</h4>
+              <h4 class="detail-section-title">{{ t('trajectory.events') }}</h4>
               <a-timeline>
                 <a-timeline-item v-for="(event, i) in traceEvents" :key="i" :color="eventColor(event.type)">
                   <div class="event-item">
@@ -58,7 +58,7 @@
               <a-empty v-if="!traceEvents.length" :description="t('common.noData')" />
             </div>
           </template>
-          <a-empty v-if="!selectedTrace" description="Select a trace to view details" />
+          <a-empty v-if="!selectedTrace" :description="t('trajectory.selectTraceDetails')" />
           <template #footer>
             <GlassButton v-if="selectedTrace" variant="secondary" size="sm" @click="exportTrace">{{ t('common.export') }}</GlassButton>
           </template>

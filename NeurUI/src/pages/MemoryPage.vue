@@ -6,12 +6,12 @@
         <p class="page-subtitle">{{ currentAgent?.name || '' }}</p>
         <div class="isolation-context">
           <a-tag color="blue" class="iso-tag">
-            <span class="iso-label">Isolation:</span>
+            <span class="iso-label">{{ t('memory.isolation') }}</span>
             agent_id: {{ isolationKey || 'none' }}
           </a-tag>
           <a-tag color="cyan" class="iso-tag">
-            <span class="iso-label">Level:</span>
-            agent-scoped
+            <span class="iso-label">{{ t('memory.level') }}</span>
+            {{ t('memory.agentScoped') }}
           </a-tag>
         </div>
       </div>
@@ -74,7 +74,7 @@
             <div class="content-preview">
               {{ truncate(record.content, 120) }}
               <a-tag v-if="record.shared || (record.share_group_ids && record.share_group_ids.length > 0)" color="gold" class="shared-badge">
-                Shared
+                {{ t('memory.shared') }}
               </a-tag>
             </div>
           </template>
@@ -127,7 +127,7 @@
             <a-select-option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="Importance (0-1)">
+        <a-form-item :label="t('memory.importance') + ' (0-1)'">
           <a-slider v-model:value="createForm.importance" :min="0" :max="1" :step="0.1" />
         </a-form-item>
       </a-form>
@@ -148,7 +148,7 @@
           <a-form-item :label="t('memory.categories')">
             <a-tag>{{ selectedMemory.category }}</a-tag>
           </a-form-item>
-          <a-form-item label="Importance">
+          <a-form-item :label="t('memory.importance')">
             <a-progress :percent="Math.round((selectedMemory.importance || 0) * 100)" size="small" />
           </a-form-item>
           <a-form-item :label="t('common.createdAt')">
@@ -215,7 +215,7 @@ const statsCards = computed(() => [
 const tableColumns = computed(() => [
   { title: t('common.description'), key: 'content', dataIndex: 'content', ellipsis: true },
   { title: t('memory.categories'), key: 'category', width: 120 },
-  { title: 'Importance', key: 'importance', width: 120 },
+  { title: t('memory.importance'), key: 'importance', width: 120 },
   { title: t('common.createdAt'), dataIndex: 'created_at', width: 180 },
   { title: t('common.actions'), key: 'actions', width: 180 },
 ])

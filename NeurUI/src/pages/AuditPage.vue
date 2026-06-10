@@ -10,11 +10,11 @@
       <div class="filters-row">
         <a-input v-model:value="filters.user" :placeholder="t('nav.users')" style="width: 150px" allow-clear />
         <a-select v-model:value="filters.action" :placeholder="t('common.actions')" style="width: 150px" allow-clear>
-          <a-select-option value="create">Create</a-select-option>
-          <a-select-option value="update">Update</a-select-option>
-          <a-select-option value="delete">Delete</a-select-option>
-          <a-select-option value="login">Login</a-select-option>
-          <a-select-option value="logout">Logout</a-select-option>
+          <a-select-option value="create">{{ t('system.create') }}</a-select-option>
+          <a-select-option value="update">{{ t('system.update') }}</a-select-option>
+          <a-select-option value="delete">{{ t('system.delete') }}</a-select-option>
+          <a-select-option value="login">{{ t('system.login') }}</a-select-option>
+          <a-select-option value="logout">{{ t('system.logout') }}</a-select-option>
         </a-select>
         <a-range-picker v-model:value="filters.dateRange" show-time style="width: 360px" />
         <GlassButton variant="primary" size="sm" :loading="loading" @click="fetchAudit">{{ t('common.search') }}</GlassButton>
@@ -24,8 +24,8 @@
     <!-- Audit statistics -->
     <div class="stats-grid" style="margin-top: 16px">
       <GlassStatCard :label="t('common.total')" :value="stats.total ?? 0" emoji="📋" />
-      <GlassStatCard label="Today" :value="stats.today ?? 0" emoji="📅" />
-      <GlassStatCard label="Warnings" :value="stats.warnings ?? 0" emoji="⚠️" />
+      <GlassStatCard :label="t('system.today')" :value="stats.today ?? 0" emoji="📅" />
+      <GlassStatCard :label="t('system.warnings')" :value="stats.warnings ?? 0" emoji="⚠️" />
     </div>
 
     <!-- Audit table -->
@@ -53,7 +53,7 @@
           </template>
           <template v-if="column.key === 'details'">
             <a-tooltip v-if="record.details" :title="JSON.stringify(record.details)">
-              <span class="audit-details">View</span>
+              <span class="audit-details">{{ t('system.view') }}</span>
             </a-tooltip>
             <span v-else class="text-muted">-</span>
           </template>
@@ -92,8 +92,8 @@ const columns = computed(() => [
   { title: t('common.createdAt'), key: 'timestamp', width: 180 },
   { title: t('nav.users'), key: 'user', width: 120 },
   { title: t('common.actions'), key: 'action', width: 100 },
-  { title: 'Resource', key: 'resource', width: 140 },
-  { title: 'Details', key: 'details', width: 80 },
+  { title: t('system.resource'), key: 'resource', width: 140 },
+  { title: t('system.details'), key: 'details', width: 80 },
 ])
 
 const actionColor = (action: string) => {

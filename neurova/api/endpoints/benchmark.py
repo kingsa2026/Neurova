@@ -21,6 +21,7 @@ from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import Query
+from fastapi import Request
 from pydantic import BaseModel
 from pydantic import Field
 
@@ -52,7 +53,7 @@ _RUNS_STORE: typing.Dict[str, dict] = {}  # run_id -> run data
 _USER_RUNS: typing.Dict[str, list] = {}  # user_id -> [run_ids]
 
 
-def _get_user_id(request) -> str:
+def _get_user_id(request: Request) -> str:
     return getattr(request.state, "user_id", "anonymous")
 
 
@@ -65,7 +66,7 @@ async def list_suites():
 
 
 @router.post("/run")
-async def run_benchmark(body: BenchmarkRunRequest, request):
+async def run_benchmark(body: BenchmarkRunRequest, request: Request):
     """执行基准测试"""
     suite = next((s for s in _SUITES if s["id"] == body.suite_id), None)
     if not suite:
@@ -106,7 +107,7 @@ async def run_benchmark(body: BenchmarkRunRequest, request):
 
 
 @router.get("/runs")
-async def list_runs(request, agent_id: typing.Optional[str] = None, suite_id: typing.Optional[str] = None, page: int = 1, size: int = 20):
+async def list_runs(request: Request, agent_id: typing.Optional[str] = None, suite_id: typing.Optional[str] = None, page: int = 1, size: int = 20):
     """查询测试运行历史"""
     user_id = _get_user_id(request)
     run_ids = _USER_RUNS.get(user_id, [])
@@ -126,13 +127,13 @@ async def list_runs(request, agent_id: typing.Optional[str] = None, suite_id: ty
 
 
 @router.get("/results")
-async def list_results(request, agent_id: typing.Optional[str] = None, suite_id: typing.Optional[str] = None, page: int = 1, size: int = 20):
+async def list_results(request: Request, agent_id: typing.Optional[str] = None, suite_id: typing.Optional[str] = None, page: int = 1, size: int = 20):
     """查询测试结果（别名）"""
     return await list_runs(request, agent_id, suite_id, page, size)
 
 
 @router.get("/runs/{run_id}")
-async def get_run(run_id: str, request):
+async def get_run(run_id: str, request: Request):
     """查看某次运行详情"""
     user_id = _get_user_id(request)
     run = _RUNS_STORE.get(run_id)
@@ -144,7 +145,7 @@ async def get_run(run_id: str, request):
 
 
 @router.get("/agents/{agent_id}")
-async def get_agent_benchmarks(agent_id: str, request, page: int = 1, size: int = 20):
+async def get_agent_benchmarks(agent_id: str, request: Request, page: int = 1, size: int = 20):
     """查看某 Agent 的评测历史"""
     user_id = _get_user_id(request)
     run_ids = _USER_RUNS.get(user_id, [])
@@ -167,7 +168,7 @@ async def get_agent_benchmarks(agent_id: str, request, page: int = 1, size: int 
 
 
 @router.post("/compare")
-async def compare_agents(request_body: dict, request):
+async def compare_agents(request_body: dict, request: Request):
     """多 Agent 对比"""
     agent_ids = request_body.get("agent_ids", [])
     suite_id = request_body.get("suite_id")

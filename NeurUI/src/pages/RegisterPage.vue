@@ -74,10 +74,10 @@
 
           <div class="nr-auth-terms">
             <a-checkbox v-model:checked="form.agreedTerms">
-              I agree to the
-              <a href="#" class="nr-auth-link-inline">Terms of Service</a>
-              and
-              <a href="#" class="nr-auth-link-inline">Privacy Policy</a>
+              {{ t('auth.agreeTo') }}
+              <a href="#" class="nr-auth-link-inline">{{ t('auth.termsOfService') }}</a>
+              {{ t('auth.and') }}
+              <a href="#" class="nr-auth-link-inline">{{ t('auth.privacyPolicy') }}</a>
             </a-checkbox>
           </div>
 

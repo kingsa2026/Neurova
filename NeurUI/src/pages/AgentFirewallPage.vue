@@ -19,17 +19,17 @@
           <span class="layer-badge layer-l1">L1</span>
           <span class="layer-arrow">&rarr;</span>
           <span class="layer-badge layer-l2">L2</span>
-          <span class="layer-desc">Three-layer firewall: Gateway &rarr; Isolation &rarr; File Protection</span>
+          <span class="layer-desc">{{ t('firewall.threeLayerDesc') }}</span>
         </div>
       </GlassPanel>
     </div>
 
     <a-tabs v-model:activeKey="activeTab">
       <!-- L0: Gateway Layer -->
-      <a-tab-pane key="l0_gateway" tab="入口网关 (L0)">
+      <a-tab-pane key="l0_gateway" :tab="t('firewall.gatewayTab')">
         <div class="layer-header">
-          <a-tag color="blue">L0 Gateway</a-tag>
-          <span class="layer-description">IP rules, rate limiting, input validation, output sanitization</span>
+          <a-tag color="blue">L0 {{ t('firewall.gateway') }}</a-tag>
+          <span class="layer-description">{{ t('firewall.gatewayDescription') }}</span>
         </div>
 
         <!-- Gateway Settings -->
@@ -37,23 +37,23 @@
           <GlassPanel variant="subtle" padding="16px 20px">
             <div class="settings-row">
               <div class="setting-item">
-                <span class="setting-label">Rate Limit</span>
+                <span class="setting-label">{{ t('firewall.rateLimit') }}</span>
                 <span class="setting-value">{{ gatewayConfig.rateLimit || '120/min' }}</span>
               </div>
               <div class="setting-item">
-                <span class="setting-label">Input Validation</span>
-                <a-tag :color="gatewayConfig.inputValidation ? 'green' : 'default'">{{ gatewayConfig.inputValidation ? 'Enabled' : 'Disabled' }}</a-tag>
+                <span class="setting-label">{{ t('firewall.inputValidation') }}</span>
+                <a-tag :color="gatewayConfig.inputValidation ? 'green' : 'default'">{{ gatewayConfig.inputValidation ? t('common.enabled') : t('common.disabled') }}</a-tag>
               </div>
               <div class="setting-item">
-                <span class="setting-label">Output Sanitization</span>
-                <a-tag :color="gatewayConfig.outputSanitization ? 'green' : 'default'">{{ gatewayConfig.outputSanitization ? 'Enabled' : 'Disabled' }}</a-tag>
+                <span class="setting-label">{{ t('firewall.outputSanitization') }}</span>
+                <a-tag :color="gatewayConfig.outputSanitization ? 'green' : 'default'">{{ gatewayConfig.outputSanitization ? t('common.enabled') : t('common.disabled') }}</a-tag>
               </div>
             </div>
           </GlassPanel>
         </div>
 
         <!-- IP Rules Section -->
-        <h4 class="section-title">IP Rules</h4>
+        <h4 class="section-title">{{ t('firewall.ipRules') }}</h4>
         <a-spin :spinning="loadingL0">
           <a-empty v-if="!loadingL0 && l0Rules.length === 0" :description="t('common.noData')" />
           <a-table
@@ -91,10 +91,10 @@
       </a-tab-pane>
 
       <!-- L1: Isolation Control Layer -->
-      <a-tab-pane key="l1_isolation" tab="隔离控制 (L1)">
+      <a-tab-pane key="l1_isolation" :tab="t('firewall.isolationTab')">
         <div class="layer-header">
-          <a-tag color="green">L1 Isolation</a-tag>
-          <span class="layer-description">Agent and user isolation, effective merged rules (stricter-takes-priority)</span>
+          <a-tag color="green">L1 {{ t('firewall.isolation') }}</a-tag>
+          <span class="layer-description">{{ t('firewall.isolationDescription') }}</span>
         </div>
 
         <!-- Isolation Status -->
@@ -102,15 +102,15 @@
           <GlassPanel variant="subtle" padding="16px 20px">
             <div class="settings-row">
               <div class="setting-item">
-                <span class="setting-label">Agent Isolation</span>
+                <span class="setting-label">{{ t('firewall.agentIsolation') }}</span>
                 <a-switch :checked="isolationConfig.agentIsolation" size="small" @change="(val: boolean) => { isolationConfig.agentIsolation = val }" />
               </div>
               <div class="setting-item">
-                <span class="setting-label">User Isolation</span>
+                <span class="setting-label">{{ t('firewall.userIsolation') }}</span>
                 <a-switch :checked="isolationConfig.userIsolation" size="small" @change="(val: boolean) => { isolationConfig.userIsolation = val }" />
               </div>
               <div class="setting-item">
-                <span class="setting-label">Current Isolation Key</span>
+                <span class="setting-label">{{ t('firewall.currentIsolationKey') }}</span>
                 <code class="pattern-code">agent:{{ agentId }}</code>
               </div>
             </div>
@@ -119,8 +119,8 @@
 
         <!-- Effective Rules (merged view) -->
         <h4 class="section-title">
-          Effective Rules
-          <a-tooltip title="Global defaults merged with user-specific overrides. Stricter rules take priority.">
+          {{ t('firewall.effectiveRules') }}
+          <a-tooltip :title="t('firewall.effectiveRulesTooltip')">
             <span class="info-icon">&#9432;</span>
           </a-tooltip>
         </h4>
@@ -164,27 +164,27 @@
       </a-tab-pane>
 
       <!-- L2: File Protection Layer -->
-      <a-tab-pane key="l2_file" tab="文件保护 (L2)">
+      <a-tab-pane key="l2_file" :tab="t('firewall.fileProtectionTab')">
         <div class="layer-header">
-          <a-tag color="orange">L2 File Protection</a-tag>
-          <span class="layer-description">Protected paths and file access control rules</span>
+          <a-tag color="orange">L2 {{ t('firewall.fileProtection') }}</a-tag>
+          <span class="layer-description">{{ t('firewall.fileProtectionDesc') }}</span>
         </div>
 
         <!-- Protected Paths -->
-        <h4 class="section-title">Protected Paths</h4>
+        <h4 class="section-title">{{ t('firewall.protectedPaths') }}</h4>
         <div class="protected-paths">
           <GlassPanel variant="subtle" padding="12px 16px">
             <div class="path-list">
               <div v-for="path in protectedPaths" :key="path" class="path-item">
                 <code class="pattern-code">{{ path }}</code>
               </div>
-              <div v-if="protectedPaths.length === 0" class="path-empty">No protected paths configured</div>
+              <div v-if="protectedPaths.length === 0" class="path-empty">{{ t('firewall.noProtectedPaths') }}</div>
             </div>
           </GlassPanel>
         </div>
 
         <!-- File Access Rules -->
-        <h4 class="section-title">File Access Rules</h4>
+        <h4 class="section-title">{{ t('firewall.fileAccessRules') }}</h4>
         <a-spin :spinning="loadingL2">
           <a-empty v-if="!loadingL2 && l2Rules.length === 0" :description="t('common.noData')" />
           <a-table
@@ -219,7 +219,7 @@
       </a-tab-pane>
 
       <!-- Blocked Requests Log -->
-      <a-tab-pane key="blocked" tab="拦截日志">
+      <a-tab-pane key="blocked" :tab="t('firewall.blockedRequests')">
         <a-spin :spinning="loadingBlocked">
           <a-empty v-if="!loadingBlocked && blockedLogs.length === 0" :description="t('common.noData')" />
           <a-table
@@ -249,30 +249,30 @@
       </a-tab-pane>
 
       <!-- Stats tab -->
-      <a-tab-pane key="stats" tab="Statistics">
+      <a-tab-pane key="stats" :tab="t('firewall.statistics')">
         <a-spin :spinning="loadingStats">
           <div class="stats-grid">
             <GlassPanel variant="subtle" padding="16px 20px">
               <div class="stat-item">
-                <span class="stat-label">Total Rules</span>
+                <span class="stat-label">{{ t('firewall.totalRules') }}</span>
                 <span class="stat-value">{{ stats.totalRules ?? 0 }}</span>
               </div>
             </GlassPanel>
             <GlassPanel variant="subtle" padding="16px 20px">
               <div class="stat-item">
-                <span class="stat-label">Active Rules</span>
+                <span class="stat-label">{{ t('firewall.activeRules') }}</span>
                 <span class="stat-value">{{ stats.activeRules ?? 0 }}</span>
               </div>
             </GlassPanel>
             <GlassPanel variant="subtle" padding="16px 20px">
               <div class="stat-item">
-                <span class="stat-label">Blocked Today</span>
+                <span class="stat-label">{{ t('firewall.blockedToday') }}</span>
                 <span class="stat-value stat-danger">{{ stats.blockedToday ?? 0 }}</span>
               </div>
             </GlassPanel>
             <GlassPanel variant="subtle" padding="16px 20px">
               <div class="stat-item">
-                <span class="stat-label">Warnings Today</span>
+                <span class="stat-label">{{ t('firewall.warningsToday') }}</span>
                 <span class="stat-value stat-warning">{{ stats.warningsToday ?? 0 }}</span>
               </div>
             </GlassPanel>
@@ -284,47 +284,47 @@
     <!-- Create/Edit rule modal -->
     <a-modal
       v-model:open="showForm"
-      :title="editingRule ? t('common.edit') + ' Rule' : t('common.create') + ' Rule'"
+      :title="editingRule ? t('firewall.editRule') : t('firewall.createRule')"
       @ok="saveRule"
       :confirm-loading="saving"
       width="560px"
     >
       <a-form layout="vertical" :model="ruleForm">
-        <a-form-item :label="t('common.name')">
-          <a-input v-model:value="ruleForm.name" placeholder="Rule name" />
+        <a-form-item :label="t('firewall.ruleName')">
+          <a-input v-model:value="ruleForm.name" :placeholder="t('firewall.ruleNamePlaceholder')" />
         </a-form-item>
-        <a-form-item label="Pattern">
-          <a-input v-model:value="ruleForm.pattern" placeholder='e.g. *secret*, DROP TABLE, "confidential"' />
+        <a-form-item :label="t('firewall.pattern')">
+          <a-input v-model:value="ruleForm.pattern" :placeholder="t('firewall.patternPlaceholder')" />
         </a-form-item>
-        <a-form-item label="Action">
+        <a-form-item :label="t('firewall.action')">
           <a-select v-model:value="ruleForm.action" style="width: 100%">
-            <a-select-option value="block">Block</a-select-option>
-            <a-select-option value="allow">Allow</a-select-option>
-            <a-select-option value="warn">Warn</a-select-option>
-            <a-select-option value="redact">Redact</a-select-option>
+            <a-select-option value="block">{{ t('firewall.block') }}</a-select-option>
+            <a-select-option value="allow">{{ t('firewall.allow') }}</a-select-option>
+            <a-select-option value="warn">{{ t('firewall.warn') }}</a-select-option>
+            <a-select-option value="redact">{{ t('firewall.redact') }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="Scope">
+        <a-form-item :label="t('firewall.scope')">
           <a-select v-model:value="ruleForm.scope" style="width: 100%">
-            <a-select-option value="inbound">Inbound (input to agent)</a-select-option>
-            <a-select-option value="outbound">Outbound (output from agent)</a-select-option>
-            <a-select-option value="both">Both</a-select-option>
+            <a-select-option value="inbound">{{ t('firewall.inbound') }}</a-select-option>
+            <a-select-option value="outbound">{{ t('firewall.outbound') }}</a-select-option>
+            <a-select-option value="both">{{ t('firewall.both') }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="Priority">
+        <a-form-item :label="t('firewall.priority')">
           <a-input-number v-model:value="ruleForm.priority" :min="0" :max="1000" style="width: 100%" />
         </a-form-item>
-        <a-form-item :label="t('common.description')">
-          <a-input v-model:value="ruleForm.description" type="textarea" :rows="2" :placeholder="t('common.description')" />
+        <a-form-item :label="t('firewall.description')">
+          <a-input v-model:value="ruleForm.description" type="textarea" :rows="2" :placeholder="t('firewall.description')" />
         </a-form-item>
-        <a-form-item label="Active">
+        <a-form-item :label="t('firewall.active')">
           <a-switch v-model:checked="ruleForm.active" />
         </a-form-item>
-        <a-form-item label="Firewall Layer">
+        <a-form-item :label="t('firewall.firewallLayer')">
           <a-select v-model:value="ruleForm.layer" style="width: 100%">
-            <a-select-option value="L0">L0 - Gateway (IP, rate limit, validation)</a-select-option>
-            <a-select-option value="L1">L1 - Isolation (agent/user rules)</a-select-option>
-            <a-select-option value="L2">L2 - File Protection (path access)</a-select-option>
+            <a-select-option value="L0">{{ t('firewall.l0GatewayDesc') }}</a-select-option>
+            <a-select-option value="L1">{{ t('firewall.l1IsolationDesc') }}</a-select-option>
+            <a-select-option value="L2">{{ t('firewall.l2FileProtectionDesc') }}</a-select-option>
           </a-select>
         </a-form-item>
       </a-form>
@@ -413,40 +413,40 @@ const layerColor = (layer: string) => {
 
 const l0Columns = computed(() => [
   { title: t('common.name'), dataIndex: 'name', key: 'name' },
-  { title: 'Pattern', key: 'pattern' },
-  { title: 'Action', key: 'action', width: 90 },
-  { title: 'Scope', key: 'scope', width: 100 },
-  { title: 'Priority', dataIndex: 'priority', key: 'priority', width: 80 },
-  { title: t('common.active'), key: 'active', width: 80 },
+  { title: t('firewall.pattern'), key: 'pattern' },
+  { title: t('firewall.action'), key: 'action', width: 90 },
+  { title: t('firewall.scope'), key: 'scope', width: 100 },
+  { title: t('firewall.priority'), dataIndex: 'priority', key: 'priority', width: 80 },
+  { title: t('firewall.active'), key: 'active', width: 80 },
   { title: t('common.actions'), key: 'actions', width: 160 },
 ])
 
 const l1Columns = computed(() => [
   { title: t('common.name'), dataIndex: 'name', key: 'name' },
-  { title: 'Pattern', key: 'pattern' },
-  { title: 'Action', key: 'action', width: 90 },
-  { title: 'Source', key: 'source', width: 90 },
-  { title: 'Scope', key: 'scope', width: 100 },
-  { title: t('common.active'), key: 'active', width: 80 },
+  { title: t('firewall.pattern'), key: 'pattern' },
+  { title: t('firewall.action'), key: 'action', width: 90 },
+  { title: t('firewall.source'), key: 'source', width: 90 },
+  { title: t('firewall.scope'), key: 'scope', width: 100 },
+  { title: t('firewall.active'), key: 'active', width: 80 },
   { title: t('common.actions'), key: 'actions', width: 160 },
 ])
 
 const l2Columns = computed(() => [
   { title: t('common.name'), dataIndex: 'name', key: 'name' },
-  { title: 'Pattern / Path', key: 'pattern' },
-  { title: 'Action', key: 'action', width: 90 },
-  { title: 'Priority', dataIndex: 'priority', key: 'priority', width: 80 },
-  { title: t('common.active'), key: 'active', width: 80 },
+  { title: t('firewall.patternPath'), key: 'pattern' },
+  { title: t('firewall.action'), key: 'action', width: 90 },
+  { title: t('firewall.priority'), dataIndex: 'priority', key: 'priority', width: 80 },
+  { title: t('firewall.active'), key: 'active', width: 80 },
   { title: t('common.actions'), key: 'actions', width: 160 },
 ])
 
 const blockedColumns = computed(() => [
-  { title: 'Time', key: 'timestamp', width: 180 },
-  { title: 'Layer', key: 'layer', width: 70 },
-  { title: 'Rule', key: 'rule' },
-  { title: 'Action', key: 'action', width: 90 },
-  { title: 'Source', dataIndex: 'source', key: 'source' },
-  { title: 'Content', dataIndex: 'content', key: 'content', ellipsis: true },
+  { title: t('firewall.time'), key: 'timestamp', width: 180 },
+  { title: t('firewall.layer'), key: 'layer', width: 70 },
+  { title: t('firewall.rule'), key: 'rule' },
+  { title: t('firewall.action'), key: 'action', width: 90 },
+  { title: t('firewall.source'), dataIndex: 'source', key: 'source' },
+  { title: t('firewall.content'), dataIndex: 'content', key: 'content', ellipsis: true },
 ])
 
 // --- CRUD ---
@@ -565,7 +565,7 @@ const fetchRules = () => fetchAllRules()
 
 const saveRule = async () => {
   if (!ruleForm.value.name || !ruleForm.value.pattern) {
-    message.warning('Name and pattern are required')
+    message.warning(t('firewall.namePatternRequired'))
     return
   }
   saving.value = true

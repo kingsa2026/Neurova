@@ -21,7 +21,7 @@
       <GlassCard variant="subtle">
         <div class="stat-item">
           <div class="stat-value">{{ graphData.edges?.length || 0 }}</div>
-          <div class="stat-label">Edges</div>
+          <div class="stat-label">{{ t('knowledge.edges') }}</div>
         </div>
       </GlassCard>
       <GlassCard variant="subtle">
@@ -83,7 +83,7 @@
     <GlassCard v-if="selectedNode" :title="selectedNode.label || selectedNode.name">
       <div class="node-detail">
         <div class="detail-row">
-          <span class="detail-label">ID</span>
+          <span class="detail-label">{{ t('knowledge.id') }}</span>
           <span class="detail-value mono">{{ selectedNode.id }}</span>
         </div>
         <div class="detail-row">
@@ -95,7 +95,7 @@
           <span class="detail-value">{{ selectedNode.description }}</span>
         </div>
         <div v-if="selectedNode.metadata" class="detail-row">
-          <span class="detail-label">Metadata</span>
+          <span class="detail-label">{{ t('knowledge.metadata') }}</span>
           <pre class="detail-value mono">{{ JSON.stringify(selectedNode.metadata, null, 2) }}</pre>
         </div>
         <div v-if="nodeEdges.length > 0" class="detail-section">

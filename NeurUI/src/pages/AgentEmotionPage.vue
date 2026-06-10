@@ -11,8 +11,8 @@
         <div class="emotion-icon">{{ emotionEmoji(currentEmotion.dominant) }}</div>
         <div class="emotion-info">
           <h3 class="emotion-label">{{ t('emotion.analysis') }}</h3>
-          <p class="emotion-dominant">{{ currentEmotion.dominant || 'Neutral' }}</p>
-          <p class="emotion-intensity">Intensity: {{ Math.round((currentEmotion.intensity ?? 0) * 100) }}%</p>
+          <p class="emotion-dominant">{{ currentEmotion.dominant || t('emotion.neutral') }}</p>
+          <p class="emotion-intensity">{{ t('emotion.intensity') }} {{ Math.round((currentEmotion.intensity ?? 0) * 100) }}%</p>
         </div>
       </div>
     </GlassPanel>

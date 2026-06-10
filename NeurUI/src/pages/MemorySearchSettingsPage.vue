@@ -1,25 +1,25 @@
 <template>
   <div class="memory-search-settings-page">
     <div class="page-header">
-      <h2 class="page-title">Memory Search Settings</h2>
+      <h2 class="page-title">{{ t('memorySearch.title') }}</h2>
       <GlassButton variant="ghost" size="sm" :loading="loading" @click="fetchSettings">{{ t('common.refresh') }}</GlassButton>
     </div>
 
     <a-spin :spinning="loading">
       <!-- Search method -->
-      <GlassCard title="Search Method" style="margin-top: 8px">
+      <GlassCard :title="t('memorySearch.searchMethod')" style="margin-top: 8px">
         <a-form layout="vertical" :model="searchConfig">
-          <a-form-item label="Search Method">
+          <a-form-item :label="t('memorySearch.searchMethod')">
             <a-radio-group v-model:value="searchConfig.method">
-              <a-radio-button value="hybrid">Hybrid</a-radio-button>
-              <a-radio-button value="bm25">BM25</a-radio-button>
-              <a-radio-button value="vector">Vector</a-radio-button>
+              <a-radio-button value="hybrid">{{ t('memorySearch.hybrid') }}</a-radio-button>
+              <a-radio-button value="bm25">{{ t('memorySearch.bm25') }}</a-radio-button>
+              <a-radio-button value="vector">{{ t('memorySearch.vector') }}</a-radio-button>
             </a-radio-group>
           </a-form-item>
-          <a-form-item label="Top K Results">
+          <a-form-item :label="t('memorySearch.topK')">
             <a-input-number v-model:value="searchConfig.top_k" :min="1" :max="100" style="width: 100%" />
           </a-form-item>
-          <a-form-item label="Score Threshold">
+          <a-form-item :label="t('memorySearch.scoreThreshold')">
             <a-slider v-model:value="searchConfig.score_threshold" :min="0" :max="100" />
           </a-form-item>
         </a-form>
@@ -31,16 +31,16 @@
       <!-- Decay settings -->
       <GlassCard :title="t('memory.decay')" style="margin-top: 16px">
         <a-form layout="vertical" :model="decay">
-          <a-form-item label="Enable Decay">
+          <a-form-item :label="t('memorySearch.enableDecay')">
             <a-switch v-model:checked="decay.enabled" />
           </a-form-item>
-          <a-form-item label="Decay Rate">
+          <a-form-item :label="t('memorySearch.decayRate')">
             <a-slider v-model:value="decay.rate" :min="0" :max="100" />
           </a-form-item>
-          <a-form-item label="Half-life (days)">
+          <a-form-item :label="t('memorySearch.halfLife')">
             <a-input-number v-model:value="decay.half_life_days" :min="1" :max="365" style="width: 100%" />
           </a-form-item>
-          <a-form-item label="Min Score Floor">
+          <a-form-item :label="t('memorySearch.minScoreFloor')">
             <a-slider v-model:value="decay.min_score" :min="0" :max="100" />
           </a-form-item>
         </a-form>
@@ -52,16 +52,16 @@
       <!-- Enhancement settings -->
       <GlassCard :title="t('memory.enhance')" style="margin-top: 16px">
         <a-form layout="vertical" :model="enhancement">
-          <a-form-item label="Enable Enhancement">
+          <a-form-item :label="t('memorySearch.enableEnhancement')">
             <a-switch v-model:checked="enhancement.enabled" />
           </a-form-item>
-          <a-form-item label="Boost Factor">
+          <a-form-item :label="t('memorySearch.boostFactor')">
             <a-slider v-model:value="enhancement.boost_factor" :min="1" :max="10" />
           </a-form-item>
-          <a-form-item label="Recency Weight">
+          <a-form-item :label="t('memorySearch.recencyWeight')">
             <a-slider v-model:value="enhancement.recency_weight" :min="0" :max="100" />
           </a-form-item>
-          <a-form-item label="Frequency Weight">
+          <a-form-item :label="t('memorySearch.frequencyWeight')">
             <a-slider v-model:value="enhancement.frequency_weight" :min="0" :max="100" />
           </a-form-item>
         </a-form>
@@ -71,9 +71,9 @@
       </GlassCard>
 
       <!-- Test search -->
-      <GlassCard title="Test Search" style="margin-top: 16px">
+      <GlassCard :title="t('memorySearch.testSearch')" style="margin-top: 16px">
         <div class="test-search">
-          <a-input-search v-model:value="testQuery" placeholder="Enter a test query..." @search="runTestSearch" style="width: 100%" />
+          <a-input-search v-model:value="testQuery" :placeholder="t('memorySearch.testQueryPlaceholder')" @search="runTestSearch" style="width: 100%" />
           <div v-if="testResults.length" class="test-results">
             <a-list :data-source="testResults" size="small">
               <template #renderItem="{ item }">

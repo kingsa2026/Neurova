@@ -21,6 +21,7 @@
             <GlassInput
               v-model:model-value="form.username"
               :placeholder="t('auth.username')"
+              autocomplete="username"
               @update:model-value="form.username = $event"
             />
           </a-form-item>
@@ -34,6 +35,7 @@
               v-model:model-value="form.password"
               type="password"
               :placeholder="t('auth.password')"
+              autocomplete="current-password"
               @update:model-value="form.password = $event"
             />
           </a-form-item>

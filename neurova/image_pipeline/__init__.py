@@ -18,6 +18,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 from enum import Enum
+from pathlib import Path
+from .docker_builder import DockerBuilder, BuildResult, get_docker_builder
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +173,10 @@ class ImagePipelineManager:
         self._builds: List[BuildRecord] = []
         self._lock = threading.RLock()
         self._init_default_templates()
+        
+        # 初始化 Docker 构建器
+        self._docker_builder = get_docker_builder()
+        
         logger.info("ImagePipelineManager initialized with %d templates", len(self._templates))
 
     def _init_default_templates(self) -> None:
@@ -216,6 +222,7 @@ class ImagePipelineManager:
         template_id: str,
         custom_tags: Optional[List[str]] = None,
         build_args: Optional[Dict[str, str]] = None,
+        platform: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         构建镜像
@@ -250,18 +257,65 @@ class ImagePipelineManager:
             
             self._builds.append(record)
             
-            # 模拟构建过程
+            # 使用 DockerBuilder 构建镜像
             try:
-                image_tag = f"{template.name.lower().replace(' ', '-')}:{uuid.uuid4().hex[:8]}"
-                record.status = BuildStatus.SUCCESS
-                record.completed_at = time.time()
-                record.image_tag = image_tag
-                record.logs.append(f"Build started for template: {template.name}")
-                record.logs.append(f"Base image: {template.base_image}")
-                record.logs.append(f"Build completed successfully")
+                # 生成 Dockerfile
+                dockerfile_content = self._docker_builder.generate_dockerfile(
+                    template_id=template_id,
+                    base_image=template.base_image,
+                    layers=template.layers,
+                    build_args=build_args,
+                )
                 
-                logger.info("Image built: %s", image_tag)
-                return {"success": True, "build": record.to_dict()}
+                # 创建临时 Dockerfile
+                import tempfile
+                import os
+                
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.dockerfile', delete=False) as f:
+                    f.write(dockerfile_content)
+                    dockerfile_path = f.name
+                
+                try:
+                    # 确定镜像标签
+                    if custom_tags:
+                        image_tag = f"{template.name.lower().replace(' ', '-')}:{custom_tags[0]}"
+                    else:
+                        image_tag = f"{template.name.lower().replace(' ', '-')}:{uuid.uuid4().hex[:8]}"
+                    
+                    record.logs.append(f"Build started for template: {template.name}")
+                    record.logs.append(f"Base image: {template.base_image}")
+                    
+                    # 调用 Docker 构建
+                    build_result = self._docker_builder.build(
+                        dockerfile_path=dockerfile_path,
+                        tag=image_tag,
+                        build_args=build_args,
+                        platform=platform,
+                        rm=True,
+                    )
+                    
+                    # 更新构建记录
+                    record.completed_at = time.time()
+                    record.logs.extend(build_result.logs)
+                    
+                    if build_result.success:
+                        record.status = BuildStatus.SUCCESS
+                        record.image_tag = build_result.image_tag
+                        record.metadata["image_id"] = build_result.image_id
+                        
+                        logger.info("Image built: %s", build_result.image_tag)
+                        return {"success": True, "build": record.to_dict()}
+                    else:
+                        record.status = BuildStatus.FAILED
+                        record.error = build_result.error
+                        
+                        logger.error("Image build failed: %s", build_result.error)
+                        return {"success": False, "error": build_result.error, "build": record.to_dict()}
+                        
+                finally:
+                    # 清理临时文件
+                    if os.path.exists(dockerfile_path):
+                        os.unlink(dockerfile_path)
                 
             except Exception as e:
                 record.status = BuildStatus.FAILED

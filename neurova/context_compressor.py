@@ -17,6 +17,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from neurova.core.logger import get_logger
+from neurova.context.token_estimator import TokenEstimator, EstimationStrategy
 
 logger = get_logger(__name__)
 
@@ -60,11 +61,9 @@ class Message:
         if self.token_count is not None:
             return self.token_count
         
-        # 简单估算：1个中文字符约2个token，1个英文单词约1个token
-        chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', self.content))
-        english_words = len(re.findall(r'[a-zA-Z]+', self.content))
-        
-        return chinese_chars * 2 + english_words
+        # 使用统一的 Token 估算器
+        estimator = TokenEstimator(EstimationStrategy.BALANCED)
+        return estimator.estimate(self.content)
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -268,7 +267,9 @@ class SmartContextCompressor:
         # 计算系统提示的token数
         system_tokens = 0
         if system_prompt:
-            system_tokens = len(system_prompt) // 4  # 粗略估算
+            # 使用统一的 Token 估算器
+            estimator = TokenEstimator(EstimationStrategy.BALANCED)
+            system_tokens = estimator.estimate(system_prompt)
         
         available_tokens = budget_tokens - system_tokens
         
@@ -608,7 +609,9 @@ class SmartContextCompressor:
         
         # 系统提示
         if system_prompt:
-            total += len(system_prompt) // 4  # 粗略估算
+            # 使用统一的 Token 估算器
+            estimator = TokenEstimator(EstimationStrategy.BALANCED)
+            total += estimator.estimate(system_prompt)
         
         # 消息
         for msg in messages:
@@ -630,8 +633,9 @@ class SmartContextCompressor:
         
         for item in context:
             content = item.get('content', '')
-            # 粗略估算
-            total += len(content) // 4
+            # 使用统一的 Token 估算器
+            estimator = TokenEstimator(EstimationStrategy.BALANCED)
+            total += estimator.estimate(content)
         
         return total
     

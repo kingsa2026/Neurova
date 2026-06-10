@@ -4,10 +4,10 @@
 
     <a-tabs v-model:activeKey="activeTab" tab-position="left" class="settings-tabs">
       <!-- General -->
-      <a-tab-pane key="general" :tab="t('common.type') === 'Type' ? 'General' : t('common.type')">
-        <GlassCard title="General Settings">
+      <a-tab-pane key="general" :tab="t('settings.general')">
+        <GlassCard :title="t('settings.generalSettings')">
           <a-form layout="vertical" :model="general">
-            <a-form-item label="App Name">
+            <a-form-item :label="t('settings.appName')">
               <a-input v-model:value="general.app_name" />
             </a-form-item>
             <a-form-item :label="t('theme.language')">
@@ -28,8 +28,8 @@
       </a-tab-pane>
 
       <!-- LLM -->
-      <a-tab-pane key="llm" tab="LLM">
-        <GlassCard title="LLM Settings">
+      <a-tab-pane key="llm" :tab="t('settings.llm')">
+        <GlassCard :title="t('settings.llmSettings')">
           <a-form layout="vertical" :model="llm">
             <a-form-item :label="t('model.providers')">
               <a-select v-model:value="llm.default_provider" style="width: 100%">
@@ -53,19 +53,19 @@
       </a-tab-pane>
 
       <!-- Security -->
-      <a-tab-pane key="security" tab="Security">
-        <GlassCard title="Security Settings">
+      <a-tab-pane key="security" :tab="t('settings.security')">
+        <GlassCard :title="t('settings.securitySettings')">
           <a-form layout="vertical" :model="security">
-            <a-form-item label="JWT Secret">
+            <a-form-item :label="t('settings.jwtSecret')">
               <a-input-password v-model:value="security.jwt_secret" />
             </a-form-item>
-            <a-form-item label="JWT Expiry (hours)">
+            <a-form-item :label="t('settings.jwtExpiry')">
               <a-input-number v-model:value="security.jwt_expiry_hours" :min="1" :max="8760" style="width: 100%" />
             </a-form-item>
-            <a-form-item label="Min Password Length">
+            <a-form-item :label="t('settings.minPasswordLength')">
               <a-input-number v-model:value="security.min_password_length" :min="6" :max="64" style="width: 100%" />
             </a-form-item>
-            <a-form-item label="Require Special Characters">
+            <a-form-item :label="t('settings.requireSpecial')">
               <a-switch v-model:checked="security.require_special" />
             </a-form-item>
           </a-form>
@@ -76,44 +76,44 @@
       </a-tab-pane>
 
       <!-- Storage -->
-      <a-tab-pane key="storage" tab="Storage">
-        <GlassCard title="Storage Settings">
+      <a-tab-pane key="storage" :tab="t('settings.storage')">
+        <GlassCard :title="t('settings.storageSettings')">
           <a-form layout="vertical" :model="storage">
-            <a-form-item label="Media Storage Path">
+            <a-form-item :label="t('settings.mediaStoragePath')">
               <a-input v-model:value="storage.media_path" />
             </a-form-item>
-            <a-form-item label="Max Upload Size (MB)">
+            <a-form-item :label="t('settings.maxUploadSize')">
               <a-input-number v-model:value="storage.max_upload_mb" :min="1" :max="1024" style="width: 100%" />
             </a-form-item>
-            <a-form-item label="Cache TTL (minutes)">
+            <a-form-item :label="t('settings.cacheTtl')">
               <a-input-number v-model:value="storage.cache_ttl_minutes" :min="1" style="width: 100%" />
             </a-form-item>
           </a-form>
           <template #footer>
             <div class="storage-actions">
               <GlassButton variant="primary" size="sm" :loading="saving" @click="saveSection('storage')">{{ t('common.save') }}</GlassButton>
-              <GlassButton variant="danger" size="sm" :loading="clearingCache" @click="clearCache">{{ t('common.refresh') }} Cache</GlassButton>
+              <GlassButton variant="danger" size="sm" :loading="clearingCache" @click="clearCache">{{ t('settings.refreshCache') }}</GlassButton>
             </div>
           </template>
         </GlassCard>
       </a-tab-pane>
 
       <!-- Advanced -->
-      <a-tab-pane key="advanced" tab="Advanced">
-        <GlassCard title="Advanced Settings">
+      <a-tab-pane key="advanced" :tab="t('settings.advanced')">
+        <GlassCard :title="t('settings.advancedSettings')">
           <a-form layout="vertical" :model="advanced">
-            <a-form-item label="Debug Mode">
+            <a-form-item :label="t('settings.debugMode')">
               <a-switch v-model:checked="advanced.debug_mode" />
             </a-form-item>
-            <a-form-item label="Log Level">
+            <a-form-item :label="t('settings.logLevel')">
               <a-select v-model:value="advanced.log_level" style="width: 100%">
-                <a-select-option value="debug">Debug</a-select-option>
-                <a-select-option value="info">Info</a-select-option>
-                <a-select-option value="warning">Warning</a-select-option>
-                <a-select-option value="error">Error</a-select-option>
+                <a-select-option value="debug">{{ t('settings.debug') }}</a-select-option>
+                <a-select-option value="info">{{ t('settings.info') }}</a-select-option>
+                <a-select-option value="warning">{{ t('settings.warning') }}</a-select-option>
+                <a-select-option value="error">{{ t('settings.error') }}</a-select-option>
               </a-select>
             </a-form-item>
-            <a-form-item label="Enable Telemetry">
+            <a-form-item :label="t('settings.enableTelemetry')">
               <a-switch v-model:checked="advanced.telemetry" />
             </a-form-item>
           </a-form>
@@ -121,6 +121,11 @@
             <GlassButton variant="primary" size="sm" :loading="saving" @click="saveSection('advanced')">{{ t('common.save') }}</GlassButton>
           </template>
         </GlassCard>
+      </a-tab-pane>
+
+      <!-- Negative Screen -->
+      <a-tab-pane key="negative-screen" :tab="t('settings.negativeScreen')">
+        <NegativeScreenSettings />
       </a-tab-pane>
     </a-tabs>
   </div>
@@ -134,6 +139,7 @@ import { useAppStore } from '@/stores/app'
 import { supportedLocales } from '@/i18n'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
 import { message } from 'ant-design-vue'
 
 const { t, locale } = useI18n()

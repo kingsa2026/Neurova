@@ -44,7 +44,7 @@
           <template v-if="column.key === 'actions'">
             <div class="action-btns">
               <GlassButton variant="ghost" size="sm" @click="editUser(record)">{{ t('common.edit') }}</GlassButton>
-              <GlassButton variant="ghost" size="sm" @click="changePassword(record)">Password</GlassButton>
+              <GlassButton variant="ghost" size="sm" @click="changePassword(record)">{{ t('user.changePassword') }}</GlassButton>
               <GlassButton variant="danger" size="sm" @click="deleteUser(record.id)">{{ t('common.delete') }}</GlassButton>
             </div>
           </template>
@@ -64,21 +64,21 @@
         <a-form-item v-if="!editingUser" :label="t('auth.password')">
           <a-input-password v-model:value="userForm.password" />
         </a-form-item>
-        <a-form-item label="Role">
+        <a-form-item :label="t('auth.role')">
           <a-select v-model:value="userForm.role" style="width: 100%">
-            <a-select-option value="user">User</a-select-option>
-            <a-select-option value="editor">Editor</a-select-option>
-            <a-select-option value="admin">Admin</a-select-option>
+            <a-select-option value="user">{{ t('auth.user') }}</a-select-option>
+            <a-select-option value="editor">{{ t('auth.editor') }}</a-select-option>
+            <a-select-option value="admin">{{ t('auth.admin') }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="Active">
+        <a-form-item :label="t('auth.active')">
           <a-switch v-model:checked="userForm.active" />
         </a-form-item>
       </a-form>
     </a-modal>
 
     <!-- Change password modal -->
-    <a-modal v-model:open="showPasswordModal" title="Change Password" @ok="savePassword" :confirm-loading="saving">
+    <a-modal v-model:open="showPasswordModal" :title="t('auth.changePassword')" @ok="savePassword" :confirm-loading="saving">
       <a-form layout="vertical">
         <a-form-item :label="t('auth.password')">
           <a-input-password v-model:value="newPassword" />
@@ -120,9 +120,9 @@ const userForm = ref({ username: '', email: '', password: '', role: 'user', acti
 const columns = computed(() => [
   { title: t('auth.username'), key: 'username' },
   { title: t('auth.email'), dataIndex: 'email', key: 'email' },
-  { title: 'Role', key: 'role', width: 100 },
+  { title: t('auth.role'), key: 'role', width: 100 },
   { title: t('common.status'), key: 'status', width: 100 },
-  { title: 'Quota', key: 'quota', width: 120 },
+  { title: t('auth.quota'), key: 'quota', width: 120 },
   { title: t('common.actions'), key: 'actions', width: 240 },
 ])
 

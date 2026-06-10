@@ -21,13 +21,13 @@
       <GlassCard variant="subtle">
         <div class="stat-item">
           <div class="stat-value">{{ averageQuality }}</div>
-          <div class="stat-label">Avg Quality</div>
+          <div class="stat-label">{{ t('growth.avgQuality') }}</div>
         </div>
       </GlassCard>
       <GlassCard variant="subtle">
         <div class="stat-item">
           <div class="stat-value">{{ recentCount }}</div>
-          <div class="stat-label">Last 7 Days</div>
+          <div class="stat-label">{{ t('growth.last7Days') }}</div>
         </div>
       </GlassCard>
     </div>
@@ -101,21 +101,21 @@
           <a-col :span="12">
             <a-form-item :label="t('common.type')">
               <a-select v-model:value="createForm.type" style="width: 100%">
-                <a-select-option value="general">General</a-select-option>
-                <a-select-option value="insight">Insight</a-select-option>
-                <a-select-option value="lesson">Lesson</a-select-option>
-                <a-select-option value="mistake">Mistake</a-select-option>
+                <a-select-option value="general">{{ t('growth.general') }}</a-select-option>
+                <a-select-option value="insight">{{ t('growth.insight') }}</a-select-option>
+                <a-select-option value="lesson">{{ t('growth.lesson') }}</a-select-option>
+                <a-select-option value="mistake">{{ t('growth.mistake') }}</a-select-option>
               </a-select>
             </a-form-item>
           </a-col>
           <a-col :span="12">
-            <a-form-item label="Quality">
+            <a-form-item :label="t('growth.quality')">
               <a-rate v-model:value="createForm.quality" :count="5" />
             </a-form-item>
           </a-col>
         </a-row>
-        <a-form-item label="Insights">
-          <a-textarea v-model:value="createForm.insights" :rows="3" placeholder="Key takeaways..." />
+        <a-form-item :label="t('growth.insights')">
+          <a-textarea v-model:value="createForm.insights" :rows="3" :placeholder="t('reflection.keyTakeaways')" />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -137,11 +137,11 @@
           <a-tag>{{ selectedReflection.type || 'general' }}</a-tag>
         </div>
         <div class="detail-section">
-          <div class="detail-label">Quality</div>
+          <div class="detail-label">{{ t('growth.quality') }}</div>
           <a-rate :value="selectedReflection.quality || 0" disabled :count="5" />
         </div>
         <div v-if="selectedReflection.insights" class="detail-section">
-          <div class="detail-label">Insights</div>
+          <div class="detail-label">{{ t('growth.insights') }}</div>
           <div class="detail-content">{{ selectedReflection.insights }}</div>
         </div>
         <div class="detail-section">

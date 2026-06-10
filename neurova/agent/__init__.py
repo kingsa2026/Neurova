@@ -41,6 +41,12 @@ from neurova.agent.tool_execution_manager import (
     ExecutionStatus,
     ExecutionEvent,
 )
+from neurova.agent.initialization_manager import (
+    InitializationManager,
+    create_initialization_manager,
+    get_initialization_manager,
+    reset_initialization_manager,
+)
 
 # 从 loops 子包导入
 from neurova.agent.loops.registry import register_loop, find_agent_loop
@@ -72,6 +78,12 @@ __all__ = [
     "TimeoutStrategy",
     "ExecutionStatus",
     "ExecutionEvent",
+
+    # 初始化管理
+    "InitializationManager",
+    "create_initialization_manager",
+    "get_initialization_manager",
+    "reset_initialization_manager",
 
     # Loop 系统
     "register_loop",

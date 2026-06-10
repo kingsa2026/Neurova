@@ -42,8 +42,8 @@
         <a-form-item :label="t('common.type')">
           <a-select v-model:value="form.type" :placeholder="t('common.type')">
             <a-select-option value="multi-agent">{{ t('collab.title') }}</a-select-option>
-            <a-select-option value="pipeline">Pipeline</a-select-option>
-            <a-select-option value="debate">Debate</a-select-option>
+            <a-select-option value="pipeline">{{ t('collab.pipeline') }}</a-select-option>
+            <a-select-option value="debate">{{ t('collab.debate') }}</a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item :label="t('collab.members')">

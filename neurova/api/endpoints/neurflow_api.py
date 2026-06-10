@@ -54,6 +54,11 @@ async def create_workflow(data: Dict[str, Any] = Body(...)):
     """创建工作流"""
     storage = _get_storage()
     try:
+        # 如果前端没有提供 id，则生成一个新的 UUID
+        if "id" not in data or not data["id"]:
+            import uuid
+            data["id"] = str(uuid.uuid4())
+        
         workflow = WorkflowDefinition.from_dict(data)
         workflow.created_at = time.time()
         workflow.updated_at = time.time()

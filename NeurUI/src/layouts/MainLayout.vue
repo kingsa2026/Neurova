@@ -270,8 +270,12 @@ const breadcrumbs = computed(() => {
   for (const r of matched) {
     if (r.path && r.path !== '/') {
       const name = r.name as string
-      const labelKey = `nav.${name.toLowerCase()}`
-      const label = t(labelKey) !== labelKey ? t(labelKey) : name
+      // Try multiple key formats: lowercase, camelCase (first letter lowercase), and original
+      const lowerKey = `nav.${name.toLowerCase()}`
+      // Convert PascalCase to camelCase: "SkillPool" -> "skillPool"
+      const camelKey = `nav.${name.charAt(0).toLowerCase() + name.slice(1)}`
+      const originalKey = `nav.${name}`
+      const label = t(lowerKey) !== lowerKey ? t(lowerKey) : (t(camelKey) !== camelKey ? t(camelKey) : (t(originalKey) !== originalKey ? t(originalKey) : name))
       crumbs.push({ path: r.path, label })
     }
   }

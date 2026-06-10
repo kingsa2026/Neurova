@@ -35,20 +35,24 @@ withDefaults(defineProps<{
 }>(), {
   variant: 'default',
   radius: 20,
-  padding: '0',
+  padding: '18px 22px',
   glow: false,
 })
 </script>
 
 <style scoped>
-.nr-glass-card { display: flex; flex-direction: column; gap: 16px; }
-.nr-glass-card-header { display: flex; flex-direction: column; gap: 6px; }
+.nr-glass-card { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.nr-glass-card-header { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .nr-glass-card-icon { font-size: 24px; color: var(--nr-primary-light); margin-bottom: 4px; }
 .nr-glass-card-title {
   font-family: var(--nr-font-display); font-size: 18px; font-weight: 600;
   color: var(--nr-text-primary); letter-spacing: -0.02em; line-height: 1.3;
+  overflow-wrap: break-word; word-break: break-word;
 }
-.nr-glass-card-subtitle { font-size: 13px; color: var(--nr-text-tertiary); }
-.nr-glass-card-body { flex: 1; }
+.nr-glass-card-subtitle {
+  font-size: 13px; color: var(--nr-text-tertiary);
+  overflow-wrap: break-word; word-break: break-word; line-height: 1.5;
+}
+.nr-glass-card-body { flex: 1; min-width: 0; }
 .nr-glass-card-footer { padding-top: 12px; border-top: 1px solid var(--nr-glass-border); }
 </style>

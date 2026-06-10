@@ -18,9 +18,9 @@
         >
           <div class="rule-meta">
             <a-badge :status="rule.active ? 'processing' : 'default'" :text="rule.active ? t('common.active') : t('common.inactive')" />
-            <span class="meta-text">Condition: {{ rule.condition }}</span>
-            <span class="meta-text">Action: {{ rule.action }}</span>
-            <span class="meta-text">Executions: {{ rule.executionCount ?? 0 }}</span>
+            <span class="meta-text">{{ t('rule.conditionLabel') }}{{ rule.condition }}</span>
+            <span class="meta-text">{{ t('rule.action') }}{{ rule.action }}</span>
+            <span class="meta-text">{{ t('rule.executions') }}{{ rule.executionCount ?? 0 }}</span>
           </div>
           <div class="rule-actions">
             <a-switch :checked="rule.active" size="small" @change="() => handleToggle(rule.id)" />
@@ -41,23 +41,23 @@
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="form.name" :placeholder="t('common.name')" />
         </a-form-item>
-        <a-form-item label="Condition">
-          <a-input v-model:value="form.condition" type="textarea" :rows="3" placeholder='e.g. message contains "urgent"' />
+        <a-form-item :label="t('rule.conditionLabel')">
+          <a-input v-model:value="form.condition" type="textarea" :rows="3" :placeholder="t('rule.conditionPlaceholder')" />
         </a-form-item>
-        <a-form-item label="Action">
+        <a-form-item :label="t('rule.action')">
           <a-select v-model:value="form.action" :placeholder="t('common.actions')">
-            <a-select-option value="send_reply">Send Reply</a-select-option>
-            <a-select-option value="trigger_workflow">Trigger Workflow</a-select-option>
-            <a-select-option value="notify">Notify</a-select-option>
-            <a-select-option value="block">Block</a-select-option>
-            <a-select-option value="transform">Transform</a-select-option>
+            <a-select-option value="send_reply">{{ t('rule.sendReply') }}</a-select-option>
+            <a-select-option value="trigger_workflow">{{ t('rule.triggerWorkflow') }}</a-select-option>
+            <a-select-option value="notify">{{ t('rule.notify') }}</a-select-option>
+            <a-select-option value="block">{{ t('rule.block') }}</a-select-option>
+            <a-select-option value="transform">{{ t('rule.transform') }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="Priority">
+        <a-form-item :label="t('rule.priority')">
           <a-select v-model:value="form.priority">
-            <a-select-option value="low">Low</a-select-option>
-            <a-select-option value="medium">Medium</a-select-option>
-            <a-select-option value="high">High</a-select-option>
+            <a-select-option value="low">{{ t('rule.low') }}</a-select-option>
+            <a-select-option value="medium">{{ t('rule.medium') }}</a-select-option>
+            <a-select-option value="high">{{ t('rule.high') }}</a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item :label="t('common.description')">
@@ -125,7 +125,7 @@ const executionLogs = ref<ExecutionLog[]>([])
 const logColumns = [
   { title: t('common.createdAt'), dataIndex: 'timestamp', key: 'timestamp' },
   { title: t('common.status'), dataIndex: 'success', key: 'result' },
-  { title: 'Detail', dataIndex: 'detail', key: 'detail' },
+  { title: t('rule.detail'), dataIndex: 'detail', key: 'detail' },
 ]
 
 const form = reactive({ name: '', condition: '', action: '', priority: 'medium', description: '' })

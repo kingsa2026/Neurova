@@ -4,15 +4,15 @@
     <div class="nr-dashboard-welcome">
       <div>
         <h1 class="nr-dashboard-greeting">
-          {{ t('dashboard.welcome') }}, {{ authStore.currentUser?.username || 'User' }}
+          {{ t('dashboard.welcome') }}, {{ authStore.currentUser?.username || t('auth.user') }}
         </h1>
         <p class="nr-dashboard-date">{{ currentDate }}</p>
       </div>
       <div class="nr-dashboard-status-badges">
-        <a-badge :status="systemHealth.api ? 'success' : 'error'" :text="`API: ${systemHealth.api ? 'OK' : 'Down'}`" />
-        <a-badge :status="systemHealth.db ? 'success' : 'error'" :text="`DB: ${systemHealth.db ? 'OK' : 'Down'}`" />
-        <a-badge :status="systemHealth.redis ? 'success' : 'error'" :text="`Cache: ${systemHealth.redis ? 'OK' : 'Down'}`" />
-        <a-badge :status="systemHealth.queue ? 'success' : 'error'" :text="`Queue: ${systemHealth.queue ? 'OK' : 'Down'}`" />
+        <a-badge :status="systemHealth.api ? 'success' : 'error'" :text="`${t('dashboard.api')}: ${systemHealth.api ? t('dashboard.ok') : t('dashboard.down')}`" />
+        <a-badge :status="systemHealth.db ? 'success' : 'error'" :text="`${t('dashboard.db')}: ${systemHealth.db ? t('dashboard.ok') : t('dashboard.down')}`" />
+        <a-badge :status="systemHealth.redis ? 'success' : 'error'" :text="`${t('dashboard.cache')}: ${systemHealth.redis ? t('dashboard.ok') : t('dashboard.down')}`" />
+        <a-badge :status="systemHealth.queue ? 'success' : 'error'" :text="`${t('dashboard.queue')}: ${systemHealth.queue ? t('dashboard.ok') : t('dashboard.down')}`" />
       </div>
     </div>
 

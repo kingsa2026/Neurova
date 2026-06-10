@@ -60,10 +60,10 @@ def _get_request_id(request: Request) -> str:
 
 
 def _get_channel_manager():
-    """获取渠道管理器"""
+    """获取渠道管理器单例"""
     try:
         from neurova.channels.manager import ChannelManager
-        return ChannelManager()
+        return ChannelManager.get_instance()
     except Exception as e:
         logger.warning(f"ChannelManager not available: {e}")
         return None

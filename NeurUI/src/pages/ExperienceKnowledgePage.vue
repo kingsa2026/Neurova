@@ -136,7 +136,7 @@
     <!-- Similar experiences modal -->
     <a-modal
       v-model:open="showSimilarModal"
-      title="Similar Experiences"
+      :title="t('experience.similarExperiences')"
       :footer="null"
       width="640px"
     >

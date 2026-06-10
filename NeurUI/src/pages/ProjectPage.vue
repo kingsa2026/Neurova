@@ -71,8 +71,8 @@
         <a-form-item :label="t('common.status')">
           <a-select v-model:value="form.status">
             <a-select-option value="active">{{ t('common.active') }}</a-select-option>
-            <a-select-option value="paused">Paused</a-select-option>
-            <a-select-option value="archived">Archived</a-select-option>
+            <a-select-option value="paused">{{ t('collab.paused') }}</a-select-option>
+            <a-select-option value="archived">{{ t('collab.archived') }}</a-select-option>
           </a-select>
         </a-form-item>
       </a-form>

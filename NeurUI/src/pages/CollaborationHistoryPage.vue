@@ -11,8 +11,8 @@
         <a-input v-model:value="filters.keyword" :placeholder="t('common.search')" style="width: 200px" allow-clear />
         <a-select v-model:value="filters.status" :placeholder="t('common.status')" style="width: 140px" allow-clear>
           <a-select-option value="active">{{ t('common.active') }}</a-select-option>
-          <a-select-option value="completed">Completed</a-select-option>
-          <a-select-option value="failed">Failed</a-select-option>
+          <a-select-option value="completed">{{ t('collab.completed') }}</a-select-option>
+          <a-select-option value="failed">{{ t('collab.failed') }}</a-select-option>
         </a-select>
         <a-input v-model:value="filters.date" type="date" style="width: 160px" />
       </div>

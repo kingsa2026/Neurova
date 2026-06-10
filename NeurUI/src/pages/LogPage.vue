@@ -3,7 +3,7 @@
     <div class="page-header">
       <h2 class="page-title">{{ t('system.logs') }}</h2>
       <div class="header-actions">
-        <a-switch v-model:checked="autoRefresh" :checked-children="t('common.refresh')" :un-checked-children="'Off'" @change="toggleAutoRefresh" />
+        <a-switch v-model:checked="autoRefresh" :checked-children="t('common.refresh')" :un-checked-children="t('common.off')" @change="toggleAutoRefresh" />
         <GlassButton variant="danger" size="sm" :loading="clearing" @click="clearLogs">{{ t('common.delete') }}</GlassButton>
       </div>
     </div>
@@ -12,10 +12,10 @@
     <GlassCard>
       <div class="filters-row">
         <a-select v-model:value="filters.level" :placeholder="t('common.type')" style="width: 150px" allow-clear>
-          <a-select-option value="debug">Debug</a-select-option>
-          <a-select-option value="info">Info</a-select-option>
-          <a-select-option value="warning">Warning</a-select-option>
-          <a-select-option value="error">Error</a-select-option>
+          <a-select-option value="debug">{{ t('log.debug') }}</a-select-option>
+          <a-select-option value="info">{{ t('log.info') }}</a-select-option>
+          <a-select-option value="warning">{{ t('log.warning') }}</a-select-option>
+          <a-select-option value="error">{{ t('log.error') }}</a-select-option>
         </a-select>
         <a-range-picker v-model:value="filters.dateRange" show-time style="width: 360px" />
         <a-input-search v-model:value="filters.keyword" :placeholder="t('common.search')" style="width: 240px" @search="fetchLogs" />
@@ -80,9 +80,9 @@ const filters = ref<{ level: string | undefined; dateRange: any; keyword: string
 
 const columns = computed(() => [
   { title: t('common.createdAt'), key: 'timestamp', width: 180 },
-  { title: 'Level', key: 'level', width: 100 },
-  { title: 'Message', key: 'message', ellipsis: true },
-  { title: 'Source', key: 'source', width: 140 },
+  { title: t('log.level'), key: 'level', width: 100 },
+  { title: t('log.message'), key: 'message', ellipsis: true },
+  { title: t('log.source'), key: 'source', width: 140 },
 ])
 
 const levelColor = (level: string) => {

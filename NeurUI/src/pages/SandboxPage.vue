@@ -18,15 +18,15 @@
             </div>
           </template>
           <div class="sb-body">
-            <p class="sb-meta">Created: {{ formatTime(sb.created_at) }}</p>
-            <p class="sb-meta">Steps: {{ sb.steps_count ?? 0 }}</p>
-            <p v-if="sb.image" class="sb-meta">Image: {{ sb.image }}</p>
+            <p class="sb-meta">{{ t('sandbox.created') }}{{ formatTime(sb.created_at) }}</p>
+            <p class="sb-meta">{{ t('sandbox.steps') }}{{ sb.steps_count ?? 0 }}</p>
+            <p v-if="sb.image" class="sb-meta">{{ t('sandbox.image') }}{{ sb.image }}</p>
           </div>
           <template #footer>
             <div class="sb-actions">
               <GlassButton variant="ghost" size="sm" @click="selectSandbox(sb)">{{ t('common.open') }}</GlassButton>
-              <GlassButton variant="ghost" size="sm" @click="commitSandbox(sb.id)">Commit</GlassButton>
-              <GlassButton variant="danger" size="sm" @click="destroySandbox(sb.id)">Destroy</GlassButton>
+              <GlassButton variant="ghost" size="sm" @click="commitSandbox(sb.id)">{{ t('sandbox.commit') }}</GlassButton>
+              <GlassButton variant="danger" size="sm" @click="destroySandbox(sb.id)">{{ t('sandbox.destroy') }}</GlassButton>
             </div>
           </template>
         </GlassCard>
@@ -35,34 +35,34 @@
     </a-spin>
 
     <!-- Execute step section -->
-    <GlassCard v-if="selectedSandbox" title="Execute Step" style="margin-top: 20px">
+    <GlassCard v-if="selectedSandbox" :title="t('sandbox.executeStep')" style="margin-top: 20px">
       <div class="exec-form">
-        <a-textarea v-model:value="stepCommand" :rows="4" placeholder="Enter command or code to execute..." />
+        <a-textarea v-model:value="stepCommand" :rows="4" :placeholder="t('sandbox.commandPlaceholder')" />
         <div class="exec-actions">
           <a-select v-model:value="stepLanguage" style="width: 120px">
-            <a-select-option value="python">Python</a-select-option>
-            <a-select-option value="shell">Shell</a-select-option>
-            <a-select-option value="javascript">JavaScript</a-select-option>
+            <a-select-option value="python">{{ t('sandbox.python') }}</a-select-option>
+            <a-select-option value="shell">{{ t('sandbox.shell') }}</a-select-option>
+            <a-select-option value="javascript">{{ t('sandbox.javascript') }}</a-select-option>
           </a-select>
           <GlassButton variant="primary" size="sm" :loading="executing" @click="executeStep">{{ t('tool.execute') }}</GlassButton>
         </div>
       </div>
       <div v-if="execOutput" class="exec-output">
-        <h4>Output</h4>
+        <h4>{{ t('sandbox.output') }}</h4>
         <pre>{{ execOutput }}</pre>
       </div>
     </GlassCard>
 
     <!-- Start sandbox modal -->
-    <a-modal v-model:open="showStart" title="Start Sandbox" @ok="confirmStart" :confirm-loading="starting">
+    <a-modal v-model:open="showStart" :title="t('sandbox.startSandbox')" @ok="confirmStart" :confirm-loading="starting">
       <a-form layout="vertical" :model="newSandbox">
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="newSandbox.name" />
         </a-form-item>
-        <a-form-item label="Image">
+        <a-form-item :label="t('sandbox.imageLabel')">
           <a-input v-model:value="newSandbox.image" placeholder="python:3.11-slim" />
         </a-form-item>
-        <a-form-item label="Timeout (seconds)">
+        <a-form-item :label="t('sandbox.timeout')">
           <a-input-number v-model:value="newSandbox.timeout" :min="60" :max="3600" style="width: 100%" />
         </a-form-item>
       </a-form>

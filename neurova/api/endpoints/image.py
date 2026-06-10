@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from neurova.image_pipeline import get_image_pipeline_manager, BuildStatus
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -135,36 +137,36 @@ async def get_template(name: str):
 @router.post("/build")
 async def build_image(body: BuildRequest):
     """构建自定义镜像"""
-    template = _templates_store.get(body.template_name)
+    # 获取 ImagePipelineManager
+    manager = get_image_pipeline_manager()
+    
+    # 检查模板是否存在
+    template = manager.get_template(body.template_name)
     if not template:
         raise HTTPException(status_code=404, detail=f"Template '{body.template_name}' not found")
     
-    build_id = _generate_build_id()
-    now = time.time()
+    # 构建镜像
+    result = manager.build_image(
+        template_id=body.template_name,
+        custom_tags=[body.tag] if body.tag else None,
+        build_args=body.build_args,
+        platform=body.platform,
+    )
     
-    # 模拟构建过程
-    build_record = {
-        "build_id": build_id,
-        "template_name": body.template_name,
-        "tag": body.tag,
-        "status": "success",  # 模拟成功
-        "started_at": now,
-        "finished_at": now + 5.0,  # 模拟 5 秒构建时间
-        "duration": 5.0,
-        "error_message": None,
-        "image_id": f"sha256:{build_id}",
-        "build_args": body.build_args,
-    }
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result.get("error", "Build failed"))
     
-    _builds_store[build_id] = build_record
+    build_data = result["build"]
     
     return {
         "code": 0,
         "message": f"Build started for template '{body.template_name}' with tag '{body.tag}'",
         "data": {
-            "build_id": build_id,
-            "status": "success",
-            "estimated_duration": 5.0,
+            "build_id": build_data["build_id"],
+            "status": build_data["status"],
+            "image_tag": build_data.get("image_tag"),
+            "image_id": build_data.get("metadata", {}).get("image_id"),
+            "duration_seconds": build_data.get("duration_seconds"),
         },
     }
 

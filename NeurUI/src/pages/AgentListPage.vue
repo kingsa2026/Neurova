@@ -238,17 +238,23 @@ onMounted(() => {
 .meta-row {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   font-size: 13px;
+  gap: 12px;
 }
 
 .meta-label {
   color: var(--nr-text-secondary);
+  flex-shrink: 0;
 }
 
 .meta-value {
   color: var(--nr-text-primary);
   font-weight: 500;
+  text-align: right;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 .card-actions {

@@ -38,10 +38,10 @@
             <div class="action-row">
               <span class="action-label">{{ t('computer.scroll') }}</span>
               <a-select v-model:value="scrollDir" size="small" style="width: 100px">
-                <a-select-option value="up">Up</a-select-option>
-                <a-select-option value="down">Down</a-select-option>
-                <a-select-option value="left">Left</a-select-option>
-                <a-select-option value="right">Right</a-select-option>
+                <a-select-option value="up">{{ t('computer.up') }}</a-select-option>
+                <a-select-option value="down">{{ t('computer.down') }}</a-select-option>
+                <a-select-option value="left">{{ t('computer.left') }}</a-select-option>
+                <a-select-option value="right">{{ t('computer.right') }}</a-select-option>
               </a-select>
               <a-input-number v-model:value="scrollAmount" :min="1" :max="10" size="small" style="width: 60px" />
               <GlassButton variant="secondary" size="sm" @click="doScroll">{{ t('computer.scroll') }}</GlassButton>
@@ -54,13 +54,13 @@
           <div class="action-grid">
             <div class="action-row">
               <a-input v-model:value="browserUrl" placeholder="https://..." size="small" style="flex: 1" />
-              <GlassButton variant="secondary" size="sm" @click="browserNavigate">Navigate</GlassButton>
+              <GlassButton variant="secondary" size="sm" @click="browserNavigate">{{ t('computer.navigate') }}</GlassButton>
             </div>
             <div class="action-grid-row">
               <GlassButton variant="ghost" size="sm" @click="browserScreenshot">{{ t('computer.screenshot') }}</GlassButton>
               <GlassButton variant="ghost" size="sm" @click="browserClick">{{ t('computer.click') }}</GlassButton>
               <GlassButton variant="ghost" size="sm" @click="browserType">{{ t('computer.type') }}</GlassButton>
-              <GlassButton variant="ghost" size="sm" @click="browserExtract">Extract</GlassButton>
+              <GlassButton variant="ghost" size="sm" @click="browserExtract">{{ t('computer.extract') }}</GlassButton>
             </div>
             <div class="action-grid-row">
               <GlassButton variant="ghost" size="sm" @click="smartClick">{{ t('computer.smartClick') }}</GlassButton>
@@ -75,7 +75,7 @@
             <a-input v-model:value="shellCommand" :placeholder="t('computer.shell')" @press-enter="executeShell">
               <template #prefix><span class="shell-prompt">$</span></template>
             </a-input>
-            <GlassButton variant="primary" size="sm" :loading="shellLoading" @click="executeShell">Run</GlassButton>
+            <GlassButton variant="primary" size="sm" :loading="shellLoading" @click="executeShell">{{ t('computer.run') }}</GlassButton>
           </div>
           <div v-if="shellOutput" class="shell-output">
             <pre>{{ shellOutput }}</pre>

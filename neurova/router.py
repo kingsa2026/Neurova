@@ -10,6 +10,7 @@ D1 任务重构版本：
 """
 
 import asyncio
+import json
 import logging
 import re
 from typing import Dict, List, Optional, Callable, Any
@@ -215,8 +216,8 @@ class MessageRouter:
         # 解析参数
         try:
             # 尝试解析为 JSON
-            params = eval(params_str) if params_str else {}
-        except:
+            params = json.loads(params_str) if params_str else {}
+        except json.JSONDecodeError:
             params = {"raw": params_str}
 
         # 执行 Skill

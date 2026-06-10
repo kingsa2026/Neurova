@@ -23,7 +23,7 @@ import threading
 import typing
 
 from asyncio import Event
-from neurova.llm.provider_manager import LLMProviderManager
+from neurova.llm.provider_manager import LLMProviderManager, get_provider_manager
 
 # core imports
 from neurova.core.event_bus import EventBus
@@ -125,7 +125,7 @@ class InfrastructureManager:
             
             # 初始化 Provider Manager
             if self._config.enable_provider_manager:
-                self._provider_manager = LLMProviderManager()
+                self._provider_manager = get_provider_manager()
                 logger.debug("LLMProviderManager 初始化完成")
     
     async def start(self) -> None:

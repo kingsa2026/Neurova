@@ -80,13 +80,13 @@
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="newProvider.name" />
         </a-form-item>
-        <a-form-item label="Base URL">
+        <a-form-item :label="t('model.baseUrl')">
           <a-input v-model:value="newProvider.base_url" placeholder="https://api.openai.com/v1" />
         </a-form-item>
-        <a-form-item label="API Key">
+        <a-form-item :label="t('model.apiKey')">
           <a-input-password v-model:value="newProvider.api_key" />
         </a-form-item>
-        <a-form-item label="Models">
+        <a-form-item :label="t('model.modelsLabel')">
           <a-select v-model:value="newProvider.models" mode="tags" :placeholder="'model-name'" style="width: 100%" />
         </a-form-item>
       </a-form>

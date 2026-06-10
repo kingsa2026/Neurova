@@ -82,10 +82,10 @@
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="newServer.name" />
         </a-form-item>
-        <a-form-item label="URL">
+        <a-form-item :label="t('tool.serverUrl')">
           <a-input v-model:value="newServer.url" placeholder="http://localhost:3000" />
         </a-form-item>
-        <a-form-item label="Auth Token">
+        <a-form-item :label="t('tool.authToken')">
           <a-input-password v-model:value="newServer.auth_token" />
         </a-form-item>
       </a-form>
@@ -94,7 +94,7 @@
     <!-- Execute tool modal -->
     <a-modal v-model:open="showExecute" :title="t('tool.execute')" @ok="runTool" :confirm-loading="executing">
       <p v-if="selectedTool" class="exec-tool-name">{{ selectedTool.name }}</p>
-      <a-form-item label="Parameters (JSON)">
+      <a-form-item :label="t('tool.parameters')">
         <a-textarea v-model:value="toolParams" :rows="6" placeholder='{"key": "value"}' />
       </a-form-item>
       <div v-if="execResult" class="exec-result">

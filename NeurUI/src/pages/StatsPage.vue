@@ -41,7 +41,7 @@
     </GlassCard>
 
     <!-- Usage trends -->
-    <GlassCard title="Usage Trends" style="margin-top: 20px">
+    <GlassCard :title="t('stats.usageTrends')" style="margin-top: 20px">
       <div class="chart-area">
         <div v-for="(point, i) in trends" :key="i" class="chart-bar-wrapper">
           <div class="chart-bar" :style="{ height: `${Math.max(4, (point.value / (maxTrend || 1)) * 140)}px` }" />

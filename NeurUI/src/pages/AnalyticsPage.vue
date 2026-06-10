@@ -3,9 +3,9 @@
     <div class="page-header">
       <h2 class="page-title">{{ t('system.analytics') }}</h2>
       <a-radio-group v-model:value="timeRange" button-style="solid" size="small" @change="fetchAll">
-        <a-radio-button value="day">Day</a-radio-button>
-        <a-radio-button value="week">Week</a-radio-button>
-        <a-radio-button value="month">Month</a-radio-button>
+        <a-radio-button value="day">{{ t('analytics.day') }}</a-radio-button>
+        <a-radio-button value="week">{{ t('analytics.week') }}</a-radio-button>
+        <a-radio-button value="month">{{ t('analytics.month') }}</a-radio-button>
       </a-radio-group>
     </div>
 
@@ -19,7 +19,7 @@
             <GlassStatCard :label="t('dashboard.totalCalls')" :value="usageData.api_calls ?? 0" emoji="📡" :trend="usageData.api_calls_trend" />
             <GlassStatCard :label="t('dashboard.totalAgents')" :value="usageData.agents ?? 0" emoji="🤖" :trend="usageData.agents_trend" />
           </div>
-          <GlassCard title="Usage Over Time" style="margin-top: 20px">
+          <GlassCard :title="t('analytics.usageOverTime')" style="margin-top: 20px">
             <div class="chart-placeholder">
               <div v-for="(point, i) in usageData.timeline ?? []" :key="i" class="chart-bar-wrapper">
                 <div class="chart-bar" :style="{ height: `${Math.max(4, (point.value / (usageData.max_value || 1)) * 160)}px` }" />
@@ -35,22 +35,22 @@
       <a-tab-pane key="performance" :tab="t('system.performance')">
         <a-spin :spinning="loading">
           <div class="stats-grid">
-            <GlassStatCard label="Avg Response" :value="`${perfData.avg_response_ms ?? 0}ms`" emoji="⚡" />
-            <GlassStatCard label="P95 Latency" :value="`${perfData.p95_ms ?? 0}ms`" emoji="📊" />
-            <GlassStatCard label="Throughput" :value="`${perfData.throughput ?? 0}/s`" emoji="🚀" />
-            <GlassStatCard label="Error Rate" :value="`${perfData.error_rate ?? 0}%`" emoji="⚠️" />
+            <GlassStatCard :label="t('analytics.avgResponse')" :value="`${perfData.avg_response_ms ?? 0}ms`" emoji="⚡" />
+            <GlassStatCard :label="t('analytics.p95Latency')" :value="`${perfData.p95_ms ?? 0}ms`" emoji="📊" />
+            <GlassStatCard :label="t('analytics.throughput')" :value="`${perfData.throughput ?? 0}/s`" emoji="🚀" />
+            <GlassStatCard :label="t('analytics.errorRate')" :value="`${perfData.error_rate ?? 0}%`" emoji="⚠️" />
           </div>
-          <GlassCard title="Response Times" style="margin-top: 20px">
+          <GlassCard :title="t('analytics.responseTimes')" style="margin-top: 20px">
             <a-table :columns="perfColumns" :data-source="perfData.endpoints ?? []" row-key="path" :pagination="false" size="small" />
           </GlassCard>
         </a-spin>
       </a-tab-pane>
 
       <!-- Behavior tab -->
-      <a-tab-pane key="behavior" tab="Behavior">
+      <a-tab-pane key="behavior" :tab="t('analytics.behavior')">
         <a-spin :spinning="loading">
           <div class="two-col">
-            <GlassCard title="Popular Features">
+            <GlassCard :title="t('analytics.popularFeatures')">
               <a-list :data-source="behaviorData.popular_features ?? []" size="small">
                 <template #renderItem="{ item }">
                   <a-list-item>
@@ -63,7 +63,7 @@
                 <template #empty><a-empty :description="t('common.noData')" /></template>
               </a-list>
             </GlassCard>
-            <GlassCard title="User Paths">
+            <GlassCard :title="t('analytics.userPaths')">
               <a-list :data-source="behaviorData.user_paths ?? []" size="small">
                 <template #renderItem="{ item }">
                   <a-list-item>
@@ -81,10 +81,10 @@
       <a-tab-pane key="errors" :tab="t('system.errors')">
         <a-spin :spinning="loading">
           <div class="stats-grid">
-            <GlassStatCard label="Total Errors" :value="errorData.total ?? 0" emoji="❌" :trend="errorData.trend" />
-            <GlassStatCard label="Error Rate" :value="`${errorData.rate ?? 0}%`" emoji="📉" />
+            <GlassStatCard :label="t('analytics.totalErrors')" :value="errorData.total ?? 0" emoji="❌" :trend="errorData.trend" />
+            <GlassStatCard :label="t('analytics.errorRate')" :value="`${errorData.rate ?? 0}%`" emoji="📉" />
           </div>
-          <GlassCard title="Top Errors" style="margin-top: 20px">
+          <GlassCard :title="t('analytics.topErrors')" style="margin-top: 20px">
             <a-table :columns="errorColumns" :data-source="errorData.top_errors ?? []" row-key="code" :pagination="false" size="small" />
           </GlassCard>
         </a-spin>
@@ -113,16 +113,16 @@ const behaviorData = ref<Record<string, any>>({})
 const errorData = ref<Record<string, any>>({})
 
 const perfColumns = computed(() => [
-  { title: 'Endpoint', dataIndex: 'path', key: 'path' },
-  { title: 'Avg (ms)', dataIndex: 'avg_ms', key: 'avg_ms' },
-  { title: 'P95 (ms)', dataIndex: 'p95_ms', key: 'p95_ms' },
-  { title: 'Calls', dataIndex: 'count', key: 'count' },
+  { title: t('analytics.endpoint'), dataIndex: 'path', key: 'path' },
+  { title: t('analytics.avgMs'), dataIndex: 'avg_ms', key: 'avg_ms' },
+  { title: t('analytics.p95Ms'), dataIndex: 'p95_ms', key: 'p95_ms' },
+  { title: t('analytics.calls'), dataIndex: 'count', key: 'count' },
 ])
 
 const errorColumns = computed(() => [
-  { title: 'Code', dataIndex: 'code', key: 'code' },
-  { title: 'Message', dataIndex: 'message', key: 'message', ellipsis: true },
-  { title: 'Count', dataIndex: 'count', key: 'count' },
+  { title: t('analytics.code'), dataIndex: 'code', key: 'code' },
+  { title: t('analytics.errorMessage'), dataIndex: 'message', key: 'message', ellipsis: true },
+  { title: t('analytics.count'), dataIndex: 'count', key: 'count' },
 ])
 
 const fetchAll = async () => {

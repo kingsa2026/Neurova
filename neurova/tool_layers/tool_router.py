@@ -19,6 +19,30 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class _SkillToolProxy:
+    """Skill 工具代理 — 包装 Skill 使其可被 ToolRouter 路由"""
+    name: str
+    skill_name: str
+    is_skill: bool = True
+    is_mcp: bool = False
+    source: str = "skill"
+    description: str = ""
+    parameters: typing.Dict[str, typing.Any] = field(default_factory=dict)
+
+
+@dataclass
+class _MCPToolProxy:
+    """MCP 工具代理 — 包装 MCP 工具使其可被 ToolRouter 路由"""
+    name: str
+    server_id: str
+    is_mcp: bool = True
+    is_skill: bool = False
+    source: str = "mcp"
+    description: str = ""
+    parameters: typing.Dict[str, typing.Any] = field(default_factory=dict)
+
+
+@dataclass
 class ToolResult:
     """工具执行结果"""
     success: bool
@@ -116,14 +140,114 @@ class ToolRouter:
         
         return self._mcp_clients[server_id]
     
-    def get_all_tools(self) -> typing.Dict[str, typing.Any]:
+    def get_all_tools(
+        self,
+        agent_id: typing.Optional[str] = None,
+        user_id: typing.Optional[str] = None,
+    ) -> typing.Dict[str, typing.Any]:
         """
-        获取所有工具
+        获取所有工具（内置 + Skill + MCP）
         
+        Args:
+            agent_id: Agent ID（保留，用于未来多租户过滤）
+            user_id: 用户 ID（保留，用于未来多租户过滤）
+            
         Returns:
             工具字典 {name: tool_instance}
         """
-        return self._builtin_tools.copy()
+        result = self._builtin_tools.copy()
+        
+        # 聚合 Skill 工具
+        result.update(self._discover_skill_tools())
+        
+        # 聚合 MCP 工具
+        result.update(self._discover_mcp_tools())
+        
+        return result
+    
+    def _discover_skill_tools(self) -> typing.Dict[str, _SkillToolProxy]:
+        """从 Skill 管理器发现 Skill 工具"""
+        tools: typing.Dict[str, _SkillToolProxy] = {}
+        if not self._skill_manager:
+            return tools
+        
+        # 尝试从 skill_manager 获取已注册的 skill 列表
+        skills = getattr(self._skill_manager, 'skills', None)
+        if skills is None:
+            # 尝试 list_skills() 方法
+            list_fn = getattr(self._skill_manager, 'list_skills', None)
+            if callable(list_fn):
+                try:
+                    skills = list_fn()
+                except Exception:
+                    pass
+        
+        if skills and isinstance(skills, dict):
+            for skill_name, skill in skills.items():
+                if skill_name not in self._builtin_tools:
+                    desc = getattr(skill, 'description', '') or ''
+                    params = getattr(skill, 'parameters', {}) or {}
+                    tools[skill_name] = _SkillToolProxy(
+                        name=skill_name,
+                        skill_name=skill_name,
+                        description=desc,
+                        parameters=params,
+                    )
+        return tools
+    
+    def _discover_mcp_tools(self) -> typing.Dict[str, _MCPToolProxy]:
+        """从 MCP 客户端发现 MCP 工具"""
+        tools: typing.Dict[str, _MCPToolProxy] = {}
+        for server_id, client in self._mcp_clients.items():
+            # 尝试从 MCP 客户端获取工具列表
+            list_tools_fn = getattr(client, 'list_tools', None)
+            if callable(list_tools_fn):
+                try:
+                    import inspect
+                    if inspect.iscoroutinefunction(list_tools_fn):
+                        # 异步方法，跳过（在 execute 时按需解析）
+                        continue
+                    mcp_tools = list_tools_fn()
+                    if isinstance(mcp_tools, list):
+                        for t in mcp_tools:
+                            tool_name = getattr(t, 'name', None) or str(t)
+                            if tool_name not in self._builtin_tools:
+                                desc = getattr(t, 'description', '') or ''
+                                params = getattr(t, 'parameters', {}) or {}
+                                tools[tool_name] = _MCPToolProxy(
+                                    name=tool_name,
+                                    server_id=server_id,
+                                    description=desc,
+                                    parameters=params,
+                                )
+                except Exception as e:
+                    logger.debug(f"Failed to list MCP tools from {server_id}: {e}")
+        return tools
+    
+    async def route(
+        self,
+        tool_name: str,
+        params: typing.Dict[str, typing.Any],
+        agent_id: typing.Optional[str] = None,
+        user_id: typing.Optional[str] = None,
+    ) -> typing.Any:
+        """
+        路由工具调用（execute 的别名，保持向后兼容）
+        
+        Args:
+            tool_name: 工具名称
+            params: 工具参数
+            agent_id: Agent ID（可选）
+            user_id: 用户 ID（可选）
+            
+        Returns:
+            工具执行结果
+        """
+        result = await self.execute(tool_name, params, agent_id=agent_id, user_id=user_id)
+        if result.success:
+            return result.result
+        else:
+            raise ValueError(result.error or f"Tool execution failed: {tool_name}")
     
     async def execute(
         self, 
@@ -135,6 +259,11 @@ class ToolRouter:
         """
         执行工具
         
+        按优先级从三个来源解析工具:
+        1. 内置工具 (_builtin_tools)
+        2. Skill 工具 (_skill_manager)
+        3. MCP 工具 (_mcp_clients)
+        
         Args:
             tool_name: 工具名称
             params: 工具参数
@@ -142,22 +271,38 @@ class ToolRouter:
             user_id: 用户 ID（用于多租户隔离，可选）
             
         Returns:
-            工具执行结果
-            
-        Returns:
             ToolResult: 执行结果
         """
         logger.debug(f"Executing tool: {tool_name} (agent_id={agent_id}, user_id={user_id})")
         
-        # 检查工具是否存在
-        if tool_name not in self._builtin_tools:
+        # ── 从三个来源解析工具 ──
+        tool = None
+        source = None
+        
+        # 1. 内置工具
+        if tool_name in self._builtin_tools:
+            tool = self._builtin_tools[tool_name]
+            source = "builtin"
+        
+        # 2. Skill 工具
+        if tool is None and self._skill_manager:
+            tool = await self._resolve_skill_tool(tool_name)
+            if tool:
+                source = "skill"
+        
+        # 3. MCP 工具
+        if tool is None and self._mcp_clients:
+            tool = await self._resolve_mcp_tool(tool_name)
+            if tool:
+                source = "mcp"
+        
+        # 所有来源均未找到
+        if tool is None:
             return ToolResult(
                 success=False,
                 error=f"Tool not found: {tool_name}",
                 metadata={"tool_name": tool_name, "agent_id": agent_id, "user_id": user_id},
             )
-        
-        tool = self._builtin_tools[tool_name]
         
         # 注入隔离上下文到参数（如果工具支持）
         if agent_id or user_id:
@@ -181,36 +326,125 @@ class ToolRouter:
             return ToolResult(
                 success=True,
                 result=result,
-                metadata={"tool_name": tool_name, "agent_id": agent_id, "user_id": user_id},
+                metadata={"tool_name": tool_name, "source": source, "agent_id": agent_id, "user_id": user_id},
             )
         except KeyError as e:
-            logger.error(f"Tool not found: {tool_name}")
+            logger.error(f"Tool not found during execution: {tool_name}")
             return ToolResult(
                 success=False,
                 error=f"Tool not found: {tool_name}",
-                metadata={"tool_name": tool_name, "agent_id": agent_id, "user_id": user_id},
+                metadata={"tool_name": tool_name, "source": source, "agent_id": agent_id, "user_id": user_id},
             )
         except Exception as e:
             logger.error(f"Tool execution failed: {tool_name}, {e}")
             return ToolResult(
                 success=False,
                 error=str(e),
-                metadata={"tool_name": tool_name, "agent_id": agent_id, "user_id": user_id},
+                metadata={"tool_name": tool_name, "source": source, "agent_id": agent_id, "user_id": user_id},
             )
+    
+    async def _resolve_skill_tool(self, tool_name: str) -> typing.Optional[_SkillToolProxy]:
+        """
+        从 Skill 管理器解析工具
+        
+        Args:
+            tool_name: 工具名称
+            
+        Returns:
+            Skill 工具代理，未找到返回 None
+        """
+        if not self._skill_manager:
+            return None
+        
+        # 尝试 has_skill() 检查
+        has_skill_fn = getattr(self._skill_manager, 'has_skill', None)
+        if callable(has_skill_fn):
+            try:
+                if not has_skill_fn(tool_name):
+                    return None
+            except Exception:
+                return None
+        else:
+            # 回退：检查 skills 字典
+            skills = getattr(self._skill_manager, 'skills', None)
+            if not skills or tool_name not in skills:
+                return None
+        
+        # 获取 skill 详情
+        skill = None
+        skills = getattr(self._skill_manager, 'skills', {})
+        if skills and tool_name in skills:
+            skill = skills[tool_name]
+        
+        desc = ''
+        params = {}
+        if skill:
+            desc = getattr(skill, 'description', '') or ''
+            params = getattr(skill, 'parameters', {}) or {}
+        
+        return _SkillToolProxy(
+            name=tool_name,
+            skill_name=tool_name,
+            description=desc,
+            parameters=params,
+        )
+    
+    async def _resolve_mcp_tool(self, tool_name: str) -> typing.Optional[_MCPToolProxy]:
+        """
+        从 MCP 客户端解析工具
+        
+        逐个扫描已连接的 MCP 服务器，查找匹配的工具。
+        
+        Args:
+            tool_name: 工具名称
+            
+        Returns:
+            MCP 工具代理，未找到返回 None
+        """
+        for server_id, client in self._mcp_clients.items():
+            list_tools_fn = getattr(client, 'list_tools', None)
+            if not callable(list_tools_fn):
+                continue
+            
+            try:
+                import inspect
+                if inspect.iscoroutinefunction(list_tools_fn):
+                    mcp_tools = await list_tools_fn()
+                else:
+                    mcp_tools = list_tools_fn()
+                
+                if not isinstance(mcp_tools, list):
+                    continue
+                
+                for t in mcp_tools:
+                    t_name = getattr(t, 'name', None) or str(t)
+                    if t_name == tool_name:
+                        desc = getattr(t, 'description', '') or ''
+                        params = getattr(t, 'parameters', {}) or {}
+                        return _MCPToolProxy(
+                            name=tool_name,
+                            server_id=server_id,
+                            description=desc,
+                            parameters=params,
+                        )
+            except Exception as e:
+                logger.debug(f"Failed to scan MCP tools from {server_id}: {e}")
+        
+        return None
     
     async def _execute_mcp(self, tool: typing.Any, params: typing.Dict[str, typing.Any]) -> typing.Any:
         """
         执行 MCP 工具
         
         Args:
-            tool: MCP 工具实例
+            tool: MCP 工具实例（需有 server_id 和 name 属性）
             params: 工具参数
             
         Returns:
             执行结果
         """
-        server_id = tool.source
-        if server_id not in self._mcp_clients:
+        server_id = getattr(tool, 'server_id', None) or getattr(tool, 'source', None)
+        if not server_id or server_id not in self._mcp_clients:
             raise ValueError(f"MCP client not found for server: {server_id}")
         
         client = self._mcp_clients[server_id]

@@ -84,20 +84,22 @@ const shineStyle = computed<CSSProperties>(() => ({
 
 .nr-glass-btn--secondary .nr-glass-btn-bg {
   position: absolute; inset: 0;
-  background: rgba(255,255,255,0.06); backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255,255,255,0.1); border-radius: inherit;
+  background: linear-gradient(135deg, #162d50 0%, #1e4976 50%, #1a3f66 100%);
+  border: 1px solid rgba(59, 130, 246, 0.25); border-radius: inherit;
   transition: all 0.3s;
 }
-.nr-glass-btn--secondary { color: var(--nr-text-primary); }
-.nr-glass-btn--secondary:hover .nr-glass-btn-bg { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.18); }
-.nr-glass-btn--secondary:hover { transform: translateY(-1px); }
+.nr-glass-btn--secondary { color: #e0eaff; box-shadow: 0 2px 12px rgba(30, 64, 120, 0.25), inset 0 1px 0 rgba(255,255,255,0.08); }
+.nr-glass-btn--secondary:hover .nr-glass-btn-bg { background: linear-gradient(135deg, #1e3d6b 0%, #2563a0 50%, #1f5080 100%); border-color: rgba(59, 130, 246, 0.4); }
+.nr-glass-btn--secondary:hover { transform: translateY(-1px); color: #fff; box-shadow: 0 4px 20px rgba(30, 64, 120, 0.4), inset 0 1px 0 rgba(255,255,255,0.12); }
 
 .nr-glass-btn--ghost .nr-glass-btn-bg {
-  position: absolute; inset: 0; background: transparent; border-radius: inherit; transition: all 0.3s;
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, #0f2040 0%, #17335a 50%, #132a4a 100%);
+  border: 1px solid rgba(59, 130, 246, 0.18); border-radius: inherit; transition: all 0.3s;
 }
-.nr-glass-btn--ghost { color: var(--nr-text-secondary); }
-.nr-glass-btn--ghost:hover { color: var(--nr-text-primary); }
-.nr-glass-btn--ghost:hover .nr-glass-btn-bg { background: rgba(255,255,255,0.04); }
+.nr-glass-btn--ghost { color: #c8d8f0; }
+.nr-glass-btn--ghost:hover { color: #e0eaff; }
+.nr-glass-btn--ghost:hover .nr-glass-btn-bg { background: linear-gradient(135deg, #162d50 0%, #1e4976 50%, #1a3f66 100%); border-color: rgba(59, 130, 246, 0.3); }
 
 .nr-glass-btn--danger .nr-glass-btn-bg {
   position: absolute; inset: 0;

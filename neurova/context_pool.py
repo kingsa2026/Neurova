@@ -20,6 +20,9 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Set
 
+# 导入统一的 Token 估算器
+from neurova.context.token_estimator import TokenEstimator, EstimationStrategy
+
 logger = logging.getLogger(__name__)
 
 class ContextSource(Enum):
@@ -808,22 +811,9 @@ class ContextPoolUtils:
         Returns:
             估算的Token数量
         """
-        if not text:
-            return 0
-
-        # 简单估算：中文约1.5 tokens/字，英文约0.25 tokens/词
-        chinese_chars = sum(1 for char in text if '\u4e00' <= char <= '\u9fff')
-        total_chars = len(text)
-        non_chinese_chars = total_chars - chinese_chars
-
-        # 英文按空格分词
-        words = text.split()
-        english_words = len(words)
-
-        chinese_tokens = chinese_chars * 1.5
-        english_tokens = english_words * 0.25
-
-        return max(1, int(chinese_tokens + english_tokens))
+        # 使用统一的 Token 估算器
+        estimator = TokenEstimator(EstimationStrategy.BALANCED)
+        return estimator.estimate(text)
 
     @staticmethod
     def merge_contexts(

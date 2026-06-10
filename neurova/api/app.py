@@ -171,8 +171,8 @@ def _initialize_components(app_state: AppState) -> None:
 
     # 初始化 LLM Provider Manager
     try:
-        from neurova.llm.provider_manager import LLMProviderManager
-        app_state.provider_manager = LLMProviderManager()
+        from neurova.llm.provider_manager import get_provider_manager
+        app_state.provider_manager = get_provider_manager()
     except Exception as e:
         logger.warning(f"LLMProviderManager init failed: {e}")
 
@@ -186,7 +186,7 @@ def _initialize_components(app_state: AppState) -> None:
     # 初始化 Channel Manager
     try:
         from neurova.channels.manager import ChannelManager
-        app_state.channel_manager = ChannelManager()
+        app_state.channel_manager = ChannelManager.get_instance()
     except Exception as e:
         logger.warning(f"ChannelManager init failed: {e}")
 

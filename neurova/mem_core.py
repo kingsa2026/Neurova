@@ -25,25 +25,151 @@ MemCore — 神经感知记忆核心模块
 
 import logging
 import asyncio
+from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from pathlib import Path
 from typing import List, Dict, Optional, Any
+import time
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass
 class Memory:
-    """记忆数据模型（pyc骨架恢复占位）"""
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+    """记忆数据模型
+    
+    具有类型安全和数据验证的记忆数据类。
+    支持向后兼容的 **kwargs 构造方式。
+    """
+    id: str = ""
+    content: str = ""
+    importance: float = 0.5
+    temperature: float = 1.0
+    last_accessed: float = field(default_factory=time.time)
+    metadata: Optional[Dict[str, Any]] = None
+    
+    def __post_init__(self):
+        """后初始化处理，支持向后兼容的 **kwargs 构造方式"""
+        # 类型转换和验证
+        if not isinstance(self.importance, (int, float)):
+            try:
+                self.importance = float(self.importance)
+            except (ValueError, TypeError):
+                raise TypeError(f"importance 必须是数字，当前值: {self.importance}")
+        
+        if not isinstance(self.temperature, (int, float)):
+            try:
+                self.temperature = float(self.temperature)
+            except (ValueError, TypeError):
+                raise TypeError(f"temperature 必须是数字，当前值: {self.temperature}")
+        
+        # 验证重要性范围
+        if not (0.0 <= self.importance <= 1.0):
+            raise ValueError(f"importance 必须在 [0.0, 1.0] 范围内，当前值: {self.importance}")
+        
+        # 验证温度非负
+        if self.temperature < 0.0:
+            raise ValueError(f"temperature 必须非负，当前值: {self.temperature}")
+        
+        # 如果没有提供 id，自动生成
+        if not self.id:
+            self.id = f"memory_{int(time.time() * 1000)}"
+        
+        # 确保 metadata 是字典
+        if self.metadata is None:
+            self.metadata = {}
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            "id": self.id,
+            "content": self.content,
+            "importance": self.importance,
+            "temperature": self.temperature,
+            "last_accessed": self.last_accessed,
+            "metadata": self.metadata or {},
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Memory':
+        """从字典创建 Memory 实例"""
+        return cls(
+            id=data.get("id", ""),
+            content=data.get("content", ""),
+            importance=data.get("importance", 0.5),
+            temperature=data.get("temperature", 1.0),
+            last_accessed=data.get("last_accessed", time.time()),
+            metadata=data.get("metadata"),
+        )
 
 
+@dataclass
 class Conversation:
-    """对话数据模型（pyc骨架恢复占位）"""
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+    """对话数据模型
+    
+    具有类型安全和数据验证的对话数据类。
+    支持向后兼容的 **kwargs 构造方式。
+    """
+    id: str = ""
+    session_id: str = ""
+    user_id: str = ""
+    agent_id: str = ""
+    messages: List[Dict[str, Any]] = field(default_factory=list)
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    metadata: Optional[Dict[str, Any]] = None
+    
+    def __post_init__(self):
+        """后初始化处理，支持向后兼容的 **kwargs 构造方式"""
+        # 如果没有提供 id，自动生成
+        if not self.id:
+            self.id = f"conversation_{int(time.time() * 1000)}"
+        
+        # 确保 messages 是列表
+        if self.messages is None:
+            self.messages = []
+        
+        # 确保 metadata 是字典
+        if self.metadata is None:
+            self.metadata = {}
+    
+    def add_message(self, role: str, content: str, metadata: Optional[Dict[str, Any]] = None):
+        """添加消息"""
+        message = {
+            "role": role,
+            "content": content,
+            "timestamp": time.time(),
+            "metadata": metadata or {},
+        }
+        self.messages.append(message)
+        self.updated_at = time.time()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            "id": self.id,
+            "session_id": self.session_id,
+            "user_id": self.user_id,
+            "agent_id": self.agent_id,
+            "messages": self.messages,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "metadata": self.metadata or {},
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Conversation':
+        """从字典创建 Conversation 实例"""
+        return cls(
+            id=data.get("id", ""),
+            session_id=data.get("session_id", ""),
+            user_id=data.get("user_id", ""),
+            agent_id=data.get("agent_id", ""),
+            messages=data.get("messages", []),
+            created_at=data.get("created_at", time.time()),
+            updated_at=data.get("updated_at", time.time()),
+            metadata=data.get("metadata"),
+        )
 
 
 class MemCore:

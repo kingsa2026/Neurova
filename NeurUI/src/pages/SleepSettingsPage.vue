@@ -9,16 +9,16 @@
       <!-- Sleep schedule -->
       <GlassCard :title="t('sleep.status')" style="margin-top: 8px">
         <a-form layout="vertical" :model="schedule">
-          <a-form-item label="Enable Auto-Sleep">
+          <a-form-item :label="t('sleep.enableAutoSleep')">
             <a-switch v-model:checked="schedule.enabled" />
           </a-form-item>
-          <a-form-item label="Sleep Time">
+          <a-form-item :label="t('sleep.sleepTime')">
             <a-time-picker v-model:value="schedule.sleep_time" format="HH:mm" style="width: 100%" />
           </a-form-item>
-          <a-form-item label="Wake Time">
+          <a-form-item :label="t('sleep.wakeTime')">
             <a-time-picker v-model:value="schedule.wake_time" format="HH:mm" style="width: 100%" />
           </a-form-item>
-          <a-form-item label="Max Sleep Duration (hours)">
+          <a-form-item :label="t('sleep.maxDuration')">
             <a-input-number v-model:value="schedule.max_duration_hours" :min="1" :max="24" style="width: 100%" />
           </a-form-item>
         </a-form>
@@ -30,20 +30,20 @@
       <!-- Dream parameters -->
       <GlassCard :title="t('sleep.dreams')" style="margin-top: 16px">
         <a-form layout="vertical" :model="dreams">
-          <a-form-item label="Enable Dreaming">
+          <a-form-item :label="t('sleep.enableDreaming')">
             <a-switch v-model:checked="dreams.enabled" />
           </a-form-item>
-          <a-form-item label="Dream Frequency">
+          <a-form-item :label="t('sleep.dreamFrequency')">
             <a-select v-model:value="dreams.frequency" style="width: 100%">
-              <a-select-option value="every_sleep">Every Sleep</a-select-option>
-              <a-select-option value="random">Random</a-select-option>
-              <a-select-option value="never">Never</a-select-option>
+              <a-select-option value="every_sleep">{{ t('sleep.everySleep') }}</a-select-option>
+              <a-select-option value="random">{{ t('sleep.random') }}</a-select-option>
+              <a-select-option value="never">{{ t('sleep.never') }}</a-select-option>
             </a-select>
           </a-form-item>
-          <a-form-item label="Dream Depth">
+          <a-form-item :label="t('sleep.dreamDepth')">
             <a-slider v-model:value="dreams.depth" :min="1" :max="10" />
           </a-form-item>
-          <a-form-item label="Max Dream Topics">
+          <a-form-item :label="t('sleep.maxDreamTopics')">
             <a-input-number v-model:value="dreams.max_topics" :min="1" :max="20" style="width: 100%" />
           </a-form-item>
         </a-form>
@@ -55,25 +55,25 @@
       <!-- Memory merge settings -->
       <GlassCard :title="t('sleep.merges')" style="margin-top: 16px">
         <a-form layout="vertical" :model="memoryMerge">
-          <a-form-item label="Enable Memory Merge">
+          <a-form-item :label="t('sleep.enableMemoryMerge')">
             <a-switch v-model:checked="memoryMerge.enabled" />
           </a-form-item>
-          <a-form-item label="Merge Strategy">
+          <a-form-item :label="t('sleep.mergeStrategy')">
             <a-select v-model:value="memoryMerge.strategy" style="width: 100%">
-              <a-select-option value="conservative">Conservative</a-select-option>
-              <a-select-option value="balanced">Balanced</a-select-option>
-              <a-select-option value="aggressive">Aggressive</a-select-option>
+              <a-select-option value="conservative">{{ t('sleep.conservative') }}</a-select-option>
+              <a-select-option value="balanced">{{ t('sleep.balanced') }}</a-select-option>
+              <a-select-option value="aggressive">{{ t('sleep.aggressive') }}</a-select-option>
             </a-select>
           </a-form-item>
-          <a-form-item label="Conflict Resolution">
+          <a-form-item :label="t('sleep.conflictResolution')">
             <a-select v-model:value="memoryMerge.conflict_resolution" style="width: 100%">
-              <a-select-option value="keep_newest">Keep Newest</a-select-option>
-              <a-select-option value="keep_strongest">Keep Strongest</a-select-option>
-              <a-select-option value="merge">Merge</a-select-option>
-              <a-select-option value="flag">Flag for Review</a-select-option>
+              <a-select-option value="keep_newest">{{ t('sleep.keepNewest') }}</a-select-option>
+              <a-select-option value="keep_strongest">{{ t('sleep.keepStrongest') }}</a-select-option>
+              <a-select-option value="merge">{{ t('sleep.mergeOption') }}</a-select-option>
+              <a-select-option value="flag">{{ t('sleep.flagForReview') }}</a-select-option>
             </a-select>
           </a-form-item>
-          <a-form-item label="Similarity Threshold">
+          <a-form-item :label="t('sleep.similarityThreshold')">
             <a-slider v-model:value="memoryMerge.similarity_threshold" :min="0" :max="100" />
           </a-form-item>
         </a-form>

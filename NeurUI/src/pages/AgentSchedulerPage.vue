@@ -28,11 +28,11 @@
             <a-tag color="blue">{{ task.schedule }}</a-tag>
             <a-badge :status="task.enabled ? 'processing' : 'default'" :text="task.enabled ? t('common.active') : t('common.inactive')" />
             <span class="meta-text" v-if="task.nextRun">{{ t('nav.scheduler') }}: {{ task.nextRun }}</span>
-            <span class="meta-text" v-if="task.lastRun">Last: {{ task.lastRun }}</span>
+            <span class="meta-text" v-if="task.lastRun">{{ t('scheduler.lastRun') }}{{ task.lastRun }}</span>
           </div>
           <div class="task-actions">
             <a-switch :checked="task.enabled" size="small" @change="(val: boolean) => handleToggle(task.id, val)" />
-            <GlassButton variant="secondary" size="sm" :loading="runningId === task.id" @click="handleRunNow(task.id)">Run Now</GlassButton>
+            <GlassButton variant="secondary" size="sm" :loading="runningId === task.id" @click="handleRunNow(task.id)">{{ t('scheduler.runNow') }}</GlassButton>
             <GlassButton variant="ghost" size="sm" @click="openEdit(task)">{{ t('common.edit') }}</GlassButton>
             <a-popconfirm :title="t('common.confirm') + '?'" @confirm="handleDelete(task.id)">
               <GlassButton variant="danger" size="sm">{{ t('common.delete') }}</GlassButton>
@@ -48,24 +48,24 @@
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="form.name" :placeholder="t('common.name')" />
         </a-form-item>
-        <a-form-item label="Schedule Type">
+        <a-form-item :label="t('scheduler.scheduleType')">
           <a-select v-model:value="form.scheduleType">
-            <a-select-option value="cron">Cron Expression</a-select-option>
-            <a-select-option value="interval">Interval (seconds)</a-select-option>
+            <a-select-option value="cron">{{ t('scheduler.cronExpression') }}</a-select-option>
+            <a-select-option value="interval">{{ t('scheduler.intervalSeconds') }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item v-if="form.scheduleType === 'cron'" label="Cron Expression">
+        <a-form-item v-if="form.scheduleType === 'cron'" :label="t('scheduler.cronExpression')">
           <a-input v-model:value="form.cron" placeholder="0 */5 * * *" />
         </a-form-item>
-        <a-form-item v-if="form.scheduleType === 'interval'" label="Interval (seconds)">
+        <a-form-item v-if="form.scheduleType === 'interval'" :label="t('scheduler.intervalSeconds')">
           <a-input v-model:value="form.interval" type="number" placeholder="300" />
         </a-form-item>
-        <a-form-item label="Action">
+        <a-form-item :label="t('scheduler.action')">
           <a-select v-model:value="form.action" :placeholder="t('common.actions')">
-            <a-select-option value="send_message">Send Message</a-select-option>
-            <a-select-option value="run_workflow">Run Workflow</a-select-option>
-            <a-select-option value="execute_skill">Execute Skill</a-select-option>
-            <a-select-option value="custom">Custom</a-select-option>
+            <a-select-option value="send_message">{{ t('scheduler.sendMessage') }}</a-select-option>
+            <a-select-option value="run_workflow">{{ t('scheduler.runWorkflow') }}</a-select-option>
+            <a-select-option value="execute_skill">{{ t('scheduler.executeSkill') }}</a-select-option>
+            <a-select-option value="custom">{{ t('scheduler.custom') }}</a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item :label="t('common.description')">

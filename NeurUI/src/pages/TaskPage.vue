@@ -63,9 +63,9 @@
       <div v-if="selectedTask" class="task-detail">
         <p><strong>{{ t('common.description') }}:</strong> {{ selectedTask.description }}</p>
         <p><strong>{{ t('common.status') }}:</strong> {{ selectedTask.status }}</p>
-        <p><strong>{{ t('common.type') }}Priority:</strong> {{ selectedTask.priority }}</p>
-        <p v-if="selectedTask.assignee"><strong>Assignee:</strong> {{ selectedTask.assignee }}</p>
-        <p v-if="selectedTask.dueDate"><strong>Due:</strong> {{ selectedTask.dueDate }}</p>
+        <p><strong>{{ t('task.priority') }}:</strong> {{ selectedTask.priority }}</p>
+        <p v-if="selectedTask.assignee"><strong>{{ t('task.assignee') }}:</strong> {{ selectedTask.assignee }}</p>
+        <p v-if="selectedTask.dueDate"><strong>{{ t('task.due') }}:</strong> {{ selectedTask.dueDate }}</p>
       </div>
     </a-modal>
 
@@ -78,17 +78,17 @@
         <a-form-item :label="t('common.description')">
           <a-input v-model:value="createForm.description" type="textarea" :rows="3" :placeholder="t('common.description')" />
         </a-form-item>
-        <a-form-item label="Priority">
+        <a-form-item :label="t('task.priority')">
           <a-select v-model:value="createForm.priority">
-            <a-select-option value="low">Low</a-select-option>
-            <a-select-option value="medium">Medium</a-select-option>
-            <a-select-option value="high">High</a-select-option>
+            <a-select-option value="low">{{ t('task.low') }}</a-select-option>
+            <a-select-option value="medium">{{ t('task.medium') }}</a-select-option>
+            <a-select-option value="high">{{ t('task.high') }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="Assignee">
-          <a-input v-model:value="createForm.assignee" placeholder="Assignee" />
+        <a-form-item :label="t('task.assignee')">
+          <a-input v-model:value="createForm.assignee" :placeholder="t('task.assignee')" />
         </a-form-item>
-        <a-form-item label="Due Date">
+        <a-form-item :label="t('task.dueDate')">
           <a-input v-model:value="createForm.dueDate" type="date" />
         </a-form-item>
       </a-form>
@@ -133,18 +133,18 @@ const selectedTask = ref<Task | null>(null)
 const createForm = reactive({ title: '', description: '', priority: 'medium', assignee: '', dueDate: '' })
 
 const columns = [
-  { key: 'todo', title: 'To Do', color: '#6366f1' },
-  { key: 'in-progress', title: 'In Progress', color: '#f59e0b' },
-  { key: 'done', title: 'Done', color: '#10b981' },
+  { key: 'todo', title: t('task.todo'), color: '#6366f1' },
+  { key: 'in-progress', title: t('task.inProgress'), color: '#f59e0b' },
+  { key: 'done', title: t('task.done'), color: '#10b981' },
 ]
 
 const tasksByStatus = (status: string) => tasks.value.filter((t) => t.status === status)
 
 const boardStats = computed(() => [
   { label: t('common.total'), value: tasks.value.length },
-  { label: 'To Do', value: tasksByStatus('todo').length },
-  { label: 'In Progress', value: tasksByStatus('in-progress').length },
-  { label: 'Done', value: tasksByStatus('done').length },
+  { label: t('task.todo'), value: tasksByStatus('todo').length },
+  { label: t('task.inProgress'), value: tasksByStatus('in-progress').length },
+  { label: t('task.done'), value: tasksByStatus('done').length },
 ])
 
 function openCreate() {

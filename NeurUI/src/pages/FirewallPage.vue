@@ -8,34 +8,34 @@
     <!-- Three-layer overview with cascade visualization -->
     <div class="layer-cascade-panel">
       <div class="cascade-header">
-        <span class="cascade-title">Three-Layer Firewall Architecture</span>
+        <span class="cascade-title">{{ t('firewall.threeLayerArchitecture') }}</span>
       </div>
       <div class="cascade-flow">
         <div class="cascade-layer">
           <div class="cascade-badge cascade-l0">L0</div>
-          <div class="cascade-label">Gateway</div>
-          <div class="cascade-desc">IP, rate limit, validation, sanitization</div>
+          <div class="cascade-label">{{ t('firewall.gateway') }}</div>
+          <div class="cascade-desc">{{ t('firewall.gatewayDesc') }}</div>
         </div>
         <div class="cascade-arrow">&rarr;</div>
         <div class="cascade-layer">
           <div class="cascade-badge cascade-l1">L1</div>
-          <div class="cascade-label">Isolation</div>
-          <div class="cascade-desc">Agent + user isolation rules</div>
+          <div class="cascade-label">{{ t('firewall.isolation') }}</div>
+          <div class="cascade-desc">{{ t('firewall.isolationDesc') }}</div>
         </div>
         <div class="cascade-arrow">&rarr;</div>
         <div class="cascade-layer">
           <div class="cascade-badge cascade-l2">L2</div>
-          <div class="cascade-label">File Protection</div>
-          <div class="cascade-desc">Protected paths, file access control</div>
+          <div class="cascade-label">{{ t('firewall.fileProtection') }}</div>
+          <div class="cascade-desc">{{ t('firewall.fileProtectionDesc') }}</div>
         </div>
       </div>
       <div class="priority-model">
-        <span class="priority-label">Rule Priority:</span>
-        <code class="priority-code">Admin Global Defaults</code>
+        <span class="priority-label">{{ t('firewall.rulePriority') }}</span>
+        <code class="priority-code">{{ t('firewall.effectiveRules') }}</code>
         <span class="priority-arrow">&rarr;</span>
-        <code class="priority-code">User Overrides (stricter only)</code>
+        <code class="priority-code">{{ t('firewall.effectiveRulesTooltip') }}</code>
         <span class="priority-arrow">&rarr;</span>
-        <code class="priority-code">Agent-specific Rules</code>
+        <code class="priority-code">{{ t('firewall.agentIsolation') }}</code>
       </div>
     </div>
 
@@ -75,7 +75,7 @@
       </a-tab-pane>
 
       <!-- Blocked requests log -->
-      <a-tab-pane key="blocked" tab="Blocked Requests">
+      <a-tab-pane key="blocked" :tab="t('firewall.blockedRequests')">
         <a-spin :spinning="loadingBlocked">
           <a-table :columns="blockedColumns" :data-source="blockedLogs" row-key="id" :pagination="{ pageSize: 20 }" size="small">
             <template #bodyCell="{ column, record }">
@@ -100,27 +100,27 @@
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="ruleForm.name" />
         </a-form-item>
-        <a-form-item label="Pattern">
-          <a-input v-model:value="ruleForm.pattern" placeholder="e.g. *secret*, DROP TABLE" />
+        <a-form-item :label="t('firewall.pattern')">
+          <a-input v-model:value="ruleForm.pattern" :placeholder="t('firewall.patternPlaceholder')" />
         </a-form-item>
-        <a-form-item label="Action">
+        <a-form-item :label="t('firewall.action')">
           <a-select v-model:value="ruleForm.action" style="width: 100%">
-            <a-select-option value="block">Block</a-select-option>
-            <a-select-option value="allow">Allow</a-select-option>
-            <a-select-option value="warn">Warn</a-select-option>
+            <a-select-option value="block">{{ t('firewall.block') }}</a-select-option>
+            <a-select-option value="allow">{{ t('firewall.allow') }}</a-select-option>
+            <a-select-option value="warn">{{ t('firewall.warn') }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="Priority">
+        <a-form-item :label="t('firewall.priority')">
           <a-input-number v-model:value="ruleForm.priority" :min="0" :max="1000" style="width: 100%" />
         </a-form-item>
-        <a-form-item label="Firewall Layer">
+        <a-form-item :label="t('firewall.firewallLayer')">
           <a-select v-model:value="ruleForm.layer" style="width: 100%">
-            <a-select-option value="L0">L0 - Gateway (IP, rate limit, validation)</a-select-option>
-            <a-select-option value="L1">L1 - Isolation (agent/user rules)</a-select-option>
-            <a-select-option value="L2">L2 - File Protection (path access)</a-select-option>
+            <a-select-option value="L0">{{ t('firewall.l0GatewayDesc') }}</a-select-option>
+            <a-select-option value="L1">{{ t('firewall.l1IsolationDesc') }}</a-select-option>
+            <a-select-option value="L2">{{ t('firewall.l2FileProtectionDesc') }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="Active">
+        <a-form-item :label="t('firewall.active')">
           <a-switch v-model:checked="ruleForm.active" />
         </a-form-item>
       </a-form>
@@ -156,21 +156,21 @@ const layerColor = (layer: string) => {
 }
 
 const ruleColumns = computed(() => [
-  { title: 'Layer', key: 'layer', width: 70 },
+  { title: t('firewall.layer'), key: 'layer', width: 70 },
   { title: t('common.name'), dataIndex: 'name', key: 'name' },
-  { title: 'Pattern', key: 'pattern' },
-  { title: 'Action', key: 'action', width: 80 },
-  { title: 'Priority', dataIndex: 'priority', key: 'priority', width: 80 },
+  { title: t('firewall.pattern'), key: 'pattern' },
+  { title: t('firewall.action'), key: 'action', width: 80 },
+  { title: t('firewall.priority'), dataIndex: 'priority', key: 'priority', width: 80 },
   { title: t('common.active'), key: 'active', width: 80 },
   { title: t('common.actions'), key: 'actions', width: 140 },
 ])
 
 const blockedColumns = computed(() => [
-  { title: 'Time', key: 'timestamp', width: 180 },
-  { title: 'Layer', key: 'layer', width: 70 },
-  { title: 'Rule', key: 'rule' },
-  { title: 'Source', dataIndex: 'source', key: 'source' },
-  { title: 'Content', dataIndex: 'content', key: 'content', ellipsis: true },
+  { title: t('firewall.time'), key: 'timestamp', width: 180 },
+  { title: t('firewall.layer'), key: 'layer', width: 70 },
+  { title: t('firewall.rule'), key: 'rule' },
+  { title: t('firewall.source'), dataIndex: 'source', key: 'source' },
+  { title: t('firewall.content'), dataIndex: 'content', key: 'content', ellipsis: true },
 ])
 
 const fetchRules = async () => {

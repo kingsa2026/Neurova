@@ -43,7 +43,7 @@
         <!-- System prompt & behavior -->
         <GlassCard :title="t('agent.systemPrompt')" style="margin-bottom: 20px">
           <a-form-item :label="t('agent.systemPrompt')">
-            <a-textarea v-model:value="formState.systemPrompt" :rows="6" placeholder="You are a helpful assistant..." />
+            <a-textarea v-model:value="formState.systemPrompt" :rows="6" :placeholder="t('agent.systemPromptPlaceholder')" />
           </a-form-item>
 
           <a-row :gutter="16">
@@ -80,12 +80,12 @@
           <template v-if="formState.ttsEnabled">
             <a-form-item :label="t('agent.ttsVoice')">
               <a-select v-model:value="formState.ttsVoice" :placeholder="t('agent.ttsVoice')" style="width: 100%">
-                <a-select-option value="alloy">Alloy</a-select-option>
-                <a-select-option value="echo">Echo</a-select-option>
-                <a-select-option value="fable">Fable</a-select-option>
-                <a-select-option value="onyx">Onyx</a-select-option>
-                <a-select-option value="nova">Nova</a-select-option>
-                <a-select-option value="shimmer">Shimmer</a-select-option>
+                <a-select-option value="alloy">{{ t('aigc.voiceAlloy') }}</a-select-option>
+                <a-select-option value="echo">{{ t('aigc.voiceEcho') }}</a-select-option>
+                <a-select-option value="fable">{{ t('aigc.voiceFable') }}</a-select-option>
+                <a-select-option value="onyx">{{ t('aigc.voiceOnyx') }}</a-select-option>
+                <a-select-option value="nova">{{ t('aigc.voiceNova') }}</a-select-option>
+                <a-select-option value="shimmer">{{ t('aigc.voiceShimmer') }}</a-select-option>
               </a-select>
             </a-form-item>
 

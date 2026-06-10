@@ -162,16 +162,30 @@ body {
 .ant-table {
   background: transparent !important;
 }
-.ant-table-thead > tr > th {
-  background: var(--nr-glass-bg) !important;
-  border-bottom: 1px solid var(--nr-glass-border) !important;
-  color: var(--nr-text-secondary) !important;
-}
 .ant-table-tbody > tr > td {
   border-bottom: 1px solid var(--nr-border-light) !important;
+  color: var(--nr-text-primary) !important;
 }
 .ant-table-tbody > tr:hover > td {
   background: var(--nr-glass-bg-hover) !important;
+}
+.ant-table-thead > tr > th {
+  background: var(--nr-glass-bg) !important;
+  border-bottom: 1px solid var(--nr-glass-border) !important;
+  color: var(--nr-text-primary) !important;
+  font-weight: 600 !important;
+}
+.ant-descriptions-item-label {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-descriptions-item-content {
+  color: var(--nr-text-primary) !important;
+}
+.ant-list-item {
+  color: var(--nr-text-primary) !important;
+}
+.ant-card {
+  color: var(--nr-text-primary) !important;
 }
 .ant-modal-content,
 .ant-drawer-content {

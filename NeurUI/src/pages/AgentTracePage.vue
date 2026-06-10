@@ -6,18 +6,18 @@
     </div>
 
     <!-- Performance metrics -->
-    <GlassCard title="Performance Metrics">
+    <GlassCard :title="t('trace.performanceMetrics')">
       <div class="metrics-grid">
-        <GlassStatCard label="Total Traces" :value="stats.total ?? 0" emoji="📊" />
-        <GlassStatCard label="Avg Duration" :value="`${stats.avg_duration_ms ?? 0}ms`" emoji="⏱️" />
-        <GlassStatCard label="Success Rate" :value="`${stats.success_rate ?? 0}%`" emoji="✅" />
-        <GlassStatCard label="Avg Steps" :value="stats.avg_steps ?? 0" emoji="📈" />
+        <GlassStatCard :label="t('trace.totalTraces')" :value="stats.total ?? 0" emoji="📊" />
+        <GlassStatCard :label="t('trace.avgDuration')" :value="`${stats.avg_duration_ms ?? 0}ms`" emoji="⏱️" />
+        <GlassStatCard :label="t('trace.successRate')" :value="`${stats.success_rate ?? 0}%`" emoji="✅" />
+        <GlassStatCard :label="t('trace.avgSteps')" :value="stats.avg_steps ?? 0" emoji="📈" />
       </div>
     </GlassCard>
 
     <a-spin :spinning="loading">
       <!-- Execution events timeline -->
-      <GlassCard title="Execution Events" style="margin-top: 16px">
+      <GlassCard :title="t('trace.executionEvents')" style="margin-top: 16px">
         <a-table
           :columns="traceColumns"
           :data-source="traces"
@@ -41,7 +41,7 @@
           <template #expandedRowRender="{ record }">
             <div class="expanded-trace">
               <!-- Tool call traces -->
-              <h4 class="section-title">Tool Calls</h4>
+              <h4 class="section-title">{{ t('trace.toolCalls') }}</h4>
               <a-list :data-source="record.tool_calls || record.expanded?.tool_calls || []" size="small">
                 <template #renderItem="{ item }">
                   <a-list-item>
@@ -52,11 +52,11 @@
                     </div>
                   </a-list-item>
                 </template>
-                <template #empty><span class="text-muted">No tool calls</span></template>
+                <template #empty><span class="text-muted">{{ t('trace.noToolCalls') }}</span></template>
               </a-list>
 
               <!-- LLM calls -->
-              <h4 class="section-title">LLM Calls</h4>
+              <h4 class="section-title">{{ t('trace.llmCalls') }}</h4>
               <a-list :data-source="record.llm_calls || record.expanded?.llm_calls || []" size="small">
                 <template #renderItem="{ item }">
                   <a-list-item>
@@ -67,22 +67,22 @@
                     </div>
                   </a-list-item>
                 </template>
-                <template #empty><span class="text-muted">No LLM calls</span></template>
+                <template #empty><span class="text-muted">{{ t('trace.noLlmCalls') }}</span></template>
               </a-list>
 
               <!-- Performance per trace -->
-              <h4 class="section-title">Performance Breakdown</h4>
+              <h4 class="section-title">{{ t('trace.performanceBreakdown') }}</h4>
               <div class="perf-breakdown">
                 <div class="perf-item">
-                  <span>LLM Time</span>
+                  <span>{{ t('trace.llmTime') }}</span>
                   <a-progress :percent="perfPercent(record, 'llm')" size="small" stroke-color="#8b5cf6" />
                 </div>
                 <div class="perf-item">
-                  <span>Tool Time</span>
+                  <span>{{ t('trace.toolTime') }}</span>
                   <a-progress :percent="perfPercent(record, 'tool')" size="small" stroke-color="#6366f1" />
                 </div>
                 <div class="perf-item">
-                  <span>Other</span>
+                  <span>{{ t('trace.other') }}</span>
                   <a-progress :percent="perfPercent(record, 'other')" size="small" stroke-color="#64748b" />
                 </div>
               </div>
@@ -121,12 +121,12 @@ const statusColor = (status: string) => {
 }
 
 const traceColumns = computed(() => [
-  { title: 'ID', dataIndex: 'id', key: 'id', width: 120 },
-  { title: 'Name', dataIndex: 'name', key: 'name' },
+  { title: t('trace.id'), dataIndex: 'id', key: 'id', width: 120 },
+  { title: t('trace.name'), dataIndex: 'name', key: 'name' },
   { title: t('common.status'), key: 'status', width: 100 },
-  { title: 'Duration', key: 'duration', width: 100 },
-  { title: 'Steps', dataIndex: 'steps_count', key: 'steps', width: 80 },
-  { title: 'Time', key: 'timestamp', width: 160 },
+  { title: t('trace.duration'), key: 'duration', width: 100 },
+  { title: t('trace.steps'), dataIndex: 'steps_count', key: 'steps', width: 80 },
+  { title: t('trace.time'), key: 'timestamp', width: 160 },
 ])
 
 const perfPercent = (record: any, type: string) => {

@@ -6,7 +6,7 @@
         <a-tag :color="overallStatus === 'healthy' ? 'green' : overallStatus === 'degraded' ? 'orange' : 'red'" class="overall-badge">
           {{ overallStatus }}
         </a-tag>
-        <GlassButton variant="primary" size="sm" :loading="reportLoading" @click="fetchReport">{{ t('system.health') }} Report</GlassButton>
+        <GlassButton variant="primary" size="sm" :loading="reportLoading" @click="fetchReport">{{ t('health.report') }}</GlassButton>
         <GlassButton variant="ghost" size="sm" :loading="loading" @click="fetchHealth">{{ t('common.refresh') }}</GlassButton>
       </div>
     </div>
@@ -55,7 +55,7 @@
     </a-spin>
 
     <!-- Full health report modal -->
-    <a-modal v-model:open="showReport" title="Health Report" :footer="null" width="640px">
+    <a-modal v-model:open="showReport" :title="t('health.reportTitle')" :footer="null" width="640px">
       <pre class="report-content">{{ reportText }}</pre>
     </a-modal>
   </div>

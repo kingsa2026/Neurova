@@ -13,11 +13,11 @@
     <GlassCard>
       <div class="storage-info">
         <div class="storage-item">
-          <span class="storage-label">Total Storage</span>
+          <span class="storage-label">{{ t('file.totalStorage') }}</span>
           <span class="storage-value">{{ formatBytes(storageInfo.total ?? 0) }}</span>
         </div>
         <div class="storage-item">
-          <span class="storage-label">Used</span>
+          <span class="storage-label">{{ t('file.usedStorage') }}</span>
           <span class="storage-value">{{ formatBytes(storageInfo.used ?? 0) }}</span>
         </div>
         <div class="storage-item" style="flex: 1">

@@ -33,23 +33,23 @@
       <!-- Detailed state -->
       <GlassCard :title="t('memory.overview')" style="margin-top: 20px">
         <div v-if="metaState" class="state-details">
-          <a-descriptions :column="2" bordered size="small">
+            <a-descriptions :column="2" bordered size="small">
             <a-descriptions-item :label="t('common.status')">
               <a-badge :status="stateBadge" :text="metaState.state || 'unknown'" />
             </a-descriptions-item>
-            <a-descriptions-item label="Confidence">
+            <a-descriptions-item :label="t('metacognition.confidence')">
               {{ formatPercent(metaState.confidence) }}
             </a-descriptions-item>
-            <a-descriptions-item label="Uncertainty">
+            <a-descriptions-item :label="t('metacognition.uncertainty')">
               {{ formatPercent(metaState.uncertainty) }}
             </a-descriptions-item>
-            <a-descriptions-item label="Awareness">
+            <a-descriptions-item :label="t('metacognition.awareness')">
               {{ formatPercent(metaState.awareness) }}
             </a-descriptions-item>
-            <a-descriptions-item label="Self-monitoring">
+            <a-descriptions-item :label="t('metacognition.selfMonitoring')">
               {{ formatPercent(metaState.self_monitoring) }}
             </a-descriptions-item>
-            <a-descriptions-item label="Adaptation Rate">
+            <a-descriptions-item :label="t('metacognition.adaptationRate')">
               {{ formatPercent(metaState.adaptation_rate) }}
             </a-descriptions-item>
           </a-descriptions>
@@ -129,32 +129,32 @@ const metrics = computed(() => {
   if (!metaState.value) return []
   return [
     {
-      label: 'Confidence',
+      label: t('metacognition.confidence'),
       displayValue: formatPercent(metaState.value.confidence),
       percent: Math.round((metaState.value.confidence || 0) * 100),
       color: '#10b981',
-      status: (metaState.value.confidence || 0) >= 0.7 ? 'High' : 'Low',
+      status: (metaState.value.confidence || 0) >= 0.7 ? t('metacognition.high') : t('metacognition.low'),
     },
     {
-      label: 'Uncertainty',
+      label: t('metacognition.uncertainty'),
       displayValue: formatPercent(metaState.value.uncertainty),
       percent: Math.round((metaState.value.uncertainty || 0) * 100),
       color: '#f59e0b',
-      status: (metaState.value.uncertainty || 0) <= 0.3 ? 'Low' : 'High',
+      status: (metaState.value.uncertainty || 0) <= 0.3 ? t('metacognition.low') : t('metacognition.high'),
     },
     {
-      label: 'Awareness',
+      label: t('metacognition.awareness'),
       displayValue: formatPercent(metaState.value.awareness),
       percent: Math.round((metaState.value.awareness || 0) * 100),
       color: '#6366f1',
-      status: (metaState.value.awareness || 0) >= 0.7 ? 'High' : 'Low',
+      status: (metaState.value.awareness || 0) >= 0.7 ? t('metacognition.high') : t('metacognition.low'),
     },
     {
-      label: 'Self-Monitoring',
+      label: t('metacognition.selfMonitoring'),
       displayValue: formatPercent(metaState.value.self_monitoring),
       percent: Math.round((metaState.value.self_monitoring || 0) * 100),
       color: '#8b5cf6',
-      status: (metaState.value.self_monitoring || 0) >= 0.5 ? 'Active' : 'Passive',
+      status: (metaState.value.self_monitoring || 0) >= 0.5 ? t('metacognition.active') : t('metacognition.passive'),
     },
   ]
 })
@@ -176,8 +176,8 @@ const stateBadge = computed(() => {
 
 const historyColumns = computed(() => [
   { title: t('common.createdAt'), dataIndex: 'created_at', key: 'created_at', width: 180 },
-  { title: 'Confidence', key: 'confidence', width: 120 },
-  { title: 'Trigger', key: 'trigger', width: 120 },
+  { title: t('metacognition.confidence'), key: 'confidence', width: 120 },
+  { title: t('metacognition.trigger'), key: 'trigger', width: 120 },
   { title: t('common.description'), dataIndex: 'summary', key: 'summary', ellipsis: true },
 ])
 

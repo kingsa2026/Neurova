@@ -19,6 +19,9 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import logging
 
+# 导入统一的 Token 估算器
+from .token_estimator import TokenEstimator, EstimationStrategy
+
 # BaseModule 可能不可用（当 neurova.core 只有 .pyc 文件时），提供降级方案
 try:
     from neurova.core.base_module import BaseModule
@@ -128,6 +131,9 @@ class UnifiedContextInjector(BaseModule):
         self._token_budget = token_budget or TokenBudget()
         self._enable_cache = enable_cache
         self._enable_compression = enable_compression
+        
+        # 初始化统一的 Token 估算器
+        self._token_estimator = TokenEstimator(EstimationStrategy.BALANCED)
 
         # 初始化智能压缩器
         if self._enable_compression:
@@ -759,13 +765,8 @@ class UnifiedContextInjector(BaseModule):
         if not text:
             return 0
 
-        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
-        other_chars = len(text) - chinese_chars
-
-        return int(
-            chinese_chars * self._token_budget.chinese_ratio +
-            other_chars * self._token_budget.english_ratio
-        )
+        # 使用统一的 Token 估算器
+        return self._token_estimator.estimate(text)
 
     def retrieve_memories(
         self,

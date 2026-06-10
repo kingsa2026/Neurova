@@ -9,6 +9,7 @@
         :value="modelValue"
         :placeholder="placeholder"
         :disabled="disabled"
+        :autocomplete="autocomplete"
         class="nr-glass-input-field"
         @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
         @focus="focused = true"
@@ -32,10 +33,12 @@ withDefaults(defineProps<{
   error?: string
   hint?: string
   disabled?: boolean
+  autocomplete?: string
 }>(), {
   modelValue: '',
   type: 'text',
   disabled: false,
+  autocomplete: 'off',
 })
 
 defineEmits<{ 'update:modelValue': [value: string] }>()

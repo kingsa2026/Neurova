@@ -91,6 +91,7 @@ class PostChatPipeline:
         self._rsi_orchestrator = None
         self._voice_memory_bridge = None
         self._skill_packer = None
+        self._voice_pipeline = None
 
     @property
     def _agt(self):
@@ -115,6 +116,7 @@ class PostChatPipeline:
         rsi_orchestrator: Any = None,
         voice_memory_bridge: Any = None,
         skill_packer: Any = None,
+        voice_pipeline: Any = None,
     ) -> None:
         """注入依赖组件（延迟绑定）
 
@@ -171,6 +173,8 @@ class PostChatPipeline:
             self._voice_memory_bridge = voice_memory_bridge
         if skill_packer is not None:
             self._skill_packer = skill_packer
+        if voice_pipeline is not None:
+            self._voice_pipeline = voice_pipeline
 
         logger.info(
             "PostChatPipeline dependencies configured: "
@@ -178,7 +182,8 @@ class PostChatPipeline:
             "growth_analyzer=%s, growth_log_manager=%s, evolution=%s, "
             "neuHebb_manager=%s, tool_lifecycle=%s, pattern_miner=%s, "
             "genetic_engine=%s, tool_marketplace=%s, conflict_detector=%s, "
-            "version_control=%s, proactive_question_manager=%s, rsi_orchestrator=%s",
+            "version_control=%s, proactive_question_manager=%s, rsi_orchestrator=%s, "
+            "voice_pipeline=%s",
             self._conversation_buffer is not None,
             self._memory_manager is not None,
             self._tts_manager is not None,
@@ -194,6 +199,7 @@ class PostChatPipeline:
             self._version_control is not None,
             self._proactive_question_manager is not None,
             self._rsi_orchestrator is not None,
+            self._voice_pipeline is not None,
         )
 
     def _get_dependency(self, name: str) -> Any:
@@ -468,81 +474,80 @@ class PostChatPipeline:
         session_id: str,
         enable_tts: bool,
     ) -> tuple:
-        """生成 TTS 语音"""
+        """生成 TTS 语音（通过统一语音管线）"""
         step_name = "generate_tts"
         start_time = time.time()
         config = self._agt.config
         use_tts = enable_tts and getattr(config, "enable_tts", False)
 
-        tts_manager = self._get_dependency("tts_manager")
-        if not use_tts or not tts_manager:
+        # 优先使用统一语音管线
+        voice_pipeline = self._get_dependency("voice_pipeline")
+        if not use_tts or not voice_pipeline:
             self._step_results.append(StepResult(
                 step_name=step_name,
                 status=StepStatus.SKIPPED,
-                message="TTS not enabled or tts_manager not available",
+                message="TTS not enabled or voice_pipeline not available",
                 duration_ms=(time.time() - start_time) * 1000
             ))
             return None, None
 
         try:
-            if not tts_manager.is_initialized:
-                tts_manager.initialize()
-
-            timestamp = int(time.time())
-            audio_filename = f"tts_{session_id or 'default'}_{timestamp}.wav"
-            audio_path = Path(config.attachment_dir) / audio_filename
-            audio_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # TTSManager.synthesize() 只接受文本参数，返回音频字节数据
-            audio_start_time = time.time()
-            audio_data = await tts_manager.synthesize(reply)
-            duration_ms = int((time.time() - audio_start_time) * 1000)
+            # 获取用户和Agent ID
+            user_id = getattr(config, "user_id", "default")
+            agent_id = getattr(config, "agent_id", "default")
+            voice = getattr(config, "tts_voice", "default")
             
-            # 将音频数据保存到文件
-            if audio_data:
-                with open(audio_path, "wb") as f:
-                    f.write(audio_data)
-                logger.info(f"TTS语音已生成: {audio_path}")
+            # 通过统一语音管线处理 TTS
+            pipeline_result = await voice_pipeline.process_tts(
+                text=reply,
+                user_id=user_id,
+                agent_id=agent_id,
+                voice=voice,
+            )
+            
+            if pipeline_result.error:
+                logger.warning(f"统一语音管线 TTS 失败: {pipeline_result.error}")
+                self._step_results.append(StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=f"Voice pipeline TTS failed: {pipeline_result.error}",
+                    duration_ms=(time.time() - start_time) * 1000
+                ))
+                return None, None
+            
+            # 保存音频到文件
+            if pipeline_result.audio_data:
+                timestamp = int(time.time())
+                audio_filename = f"tts_{session_id or 'default'}_{timestamp}.wav"
+                audio_path = Path(config.attachment_dir) / audio_filename
+                audio_path.parent.mkdir(parents=True, exist_ok=True)
                 
-                # 记录TTS使用统计到语音记忆桥接器
-                voice_memory_bridge = self._get_dependency("voice_memory_bridge")
-                if voice_memory_bridge:
-                    try:
-                        tts_result = {
-                            "text_length": len(reply),
-                            "engine": getattr(tts_manager, "engine_name", "unknown"),
-                            "voice": getattr(config, "tts_voice", "default"),
-                            "duration_ms": duration_ms,
-                            "success": True,
-                            "audio_size_bytes": len(audio_data),
-                        }
-                        # 获取用户和Agent ID
-                        user_id = getattr(config, "user_id", "default")
-                        agent_id = getattr(config, "agent_id", "default")
-                        
-                        await voice_memory_bridge.record_tts_usage(
-                            tts_result=tts_result,
-                            user_id=user_id,
-                            agent_id=agent_id,
-                        )
-                        logger.debug("TTS使用统计已记录到语音记忆桥接器")
-                    except Exception as e:
-                        logger.warning(f"记录TTS使用统计失败: {e}")
+                with open(audio_path, "wb") as f:
+                    f.write(pipeline_result.audio_data)
+                logger.info(f"TTS语音已生成: {audio_path}")
                 
                 self._step_results.append(StepResult(
                     step_name=step_name,
                     status=StepStatus.EXECUTED,
-                    message=f"TTS generated: {audio_path}",
+                    message=f"TTS generated via voice pipeline: {audio_path}",
                     duration_ms=(time.time() - start_time) * 1000,
-                    data={"audio_path": str(audio_path), "audio_size": len(audio_data)}
+                    data={
+                        "audio_path": str(audio_path),
+                        "audio_size": len(pipeline_result.audio_data),
+                        "tts_engine": pipeline_result.tts_engine,
+                        "tts_voice": pipeline_result.tts_voice,
+                        "tts_duration_ms": pipeline_result.tts_duration_ms,
+                        "context_injected": pipeline_result.context_injected,
+                        "memory_recorded": pipeline_result.memory_recorded,
+                    }
                 ))
-                return str(audio_path), audio_data
+                return str(audio_path), pipeline_result.audio_data
             else:
-                logger.warning("TTS合成返回空数据")
+                logger.warning("统一语音管线 TTS 返回空音频数据")
                 self._step_results.append(StepResult(
                     step_name=step_name,
                     status=StepStatus.FAILED,
-                    message="TTS synthesis returned empty data",
+                    message="Voice pipeline TTS returned empty audio data",
                     duration_ms=(time.time() - start_time) * 1000
                 ))
                 return None, None
