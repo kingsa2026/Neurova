@@ -107,28 +107,30 @@ class TemperatureEngine:
         Returns:
             float: 衰减后的温度
         """
-        # 1. 计算衰减因子（贝叶斯遗忘曲线）
+        # 1. 基础衰减率（贝叶斯遗忘曲线）
+        # curve_factor 越大衰减越快：1天=0.4, 7天=0.2, 30天=0.1, >30天=0.05
         curve_factor = cls._calculate_curve_factor(days_idle)
 
-        # 2. 情感保护
+        # 2. 情感保护（减缓衰减，值越小保护越强）
         emotion_protect = (cls._CLASS_EMOTIONAL_PROTECTION_FACTOR
                           if emotion_score > cls._CLASS_EMOTIONAL_PROTECTION_THRESHOLD
                           else 1.0)
 
-        # 3. 饱和效应
-        saturation_factor = 1.0 - (current_temp / 100.0) ** 2
+        # 3. 饱和效应（高温时衰减更快，低温时衰减更慢）
+        # 高温 → 1.0（最大衰减），低温 → 接近 0（最小衰减）
+        saturation_factor = min(1.0, (current_temp / 100.0) ** 2)
 
-        # 4. 重要性加权（重要记忆衰减更少）
+        # 4. 重要性加权（重要记忆衰减更少，值越小保护越强）
         importance_weight = 1.0 - 0.5 * importance
 
         # 5. 回忆次数保护
         recall_protection = min(1.0 + recall_count * 0.05, 1.5)
 
-        # 6. 计算最终衰减
-        decay = curve_factor * emotion_protect * saturation_factor * importance_weight
+        # 6. 计算衰减率（所有因子乘积，确保 ≤ 1.0）
+        decay_rate = min(1.0, curve_factor * emotion_protect * saturation_factor * importance_weight)
 
-        # 应用衰减
-        new_temp = current_temp * (1.0 - decay)
+        # 7. 应用衰减
+        new_temp = current_temp * (1.0 - decay_rate)
 
         # 最后应用回忆保护（防止过度衰减）
         new_temp = max(new_temp, current_temp * recall_protection * 0.1)
@@ -139,26 +141,26 @@ class TemperatureEngine:
     def _calculate_curve_factor(cls, days_idle: float) -> float:
         """计算遗忘曲线因子
 
-        基于空闲天数的分段函数：
-        - ≤1天: 2.0 (快速衰减)
-        - ≤7天: 1.0 (正常衰减)
-        - ≤30天: 0.5 (慢速衰减)
-        - >30天: 0.2 (极慢衰减)
+        基于空闲天数的分段函数（值越大衰减越快）：
+        - ≤1天: 0.05 (极少衰减)
+        - ≤7天: 0.1 (慢速衰减)
+        - ≤30天: 0.2 (正常衰减)
+        - >30天: 0.4 (快速衰减)
 
         Args:
             days_idle: 空闲天数
 
         Returns:
-            float: 曲线因子
+            float: 曲线因子 (0.0 - 1.0)
         """
         if days_idle <= 1:
-            return 2.0
+            return 0.05
         elif days_idle <= 7:
-            return 1.0
+            return 0.1
         elif days_idle <= 30:
-            return 0.5
-        else:
             return 0.2
+        else:
+            return 0.4
 
     @classmethod
     def get_lifecycle_stage(cls, temperature: float) -> str:

@@ -100,8 +100,21 @@
           <div class="result-header">
             <a-tag :color="typeColor(result.type)">{{ result.type }}</a-tag>
             <span class="result-score">Score: {{ Math.round(result.score * 100) }}%</span>
+            <a-tag v-if="result.channel_scores" color="cyan" size="small">{{ t('memorySearch.nerfTag') }}</a-tag>
           </div>
           <div class="result-content">{{ result.content }}</div>
+          <!-- NeRF channel scores breakdown -->
+          <div v-if="result.channel_scores && Object.keys(result.channel_scores).length > 0" class="channel-scores-bar">
+            <div
+              v-for="(val, ch) in result.channel_scores"
+              :key="ch"
+              class="channel-segment"
+              :style="{ width: `${(val as number) / result.score * 100}%`, backgroundColor: channelColorMap[ch as string] }"
+              :title="`${ch}: ${(val as number).toFixed(3)}`"
+            >
+              <span v-if="(val as number) / result.score > 0.15" class="channel-label">{{ ch }}</span>
+            </div>
+          </div>
           <div class="result-date">{{ formatTime(result.created_at) }}</div>
         </div>
       </div>
@@ -313,6 +326,16 @@ const typeColor = (type: string) => {
     short_term: '#6366f1', long_term: '#10b981', episodic: '#f59e0b', semantic: '#8b5cf6',
   }
   return map[type] || '#6366f1'
+}
+
+// NeRF channel color map for visualization
+const channelColorMap: Record<string, string> = {
+  text: '#1890ff',
+  temperature: '#ff7a45',
+  category: '#722ed1',
+  graph: '#13c2c2',
+  emotion: '#eb2f96',
+  voice: '#52c41a',
 }
 
 const statsCards = computed(() => [
@@ -672,6 +695,30 @@ onMounted(() => {
   color: var(--nr-text-muted);
   font-family: var(--nr-font-mono);
   margin-top: 6px;
+}
+
+/* NeRF channel scores visualization */
+.channel-scores-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.channel-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4px;
+  transition: width 0.3s ease;
+}
+.channel-label {
+  font-size: 9px;
+  color: white;
+  font-weight: 500;
+  white-space: nowrap;
+  padding: 0 4px;
 }
 
 .content-preview {

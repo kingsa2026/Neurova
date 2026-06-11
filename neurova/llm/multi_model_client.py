@@ -8,6 +8,7 @@
 4. 支持负载均衡策略
 """
 
+import asyncio
 import logging
 import threading
 import time
@@ -267,7 +268,7 @@ class MultiModelLLMClient:
 
         try:
             start_time = time.time()
-            result = await client.client.chat(messages)
+            result = await asyncio.to_thread(client.client.chat, messages)
             duration = time.time() - start_time
 
             client.increment_request(success=True)

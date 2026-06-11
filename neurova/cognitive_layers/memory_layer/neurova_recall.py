@@ -333,7 +333,11 @@ class RecalledMemory:
     recalled_at: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        """转换为字典格式
+
+        包含 channel_scores（如果有）用于前端 NeRF 可视化。
+        """
+        result = {
             "memory_id": self.memory_id,
             "content": self.content,
             "score": self.score,
@@ -341,6 +345,11 @@ class RecalledMemory:
             "metadata": self.metadata,
             "recalled_at": self.recalled_at.isoformat(),
         }
+        # 从 metadata 中提取 channel_scores（NeRF 体渲染数据）
+        if self.metadata and "channel_scores" in self.metadata:
+            result["channel_scores"] = self.metadata["channel_scores"]
+            result["nerf_rendered"] = self.metadata.get("nerf_rendered", False)
+        return result
 
 
 @dataclass
@@ -375,6 +384,10 @@ class NeurovaRecallEngine:
     Neurova 统一记忆检索引擎
     
     多维融合召回 + 意图驱动钻取
+    
+    fusion_mode:
+        "legacy" — 传统加权求和: score × weight × time_decay
+        "nerf"   — NeRF 体渲染: Σ T_i · σ_i · c_i · w_i（透射率加权积分）
     """
     
     def __init__(
@@ -386,6 +399,8 @@ class NeurovaRecallEngine:
         intent_strategy: Optional[IntentAwareRecallStrategy] = None,
         use_plugins: bool = False,
         registry: Any = None,
+        fusion_mode: str = "legacy",
+        density_scale: float = 1.0,
     ):
         """
         初始化检索引擎
@@ -398,11 +413,14 @@ class NeurovaRecallEngine:
             intent_strategy: 意图检索策略（可选，默认自动创建）
             use_plugins: 是否使用插件化通道（Phase 1）
             registry: ChannelRegistry 实例（use_plugins=True 时使用）
+            fusion_mode: 融合模式 "legacy" 或 "nerf"
+            density_scale: 体渲染密度缩放因子（nerf 模式专用）
         """
         self.memory_manager = memory_manager
         self.max_workers = max_workers
         self.timeout_seconds = timeout_seconds
         self.use_plugins = use_plugins
+        self.fusion_mode = fusion_mode
 
         # 意图感知组件
         self.intent_detector = intent_detector or QueryIntentDetector()
@@ -413,6 +431,12 @@ class NeurovaRecallEngine:
         if use_plugins and self._registry is None:
             from .channels.registry import get_channel_registry
             self._registry = get_channel_registry()
+
+        # 体渲染器（nerf 模式）
+        self._volume_renderer = None
+        if fusion_mode == "nerf":
+            from .volume_renderer import VolumeRenderer
+            self._volume_renderer = VolumeRenderer(density_scale=density_scale)
 
         # 默认通道权重（无意图时的 fallback）
         self._channel_weights = {
@@ -425,8 +449,55 @@ class NeurovaRecallEngine:
         }
 
         mode = "插件模式" if use_plugins else "传统模式"
-        logger.info(f"NeurovaRecallEngine 初始化完成（{mode}，含意图感知）")
-    
+        fusion_desc = "体渲染" if fusion_mode == "nerf" else "加权求和"
+        logger.info(f"NeurovaRecallEngine 初始化完成（{mode}，{fusion_desc}融合，含意图感知）")
+
+    def update_fusion_settings(
+        self,
+        fusion_mode: Optional[str] = None,
+        density_scale: Optional[float] = None,
+        channel_densities: Optional[Dict[str, float]] = None,
+    ) -> None:
+        """运行时更新体渲染融合设置
+
+        Args:
+            fusion_mode: "legacy" 或 "nerf"
+            density_scale: 密度缩放因子 (0.1 ~ 5.0)
+            channel_densities: 各通道密度 {"text": 0.9, ...}
+        """
+        if fusion_mode is not None and fusion_mode in ("legacy", "nerf"):
+            self.fusion_mode = fusion_mode
+            if fusion_mode == "nerf" and self._volume_renderer is None:
+                from .volume_renderer import VolumeRenderer
+                self._volume_renderer = VolumeRenderer(
+                    density_scale=density_scale or 1.0
+                )
+
+        if density_scale is not None and self._volume_renderer is not None:
+            self._volume_renderer.density_scale = max(0.1, min(5.0, density_scale))
+
+        if channel_densities and self._volume_renderer is not None:
+            for ch, val in channel_densities.items():
+                if ch in self._volume_renderer.channel_densities:
+                    self._volume_renderer.channel_densities[ch] = max(0.0, min(1.0, float(val)))
+
+        logger.info(f"NeRF 融合设置已更新: mode={self.fusion_mode}")
+
+    def get_fusion_settings(self) -> Dict[str, Any]:
+        """获取当前融合设置"""
+        settings: Dict[str, Any] = {
+            "fusion_mode": self.fusion_mode,
+            "density_scale": 1.0,
+            "channel_densities": {},
+        }
+        if self._volume_renderer is not None:
+            settings["density_scale"] = self._volume_renderer.density_scale
+            settings["channel_densities"] = dict(self._volume_renderer.channel_densities)
+        else:
+            from .volume_renderer import VolumeRenderer
+            settings["channel_densities"] = dict(VolumeRenderer.DEFAULT_CHANNEL_DENSITY)
+        return settings
+
     def recall(
         self,
         query: str,
@@ -602,12 +673,17 @@ class NeurovaRecallEngine:
                     logger.error(f"通道 {channel.value} 检索失败: {e}")
 
         deduplicated = self._deduplicate_results(all_results)
-        weights = channel_weights if channel_weights else self._channel_weights
-        for memory in deduplicated:
-            memory.score = self._fusion_score(memory, query, channel_weights=weights)
 
-        deduplicated.sort(key=lambda m: m.score, reverse=True)
-        return deduplicated[:limit]
+        if self.fusion_mode == "nerf" and self._volume_renderer is not None:
+            deduplicated = self._nerf_fusion(deduplicated, channel_weights, limit)
+        else:
+            weights = channel_weights if channel_weights else self._channel_weights
+            for memory in deduplicated:
+                memory.score = self._fusion_score(memory, query, channel_weights=weights)
+            deduplicated.sort(key=lambda m: m.score, reverse=True)
+            deduplicated = deduplicated[:limit]
+
+        return deduplicated
 
     def _phase1_plugin_recall(
         self,
@@ -826,7 +902,7 @@ class NeurovaRecallEngine:
         query: str,
         channel_weights: Optional[Dict[RecallChannel, float]] = None,
     ) -> float:
-        """计算融合分数
+        """计算融合分数（legacy 模式）
 
         Args:
             memory: 召回的记忆
@@ -850,6 +926,90 @@ class NeurovaRecallEngine:
         fusion_score = base_score * channel_weight * time_decay
 
         return fusion_score
+
+    def _nerf_fusion(
+        self,
+        memories: List[RecalledMemory],
+        channel_weights: Optional[Dict[RecallChannel, float]] = None,
+        limit: int = 10,
+    ) -> List[RecalledMemory]:
+        """NeRF 体渲染融合
+
+        将多通道 RecalledMemory 列表按通道分组，通过 VolumeRenderer
+        执行透射率加权积分，再转换回 RecalledMemory 格式。
+
+        Args:
+            memories: 去重后的记忆列表
+            channel_weights: 意图感知的通道权重
+            limit: 返回数量
+
+        Returns:
+            体渲染后的 RecalledMemory 列表
+        """
+        # 按 memory_id 分组（同一条记忆可能出现在多个通道）
+        memory_groups: Dict[str, List[RecalledMemory]] = {}
+        for mem in memories:
+            if mem.memory_id not in memory_groups:
+                memory_groups[mem.memory_id] = []
+            memory_groups[mem.memory_id].append(mem)
+
+        # 转换为 VolumeRenderer 需要的格式
+        channel_results: Dict[str, List[Dict]] = {}
+        for mem in memories:
+            ch_name = mem.channel.value if hasattr(mem.channel, 'value') else str(mem.channel)
+            if ch_name not in channel_results:
+                channel_results[ch_name] = []
+            channel_results[ch_name].append({
+                "memory_id": mem.memory_id,
+                "content": mem.content,
+                "score": mem.score,
+                "metadata": mem.metadata,
+            })
+
+        # 获取意图字符串
+        intent_str = "exploratory"
+        if channel_weights:
+            # 从权重反推意图（取第一个匹配的）
+            for intent in QueryIntent:
+                if self.intent_strategy.get_channel_weights(intent) == channel_weights:
+                    intent_str = intent.value
+                    break
+
+        # 体渲染
+        rendered = self._volume_renderer.render(
+            channel_results, intent=intent_str, limit=limit
+        )
+
+        # 转换回 RecalledMemory
+        result = []
+        for rm in rendered:
+            # 找到原始记忆的元数据
+            original = memory_groups.get(rm.memory_id, [None])[0]
+            # 从 channel_scores 找最高贡献通道
+            best_ch = "text"
+            if rm.channel_scores:
+                best_ch = max(rm.channel_scores, key=rm.channel_scores.get)
+            try:
+                channel_enum = RecallChannel(best_ch)
+            except ValueError:
+                channel_enum = RecallChannel.TEXT
+
+            # 构建 metadata，包含 channel_scores 供前端展示
+            meta = rm.metadata.copy() if rm.metadata else (original.metadata.copy() if original and original.metadata else {})
+            # 将 channel_scores 注入 metadata，前端用作 NeRF 标识和可视化
+            if rm.channel_scores:
+                meta["channel_scores"] = rm.channel_scores
+                meta["nerf_rendered"] = True
+
+            result.append(RecalledMemory(
+                memory_id=rm.memory_id,
+                content=rm.content,
+                score=rm.score,
+                channel=channel_enum,
+                metadata=meta,
+            ))
+
+        return result
     
     def _recency_score(self, recalled_at: datetime.datetime) -> float:
         """计算时间衰减分数"""

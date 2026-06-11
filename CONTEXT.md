@@ -176,3 +176,8 @@ Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，82 个页面组件：
 - [x] 合并重复的 AgentConfig (P3) — 删除死代码 agent/config.py（156行）
 - [x] 移除过渡性委托方法 (P4) — 删除15个死代码方法(~200行)，内联1个调用
 - [x] 清理进化模块空文件 (P5) — 验证全部19个文件均有实质实现，无需清理
+
+### 本轮完成
+- [x] 记忆检索通道插件化 (Phase 1-3) — BaseChannel + 6内置通道 + MoE路由 + 结果处理
+- [x] LLM 多模态路由验证 — MiMo API 集成，能力探测，自适应路由，上下文连续性
+- [x] 修复 MultiModelLLMClient.sync/async 调用 bug

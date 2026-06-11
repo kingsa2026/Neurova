@@ -95,8 +95,34 @@ try:
 except ImportError as _e:
     _mem_layer_logger.debug(f"neurova_recall intent classes 未可用: {_e}")
 
+# NeRF 记忆系统升级模块
+try:
+    from .positional_encoding import (
+        PositionalEncodingConfig, PositionalEncoder, TemporalPositionalEncoder,
+        EmotionPositionalEncoder, ImportancePositionalEncoder,
+        create_temporal_encoder, create_emotion_encoder, create_importance_encoder
+    )
+except ImportError as _e:
+    _mem_layer_logger.debug(f"positional_encoding 未可用: {_e}")
+
+try:
+    from .memory_field import (
+        MemoryFieldConfig, MemoryFieldNetwork, MemoryFieldTrainer,
+        get_memory_field, reset_memory_field
+    )
+except ImportError as _e:
+    _mem_layer_logger.debug(f"memory_field 未可用 (需要 torch): {_e}")
+
+try:
+    from .volume_renderer import (
+        ChannelSample, RenderedMemory, VolumeRenderer,
+        create_volume_renderer, get_volume_renderer
+    )
+except ImportError as _e:
+    _mem_layer_logger.debug(f"volume_renderer 未可用: {_e}")
+
 # 版本信息
-__version__ = "0.2.0"  # 升级版本号
+__version__ = "0.3.0"  # NeRF 升级版本
 __all__ = [
     # 原有模块
     "MoEMemoryRouter",
@@ -127,4 +153,23 @@ __all__ = [
     "QueryIntent",
     "QueryIntentDetector",
     "IntentAwareRecallStrategy",
+    # NeRF 记忆系统升级模块
+    "PositionalEncodingConfig",
+    "PositionalEncoder",
+    "TemporalPositionalEncoder",
+    "EmotionPositionalEncoder",
+    "ImportancePositionalEncoder",
+    "create_temporal_encoder",
+    "create_emotion_encoder",
+    "create_importance_encoder",
+    "MemoryFieldConfig",
+    "MemoryFieldNetwork",
+    "MemoryFieldTrainer",
+    "get_memory_field",
+    "reset_memory_field",
+    "ChannelSample",
+    "RenderedMemory",
+    "VolumeRenderer",
+    "create_volume_renderer",
+    "get_volume_renderer",
 ]
