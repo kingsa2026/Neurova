@@ -32,6 +32,7 @@ export interface MemorySearchResult {
   score: number
   type: string
   created_at: string
+  channel_scores?: Record<string, number>  // NeRF 体渲染各通道贡献
 }
 
 export interface MemoryStats {
@@ -39,6 +40,26 @@ export interface MemoryStats {
   by_type: { type: string; count: number }[]
   avg_importance: number
   storage_used: number
+}
+
+// NeRF 体渲染融合配置
+export interface NerfSettings {
+  fusion_mode: 'legacy' | 'nerf'
+  density_scale: number
+  channel_densities: Record<string, number>
+  available_modes: string[]
+  mode_descriptions: Record<string, string>
+}
+
+export interface NerfSettingsUpdate {
+  fusion_mode?: 'legacy' | 'nerf'
+  density_scale?: number
+  channel_densities?: Record<string, number>
+}
+
+export interface ChannelWeights {
+  intent: string
+  weights: Record<string, number>
 }
 
 // ---------------------------------------------------------------------------
@@ -80,4 +101,30 @@ export function searchMemories(agentId: string, query: string, params?: { limit?
 /** Get memory statistics. */
 export function getMemoryStats(agentId: string) {
   return api.get<ApiResponse<MemoryStats>>(`${BASE}/stats`, { params: { agent_id: agentId } })
+}
+
+// ---------------------------------------------------------------------------
+// NeRF Settings API
+// ---------------------------------------------------------------------------
+
+const ENHANCED_BASE = '/enhanced-memory-search'
+
+/** Get NeRF volume rendering settings. */
+export function getNerfSettings() {
+  return api.get<ApiResponse<NerfSettings>>(`${ENHANCED_BASE}/nerf-settings`)
+}
+
+/** Update NeRF volume rendering settings. */
+export function updateNerfSettings(data: NerfSettingsUpdate) {
+  return api.put<ApiResponse<NerfSettings>>(`${ENHANCED_BASE}/nerf-settings`, data)
+}
+
+/** Reset NeRF settings to defaults. */
+export function resetNerfSettings() {
+  return api.post<ApiResponse<NerfSettings>>(`${ENHANCED_BASE}/nerf-settings/reset`)
+}
+
+/** Get channel weights for a specific intent. */
+export function getChannelWeights(intent: string) {
+  return api.get<ApiResponse<ChannelWeights>>(`${ENHANCED_BASE}/channel-weights`, { params: { intent } })
 }

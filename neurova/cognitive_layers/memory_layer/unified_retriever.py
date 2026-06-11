@@ -87,7 +87,12 @@ class UnifiedRetriever:
         if self._recall:
             try:
                 recall_results = self._recall.recall_flat(query, limit=limit)
-                results.extend(recall_results)
+                # RecalledMemory 对象需要转换为字典格式
+                for rm in recall_results:
+                    if hasattr(rm, 'to_dict'):
+                        results.append(rm.to_dict())
+                    else:
+                        results.append(rm)
             except Exception as e:
                 logger.warning(f"Recall 检索失败: {e}")
 

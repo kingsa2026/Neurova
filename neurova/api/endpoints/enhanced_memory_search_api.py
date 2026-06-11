@@ -1,5 +1,7 @@
 """
 Enhanced Memory Search API - 增强版记忆检索API
+
+支持 NeRF 体渲染融合模式的配置和查询。
 """
 
 import datetime
@@ -9,11 +11,25 @@ import typing
 from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Query
+from fastapi import Request
 from pydantic import BaseModel
 from pydantic import Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _get_all_recall_engines(request: Request) -> typing.List:
+    """从所有活跃 Agent 中获取 NeurovaRecallEngine 实例"""
+    engines = []
+    agents = getattr(request.app.state, 'agents', {})
+    for agent_id, agent in agents.items():
+        memory_agent = getattr(agent, 'memory_agent', None)
+        if memory_agent:
+            recall_engine = getattr(memory_agent, 'recall_engine', None)
+            if recall_engine:
+                engines.append(recall_engine)
+    return engines
 
 
 class EnhancedSearchRequest(BaseModel):
@@ -23,20 +39,84 @@ class EnhancedSearchRequest(BaseModel):
     include_metadata: bool = True
 
 
+# NeRF 融合模式全局配置
+_nerf_config: typing.Dict[str, typing.Any] = {
+    "fusion_mode": "legacy",       # "legacy" | "nerf"
+    "density_scale": 1.0,          # 体渲染密度缩放因子
+    "channel_densities": {         # 各通道密度（置信度）
+        "temperature": 0.7,
+        "text": 0.9,
+        "category": 0.5,
+        "graph": 0.6,
+        "emotion": 0.8,
+        "voice": 0.4,
+    },
+}
+
+
 # Simulated activation store
 _activations: typing.Dict[str, dict] = {}
 
 
 @router.post("/search")
-async def enhanced_memory_search(body: EnhancedSearchRequest):
-    """增强版记忆检索 - 使用多层级评分机制"""
-    return {
-        "code": 0, "message": "success",
-        "data": {
-            "query": body.query, "results": [], "total": 0,
-            "scoring": {"method": "multi-layer", "layers": ["semantic", "temporal", "activation", "relevance"]},
-        },
-    }
+async def enhanced_memory_search(body: EnhancedSearchRequest, request: Request):
+    """增强版记忆检索 - 使用 NeurovaRecallEngine 多通道融合检索
+
+    当 fusion_mode 为 "nerf" 时，使用 NeRF 体渲染融合；
+    当 fusion_mode 为 "legacy" 时，使用传统加权求和。
+    """
+    engines = _get_all_recall_engines(request)
+    if not engines:
+        return {
+            "code": 0, "message": "success",
+            "data": {
+                "query": body.query, "results": [], "total": 0,
+                "scoring": {"method": "multi-layer", "layers": ["semantic", "temporal", "activation", "relevance"]},
+            },
+        }
+
+    # 使用第一个引擎进行检索
+    engine = engines[0]
+    try:
+        # 执行检索
+        recalled_memories = engine.recall_flat(
+            query=body.query,
+            limit=body.top_k,
+        )
+
+        # 转换为 API 响应格式
+        results = []
+        for rm in recalled_memories:
+            if hasattr(rm, 'to_dict'):
+                result_dict = rm.to_dict()
+            else:
+                result_dict = rm
+
+            # 过滤低分结果
+            if result_dict.get("score", 0) < body.min_score:
+                continue
+
+            results.append(result_dict)
+
+        return {
+            "code": 0, "message": "success",
+            "data": {
+                "query": body.query,
+                "results": results,
+                "total": len(results),
+                "fusion_mode": engine.fusion_mode,
+                "scoring": {
+                    "method": "nerf_volume_rendering" if engine.fusion_mode == "nerf" else "legacy_weighted_sum",
+                    "layers": ["text", "temperature", "category", "graph", "emotion", "voice"],
+                },
+            },
+        }
+    except Exception as e:
+        logger.error(f"增强记忆检索失败: {e}")
+        return {
+            "code": -1, "message": f"检索失败: {str(e)}",
+            "data": {"query": body.query, "results": [], "total": 0},
+        }
 
 
 @router.get("/stats")
@@ -76,6 +156,180 @@ async def update_memory_search_settings(body: dict):
     """更新记忆搜索设置"""
     # 这里应该保存设置，现在只是返回成功
     return {"code": 0, "message": "Settings updated"}
+
+
+@router.get("/nerf-settings")
+async def get_nerf_settings(request: Request):
+    """获取 NeRF 体渲染融合设置
+
+    优先从活跃 Agent 的 recall_engine 获取实时设置，
+    如果没有活跃 Agent 则返回全局默认设置。
+    """
+    # 尝试从活跃引擎获取设置
+    engines = _get_all_recall_engines(request)
+    if engines:
+        # 使用第一个引擎的设置作为当前设置
+        settings = engines[0].get_fusion_settings()
+        return {
+            "code": 0, "message": "success",
+            "data": {
+                "fusion_mode": settings["fusion_mode"],
+                "density_scale": settings["density_scale"],
+                "channel_densities": settings["channel_densities"],
+                "available_modes": ["legacy", "nerf"],
+                "mode_descriptions": {
+                    "legacy": "传统加权求和: score × weight × time_decay",
+                    "nerf": "NeRF 体渲染: Σ T_i · σ_i · c_i · w_i（透射率加权积分）",
+                },
+                "active_engines_count": len(engines),
+            },
+        }
+
+    # 没有活跃引擎时返回全局默认设置
+    return {
+        "code": 0, "message": "success",
+        "data": {
+            "fusion_mode": _nerf_config["fusion_mode"],
+            "density_scale": _nerf_config["density_scale"],
+            "channel_densities": _nerf_config["channel_densities"],
+            "available_modes": ["legacy", "nerf"],
+            "mode_descriptions": {
+                "legacy": "传统加权求和: score × weight × time_decay",
+                "nerf": "NeRF 体渲染: Σ T_i · σ_i · c_i · w_i（透射率加权积分）",
+            },
+            "active_engines_count": 0,
+        },
+    }
+
+
+@router.put("/nerf-settings")
+async def update_nerf_settings(body: dict, request: Request):
+    """更新 NeRF 体渲染融合设置
+
+    body:
+        fusion_mode: "legacy" | "nerf"
+        density_scale: float (0.1 ~ 5.0)
+        channel_densities: dict (可选)
+
+    设置会同步到所有活跃 Agent 的 recall_engine。
+    """
+    global _nerf_config
+
+    # 准备更新参数
+    fusion_mode = body.get("fusion_mode")
+    density_scale = body.get("density_scale")
+    channel_densities = body.get("channel_densities")
+
+    # 验证参数
+    if fusion_mode and fusion_mode not in ("legacy", "nerf"):
+        raise HTTPException(status_code=400, detail=f"Invalid fusion_mode: {fusion_mode}")
+    if density_scale is not None:
+        density_scale = max(0.1, min(5.0, float(density_scale)))
+
+    # 更新全局配置（用于无活跃引擎时的默认值）
+    if fusion_mode:
+        _nerf_config["fusion_mode"] = fusion_mode
+    if density_scale is not None:
+        _nerf_config["density_scale"] = density_scale
+    if channel_densities and isinstance(channel_densities, dict):
+        for ch, val in channel_densities.items():
+            if ch in _nerf_config["channel_densities"]:
+                _nerf_config["channel_densities"][ch] = max(0.0, min(1.0, float(val)))
+
+    # 同步到所有活跃引擎
+    engines = _get_all_recall_engines(request)
+    updated_count = 0
+    for engine in engines:
+        try:
+            engine.update_fusion_settings(
+                fusion_mode=fusion_mode,
+                density_scale=density_scale,
+                channel_densities=channel_densities,
+            )
+            updated_count += 1
+        except Exception as e:
+            logger.warning(f"更新 recall_engine 设置失败: {e}")
+
+    logger.info(
+        f"NeRF 设置已更新: fusion_mode={_nerf_config['fusion_mode']}, "
+        f"density_scale={_nerf_config['density_scale']}, "
+        f"engines_updated={updated_count}/{len(engines)}"
+    )
+
+    return {
+        "code": 0,
+        "message": f"NeRF settings updated ({updated_count} engines synced)",
+        "data": {
+            **_nerf_config,
+            "engines_updated": updated_count,
+        },
+    }
+
+
+@router.post("/nerf-settings/reset")
+async def reset_nerf_settings(request: Request):
+    """重置 NeRF 设置为默认值
+
+    重置会同步到所有活跃 Agent 的 recall_engine。
+    """
+    global _nerf_config
+
+    # 默认配置
+    defaults = {
+        "fusion_mode": "legacy",
+        "density_scale": 1.0,
+        "channel_densities": {
+            "temperature": 0.7,
+            "text": 0.9,
+            "category": 0.5,
+            "graph": 0.6,
+            "emotion": 0.8,
+            "voice": 0.4,
+        },
+    }
+
+    # 更新全局配置
+    _nerf_config = defaults.copy()
+
+    # 同步到所有活跃引擎
+    engines = _get_all_recall_engines(request)
+    updated_count = 0
+    for engine in engines:
+        try:
+            engine.update_fusion_settings(
+                fusion_mode="legacy",
+                density_scale=1.0,
+                channel_densities=defaults["channel_densities"],
+            )
+            updated_count += 1
+        except Exception as e:
+            logger.warning(f"重置 recall_engine 设置失败: {e}")
+
+    logger.info(f"NeRF 设置已重置为默认值, engines_reset={updated_count}/{len(engines)}")
+
+    return {
+        "code": 0,
+        "message": f"NeRF settings reset to defaults ({updated_count} engines synced)",
+        "data": {
+            **_nerf_config,
+            "engines_updated": updated_count,
+        },
+    }
+
+
+@router.get("/channel-weights")
+async def get_channel_weights(intent: str = Query(default="exploratory")):
+    """获取指定意图的通道权重（用于前端可视化）"""
+    # 意图 → 通道权重映射
+    intent_weights = {
+        "factual": {"text": 0.40, "temperature": 0.20, "category": 0.20, "graph": 0.10, "emotion": 0.05, "voice": 0.05},
+        "temporal": {"temperature": 0.50, "text": 0.15, "category": 0.10, "graph": 0.10, "emotion": 0.10, "voice": 0.05},
+        "causal": {"graph": 0.50, "text": 0.15, "category": 0.10, "temperature": 0.10, "emotion": 0.10, "voice": 0.05},
+        "comparative": {"category": 0.35, "text": 0.25, "graph": 0.15, "temperature": 0.10, "emotion": 0.10, "voice": 0.05},
+        "exploratory": {"text": 0.25, "temperature": 0.20, "graph": 0.20, "category": 0.15, "emotion": 0.10, "voice": 0.10},
+    }
+    weights = intent_weights.get(intent, intent_weights["exploratory"])
+    return {"code": 0, "message": "success", "data": {"intent": intent, "weights": weights}}
 
 
 @router.post("/decay")

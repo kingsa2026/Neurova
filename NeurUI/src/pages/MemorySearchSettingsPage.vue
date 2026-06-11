@@ -70,6 +70,69 @@
         </template>
       </GlassCard>
 
+      <!-- NeRF Volume Rendering Settings -->
+      <GlassCard :title="t('memorySearch.nerfTitle')" style="margin-top: 16px">
+        <a-form layout="vertical" :model="nerfSettings">
+          <a-form-item :label="t('memorySearch.nerfMode')">
+            <a-radio-group v-model:value="nerfSettings.fusion_mode" @change="onNerfModeChange">
+              <a-radio-button value="legacy">
+                <a-tooltip :title="t('memorySearch.nerfLegacyDesc')">{{ t('memorySearch.nerfLegacy') }}</a-tooltip>
+              </a-radio-button>
+              <a-radio-button value="nerf">
+                <a-tooltip :title="t('memorySearch.nerfNerfDesc')">{{ t('memorySearch.nerfNerf') }}</a-tooltip>
+              </a-radio-button>
+            </a-radio-group>
+            <div class="mode-desc">{{ nerfModeDescription }}</div>
+          </a-form-item>
+
+          <template v-if="nerfSettings.fusion_mode === 'nerf'">
+            <a-form-item :label="t('memorySearch.densityScale')">
+              <a-slider v-model:value="nerfSettings.density_scale" :min="0.1" :max="5.0" :step="0.1" />
+              <div class="slider-hint">{{ t('memorySearch.densityScaleHint') }}</div>
+            </a-form-item>
+
+            <a-form-item :label="t('memorySearch.channelDensities')">
+              <div class="channel-densities">
+                <div v-for="(val, ch) in nerfSettings.channel_densities" :key="ch" class="channel-density-row">
+                  <span class="channel-name">{{ channelLabel(ch as string) }}</span>
+                  <a-slider
+                    :value="val"
+                    :min="0" :max="1.0" :step="0.05"
+                    style="flex: 1"
+                    @change="(v: number) => onChannelDensityChange(ch, v)"
+                  />
+                  <span class="channel-value">{{ (val as number).toFixed(2) }}</span>
+                </div>
+              </div>
+            </a-form-item>
+
+            <!-- Intent weight visualization -->
+            <a-form-item :label="t('memorySearch.intentWeightPreview')">
+              <a-select v-model:value="previewIntent" style="width: 200px" @change="fetchChannelWeights">
+                <a-select-option value="factual">{{ t('memorySearch.intentFactual') }}</a-select-option>
+                <a-select-option value="temporal">{{ t('memorySearch.intentTemporal') }}</a-select-option>
+                <a-select-option value="causal">{{ t('memorySearch.intentCausal') }}</a-select-option>
+                <a-select-option value="comparative">{{ t('memorySearch.intentComparative') }}</a-select-option>
+                <a-select-option value="exploratory">{{ t('memorySearch.intentExploratory') }}</a-select-option>
+              </a-select>
+              <div class="weight-bars">
+                <div v-for="(w, ch) in channelWeights" :key="ch" class="weight-bar-row">
+                  <span class="weight-label">{{ channelLabel(ch as string) }}</span>
+                  <div class="weight-bar-bg">
+                    <div class="weight-bar-fill" :style="{ width: `${(w as number) * 100}%`, backgroundColor: channelColor(ch as string) }" />
+                  </div>
+                  <span class="weight-value">{{ ((w as number) * 100).toFixed(0) }}%</span>
+                </div>
+              </div>
+            </a-form-item>
+          </template>
+        </a-form>
+        <template #footer>
+          <GlassButton variant="ghost" size="sm" :loading="saving" @click="resetNerf">{{ t('common.reset') }}</GlassButton>
+          <GlassButton variant="primary" size="sm" :loading="saving" @click="saveNerfSettings">{{ t('common.save') }}</GlassButton>
+        </template>
+      </GlassCard>
+
       <!-- Test search -->
       <GlassCard :title="t('memorySearch.testSearch')" style="margin-top: 16px">
         <div class="test-search">
@@ -81,6 +144,7 @@
                   <div class="result-item">
                     <span class="result-content">{{ item.content || item.text }}</span>
                     <a-tag>{{ (item.score ?? 0).toFixed(3) }}</a-tag>
+                    <a-tag v-if="item.channel_scores" color="cyan" class="nerf-tag">NeRF</a-tag>
                   </div>
                 </a-list-item>
               </template>
@@ -94,9 +158,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
+import { getNerfSettings, updateNerfSettings, resetNerfSettings, getChannelWeights } from '@/api/modules/memory'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
@@ -113,6 +178,49 @@ const searchConfig = ref({ method: 'hybrid', top_k: 10, score_threshold: 30 })
 const decay = ref({ enabled: true, rate: 50, half_life_days: 30, min_score: 10 })
 const enhancement = ref({ enabled: true, boost_factor: 2, recency_weight: 60, frequency_weight: 40 })
 
+// NeRF settings
+const nerfSettings = ref({
+  fusion_mode: 'legacy' as 'legacy' | 'nerf',
+  density_scale: 1.0,
+  channel_densities: {
+    temperature: 0.7,
+    text: 0.9,
+    category: 0.5,
+    graph: 0.6,
+    emotion: 0.8,
+    voice: 0.4,
+  } as Record<string, number>,
+})
+const previewIntent = ref('exploratory')
+const channelWeights = ref<Record<string, number>>({})
+
+const nerfModeDescription = computed(() => {
+  return nerfSettings.value.fusion_mode === 'nerf'
+    ? t('memorySearch.nerfNerfDesc')
+    : t('memorySearch.nerfLegacyDesc')
+})
+
+const channelColors: Record<string, string> = {
+  text: '#1890ff',
+  temperature: '#ff7a45',
+  category: '#722ed1',
+  graph: '#13c2c2',
+  emotion: '#eb2f96',
+  voice: '#52c41a',
+}
+
+const channelColor = (ch: string) => channelColors[ch] || '#8c8c8c'
+
+const channelLabelMap: Record<string, string> = {
+  text: 'channelText',
+  temperature: 'channelTemperature',
+  category: 'channelCategory',
+  graph: 'channelGraph',
+  emotion: 'channelEmotion',
+  voice: 'channelVoice',
+}
+const channelLabel = (ch: string) => t(`memorySearch.${channelLabelMap[ch] || ch}`)
+
 const fetchSettings = async () => {
   loading.value = true
   try {
@@ -128,6 +236,37 @@ const fetchSettings = async () => {
   }
 }
 
+const fetchNerfSettings = async () => {
+  try {
+    const res = await getNerfSettings()
+    const data = res?.data
+    if (data) {
+      nerfSettings.value.fusion_mode = data.fusion_mode
+      nerfSettings.value.density_scale = data.density_scale
+      nerfSettings.value.channel_densities = data.channel_densities
+    }
+  } catch {
+    // NeRF settings may not be available yet
+  }
+}
+
+const fetchChannelWeights = async (intent: string) => {
+  try {
+    const res = await getChannelWeights(intent)
+    channelWeights.value = res?.data?.weights || {}
+  } catch {
+    channelWeights.value = {}
+  }
+}
+
+const onNerfModeChange = () => {
+  // Mode changed, nothing else needed
+}
+
+const onChannelDensityChange = (ch: string, val: number) => {
+  nerfSettings.value.channel_densities[ch] = val
+}
+
 const saveSettings = async () => {
   saving.value = true
   try {
@@ -137,6 +276,40 @@ const saveSettings = async () => {
       enhancement: enhancement.value,
     })
     message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    saving.value = false
+  }
+}
+
+const saveNerfSettings = async () => {
+  saving.value = true
+  try {
+    await updateNerfSettings({
+      fusion_mode: nerfSettings.value.fusion_mode,
+      density_scale: nerfSettings.value.density_scale,
+      channel_densities: nerfSettings.value.channel_densities,
+    })
+    message.success(t('memorySearch.saved'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    saving.value = false
+  }
+}
+
+const resetNerf = async () => {
+  saving.value = true
+  try {
+    const res = await resetNerfSettings()
+    const data = res?.data
+    if (data) {
+      nerfSettings.value.fusion_mode = data.fusion_mode
+      nerfSettings.value.density_scale = data.density_scale
+      nerfSettings.value.channel_densities = data.channel_densities
+    }
+    message.success(t('memorySearch.resetDone'))
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -164,7 +337,11 @@ const runTestSearch = async () => {
   }
 }
 
-onMounted(fetchSettings)
+onMounted(() => {
+  fetchSettings()
+  fetchNerfSettings()
+  fetchChannelWeights(previewIntent.value)
+})
 </script>
 
 <style scoped>
@@ -175,4 +352,80 @@ onMounted(fetchSettings)
 .test-results { max-height: 300px; overflow: auto; }
 .result-item { display: flex; justify-content: space-between; align-items: center; width: 100%; }
 .result-content { font-size: 13px; color: var(--nr-text-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nerf-tag { margin-left: 8px; }
+
+/* NeRF settings styles */
+.mode-desc {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  font-style: italic;
+}
+.slider-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--nr-text-tertiary);
+}
+.channel-densities {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.channel-density-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.channel-name {
+  width: 80px;
+  font-size: 13px;
+  color: var(--nr-text-primary);
+  text-transform: capitalize;
+}
+.channel-value {
+  width: 40px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  font-family: monospace;
+}
+
+/* Intent weight bars */
+.weight-bars {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.weight-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.weight-label {
+  width: 80px;
+  font-size: 12px;
+  color: var(--nr-text-primary);
+  text-transform: capitalize;
+}
+.weight-bar-bg {
+  flex: 1;
+  height: 16px;
+  background: var(--nr-bg-secondary, rgba(255,255,255,0.05));
+  border-radius: 4px;
+  overflow: hidden;
+}
+.weight-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  min-width: 2px;
+}
+.weight-value {
+  width: 40px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--nr-text-secondary);
+  font-family: monospace;
+}
 </style>
