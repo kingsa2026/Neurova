@@ -176,7 +176,43 @@ async def execute_workflow(
             emotion_module = getattr(memory_manager, '_emotion_module', None)
         crystallizer = getattr(agent, 'crystallizer', None)
     
-    # 如果 context_pool 仍然为 None，创建一个默认的 ContextPool 实例
+    # 降级机制：当 Agent 不可用时，创建默认实例
+    # memory_manager
+    if memory_manager is None:
+        try:
+            from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+            memory_manager = MemoryManager(
+                agent_id=agent_id or "default",
+                user_id=user_id or "default"
+            )
+            logger.info("Agent 不可用，已创建默认 MemoryManager 用于 $memory 变量解析")
+        except Exception as e:
+            logger.warning(f"创建默认 MemoryManager 失败: {e}")
+    
+    # emotion_module: 优先从 memory_manager 提取，否则创建独立实例
+    if emotion_module is None:
+        if memory_manager and hasattr(memory_manager, '_emotion_module'):
+            emotion_module = memory_manager._emotion_module
+        if emotion_module is None:
+            try:
+                from neurova.cognitive_layers.memory_layer.modules.emotion_module import EmotionModule
+                emotion_module = EmotionModule(db_path=None)  # 纯内存模式
+                logger.info("Agent 不可用，已创建默认 EmotionModule 用于 $emotion 变量解析")
+            except Exception as e:
+                logger.warning(f"创建默认 EmotionModule 失败: {e}")
+    
+    # crystallizer: 尝试创建带默认存储引擎的结晶器
+    if crystallizer is None:
+        try:
+            from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
+            from neurova.cognitive_layers.memory_layer.pattern_crystallizer import PatternCrystallizer
+            engine = CognitiveStorageEngine(agent_id=agent_id or "default")
+            crystallizer = PatternCrystallizer(engine=engine)
+            logger.info("Agent 不可用，已创建默认 PatternCrystallizer 用于 $crystal 变量解析")
+        except Exception as e:
+            logger.warning(f"创建默认 PatternCrystallizer 失败: {e}")
+    
+    # context_pool: 保持原有降级逻辑
     if context_pool is None:
         try:
             from neurova.context_pool import ContextPool
@@ -184,6 +220,7 @@ async def execute_workflow(
                 user_id=user_id or "default",
                 agent_id=agent_id or "default"
             )
+            logger.info("Agent 不可用，已创建默认 ContextPool 用于 $context 变量解析")
         except Exception as e:
             logger.warning(f"创建默认 ContextPool 失败: {e}")
     

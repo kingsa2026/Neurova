@@ -80,6 +80,21 @@ try:
 except ImportError as _e:
     _mem_layer_logger.debug(f"sleep_adapter 未可用: {_e}")
 
+try:
+    from .causal_reasoning import CausalReasoningEngine, get_causal_reasoning_engine
+except ImportError as _e:
+    _mem_layer_logger.debug(f"causal_reasoning 未可用: {_e}")
+
+try:
+    from .question_decomposer import QuestionDecomposer, QuestionType, get_question_decomposer
+except ImportError as _e:
+    _mem_layer_logger.debug(f"question_decomposer 未可用: {_e}")
+
+try:
+    from .neurova_recall import QueryIntent, QueryIntentDetector, IntentAwareRecallStrategy
+except ImportError as _e:
+    _mem_layer_logger.debug(f"neurova_recall intent classes 未可用: {_e}")
+
 # 版本信息
 __version__ = "0.2.0"  # 升级版本号
 __all__ = [
@@ -102,4 +117,14 @@ __all__ = [
     "ReasoningTraceManager",
     "ReasoningStep",
     "ReasoningTrace",
+    # 图能力增强模块
+    "CausalReasoningEngine",
+    "get_causal_reasoning_engine",
+    "QuestionDecomposer",
+    "QuestionType",
+    "get_question_decomposer",
+    # 意图感知检索模块
+    "QueryIntent",
+    "QueryIntentDetector",
+    "IntentAwareRecallStrategy",
 ]

@@ -138,10 +138,10 @@ const agentStore = useAgentStore()
 const searchQuery = ref('')
 const viewMode = ref<'card' | 'table'>('card')
 
-const viewOptions = [
-  { label: 'Card', value: 'card' },
-  { label: 'Table', value: 'table' },
-]
+const viewOptions = computed(() => [
+  { label: t('common.viewCard'), value: 'card' },
+  { label: t('common.viewTable'), value: 'table' },
+])
 
 const tableColumns = computed(() => [
   { title: t('common.name'), key: 'name', dataIndex: 'name' },

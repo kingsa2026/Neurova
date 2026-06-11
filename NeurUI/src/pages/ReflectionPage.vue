@@ -5,16 +5,21 @@
         <h2 class="page-title">{{ t('growth.reflection') }}</h2>
         <p class="page-subtitle">{{ currentAgent?.name || '' }}</p>
       </div>
-      <GlassButton variant="primary" @click="showCreateModal = true">
-        {{ t('common.create') }}
-      </GlassButton>
+      <div class="header-actions">
+        <GlassButton variant="secondary" size="sm" :loading="loading" @click="fetchReflections">
+          {{ t('common.refresh') }}
+        </GlassButton>
+        <GlassButton variant="primary" @click="showCreateModal = true">
+          {{ t('common.create') }}
+        </GlassButton>
+      </div>
     </div>
 
     <!-- Stats -->
     <div class="stats-grid">
       <GlassCard variant="subtle">
         <div class="stat-item">
-          <div class="stat-value">{{ reflections.length }}</div>
+          <div class="stat-value">{{ total }}</div>
           <div class="stat-label">{{ t('common.total') }}</div>
         </div>
       </GlassCard>
@@ -26,8 +31,8 @@
       </GlassCard>
       <GlassCard variant="subtle">
         <div class="stat-item">
-          <div class="stat-value">{{ recentCount }}</div>
-          <div class="stat-label">{{ t('growth.last7Days') }}</div>
+          <div class="stat-value">{{ categoryBreakdown.length }}</div>
+          <div class="stat-label">{{ t('common.type') + 's' }}</div>
         </div>
       </GlassCard>
     </div>
@@ -40,44 +45,63 @@
           :placeholder="t('common.search')"
           style="max-width: 320px"
           allow-clear
+          @search="fetchReflections"
         />
+        <a-select
+          v-model:value="categoryFilter"
+          :placeholder="t('common.type')"
+          allow-clear
+          style="min-width: 160px"
+          @change="fetchReflections"
+        >
+          <a-select-option value="general">{{ t('growth.general') }}</a-select-option>
+          <a-select-option value="insight">{{ t('growth.insight') }}</a-select-option>
+          <a-select-option value="lesson">{{ t('growth.lesson') }}</a-select-option>
+          <a-select-option value="mistake">{{ t('growth.mistake') }}</a-select-option>
+        </a-select>
       </div>
 
       <a-spin :spinning="loading">
         <a-table
           :columns="tableColumns"
           :data-source="filteredReflections"
-          :pagination="{ pageSize: 12, showSizeChanger: true }"
+          :pagination="{
+            current: page,
+            pageSize: size,
+            total: total,
+            showSizeChanger: true,
+            showTotal: (t: number) => `${t} items`,
+          }"
           row-key="id"
           size="middle"
+          @change="onTableChange"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'content'">
               <div class="content-preview">{{ truncate(record.content, 100) }}</div>
             </template>
             <template v-else-if="column.key === 'quality'">
-              <a-rate :value="record.quality || 0" disabled :count="5" style="font-size: 14px" />
+              <div class="quality-cell">
+                <a-rate :value="record.quality_score || record.quality || 0" disabled :count="5" style="font-size: 14px" />
+                <span v-if="record.quality_score !== undefined" class="quality-score-text">
+                  {{ record.quality_score.toFixed(1) }}
+                </span>
+              </div>
             </template>
             <template v-else-if="column.key === 'type'">
-              <a-tag :color="record.type === 'insight' ? 'purple' : record.type === 'lesson' ? 'green' : 'blue'">
-                {{ record.type || 'general' }}
-              </a-tag>
+              <a-tag :color="categoryColor(record.category || record.type)">{{ record.category || record.type || 'general' }}</a-tag>
+            </template>
+            <template v-else-if="column.key === 'insights'">
+              <span v-if="record.insights?.length" class="insights-count">
+                {{ record.insights.length }}
+              </span>
+              <span v-else class="no-insights">-</span>
             </template>
             <template v-else-if="column.key === 'actions'">
               <div class="row-actions">
                 <GlassButton size="sm" variant="ghost" @click="viewReflection(record)">
                   {{ t('common.open') }}
                 </GlassButton>
-                <a-popconfirm
-                  :title="t('common.delete') + '?'"
-                  @confirm="deleteReflection(record.id)"
-                  :ok-text="t('common.yes')"
-                  :cancel-text="t('common.no')"
-                >
-                  <GlassButton size="sm" variant="danger">
-                    {{ t('common.delete') }}
-                  </GlassButton>
-                </a-popconfirm>
               </div>
             </template>
           </template>
@@ -100,7 +124,7 @@
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item :label="t('common.type')">
-              <a-select v-model:value="createForm.type" style="width: 100%">
+              <a-select v-model:value="createForm.category" style="width: 100%">
                 <a-select-option value="general">{{ t('growth.general') }}</a-select-option>
                 <a-select-option value="insight">{{ t('growth.insight') }}</a-select-option>
                 <a-select-option value="lesson">{{ t('growth.lesson') }}</a-select-option>
@@ -134,15 +158,23 @@
         </div>
         <div class="detail-section">
           <div class="detail-label">{{ t('common.type') }}</div>
-          <a-tag>{{ selectedReflection.type || 'general' }}</a-tag>
+          <a-tag :color="categoryColor(selectedReflection.category || selectedReflection.type)">{{ selectedReflection.category || selectedReflection.type || 'general' }}</a-tag>
         </div>
         <div class="detail-section">
           <div class="detail-label">{{ t('growth.quality') }}</div>
-          <a-rate :value="selectedReflection.quality || 0" disabled :count="5" />
+          <a-rate :value="selectedReflection.quality_score || selectedReflection.quality || 0" disabled :count="5" />
+          <span v-if="selectedReflection.quality_score !== undefined" class="quality-score-detail">
+            {{ selectedReflection.quality_score.toFixed(1) }} / 5
+          </span>
         </div>
-        <div v-if="selectedReflection.insights" class="detail-section">
+        <div v-if="selectedReflection.insights?.length || selectedReflection.insights" class="detail-section">
           <div class="detail-label">{{ t('growth.insights') }}</div>
-          <div class="detail-content">{{ selectedReflection.insights }}</div>
+          <div v-if="Array.isArray(selectedReflection.insights)" class="detail-insights-list">
+            <ul>
+              <li v-for="(insight, idx) in selectedReflection.insights" :key="idx">{{ insight }}</li>
+            </ul>
+          </div>
+          <div v-else class="detail-content">{{ selectedReflection.insights }}</div>
         </div>
         <div class="detail-section">
           <div class="detail-label">{{ t('common.createdAt') }}</div>
@@ -160,22 +192,27 @@ import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
-import { request } from '@/api'
+import * as growthApi from '@/api/modules/growth'
+import type { GrowthReflection } from '@/api/modules/growth'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage()
 
 const loading = ref(false)
 const creating = ref(false)
-const reflections = ref<any[]>([])
+const reflections = ref<GrowthReflection[]>([])
+const total = ref(0)
+const page = ref(1)
+const size = ref(12)
 const searchQuery = ref('')
+const categoryFilter = ref<string | undefined>(undefined)
 const showCreateModal = ref(false)
 const showDetailModal = ref(false)
 const selectedReflection = ref<any>(null)
 
 const createForm = ref({
   content: '',
-  type: 'general',
+  category: 'general',
   quality: 3,
   insights: '',
 })
@@ -183,10 +220,18 @@ const createForm = ref({
 const tableColumns = computed(() => [
   { title: t('common.description'), key: 'content', dataIndex: 'content', ellipsis: true },
   { title: t('common.type'), key: 'type', width: 120 },
-  { title: 'Quality', key: 'quality', width: 160 },
+  { title: t('reflection.quality'), key: 'quality', width: 180 },
+  { title: t('growth.insights'), key: 'insights', width: 90, align: 'center' as const },
   { title: t('common.createdAt'), dataIndex: 'created_at', width: 180 },
-  { title: t('common.actions'), key: 'actions', width: 180 },
+  { title: t('common.actions'), key: 'actions', width: 120 },
 ])
+
+const categoryColor = (cat: string) => {
+  const map: Record<string, string> = {
+    general: 'blue', insight: 'purple', lesson: 'green', mistake: 'red',
+  }
+  return map[cat] || 'default'
+}
 
 const filteredReflections = computed(() => {
   if (!searchQuery.value) return reflections.value
@@ -194,35 +239,48 @@ const filteredReflections = computed(() => {
   return reflections.value.filter(
     (r) =>
       (r.content || '').toLowerCase().includes(q) ||
-      (r.type || '').toLowerCase().includes(q),
+      (r.category || '').toLowerCase().includes(q),
   )
 })
 
 const averageQuality = computed(() => {
-  if (reflections.value.length === 0) return '0'
-  const sum = reflections.value.reduce((acc, r) => acc + (r.quality || 0), 0)
-  return (sum / reflections.value.length).toFixed(1)
+  const withScore = reflections.value.filter((r) => r.quality_score !== undefined)
+  if (withScore.length === 0) return '0'
+  const sum = withScore.reduce((acc, r) => acc + (r.quality_score || 0), 0)
+  return (sum / withScore.length).toFixed(1)
 })
 
-const recentCount = computed(() => {
-  const weekAgo = new Date()
-  weekAgo.setDate(weekAgo.getDate() - 7)
-  return reflections.value.filter((r) => new Date(r.created_at) >= weekAgo).length
+const categoryBreakdown = computed(() => {
+  const cats = new Set(reflections.value.map((r) => r.category).filter(Boolean))
+  return [...cats]
 })
 
 const truncate = (text: string, len: number) =>
   text && text.length > len ? text.slice(0, len) + '...' : text || ''
 
+const onTableChange = (pagination: any) => {
+  page.value = pagination.current || 1
+  size.value = pagination.pageSize || 12
+  fetchReflections()
+}
+
 const fetchReflections = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/growth/reflection', {
-      params: { agent_id: agentId.value },
+    const res = await growthApi.getReflections(agentId.value, {
+      page: page.value,
+      size: size.value,
     })
-    const data = res?.data ?? res
-    reflections.value = Array.isArray(data) ? data : data?.items ?? data?.reflections ?? []
+    const data = res.data
+    if (data && typeof data === 'object' && 'items' in data) {
+      reflections.value = data.items ?? []
+      total.value = data.total ?? 0
+    } else {
+      reflections.value = Array.isArray(data) ? data : []
+      total.value = reflections.value.length
+    }
   } catch (e: any) {
-    message.error(e?.message || t('common.error'))
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
     loading.value = false
   }
@@ -235,19 +293,17 @@ const createReflection = async () => {
   }
   creating.value = true
   try {
-    await request.post('/growth/reflection', {
-      agent_id: agentId.value,
-      content: createForm.value.content,
-      type: createForm.value.type,
-      quality: createForm.value.quality,
-      insights: createForm.value.insights,
-    })
+    await growthApi.createReflection(
+      agentId.value,
+      createForm.value.content,
+      createForm.value.category,
+    )
     message.success(t('common.success'))
     showCreateModal.value = false
-    createForm.value = { content: '', type: 'general', quality: 3, insights: '' }
+    createForm.value = { content: '', category: 'general', quality: 3, insights: '' }
     await fetchReflections()
   } catch (e: any) {
-    message.error(e?.message || t('common.error'))
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
     creating.value = false
   }
@@ -256,16 +312,6 @@ const createReflection = async () => {
 const viewReflection = (record: any) => {
   selectedReflection.value = record
   showDetailModal.value = true
-}
-
-const deleteReflection = async (id: string) => {
-  try {
-    await request.delete(`/growth/reflection/${id}`)
-    message.success(t('common.success'))
-    await fetchReflections()
-  } catch (e: any) {
-    message.error(e?.message || t('common.error'))
-  }
 }
 
 onMounted(() => {
@@ -300,6 +346,12 @@ onMounted(() => {
   font-size: 13px;
 }
 
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -328,6 +380,8 @@ onMounted(() => {
 }
 
 .toolbar {
+  display: flex;
+  gap: 12px;
   margin-bottom: 16px;
 }
 
@@ -335,6 +389,39 @@ onMounted(() => {
   font-size: 13px;
   color: var(--nr-text-primary);
   line-height: 1.5;
+}
+
+.quality-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quality-score-text {
+  font-size: 12px;
+  font-family: var(--nr-font-mono);
+  color: var(--nr-text-secondary);
+}
+
+.quality-score-detail {
+  font-size: 13px;
+  font-family: var(--nr-font-mono);
+  color: var(--nr-text-secondary);
+  margin-left: 8px;
+}
+
+.insights-count {
+  font-size: 12px;
+  font-family: var(--nr-font-mono);
+  color: var(--nr-text-secondary);
+  background: rgba(99, 102, 241, 0.15);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.no-insights {
+  font-size: 12px;
+  color: var(--nr-text-muted);
 }
 
 .row-actions {
@@ -359,6 +446,17 @@ onMounted(() => {
   color: var(--nr-text-primary);
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.detail-insights-list ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.detail-insights-list li {
+  font-size: 14px;
+  color: var(--nr-text-primary);
+  line-height: 1.6;
 }
 
 .mono {

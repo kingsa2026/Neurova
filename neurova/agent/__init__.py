@@ -20,17 +20,18 @@ Agent 包 — 统一入口
     ├── AgentConfig    # Agent 配置
     ├── AgentLLMClient # Agent LLM 客户端
     ├── MemCore        # 记忆核心模块
-    ├── ContextOrchestrator # 上下文构建模块
     ├── ToolExecutor   # 工具执行模块
     ├── ChatPipeline   # 对话流程管线 (P5)
     └── loops/         # Agent Loop 系统
+
+    ContextOrchestrator → neurova.context 包（统一路径）
 """
 
 # 从 mem_core 导入记忆核心模块
 from neurova.mem_core import MemCore
 
-# 从子模块导入深度模块
-from neurova.agent.context_orchestrator import ContextOrchestrator
+# ContextOrchestrator 已统一到 neurova.context 包
+# from neurova.agent.context_orchestrator import ContextOrchestrator  # 已删除，使用 neurova.context
 from neurova.agent.tool_executor import ToolExecutor
 from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
 from neurova.agent.loop_manager import LoopManager, LoopState, LoopEvent
@@ -66,7 +67,7 @@ __all__ = [
 
     # 深度模块
     "MemCore",
-    "ContextOrchestrator",
+    # ContextOrchestrator 已统一到 neurova.context 包
     "ToolExecutor",
     "ChatPipeline",
     "ChatContext",

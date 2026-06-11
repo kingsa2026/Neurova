@@ -108,7 +108,7 @@ logs/
 
 # ==================== 根目录临时文件 ====================
 
-# 调试/检查/修复脚本（仅根目录）
+# 根目录临时脚本（仅根目录）
 /_*.py
 /cleanup_redundant.py
 /debug_backend.py
@@ -144,6 +144,24 @@ logs/
 /check_imports.py
 /final_check.py
 /run_longmeval.py
+/compare_local_remote.py
+/create_next_version.py
+/create_release.py
+/execute_github_release.py
+/github_auto_release.py
+/github_operations.py
+/create_github_release.py
+/test_jwt_fix.py
+/test_chat_pipeline_basic.py
+/test_crystallized_simple.py
+/test_edge_tts_direct.py
+/test_login_api.py
+/test_memory_retrieval_integration.py
+/test_minimal.py
+/test_moss_tts.py
+/test_resolution_context_injection.py
+/test_tool_execution_integration.py
+/test_tts_init.py
 
 # 临时文本输出（仅根目录）
 /*_output*.txt
@@ -158,6 +176,11 @@ logs/
 /debug_*.html
 /debug_*.js
 /BROWSER_TEST.js
+/neurova-dataflow-breakpoints.html
+/neurova-dataflow-diagram.html
+/neurova-dependency-diagram*.html
+/risk-mitigation-plan.html
+/docs/cache-cleanup-report.html
 
 # 临时脚本（仅根目录）
 /*.ps1
@@ -169,6 +192,10 @@ logs/
 /*_COVERAGE*.md
 /*_AUDIT*.md
 /*_SUMMARY*.md
+
+# 根目录临时md文件（排除README.md）
+/*.md
+!README.md
 
 # 敏感信息
 .neurova_token.json
@@ -188,36 +215,38 @@ token.txt
 
 # ==================== 排除的目录 ====================
 
-# 临时文件夹
+# 临时/生成/测试目录
+/code_patches/
+/embedding/
+/examples/
+/flow-kb-sdk/
+/generated_skills/
+/helm/
+/logs/
+/MagicMock/
+/memory/
+/mklink/
+/node_modules/
+/other/
+/security/
+/sessions/
+/storage/
 /temp/
+/thought-retriever-src/
+/trajectories/
+/uploads/
 
 # Agent 工作区
 /agents/
-
-# 临时/生成/测试目录
-/examples/
-/generated_skills/
-/MagicMock/
-/embedding/
-/session/
-/test_integration/
-/test_storage/
-/test_ws/
-/thought-retriever-src/
-/trajectories/
 
 # 大型第三方项目
 /QwenPaw-main/
 /QwenPaw-1.1.6/
 /openhuman-main/
-/flow-kb-sdk/
 /neuUI/liquid-glass-vue-main/
 
 # 备份/补丁/其他
 /backups/
-/code_patches/
-/other/
-/session/
 /backup_test_files/
 
 # 部署
@@ -228,7 +257,6 @@ token.txt
 
 # 数据和存储
 /data/
-/memory/
 /neurova/data/
 /neurova/static/
 /neurova/tests/
@@ -265,4 +293,3 @@ secret_*.json
 !Makefile
 !LICENSE
 !docs/**/*.md
-!neuUI/.gitignore

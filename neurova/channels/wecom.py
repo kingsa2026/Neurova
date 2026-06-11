@@ -177,11 +177,27 @@ class WeComAdapter(ChannelAdapter):
             )
 
             # 触发事件
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(
-                self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
-            )
-            loop.close()
+            # 使用 call_soon_threadsafe 调度到主事件循环，避免跨事件循环问题
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # 如果事件循环正在运行，使用 call_soon_threadsafe
+                    asyncio.run_coroutine_threadsafe(
+                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg),
+                        loop
+                    )
+                else:
+                    # 如果事件循环未运行，直接运行
+                    loop.run_until_complete(
+                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
+                    )
+            except RuntimeError:
+                # 如果没有事件循环，创建新的
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(
+                    self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
+                )
+                loop.close()
 
             # 被动回复（示例: 回复文本）
             return self._build_reply_xml(from_user, to_user_name, "收到您的消息，正在处理中...")

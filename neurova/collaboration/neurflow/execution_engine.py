@@ -249,7 +249,13 @@ class WorkflowExecutor:
                     result = await self._execute_node(node, resolved_config, {
                         "inputs": inputs,
                         "variables": resolution_context.variables,
-                        "node_results": resolution_context.node_results
+                        "node_results": resolution_context.node_results,
+                        "memory_manager": resolution_context.memory_manager,
+                        "context_pool": resolution_context.context_pool,
+                        "emotion_module": resolution_context.emotion_module,
+                        "crystallizer": resolution_context.crystallizer,
+                        "variable_resolver": self._variable_resolver,
+                        "resolution_context": resolution_context,
                     })
                     
                     finished_at = time.time()
@@ -480,6 +486,56 @@ class WorkflowExecutor:
         ))
         
         return True
+    
+    def get_recent_executions(
+        self,
+        agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        limit: int = 10,
+        since_timestamp: Optional[float] = None
+    ) -> List[ExecutionInstance]:
+        """
+        获取最近的执行实例
+        
+        Args:
+            agent_id: 可选，按 Agent ID 过滤
+            user_id: 可选，按用户 ID 过滤
+            limit: 最大返回数量
+            since_timestamp: 可选，只返回此时间戳之后的执行
+            
+        Returns:
+            按开始时间降序排列的执行实例列表
+        """
+        now = time.time()
+        if since_timestamp is None:
+            # 默认返回最近 5 分钟内的执行
+            since_timestamp = now - 300
+        
+        # 收集符合条件的实例
+        recent = []
+        for instance_id, instance in self._instances.items():
+            # 时间过滤
+            if instance.started_at < since_timestamp:
+                continue
+            
+            # Agent ID 过滤
+            if agent_id and instance.agent_id != agent_id:
+                continue
+            
+            # User ID 过滤
+            if user_id and instance.user_id != user_id:
+                continue
+            
+            # 只包含已完成的执行
+            status = self._statuses.get(instance_id)
+            if status in [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]:
+                recent.append(instance)
+        
+        # 按开始时间降序排序
+        recent.sort(key=lambda x: x.started_at, reverse=True)
+        
+        # 限制返回数量
+        return recent[:limit]
 
 
 # 单例

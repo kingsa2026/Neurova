@@ -118,8 +118,43 @@ class ChannelManager:
     # ============================================================
 
     def set_message_handler(self, handler: MessageHandler):
-        """设置消息处理函数 - 收到消息后调用此函数"""
+        """设置消息处理函数 - 收到消息后调用此函数
+        
+        注意: 此方法会覆盖之前的处理器。如果需要多个处理器，请使用 add_message_handler。
+        """
         self._message_handler = handler
+        
+    def add_message_handler(self, handler: MessageHandler, priority: int = 0) -> int:
+        """添加消息处理函数（支持多个处理器）
+        
+        Args:
+            handler: 消息处理函数
+            priority: 优先级（数字越小优先级越高）
+            
+        Returns:
+            处理器ID（用于后续移除）
+        """
+        if not hasattr(self, '_message_handlers'):
+            self._message_handlers: List[tuple] = []
+            
+        handler_id = len(self._message_handlers)
+        self._message_handlers.append((priority, handler_id, handler))
+        # 按优先级排序
+        self._message_handlers.sort(key=lambda x: x[0])
+        logger.info(f"Added message handler with priority {priority}, id={handler_id}")
+        return handler_id
+        
+    def remove_message_handler(self, handler_id: int) -> bool:
+        """移除消息处理函数"""
+        if not hasattr(self, '_message_handlers'):
+            return False
+            
+        for i, (priority, hid, handler) in enumerate(self._message_handlers):
+            if hid == handler_id:
+                del self._message_handlers[i]
+                logger.info(f"Removed message handler id={handler_id}")
+                return True
+        return False
 
     async def send_message(
         self,
@@ -214,26 +249,42 @@ class ChannelManager:
         # 广播到 SessionSyncManager
         await self._sync_to_session_sync(event_type, message)
 
-        if event_type == ChannelEventType.MESSAGE_RECEIVED and self._message_handler:
-            try:
-                reply = await self._message_handler(message)
-                if reply:
-                    await self.send_message(
-                        message.channel_type,
-                        message.chat_id,
-                        reply,
-                    )
-            except Exception as e:
-                logger.exception(f"Message handler error: {e}")
-                # 尝试发送错误提示
+        if event_type == ChannelEventType.MESSAGE_RECEIVED:
+            # 优先使用多处理器链
+            if hasattr(self, '_message_handlers') and self._message_handlers:
+                for priority, handler_id, handler in self._message_handlers:
+                    try:
+                        reply = await handler(message)
+                        if reply:
+                            await self.send_message(
+                                message.channel_type,
+                                message.chat_id,
+                                reply,
+                            )
+                            break  # 第一个返回回复的处理器获胜
+                    except Exception as e:
+                        logger.exception(f"Message handler {handler_id} error: {e}")
+            # 回退到单处理器模式
+            elif self._message_handler:
                 try:
-                    await self.send_message(
-                        message.channel_type,
-                        message.chat_id,
-                        "抱歉，处理消息时出现错误，请稍后重试。",
-                    )
-                except Exception:
-                    pass
+                    reply = await self._message_handler(message)
+                    if reply:
+                        await self.send_message(
+                            message.channel_type,
+                            message.chat_id,
+                            reply,
+                        )
+                except Exception as e:
+                    logger.exception(f"Message handler error: {e}")
+                    # 尝试发送错误提示
+                    try:
+                        await self.send_message(
+                            message.channel_type,
+                            message.chat_id,
+                            "抱歉，处理消息时出现错误，请稍后重试。",
+                        )
+                    except Exception:
+                        pass
 
     async def _sync_to_session_sync(
         self, event_type: ChannelEventType, message: ChannelMessage

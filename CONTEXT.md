@@ -167,10 +167,12 @@ Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，82 个页面组件：
 - [x] 睡眠闭环修复 (MemoryRecord 转换)
 - [x] 工具记忆闭环修复 (match_by_query 接口)
 - [x] 骨架文件实现 (140+ 文件)
+- [x] 记忆检索通道插件化 (BaseChannel + Registry + 6内置通道 + MoE路由 + 结果处理)
+- [x] Agent.__init__ 分解为 SubSystemContainer (427行→14行)
 
 ### 待办
-- [ ] Agent.__init__ 分解为 SubSystemContainer (P0)
-- [ ] 合并重复的 ContextOrchestrator (P2)
-- [ ] 合并重复的 AgentConfig (P3)
-- [ ] 移除过渡性委托方法 (P4)
-- [ ] 清理进化模块空文件 (P5)
+- [x] Agent.__init__ 分解为 SubSystemContainer (P0) — 427行→14行，14个分组方法
+- [x] 合并重复的 ContextOrchestrator (P2) — 删除2个死代码文件(744行)，保留 neurova/context/orchestrator.py
+- [x] 合并重复的 AgentConfig (P3) — 删除死代码 agent/config.py（156行）
+- [x] 移除过渡性委托方法 (P4) — 删除15个死代码方法(~200行)，内联1个调用
+- [x] 清理进化模块空文件 (P5) — 验证全部19个文件均有实质实现，无需清理

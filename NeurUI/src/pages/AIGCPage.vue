@@ -180,10 +180,10 @@ const imagePreviewVisible = ref(false)
 const imagePreviewUrl = ref('')
 
 const imageTemplates = [
-  { label: 'Default', value: 'default' },
-  { label: 'Photorealistic', value: 'photorealistic' },
-  { label: 'Anime', value: 'anime' },
-  { label: 'Oil Painting', value: 'oil-painting' },
+  { label: t('aigc.default'), value: 'default' },
+  { label: t('aigc.photorealistic'), value: 'photorealistic' },
+  { label: t('aigc.anime'), value: 'anime' },
+  { label: t('aigc.oilPainting'), value: 'oil-painting' },
 ]
 
 async function generateImage() {
@@ -219,12 +219,12 @@ const audioGenerating = ref(false)
 const audioUrl = ref('')
 
 const voiceOptions = [
-  { label: 'Alloy', value: 'alloy' },
-  { label: 'Echo', value: 'echo' },
-  { label: 'Fable', value: 'fable' },
-  { label: 'Onyx', value: 'onyx' },
-  { label: 'Nova', value: 'nova' },
-  { label: 'Shimmer', value: 'shimmer' },
+  { label: t('aigc.voiceAlloy'), value: 'alloy' },
+  { label: t('aigc.voiceEcho'), value: 'echo' },
+  { label: t('aigc.voiceFable'), value: 'fable' },
+  { label: t('aigc.voiceOnyx'), value: 'onyx' },
+  { label: t('aigc.voiceNova'), value: 'nova' },
+  { label: t('aigc.voiceShimmer'), value: 'shimmer' },
 ]
 
 async function generateAudio() {

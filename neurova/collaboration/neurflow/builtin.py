@@ -286,11 +286,35 @@ BUILTIN_NODES: List[Dict[str, Any]] = [
         "label": "情感分析",
         "icon": "😊",
         "category": "memory",
-        "description": "分析或表达情感状态",
+        "description": "分析文本情感、查询情感记忆或获取记忆情感状态",
         "sub_blocks": [
-            {"id": "text", "title": "文本", "type": "textarea"},
+            {"id": "text", "title": "文本", "type": "textarea",
+             "description": "analyze/query 模式下为待分析文本，state 模式下忽略"},
             {"id": "mode", "title": "模式", "type": "select", "default_value": "analyze",
-             "options": [{"label": "分析", "value": "analyze"}, {"label": "表达", "value": "express"}]}
+             "options": [
+                 {"label": "分析文本情感", "value": "analyze"},
+                 {"label": "查询情感记忆", "value": "query"},
+                 {"label": "获取记忆情感状态", "value": "state"}
+             ]},
+            {"id": "emotion_type", "title": "情感类型", "type": "select",
+             "description": "query 模式下过滤特定情感类型",
+             "options": [
+                 {"label": "全部", "value": ""},
+                 {"label": "喜悦", "value": "joy"},
+                 {"label": "悲伤", "value": "sadness"},
+                 {"label": "愤怒", "value": "anger"},
+                 {"label": "恐惧", "value": "fear"},
+                 {"label": "惊讶", "value": "surprise"},
+                 {"label": "中性", "value": "neutral"}
+             ]},
+            {"id": "memory_id", "title": "记忆ID", "type": "input",
+             "description": "state 模式下指定要查询的记忆ID"},
+            {"id": "min_intensity", "title": "最低强度", "type": "slider",
+             "default_value": 0.5, "min": 0.0, "max": 1.0,
+             "description": "query 模式下过滤最低情感强度"},
+            {"id": "limit", "title": "数量限制", "type": "slider",
+             "default_value": 10, "min": 1, "max": 100,
+             "description": "query 模式下最大返回数量"}
         ],
         "inputs": [{"id": "input", "label": "输入"}],
         "outputs": [{"id": "output", "label": "情感状态"}],
@@ -567,8 +591,16 @@ async def exec_llm(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
     max_tokens = config.get("max_tokens", 4096)
     system_prompt = config.get("system_prompt", "")
     
-    # 注意：变量解析已在执行引擎层完成（resolve_config），
-    # 这里的 prompt 已经是解析后的值，无需再次解析
+    # 变量解析已在执行引擎层完成（resolve_config），
+    # 但作为防御性编程，如果 prompt 中仍含未解析的变量引用，
+    # 使用 ctx 中的 variable_resolver 进行兜底解析
+    var_resolver = ctx.get("variable_resolver")
+    if var_resolver and ctx.get("resolution_context"):
+        import re
+        if re.search(r'\$[a-zA-Z_]\w*', prompt) or re.search(r'\$[a-zA-Z_]\w*', system_prompt):
+            res_ctx = ctx["resolution_context"]
+            prompt = var_resolver.resolve_config(prompt, res_ctx)
+            system_prompt = var_resolver.resolve_config(system_prompt, res_ctx)
     
     try:
         response = await agent.chat(
@@ -759,11 +791,11 @@ async def exec_tdd(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
 
 async def exec_memory_load(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
     """记忆加载节点执行器"""
-    memory_manager = _get_memory_manager()
+    memory_manager = ctx.get("memory_manager") or _get_memory_manager()
     if memory_manager is None:
         return {
             "status": "failed",
-            "error": "MemoryManager 未初始化",
+            "error": "MemoryManager 未初始化（ctx.memory_manager 和全局实例均不可用）",
             "output": None,
         }
     
@@ -796,11 +828,11 @@ async def exec_memory_load(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
 
 async def exec_memory_save(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
     """记忆保存节点执行器"""
-    memory_manager = _get_memory_manager()
+    memory_manager = ctx.get("memory_manager") or _get_memory_manager()
     if memory_manager is None:
         return {
             "status": "failed",
-            "error": "MemoryManager 未初始化",
+            "error": "MemoryManager 未初始化（ctx.memory_manager 和全局实例均不可用）",
             "output": None,
         }
     
@@ -829,31 +861,84 @@ async def exec_memory_save(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
 
 
 async def exec_context(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """获取上下文节点执行器"""
-    context_pool = _get_context_pool()
+    """获取上下文节点执行器
+    
+    从执行上下文中获取 context_pool，按来源过滤并应用 token 预算。
+    """
+    context_pool = ctx.get("context_pool")
     if context_pool is None:
         return {
             "status": "failed",
-            "error": "ContextPool 未初始化",
+            "error": "context_pool 未注入到执行上下文（ResolutionContext.context_pool 为 None）",
             "output": None,
         }
-    
-    sources = config.get("sources", ["memory", "emotion"])
+
+    sources_str = config.get("sources", '["memory", "emotion"]')
     token_budget = config.get("token_budget", 4096)
-    
+
     try:
-        # 调用 ContextPool 获取上下文
-        context_data = context_pool.get_context(
-            sources=sources,
-            token_budget=token_budget
-        )
-        
+        # 解析 sources（支持 JSON 字符串或列表）
+        if isinstance(sources_str, str):
+            import json
+            sources = json.loads(sources_str)
+        else:
+            sources = sources_str
+
+        # 获取所有上下文
+        all_contexts = context_pool.get_contexts()
+
+        # 按来源过滤
+        from neurova.context_pool import ContextSource
+        source_enum_map = {
+            "memory": ContextSource.MEMORY,
+            "emotion": ContextSource.EMOTION,
+            "conversation": ContextSource.CONVERSATION,
+            "experience": ContextSource.EXPERIENCE,
+            "reflection": ContextSource.REFLECTION,
+            "tool_call": ContextSource.TOOL_CALL,
+            "multimodal": ContextSource.MULTIMODAL,
+            "system_instruction": ContextSource.SYSTEM_INSTRUCTION,
+            "developer_instruction": ContextSource.DEVELOPER_INSTRUCTION,
+            "user_input": ContextSource.USER_INPUT,
+        }
+
+        source_enums = set()
+        for s in sources:
+            if s in source_enum_map:
+                source_enums.add(source_enum_map[s])
+
+        if source_enums:
+            filtered = [ctx_item for ctx_item in all_contexts if ctx_item.source in source_enums]
+        else:
+            filtered = all_contexts
+
+        # 应用 token 预算截断
+        result = []
+        total_tokens = 0
+        for ctx_item in filtered:
+            item_tokens = ctx_item.tokens or len(ctx_item.content) // 4
+            if total_tokens + item_tokens > token_budget:
+                break
+            result.append({
+                "source": ctx_item.source.value if hasattr(ctx_item.source, "value") else str(ctx_item.source),
+                "content": ctx_item.content,
+                "priority": ctx_item.priority,
+                "tokens": item_tokens,
+            })
+            total_tokens += item_tokens
+
         return {
             "status": "success",
-            "output": context_data,
+            "output": result,
+            "metadata": {
+                "total_contexts": len(all_contexts),
+                "filtered_count": len(result),
+                "total_tokens": total_tokens,
+                "token_budget": token_budget,
+            },
         }
     except Exception as e:
-        logger.error(f"获取上下文失败: {e}")
+        logger.error(f"获取上下文失败: {e}", exc_info=True)
         return {
             "status": "failed",
             "error": str(e),
@@ -862,41 +947,96 @@ async def exec_context(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str,
 
 
 async def exec_emotion(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """情感分析节点执行器"""
-    emotion_module = _get_emotion_module()
+    """情感分析节点执行器
+    
+    支持三种模式：
+    - analyze: 分析文本情感（调用 analyze_text_emotion）
+    - query: 查询情感记忆（调用 get_emotional_memories）
+    - state: 获取当前情感状态（从 emotion_module 读取）
+    """
+    emotion_module = ctx.get("emotion_module")
     if emotion_module is None:
         return {
             "status": "failed",
-            "error": "EmotionModule 未初始化",
+            "error": "emotion_module 未注入到执行上下文（ResolutionContext.emotion_module 为 None）",
             "output": None,
         }
-    
+
     text = config.get("text", "")
     mode = config.get("mode", "analyze")
-    
+
     try:
         if mode == "analyze":
-            # 调用 EmotionModule 分析情感
-            emotion_result = emotion_module.analyze(text)
+            # 调用 EmotionModule.analyze_text_emotion 分析文本情感
+            emotion_state = emotion_module.analyze_text_emotion(text)
             return {
                 "status": "success",
-                "output": emotion_result,
+                "output": {
+                    "primary_emotion": emotion_state.primary_emotion.value,
+                    "intensity": emotion_state.intensity,
+                    "valence": emotion_state.valence,
+                    "arousal": emotion_state.arousal,
+                    "secondary_emotions": {
+                        k.value: v for k, v in emotion_state.secondary_emotions.items()
+                    } if emotion_state.secondary_emotions else {},
+                },
             }
-        elif mode == "express":
-            # 调用 EmotionModule 表达情感
-            emotion_result = emotion_module.express(text)
+        elif mode == "query":
+            # 查询带有特定情感的记忆
+            emotion_type_str = config.get("emotion_type")
+            min_intensity = config.get("min_intensity", 0.5)
+            limit = config.get("limit", 10)
+
+            from neurova.cognitive_layers.memory_layer.modules.emotion_module import EmotionType
+            emotion_type = None
+            if emotion_type_str:
+                try:
+                    emotion_type = EmotionType(emotion_type_str)
+                except ValueError:
+                    pass
+
+            memory_ids = emotion_module.get_emotional_memories(
+                emotion_type=emotion_type,
+                min_intensity=min_intensity,
+                limit=limit,
+            )
             return {
                 "status": "success",
-                "output": emotion_result,
+                "output": memory_ids,
+            }
+        elif mode == "state":
+            # 获取特定记忆的情感状态
+            memory_id = config.get("memory_id", "")
+            if memory_id:
+                emotion_state = emotion_module.get_emotion(memory_id)
+                if emotion_state:
+                    return {
+                        "status": "success",
+                        "output": {
+                            "primary_emotion": emotion_state.primary_emotion.value,
+                            "intensity": emotion_state.intensity,
+                            "valence": emotion_state.valence,
+                            "arousal": emotion_state.arousal,
+                        },
+                    }
+                return {
+                    "status": "success",
+                    "output": None,
+                    "message": f"记忆 {memory_id} 无情感标注",
+                }
+            return {
+                "status": "failed",
+                "error": "state 模式需要提供 memory_id",
+                "output": None,
             }
         else:
             return {
                 "status": "failed",
-                "error": f"未知模式: {mode}",
+                "error": f"未知模式: {mode}，支持: analyze, query, state",
                 "output": None,
             }
     except Exception as e:
-        logger.error(f"情感分析失败: {e}")
+        logger.error(f"情感分析失败: {e}", exc_info=True)
         return {
             "status": "failed",
             "error": str(e),
@@ -1055,13 +1195,17 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
         }
     
     # 等待审批回复
-    # 使用 asyncio.Event 实现异步等待
-    approval_event = asyncio.Event()
+    # 使用线程安全的 threading.Event 替代 asyncio.Event，解决跨事件循环问题
+    import threading
+    approval_event = threading.Event()
     approval_result = {"approved": None, "reason": ""}
     
+    # 获取当前事件循环，用于线程安全调度
+    loop = asyncio.get_event_loop()
+    
     # 注册审批回调
-    async def on_approval_reply(message_content: str) -> bool:
-        """处理审批回复"""
+    def on_approval_reply_sync(message_content: str) -> bool:
+        """同步处理审批回复（从线程安全回调调用）"""
         content_lower = message_content.lower().strip()
         
         # 批准关键词
@@ -1087,22 +1231,46 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
         
         return False
     
-    # 将回调注册到消息处理器
+    # 异步包装器，用于 ChannelManager 的异步处理器
+    async def on_approval_reply_async(message_content: str) -> bool:
+        """异步处理审批回复"""
+        return on_approval_reply_sync(message_content)
+    
+    # 将回调注册到消息处理器（使用多处理器模式，避免覆盖其他处理器）
     async def message_handler(message):
         """消息处理器 — 过滤审批回复"""
         # 只处理来自审批人的消息
         if hasattr(message, 'sender_id') and message.sender_id == approver:
             # 尝试解析审批回复
             content = message.content if hasattr(message, 'content') else str(message)
-            await on_approval_reply(content)
+            await on_approval_reply_async(content)
         return None  # 不自动回复
     
-    channel_manager.set_message_handler(message_handler)
-    logger.info(f"等待审批回复: {approval_id}")
+    # 使用 add_message_handler 而不是 set_message_handler，避免覆盖其他处理器
+    handler_id = channel_manager.add_message_handler(message_handler, priority=10)
+    logger.info(f"等待审批回复: {approval_id}, handler_id={handler_id}")
     
     try:
         # 等待审批事件，带超时
-        await asyncio.wait_for(approval_event.wait(), timeout=timeout)
+        # 使用 run_in_executor 将 threading.Event.wait() 包装为异步操作
+        # threading.Event.wait(timeout) 返回 True（事件已设置）或 False（超时）
+        event_set = await loop.run_in_executor(None, approval_event.wait, timeout)
+        
+        # 移除消息处理器
+        channel_manager.remove_message_handler(handler_id)
+        
+        if not event_set:
+            # threading.Event.wait 返回 False 表示超时
+            logger.warning(f"审批超时: {approval_id}")
+            return {
+                "status": "timeout",
+                "output": {
+                    "approver": approver,
+                    "message": message,
+                    "approved": None,
+                    "reason": "审批超时",
+                },
+            }
         
         # 返回审批结果
         if approval_result["approved"]:
@@ -1126,8 +1294,10 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
                 },
             }
     
-    except asyncio.TimeoutError:
-        logger.warning(f"审批超时: {approval_id}")
+    except Exception:
+        # 移除消息处理器
+        channel_manager.remove_message_handler(handler_id)
+        logger.warning(f"审批异常: {approval_id}")
         return {
             "status": "timeout",
             "output": {

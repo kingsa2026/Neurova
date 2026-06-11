@@ -91,6 +91,7 @@ class PostChatPipeline:
         self._rsi_orchestrator = None
         self._voice_memory_bridge = None
         self._skill_packer = None
+        self._neurflow_executor = None
         self._voice_pipeline = None
 
     @property
@@ -117,6 +118,7 @@ class PostChatPipeline:
         voice_memory_bridge: Any = None,
         skill_packer: Any = None,
         voice_pipeline: Any = None,
+        neurflow_executor: Any = None,
     ) -> None:
         """注入依赖组件（延迟绑定）
 
@@ -175,6 +177,8 @@ class PostChatPipeline:
             self._skill_packer = skill_packer
         if voice_pipeline is not None:
             self._voice_pipeline = voice_pipeline
+        if neurflow_executor is not None:
+            self._neurflow_executor = neurflow_executor
 
         logger.info(
             "PostChatPipeline dependencies configured: "
@@ -183,7 +187,7 @@ class PostChatPipeline:
             "neuHebb_manager=%s, tool_lifecycle=%s, pattern_miner=%s, "
             "genetic_engine=%s, tool_marketplace=%s, conflict_detector=%s, "
             "version_control=%s, proactive_question_manager=%s, rsi_orchestrator=%s, "
-            "voice_pipeline=%s",
+            "voice_pipeline=%s, neurflow_executor=%s",
             self._conversation_buffer is not None,
             self._memory_manager is not None,
             self._tts_manager is not None,
@@ -200,6 +204,7 @@ class PostChatPipeline:
             self._proactive_question_manager is not None,
             self._rsi_orchestrator is not None,
             self._voice_pipeline is not None,
+            self._neurflow_executor is not None,
         )
 
     def _get_dependency(self, name: str) -> Any:
@@ -261,6 +266,9 @@ class PostChatPipeline:
 
         # 步骤 9: 经验记录
         await self._step_record_experience(user_input, reply, save_memory)
+
+        # 步骤 9.05: 记录工作流执行经验（Agent-Neurflow 集成）
+        await self._step_record_workflow_experience(user_input, reply, actual_session_id)
 
         # 步骤 9.1: Evocate 生成（从对话中提取结构化推理记忆）
         await self._step_evocate_generation(user_input, reply, actual_session_id)
@@ -1385,3 +1393,137 @@ class PostChatPipeline:
             ))
 
         return None
+
+    async def _step_record_workflow_experience(
+        self,
+        user_input: str,
+        reply: str,
+        session_id: str,
+    ):
+        """Step 9.05: 记录工作流执行经验到记忆系统
+        
+        从 Neurflow 执行引擎获取最近的执行记录，将成功的工作流执行经验
+        存储到记忆系统中，以便后续对话中检索和复用。
+        """
+        step_name = "record_workflow_experience"
+        start_time = time.time()
+        
+        # 获取工作流执行器
+        neurflow_executor = self._get_dependency("neurflow_executor")
+        if not neurflow_executor:
+            self._step_results.append(StepResult(
+                step_name=step_name,
+                status=StepStatus.SKIPPED,
+                message="neurflow_executor not available",
+                duration_ms=(time.time() - start_time) * 1000
+            ))
+            return
+        
+        memory_manager = self._get_dependency("memory_manager")
+        if not memory_manager:
+            self._step_results.append(StepResult(
+                step_name=step_name,
+                status=StepStatus.SKIPPED,
+                message="memory_manager not available",
+                duration_ms=(time.time() - start_time) * 1000
+            ))
+            return
+        
+        try:
+            # 获取最近的执行记录（5分钟内）
+            recent_executions = neurflow_executor.get_recent_executions(
+                agent_id=getattr(self._agt.config, "agent_id", None),
+                limit=5
+            )
+            
+            if not recent_executions:
+                self._step_results.append(StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="No recent workflow executions found",
+                    duration_ms=(time.time() - start_time) * 1000
+                ))
+                return
+            
+            # 记录每个成功执行的工作流经验
+            recorded_count = 0
+            for execution in recent_executions:
+                # 只记录成功的执行
+                if execution.status.value != "completed":
+                    continue
+                
+                # 构建经验内容
+                workflow_id = execution.workflow_id
+                duration = execution.duration or 0
+                outputs_summary = str(execution.outputs)[:200] if execution.outputs else "无输出"
+                
+                # 提取节点执行信息
+                node_count = len(execution.node_results)
+                successful_nodes = sum(
+                    1 for node_result in execution.node_results.values()
+                    if node_result.status == "success"
+                )
+                
+                experience_content = (
+                    f"工作流 {workflow_id} 执行成功完成。"
+                    f"包含 {node_count} 个节点，成功执行 {successful_nodes} 个。"
+                    f"执行耗时 {duration:.2f} 秒。"
+                    f"输出: {outputs_summary}"
+                )
+                
+                # 存储到记忆系统
+                metadata = {
+                    "workflow_id": workflow_id,
+                    "execution_id": execution.id,
+                    "duration": duration,
+                    "node_count": node_count,
+                    "successful_nodes": successful_nodes,
+                    "session_id": session_id,
+                    "source": "neurflow_execution",
+                    "execution_started_at": execution.started_at,
+                    "execution_finished_at": execution.finished_at,
+                }
+                
+                memory_id = memory_manager.remember(
+                    content=experience_content,
+                    memory_type="workflow_experience",
+                    metadata=metadata,
+                )
+                
+                if memory_id:
+                    recorded_count += 1
+                    logger.debug(
+                        f"工作流经验已记录: {workflow_id} -> {memory_id}"
+                    )
+            
+            if recorded_count > 0:
+                logger.info(
+                    f"🔄 已记录 {recorded_count} 个工作流执行经验"
+                )
+                self._step_results.append(StepResult(
+                    step_name=step_name,
+                    status=StepStatus.EXECUTED,
+                    message=f"Recorded {recorded_count} workflow execution experiences",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={
+                        "recorded_count": recorded_count,
+                        "total_executions": len(recent_executions),
+                        "workflow_ids": [e.workflow_id for e in recent_executions],
+                    }
+                ))
+            else:
+                self._step_results.append(StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="No successful workflow executions to record",
+                    duration_ms=(time.time() - start_time) * 1000
+                ))
+                
+        except Exception as e:
+            logger.warning(f"Step 9.05 工作流经验记录失败: {e}")
+            self._step_results.append(StepResult(
+                step_name=step_name,
+                status=StepStatus.FAILED,
+                message=str(e),
+                duration_ms=(time.time() - start_time) * 1000
+            ))

@@ -294,11 +294,11 @@ function populateDemoData() {
   stats.callTrend = 15
 
   activities.value = [
-    { icon: '🤖', text: 'Agent "Nova" created', time: '2h ago', color: 'rgba(99,102,241,0.15)' },
-    { icon: '💬', text: 'New conversation started', time: '3h ago', color: 'rgba(34,211,238,0.15)' },
-    { icon: '🧩', text: 'Skill "web_search" installed', time: '5h ago', color: 'rgba(167,139,250,0.15)' },
-    { icon: '📊', text: 'Token usage milestone reached', time: '1d ago', color: 'rgba(16,185,129,0.15)' },
-    { icon: '⚙️', text: 'Model switched to GPT-4o', time: '2d ago', color: 'rgba(245,158,11,0.15)' },
+    { icon: '🤖', text: t('dashboard.demoAgentCreated'), time: t('dashboard.demoTimeAgo2h'), color: 'rgba(99,102,241,0.15)' },
+    { icon: '💬', text: t('dashboard.demoConversationStarted'), time: t('dashboard.demoTimeAgo3h'), color: 'rgba(34,211,238,0.15)' },
+    { icon: '🧩', text: t('dashboard.demoSkillInstalled'), time: t('dashboard.demoTimeAgo5h'), color: 'rgba(167,139,250,0.15)' },
+    { icon: '📊', text: t('dashboard.demoTokenMilestone'), time: t('dashboard.demoTimeAgo1d'), color: 'rgba(16,185,129,0.15)' },
+    { icon: '⚙️', text: t('dashboard.demoModelSwitched'), time: t('dashboard.demoTimeAgo2d'), color: 'rgba(245,158,11,0.15)' },
   ]
 
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']

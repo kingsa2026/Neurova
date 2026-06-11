@@ -112,7 +112,7 @@ const form = reactive({ name: '', description: '', status: 'active' })
 const stats = computed(() => [
   { label: t('common.total'), value: projects.value.length },
   { label: t('common.active'), value: projects.value.filter((p) => p.status === 'active').length },
-  { label: 'Archived', value: projects.value.filter((p) => p.status === 'archived').length },
+  { label: t('common.archived'), value: projects.value.filter((p) => p.status === 'archived').length },
 ])
 
 function resetForm() {

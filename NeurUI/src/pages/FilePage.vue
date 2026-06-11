@@ -70,7 +70,7 @@
     </a-modal>
 
     <!-- Version history modal -->
-    <a-modal v-model:open="showHistoryModal" title="Version History" :footer="null">
+    <a-modal v-model:open="showHistoryModal" :title="t('file.versionHistory')" :footer="null">
       <a-timeline>
         <a-timeline-item v-for="ver in versions" :key="ver.version" :color="ver.version === currentVersion ? 'green' : 'gray'">
           <div class="version-item">
@@ -115,9 +115,9 @@ const storagePercent = computed(() => {
 
 const columns = computed(() => [
   { title: t('common.name'), key: 'name' },
-  { title: 'Size', key: 'size', width: 100 },
+  { title: t('file.size'), key: 'size', width: 100 },
   { title: t('common.type'), dataIndex: 'type', key: 'type', width: 100 },
-  { title: 'Version', key: 'version', width: 80 },
+  { title: t('file.version'), key: 'version', width: 80 },
   { title: t('common.createdAt'), dataIndex: 'created_at', key: 'created_at', width: 160 },
   { title: t('common.actions'), key: 'actions', width: 260 },
 ])

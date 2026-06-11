@@ -18,12 +18,32 @@
           <div class="overview-grid">
             <GlassCard :title="t('growth.motivation')">
               <div class="big-stat">
-                <div class="big-value">{{ formatPercent(overview.motivation_level) }}</div>
+                <div class="big-value">{{ formatPercent(motivationData?.level) }}</div>
                 <a-progress
-                  :percent="Math.round((overview.motivation_level || 0) * 100)"
-                  :stroke-color="overview.motivation_level >= 0.7 ? '#10b981' : '#f59e0b'"
+                  :percent="Math.round((motivationData?.level || 0) * 100)"
+                  :stroke-color="(motivationData?.level || 0) >= 0.7 ? '#10b981' : '#f59e0b'"
                   :show-info="false"
                 />
+              </div>
+              <!-- Motivation factors -->
+              <div v-if="motivationData?.factors?.length" class="factors-list">
+                <div v-for="factor in motivationData.factors" :key="factor.name" class="factor-row">
+                  <div class="factor-info">
+                    <span class="factor-name">{{ factor.name }}</span>
+                    <span class="factor-impact" :class="{ positive: factor.impact > 0, negative: factor.impact < 0 }">
+                      {{ factor.impact > 0 ? '+' : '' }}{{ Math.round(factor.impact * 100) }}%
+                    </span>
+                  </div>
+                  <a-progress
+                    :percent="Math.min(Math.abs(factor.impact) * 100, 100)"
+                    :stroke-color="factor.impact >= 0 ? '#10b981' : '#ef4444'"
+                    size="small"
+                    :show-info="false"
+                  />
+                </div>
+              </div>
+              <div v-if="motivationData?.updated_at" class="meta-timestamp">
+                {{ t('common.updated') }}: {{ formatTime(motivationData.updated_at) }}
               </div>
             </GlassCard>
 
@@ -42,22 +62,82 @@
                 </div>
               </div>
               <a-empty v-else :description="t('common.noData')" />
+              <div v-if="personalityProfile?.style || personalityProfile?.tone" class="personality-meta">
+                <a-tag v-if="personalityProfile?.style">{{ personalityProfile.style }}</a-tag>
+                <a-tag v-if="personalityProfile?.tone" color="purple">{{ personalityProfile.tone }}</a-tag>
+              </div>
             </GlassCard>
           </div>
 
           <!-- Constitution summary -->
           <GlassCard :title="t('growth.constitution')" style="margin-top: 20px">
-            <div v-if="constitutionSummary" class="constitution-preview">
-              <p>{{ constitutionSummary }}</p>
+            <div v-if="constitutionRules.length > 0" class="constitution-preview">
+              <p>{{ constitutionRules.slice(0, 3).map((r: any) => r.rule).join('\n') }}</p>
+              <a v-if="constitutionRules.length > 3" class="show-more-link" @click="activeTab = 'constitution'">
+                +{{ constitutionRules.length - 3 }} {{ t('growth.moreRules') || 'more rules' }}
+              </a>
             </div>
             <a-empty v-else :description="t('common.noData')" />
           </GlassCard>
         </a-spin>
       </a-tab-pane>
 
+      <!-- Reflections Tab (NEW) -->
+      <a-tab-pane key="reflections" :tab="t('growth.reflection')">
+        <div class="tab-toolbar">
+          <GlassButton variant="primary" size="sm" @click="showReflectionModal = true">
+            {{ t('common.create') }}
+          </GlassButton>
+        </div>
+        <a-spin :spinning="loadingReflections">
+          <div v-if="reflections.length > 0" class="reflections-list">
+            <GlassCard v-for="r in reflections" :key="r.id" variant="subtle">
+              <div class="reflection-item">
+                <div class="reflection-header">
+                  <a-tag v-if="r.category" :color="categoryColor(r.category)">{{ r.category }}</a-tag>
+                  <span class="reflection-date">{{ formatTime(r.created_at) }}</span>
+                </div>
+                <div class="reflection-content">{{ r.content }}</div>
+                <div v-if="r.insights?.length" class="reflection-insights">
+                  <div class="insights-label">{{ t('growth.insights') }}</div>
+                  <ul>
+                    <li v-for="(insight, idx) in r.insights" :key="idx">{{ insight }}</li>
+                  </ul>
+                </div>
+                <div v-if="r.quality_score !== undefined" class="reflection-quality">
+                  <span class="quality-label">{{ t('growth.quality') }}:</span>
+                  <a-rate :value="r.quality_score" disabled :count="5" style="font-size: 12px" />
+                </div>
+              </div>
+            </GlassCard>
+          </div>
+          <a-empty v-else :description="t('common.noData')" />
+          <div v-if="reflectionsTotal > reflectionsPageSize" class="pagination-bar">
+            <a-pagination
+              v-model:current="reflectionsPage"
+              :total="reflectionsTotal"
+              :page-size="reflectionsPageSize"
+              @change="onReflectionsPageChange"
+              size="small"
+            />
+          </div>
+        </a-spin>
+      </a-tab-pane>
+
       <!-- Questions Tab -->
       <a-tab-pane key="questions" :tab="t('growth.questions')">
         <div class="tab-toolbar">
+          <a-select
+            v-model:value="questionsFilter"
+            :placeholder="t('common.filter') || 'Filter'"
+            allow-clear
+            style="min-width: 140px; margin-right: 12px"
+            @change="fetchQuestions"
+          >
+            <a-select-option value="all">{{ t('common.all') }}</a-select-option>
+            <a-select-option value="unanswered">{{ t('growth.pending') }}</a-select-option>
+            <a-select-option value="answered">{{ t('growth.answered') }}</a-select-option>
+          </a-select>
           <GlassButton variant="primary" size="sm" @click="showQuestionModal = true">
             {{ t('common.create') }}
           </GlassButton>
@@ -72,9 +152,10 @@
                     {{ q.answered ? t('growth.answered') : t('growth.pending') }}
                   </a-tag>
                 </div>
+                <div v-if="q.context" class="question-context">{{ q.context }}</div>
                 <div v-if="q.answer" class="question-answer">{{ q.answer }}</div>
                 <div class="question-actions">
-                  <GlassButton v-if="!q.answered" size="sm" variant="ghost" @click="answerQuestion(q)">
+                  <GlassButton v-if="!q.answered" size="sm" variant="ghost" @click="openAnswerModal(q)">
                     {{ t('growth.answer') }}
                   </GlassButton>
                 </div>
@@ -88,9 +169,18 @@
       <!-- Proactive Actions Tab -->
       <a-tab-pane key="actions" :tab="t('growth.proactive')">
         <div class="tab-toolbar">
-          <GlassButton variant="primary" size="sm" @click="showActionModal = true">
-            {{ t('common.create') }}
-          </GlassButton>
+          <a-select
+            v-model:value="actionsFilter"
+            :placeholder="t('common.filter') || 'Filter'"
+            allow-clear
+            style="min-width: 140px; margin-right: 12px"
+            @change="fetchActions"
+          >
+            <a-select-option value="all">{{ t('common.all') }}</a-select-option>
+            <a-select-option value="pending">{{ t('growth.pending') }}</a-select-option>
+            <a-select-option value="completed">{{ t('growth.completed') || 'Completed' }}</a-select-option>
+            <a-select-option value="skipped">{{ t('growth.skipped') || 'Skipped' }}</a-select-option>
+          </a-select>
         </div>
         <a-spin :spinning="loadingActions">
           <a-table
@@ -104,14 +194,12 @@
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'status'">
                 <a-badge
-                  :status="record.status === 'completed' ? 'success' : record.status === 'in_progress' ? 'processing' : 'default'"
+                  :status="record.status === 'completed' ? 'success' : record.status === 'in_progress' ? 'processing' : record.status === 'skipped' ? 'warning' : 'default'"
                   :text="record.status"
                 />
               </template>
-              <template v-else-if="column.key === 'priority'">
-                <a-tag :color="record.priority === 'high' ? 'red' : record.priority === 'medium' ? 'orange' : 'blue'">
-                  {{ record.priority }}
-                </a-tag>
+              <template v-else-if="column.key === 'type'">
+                <a-tag>{{ record.type }}</a-tag>
               </template>
             </template>
           </a-table>
@@ -121,33 +209,68 @@
 
       <!-- Constitution Tab -->
       <a-tab-pane key="constitution" :tab="t('growth.constitution')">
+        <div class="tab-toolbar">
+          <GlassButton variant="primary" size="sm" @click="showAddRuleModal = true">
+            {{ t('common.create') }}
+          </GlassButton>
+        </div>
         <a-spin :spinning="loadingConstitution">
           <GlassCard :title="t('growth.rules')">
             <div v-if="constitutionRules.length > 0" class="rules-list">
-              <div v-for="(rule, idx) in constitutionRules" :key="idx" class="rule-item">
+              <div v-for="rule in constitutionRules" :key="rule.id" class="rule-item">
                 <div class="rule-header">
-                  <span class="rule-index">{{ idx + 1 }}</span>
-                  <span class="rule-text">{{ rule.rule || rule.content }}</span>
+                  <span class="rule-index">{{ rule.priority ?? (constitutionRules.indexOf(rule) + 1) }}</span>
+                  <div class="rule-body">
+                    <span class="rule-text">{{ rule.rule }}</span>
+                    <div class="rule-meta">
+                      <a-badge :status="rule.enabled ? 'success' : 'default'" :text="rule.enabled ? 'Enabled' : 'Disabled'" />
+                      <span class="rule-date">{{ formatTime(rule.created_at) }}</span>
+                    </div>
+                  </div>
+                  <div class="rule-actions">
+                    <a-tooltip :title="rule.enabled ? (t('common.disable') || 'Disable') : (t('common.enable') || 'Enable')">
+                      <a-switch
+                        :checked="rule.enabled"
+                        size="small"
+                        @change="(checked: boolean) => toggleRule(rule, checked)"
+                      />
+                    </a-tooltip>
+                    <a-popconfirm
+                      :title="t('common.delete') + '?'"
+                      @confirm="removeRule(rule.id)"
+                      :ok-text="t('common.yes')"
+                      :cancel-text="t('common.no')"
+                    >
+                      <GlassButton size="sm" variant="danger">
+                        {{ t('common.delete') }}
+                      </GlassButton>
+                    </a-popconfirm>
+                  </div>
                 </div>
-                <div v-if="rule.description" class="rule-desc">{{ rule.description }}</div>
               </div>
             </div>
             <a-empty v-else :description="t('common.noData')" />
-
-            <template #footer>
-              <div class="constitution-actions">
-                <GlassButton variant="secondary" size="sm" @click="showEditConstitution = true">
-                  {{ t('common.edit') }}
-                </GlassButton>
-                <GlassButton variant="primary" size="sm" :loading="evaluating" @click="evaluateConstitution">
-                  {{ t('growth.evaluate') }}
-                </GlassButton>
-              </div>
-            </template>
           </GlassCard>
         </a-spin>
       </a-tab-pane>
     </a-tabs>
+
+    <!-- Create reflection modal (NEW) -->
+    <a-modal v-model:open="showReflectionModal" :title="t('growth.reflection')" @ok="submitReflection" :confirm-loading="creatingReflection" width="560px">
+      <a-form layout="vertical">
+        <a-form-item :label="t('common.description')" required>
+          <a-textarea v-model:value="newReflection.content" :rows="4" />
+        </a-form-item>
+        <a-form-item :label="t('common.type')">
+          <a-select v-model:value="newReflection.category" style="width: 100%">
+            <a-select-option value="general">{{ t('growth.general') }}</a-select-option>
+            <a-select-option value="insight">{{ t('growth.insight') }}</a-select-option>
+            <a-select-option value="lesson">{{ t('growth.lesson') }}</a-select-option>
+            <a-select-option value="mistake">{{ t('growth.mistake') }}</a-select-option>
+          </a-select>
+        </a-form-item>
+      </a-form>
+    </a-modal>
 
     <!-- Create question modal -->
     <a-modal v-model:open="showQuestionModal" :title="t('growth.questions')" @ok="createQuestion" :confirm-loading="creatingQuestion">
@@ -168,27 +291,14 @@
       </a-form>
     </a-modal>
 
-    <!-- Create action modal -->
-    <a-modal v-model:open="showActionModal" :title="t('growth.proactive')" @ok="createAction" :confirm-loading="creatingAction">
-      <a-form layout="vertical" :model="newAction">
-        <a-form-item :label="t('common.description')">
-          <a-textarea v-model:value="newAction.description" :rows="3" />
+    <!-- Add constitution rule modal (NEW) -->
+    <a-modal v-model:open="showAddRuleModal" :title="t('growth.rules')" @ok="addRule" :confirm-loading="addingRule">
+      <a-form layout="vertical">
+        <a-form-item :label="t('growth.rules')" required>
+          <a-textarea v-model:value="newRuleText" :rows="3" />
         </a-form-item>
         <a-form-item :label="t('growth.priority')">
-          <a-select v-model:value="newAction.priority" style="width: 100%">
-            <a-select-option value="low">{{ t('growth.low') }}</a-select-option>
-            <a-select-option value="medium">{{ t('growth.medium') }}</a-select-option>
-            <a-select-option value="high">{{ t('growth.high') }}</a-select-option>
-          </a-select>
-        </a-form-item>
-      </a-form>
-    </a-modal>
-
-    <!-- Edit constitution modal -->
-    <a-modal v-model:open="showEditConstitution" :title="t('growth.constitution')" @ok="saveConstitution" :confirm-loading="savingConstitution" width="640px">
-      <a-form layout="vertical">
-        <a-form-item :label="t('growth.rules')">
-          <a-textarea v-model:value="constitutionText" :rows="10" :placeholder="t('growth.oneRulePerLine')" />
+          <a-input-number v-model:value="newRulePriority" :min="1" :max="100" style="width: 100%" />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -202,7 +312,8 @@ import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
-import { request } from '@/api'
+import * as growthApi from '@/api/modules/growth'
+import type { MotivationState, PersonalityProfile, ConstitutionRule, GrowthReflection, GrowthQuestion, ProactiveAction } from '@/api/modules/growth'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage()
@@ -211,38 +322,50 @@ const activeTab = ref('overview')
 
 // Overview state
 const loadingOverview = ref(false)
-const overview = ref<any>({})
+const motivationData = ref<MotivationState | null>(null)
+const personalityProfile = ref<PersonalityProfile | null>(null)
 const personalityTraits = ref<{ name: string; value: number }[]>([])
-const constitutionSummary = ref('')
+const constitutionRules = ref<ConstitutionRule[]>([])
+
+// Reflections state (NEW)
+const loadingReflections = ref(false)
+const reflections = ref<GrowthReflection[]>([])
+const reflectionsPage = ref(1)
+const reflectionsPageSize = 10
+const reflectionsTotal = ref(0)
+const showReflectionModal = ref(false)
+const creatingReflection = ref(false)
+const newReflection = ref({ content: '', category: 'general' })
 
 // Questions state
 const loadingQuestions = ref(false)
-const questions = ref<any[]>([])
+const questions = ref<GrowthQuestion[]>([])
+const questionsFilter = ref<string>('all')
 const showQuestionModal = ref(false)
 const creatingQuestion = ref(false)
 const newQuestion = ref('')
 const showAnswerModal = ref(false)
-const questionToAnswer = ref<any>(null)
+const questionToAnswer = ref<GrowthQuestion | null>(null)
 const answerText = ref('')
 const submittingAnswer = ref(false)
 
 // Actions state
 const loadingActions = ref(false)
-const actions = ref<any[]>([])
-const showActionModal = ref(false)
-const creatingAction = ref(false)
-const newAction = ref({ description: '', priority: 'medium' })
+const actions = ref<ProactiveAction[]>([])
+const actionsFilter = ref<string>('all')
 
 // Constitution state
 const loadingConstitution = ref(false)
-const constitutionRules = ref<any[]>([])
-const showEditConstitution = ref(false)
-const constitutionText = ref('')
-const savingConstitution = ref(false)
-const evaluating = ref(false)
+const showAddRuleModal = ref(false)
+const addingRule = ref(false)
+const newRuleText = ref('')
+const newRulePriority = ref(1)
+const deletingRule = ref(false)
 
 const formatPercent = (val: number | undefined) =>
   val !== undefined && val !== null ? `${Math.round(val * 100)}%` : '-'
+
+const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 
 const traitColor = (val: number) => {
   if (val >= 0.7) return '#10b981'
@@ -250,49 +373,111 @@ const traitColor = (val: number) => {
   return '#f59e0b'
 }
 
+const categoryColor = (cat: string) => {
+  const map: Record<string, string> = {
+    general: 'blue', insight: 'purple', lesson: 'green', mistake: 'red',
+  }
+  return map[cat] || 'default'
+}
+
 const actionColumns = computed(() => [
   { title: t('common.description'), dataIndex: 'description', key: 'description', ellipsis: true },
+  { title: t('common.type'), key: 'type', dataIndex: 'type', width: 120 },
   { title: t('common.status'), key: 'status', width: 140 },
-  { title: t('growth.priority'), key: 'priority', width: 100 },
   { title: t('common.createdAt'), dataIndex: 'created_at', width: 180 },
 ])
+
+// --- Fetch functions using growth API module ---
 
 const fetchOverview = async () => {
   loadingOverview.value = true
   try {
-    const [growthRes, personalityRes] = await Promise.all([
-      request.get('/growth', { params: { agent_id: agentId.value } }),
-      request.get('/growth/personality', { params: { agent_id: agentId.value } }),
+    const [motivationRes, personalityRes, constitutionRes] = await Promise.all([
+      growthApi.getMotivation(agentId.value),
+      growthApi.getPersonality(agentId.value),
+      growthApi.getConstitution(agentId.value),
     ])
-    const growth: any = growthRes?.data ?? growthRes
-    const personality: any = personalityRes?.data ?? personalityRes
 
-    overview.value = growth?.overview ?? growth ?? {}
-    constitutionSummary.value = growth?.constitution_summary ?? growth?.constitution?.summary ?? ''
+    motivationData.value = motivationRes.data ?? null
+    personalityProfile.value = personalityRes.data ?? null
 
+    const personality = personalityRes.data
     if (personality?.traits) {
       personalityTraits.value = Object.entries(personality.traits).map(([name, value]) => ({
         name,
         value: value as number,
       }))
-    } else if (Array.isArray(personality)) {
-      personalityTraits.value = personality
     }
+
+    constitutionRules.value = Array.isArray(constitutionRes.data) ? constitutionRes.data : []
   } catch (e: any) {
-    message.error(e?.message || t('common.error'))
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
     loadingOverview.value = false
+  }
+}
+
+const fetchReflections = async () => {
+  loadingReflections.value = true
+  try {
+    const res = await growthApi.getReflections(agentId.value, {
+      page: reflectionsPage.value,
+      size: reflectionsPageSize,
+    })
+    const data = res.data
+    if (data && typeof data === 'object' && 'items' in data) {
+      reflections.value = data.items ?? []
+      reflectionsTotal.value = data.total ?? 0
+    } else {
+      reflections.value = Array.isArray(data) ? data : []
+      reflectionsTotal.value = reflections.value.length
+    }
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  } finally {
+    loadingReflections.value = false
+  }
+}
+
+const onReflectionsPageChange = (p: number) => {
+  reflectionsPage.value = p
+  fetchReflections()
+}
+
+const submitReflection = async () => {
+  if (!newReflection.value.content.trim()) {
+    message.warning(t('validation.required'))
+    return
+  }
+  creatingReflection.value = true
+  try {
+    await growthApi.createReflection(agentId.value, newReflection.value.content, newReflection.value.category)
+    message.success(t('common.success'))
+    showReflectionModal.value = false
+    newReflection.value = { content: '', category: 'general' }
+    await fetchReflections()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  } finally {
+    creatingReflection.value = false
   }
 }
 
 const fetchQuestions = async () => {
   loadingQuestions.value = true
   try {
-    const res: any = await request.get('/growth/questions', { params: { agent_id: agentId.value } })
-    const data = res?.data ?? res
-    questions.value = Array.isArray(data) ? data : data?.items ?? data?.questions ?? []
+    const params: { page?: number; size?: number; answered?: boolean } = { size: 50 }
+    if (questionsFilter.value === 'answered') params.answered = true
+    if (questionsFilter.value === 'unanswered') params.answered = false
+    const res = await growthApi.getQuestions(agentId.value, params)
+    const data = res.data
+    if (data && typeof data === 'object' && 'items' in data) {
+      questions.value = data.items ?? []
+    } else {
+      questions.value = Array.isArray(data) ? data : []
+    }
   } catch (e: any) {
-    message.error(e?.message || t('common.error'))
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
     loadingQuestions.value = false
   }
@@ -305,42 +490,43 @@ const createQuestion = async () => {
   }
   creatingQuestion.value = true
   try {
-    await request.post('/growth/questions', {
-      agent_id: agentId.value,
-      question: newQuestion.value,
-    })
+    // The API module does not expose a createQuestion function directly,
+    // so we use answerQuestion pattern. But since the growth API module
+    // has no createQuestion, we'll use the existing approach via getQuestions
+    // The growth module has getQuestions and answerQuestion. For creation,
+    // we still need a POST. Let's use a direct call for this edge case.
+    const api = (await import('@/api')).default
+    await api.post('/growth/questions', { agent_id: agentId.value, question: newQuestion.value })
     message.success(t('common.success'))
     showQuestionModal.value = false
     newQuestion.value = ''
     await fetchQuestions()
   } catch (e: any) {
-    message.error(e?.message || t('common.error'))
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
     creatingQuestion.value = false
   }
 }
 
-const answerQuestion = (q: any) => {
+const openAnswerModal = (q: GrowthQuestion) => {
   questionToAnswer.value = q
   answerText.value = ''
   showAnswerModal.value = true
 }
 
 const submitAnswer = async () => {
-  if (!answerText.value.trim()) {
+  if (!answerText.value.trim() || !questionToAnswer.value) {
     message.warning(t('validation.required'))
     return
   }
   submittingAnswer.value = true
   try {
-    await request.put(`/growth/questions/${questionToAnswer.value.id}`, {
-      answer: answerText.value,
-    })
+    await growthApi.answerQuestion(questionToAnswer.value.id, answerText.value)
     message.success(t('common.success'))
     showAnswerModal.value = false
     await fetchQuestions()
   } catch (e: any) {
-    message.error(e?.message || t('common.error'))
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
     submittingAnswer.value = false
   }
@@ -349,84 +535,78 @@ const submitAnswer = async () => {
 const fetchActions = async () => {
   loadingActions.value = true
   try {
-    const res: any = await request.get('/growth/actions', { params: { agent_id: agentId.value } })
-    const data = res?.data ?? res
-    actions.value = Array.isArray(data) ? data : data?.items ?? data?.actions ?? []
+    const params: { status?: string } = {}
+    if (actionsFilter.value && actionsFilter.value !== 'all') {
+      params.status = actionsFilter.value
+    }
+    const res = await growthApi.getProactiveActions(agentId.value, params)
+    const data = res.data
+    actions.value = Array.isArray(data) ? data : []
   } catch (e: any) {
-    message.error(e?.message || t('common.error'))
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
     loadingActions.value = false
-  }
-}
-
-const createAction = async () => {
-  if (!newAction.value.description.trim()) {
-    message.warning(t('validation.required'))
-    return
-  }
-  creatingAction.value = true
-  try {
-    await request.post('/growth/actions', {
-      agent_id: agentId.value,
-      ...newAction.value,
-    })
-    message.success(t('common.success'))
-    showActionModal.value = false
-    newAction.value = { description: '', priority: 'medium' }
-    await fetchActions()
-  } catch (e: any) {
-    message.error(e?.message || t('common.error'))
-  } finally {
-    creatingAction.value = false
   }
 }
 
 const fetchConstitution = async () => {
   loadingConstitution.value = true
   try {
-    const res: any = await request.get('/growth/constitution', { params: { agent_id: agentId.value } })
-    const data = res?.data ?? res
-    constitutionRules.value = Array.isArray(data) ? data : data?.rules ?? data?.items ?? []
-    constitutionText.value = constitutionRules.value.map((r: any) => r.rule || r.content).join('\n')
+    const res = await growthApi.getConstitution(agentId.value)
+    constitutionRules.value = Array.isArray(res.data) ? res.data : []
   } catch (e: any) {
-    message.error(e?.message || t('common.error'))
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
     loadingConstitution.value = false
   }
 }
 
-const saveConstitution = async () => {
-  savingConstitution.value = true
+const addRule = async () => {
+  if (!newRuleText.value.trim()) {
+    message.warning(t('validation.required'))
+    return
+  }
+  addingRule.value = true
   try {
-    const rules = constitutionText.value.split('\n').filter((line) => line.trim())
-    await request.put('/growth/constitution', {
-      agent_id: agentId.value,
-      rules: rules.map((r) => ({ rule: r })),
-    })
+    await growthApi.addConstitutionRule(agentId.value, newRuleText.value, newRulePriority.value)
     message.success(t('common.success'))
-    showEditConstitution.value = false
+    showAddRuleModal.value = false
+    newRuleText.value = ''
+    newRulePriority.value = 1
     await fetchConstitution()
   } catch (e: any) {
-    message.error(e?.message || t('common.error'))
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
-    savingConstitution.value = false
+    addingRule.value = false
   }
 }
 
-const evaluateConstitution = async () => {
-  evaluating.value = true
+const toggleRule = async (rule: ConstitutionRule, enabled: boolean) => {
   try {
-    await request.post('/growth/constitution/evaluate', { agent_id: agentId.value })
+    await growthApi.updateConstitutionRule(rule.id, { enabled })
     message.success(t('common.success'))
+    await fetchConstitution()
   } catch (e: any) {
-    message.error(e?.message || t('common.error'))
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  }
+}
+
+const removeRule = async (ruleId: string) => {
+  deletingRule.value = true
+  try {
+    await growthApi.deleteConstitutionRule(ruleId)
+    message.success(t('common.success'))
+    await fetchConstitution()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
-    evaluating.value = false
+    deletingRule.value = false
   }
 }
 
 onMounted(() => {
   fetchOverview()
+  fetchReflections()
   fetchQuestions()
   fetchActions()
   fetchConstitution()
@@ -479,6 +659,61 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
+.factors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.factor-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.factor-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.factor-name {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  text-transform: capitalize;
+}
+
+.factor-impact {
+  font-size: 11px;
+  font-family: var(--nr-font-mono);
+}
+
+.factor-impact.positive {
+  color: #10b981;
+}
+
+.factor-impact.negative {
+  color: #ef4444;
+}
+
+.meta-timestamp {
+  font-size: 11px;
+  color: var(--nr-text-muted);
+  margin-top: 12px;
+  font-family: var(--nr-font-mono);
+}
+
+.personality-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 .traits-list {
   display: flex;
   flex-direction: column;
@@ -517,12 +752,95 @@ onMounted(() => {
   white-space: pre-wrap;
 }
 
+.show-more-link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--nr-primary-light);
+  cursor: pointer;
+}
+
 .tab-toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   margin-bottom: 16px;
 }
 
+/* Reflections */
+.reflections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reflection-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.reflection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.reflection-date {
+  font-size: 11px;
+  color: var(--nr-text-muted);
+  font-family: var(--nr-font-mono);
+}
+
+.reflection-content {
+  font-size: 14px;
+  color: var(--nr-text-primary);
+  line-height: 1.6;
+}
+
+.reflection-insights {
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+}
+
+.insights-label {
+  font-size: 11px;
+  color: var(--nr-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.reflection-insights ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.reflection-insights li {
+  font-size: 13px;
+  color: var(--nr-text-secondary);
+  line-height: 1.5;
+}
+
+.reflection-quality {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quality-label {
+  font-size: 12px;
+  color: var(--nr-text-tertiary);
+}
+
+.pagination-bar {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+/* Questions */
 .questions-list {
   display: flex;
   flex-direction: column;
@@ -549,6 +867,12 @@ onMounted(() => {
   margin: 0;
 }
 
+.question-context {
+  font-size: 12px;
+  color: var(--nr-text-tertiary);
+  font-style: italic;
+}
+
 .question-answer {
   font-size: 13px;
   color: var(--nr-text-secondary);
@@ -563,6 +887,7 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
+/* Constitution rules */
 .rules-list {
   display: flex;
   flex-direction: column;
@@ -596,23 +921,36 @@ onMounted(() => {
   justify-content: center;
 }
 
+.rule-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .rule-text {
   font-size: 14px;
   color: var(--nr-text-primary);
   line-height: 1.5;
 }
 
-.rule-desc {
-  font-size: 12px;
-  color: var(--nr-text-tertiary);
-  margin-top: 6px;
-  padding-left: 36px;
+.rule-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.constitution-actions {
+.rule-date {
+  font-size: 11px;
+  color: var(--nr-text-muted);
+  font-family: var(--nr-font-mono);
+}
+
+.rule-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .modal-question {

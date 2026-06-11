@@ -258,11 +258,10 @@ class VoiceMemoryBridge:
             if emotion_state and self._evolution_orchestrator:
                 try:
                     self._evolution_orchestrator.on_experience_recorded(
-                        experience_type="voice_emotion",
-                        emotion_data=emotion_state,
-                        tool_name="asr_transcribe",
-                        user_id=user_id,
-                        agent_id=agent_id,
+                        text=f"[语音情感] {emotion_state}",
+                        task="voice_emotion",
+                        tools=["asr_transcribe"],
+                        success=True,
                     )
                     logger.debug(f"语音情感已记录到进化系统")
                 except Exception as e:
