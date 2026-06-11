@@ -15,8 +15,8 @@ docker:
 image:
 name: docker.cnb.cool/fuliai/framepack_comfyui/framepacke:v1.2
 runner:
-cpus: 32
-memory: 64G
+cpus: 16
+memory: 32G
 tags: cnb:arch:amd64:gpu
-gpu: 1
+gpu: 2
   # 更多资料见 https://docs.cnb.cool/build/quick-start.html
