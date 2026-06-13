@@ -13,20 +13,16 @@ Agent 管理接口 - Agent Endpoint
 7. 获取/更新宪法 (GET/PUT /api/v1/agents/{agent_id}/constitution)
 """
 
-import datetime
 import json
 import logging
 import os
-from pathlib import Path
-import time
-import traceback
-import typing
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi import Path as FastAPIPath
-from fastapi.responses import JSONResponse
+from fastapi import Query, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
@@ -41,6 +37,7 @@ from neurova.api.endpoints import get_app_state
 
 class AgentInfo(BaseModel):
     """Agent 信息"""
+
     agent_id: str
     name: str
     description: str = ""
@@ -54,6 +51,7 @@ class AgentInfo(BaseModel):
 
 class CreateAgentRequest(BaseModel):
     """创建 Agent 请求"""
+
     name: str = Field(..., description="Agent 名称")
     description: str = Field(default="", description="Agent 描述")
     model: Optional[str] = Field(default=None, description="LLM 模型")
@@ -63,16 +61,19 @@ class CreateAgentRequest(BaseModel):
 
 class UpdateConstitutionRequest(BaseModel):
     """更新宪法请求"""
+
     constitution: Dict[str, Any] = Field(..., description="宪法内容")
 
 
 class UpdatePersonalityRequest(BaseModel):
     """更新性格请求"""
+
     personality: Dict[str, Any] = Field(..., description="性格配置")
 
 
 class DecisionRequest(BaseModel):
     """决策请求"""
+
     context: str = Field(..., description="决策上下文")
     options: List[str] = Field(default=[], description="可选项")
     constraints: List[str] = Field(default=[], description="约束条件")
@@ -96,7 +97,7 @@ def load_agents_config() -> Dict[str, Any]:
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.warning(f"Failed to load agents config: {e}")
+            logger.warning("Failed to load agents config: %s", e)
     return {}
 
 
@@ -107,14 +108,14 @@ def agent_to_info(agent) -> Dict[str, Any]:
     name = "Unknown"
     description = ""
     enable_memory = False
-    
+
     if hasattr(agent, "config"):
         config = agent.config
         agent_id = getattr(config, "agent_id", "unknown")
         name = getattr(config, "name", "Unknown")
         description = getattr(config, "description", "")
         enable_memory = getattr(config, "enable_memory", False)
-    
+
     info = {
         "agent_id": agent_id,
         "name": name,
@@ -151,7 +152,7 @@ def get_agent_from_state(agent_id: str = "default"):
 @router.get("", response_model=List[AgentInfo])
 async def list_agents(request: Request):
     """列出所有 Agent"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
     state = _get_app_state()
 
     agents = []
@@ -168,13 +169,15 @@ async def list_agents(request: Request):
             agent_id = agent_cfg.get("agent_id", "unknown")
             # 检查是否已存在
             if not any(a.agent_id == agent_id for a in agents):
-                agents.append(AgentInfo(
-                    agent_id=agent_id,
-                    name=agent_cfg.get("name", "Unknown"),
-                    description=agent_cfg.get("description", ""),
-                    model=agent_cfg.get("model", ""),
-                    status="config_only",
-                ))
+                agents.append(
+                    AgentInfo(
+                        agent_id=agent_id,
+                        name=agent_cfg.get("name", "Unknown"),
+                        description=agent_cfg.get("description", ""),
+                        model=agent_cfg.get("model", ""),
+                        status="config_only",
+                    )
+                )
 
     return agents
 
@@ -182,7 +185,7 @@ async def list_agents(request: Request):
 @router.get("/{agent_id}", response_model=AgentInfo)
 async def get_agent(request: Request, agent_id: str = FastAPIPath(...)):
     """获取 Agent 详情"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = get_agent_from_state(agent_id)
     if not agent:
@@ -205,15 +208,19 @@ async def get_agent(request: Request, agent_id: str = FastAPIPath(...)):
 
 
 @router.post("", response_model=AgentInfo)
-async def create_agent(request: Request, body: CreateAgentRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
+async def create_agent(
+    request: Request, body: CreateAgentRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """创建 Agent"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     try:
         from neurova.agent_core import Agent, AgentConfig
 
         agent_id = str(uuid.uuid4())[:8]
-        workspace_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "agent_workspaces", agent_id)
+        workspace_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "agent_workspaces", agent_id
+        )
         os.makedirs(workspace_path, exist_ok=True)
         config = AgentConfig(
             name=body.name,
@@ -242,7 +249,7 @@ async def create_agent(request: Request, body: CreateAgentRequest, current_user:
 @router.delete("/{agent_id}")
 async def delete_agent(request: Request, agent_id: str = FastAPIPath(...)):
     """删除 Agent"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     state = _get_app_state()
     if not state:
@@ -258,7 +265,7 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...)):
         try:
             agent.shutdown()
         except Exception as e:
-            logger.warning(f"Agent shutdown error: {e}")
+            logger.warning("Agent shutdown error: %s", e)
 
     # 移除
     del agents[agent_id]
@@ -269,7 +276,7 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...)):
 @router.get("/{agent_id}/stats")
 async def get_agent_stats(request: Request, agent_id: str = FastAPIPath(...)):
     """获取 Agent 统计"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = get_agent_from_state(agent_id)
     if not agent:
@@ -290,7 +297,7 @@ async def get_agent_stats(request: Request, agent_id: str = FastAPIPath(...)):
             agent_stats = agent.get_stats()
             stats.update(agent_stats)
         except Exception as e:
-            logger.warning(f"Get agent stats error: {e}")
+            logger.warning("Get agent stats error: %s", e)
 
     return {"code": 0, "data": stats}
 
@@ -298,7 +305,7 @@ async def get_agent_stats(request: Request, agent_id: str = FastAPIPath(...)):
 @router.post("/{agent_id}/switch")
 async def switch_agent(request: Request, agent_id: str = FastAPIPath(...)):
     """切换默认 Agent"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     state = _get_app_state()
     if not state:
@@ -316,7 +323,7 @@ async def switch_agent(request: Request, agent_id: str = FastAPIPath(...)):
 @router.get("/{agent_id}/constitution")
 async def get_constitution(request: Request, agent_id: str = FastAPIPath(...)):
     """获取 Agent 宪法"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = get_agent_from_state(agent_id)
     if not agent:
@@ -327,7 +334,7 @@ async def get_constitution(request: Request, agent_id: str = FastAPIPath(...)):
         try:
             constitution = agent.get_constitution()
         except Exception as e:
-            logger.warning(f"Get constitution error: {e}")
+            logger.warning("Get constitution error: %s", e)
 
     return {"code": 0, "data": {"constitution": constitution}}
 
@@ -339,7 +346,7 @@ async def update_constitution(
     body: UpdateConstitutionRequest = Body(...),
 ):
     """更新 Agent 宪法"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = get_agent_from_state(agent_id)
     if not agent:
@@ -361,7 +368,7 @@ async def make_decision(
     body: DecisionRequest = Body(...),
 ):
     """请求 Agent 做出决策"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = get_agent_from_state(agent_id)
     if not agent:
@@ -392,7 +399,7 @@ async def make_decision(
 @router.post("/{agent_id}/rebuild-loop")
 async def rebuild_loop(request: Request, agent_id: str = FastAPIPath(...), model: str = Query(default=None)):
     """重建 Agent Loop（热切换模型）"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = get_agent_from_state(agent_id)
     if not agent:

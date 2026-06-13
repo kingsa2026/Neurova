@@ -18,35 +18,43 @@ from __future__ import annotations
 - QuestionQueueManager - 问题队列管理器
 """
 
-import time
+import datetime as dt  # 避免变量名冲突
 import logging
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
-import datetime as dt  # 避免变量名冲突
 from enum import Enum
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from neurova.cognitive_layers.meta_cognition_layer.growth_log import (
+    GrowthLogManager,
+    ReflectionLogStatus,
+    ReflectionType,
+)
+from neurova.cognitive_layers.meta_cognition_layer.question_queue import (
+    QuestionQueueManager,
+)
 from neurova.core.base_module import BaseModule
-from neurova.core.event_bus import Event
-from neurova.cognitive_layers.memory_layer.models import MemoryCategory, Memory
-from neurova.cognitive_layers.meta_cognition_layer.growth_log import GrowthLogManager, ReflectionType, ReflectionLogStatus
-from neurova.cognitive_layers.meta_cognition_layer.question_queue import QuestionQueueManager, QuestionEntry, QuestionStatus
 
 if TYPE_CHECKING:
     from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
 logger = logging.getLogger(__name__)
 
+
 class ContextPriority(Enum):
     """上下文优先级"""
-    CRITICAL = 100   # 系统提示、固化记忆
-    HIGH = 80        # 高温记忆、反思日志
-    NORMAL = 50      # 普通记忆
-    LOW = 20         # 低温记忆、归档内容
+
+    CRITICAL = 100  # 系统提示、固化记忆
+    HIGH = 80  # 高温记忆、反思日志
+    NORMAL = 50  # 普通记忆
+    LOW = 20  # 低温记忆、归档内容
+
 
 @dataclass
 class TokenBudget:
     """Token 预算配置 - 增强版"""
+
     max_total: int = 16000
     system_prompt: int = 1500
     reflection_log: int = 1000
@@ -63,9 +71,11 @@ class TokenBudget:
     def english_ratio(self) -> float:
         return 0.25
 
+
 @dataclass
 class ContextEntry:
     """上下文条目"""
+
     id: str
     content: str
     priority: ContextPriority
@@ -77,19 +87,21 @@ class ContextEntry:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            'id': self.id,
-            'content': self.content,
-            'priority': self.priority.value,
-            'category': self.category,
-            'temperature': self.temperature,
-            'is_crystallized': self.is_crystallized,
-            'metadata': self.metadata,
-            'created_at': self.created_at,
+            "id": self.id,
+            "content": self.content,
+            "priority": self.priority.value,
+            "category": self.category,
+            "temperature": self.temperature,
+            "is_crystallized": self.is_crystallized,
+            "metadata": self.metadata,
+            "created_at": self.created_at,
         }
+
 
 @dataclass
 class ContextBuildResult:
     """上下文构建结果"""
+
     context: List[Dict[str, str]]
     total_tokens: int
     compression_ratio: float
@@ -97,6 +109,7 @@ class ContextBuildResult:
     memory_count: int
     history_count: int
     stats: Dict[str, Any]
+
 
 class UnifiedContextInjector(BaseModule):
     """
@@ -116,13 +129,13 @@ class UnifiedContextInjector(BaseModule):
 
     def __init__(
         self,
-        memory_manager: 'MemoryManager',
+        memory_manager: "MemoryManager",
         growth_log_manager: Optional[GrowthLogManager] = None,
         question_queue_manager: Optional[QuestionQueueManager] = None,
         token_budget: Optional[TokenBudget] = None,
         enable_cache: bool = True,
         enable_compression: bool = True,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(
             module_id=self.MODULE_ID,
@@ -130,7 +143,7 @@ class UnifiedContextInjector(BaseModule):
             version=self.MODULE_VERSION,
             description="统一上下文注入器 - 整合所有上下文注入逻辑",
             dependencies=["memory_manager"],
-            **kwargs
+            **kwargs,
         )
 
         self._memory_manager = memory_manager
@@ -144,10 +157,11 @@ class UnifiedContextInjector(BaseModule):
         if self._enable_compression:
             try:
                 from neurova.context_compressor import SmartContextCompressor
+
                 self._compressor = SmartContextCompressor()
                 logger.info("SmartContextCompressor initialized")
             except Exception as e:
-                logger.warning(f"SmartContextCompressor initialization failed: {e}")
+                logger.warning("SmartContextCompressor initialization failed: %s", e)
                 self._compressor = None
         else:
             self._compressor = None
@@ -166,11 +180,14 @@ class UnifiedContextInjector(BaseModule):
         self.subscribe_event("context.invalidate_cache", self._handle_cache_invalidate)
         self.subscribe_event("context.set_priority", self._handle_set_priority)
 
-        self.log_info("UnifiedContextInjector 初始化完成", {
-            "max_total_tokens": self._token_budget.max_total,
-            "enable_cache": self._enable_cache,
-            "enable_compression": self._enable_compression,
-        })
+        self.log_info(
+            "UnifiedContextInjector 初始化完成",
+            {
+                "max_total_tokens": self._token_budget.max_total,
+                "enable_cache": self._enable_cache,
+                "enable_compression": self._enable_compression,
+            },
+        )
 
     async def on_start(self) -> None:
         """启动钩子"""
@@ -214,9 +231,7 @@ class UnifiedContextInjector(BaseModule):
         effective_max = max_tokens if max_tokens is not None else self._token_budget.max_total
 
         # 动态调整各部分预算
-        effective_budget = self._adjust_budget(
-            conversation_history, memories, effective_max
-        )
+        effective_budget = self._adjust_budget(conversation_history, memories, effective_max)
 
         # 临时替换预算
         original_budget = self._token_budget
@@ -224,9 +239,14 @@ class UnifiedContextInjector(BaseModule):
 
         try:
             return self._build_context_internal(
-                system_prompt, memories, conversation_history,
-                user_input, agent_emotion, include_reflection_log, include_question_queue,
-                experience
+                system_prompt,
+                memories,
+                conversation_history,
+                user_input,
+                agent_emotion,
+                include_reflection_log,
+                include_question_queue,
+                experience,
             )
         finally:
             # 恢复原始预算
@@ -242,8 +262,8 @@ class UnifiedContextInjector(BaseModule):
         3. 优先保证重要内容
         """
         # 计算各部分实际需求
-        history_estimate = sum(self._count_tokens(m.get('content', '')) for m in history)
-        memory_estimate = sum(self._count_tokens(m.get('content', '')) for m in memories)
+        history_estimate = sum(self._count_tokens(m.get("content", "")) for m in history)
+        memory_estimate = sum(self._count_tokens(m.get("content", "")) for m in memories)
 
         # 系统提示估算
         system_estimate = self._token_budget.system_prompt
@@ -274,7 +294,7 @@ class UnifiedContextInjector(BaseModule):
             system_prompt=system_budget,
             reflection_log=self._token_budget.reflection_log,
             memories=memory_budget,
-            conversation_history=history_budget
+            conversation_history=history_budget,
         )
 
     def _build_context_internal(
@@ -293,7 +313,6 @@ class UnifiedContextInjector(BaseModule):
         """
         start_time = time.time()
 
-        context_entries = []
 
         reflection_content = ""
         if include_reflection_log and self._growth_log_manager:
@@ -322,7 +341,7 @@ class UnifiedContextInjector(BaseModule):
         system_tokens = self._count_tokens(system_content)
 
         history = self._trim_history(conversation_history)
-        history_tokens = sum(self._count_tokens(msg.get('content', '')) for msg in history)
+        history_tokens = sum(self._count_tokens(msg.get("content", "")) for msg in history)
 
         user_tokens = self._count_tokens(user_input)
 
@@ -330,20 +349,16 @@ class UnifiedContextInjector(BaseModule):
 
         compression_ratio = 1.0
         if total_tokens > self._token_budget.max_total and self._enable_compression:
-            system_content, history, compression_ratio = self._compress_context(
-                system_content, history, user_tokens
-            )
+            system_content, history, compression_ratio = self._compress_context(system_content, history, user_tokens)
             total_tokens = (
-                self._count_tokens(system_content) +
-                sum(self._count_tokens(msg.get('content', '')) for msg in history) +
-                user_tokens
+                self._count_tokens(system_content)
+                + sum(self._count_tokens(msg.get("content", "")) for msg in history)
+                + user_tokens
             )
 
-        context = [
-            {'role': 'system', 'content': system_content}
-        ]
+        context = [{"role": "system", "content": system_content}]
         context.extend(history)
-        context.append({'role': 'user', 'content': user_input})
+        context.append({"role": "user", "content": user_input})
 
         result = ContextBuildResult(
             context=context,
@@ -353,19 +368,22 @@ class UnifiedContextInjector(BaseModule):
             memory_count=len(memories),
             history_count=len(history),
             stats={
-                'system_tokens': system_tokens,
-                'history_tokens': history_tokens,
-                'user_tokens': user_tokens,
-                'build_time_ms': int((time.time() - start_time) * 1000),
-                'within_budget': total_tokens <= self._token_budget.max_total,
-            }
+                "system_tokens": system_tokens,
+                "history_tokens": history_tokens,
+                "user_tokens": user_tokens,
+                "build_time_ms": int((time.time() - start_time) * 1000),
+                "within_budget": total_tokens <= self._token_budget.max_total,
+            },
         )
 
-        self.log_info("上下文构建完成", {
-            'total_tokens': total_tokens,
-            'within_budget': result.stats['within_budget'],
-            'compression_ratio': compression_ratio,
-        })
+        self.log_info(
+            "上下文构建完成",
+            {
+                "total_tokens": total_tokens,
+                "within_budget": result.stats["within_budget"],
+                "compression_ratio": compression_ratio,
+            },
+        )
 
         return result
 
@@ -375,7 +393,7 @@ class UnifiedContextInjector(BaseModule):
         reflection_content: str = "",
         memory_content: str = "",
         emotion_content: str = "",
-        experience_content: str = ""
+        experience_content: str = "",
     ) -> str:
         """构建系统提示"""
         parts = [base_prompt]
@@ -440,22 +458,22 @@ class UnifiedContextInjector(BaseModule):
         for mem in memories:
             # 基础分数：温度和固化状态
             base_score = 0
-            if mem.get('is_crystallized'):
+            if mem.get("is_crystallized"):
                 base_score += 100  # 固化记忆最高优先级
-            elif mem.get('is_important'):
+            elif mem.get("is_important"):
                 base_score += 80
-            base_score += mem.get('temperature', 50) * 0.5
+            base_score += mem.get("temperature", 50) * 0.5
 
             # 相关性分数
             relevance_score = 0
             if topic_keywords:
-                content = mem.get('content', '').lower()
+                content = mem.get("content", "").lower()
                 for keyword in topic_keywords:
                     if keyword.lower() in content:
                         relevance_score += 20
 
             # 分类优先级
-            category_priority = self._get_category_priority(mem.get('category', ''))
+            category_priority = self._get_category_priority(mem.get("category", ""))
 
             total_score = base_score + relevance_score + category_priority
             scored_memories.append((total_score, mem))
@@ -469,7 +487,7 @@ class UnifiedContextInjector(BaseModule):
         budget = self._token_budget.memories
 
         for score, mem in scored_memories:
-            content = mem.get('content', '')
+            content = mem.get("content", "")
             mem_tokens = self._count_tokens(content)
 
             # 检查是否超过预算
@@ -477,7 +495,7 @@ class UnifiedContextInjector(BaseModule):
                 # 尝试压缩这条记忆
                 if len(lines) == 0:
                     # 第一条记忆就超预算，截断
-                    truncated = content[:int(budget / self._token_budget.chinese_ratio)]
+                    truncated = content[: int(budget / self._token_budget.chinese_ratio)]
                     lines.append(f"- {truncated}... [已截断]")
                     total_tokens += self._count_tokens(lines[-1])
                 break
@@ -487,16 +505,16 @@ class UnifiedContextInjector(BaseModule):
 
             # 添加标记
             if self._show_temperature:
-                temp = mem.get('temperature', 50)
-                if mem.get('is_crystallized'):
+                temp = mem.get("temperature", 50)
+                if mem.get("is_crystallized"):
                     line += " 🔒"
-                elif mem.get('is_important'):
+                elif mem.get("is_important"):
                     line += f" ⭐ ({temp:.0f}°C)"
                 elif temp > 70:
                     line += f" ({temp:.0f}°C)"
 
             # 添加分类标记
-            category = mem.get('category', '')
+            category = mem.get("category", "")
             if category:
                 category_emoji = self._get_category_emoji(category)
                 line = f"{category_emoji} {line}"
@@ -515,10 +533,10 @@ class UnifiedContextInjector(BaseModule):
         words = []
         current = []
         for char in text:
-            if '\u4e00' <= char <= '\u9fff':
+            if "\u4e00" <= char <= "\u9fff":
                 current.append(char)
                 if len(current) >= 2:
-                    words.append(''.join(current))
+                    words.append("".join(current))
                     current = current[-1:]
             else:
                 current = []
@@ -536,40 +554,40 @@ class UnifiedContextInjector(BaseModule):
     def _get_category_priority(self, category: str) -> float:
         """获取记忆分类的优先级"""
         priorities = {
-            'profile': 50,      # 用户画像
-            'task': 45,         # 任务
-            'skill': 40,        # 技能
-            'identity': 40,     # 身份
-            'core_command': 50, # 核心指令
-            'lesson': 35,       # 教训
-            'experience': 30,  # 经验
-            'fact': 25,         # 事实
-            'relationship': 20, # 关系
-            'emotional': 20,    # 情感
-            'conversation': 15, # 对话
-            'reflection_log': 30,  # 反思
-            'creative': 15,     # 创意
+            "profile": 50,  # 用户画像
+            "task": 45,  # 任务
+            "skill": 40,  # 技能
+            "identity": 40,  # 身份
+            "core_command": 50,  # 核心指令
+            "lesson": 35,  # 教训
+            "experience": 30,  # 经验
+            "fact": 25,  # 事实
+            "relationship": 20,  # 关系
+            "emotional": 20,  # 情感
+            "conversation": 15,  # 对话
+            "reflection_log": 30,  # 反思
+            "creative": 15,  # 创意
         }
         return priorities.get(category.lower(), 10)
 
     def _get_category_emoji(self, category: str) -> str:
         """获取记忆分类的emoji标记"""
         emojis = {
-            'profile': '👤',
-            'task': '📋',
-            'skill': '🎯',
-            'identity': '🆔',
-            'core_command': '⚡',
-            'lesson': '📝',
-            'experience': '💡',
-            'fact': '📚',
-            'relationship': '🔗',
-            'emotional': '💭',
-            'conversation': '💬',
-            'reflection_log': '🔄',
-            'creative': '✨',
+            "profile": "👤",
+            "task": "📋",
+            "skill": "🎯",
+            "identity": "🆔",
+            "core_command": "⚡",
+            "lesson": "📝",
+            "experience": "💡",
+            "fact": "📚",
+            "relationship": "🔗",
+            "emotional": "💭",
+            "conversation": "💬",
+            "reflection_log": "🔄",
+            "creative": "✨",
         }
-        return emojis.get(category.lower(), '📌')
+        return emojis.get(category.lower(), "📌")
 
     def _build_experience_context(self, query: str = "") -> str:
         """构建经验上下文 - 从经验知识库中检索相关经验"""
@@ -590,9 +608,9 @@ class UnifiedContextInjector(BaseModule):
 
             parts = ["\n## 相关经验"]
             for exp in similar[:3]:  # 最多显示3条
-                context_summary = exp.get('context', '')[:50]
-                result_summary = exp.get('result', '')[:50]
-                success_mark = "✓" if exp.get('success') else "✗"
+                context_summary = exp.get("context", "")[:50]
+                result_summary = exp.get("result", "")[:50]
+                success_mark = "✓" if exp.get("success") else "✗"
                 parts.append(f"{success_mark} {context_summary} → {result_summary}")
 
             return "\n".join(parts)
@@ -621,9 +639,9 @@ class UnifiedContextInjector(BaseModule):
         try:
             parts = []
             for exp in experiences[:3]:  # 最多显示3条
-                context_summary = exp.get('context', '')[:50]
-                result_summary = exp.get('result', '')[:50]
-                success_mark = "✓" if exp.get('success') else "✗"
+                context_summary = exp.get("context", "")[:50]
+                result_summary = exp.get("result", "")[:50]
+                success_mark = "✓" if exp.get("success") else "✗"
                 parts.append(f"{success_mark} {context_summary} → {result_summary}")
 
             return "\n".join(parts)
@@ -638,11 +656,16 @@ class UnifiedContextInjector(BaseModule):
         for emotion_type, intensity in emotion.items():
             if intensity > 0.3:
                 emojis = {
-                    'joy': '😊', 'sadness': '😢', 'anger': '😠',
-                    'fear': '😨', 'surprise': '😲', 'neutral': '😐', 'hope': '🌟'
+                    "joy": "😊",
+                    "sadness": "😢",
+                    "anger": "😠",
+                    "fear": "😨",
+                    "surprise": "😲",
+                    "neutral": "😐",
+                    "hope": "🌟",
                 }
-                emoji = emojis.get(emotion_type, '')
-                emotions.append(f"{emoji} {emotion_type}: {intensity:.0%}")
+                emoji = emojis.get(emotion_type, "")
+                emotions.append(f"{emoji} {emotion_type}: {intensity * 100:.0f}%%")
 
         return " | ".join(emotions) if emotions else "😐 neutral"
 
@@ -656,7 +679,7 @@ class UnifiedContextInjector(BaseModule):
         budget = self._token_budget.conversation_history
 
         for msg in reversed(history):
-            msg_tokens = self._count_tokens(msg.get('content', ''))
+            msg_tokens = self._count_tokens(msg.get("content", ""))
             if total_tokens + msg_tokens <= budget:
                 trimmed.insert(0, msg)
                 total_tokens += msg_tokens
@@ -667,12 +690,7 @@ class UnifiedContextInjector(BaseModule):
 
         return trimmed
 
-    def _compress_context(
-        self,
-        system_content: str,
-        history: List[Dict],
-        user_tokens: int
-    ) -> tuple:
+    def _compress_context(self, system_content: str, history: List[Dict], user_tokens: int) -> tuple:
         """压缩上下文 - 使用SmartContextCompressor"""
         # 如果压缩器不可用，使用简单压缩
         if not self._compressor:
@@ -685,7 +703,7 @@ class UnifiedContextInjector(BaseModule):
                 memory_lines = system_content.split("## 相关记忆")[1].split("\n")
                 for line in memory_lines:
                     if line.strip() and line.strip().startswith("- "):
-                        memories.append({'content': line[2:].strip()})
+                        memories.append({"content": line[2:].strip()})
 
             # 使用SmartContextCompressor
             result = self._compressor.compress_context(
@@ -693,36 +711,28 @@ class UnifiedContextInjector(BaseModule):
                 memories=memories,
                 conversation_history=history,
                 user_input="",  # user_input会在后面添加
-                current_tokens=None
+                current_tokens=None,
             )
 
-            compressed_context = result['context']
+            compressed_context = result["context"]
 
             # 从压缩后的上下文中提取system_content和history
             if compressed_context and len(compressed_context) > 0:
-                system_content = compressed_context[0].get('content', system_content)
+                system_content = compressed_context[0].get("content", system_content)
                 history = compressed_context[1:-1] if len(compressed_context) > 1 else []
 
-            compression_ratio = result['stats'].get('compression_ratio', 1.0)
+            compression_ratio = result["stats"].get("compression_ratio", 1.0)
 
             return system_content, history, compression_ratio
 
         except Exception as e:
-            logger.warning(f"Smart compression failed, using simple compression: {e}")
+            logger.warning("Smart compression failed, using simple compression: %s", e)
             return self._simple_compress(system_content, history, user_tokens)
 
-    def _simple_compress(
-        self,
-        system_content: str,
-        history: List[Dict],
-        user_tokens: int
-    ) -> tuple:
+    def _simple_compress(self, system_content: str, history: List[Dict], user_tokens: int) -> tuple:
         """简单压缩（降级方案）"""
         available_budget = self._token_budget.max_total - user_tokens
-        system_budget = min(
-            self._token_budget.system_prompt,
-            available_budget // 2
-        )
+        system_budget = min(self._token_budget.system_prompt, available_budget // 2)
 
         if self._count_tokens(system_content) > system_budget:
             system_content = self._truncate_text(system_content, system_budget)
@@ -732,7 +742,7 @@ class UnifiedContextInjector(BaseModule):
         total_tokens = 0
 
         for msg in reversed(history):
-            msg_tokens = self._count_tokens(msg.get('content', ''))
+            msg_tokens = self._count_tokens(msg.get("content", ""))
             if total_tokens + msg_tokens <= history_budget:
                 compressed_history.insert(0, msg)
                 total_tokens += msg_tokens
@@ -744,14 +754,9 @@ class UnifiedContextInjector(BaseModule):
             dropped_count = len(history) - kept_count
             summary_tokens = min(100, history_budget - total_tokens)
             summary_content = f"[对话摘要: 省略了{dropped_count}轮对话]"
-            compressed_history.insert(0, {
-                'role': 'system',
-                'content': summary_content[:summary_tokens]
-            })
+            compressed_history.insert(0, {"role": "system", "content": summary_content[:summary_tokens]})
 
-        ratio = (
-            self._count_tokens(system_content) + total_tokens + user_tokens
-        ) / (self._token_budget.max_total + 1)
+        ratio = (self._count_tokens(system_content) + total_tokens + user_tokens) / (self._token_budget.max_total + 1)
 
         return system_content, compressed_history, min(1.0, ratio)
 
@@ -770,20 +775,12 @@ class UnifiedContextInjector(BaseModule):
         if not text:
             return 0
 
-        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+        chinese_chars = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
         other_chars = len(text) - chinese_chars
 
-        return int(
-            chinese_chars * self._token_budget.chinese_ratio +
-            other_chars * self._token_budget.english_ratio
-        )
+        return int(chinese_chars * self._token_budget.chinese_ratio + other_chars * self._token_budget.english_ratio)
 
-    def retrieve_memories(
-        self,
-        query: str,
-        limit: int = 10,
-        prioritize_high_temp: bool = True
-    ) -> List[Dict]:
+    def retrieve_memories(self, query: str, limit: int = 10, prioritize_high_temp: bool = True) -> List[Dict]:
         """检索相关记忆"""
         try:
             query_memories = self._memory_manager.recall(query=query, limit=limit)
@@ -794,31 +791,23 @@ class UnifiedContextInjector(BaseModule):
             try:
                 all_memories = self._memory_manager.get_memories(limit=100)
                 hot_memories = [
-                    m for m in all_memories
-                    if not m.get('is_crystallized', False) and m.get('temperature', 50) > 70
+                    m for m in all_memories if not m.get("is_crystallized", False) and m.get("temperature", 50) > 70
                 ][:3]
-                crystallized = [
-                    m for m in all_memories
-                    if m.get('is_crystallized', False)
-                ][:5]
+                crystallized = [m for m in all_memories if m.get("is_crystallized", False)][:5]
             except Exception:
                 pass
 
             seen_ids = set()
             all_memories = []
             for mem in query_memories + hot_memories + crystallized:
-                mem_id = mem.get('id', '')
+                mem_id = mem.get("id", "")
                 if mem_id and mem_id not in seen_ids:
                     seen_ids.add(mem_id)
                     all_memories.append(mem)
 
             if prioritize_high_temp:
                 all_memories.sort(
-                    key=lambda m: (
-                        m.get('is_crystallized', False),
-                        m.get('temperature', 50)
-                    ),
-                    reverse=True
+                    key=lambda m: (m.get("is_crystallized", False), m.get("temperature", 50)), reverse=True
                 )
 
             return all_memories[:limit]
@@ -828,9 +817,7 @@ class UnifiedContextInjector(BaseModule):
             return []
 
     def get_reflection_logs_for_context(
-        self,
-        focus_types: Optional[List[ReflectionType]] = None,
-        limit: int = 5
+        self, focus_types: Optional[List[ReflectionType]] = None, limit: int = 5
     ) -> str:
         """获取用于上下文的反思日志"""
         if not self._growth_log_manager:
@@ -915,25 +902,28 @@ class UnifiedContextInjector(BaseModule):
         """处理上下文构建请求"""
         try:
             result = self.build_context(
-                system_prompt=data.get('system_prompt', ''),
-                memories=data.get('memories', []),
-                conversation_history=data.get('conversation_history', []),
-                user_input=data.get('user_input', ''),
-                agent_emotion=data.get('agent_emotion'),
-                include_reflection_log=data.get('include_reflection_log', True),
+                system_prompt=data.get("system_prompt", ""),
+                memories=data.get("memories", []),
+                conversation_history=data.get("conversation_history", []),
+                user_input=data.get("user_input", ""),
+                agent_emotion=data.get("agent_emotion"),
+                include_reflection_log=data.get("include_reflection_log", True),
             )
 
-            self.emit_event("context.built", {
-                'total_tokens': result.total_tokens,
-                'within_budget': result.stats['within_budget'],
-            })
+            self.emit_event(
+                "context.built",
+                {
+                    "total_tokens": result.total_tokens,
+                    "within_budget": result.stats["within_budget"],
+                },
+            )
 
         except Exception as e:
             self.log_error(f"处理上下文构建请求失败: {e}")
 
     async def _handle_cache_invalidate(self, data: Dict[str, Any]) -> None:
         """处理缓存失效请求"""
-        key = data.get('key')
+        key = data.get("key")
         if key:
             self._cache.pop(key, None)
         else:
@@ -941,22 +931,23 @@ class UnifiedContextInjector(BaseModule):
 
     async def _handle_set_priority(self, data: Dict[str, Any]) -> None:
         """处理设置优先级请求"""
-        context_type = data.get('type')
-        priority = data.get('priority')
+        context_type = data.get("type")
+        priority = data.get("priority")
 
-        if context_type == 'temperature':
+        if context_type == "temperature":
             self._show_temperature = priority
-        elif context_type == 'confidence':
+        elif context_type == "confidence":
             self._show_confidence = priority
-        elif context_type == 'empathy':
+        elif context_type == "empathy":
             self._show_empathy = priority
 
+
 def create_unified_context_injector(
-    memory_manager: 'MemoryManager',
+    memory_manager: "MemoryManager",
     growth_log_manager: Optional[GrowthLogManager] = None,
     question_queue_manager: Optional[QuestionQueueManager] = None,
     max_tokens: int = 16000,
-    **kwargs
+    **kwargs,
 ) -> UnifiedContextInjector:
     """
     创建统一上下文注入器工厂函数
@@ -978,8 +969,9 @@ def create_unified_context_injector(
         growth_log_manager=growth_log_manager,
         question_queue_manager=question_queue_manager,
         token_budget=token_budget,
-        **kwargs
+        **kwargs,
     )
+
 
 class ContextBuilder:
     """
@@ -991,11 +983,7 @@ class ContextBuilder:
 
     MAX_CONTEXT_TOKENS = 16000  # 与 UnifiedContextInjector 保持一致
 
-    def __init__(
-        self,
-        config: Dict = None,
-        unified_injector: Optional[UnifiedContextInjector] = None
-    ):
+    def __init__(self, config: Dict = None, unified_injector: Optional[UnifiedContextInjector] = None):
         self.config = config or {}
         self._unified_injector = unified_injector
 
@@ -1028,9 +1016,7 @@ class ContextBuilder:
             return result.context
 
         # 降级模式：直接使用 injector 的静态方法
-        return self._fallback_build_context(
-            system_prompt, memories, conversation_history, user_input, agent_emotion
-        )
+        return self._fallback_build_context(system_prompt, memories, conversation_history, user_input, agent_emotion)
 
     def build_from_pool(
         self,
@@ -1099,15 +1085,15 @@ class ContextBuilder:
         if not system_content:
             system_content = "You are a helpful assistant."
 
-        context = [{'role': 'system', 'content': system_content}]
+        context = [{"role": "system", "content": system_content}]
         # 对话历史
         if conversation_history:
             context.extend(conversation_history)
         else:
             for i, content in enumerate(history_items):
                 role = "user" if i % 2 == 0 else "assistant"
-                context.append({'role': role, 'content': content})
-        context.append({'role': 'user', 'content': user_input})
+                context.append({"role": role, "content": content})
+        context.append({"role": "user", "content": user_input})
 
         return context
 
@@ -1122,21 +1108,25 @@ class ContextBuilder:
     def _extract_memory_dicts_from_pool(self, pool: list) -> List[Dict]:
         """从候选池中提取记忆条目，还原为 dict 格式"""
         from neurova.context_pool import ContextSource
+
         memories = []
         for item in pool:
             if item.source == ContextSource.MEMORY:
-                memories.append({
-                    "content": item.content,
-                    "temperature": item.metadata.get("temperature", 50),
-                    "is_crystallized": item.metadata.get("is_crystallized", False),
-                    "is_important": item.metadata.get("is_important", False),
-                    "category": item.metadata.get("category", ""),
-                })
+                memories.append(
+                    {
+                        "content": item.content,
+                        "temperature": item.metadata.get("temperature", 50),
+                        "is_crystallized": item.metadata.get("is_crystallized", False),
+                        "is_important": item.metadata.get("is_important", False),
+                        "category": item.metadata.get("category", ""),
+                    }
+                )
         return memories
 
     def _extract_emotion_from_pool(self, pool: list) -> Optional[Dict]:
         """从候选池中提取情感状态"""
         from neurova.context_pool import ContextSource
+
         for item in pool:
             if item.source == ContextSource.EMOTION:
                 return {
@@ -1148,22 +1138,26 @@ class ContextBuilder:
     def _extract_experience_dicts_from_pool(self, pool: list) -> List[Dict]:
         """从候选池中提取经验条目，还原为 dict 格式"""
         from neurova.context_pool import ContextSource
+
         experiences = []
         for item in pool:
             if item.source == ContextSource.EXPERIENCE:
-                experiences.append({
-                    "context": item.content[:100],  # 使用内容作为上下文摘要
-                    "result": item.metadata.get("result", ""),
-                    "success": item.metadata.get("success", True),
-                    "lesson": item.metadata.get("lesson", ""),
-                    "confidence": item.metadata.get("confidence", 1.0),
-                })
+                experiences.append(
+                    {
+                        "context": item.content[:100],  # 使用内容作为上下文摘要
+                        "result": item.metadata.get("result", ""),
+                        "success": item.metadata.get("success", True),
+                        "lesson": item.metadata.get("lesson", ""),
+                        "confidence": item.metadata.get("confidence", 1.0),
+                    }
+                )
         return experiences
 
     @staticmethod
     def _source_to_section_name(source) -> str:
         """将 ContextSource 映射为 section 标题"""
         from neurova.context_pool import ContextSource
+
         mapping = {
             ContextSource.SYSTEM_INSTRUCTION: "系统指令",
             ContextSource.DEVELOPER_INSTRUCTION: "行为规则",
@@ -1189,12 +1183,11 @@ class ContextBuilder:
 
         注意：这是临时降级方案，生产环境应确保 injector 可用。
         """
-        from neurova.context import UnifiedContextInjector, TokenBudget
+        from neurova.context import TokenBudget, UnifiedContextInjector
 
         # 创建临时 injector
         temp_injector = UnifiedContextInjector(
-            memory_manager=None,  # 无记忆管理器
-            token_budget=TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)
+            memory_manager=None, token_budget=TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)  # 无记忆管理器
         )
 
         result = temp_injector.build_context(
@@ -1212,19 +1205,15 @@ class ContextBuilder:
 
         注意：这是临时降级方案，生产环境应确保 injector 可用。
         """
-        from neurova.context import UnifiedContextInjector, TokenBudget
+        from neurova.context import TokenBudget, UnifiedContextInjector
 
         # 创建临时 injector
         temp_injector = UnifiedContextInjector(
-            memory_manager=None,
-            token_budget=TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)
+            memory_manager=None, token_budget=TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)
         )
 
         # 计算总 tokens
-        total_tokens = sum(
-            temp_injector._count_tokens(msg.get('content', ''))
-            for msg in context
-        )
+        total_tokens = sum(temp_injector._count_tokens(msg.get("content", "")) for msg in context)
 
         if total_tokens <= self.MAX_CONTEXT_TOKENS:
             return context
@@ -1280,18 +1269,18 @@ class ContextBuilder:
         options = options or {}
 
         # 提取会话信息
-        conversation_history = session.get('conversation_history', [])
-        user_id = session.get('user_id')
-        agent_id = session.get('agent_id')
-        metadata = session.get('metadata', {})
+        conversation_history = session.get("conversation_history", [])
+        user_id = session.get("user_id")
+        session.get("agent_id")
+        metadata = session.get("metadata", {})
 
         # 提取选项
-        include_reflection_log = options.get('include_reflection_log', True)
-        include_question_queue = options.get('include_question_queue', False)
-        max_tokens = options.get('max_tokens')
-        tool_memory_result = options.get('tool_memory_result')
-        experience_items = options.get('experience_items')
-        system_prompt = options.get('system_prompt', self._get_default_system_prompt())
+        include_reflection_log = options.get("include_reflection_log", True)
+        include_question_queue = options.get("include_question_queue", False)
+        max_tokens = options.get("max_tokens")
+        tool_memory_result = options.get("tool_memory_result")
+        experience_items = options.get("experience_items")
+        system_prompt = options.get("system_prompt", self._get_default_system_prompt())
 
         # 自动检索记忆
         memories = self._auto_retrieve_memories(user_input, user_id)
@@ -1319,9 +1308,7 @@ class ContextBuilder:
             return result.context
 
         # 降级模式
-        return self._fallback_build_context(
-            system_prompt, memories, conversation_history, user_input, agent_emotion
-        )
+        return self._fallback_build_context(system_prompt, memories, conversation_history, user_input, agent_emotion)
 
     def _get_default_system_prompt(self) -> str:
         """获取默认系统提示"""
@@ -1342,7 +1329,7 @@ class ContextBuilder:
             )
             return memories or []
         except Exception as e:
-            logger.warning(f"自动记忆检索失败: {e}")
+            logger.warning("自动记忆检索失败: %s", e)
             return []
 
     def _analyze_emotion(self, user_input: str, metadata: Dict) -> Optional[Dict]:
@@ -1350,10 +1337,10 @@ class ContextBuilder:
         # 简单的情感分析逻辑
         # 实际实现可以使用更复杂的情感分析模型
         emotion_keywords = {
-            'joy': ['开心', '高兴', '快乐', '喜欢', '好'],
-            'sadness': ['难过', '伤心', '失望', '不好'],
-            'anger': ['生气', '愤怒', '讨厌', '烦'],
-            'neutral': ['你好', '请问', '怎么', '什么'],
+            "joy": ["开心", "高兴", "快乐", "喜欢", "好"],
+            "sadness": ["难过", "伤心", "失望", "不好"],
+            "anger": ["生气", "愤怒", "讨厌", "烦"],
+            "neutral": ["你好", "请问", "怎么", "什么"],
         }
 
         user_input_lower = user_input.lower()
@@ -1372,7 +1359,7 @@ class ContextBuilder:
             return memories
 
         # 提取工具记忆
-        tool_memories = tool_memory_result.get('memories', [])
+        tool_memories = tool_memory_result.get("memories", [])
         if not tool_memories:
             return memories
 
@@ -1380,7 +1367,7 @@ class ContextBuilder:
         merged = memories.copy()
         for tool_mem in tool_memories:
             # 检查是否已存在
-            if not any(m.get('content') == tool_mem.get('content') for m in merged):
+            if not any(m.get("content") == tool_mem.get("content") for m in merged):
                 merged.append(tool_mem)
 
         return merged

@@ -3,8 +3,9 @@ ThresholdConfig — 通道激活阈值配置
 
 支持 per-channel 阈值和默认阈值，可从 dict 加载。
 """
+
 import logging
-from typing import Dict, Optional
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class ThresholdConfig:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict) -> 'ThresholdConfig':
+    def from_dict(cls, data: Dict) -> "ThresholdConfig":
         """从字典加载配置"""
         default = data.get("default", 0.3)
         config = cls(default_threshold=default)

@@ -4,18 +4,19 @@ LLM Client - 语言模型客户端
 支持预设配置快速初始化
 """
 
-import time
-import logging
-from typing import List, Dict, Optional, Iterator, AsyncIterator, Any
 import asyncio
+import logging
+import time
 from dataclasses import dataclass, field
+from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 
 # OpenAI 库导入（可选）
 try:
     import openai
-    from openai import OpenAI, AsyncOpenAI, APIError, APIConnectionError, RateLimitError, AuthenticationError
+    from openai import APIConnectionError, APIError, AsyncOpenAI, AuthenticationError, OpenAI, RateLimitError
+
     OPENAI_AVAILABLE = True
-    ASYNC_OPENAI_AVAILABLE = hasattr(openai, 'AsyncOpenAI')
+    ASYNC_OPENAI_AVAILABLE = hasattr(openai, "AsyncOpenAI")
 except ImportError:
     OPENAI_AVAILABLE = False
     ASYNC_OPENAI_AVAILABLE = False
@@ -35,9 +36,11 @@ except ImportError:
 
     logging.warning("openai 库未安装，LLM 客户端将使用模拟模式")
 
+
 @dataclass
 class LLMResponse:
     """LLM 响应数据结构"""
+
     content: str = ""
     role: str = "assistant"
     model: str = ""
@@ -47,9 +50,11 @@ class LLMResponse:
     finish_reason: Optional[str] = None
     response_id: Optional[str] = None
 
+
 @dataclass
 class LLMConfig:
     """LLM 配置"""
+
     api_key: str = ""
     base_url: str = "https://api.openai.com/v1"
     model: str = "gpt-4"
@@ -63,6 +68,7 @@ class LLMConfig:
     retry_delay: float = 1.0
     stream: bool = False
     preset_name: str = ""
+
 
 class LLMClient:
     """LLM 客户端
@@ -129,9 +135,9 @@ class LLMClient:
                     max_retries=self.config.max_retries,
                 )
 
-            self.logger.info(f"LLM 客户端初始化成功: model={self.config.model}")
+            self.logger.info("LLM 客户端初始化成功: model=%s", self.config.model)
         except Exception as e:
-            self.logger.error(f"LLM 客户端初始化失败: {e}")
+            self.logger.error("LLM 客户端初始化失败: %s", e)
             self.client = None
             self.async_client = None
 
@@ -188,14 +194,16 @@ class LLMClient:
             if choice.message.tool_calls:
                 tool_calls = []
                 for tc in choice.message.tool_calls:
-                    tool_calls.append({
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
+                    tool_calls.append(
+                        {
+                            "id": tc.id,
+                            "type": tc.type,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
                         }
-                    })
+                    )
 
             # 更新统计
             self._stats["total_calls"] += 1
@@ -219,7 +227,7 @@ class LLMClient:
             self._stats["failed_calls"] += 1
             self._stats["total_time"] += time.time() - start_time
 
-            self.logger.error(f"LLM 调用失败: {e}")
+            self.logger.error("LLM 调用失败: %s", e)
 
             # 根据异常类型重新抛出
             if isinstance(e, APIConnectionError):
@@ -293,14 +301,16 @@ class LLMClient:
                     tool_calls = []
                     for tc in choice.delta.tool_calls:
                         if tc.function:
-                            tool_calls.append({
-                                "id": tc.id,
-                                "type": tc.type,
-                                "function": {
-                                    "name": tc.function.name,
-                                    "arguments": tc.function.arguments,
+                            tool_calls.append(
+                                {
+                                    "id": tc.id,
+                                    "type": tc.type,
+                                    "function": {
+                                        "name": tc.function.name,
+                                        "arguments": tc.function.arguments,
+                                    },
                                 }
-                            })
+                            )
 
                 # 更新统计
                 self._stats["total_tokens"] += usage.get("total_tokens", 0)
@@ -326,7 +336,7 @@ class LLMClient:
             self._stats["failed_calls"] += 1
             self._stats["total_time"] += time.time() - start_time
 
-            self.logger.error(f"LLM 流式调用失败: {e}")
+            self.logger.error("LLM 流式调用失败: %s", e)
 
             # 根据异常类型重新抛出
             if isinstance(e, APIConnectionError):
@@ -402,14 +412,16 @@ class LLMClient:
                     tool_calls = []
                     for tc in choice.delta.tool_calls:
                         if tc.function:
-                            tool_calls.append({
-                                "id": tc.id,
-                                "type": tc.type,
-                                "function": {
-                                    "name": tc.function.name,
-                                    "arguments": tc.function.arguments,
+                            tool_calls.append(
+                                {
+                                    "id": tc.id,
+                                    "type": tc.type,
+                                    "function": {
+                                        "name": tc.function.name,
+                                        "arguments": tc.function.arguments,
+                                    },
                                 }
-                            })
+                            )
 
                 # 更新统计
                 self._stats["total_tokens"] += usage.get("total_tokens", 0)
@@ -435,7 +447,7 @@ class LLMClient:
             self._stats["failed_calls"] += 1
             self._stats["total_time"] += time.time() - start_time
 
-            self.logger.error(f"异步 LLM 流式调用失败: {e}")
+            self.logger.error("异步 LLM 流式调用失败: %s", e)
 
             # 根据异常类型重新抛出
             if isinstance(e, APIConnectionError):
@@ -485,7 +497,7 @@ class LLMClient:
                 },
             )
         except Exception as e:
-            self.logger.error(f"API 测试调用失败: {e}")
+            self.logger.error("API 测试调用失败: %s", e)
             return LLMResponse(content=f"API 测试失败: {e}", model=config.model)
 
     def _mock_response(self, messages: List[Dict[str, str]]) -> LLMResponse:
@@ -516,7 +528,7 @@ class LLMClient:
         response_text = f"[模拟响应] 收到您的消息：{user_content[:100]}..."
         chunk_size = 10
         for i in range(0, len(response_text), chunk_size):
-            chunk = response_text[i:i+chunk_size]
+            chunk = response_text[i : i + chunk_size]
             yield LLMResponse(
                 content=chunk,
                 role="assistant",
@@ -545,7 +557,7 @@ class LLMClient:
         response_text = f"[模拟响应] 收到您的消息：{user_content[:100]}..."
         chunk_size = 10
         for i in range(0, len(response_text), chunk_size):
-            chunk = response_text[i:i+chunk_size]
+            chunk = response_text[i : i + chunk_size]
             yield LLMResponse(
                 content=chunk,
                 role="assistant",
@@ -599,7 +611,7 @@ class LLMClient:
         # 这个方法需要预设注册表
         # 暂时只更新 preset_name
         self.config.preset_name = preset_name
-        self.logger.info(f"切换到预设: {preset_name}")
+        self.logger.info("切换到预设: %s", preset_name)
 
     def list_available_presets(self, category: Optional[str] = None) -> List[Dict]:
         """

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # ────── Enums ──────
 
+
 class FlowPhase(Enum):
     IDLE = "idle"
     CONVERSATION = "conversation"
@@ -44,6 +45,7 @@ class Severity(Enum):
 
 
 # ────── Data Classes ──────
+
 
 @dataclass
 class FlowEvent:
@@ -95,6 +97,7 @@ class FlowContext:
 
 # ────── FlowTracer ──────
 
+
 class FlowTracer:
     def __init__(self, max_events: int = 1000):
         self._events: List[FlowEvent] = []
@@ -106,15 +109,22 @@ class FlowTracer:
         self._pending[evt_id] = time.time() * 1000
         return evt_id
 
-    def end_phase(self, event_id: str, phase: FlowPhase, success: bool,
-                  data: Optional[Dict[str, Any]] = None, error: Optional[str] = None) -> FlowEvent:
+    def end_phase(
+        self,
+        event_id: str,
+        phase: FlowPhase,
+        success: bool,
+        data: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> FlowEvent:
         start_ms = self._pending.pop(event_id, time.time() * 1000)
         duration_ms = (time.time() * 1000) - start_ms
-        event = FlowEvent(event_id=event_id, phase=phase, data=data or {},
-                          duration_ms=duration_ms, success=success, error=error)
+        event = FlowEvent(
+            event_id=event_id, phase=phase, data=data or {}, duration_ms=duration_ms, success=success, error=error
+        )
         self._events.append(event)
         if len(self._events) > self._max_events:
-            self._events = self._events[-self._max_events:]
+            self._events = self._events[-self._max_events :]
         return event
 
     def get_phase_timeline(self, phase: FlowPhase) -> List[FlowEvent]:
@@ -135,11 +145,11 @@ class FlowTracer:
                 successes += 1
             else:
                 phases[name]["failures"] += 1
-        return {"total_events": len(self._events), "phases": phases,
-                "success_rate": successes / len(self._events)}
+        return {"total_events": len(self._events), "phases": phases, "success_rate": successes / len(self._events)}
 
 
 # ────── MessageFlowManager ──────
+
 
 class MessageFlowManager:
     def __init__(self, max_history: int = 500):
@@ -147,16 +157,22 @@ class MessageFlowManager:
         self._max_history = max_history
         self._counter = 0
 
-    def receive_message(self, session_id: str, role: str, content: str,
-                        metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def receive_message(
+        self, session_id: str, role: str, content: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         self._counter += 1
-        msg = {"id": f"msg_{self._counter:06d}", "role": role, "content": content,
-               "timestamp": datetime.datetime.now().isoformat(), "metadata": metadata or {}}
+        msg = {
+            "id": f"msg_{self._counter:06d}",
+            "role": role,
+            "content": content,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "metadata": metadata or {},
+        }
         if session_id not in self._sessions:
             self._sessions[session_id] = []
         self._sessions[session_id].append(msg)
         if len(self._sessions[session_id]) > self._max_history:
-            self._sessions[session_id] = self._sessions[session_id][-self._max_history:]
+            self._sessions[session_id] = self._sessions[session_id][-self._max_history :]
         return msg
 
     def get_history(self, session_id: str, limit: int = 0) -> List[Dict[str, Any]]:
@@ -176,6 +192,7 @@ class MessageFlowManager:
 
 # ────── ContextMemoryBridge ──────
 
+
 class ContextMemoryBridge:
     def __init__(self, max_cache_entries: int = 100):
         self._cache: OrderedDict = OrderedDict()
@@ -184,9 +201,13 @@ class ContextMemoryBridge:
         self._misses = 0
         self._evictions = 0
 
-    def build_context(self, flow_ctx: FlowContext, system_prompt: str = "",
-                      external_memories: Optional[List[Dict[str, Any]]] = None,
-                      external_experiences: Optional[List[Dict[str, Any]]] = None) -> FlowContext:
+    def build_context(
+        self,
+        flow_ctx: FlowContext,
+        system_prompt: str = "",
+        external_memories: Optional[List[Dict[str, Any]]] = None,
+        external_experiences: Optional[List[Dict[str, Any]]] = None,
+    ) -> FlowContext:
         cache_key = f"{flow_ctx.agent_id}:{flow_ctx.session_id}"
         if cache_key in self._cache:
             self._hits += 1
@@ -212,8 +233,10 @@ class ContextMemoryBridge:
             cached_items.extend(external_experiences)
         flow_ctx.cached_memories = cached_items
 
-        self._cache[cache_key] = {"built_context": copy.deepcopy(context_parts),
-                                   "cached_memories": copy.deepcopy(cached_items)}
+        self._cache[cache_key] = {
+            "built_context": copy.deepcopy(context_parts),
+            "cached_memories": copy.deepcopy(cached_items),
+        }
         while len(self._cache) > self._max_cache:
             self._cache.popitem(last=False)
             self._evictions += 1
@@ -226,15 +249,20 @@ class ContextMemoryBridge:
 
     def get_cache_stats(self) -> Dict[str, Any]:
         total = self._hits + self._misses
-        return {"hits": self._hits, "misses": self._misses,
-                "cache_size": len(self._cache), "evictions": self._evictions,
-                "hit_rate": self._hits / total if total > 0 else 0.0}
+        return {
+            "hits": self._hits,
+            "misses": self._misses,
+            "cache_size": len(self._cache),
+            "evictions": self._evictions,
+            "hit_rate": self._hits / total if total > 0 else 0.0,
+        }
 
     def _count_tokens(self, text: str) -> int:
         return len(text) // 4
 
 
 # ────── MemoryCoordinator ──────
+
 
 class MemoryCoordinator:
     def __init__(self):
@@ -244,13 +272,24 @@ class MemoryCoordinator:
         self._write_count = 0
         self._retrieve_count = 0
 
-    def write(self, content: str, category: str = "general", temperature: float = 50.0,
-              is_important: bool = False, buffered: bool = False) -> str:
+    def write(
+        self,
+        content: str,
+        category: str = "general",
+        temperature: float = 50.0,
+        is_important: bool = False,
+        buffered: bool = False,
+    ) -> str:
         self._counter += 1
         mem_id = f"mem_{self._counter:06d}"
-        memory = {"id": mem_id, "content": content, "category": category,
-                  "temperature": temperature, "is_important": is_important,
-                  "created_at": time.time()}
+        memory = {
+            "id": mem_id,
+            "content": content,
+            "category": category,
+            "temperature": temperature,
+            "is_important": is_important,
+            "created_at": time.time(),
+        }
         if buffered:
             self._buffer.append(memory)
         else:
@@ -258,8 +297,9 @@ class MemoryCoordinator:
             self._write_count += 1
         return mem_id
 
-    def retrieve(self, query: str, category: Optional[str] = None,
-                 limit: int = 10, min_temperature: float = 0.0) -> List[Dict[str, Any]]:
+    def retrieve(
+        self, query: str, category: Optional[str] = None, limit: int = 10, min_temperature: float = 0.0
+    ) -> List[Dict[str, Any]]:
         self._retrieve_count += 1
         results = list(self._memories)
         if category:
@@ -277,11 +317,16 @@ class MemoryCoordinator:
         return count
 
     def get_stats(self) -> Dict[str, Any]:
-        return {"total_memories": len(self._memories), "buffer_size": len(self._buffer),
-                "write_count": self._write_count, "retrieve_count": self._retrieve_count}
+        return {
+            "total_memories": len(self._memories),
+            "buffer_size": len(self._buffer),
+            "write_count": self._write_count,
+            "retrieve_count": self._retrieve_count,
+        }
 
 
 # ────── ToolFeedbackLoop ──────
+
 
 class ToolFeedbackLoop:
     def __init__(self):
@@ -297,6 +342,7 @@ class ToolFeedbackLoop:
 
     async def invoke(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         import inspect
+
         self._stats["invocations"] += 1
         if tool_name not in self._tool_registry:
             self._stats["failures"] += 1
@@ -316,24 +362,33 @@ class ToolFeedbackLoop:
             self._stats["failures"] += 1
             return {"success": False, "error": str(e), "duration_ms": duration_ms}
 
-    def collect_feedback(self, invocation_result: Dict[str, Any],
-                         user_rating: float = 0.5, comment: str = "") -> Dict[str, Any]:
+    def collect_feedback(
+        self, invocation_result: Dict[str, Any], user_rating: float = 0.5, comment: str = ""
+    ) -> Dict[str, Any]:
         should_learn = user_rating < 0.5 or not invocation_result.get("success", True)
-        feedback = {"tool_name": invocation_result.get("tool_name", ""),
-                    "success": invocation_result.get("success", True),
-                    "user_rating": user_rating, "comment": comment,
-                    "should_learn": should_learn, "timestamp": time.time()}
+        feedback = {
+            "tool_name": invocation_result.get("tool_name", ""),
+            "success": invocation_result.get("success", True),
+            "user_rating": user_rating,
+            "comment": comment,
+            "should_learn": should_learn,
+            "timestamp": time.time(),
+        }
         self._feedback_history.append(feedback)
         return feedback
 
     def get_feedback_stats(self) -> Dict[str, Any]:
         invocations = self._stats["invocations"]
-        return {"invocations": invocations, "successes": self._stats["successes"],
-                "failures": self._stats["failures"],
-                "success_rate": self._stats["successes"] / invocations if invocations > 0 else 0.0}
+        return {
+            "invocations": invocations,
+            "successes": self._stats["successes"],
+            "failures": self._stats["failures"],
+            "success_rate": self._stats["successes"] / invocations if invocations > 0 else 0.0,
+        }
 
 
 # ────── ExperienceEvolutionEngine ──────
+
 
 class ExperienceEvolutionEngine:
     def __init__(self):
@@ -341,17 +396,27 @@ class ExperienceEvolutionEngine:
         self._counter = 0
         self._skills_with_exps: Dict[str, int] = {}
 
-    def accumulate_experience(self, context: Dict[str, Any], result: Dict[str, Any],
-                               success: bool, skill_name: str = "general") -> str:
+    def accumulate_experience(
+        self, context: Dict[str, Any], result: Dict[str, Any], success: bool, skill_name: str = "general"
+    ) -> str:
         self._counter += 1
         exp_id = f"exp_{self._counter:06d}"
-        self._experiences.append({"id": exp_id, "context": context, "result": result,
-                                   "success": success, "skill_name": skill_name, "timestamp": time.time()})
+        self._experiences.append(
+            {
+                "id": exp_id,
+                "context": context,
+                "result": result,
+                "success": success,
+                "skill_name": skill_name,
+                "timestamp": time.time(),
+            }
+        )
         self._skills_with_exps[skill_name] = self._skills_with_exps.get(skill_name, 0) + 1
         return exp_id
 
-    def find_similar_experiences(self, query: str, skill_name: Optional[str] = None,
-                                  limit: int = 5) -> List[Dict[str, Any]]:
+    def find_similar_experiences(
+        self, query: str, skill_name: Optional[str] = None, limit: int = 5
+    ) -> List[Dict[str, Any]]:
         candidates = self._experiences
         if skill_name:
             candidates = [e for e in candidates if e["skill_name"] == skill_name]
@@ -379,16 +444,23 @@ class ExperienceEvolutionEngine:
             suggestions.append("高失败率，建议优化工具参数")
         if len(failures) >= 3:
             suggestions.append("连续失败过多，建议更换工具组合")
-        return {"evolved": len(suggestions) > 0, "skill_name": skill_name,
-                "total_experiences": len(skill_exps), "failure_rate": failure_rate,
-                "suggestions": suggestions}
+        return {
+            "evolved": len(suggestions) > 0,
+            "skill_name": skill_name,
+            "total_experiences": len(skill_exps),
+            "failure_rate": failure_rate,
+            "suggestions": suggestions,
+        }
 
     def get_evolution_stats(self) -> Dict[str, Any]:
-        return {"experiences_recorded": len(self._experiences),
-                "skills_with_experiences": list(self._skills_with_exps.keys())}
+        return {
+            "experiences_recorded": len(self._experiences),
+            "skills_with_experiences": list(self._skills_with_exps.keys()),
+        }
 
 
 # ────── SleepConsolidationCoordinator ──────
+
 
 class SleepConsolidationCoordinator:
     def __init__(self):
@@ -399,16 +471,17 @@ class SleepConsolidationCoordinator:
 
     def consolidate_memories(self, memories: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not memories:
-            return {"consolidated_memories": [],
-                    "report": {"total_processed": 0, "merged_count": 0, "consolidation_quality": 1.0}}
+            return {
+                "consolidated_memories": [],
+                "report": {"total_processed": 0, "merged_count": 0, "consolidation_quality": 1.0},
+            }
         consolidated = list(memories)
         merged_count = 0
         i = 0
         while i < len(consolidated):
             j = i + 1
             while j < len(consolidated):
-                sim = self._calculate_similarity(consolidated[i].get("content", ""),
-                                                  consolidated[j].get("content", ""))
+                sim = self._calculate_similarity(consolidated[i].get("content", ""), consolidated[j].get("content", ""))
                 if sim >= self._merge_threshold:
                     consolidated[i] = self._merge_memory_pair(consolidated[i], consolidated[j])
                     consolidated.pop(j)
@@ -418,8 +491,7 @@ class SleepConsolidationCoordinator:
                     j += 1
             i += 1
         quality = max(0.7, 1.0 - (merged_count * 0.1))
-        report = {"total_processed": len(memories), "merged_count": merged_count,
-                  "consolidation_quality": quality}
+        report = {"total_processed": len(memories), "merged_count": merged_count, "consolidation_quality": quality}
         self._dream_reports.append(report)
         return {"consolidated_memories": consolidated, "report": report}
 
@@ -429,10 +501,9 @@ class SleepConsolidationCoordinator:
         clean = text.replace(" ", "").replace("不", "").replace("没有", "")
         if len(clean) < 2:
             return set(clean)
-        return {clean[i:i+2] for i in range(len(clean) - 1)}
+        return {clean[i : i + 2] for i in range(len(clean) - 1)}
 
-    def detect_and_resolve_conflicts(self, new_content: str,
-                                      existing_memories: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def detect_and_resolve_conflicts(self, new_content: str, existing_memories: List[Dict[str, Any]]) -> Dict[str, Any]:
         conflicts: List[Dict[str, Any]] = []
         resolutions: List[Dict[str, Any]] = []
         negation_patterns = ["不", "没有", "并非", "never", "not", "don't", "doesn't"]
@@ -445,9 +516,9 @@ class SleepConsolidationCoordinator:
             overlap = new_tokens & old_tokens
             if new_has_neg != old_has_neg and len(overlap) >= 1:
                 self._stats["conflicts_detected"] += 1
-                conflicts.append({"existing_id": mem.get("id", ""),
-                                   "existing_content": existing_content,
-                                   "new_content": new_content})
+                conflicts.append(
+                    {"existing_id": mem.get("id", ""), "existing_content": existing_content, "new_content": new_content}
+                )
                 strategy = self._conflict_resolution_strategy
                 if strategy == "latest":
                     action = "keep_new"
@@ -468,8 +539,12 @@ class SleepConsolidationCoordinator:
                 if merged_content:
                     resolution["merged_content"] = merged_content
                 resolutions.append(resolution)
-        return {"conflicts_found": len(conflicts), "strategy": self._conflict_resolution_strategy,
-                "conflicts": conflicts, "resolutions": resolutions}
+        return {
+            "conflicts_found": len(conflicts),
+            "strategy": self._conflict_resolution_strategy,
+            "conflicts": conflicts,
+            "resolutions": resolutions,
+        }
 
     def set_merge_threshold(self, threshold: float) -> None:
         self._merge_threshold = max(0.0, min(1.0, threshold))
@@ -483,10 +558,12 @@ class SleepConsolidationCoordinator:
         return self._dream_reports[-limit:]
 
     def get_stats(self) -> Dict[str, Any]:
-        return {"merges": self._stats["merges"],
-                "conflicts_detected": self._stats["conflicts_detected"],
-                "merge_threshold": self._merge_threshold,
-                "conflict_resolution_strategy": self._conflict_resolution_strategy}
+        return {
+            "merges": self._stats["merges"],
+            "conflicts_detected": self._stats["conflicts_detected"],
+            "merge_threshold": self._merge_threshold,
+            "conflict_resolution_strategy": self._conflict_resolution_strategy,
+        }
 
     def _calculate_similarity(self, a: str, b: str) -> float:
         if not a or not b:
@@ -506,6 +583,7 @@ class SleepConsolidationCoordinator:
 
 # ────── MetaCognitionEvaluator ──────
 
+
 class MetaCognitionEvaluator:
     def __init__(self):
         self._evaluation_history: List[Dict[str, Any]] = []
@@ -518,10 +596,14 @@ class MetaCognitionEvaluator:
         quality = self._calculate_overall_quality(phase_scores)
         anomalies = self._detect_anomalies(tracer)
         recommendations = self._generate_recommendations(phase_scores, anomalies)
-        report = {"evaluation_id": eval_id, "phase_scores": phase_scores,
-                  "quality_score": quality, "anomalies": anomalies,
-                  "recommendations": recommendations,
-                  "timestamp": datetime.datetime.now().isoformat()}
+        report = {
+            "evaluation_id": eval_id,
+            "phase_scores": phase_scores,
+            "quality_score": quality,
+            "anomalies": anomalies,
+            "recommendations": recommendations,
+            "timestamp": datetime.datetime.now().isoformat(),
+        }
         self._evaluation_history.append(report)
         return report
 
@@ -529,9 +611,12 @@ class MetaCognitionEvaluator:
         if not self._evaluation_history:
             return {"evaluations": 0, "avg_quality_score": 0.0}
         qualities = [r["quality_score"] for r in self._evaluation_history]
-        return {"evaluations": len(self._evaluation_history),
-                "avg_quality_score": sum(qualities) / len(qualities),
-                "min_quality_score": min(qualities), "max_quality_score": max(qualities)}
+        return {
+            "evaluations": len(self._evaluation_history),
+            "avg_quality_score": sum(qualities) / len(qualities),
+            "min_quality_score": min(qualities),
+            "max_quality_score": max(qualities),
+        }
 
     def _calculate_phase_scores(self, tracer: FlowTracer) -> Dict[str, float]:
         stats = tracer.get_stats()
@@ -550,12 +635,12 @@ class MetaCognitionEvaluator:
         stats = tracer.get_stats()
         for name, ps in stats.get("phases", {}).items():
             if ps["count"] > 0 and (ps["failures"] / ps["count"]) > 0.4:
-                anomalies.append({"type": "low_success_rate", "phase": name,
-                                   "failure_rate": ps["failures"] / ps["count"]})
+                anomalies.append(
+                    {"type": "low_success_rate", "phase": name, "failure_rate": ps["failures"] / ps["count"]}
+                )
         return anomalies
 
-    def _generate_recommendations(self, phase_scores: Dict[str, float],
-                                   anomalies: List[Dict[str, Any]]) -> List[str]:
+    def _generate_recommendations(self, phase_scores: Dict[str, float], anomalies: List[Dict[str, Any]]) -> List[str]:
         recs: List[str] = []
         for a in anomalies:
             if a["type"] == "low_success_rate":
@@ -564,6 +649,7 @@ class MetaCognitionEvaluator:
 
 
 # ────── FlowOrchestrator ──────
+
 
 class FlowOrchestrator:
     """完整流程编排器"""
@@ -579,20 +665,41 @@ class FlowOrchestrator:
         self.tracer = FlowTracer()
         self._cycle_count = 0
 
-    def process_conversation(self, user_input: str = "", session_id: str = "",
-                              agent_id: str = "", user_id: str = "",
-                              system_prompt: str = "", token_budget: int = 4000) -> FlowContext:
+    def process_conversation(
+        self,
+        user_input: str = "",
+        session_id: str = "",
+        agent_id: str = "",
+        user_id: str = "",
+        system_prompt: str = "",
+        token_budget: int = 4000,
+    ) -> FlowContext:
         self._cycle_count += 1
-        ctx = FlowContext(session_id=session_id or f"sess_{self._cycle_count:06d}",
-                          agent_id=agent_id, user_id=user_id, user_input=user_input,
-                          system_prompt=system_prompt, token_budget=token_budget,
-                          _cycle_count=self._cycle_count)
+        ctx = FlowContext(
+            session_id=session_id or f"sess_{self._cycle_count:06d}",
+            agent_id=agent_id,
+            user_id=user_id,
+            user_input=user_input,
+            system_prompt=system_prompt,
+            token_budget=token_budget,
+            _cycle_count=self._cycle_count,
+        )
         ctx.metadata["cycle_count"] = self._cycle_count
 
-        phases = [FlowPhase.CONVERSATION, FlowPhase.CONTEXT_BUILD, FlowPhase.MEMORY_CACHE,
-                  FlowPhase.MEMORY_RETRIEVAL, FlowPhase.MEMORY_WRITE, FlowPhase.TOOL_INVOCATION,
-                  FlowPhase.RESULT_FEEDBACK, FlowPhase.EXPERIENCE_ACCUMULATE, FlowPhase.EVOLUTION,
-                  FlowPhase.SLEEP_CONSOLIDATION, FlowPhase.CONFLICT_RESOLUTION, FlowPhase.METACOGNITION]
+        phases = [
+            FlowPhase.CONVERSATION,
+            FlowPhase.CONTEXT_BUILD,
+            FlowPhase.MEMORY_CACHE,
+            FlowPhase.MEMORY_RETRIEVAL,
+            FlowPhase.MEMORY_WRITE,
+            FlowPhase.TOOL_INVOCATION,
+            FlowPhase.RESULT_FEEDBACK,
+            FlowPhase.EXPERIENCE_ACCUMULATE,
+            FlowPhase.EVOLUTION,
+            FlowPhase.SLEEP_CONSOLIDATION,
+            FlowPhase.CONFLICT_RESOLUTION,
+            FlowPhase.METACOGNITION,
+        ]
         for phase in phases:
             ctx = self._run_phase(phase, ctx)
         ctx.metadata["completed_at"] = datetime.datetime.now().isoformat()
@@ -619,15 +726,16 @@ class FlowOrchestrator:
             ctx = handler(ctx)
             self.tracer.end_phase(evt_id, phase, True)
         except Exception as e:
-            logger.warning(f"Phase {phase.value} failed: {e}")
+            logger.warning("Phase %s failed: %s", phase.value, e)
             self.tracer.end_phase(evt_id, phase, False, error=str(e))
         return ctx
 
     def _phase_conversation(self, ctx: FlowContext) -> FlowContext:
         """记录用户输入到消息流"""
         if ctx.user_input:
-            msg = self.message_flow.receive_message(ctx.session_id, "user", ctx.user_input,
-                                                     metadata={"agent_id": ctx.agent_id})
+            msg = self.message_flow.receive_message(
+                ctx.session_id, "user", ctx.user_input, metadata={"agent_id": ctx.agent_id}
+            )
             ctx.conversation_history.append(msg)
         return ctx
 
@@ -652,8 +760,7 @@ class FlowOrchestrator:
     def _phase_memory_write(self, ctx: FlowContext) -> FlowContext:
         """写入新记忆"""
         if ctx.user_input:
-            self.memory_coordinator.write(ctx.user_input, category="conversation",
-                                           temperature=80.0)
+            self.memory_coordinator.write(ctx.user_input, category="conversation", temperature=80.0)
         return ctx
 
     def _phase_tool_invocation(self, ctx: FlowContext) -> FlowContext:
@@ -684,8 +791,10 @@ class FlowOrchestrator:
 
     def _phase_sleep_consolidation(self, ctx: FlowContext) -> FlowContext:
         """睡眠记忆合并"""
-        memories = [{"id": m["id"], "content": m.get("content", ""), "temperature": m.get("temperature", 50)}
-                    for m in self.memory_coordinator._memories]
+        memories = [
+            {"id": m["id"], "content": m.get("content", ""), "temperature": m.get("temperature", 50)}
+            for m in self.memory_coordinator._memories
+        ]
         if memories:
             result = self.sleep_consolidation.consolidate_memories(memories)
             ctx.sleep_results = result
@@ -694,8 +803,10 @@ class FlowOrchestrator:
     def _phase_conflict_resolution(self, ctx: FlowContext) -> FlowContext:
         """冲突检测与解决"""
         if ctx.user_input:
-            existing = [{"id": m["id"], "content": m.get("content", ""), "temperature": m.get("temperature", 50)}
-                        for m in self.memory_coordinator._memories]
+            existing = [
+                {"id": m["id"], "content": m.get("content", ""), "temperature": m.get("temperature", 50)}
+                for m in self.memory_coordinator._memories
+            ]
             result = self.sleep_consolidation.detect_and_resolve_conflicts(ctx.user_input, existing)
             ctx.conflicts = result.get("conflicts", [])
         return ctx
@@ -737,11 +848,21 @@ def get_flow_orchestrator() -> FlowOrchestrator:
     return _global_flow_orchestrator
 
 
-def process_conversation_flow(user_input: str = "", session_id: str = "",
-                               agent_id: str = "", user_id: str = "",
-                               system_prompt: str = "", token_budget: int = 4000) -> FlowContext:
+def process_conversation_flow(
+    user_input: str = "",
+    session_id: str = "",
+    agent_id: str = "",
+    user_id: str = "",
+    system_prompt: str = "",
+    token_budget: int = 4000,
+) -> FlowContext:
     """便捷函数：使用全局编排器处理一次对话"""
     orchestrator = get_flow_orchestrator()
-    return orchestrator.process_conversation(user_input=user_input, session_id=session_id,
-                                              agent_id=agent_id, user_id=user_id,
-                                              system_prompt=system_prompt, token_budget=token_budget)
+    return orchestrator.process_conversation(
+        user_input=user_input,
+        session_id=session_id,
+        agent_id=agent_id,
+        user_id=user_id,
+        system_prompt=system_prompt,
+        token_budget=token_budget,
+    )

@@ -12,11 +12,10 @@ import asyncio
 import io
 import logging
 import struct
-import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Optional, AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 try:
     import numpy as np
@@ -75,7 +74,7 @@ def _create_wav_bytes(
     header.extend(b"WAVE")
     header.extend(b"fmt ")
     header.extend(struct.pack("<I", 16))  # fmt chunk size
-    header.extend(struct.pack("<H", 1))   # PCM format
+    header.extend(struct.pack("<H", 1))  # PCM format
     header.extend(struct.pack("<H", channels))
     header.extend(struct.pack("<I", sample_rate))
     header.extend(struct.pack("<I", byte_rate))
@@ -133,11 +132,7 @@ class MOSSNanTTS(TTSBase):
     @property
     def stats(self) -> dict:
         """推理统计"""
-        avg_ms = (
-            self._total_inference_ms / self._total_syntheses
-            if self._total_syntheses > 0
-            else 0
-        )
+        avg_ms = self._total_inference_ms / self._total_syntheses if self._total_syntheses > 0 else 0
         return {
             "total_syntheses": self._total_syntheses,
             "total_audio_duration_sec": round(self._total_duration_sec, 2),
@@ -175,12 +170,13 @@ class MOSSNanTTS(TTSBase):
                     logger.warning("Tokenizer 下载失败，声音克隆功能不可用")
             else:
                 if not self._downloader.is_model_available("moss-tts-nano"):
-                    logger.error(f"模型不存在: {self._model_dir}")
+                    logger.error("模型不存在: %s", self._model_dir)
                     return False
 
             # 加载 ONNX Runtime
             try:
                 import onnxruntime as ort
+
                 self._ort = ort
             except ImportError:
                 logger.error("onnxruntime 未安装，请运行: pip install onnxruntime")
@@ -194,7 +190,7 @@ class MOSSNanTTS(TTSBase):
                 if onnx_files:
                     tts_model_path = onnx_files[0]
                 else:
-                    logger.error(f"TTS ONNX 模型文件不存在: {tts_model_path}")
+                    logger.error("TTS ONNX 模型文件不存在: %s", tts_model_path)
                     return False
 
             session_opts = ort.SessionOptions()
@@ -202,21 +198,17 @@ class MOSSNanTTS(TTSBase):
             session_opts.inter_op_num_threads = 4
             session_opts.intra_op_num_threads = 4
 
-            self._tts_session = ort.InferenceSession(
-                str(tts_model_path), sess_options=session_opts
-            )
-            logger.info(f"TTS 模型加载完成: {tts_model_path}")
+            self._tts_session = ort.InferenceSession(str(tts_model_path), sess_options=session_opts)
+            logger.info("TTS 模型加载完成: %s", tts_model_path)
 
             # 加载 Tokenizer（可选）
             tokenizer_path = self._tokenizer_dir / "model.onnx"
             if tokenizer_path.exists():
                 try:
-                    self._tokenizer_session = ort.InferenceSession(
-                        str(tokenizer_path), sess_options=session_opts
-                    )
-                    logger.info(f"Tokenizer 加载完成: {tokenizer_path}")
+                    self._tokenizer_session = ort.InferenceSession(str(tokenizer_path), sess_options=session_opts)
+                    logger.info("Tokenizer 加载完成: %s", tokenizer_path)
                 except Exception as e:
-                    logger.warning(f"Tokenizer 加载失败（声音克隆不可用）: {e}")
+                    logger.warning("Tokenizer 加载失败（声音克隆不可用）: %s", e)
 
             self._initialized = True
             logger.info(
@@ -383,9 +375,7 @@ class MOSSNanTTS(TTSBase):
 
             # 在线程池中运行推理（避免阻塞事件循环）
             loop = asyncio.get_event_loop()
-            audio_data = await loop.run_in_executor(
-                None, self._run_inference, text, ref_audio_np, voice_ref_text
-            )
+            audio_data = await loop.run_in_executor(None, self._run_inference, text, ref_audio_np, voice_ref_text)
 
             # 转换为 WAV 字节
             wav_bytes = _create_wav_bytes(
@@ -455,9 +445,7 @@ class MOSSNanTTS(TTSBase):
 
             # 运行推理
             loop = asyncio.get_event_loop()
-            audio_data = await loop.run_in_executor(
-                None, self._run_inference, text, ref_audio_np, voice_ref_text
-            )
+            audio_data = await loop.run_in_executor(None, self._run_inference, text, ref_audio_np, voice_ref_text)
 
             # 转换为 int16
             if audio_data.dtype != np.float32:
@@ -492,7 +480,7 @@ class MOSSNanTTS(TTSBase):
                 self._total_syntheses += 1
                 self._total_duration_sec += duration_sec
 
-            logger.info(f"MOSSNanTTS 流式合成完成 | {duration_sec:.1f}秒")
+            logger.info("MOSSNanTTS 流式合成完成 | %.1f秒", duration_sec)
 
         except Exception as e:
             logger.error(f"MOSSNanTTS 流式合成失败: {e}", exc_info=True)
@@ -520,7 +508,7 @@ class MOSSNanTTS(TTSBase):
             return audio
 
         except Exception as e:
-            logger.warning(f"音频加载失败: {e}，返回静音")
+            logger.warning("音频加载失败: %s，返回静音", e)
             return np.zeros(self._sample_rate, dtype=np.float32)  # 1秒静音
 
     async def shutdown(self) -> None:
@@ -528,4 +516,4 @@ class MOSSNanTTS(TTSBase):
         self._tts_session = None
         self._tokenizer_session = None
         self._initialized = False
-        logger.info(f"MOSSNanTTS 已关闭 | 统计: {self.stats}")
+        logger.info("MOSSNanTTS 已关闭 | 统计: %s", self.stats)

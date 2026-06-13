@@ -16,14 +16,13 @@
   上下文匹配 ──▶ 推荐技能
 """
 
-from dataclasses import dataclass, field
 import datetime
 import hashlib
 import logging
 import re
 import threading
-import time
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +30,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ToolPattern:
     """工具执行模式"""
+
     pattern_id: str = ""
     tool_sequence: List[str] = field(default_factory=list)
     context_keywords: List[str] = field(default_factory=list)
@@ -69,6 +69,7 @@ class ToolPattern:
 @dataclass
 class SkillTemplate:
     """技能模板"""
+
     template_id: str = ""
     name: str = ""
     description: str = ""
@@ -101,6 +102,7 @@ class SkillTemplate:
 @dataclass
 class ObservationRecord:
     """观察记录"""
+
     tool_sequence: List[str] = field(default_factory=list)
     context: str = ""
     success: bool = False
@@ -111,6 +113,7 @@ class ObservationRecord:
 
 # ────── 主类 ──────
 
+
 class AutoSkillBuilder:
     """
     技能自动构建器
@@ -118,10 +121,13 @@ class AutoSkillBuilder:
     观察工具执行序列，识别重复模式，自动封装为可复用的技能模板。
     """
 
-    def __init__(self, min_pattern_occurrences: int = 3,
-                 min_success_rate: float = 0.7,
-                 max_patterns: int = 1000,
-                 similarity_threshold: float = 0.8):
+    def __init__(
+        self,
+        min_pattern_occurrences: int = 3,
+        min_success_rate: float = 0.7,
+        max_patterns: int = 1000,
+        similarity_threshold: float = 0.8,
+    ):
         """
         初始化技能构建器
 
@@ -149,9 +155,14 @@ class AutoSkillBuilder:
 
         logger.info("AutoSkillBuilder initialized")
 
-    def observe(self, tool_sequence: List[str], context: str = "",
-               success: bool = True, duration: float = 0.0,
-               metadata: Optional[Dict[str, Any]] = None):
+    def observe(
+        self,
+        tool_sequence: List[str],
+        context: str = "",
+        success: bool = True,
+        duration: float = 0.0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
         """
         观察工具执行序列
 
@@ -175,14 +186,13 @@ class AutoSkillBuilder:
 
             # 限制观察记录数量
             if len(self._observations) > self._max_observations:
-                self._observations = self._observations[-self._max_observations:]
+                self._observations = self._observations[-self._max_observations :]
 
             # 提取或更新模式
             if len(tool_sequence) >= 2:  # 至少2个工具才算模式
                 self._update_pattern(tool_sequence, context, success, duration)
 
-    def _update_pattern(self, tool_sequence: List[str], context: str,
-                       success: bool, duration: float):
+    def _update_pattern(self, tool_sequence: List[str], context: str, success: bool, duration: float):
         """更新模式"""
         # 生成模式ID
         content = ":".join(tool_sequence)
@@ -203,10 +213,7 @@ class AutoSkillBuilder:
                 pattern.failure_count += 1
 
             # 更新平均时长
-            pattern.avg_duration = (
-                (pattern.avg_duration * (pattern.total_uses - 1) + duration)
-                / pattern.total_uses
-            )
+            pattern.avg_duration = (pattern.avg_duration * (pattern.total_uses - 1) + duration) / pattern.total_uses
 
             # 合并关键词
             for kw in keywords:
@@ -238,9 +245,35 @@ class AutoSkillBuilder:
 
         # 过滤停用词
         stop_words = {
-            "的", "了", "在", "是", "我", "有", "和", "就", "不", "人",
-            "都", "一", "也", "很", "到", "说", "要", "去", "你", "会",
-            "the", "a", "an", "is", "are", "was", "were", "be", "have",
+            "的",
+            "了",
+            "在",
+            "是",
+            "我",
+            "有",
+            "和",
+            "就",
+            "不",
+            "人",
+            "都",
+            "一",
+            "也",
+            "很",
+            "到",
+            "说",
+            "要",
+            "去",
+            "你",
+            "会",
+            "the",
+            "a",
+            "an",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "have",
         }
 
         return [w for w in words if w not in stop_words and len(w) > 1][:10]
@@ -263,8 +296,7 @@ class AutoSkillBuilder:
         # 封装为技能模板
         self._encapsulate_pattern(pattern)
 
-    def _pattern_skill_similarity(self, pattern: ToolPattern,
-                                 template: SkillTemplate) -> float:
+    def _pattern_skill_similarity(self, pattern: ToolPattern, template: SkillTemplate) -> float:
         """计算模式与技能模板的相似度"""
         # 工具序列相似度
         seq1 = set(pattern.tool_sequence)
@@ -300,7 +332,7 @@ class AutoSkillBuilder:
 
         self._templates[template_id] = template
 
-        logger.info(f"Encapsulated pattern {pattern.pattern_id} into skill {template_id}")
+        logger.info("Encapsulated pattern %s into skill %s", pattern.pattern_id, template_id)
 
     def _generate_skill_name(self, pattern: ToolPattern) -> str:
         """生成技能名称"""
@@ -312,10 +344,9 @@ class AutoSkillBuilder:
     def _generate_skill_description(self, pattern: ToolPattern) -> str:
         """生成技能描述"""
         tools = " → ".join(pattern.tool_sequence[:3])
-        return f"自动封装的技能：执行 {tools}，成功率 {pattern.success_rate:.0%}"
+        return f"自动封装的技能：执行 {tools}，成功率 {pattern.success_rate * 100:.0f}%%"
 
-    def find_skills_for_context(self, context: str,
-                               tool_sequence: Optional[List[str]] = None) -> List[SkillTemplate]:
+    def find_skills_for_context(self, context: str, tool_sequence: Optional[List[str]] = None) -> List[SkillTemplate]:
         """
         根据上下文查找匹配的技能
 
@@ -345,9 +376,9 @@ class AutoSkillBuilder:
 
             return [template for template, score in results]
 
-    def _calculate_match_score(self, template: SkillTemplate,
-                              context_keywords: List[str],
-                              tool_sequence: Optional[List[str]] = None) -> float:
+    def _calculate_match_score(
+        self, template: SkillTemplate, context_keywords: List[str], tool_sequence: Optional[List[str]] = None
+    ) -> float:
         """计算匹配分数"""
         score = 0.0
 
@@ -380,11 +411,9 @@ class AutoSkillBuilder:
             total_observations = len(self._observations)
 
             # 按成功率排序的 top 模式
-            top_patterns = sorted(
-                self._patterns.values(),
-                key=lambda p: p.success_rate * p.total_uses,
-                reverse=True
-            )[:10]
+            top_patterns = sorted(self._patterns.values(), key=lambda p: p.success_rate * p.total_uses, reverse=True)[
+                :10
+            ]
 
             return {
                 "total_patterns": total_patterns,

@@ -12,21 +12,18 @@ Neurova 启动管理器
 6. 健康检查
 """
 
-import asyncio
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-import inspect
-import json
 import logging
-from pathlib import Path
-import re
 import threading
 import time
-import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Type
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Type
 
-from neurova.core.module_system import DependencyResolver, Module, ModuleInfo, ModuleRegistry, ModuleState, StartupResult
-from neurova.core.event_bus import EventPriority, EventBus, get_event_bus
+from neurova.core.event_bus import get_event_bus
+from neurova.core.module_system import (
+    Module,
+    ModuleRegistry,
+    StartupResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +31,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StartupConfig:
     """启动配置"""
+
     startup_timeout: float = 60.0
     health_check_interval: float = 30.0
     auto_recovery: bool = True
@@ -86,9 +84,11 @@ class StartupManager:
     ) -> None:
         """注册模块"""
         self._registry.register(name, module_class, dependencies, **kwargs)
-        logger.info(f"Registered module: {name}")
+        logger.info("Registered module: %s", name)
 
-    def register_module_class(self, module_class: Type[Module], name: str = None, dependencies: List[str] = None) -> None:
+    def register_module_class(
+        self, module_class: Type[Module], name: str = None, dependencies: List[str] = None
+    ) -> None:
         """通过类注册模块"""
         module_name = name or module_class.__name__
         self.register_module(module_name, module_class, dependencies)
@@ -119,11 +119,11 @@ class StartupManager:
 
         if result.success:
             self._started = True
-            logger.info(f"System started successfully in {result.duration:.2f}s")
-            logger.info(f"Modules started: {result.modules_started}")
+            logger.info("System started successfully in %.2fs", result.duration)
+            logger.info("Modules started: %s", result.modules_started)
             self._event_bus.publish("system.started", data=result, source="StartupManager")
         else:
-            logger.error(f"System startup failed: {result.errors}")
+            logger.error("System startup failed: %s", result.errors)
             self._event_bus.publish("system.startup_failed", data=result, source="StartupManager")
 
         return result
@@ -141,7 +141,7 @@ class StartupManager:
             try:
                 hook()
             except Exception as e:
-                logger.error(f"Shutdown hook error: {e}")
+                logger.error("Shutdown hook error: %s", e)
 
         # 停止所有模块
         self._registry.stop_all()

@@ -10,19 +10,25 @@ NeuHebbForge — Neurova Hebb 生成器
 from __future__ import annotations
 
 import logging
-import re
 import math
-from typing import Callable, List, Optional, Dict, Any
+import re
+from typing import Callable, List, Optional
 
-from .neurova_hebb import NeurovaHebb, NeuHebbConfig
+from .neurova_hebb import NeuHebbConfig, NeurovaHebb
 
 logger = logging.getLogger(__name__)
 
 # 无效答案特征词（小写匹配）
 _INVALID_INDICATORS = [
-    "i don't know", "idk", "insufficient information",
-    "i do not know", "not sure", "cannot determine",
-    "no information", "unable to answer", "not enough context",
+    "i don't know",
+    "idk",
+    "insufficient information",
+    "i do not know",
+    "not sure",
+    "cannot determine",
+    "no information",
+    "unable to answer",
+    "not enough context",
 ]
 
 
@@ -89,7 +95,7 @@ class NeuHebbForge:
 
         # 如果段落太少，按句号切分
         if len(paragraphs) < 2:
-            sentences = re.split(r'(?<=[.!?。！？])\s+', content.strip())
+            sentences = re.split(r"(?<=[.!?。！？])\s+", content.strip())
             chunks = []
             current = ""
             for s in sentences:
@@ -139,7 +145,9 @@ class NeuHebbForge:
 
             # 4.1 稠密检索相关块
             retrieved_chunks = self._dense_search(
-                query, chunks, chunk_embeddings,
+                query,
+                chunks,
+                chunk_embeddings,
                 num=min(self.config.chunk_num, len(chunks)),
             )
 
@@ -179,7 +187,9 @@ class NeuHebbForge:
 
         logger.info(
             "Generated %d NeurovaHebbs for document %s (from %d queries)",
-            len(new_hebbs), document_id, len(pre_queries),
+            len(new_hebbs),
+            document_id,
+            len(pre_queries),
         )
         return new_hebbs
 
@@ -227,9 +237,7 @@ class NeuHebbForge:
         )
         return self._llm(prompt).strip()
 
-    def _summarize_to_neurova_hebb(
-        self, question: str, answer: str, verify: bool = False
-    ) -> str:
+    def _summarize_to_neurova_hebb(self, question: str, answer: str, verify: bool = False) -> str:
         """将问答对总结为结构化的知识单元。"""
         if verify:
             prompt = (

@@ -11,23 +11,22 @@ from __future__ import annotations
 """
 
 import copy
-from dataclasses import dataclass, field
-import enum
 import json
 import logging
-from pathlib import Path
 import threading
 import time
 import typing
 import uuid
-
+from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
 class StateStatus(Enum):
     """状态管理器状态"""
+
     IDLE = "idle"
     LOADING = "loading"
     SAVING = "saving"
@@ -37,6 +36,7 @@ class StateStatus(Enum):
 @dataclass
 class StateChange:
     """状态变更记录"""
+
     key: str
     old_value: typing.Any
     new_value: typing.Any
@@ -46,6 +46,7 @@ class StateChange:
 @dataclass
 class StateSnapshot:
     """状态快照"""
+
     snapshot_id: str
     description: str
     state: dict
@@ -55,7 +56,7 @@ class StateSnapshot:
 class StateManager:
     """
     统一状态管理器
-    
+
     支持点号分隔的嵌套键访问（如 "user.profile.name"）
     """
 
@@ -72,11 +73,11 @@ class StateManager:
     def get(self, key: str, default: typing.Any = None) -> typing.Any:
         """
         获取状态值
-        
+
         Args:
             key: 点号分隔的键路径
             default: 默认值
-            
+
         Returns:
             状态值
         """
@@ -86,7 +87,7 @@ class StateManager:
     def set(self, key: str, value: typing.Any) -> None:
         """
         设置状态值
-        
+
         Args:
             key: 点号分隔的键路径
             value: 要设置的值
@@ -94,20 +95,20 @@ class StateManager:
         with self._lock:
             old_value = self._get_nested(self._state, key)
             self._set_nested(self._state, key, value)
-            
+
             change = StateChange(key=key, old_value=old_value, new_value=value)
             self._change_log.append(change)
-            
+
             self._notify_listeners(key, old_value, value)
             self._emit_state_event(key, old_value, value)
 
     def delete(self, key: str) -> typing.Any:
         """
         删除状态值
-        
+
         Args:
             key: 点号分隔的键路径
-            
+
         Returns:
             被删除的值，不存在则返回 None
         """
@@ -115,22 +116,22 @@ class StateManager:
             old_value = self._get_nested(self._state, key)
             if old_value is None and not self._key_exists(self._state, key):
                 return None
-            
+
             self._delete_nested(self._state, key)
-            
+
             change = StateChange(key=key, old_value=old_value, new_value=None)
             self._change_log.append(change)
-            
+
             self._notify_listeners(key, old_value, None)
             return old_value
 
     def has(self, key: str) -> bool:
         """
         检查键是否存在
-        
+
         Args:
             key: 点号分隔的键路径
-            
+
         Returns:
             是否存在
         """
@@ -150,10 +151,10 @@ class StateManager:
     def update(self, updates: dict) -> list[StateChange]:
         """
         批量更新状态
-        
+
         Args:
             updates: 键值对字典
-            
+
         Returns:
             变更列表
         """
@@ -177,7 +178,7 @@ class StateManager:
     def on_change(self, key: str, listener: typing.Callable) -> None:
         """
         注册键变更监听器
-        
+
         Args:
             key: 监听的键
             listener: 回调函数 (key, old_value, new_value)
@@ -190,7 +191,7 @@ class StateManager:
     def on_any_change(self, listener: typing.Callable) -> None:
         """
         注册全局变更监听器
-        
+
         Args:
             listener: 回调函数 (key, old_value, new_value)
         """
@@ -213,7 +214,7 @@ class StateManager:
             try:
                 listener(key, old_value, new_value)
             except Exception as e:
-                logger.error(f"监听器执行失败: {e}")
+                logger.error("监听器执行失败: %s", e)
 
     def _emit_state_event(self, key: str, old_value: typing.Any, new_value: typing.Any) -> None:
         """通知全局监听器"""
@@ -221,35 +222,31 @@ class StateManager:
             try:
                 listener(key, old_value, new_value)
             except Exception as e:
-                logger.error(f"全局监听器执行失败: {e}")
+                logger.error("全局监听器执行失败: %s", e)
 
     def create_snapshot(self, description: str = "") -> str:
         """
         创建状态快照
-        
+
         Args:
             description: 快照描述
-            
+
         Returns:
             快照 ID
         """
         with self._lock:
             snapshot_id = str(uuid.uuid4())
-            snapshot = StateSnapshot(
-                snapshot_id=snapshot_id,
-                description=description,
-                state=copy.deepcopy(self._state)
-            )
+            snapshot = StateSnapshot(snapshot_id=snapshot_id, description=description, state=copy.deepcopy(self._state))
             self._snapshots[snapshot_id] = snapshot
             return snapshot_id
 
     def restore_snapshot(self, snapshot_id: str) -> bool:
         """
         恢复状态快照
-        
+
         Args:
             snapshot_id: 快照 ID
-            
+
         Returns:
             是否恢复成功
         """
@@ -264,11 +261,7 @@ class StateManager:
         """列出所有快照"""
         with self._lock:
             return [
-                {
-                    "id": s.snapshot_id,
-                    "description": s.description,
-                    "timestamp": s.timestamp
-                }
+                {"id": s.snapshot_id, "description": s.description, "timestamp": s.timestamp}
                 for s in self._snapshots.values()
             ]
 
@@ -284,12 +277,7 @@ class StateManager:
         """获取变更日志"""
         with self._lock:
             return [
-                {
-                    "key": c.key,
-                    "old_value": c.old_value,
-                    "new_value": c.new_value,
-                    "timestamp": c.timestamp
-                }
+                {"key": c.key, "old_value": c.old_value, "new_value": c.new_value, "timestamp": c.timestamp}
                 for c in self._change_log
             ]
 
@@ -307,29 +295,29 @@ class StateManager:
         if not self._persist_path:
             logger.warning("未设置持久化路径")
             return False
-        
+
         with self._lock:
             try:
                 self._persist_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self._persist_path, 'w', encoding='utf-8') as f:
+                with open(self._persist_path, "w", encoding="utf-8") as f:
                     json.dump(self._state, f, ensure_ascii=False, indent=2, default=str)
                 return True
             except Exception as e:
-                logger.error(f"保存状态失败: {e}")
+                logger.error("保存状态失败: %s", e)
                 return False
 
     def load(self) -> bool:
         """从文件加载状态"""
         if not self._persist_path or not self._persist_path.exists():
             return False
-        
+
         with self._lock:
             try:
-                with open(self._persist_path, 'r', encoding='utf-8') as f:
+                with open(self._persist_path, "r", encoding="utf-8") as f:
                     self._state = json.load(f)
                 return True
             except Exception as e:
-                logger.error(f"加载状态失败: {e}")
+                logger.error("加载状态失败: %s", e)
                 return False
 
     @property
@@ -346,7 +334,7 @@ class StateManager:
 
     def _get_nested(self, data: dict, key: str, default: typing.Any = None) -> typing.Any:
         """获取嵌套字典值"""
-        keys = key.split('.')
+        keys = key.split(".")
         current = data
         for k in keys:
             if isinstance(current, dict) and k in current:
@@ -357,7 +345,7 @@ class StateManager:
 
     def _set_nested(self, data: dict, key: str, value: typing.Any) -> None:
         """设置嵌套字典值"""
-        keys = key.split('.')
+        keys = key.split(".")
         current = data
         for k in keys[:-1]:
             if k not in current or not isinstance(current[k], dict):
@@ -367,7 +355,7 @@ class StateManager:
 
     def _delete_nested(self, data: dict, key: str) -> None:
         """删除嵌套字典值"""
-        keys = key.split('.')
+        keys = key.split(".")
         current = data
         for k in keys[:-1]:
             if isinstance(current, dict) and k in current:
@@ -379,7 +367,7 @@ class StateManager:
 
     def _key_exists(self, data: dict, key: str) -> bool:
         """检查嵌套键是否存在"""
-        keys = key.split('.')
+        keys = key.split(".")
         current = data
         for k in keys:
             if isinstance(current, dict) and k in current:

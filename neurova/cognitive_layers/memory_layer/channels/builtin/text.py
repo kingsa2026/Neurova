@@ -3,7 +3,8 @@ TextChannel — 文本通道（语义相似度）
 
 基于关键词/TF-IDF 的文本匹配检索。
 """
-from typing import Any, Dict, List, Optional
+
+from typing import List
 
 from ..base import BaseChannel, ChannelMetadata, ChannelResult
 
@@ -20,13 +21,7 @@ class TextChannel(BaseChannel):
             capabilities=["text", "semantic", "keyword"],
         )
 
-    async def retrieve(
-        self,
-        query: str,
-        limit: int = 10,
-        weight: float = 1.0,
-        **kwargs
-    ) -> List[ChannelResult]:
+    async def retrieve(self, query: str, limit: int = 10, weight: float = 1.0, **kwargs) -> List[ChannelResult]:
         memory_manager = kwargs.get("memory_manager")
         if not memory_manager:
             return []
@@ -48,17 +43,19 @@ class TextChannel(BaseChannel):
                     matched = sum(1 for w in query_words if w in content_lower)
                     score = (matched / len(query_words)) * weight
 
-                scored.append(ChannelResult(
-                    memory_id=mem.get("id", ""),
-                    content=content,
-                    score=score,
-                    channel="text",
-                    metadata={"match_type": "keyword"},
-                ))
+                scored.append(
+                    ChannelResult(
+                        memory_id=mem.get("id", ""),
+                        content=content,
+                        score=score,
+                        channel="text",
+                        metadata={"match_type": "keyword"},
+                    )
+                )
 
             scored.sort(key=lambda m: m.score, reverse=True)
             return scored[:limit]
 
         except Exception as e:
-            self._logger.debug(f"文本通道检索失败: {e}")
+            self._logger.debug("文本通道检索失败: %s", e)
             return []

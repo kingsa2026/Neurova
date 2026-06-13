@@ -13,47 +13,47 @@
   输入 ──▶ 观察 ──▶ 回忆 ──▶ 推理 ──▶ 反思 ──▶ 巩固 ──▶ 输出
 """
 
-import asyncio
 import copy
-from dataclasses import dataclass, field
 import datetime
-import enum
 import json
 import logging
-from pathlib import Path
 import threading
 import time
-import traceback
 import typing
-
+from dataclasses import dataclass, field
 from enum import Enum
-from neurova.skills.models import ExperienceRecord
+from pathlib import Path
+
 
 logger = logging.getLogger(__name__)
 
 
 # ────── 数据模型 ──────
 
+
 class AttentionLevel(Enum):
     """注意力级别"""
-    LOW = "low"          # 低注意力
-    MEDIUM = "medium"    # 中等注意力
-    HIGH = "high"        # 高注意力
+
+    LOW = "low"  # 低注意力
+    MEDIUM = "medium"  # 中等注意力
+    HIGH = "high"  # 高注意力
     CRITICAL = "critical"  # 关键注意力
 
 
 class MemoryType(Enum):
     """记忆类型"""
-    SHORT_TERM = "short_term"    # 短期记忆
-    LONG_TERM = "long_term"      # 长期记忆
-    WORKING = "working"          # 工作记忆
-    EPISODIC = "episodic"        # 情景记忆
-    SEMANTIC = "semantic"        # 语义记忆
+
+    SHORT_TERM = "short_term"  # 短期记忆
+    LONG_TERM = "long_term"  # 长期记忆
+    WORKING = "working"  # 工作记忆
+    EPISODIC = "episodic"  # 情景记忆
+    SEMANTIC = "semantic"  # 语义记忆
 
 
 @dataclass
 class CognitiveState:
     """认知状态"""
+
     attention_level: AttentionLevel = AttentionLevel.MEDIUM
     active_memories: typing.List[str] = field(default_factory=list)
     current_focus: str = ""
@@ -78,6 +78,7 @@ class CognitiveState:
 @dataclass
 class CognitiveCycleResult:
     """认知周期结果"""
+
     cycle_id: str = ""
     success: bool = False
     observations: typing.List[str] = field(default_factory=list)
@@ -107,6 +108,7 @@ class CognitiveCycleResult:
 
 # ────── 管理器 ──────
 
+
 class AttentionManager:
     """
     注意力管理器
@@ -126,7 +128,7 @@ class AttentionManager:
         self._switch_threshold = 0.7
         self._lock = threading.RLock()
 
-        logger.info(f"AttentionManager initialized with level: {initial_level.value}")
+        logger.info("AttentionManager initialized with level: %s", initial_level.value)
 
     def get_attention(self) -> AttentionLevel:
         """
@@ -157,11 +159,10 @@ class AttentionManager:
             if len(self._attention_history) > 100:
                 self._attention_history = self._attention_history[-100:]
 
-            logger.debug(f"Attention changed: {old_level.value} → {level.value}")
+            logger.debug("Attention changed: %s → %s", old_level.value, level.value)
             return True
 
-    def should_switch_attention(self, new_focus: str, current_focus: str,
-                               importance: float) -> bool:
+    def should_switch_attention(self, new_focus: str, current_focus: str, importance: float) -> bool:
         """
         是否应该切换注意力
 
@@ -205,8 +206,9 @@ class MemoryManager:
 
         logger.info("MemoryManager initialized")
 
-    def add_memory(self, memory_type: MemoryType, content: str,
-                  metadata: typing.Optional[typing.Dict[str, typing.Any]] = None) -> str:
+    def add_memory(
+        self, memory_type: MemoryType, content: str, metadata: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> str:
         """
         添加记忆
 
@@ -232,12 +234,13 @@ class MemoryManager:
             }
 
             self._memories[memory_type].append(memory)
-            logger.debug(f"Added {memory_type.value} memory: {memory_id}")
+            logger.debug("Added %s memory: %s", memory_type.value, memory_id)
 
             return memory_id
 
-    def retrieve_memory(self, query: str, memory_type: typing.Optional[MemoryType] = None,
-                       limit: int = 10) -> typing.List[typing.Dict[str, typing.Any]]:
+    def retrieve_memory(
+        self, query: str, memory_type: typing.Optional[MemoryType] = None, limit: int = 10
+    ) -> typing.List[typing.Dict[str, typing.Any]]:
         """
         检索记忆
 
@@ -302,11 +305,12 @@ class MemoryManager:
                     count += len(self._memories[mem_type])
                     self._memories[mem_type] = []
 
-            logger.info(f"Cleared {count} memories")
+            logger.info("Cleared %s memories", count)
             return count
 
 
 # ────── 主类 ──────
+
 
 class CognitionOrchestrator:
     """
@@ -401,7 +405,7 @@ class CognitionOrchestrator:
 
         for skill in self._registry.list_skills():
             score = 0
-            if hasattr(skill, 'keywords'):
+            if hasattr(skill, "keywords"):
                 for keyword in skill.keywords:
                     if keyword.lower() in task_lower:
                         score += 1
@@ -412,7 +416,9 @@ class CognitionOrchestrator:
 
         return best_skill
 
-    async def process_task(self, task: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.Dict[str, typing.Any]:
+    async def process_task(
+        self, task: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> typing.Dict[str, typing.Any]:
         """
         处理任务
 
@@ -443,7 +449,7 @@ class CognitionOrchestrator:
             }
 
         except Exception as e:
-            logger.error(f"Task processing failed: {e}")
+            logger.error("Task processing failed: %s", e)
             return {
                 "success": False,
                 "task": task,
@@ -451,8 +457,9 @@ class CognitionOrchestrator:
                 "duration_ms": (time.time() - start_time) * 1000,
             }
 
-    async def process_thought_cycle(self, input_text: str,
-                                   context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> CognitiveCycleResult:
+    async def process_thought_cycle(
+        self, input_text: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> CognitiveCycleResult:
         """
         处理思维周期
 
@@ -500,18 +507,19 @@ class CognitionOrchestrator:
             # 更新周期计数
             self._cycle_count += 1
 
-            logger.info(f"Thought cycle {cycle_id} completed in {result.duration_ms:.1f}ms")
+            logger.info("Thought cycle %s completed in %.1fms", cycle_id, result.duration_ms)
 
         except Exception as e:
-            logger.error(f"Thought cycle failed: {e}")
+            logger.error("Thought cycle failed: %s", e)
             result.success = False
             result.error = str(e)
             result.duration_ms = (time.time() - start_time) * 1000
 
         return result
 
-    async def _observe(self, input_text: str,
-                      context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.List[str]:
+    async def _observe(
+        self, input_text: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> typing.List[str]:
         """
         观察阶段
 
@@ -538,8 +546,9 @@ class CognitionOrchestrator:
 
         return observations
 
-    async def _recall(self, observations: typing.List[str],
-                     context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.List[str]:
+    async def _recall(
+        self, observations: typing.List[str], context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> typing.List[str]:
         """
         回忆阶段
 
@@ -560,9 +569,12 @@ class CognitionOrchestrator:
 
         return recalled
 
-    async def _reason(self, observations: typing.List[str],
-                     recalled: typing.List[str],
-                     context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.List[str]:
+    async def _reason(
+        self,
+        observations: typing.List[str],
+        recalled: typing.List[str],
+        context: typing.Optional[typing.Dict[str, typing.Any]] = None,
+    ) -> typing.List[str]:
         """
         推理阶段
 
@@ -588,8 +600,9 @@ class CognitionOrchestrator:
 
         return reasoning
 
-    async def _send_to_cerebellum(self, reasoning: typing.List[str],
-                                 context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.List[str]:
+    async def _send_to_cerebellum(
+        self, reasoning: typing.List[str], context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> typing.List[str]:
         """
         发送到小脑（工具执行）
 
@@ -605,17 +618,20 @@ class CognitionOrchestrator:
         if self._cerebellum:
             try:
                 # 调用小脑执行工具
-                if hasattr(self._cerebellum, 'execute'):
+                if hasattr(self._cerebellum, "execute"):
                     result = await self._cerebellum.execute(reasoning, context)
                     tool_results.append(str(result))
             except Exception as e:
-                logger.error(f"Cerebellum execution failed: {e}")
+                logger.error("Cerebellum execution failed: %s", e)
 
         return tool_results
 
-    async def _reflect(self, reasoning: typing.List[str],
-                      tool_results: typing.List[str],
-                      context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.List[str]:
+    async def _reflect(
+        self,
+        reasoning: typing.List[str],
+        tool_results: typing.List[str],
+        context: typing.Optional[typing.Dict[str, typing.Any]] = None,
+    ) -> typing.List[str]:
         """
         反思阶段
 
@@ -641,10 +657,13 @@ class CognitionOrchestrator:
 
         return reflections
 
-    async def _consolidate(self, observations: typing.List[str],
-                          reasoning: typing.List[str],
-                          reflections: typing.List[str],
-                          context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.List[str]:
+    async def _consolidate(
+        self,
+        observations: typing.List[str],
+        reasoning: typing.List[str],
+        reflections: typing.List[str],
+        context: typing.Optional[typing.Dict[str, typing.Any]] = None,
+    ) -> typing.List[str]:
         """
         巩固阶段
 
@@ -662,17 +681,13 @@ class CognitionOrchestrator:
         # 将重要信息存入长期记忆
         for observation in observations:
             memory_id = self._memory_manager.add_memory(
-                MemoryType.LONG_TERM,
-                observation,
-                {"type": "observation", "cycle": self._cycle_count}
+                MemoryType.LONG_TERM, observation, {"type": "observation", "cycle": self._cycle_count}
             )
             consolidated.append(memory_id)
 
         for reflection in reflections:
             memory_id = self._memory_manager.add_memory(
-                MemoryType.SEMANTIC,
-                reflection,
-                {"type": "reflection", "cycle": self._cycle_count}
+                MemoryType.SEMANTIC, reflection, {"type": "reflection", "cycle": self._cycle_count}
             )
             consolidated.append(memory_id)
 
@@ -725,14 +740,14 @@ class CognitionOrchestrator:
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
 
-            with open(path, 'w', encoding='utf-8') as f:
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
 
-            logger.info(f"State saved to {path}")
+            logger.info("State saved to %s", path)
             return True
 
         except Exception as e:
-            logger.error(f"Failed to save state: {e}")
+            logger.error("Failed to save state: %s", e)
             return False
 
     def load_state(self, path: typing.Union[str, Path]) -> bool:
@@ -746,7 +761,7 @@ class CognitionOrchestrator:
             bool: 是否加载成功
         """
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 state = json.load(f)
 
             # 恢复认知状态
@@ -762,11 +777,11 @@ class CognitionOrchestrator:
 
             self._cycle_count = state.get("cycle_count", 0)
 
-            logger.info(f"State loaded from {path}")
+            logger.info("State loaded from %s", path)
             return True
 
         except Exception as e:
-            logger.error(f"Failed to load state: {e}")
+            logger.error("Failed to load state: %s", e)
             return False
 
     def integrate_with_multi_agent_manager(self, manager: typing.Any) -> None:
@@ -883,7 +898,7 @@ class MetacognitionMonitor:
         }
 
         self._alerts.append(alert)
-        logger.warning(f"Metacognition alert: {alert_type} - {message}")
+        logger.warning("Metacognition alert: %s - %s", alert_type, message)
 
     def get_report(self) -> typing.Dict[str, typing.Any]:
         """

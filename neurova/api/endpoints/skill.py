@@ -14,12 +14,10 @@ from __future__ import annotations
 
 import logging
 import time
-import typing
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -29,6 +27,7 @@ router = APIRouter()
 
 class SkillInfo(BaseModel):
     """技能信息"""
+
     skill_id: str
     name: str
     description: str = ""
@@ -43,6 +42,7 @@ class SkillInfo(BaseModel):
 
 class SkillExecuteRequest(BaseModel):
     """技能执行请求"""
+
     parameters: Dict[str, Any] = Field(default_factory=dict, description="技能参数")
     context: Dict[str, Any] = Field(default_factory=dict, description="执行上下文")
     timeout: int = Field(default=30, description="超时时间(秒)")
@@ -50,6 +50,7 @@ class SkillExecuteRequest(BaseModel):
 
 class SkillExecuteResponse(BaseModel):
     """技能执行响应"""
+
     success: bool
     result: Any = None
     error: Optional[str] = None
@@ -59,6 +60,7 @@ class SkillExecuteResponse(BaseModel):
 
 class SkillLearnRequest(BaseModel):
     """技能学习请求"""
+
     conversation_id: Optional[str] = None
     messages: List[Dict[str, Any]] = Field(default_factory=list, description="对话消息")
     feedback: Optional[str] = None
@@ -66,6 +68,7 @@ class SkillLearnRequest(BaseModel):
 
 class SkillLearnResponse(BaseModel):
     """技能学习响应"""
+
     success: bool
     patterns_learned: int = 0
     skills_updated: int = 0
@@ -74,6 +77,7 @@ class SkillLearnResponse(BaseModel):
 
 class SkillStats(BaseModel):
     """技能统计"""
+
     total_skills: int = 0
     enabled_skills: int = 0
     total_executions: int = 0
@@ -89,6 +93,7 @@ def _get_request_id(request: Request) -> str:
 def _get_agent(agent_id: str = "default"):
     """获取 Agent 实例"""
     from neurova.api.endpoints import get_agent_instance
+
     return get_agent_instance(agent_id)
 
 
@@ -96,9 +101,10 @@ def _get_skill_manager():
     """获取技能管理器"""
     try:
         from neurova.skill_system import SkillRegistry
+
         return SkillRegistry()
     except Exception as e:
-        logger.warning(f"SkillRegistry not available: {e}")
+        logger.warning("SkillRegistry not available: %s", e)
         return None
 
 
@@ -166,13 +172,13 @@ async def get_skills(
 ):
     """获取所有技能列表"""
     skills = _get_builtin_skills()
-    
+
     # 应用筛选
     if category:
         skills = [s for s in skills if s.get("category") == category]
     if enabled_only:
         skills = [s for s in skills if s.get("enabled", True)]
-    
+
     return [SkillInfo(**s) for s in skills]
 
 
@@ -180,7 +186,7 @@ async def get_skills(
 async def get_skill_stats(request: Request):
     """获取技能统计信息"""
     skills = _get_builtin_skills()
-    
+
     return SkillStats(
         total_skills=len(skills),
         enabled_skills=len([s for s in skills if s.get("enabled", True)]),
@@ -202,7 +208,7 @@ async def get_skill_tips(
         "code_execution 可以执行复杂的计算任务",
         "file_read 和 file_write 用于文件操作",
     ]
-    
+
     return {
         "code": 0,
         "message": "success",
@@ -219,8 +225,8 @@ async def learn_from_conversation(
     body: SkillLearnRequest,
 ):
     """从对话中学习技能"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     try:
         agent = _get_agent()
         if not agent:
@@ -228,7 +234,7 @@ async def learn_from_conversation(
                 success=False,
                 message="Agent not available",
             )
-        
+
         # 尝试调用 Agent 的学习功能
         if hasattr(agent, "learn_from_conversation"):
             result = await agent.learn_from_conversation(
@@ -241,7 +247,7 @@ async def learn_from_conversation(
                 skills_updated=result.get("skills_updated", 0),
                 message="Learning completed",
             )
-        
+
         return SkillLearnResponse(
             success=True,
             patterns_learned=0,
@@ -263,11 +269,11 @@ async def get_skill(
 ):
     """获取单个技能详情"""
     skills = _get_builtin_skills()
-    
+
     for skill in skills:
         if skill.get("skill_id") == skill_id:
             return SkillInfo(**skill)
-    
+
     raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
 
 
@@ -278,16 +284,16 @@ async def execute_skill(
     body: SkillExecuteRequest = SkillExecuteRequest(),
 ):
     """执行技能"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
     start_time = time.time()
-    
+
     # 验证技能存在
     skills = _get_builtin_skills()
     skill_exists = any(s.get("skill_id") == skill_id for s in skills)
-    
+
     if not skill_exists:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
-    
+
     try:
         agent = _get_agent()
         if not agent:
@@ -296,7 +302,7 @@ async def execute_skill(
                 error="Agent not available",
                 skill_id=skill_id,
             )
-        
+
         # 尝试通过 Agent 执行技能
         if hasattr(agent, "execute_skill"):
             result = await agent.execute_skill(
@@ -311,7 +317,7 @@ async def execute_skill(
                 execution_time=time.time() - start_time,
                 skill_id=skill_id,
             )
-        
+
         # 降级：返回模拟结果
         return SkillExecuteResponse(
             success=True,
@@ -337,10 +343,10 @@ async def enable_skill(
     """启用技能"""
     skills = _get_builtin_skills()
     skill_exists = any(s.get("skill_id") == skill_id for s in skills)
-    
+
     if not skill_exists:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
-    
+
     return {
         "code": 0,
         "message": f"Skill '{skill_id}' enabled",
@@ -356,10 +362,10 @@ async def disable_skill(
     """禁用技能"""
     skills = _get_builtin_skills()
     skill_exists = any(s.get("skill_id") == skill_id for s in skills)
-    
+
     if not skill_exists:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
-    
+
     return {
         "code": 0,
         "message": f"Skill '{skill_id}' disabled",

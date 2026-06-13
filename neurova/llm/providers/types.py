@@ -7,14 +7,15 @@ Provider 核心类型定义
 提供类型安全和序列化支持。
 """
 
-import logging
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field
 
+
 class ProviderType(str, Enum):
     """Provider 类型"""
+
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GEMINI = "gemini"
@@ -22,8 +23,10 @@ class ProviderType(str, Enum):
     OPENROUTER = "openrouter"
     CUSTOM = "custom"
 
+
 class ProviderCapability(str, Enum):
     """Provider 能力"""
+
     TEXT = "text"
     VISION = "vision"
     AUDIO = "audio"
@@ -35,8 +38,10 @@ class ProviderCapability(str, Enum):
     MULTIMODAL = "multimodal"
     TOOL_USE = "tool_use"
 
+
 class ModelInfo(BaseModel):
     """模型信息"""
+
     id: str = ""
     name: str = ""
     provider: str = ""
@@ -51,11 +56,13 @@ class ModelInfo(BaseModel):
         return self.model_dump()
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ModelInfo':
+    def from_dict(cls, data: Dict[str, Any]) -> "ModelInfo":
         return cls(**data)
+
 
 class ProviderInfo(BaseModel):
     """Provider 信息"""
+
     id: str = ""
     name: str = ""
     provider_type: ProviderType = ProviderType.OPENAI
@@ -70,11 +77,13 @@ class ProviderInfo(BaseModel):
         return self.model_dump()
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ProviderInfo':
+    def from_dict(cls, data: Dict[str, Any]) -> "ProviderInfo":
         return cls(**data)
+
 
 class ProbeResult(BaseModel):
     """模型探测结果"""
+
     model_id: str = ""
     supported: bool = False
     capabilities: List[ProviderCapability] = Field(default_factory=list)
@@ -82,8 +91,10 @@ class ProbeResult(BaseModel):
     error: str = ""
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+
 class ConnectionResult(BaseModel):
     """连接测试结果"""
+
     success: bool = False
     latency_ms: float = 0.0
     error: str = ""

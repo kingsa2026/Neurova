@@ -11,12 +11,10 @@ Agent 执行危险命令审批机制
 from __future__ import annotations
 
 import datetime
-import enum
 import json
 import logging
 import re
 import threading
-import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -28,18 +26,20 @@ logger = logging.getLogger(__name__)
 
 class ApprovalStatus(str, Enum):
     """审批状态"""
-    PENDING = "pending"          # 等待审批
-    APPROVED = "approved"        # 已批准
-    REJECTED = "rejected"        # 已拒绝
-    EXPIRED = "expired"          # 已过期
+
+    PENDING = "pending"  # 等待审批
+    APPROVED = "approved"  # 已批准
+    REJECTED = "rejected"  # 已拒绝
+    EXPIRED = "expired"  # 已过期
     AUTO_APPROVED = "auto_approved"  # 自动批准
 
 
 class ApprovalLevel(str, Enum):
     """审批等级"""
-    NONE = "none"        # 无需审批
-    SMART = "smart"      # 智能模式（危险命令需要审批）
-    ALWAYS = "always"    # 所有命令都需要审批
+
+    NONE = "none"  # 无需审批
+    SMART = "smart"  # 智能模式（危险命令需要审批）
+    ALWAYS = "always"  # 所有命令都需要审批
 
 
 class DangerousCommandDetector:
@@ -48,55 +48,52 @@ class DangerousCommandDetector:
     # 危险命令模式列表
     DANGEROUS_PATTERNS = [
         # 文件系统危险操作
-        r'rm\s+(-[rf]+\s+|--recursive|--force)',
-        r'rmdir\s+',
-        r'mv\s+.*\s+/dev/null',
-        r'dd\s+',
-        r'mkfs\.',
-        r'fdisk\s+',
-        r'chmod\s+777',
-        r'chown\s+root',
+        r"rm\s+(-[rf]+\s+|--recursive|--force)",
+        r"rmdir\s+",
+        r"mv\s+.*\s+/dev/null",
+        r"dd\s+",
+        r"mkfs\.",
+        r"fdisk\s+",
+        r"chmod\s+777",
+        r"chown\s+root",
         # 网络危险操作
-        r'curl\s+.*\|\s*(bash|sh)',
-        r'wget\s+.*\|\s*(bash|sh)',
-        r'nc\s+.*-e\s+',
-        r'ncat\s+.*-e\s+',
+        r"curl\s+.*\|\s*(bash|sh)",
+        r"wget\s+.*\|\s*(bash|sh)",
+        r"nc\s+.*-e\s+",
+        r"ncat\s+.*-e\s+",
         # 系统危险操作
-        r'shutdown\s+',
-        r'reboot\s+',
-        r'halt\s+',
-        r'poweroff',
-        r'init\s+0',
-        r'kill\s+-9\s+1',
-        r'killall\s+',
-        r'pkill\s+',
+        r"shutdown\s+",
+        r"reboot\s+",
+        r"halt\s+",
+        r"poweroff",
+        r"init\s+0",
+        r"kill\s+-9\s+1",
+        r"killall\s+",
+        r"pkill\s+",
         # 权限提升
-        r'sudo\s+',
-        r'su\s+root',
-        r'su\s+-',
+        r"sudo\s+",
+        r"su\s+root",
+        r"su\s+-",
         # 数据库危险操作
-        r'DROP\s+DATABASE',
-        r'DROP\s+TABLE',
-        r'DELETE\s+FROM\s+.*\s+WHERE\s+1\s*=\s*1',
-        r'TRUNCATE\s+TABLE',
+        r"DROP\s+DATABASE",
+        r"DROP\s+TABLE",
+        r"DELETE\s+FROM\s+.*\s+WHERE\s+1\s*=\s*1",
+        r"TRUNCATE\s+TABLE",
         # 代码执行
-        r'eval\s*\(',
-        r'exec\s*\(',
-        r'__import__\s*\(',
-        r'subprocess\.call',
-        r'os\.system\s*\(',
+        r"eval\s*\(",
+        r"exec\s*\(",
+        r"__import__\s*\(",
+        r"subprocess\.call",
+        r"os\.system\s*\(",
         # 危险的 Python 操作
-        r'import\s+subprocess',
-        r'import\s+os',
-        r'from\s+os\s+import',
-        r'from\s+subprocess\s+import',
+        r"import\s+subprocess",
+        r"import\s+os",
+        r"from\s+os\s+import",
+        r"from\s+subprocess\s+import",
     ]
 
     def __init__(self):
-        self._compiled_patterns = [
-            re.compile(pattern, re.IGNORECASE)
-            for pattern in self.DANGEROUS_PATTERNS
-        ]
+        self._compiled_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.DANGEROUS_PATTERNS]
 
     def is_dangerous(self, command: str) -> bool:
         """检测命令是否危险"""
@@ -125,6 +122,7 @@ class DangerousCommandDetector:
 @dataclass
 class ApprovalRequest:
     """审批请求"""
+
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     agent_id: str = ""
     user_id: str = ""
@@ -168,8 +166,16 @@ class ApprovalRequest:
             description=data.get("description", ""),
             danger_reason=data.get("danger_reason", ""),
             status=ApprovalStatus(data.get("status", "pending")),
-            created_at=datetime.datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.datetime.now(datetime.timezone.utc),
-            updated_at=datetime.datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else datetime.datetime.now(datetime.timezone.utc),
+            created_at=(
+                datetime.datetime.fromisoformat(data["created_at"])
+                if data.get("created_at")
+                else datetime.datetime.now(datetime.timezone.utc)
+            ),
+            updated_at=(
+                datetime.datetime.fromisoformat(data["updated_at"])
+                if data.get("updated_at")
+                else datetime.datetime.now(datetime.timezone.utc)
+            ),
             expires_at=datetime.datetime.fromisoformat(data["expires_at"]) if data.get("expires_at") else None,
             approved_by=data.get("approved_by"),
             approval_note=data.get("approval_note"),
@@ -210,7 +216,7 @@ class ApprovalManager:
         # 加载历史请求
         self._load_requests()
 
-        logger.info(f"审批管理器初始化完成，等级: {approval_level.value}")
+        logger.info("审批管理器初始化完成，等级: %s", approval_level.value)
 
     def register_notification_callback(self, callback: Callable):
         """注册通知回调"""
@@ -290,7 +296,8 @@ class ApprovalManager:
                 command=command,
                 description=description,
                 danger_reason=danger_reason,
-                expires_at=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=self.DEFAULT_EXPIRY_SECONDS),
+                expires_at=datetime.datetime.now(datetime.timezone.utc)
+                + datetime.timedelta(seconds=self.DEFAULT_EXPIRY_SECONDS),
                 metadata=metadata or {},
             )
 
@@ -300,7 +307,7 @@ class ApprovalManager:
             # 发送通知
             self._send_approval_notification(request)
 
-            logger.info(f"创建审批请求: {request.request_id}, 命令: {command[:50]}...")
+            logger.info("创建审批请求: %s, 命令: %s...", request.request_id, command[:50])
 
             return request
 
@@ -314,18 +321,18 @@ class ApprovalManager:
         with self._lock:
             request = self._requests.get(request_id)
             if not request:
-                logger.warning(f"审批请求不存在: {request_id}")
+                logger.warning("审批请求不存在: %s", request_id)
                 return False
 
             if request.status != ApprovalStatus.PENDING:
-                logger.warning(f"审批请求状态不是待处理: {request_id}, 状态: {request.status.value}")
+                logger.warning("审批请求状态不是待处理: %s, 状态: %s", request_id, request.status.value)
                 return False
 
             # 检查是否过期
             if request.expires_at and datetime.datetime.now(datetime.timezone.utc) > request.expires_at:
                 request.status = ApprovalStatus.EXPIRED
                 self._save_requests()
-                logger.warning(f"审批请求已过期: {request_id}")
+                logger.warning("审批请求已过期: %s", request_id)
                 return False
 
             # 更新状态
@@ -342,7 +349,7 @@ class ApprovalManager:
             # 发送结果通知
             self._send_approval_result(request)
 
-            logger.info(f"审批请求已批准: {request_id}, 批准人: {approved_by}")
+            logger.info("审批请求已批准: %s, 批准人: %s", request_id, approved_by)
 
             return True
 
@@ -356,11 +363,11 @@ class ApprovalManager:
         with self._lock:
             request = self._requests.get(request_id)
             if not request:
-                logger.warning(f"审批请求不存在: {request_id}")
+                logger.warning("审批请求不存在: %s", request_id)
                 return False
 
             if request.status != ApprovalStatus.PENDING:
-                logger.warning(f"审批请求状态不是待处理: {request_id}, 状态: {request.status.value}")
+                logger.warning("审批请求状态不是待处理: %s, 状态: %s", request_id, request.status.value)
                 return False
 
             # 更新状态
@@ -374,7 +381,7 @@ class ApprovalManager:
             # 发送结果通知
             self._send_approval_result(request)
 
-            logger.info(f"审批请求已拒绝: {request_id}, 拒绝人: {rejected_by}")
+            logger.info("审批请求已拒绝: %s, 拒绝人: %s", request_id, rejected_by)
 
             return True
 
@@ -383,10 +390,7 @@ class ApprovalManager:
         with self._lock:
             self._cleanup_expired_requests()
 
-            requests = [
-                r for r in self._requests.values()
-                if r.status == ApprovalStatus.PENDING
-            ]
+            requests = [r for r in self._requests.values() if r.status == ApprovalStatus.PENDING]
 
             if agent_id:
                 requests = [r for r in requests if r.agent_id == agent_id]
@@ -399,9 +403,20 @@ class ApprovalManager:
 
         # 默认白名单
         default_whitelist = {
-            "ls", "pwd", "echo", "cat", "head", "tail",
-            "grep", "find", "which", "whoami", "date",
-            "python --version", "node --version", "npm --version",
+            "ls",
+            "pwd",
+            "echo",
+            "cat",
+            "head",
+            "tail",
+            "grep",
+            "find",
+            "which",
+            "whoami",
+            "date",
+            "python --version",
+            "node --version",
+            "npm --version",
         }
 
         # 检查默认白名单
@@ -434,7 +449,7 @@ class ApprovalManager:
             try:
                 callback("approval_request", request.to_dict())
             except Exception as e:
-                logger.error(f"发送审批通知失败: {e}")
+                logger.error("发送审批通知失败: %s", e)
 
     def _send_approval_result(self, request: ApprovalRequest):
         """发送审批结果通知"""
@@ -442,7 +457,7 @@ class ApprovalManager:
             try:
                 callback("approval_result", request.to_dict())
             except Exception as e:
-                logger.error(f"发送审批结果通知失败: {e}")
+                logger.error("发送审批结果通知失败: %s", e)
 
     def _cleanup_expired_requests(self):
         """清理过期请求"""
@@ -456,13 +471,13 @@ class ApprovalManager:
 
         if expired_ids:
             self._save_requests()
-            logger.info(f"清理了 {len(expired_ids)} 个过期审批请求")
+            logger.info("清理了 %s 个过期审批请求", len(expired_ids))
 
     def _load_requests(self):
         """加载审批请求"""
         try:
             if self._storage_path.exists():
-                with open(self._storage_path, 'r', encoding='utf-8') as f:
+                with open(self._storage_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     for request_data in data.get("requests", []):
                         request = ApprovalRequest.from_dict(request_data)
@@ -475,9 +490,9 @@ class ApprovalManager:
                     for cmd, ts_str in data.get("approved_history", {}).items():
                         self._approved_history[cmd] = datetime.datetime.fromisoformat(ts_str)
 
-                logger.info(f"加载了 {len(self._requests)} 个审批请求")
+                logger.info("加载了 %s 个审批请求", len(self._requests))
         except Exception as e:
-            logger.error(f"加载审批请求失败: {e}")
+            logger.error("加载审批请求失败: %s", e)
 
     def _save_requests(self):
         """保存审批请求"""
@@ -485,17 +500,14 @@ class ApprovalManager:
             data = {
                 "requests": [r.to_dict() for r in self._requests.values()],
                 "whitelist": list(self._whitelist),
-                "approved_history": {
-                    cmd: ts.isoformat()
-                    for cmd, ts in self._approved_history.items()
-                },
+                "approved_history": {cmd: ts.isoformat() for cmd, ts in self._approved_history.items()},
             }
 
-            with open(self._storage_path, 'w', encoding='utf-8') as f:
+            with open(self._storage_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
         except Exception as e:
-            logger.error(f"保存审批请求失败: {e}")
+            logger.error("保存审批请求失败: %s", e)
 
 
 # ========================= 全局单例和便捷函数 =========================
@@ -504,7 +516,9 @@ _approval_manager: Optional[ApprovalManager] = None
 _am_lock = threading.Lock()
 
 
-def get_approval_manager(workspace_path: str = ".", approval_level: ApprovalLevel = ApprovalLevel.SMART) -> ApprovalManager:
+def get_approval_manager(
+    workspace_path: str = ".", approval_level: ApprovalLevel = ApprovalLevel.SMART
+) -> ApprovalManager:
     """获取全局审批管理器"""
     global _approval_manager
     if _approval_manager is None:
@@ -518,7 +532,7 @@ def set_approval_level(level: ApprovalLevel):
     """设置审批等级"""
     manager = get_approval_manager()
     manager._approval_level = level
-    logger.info(f"审批等级已设置为: {level.value}")
+    logger.info("审批等级已设置为: %s", level.value)
 
 
 def generate_approval_html(request_data: Dict[str, Any]) -> str:
@@ -773,6 +787,7 @@ def create_approval_api_endpoints(app, approval_manager: ApprovalManager):
             raise HTTPException(status_code=404, detail="审批请求不存在")
 
         from fastapi.responses import HTMLResponse
+
         html = generate_approval_html(request.to_dict())
         return HTMLResponse(content=html)
 

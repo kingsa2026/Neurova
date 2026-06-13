@@ -12,11 +12,11 @@ _logger = logging.getLogger(__name__)
 try:
     from neurova.mem_core import Memory
 except ImportError as _e:
-    _logger.debug(f"Memory 未可用: {_e}")
+    _logger.debug("Memory 未可用: %s", _e)
     Memory = None
 
 # cognitive imports
 try:
-    import neurova.cognitive.orchestrator
+    pass
 except ImportError as _e:
-    _logger.debug(f"cognitive.orchestrator 模块未可用: {_e}")
+    _logger.debug("cognitive.orchestrator 模块未可用: %s", _e)

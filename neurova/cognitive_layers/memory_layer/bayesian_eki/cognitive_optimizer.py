@@ -19,7 +19,8 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 try:
-    import numpy as np
+    pass
+
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
@@ -27,29 +28,34 @@ except ImportError:
 
 # ────── Enums ──────
 
+
 class TaskValue(Enum):
     """任务价值级别"""
-    TRIVIAL = "trivial"       # 微不足道
-    LOW = "low"               # 低价值
-    MEDIUM = "medium"         # 中等价值
-    HIGH = "high"             # 高价值
-    CRITICAL = "critical"     # 关键价值
+
+    TRIVIAL = "trivial"  # 微不足道
+    LOW = "low"  # 低价值
+    MEDIUM = "medium"  # 中等价值
+    HIGH = "high"  # 高价值
+    CRITICAL = "critical"  # 关键价值
 
 
 class ReinforcementAction(Enum):
     """强化动作"""
-    NONE = "none"             # 不强化
-    REVIEW = "review"         # 复习
+
+    NONE = "none"  # 不强化
+    REVIEW = "review"  # 复习
     CONSOLIDATE = "consolidate"  # 巩固
-    COMPRESS = "compress"     # 压缩
-    DISCARD = "discard"       # 丢弃
+    COMPRESS = "compress"  # 压缩
+    DISCARD = "discard"  # 丢弃
 
 
 # ────── Data Models ──────
 
+
 @dataclass
 class TaskResult:
     """任务处理结果"""
+
     task_id: str = ""
     value: TaskValue = TaskValue.MEDIUM
     score: float = 0.5
@@ -63,6 +69,7 @@ class TaskResult:
 @dataclass
 class MemoryState:
     """记忆状态追踪"""
+
     memory_id: str = ""
     importance: float = 50.0
     access_count: int = 0
@@ -73,6 +80,7 @@ class MemoryState:
 
 
 # ────── 主类 ──────
+
 
 class EKICognitiveOptimizer:
     """
@@ -109,7 +117,7 @@ class EKICognitiveOptimizer:
         self._total_tasks = 0
         self._total_reinforcements = 0
 
-        logger.info(f"EKICognitiveOptimizer initialized (ensemble_size={ensemble_size})")
+        logger.info("EKICognitiveOptimizer initialized (ensemble_size=%s)", ensemble_size)
 
     def _init_ensemble(self):
         """初始化参数集合"""
@@ -123,8 +131,7 @@ class EKICognitiveOptimizer:
             }
             self._ensemble.append(particle)
 
-    def register_memory(self, memory_id: str, importance: float = 50.0,
-                       access_count: int = 0) -> MemoryState:
+    def register_memory(self, memory_id: str, importance: float = 50.0, access_count: int = 0) -> MemoryState:
         """
         注册记忆到优化器
 
@@ -146,8 +153,7 @@ class EKICognitiveOptimizer:
             self._memory_states[memory_id] = state
             return state
 
-    def process_task(self, task_id: str, content: str,
-                    context: Optional[Dict[str, Any]] = None) -> TaskResult:
+    def process_task(self, task_id: str, content: str, context: Optional[Dict[str, Any]] = None) -> TaskResult:
         """
         处理任务并评估价值
 
@@ -185,12 +191,13 @@ class EKICognitiveOptimizer:
         with self._lock:
             self._task_history.append(result)
             if len(self._task_history) > self._max_history:
-                self._task_history = self._task_history[-self._max_history:]
+                self._task_history = self._task_history[-self._max_history :]
 
         return result
 
-    def _compute_task_value(self, content: str,
-                           context: Optional[Dict[str, Any]] = None) -> Tuple[TaskValue, float, float]:
+    def _compute_task_value(
+        self, content: str, context: Optional[Dict[str, Any]] = None
+    ) -> Tuple[TaskValue, float, float]:
         """
         计算任务价值
 
@@ -251,8 +258,7 @@ class EKICognitiveOptimizer:
 
         return value, score, confidence
 
-    def _compute_information_gain(self, content: str,
-                                 context: Optional[Dict[str, Any]] = None) -> float:
+    def _compute_information_gain(self, content: str, context: Optional[Dict[str, Any]] = None) -> float:
         """计算信息增益"""
         # 简化实现：基于内容的新颖性和复杂度
         words = content.split()
@@ -268,8 +274,7 @@ class EKICognitiveOptimizer:
         # 信息增益 = 词汇丰富度 * 长度因子
         return lexical_diversity * length_factor
 
-    def _update_with_feedback(self, memory_id: str, success: bool,
-                             feedback_score: float = 0.5):
+    def _update_with_feedback(self, memory_id: str, success: bool, feedback_score: float = 0.5):
         """
         使用反馈更新EKI集合
 
@@ -290,10 +295,7 @@ class EKICognitiveOptimizer:
             observation = feedback_score if success else 0.0
             for particle in self._ensemble:
                 # 计算预测
-                prediction = (
-                    particle["importance_weight"] * state.importance / 100.0
-                    + particle["novelty_bonus"]
-                )
+                prediction = particle["importance_weight"] * state.importance / 100.0 + particle["novelty_bonus"]
 
                 # 计算创新
                 innovation = observation - prediction
@@ -305,8 +307,7 @@ class EKICognitiveOptimizer:
                 particle["importance_weight"] += self._learning_rate * kalman_gain * innovation
                 particle["importance_weight"] = max(0.01, min(1.0, particle["importance_weight"]))
 
-    def recommend_reinforcement(self, score: float,
-                               information_gain: float) -> ReinforcementAction:
+    def recommend_reinforcement(self, score: float, information_gain: float) -> ReinforcementAction:
         """
         推荐强化动作
 
@@ -328,8 +329,7 @@ class EKICognitiveOptimizer:
         else:
             return ReinforcementAction.NONE
 
-    def predict_memory_decay(self, memory_id: str,
-                            hours_ahead: float = 24.0) -> float:
+    def predict_memory_decay(self, memory_id: str, hours_ahead: float = 24.0) -> float:
         """
         预测记忆衰减
 
@@ -374,7 +374,6 @@ class EKICognitiveOptimizer:
     def _flush_updates(self):
         """刷新所有待处理的更新"""
         # 当前实现实时更新，此方法用于未来扩展
-        pass
 
     def train_surrogate(self, training_data: List[Tuple[str, float]]):
         """
@@ -394,7 +393,7 @@ class EKICognitiveOptimizer:
                 particle["novelty_bonus"] += self._learning_rate * error * 0.1
                 particle["novelty_bonus"] = max(0.0, min(0.5, particle["novelty_bonus"]))
 
-        logger.info(f"Surrogate model trained on {len(training_data)} samples")
+        logger.info("Surrogate model trained on %s samples", len(training_data))
 
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""

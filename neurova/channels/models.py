@@ -1,17 +1,19 @@
 from __future__ import annotations
+
 """channels/models.py — 渠道系统核心数据模型
 
 包含：MessageChannel, ContentType, UnifiedMessage, UserIdentity, SessionContext, ChannelConfig
 """
 
-from dataclasses import dataclass, field, asdict
 import time
-from typing import Any, Dict, List, Optional
+from dataclasses import asdict, dataclass, field
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class MessageChannel(Enum):
     """消息渠道"""
+
     WEB = "web"
     API = "api"
     FEISHU = "feishu"
@@ -24,6 +26,7 @@ class MessageChannel(Enum):
 
 class ContentType(Enum):
     """内容类型"""
+
     TEXT = "text"
     IMAGE = "image"
     AUDIO = "audio"
@@ -37,6 +40,7 @@ class ContentType(Enum):
 @dataclass
 class UnifiedMessage:
     """统一消息模型 — 跨渠道消息格式"""
+
     message_id: str
     channel: MessageChannel
     content_type: ContentType
@@ -70,6 +74,7 @@ class UnifiedMessage:
 @dataclass
 class UserIdentity:
     """用户身份映射"""
+
     user_id: str
     channel: MessageChannel
     channel_user_id: str
@@ -98,6 +103,7 @@ class UserIdentity:
 @dataclass
 class SessionContext:
     """会话上下文"""
+
     session_id: str
     user_id: str
     channel: MessageChannel
@@ -135,6 +141,7 @@ class SessionContext:
 @dataclass
 class ChannelConfig:
     """渠道配置"""
+
     channel: MessageChannel
     enabled: bool = True
     webhook_url: Optional[str] = None

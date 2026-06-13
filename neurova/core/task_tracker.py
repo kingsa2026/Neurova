@@ -6,37 +6,37 @@ TaskTracker - 任务追踪器
 实现任务的生命周期管理，支持进度追踪、状态更新和任务控制。
 """
 
-import asyncio
-from dataclasses import dataclass, field
 import datetime
-import enum
 import logging
+import threading
+import time
 import typing
 import uuid
-
+from dataclasses import dataclass, field
 from enum import Enum
-import time
-import threading
 
 logger = logging.getLogger(__name__)
 
 
 # ────── 数据模型 ──────
 
+
 class TaskStatus(Enum):
     """任务状态"""
-    PENDING = "pending"          # 等待执行
-    RUNNING = "running"          # 执行中
-    PAUSED = "paused"            # 暂停
-    COMPLETED = "completed"      # 完成
-    FAILED = "failed"            # 失败
-    CANCELLED = "cancelled"      # 取消
-    TIMEOUT = "timeout"          # 超时
+
+    PENDING = "pending"  # 等待执行
+    RUNNING = "running"  # 执行中
+    PAUSED = "paused"  # 暂停
+    COMPLETED = "completed"  # 完成
+    FAILED = "failed"  # 失败
+    CANCELLED = "cancelled"  # 取消
+    TIMEOUT = "timeout"  # 超时
 
 
 @dataclass
 class TaskInfo:
     """任务信息"""
+
     task_id: str = ""
     name: str = ""
     description: str = ""
@@ -90,6 +90,7 @@ class TaskInfo:
 
 # ────── 主类 ──────
 
+
 class TaskTracker:
     """
     任务追踪器
@@ -135,6 +136,7 @@ class TaskTracker:
 
     def _start_cleanup_thread(self):
         """启动清理线程"""
+
         def cleanup_loop():
             while self._running:
                 try:
@@ -142,14 +144,18 @@ class TaskTracker:
                     if self._running:
                         self.cleanup_old_tasks()
                 except Exception as e:
-                    logger.error(f"Cleanup error: {e}")
+                    logger.error("Cleanup error: %s", e)
 
         self._cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True)
         self._cleanup_thread.start()
 
-    def start_tracking(self, name: str, description: str = "",
-                      metadata: typing.Optional[typing.Dict[str, typing.Any]] = None,
-                      parent_task_id: typing.Optional[str] = None) -> TaskInfo:
+    def start_tracking(
+        self,
+        name: str,
+        description: str = "",
+        metadata: typing.Optional[typing.Dict[str, typing.Any]] = None,
+        parent_task_id: typing.Optional[str] = None,
+    ) -> TaskInfo:
         """
         开始追踪任务
 
@@ -180,11 +186,10 @@ class TaskTracker:
 
             self._notify_subscribers("status_change", task)
 
-            logger.info(f"Started tracking task: {task.task_id} - {name}")
+            logger.info("Started tracking task: %s - %s", task.task_id, name)
             return task
 
-    def update_progress(self, task_id: str, progress: float,
-                       message: str = "") -> bool:
+    def update_progress(self, task_id: str, progress: float, message: str = "") -> bool:
         """
         更新任务进度
 
@@ -210,11 +215,10 @@ class TaskTracker:
 
             self._notify_subscribers("progress_update", task)
 
-            logger.debug(f"Task {task_id} progress: {progress:.1f}%")
+            logger.debug("Task %.1f progress: %s%", task_id, progress)
             return True
 
-    def complete_task(self, task_id: str,
-                     result: typing.Optional[typing.Dict[str, typing.Any]] = None) -> bool:
+    def complete_task(self, task_id: str, result: typing.Optional[typing.Dict[str, typing.Any]] = None) -> bool:
         """
         完成任务
 
@@ -241,7 +245,7 @@ class TaskTracker:
             self._notify_subscribers("task_completed", task)
             self._notify_subscribers("status_change", task)
 
-            logger.info(f"Task completed: {task_id}")
+            logger.info("Task completed: %s", task_id)
             return True
 
     def fail_task(self, task_id: str, error_message: str) -> bool:
@@ -270,7 +274,7 @@ class TaskTracker:
             self._notify_subscribers("task_failed", task)
             self._notify_subscribers("status_change", task)
 
-            logger.info(f"Task failed: {task_id} - {error_message}")
+            logger.info("Task failed: %s - %s", task_id, error_message)
             return True
 
     def pause_task(self, task_id: str) -> bool:
@@ -294,7 +298,7 @@ class TaskTracker:
             task.status = TaskStatus.PAUSED
             self._notify_subscribers("status_change", task)
 
-            logger.info(f"Task paused: {task_id}")
+            logger.info("Task paused: %s", task_id)
             return True
 
     def resume_task(self, task_id: str) -> bool:
@@ -318,7 +322,7 @@ class TaskTracker:
             task.status = TaskStatus.RUNNING
             self._notify_subscribers("status_change", task)
 
-            logger.info(f"Task resumed: {task_id}")
+            logger.info("Task resumed: %s", task_id)
             return True
 
     def stop_task(self, task_id: str, reason: str = "Cancelled") -> bool:
@@ -346,7 +350,7 @@ class TaskTracker:
 
             self._notify_subscribers("status_change", task)
 
-            logger.info(f"Task stopped: {task_id} - {reason}")
+            logger.info("Task stopped: %s - %s", task_id, reason)
             return True
 
     def get_task_status(self, task_id: str) -> typing.Optional[TaskInfo]:
@@ -411,7 +415,7 @@ class TaskTracker:
             try:
                 callback(task)
             except Exception as e:
-                logger.error(f"Subscriber callback error: {e}")
+                logger.error("Subscriber callback error: %s", e)
 
     def cleanup_old_tasks(self, max_age_hours: int = 24) -> int:
         """
@@ -435,7 +439,7 @@ class TaskTracker:
                 del self._tasks[task_id]
 
             if tasks_to_remove:
-                logger.info(f"Cleaned up {len(tasks_to_remove)} old tasks")
+                logger.info("Cleaned up %s old tasks", len(tasks_to_remove))
 
             return len(tasks_to_remove)
 
@@ -459,10 +463,7 @@ class TaskTracker:
             return {
                 "total_tasks": total_tasks,
                 "status_counts": status_counts,
-                "subscribers": {
-                    event_type: len(callbacks)
-                    for event_type, callbacks in self._subscribers.items()
-                },
+                "subscribers": {event_type: len(callbacks) for event_type, callbacks in self._subscribers.items()},
             }
 
     def shutdown(self):

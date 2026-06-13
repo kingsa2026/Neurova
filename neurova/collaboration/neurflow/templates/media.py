@@ -8,26 +8,24 @@
 - 音频制作
 - 多媒体内容生成
 """
+
 import time
 import uuid
-from typing import Dict, List, Any
+from typing import List
 
-from ..models import (
-    WorkflowDefinition, WorkflowNode, WorkflowEdge, WorkflowVariable,
-    WorkflowStatus, NodeCategory
-)
+from ..models import WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus, WorkflowVariable
 
 
 def get_media_template() -> WorkflowDefinition:
     """获取媒体创作工作流模板
-    
+
     Returns:
         预定义的媒体创作工作流定义
     """
     nodes = _create_nodes()
     edges = _create_edges()
     variables = _create_variables()
-    
+
     return WorkflowDefinition(
         id=f"template_media_{uuid.uuid4().hex[:8]}",
         name="媒体创作",
@@ -49,7 +47,7 @@ def get_media_template() -> WorkflowDefinition:
             "estimated_time": "30-60 minutes",
             "required_skills": ["media", "content-creation"],
             "description": "自动化多媒体内容创作流程",
-        }
+        },
     )
 
 
@@ -78,12 +76,11 @@ def _create_nodes() -> List[WorkflowNode]:
                         "options": ["教育", "娱乐", "商业", "纪录片", "创意"],
                         "default": "教育",
                         "description": "媒体风格",
-                    }
+                    },
                 }
             },
             label="开始",
         ),
-        
         WorkflowNode(
             id="script",
             type="builtin:llm",
@@ -107,7 +104,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="文案创作",
         ),
-        
         WorkflowNode(
             id="voiceover",
             type="builtin:tts",
@@ -120,7 +116,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="配音生成",
         ),
-        
         WorkflowNode(
             id="thumbnail",
             type="builtin:llm",
@@ -144,7 +139,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="封面设计",
         ),
-        
         WorkflowNode(
             id="video_gen",
             type="builtin:llm",
@@ -167,7 +161,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="视频分镜",
         ),
-        
         WorkflowNode(
             id="merge",
             type="builtin:merge",
@@ -177,7 +170,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="素材合并",
         ),
-        
         WorkflowNode(
             id="end",
             type="builtin:end",

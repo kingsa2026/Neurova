@@ -83,7 +83,7 @@ class ConfigManager:
         count = 0
         for key, value in os.environ.items():
             if key.startswith(prefix):
-                config_key = key[len(prefix):].lower()
+                config_key = key[len(prefix) :].lower()
                 self.set(config_key, value)
                 count += 1
         return count

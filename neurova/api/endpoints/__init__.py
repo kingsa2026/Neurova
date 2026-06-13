@@ -35,6 +35,7 @@ def get_startup_manager():
     if _app_state:
         return _app_state.get("startup_manager")
     from neurova.core.startup_manager import get_startup_manager as _get
+
     return _get()
 
 
@@ -43,6 +44,7 @@ def get_health_checker():
     if _app_state:
         return _app_state.get("health_checker")
     from neurova.core.health_checker import get_health_checker as _get
+
     return _get()
 
 
@@ -72,9 +74,10 @@ def init_default_user():
     """初始化默认用户"""
     try:
         from neurova.api.auth import _load_or_create_secret_key
+
         _load_or_create_secret_key()
     except Exception as e:
-        logger.warning(f"Failed to init default user: {e}")
+        logger.warning("Failed to init default user: %s", e)
 
 
 def load_agents_config():
@@ -83,37 +86,43 @@ def load_agents_config():
     if config_path.exists():
         try:
             import json
+
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.warning(f"Failed to load agents config: {e}")
+            logger.warning("Failed to load agents config: %s", e)
     return {}
 
 
 def startup_version_check():
     """版本检查"""
     import sys
+
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    logger.info(f"Python version: {python_version}")
+    logger.info("Python version: %s", python_version)
     if sys.version_info < (3, 10):
-        logger.warning(f"Python 3.10+ recommended, current: {python_version}")
+        logger.warning("Python 3.10+ recommended, current: %s", python_version)
 
 
 def create_database_check():
     """创建数据库检查"""
+
     def check_database():
         try:
             from neurova.core.database import _get_db_conn
+
             conn = _get_db_conn()
             conn.execute("SELECT 1")
             return True, "Database OK"
         except Exception as e:
             return False, str(e)
+
     return check_database
 
 
 def create_llm_check():
     """创建 LLM 检查"""
+
     def check_llm():
         try:
             if _app_state and _app_state.get("llm_client"):
@@ -121,11 +130,13 @@ def create_llm_check():
             return False, "LLM client not initialized"
         except Exception as e:
             return False, str(e)
+
     return check_llm
 
 
 def create_memory_check():
     """创建记忆系统检查"""
+
     def check_memory():
         try:
             if _app_state and _app_state.get("agents"):
@@ -133,11 +144,13 @@ def create_memory_check():
             return False, "Memory system not initialized"
         except Exception as e:
             return False, str(e)
+
     return check_memory
 
 
 def create_service_check():
     """创建服务检查"""
+
     def check_service():
         try:
             if _app_state and _app_state.get("startup_manager"):
@@ -148,12 +161,14 @@ def create_service_check():
             return False, "Startup manager not available"
         except Exception as e:
             return False, str(e)
+
     return check_service
 
 
 def setup_middleware(app):
     """设置中间件"""
     from neurova.api.middleware import setup_middleware as _setup
+
     _setup(app)
 
 
@@ -232,7 +247,11 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.knowledge_graph_api", "/v1/knowledge-graph", "Knowledge Graph API"),
         ("neurova.api.endpoints.knowledge_integration", "/v1/knowledge-integration", "Knowledge Integration API"),
         ("neurova.api.endpoints.semantic_search_api", "/v1/semantic-search", "Semantic Search API"),
-        ("neurova.api.endpoints.enhanced_memory_search_api", "/v1/enhanced-memory-search", "Enhanced Memory Search API"),
+        (
+            "neurova.api.endpoints.enhanced_memory_search_api",
+            "/v1/enhanced-memory-search",
+            "Enhanced Memory Search API",
+        ),
         ("neurova.api.endpoints.memory_timeline_api", "/v1/memory-timeline", "Memory Timeline API"),
         ("neurova.api.endpoints.synonym_api", "/v1/synonyms", "Synonym API"),
         ("neurova.api.endpoints.agent_enhancement", "/v1/agent-enhancement", "Agent Enhancement API"),
@@ -255,14 +274,14 @@ def register_endpoint_routers(app) -> None:
             if hasattr(module, "router"):
                 app.include_router(module.router, prefix="/api" + prefix, tags=[description])
                 registered += 1
-                logger.debug(f"Registered router: {prefix} ({description})")
+                logger.debug("Registered router: %s (%s)", prefix, description)
             elif hasattr(module, "endpoints"):
                 # 某些模块直接定义 endpoints
                 registered += 1
-                logger.debug(f"Registered module: {module_path} ({description})")
+                logger.debug("Registered module: %s (%s)", module_path, description)
         except ImportError as e:
-            logger.debug(f"Skipping {module_path}: {e}")
+            logger.debug("Skipping %s: %s", module_path, e)
         except Exception as e:
-            logger.warning(f"Failed to register {module_path}: {e}")
+            logger.warning("Failed to register %s: %s", module_path, e)
 
-    logger.info(f"Registered {registered}/{len(endpoint_modules)} endpoint routers")
+    logger.info("Registered %s/%s endpoint routers", registered, len(endpoint_modules))

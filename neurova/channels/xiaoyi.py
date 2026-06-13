@@ -7,20 +7,20 @@ API 文档: https://developer.huawei.com/consumer/cn/
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Dict, Any, Optional, List
-import websockets
-import hashlib
-import base64
-import time
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
-from .base import ChannelAdapter, ChannelConfig, ChannelMessage
+import websockets
+
+from .base import ChannelAdapter, ChannelConfig
 
 logger = logging.getLogger(__name__)
+
 
 class XiaoYiAdapter(ChannelAdapter):
     """
@@ -71,13 +71,17 @@ class XiaoYiAdapter(ChannelAdapter):
                     "bot_prefix": config.get("bot_prefix", "@bot"),
                     "show_tool_messages": config.get("show_tool_messages", "true"),
                     "show_thinking": config.get("show_thinking", "true"),
-                }
+                },
             )
 
             # 验证必需参数
-            if not all([self.config.config.get("access_key"),
-                       self.config.config.get("secret_key"),
-                       self.config.config.get("agent_id")]):
+            if not all(
+                [
+                    self.config.config.get("access_key"),
+                    self.config.config.get("secret_key"),
+                    self.config.config.get("agent_id"),
+                ]
+            ):
                 logger.error("小艺认证失败: AK, SK, Agent ID 不能为空")
                 return False
 
@@ -86,7 +90,7 @@ class XiaoYiAdapter(ChannelAdapter):
             return True
 
         except Exception as e:
-            logger.error(f"小艺认证失败: {e}")
+            logger.error("小艺认证失败: %s", e)
             return False
 
     def _generate_signature(self, method: str, url: str, body: str = "", content_type: str = "") -> Dict[str, str]:
@@ -110,21 +114,19 @@ class XiaoYiAdapter(ChannelAdapter):
 
             # 生成时间戳
             now = datetime.utcnow()
-            date_str = now.strftime('%Y%m%dT%H%M%SZ')
+            date_str = now.strftime("%Y%m%dT%H%M%SZ")
 
             # 生成随机数
             nonce = str(uuid.uuid4())
 
             # 构建签名字符串
-            string_to_sign = f"{method}\n{path}\n\ncontent-type:{content_type}\nhost:{host}\nx-date:{date_str}\nx-nonce:{nonce}\n"
+            string_to_sign = (
+                f"{method}\n{path}\n\ncontent-type:{content_type}\nhost:{host}\nx-date:{date_str}\nx-nonce:{nonce}\n"
+            )
 
             # HMAC-SHA256签名
             secret_key = self.config.config.get("secret_key")
-            signature = hmac.new(
-                secret_key.encode('utf-8'),
-                string_to_sign.encode('utf-8'),
-                hashlib.sha256
-            ).hexdigest()
+            signature = hmac.new(secret_key.encode("utf-8"), string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
             # 构建Authorization头部
             access_key = self.config.config.get("access_key")
@@ -135,11 +137,11 @@ class XiaoYiAdapter(ChannelAdapter):
                 "X-Date": date_str,
                 "X-Nonce": nonce,
                 "Content-Type": content_type,
-                "Host": host
+                "Host": host,
             }
 
         except Exception as e:
-            logger.error(f"生成签名失败: {e}")
+            logger.error("生成签名失败: %s", e)
             return {}
 
     async def _init_connection(self) -> bool:
@@ -147,7 +149,7 @@ class XiaoYiAdapter(ChannelAdapter):
         try:
             # 尝试导入websockets
             try:
-                import websockets
+                pass
             except ImportError:
                 logger.warning("websockets 未安装，使用模拟模式")
                 self._connected = True
@@ -158,7 +160,7 @@ class XiaoYiAdapter(ChannelAdapter):
             return True
 
         except Exception as e:
-            logger.error(f"小艺连接初始化失败: {e}")
+            logger.error("小艺连接初始化失败: %s", e)
             return False
 
     async def _async_init_connection(self):
@@ -173,13 +175,13 @@ class XiaoYiAdapter(ChannelAdapter):
             self.ws = await websockets.connect(ws_url, extra_headers=headers)
             self._connected = True
 
-            logger.info(f"小艺 WebSocket 连接成功: {ws_url}")
+            logger.info("小艺 WebSocket 连接成功: %s", ws_url)
 
             # 启动接收消息循环
             self._receive_task = asyncio.create_task(self._receive_loop())
 
         except Exception as e:
-            logger.error(f"小艺 WebSocket 连接失败: {e}")
+            logger.error("小艺 WebSocket 连接失败: %s", e)
             self._connected = False
             raise
 
@@ -191,11 +193,11 @@ class XiaoYiAdapter(ChannelAdapter):
                     data = json.loads(message)
                     await self._handle_message(data)
                 except json.JSONDecodeError:
-                    logger.warning(f"小艺收到非 JSON 消息: {message}")
+                    logger.warning("小艺收到非 JSON 消息: %s", message)
         except websockets.ConnectionClosed:
             logger.info("小艺 WebSocket 连接已关闭")
         except Exception as e:
-            logger.error(f"小艺消息接收异常: {e}")
+            logger.error("小艺消息接收异常: %s", e)
         finally:
             self._connected = False
 
@@ -209,31 +211,28 @@ class XiaoYiAdapter(ChannelAdapter):
                 content = data.get("content", "")
                 session_id = data.get("session_id", "")
 
-                logger.info(f"小艺收到消息: {content}")
+                logger.info("小艺收到消息: %s", content)
 
                 # 发送消息事件
-                if hasattr(self, 'on_message'):
-                    await self.on_message(content, {
-                        "session_id": session_id,
-                        "channel": "xiaoyi"
-                    })
+                if hasattr(self, "on_message"):
+                    await self.on_message(content, {"session_id": session_id, "channel": "xiaoyi"})
 
             elif msg_type == "session_start":
                 session_id = data.get("session_id", "")
-                logger.info(f"小艺会话开始: {session_id}")
+                logger.info("小艺会话开始: %s", session_id)
 
             elif msg_type == "session_end":
                 logger.info("小艺会话结束")
 
             elif msg_type == "error":
                 error_msg = data.get("message", "Unknown error")
-                logger.error(f"小艺错误: {error_msg}")
+                logger.error("小艺错误: %s", error_msg)
 
             else:
-                logger.warning(f"小艺收到未知消息类型: {msg_type}")
+                logger.warning("小艺收到未知消息类型: %s", msg_type)
 
         except Exception as e:
-            logger.error(f"处理小艺消息失败: {e}")
+            logger.error("处理小艺消息失败: %s", e)
 
     async def send_message(self, message: str, session_id: str = None, **kwargs) -> bool:
         """发送小艺消息"""
@@ -253,16 +252,16 @@ class XiaoYiAdapter(ChannelAdapter):
                 "content": message,
                 "message_id": str(uuid.uuid4()),
                 "timestamp": datetime.now().isoformat(),
-                "metadata": kwargs
+                "metadata": kwargs,
             }
 
             # 发送消息
             await self.ws.send(json.dumps(msg_data))
-            logger.info(f"小艺消息发送成功: {message[:50]}...")
+            logger.info("小艺消息发送成功: %s...", message[:50])
             return True
 
         except Exception as e:
-            logger.error(f"小艺消息发送异常: {e}")
+            logger.error("小艺消息发送异常: %s", e)
             return False
 
     async def receive_message(self) -> Optional[Dict[str, Any]]:
@@ -276,7 +275,7 @@ class XiaoYiAdapter(ChannelAdapter):
             return json.loads(message)
 
         except Exception as e:
-            logger.error(f"小艺消息接收异常: {e}")
+            logger.error("小艺消息接收异常: %s", e)
             return None
 
     def parse_raw_message(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -321,14 +320,14 @@ class XiaoYiAdapter(ChannelAdapter):
                 "metadata": {
                     "device": metadata.get("device", ""),
                     "location": metadata.get("location", ""),
-                    "ws_url": self.config.config.get("ws_url") if self.config else ""
-                }
+                    "ws_url": self.config.config.get("ws_url") if self.config else "",
+                },
             }
 
             return parsed
 
         except Exception as e:
-            logger.error(f"解析小艺消息失败: {e}")
+            logger.error("解析小艺消息失败: %s", e)
             return {}
 
     def get_channel_config(self) -> Dict[str, Any]:
@@ -344,7 +343,7 @@ class XiaoYiAdapter(ChannelAdapter):
             "bot_prefix": self.bot_prefix,
             "show_tool_messages": self.show_tool_messages,
             "show_thinking": self.show_thinking,
-            "authenticated": self.authenticated
+            "authenticated": self.authenticated,
         }
 
     def update_config(self, config_updates: Dict[str, Any]) -> bool:
@@ -355,25 +354,28 @@ class XiaoYiAdapter(ChannelAdapter):
 
             # 更新配置
             for key, value in config_updates.items():
-                if key in ["access_key", "secret_key", "agent_id", "ws_url",
-                          "bot_prefix", "show_tool_messages", "show_thinking"]:
+                if key in [
+                    "access_key",
+                    "secret_key",
+                    "agent_id",
+                    "ws_url",
+                    "bot_prefix",
+                    "show_tool_messages",
+                    "show_thinking",
+                ]:
                     self.config.config[key] = value
 
             return True
 
         except Exception as e:
-            logger.error(f"更新配置失败: {e}")
+            logger.error("更新配置失败: %s", e)
             return False
+
 
 def create_xiaoyi_adapter(access_key: str, secret_key: str, agent_id: str) -> XiaoYiAdapter:
     """创建小艺适配器"""
     adapter = XiaoYiAdapter()
     adapter.config = ChannelConfig(
-        channel="xiaoyi",
-        config={
-            "access_key": access_key,
-            "secret_key": secret_key,
-            "agent_id": agent_id
-        }
+        channel="xiaoyi", config={"access_key": access_key, "secret_key": secret_key, "agent_id": agent_id}
     )
     return adapter

@@ -13,15 +13,13 @@ from __future__ import annotations
 import datetime
 import json
 import logging
-import os
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional
 
 from neurova.llm.providers.base import BaseProvider
 from neurova.llm.providers.types import (
-    ConnectionResult,
     ModelInfo,
     ProbeResult,
     ProviderCapability,
@@ -30,6 +28,7 @@ from neurova.llm.providers.types import (
 
 try:
     import litellm
+
     _LITELLM_AVAILABLE = True
 except ImportError:
     litellm = None

@@ -6,4 +6,3 @@ LLM Client 模块（pyc骨架恢复占位）
 """
 
 # 重新导出 neurova.llm_client 的内容以保持兼容性
-from neurova.llm_client import LLMClient, LLMConfig, LLMResponse

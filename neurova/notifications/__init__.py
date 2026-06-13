@@ -10,13 +10,13 @@
 - NotificationManager: 通知管理器（集成负一屏推送）
 """
 
+from .manager import NotificationManager
 from .negative_screen import (
     NegativeScreenConfig,
     NegativeScreenConfigManager,
     NegativeScreenPusher,
     PushResult,
 )
-from .manager import NotificationManager
 
 __all__ = [
     "NegativeScreenConfig",

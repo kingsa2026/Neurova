@@ -13,16 +13,16 @@ Agent 协作能力模块
     from neurova.agent.matrix import CapabilityMatrix, AgentCapability
 """
 
+from .capability_discovery import AgentCapability, CapabilityDiscovery, CapabilityMatch
+from .dead_letter_queue import DeadLetterQueue, DLQConfig
 from .message_protocol import (
     AgentMessage,
+    DeadLetterMessage,
+    DeadLetterReason,
     MessagePriority,
     MessageType,
     ProtocolVersion,
-    DeadLetterMessage,
-    DeadLetterReason,
 )
-from .dead_letter_queue import DeadLetterQueue, DLQConfig
-from .capability_discovery import CapabilityDiscovery, AgentCapability, CapabilityMatch
 
 __all__ = [
     # 消息协议

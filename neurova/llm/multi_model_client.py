@@ -12,18 +12,18 @@ import asyncio
 import logging
 import threading
 import time
-import typing
-from typing import Dict, List, Optional, Any, Callable
+from typing import Any, Dict, List, Optional
 
-from neurova.llm_client import LLMClient, LLMConfig
 from neurova.llm.provider_manager import (
     LLMProviderManager,
-    get_provider_manager,
-    ProviderConfig,
     LoadBalancingStrategy,
+    ProviderConfig,
+    get_provider_manager,
 )
+from neurova.llm_client import LLMClient, LLMConfig
 
 logger = logging.getLogger(__name__)
+
 
 class ModelClient:
     """单个模型的客户端封装"""
@@ -50,6 +50,7 @@ class ModelClient:
         if not success:
             self.error_count += 1
 
+
 class MultiModelLLMClient:
     """
     多模型 LLM 客户端管理器
@@ -60,6 +61,7 @@ class MultiModelLLMClient:
     3. 支持按模型名称自动路由请求
     4. 支持负载均衡策略
     """
+
     _instance = None
     _lock = threading.Lock()
 
@@ -74,7 +76,7 @@ class MultiModelLLMClient:
         provider_manager: Optional[LLMProviderManager] = None,
         strategy: LoadBalancingStrategy = LoadBalancingStrategy.PRIORITY_FIRST,
     ):
-        if hasattr(self, '_initialized') and self._initialized:
+        if hasattr(self, "_initialized") and self._initialized:
             return
         self._initialized = True
 
@@ -96,7 +98,7 @@ class MultiModelLLMClient:
             if default_provider.default_model:
                 self._current_provider_id = default_provider.id
                 self._current_model = default_provider.default_model
-                logger.info(f"Initialized default client: {default_provider.id}/{default_provider.default_model}")
+                logger.info("Initialized default client: %s/%s", default_provider.id, default_provider.default_model)
 
     def _initialize_provider_clients(self, provider: ProviderConfig) -> None:
         """为服务商初始化客户端"""
@@ -114,7 +116,7 @@ class MultiModelLLMClient:
 
         try:
             if not provider.api_key:
-                logger.warning(f"No API key for provider {provider.id}")
+                logger.warning("No API key for provider %s", provider.id)
                 return None
 
             config = LLMConfig(
@@ -127,7 +129,7 @@ class MultiModelLLMClient:
             self._clients[client_key] = model_client
             return model_client
         except Exception as e:
-            logger.error(f"Failed to create client for {provider.id}/{model}: {e}")
+            logger.error("Failed to create client for %s/%s: %s", provider.id, model, e)
             return None
 
     def get_client(
@@ -171,7 +173,7 @@ class MultiModelLLMClient:
             # 尝试创建客户端
             provider = self._provider_manager.get_provider(provider_id)
             if not provider:
-                logger.warning(f"Provider {provider_id} not found")
+                logger.warning("Provider %s not found", provider_id)
                 return False
             client = self._create_model_client(provider, model)
             if not client:
@@ -179,7 +181,7 @@ class MultiModelLLMClient:
 
         self._current_provider_id = provider_id
         self._current_model = model
-        logger.info(f"Active model set to {provider_id}/{model}")
+        logger.info("Active model set to %s/%s", provider_id, model)
         return True
 
     def switch_to_next_model(self) -> bool:
@@ -195,8 +197,7 @@ class MultiModelLLMClient:
         # 查找当前模型的索引
         current_index = -1
         for i, client in enumerate(models):
-            if (client.provider.id == self._current_provider_id and
-                client.model == self._current_model):
+            if client.provider.id == self._current_provider_id and client.model == self._current_model:
                 current_index = i
                 break
 
@@ -206,29 +207,32 @@ class MultiModelLLMClient:
 
         self._current_provider_id = next_client.provider.id
         self._current_model = next_client.model
-        logger.info(f"Switched to model {self._current_provider_id}/{self._current_model}")
+        logger.info("Switched to model %s/%s", self._current_provider_id, self._current_model)
         return True
 
     def list_available_models(self) -> List[Dict[str, Any]]:
         """列出所有可用模型"""
         models = []
         for client in self._clients.values():
-            models.append({
-                'provider_id': client.provider.id,
-                'provider_name': client.provider.name,
-                'model': client.model,
-                'is_current': (client.provider.id == self._current_provider_id and
-                              client.model == self._current_model),
-                'request_count': client.request_count,
-                'success_rate': client.success_rate,
-            })
+            models.append(
+                {
+                    "provider_id": client.provider.id,
+                    "provider_name": client.provider.name,
+                    "model": client.model,
+                    "is_current": (
+                        client.provider.id == self._current_provider_id and client.model == self._current_model
+                    ),
+                    "request_count": client.request_count,
+                    "success_rate": client.success_rate,
+                }
+            )
         return models
 
     def refresh_provider(self, provider_id: str) -> bool:
         """刷新服务商客户端"""
         provider = self._provider_manager.get_provider(provider_id)
         if not provider:
-            logger.warning(f"Provider {provider_id} not found")
+            logger.warning("Provider %s not found", provider_id)
             return False
 
         # 移除旧客户端
@@ -240,7 +244,7 @@ class MultiModelLLMClient:
             # 重新初始化
             if provider.enabled and provider.api_key:
                 self._initialize_provider_clients(provider)
-                logger.info(f"Refreshed provider {provider_id}")
+                logger.info("Refreshed provider %s", provider_id)
                 return True
 
         return False
@@ -262,8 +266,8 @@ class MultiModelLLMClient:
         if not client:
             logger.warning("No client available for chat")
             return {
-                'success': False,
-                'error': 'No client available',
+                "success": False,
+                "error": "No client available",
             }
 
         try:
@@ -273,19 +277,19 @@ class MultiModelLLMClient:
 
             client.increment_request(success=True)
             return {
-                'success': True,
-                'response': result,
-                'duration': duration,
-                'model': client.model,
-                'provider': client.provider.id,
+                "success": True,
+                "response": result,
+                "duration": duration,
+                "model": client.model,
+                "provider": client.provider.id,
             }
         except Exception as e:
             client.increment_request(success=False)
             return {
-                'success': False,
-                'error': str(e),
-                'model': client.model,
-                'provider': client.provider.id,
+                "success": False,
+                "error": str(e),
+                "model": client.model,
+                "provider": client.provider.id,
             }
 
     async def chat_stream(
@@ -298,18 +302,18 @@ class MultiModelLLMClient:
         client = self._get_client_for_request(model, provider_id)
         if not client:
             logger.warning("No client available for stream chat")
-            yield {'error': 'No client available'}
+            yield {"error": "No client available"}
             return
 
         try:
             start_time = time.time()
             async for chunk in client.client.chat_stream(messages):
                 yield chunk
-            duration = time.time() - start_time
+            time.time() - start_time
             client.increment_request(success=True)
         except Exception as e:
             client.increment_request(success=False)
-            yield {'error': str(e)}
+            yield {"error": str(e)}
 
     def _get_client_for_request(
         self,
@@ -330,15 +334,17 @@ class MultiModelLLMClient:
         total_errors = sum(c.error_count for c in self._clients.values())
 
         return {
-            'total_clients': len(self._clients),
-            'current_provider': self._current_provider_id,
-            'current_model': self._current_model,
-            'total_requests': total_requests,
-            'total_errors': total_errors,
-            'models': self.list_available_models(),
+            "total_clients": len(self._clients),
+            "current_provider": self._current_provider_id,
+            "current_model": self._current_model,
+            "total_requests": total_requests,
+            "total_errors": total_errors,
+            "models": self.list_available_models(),
         }
 
+
 _multi_model_client: Optional[MultiModelLLMClient] = None
+
 
 def get_multi_model_client() -> MultiModelLLMClient:
     """获取 MultiModelLLMClient 单例"""
@@ -347,7 +353,8 @@ def get_multi_model_client() -> MultiModelLLMClient:
         _multi_model_client = MultiModelLLMClient()
     return _multi_model_client
 
+
 __all__ = [
-    'MultiModelLLMClient',
-    'get_multi_model_client',
+    "MultiModelLLMClient",
+    "get_multi_model_client",
 ]

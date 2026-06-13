@@ -69,6 +69,7 @@ _private_skills: Dict[str, Dict[str, Any]] = {}
 def _get_spm():
     try:
         from neurova.skill_system.skill_pool_manager import SkillPoolManager
+
         return SkillPoolManager()
     except Exception:
         return None
@@ -114,9 +115,15 @@ async def create_private_skill(body: SkillCreate, user_id: str = Query(default="
     sid = str(uuid.uuid4())
     now = time.time()
     skill = {
-        "skill_id": sid, "name": body.name, "description": body.description,
-        "category": body.category, "scope": "private", "owner_id": user_id,
-        "enabled": True, "created_at": now, "updated_at": now,
+        "skill_id": sid,
+        "name": body.name,
+        "description": body.description,
+        "category": body.category,
+        "scope": "private",
+        "owner_id": user_id,
+        "enabled": True,
+        "created_at": now,
+        "updated_at": now,
     }
     _private_skills[sid] = skill
     return SkillInfo(**skill)

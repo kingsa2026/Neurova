@@ -10,7 +10,6 @@ Audio API - 音频端点
 """
 
 import base64
-import io
 import logging
 import time
 import uuid
@@ -30,6 +29,7 @@ from neurova.api.endpoints import get_app_state
 
 class SynthesizeRequest(BaseModel):
     """TTS 合成请求"""
+
     text: str = Field(..., description="要合成的文本", max_length=5000)
     voice: Optional[str] = Field(default=None, description="音色名称")
     speed: float = Field(default=1.0, ge=0.5, le=2.0, description="语速")
@@ -41,15 +41,13 @@ class SynthesizeRequest(BaseModel):
 
 class TranscribeRequest(BaseModel):
     """ASR 转写请求"""
+
     language: str = Field(default="zh", description="语言 (zh/en/auto)")
-
-
-
-
 
 
 class AudioAPIResponse(BaseModel):
     """统一 API 响应"""
+
     code: int = 0
     message: str = "success"
     data: Optional[dict] = None
@@ -58,10 +56,10 @@ class AudioAPIResponse(BaseModel):
 
 def _get_voice_engine(engine_type: str):
     """获取 VoiceEngine
-    
+
     Args:
         engine_type: 引擎类型 ("tts" 或 "asr")
-    
+
     Returns:
         VoiceEngine 或 None
     """
@@ -79,7 +77,7 @@ def _get_tts_manager():
     voice_engine = _get_voice_engine("tts")
     if voice_engine:
         return voice_engine
-    
+
     # 降级到旧的 TTSManager
     state = get_app_state()
     if state:
@@ -93,7 +91,7 @@ def _get_asr_manager():
     voice_engine = _get_voice_engine("asr")
     if voice_engine:
         return voice_engine
-    
+
     # 降级到旧的 ASRManager
     state = get_app_state()
     if state:
@@ -135,11 +133,7 @@ async def synthesize_speech(request: Request, body: SynthesizeRequest):
                 kwargs["voice_ref_text"] = body.voice_ref_text
 
             # 使用 VoiceEngine 统一接口
-            result = await voice_engine.process(
-                input_data=body.text,
-                operation="synthesize",
-                **kwargs
-            )
+            result = await voice_engine.process(input_data=body.text, operation="synthesize", **kwargs)
 
             if result.error:
                 raise HTTPException(status_code=500, detail=result.error)
@@ -245,17 +239,13 @@ async def transcribe_audio(
     if voice_engine and voice_engine.is_available():
         try:
             audio_bytes = await audio_file.read()
-            
+
             # 使用 VoiceEngine 统一接口
-            result = await voice_engine.process(
-                input_data=audio_bytes,
-                operation="transcribe",
-                language=language
-            )
-            
+            result = await voice_engine.process(input_data=audio_bytes, operation="transcribe", language=language)
+
             if result.error:
                 raise HTTPException(status_code=500, detail=result.error)
-            
+
             return {
                 "code": 0,
                 "data": {
@@ -265,13 +255,13 @@ async def transcribe_audio(
                 },
                 "request_id": str(uuid.uuid4())[:8],
             }
-            
+
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"VoiceEngine ASR 转写失败: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"转写失败: {str(e)}")
-    
+
     # 降级到旧的 ASRManager
     asr_manager = _get_asr_manager()
     if not asr_manager or not asr_manager.is_initialized:
@@ -292,9 +282,6 @@ async def transcribe_audio(
         raise HTTPException(status_code=500, detail=f"转写失败: {str(e)}")
 
 
-
-
-
 @router.get("/status")
 async def audio_status():
     """
@@ -305,7 +292,7 @@ async def audio_status():
     # 优先使用 VoiceEngine
     tts_voice_engine = _get_voice_engine("tts")
     asr_voice_engine = _get_voice_engine("asr")
-    
+
     if tts_voice_engine:
         tts_stats = {
             "initialized": tts_voice_engine.is_available(),
@@ -314,7 +301,7 @@ async def audio_status():
     else:
         tts = _get_tts_manager()
         tts_stats = tts.stats if tts else {"initialized": False}
-    
+
     if asr_voice_engine:
         asr_stats = {
             "initialized": asr_voice_engine.is_available(),
@@ -340,48 +327,56 @@ async def list_engines():
     # 优先使用 VoiceEngine
     tts_voice_engine = _get_voice_engine("tts")
     asr_voice_engine = _get_voice_engine("asr")
-    
+
     engines = []
-    
+
     if tts_voice_engine:
         tts_info = tts_voice_engine.get_info()
-        engines.append({
-            "name": "tts",
-            "type": "text-to-speech",
-            "engine": tts_info.get("engine_class", "unknown"),
-            "initialized": tts_voice_engine.is_available(),
-            "voice_engine": True,
-        })
+        engines.append(
+            {
+                "name": "tts",
+                "type": "text-to-speech",
+                "engine": tts_info.get("engine_class", "unknown"),
+                "initialized": tts_voice_engine.is_available(),
+                "voice_engine": True,
+            }
+        )
     else:
         tts = _get_tts_manager()
         if tts:
-            engines.append({
-                "name": "tts",
-                "type": "text-to-speech",
-                "engine": tts.get_engine_name(),
-                "initialized": tts.is_initialized,
-                "voice_engine": False,
-            })
-    
+            engines.append(
+                {
+                    "name": "tts",
+                    "type": "text-to-speech",
+                    "engine": tts.get_engine_name(),
+                    "initialized": tts.is_initialized,
+                    "voice_engine": False,
+                }
+            )
+
     if asr_voice_engine:
         asr_info = asr_voice_engine.get_info()
-        engines.append({
-            "name": "asr",
-            "type": "speech-to-text",
-            "engine": asr_info.get("engine_class", "unknown"),
-            "initialized": asr_voice_engine.is_available(),
-            "voice_engine": True,
-        })
+        engines.append(
+            {
+                "name": "asr",
+                "type": "speech-to-text",
+                "engine": asr_info.get("engine_class", "unknown"),
+                "initialized": asr_voice_engine.is_available(),
+                "voice_engine": True,
+            }
+        )
     else:
         asr_manager = _get_asr_manager()
         if asr_manager:
-            engines.append({
-                "name": "asr",
-                "type": "speech-to-text",
-                "engine": asr_manager.get_engine_name(),
-                "initialized": asr_manager.is_initialized,
-                "voice_engine": False,
-            })
+            engines.append(
+                {
+                    "name": "asr",
+                    "type": "speech-to-text",
+                    "engine": asr_manager.get_engine_name(),
+                    "initialized": asr_manager.is_initialized,
+                    "voice_engine": False,
+                }
+            )
 
     return {
         "code": 0,

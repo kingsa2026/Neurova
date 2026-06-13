@@ -17,16 +17,16 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from neurova.channels.base import ChannelConfig
-from neurova.channels.feishu import create_feishu_adapter, FeishuAdapter
-from neurova.channels.dingtalk import create_dingtalk_adapter, DingTalkAdapter
-from neurova.channels.wecom import create_wecom_adapter, WeComAdapter
+from neurova.channels.dingtalk import create_dingtalk_adapter
+from neurova.channels.feishu import create_feishu_adapter
 from neurova.channels.manager import get_channel_manager
+from neurova.channels.wecom import create_wecom_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +40,10 @@ CONFIG_FILE = CONFIG_DIR / "channel_configs.json"
 # 请求/响应模型
 # ============================================================
 
+
 class ChannelConfigRequest(BaseModel):
     """渠道配置请求"""
+
     channel_type: str = Field(..., description="渠道类型: feishu, dingtalk, wecom")
     enabled: bool = Field(True, description="是否启用")
     app_id: str = Field("", description="应用 ID")
@@ -53,8 +55,10 @@ class ChannelConfigRequest(BaseModel):
     verification_token: str = Field("", description="验证 Token")
     extra: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
 
+
 class ChannelConfigResponse(BaseModel):
     """渠道配置响应"""
+
     channel_type: str
     enabled: bool
     app_id_masked: str
@@ -62,15 +66,19 @@ class ChannelConfigResponse(BaseModel):
     connected: bool = False
     extra: Dict[str, Any] = Field(default_factory=dict)
 
+
 class ChannelTestResult(BaseModel):
     """连接测试结果"""
+
     success: bool
     message: str
     details: Dict[str, Any] = Field(default_factory=dict)
 
+
 # ============================================================
 # 配置持久化
 # ============================================================
+
 
 def _load_configs() -> Dict[str, Dict[str, Any]]:
     """从文件加载配置"""
@@ -81,6 +89,7 @@ def _load_configs() -> Dict[str, Dict[str, Any]]:
     except (json.JSONDecodeError, IOError):
         return {}
 
+
 def _save_configs(configs: Dict[str, Dict[str, Any]]):
     """保存配置到文件"""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -89,9 +98,11 @@ def _save_configs(configs: Dict[str, Dict[str, Any]]):
         encoding="utf-8",
     )
 
+
 # ============================================================
 # API 端点
 # ============================================================
+
 
 @router.get("", summary="列出所有渠道配置")
 async def list_configs():
@@ -102,15 +113,18 @@ async def list_configs():
     result = []
     for channel_type, cfg in configs.items():
         adapter = manager.get_adapter(channel_type)
-        result.append(ChannelConfigResponse(
-            channel_type=channel_type,
-            enabled=cfg.get("enabled", True),
-            app_id_masked=(cfg.get("app_id", "")[:8] + "***") if cfg.get("app_id") else "",
-            use_stream=cfg.get("use_stream", True),
-            connected=adapter.is_connected if adapter else False,
-            extra=cfg.get("extra", {}),
-        ))
+        result.append(
+            ChannelConfigResponse(
+                channel_type=channel_type,
+                enabled=cfg.get("enabled", True),
+                app_id_masked=(cfg.get("app_id", "")[:8] + "***") if cfg.get("app_id") else "",
+                use_stream=cfg.get("use_stream", True),
+                connected=adapter.is_connected if adapter else False,
+                extra=cfg.get("extra", {}),
+            )
+        )
     return result
+
 
 @router.get("/{channel_type}", summary="获取指定渠道配置")
 async def get_config(channel_type: str):
@@ -131,6 +145,7 @@ async def get_config(channel_type: str):
         connected=adapter.is_connected if adapter else False,
         extra=cfg.get("extra", {}),
     )
+
 
 @router.post("", summary="创建/更新渠道配置")
 async def create_or_update_config(request: ChannelConfigRequest):
@@ -168,6 +183,7 @@ async def create_or_update_config(request: ChannelConfigRequest):
         "message": f"Channel '{request.channel_type}' configured and registered",
     }
 
+
 @router.delete("/{channel_type}", summary="删除渠道配置")
 async def delete_config(channel_type: str):
     """删除渠道配置并注销适配器"""
@@ -189,6 +205,7 @@ async def delete_config(channel_type: str):
     _save_configs(configs)
 
     return {"success": True, "message": f"Channel '{channel_type}' deleted"}
+
 
 @router.post("/{channel_type}/test", summary="测试渠道连接")
 async def test_connection(channel_type: str, request: ChannelConfigRequest):
@@ -226,6 +243,7 @@ async def test_connection(channel_type: str, request: ChannelConfigRequest):
             message=f"Connection error: {str(e)}",
             details={"error": str(e)},
         )
+
 
 def _create_adapter(channel_type: str, config: ChannelConfig):
     """根据类型创建适配器"""

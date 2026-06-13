@@ -13,24 +13,23 @@ WebSocket 消息渠道适配器
 pip install websockets
 """
 
+import asyncio
 import json
 import logging
-import time
-import asyncio
 import ssl
-from typing import Optional, Dict, Any, List
+import time
 from datetime import datetime
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional
 
 try:
     import websockets
+
     WEBSOCKETS_AVAILABLE = True
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
 
-from neurova.channels import (
-    ChannelAdapter, MessageChannel, UnifiedMessage, ContentType
-)
+from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+
 
 class WebSocketAdapter(ChannelAdapter):
     """
@@ -60,12 +59,12 @@ class WebSocketAdapter(ChannelAdapter):
         self.headers: Dict[str, str] = {}
         self.subprotocols: List[str] = []
         self.ping_interval = 20  # 心跳间隔 (秒)
-        self.ping_timeout = 10   # 心跳超时 (秒)
+        self.ping_timeout = 10  # 心跳超时 (秒)
         self.close_timeout = 10  # 关闭超时 (秒)
 
         # 重连配置
         self.reconnect_enabled = True
-        self.reconnect_interval = 5      # 重连间隔 (秒)
+        self.reconnect_interval = 5  # 重连间隔 (秒)
         self.reconnect_max_attempts = 0  # 最大重连次数 (0=无限)
         self.reconnect_attempts = 0
 
@@ -134,7 +133,7 @@ class WebSocketAdapter(ChannelAdapter):
             try:
                 self.headers = json.loads(headers_str)
             except json.JSONDecodeError:
-                logging.warning(f"Headers 解析失败: {headers_str}")
+                logging.warning("Headers 解析失败: %s", headers_str)
 
         # 解析子协议
         subprotocols_str = config.get("subprotocols", "")
@@ -177,9 +176,8 @@ class WebSocketAdapter(ChannelAdapter):
             headers["Authorization"] = f"Bearer {self.auth_token}"
         elif self.auth_type == "basic" and self.auth_username:
             import base64
-            credentials = base64.b64encode(
-                f"{self.auth_username}:{self.auth_password}".encode()
-            ).decode()
+
+            credentials = base64.b64encode(f"{self.auth_username}:{self.auth_password}".encode()).decode()
             headers["Authorization"] = f"Basic {credentials}"
         elif self.auth_type == "api_key" and self.api_key_value:
             headers[self.api_key_header] = self.api_key_value
@@ -206,7 +204,7 @@ class WebSocketAdapter(ChannelAdapter):
             self._event_loop.run_until_complete(self._async_init_connection())
             return True
         except Exception as e:
-            logging.error(f"WebSocket 连接初始化失败: {e}")
+            logging.error("WebSocket 连接初始化失败: %s", e)
             self._initialized = True  # 允许继续，连接可以后续重试
             return True
 
@@ -234,14 +232,14 @@ class WebSocketAdapter(ChannelAdapter):
 
             self._connected = True
             self._reconnect_attempts = 0
-            logging.info(f"WebSocket 连接成功: {self.ws_url}")
+            logging.info("WebSocket 连接成功: %s", self.ws_url)
             self._initialized = True
 
             # 启动消息接收循环
             self._receive_task = asyncio.create_task(self._receive_loop())
 
         except Exception as e:
-            logging.error(f"WebSocket 连接失败: {e}")
+            logging.error("WebSocket 连接失败: %s", e)
             raise
 
     async def _receive_loop(self):
@@ -256,9 +254,9 @@ class WebSocketAdapter(ChannelAdapter):
                     if unified_msg:
                         self._message_queue.append(unified_msg)
                 except Exception as e:
-                    logging.error(f"WebSocket 消息解析异常: {e}")
+                    logging.error("WebSocket 消息解析异常: %s", e)
         except websockets.exceptions.ConnectionClosed as e:
-            logging.warning(f"WebSocket 连接已关闭: {e}")
+            logging.warning("WebSocket 连接已关闭: %s", e)
             self._connected = False
             self._ws_connection = None
 
@@ -266,17 +264,17 @@ class WebSocketAdapter(ChannelAdapter):
             if self.reconnect_enabled:
                 await self._reconnect()
         except Exception as e:
-            logging.error(f"WebSocket 接收循环异常: {e}")
+            logging.error("WebSocket 接收循环异常: %s", e)
             self._connected = False
 
     async def _reconnect(self):
         """自动重连"""
         if self.reconnect_max_attempts > 0 and self._reconnect_attempts >= self.reconnect_max_attempts:
-            logging.error(f"WebSocket 达到最大重连次数 ({self.reconnect_max_attempts})，停止重连")
+            logging.error("WebSocket 达到最大重连次数 (%s)，停止重连", self.reconnect_max_attempts)
             return
 
         self._reconnect_attempts += 1
-        logging.info(f"WebSocket 尝试重连 ({self._reconnect_attempts}/{self.reconnect_max_attempts or '∞'})...")
+        logging.info("WebSocket 尝试重连 (%s/%s)...", self._reconnect_attempts, self.reconnect_max_attempts or '∞')
 
         await asyncio.sleep(self.reconnect_interval)
 
@@ -284,7 +282,7 @@ class WebSocketAdapter(ChannelAdapter):
             await self._async_init_connection()
             logging.info("WebSocket 重连成功")
         except Exception as e:
-            logging.error(f"WebSocket 重连失败: {e}")
+            logging.error("WebSocket 重连失败: %s", e)
             # 继续尝试重连
             if self.reconnect_enabled:
                 asyncio.create_task(self._reconnect())
@@ -361,31 +359,32 @@ class WebSocketAdapter(ChannelAdapter):
             return False
 
         if not WEBSOCKETS_AVAILABLE or not self._ws_connection:
-            logging.info(f"[WebSocket模拟] 发送消息: {message.content[:50]}")
+            logging.info("[WebSocket模拟] 发送消息: %s", message.content[:50])
             return True
 
         try:
             # 构建消息体
             if self.message_format == "json":
-                payload = json.dumps({
-                    "message_id": message.message_id,
-                    self.content_field: message.content,
-                    "content_type": message.content_type.value,
-                    "timestamp": datetime.now().isoformat(),
-                    "chat_id": message.chat_id,
-                    "agent_id": message.agent_id,
-                    **(message.metadata or {}),
-                }, ensure_ascii=False)
+                payload = json.dumps(
+                    {
+                        "message_id": message.message_id,
+                        self.content_field: message.content,
+                        "content_type": message.content_type.value,
+                        "timestamp": datetime.now().isoformat(),
+                        "chat_id": message.chat_id,
+                        "agent_id": message.agent_id,
+                        **(message.metadata or {}),
+                    },
+                    ensure_ascii=False,
+                )
             else:
                 payload = message.content
 
             # 异步发送消息
-            self._event_loop.run_until_complete(
-                self._ws_connection.send(payload)
-            )
+            self._event_loop.run_until_complete(self._ws_connection.send(payload))
             return True
         except Exception as e:
-            logging.error(f"WebSocket 消息发送异常: {e}")
+            logging.error("WebSocket 消息发送异常: %s", e)
             return False
 
     def receive_message(self) -> Optional[UnifiedMessage]:
@@ -430,7 +429,7 @@ class WebSocketAdapter(ChannelAdapter):
             try:
                 self.headers = json.loads(config_updates["headers"])
             except json.JSONDecodeError as e:
-                logging.warning(f"WebSocket headers JSON 解析失败: {e}")
+                logging.warning("WebSocket headers JSON 解析失败: %s", e)
         if "subprotocols" in config_updates:
             self.subprotocols = [s.strip() for s in config_updates["subprotocols"].split(",") if s.strip()]
         if "ping_interval" in config_updates:
@@ -459,14 +458,16 @@ class WebSocketAdapter(ChannelAdapter):
             self._connected = False
             logging.info("WebSocket 连接已断开")
 
-def create_websocket_adapter(ws_url: str = "", auth_type: str = "none",
-                            auth_token: str = "") -> WebSocketAdapter:
+
+def create_websocket_adapter(ws_url: str = "", auth_type: str = "none", auth_token: str = "") -> WebSocketAdapter:
     """创建 WebSocket 适配器"""
     adapter = WebSocketAdapter()
     if ws_url:
-        adapter.authenticate({
-            "ws_url": ws_url,
-            "auth_type": auth_type,
-            "auth_token": auth_token,
-        })
+        adapter.authenticate(
+            {
+                "ws_url": ws_url,
+                "auth_type": auth_type,
+                "auth_token": auth_token,
+            }
+        )
     return adapter

@@ -17,13 +17,8 @@ import logging
 import typing
 import uuid
 
-from fastapi import APIRouter
-from fastapi import Depends
-from fastapi import HTTPException
-from fastapi import Query
-from fastapi import Request
-from pydantic import BaseModel
-from pydantic import Field
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +26,7 @@ router = APIRouter()
 
 
 # ── Models ─────────────────────────────────────────────
+
 
 class BenchmarkRunRequest(BaseModel):
     suite_id: str
@@ -42,11 +38,46 @@ class BenchmarkRunRequest(BaseModel):
 # ── In-memory stores ───────────────────────────────────
 
 _SUITES: typing.List[dict] = [
-    {"id": "reasoning-v1", "name": "Logical Reasoning", "description": "Tests logical deduction and problem solving", "tasks": 50, "difficulty": "medium", "category": "reasoning"},
-    {"id": "coding-v1", "name": "Code Generation", "description": "Tests code generation and debugging", "tasks": 30, "difficulty": "hard", "category": "coding"},
-    {"id": "memory-v1", "name": "Memory Recall", "description": "Tests short-term and long-term memory", "tasks": 40, "difficulty": "easy", "category": "memory"},
-    {"id": "creative-v1", "name": "Creative Writing", "description": "Tests creative content generation", "tasks": 20, "difficulty": "medium", "category": "creative"},
-    {"id": "multimodal-v1", "name": "Multimodal Understanding", "description": "Tests image/audio understanding", "tasks": 25, "difficulty": "hard", "category": "multimodal"},
+    {
+        "id": "reasoning-v1",
+        "name": "Logical Reasoning",
+        "description": "Tests logical deduction and problem solving",
+        "tasks": 50,
+        "difficulty": "medium",
+        "category": "reasoning",
+    },
+    {
+        "id": "coding-v1",
+        "name": "Code Generation",
+        "description": "Tests code generation and debugging",
+        "tasks": 30,
+        "difficulty": "hard",
+        "category": "coding",
+    },
+    {
+        "id": "memory-v1",
+        "name": "Memory Recall",
+        "description": "Tests short-term and long-term memory",
+        "tasks": 40,
+        "difficulty": "easy",
+        "category": "memory",
+    },
+    {
+        "id": "creative-v1",
+        "name": "Creative Writing",
+        "description": "Tests creative content generation",
+        "tasks": 20,
+        "difficulty": "medium",
+        "category": "creative",
+    },
+    {
+        "id": "multimodal-v1",
+        "name": "Multimodal Understanding",
+        "description": "Tests image/audio understanding",
+        "tasks": 25,
+        "difficulty": "hard",
+        "category": "multimodal",
+    },
 ]
 
 _RUNS_STORE: typing.Dict[str, dict] = {}  # run_id -> run data
@@ -58,6 +89,7 @@ def _get_user_id(request: Request) -> str:
 
 
 # ── Endpoints ──────────────────────────────────────────
+
 
 @router.get("/suites")
 async def list_suites():
@@ -77,6 +109,7 @@ async def run_benchmark(body: BenchmarkRunRequest, request: Request):
 
     # Simulate benchmark execution
     import random
+
     tasks_completed = suite["tasks"]
     correct = random.randint(int(tasks_completed * 0.5), int(tasks_completed * 0.95))
     score = round(correct / tasks_completed * 100, 2)
@@ -107,7 +140,13 @@ async def run_benchmark(body: BenchmarkRunRequest, request: Request):
 
 
 @router.get("/runs")
-async def list_runs(request: Request, agent_id: typing.Optional[str] = None, suite_id: typing.Optional[str] = None, page: int = 1, size: int = 20):
+async def list_runs(
+    request: Request,
+    agent_id: typing.Optional[str] = None,
+    suite_id: typing.Optional[str] = None,
+    page: int = 1,
+    size: int = 20,
+):
     """查询测试运行历史"""
     user_id = _get_user_id(request)
     run_ids = _USER_RUNS.get(user_id, [])
@@ -127,7 +166,13 @@ async def list_runs(request: Request, agent_id: typing.Optional[str] = None, sui
 
 
 @router.get("/results")
-async def list_results(request: Request, agent_id: typing.Optional[str] = None, suite_id: typing.Optional[str] = None, page: int = 1, size: int = 20):
+async def list_results(
+    request: Request,
+    agent_id: typing.Optional[str] = None,
+    suite_id: typing.Optional[str] = None,
+    page: int = 1,
+    size: int = 20,
+):
     """查询测试结果（别名）"""
     return await list_runs(request, agent_id, suite_id, page, size)
 
@@ -164,7 +209,18 @@ async def get_agent_benchmarks(agent_id: str, request: Request, page: int = 1, s
         avg_score = 0
         best_score = 0
 
-    return {"code": 0, "message": "success", "data": {"items": items, "total": total, "avg_score": avg_score, "best_score": best_score, "page": page, "size": size}}
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "items": items,
+            "total": total,
+            "avg_score": avg_score,
+            "best_score": best_score,
+            "page": page,
+            "size": size,
+        },
+    }
 
 
 @router.post("/compare")
@@ -193,6 +249,11 @@ async def compare_agents(request_body: dict, request: Request):
         else:
             avg_score = best_score = avg_latency = 0
 
-        results[aid] = {"runs": len(agent_runs), "avg_score": avg_score, "best_score": best_score, "avg_latency_ms": avg_latency}
+        results[aid] = {
+            "runs": len(agent_runs),
+            "avg_score": avg_score,
+            "best_score": best_score,
+            "avg_latency_ms": avg_latency,
+        }
 
     return {"code": 0, "message": "success", "data": {"comparison": results}}

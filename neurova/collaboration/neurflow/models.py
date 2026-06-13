@@ -2,18 +2,20 @@
 Neurflow 数据模型 — 垂直切片 1
 核心数据类：WorkflowDefinition, NodeDefinition, ExecutionInstance 等
 """
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
-from enum import Enum
+
 import time
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class WorkflowStatus(Enum):
     """工作流状态枚举"""
+
     DRAFT = "draft"
     PUBLISHED = "published"
     RUNNING = "running"
-    PAUSED = "paused"           # 等待人工审批
+    PAUSED = "paused"  # 等待人工审批
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -21,37 +23,39 @@ class WorkflowStatus(Enum):
 
 class NodeCategory(Enum):
     """节点分类枚举"""
-    FLOW = "flow"               # 流程控制：条件/循环/并行/合并
-    TOOLS = "tools"             # ToolEngine 工具
-    SKILLS = "skills"           # SkillRegistry 技能
-    MCP = "mcp"                 # MCP 外部工具
-    AI = "ai"                   # LLM/Agent/进化/TDD
-    MEMORY = "memory"           # 记忆/上下文/情感
-    MEDIA = "media"             # 媒体生成（图/音/视频）
-    DOCUMENT = "document"       # 文档处理
-    DATA = "data"               # 数据分析/抓取
-    COMMERCE = "commerce"       # 电商运营
-    WEB = "web"                 # 网站维护
-    INPUT = "input"             # 人工输入/审批
+
+    FLOW = "flow"  # 流程控制：条件/循环/并行/合并
+    TOOLS = "tools"  # ToolEngine 工具
+    SKILLS = "skills"  # SkillRegistry 技能
+    MCP = "mcp"  # MCP 外部工具
+    AI = "ai"  # LLM/Agent/进化/TDD
+    MEMORY = "memory"  # 记忆/上下文/情感
+    MEDIA = "media"  # 媒体生成（图/音/视频）
+    DOCUMENT = "document"  # 文档处理
+    DATA = "data"  # 数据分析/抓取
+    COMMERCE = "commerce"  # 电商运营
+    WEB = "web"  # 网站维护
+    INPUT = "input"  # 人工输入/审批
 
 
 @dataclass
 class SubBlockConfig:
     """节点参数配置 — 声明式定义，自动生成前端表单"""
+
     id: str
     title: str
-    type: str                   # input|textarea|select|slider|switch|code|json|model-selector|file
+    type: str  # input|textarea|select|slider|switch|code|json|model-selector|file
     placeholder: Optional[str] = None
     description: Optional[str] = None
     required: bool = False
     default_value: Optional[Any] = None
-    options: Optional[List[Dict[str, Any]]] = None   # select: [{label, value}]
+    options: Optional[List[Dict[str, Any]]] = None  # select: [{label, value}]
     min: Optional[float] = None
     max: Optional[float] = None
-    language: Optional[str] = None                    # code: "python"/"javascript"
-    provider_capability: Optional[str] = None         # model-selector: "vision"/"text"
-    file_types: Optional[List[str]] = None            # file: ["image/png", "audio/mp3"]
-    condition: Optional[Dict[str, Any]] = None        # 条件可见: {field, operator, value}
+    language: Optional[str] = None  # code: "python"/"javascript"
+    provider_capability: Optional[str] = None  # model-selector: "vision"/"text"
+    file_types: Optional[List[str]] = None  # file: ["image/png", "audio/mp3"]
+    condition: Optional[Dict[str, Any]] = None  # 条件可见: {field, operator, value}
     depends_on: Optional[List[str]] = None
     validation: Optional[Dict[str, Any]] = None
 
@@ -59,6 +63,7 @@ class SubBlockConfig:
 @dataclass
 class NodePort:
     """节点端口定义"""
+
     id: str
     label: str
     type: str = "any"
@@ -69,15 +74,16 @@ class NodePort:
 @dataclass
 class NodeDefinition:
     """节点类型定义 — 注册表条目"""
-    type: str                   # "tool:web_search" | "skill:article" | "builtin:condition"
+
+    type: str  # "tool:web_search" | "skill:article" | "builtin:condition"
     label: str
-    icon: str                   # emoji 或图标名
-    category: str               # NodeCategory.value
+    icon: str  # emoji 或图标名
+    category: str  # NodeCategory.value
     description: str
     sub_blocks: List[SubBlockConfig]
     inputs: List[NodePort]
     outputs: List[NodePort]
-    source: str = "builtin"     # tool|skill|mcp|builtin
+    source: str = "builtin"  # tool|skill|mcp|builtin
     source_id: Optional[str] = None
     version: str = "1.0.0"
     tags: List[str] = field(default_factory=list)
@@ -87,10 +93,11 @@ class NodeDefinition:
 @dataclass
 class WorkflowNode:
     """工作流节点实例"""
+
     id: str
-    type: str                   # NodeDefinition.type
+    type: str  # NodeDefinition.type
     position: Dict[str, float]  # {x, y}
-    config: Dict[str, Any]      # SubBlockConfig 的值
+    config: Dict[str, Any]  # SubBlockConfig 的值
     label: Optional[str] = None
     enabled: bool = True
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -99,10 +106,11 @@ class WorkflowNode:
 @dataclass
 class WorkflowEdge:
     """工作流边（连接）"""
+
     id: str
     source: str
     target: str
-    source_handle: Optional[str] = None   # "true"/"false"/"loop_body"/"loop_done"
+    source_handle: Optional[str] = None  # "true"/"false"/"loop_body"/"loop_done"
     target_handle: Optional[str] = None
     label: Optional[str] = None
     condition: Optional[str] = None
@@ -111,16 +119,18 @@ class WorkflowEdge:
 @dataclass
 class WorkflowVariable:
     """工作流变量"""
+
     name: str
-    type: str                   # string|number|boolean|json|array
+    type: str  # string|number|boolean|json|array
     default_value: Optional[Any] = None
     description: Optional[str] = None
-    scope: str = "workflow"     # workflow|execution|node
+    scope: str = "workflow"  # workflow|execution|node
 
 
 @dataclass
 class WorkflowDefinition:
     """工作流定义（序列化格式）"""
+
     id: str
     name: str
     description: str
@@ -141,22 +151,30 @@ class WorkflowDefinition:
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典"""
         return {
-            "id": self.id, "name": self.name, "description": self.description,
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
             "version": self.version,
             "nodes": [n.__dict__ for n in self.nodes],
             "edges": [e.__dict__ for e in self.edges],
             "variables": [v.__dict__ for v in self.variables],
-            "tags": self.tags, "category": self.category, "author": self.author,
-            "created_at": self.created_at, "updated_at": self.updated_at,
-            "status": self.status.value, "template": self.template,
-            "public": self.public, "metadata": self.metadata,
+            "tags": self.tags,
+            "category": self.category,
+            "author": self.author,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "status": self.status.value,
+            "template": self.template,
+            "public": self.public,
+            "metadata": self.metadata,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "WorkflowDefinition":
         """从字典反序列化"""
         return cls(
-            id=data["id"], name=data["name"],
+            id=data["id"],
+            name=data["name"],
             description=data.get("description", ""),
             version=data.get("version", "1.0.0"),
             nodes=[WorkflowNode(**n) for n in data.get("nodes", [])],
@@ -177,8 +195,9 @@ class WorkflowDefinition:
 @dataclass
 class NodeExecutionResult:
     """节点执行结果"""
+
     node_id: str
-    status: str                 # success|failed|skipped|pending
+    status: str  # success|failed|skipped|pending
     output: Any
     error: Optional[str] = None
     started_at: float = 0.0
@@ -192,6 +211,7 @@ class NodeExecutionResult:
 @dataclass
 class ExecutionInstance:
     """工作流执行实例"""
+
     id: str
     workflow_id: str
     status: WorkflowStatus
@@ -211,6 +231,7 @@ class ExecutionInstance:
 @dataclass
 class AgentInfo:
     """团队 Agent 信息"""
+
     agent_id: str
     name: str
     role: str
@@ -218,14 +239,23 @@ class AgentInfo:
     flow_id: Optional[str] = None
     created_at: float = 0.0
     archived_at: Optional[float] = None
-    status: str = "active"      # active|archived|deleted
+    status: str = "active"  # active|archived|deleted
     capabilities: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 # 便捷导出
 __all__ = [
-    "WorkflowStatus", "NodeCategory", "SubBlockConfig", "NodePort",
-    "NodeDefinition", "WorkflowNode", "WorkflowEdge", "WorkflowVariable",
-    "WorkflowDefinition", "NodeExecutionResult", "ExecutionInstance", "AgentInfo"
+    "WorkflowStatus",
+    "NodeCategory",
+    "SubBlockConfig",
+    "NodePort",
+    "NodeDefinition",
+    "WorkflowNode",
+    "WorkflowEdge",
+    "WorkflowVariable",
+    "WorkflowDefinition",
+    "NodeExecutionResult",
+    "ExecutionInstance",
+    "AgentInfo",
 ]

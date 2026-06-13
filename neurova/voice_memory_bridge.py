@@ -14,18 +14,17 @@ VoiceMemoryBridge — 语音记忆桥接器
 
 import asyncio
 import logging
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, Any, List, Optional, Union
-from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class VoiceMemoryType(Enum):
     """语音记忆类型"""
+
     ASR_TRANSCRIPTION = "asr_transcription"  # ASR 转写结果
     TTS_USAGE = "tts_usage"  # TTS 使用统计
     VOICE_EMOTION = "voice_emotion"  # 语音情感分析
@@ -35,6 +34,7 @@ class VoiceMemoryType(Enum):
 @dataclass
 class VoiceMemoryConfig:
     """语音记忆配置"""
+
     enable_asr_memory: bool = True  # 启用 ASR 记忆存储
     enable_tts_stats: bool = True  # 启用 TTS 使用统计
     enable_emotion_analysis: bool = True  # 启用情感分析
@@ -47,6 +47,7 @@ class VoiceMemoryConfig:
 @dataclass
 class ASRMemoryRecord:
     """ASR 记忆记录"""
+
     text: str
     confidence: float
     language: str
@@ -58,7 +59,7 @@ class ASRMemoryRecord:
     audio_metadata: Optional[Dict[str, Any]] = None
     emotion_label: Optional[str] = None
     emotion_confidence: Optional[float] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
         return {
@@ -80,6 +81,7 @@ class ASRMemoryRecord:
 @dataclass
 class TTSUsageStats:
     """TTS 使用统计"""
+
     text_length: int
     engine: str
     voice: str
@@ -91,7 +93,7 @@ class TTSUsageStats:
     agent_id: str
     error: Optional[str] = None
     audio_metadata: Optional[Dict[str, Any]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
         return {
@@ -113,6 +115,7 @@ class TTSUsageStats:
 @dataclass
 class VoiceMemoryResult:
     """语音记忆操作结果"""
+
     success: bool
     memory_id: Optional[str] = None
     emotion_label: Optional[str] = None
@@ -124,22 +127,22 @@ class VoiceMemoryResult:
 
 class VoiceMemoryBridge:
     """语音记忆桥接器
-    
+
     深模块：小接口，深实现
-    
+
     接口：
     - record_asr_result() - 记录 ASR 结果到记忆系统
     - record_tts_usage() - 记录 TTS 使用统计
     - analyze_voice_emotion() - 分析语音情感
     - get_voice_memory_stats() - 获取语音记忆统计
-    
+
     实现细节：
     - 适配 ASRManager 输出格式到记忆系统格式
     - 适配 TTSManager 输出格式到进化系统格式
     - 集成情感分析模块
     - 提供批量处理能力
     """
-    
+
     def __init__(
         self,
         config: Optional[VoiceMemoryConfig] = None,
@@ -149,7 +152,7 @@ class VoiceMemoryBridge:
     ):
         """
         初始化语音记忆桥接器
-        
+
         Args:
             config: 语音记忆配置
             memory_manager: 记忆管理器实例
@@ -160,14 +163,14 @@ class VoiceMemoryBridge:
         self._memory_manager = memory_manager
         self._emotion_module = emotion_module
         self._evolution_orchestrator = evolution_orchestrator
-        
+
         # 内部状态
         self._stats_cache: Dict[str, Any] = {}
         self._batch_buffer: List[Dict[str, Any]] = []
         self._last_flush_time: Optional[datetime] = None
-        
+
         logger.info("VoiceMemoryBridge 初始化完成")
-    
+
     async def record_asr_result(
         self,
         asr_result: Dict[str, Any],
@@ -177,7 +180,7 @@ class VoiceMemoryBridge:
     ) -> VoiceMemoryResult:
         """
         记录 ASR 结果到记忆系统
-        
+
         Args:
             asr_result: ASR 引擎输出结果
                 - text: 转写文本
@@ -188,7 +191,7 @@ class VoiceMemoryBridge:
             user_id: 用户 ID
             agent_id: Agent ID
             audio_metadata: 音频元数据（可选）
-            
+
         Returns:
             VoiceMemoryResult: 操作结果
         """
@@ -200,7 +203,7 @@ class VoiceMemoryBridge:
                     success=False,
                     error=f"Confidence {confidence} below threshold {self.config.min_confidence_threshold}",
                 )
-            
+
             # 2. 创建 ASR 记忆记录
             record = ASRMemoryRecord(
                 text=asr_result.get("text", ""),
@@ -213,7 +216,7 @@ class VoiceMemoryBridge:
                 agent_id=agent_id,
                 audio_metadata=audio_metadata,
             )
-            
+
             # 3. 情感分析（如果启用）
             emotion_label = None
             emotion_state = None
@@ -223,7 +226,7 @@ class VoiceMemoryBridge:
                     record.emotion_label = emotion_state.get("primary_emotion", "neutral")
                     record.emotion_confidence = emotion_state.get("confidence", 0.0)
                     emotion_label = record.emotion_label
-            
+
             # 4. 存储到记忆系统
             memory_id = None
             if self.config.enable_asr_memory and self._memory_manager:
@@ -232,8 +235,8 @@ class VoiceMemoryBridge:
                     memory_type="asr_transcription",
                     metadata=record.to_dict(),
                 )
-                logger.debug(f"ASR 结果已存储到记忆系统: {memory_id}")
-            
+                logger.debug("ASR 结果已存储到记忆系统: %s", memory_id)
+
             # 5. 记录到进化系统（P0 修复：ASR → 进化）
             if self._evolution_orchestrator:
                 try:
@@ -252,8 +255,8 @@ class VoiceMemoryBridge:
                     )
                     logger.debug(f"ASR 结果已记录到进化系统")
                 except Exception as e:
-                    logger.warning(f"ASR 进化记录失败: {e}")
-            
+                    logger.warning("ASR 进化记录失败: %s", e)
+
             # 6. 语音情感 → 进化系统（P2 修复）
             if emotion_state and self._evolution_orchestrator:
                 try:
@@ -265,22 +268,22 @@ class VoiceMemoryBridge:
                     )
                     logger.debug(f"语音情感已记录到进化系统")
                 except Exception as e:
-                    logger.warning(f"语音情感进化记录失败: {e}")
-            
+                    logger.warning("语音情感进化记录失败: %s", e)
+
             return VoiceMemoryResult(
                 success=True,
                 memory_id=memory_id,
                 emotion_label=emotion_label,
                 metadata={"record": record.to_dict()},
             )
-            
+
         except Exception as e:
-            logger.error(f"记录 ASR 结果失败: {e}")
+            logger.error("记录 ASR 结果失败: %s", e)
             return VoiceMemoryResult(
                 success=False,
                 error=str(e),
             )
-    
+
     async def record_tts_usage(
         self,
         tts_result: Dict[str, Any],
@@ -290,7 +293,7 @@ class VoiceMemoryBridge:
     ) -> VoiceMemoryResult:
         """
         记录 TTS 使用统计
-        
+
         Args:
             tts_result: TTS 引擎输出结果
                 - text_length: 文本长度
@@ -303,7 +306,7 @@ class VoiceMemoryBridge:
             user_id: 用户 ID
             agent_id: Agent ID
             audio_metadata: 音频元数据（可选）
-            
+
         Returns:
             VoiceMemoryResult: 操作结果
         """
@@ -322,7 +325,7 @@ class VoiceMemoryBridge:
                 error=tts_result.get("error"),
                 audio_metadata=audio_metadata,
             )
-            
+
             # 2. 记录到进化系统（如果启用）
             stats_recorded = False
             if self.config.enable_tts_stats and self._evolution_orchestrator:
@@ -343,10 +346,10 @@ class VoiceMemoryBridge:
                         execution_time=stats.duration_ms / 1000.0,  # 转换为秒
                     )
                     stats_recorded = True
-                    logger.debug(f"TTS 使用统计已记录到进化系统: {stats.engine}")
+                    logger.debug("TTS 使用统计已记录到进化系统: %s", stats.engine)
                 except Exception as e:
-                    logger.warning(f"记录 TTS 使用统计到进化系统失败: {e}")
-            
+                    logger.warning("记录 TTS 使用统计到进化系统失败: %s", e)
+
             # 3. 存储到记忆系统（可选，用于历史查询）
             memory_id = None
             if self._memory_manager:
@@ -355,7 +358,7 @@ class VoiceMemoryBridge:
                     memory_type="tts_usage",
                     metadata=stats.to_dict(),
                 )
-            
+
             return VoiceMemoryResult(
                 success=True,
                 memory_id=memory_id,
@@ -363,14 +366,14 @@ class VoiceMemoryBridge:
                 success_flag=stats.success,
                 metadata={"stats": stats.to_dict()},
             )
-            
+
         except Exception as e:
-            logger.error(f"记录 TTS 使用统计失败: {e}")
+            logger.error("记录 TTS 使用统计失败: %s", e)
             return VoiceMemoryResult(
                 success=False,
                 error=str(e),
             )
-    
+
     async def analyze_voice_emotion(
         self,
         text: str,
@@ -378,17 +381,17 @@ class VoiceMemoryBridge:
     ) -> Optional[Dict[str, Any]]:
         """
         分析语音文本情感
-        
+
         Args:
             text: 转写文本
             user_id: 用户 ID
-            
+
         Returns:
             情感分析结果字典，包含 primary_emotion 和 confidence
         """
         if not self._emotion_module:
             return None
-        
+
         try:
             emotion_state = self._emotion_module.analyze_text_emotion(text)
             if emotion_state:
@@ -403,10 +406,10 @@ class VoiceMemoryBridge:
                     "secondary_emotions": getattr(emotion_state, "secondary_emotions", {}),
                 }
         except Exception as e:
-            logger.warning(f"语音情感分析失败: {e}")
-        
+            logger.warning("语音情感分析失败: %s", e)
+
         return None
-    
+
     async def get_voice_memory_stats(
         self,
         user_id: str,
@@ -415,12 +418,12 @@ class VoiceMemoryBridge:
     ) -> Dict[str, Any]:
         """
         获取语音记忆统计
-        
+
         Args:
             user_id: 用户 ID
             agent_id: Agent ID
             time_range_days: 统计时间范围（天）
-            
+
         Returns:
             统计信息字典
         """
@@ -433,10 +436,10 @@ class VoiceMemoryBridge:
             "popular_engines": {},
             "time_range_days": time_range_days,
         }
-        
+
         if not self._memory_manager:
             return stats
-        
+
         try:
             # 查询 ASR 记忆 - 使用 recall 方法搜索包含 asr_transcription 的记忆
             # recall 返回的是相关记忆列表，我们需要过滤 memory_type
@@ -446,10 +449,11 @@ class VoiceMemoryBridge:
             )
             # 过滤出 ASR 类型的记忆（通过 metadata 中的 memory_type 字段）
             asr_memories = [
-                mem for mem in asr_memories_raw
+                mem
+                for mem in asr_memories_raw
                 if isinstance(mem, dict) and mem.get("metadata", {}).get("memory_type") == "asr_transcription"
             ]
-            
+
             # 查询 TTS 记忆
             tts_memories_raw = self._memory_manager.recall(
                 query="tts_usage",
@@ -457,10 +461,11 @@ class VoiceMemoryBridge:
             )
             # 过滤出 TTS 类型的记忆
             tts_memories = [
-                mem for mem in tts_memories_raw
+                mem
+                for mem in tts_memories_raw
                 if isinstance(mem, dict) and mem.get("metadata", {}).get("memory_type") == "tts_usage"
             ]
-            
+
             # 统计 ASR 数据
             if asr_memories:
                 stats["asr_count"] = len(asr_memories)
@@ -472,42 +477,45 @@ class VoiceMemoryBridge:
                         confidences.append(metadata["confidence"])
                     engine = metadata.get("engine", "unknown")
                     engines[engine] = engines.get(engine, 0) + 1
-                
+
                 if confidences:
                     stats["avg_confidence"] = sum(confidences) / len(confidences)
                 stats["popular_engines"] = engines
-            
+
             # 统计 TTS 数据
             if tts_memories:
                 stats["tts_count"] = len(tts_memories)
                 success_count = sum(1 for mem in tts_memories if mem.get("metadata", {}).get("success", False))
                 if stats["tts_count"] > 0:
                     stats["tts_success_rate"] = success_count / stats["tts_count"]
-            
+
             # 计算 ASR 成功率（基于置信度阈值）
             if stats["asr_count"] > 0:
-                valid_count = sum(1 for mem in asr_memories 
-                               if mem.get("metadata", {}).get("confidence", 0) >= self.config.min_confidence_threshold)
+                valid_count = sum(
+                    1
+                    for mem in asr_memories
+                    if mem.get("metadata", {}).get("confidence", 0) >= self.config.min_confidence_threshold
+                )
                 stats["asr_success_rate"] = valid_count / stats["asr_count"]
-            
+
         except Exception as e:
-            logger.error(f"获取语音记忆统计失败: {e}")
-        
+            logger.error("获取语音记忆统计失败: %s", e)
+
         return stats
-    
+
     async def flush_batch(self) -> int:
         """
         刷新批量缓冲区到存储
-        
+
         Returns:
             刷新的记录数量
         """
         if not self._batch_buffer:
             return 0
-        
+
         count = len(self._batch_buffer)
-        logger.debug(f"刷新 {count} 条语音记忆到存储")
-        
+        logger.debug("刷新 %s 条语音记忆到存储", count)
+
         # 这里可以实现批量写入优化
         # 目前逐条写入
         for record in self._batch_buffer:
@@ -525,17 +533,17 @@ class VoiceMemoryBridge:
                         agent_id=record.get("agent_id", ""),
                     )
             except Exception as e:
-                logger.warning(f"批量刷新记录失败: {e}")
-        
+                logger.warning("批量刷新记录失败: %s", e)
+
         self._batch_buffer.clear()
         self._last_flush_time = datetime.now(timezone.utc)
-        
+
         return count
-    
+
     def shutdown(self):
         """关闭桥接器，清理资源"""
         logger.info("VoiceMemoryBridge 关闭中...")
-        
+
         # 刷新剩余缓冲区
         if self._batch_buffer:
             try:
@@ -549,13 +557,13 @@ class VoiceMemoryBridge:
                     loop.run_until_complete(self.flush_batch())
                     loop.close()
                 except Exception as e:
-                    logger.warning(f"同步刷新缓冲区失败: {e}")
-        
+                    logger.warning("同步刷新缓冲区失败: %s", e)
+
         # 清理引用
         self._memory_manager = None
         self._emotion_module = None
         self._evolution_orchestrator = None
-        
+
         logger.info("VoiceMemoryBridge 已关闭")
 
 
@@ -568,13 +576,13 @@ def create_voice_memory_bridge(
 ) -> VoiceMemoryBridge:
     """
     创建语音记忆桥接器实例
-    
+
     Args:
         config: 语音记忆配置
         memory_manager: 记忆管理器实例
         emotion_module: 情感分析模块实例
         evolution_orchestrator: 进化编排器实例
-        
+
     Returns:
         VoiceMemoryBridge 实例
     """
@@ -603,25 +611,25 @@ def init_voice_memory_bridge(
 ) -> VoiceMemoryBridge:
     """
     初始化默认语音记忆桥接器
-    
+
     Args:
         config: 语音记忆配置
         memory_manager: 记忆管理器实例
         emotion_module: 情感分析模块实例
         evolution_orchestrator: 进化编排器实例
-        
+
     Returns:
         VoiceMemoryBridge 实例
     """
     global _default_bridge
-    
+
     _default_bridge = create_voice_memory_bridge(
         config=config,
         memory_manager=memory_manager,
         emotion_module=emotion_module,
         evolution_orchestrator=evolution_orchestrator,
     )
-    
+
     logger.info("默认 VoiceMemoryBridge 已初始化")
     return _default_bridge
 
@@ -629,9 +637,9 @@ def init_voice_memory_bridge(
 def reset_voice_memory_bridge():
     """重置默认语音记忆桥接器"""
     global _default_bridge
-    
+
     if _default_bridge:
         _default_bridge.shutdown()
-    
+
     _default_bridge = None
     logger.info("默认 VoiceMemoryBridge 已重置")

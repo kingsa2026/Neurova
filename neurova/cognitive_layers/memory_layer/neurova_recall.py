@@ -10,47 +10,51 @@ Neurova 统一记忆检索引擎 — 多维融合 + 意图钻取
   不是"遍历"，而是"钻探"——有意图、有方向、可解释地深入
 """
 
-from dataclasses import dataclass, field
 import datetime
 import logging
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 # ────── Enums ──────
 
+
 class RecallChannel(Enum):
     """检索通道"""
-    TEMPERATURE = "temperature"   # 温度通道（热记忆优先）
-    TEXT = "text"                 # 文本通道（语义相似度）
-    CATEGORY = "category"        # 分类通道（同类别记忆）
-    GRAPH = "graph"              # 图通道（关系图谱）
-    EMOTION = "emotion"          # 情感通道（情感相似度）
-    VOICE = "voice"              # 语音通道（语音转写记忆）
+
+    TEMPERATURE = "temperature"  # 温度通道（热记忆优先）
+    TEXT = "text"  # 文本通道（语义相似度）
+    CATEGORY = "category"  # 分类通道（同类别记忆）
+    GRAPH = "graph"  # 图通道（关系图谱）
+    EMOTION = "emotion"  # 情感通道（情感相似度）
+    VOICE = "voice"  # 语音通道（语音转写记忆）
 
 
 class DrillIntent(Enum):
     """钻取意图"""
-    EXPLORE = "explore"           # 探索（发现新知识）
-    DEEPEN = "deepen"            # 深化（深入理解）
-    CONNECT = "connect"          # 连接（建立关联）
-    CONTRAST = "contrast"        # 对比（寻找差异）
-    VALIDATE = "validate"        # 验证（确认事实）
+
+    EXPLORE = "explore"  # 探索（发现新知识）
+    DEEPEN = "deepen"  # 深化（深入理解）
+    CONNECT = "connect"  # 连接（建立关联）
+    CONTRAST = "contrast"  # 对比（寻找差异）
+    VALIDATE = "validate"  # 验证（确认事实）
 
 
 class QueryIntent(Enum):
     """查询意图 — 决定检索策略选择"""
-    FACTUAL = "factual"           # 事实查询（精确匹配）
-    TEMPORAL = "temporal"         # 时间查询（时间敏感）
-    CAUSAL = "causal"             # 因果查询（因果推理）
-    COMPARATIVE = "comparative"   # 比较查询（多维对比）
-    EXPLORATORY = "exploratory"   # 探索查询（广泛发现）
-    UNKNOWN = "unknown"           # 未知意图
+
+    FACTUAL = "factual"  # 事实查询（精确匹配）
+    TEMPORAL = "temporal"  # 时间查询（时间敏感）
+    CAUSAL = "causal"  # 因果查询（因果推理）
+    COMPARATIVE = "comparative"  # 比较查询（多维对比）
+    EXPLORATORY = "exploratory"  # 探索查询（广泛发现）
+    UNKNOWN = "unknown"  # 未知意图
 
 
 class QueryIntentDetector:
@@ -63,47 +67,167 @@ class QueryIntentDetector:
     INTENT_KEYWORDS = {
         QueryIntent.TEMPORAL: [
             # 英文
-            "when", "time", "date", "before", "after", "during", "recently",
-            "lately", "ago", "last", "next", "today", "yesterday", "tomorrow",
-            "latest", "recent", "history", "timeline", "schedule",
+            "when",
+            "time",
+            "date",
+            "before",
+            "after",
+            "during",
+            "recently",
+            "lately",
+            "ago",
+            "last",
+            "next",
+            "today",
+            "yesterday",
+            "tomorrow",
+            "latest",
+            "recent",
+            "history",
+            "timeline",
+            "schedule",
             # 中文
-            "什么时候", "时间", "日期", "之前", "之后", "期间", "最近",
-            "以来", "昨天", "今天", "明天", "上次", "下次", "历史", "时间线",
+            "什么时候",
+            "时间",
+            "日期",
+            "之前",
+            "之后",
+            "期间",
+            "最近",
+            "以来",
+            "昨天",
+            "今天",
+            "明天",
+            "上次",
+            "下次",
+            "历史",
+            "时间线",
         ],
         QueryIntent.CAUSAL: [
             # 英文
-            "why", "because", "cause", "reason", "result", "lead to", "due to",
-            "effect", "consequence", "impact", "how did", "what caused",
-            "therefore", "hence", "consequently",
+            "why",
+            "because",
+            "cause",
+            "reason",
+            "result",
+            "lead to",
+            "due to",
+            "effect",
+            "consequence",
+            "impact",
+            "how did",
+            "what caused",
+            "therefore",
+            "hence",
+            "consequently",
             # 中文
-            "为什么", "原因", "导致", "因为", "结果", "影响", "因素",
-            "故而", "因此", "之所以", "造成", "引发", "致使",
+            "为什么",
+            "原因",
+            "导致",
+            "因为",
+            "结果",
+            "影响",
+            "因素",
+            "故而",
+            "因此",
+            "之所以",
+            "造成",
+            "引发",
+            "致使",
         ],
         QueryIntent.COMPARATIVE: [
             # 英文
-            "compare", "difference", "vs", "versus", "better", "worse",
-            "similar", "different", "alternative", "which", "prefer",
-            "advantage", "disadvantage", "pros", "cons", "trade-off",
+            "compare",
+            "difference",
+            "vs",
+            "versus",
+            "better",
+            "worse",
+            "similar",
+            "different",
+            "alternative",
+            "which",
+            "prefer",
+            "advantage",
+            "disadvantage",
+            "pros",
+            "cons",
+            "trade-off",
             # 中文
-            "比较", "对比", "区别", "差异", "哪个", "更好", "更差",
-            "类似", "不同", "替代", "优势", "劣势", "优缺点", "权衡",
+            "比较",
+            "对比",
+            "区别",
+            "差异",
+            "哪个",
+            "更好",
+            "更差",
+            "类似",
+            "不同",
+            "替代",
+            "优势",
+            "劣势",
+            "优缺点",
+            "权衡",
         ],
         QueryIntent.EXPLORATORY: [
             # 英文
-            "explore", "discover", "find", "search", "look for", "what",
-            "how", "tell me about", "describe", "explain", "overview",
-            "introduction", "learn", "understand", "know about",
+            "explore",
+            "discover",
+            "find",
+            "search",
+            "look for",
+            "what",
+            "how",
+            "tell me about",
+            "describe",
+            "explain",
+            "overview",
+            "introduction",
+            "learn",
+            "understand",
+            "know about",
             # 中文
-            "什么是", "介绍", "描述", "解释", "概述", "了解", "探索",
-            "发现", "查找", "搜索", "学习", "理解", "知道", "知识",
+            "什么是",
+            "介绍",
+            "描述",
+            "解释",
+            "概述",
+            "了解",
+            "探索",
+            "发现",
+            "查找",
+            "搜索",
+            "学习",
+            "理解",
+            "知道",
+            "知识",
         ],
         QueryIntent.FACTUAL: [
             # 英文
-            "who", "where", "how many", "how much", "exact", "specific",
-            "define", "definition", "name", "list", "count",
+            "who",
+            "where",
+            "how many",
+            "how much",
+            "exact",
+            "specific",
+            "define",
+            "definition",
+            "name",
+            "list",
+            "count",
             # 中文
-            "谁", "哪里", "多少", "具体", "定义", "名称", "列表",
-            "数量", "确切", "精确", "几个", "哪些",
+            "谁",
+            "哪里",
+            "多少",
+            "具体",
+            "定义",
+            "名称",
+            "列表",
+            "数量",
+            "确切",
+            "精确",
+            "几个",
+            "哪些",
         ],
     }
 
@@ -150,10 +274,7 @@ class QueryIntentDetector:
         score = self._score_keywords(query, keywords)
 
         # 计算所有意图的总分用于归一化
-        total_score = sum(
-            self._score_keywords(query, kw)
-            for kw in self.INTENT_KEYWORDS.values()
-        )
+        total_score = sum(self._score_keywords(query, kw) for kw in self.INTENT_KEYWORDS.values())
 
         if total_score == 0:
             return 0.0
@@ -162,10 +283,7 @@ class QueryIntentDetector:
         raw_confidence = score / total_score
 
         # 多关键词匹配提升置信度
-        matched_count = sum(
-            1 for kw in keywords
-            if kw.lower() in query.lower()
-        )
+        matched_count = sum(1 for kw in keywords if kw.lower() in query.lower())
         boost = min(0.3, matched_count * 0.1)
 
         return min(1.0, raw_confidence + boost)
@@ -317,14 +435,16 @@ class IntentAwareRecallStrategy:
             weights: 新的通道权重映射
         """
         self._overrides[intent] = dict(weights)
-        logger.debug(f"更新意图 {intent.value} 的通道权重: {weights}")
+        logger.debug("更新意图 %s 的通道权重: %s", intent.value, weights)
 
 
 # ────── Data Models ──────
 
+
 @dataclass
 class RecalledMemory:
     """召回的记忆"""
+
     memory_id: str = ""
     content: str = ""
     score: float = 0.0
@@ -355,6 +475,7 @@ class RecalledMemory:
 @dataclass
 class RecallResult:
     """检索结果"""
+
     query: str = ""
     intent: QueryIntent = QueryIntent.UNKNOWN
     recalled_memories: List[RecalledMemory] = field(default_factory=list)
@@ -379,17 +500,18 @@ class RecallResult:
 
 # ────── Main Engine ──────
 
+
 class NeurovaRecallEngine:
     """
     Neurova 统一记忆检索引擎
-    
+
     多维融合召回 + 意图驱动钻取
-    
+
     fusion_mode:
         "legacy" — 传统加权求和: score × weight × time_decay
         "nerf"   — NeRF 体渲染: Σ T_i · σ_i · c_i · w_i（透射率加权积分）
     """
-    
+
     def __init__(
         self,
         memory_manager: Any = None,
@@ -430,12 +552,14 @@ class NeurovaRecallEngine:
         self._registry = registry
         if use_plugins and self._registry is None:
             from .channels.registry import get_channel_registry
+
             self._registry = get_channel_registry()
 
         # 体渲染器（nerf 模式）
         self._volume_renderer = None
         if fusion_mode == "nerf":
             from .volume_renderer import VolumeRenderer
+
             self._volume_renderer = VolumeRenderer(density_scale=density_scale)
 
         # 默认通道权重（无意图时的 fallback）
@@ -450,7 +574,7 @@ class NeurovaRecallEngine:
 
         mode = "插件模式" if use_plugins else "传统模式"
         fusion_desc = "体渲染" if fusion_mode == "nerf" else "加权求和"
-        logger.info(f"NeurovaRecallEngine 初始化完成（{mode}，{fusion_desc}融合，含意图感知）")
+        logger.info("NeurovaRecallEngine 初始化完成（%s，%s融合，含意图感知）", mode, fusion_desc)
 
     def update_fusion_settings(
         self,
@@ -469,9 +593,8 @@ class NeurovaRecallEngine:
             self.fusion_mode = fusion_mode
             if fusion_mode == "nerf" and self._volume_renderer is None:
                 from .volume_renderer import VolumeRenderer
-                self._volume_renderer = VolumeRenderer(
-                    density_scale=density_scale or 1.0
-                )
+
+                self._volume_renderer = VolumeRenderer(density_scale=density_scale or 1.0)
 
         if density_scale is not None and self._volume_renderer is not None:
             self._volume_renderer.density_scale = max(0.1, min(5.0, density_scale))
@@ -481,7 +604,7 @@ class NeurovaRecallEngine:
                 if ch in self._volume_renderer.channel_densities:
                     self._volume_renderer.channel_densities[ch] = max(0.0, min(1.0, float(val)))
 
-        logger.info(f"NeRF 融合设置已更新: mode={self.fusion_mode}")
+        logger.info("NeRF 融合设置已更新: mode=%s", self.fusion_mode)
 
     def get_fusion_settings(self) -> Dict[str, Any]:
         """获取当前融合设置"""
@@ -495,6 +618,7 @@ class NeurovaRecallEngine:
             settings["channel_densities"] = dict(self._volume_renderer.channel_densities)
         else:
             from .volume_renderer import VolumeRenderer
+
             settings["channel_densities"] = dict(VolumeRenderer.DEFAULT_CHANNEL_DENSITY)
         return settings
 
@@ -571,7 +695,7 @@ class NeurovaRecallEngine:
                 "retrieval_params": retrieval_params,
             },
         )
-    
+
     def recall_flat(
         self,
         query: str,
@@ -602,25 +726,25 @@ class NeurovaRecallEngine:
         retrieval_params = self.intent_strategy.get_retrieval_params(query_intent)
         effective_limit = retrieval_params.get("limit", limit)
 
-        results = self._phase1_multichannel_recall(
-            query, channels, effective_limit, channel_weights=channel_weights
-        )
+        results = self._phase1_multichannel_recall(query, channels, effective_limit, channel_weights=channel_weights)
 
         # 按分数排序
         results.sort(key=lambda m: m.score, reverse=True)
 
         return results[:effective_limit]
-    
+
     def _run_with_timeout(self, func, *args, **kwargs) -> Any:
         """带超时执行"""
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func, *args, **kwargs)
-            try:
-                return future.result(timeout=self.timeout_seconds)
-            except TimeoutError:
-                logger.warning(f"执行超时: {func.__name__}")
-                return []
-    
+        from neurova.core.thread_pool import get_thread_pool
+        
+        executor = get_thread_pool()
+        future = executor.submit(func, *args, **kwargs)
+        try:
+            return future.result(timeout=self.timeout_seconds)
+        except TimeoutError:
+            logger.warning("执行超时: %s", func.__name__)
+            return []
+
     def _phase1_multichannel_recall(
         self,
         query: str,
@@ -647,30 +771,31 @@ class NeurovaRecallEngine:
         # 传统模式：直接调用硬编码通道
         all_results: List[RecalledMemory] = []
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {}
+        from neurova.core.thread_pool import get_thread_pool
+        executor = get_thread_pool()
+        futures = {}
 
-            for channel in channels:
-                if channel == RecallChannel.TEMPERATURE:
-                    futures[executor.submit(self._channel_temperature, query, limit)] = channel
-                elif channel == RecallChannel.TEXT:
-                    futures[executor.submit(self._channel_text, query, limit)] = channel
-                elif channel == RecallChannel.CATEGORY:
-                    futures[executor.submit(self._channel_category, query, limit)] = channel
-                elif channel == RecallChannel.GRAPH:
-                    futures[executor.submit(self._channel_graph, query, limit)] = channel
-                elif channel == RecallChannel.EMOTION:
-                    futures[executor.submit(self._channel_emotion, query, limit)] = channel
-                elif channel == RecallChannel.VOICE:
-                    futures[executor.submit(self._channel_voice, query, limit)] = channel
+        for channel in channels:
+            if channel == RecallChannel.TEMPERATURE:
+                futures[executor.submit(self._channel_temperature, query, limit)] = channel
+            elif channel == RecallChannel.TEXT:
+                futures[executor.submit(self._channel_text, query, limit)] = channel
+            elif channel == RecallChannel.CATEGORY:
+                futures[executor.submit(self._channel_category, query, limit)] = channel
+            elif channel == RecallChannel.GRAPH:
+                futures[executor.submit(self._channel_graph, query, limit)] = channel
+            elif channel == RecallChannel.EMOTION:
+                futures[executor.submit(self._channel_emotion, query, limit)] = channel
+            elif channel == RecallChannel.VOICE:
+                futures[executor.submit(self._channel_voice, query, limit)] = channel
 
-            for future in as_completed(futures):
-                channel = futures[future]
-                try:
-                    results = future.result(timeout=self.timeout_seconds)
-                    all_results.extend(results)
-                except Exception as e:
-                    logger.error(f"通道 {channel.value} 检索失败: {e}")
+        for future in as_completed(futures):
+            channel = futures[future]
+            try:
+                results = future.result(timeout=self.timeout_seconds)
+                all_results.extend(results)
+            except Exception as e:
+                logger.error("通道 %s 检索失败: %s", channel.value, e)
 
         deduplicated = self._deduplicate_results(all_results)
 
@@ -694,6 +819,7 @@ class NeurovaRecallEngine:
     ) -> List[RecalledMemory]:
         """插件模式：通过 ChannelRegistry 执行通道检索"""
         import asyncio
+
         from .channels.base import ChannelResult
 
         # 映射 RecallChannel → 通道名称
@@ -704,10 +830,7 @@ class NeurovaRecallEngine:
 
         # 获取启用的插件通道
         enabled_names = {rc.value for rc in channels}
-        plugin_channels = [
-            ch for ch in self._registry.get_active()
-            if ch.metadata.name in enabled_names
-        ]
+        plugin_channels = [ch for ch in self._registry.get_active() if ch.metadata.name in enabled_names]
 
         if not plugin_channels:
             return []
@@ -724,30 +847,36 @@ class NeurovaRecallEngine:
             tasks = []
             for ch in plugin_channels:
                 ch_weight = weights.get(RecallChannel(ch.metadata.name), 1.0)
-                tasks.append(ch.retrieve(
-                    query=query, limit=limit, weight=ch_weight,
-                    memory_manager=self.memory_manager,
-                ))
+                tasks.append(
+                    ch.retrieve(
+                        query=query,
+                        limit=limit,
+                        weight=ch_weight,
+                        memory_manager=self.memory_manager,
+                    )
+                )
             return await asyncio.gather(*tasks, return_exceptions=True)
 
         results_list = loop.run_until_complete(_run_all())
 
         for channel_results in results_list:
             if isinstance(channel_results, Exception):
-                logger.warning(f"插件通道执行异常: {channel_results}")
+                logger.warning("插件通道执行异常: %s", channel_results)
                 continue
             if not isinstance(channel_results, list):
                 continue
             for cr in channel_results:
                 if not isinstance(cr, ChannelResult):
                     continue
-                all_results.append(RecalledMemory(
-                    memory_id=cr.memory_id,
-                    content=cr.content,
-                    score=cr.score,
-                    channel=RecallChannel(cr.channel) if cr.channel in channel_name_map else RecallChannel.TEXT,
-                    metadata=cr.metadata,
-                ))
+                all_results.append(
+                    RecalledMemory(
+                        memory_id=cr.memory_id,
+                        content=cr.content,
+                        score=cr.score,
+                        channel=RecallChannel(cr.channel) if cr.channel in channel_name_map else RecallChannel.TEXT,
+                        metadata=cr.metadata,
+                    )
+                )
 
         deduplicated = self._deduplicate_results(all_results)
         for memory in deduplicated:
@@ -755,63 +884,64 @@ class NeurovaRecallEngine:
 
         deduplicated.sort(key=lambda m: m.score, reverse=True)
         return deduplicated[:limit]
-    
+
     def _channel_temperature(self, query: str, limit: int) -> List[RecalledMemory]:
         """温度通道（热记忆优先）"""
         # 简化实现
-        logger.debug(f"温度通道检索: {query}")
+        logger.debug("温度通道检索: %s", query)
         return []
-    
+
     def _channel_text(self, query: str, limit: int) -> List[RecalledMemory]:
         """文本通道（语义相似度）"""
         # 简化实现
-        logger.debug(f"文本通道检索: {query}")
+        logger.debug("文本通道检索: %s", query)
         return []
-    
+
     def _channel_category(self, query: str, limit: int) -> List[RecalledMemory]:
         """分类通道（同类别记忆）"""
         # 简化实现
-        logger.debug(f"分类通道检索: {query}")
+        logger.debug("分类通道检索: %s", query)
         return []
-    
+
     def _channel_graph(self, query: str, limit: int) -> List[RecalledMemory]:
         """图通道（关系图谱）"""
         # 简化实现
-        logger.debug(f"图通道检索: {query}")
+        logger.debug("图通道检索: %s", query)
         return []
-    
+
     def _channel_emotion(self, query: str, limit: int) -> List[RecalledMemory]:
         """情感通道（情感相似度）
-        
+
         检索与查询文本情感相似的记忆：
         1. 分析查询文本的情感
         2. 搜索相同情感类型的记忆
         3. 按情感强度排序
         """
-        logger.debug(f"情感通道检索: {query}")
-        
+        logger.debug("情感通道检索: %s", query)
+
         if not self.memory_manager:
             return []
-        
+
         try:
             # 分析查询情感
-            from neurova.cognitive_layers.memory_layer.modules.emotion_module import EmotionModule
-            emotion_module = getattr(self.memory_manager, 'emotion_module', None)
+            pass
+
+            emotion_module = getattr(self.memory_manager, "emotion_module", None)
             if not emotion_module:
                 return []
-            
+
             # 分析查询情感
             emotion_state = emotion_module.analyze_text_emotion(query)
             if not emotion_state or emotion_state.primary_emotion.value == "neutral":
                 return []
-            
+
             # 搜索相同情感的记忆
             memory_ids = emotion_module.get_emotional_memories(
                 emotion_type=emotion_state.primary_emotion,
                 min_intensity=0.3,
                 limit=limit,
             )
-            
+
             results = []
             for mid in memory_ids:
                 mem_dict = self.memory_manager.recall(query="", limit=1)
@@ -820,46 +950,48 @@ class NeurovaRecallEngine:
                 if mem_obj:
                     mem_emotion = emotion_module.get_emotion(mid)
                     score = mem_emotion.intensity if mem_emotion else 0.5
-                    
-                    results.append(RecalledMemory(
-                        memory_id=mid,
-                        content=mem_obj.content,
-                        score=score,
-                        channel=RecallChannel.EMOTION,
-                        metadata={
-                            "emotion": emotion_state.primary_emotion.value,
-                            "intensity": emotion_state.intensity,
-                        },
-                    ))
-            
+
+                    results.append(
+                        RecalledMemory(
+                            memory_id=mid,
+                            content=mem_obj.content,
+                            score=score,
+                            channel=RecallChannel.EMOTION,
+                            metadata={
+                                "emotion": emotion_state.primary_emotion.value,
+                                "intensity": emotion_state.intensity,
+                            },
+                        )
+                    )
+
             return results
-            
+
         except Exception as e:
-            logger.debug(f"情感通道检索失败: {e}")
+            logger.debug("情感通道检索失败: %s", e)
             return []
-    
+
     def _channel_voice(self, query: str, limit: int) -> List[RecalledMemory]:
         """语音通道（语音转写记忆检索）
-        
+
         检索语音转写记忆（用户通过语音说过的内容）：
         1. 搜索 memory_type="asr_transcription" 的记忆
         2. 按置信度和时间衰减排序
         3. 返回 RecalledMemory 对象列表
         """
-        logger.debug(f"语音通道检索: {query}")
-        
+        logger.debug("语音通道检索: %s", query)
+
         if not self.memory_manager:
             return []
-        
+
         try:
             # 搜索语音转写记忆
             all_memories = self.memory_manager.get_all_memories()
             voice_memories = []
-            
+
             for mem_dict in all_memories:
                 mem_type = mem_dict.get("memory_type", "")
                 meta = mem_dict.get("metadata", {})
-                
+
                 # 筛选语音转写记忆
                 if mem_type == "asr_transcription" or meta.get("record"):
                     content = mem_dict.get("content", "")
@@ -868,34 +1000,36 @@ class NeurovaRecallEngine:
                         # 提取置信度和时间
                         record_data = meta.get("record", {})
                         confidence = record_data.get("confidence", 0.5)
-                        timestamp = mem_dict.get("timestamp", "")
-                        
+                        mem_dict.get("timestamp", "")
+
                         # 计算分数（置信度 + 时间衰减）
                         recency_score = 1.0  # 简化：假设都是近期记忆
                         score = confidence * 0.7 + recency_score * 0.3
-                        
-                        voice_memories.append(RecalledMemory(
-                            memory_id=mem_dict.get("id", ""),
-                            content=content,
-                            score=score,
-                            channel=RecallChannel.VOICE,
-                            metadata={
-                                "confidence": confidence,
-                                "engine": record_data.get("engine", "unknown"),
-                                "language": record_data.get("language", "unknown"),
-                                "emotion": record_data.get("emotion_label"),
-                            },
-                        ))
-            
+
+                        voice_memories.append(
+                            RecalledMemory(
+                                memory_id=mem_dict.get("id", ""),
+                                content=content,
+                                score=score,
+                                channel=RecallChannel.VOICE,
+                                metadata={
+                                    "confidence": confidence,
+                                    "engine": record_data.get("engine", "unknown"),
+                                    "language": record_data.get("language", "unknown"),
+                                    "emotion": record_data.get("emotion_label"),
+                                },
+                            )
+                        )
+
             # 按分数排序
             voice_memories.sort(key=lambda m: m.score, reverse=True)
-            
+
             return voice_memories[:limit]
-            
+
         except Exception as e:
-            logger.debug(f"语音通道检索失败: {e}")
+            logger.debug("语音通道检索失败: %s", e)
             return []
-    
+
     def _fusion_score(
         self,
         memory: RecalledMemory,
@@ -956,15 +1090,17 @@ class NeurovaRecallEngine:
         # 转换为 VolumeRenderer 需要的格式
         channel_results: Dict[str, List[Dict]] = {}
         for mem in memories:
-            ch_name = mem.channel.value if hasattr(mem.channel, 'value') else str(mem.channel)
+            ch_name = mem.channel.value if hasattr(mem.channel, "value") else str(mem.channel)
             if ch_name not in channel_results:
                 channel_results[ch_name] = []
-            channel_results[ch_name].append({
-                "memory_id": mem.memory_id,
-                "content": mem.content,
-                "score": mem.score,
-                "metadata": mem.metadata,
-            })
+            channel_results[ch_name].append(
+                {
+                    "memory_id": mem.memory_id,
+                    "content": mem.content,
+                    "score": mem.score,
+                    "metadata": mem.metadata,
+                }
+            )
 
         # 获取意图字符串
         intent_str = "exploratory"
@@ -976,9 +1112,7 @@ class NeurovaRecallEngine:
                     break
 
         # 体渲染
-        rendered = self._volume_renderer.render(
-            channel_results, intent=intent_str, limit=limit
-        )
+        rendered = self._volume_renderer.render(channel_results, intent=intent_str, limit=limit)
 
         # 转换回 RecalledMemory
         result = []
@@ -995,37 +1129,43 @@ class NeurovaRecallEngine:
                 channel_enum = RecallChannel.TEXT
 
             # 构建 metadata，包含 channel_scores 供前端展示
-            meta = rm.metadata.copy() if rm.metadata else (original.metadata.copy() if original and original.metadata else {})
+            meta = (
+                rm.metadata.copy()
+                if rm.metadata
+                else (original.metadata.copy() if original and original.metadata else {})
+            )
             # 将 channel_scores 注入 metadata，前端用作 NeRF 标识和可视化
             if rm.channel_scores:
                 meta["channel_scores"] = rm.channel_scores
                 meta["nerf_rendered"] = True
 
-            result.append(RecalledMemory(
-                memory_id=rm.memory_id,
-                content=rm.content,
-                score=rm.score,
-                channel=channel_enum,
-                metadata=meta,
-            ))
+            result.append(
+                RecalledMemory(
+                    memory_id=rm.memory_id,
+                    content=rm.content,
+                    score=rm.score,
+                    channel=channel_enum,
+                    metadata=meta,
+                )
+            )
 
         return result
-    
+
     def _recency_score(self, recalled_at: datetime.datetime) -> float:
         """计算时间衰减分数"""
         now = datetime.datetime.now(datetime.timezone.utc)
         age_hours = (now - recalled_at).total_seconds() / 3600
-        
+
         # 指数衰减
         decay_rate = 0.1  # 每小时衰减10%
         score = math.exp(-decay_rate * age_hours)
-        
+
         return max(0.1, score)  # 最低0.1分
-    
+
     def _deduplicate_results(self, results: List[RecalledMemory]) -> List[RecalledMemory]:
         """去重结果"""
         seen: Dict[str, RecalledMemory] = {}
-        
+
         for memory in results:
             if memory.memory_id in seen:
                 # 保留分数更高的
@@ -1033,9 +1173,9 @@ class NeurovaRecallEngine:
                     seen[memory.memory_id] = memory
             else:
                 seen[memory.memory_id] = memory
-        
+
         return list(seen.values())
-    
+
     def _phase2_drill(
         self,
         query: str,
@@ -1045,22 +1185,22 @@ class NeurovaRecallEngine:
     ) -> List[RecalledMemory]:
         """
         Phase 2: 意图驱动钻取
-        
+
         Args:
             query: 查询文本
             intent: 钻取意图
             seed_memories: 种子记忆
             limit: 返回数量限制
-            
+
         Returns:
             钻取后的记忆列表
         """
         if not seed_memories:
             return []
-        
+
         # 推断钻取意图
         inferred_intent = self._infer_intent(query, intent)
-        
+
         # 根据意图选择钻取策略
         if inferred_intent == DrillIntent.EXPLORE:
             return self._drill_explore(query, seed_memories, limit)
@@ -1072,14 +1212,14 @@ class NeurovaRecallEngine:
             return self._drill_contrast(query, seed_memories, limit)
         elif inferred_intent == DrillIntent.VALIDATE:
             return self._drill_validate(query, seed_memories, limit)
-        
+
         # 默认返回种子记忆
         return seed_memories[:limit]
-    
+
     def _infer_intent(self, query: str, default_intent: DrillIntent) -> DrillIntent:
         """推断钻取意图"""
         query_lower = query.lower()
-        
+
         # 关键词匹配
         if any(word in query_lower for word in ["什么是", "是什么", "定义", "概念"]):
             return DrillIntent.EXPLORE
@@ -1091,14 +1231,14 @@ class NeurovaRecallEngine:
             return DrillIntent.CONTRAST
         elif any(word in query_lower for word in ["确认", "验证", "正确", "真实"]):
             return DrillIntent.VALIDATE
-        
+
         return default_intent
-    
+
     def _infer_category(self, query: str) -> Optional[str]:
         """推断查询类别"""
         # 简化实现
         return None
-    
+
     def _active_channels(self, intent: DrillIntent) -> List[RecallChannel]:
         """根据意图确定活跃通道"""
         channel_mapping = {
@@ -1108,29 +1248,29 @@ class NeurovaRecallEngine:
             DrillIntent.CONTRAST: [RecallChannel.TEXT, RecallChannel.CATEGORY],
             DrillIntent.VALIDATE: [RecallChannel.TEXT, RecallChannel.EMOTION],
         }
-        
+
         return channel_mapping.get(intent, list(RecallChannel))
-    
+
     def _drill_explore(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
         """探索钻取"""
         # 简化实现：返回种子记忆
         return seed_memories[:limit]
-    
+
     def _drill_deepen(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
         """深化钻取"""
         # 简化实现：返回种子记忆
         return seed_memories[:limit]
-    
+
     def _drill_connect(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
         """连接钻取"""
         # 简化实现：返回种子记忆
         return seed_memories[:limit]
-    
+
     def _drill_contrast(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
         """对比钻取"""
         # 简化实现：返回种子记忆
         return seed_memories[:limit]
-    
+
     def _drill_validate(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
         """验证钻取"""
         # 简化实现：返回种子记忆

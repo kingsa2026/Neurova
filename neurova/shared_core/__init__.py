@@ -12,8 +12,4 @@ Shared Core - Neurova 多Agent 共用核心组件
 """
 
 # shared_core imports
-import neurova.shared_core.execution_engine
-import neurova.shared_core.infrastructure
-import neurova.shared_core.plan_orchestrator
 
-pass

@@ -9,26 +9,24 @@
 - 报告撰写
 - 内容生成
 """
+
 import time
 import uuid
-from typing import Dict, List, Any
+from typing import List
 
-from ..models import (
-    WorkflowDefinition, WorkflowNode, WorkflowEdge, WorkflowVariable,
-    WorkflowStatus, NodeCategory
-)
+from ..models import WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus, WorkflowVariable
 
 
 def get_writing_template() -> WorkflowDefinition:
     """获取文学创作工作流模板
-    
+
     Returns:
         预定义的文学创作工作流定义
     """
     nodes = _create_nodes()
     edges = _create_edges()
     variables = _create_variables()
-    
+
     return WorkflowDefinition(
         id=f"template_writing_{uuid.uuid4().hex[:8]}",
         name="文学创作",
@@ -50,7 +48,7 @@ def get_writing_template() -> WorkflowDefinition:
             "estimated_time": "20-40 minutes",
             "required_skills": ["writing", "creativity"],
             "description": "自动化文学创作流程",
-        }
+        },
     )
 
 
@@ -79,12 +77,11 @@ def _create_nodes() -> List[WorkflowNode]:
                         "options": ["短文 (500字)", "中等 (1500字)", "长文 (3000字)", "自定义"],
                         "default": "中等 (1500字)",
                         "description": "文章长度",
-                    }
+                    },
                 }
             },
             label="开始",
         ),
-        
         WorkflowNode(
             id="outline",
             type="builtin:llm",
@@ -108,7 +105,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="大纲生成",
         ),
-        
         WorkflowNode(
             id="research",
             type="builtin:memory-load",
@@ -120,7 +116,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="检索参考",
         ),
-        
         WorkflowNode(
             id="draft",
             type="builtin:llm",
@@ -149,7 +144,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="撰写初稿",
         ),
-        
         WorkflowNode(
             id="human_review",
             type="builtin:human_input",
@@ -160,7 +154,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="人工审核",
         ),
-        
         WorkflowNode(
             id="polish",
             type="builtin:llm",
@@ -186,7 +179,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="文章润色",
         ),
-        
         WorkflowNode(
             id="end",
             type="builtin:end",

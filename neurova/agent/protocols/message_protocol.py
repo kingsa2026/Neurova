@@ -10,31 +10,34 @@ Agent 通信协议模块
 """
 
 import json
-import uuid
-import time
 import logging
+import time
+import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field, asdict
 from enum import Enum
-from collections import defaultdict
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
 class ProtocolVersion:
     """协议版本常量"""
+
     CURRENT = "2.0"
     SUPPORTED_VERSIONS = ["1.0", "1.5", "2.0"]
+
 
 class MessagePriority(str, Enum):
     """消息优先级枚举
 
     优先级从小到大：LOW -> NORMAL -> HIGH -> URGENT
     """
-    LOW = "low"       # 低优先级，可延迟处理
-    NORMAL = "normal" # 普通优先级，正常处理
-    HIGH = "high"     # 高优先级，尽快处理
-    URGENT = "urgent" # 紧急优先级，立即处理
+
+    LOW = "low"  # 低优先级，可延迟处理
+    NORMAL = "normal"  # 普通优先级，正常处理
+    HIGH = "high"  # 高优先级，尽快处理
+    URGENT = "urgent"  # 紧急优先级，立即处理
 
     @property
     def value_int(self) -> int:
@@ -59,32 +62,36 @@ class MessagePriority(str, Enum):
         else:
             return cls.URGENT
 
+
 class MessageType(str, Enum):
     """消息类型枚举"""
+
     # 协作消息
-    REQUEST = "request"           # 请求消息
-    RESPONSE = "response"         # 响应消息
-    NOTIFICATION = "notification" # 通知消息
-    BROADCAST = "broadcast"       # 广播消息
+    REQUEST = "request"  # 请求消息
+    RESPONSE = "response"  # 响应消息
+    NOTIFICATION = "notification"  # 通知消息
+    BROADCAST = "broadcast"  # 广播消息
 
     # 特殊消息
-    HEARTBEAT = "heartbeat"       # 心跳消息
+    HEARTBEAT = "heartbeat"  # 心跳消息
     CAPABILITY_QUERY = "capability_query"  # 能力查询
     CAPABILITY_RESPONSE = "capability_response"  # 能力响应
     TASK_ASSIGNMENT = "task_assignment"  # 任务分配
-    TASK_RESULT = "task_result"   # 任务结果
+    TASK_RESULT = "task_result"  # 任务结果
     COLLABORATION_INVITE = "collaboration_invite"  # 协作邀请
     COLLABORATION_ACCEPT = "collaboration_accept"  # 协作接受
     COLLABORATION_REJECT = "collaboration_reject"  # 协作拒绝
     COLLABORATION_END = "collaboration_end"  # 协作结束
 
     # 死信相关
-    DEAD_LETTER = "dead_letter"   # 死信消息
-    RETRY = "retry"              # 重试消息
+    DEAD_LETTER = "dead_letter"  # 死信消息
+    RETRY = "retry"  # 重试消息
+
 
 class DeadLetterReason(str, Enum):
     """死信原因枚举"""
-    TIMEOUT = "timeout"           # 超时
+
+    TIMEOUT = "timeout"  # 超时
     RECIPIENT_NOT_FOUND = "recipient_not_found"  # 接收者不存在
     RECIPIENT_UNAVAILABLE = "recipient_unavailable"  # 接收者不可用
     INVALID_MESSAGE = "invalid_message"  # 消息格式错误
@@ -93,6 +100,7 @@ class DeadLetterReason(str, Enum):
     SYSTEM_ERROR = "system_error"  # 系统错误
     MAX_RETRIES_EXCEEDED = "max_retries_exceeded"  # 超过最大重试次数
     UNKNOWN_ERROR = "unknown_error"  # 未知错误
+
 
 @dataclass
 class AgentMessage:
@@ -126,6 +134,7 @@ class AgentMessage:
         "attachments": [...]
     }
     """
+
     # 核心字段
     message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     version: str = ProtocolVersion.CURRENT
@@ -277,9 +286,11 @@ class AgentMessage:
         self.retry_count += 1
         return self.retry_count < self.max_retries
 
+
 @dataclass
 class DeadLetterMessage:
     """死信消息（无法投递或处理失败的消息）"""
+
     original_message: AgentMessage
     reason: DeadLetterReason
     error_details: str
@@ -298,6 +309,7 @@ class DeadLetterMessage:
             "handler_id": self.handler_id,
             "original_error": self.original_error,
         }
+
 
 class MessageQueue:
     """优先级消息队列"""
@@ -318,8 +330,7 @@ class MessageQueue:
 
     def dequeue(self) -> Optional[AgentMessage]:
         """出队（按优先级，先高后低）"""
-        for priority in [MessagePriority.URGENT, MessagePriority.HIGH,
-                         MessagePriority.NORMAL, MessagePriority.LOW]:
+        for priority in [MessagePriority.URGENT, MessagePriority.HIGH, MessagePriority.NORMAL, MessagePriority.LOW]:
             if self._queues[priority]:
                 self._total_count -= 1
                 return self._queues[priority].pop(0)
@@ -327,8 +338,7 @@ class MessageQueue:
 
     def peek(self) -> Optional[AgentMessage]:
         """查看队首消息（不移除）"""
-        for priority in [MessagePriority.URGENT, MessagePriority.HIGH,
-                         MessagePriority.NORMAL, MessagePriority.LOW]:
+        for priority in [MessagePriority.URGENT, MessagePriority.HIGH, MessagePriority.NORMAL, MessagePriority.LOW]:
             if self._queues[priority]:
                 return self._queues[priority][0]
         return None
@@ -350,6 +360,7 @@ class MessageQueue:
         for queue in self._queues.values():
             queue.clear()
         self._total_count = 0
+
 
 class MessageSerializer:
     """消息序列化工具"""
@@ -374,8 +385,10 @@ class MessageSerializer:
         """批量反序列化"""
         return [AgentMessage.from_dict(d) for d in json.loads(data.decode("utf-8"))]
 
+
 # 全局消息队列实例
 _global_message_queue: Optional[MessageQueue] = None
+
 
 def get_message_queue() -> MessageQueue:
     """获取全局消息队列"""

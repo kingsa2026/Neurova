@@ -11,19 +11,19 @@ MemoryBus — 记忆子系统的注册中心与事件路由器
 """
 
 import logging
-import time
 import threading
-import typing
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class HealthStatus(str, Enum):
     """健康状态"""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
@@ -33,6 +33,7 @@ class HealthStatus(str, Enum):
 @dataclass
 class ModuleHealth:
     """模块健康状态"""
+
     module_name: str
     status: HealthStatus = HealthStatus.UNKNOWN
     last_check: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -45,6 +46,7 @@ class ModuleHealth:
 @dataclass
 class BusEvent:
     """总线事件"""
+
     event_type: str
     source_module: str
     data: Dict[str, Any] = field(default_factory=dict)
@@ -60,59 +62,59 @@ HealthChecker = Callable[[], ModuleHealth]
 class MemoryBus:
     """
     记忆总线 - 注册中心与事件路由器
-    
+
     只做三件事：
     1. register() - 注册模块
     2. get() - 获取模块
     3. emit() - 发射事件
     """
-    
+
     def __init__(self, max_event_history: int = 1000):
         """
         初始化记忆总线
-        
+
         Args:
             max_event_history: 最大事件历史记录数
         """
         self._lock = threading.RLock()
-        
+
         # 模块注册表
         self._modules: Dict[str, Any] = {}
         self._module_types: Dict[str, str] = {}
-        
+
         # 事件处理
         self._event_handlers: Dict[str, List[EventHandler]] = {}
         self._global_handlers: List[EventHandler] = []
         self._event_history: List[BusEvent] = []
         self._max_event_history = max_event_history
-        
+
         # 健康检查
         self._health_checkers: Dict[str, HealthChecker] = {}
         self._health_status: Dict[str, ModuleHealth] = {}
         self._health_history: List[Dict[str, ModuleHealth]] = []
         self._max_health_history = 100
-        
+
         # 统计
         self._event_counts: Dict[str, int] = {}
         self._module_access_counts: Dict[str, int] = {}
-        
+
         # 事件ID计数器
         self._event_id_counter = 0
-        
+
         logger.info("MemoryBus initialized")
-    
+
     @property
     def events(self) -> List[BusEvent]:
         """获取事件历史"""
         with self._lock:
             return list(self._event_history)
-    
+
     @property
     def module_names(self) -> List[str]:
         """获取所有注册的模块名称"""
         with self._lock:
             return list(self._modules.keys())
-    
+
     def register(
         self,
         name: str,
@@ -122,7 +124,7 @@ class MemoryBus:
     ) -> None:
         """
         注册模块
-        
+
         Args:
             name: 模块名称
             module: 模块实例
@@ -131,11 +133,11 @@ class MemoryBus:
         """
         with self._lock:
             if name in self._modules:
-                logger.warning(f"Module '{name}' already registered, overwriting")
-            
+                logger.warning("Module '%s' already registered, overwriting", name)
+
             self._modules[name] = module
             self._module_types[name] = module_type
-            
+
             if health_checker:
                 self._health_checkers[name] = health_checker
                 # 立即执行一次健康检查
@@ -153,16 +155,16 @@ class MemoryBus:
                     module_name=name,
                     status=HealthStatus.HEALTHY,
                 )
-            
-            logger.info(f"Module registered: {name} (type={module_type})")
-    
+
+            logger.info("Module registered: %s (type=%s)", name, module_type)
+
     def get(self, name: str) -> Optional[Any]:
         """
         获取模块
-        
+
         Args:
             name: 模块名称
-            
+
         Returns:
             模块实例，如果不存在返回None
         """
@@ -171,14 +173,14 @@ class MemoryBus:
             if module:
                 self._module_access_counts[name] = self._module_access_counts.get(name, 0) + 1
             return module
-    
+
     def get_healthy(self, module_type: Optional[str] = None) -> List[Any]:
         """
         获取健康的模块
-        
+
         Args:
             module_type: 模块类型过滤
-            
+
         Returns:
             健康模块列表
         """
@@ -188,23 +190,23 @@ class MemoryBus:
                 # 检查类型过滤
                 if module_type and self._module_types.get(name) != module_type:
                     continue
-                
+
                 # 检查健康状态
                 health = self._health_status.get(name)
                 if health and health.status == HealthStatus.HEALTHY:
                     healthy_modules.append(module)
-            
+
             return healthy_modules
-    
+
     def emit(self, event_type: str, source_module: str, data: Optional[Dict[str, Any]] = None) -> BusEvent:
         """
         发射事件（同步）
-        
+
         Args:
             event_type: 事件类型
             source_module: 源模块名称
             data: 事件数据
-            
+
         Returns:
             创建的事件对象
         """
@@ -217,48 +219,48 @@ class MemoryBus:
                 data=data or {},
                 event_id=f"evt_{self._event_id_counter}",
             )
-            
+
             # 记录事件历史
             self._event_history.append(event)
             if len(self._event_history) > self._max_event_history:
-                self._event_history = self._event_history[-self._max_event_history:]
-            
+                self._event_history = self._event_history[-self._max_event_history :]
+
             # 更新统计
             self._event_counts[event_type] = self._event_counts.get(event_type, 0) + 1
-            
+
             # 获取处理器
             handlers = list(self._event_handlers.get(event_type, []))
             handlers.extend(self._global_handlers)
-        
+
         # 在锁外执行处理器，避免死锁
         for handler in handlers:
             try:
                 handler(event)
             except Exception as e:
-                logger.error(f"Event handler failed for {event_type}: {e}")
-        
+                logger.error("Event handler failed for %s: %s", event_type, e)
+
         return event
-    
+
     async def aemit(self, event_type: str, source_module: str, data: Optional[Dict[str, Any]] = None) -> BusEvent:
         """
         发射事件（异步）
-        
+
         Args:
             event_type: 事件类型
             source_module: 源模块名称
             data: 事件数据
-            
+
         Returns:
             创建的事件对象
         """
         # 异步版本目前只是同步版本的包装
         # 未来可以扩展为真正的异步处理
         return self.emit(event_type, source_module, data)
-    
+
     def subscribe(self, event_type: str, handler: EventHandler) -> None:
         """
         订阅事件
-        
+
         Args:
             event_type: 事件类型
             handler: 事件处理函数
@@ -268,22 +270,22 @@ class MemoryBus:
                 self._event_handlers[event_type] = []
             if handler not in self._event_handlers[event_type]:
                 self._event_handlers[event_type].append(handler)
-    
+
     def subscribe_all(self, handler: EventHandler) -> None:
         """
         订阅所有事件
-        
+
         Args:
             handler: 事件处理函数
         """
         with self._lock:
             if handler not in self._global_handlers:
                 self._global_handlers.append(handler)
-    
+
     def unsubscribe(self, event_type: str, handler: EventHandler) -> None:
         """
         取消订阅事件
-        
+
         Args:
             event_type: 事件类型
             handler: 事件处理函数
@@ -294,11 +296,11 @@ class MemoryBus:
                     self._event_handlers[event_type].remove(handler)
                 except ValueError:
                     pass
-    
+
     def unsubscribe_all(self, handler: EventHandler) -> None:
         """
         取消订阅所有事件
-        
+
         Args:
             handler: 事件处理函数
         """
@@ -307,18 +309,18 @@ class MemoryBus:
                 self._global_handlers.remove(handler)
             except ValueError:
                 pass
-    
+
     def health_report(self) -> Dict[str, Any]:
         """
         获取健康报告
-        
+
         Returns:
             健康报告字典
         """
         with self._lock:
             # 刷新所有健康状态
             self._refresh_health_status()
-            
+
             report = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "total_modules": len(self._modules),
@@ -328,7 +330,7 @@ class MemoryBus:
                 "unknown_modules": 0,
                 "modules": {},
             }
-            
+
             for name, health in self._health_status.items():
                 report["modules"][name] = {
                     "status": health.status.value,
@@ -338,7 +340,7 @@ class MemoryBus:
                     "response_time_ms": health.response_time_ms,
                     "module_type": self._module_types.get(name, "unknown"),
                 }
-                
+
                 if health.status == HealthStatus.HEALTHY:
                     report["healthy_modules"] += 1
                 elif health.status == HealthStatus.DEGRADED:
@@ -347,26 +349,26 @@ class MemoryBus:
                     report["unhealthy_modules"] += 1
                 else:
                     report["unknown_modules"] += 1
-            
+
             return report
-    
+
     def health_history(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
         获取健康历史
-        
+
         Args:
             limit: 返回记录数限制
-            
+
         Returns:
             健康历史记录列表
         """
         with self._lock:
             return list(self._health_history[-limit:])
-    
+
     def refresh_health(self, module_name: Optional[str] = None) -> None:
         """
         刷新健康状态
-        
+
         Args:
             module_name: 模块名称，如果为None则刷新所有
         """
@@ -375,25 +377,25 @@ class MemoryBus:
                 self._refresh_module_health(module_name)
             else:
                 self._refresh_health_status()
-    
+
     def shutdown_all(self) -> None:
         """关闭所有模块"""
         with self._lock:
             modules = list(self._modules.items())
-        
+
         # 在锁外执行关闭操作
         for name, module in modules:
             try:
-                if hasattr(module, 'shutdown'):
+                if hasattr(module, "shutdown"):
                     module.shutdown()
-                elif hasattr(module, 'close'):
+                elif hasattr(module, "close"):
                     module.close()
-                elif hasattr(module, 'stop'):
+                elif hasattr(module, "stop"):
                     module.stop()
-                logger.info(f"Module shutdown: {name}")
+                logger.info("Module shutdown: %s", name)
             except Exception as e:
-                logger.error(f"Failed to shutdown module {name}: {e}")
-        
+                logger.error("Failed to shutdown module %s: %s", name, e)
+
         with self._lock:
             self._modules.clear()
             self._module_types.clear()
@@ -401,14 +403,14 @@ class MemoryBus:
             self._health_status.clear()
             self._event_handlers.clear()
             self._global_handlers.clear()
-        
+
         logger.info("All modules shutdown")
-    
+
     def _refresh_health_status(self) -> None:
         """刷新所有模块的健康状态"""
         for name in self._modules:
             self._refresh_module_health(name)
-        
+
         # 保存健康快照
         snapshot = {}
         for name, health in self._health_status.items():
@@ -421,16 +423,16 @@ class MemoryBus:
                 response_time_ms=health.response_time_ms,
                 metadata=health.metadata.copy(),
             )
-        
+
         self._health_history.append(snapshot)
         if len(self._health_history) > self._max_health_history:
-            self._health_history = self._health_history[-self._max_health_history:]
-    
+            self._health_history = self._health_history[-self._max_health_history :]
+
     def _refresh_module_health(self, module_name: str) -> None:
         """刷新单个模块的健康状态"""
         if module_name not in self._health_checkers:
             return
-        
+
         checker = self._health_checkers[module_name]
         try:
             start_time = time.time()
@@ -450,16 +452,16 @@ class MemoryBus:
                     current_health.status = HealthStatus.UNHEALTHY
                 elif current_health.error_count > 2:
                     current_health.status = HealthStatus.DEGRADED
-    
+
     def _record_health(self, module_name: str, health: ModuleHealth) -> None:
         """记录健康状态"""
         with self._lock:
             self._health_status[module_name] = health
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """
         获取总线统计信息
-        
+
         Returns:
             统计信息字典
         """
@@ -469,14 +471,11 @@ class MemoryBus:
                 "total_events": len(self._event_history),
                 "event_counts": dict(self._event_counts),
                 "module_access_counts": dict(self._module_access_counts),
-                "event_handlers": {
-                    event_type: len(handlers)
-                    for event_type, handlers in self._event_handlers.items()
-                },
+                "event_handlers": {event_type: len(handlers) for event_type, handlers in self._event_handlers.items()},
                 "global_handlers": len(self._global_handlers),
                 "health_checkers": len(self._health_checkers),
             }
-    
+
     def __repr__(self) -> str:
         return f"MemoryBus(modules={len(self._modules)}, events={len(self._event_history)})"
 
@@ -489,10 +488,10 @@ _bus_lock = threading.Lock()
 def get_memory_bus(max_event_history: int = 1000) -> MemoryBus:
     """
     获取全局记忆总线单例
-    
+
     Args:
         max_event_history: 最大事件历史记录数
-        
+
     Returns:
         MemoryBus实例
     """

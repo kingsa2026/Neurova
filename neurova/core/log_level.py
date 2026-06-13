@@ -2,12 +2,12 @@
 日志级别定义 - 独立文件避免循环导入
 """
 
-import enum
 from enum import IntEnum
 
 
 class LogLevel(IntEnum):
     """日志级别"""
+
     DEBUG = 10
     INFO = 20
     WARNING = 30

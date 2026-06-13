@@ -27,44 +27,47 @@ Agent 包 — 统一入口
     ContextOrchestrator → neurova.context 包（统一路径）
 """
 
-# 从 mem_core 导入记忆核心模块
-from neurova.mem_core import MemCore
-
-# ContextOrchestrator 已统一到 neurova.context 包
-# from neurova.agent.context_orchestrator import ContextOrchestrator  # 已删除，使用 neurova.context
-from neurova.agent.tool_executor import ToolExecutor
-from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
-from neurova.agent.loop_manager import LoopManager, LoopState, LoopEvent
-from neurova.agent.tool_execution_manager import (
-    ToolExecutionManager,
-    ToolExecutionContext,
-    TimeoutStrategy,
-    ExecutionStatus,
-    ExecutionEvent,
-)
+from neurova.agent.chat_pipeline import ChatContext, ChatPipeline
 from neurova.agent.initialization_manager import (
     InitializationManager,
     create_initialization_manager,
     get_initialization_manager,
     reset_initialization_manager,
 )
+from neurova.agent.loop_manager import LoopEvent, LoopManager, LoopState
 
 # 从 loops 子包导入
-from neurova.agent.loops.registry import register_loop, find_agent_loop
+from neurova.agent.loops.registry import find_agent_loop, register_loop
+from neurova.agent.tool_execution_manager import (
+    ExecutionEvent,
+    ExecutionStatus,
+    TimeoutStrategy,
+    ToolExecutionContext,
+    ToolExecutionManager,
+)
+
+# ContextOrchestrator 已统一到 neurova.context 包
+# from neurova.agent.context_orchestrator import ContextOrchestrator  # 已删除，使用 neurova.context
+from neurova.agent.tool_executor import ToolExecutor
+
+# 从 mem_core 导入记忆核心模块
+from neurova.mem_core import MemCore
+
 
 # 延迟导入 Agent 核心类（避免循环导入）
 def __getattr__(name: str):
     if name in ("Agent", "AgentConfig", "AgentLLMClient"):
         from neurova.agent_core import Agent, AgentConfig, AgentLLMClient
+
         return {"Agent": Agent, "AgentConfig": AgentConfig, "AgentLLMClient": AgentLLMClient}[name]
     raise AttributeError(f"module 'neurova.agent' has no attribute {name!r}")
+
 
 __all__ = [
     # 核心类（延迟导入）
     "Agent",
     "AgentConfig",
     "AgentLLMClient",
-
     # 深度模块
     "MemCore",
     # ContextOrchestrator 已统一到 neurova.context 包
@@ -79,13 +82,11 @@ __all__ = [
     "TimeoutStrategy",
     "ExecutionStatus",
     "ExecutionEvent",
-
     # 初始化管理
     "InitializationManager",
     "create_initialization_manager",
     "get_initialization_manager",
     "reset_initialization_manager",
-
     # Loop 系统
     "register_loop",
     "find_agent_loop",

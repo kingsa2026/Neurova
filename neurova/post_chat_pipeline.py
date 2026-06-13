@@ -22,17 +22,17 @@ PostChatPipeline — 对话后处理管线
 - 可独立测试
 """
 
-import time
 import logging
-from pathlib import Path
-from datetime import datetime
-from enum import Enum
-from typing import List, Dict, Optional, Any, Set
+import time
 from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 try:
     from neurova.cognitive_layers.meta_cognition_layer.growth_log import ReflectionType
 except ImportError:
+
     class ReflectionType(str, Enum):
         ERROR_ANALYSIS = "error_analysis"
         PROBLEM_SOLVING = "problem_solving"
@@ -40,11 +40,13 @@ except ImportError:
         INTERACTION = "interaction"
         LEARNING = "learning"
 
+
 logger = logging.getLogger(__name__)
 
 
 class StepStatus(str, Enum):
     """步骤执行状态"""
+
     PENDING = "pending"
     EXECUTED = "executed"
     SKIPPED = "skipped"
@@ -55,11 +57,13 @@ class StepStatus(str, Enum):
 @dataclass
 class StepResult:
     """步骤执行结果"""
+
     step_name: str
     status: StepStatus
     message: str = ""
     duration_ms: float = 0.0
     data: Dict[str, Any] = field(default_factory=dict)
+
 
 class PostChatPipeline:
     """对话后处理管线
@@ -72,7 +76,7 @@ class PostChatPipeline:
         self._agent = agent_ref
         self._step_results: List[StepResult] = []
         self._dependencies: Dict[str, Any] = {}
-        
+
         # 显式声明所有依赖组件
         self._conversation_buffer = None
         self._memory_manager = None
@@ -214,7 +218,7 @@ class PostChatPipeline:
             dep = getattr(self, f"_{name}")
             if dep is not None:
                 return dep
-        
+
         # 降级到agent_ref
         return getattr(self._agent, name, None)
 
@@ -241,11 +245,9 @@ class PostChatPipeline:
         """
         # 清空步骤结果
         self._step_results.clear()
-        
+
         # 步骤 6: 保存到 session 文件
-        actual_session_id = await self._step_save_session(
-            user_input, reply, session_id, save_memory, metadata
-        )
+        actual_session_id = await self._step_save_session(user_input, reply, session_id, save_memory, metadata)
 
         # 步骤 6.5: 保存对话记忆到数据库
         await self._step_save_memory(user_input, reply, actual_session_id)
@@ -254,9 +256,7 @@ class PostChatPipeline:
         self._step_update_memory_temperature()
 
         # 步骤 7: TTS 语音生成
-        audio_path, audio_data = await self._step_generate_tts(
-            reply, actual_session_id, enable_tts
-        )
+        audio_path, audio_data = await self._step_generate_tts(reply, actual_session_id, enable_tts)
 
         # 步骤 8: 认知能力分析
         cognitive_score = await self._step_cognitive_analysis(user_input)
@@ -287,16 +287,19 @@ class PostChatPipeline:
 
         # 步骤 11: RSI 迭代（递归自我改进）
         rsi_result = await self._step_rsi_iteration()
-        
+
         # 记录步骤统计
         executed = sum(1 for r in self._step_results if r.status == StepStatus.EXECUTED)
         skipped = sum(1 for r in self._step_results if r.status == StepStatus.SKIPPED)
         failed = sum(1 for r in self._step_results if r.status == StepStatus.FAILED)
         degraded = sum(1 for r in self._step_results if r.status == StepStatus.DEGRADED)
-        
+
         logger.info(
             "PostChatPipeline completed: executed=%d, skipped=%d, failed=%d, degraded=%d",
-            executed, skipped, failed, degraded
+            executed,
+            skipped,
+            failed,
+            degraded,
         )
 
         return {
@@ -312,32 +315,38 @@ class PostChatPipeline:
         """更新记忆温度（批量衰减）"""
         step_name = "update_memory_temperature"
         start_time = time.time()
-        
+
         try:
             # 调用 Agent 的 _update_memory_temperature 方法
-            if hasattr(self._agt, '_update_memory_temperature'):
+            if hasattr(self._agt, "_update_memory_temperature"):
                 self._agt._update_memory_temperature()
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.EXECUTED,
-                    message="Memory temperature updated",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.EXECUTED,
+                        message="Memory temperature updated",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
             else:
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.SKIPPED,
-                    message="Agent has no _update_memory_temperature method",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.SKIPPED,
+                        message="Agent has no _update_memory_temperature method",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
         except Exception as e:
-            logger.warning(f"记忆温度更新失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("记忆温度更新失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
     async def _step_save_session(
         self,
@@ -353,20 +362,20 @@ class PostChatPipeline:
         result_session_id = session_id or ""
 
         if not save_memory:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="save_memory=False, skip session backup",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="save_memory=False, skip session backup",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return result_session_id
 
         try:
             assistant_meta = {
                 "reasoning_content": getattr(self._agt, "_current_reasoning", None),
-                "tool_calls": self._agt._collect_tool_messages()
-                if self._agt._collect_tool_messages()
-                else None,
+                "tool_calls": self._agt._collect_tool_messages() if self._agt._collect_tool_messages() else None,
             }
             # 过滤 None 值
             assistant_meta = {k: v for k, v in assistant_meta.items() if v is not None}
@@ -378,21 +387,25 @@ class PostChatPipeline:
                 metadata,
                 assistant_meta if assistant_meta else None,
             )
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.EXECUTED,
-                message=f"Session saved: {result_session_id}",
-                duration_ms=(time.time() - start_time) * 1000,
-                data={"session_id": result_session_id}
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.EXECUTED,
+                    message=f"Session saved: {result_session_id}",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={"session_id": result_session_id},
+                )
+            )
         except Exception as e:
-            logger.warning(f"Session备份失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("Session备份失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
         return result_session_id
 
@@ -405,20 +418,22 @@ class PostChatPipeline:
         """保存对话记忆到记忆数据库"""
         step_name = "save_memory"
         start_time = time.time()
-        
+
         # 获取依赖组件
         memory_manager = self._get_dependency("memory_manager")
         conversation_buffer = self._get_dependency("conversation_buffer")
-        
+
         if not conversation_buffer and not memory_manager:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="No memory_manager or conversation_buffer available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="No memory_manager or conversation_buffer available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
-        
+
         try:
             # 使用对话缓冲区
             if conversation_buffer:
@@ -441,40 +456,44 @@ class PostChatPipeline:
                     metadata={"sender_type": "agent", "session_id": session_id or "default"},
                 )
                 logger.debug("对话已直接写入记忆数据库")
-                
+
                 # 保存情感信息到记忆
                 self._save_emotion_to_memory(memory_manager, user_input, user_memory_id)
-            
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.EXECUTED,
-                message="Memory saved successfully",
-                duration_ms=(time.time() - start_time) * 1000,
-                data={"user_memory_id": user_memory_id, "agent_memory_id": agent_memory_id}
-            ))
+
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.EXECUTED,
+                    message="Memory saved successfully",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={"user_memory_id": user_memory_id, "agent_memory_id": agent_memory_id},
+                )
+            )
         except Exception as e:
-            logger.warning(f"对话记忆保存失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("对话记忆保存失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
     def _save_emotion_to_memory(self, memory_manager, user_input: str, memory_id: str):
         """将情感信息保存到记忆"""
         emotion_module = getattr(memory_manager, "emotion_module", None)
         if not emotion_module:
             return
-        
+
         try:
             # 分析用户输入的情感
             emotion_state = emotion_module.analyze_text_emotion(user_input)
             if emotion_state and emotion_state.primary_emotion.value != "neutral":
                 emotion_module.set_emotion(memory_id, emotion_state)
-                logger.debug(f"情感已保存到记忆 {memory_id}: {emotion_state.primary_emotion.value}")
+                logger.debug("情感已保存到记忆 %s: %s", memory_id, emotion_state.primary_emotion.value)
         except Exception as e:
-            logger.debug(f"情感保存失败: {e}")
+            logger.debug("情感保存失败: %s", e)
 
     async def _step_generate_tts(
         self,
@@ -491,12 +510,14 @@ class PostChatPipeline:
         # 优先使用统一语音管线
         voice_pipeline = self._get_dependency("voice_pipeline")
         if not use_tts or not voice_pipeline:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="TTS not enabled or voice_pipeline not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="TTS not enabled or voice_pipeline not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return None, None
 
         try:
@@ -504,7 +525,7 @@ class PostChatPipeline:
             user_id = getattr(config, "user_id", "default")
             agent_id = getattr(config, "agent_id", "default")
             voice = getattr(config, "tts_voice", "default")
-            
+
             # 通过统一语音管线处理 TTS
             pipeline_result = await voice_pipeline.process_tts(
                 text=reply,
@@ -512,77 +533,87 @@ class PostChatPipeline:
                 agent_id=agent_id,
                 voice=voice,
             )
-            
+
             if pipeline_result.error:
-                logger.warning(f"统一语音管线 TTS 失败: {pipeline_result.error}")
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.FAILED,
-                    message=f"Voice pipeline TTS failed: {pipeline_result.error}",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
+                logger.warning("统一语音管线 TTS 失败: %s", pipeline_result.error)
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.FAILED,
+                        message=f"Voice pipeline TTS failed: {pipeline_result.error}",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
                 return None, None
-            
+
             # 保存音频到文件
             if pipeline_result.audio_data:
                 timestamp = int(time.time())
                 audio_filename = f"tts_{session_id or 'default'}_{timestamp}.wav"
                 audio_path = Path(config.attachment_dir) / audio_filename
                 audio_path.parent.mkdir(parents=True, exist_ok=True)
-                
+
                 with open(audio_path, "wb") as f:
                     f.write(pipeline_result.audio_data)
-                logger.info(f"TTS语音已生成: {audio_path}")
-                
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.EXECUTED,
-                    message=f"TTS generated via voice pipeline: {audio_path}",
-                    duration_ms=(time.time() - start_time) * 1000,
-                    data={
-                        "audio_path": str(audio_path),
-                        "audio_size": len(pipeline_result.audio_data),
-                        "tts_engine": pipeline_result.tts_engine,
-                        "tts_voice": pipeline_result.tts_voice,
-                        "tts_duration_ms": pipeline_result.tts_duration_ms,
-                        "context_injected": pipeline_result.context_injected,
-                        "memory_recorded": pipeline_result.memory_recorded,
-                    }
-                ))
+                logger.info("TTS语音已生成: %s", audio_path)
+
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.EXECUTED,
+                        message=f"TTS generated via voice pipeline: {audio_path}",
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={
+                            "audio_path": str(audio_path),
+                            "audio_size": len(pipeline_result.audio_data),
+                            "tts_engine": pipeline_result.tts_engine,
+                            "tts_voice": pipeline_result.tts_voice,
+                            "tts_duration_ms": pipeline_result.tts_duration_ms,
+                            "context_injected": pipeline_result.context_injected,
+                            "memory_recorded": pipeline_result.memory_recorded,
+                        },
+                    )
+                )
                 return str(audio_path), pipeline_result.audio_data
             else:
                 logger.warning("统一语音管线 TTS 返回空音频数据")
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.FAILED,
-                    message="Voice pipeline TTS returned empty audio data",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.FAILED,
+                        message="Voice pipeline TTS returned empty audio data",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
                 return None, None
         except Exception as e:
-            logger.warning(f"TTS语音生成失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("TTS语音生成失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return None, None
 
     async def _step_cognitive_analysis(self, user_input: str) -> float:
         """认知能力分析"""
         step_name = "cognitive_analysis"
         start_time = time.time()
-        
+
         growth_analyzer = self._get_dependency("growth_analyzer")
         if not growth_analyzer:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="growth_analyzer not available, using default score 0.75",
-                duration_ms=(time.time() - start_time) * 1000,
-                data={"score": 0.75}
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="growth_analyzer not available, using default score 0.75",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={"score": 0.75},
+                )
+            )
             return 0.75
 
         try:
@@ -594,22 +625,26 @@ class PostChatPipeline:
                     context="conversation",
                 )
                 logger.info("🧠 认知能力分析完成")
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.EXECUTED,
-                    message="Cognitive analysis completed",
-                    duration_ms=(time.time() - start_time) * 1000,
-                    data={"score": 0.75, "concepts": concepts}
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.EXECUTED,
+                        message="Cognitive analysis completed",
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={"score": 0.75, "concepts": concepts},
+                    )
+                )
                 return 0.75
         except Exception as e:
-            logger.warning(f"认知能力分析失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("认知能力分析失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
         return 0.75
 
@@ -618,10 +653,22 @@ class PostChatPipeline:
     # ============================================================
 
     REFLECTION_CONFUSION_KEYWORDS = [
-        "不明白", "不对", "错了", "不是这样", "搞错了", "再想想", "重新",
+        "不明白",
+        "不对",
+        "错了",
+        "不是这样",
+        "搞错了",
+        "再想想",
+        "重新",
     ]
     REFLECTION_UNCERTAINTY_KEYWORDS = [
-        "不确定", "可能", "也许", "大概", "或许", "估计", "不敢肯定",
+        "不确定",
+        "可能",
+        "也许",
+        "大概",
+        "或许",
+        "估计",
+        "不敢肯定",
     ]
     REFLECTION_TURN_INTERVAL = 10
 
@@ -635,26 +682,30 @@ class PostChatPipeline:
         """
         step_name = "reflection"
         start_time = time.time()
-        
+
         growth_log_manager = self._get_dependency("growth_log_manager")
         if not growth_log_manager:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="growth_log_manager not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="growth_log_manager not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         should_reflect = self._should_reflect(user_input, reply)
         if not should_reflect:
             logger.debug("反思条件未满足，跳过 Step 8.5")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="Reflection conditions not met",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="Reflection conditions not met",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         try:
@@ -684,28 +735,34 @@ class PostChatPipeline:
                 logger.info(
                     f"🧠 反思日志已生成: {entry.id} (类型: {reflection_type.value}, 触发: {context['trigger']})"
                 )
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.EXECUTED,
-                    message=f"Reflection log generated: {entry.id}",
-                    duration_ms=(time.time() - start_time) * 1000,
-                    data={"reflection_id": entry.id, "type": reflection_type.value}
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.EXECUTED,
+                        message=f"Reflection log generated: {entry.id}",
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={"reflection_id": entry.id, "type": reflection_type.value},
+                    )
+                )
             else:
-                self._step_results.append(StepResult(
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.FAILED,
+                        message="Failed to generate reflection log",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
+        except Exception as e:
+            logger.warning("Step 8.5 反思日志生成失败: %s", e)
+            self._step_results.append(
+                StepResult(
                     step_name=step_name,
                     status=StepStatus.FAILED,
-                    message="Failed to generate reflection log",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
-        except Exception as e:
-            logger.warning(f"Step 8.5 反思日志生成失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
     def _should_reflect(self, user_input: str, reply: str) -> bool:
         """判断是否应该触发反思"""
@@ -727,9 +784,9 @@ class PostChatPipeline:
 
         return False
 
-    def _infer_reflection_type(self, user_input: str, reply: str) -> 'ReflectionType':
+    def _infer_reflection_type(self, user_input: str, reply: str) -> "ReflectionType":
         """根据对话内容推断反思类型
-        
+
         映射关系:
         - 错误/失败 → ERROR
         - 问题/怎么 → IMPROVEMENT
@@ -781,54 +838,62 @@ class PostChatPipeline:
         """通过统一进化引擎记录经验"""
         step_name = "record_experience"
         start_time = time.time()
-        
+
         evolution = self._get_dependency("evolution")
         if not evolution:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="evolution not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="evolution not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         try:
             tool_messages = self._agt._collect_tool_messages()
-            tools_used = list(set(
-                tm.get("tool_name", "unknown") for tm in tool_messages
-            ))
+            tools_used = list(set(tm.get("tool_name", "unknown") for tm in tool_messages))
 
             # 记录经验到进化系统（只调用一次）
             if hasattr(evolution, "on_experience_recorded"):
-                evolution.on_experience_recorded(
+                from neurova.evolution.evolution_facade import EvolutionFacade
+                facade = EvolutionFacade(evolution)
+                facade.record_experience(
                     text=f"用户: {user_input}\n助手: {reply}",
                     task=user_input,
                     tools=tools_used,
                     success=len(tool_messages) > 0,
                 )
-                logger.info(f"📚 对话经验已记录 (工具: {tools_used})")
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.EXECUTED,
-                    message=f"Experience recorded with {len(tools_used)} tools",
-                    duration_ms=(time.time() - start_time) * 1000,
-                    data={"tools_used": tools_used}
-                ))
+                logger.info("📚 对话经验已记录 (工具: %s)", tools_used)
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.EXECUTED,
+                        message=f"Experience recorded with {len(tools_used)} tools",
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={"tools_used": tools_used},
+                    )
+                )
             else:
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.SKIPPED,
-                    message="evolution has no on_experience_recorded method",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.SKIPPED,
+                        message="evolution has no on_experience_recorded method",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
         except Exception as e:
-            logger.warning(f"经验记录失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("经验记录失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
     async def _step_evocate_generation(
         self,
@@ -842,16 +907,18 @@ class PostChatPipeline:
         """
         step_name = "evocate_generation"
         start_time = time.time()
-        
+
         neuHebb_manager = self._get_dependency("neuHebb_manager")
         if not neuHebb_manager:
             logger.debug("NeuHebbManager 未初始化，跳过 Evocate 生成")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="neuHebb_manager not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="neuHebb_manager not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         try:
@@ -863,31 +930,38 @@ class PostChatPipeline:
             if hebbs:
                 logger.info(
                     f"🧠 Evocate: 从对话生成 %d 个 NeurovaHebb (session: %s)",
-                    len(hebbs), session_id,
+                    len(hebbs),
+                    session_id,
                 )
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.EXECUTED,
-                    message=f"Generated {len(hebbs)} NeurovaHebb",
-                    duration_ms=(time.time() - start_time) * 1000,
-                    data={"hebbs_count": len(hebbs), "session_id": session_id}
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.EXECUTED,
+                        message=f"Generated {len(hebbs)} NeurovaHebb",
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={"hebbs_count": len(hebbs), "session_id": session_id},
+                    )
+                )
             else:
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.EXECUTED,
-                    message="No NeurovaHebb generated",
-                    duration_ms=(time.time() - start_time) * 1000,
-                    data={"hebbs_count": 0}
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.EXECUTED,
+                        message="No NeurovaHebb generated",
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={"hebbs_count": 0},
+                    )
+                )
         except Exception as e:
-            logger.warning(f"Evocate 生成失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("Evocate 生成失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
     async def _step_p0_post_processing(self, save_memory: bool):
         """P0: 执行所有 P0 接线模块的后处理"""
@@ -900,15 +974,17 @@ class PostChatPipeline:
         """9.5: 工具生命周期评估"""
         step_name = "lifecycle_evaluate"
         start_time = time.time()
-        
+
         tool_lifecycle = self._get_dependency("tool_lifecycle")
         if not tool_lifecycle:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="tool_lifecycle not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="tool_lifecycle not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         try:
@@ -916,9 +992,7 @@ class PostChatPipeline:
             evolution = self._get_dependency("evolution")
 
             if "degraded" in lifecycle_report or "archived" in lifecycle_report:
-                logger.info(
-                    f"🔄 工具生命周期评估: {lifecycle_report}"
-                )
+                logger.info("🔄 工具生命周期评估: %s", lifecycle_report)
 
             # 对降级/归档的工具应用权重衰减
             if evolution and hasattr(evolution, "_tool_weights"):
@@ -927,49 +1001,57 @@ class PostChatPipeline:
                     for tool_name, factor in decay.items():
                         if tool_name in evolution._tool_weights:
                             evolution._tool_weights[tool_name] *= factor
-                    logger.debug(f"📉 工具权重衰减: {len(decay)} 个工具")
-            
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.EXECUTED,
-                message=f"Lifecycle evaluation completed",
-                duration_ms=(time.time() - start_time) * 1000,
-                data={"report": lifecycle_report}
-            ))
+                    logger.debug("📉 工具权重衰减: %s 个工具", len(decay))
+
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.EXECUTED,
+                    message=f"Lifecycle evaluation completed",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={"report": lifecycle_report},
+                )
+            )
         except Exception as e:
-            logger.warning(f"工具生命周期评估失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("工具生命周期评估失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
     async def _step_pattern_mining(self):
         """9.6: PatternMiner 序列收集与挖掘"""
         step_name = "pattern_mining"
         start_time = time.time()
-        
+
         evolution = self._get_dependency("evolution")
         pattern_miner = getattr(evolution, "pattern_miner", None) if evolution else None
         if not pattern_miner:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="pattern_miner not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="pattern_miner not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         try:
             tool_messages = self._agt._collect_tool_messages()
             if not tool_messages:
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.SKIPPED,
-                    message="No tool messages to process",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.SKIPPED,
+                        message="No tool messages to process",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
                 return
 
             # 构建工具调用序列
@@ -982,7 +1064,7 @@ class PostChatPipeline:
             patterns = pattern_miner.mine()
 
             if patterns:
-                logger.info(f"⛏️ PatternMiner 发现 {len(patterns)} 个频繁模式")
+                logger.info("⛏️ PatternMiner 发现 %s 个频繁模式", len(patterns))
 
             # 将模式反馈给 skill_packer
             skill_packer = self._get_dependency("skill_packer")
@@ -990,63 +1072,74 @@ class PostChatPipeline:
                 templates = pattern_miner.to_skill_template_list()
                 for tmpl in templates:
                     skill_packer.observe(tools=tmpl["tools"], support=tmpl["support"], auto_registered=True)
-            
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.EXECUTED,
-                message=f"Pattern mining completed: {len(patterns) if patterns else 0} patterns found",
-                duration_ms=(time.time() - start_time) * 1000,
-                data={"patterns_count": len(patterns) if patterns else 0, "sequence_length": len(sequence)}
-            ))
+
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.EXECUTED,
+                    message=f"Pattern mining completed: {len(patterns) if patterns else 0} patterns found",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={"patterns_count": len(patterns) if patterns else 0, "sequence_length": len(sequence)},
+                )
+            )
         except Exception as e:
-            logger.warning(f"PatternMiner 序列收集失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("PatternMiner 序列收集失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
     async def _step_genetic_evolution(self):
         """9.7: ToolGeneticEngine 种子种群并进化"""
         step_name = "genetic_evolution"
         start_time = time.time()
-        
+
         evolution = self._get_dependency("evolution")
         if not evolution:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="evolution not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="evolution not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         genetic_engine = getattr(evolution, "genetic_engine", None)
         pattern_miner = getattr(evolution, "pattern_miner", None)
         if not genetic_engine or not pattern_miner:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="genetic_engine or pattern_miner not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="genetic_engine or pattern_miner not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         try:
             if pattern_miner.sequence_count == 0:
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.SKIPPED,
-                    message="No sequences to evolve",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.SKIPPED,
+                        message="No sequences to evolve",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
                 return
 
             top_patterns = pattern_miner.get_top_patterns()
 
             # 从模式构建基因型种子
             from neurova.evolution.genetic_engine import ToolGenotype
+
             for pattern in top_patterns:
                 genotype = ToolGenotype(
                     tool_sequence=pattern.tools,
@@ -1056,7 +1149,7 @@ class PostChatPipeline:
 
             # 执行进化
             new_gen = genetic_engine.evolve()
-            logger.info(f"🧬 ToolGeneticEngine 进化完成: 种群={len(genetic_engine.population)}, 新个体={len(new_gen)}")
+            logger.info("🧬 ToolGeneticEngine 进化完成: 种群=%s, 新个体=%s", len(genetic_engine.population), len(new_gen))
 
             # 将进化结果反馈到工具权重
             for genotype in new_gen:
@@ -1065,36 +1158,42 @@ class PostChatPipeline:
                         # 高适应度个体的工具应获得权重提升
                         if genotype.fitness > 0.5:
                             evolution.tool_weights.update_weight(tool_name, True)
-            
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.EXECUTED,
-                message=f"Genetic evolution completed: {len(new_gen)} new individuals",
-                duration_ms=(time.time() - start_time) * 1000,
-                data={"population_size": len(genetic_engine.population), "new_individuals": len(new_gen)}
-            ))
+
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.EXECUTED,
+                    message=f"Genetic evolution completed: {len(new_gen)} new individuals",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={"population_size": len(genetic_engine.population), "new_individuals": len(new_gen)},
+                )
+            )
         except Exception as e:
-            logger.warning(f"ToolGeneticEngine 进化失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("ToolGeneticEngine 进化失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
     async def _step_marketplace_publish(self):
         """9.8: ToolMarketplace 工具发布"""
         step_name = "marketplace_publish"
         start_time = time.time()
-        
+
         marketplace = self._get_dependency("tool_marketplace")
         if not marketplace:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="tool_marketplace not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="tool_marketplace not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         try:
@@ -1120,6 +1219,7 @@ class PostChatPipeline:
                 # 构建市场工具
                 try:
                     from neurova.tool_layers import MarketplaceTool
+
                     mkt_tool = MarketplaceTool(
                         name=tool_name,
                         description=skill.description if skill else f"auto-registered tool: {tool_name}",
@@ -1127,50 +1227,58 @@ class PostChatPipeline:
                         agent_id=self._agt.config.agent_id,
                     )
                     marketplace.add_tool(mkt_tool)
-                    logger.info(f"🏪 工具已发布到市场: {tool_name}")
+                    logger.info("🏪 工具已发布到市场: %s", tool_name)
                     published_tools.append(tool_name)
                 except (ImportError, Exception) as e:
-                    logger.warning(f"ToolMarketplace 发布失败: {e}")
-            
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.EXECUTED,
-                message=f"Published {len(published_tools)} tools to marketplace",
-                duration_ms=(time.time() - start_time) * 1000,
-                data={"published_tools": published_tools}
-            ))
+                    logger.warning("ToolMarketplace 发布失败: %s", e)
+
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.EXECUTED,
+                    message=f"Published {len(published_tools)} tools to marketplace",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={"published_tools": published_tools},
+                )
+            )
         except Exception as e:
-            logger.warning(f"ToolMarketplace 发布失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("ToolMarketplace 发布失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
     async def _step_conflict_detection(self, user_input: str, reply: str):
         """Step 9.9: 新记忆写入后自动检测冲突"""
         step_name = "conflict_detection"
         start_time = time.time()
-        
+
         conflict_detector = self._get_dependency("conflict_detector")
         if not conflict_detector:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="conflict_detector not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="conflict_detector not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         memory_manager = self._get_dependency("memory_manager")
         if not memory_manager:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="memory_manager not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="memory_manager not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         try:
@@ -1192,54 +1300,64 @@ class PostChatPipeline:
                     logger.info(
                         f"  冲突: {conflict.conflict_type.value} ({conflict.conflict_level}) - {conflict.description}"
                     )
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.EXECUTED,
-                    message=f"Detected {len(result.conflicts)} conflicts",
-                    duration_ms=(time.time() - start_time) * 1000,
-                    data={"conflicts_count": len(result.conflicts), "confidence": result.confidence}
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.EXECUTED,
+                        message=f"Detected {len(result.conflicts)} conflicts",
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={"conflicts_count": len(result.conflicts), "confidence": result.confidence},
+                    )
+                )
             else:
                 logger.debug("记忆冲突检测通过，无冲突")
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.EXECUTED,
-                    message="No conflicts detected",
-                    duration_ms=(time.time() - start_time) * 1000,
-                    data={"conflicts_count": 0}
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.EXECUTED,
+                        message="No conflicts detected",
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={"conflicts_count": 0},
+                    )
+                )
         except Exception as e:
-            logger.warning(f"Step 9.9 记忆冲突检测失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("Step 9.9 记忆冲突检测失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
     async def _step_version_snapshot(self, user_input: str):
         """Step 9.95: 为相关记忆创建版本快照（确保可回滚）"""
         step_name = "version_snapshot"
         start_time = time.time()
-        
+
         version_control = self._get_dependency("version_control")
         if not version_control:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="version_control not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="version_control not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         memory_manager = self._get_dependency("memory_manager")
         if not memory_manager:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="memory_manager not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="memory_manager not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
 
         try:
@@ -1257,22 +1375,26 @@ class PostChatPipeline:
                     snapshot_count += 1
 
             if snapshot_count > 0:
-                logger.debug(f"📸 已为 {snapshot_count} 条相关记忆创建版本快照")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.EXECUTED,
-                message=f"Created {snapshot_count} snapshots",
-                duration_ms=(time.time() - start_time) * 1000,
-                data={"snapshot_count": snapshot_count}
-            ))
+                logger.debug("📸 已为 %s 条相关记忆创建版本快照", snapshot_count)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.EXECUTED,
+                    message=f"Created {snapshot_count} snapshots",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={"snapshot_count": snapshot_count},
+                )
+            )
         except Exception as e:
-            logger.warning(f"Step 9.95 记忆版本快照失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("Step 9.95 记忆版本快照失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
     async def _step_proactive_question(self, user_input: str, reply: str) -> Optional[str]:
         """Step 10: 分析对话后决定是否主动提问
@@ -1282,15 +1404,17 @@ class PostChatPipeline:
         """
         step_name = "proactive_question"
         start_time = time.time()
-        
+
         proactive_manager = self._get_dependency("proactive_question_manager")
         if not proactive_manager:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="proactive_question_manager not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="proactive_question_manager not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return None
 
         try:
@@ -1301,45 +1425,55 @@ class PostChatPipeline:
                 if hasattr(proactive_manager, "generate_question"):
                     question = proactive_manager.generate_question(context)
                     if question:
-                        logger.info(f"🤔 主动提问: {question} (原因: {reason})")
-                        self._step_results.append(StepResult(
-                            step_name=step_name,
-                            status=StepStatus.EXECUTED,
-                            message=f"Proactive question generated: {question[:50]}...",
-                            duration_ms=(time.time() - start_time) * 1000,
-                            data={"question": question, "reason": reason}
-                        ))
+                        logger.info("🤔 主动提问: %s (原因: %s)", question, reason)
+                        self._step_results.append(
+                            StepResult(
+                                step_name=step_name,
+                                status=StepStatus.EXECUTED,
+                                message=f"Proactive question generated: {question[:50]}...",
+                                duration_ms=(time.time() - start_time) * 1000,
+                                data={"question": question, "reason": reason},
+                            )
+                        )
                         return question
                     else:
-                        logger.debug(f"主动提问条件满足但未生成问题: {reason}")
-                        self._step_results.append(StepResult(
+                        logger.debug("主动提问条件满足但未生成问题: %s", reason)
+                        self._step_results.append(
+                            StepResult(
+                                step_name=step_name,
+                                status=StepStatus.SKIPPED,
+                                message=f"Should ask but no question generated: {reason}",
+                                duration_ms=(time.time() - start_time) * 1000,
+                            )
+                        )
+                else:
+                    self._step_results.append(
+                        StepResult(
                             step_name=step_name,
                             status=StepStatus.SKIPPED,
-                            message=f"Should ask but no question generated: {reason}",
-                            duration_ms=(time.time() - start_time) * 1000
-                        ))
-                else:
-                    self._step_results.append(StepResult(
+                            message="proactive_manager has no generate_question method",
+                            duration_ms=(time.time() - start_time) * 1000,
+                        )
+                    )
+            else:
+                self._step_results.append(
+                    StepResult(
                         step_name=step_name,
                         status=StepStatus.SKIPPED,
-                        message="proactive_manager has no generate_question method",
-                        duration_ms=(time.time() - start_time) * 1000
-                    ))
-            else:
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.SKIPPED,
-                    message=f"Proactive question conditions not met: {reason}",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
+                        message=f"Proactive question conditions not met: {reason}",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
         except Exception as e:
-            logger.warning(f"Step 10 主动提问决策失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("Step 10 主动提问决策失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
         return None
 
@@ -1353,44 +1487,52 @@ class PostChatPipeline:
         """
         step_name = "rsi_iteration"
         start_time = time.time()
-        
+
         rsi = self._get_dependency("rsi_orchestrator")
         if not rsi:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="rsi_orchestrator not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="rsi_orchestrator not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return None
 
         try:
             if rsi.should_continue():
                 result = rsi.run_iteration()
-                logger.info(f"RSI 迭代完成: {result.get('convergence', {}).get('status', 'unknown')}")
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.EXECUTED,
-                    message=f"RSI iteration completed: {result.get('convergence', {}).get('status', 'unknown')}",
-                    duration_ms=(time.time() - start_time) * 1000,
-                    data={"convergence_status": result.get('convergence', {}).get('status')}
-                ))
+                logger.info("RSI 迭代完成: %s", result.get('convergence', {}).get('status', 'unknown'))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.EXECUTED,
+                        message=f"RSI iteration completed: {result.get('convergence', {}).get('status', 'unknown')}",
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={"convergence_status": result.get("convergence", {}).get("status")},
+                    )
+                )
                 return result
             else:
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.SKIPPED,
-                    message="RSI should_continue returned False",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.SKIPPED,
+                        message="RSI should_continue returned False",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
         except Exception as e:
-            logger.warning(f"Step 11 RSI 迭代失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("Step 11 RSI 迭代失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
 
         return None
 
@@ -1401,76 +1543,80 @@ class PostChatPipeline:
         session_id: str,
     ):
         """Step 9.05: 记录工作流执行经验到记忆系统
-        
+
         从 Neurflow 执行引擎获取最近的执行记录，将成功的工作流执行经验
         存储到记忆系统中，以便后续对话中检索和复用。
         """
         step_name = "record_workflow_experience"
         start_time = time.time()
-        
+
         # 获取工作流执行器
         neurflow_executor = self._get_dependency("neurflow_executor")
         if not neurflow_executor:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="neurflow_executor not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="neurflow_executor not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
-        
+
         memory_manager = self._get_dependency("memory_manager")
         if not memory_manager:
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.SKIPPED,
-                message="memory_manager not available",
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="memory_manager not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
             return
-        
+
         try:
             # 获取最近的执行记录（5分钟内）
             recent_executions = neurflow_executor.get_recent_executions(
-                agent_id=getattr(self._agt.config, "agent_id", None),
-                limit=5
+                agent_id=getattr(self._agt.config, "agent_id", None), limit=5
             )
-            
+
             if not recent_executions:
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.SKIPPED,
-                    message="No recent workflow executions found",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.SKIPPED,
+                        message="No recent workflow executions found",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
                 return
-            
+
             # 记录每个成功执行的工作流经验
             recorded_count = 0
             for execution in recent_executions:
                 # 只记录成功的执行
                 if execution.status.value != "completed":
                     continue
-                
+
                 # 构建经验内容
                 workflow_id = execution.workflow_id
                 duration = execution.duration or 0
                 outputs_summary = str(execution.outputs)[:200] if execution.outputs else "无输出"
-                
+
                 # 提取节点执行信息
                 node_count = len(execution.node_results)
                 successful_nodes = sum(
-                    1 for node_result in execution.node_results.values()
-                    if node_result.status == "success"
+                    1 for node_result in execution.node_results.values() if node_result.status == "success"
                 )
-                
+
                 experience_content = (
                     f"工作流 {workflow_id} 执行成功完成。"
                     f"包含 {node_count} 个节点，成功执行 {successful_nodes} 个。"
                     f"执行耗时 {duration:.2f} 秒。"
                     f"输出: {outputs_summary}"
                 )
-                
+
                 # 存储到记忆系统
                 metadata = {
                     "workflow_id": workflow_id,
@@ -1483,47 +1629,49 @@ class PostChatPipeline:
                     "execution_started_at": execution.started_at,
                     "execution_finished_at": execution.finished_at,
                 }
-                
+
                 memory_id = memory_manager.remember(
                     content=experience_content,
                     memory_type="workflow_experience",
                     metadata=metadata,
                 )
-                
+
                 if memory_id:
                     recorded_count += 1
-                    logger.debug(
-                        f"工作流经验已记录: {workflow_id} -> {memory_id}"
-                    )
-            
+                    logger.debug("工作流经验已记录: %s -> %s", workflow_id, memory_id)
+
             if recorded_count > 0:
-                logger.info(
-                    f"🔄 已记录 {recorded_count} 个工作流执行经验"
+                logger.info("🔄 已记录 %s 个工作流执行经验", recorded_count)
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.EXECUTED,
+                        message=f"Recorded {recorded_count} workflow execution experiences",
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={
+                            "recorded_count": recorded_count,
+                            "total_executions": len(recent_executions),
+                            "workflow_ids": [e.workflow_id for e in recent_executions],
+                        },
+                    )
                 )
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.EXECUTED,
-                    message=f"Recorded {recorded_count} workflow execution experiences",
-                    duration_ms=(time.time() - start_time) * 1000,
-                    data={
-                        "recorded_count": recorded_count,
-                        "total_executions": len(recent_executions),
-                        "workflow_ids": [e.workflow_id for e in recent_executions],
-                    }
-                ))
             else:
-                self._step_results.append(StepResult(
-                    step_name=step_name,
-                    status=StepStatus.SKIPPED,
-                    message="No successful workflow executions to record",
-                    duration_ms=(time.time() - start_time) * 1000
-                ))
-                
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.SKIPPED,
+                        message="No successful workflow executions to record",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                )
+
         except Exception as e:
-            logger.warning(f"Step 9.05 工作流经验记录失败: {e}")
-            self._step_results.append(StepResult(
-                step_name=step_name,
-                status=StepStatus.FAILED,
-                message=str(e),
-                duration_ms=(time.time() - start_time) * 1000
-            ))
+            logger.warning("Step 9.05 工作流经验记录失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )

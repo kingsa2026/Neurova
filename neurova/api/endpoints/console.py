@@ -13,17 +13,9 @@ import typing
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter
-from fastapi import File
-from fastapi import HTTPException
-from fastapi import Request
-from fastapi import UploadFile
-from fastapi import WebSocket
-from fastapi import WebSocketDisconnect
-from fastapi.responses import FileResponse
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from pydantic import Field
 
 from neurova.api.endpoints import get_agent_instance
 
@@ -32,6 +24,7 @@ router = APIRouter()
 
 
 # ── Connection Manager ─────────────────────────────────
+
 
 class ConnectionManager:
     def __init__(self):
@@ -97,6 +90,7 @@ def _get_user_id(request) -> str:
 
 # ── Models ─────────────────────────────────────────────
 
+
 class ChatRequest(BaseModel):
     message: str
     session_id: typing.Optional[str] = None
@@ -111,14 +105,20 @@ class CommandRequest(BaseModel):
 
 # ── Chat endpoints ─────────────────────────────────────
 
+
 @router.post("/chat")
 async def post_console_chat(body: ChatRequest, request: Request):
     """流式聊天接口（SSE）"""
     user_id = _get_user_id(request)
     session_id = body.session_id or str(uuid.uuid4())
-    session = _CHAT_SESSIONS.setdefault(session_id, {"id": session_id, "user_id": user_id, "messages": [], "created_at": datetime.datetime.utcnow().isoformat()})
+    session = _CHAT_SESSIONS.setdefault(
+        session_id,
+        {"id": session_id, "user_id": user_id, "messages": [], "created_at": datetime.datetime.utcnow().isoformat()},
+    )
 
-    session["messages"].append({"role": "user", "content": body.message, "timestamp": datetime.datetime.utcnow().isoformat()})
+    session["messages"].append(
+        {"role": "user", "content": body.message, "timestamp": datetime.datetime.utcnow().isoformat()}
+    )
 
     # Try to get agent for real response
     try:
@@ -132,9 +132,12 @@ async def post_console_chat(body: ChatRequest, request: Request):
         logger.warning("Console chat fallback: %s", e)
         reply = f"Echo: {body.message}"
 
-    session["messages"].append({"role": "assistant", "content": reply, "timestamp": datetime.datetime.utcnow().isoformat()})
+    session["messages"].append(
+        {"role": "assistant", "content": reply, "timestamp": datetime.datetime.utcnow().isoformat()}
+    )
 
     if body.stream:
+
         async def event_stream():
             words = reply.split(" ")
             for i, word in enumerate(words):
@@ -169,8 +172,10 @@ async def post_console_chat_new(request: Request):
     user_id = _get_user_id(request)
     session_id = str(uuid.uuid4())
     _CHAT_SESSIONS[session_id] = {
-        "id": session_id, "user_id": user_id,
-        "messages": [], "created_at": datetime.datetime.utcnow().isoformat(),
+        "id": session_id,
+        "user_id": user_id,
+        "messages": [],
+        "created_at": datetime.datetime.utcnow().isoformat(),
     }
     return {"code": 0, "message": "Session created", "data": {"session_id": session_id}}
 
@@ -186,6 +191,7 @@ async def get_chat_sessions(request: Request):
 
 # ── File endpoints ─────────────────────────────────────
 
+
 @router.post("/upload")
 async def post_console_upload(request: Request, file: UploadFile = File(...)):
     """上传文件"""
@@ -197,9 +203,12 @@ async def post_console_upload(request: Request, file: UploadFile = File(...)):
     dest.write_bytes(content)
 
     file_info = {
-        "file_id": file_id, "filename": safe_name, "size": len(content),
+        "file_id": file_id,
+        "filename": safe_name,
+        "size": len(content),
         "content_type": file.content_type or "application/octet-stream",
-        "path": str(dest), "uploaded_at": datetime.datetime.utcnow().isoformat(),
+        "path": str(dest),
+        "uploaded_at": datetime.datetime.utcnow().isoformat(),
     }
     return {"code": 0, "message": "File uploaded", "data": file_info}
 
@@ -210,10 +219,13 @@ async def list_console_uploads(request: Request):
     files = []
     for f in sorted(_CONSOLE_UPLOAD_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
         if f.is_file():
-            files.append({
-                "filename": f.name, "size": f.stat().st_size,
-                "modified": datetime.datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
-            })
+            files.append(
+                {
+                    "filename": f.name,
+                    "size": f.stat().st_size,
+                    "modified": datetime.datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+                }
+            )
     return {"code": 0, "message": "success", "data": {"files": files, "total": len(files)}}
 
 
@@ -240,6 +252,7 @@ async def delete_console_upload(filename: str):
 
 # ── Debug endpoints ────────────────────────────────────
 
+
 @router.get("/debug/logs")
 async def get_backend_debug_logs(lines: int = 100):
     """查看后端日志"""
@@ -255,6 +268,7 @@ async def get_backend_debug_logs(lines: int = 100):
 async def get_system_status():
     """系统状态"""
     import psutil
+
     try:
         cpu = psutil.cpu_percent(interval=0.1)
         mem = psutil.virtual_memory()
@@ -268,7 +282,10 @@ async def get_system_status():
             "uptime_seconds": int(time.time() - psutil.boot_time()),
         }
     except Exception:
-        status = {"note": "psutil not available, showing basic info", "timestamp": datetime.datetime.utcnow().isoformat()}
+        status = {
+            "note": "psutil not available, showing basic info",
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+        }
     return {"code": 0, "message": "success", "data": status}
 
 
@@ -286,8 +303,13 @@ async def post_debug_run_command(body: CommandRequest):
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
         return {
-            "code": 0, "message": "success",
-            "data": {"stdout": stdout.decode(errors="replace"), "stderr": stderr.decode(errors="replace"), "returncode": proc.returncode},
+            "code": 0,
+            "message": "success",
+            "data": {
+                "stdout": stdout.decode(errors="replace"),
+                "stderr": stderr.decode(errors="replace"),
+                "returncode": proc.returncode,
+            },
         }
     except asyncio.TimeoutError:
         raise HTTPException(status_code=408, detail="Command timed out")
@@ -296,6 +318,7 @@ async def post_debug_run_command(body: CommandRequest):
 
 
 # ── WebSocket ──────────────────────────────────────────
+
 
 @router.websocket("/ws/{client_id}")
 async def websocket_console(websocket: WebSocket, client_id: str):
@@ -324,6 +347,7 @@ async def websocket_console(websocket: WebSocket, client_id: str):
 
 # ── Push message endpoints ─────────────────────────────
 
+
 @router.get("/push/messages")
 async def get_push_messages(request: Request, since: float = 0):
     """获取推送消息（轮询方式）"""
@@ -335,7 +359,12 @@ async def get_push_messages(request: Request, since: float = 0):
 @router.post("/push/message")
 async def post_push_message(body: dict, request: Request):
     """发送推送消息（广播给所有WebSocket连接）"""
-    message = {"type": "push", "content": body.get("content", ""), "sender": _get_user_id(request), "timestamp": time.time()}
+    message = {
+        "type": "push",
+        "content": body.get("content", ""),
+        "sender": _get_user_id(request),
+        "timestamp": time.time(),
+    }
     await _manager.broadcast(message)
     _manager.store_message(_get_user_id(request), message)
     return {"code": 0, "message": "Push sent"}

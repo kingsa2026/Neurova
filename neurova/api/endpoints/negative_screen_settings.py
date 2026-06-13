@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -35,6 +35,7 @@ router = APIRouter()
 
 class NegativeScreenConfigResponse(BaseModel):
     """负一屏配置响应"""
+
     user_id: str
     auth_code: Optional[str] = None
     enabled: bool = False
@@ -44,6 +45,7 @@ class NegativeScreenConfigResponse(BaseModel):
 
 class UpdateNegativeScreenConfigRequest(BaseModel):
     """更新负一屏配置请求"""
+
     auth_code: Optional[str] = Field(None, description="授权码")
     enabled: Optional[bool] = Field(None, description="是否启用")
     push_url: Optional[str] = Field(None, description="推送URL")
@@ -51,6 +53,7 @@ class UpdateNegativeScreenConfigRequest(BaseModel):
 
 class TestPushRequest(BaseModel):
     """测试推送请求"""
+
     task_name: str = Field("测试任务", description="任务名称")
     task_content: str = Field("## 测试内容\n\n这是一条测试推送", description="任务内容")
     task_result: str = Field("测试完成", description="任务结果")
@@ -58,6 +61,7 @@ class TestPushRequest(BaseModel):
 
 class TestPushResponse(BaseModel):
     """测试推送响应"""
+
     success: bool
     task_id: Optional[str] = None
     response_code: Optional[str] = None
@@ -85,7 +89,7 @@ def _get_request_id(request: Request) -> str:
 def _get_current_user_id(request: Request) -> str:
     """
     获取当前用户ID
-    
+
     TODO: 从 JWT token 或 session 中获取实际用户ID
     """
     # 这里简化处理，实际应该从认证中获取
@@ -102,12 +106,12 @@ async def get_negative_screen_config(
     config_manager: NegativeScreenConfigManager = Depends(_get_config_manager),
 ):
     """获取用户负一屏配置"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
     user_id = _get_current_user_id(request)
-    
+
     try:
         config = config_manager.get_config(user_id)
-        
+
         if config is None:
             # 返回默认配置
             return NegativeScreenConfigResponse(
@@ -117,7 +121,7 @@ async def get_negative_screen_config(
                 push_url="https://hiboard-claw-drcn.ai.dbankcloud.cn/distribution/message/cloud/claw/msg/upload",
                 masked_auth_code=None,
             )
-        
+
         return NegativeScreenConfigResponse(
             user_id=config.user_id,
             auth_code=config.auth_code,
@@ -125,9 +129,9 @@ async def get_negative_screen_config(
             push_url=config.push_url,
             masked_auth_code=config.masked_auth_code,
         )
-        
+
     except Exception as e:
-        logger.exception(f"获取负一屏配置失败: {e}")
+        logger.exception("获取负一屏配置失败: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取配置失败: {str(e)}",
@@ -143,14 +147,14 @@ async def update_negative_screen_config(
     """更新用户负一屏配置"""
     request_id = _get_request_id(request)
     user_id = _get_current_user_id(request)
-    
+
     try:
         # 获取现有配置或创建新配置
         config = config_manager.get_config(user_id)
-        
+
         if config is None:
             config = NegativeScreenConfig(user_id=user_id)
-        
+
         # 更新字段
         if body.auth_code is not None:
             config.auth_code = body.auth_code
@@ -158,18 +162,18 @@ async def update_negative_screen_config(
             config.enabled = body.enabled
         if body.push_url is not None:
             config.push_url = body.push_url
-        
+
         # 保存配置
         success = config_manager.save_config(config)
-        
+
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="保存配置失败",
             )
-        
-        logger.info(f"用户 {user_id} 更新负一屏配置")
-        
+
+        logger.info("用户 %s 更新负一屏配置", user_id)
+
         return {
             "code": 0,
             "message": "配置已更新",
@@ -180,11 +184,11 @@ async def update_negative_screen_config(
             },
             "request_id": request_id,
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"更新负一屏配置失败: {e}")
+        logger.exception("更新负一屏配置失败: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新配置失败: {str(e)}",
@@ -199,31 +203,31 @@ async def test_negative_screen_push(
     pusher: NegativeScreenPusher = Depends(_get_pusher),
 ):
     """测试负一屏推送"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
     user_id = _get_current_user_id(request)
-    
+
     try:
         # 获取用户配置
         config = config_manager.get_config(user_id)
-        
+
         if config is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="未配置负一屏推送，请先配置 authCode",
             )
-        
+
         if not config.enabled:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="负一屏推送功能已禁用",
             )
-        
+
         if not config.auth_code:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="authCode 未设置",
             )
-        
+
         # 执行测试推送
         result = await pusher.push_task(
             config=config,
@@ -231,25 +235,25 @@ async def test_negative_screen_push(
             task_content=body.task_content,
             task_result=body.task_result,
         )
-        
+
         if result.success:
-            logger.info(f"用户 {user_id} 测试推送成功")
+            logger.info("用户 %s 测试推送成功", user_id)
             return TestPushResponse(
                 success=True,
                 task_id=result.task_id,
                 response_code=result.response_code,
             )
         else:
-            logger.warning(f"用户 {user_id} 测试推送失败: {result.error}")
+            logger.warning("用户 %s 测试推送失败: %s", user_id, result.error)
             return TestPushResponse(
                 success=False,
                 error=result.error,
             )
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"测试推送失败: {e}")
+        logger.exception("测试推送失败: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"测试推送失败: {str(e)}",
@@ -264,12 +268,12 @@ async def delete_negative_screen_config(
     """删除用户负一屏配置"""
     request_id = _get_request_id(request)
     user_id = _get_current_user_id(request)
-    
+
     try:
         success = config_manager.delete_config(user_id)
-        
+
         if success:
-            logger.info(f"用户 {user_id} 删除负一屏配置")
+            logger.info("用户 %s 删除负一屏配置", user_id)
             return {
                 "code": 0,
                 "message": "配置已删除",
@@ -281,11 +285,11 @@ async def delete_negative_screen_config(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="配置不存在",
             )
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"删除负一屏配置失败: {e}")
+        logger.exception("删除负一屏配置失败: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"删除配置失败: {str(e)}",

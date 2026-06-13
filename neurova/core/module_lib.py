@@ -11,50 +11,40 @@ from __future__ import annotations
 - 模块版本管理
 """
 
-import asyncio
-from dataclasses import dataclass, field
-import enum
-import logging
-from pathlib import Path
-import sys
-import time
-import typing
-import threading
-
-from enum import Enum
-from asyncio import Event
-from neurova.core.logger import LogLevel
-from neurova.core.module_system import Module
-from typing import Type
 import importlib
 import importlib.util
+import logging
+import threading
+import typing
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Type
 
 # core imports
-import neurova.core.base_module
-import neurova.core.config_manager
-import neurova.core.error_handler
-import neurova.core.event_bus
-import neurova.core.log_level
-import neurova.core.logger
-import neurova.core.state_manager
+from neurova.core.logger import LogLevel
+from neurova.core.module_system import Module
 
 logger = logging.getLogger(__name__)
 
 
 # ────── 数据模型 ──────
 
+
 class ModuleType(Enum):
     """模块类型"""
-    CORE = "core"              # 核心模块
-    PLUGIN = "plugin"          # 插件模块
-    EXTENSION = "extension"    # 扩展模块
-    BUILTIN = "builtin"        # 内置模块
-    CUSTOM = "custom"          # 自定义模块
+
+    CORE = "core"  # 核心模块
+    PLUGIN = "plugin"  # 插件模块
+    EXTENSION = "extension"  # 扩展模块
+    BUILTIN = "builtin"  # 内置模块
+    CUSTOM = "custom"  # 自定义模块
 
 
 @dataclass
 class ModuleDescriptor:
     """模块描述符"""
+
     module_id: str = ""
     name: str = ""
     version: str = "1.0.0"
@@ -91,6 +81,7 @@ class ModuleDescriptor:
 
 
 # ────── 主类 ──────
+
 
 class ModuleLib:
     """
@@ -140,12 +131,12 @@ class ModuleLib:
             path_obj = Path(path) if isinstance(path, str) else path
 
             if not path_obj.exists():
-                logger.warning(f"Load path does not exist: {path_obj}")
+                logger.warning("Load path does not exist: %s", path_obj)
                 return False
 
             if path_obj not in self._load_paths:
                 self._load_paths.append(path_obj)
-                logger.info(f"Added load path: {path_obj}")
+                logger.info("Added load path: %s", path_obj)
 
             return True
 
@@ -164,7 +155,7 @@ class ModuleLib:
 
             if path_obj in self._load_paths:
                 self._load_paths.remove(path_obj)
-                logger.info(f"Removed load path: {path_obj}")
+                logger.info("Removed load path: %s", path_obj)
                 return True
 
             return False
@@ -184,7 +175,7 @@ class ModuleLib:
             module_id = descriptor.module_id
 
             if module_id in self._descriptors:
-                logger.warning(f"Module already registered: {module_id}")
+                logger.warning("Module already registered: %s", module_id)
                 return False
 
             self._descriptors[module_id] = descriptor
@@ -192,7 +183,7 @@ class ModuleLib:
             # 更新依赖图
             self._dependency_graph[module_id] = descriptor.dependencies.copy()
 
-            logger.info(f"Registered module: {module_id}")
+            logger.info("Registered module: %s", module_id)
             return True
 
     def unregister_async(self, module_id: str) -> typing.Coroutine:
@@ -205,8 +196,10 @@ class ModuleLib:
         返回:
             Coroutine: 异步协程
         """
+
         async def _unregister():
             return self.unregister(module_id)
+
         return _unregister()
 
     def unregister(self, module_id: str) -> bool:
@@ -226,7 +219,7 @@ class ModuleLib:
             # 检查依赖
             dependents = self._get_dependents(module_id)
             if dependents:
-                logger.warning(f"Cannot unregister {module_id}: depended by {dependents}")
+                logger.warning("Cannot unregister %s: depended by %s", module_id, dependents)
                 return False
 
             # 停止并销毁模块
@@ -239,7 +232,7 @@ class ModuleLib:
             if module_id in self._dependency_graph:
                 del self._dependency_graph[module_id]
 
-            logger.info(f"Unregistered module: {module_id}")
+            logger.info("Unregistered module: %s", module_id)
             return True
 
     def load_module(self, module_id: str) -> typing.Optional[Module]:
@@ -258,23 +251,23 @@ class ModuleLib:
 
             descriptor = self._descriptors.get(module_id)
             if not descriptor:
-                logger.error(f"Module descriptor not found: {module_id}")
+                logger.error("Module descriptor not found: %s", module_id)
                 return None
 
             # 查找模块类
             module_class = self._find_module_class(descriptor)
             if not module_class:
-                logger.error(f"Module class not found: {descriptor.class_name}")
+                logger.error("Module class not found: %s", descriptor.class_name)
                 return None
 
             # 创建模块实例
             try:
                 module = module_class(descriptor.config)
                 self._modules[module_id] = module
-                logger.info(f"Loaded module: {module_id}")
+                logger.info("Loaded module: %s", module_id)
                 return module
             except Exception as e:
-                logger.error(f"Failed to load module {module_id}: {e}")
+                logger.error("Failed to load module %s: %s", module_id, e)
                 return None
 
     def load_builtin(self, module_id: str) -> typing.Optional[Module]:
@@ -289,7 +282,7 @@ class ModuleLib:
         """
         descriptor = self._descriptors.get(module_id)
         if not descriptor or descriptor.module_type != ModuleType.BUILTIN:
-            logger.error(f"Not a builtin module: {module_id}")
+            logger.error("Not a builtin module: %s", module_id)
             return None
 
         return self.load_module(module_id)
@@ -307,32 +300,26 @@ class ModuleLib:
         # 尝试从入口点加载
         if descriptor.entry_point:
             try:
-                spec = importlib.util.spec_from_file_location(
-                    descriptor.name,
-                    descriptor.entry_point
-                )
+                spec = importlib.util.spec_from_file_location(descriptor.name, descriptor.entry_point)
                 if spec and spec.loader:
                     module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(module)
                     return getattr(module, descriptor.class_name, None)
             except Exception as e:
-                logger.error(f"Failed to load from entry point: {e}")
+                logger.error("Failed to load from entry point: %s", e)
 
         # 尝试从加载路径查找
         for load_path in self._load_paths:
             module_file = load_path / f"{descriptor.name}.py"
             if module_file.exists():
                 try:
-                    spec = importlib.util.spec_from_file_location(
-                        descriptor.name,
-                        str(module_file)
-                    )
+                    spec = importlib.util.spec_from_file_location(descriptor.name, str(module_file))
                     if spec and spec.loader:
                         module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(module)
                         return getattr(module, descriptor.class_name, None)
                 except Exception as e:
-                    logger.error(f"Failed to load from path: {e}")
+                    logger.error("Failed to load from path: %s", e)
 
         return None
 
@@ -352,7 +339,7 @@ class ModuleLib:
 
         for dep_id in descriptor.dependencies:
             if dep_id not in self._modules:
-                logger.error(f"Missing dependency: {dep_id}")
+                logger.error("Missing dependency: %s", dep_id)
                 return False
 
         return True
@@ -377,12 +364,12 @@ class ModuleLib:
             return False
 
         try:
-            if hasattr(module, 'initialize'):
+            if hasattr(module, "initialize"):
                 module.initialize()
-            logger.info(f"Initialized module: {module_id}")
+            logger.info("Initialized module: %s", module_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to initialize module {module_id}: {e}")
+            logger.error("Failed to initialize module %s: %s", module_id, e)
             return False
 
     def start_module(self, module_id: str) -> bool:
@@ -400,12 +387,12 @@ class ModuleLib:
             return False
 
         try:
-            if hasattr(module, 'start'):
+            if hasattr(module, "start"):
                 module.start()
-            logger.info(f"Started module: {module_id}")
+            logger.info("Started module: %s", module_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to start module {module_id}: {e}")
+            logger.error("Failed to start module %s: %s", module_id, e)
             return False
 
     def stop_module(self, module_id: str) -> bool:
@@ -423,12 +410,12 @@ class ModuleLib:
             return False
 
         try:
-            if hasattr(module, 'stop'):
+            if hasattr(module, "stop"):
                 module.stop()
-            logger.info(f"Stopped module: {module_id}")
+            logger.info("Stopped module: %s", module_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to stop module {module_id}: {e}")
+            logger.error("Failed to stop module %s: %s", module_id, e)
             return False
 
     def destroy_module(self, module_id: str) -> bool:
@@ -446,12 +433,12 @@ class ModuleLib:
             return False
 
         try:
-            if hasattr(module, 'destroy'):
+            if hasattr(module, "destroy"):
                 module.destroy()
-            logger.info(f"Destroyed module: {module_id}")
+            logger.info("Destroyed module: %s", module_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to destroy module {module_id}: {e}")
+            logger.error("Failed to destroy module %s: %s", module_id, e)
             return False
 
     def initialize_all(self) -> typing.Dict[str, bool]:
@@ -611,7 +598,7 @@ class ModuleLib:
         """
         running = []
         for module_id, module in self._modules.items():
-            if hasattr(module, 'is_running') and module.is_running:
+            if hasattr(module, "is_running") and module.is_running:
                 running.append(module_id)
         return running
 
@@ -629,7 +616,7 @@ class ModuleLib:
         if not module:
             return None
 
-        if hasattr(module, 'get_api'):
+        if hasattr(module, "get_api"):
             return module.get_api()
 
         return None

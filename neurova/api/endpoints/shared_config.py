@@ -6,17 +6,15 @@ import datetime
 import logging
 import typing
 
-from fastapi import APIRouter
-from fastapi import HTTPException
-from fastapi import Request
-from pydantic import BaseModel
-from pydantic import Field
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 # ── Models ─────────────────────────────────────────────
+
 
 class LLMProviderRequest(BaseModel):
     name: str
@@ -59,6 +57,7 @@ def _get_request_id(request) -> str:
 
 # ── Config endpoints ───────────────────────────────────
 
+
 @router.get("/")
 async def get_shared_config():
     """获取完整的共享配置"""
@@ -75,6 +74,7 @@ async def update_shared_config(body: dict):
 
 
 # ── LLM Provider endpoints ─────────────────────────────
+
 
 @router.get("/llm-providers")
 async def list_llm_providers():
@@ -136,6 +136,7 @@ async def delete_llm_provider(name: str):
 
 # ── MCP Server endpoints ───────────────────────────────
 
+
 @router.get("/mcp-servers")
 async def list_mcp_servers():
     """获取所有 MCP 服务器配置"""
@@ -196,10 +197,12 @@ async def delete_mcp_server(name: str):
 
 # ── Export/Import ──────────────────────────────────────
 
+
 @router.get("/export")
 async def export_config():
     """导出完整的共享配置"""
     import copy
+
     config = copy.deepcopy(_shared_config)
     # Mask API keys in export
     for provider in config.get("llm_providers", {}).values():

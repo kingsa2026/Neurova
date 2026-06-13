@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Callable, List, Optional, Dict, Any, Tuple
+from typing import Callable, List, Optional, Tuple
 
-from .neurova_hebb import NeurovaHebb, NeuHebbConfig, NeuHebbMem
+from .neurova_hebb import NeuHebbConfig, NeuHebbMem, NeurovaHebb
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class NeuHebbCurator:
         scored.sort(key=lambda x: x[0], reverse=True)
 
         # 应用多样性过滤
-        candidates = [h for _, h in scored[:self.config.max_neurova_hebbs_per_query]]
+        candidates = [h for _, h in scored[: self.config.max_neurova_hebbs_per_query]]
         filtered = self.diversity_filter(candidates)
 
         # 限制数量

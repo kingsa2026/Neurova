@@ -5,16 +5,15 @@ Neurova 数据分析模块 - 数据模型
 定义分析数据结构和类型
 """
 
-import datetime
 import time
-import typing
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 
 class MetricType(Enum):
     """指标类型"""
+
     COUNTER = "counter"  # 计数器，只增不减
     GAUGE = "gauge"  # 仪表盘，可增可减
     HISTOGRAM = "histogram"  # 直方图
@@ -25,6 +24,7 @@ class MetricType(Enum):
 
 class AgentStatus(Enum):
     """Agent状态"""
+
     ACTIVE = "active"
     IDLE = "idle"
     BUSY = "busy"
@@ -36,6 +36,7 @@ class AgentStatus(Enum):
 
 class TaskStatus(Enum):
     """任务状态"""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -47,16 +48,17 @@ class TaskStatus(Enum):
 @dataclass
 class TimeSeriesPoint:
     """时间序列数据点"""
+
     timestamp: float
     value: float
     metadata: Optional[Dict[str, Any]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return asdict(self)
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'TimeSeriesPoint':
+    def from_dict(cls, data: Dict[str, Any]) -> "TimeSeriesPoint":
         """从字典创建"""
         return cls(**data)
 
@@ -64,6 +66,7 @@ class TimeSeriesPoint:
 @dataclass
 class AgentMetrics:
     """Agent指标"""
+
     agent_id: str
     agent_name: str
     status: AgentStatus
@@ -79,33 +82,33 @@ class AgentMetrics:
     last_active_at: Optional[float] = None
     created_at: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
-    
+
     def __post_init__(self):
         if self.created_at is None:
             self.created_at = time.time()
         if self.last_active_at is None:
             self.last_active_at = time.time()
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         result = asdict(self)
-        result['status'] = self.status.value
+        result["status"] = self.status.value
         return result
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'AgentMetrics':
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentMetrics":
         """从字典创建"""
         data = data.copy()
-        data['status'] = AgentStatus(data['status'])
+        data["status"] = AgentStatus(data["status"])
         return cls(**data)
-    
+
     @property
     def success_rate(self) -> float:
         """成功率"""
         if self.total_requests == 0:
             return 0.0
         return self.successful_requests / self.total_requests
-    
+
     @property
     def error_rate(self) -> float:
         """错误率"""
@@ -117,6 +120,7 @@ class AgentMetrics:
 @dataclass
 class UserMetrics:
     """用户指标"""
+
     user_id: str
     username: str
     total_sessions: int
@@ -128,19 +132,19 @@ class UserMetrics:
     last_active_at: Optional[float] = None
     created_at: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
-    
+
     def __post_init__(self):
         if self.created_at is None:
             self.created_at = time.time()
         if self.last_active_at is None:
             self.last_active_at = time.time()
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return asdict(self)
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'UserMetrics':
+    def from_dict(cls, data: Dict[str, Any]) -> "UserMetrics":
         """从字典创建"""
         return cls(**data)
 
@@ -148,6 +152,7 @@ class UserMetrics:
 @dataclass
 class TaskMetrics:
     """任务指标"""
+
     task_id: str
     task_type: str
     status: TaskStatus
@@ -160,24 +165,24 @@ class TaskMetrics:
     cost: float = 0.0
     error_message: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
-    
+
     def __post_init__(self):
         if self.start_time is None:
             self.start_time = time.time()
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         result = asdict(self)
-        result['status'] = self.status.value
+        result["status"] = self.status.value
         return result
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'TaskMetrics':
+    def from_dict(cls, data: Dict[str, Any]) -> "TaskMetrics":
         """从字典创建"""
         data = data.copy()
-        data['status'] = TaskStatus(data['status'])
+        data["status"] = TaskStatus(data["status"])
         return cls(**data)
-    
+
     def complete(self, tokens_used: int = 0, cost: float = 0.0):
         """完成任务"""
         self.status = TaskStatus.COMPLETED
@@ -185,7 +190,7 @@ class TaskMetrics:
         self.duration_seconds = self.end_time - self.start_time
         self.tokens_used = tokens_used
         self.cost = cost
-    
+
     def fail(self, error_message: str):
         """任务失败"""
         self.status = TaskStatus.FAILED
@@ -197,6 +202,7 @@ class TaskMetrics:
 @dataclass
 class DashboardStats:
     """仪表盘统计"""
+
     total_agents: int
     active_agents: int
     total_users: int
@@ -210,17 +216,17 @@ class DashboardStats:
     uptime_seconds: float
     timestamp: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
-    
+
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = time.time()
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return asdict(self)
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'DashboardStats':
+    def from_dict(cls, data: Dict[str, Any]) -> "DashboardStats":
         """从字典创建"""
         return cls(**data)
 
@@ -228,6 +234,7 @@ class DashboardStats:
 @dataclass
 class RealtimeMetric:
     """实时指标"""
+
     name: str
     value: float
     metric_type: MetricType
@@ -235,28 +242,29 @@ class RealtimeMetric:
     timestamp: Optional[float] = None
     tags: Optional[Dict[str, str]] = None
     metadata: Optional[Dict[str, Any]] = None
-    
+
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = time.time()
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         result = asdict(self)
-        result['metric_type'] = self.metric_type.value
+        result["metric_type"] = self.metric_type.value
         return result
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'RealtimeMetric':
+    def from_dict(cls, data: Dict[str, Any]) -> "RealtimeMetric":
         """从字典创建"""
         data = data.copy()
-        data['metric_type'] = MetricType(data['metric_type'])
+        data["metric_type"] = MetricType(data["metric_type"])
         return cls(**data)
 
 
 @dataclass
 class TrendData:
     """趋势数据"""
+
     metric_name: str
     time_range: str  # e.g., "1h", "24h", "7d", "30d"
     data_points: List[TimeSeriesPoint]
@@ -267,28 +275,29 @@ class TrendData:
     max_value: float
     timestamp: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
-    
+
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = time.time()
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         result = asdict(self)
-        result['data_points'] = [point.to_dict() for point in self.data_points]
+        result["data_points"] = [point.to_dict() for point in self.data_points]
         return result
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'TrendData':
+    def from_dict(cls, data: Dict[str, Any]) -> "TrendData":
         """从字典创建"""
         data = data.copy()
-        data['data_points'] = [TimeSeriesPoint.from_dict(p) for p in data['data_points']]
+        data["data_points"] = [TimeSeriesPoint.from_dict(p) for p in data["data_points"]]
         return cls(**data)
 
 
 @dataclass
 class DistributionData:
     """分布数据"""
+
     metric_name: str
     buckets: List[Dict[str, Any]]  # [{"label": "0-100", "count": 10}, ...]
     total_count: int
@@ -298,17 +307,17 @@ class DistributionData:
     percentiles: Dict[int, float]  # {50: 0.5, 90: 0.9, 95: 0.95, 99: 0.99}
     timestamp: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
-    
+
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = time.time()
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return asdict(self)
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'DistributionData':
+    def from_dict(cls, data: Dict[str, Any]) -> "DistributionData":
         """从字典创建"""
         return cls(**data)
 
@@ -316,6 +325,7 @@ class DistributionData:
 @dataclass
 class AnalyticsModels:
     """分析模型集合"""
+
     agent_metrics: List[AgentMetrics]
     user_metrics: List[UserMetrics]
     task_metrics: List[TaskMetrics]
@@ -323,7 +333,7 @@ class AnalyticsModels:
     realtime_metrics: List[RealtimeMetric] = None
     trend_data: List[TrendData] = None
     distribution_data: List[DistributionData] = None
-    
+
     def __post_init__(self):
         if self.realtime_metrics is None:
             self.realtime_metrics = []
@@ -331,28 +341,28 @@ class AnalyticsModels:
             self.trend_data = []
         if self.distribution_data is None:
             self.distribution_data = []
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
-            'agent_metrics': [m.to_dict() for m in self.agent_metrics],
-            'user_metrics': [m.to_dict() for m in self.user_metrics],
-            'task_metrics': [m.to_dict() for m in self.task_metrics],
-            'dashboard_stats': self.dashboard_stats.to_dict() if self.dashboard_stats else None,
-            'realtime_metrics': [m.to_dict() for m in self.realtime_metrics],
-            'trend_data': [t.to_dict() for t in self.trend_data],
-            'distribution_data': [d.to_dict() for d in self.distribution_data]
+            "agent_metrics": [m.to_dict() for m in self.agent_metrics],
+            "user_metrics": [m.to_dict() for m in self.user_metrics],
+            "task_metrics": [m.to_dict() for m in self.task_metrics],
+            "dashboard_stats": self.dashboard_stats.to_dict() if self.dashboard_stats else None,
+            "realtime_metrics": [m.to_dict() for m in self.realtime_metrics],
+            "trend_data": [t.to_dict() for t in self.trend_data],
+            "distribution_data": [d.to_dict() for d in self.distribution_data],
         }
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'AnalyticsModels':
+    def from_dict(cls, data: Dict[str, Any]) -> "AnalyticsModels":
         """从字典创建"""
         return cls(
-            agent_metrics=[AgentMetrics.from_dict(m) for m in data.get('agent_metrics', [])],
-            user_metrics=[UserMetrics.from_dict(m) for m in data.get('user_metrics', [])],
-            task_metrics=[TaskMetrics.from_dict(m) for m in data.get('task_metrics', [])],
-            dashboard_stats=DashboardStats.from_dict(data['dashboard_stats']) if data.get('dashboard_stats') else None,
-            realtime_metrics=[RealtimeMetric.from_dict(m) for m in data.get('realtime_metrics', [])],
-            trend_data=[TrendData.from_dict(t) for t in data.get('trend_data', [])],
-            distribution_data=[DistributionData.from_dict(d) for d in data.get('distribution_data', [])]
+            agent_metrics=[AgentMetrics.from_dict(m) for m in data.get("agent_metrics", [])],
+            user_metrics=[UserMetrics.from_dict(m) for m in data.get("user_metrics", [])],
+            task_metrics=[TaskMetrics.from_dict(m) for m in data.get("task_metrics", [])],
+            dashboard_stats=DashboardStats.from_dict(data["dashboard_stats"]) if data.get("dashboard_stats") else None,
+            realtime_metrics=[RealtimeMetric.from_dict(m) for m in data.get("realtime_metrics", [])],
+            trend_data=[TrendData.from_dict(t) for t in data.get("trend_data", [])],
+            distribution_data=[DistributionData.from_dict(d) for d in data.get("distribution_data", [])],
         )

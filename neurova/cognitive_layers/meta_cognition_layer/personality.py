@@ -12,17 +12,14 @@ from __future__ import annotations
 """
 
 import datetime
-import enum
 import json
 import logging
 import threading
-import time
-import typing
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from neurova.core.base_module import BaseModule, ModuleState
 
@@ -39,6 +36,7 @@ def _now_iso() -> str:
 
 class PersonalityTrait(str, Enum):
     """个性特征（基于 OCEAN 模型）"""
+
     OPENNESS = "openness"
     CONSCIENTIOUSNESS = "conscientiousness"
     EXTRAVERSION = "extraversion"
@@ -60,6 +58,7 @@ _DEFAULT_TRAIT_VALUE: float = 0.5
 @dataclass
 class TraitRecord:
     """特征记录"""
+
     trait: PersonalityTrait
     value: float
     confidence: float = 0.0
@@ -110,6 +109,7 @@ class TraitRecord:
 @dataclass
 class Experience:
     """经验"""
+
     experience_id: str
     description: str
     impact_score: float = 0.0
@@ -167,6 +167,7 @@ class Experience:
 @dataclass
 class PersonalitySnapshot:
     """个性快照"""
+
     snapshot_id: str
     timestamp: datetime.datetime
     traits: Dict[PersonalityTrait, float] = field(default_factory=dict)
@@ -392,13 +393,15 @@ class PersonalityDevelopmentSystem(BaseModule):
             rec.sample_size += 1
             rec.confidence = min(1.0, rec.confidence + 0.02)
             rec.last_updated = datetime.datetime.now()
-            rec.history.append({
-                "ts": _now_iso(),
-                "value": float(new_value),
-                "delta": float(delta),
-                "experience_id": experience.experience_id,
-                "source": "experience",
-            })
+            rec.history.append(
+                {
+                    "ts": _now_iso(),
+                    "value": float(new_value),
+                    "delta": float(delta),
+                    "experience_id": experience.experience_id,
+                    "source": "experience",
+                }
+            )
             if len(rec.history) > 200:
                 rec.history = rec.history[-200:]
 
@@ -439,13 +442,15 @@ class PersonalityDevelopmentSystem(BaseModule):
             rec.confidence = max(0.0, min(1.0, float(confidence)))
             rec.sample_size += 1
             rec.last_updated = datetime.datetime.now()
-            rec.history.append({
-                "ts": _now_iso(),
-                "value": float(new_value),
-                "old_value": float(old_value),
-                "delta": float(new_value - old_value),
-                "source": "update_trait",
-            })
+            rec.history.append(
+                {
+                    "ts": _now_iso(),
+                    "value": float(new_value),
+                    "old_value": float(old_value),
+                    "delta": float(new_value - old_value),
+                    "source": "update_trait",
+                }
+            )
             if len(rec.history) > 200:
                 rec.history = rec.history[-200:]
             if self._dir is not None:
@@ -658,12 +663,14 @@ class PersonalityDevelopmentSystem(BaseModule):
                 applied.append(float(new_value))
                 rec.value = new_value
                 rec.last_updated = datetime.datetime.now()
-                rec.history.append({
-                    "ts": _now_iso(),
-                    "value": float(new_value),
-                    "delta": float(d),
-                    "source": "drift_trait",
-                })
+                rec.history.append(
+                    {
+                        "ts": _now_iso(),
+                        "value": float(new_value),
+                        "delta": float(d),
+                        "source": "drift_trait",
+                    }
+                )
             if len(rec.history) > 200:
                 rec.history = rec.history[-200:]
             if self._dir is not None:

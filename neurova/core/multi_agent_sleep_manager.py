@@ -191,10 +191,7 @@ class IdleTracker:
                 return self.get_current_idle_time() >= threshold
             temp_threshold = self._temperature_thresholds.get(target_phase, 30.0)
             time_threshold = int(self._idle_thresholds.get(target_phase, 0))
-            return (
-                float(current_temperature) <= temp_threshold
-                or self.get_current_idle_time() >= time_threshold
-            )
+            return float(current_temperature) <= temp_threshold or self.get_current_idle_time() >= time_threshold
 
     def get_next_phase(self, current_temperature: float = 25.0) -> Optional[str]:
         with self._lock:

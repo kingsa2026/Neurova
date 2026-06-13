@@ -13,9 +13,9 @@
 
 import logging
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -114,6 +114,7 @@ async def validate_schema(body: ValidateSchemaRequest):
 async def parse_tool_call(body: ParseToolCallRequest):
     """解析工具调用"""
     import json
+
     try:
         # 简单的 JSON 工具调用解析
         msg = body.message.strip()
@@ -152,11 +153,23 @@ async def get_schema_examples():
     return {
         "code": 0,
         "data": {
-            "openai": _to_openai("get_weather", "Get weather info", {
-                "type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"],
-            }),
-            "anthropic": _to_anthropic("get_weather", "Get weather info", {
-                "type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"],
-            }),
+            "openai": _to_openai(
+                "get_weather",
+                "Get weather info",
+                {
+                    "type": "object",
+                    "properties": {"location": {"type": "string"}},
+                    "required": ["location"],
+                },
+            ),
+            "anthropic": _to_anthropic(
+                "get_weather",
+                "Get weather info",
+                {
+                    "type": "object",
+                    "properties": {"location": {"type": "string"}},
+                    "required": ["location"],
+                },
+            ),
         },
     }

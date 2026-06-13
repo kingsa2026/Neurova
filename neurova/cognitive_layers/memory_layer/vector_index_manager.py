@@ -7,15 +7,14 @@
 3. 索引状态追踪 - 完整的索引生命周期管理
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
 import json
 import logging
 import os
-from pathlib import Path
 import threading
 import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
@@ -23,8 +22,10 @@ logger = logging.getLogger(__name__)
 
 # ────── Enums ──────
 
+
 class SyncStatus(Enum):
     """同步状态"""
+
     IDLE = "idle"
     SYNCING = "syncing"
     PARTIAL = "partial"
@@ -34,6 +35,7 @@ class SyncStatus(Enum):
 
 class OperationType(Enum):
     """操作类型"""
+
     ADD = "add"
     UPDATE = "update"
     DELETE = "delete"
@@ -42,9 +44,11 @@ class OperationType(Enum):
 
 # ────── Data Models ──────
 
+
 @dataclass
 class IndexOperation:
     """索引操作"""
+
     op_id: str = ""
     op_type: OperationType = OperationType.ADD
     memory_id: str = ""
@@ -57,6 +61,7 @@ class IndexOperation:
 @dataclass
 class IndexState:
     """索引状态"""
+
     total_vectors: int = 0
     indexed_count: int = 0
     pending_count: int = 0
@@ -80,6 +85,7 @@ class IndexState:
 
 
 # ────── 主类 ──────
+
 
 class VectorIndexManager:
     """
@@ -127,7 +133,7 @@ class VectorIndexManager:
         if auto_start:
             self._start_workers()
 
-        logger.info(f"VectorIndexManager initialized (workers={num_workers}, batch_size={batch_size})")
+        logger.info("VectorIndexManager initialized (workers=%s, batch_size=%s)", num_workers, batch_size)
 
     # ── 状态持久化 ──
 
@@ -151,7 +157,7 @@ class VectorIndexManager:
                     state.last_full_rebuild = datetime.fromisoformat(data["last_full_rebuild"])
                 return state
             except Exception as e:
-                logger.warning(f"Failed to load index state: {e}")
+                logger.warning("Failed to load index state: %s", e)
         return IndexState()
 
     def _save_state(self):
@@ -163,7 +169,7 @@ class VectorIndexManager:
             with open(self._state_path, "w", encoding="utf-8") as f:
                 json.dump(self._state.to_dict(), f, indent=2, ensure_ascii=False)
         except Exception as e:
-            logger.error(f"Failed to save index state: {e}")
+            logger.error("Failed to save index state: %s", e)
 
     # ── Worker 线程 ──
 
@@ -177,7 +183,7 @@ class VectorIndexManager:
                 t = threading.Thread(target=self._worker_loop, name=f"index-worker-{i}", daemon=True)
                 t.start()
                 self._workers.append(t)
-            logger.info(f"Started {self._num_workers} index workers")
+            logger.info("Started %s index workers", self._num_workers)
 
     def _worker_loop(self):
         """Worker 主循环"""
@@ -195,8 +201,8 @@ class VectorIndexManager:
                 with self._lock:
                     # 按优先级排序
                     self._queue.sort(key=lambda op: -op.priority)
-                    batch = self._queue[:self._batch_size]
-                    self._queue = self._queue[self._batch_size:]
+                    batch = self._queue[: self._batch_size]
+                    self._queue = self._queue[self._batch_size :]
 
                 for op in batch:
                     if not self._running:
@@ -204,7 +210,7 @@ class VectorIndexManager:
                     self._process_operation(op)
 
             except Exception as e:
-                logger.error(f"Index worker error: {e}")
+                logger.error("Index worker error: %s", e)
                 time.sleep(0.5)
 
     def _process_operation(self, op: IndexOperation) -> bool:
@@ -232,7 +238,7 @@ class VectorIndexManager:
             return success
 
         except Exception as e:
-            logger.error(f"Failed to process operation {op.op_id}: {e}")
+            logger.error("Failed to process operation %s: %s", op.op_id, e)
             with self._lock:
                 self._state.failed_count += 1
                 self._state.pending_count = max(0, self._state.pending_count - 1)
@@ -248,32 +254,36 @@ class VectorIndexManager:
             self._state.version += 1
         self._queue_event.set()
 
-    def add_memory(self, memory_id: str, embedding: List[float],
-                   metadata: Optional[Dict[str, Any]] = None):
+    def add_memory(self, memory_id: str, embedding: List[float], metadata: Optional[Dict[str, Any]] = None):
         """添加记忆到索引"""
-        self.queue_operation(IndexOperation(
-            op_type=OperationType.ADD,
-            memory_id=memory_id,
-            embedding=embedding,
-            metadata=metadata or {},
-        ))
+        self.queue_operation(
+            IndexOperation(
+                op_type=OperationType.ADD,
+                memory_id=memory_id,
+                embedding=embedding,
+                metadata=metadata or {},
+            )
+        )
 
-    def update_memory(self, memory_id: str, embedding: List[float],
-                      metadata: Optional[Dict[str, Any]] = None):
+    def update_memory(self, memory_id: str, embedding: List[float], metadata: Optional[Dict[str, Any]] = None):
         """更新记忆索引"""
-        self.queue_operation(IndexOperation(
-            op_type=OperationType.UPDATE,
-            memory_id=memory_id,
-            embedding=embedding,
-            metadata=metadata or {},
-        ))
+        self.queue_operation(
+            IndexOperation(
+                op_type=OperationType.UPDATE,
+                memory_id=memory_id,
+                embedding=embedding,
+                metadata=metadata or {},
+            )
+        )
 
     def delete_memory(self, memory_id: str):
         """从索引删除记忆"""
-        self.queue_operation(IndexOperation(
-            op_type=OperationType.DELETE,
-            memory_id=memory_id,
-        ))
+        self.queue_operation(
+            IndexOperation(
+                op_type=OperationType.DELETE,
+                memory_id=memory_id,
+            )
+        )
 
     def sync_incremental(self, memory_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
@@ -318,7 +328,7 @@ class VectorIndexManager:
         except Exception as e:
             with self._lock:
                 self._state.sync_status = SyncStatus.FAILED
-            logger.error(f"Incremental sync failed: {e}")
+            logger.error("Incremental sync failed: %s", e)
             return {"status": "failed", "error": str(e)}
 
     def sync_full(self) -> Dict[str, Any]:
@@ -350,7 +360,7 @@ class VectorIndexManager:
         except Exception as e:
             with self._lock:
                 self._state.sync_status = SyncStatus.FAILED
-            logger.error(f"Full sync failed: {e}")
+            logger.error("Full sync failed: %s", e)
             return {"status": "failed", "error": str(e)}
 
     def get_state(self) -> IndexState:

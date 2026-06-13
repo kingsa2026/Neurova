@@ -14,13 +14,8 @@ import enum
 import logging
 import typing
 
-from fastapi import APIRouter
-from fastapi import Depends
-from fastapi import HTTPException
-from fastapi import Query
-from fastapi import Request
-from pydantic import BaseModel
-from pydantic import Field
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +23,7 @@ router = APIRouter()
 
 
 # ── Enums ──────────────────────────────────────────────
+
 
 class SkillCategory(str, enum.Enum):
     PRODUCTIVITY = "productivity"
@@ -48,6 +44,7 @@ class SkillDifficulty(str, enum.Enum):
 
 
 # ── Models ─────────────────────────────────────────────
+
 
 class SkillInfo(BaseModel):
     id: str = ""
@@ -90,12 +87,96 @@ def _init_sample_skills():
     if _SKILLS_STORE:
         return
     samples = [
-        {"id": "web-search", "name": "Web Search", "description": "Search the web for information", "author": "Neurova", "version": "1.2.0", "category": "data", "difficulty": "beginner", "tags": ["search", "web", "internet"], "rating": 4.5, "rating_count": 120, "downloads": 5000, "featured": True, "icon": "🔍"},
-        {"id": "code-interpreter", "name": "Code Interpreter", "description": "Execute and analyze code snippets", "author": "Neurova", "version": "2.0.1", "category": "development", "difficulty": "intermediate", "tags": ["code", "python", "exec"], "rating": 4.8, "rating_count": 200, "downloads": 8000, "featured": True, "icon": "💻"},
-        {"id": "file-manager", "name": "File Manager", "description": "Manage files and directories", "author": "Neurova", "version": "1.0.0", "category": "system", "difficulty": "beginner", "tags": ["file", "system", "io"], "rating": 4.2, "rating_count": 80, "downloads": 3000, "featured": False, "icon": "📁"},
-        {"id": "data-analysis", "name": "Data Analysis", "description": "Analyze and visualize data", "author": "Neurova", "version": "1.5.0", "category": "analysis", "difficulty": "advanced", "tags": ["data", "analytics", "chart"], "rating": 4.6, "rating_count": 90, "downloads": 4000, "featured": True, "icon": "📊"},
-        {"id": "email-sender", "name": "Email Sender", "description": "Send emails via SMTP", "author": "Community", "version": "1.1.0", "category": "communication", "difficulty": "intermediate", "tags": ["email", "smtp", "notify"], "rating": 4.0, "rating_count": 50, "downloads": 1500, "featured": False, "icon": "📧"},
-        {"id": "task-scheduler", "name": "Task Scheduler", "description": "Schedule and manage recurring tasks", "author": "Neurova", "version": "1.3.0", "category": "automation", "difficulty": "intermediate", "tags": ["cron", "schedule", "automation"], "rating": 4.4, "rating_count": 70, "downloads": 2500, "featured": False, "icon": "⏰"},
+        {
+            "id": "web-search",
+            "name": "Web Search",
+            "description": "Search the web for information",
+            "author": "Neurova",
+            "version": "1.2.0",
+            "category": "data",
+            "difficulty": "beginner",
+            "tags": ["search", "web", "internet"],
+            "rating": 4.5,
+            "rating_count": 120,
+            "downloads": 5000,
+            "featured": True,
+            "icon": "🔍",
+        },
+        {
+            "id": "code-interpreter",
+            "name": "Code Interpreter",
+            "description": "Execute and analyze code snippets",
+            "author": "Neurova",
+            "version": "2.0.1",
+            "category": "development",
+            "difficulty": "intermediate",
+            "tags": ["code", "python", "exec"],
+            "rating": 4.8,
+            "rating_count": 200,
+            "downloads": 8000,
+            "featured": True,
+            "icon": "💻",
+        },
+        {
+            "id": "file-manager",
+            "name": "File Manager",
+            "description": "Manage files and directories",
+            "author": "Neurova",
+            "version": "1.0.0",
+            "category": "system",
+            "difficulty": "beginner",
+            "tags": ["file", "system", "io"],
+            "rating": 4.2,
+            "rating_count": 80,
+            "downloads": 3000,
+            "featured": False,
+            "icon": "📁",
+        },
+        {
+            "id": "data-analysis",
+            "name": "Data Analysis",
+            "description": "Analyze and visualize data",
+            "author": "Neurova",
+            "version": "1.5.0",
+            "category": "analysis",
+            "difficulty": "advanced",
+            "tags": ["data", "analytics", "chart"],
+            "rating": 4.6,
+            "rating_count": 90,
+            "downloads": 4000,
+            "featured": True,
+            "icon": "📊",
+        },
+        {
+            "id": "email-sender",
+            "name": "Email Sender",
+            "description": "Send emails via SMTP",
+            "author": "Community",
+            "version": "1.1.0",
+            "category": "communication",
+            "difficulty": "intermediate",
+            "tags": ["email", "smtp", "notify"],
+            "rating": 4.0,
+            "rating_count": 50,
+            "downloads": 1500,
+            "featured": False,
+            "icon": "📧",
+        },
+        {
+            "id": "task-scheduler",
+            "name": "Task Scheduler",
+            "description": "Schedule and manage recurring tasks",
+            "author": "Neurova",
+            "version": "1.3.0",
+            "category": "automation",
+            "difficulty": "intermediate",
+            "tags": ["cron", "schedule", "automation"],
+            "rating": 4.4,
+            "rating_count": 70,
+            "downloads": 2500,
+            "featured": False,
+            "icon": "⏰",
+        },
     ]
     now = datetime.datetime.utcnow().isoformat()
     for s in samples:
@@ -112,6 +193,7 @@ def _get_user_id(request: Request) -> str:
 
 
 # ── Endpoints ──────────────────────────────────────────
+
 
 @router.get("/skills")
 async def get_skills(
@@ -135,7 +217,13 @@ async def get_skills(
         results = [s for s in results if s.get("difficulty") == difficulty]
     if q:
         q_lower = q.lower()
-        results = [s for s in results if q_lower in s.get("name", "").lower() or q_lower in s.get("description", "").lower() or any(q_lower in t for t in s.get("tags", []))]
+        results = [
+            s
+            for s in results
+            if q_lower in s.get("name", "").lower()
+            or q_lower in s.get("description", "").lower()
+            or any(q_lower in t for t in s.get("tags", []))
+        ]
 
     for s in results:
         s["installed"] = s["id"] in installed
@@ -210,10 +298,7 @@ async def get_categories():
         cat = skill.get("category", "other")
         category_stats[cat] = category_stats.get(cat, 0) + 1
 
-    categories = [
-        {"id": c.value, "name": c.name, "count": category_stats.get(c.value, 0)}
-        for c in SkillCategory
-    ]
+    categories = [{"id": c.value, "name": c.name, "count": category_stats.get(c.value, 0)} for c in SkillCategory]
     return {"code": 0, "message": "success", "data": {"categories": categories}}
 
 
@@ -244,7 +329,12 @@ async def rate_skill(skill_id: str, body: SkillReview, request: Request):
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
 
     reviews = _REVIEWS_STORE.setdefault(skill_id, [])
-    review = {"user": body.user, "rating": body.rating, "comment": body.comment, "created_at": datetime.datetime.utcnow().isoformat()}
+    review = {
+        "user": body.user,
+        "rating": body.rating,
+        "comment": body.comment,
+        "created_at": datetime.datetime.utcnow().isoformat(),
+    }
     reviews.append(review)
 
     skill = _SKILLS_STORE[skill_id]
@@ -252,4 +342,8 @@ async def rate_skill(skill_id: str, body: SkillReview, request: Request):
     skill["rating"] = round(total_rating / len(reviews), 2)
     skill["rating_count"] = len(reviews)
 
-    return {"code": 0, "message": "Rating submitted", "data": {"skill_id": skill_id, "new_rating": skill["rating"], "rating_count": skill["rating_count"]}}
+    return {
+        "code": 0,
+        "message": "Rating submitted",
+        "data": {"skill_id": skill_id, "new_rating": skill["rating"], "rating_count": skill["rating_count"]},
+    }

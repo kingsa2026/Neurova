@@ -7,10 +7,10 @@ Whisper Engine - OpenAI Whisper 音频理解引擎
 
 import asyncio
 import logging
-import time
 import threading
+import time
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict
 
 from neurova.asr.base import ASRBase
 
@@ -46,11 +46,7 @@ class WhisperEngine(ASRBase):
 
     @property
     def stats(self) -> Dict[str, Any]:
-        avg_ms = (
-            self._total_inference_ms / self._total_requests
-            if self._total_requests > 0
-            else 0
-        )
+        avg_ms = self._total_inference_ms / self._total_requests if self._total_requests > 0 else 0
         return {
             "model_name": self._model_name,
             "initialized": self._initialized,
@@ -64,6 +60,7 @@ class WhisperEngine(ASRBase):
         try:
             try:
                 import whisper
+
                 self._whisper = whisper
             except ImportError:
                 self._logger.warning("whisper 未安装，请运行: pip install openai-whisper")
@@ -73,6 +70,7 @@ class WhisperEngine(ASRBase):
             if self._device == "auto":
                 try:
                     import torch
+
                     if torch.cuda.is_available():
                         self._device = "cuda"
                     else:
@@ -83,12 +81,10 @@ class WhisperEngine(ASRBase):
             try:
                 self._model = self._whisper.load_model(self._model_name, device=self._device)
                 self._initialized = True
-                self._logger.info(
-                    f"Whisper 初始化完成 | 模型={self._model_name} | 设备={self._device}"
-                )
+                self._logger.info("Whisper 初始化完成 | 模型=%s | 设备=%s", self._model_name, self._device)
                 return True
             except Exception as e:
-                self._logger.error(f"Whisper 模型加载失败: {e}")
+                self._logger.error("Whisper 模型加载失败: %s", e)
                 return False
 
         except Exception as e:
@@ -98,15 +94,17 @@ class WhisperEngine(ASRBase):
     def _load_audio(self, audio_bytes: bytes):
         """加载音频"""
         import io
+
         try:
             import soundfile as sf
+
             with io.BytesIO(audio_bytes) as buf:
                 audio, sr = sf.read(buf, dtype="float32")
             if audio.ndim == 2:
                 audio = audio.mean(axis=1)
             return audio, sr
         except Exception as e:
-            self._logger.error(f"音频加载失败: {e}")
+            self._logger.error("音频加载失败: %s", e)
             raise
 
     async def transcribe(
@@ -117,7 +115,7 @@ class WhisperEngine(ASRBase):
         if not self._initialized:
             raise RuntimeError("Whisper 未初始化")
 
-        if not hasattr(self, '_whisper') or self._model is None:
+        if not hasattr(self, "_whisper") or self._model is None:
             return {
                 "text": "",
                 "error": "Whisper 未安装或模型未加载",
@@ -131,9 +129,7 @@ class WhisperEngine(ASRBase):
             audio, sr = self._load_audio(audio_bytes)
 
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, self._transcribe_sync, audio, language
-            )
+            result = await loop.run_in_executor(None, self._transcribe_sync, audio, language)
 
             inference_ms = (time.time() - start_time) * 1000
             with self._lock:
@@ -152,6 +148,7 @@ class WhisperEngine(ASRBase):
         # Whisper 需要 numpy 数组
         try:
             import numpy as np
+
             if not isinstance(audio, np.ndarray):
                 audio = np.array(audio, dtype=np.float32)
         except ImportError:
@@ -169,4 +166,4 @@ class WhisperEngine(ASRBase):
     async def shutdown(self) -> None:
         self._model = None
         self._initialized = False
-        self._logger.info(f"WhisperEngine 已关闭 | 统计: {self.stats}")
+        self._logger.info("WhisperEngine 已关闭 | 统计: %s", self.stats)

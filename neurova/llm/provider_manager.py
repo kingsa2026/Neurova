@@ -12,12 +12,11 @@ import logging
 import os
 import threading
 import time
-import re
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 # 导入依赖
 try:
@@ -27,45 +26,57 @@ except ImportError:
     class Module:
         def __init__(self, config=None, event_bus=None):
             pass
+
         def _log(self, level, message):
             pass
+
 
 try:
     from neurova.core.log_level import LogLevel
 except ImportError:
+
     class LogLevel:
-        INFO = 'INFO'
-        WARNING = 'WARNING'
-        ERROR = 'ERROR'
+        INFO = "INFO"
+        WARNING = "WARNING"
+        ERROR = "ERROR"
+
 
 try:
     from neurova.core.logger import get_logger
 except ImportError:
+
     def get_logger(name):
         return logging.getLogger(name)
 
+
 try:
-    from neurova.llm.presets import get_preset_registry, LLMPresetRegistry, ModelPreset
+    from neurova.llm.presets import LLMPresetRegistry, ModelPreset, get_preset_registry
 except ImportError:
     # 占位符
     def get_preset_registry():
         return None
+
     class LLMPresetRegistry:
         def list_presets(self):
             return []
+
     class ModelPreset:
         pass
 
+
 try:
-    from neurova.llm.providers.secret_store import SecretStore, encrypt_api_key, decrypt_api_key
+    from neurova.llm.providers.secret_store import SecretStore, decrypt_api_key, encrypt_api_key
 except ImportError:
     # 占位符
     def encrypt_api_key(key):
         return key
+
     def decrypt_api_key(key):
         return key
+
     class SecretStore:
         pass
+
 
 try:
     from neurova.llm.providers.types import ConnectionResult, ProbeResult, PydanticModelInfo
@@ -90,19 +101,24 @@ except ImportError:
         name: str = ""
         owned_by: str = ""
 
+
 logger = get_logger(__name__)
+
 
 class LoadBalancingStrategy(Enum):
     """负载均衡策略"""
-    ROUND_ROBIN = 'round_robin'
-    WEIGHTED_RANDOM = 'weighted_random'
-    PRIORITY_FIRST = 'priority_first'
-    LEAST_ERRORS = 'least_errors'
-    FASTEST_RESPONSE = 'fastest_response'
+
+    ROUND_ROBIN = "round_robin"
+    WEIGHTED_RANDOM = "weighted_random"
+    PRIORITY_FIRST = "priority_first"
+    LEAST_ERRORS = "least_errors"
+    FASTEST_RESPONSE = "fastest_response"
+
 
 @dataclass
 class ProviderConfig:
     """服务商配置"""
+
     id: str
     name: str
     provider: str  # openai, anthropic, gemini, ollama, etc.
@@ -135,7 +151,7 @@ class ProviderConfig:
         if not self.updated_at:
             self.updated_at = datetime.now().isoformat()
 
-    def to_preset(self) -> 'ModelPreset':
+    def to_preset(self) -> "ModelPreset":
         """转换为 ModelPreset"""
         return ModelPreset(
             id=self.id,
@@ -153,12 +169,19 @@ class ProviderConfig:
         """转换为字典"""
         data = asdict(self)
         if encrypt and self.api_key:
-            data['encrypted_api_key'] = encrypt_api_key(self.api_key)
-            data['api_key'] = None
+            data["encrypted_api_key"] = encrypt_api_key(self.api_key)
+            data["api_key"] = None
         # 移除内部字段
-        for key in ['health_status', 'last_health_check', 'consecutive_successes',
-                    'consecutive_failures', 'current_requests', 'total_requests',
-                    'total_response_time', 'health_check_enabled']:
+        for key in [
+            "health_status",
+            "last_health_check",
+            "consecutive_successes",
+            "consecutive_failures",
+            "current_requests",
+            "total_requests",
+            "total_response_time",
+            "health_check_enabled",
+        ]:
             data.pop(key, None)
         return data
 
@@ -172,24 +195,26 @@ class ProviderConfig:
         return self.api_key[:4] + "***" + self.api_key[-4:]
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], decrypt: bool = False) -> 'ProviderConfig':
+    def from_dict(cls, data: Dict[str, Any], decrypt: bool = False) -> "ProviderConfig":
         """从字典创建"""
         data = data.copy()
-        if decrypt and data.get('encrypted_api_key'):
+        if decrypt and data.get("encrypted_api_key"):
             try:
-                data['api_key'] = decrypt_api_key(data['encrypted_api_key'])
-                logger.info(f"Decrypted API key for provider {data.get('name', 'unknown')}")
+                data["api_key"] = decrypt_api_key(data["encrypted_api_key"])
+                logger.info("Decrypted API key for provider %s", data.get('name', 'unknown'))
             except Exception as e:
-                logger.warning(f"Failed to decrypt API key: {e}")
+                logger.warning("Failed to decrypt API key: %s", e)
         # 移除不需要的字段
-        data.pop('encrypted_api_key', None)
+        data.pop("encrypted_api_key", None)
         return cls(**data)
+
 
 class LLMProviderManager(Module):
     """LLM 服务商配置管理器"""
-    MODULE_ID = 'llm_provider_manager'
-    MODULE_NAME = 'LLM Provider Manager'
-    MODULE_VERSION = '1.0.0'
+
+    MODULE_ID = "llm_provider_manager"
+    MODULE_NAME = "LLM Provider Manager"
+    MODULE_VERSION = "1.0.0"
     _instance = None
     _lock = threading.Lock()
 
@@ -227,17 +252,17 @@ class LLMProviderManager(Module):
             return
 
         try:
-            with open(self._config_path, 'r', encoding='utf-8') as f:
+            with open(self._config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            for provider_data in data.get('providers', []):
+            for provider_data in data.get("providers", []):
                 provider = ProviderConfig.from_dict(provider_data)
                 self._providers[provider.id] = provider
 
-            self._default_provider_id = data.get('default_provider_id')
-            logger.info(f"Loaded {len(self._providers)} providers from {self._config_path}")
+            self._default_provider_id = data.get("default_provider_id")
+            logger.info("Loaded %s providers from %s", len(self._providers), self._config_path)
         except Exception as e:
-            logger.error(f"Failed to load config: {e}")
+            logger.error("Failed to load config: %s", e)
             self._load_builtin_providers()
             self._save_config()
 
@@ -245,27 +270,28 @@ class LLMProviderManager(Module):
         """创建配置备份"""
         try:
             import shutil
+
             if self._config_path.exists():
                 backup_path = self._config_path.with_suffix(f".{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak")
                 shutil.copy2(self._config_path, backup_path)
-                logger.info(f"Created backup: {backup_path}")
+                logger.info("Created backup: %s", backup_path)
         except Exception as e:
-            logger.error(f"Failed to create backup: {e}")
+            logger.error("Failed to create backup: %s", e)
 
     def _save_config(self) -> None:
         """保存配置"""
         with self._config_lock:
             data = {
-                'providers': [p.to_dict(encrypt=True) for p in self._providers.values()],
-                'default_provider_id': self._default_provider_id,
-                'updated_at': datetime.now().isoformat(),
+                "providers": [p.to_dict(encrypt=True) for p in self._providers.values()],
+                "default_provider_id": self._default_provider_id,
+                "updated_at": datetime.now().isoformat(),
             }
 
             os.makedirs(self._config_path.parent, exist_ok=True)
-            with open(self._config_path, 'w', encoding='utf-8') as f:
+            with open(self._config_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
-            logger.info(f"Saved config to {self._config_path}")
+            logger.info("Saved config to %s", self._config_path)
 
     def _load_builtin_providers(self) -> None:
         """加载内置服务商"""
@@ -316,7 +342,7 @@ class LLMProviderManager(Module):
             self._providers[provider_id] = provider_config
             self._save_config()
 
-        logger.info(f"Added provider: {name} ({provider_id})")
+        logger.info("Added provider: %s (%s)", name, provider_id)
         return provider_config
 
     def update_provider(
@@ -332,7 +358,7 @@ class LLMProviderManager(Module):
     ) -> bool:
         """更新服务商配置"""
         if provider_id not in self._providers:
-            logger.warning(f"Provider {provider_id} not found")
+            logger.warning("Provider %s not found", provider_id)
             return False
 
         provider = self._providers[provider_id]
@@ -357,13 +383,13 @@ class LLMProviderManager(Module):
         with self._config_lock:
             self._save_config()
 
-        logger.info(f"Updated provider: {provider.name}")
+        logger.info("Updated provider: %s", provider.name)
         return True
 
     def update_provider_metadata(self, provider_id: str, metadata: Dict[str, Any]) -> bool:
         """更新服务商元数据"""
         if provider_id not in self._providers:
-            logger.warning(f"Provider {provider_id} not found")
+            logger.warning("Provider %s not found", provider_id)
             return False
 
         provider = self._providers[provider_id]
@@ -380,12 +406,12 @@ class LLMProviderManager(Module):
     def remove_provider(self, provider_id: str) -> bool:
         """移除服务商"""
         if provider_id not in self._providers:
-            logger.warning(f"Provider {provider_id} not found")
+            logger.warning("Provider %s not found", provider_id)
             return False
 
         provider = self._providers[provider_id]
         if provider.is_builtin:
-            logger.warning(f"Cannot remove built-in provider: {provider.name}")
+            logger.warning("Cannot remove built-in provider: %s", provider.name)
             return False
 
         with self._config_lock:
@@ -394,7 +420,7 @@ class LLMProviderManager(Module):
             del self._providers[provider_id]
             self._save_config()
 
-        logger.info(f"Removed provider: {provider.name}")
+        logger.info("Removed provider: %s", provider.name)
         return True
 
     def get_provider(self, provider_id: str) -> Optional[ProviderConfig]:
@@ -431,7 +457,7 @@ class LLMProviderManager(Module):
     def set_default_provider(self, provider_id: str) -> bool:
         """设置默认服务商"""
         if provider_id not in self._providers:
-            logger.warning(f"Provider {provider_id} not found")
+            logger.warning("Provider %s not found", provider_id)
             return False
 
         self._default_provider_id = provider_id
@@ -439,7 +465,7 @@ class LLMProviderManager(Module):
         with self._config_lock:
             self._save_config()
 
-        logger.info(f"Default provider set to: {self._providers[provider_id].name}")
+        logger.info("Default provider set to: %s", self._providers[provider_id].name)
         return True
 
     def enable_provider(self, provider_id: str) -> bool:
@@ -462,10 +488,12 @@ class LLMProviderManager(Module):
         query_lower = query.lower()
         results = []
         for provider in self._providers.values():
-            if (query_lower in provider.name.lower() or
-                query_lower in provider.provider.lower() or
-                query_lower in (provider.description or "").lower() or
-                any(query_lower in model.lower() for model in provider.models)):
+            if (
+                query_lower in provider.name.lower()
+                or query_lower in provider.provider.lower()
+                or query_lower in (provider.description or "").lower()
+                or any(query_lower in model.lower() for model in provider.models)
+            ):
                 results.append(provider)
         return results
 
@@ -473,24 +501,24 @@ class LLMProviderManager(Module):
         """获取统计信息"""
         providers = self.list_providers()
         return {
-            'total_providers': len(providers),
-            'enabled_providers': len([p for p in providers if p.enabled]),
-            'builtin_providers': len([p for p in providers if p.is_builtin]),
-            'default_provider': self._default_provider_id,
-            'config_path': str(self._config_path),
+            "total_providers": len(providers),
+            "enabled_providers": len([p for p in providers if p.enabled]),
+            "builtin_providers": len([p for p in providers if p.is_builtin]),
+            "default_provider": self._default_provider_id,
+            "config_path": str(self._config_path),
         }
 
     def health_check_provider(self, provider_id: str) -> bool:
         """健康检查服务商"""
         if provider_id not in self._providers:
-            logger.warning(f"Provider {provider_id} not found")
+            logger.warning("Provider %s not found", provider_id)
             return False
 
         provider = self._providers[provider_id]
         if not provider.health_check_enabled:
             return True
 
-        logger.debug(f"Health checking provider: {provider.name}")
+        logger.debug("Health checking provider: %s", provider.name)
 
         # 简单健康检查：尝试获取模型列表
         try:
@@ -499,7 +527,7 @@ class LLMProviderManager(Module):
             provider.health_status = "healthy"
             return True
         except Exception as e:
-            logger.error(f"Health check failed for {provider.name}: {e}")
+            logger.error("Health check failed for %s: %s", provider.name, e)
             provider.health_status = "unhealthy"
             return False
 
@@ -531,9 +559,11 @@ class LLMProviderManager(Module):
             provider.health_status = "unhealthy"
 
             if provider.consecutive_failures >= 3:
-                logger.warning(f"Provider {provider.name} has {provider.consecutive_failures} consecutive failures")
+                logger.warning("Provider %s has %s consecutive failures", provider.name, provider.consecutive_failures)
 
-    def get_healthy_providers(self, strategy: LoadBalancingStrategy = LoadBalancingStrategy.PRIORITY_FIRST) -> List[ProviderConfig]:
+    def get_healthy_providers(
+        self, strategy: LoadBalancingStrategy = LoadBalancingStrategy.PRIORITY_FIRST
+    ) -> List[ProviderConfig]:
         """获取健康的服务商"""
         providers = self.list_providers(enabled_only=True)
         healthy = [p for p in providers if p.health_status != "unhealthy"]
@@ -554,7 +584,9 @@ class LLMProviderManager(Module):
         else:
             return healthy
 
-    def select_provider(self, model: Optional[str] = None, strategy: LoadBalancingStrategy = LoadBalancingStrategy.PRIORITY_FIRST) -> Optional[ProviderConfig]:
+    def select_provider(
+        self, model: Optional[str] = None, strategy: LoadBalancingStrategy = LoadBalancingStrategy.PRIORITY_FIRST
+    ) -> Optional[ProviderConfig]:
         """选择服务商"""
         healthy_providers = self.get_healthy_providers(strategy)
         if not healthy_providers:
@@ -599,24 +631,24 @@ class LLMProviderManager(Module):
         """检测模型能力"""
         provider = self.get_provider(provider_id)
         if not provider:
-            logger.warning(f"Provider {provider_id} not found")
+            logger.warning("Provider %s not found", provider_id)
             return {}
 
         try:
             # 这里应该调用实际的能力检测
             return {
-                'vision': 'vision' in model.lower() or 'vl' in model.lower(),
-                'audio': 'audio' in model.lower(),
-                'video': 'video' in model.lower(),
-                'tool_use': True,
+                "vision": "vision" in model.lower() or "vl" in model.lower(),
+                "audio": "audio" in model.lower(),
+                "video": "video" in model.lower(),
+                "tool_use": True,
             }
         except Exception as e:
-            logger.error(f"Failed to detect capabilities: {e}")
+            logger.error("Failed to detect capabilities: %s", e)
             return {}
 
     def _generate_provider_id(self, name: str) -> str:
         """生成服务商 ID"""
-        base_id = name.lower().replace(' ', '-').replace('_', '-')
+        base_id = name.lower().replace(" ", "-").replace("_", "-")
         provider_id = base_id
         counter = 1
         while provider_id in self._providers:
@@ -636,8 +668,8 @@ class LLMProviderManager(Module):
     def export_config(self, include_encrypted: bool = False) -> str:
         """导出配置"""
         data = {
-            'providers': [p.to_dict(encrypt=include_encrypted) for p in self._providers.values()],
-            'default_provider_id': self._default_provider_id,
+            "providers": [p.to_dict(encrypt=include_encrypted) for p in self._providers.values()],
+            "default_provider_id": self._default_provider_id,
         }
         return json.dumps(data, indent=2, ensure_ascii=False)
 
@@ -647,34 +679,34 @@ class LLMProviderManager(Module):
             data = json.loads(json_str)
 
             with self._config_lock:
-                for provider_data in data.get('providers', []):
+                for provider_data in data.get("providers", []):
                     provider = ProviderConfig.from_dict(provider_data)
                     self._providers[provider.id] = provider
 
-                if 'default_provider_id' in data:
-                    self._default_provider_id = data['default_provider_id']
+                if "default_provider_id" in data:
+                    self._default_provider_id = data["default_provider_id"]
 
                 self._save_config()
 
-            logger.info(f"Imported {len(data.get('providers', []))} providers")
+            logger.info("Imported %s providers", len(data.get('providers', [])))
             return True
         except Exception as e:
-            logger.error(f"Failed to import config: {e}")
+            logger.error("Failed to import config: %s", e)
             return False
 
     def activate_model(self, provider_id: str, model_id: str) -> bool:
         """激活模型"""
         if provider_id not in self._providers:
-            logger.error(f"Provider {provider_id} not found")
+            logger.error("Provider %s not found", provider_id)
             return False
 
         provider = self._providers[provider_id]
         if not provider.enabled:
-            logger.error(f"Provider {provider.name} is disabled")
+            logger.error("Provider %s is disabled", provider.name)
             return False
 
         if model_id not in provider.models and model_id != provider.default_model:
-            logger.error(f"Model {model_id} not found in provider {provider.name}")
+            logger.error("Model %s not found in provider %s", model_id, provider.name)
             return False
 
         provider.default_model = model_id
@@ -683,7 +715,7 @@ class LLMProviderManager(Module):
         with self._config_lock:
             self._save_config()
 
-        logger.info(f"Activated model {model_id} in provider {provider.name}")
+        logger.info("Activated model %s in provider %s", model_id, provider.name)
         return True
 
     def get_active_model(self) -> Optional[Dict[str, Any]]:
@@ -693,17 +725,17 @@ class LLMProviderManager(Module):
             return None
 
         return {
-            'provider_id': provider.id,
-            'provider_name': provider.name,
-            'model': provider.default_model,
-            'base_url': provider.base_url,
+            "provider_id": provider.id,
+            "provider_name": provider.name,
+            "model": provider.default_model,
+            "base_url": provider.base_url,
         }
 
     def fetch_provider_models(self, provider_id: str) -> List[PydanticModelInfo]:
         """获取服务商模型列表"""
         provider = self.get_provider(provider_id)
         if not provider:
-            logger.error(f"Provider {provider_id} not found")
+            logger.error("Provider %s not found", provider_id)
             return []
 
         try:
@@ -711,40 +743,42 @@ class LLMProviderManager(Module):
             # 返回占位符数据
             models = []
             for model_id in provider.models:
-                models.append(PydanticModelInfo(
-                    id=model_id,
-                    name=model_id,
-                    owned_by=provider.name,
-                ))
+                models.append(
+                    PydanticModelInfo(
+                        id=model_id,
+                        name=model_id,
+                        owned_by=provider.name,
+                    )
+                )
             return models
         except Exception as e:
-            logger.error(f"Failed to fetch models: {e}")
+            logger.error("Failed to fetch models: %s", e)
             return []
 
     def probe_model_multimodal(self, provider_id: str, model_id: str) -> ProbeResult:
         """探测模型多模态能力"""
         provider = self.get_provider(provider_id)
         if not provider:
-            logger.error(f"Provider {provider_id} not found")
+            logger.error("Provider %s not found", provider_id)
             return ProbeResult()
 
         try:
             # 这里应该调用实际的探测 API
             return ProbeResult(
-                vision='vision' in model_id.lower() or 'vl' in model_id.lower(),
-                audio='audio' in model_id.lower(),
-                video='video' in model_id.lower(),
-                image_generation='image' in model_id.lower(),
+                vision="vision" in model_id.lower() or "vl" in model_id.lower(),
+                audio="audio" in model_id.lower(),
+                video="video" in model_id.lower(),
+                image_generation="image" in model_id.lower(),
             )
         except Exception as e:
-            logger.error(f"Failed to probe model: {e}")
+            logger.error("Failed to probe model: %s", e)
             return ProbeResult()
 
     def check_provider_connection(self, provider_id: str) -> ConnectionResult:
         """检查服务商连接"""
         provider = self.get_provider(provider_id)
         if not provider:
-            logger.error(f"Provider {provider_id} not found")
+            logger.error("Provider %s not found", provider_id)
             return ConnectionResult(success=False, message="Provider not found")
 
         try:
@@ -760,7 +794,7 @@ class LLMProviderManager(Module):
                 latency_ms=latency,
             )
         except Exception as e:
-            logger.error(f"Connection check failed: {e}")
+            logger.error("Connection check failed: %s", e)
             provider.health_status = "unhealthy"
             return ConnectionResult(
                 success=False,
@@ -796,36 +830,44 @@ class LLMProviderManager(Module):
         try:
             if provider.provider == "openai":
                 from neurova.llm.providers import OpenAIProvider
+
                 return OpenAIProvider(provider)
             elif provider.provider == "anthropic":
                 from neurova.llm.providers import AnthropicProvider
+
                 return AnthropicProvider(provider)
             elif provider.provider == "gemini":
                 from neurova.llm.providers import GeminiProvider
+
                 return GeminiProvider(provider)
             elif provider.provider == "ollama":
                 from neurova.llm.providers import OllamaProvider
+
                 return OllamaProvider(provider)
             else:
                 # 默认使用 OpenAI 兼容
                 from neurova.llm.providers import OpenAIProvider
+
                 return OpenAIProvider(provider)
         except ImportError as e:
-            logger.warning(f"Could not import provider {provider.provider}: {e}")
+            logger.warning("Could not import provider %s: %s", provider.provider, e)
             return None
 
+
 _provider_manager: Optional[LLMProviderManager] = None
+
 
 def get_provider_manager(config_path: Optional[str] = None) -> LLMProviderManager:
     """获取 LLMProviderManager 单例"""
     global _provider_manager
     if _provider_manager is None:
-        _provider_manager = LLMProviderManager(config={'config_path': config_path})
+        _provider_manager = LLMProviderManager(config={"config_path": config_path})
     return _provider_manager
 
+
 __all__ = [
-    'LoadBalancingStrategy',
-    'ProviderConfig',
-    'LLMProviderManager',
-    'get_provider_manager',
+    "LoadBalancingStrategy",
+    "ProviderConfig",
+    "LLMProviderManager",
+    "get_provider_manager",
 ]

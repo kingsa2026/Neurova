@@ -16,44 +16,44 @@ import logging
 _logger = logging.getLogger(__name__)
 
 try:
-    from .recursive_ratchet_pruner import RecursiveRatchetPruner, EnhancedRatchetPruner, Candidate
+    from .recursive_ratchet_pruner import Candidate, EnhancedRatchetPruner, RecursiveRatchetPruner
 except ImportError as _e:
-    _logger.debug(f"rsi.recursive_ratchet_pruner 未可用: {_e}")
+    _logger.debug("rsi.recursive_ratchet_pruner 未可用: %s", _e)
 
 try:
-    from .integration_manager import RSIIntegrationManager, ParameterInfo, create_rsi_integration_manager
+    from .integration_manager import ParameterInfo, RSIIntegrationManager, create_rsi_integration_manager
 except ImportError as _e:
-    _logger.debug(f"rsi.integration_manager 未可用: {_e}")
+    _logger.debug("rsi.integration_manager 未可用: %s", _e)
 
 try:
     from .convergence_analyzer import ConvergenceAnalyzer, ConvergenceMetrics, create_convergence_analyzer
 except ImportError as _e:
-    _logger.debug(f"rsi.convergence_analyzer 未可用: {_e}")
+    _logger.debug("rsi.convergence_analyzer 未可用: %s", _e)
 
 try:
-    from .metrics import RSIMetrics, Alert, AlertLevel, create_rsi_metrics
+    from .metrics import Alert, AlertLevel, RSIMetrics, create_rsi_metrics
 except ImportError as _e:
-    _logger.debug(f"rsi.metrics 未可用: {_e}")
+    _logger.debug("rsi.metrics 未可用: %s", _e)
 
 try:
     from .rollback_manager import RSIRollbackManager, create_rollback_manager
 except ImportError as _e:
-    _logger.debug(f"rsi.rollback_manager 未可用: {_e}")
+    _logger.debug("rsi.rollback_manager 未可用: %s", _e)
 
 try:
     from .deployment_controller import RSIDeploymentController, create_deployment_controller
 except ImportError as _e:
-    _logger.debug(f"rsi.deployment_controller 未可用: {_e}")
+    _logger.debug("rsi.deployment_controller 未可用: %s", _e)
 
 try:
     from .dashboard import RSIDashboard, create_rsi_dashboard
 except ImportError as _e:
-    _logger.debug(f"rsi.dashboard 未可用: {_e}")
+    _logger.debug("rsi.dashboard 未可用: %s", _e)
 
 try:
     from .orchestrator import RSIOrchestrator, create_rsi_orchestrator
 except ImportError as _e:
-    _logger.debug(f"rsi.orchestrator 未可用: {_e}")
+    _logger.debug("rsi.orchestrator 未可用: %s", _e)
 
 __all__ = [
     "RecursiveRatchetPruner",

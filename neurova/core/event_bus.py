@@ -12,22 +12,20 @@ from __future__ import annotations
 
 import asyncio
 import collections
-from collections import defaultdict
-from dataclasses import dataclass, field
-from enum import IntEnum
-import enum
-import inspect
 import logging
 import threading
 import time
-import typing
-from typing import Awaitable, Callable, Dict, List, Optional, Any, Set
+from collections import defaultdict
+from dataclasses import dataclass, field
+from enum import IntEnum
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 
 class EventPriority(IntEnum):
     """事件优先级"""
+
     LOW = 0
     NORMAL = 1
     HIGH = 2
@@ -37,6 +35,7 @@ class EventPriority(IntEnum):
 @dataclass
 class Event:
     """事件数据结构"""
+
     name: str
     data: Any = None
     source: str = ""
@@ -47,6 +46,7 @@ class Event:
 @dataclass
 class Subscription:
     """订阅信息"""
+
     event_name: str
     handler: Callable
     priority: EventPriority = EventPriority.NORMAL
@@ -58,7 +58,7 @@ class Subscription:
 class EventBus:
     """
     统一事件总线
-    
+
     支持同步和异步事件处理，事件优先级，以及事件日志追踪。
     """
 
@@ -129,7 +129,7 @@ class EventBus:
             # 按优先级排序（高优先级先执行）
             self._subscribers[event_name].sort(key=lambda s: s.priority, reverse=True)
             self._registered_events.add(event_name)
-        logger.debug(f"Subscribed to '{event_name}' (priority={priority}, async={is_async}, module={module_name})")
+        logger.debug("Subscribed to '%s' (priority=%s, async=%s, module=%s)", event_name, priority, is_async, module_name)
         return sub
 
     def unsubscribe(self, event_name: str, handler: Callable) -> bool:
@@ -138,9 +138,7 @@ class EventBus:
             if event_name not in self._subscribers:
                 return False
             before = len(self._subscribers[event_name])
-            self._subscribers[event_name] = [
-                s for s in self._subscribers[event_name] if s.handler != handler
-            ]
+            self._subscribers[event_name] = [s for s in self._subscribers[event_name] if s.handler != handler]
             return len(self._subscribers[event_name]) < before
 
     def unsubscribe_module(self, module_name: str) -> int:

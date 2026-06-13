@@ -4,6 +4,7 @@ CentroidInitializer — 从通道描述自动生成质心向量
 在 MoE 路由中，每个通道需要一个质心向量来计算查询相关性。
 质心从通道的 description 字段自动生成。
 """
+
 import logging
 from typing import Any
 
@@ -41,12 +42,12 @@ class CentroidInitializer:
 
             description = channel.metadata.description
             if not description:
-                logger.warning(f"通道 {name} 无描述，跳过质心生成")
+                logger.warning("通道 %s 无描述，跳过质心生成", name)
                 continue
 
             centroid = self.vector_store.encode(description)
             self.vector_store.register_centroid(name, centroid)
             count += 1
-            logger.debug(f"为通道 {name} 生成质心")
+            logger.debug("为通道 %s 生成质心", name)
 
         return count

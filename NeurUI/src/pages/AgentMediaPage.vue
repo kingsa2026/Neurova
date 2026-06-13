@@ -143,10 +143,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
-import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import * as mediaApi from '@/api/modules/media'
 
 interface MediaItem {
   id: string
@@ -214,9 +214,18 @@ function formatDate(d?: string) {
 async function fetchMedia() {
   loading.value = true
   try {
-    const res: any = await request.get(`/media/list?agent_id=${props.agentId}`)
-    const data = res?.data ?? res
-    mediaItems.value = Array.isArray(data) ? data : data?.items ?? data?.media ?? []
+    const res = await mediaApi.listMedia({ agent_id: props.agentId, search: searchQuery.value || undefined, mime_type: typeFilter.value || undefined })
+    const data = res?.data
+    const items = data?.items ?? (Array.isArray(data) ? data : [])
+    mediaItems.value = items.map((m: any) => ({
+      id: m.id,
+      name: m.filename || m.name,
+      type: (m.mime_type?.startsWith('image') ? 'image' : m.mime_type?.startsWith('audio') ? 'audio' : 'video') as any,
+      url: m.url || '',
+      thumbnail_url: m.url,
+      size: m.size,
+      created_at: m.created_at,
+    }))
   } catch {
     message.error(t('media.loadError'))
   } finally {
@@ -233,12 +242,7 @@ async function onFileSelected(e: Event) {
   if (!input.files?.length) return
   for (const file of Array.from(input.files)) {
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('agent_id', props.agentId)
-      await request.post('/media/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      await mediaApi.saveMedia(file, props.agentId)
     } catch {
       message.error(t('media.uploadError'))
     }
@@ -268,7 +272,7 @@ function confirmDelete(item: MediaItem) {
     cancelText: t('common.cancel'),
     onOk: async () => {
       try {
-        await request.delete(`/media/${item.id}`)
+        await mediaApi.deleteMedia(item.id)
         mediaItems.value = mediaItems.value.filter((m) => m.id !== item.id)
         message.success(t('media.deleteSuccess'))
       } catch {

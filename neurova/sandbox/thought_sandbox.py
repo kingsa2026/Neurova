@@ -9,7 +9,6 @@ Thought Sandbox - 思维沙箱
 4. 执行超时和资源限制
 """
 
-import asyncio
 import logging
 import threading
 import time
@@ -17,35 +16,38 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class SandboxState(str, Enum):
     """沙箱状态"""
-    IDLE = "idle"                # 空闲
-    RUNNING = "running"          # 运行中
-    PAUSED = "paused"            # 暂停
-    COMPLETED = "completed"      # 完成
-    FAILED = "failed"            # 失败
-    TIMEOUT = "timeout"          # 超时
+
+    IDLE = "idle"  # 空闲
+    RUNNING = "running"  # 运行中
+    PAUSED = "paused"  # 暂停
+    COMPLETED = "completed"  # 完成
+    FAILED = "failed"  # 失败
+    TIMEOUT = "timeout"  # 超时
     ROLLED_BACK = "rolled_back"  # 已回滚
 
 
 class ThoughtType(str, Enum):
     """思维类型"""
-    REASONING = "reasoning"          # 推理
-    HYPOTHESIS = "hypothesis"        # 假设
-    SIMULATION = "simulation"        # 模拟
-    ANALYSIS = "analysis"            # 分析
-    EXPLORATION = "exploration"      # 探索
+
+    REASONING = "reasoning"  # 推理
+    HYPOTHESIS = "hypothesis"  # 假设
+    SIMULATION = "simulation"  # 模拟
+    ANALYSIS = "analysis"  # 分析
+    EXPLORATION = "exploration"  # 探索
     COUNTERFACTUAL = "counterfactual"  # 反事实推理
 
 
 @dataclass
 class ThoughtStep:
     """思维步骤"""
+
     step_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     thought_type: ThoughtType = ThoughtType.REASONING
     content: str = ""
@@ -74,6 +76,7 @@ class ThoughtStep:
 @dataclass
 class ThoughtSnapshot:
     """思维快照（用于回滚）"""
+
     snapshot_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     state: Dict[str, Any] = field(default_factory=dict)
     step_count: int = 0
@@ -92,6 +95,7 @@ class ThoughtSnapshot:
 @dataclass
 class SandboxResult:
     """沙箱执行结果"""
+
     session_id: str = ""
     state: SandboxState = SandboxState.COMPLETED
     steps: List[ThoughtStep] = field(default_factory=list)
@@ -256,7 +260,7 @@ class ThoughtSandbox:
             except Exception as e:
                 self._state = SandboxState.FAILED
                 error = str(e)
-                logger.error(f"Sandbox execution failed: {e}")
+                logger.error("Sandbox execution failed: %s", e)
 
             total_duration = (time.time() - start_time) * 1000
 
@@ -319,7 +323,7 @@ class ThoughtSandbox:
         except Exception as e:
             step.output_data = {"error": str(e)}
             step.confidence = 0.0
-            logger.warning(f"Step execution error: {e}")
+            logger.warning("Step execution error: %s", e)
 
         step.duration_ms = (time.time() - start_time) * 1000
         return step
@@ -353,9 +357,9 @@ class ThoughtSandbox:
             for snapshot in reversed(self._snapshots):
                 if snapshot.snapshot_id == snapshot_id:
                     self._state_data = snapshot.state.copy()
-                    self._steps = self._steps[:snapshot.step_count]
+                    self._steps = self._steps[: snapshot.step_count]
                     self._state = SandboxState.ROLLED_BACK
-                    logger.info(f"Rolled back to snapshot {snapshot_id}")
+                    logger.info("Rolled back to snapshot %s", snapshot_id)
                     return True
             return False
 

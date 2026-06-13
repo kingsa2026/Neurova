@@ -17,7 +17,6 @@
 
 import logging
 import mimetypes
-import os
 import time
 import uuid
 from pathlib import Path
@@ -65,15 +64,15 @@ _files_store: Dict[str, Dict[str, Any]] = {}
 
 def _determine_file_type(filename: str) -> str:
     ext = Path(filename).suffix.lower()
-    if ext in ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp'):
+    if ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"):
         return "image"
-    if ext in ('.mp3', '.wav', '.ogg', '.flac', '.aac'):
+    if ext in (".mp3", ".wav", ".ogg", ".flac", ".aac"):
         return "audio"
-    if ext in ('.mp4', '.avi', '.mov', '.webm', '.mkv'):
+    if ext in (".mp4", ".avi", ".mov", ".webm", ".mkv"):
         return "video"
-    if ext in ('.py', '.js', '.ts', '.java', '.cpp', '.go', '.rs'):
+    if ext in (".py", ".js", ".ts", ".java", ".cpp", ".go", ".rs"):
         return "code"
-    if ext in ('.md', '.txt', '.rst'):
+    if ext in (".md", ".txt", ".rst"):
         return "text"
     return "file"
 
@@ -100,11 +99,18 @@ async def upload_file(
 
     mime, _ = mimetypes.guess_type(file.filename or "")
     info = {
-        "file_id": file_id, "filename": file.filename, "file_type": file_type,
-        "mime_type": mime or "application/octet-stream", "size": len(content),
-        "version": "1.0.0", "status": "active", "user_id": user_id,
-        "agent_id": agent_id, "path": str(file_path),
-        "created_at": now, "updated_at": now,
+        "file_id": file_id,
+        "filename": file.filename,
+        "file_type": file_type,
+        "mime_type": mime or "application/octet-stream",
+        "size": len(content),
+        "version": "1.0.0",
+        "status": "active",
+        "user_id": user_id,
+        "agent_id": agent_id,
+        "path": str(file_path),
+        "created_at": now,
+        "updated_at": now,
     }
     _files_store[file_id] = info
     return FileInfo(**info)
@@ -131,8 +137,10 @@ async def get_storage_info(user_id: str = Query(default="default")):
         ft = f.get("file_type", "file")
         by_type[ft] = by_type.get(ft, 0) + 1
     return StorageInfo(
-        user_id=user_id, total_files=len(files),
-        total_size=sum(f.get("size", 0) for f in files), by_type=by_type,
+        user_id=user_id,
+        total_files=len(files),
+        total_size=sum(f.get("size", 0) for f in files),
+        by_type=by_type,
     )
 
 
@@ -167,7 +175,8 @@ async def download_file(file_id: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File missing on disk")
     return FileResponse(
-        str(file_path), media_type=info.get("mime_type", "application/octet-stream"),
+        str(file_path),
+        media_type=info.get("mime_type", "application/octet-stream"),
         filename=info.get("filename", "download"),
     )
 
@@ -205,7 +214,10 @@ async def get_file_versions(file_id: str):
     info = _files_store.get(file_id)
     if not info:
         raise HTTPException(status_code=404, detail="File not found")
-    return {"code": 0, "data": {"versions": [{"version": info.get("version", "1.0.0"), "created_at": info.get("created_at", 0)}]}}
+    return {
+        "code": 0,
+        "data": {"versions": [{"version": info.get("version", "1.0.0"), "created_at": info.get("created_at", 0)}]},
+    }
 
 
 @router.post("/{file_id}/approve")

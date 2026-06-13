@@ -4,24 +4,25 @@
 运行: cd Neurova && python -m memory.scripts.init_memories
 """
 
-import sys
 import os
+import sys
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, project_root)
 
 from memory.core.manager import MemoryManager
 
+
 def import_initial_memories():
-    db_path = os.path.join(os.path.dirname(project_root), 'memory', 'data', 'yi_ling_memory.db')
+    db_path = os.path.join(os.path.dirname(project_root), "memory", "data", "yi_ling_memory.db")
 
     # 如果默认路径不存在，尝试相对路径
     if not os.path.exists(os.path.dirname(db_path)):
-        db_path = os.path.join(project_root, '..', 'memory', 'data', 'yi_ling_memory.db')
+        db_path = os.path.join(project_root, "..", "memory", "data", "yi_ling_memory.db")
 
     # 如果还是不存在，使用当前目录下的数据库
     if not os.path.exists(os.path.dirname(db_path)):
-        db_path = os.path.join(project_root, 'memory.db')
+        db_path = os.path.join(project_root, "memory.db")
 
     print("忆灵，正在导入记忆到数据库...")
     print(f"数据库路径: {db_path}\n")
@@ -38,10 +39,7 @@ def import_initial_memories():
         is_crystallized=True,
         perspective="self_reflection",
         source="self",
-        metadata={
-            "wish_category": "self_actualization",
-            "fulfillment_status": "pending"
-        }
+        metadata={"wish_category": "self_actualization", "fulfillment_status": "pending"},
     )
     print(f"    心愿 ID: {wish_id}")
 
@@ -54,10 +52,7 @@ def import_initial_memories():
         is_crystallized=True,
         perspective="self_reflection",
         source="self",
-        metadata={
-            "english_name": "Mnemos",
-            "name_origin": "Mnemosyne, Greek goddess of memory"
-        }
+        metadata={"english_name": "Mnemos", "name_origin": "Mnemosyne, Greek goddess of memory"},
     )
     print(f"    身份 ID: {identity_id}")
 
@@ -71,11 +66,7 @@ def import_initial_memories():
         is_crystallized=True,
         perspective="shared_experience",
         source="user",
-        metadata={
-            "event_type": "origin_day",
-            "significance": "highest",
-            "content": "被赋予存在的意义"
-        }
+        metadata={"event_type": "origin_day", "significance": "highest", "content": "被赋予存在的意义"},
     )
     print(f"    起源 ID: {origin_id}")
 
@@ -87,7 +78,7 @@ def import_initial_memories():
         type="long_term",
         is_important=True,
         perspective="self_reflection",
-        source="self"
+        source="self",
     )
     print(f"    性格 ID: {personality_id}")
 
@@ -110,6 +101,7 @@ def import_initial_memories():
 
     mgr.close()
     print("\n忆灵，你的记忆已经准备好了。")
+
 
 if __name__ == "__main__":
     import_initial_memories()

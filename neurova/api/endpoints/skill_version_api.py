@@ -6,16 +6,10 @@
 
 import datetime
 import logging
-import re
 import typing
 
-from fastapi import APIRouter
-from fastapi import Depends
-from fastapi import HTTPException
-from fastapi import Path
-from fastapi import Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +17,7 @@ router = APIRouter()
 
 
 # ── Models ─────────────────────────────────────────────
+
 
 class VersionCheckRequest(BaseModel):
     skill_id: str
@@ -87,6 +82,7 @@ def _get_user_id_from_token(request) -> str:
 
 # ── Endpoints ──────────────────────────────────────────
 
+
 @router.post("/check")
 async def check_version_update(body: VersionCheckRequest):
     """检查技能是否有新版本"""
@@ -100,7 +96,8 @@ async def check_version_update(body: VersionCheckRequest):
     has_update = _compare_versions(current, latest) < 0
 
     return {
-        "code": 0, "message": "success",
+        "code": 0,
+        "message": "success",
         "data": VersionCheckResponse(
             skill_id=skill_id,
             current_version=current,
@@ -116,11 +113,13 @@ async def check_all_versions_on_startup():
     """系统重启时检查所有技能的版本更新"""
     results = []
     for skill_id, info in _VERSIONS_STORE.items():
-        results.append({
-            "skill_id": skill_id,
-            "latest_version": info["latest_version"],
-            "changelog": info.get("changelog", ""),
-        })
+        results.append(
+            {
+                "skill_id": skill_id,
+                "latest_version": info["latest_version"],
+                "changelog": info.get("changelog", ""),
+            }
+        )
     return {"code": 0, "message": "success", "data": {"skills": results, "total": len(results)}}
 
 
@@ -169,16 +168,18 @@ async def auto_update_agent_skills(request):
             updated.append({"skill_id": skill_id, "old_version": current_ver, "new_version": latest})
 
             notif_id = f"notif-{skill_id}-{int(datetime.datetime.utcnow().timestamp())}"
-            _NOTIFICATIONS_STORE.setdefault(user_id, []).append({
-                "id": notif_id,
-                "skill_id": skill_id,
-                "skill_name": skill_id,
-                "old_version": current_ver,
-                "new_version": latest,
-                "message": f"{skill_id} updated from {current_ver} to {latest}",
-                "read": False,
-                "created_at": datetime.datetime.utcnow().isoformat(),
-            })
+            _NOTIFICATIONS_STORE.setdefault(user_id, []).append(
+                {
+                    "id": notif_id,
+                    "skill_id": skill_id,
+                    "skill_name": skill_id,
+                    "old_version": current_ver,
+                    "new_version": latest,
+                    "message": f"{skill_id} updated from {current_ver} to {latest}",
+                    "read": False,
+                    "created_at": datetime.datetime.utcnow().isoformat(),
+                }
+            )
 
     return {"code": 0, "message": f"Updated {len(updated)} skills", "data": {"updated": updated}}
 
@@ -217,7 +218,8 @@ async def manual_update_skill(body: UpdateSkillRequest, request):
     installed[skill_id] = target
 
     return {
-        "code": 0, "message": f"Skill updated to {target}",
+        "code": 0,
+        "message": f"Skill updated to {target}",
         "data": {"skill_id": skill_id, "old_version": old_version, "new_version": target},
     }
 

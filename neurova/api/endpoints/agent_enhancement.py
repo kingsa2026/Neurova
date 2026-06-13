@@ -15,9 +15,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Request
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -27,8 +26,10 @@ router = APIRouter()
 # Pydantic Models
 # ---------------------------------------------------------------------------
 
+
 class AgentStatus(BaseModel):
     """Agent状态"""
+
     agent_id: str
     status: str = "running"
     uptime: float = 0
@@ -40,6 +41,7 @@ class AgentStatus(BaseModel):
 
 class AgentCapabilities(BaseModel):
     """Agent能力"""
+
     agent_id: str
     capabilities: List[str] = []
     tools: List[str] = []
@@ -49,6 +51,7 @@ class AgentCapabilities(BaseModel):
 
 class AgentHealth(BaseModel):
     """Agent健康状态"""
+
     agent_id: str
     healthy: bool = True
     checks: Dict[str, Any] = {}
@@ -57,6 +60,7 @@ class AgentHealth(BaseModel):
 
 class RestartResponse(BaseModel):
     """重启响应"""
+
     agent_id: str
     success: bool
     message: str
@@ -79,6 +83,7 @@ def _get_agent(agent_id: str) -> Optional[Any]:
     """获取Agent实例"""
     try:
         from neurova.api.endpoints import get_agent_instance
+
         return get_agent_instance(agent_id)
     except Exception:
         return None
@@ -88,6 +93,7 @@ def _get_agent(agent_id: str) -> Optional[Any]:
 # Routes
 # ---------------------------------------------------------------------------
 
+
 @router.get("/{agent_id}/status", response_model=AgentStatus)
 async def get_agent_status(
     request: Request,
@@ -95,26 +101,29 @@ async def get_agent_status(
 ):
     """获取 Agent 运行状态"""
     agent = _get_agent(agent_id)
-    
+
     # 尝试从Agent获取真实状态
     if agent and hasattr(agent, "get_status"):
         try:
             status = await agent.get_status()
             return AgentStatus(**status)
         except Exception as e:
-            logger.warning(f"Failed to get agent status: {e}")
-    
+            logger.warning("Failed to get agent status: %s", e)
+
     # 返回模拟状态
     now = time.time()
-    status = _agents_status.get(agent_id, {
-        "agent_id": agent_id,
-        "status": "running",
-        "uptime": 3600,
-        "memory_usage": 1024 * 1024 * 100,
-        "message_count": 42,
-        "last_active": now,
-        "created_at": now - 3600,
-    })
+    status = _agents_status.get(
+        agent_id,
+        {
+            "agent_id": agent_id,
+            "status": "running",
+            "uptime": 3600,
+            "memory_usage": 1024 * 1024 * 100,
+            "message_count": 42,
+            "last_active": now,
+            "created_at": now - 3600,
+        },
+    )
     return AgentStatus(**status)
 
 
@@ -125,15 +134,15 @@ async def get_agent_capabilities(
 ):
     """获取 Agent 能力描述"""
     agent = _get_agent(agent_id)
-    
+
     # 尝试从Agent获取真实能力
     if agent and hasattr(agent, "get_capabilities"):
         try:
             caps = await agent.get_capabilities()
             return AgentCapabilities(**caps)
         except Exception as e:
-            logger.warning(f"Failed to get agent capabilities: {e}")
-    
+            logger.warning("Failed to get agent capabilities: %s", e)
+
     # 返回默认能力
     return AgentCapabilities(
         agent_id=agent_id,
@@ -151,14 +160,14 @@ async def agent_health_check(
 ):
     """Agent 健康检查"""
     agent = _get_agent(agent_id)
-    
+
     checks = {
         "agent_exists": agent is not None,
         "memory_system": False,
         "llm_connection": False,
         "tool_executor": False,
     }
-    
+
     # 检查各个子系统
     if agent:
         if hasattr(agent, "memory_manager") and agent.memory_manager:
@@ -167,9 +176,9 @@ async def agent_health_check(
             checks["llm_connection"] = True
         if hasattr(agent, "tool_executor") and agent.tool_executor:
             checks["tool_executor"] = True
-    
+
     healthy = all(checks.values())
-    
+
     return AgentHealth(
         agent_id=agent_id,
         healthy=healthy,
@@ -186,7 +195,7 @@ async def restart_agent(
     """重启 Agent"""
     start = time.time()
     agent = _get_agent(agent_id)
-    
+
     # 尝试重启Agent
     if agent and hasattr(agent, "restart"):
         try:
@@ -198,14 +207,14 @@ async def restart_agent(
                 restart_time=time.time() - start,
             )
         except Exception as e:
-            logger.error(f"Failed to restart agent: {e}")
+            logger.error("Failed to restart agent: %s", e)
             return RestartResponse(
                 agent_id=agent_id,
                 success=False,
                 message=f"Restart failed: {str(e)}",
                 restart_time=time.time() - start,
             )
-    
+
     # 模拟重启
     _agents_status[agent_id] = {
         "agent_id": agent_id,
@@ -216,7 +225,7 @@ async def restart_agent(
         "last_active": time.time(),
         "created_at": time.time(),
     }
-    
+
     return RestartResponse(
         agent_id=agent_id,
         success=True,

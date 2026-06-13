@@ -26,6 +26,7 @@ router = APIRouter()
 
 class BoardInfo(BaseModel):
     """看板信息"""
+
     board_id: str
     name: str
     description: str = ""
@@ -37,6 +38,7 @@ class BoardInfo(BaseModel):
 
 class BoardCreate(BaseModel):
     """创建看板请求"""
+
     name: str = Field(..., description="看板名称")
     description: str = Field(default="", description="看板描述")
     project_id: Optional[str] = Field(default=None, description="所属项目ID")
@@ -45,6 +47,7 @@ class BoardCreate(BaseModel):
 
 class TaskInfo(BaseModel):
     """任务信息"""
+
     task_id: str
     title: str
     description: str = ""
@@ -58,6 +61,7 @@ class TaskInfo(BaseModel):
 
 class TaskCreate(BaseModel):
     """创建任务请求"""
+
     title: str = Field(..., description="任务标题")
     description: str = Field(default="", description="任务描述")
     status: str = Field(default="To Do", description="状态")
@@ -67,6 +71,7 @@ class TaskCreate(BaseModel):
 
 class TaskUpdate(BaseModel):
     """更新任务请求"""
+
     title: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
@@ -76,12 +81,14 @@ class TaskUpdate(BaseModel):
 
 class TaskMove(BaseModel):
     """移动任务请求"""
+
     status: str = Field(..., description="目标状态")
     position: int = Field(default=0, description="目标位置")
 
 
 class BoardStats(BaseModel):
     """看板统计"""
+
     board_id: str
     total_tasks: int = 0
     by_status: Dict[str, int] = {}
@@ -100,6 +107,7 @@ def _get_tbs():
     """获取 TaskBoardManager"""
     try:
         from neurova.projects.task_board import TaskBoardManager
+
         return TaskBoardManager()
     except Exception:
         return None
@@ -108,6 +116,7 @@ def _get_tbs():
 # ---------------------------------------------------------------------------
 # 路由
 # ---------------------------------------------------------------------------
+
 
 @router.post("/boards", response_model=BoardInfo)
 async def create_board(body: BoardCreate):

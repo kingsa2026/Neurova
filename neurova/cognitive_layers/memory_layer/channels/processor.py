@@ -7,6 +7,7 @@ UnifiedResultProcessor — 统一结果处理管道
 3. 时序衰减（时间戳）
 4. 冲突检测（语义矛盾）
 """
+
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ProcessOutput:
     """处理输出"""
+
     results: List[ChannelResult] = field(default_factory=list)
     total_count: int = 0
     deduped_count: int = 0

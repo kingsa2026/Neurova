@@ -13,7 +13,4 @@ Configuration:
 """
 
 # media imports
-import neurova.media.config
-import neurova.media.manager
 
-pass

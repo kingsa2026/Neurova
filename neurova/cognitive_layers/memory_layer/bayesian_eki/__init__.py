@@ -20,10 +20,10 @@ EKI认知优化框架 - Ensemble Kalman Inversion for Cognitive Optimization
 
 from .cognitive_optimizer import (
     EKICognitiveOptimizer,
-    TaskValue,
-    TaskResult,
     MemoryState,
     ReinforcementAction,
+    TaskResult,
+    TaskValue,
     get_cognitive_optimizer,
     reset_cognitive_optimizer,
 )

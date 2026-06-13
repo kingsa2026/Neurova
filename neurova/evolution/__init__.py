@@ -11,17 +11,17 @@ _logger = logging.getLogger(__name__)
 
 try:
     from .closed_loop import (
-        EvolutionOrchestrator,
-        ToolLifecycleManager,
         AdaptiveToolWeights,
+        EvolutionOrchestrator,
+        NLToolSynthesizer,
         PatternMiner,
         ToolGeneticEngine,
-        NLToolSynthesizer,
+        ToolLifecycleManager,
         get_evolution_orchestrator,
         reset_evolution_orchestrator,
     )
 except ImportError as _e:
-    _logger.debug(f"closed_loop 模块未可用: {_e}")
+    _logger.debug("closed_loop 模块未可用: %s", _e)
     EvolutionOrchestrator = None
     ToolLifecycleManager = None
     AdaptiveToolWeights = None
@@ -34,12 +34,12 @@ except ImportError as _e:
 # RSI模块（递归自我进化）
 try:
     from .rsi import (
-        RecursiveRatchetPruner,
-        EnhancedRatchetPruner,
         Candidate,
+        EnhancedRatchetPruner,
+        RecursiveRatchetPruner,
     )
 except ImportError as _e:
-    _logger.debug(f"rsi 模块未可用: {_e}")
+    _logger.debug("rsi 模块未可用: %s", _e)
     RecursiveRatchetPruner = None
     EnhancedRatchetPruner = None
     Candidate = None

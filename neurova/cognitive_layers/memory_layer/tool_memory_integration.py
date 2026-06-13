@@ -8,9 +8,9 @@
 """
 
 import logging
-from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ToolUsageRecord:
     """工具使用记录"""
+
     tool_name: str
     success: bool
     execution_time: float = 0.0
@@ -39,8 +40,16 @@ class ToolMemoryIntegration:
         tool_lifecycle: 工具生命周期管理器（废弃检测）
     """
 
-    def __init__(self, memory_layer=None, muscle_memory=None, confidence_threshold: float = 0.8,
-                 temperature_threshold: float = 30.0, tool_weights=None, tool_lifecycle=None, **kwargs):
+    def __init__(
+        self,
+        memory_layer=None,
+        muscle_memory=None,
+        confidence_threshold: float = 0.8,
+        temperature_threshold: float = 30.0,
+        tool_weights=None,
+        tool_lifecycle=None,
+        **kwargs,
+    ):
         self.memory_layer = memory_layer
         self.muscle_memory = muscle_memory
         self.confidence_threshold = confidence_threshold
@@ -121,9 +130,9 @@ class ToolMemoryIntegration:
                     metadata={"tool_source": tool_source} if tool_source else None,
                 )
             except Exception as e:
-                logger.debug(f"肌肉记忆记录失败: {e}")
+                logger.debug("肌肉记忆记录失败: %s", e)
 
-        logger.debug(f"Recorded tool usage: {tool_name}, success={success}")
+        logger.debug("Recorded tool usage: %s, success=%s", tool_name, success)
 
     def get_tool_stats(self, tool_name: str = None) -> Dict[str, Any]:
         """获取工具统计"""
@@ -153,15 +162,12 @@ class ToolMemoryIntegration:
         success_rate = success_count / total_usages if total_usages > 0 else 0.0
 
         # 肌肉记忆命中数：从 usage_history 中统计有 muscle_memory 匹配的记录
-        muscle_memory_hits = sum(
-            1 for r in self.usage_history
-            if r.context.get('tool_source') == 'muscle_memory'
-        )
+        muscle_memory_hits = sum(1 for r in self.usage_history if r.context.get("tool_source") == "muscle_memory")
 
         return {
-            'total_usages': total_usages,
-            'success_rate': success_rate,
-            'muscle_memory_hits': muscle_memory_hits,
+            "total_usages": total_usages,
+            "success_rate": success_rate,
+            "muscle_memory_hits": muscle_memory_hits,
         }
 
     def check_tool_memory(self, user_input: str) -> tuple:
@@ -188,7 +194,7 @@ class ToolMemoryIntegration:
 
                     # 检查工具是否已废弃/降级
                     if self._should_demote_from_muscle_memory(tool_name):
-                        logger.info(f"工具 {tool_name} 已废弃/降级，跳过肌肉记忆匹配")
+                        logger.info("工具 %s 已废弃/降级，跳过肌肉记忆匹配", tool_name)
                         return None, "do_not_execute"
 
                     # 动态阈值
@@ -210,7 +216,7 @@ class ToolMemoryIntegration:
                     else:
                         return result, "do_not_execute"
             except Exception as e:
-                logger.warning(f"肌肉记忆匹配失败: {e}")
+                logger.warning("肌肉记忆匹配失败: %s", e)
 
         # 2. 降级：关键词匹配
         return self._check_keyword_match(user_input)
@@ -281,13 +287,14 @@ class ToolMemoryIntegration:
         try:
             weight_obj = self.tool_weights.get_weight(tool_name)
             if weight_obj:
-                multiplier = getattr(weight_obj, 'adaptive_multiplier', 1.0)
+                multiplier = getattr(weight_obj, "adaptive_multiplier", 1.0)
                 if multiplier > 0:
                     import math
+
                     threshold = self.confidence_threshold / math.sqrt(multiplier)
                     return max(0.3, min(1.0, threshold))
         except Exception as e:
-            logger.debug(f"获取工具权重失败: {e}")
+            logger.debug("获取工具权重失败: %s", e)
 
         return self.confidence_threshold
 
@@ -299,6 +306,7 @@ class ToolMemoryIntegration:
         try:
             state = self.tool_lifecycle.get_state(tool_name)
             from neurova.evolution.tool_lifecycle import ToolLifecycleState
+
             return state in (ToolLifecycleState.ARCHIVED, ToolLifecycleState.DEGRADED)
         except Exception:
             return False

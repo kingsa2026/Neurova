@@ -12,7 +12,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List
 
 import numpy as np
 
@@ -99,11 +99,7 @@ class ONNXEmbeddingEngine:
 
     @property
     def stats(self) -> Dict[str, Any]:
-        avg_ms = (
-            self._total_inference_ms / self._total_requests
-            if self._total_requests > 0
-            else 0
-        )
+        avg_ms = self._total_inference_ms / self._total_requests if self._total_requests > 0 else 0
         return {
             "model_name": self._model_name,
             "dimension": self._dimension,
@@ -133,7 +129,7 @@ class ONNXEmbeddingEngine:
                 self._model_dir = downloader.ensure_model("bge-small-zh-v1.5")
             else:
                 if not downloader.is_model_available("bge-small-zh-v1.5"):
-                    logger.error(f"嵌入模型不存在: {self._model_dir}")
+                    logger.error("嵌入模型不存在: %s", self._model_dir)
                     return False
 
             # 加载 Tokenizer
@@ -144,7 +140,7 @@ class ONNXEmbeddingEngine:
                 if tokenizer_path.exists():
                     self._tokenizer = SentencePieceProcessor()
                     self._tokenizer.Load(str(tokenizer_path))
-                    logger.info(f"Tokenizer 加载完成: {tokenizer_path}")
+                    logger.info("Tokenizer 加载完成: %s", tokenizer_path)
                 else:
                     # 回退到 HuggingFace tokenizer
                     self._tokenizer = self._load_hf_tokenizer()
@@ -200,9 +196,7 @@ class ONNXEmbeddingEngine:
             session_opts.inter_op_num_threads = 4
             session_opts.intra_op_num_threads = 4
 
-            self._ort_session = ort.InferenceSession(
-                str(onnx_path), sess_options=session_opts
-            )
+            self._ort_session = ort.InferenceSession(str(onnx_path), sess_options=session_opts)
 
             # 推断向量维度
             output_meta = self._ort_session.get_outputs()[0]
@@ -218,7 +212,7 @@ class ONNXEmbeddingEngine:
             return True
 
         except Exception as e:
-            logger.warning(f"ONNX Runtime 加载失败: {e}")
+            logger.warning("ONNX Runtime 加载失败: %s", e)
             return False
 
     async def _try_load_sentence_transformers(self) -> bool:
@@ -231,7 +225,7 @@ class ONNXEmbeddingEngine:
 
         try:
             self._st_model = SentenceTransformer(str(self._model_dir))
-            if hasattr(self._st_model, 'get_embedding_dimension'):
+            if hasattr(self._st_model, "get_embedding_dimension"):
                 self._dimension = self._st_model.get_embedding_dimension()
             else:
                 self._dimension = self._st_model.get_sentence_embedding_dimension()
@@ -245,7 +239,7 @@ class ONNXEmbeddingEngine:
             return True
 
         except Exception as e:
-            logger.warning(f"sentence-transformers 加载失败: {e}")
+            logger.warning("sentence-transformers 加载失败: %s", e)
             return False
 
     def _load_hf_tokenizer(self):
@@ -257,20 +251,20 @@ class ONNXEmbeddingEngine:
             tokenizer_path = self._model_dir / "tokenizer.json"
             if tokenizer_path.exists():
                 tokenizer = Tokenizer.from_file(str(tokenizer_path))
-                logger.info(f"tokenizers.Tokenizer 加载完成: {tokenizer_path}")
+                logger.info("tokenizers.Tokenizer 加载完成: %s", tokenizer_path)
                 return tokenizer
         except Exception as e:
-            logger.debug(f"tokenizers.Tokenizer 加载失败: {e}")
+            logger.debug("tokenizers.Tokenizer 加载失败: %s", e)
 
         # 回退到 transformers
         try:
             from transformers import AutoTokenizer
 
             tokenizer = AutoTokenizer.from_pretrained(str(self._model_dir))
-            logger.info(f"HuggingFace tokenizer 加载完成: {self._model_dir}")
+            logger.info("HuggingFace tokenizer 加载完成: %s", self._model_dir)
             return tokenizer
         except Exception as e:
-            logger.warning(f"HuggingFace tokenizer 加载失败: {e}")
+            logger.warning("HuggingFace tokenizer 加载失败: %s", e)
             return None
 
     def encode(self, text: str) -> List[float]:
@@ -346,7 +340,7 @@ class ONNXEmbeddingEngine:
 
                 # 截断
                 if len(token_ids) > self._max_length:
-                    token_ids = token_ids[:self._max_length]
+                    token_ids = token_ids[: self._max_length]
 
                 # 创建 attention mask
                 attention_mask = [1] * len(token_ids)
@@ -417,4 +411,4 @@ class ONNXEmbeddingEngine:
         self._tokenizer = None
         self._initialized = False
         self._backend_type = None
-        logger.info(f"ONNXEmbeddingEngine 已关闭 | 统计: {self.stats}")
+        logger.info("ONNXEmbeddingEngine 已关闭 | 统计: %s", self.stats)

@@ -7,12 +7,12 @@
 3. EnhancedRatchetPruner - 增强型棘轮剪枝器（结合递归和基础剪枝）
 """
 
-import logging
-from typing import Dict, List, Optional, Any, Callable, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime, UTC
-import json
 import hashlib
+import json
+import logging
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Candidate:
     """候选方案数据结构"""
+
     id: str
     name: str
     parameters: Dict[str, Any] = field(default_factory=dict)
@@ -30,7 +31,7 @@ class Candidate:
     validation_score: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -45,15 +46,15 @@ class Candidate:
             "metadata": self.metadata,
             "created_at": self.created_at.isoformat(),
         }
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Candidate':
+    def from_dict(cls, data: Dict[str, Any]) -> "Candidate":
         """从字典创建候选方案"""
         data = data.copy()
         if "created_at" in data and isinstance(data["created_at"], str):
             data["created_at"] = datetime.fromisoformat(data["created_at"])
         return cls(**data)
-    
+
     def generate_id(self) -> str:
         """生成唯一ID"""
         content = json.dumps(self.parameters, sort_keys=True)
@@ -63,6 +64,7 @@ class Candidate:
 @dataclass
 class PruneRoundResult:
     """剪枝轮次结果"""
+
     round_num: int
     precision: str  # coarse, medium, fine
     input_count: int
@@ -73,28 +75,25 @@ class PruneRoundResult:
 
 class RecursiveRatchetPruner:
     """递归棘轮剪枝器 - 多轮筛选，逐步提高精度
-    
+
     核心思想：通过"粗筛→中筛→细筛"的多轮筛选策略，将计算成本进一步降低。
-    
+
     设计优势：
     1. 粗筛阶段使用启发式规则，成本低（O(n)）
     2. 中筛阶段使用快速评估，成本中等（O(n log n)）
     3. 细筛阶段使用完整验证，成本高但精度高（O(n * V)）
     4. 总体计算成本降低87.5%（相比一次性完整验证）
     """
-    
+
     # 筛选精度常量
     PRECISION_COARSE = "coarse"
     PRECISION_MEDIUM = "medium"
     PRECISION_FINE = "fine"
-    
+
     # 默认最大复杂度阈值
     MAX_COMPLEXITY = 10.0
-    
-    def __init__(self, 
-                 rounds: int = 3,
-                 candidates_per_round: List[int] = None,
-                 max_complexity: float = None):
+
+    def __init__(self, rounds: int = 3, candidates_per_round: List[int] = None, max_complexity: float = None):
         """
         Args:
             rounds: 筛选轮数（默认3轮）
@@ -108,81 +107,79 @@ class RecursiveRatchetPruner:
         self.rounds = rounds
         self.candidates_per_round = candidates_per_round or [100, 20, 5]
         self.max_complexity = max_complexity or self.MAX_COMPLEXITY
-        
+
         # 每轮筛选的评估精度
         self.round_precision = {
-            0: self.PRECISION_COARSE,    # 粗筛：启发式规则，成本低
-            1: self.PRECISION_MEDIUM,    # 中筛：快速评估，成本中等
-            2: self.PRECISION_FINE,      # 细筛：完整验证，成本高
+            0: self.PRECISION_COARSE,  # 粗筛：启发式规则，成本低
+            1: self.PRECISION_MEDIUM,  # 中筛：快速评估，成本中等
+            2: self.PRECISION_FINE,  # 细筛：完整验证，成本高
         }
-        
+
         # 历史最优方案缓存
         self.best_candidates_cache: Dict[int, Candidate] = {}
-        
+
         # 剪枝历史
         self.prune_history: List[PruneRoundResult] = []
-        
+
         # 失败方案历史（用于粗筛阶段排除）
         self.failed_candidates_history: List[Candidate] = []
-        
-        logger.info(f"RecursiveRatchetPruner initialized with {rounds} rounds, "
-                    f"candidates_per_round={self.candidates_per_round}")
-    
-    def recursive_prune(self, 
-                       candidates: List[Candidate],
-                       validation_fn: Callable[[Candidate], Dict[str, Any]] = None,
-                       quick_eval_fn: Callable[[Candidate], float] = None,
-                       heuristic_fn: Callable[[Candidate], float] = None) -> Optional[Candidate]:
+
+        logger.info(
+            f"RecursiveRatchetPruner initialized with {rounds} rounds, "
+            f"candidates_per_round={self.candidates_per_round}"
+        )
+
+    def recursive_prune(
+        self,
+        candidates: List[Candidate],
+        validation_fn: Callable[[Candidate], Dict[str, Any]] = None,
+        quick_eval_fn: Callable[[Candidate], float] = None,
+        heuristic_fn: Callable[[Candidate], float] = None,
+    ) -> Optional[Candidate]:
         """递归棘轮剪枝
-        
+
         Args:
             candidates: 初始候选方案列表
             validation_fn: 验证函数（用于细筛阶段），返回验证结果字典
             quick_eval_fn: 快速评估函数（用于中筛阶段），返回分数
             heuristic_fn: 启发式评分函数（用于粗筛阶段），返回分数
-            
+
         Returns:
             最优候选方案，如果没有候选方案则返回None
         """
         if not candidates:
             logger.warning("No candidates provided for pruning")
             return None
-        
+
         current_candidates = candidates.copy()
         self.prune_history = []  # 重置历史
-        
-        logger.info(f"Starting recursive pruning with {len(candidates)} candidates")
-        
+
+        logger.info("Starting recursive pruning with %s candidates", len(candidates))
+
         for round_num in range(self.rounds):
             if len(current_candidates) <= 1:
-                logger.info(f"Only {len(current_candidates)} candidate(s) remaining, stopping early")
+                logger.info("Only %s candidate(s) remaining, stopping early", len(current_candidates))
                 break
-            
+
             # 确定本轮保留数量
             keep_count = min(
                 self.candidates_per_round[round_num] if round_num < len(self.candidates_per_round) else 1,
-                len(current_candidates)
+                len(current_candidates),
             )
-            
+
             # 执行本轮筛选
             start_time = datetime.now()
-            
+
             if round_num == 0:
                 # 第1轮：粗筛（启发式规则）
-                current_candidates = self._coarse_prune(
-                    current_candidates, keep_count, heuristic_fn
-                )
+                current_candidates = self._coarse_prune(current_candidates, keep_count, heuristic_fn)
             elif round_num == 1:
                 # 第2轮：中筛（快速评估）
-                current_candidates = self._medium_prune(
-                    current_candidates, keep_count, quick_eval_fn
-                )
+                current_candidates = self._medium_prune(current_candidates, keep_count, quick_eval_fn)
             else:
                 # 第3轮：细筛（完整验证）
-                current_candidates = self._fine_prune(
-                    current_candidates, keep_count, validation_fn
-                )
-            
+                current_candidates = self._fine_prune(current_candidates, keep_count, validation_fn)
+
             # 记录本轮结果
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
             round_result = PruneRoundResult(
@@ -191,32 +188,34 @@ class RecursiveRatchetPruner:
                 input_count=len(current_candidates) if round_num == 0 else len(current_candidates),
                 output_count=len(current_candidates),
                 execution_time_ms=execution_time,
-                best_candidate=current_candidates[0] if current_candidates else None
+                best_candidate=current_candidates[0] if current_candidates else None,
             )
             self.prune_history.append(round_result)
-            
+
             # 记录本轮最优
             if current_candidates:
                 self.best_candidates_cache[round_num] = current_candidates[0]
-            
-            logger.debug(f"Round {round_num} ({self.round_precision.get(round_num, 'unknown')}): "
-                        f"{len(current_candidates)} candidates remaining")
-        
+
+            logger.debug(
+                f"Round {round_num} ({self.round_precision.get(round_num, 'unknown')}): "
+                f"{len(current_candidates)} candidates remaining"
+            )
+
         # 返回最终最优方案
         result = current_candidates[0] if current_candidates else None
-        
+
         if result:
-            logger.info(f"Recursive pruning completed. Best candidate: {result.id} "
-                       f"(score: {result.validation_score:.3f})")
-        
+            logger.info(
+                f"Recursive pruning completed. Best candidate: {result.id} " f"(score: {result.validation_score:.3f})"
+            )
+
         return result
-    
-    def _coarse_prune(self, 
-                     candidates: List[Candidate],
-                     keep_count: int,
-                     heuristic_fn: Callable[[Candidate], float] = None) -> List[Candidate]:
+
+    def _coarse_prune(
+        self, candidates: List[Candidate], keep_count: int, heuristic_fn: Callable[[Candidate], float] = None
+    ) -> List[Candidate]:
         """第1轮：粗筛 - 基于启发式规则快速淘汰
-        
+
         规则：
         1. 排除明显不合理的方案（复杂度过高）
         2. 排除违反硬约束的方案
@@ -224,48 +223,47 @@ class RecursiveRatchetPruner:
         4. 基于简单启发式评分排序
         """
         filtered = []
-        
+
         for c in candidates:
             # 规则1: 排除明显不合理的方案
             if c.complexity > self.max_complexity:
-                logger.debug(f"Candidate {c.id} excluded: complexity {c.complexity} > {self.max_complexity}")
+                logger.debug("Candidate %s excluded: complexity %s > %s", c.id, c.complexity, self.max_complexity)
                 continue
-            
+
             # 规则2: 排除违反硬约束的方案
             if c.violates_hard_constraints:
-                logger.debug(f"Candidate {c.id} excluded: violates hard constraints")
+                logger.debug("Candidate %s excluded: violates hard constraints", c.id)
                 continue
-            
+
             # 规则3: 排除与历史失败方案相似的方案
             if self._similar_to_failed(c):
-                logger.debug(f"Candidate {c.id} excluded: similar to failed candidate")
+                logger.debug("Candidate %s excluded: similar to failed candidate", c.id)
                 continue
-            
+
             filtered.append(c)
-        
+
         # 应用启发式评分
         if heuristic_fn:
             for c in filtered:
                 c.heuristic_score = heuristic_fn(c)
-        
+
         # 基于启发式评分排序
         scored = [(c, c.heuristic_score) for c in filtered]
         scored.sort(key=lambda x: x[1], reverse=True)
-        
+
         result = [c for c, _ in scored[:keep_count]]
-        
+
         # 更新启发式分数
         for c in result:
             c.heuristic_score = next(score for candidate, score in scored if candidate.id == c.id)
-        
+
         return result
-    
-    def _medium_prune(self, 
-                     candidates: List[Candidate],
-                     keep_count: int,
-                     quick_eval_fn: Callable[[Candidate], float] = None) -> List[Candidate]:
+
+    def _medium_prune(
+        self, candidates: List[Candidate], keep_count: int, quick_eval_fn: Callable[[Candidate], float] = None
+    ) -> List[Candidate]:
         """第2轮：中筛 - 基于快速评估分数
-        
+
         使用轻量级评估函数，成本中等：
         1. 模拟执行关键路径
         2. 评估资源消耗
@@ -283,18 +281,17 @@ class RecursiveRatchetPruner:
                     c.quick_evaluation_score = score
                     scored.append((c, score))
                 except Exception as e:
-                    logger.warning(f"Quick evaluation failed for candidate {c.id}: {e}")
+                    logger.warning("Quick evaluation failed for candidate %s: %s", c.id, e)
                     scored.append((c, 0.0))
-        
+
         scored.sort(key=lambda x: x[1], reverse=True)
         return [c for c, _ in scored[:keep_count]]
-    
-    def _fine_prune(self, 
-                   candidates: List[Candidate],
-                   keep_count: int,
-                   validation_fn: Callable[[Candidate], Dict[str, Any]] = None) -> List[Candidate]:
+
+    def _fine_prune(
+        self, candidates: List[Candidate], keep_count: int, validation_fn: Callable[[Candidate], Dict[str, Any]] = None
+    ) -> List[Candidate]:
         """第3轮：细筛 - 完整验证
-        
+
         使用完整的验证函数，成本高但精度高：
         1. 运行完整测试套件
         2. 性能基准测试
@@ -314,24 +311,24 @@ class RecursiveRatchetPruner:
                     c.validation_score = score
                     scored.append((c, score))
                 except Exception as e:
-                    logger.warning(f"Validation failed for candidate {c.id}: {e}")
+                    logger.warning("Validation failed for candidate %s: %s", c.id, e)
                     scored.append((c, 0.0))
-        
+
         scored.sort(key=lambda x: x[1], reverse=True)
         return [c for c, _ in scored[:keep_count]]
-    
+
     def _compute_validation_score(self, validation_result: Dict[str, Any]) -> float:
         """计算验证分数
-        
+
         Args:
             validation_result: 验证结果字典，包含各个维度的分数
-            
+
         Returns:
             综合验证分数（0.0-1.0）
         """
         if not validation_result:
             return 0.0
-        
+
         # 计算加权平均分
         weights = {
             "functional_correctness": 0.3,
@@ -340,66 +337,66 @@ class RecursiveRatchetPruner:
             "semantic_alignment": 0.15,
             "diversity_test": 0.1,
         }
-        
+
         total_score = 0.0
         total_weight = 0.0
-        
+
         for dimension, weight in weights.items():
             if dimension in validation_result:
                 score = validation_result[dimension]
                 if isinstance(score, (int, float)):
                     total_score += score * weight
                     total_weight += weight
-        
+
         if total_weight == 0:
             # 如果没有匹配的维度，返回平均分
             scores = [v for v in validation_result.values() if isinstance(v, (int, float))]
             return sum(scores) / len(scores) if scores else 0.0
-        
+
         return total_score / total_weight
-    
+
     def _similar_to_failed(self, candidate: Candidate, similarity_threshold: float = 0.8) -> bool:
         """检查候选方案是否与历史失败方案相似
-        
+
         Args:
             candidate: 待检查的候选方案
             similarity_threshold: 相似度阈值（0.0-1.0）
-            
+
         Returns:
             如果相似则返回True
         """
         if not self.failed_candidates_history:
             return False
-        
+
         for failed in self.failed_candidates_history:
             similarity = self._compute_similarity(candidate, failed)
             if similarity > similarity_threshold:
                 return True
-        
+
         return False
-    
+
     def _compute_similarity(self, candidate1: Candidate, candidate2: Candidate) -> float:
         """计算两个候选方案的相似度
-        
+
         使用Jaccard相似度计算参数相似性
         """
         if not candidate1.parameters or not candidate2.parameters:
             return 0.0
-        
+
         # 获取所有参数键
         keys1 = set(candidate1.parameters.keys())
         keys2 = set(candidate2.parameters.keys())
-        
+
         if not keys1 or not keys2:
             return 0.0
-        
+
         # 计算Jaccard相似度
         intersection = keys1.intersection(keys2)
         union = keys1.union(keys2)
-        
+
         if not union:
             return 0.0
-        
+
         # 参数值相似度
         value_similarity = 0.0
         if intersection:
@@ -408,24 +405,24 @@ class RecursiveRatchetPruner:
                 if candidate1.parameters[key] == candidate2.parameters[key]:
                     matching_values += 1
             value_similarity = matching_values / len(intersection)
-        
+
         # 综合相似度（键相似度 + 值相似度）
         key_similarity = len(intersection) / len(union)
-        
+
         return (key_similarity + value_similarity) / 2
-    
+
     def add_failed_candidate(self, candidate: Candidate) -> None:
         """添加失败方案到历史记录
-        
+
         Args:
             candidate: 失败的候选方案
         """
         self.failed_candidates_history.append(candidate)
-        
+
         # 保持历史记录在合理范围内
         if len(self.failed_candidates_history) > 100:
             self.failed_candidates_history = self.failed_candidates_history[-50:]
-    
+
     def get_prune_history(self) -> List[Dict[str, Any]]:
         """获取剪枝历史"""
         return [
@@ -439,7 +436,7 @@ class RecursiveRatchetPruner:
             }
             for r in self.prune_history
         ]
-    
+
     def clear_cache(self) -> None:
         """清除缓存"""
         self.best_candidates_cache.clear()
@@ -449,18 +446,20 @@ class RecursiveRatchetPruner:
 
 class EnhancedRatchetPruner:
     """增强型棘轮剪枝器 - 结合递归剪枝和基础剪枝
-    
+
     设计思想：
     1. 先使用递归剪枝进行粗筛
     2. 再使用基础剪枝进行细筛
     3. 结合两者的优势，既保证效率又保证精度
     """
-    
-    def __init__(self, 
-                 max_candidates_per_dimension: int = 3,
-                 use_recursive: bool = True,
-                 recursive_rounds: int = 3,
-                 recursive_candidates_per_round: List[int] = None):
+
+    def __init__(
+        self,
+        max_candidates_per_dimension: int = 3,
+        use_recursive: bool = True,
+        recursive_rounds: int = 3,
+        recursive_candidates_per_round: List[int] = None,
+    ):
         """
         Args:
             max_candidates_per_dimension: 每个维度最大候选数量（基础剪枝）
@@ -470,72 +469,72 @@ class EnhancedRatchetPruner:
         """
         self.max_candidates = max_candidates_per_dimension
         self.use_recursive = use_recursive
-        
+
         # 创建递归剪枝器
         if use_recursive:
             self.recursive_pruner = RecursiveRatchetPruner(
-                rounds=recursive_rounds,
-                candidates_per_round=recursive_candidates_per_round
+                rounds=recursive_rounds, candidates_per_round=recursive_candidates_per_round
             )
         else:
             self.recursive_pruner = None
-        
+
         # 维度最优方案缓存
         self.dimension_winners: Dict[str, List[Candidate]] = {}
-        
-        logger.info(f"EnhancedRatchetPruner initialized: "
-                   f"use_recursive={use_recursive}, "
-                   f"max_candidates_per_dimension={max_candidates_per_dimension}")
-    
-    def prune_candidates(self, 
-                        dimension: str,
-                        candidates: List[Candidate],
-                        validation_fn: Callable[[Candidate], Dict[str, Any]] = None,
-                        quick_eval_fn: Callable[[Candidate], float] = None,
-                        heuristic_fn: Callable[[Candidate], float] = None) -> List[Candidate]:
+
+        logger.info(
+            f"EnhancedRatchetPruner initialized: "
+            f"use_recursive={use_recursive}, "
+            f"max_candidates_per_dimension={max_candidates_per_dimension}"
+        )
+
+    def prune_candidates(
+        self,
+        dimension: str,
+        candidates: List[Candidate],
+        validation_fn: Callable[[Candidate], Dict[str, Any]] = None,
+        quick_eval_fn: Callable[[Candidate], float] = None,
+        heuristic_fn: Callable[[Candidate], float] = None,
+    ) -> List[Candidate]:
         """增强型剪枝：先递归剪枝，再基础剪枝
-        
+
         Args:
             dimension: 维度名称
             candidates: 候选方案列表
             validation_fn: 验证函数
             quick_eval_fn: 快速评估函数
             heuristic_fn: 启发式评分函数
-            
+
         Returns:
             剪枝后的候选方案列表
         """
         if not candidates:
             return []
-        
-        logger.info(f"Pruning {len(candidates)} candidates for dimension '{dimension}'")
-        
+
+        logger.info("Pruning %s candidates for dimension '%s'", len(candidates), dimension)
+
         # 第一阶段：递归剪枝（如果启用且候选数量足够多）
         if self.use_recursive and len(candidates) > 20:
-            logger.info(f"Phase 1: Recursive pruning for dimension '{dimension}'")
+            logger.info("Phase 1: Recursive pruning for dimension '%s'", dimension)
             best_candidate = self.recursive_pruner.recursive_prune(
-                candidates,
-                validation_fn=validation_fn,
-                quick_eval_fn=quick_eval_fn,
-                heuristic_fn=heuristic_fn
+                candidates, validation_fn=validation_fn, quick_eval_fn=quick_eval_fn, heuristic_fn=heuristic_fn
             )
-            
+
             if best_candidate:
                 # 保留递归剪枝的最优方案，加上其他候选
                 recursive_result = [best_candidate]
-                
+
                 # 添加其他未被递归剪枝排除的候选
                 for c in candidates:
                     if c.id != best_candidate.id:
                         recursive_result.append(c)
-                
+
                 # 限制数量
-                candidates = recursive_result[:self.max_candidates * 3]  # 保留更多候选用于基础剪枝
-                logger.info(f"Recursive pruning reduced to {len(candidates)} candidates")
-        
+                candidates = recursive_result[: self.max_candidates * 3]  # 保留更多候选用于基础剪枝
+                logger.info("Recursive pruning reduced to %s candidates", len(candidates))
+
         # 第二阶段：基础剪枝
-        logger.info(f"Phase 2: Basic pruning for dimension '{dimension}'")
-        
+        logger.info("Phase 2: Basic pruning for dimension '%s'", dimension)
+
         # 按验证分数排序
         if validation_fn:
             for c in candidates:
@@ -543,28 +542,27 @@ class EnhancedRatchetPruner:
                     result = validation_fn(c)
                     c.validation_score = self._compute_validation_score(result)
                 except Exception as e:
-                    logger.warning(f"Validation failed for candidate {c.id}: {e}")
+                    logger.warning("Validation failed for candidate %s: %s", c.id, e)
                     c.validation_score = 0.0
-        
+
         # 按分数排序
         candidates.sort(key=lambda x: x.validation_score, reverse=True)
-        
+
         # 保留top-k
-        result = candidates[:self.max_candidates]
-        
+        result = candidates[: self.max_candidates]
+
         # 更新维度缓存
         self.dimension_winners[dimension] = result
-        
-        logger.info(f"Pruning completed for dimension '{dimension}': "
-                   f"{len(result)} candidates remaining")
-        
+
+        logger.info("Pruning completed for dimension '%s': " f"%s candidates remaining", dimension, len(result))
+
         return result
-    
+
     def _compute_validation_score(self, validation_result: Dict[str, Any]) -> float:
         """计算验证分数（与RecursiveRatchetPruner相同）"""
         if not validation_result:
             return 0.0
-        
+
         weights = {
             "functional_correctness": 0.3,
             "performance_baseline": 0.25,
@@ -572,27 +570,27 @@ class EnhancedRatchetPruner:
             "semantic_alignment": 0.15,
             "diversity_test": 0.1,
         }
-        
+
         total_score = 0.0
         total_weight = 0.0
-        
+
         for dimension, weight in weights.items():
             if dimension in validation_result:
                 score = validation_result[dimension]
                 if isinstance(score, (int, float)):
                     total_score += score * weight
                     total_weight += weight
-        
+
         if total_weight == 0:
             scores = [v for v in validation_result.values() if isinstance(v, (int, float))]
             return sum(scores) / len(scores) if scores else 0.0
-        
+
         return total_score / total_weight
-    
+
     def get_dimension_winners(self, dimension: str) -> List[Candidate]:
         """获取指定维度的最优方案"""
         return self.dimension_winners.get(dimension, [])
-    
+
     def clear_cache(self) -> None:
         """清除缓存"""
         self.dimension_winners.clear()

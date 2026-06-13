@@ -12,9 +12,10 @@ import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
 
 def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
     """计算两个向量的余弦相似度"""
@@ -30,9 +31,11 @@ def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
 
     return dot_product / (norm_a * norm_b)
 
+
 @dataclass
 class MemoryRecord:
     """记忆记录"""
+
     id: str
     content: str
     embedding: List[float] = field(default_factory=list)
@@ -49,7 +52,7 @@ class MemoryRecord:
     neuser_id: str = "default"
     user_id: str = "default"
     shared: bool = False  # 跨 agent 共享开关
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MemoryRecord":
         """从字典创建MemoryRecord（兼容Memory.to_dict()格式）"""
@@ -62,7 +65,7 @@ class MemoryRecord:
                 created_at = datetime.now()
         elif not isinstance(created_at, datetime):
             created_at = datetime.now()
-            
+
         # 映射MemoryManager的字段到MemoryRecord
         return cls(
             id=data.get("id", ""),
@@ -81,7 +84,7 @@ class MemoryRecord:
             user_id=data.get("user_id", "default"),
             shared=data.get("shared", False),
         )
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式（兼容Memory.from_dict()格式）"""
         return {
@@ -92,7 +95,9 @@ class MemoryRecord:
             "importance": self.importance,
             "emotion_score": self.emotion_score,
             "recall_count": self.recall_count,
-            "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else str(self.created_at),
+            "created_at": (
+                self.created_at.isoformat() if isinstance(self.created_at, datetime) else str(self.created_at)
+            ),
             "categories": self.categories,
             "is_archived": self.is_archived,
             "merged_from": self.merged_from,
@@ -102,15 +107,18 @@ class MemoryRecord:
             "shared": self.shared,
         }
 
+
 @dataclass
 class MergeResult:
     """合并结果"""
+
     merged_id: str
     merged_content: str
     source_ids: List[str]
     avg_temperature: float
     avg_importance: float
     combined_categories: List[str]
+
 
 class SleepConsolidation:
     """睡眠整合引擎
@@ -122,12 +130,14 @@ class SleepConsolidation:
     4. 归档低活跃度记忆
     """
 
-    def __init__(self,
-                 similarity_threshold: float = 0.7,
-                 archive_threshold: float = 20.0,
-                 decay_rate: float = 0.1,
-                 memory_manager=None,
-                 storage=None):
+    def __init__(
+        self,
+        similarity_threshold: float = 0.7,
+        archive_threshold: float = 20.0,
+        decay_rate: float = 0.1,
+        memory_manager=None,
+        storage=None,
+    ):
         """初始化睡眠整合引擎
 
         Args:
@@ -151,9 +161,9 @@ class SleepConsolidation:
         self._total_merged: int = 0
         self._temperature_sum: float = 0.0
 
-        logger.debug(f"SleepConsolidation 初始化: "
-                    f"similarity={similarity_threshold}, "
-                    f"archive={archive_threshold}")
+        logger.debug(
+            f"SleepConsolidation 初始化: " f"similarity={similarity_threshold}, " f"archive={archive_threshold}"
+        )
 
     def set_state_value(self, key: str, value: Any) -> None:
         """设置状态值（供 IdleTimeTracker 调用）"""
@@ -203,7 +213,7 @@ class SleepConsolidation:
                 # 创建新簇
                 clusters.append([memory])
 
-        logger.debug(f"聚类结果: {len(memories)} 条记忆 → {len(clusters)} 个簇")
+        logger.debug("聚类结果: %s 条记忆 → %s 个簇", len(memories), len(clusters))
         return clusters
 
     def merge_cluster(self, cluster: List[MemoryRecord]) -> MergeResult:
@@ -243,9 +253,7 @@ class SleepConsolidation:
         avg_importance = sum(m.importance for m in cluster) / len(cluster)
 
         # 合并分类（去重）
-        all_categories = list(set(
-            cat for m in cluster for cat in m.categories
-        ))
+        all_categories = list(set(cat for m in cluster for cat in m.categories))
 
         # 生成合并ID
         merged_id = f"merged_{cluster[0].id}_{len(cluster)}"
@@ -262,7 +270,7 @@ class SleepConsolidation:
             combined_categories=all_categories,
         )
 
-        logger.debug(f"合并簇: {len(cluster)} 条记忆 → {merged_id}")
+        logger.debug("合并簇: %s 条记忆 → %s", len(cluster), merged_id)
         return result
 
     def apply_sleep_decay(self, memories: List[MemoryRecord]) -> List[MemoryRecord]:
@@ -291,12 +299,13 @@ class SleepConsolidation:
             # 归档检查
             if memory.temperature < self.archive_threshold:
                 memory.is_archived = True
-                logger.debug(f"记忆 {memory.id} 已归档 (温度: {memory.temperature:.1f})")
+                logger.debug("记忆 %s 已归档 (温度: %.1f)", memory.id, memory.temperature)
 
         return memories
 
-    def consolidate(self, memories: List[MemoryRecord], 
-                    isolation_context: Optional["IsolationContext"] = None) -> Tuple[List[MemoryRecord], List[MergeResult]]:
+    def consolidate(
+        self, memories: List[MemoryRecord], isolation_context: Optional["IsolationContext"] = None
+    ) -> Tuple[List[MemoryRecord], List[MergeResult]]:
         """执行完整的睡眠整合流程
 
         步骤：
@@ -313,7 +322,7 @@ class SleepConsolidation:
             Tuple[List[MemoryRecord], List[MergeResult]]:
                 整合后的记忆列表, 合并记录列表
         """
-        logger.info(f"开始睡眠整合: {len(memories)} 条记忆")
+        logger.info("开始睡眠整合: %s 条记忆", len(memories))
 
         # 1. 聚类
         clusters = self.cluster_by_similarity(memories)
@@ -354,9 +363,11 @@ class SleepConsolidation:
         active_count = sum(1 for m in merged_memories if not m.is_archived)
         archived_count = sum(1 for m in merged_memories if m.is_archived)
 
-        logger.info(f"睡眠整合完成: "
-                   f"合并 {len(memories)} → {len(merged_memories)} 条记忆, "
-                   f"活跃 {active_count}, 归档 {archived_count}")
+        logger.info(
+            f"睡眠整合完成: "
+            f"合并 {len(memories)} → {len(merged_memories)} 条记忆, "
+            f"活跃 {active_count}, 归档 {archived_count}"
+        )
 
         # 更新 RSI 反馈统计
         self._consolidation_count += 1
@@ -376,14 +387,12 @@ class SleepConsolidation:
         total_memories = self._total_memories_processed
         merge_rate = self._total_merged / total_memories if total_memories > 0 else 0.0
         total_merged_memories = self._consolidation_count  # 每次整合产出的记忆数
-        avg_temperature = (
-            self._temperature_sum / total_merged_memories if total_merged_memories > 0 else 50.0
-        )
+        avg_temperature = self._temperature_sum / total_merged_memories if total_merged_memories > 0 else 50.0
 
         return {
-            'consolidation_count': self._consolidation_count,
-            'merge_rate': merge_rate,
-            'avg_temperature': avg_temperature,
+            "consolidation_count": self._consolidation_count,
+            "merge_rate": merge_rate,
+            "avg_temperature": avg_temperature,
         }
 
     def run_sleep_cycle(self, memories: List[MemoryRecord], phase: str = "sleep") -> Dict[str, Any]:
@@ -397,11 +406,11 @@ class SleepConsolidation:
             Dict[str, Any]: 包含整合结果的字典
         """
         merged_memories, merge_results = self.consolidate(memories)
-        
+
         # 计算统计信息
         active_count = sum(1 for m in merged_memories if not m.is_archived)
         archived_count = sum(1 for m in merged_memories if m.is_archived)
-        
+
         # 构建结果字典（向后兼容）
         result = {
             "phase": phase,
@@ -412,6 +421,6 @@ class SleepConsolidation:
             "merged_memories": merged_memories,
             "merge_results": merge_results,
         }
-        
-        logger.info(f"睡眠周期完成: 阶段={phase}, 处理={len(memories)} 条记忆")
+
+        logger.info("睡眠周期完成: 阶段=%s, 处理=%s 条记忆", phase, len(memories))
         return result

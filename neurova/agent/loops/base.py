@@ -3,14 +3,16 @@ Agent Loop 基类 - 定义标准接口
 
 每个 Loop 实现特定的模型交互逻辑。
 """
+
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
 from datetime import datetime
-from neurova.llm_client import LLMResponse
+from typing import Any, Dict, List, Optional
+
 
 logger = logging.getLogger(__name__)
+
 
 class BaseAgentLoop(ABC):
     """
@@ -22,7 +24,7 @@ class BaseAgentLoop(ABC):
     设计参考: cua-main 的 Agent Loop 系统
     """
 
-    def __init__(self, agent: 'Agent'):
+    def __init__(self, agent: "Agent"):
         """
         初始化 Loop
 
@@ -33,12 +35,7 @@ class BaseAgentLoop(ABC):
         self.llm_client = agent.llm_client
 
     @abstractmethod
-    async def predict_step(
-        self,
-        messages: List[Dict],
-        tools: Optional[List[Dict]] = None,
-        **kwargs
-    ) -> Any:
+    async def predict_step(self, messages: List[Dict], tools: Optional[List[Dict]] = None, **kwargs) -> Any:
         """
         执行一步预测 - 子类必须实现
 
@@ -50,7 +47,6 @@ class BaseAgentLoop(ABC):
         返回:
             LLMResponse 对象或原始响应
         """
-        pass
 
     async def handle_tool_calls(self, tool_calls: List, messages: List[Dict]) -> List[Dict]:
         """
@@ -69,7 +65,7 @@ class BaseAgentLoop(ABC):
         new_messages = []
 
         # 初始化工具消息列表（如果不存在）
-        if not hasattr(self.agent, '_tool_messages_list'):
+        if not hasattr(self.agent, "_tool_messages_list"):
             self.agent._tool_messages_list = []
 
         for tool_call in tool_calls:
@@ -80,36 +76,37 @@ class BaseAgentLoop(ABC):
 
             try:
                 # 记录工具调用消息（用于前端展示）
-                self.agent._tool_messages_list.append({
-                    "type": "tool_call",
-                    "tool_name": _tc_function_name,
-                    "params": _tc_arguments,
-                    "timestamp": datetime.now().isoformat(),
-                })
+                self.agent._tool_messages_list.append(
+                    {
+                        "type": "tool_call",
+                        "tool_name": _tc_function_name,
+                        "params": _tc_arguments,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
 
                 # 执行工具：优先 SkillRegistry → 失败则 fallback ToolRouter
                 exec_result = None
 
                 # 1. 尝试 SkillRegistry
                 if self.agent.skill_registry:
-                    skill_result = await self.agent.skill_registry.execute_skill(
-                        _tc_function_name, **_tc_arguments
-                    )
+                    skill_result = await self.agent.skill_registry.execute_skill(_tc_function_name, **_tc_arguments)
                     # SkillRegistry 找不到该 skill 时返回 None；找到但执行失败返回 success=False
-                    if skill_result is not None and getattr(skill_result, 'success', False):
+                    if skill_result is not None and getattr(skill_result, "success", False):
                         from types import SimpleNamespace
+
                         exec_result = SimpleNamespace(
                             success=True,
-                            data=getattr(skill_result, 'data', None),
+                            data=getattr(skill_result, "data", None),
                             error=None,
                             metadata={},
                         )
-                        logger.info(f"Tool executed via SkillRegistry: {_tc_function_name}")
+                        logger.info("Tool executed via SkillRegistry: %s", _tc_function_name)
 
                 # 2. Fallback: ToolRouter（内置工具 + MCP 工具）
-                if exec_result is None and hasattr(self.agent, 'tool_router') and self.agent.tool_router:
+                if exec_result is None and hasattr(self.agent, "tool_router") and self.agent.tool_router:
                     try:
-                        user_id = getattr(self.agent.config, 'user_id', 'default')
+                        user_id = getattr(self.agent.config, "user_id", "default")
                         router_result = await self.agent.tool_router.execute(
                             tool_name=_tc_function_name,
                             params=_tc_arguments,
@@ -118,18 +115,19 @@ class BaseAgentLoop(ABC):
                         )
                         if router_result and router_result.success:
                             from types import SimpleNamespace
+
                             exec_result = SimpleNamespace(
                                 success=True,
                                 data=router_result.result,
                                 error=None,
                                 metadata={},
                             )
-                            logger.info(f"Tool executed via ToolRouter: {_tc_function_name}")
+                            logger.info("Tool executed via ToolRouter: %s", _tc_function_name)
                         else:
                             err = router_result.error if router_result else "ToolRouter 执行返回空"
                             exec_result = SimpleNamespace(success=False, data=None, error=err, metadata={})
                     except Exception as e:
-                        logger.warning(f"ToolRouter fallback 失败: {_tc_function_name}, {e}")
+                        logger.warning("ToolRouter fallback 失败: %s, %s", _tc_function_name, e)
 
                 if exec_result:
                     # 构建 tool_result message
@@ -138,63 +136,77 @@ class BaseAgentLoop(ABC):
                     else:
                         content = json.dumps({"error": exec_result.error})
 
-                    new_messages.append({
-                        "role": "tool",
-                        "tool_call_id": _tc_id,
-                        "content": content,
-                    })
+                    new_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": _tc_id,
+                            "content": content,
+                        }
+                    )
 
                     # 记录工具执行结果（用于前端展示）
-                    self.agent._tool_messages_list.append({
-                        "type": "tool_result",
-                        "tool_name": _tc_function_name,
-                        "result": content[:500] if content else "执行完成",
-                        "success": exec_result.success,
-                        "timestamp": datetime.now().isoformat(),
-                    })
+                    self.agent._tool_messages_list.append(
+                        {
+                            "type": "tool_result",
+                            "tool_name": _tc_function_name,
+                            "result": content[:500] if content else "执行完成",
+                            "success": exec_result.success,
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                    )
 
-                    logger.info(f"Tool executed: {_tc_function_name}, success={exec_result.success}")
+                    logger.info("Tool executed: %s, success=%s", _tc_function_name, exec_result.success)
 
                 else:
-                    logger.warning(f"工具执行失败（SkillRegistry+ToolRouter 均未能处理）: {_tc_function_name}")
+                    logger.warning("工具执行失败（SkillRegistry+ToolRouter 均未能处理）: %s", _tc_function_name)
                     err = f"工具 {_tc_function_name} 执行失败：SkillRegistry 和 ToolRouter 均未找到该工具"
-                    new_messages.append({
-                        "role": "tool",
-                        "tool_call_id": _tc_id,
-                        "content": json.dumps({"error": err}),
-                    })
-                    self.agent._tool_messages_list.append({
-                        "type": "tool_result",
-                        "tool_name": _tc_function_name,
-                        "result": err,
-                        "success": False,
-                        "timestamp": datetime.now().isoformat(),
-                    })
+                    new_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": _tc_id,
+                            "content": json.dumps({"error": err}),
+                        }
+                    )
+                    self.agent._tool_messages_list.append(
+                        {
+                            "type": "tool_result",
+                            "tool_name": _tc_function_name,
+                            "result": err,
+                            "success": False,
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                    )
 
             except Exception as e:
                 logger.error(f"Error executing tool {_tc_function_name}: {e}", exc_info=True)
-                new_messages.append({
-                    "role": "tool",
-                    "tool_call_id": _tc_id,
-                    "content": json.dumps({"error": str(e)}),
-                })
-                self.agent._tool_messages_list.append({
-                    "type": "tool_result",
-                    "tool_name": _tc_function_name,
-                    "result": f"执行出错: {str(e)}",
-                    "success": False,
-                    "timestamp": datetime.now().isoformat(),
-                })
-
-                # 记录异常结果
-                if hasattr(self.agent, '_tool_messages_list'):
-                    self.agent._tool_messages_list.append({
+                new_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": _tc_id,
+                        "content": json.dumps({"error": str(e)}),
+                    }
+                )
+                self.agent._tool_messages_list.append(
+                    {
                         "type": "tool_result",
-                        "tool_name": tool_call.get('function', {}).get('name', 'unknown'),
-                        "result": f"Error: {str(e)}",
+                        "tool_name": _tc_function_name,
+                        "result": f"执行出错: {str(e)}",
                         "success": False,
                         "timestamp": datetime.now().isoformat(),
-                    })
+                    }
+                )
+
+                # 记录异常结果
+                if hasattr(self.agent, "_tool_messages_list"):
+                    self.agent._tool_messages_list.append(
+                        {
+                            "type": "tool_result",
+                            "tool_name": tool_call.get("function", {}).get("name", "unknown"),
+                            "result": f"Error: {str(e)}",
+                            "success": False,
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                    )
 
         return new_messages
 
@@ -213,6 +225,7 @@ class BaseAgentLoop(ABC):
         # 尝试使用 OpenAI Schema Adapter (如果存在)
         try:
             from neurova.skill_system.compat import OpenAISchemaAdapter
+
             use_adapter = True
         except ImportError:
             use_adapter = False
@@ -227,12 +240,8 @@ class BaseAgentLoop(ABC):
                     "function": {
                         "name": skill.name,
                         "description": skill.description,
-                        "parameters": {
-                            "type": "object",
-                            "properties": {},
-                            "required": []
-                        }
-                    }
+                        "parameters": {"type": "object", "properties": {}, "required": []},
+                    },
                 }
 
             tools.append(tool_schema)

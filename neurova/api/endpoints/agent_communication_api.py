@@ -14,15 +14,13 @@ Agent 外部通信 API 端点（简化版）
 - API密钥绑定到特定用户和Agent
 """
 
-import datetime
 import hashlib
-import hmac
 import logging
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -33,8 +31,10 @@ router = APIRouter()
 # Pydantic Models
 # ---------------------------------------------------------------------------
 
+
 class GenerateAPIKeyRequest(BaseModel):
     """生成API密钥请求"""
+
     name: str = Field(..., description="密钥名称")
     agent_id: str = Field(default="default", description="Agent ID")
     permissions: List[str] = Field(default=["chat", "memory"], description="权限列表")
@@ -43,6 +43,7 @@ class GenerateAPIKeyRequest(BaseModel):
 
 class GenerateAPIKeyResponse(BaseModel):
     """生成API密钥响应"""
+
     key_id: str
     api_key: str
     name: str
@@ -54,12 +55,14 @@ class GenerateAPIKeyResponse(BaseModel):
 
 class UpdateAPIKeyRequest(BaseModel):
     """更新API密钥请求"""
+
     name: Optional[str] = None
     permissions: Optional[List[str]] = None
 
 
 class HandshakeRequestModel(BaseModel):
     """握手请求"""
+
     agent_id: str = Field(..., description="外部Agent ID")
     agent_name: str = Field(..., description="外部Agent名称")
     capabilities: List[str] = Field(default_factory=list, description="能力列表")
@@ -68,6 +71,7 @@ class HandshakeRequestModel(BaseModel):
 
 class SendMessageRequest(BaseModel):
     """发送消息请求"""
+
     target_agent_id: str = Field(..., description="目标Agent ID")
     message_type: str = Field(default="text", description="消息类型")
     content: Dict[str, Any] = Field(..., description="消息内容")
@@ -87,6 +91,7 @@ _external_agents: Dict[str, Dict[str, Any]] = {}
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _generate_api_key() -> str:
     """生成API密钥"""
@@ -108,11 +113,12 @@ def _verify_api_key_or_token(
         token = authorization[7:]
         try:
             from neurova.api.auth import verify_token
+
             payload = verify_token(token)
             return {"user_id": payload.get("sub", "default"), "auth_type": "jwt"}
         except Exception:
             pass
-    
+
     # 尝试API Key
     if x_api_key:
         key_hash = _hash_api_key(x_api_key)
@@ -127,7 +133,7 @@ def _verify_api_key_or_token(
                     "agent_id": key_info.get("agent_id", "default"),
                     "auth_type": "api_key",
                 }
-    
+
     # 默认用户（开发模式）
     return {"user_id": "default", "agent_id": "default", "auth_type": "default"}
 
@@ -135,6 +141,7 @@ def _verify_api_key_or_token(
 # ---------------------------------------------------------------------------
 # Routes - API Key Management
 # ---------------------------------------------------------------------------
+
 
 @router.post("/api-keys", response_model=GenerateAPIKeyResponse)
 async def generate_api_key(
@@ -145,11 +152,11 @@ async def generate_api_key(
     key_id = str(uuid.uuid4())
     api_key = _generate_api_key()
     now = time.time()
-    
+
     expires_at = None
     if body.expires_in_days:
         expires_at = now + body.expires_in_days * 86400
-    
+
     key_info = {
         "key_id": key_id,
         "key_hash": _hash_api_key(api_key),
@@ -162,7 +169,7 @@ async def generate_api_key(
         "expires_at": expires_at,
     }
     _api_keys[key_id] = key_info
-    
+
     return GenerateAPIKeyResponse(
         key_id=key_id,
         api_key=api_key,
@@ -208,12 +215,12 @@ async def update_api_key(
         raise HTTPException(status_code=404, detail="API key not found")
     if key_info.get("user_id") != auth.get("user_id"):
         raise HTTPException(status_code=403, detail="Permission denied")
-    
+
     if body.name is not None:
         key_info["name"] = body.name
     if body.permissions is not None:
         key_info["permissions"] = body.permissions
-    
+
     return {"code": 0, "message": "API key updated"}
 
 
@@ -228,7 +235,7 @@ async def revoke_api_key(
         raise HTTPException(status_code=404, detail="API key not found")
     if key_info.get("user_id") != auth.get("user_id"):
         raise HTTPException(status_code=403, detail="Permission denied")
-    
+
     key_info["revoked"] = True
     return {"code": 0, "message": "API key revoked"}
 
@@ -244,7 +251,7 @@ async def delete_api_key(
         raise HTTPException(status_code=404, detail="API key not found")
     if key_info.get("user_id") != auth.get("user_id"):
         raise HTTPException(status_code=403, detail="Permission denied")
-    
+
     del _api_keys[key_id]
     return {"code": 0, "message": "API key deleted"}
 
@@ -252,6 +259,7 @@ async def delete_api_key(
 # ---------------------------------------------------------------------------
 # Routes - Handshake Protocol
 # ---------------------------------------------------------------------------
+
 
 @router.post("/handshake")
 async def handshake(
@@ -261,7 +269,7 @@ async def handshake(
     """握手协议端点"""
     handshake_id = str(uuid.uuid4())
     now = time.time()
-    
+
     # 记录握手
     _handshakes[handshake_id] = {
         "handshake_id": handshake_id,
@@ -273,7 +281,7 @@ async def handshake(
         "status": "completed",
         "created_at": now,
     }
-    
+
     # 注册外部Agent
     _external_agents[body.agent_id] = {
         "agent_id": body.agent_id,
@@ -284,7 +292,7 @@ async def handshake(
         "last_seen": now,
         "status": "online",
     }
-    
+
     return {
         "code": 0,
         "data": {
@@ -300,6 +308,7 @@ async def handshake(
 # Routes - Message Send/Receive
 # ---------------------------------------------------------------------------
 
+
 @router.post("/messages/send")
 async def send_message(
     body: SendMessageRequest,
@@ -308,7 +317,7 @@ async def send_message(
     """发送消息"""
     message_id = str(uuid.uuid4())
     now = time.time()
-    
+
     message = {
         "message_id": message_id,
         "from_agent_id": auth.get("agent_id", "default"),
@@ -321,17 +330,18 @@ async def send_message(
         "status": "sent",
     }
     _messages.append(message)
-    
+
     # 尝试通过Agent路由发送
     try:
         from neurova.api.endpoints import get_agent_instance
+
         agent = get_agent_instance()
         if agent and hasattr(agent, "send_message"):
             await agent.send_message(body.target_agent_id, body.content)
             message["status"] = "delivered"
     except Exception as e:
-        logger.warning(f"Failed to deliver message via agent: {e}")
-    
+        logger.warning("Failed to deliver message via agent: %s", e)
+
     return {
         "code": 0,
         "data": {
@@ -359,6 +369,7 @@ async def get_messages(
 # ---------------------------------------------------------------------------
 # Routes - External Agent Management
 # ---------------------------------------------------------------------------
+
 
 @router.get("/external-agents")
 async def list_external_agents(
@@ -400,7 +411,7 @@ async def get_agent_status(
         raise HTTPException(status_code=404, detail="External agent not found")
     if agent.get("user_id") != auth.get("user_id"):
         raise HTTPException(status_code=403, detail="Permission denied")
-    
+
     return {
         "code": 0,
         "data": {
@@ -418,7 +429,7 @@ async def get_routing_stats(
     """获取路由统计信息"""
     user_id = auth.get("user_id", "default")
     user_messages = [m for m in _messages if m.get("user_id") == user_id]
-    
+
     return {
         "code": 0,
         "data": {

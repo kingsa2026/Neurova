@@ -9,35 +9,39 @@ D1 任务重构版本：
 """
 
 import logging
-import inspect
-import json
 import time
-from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
 class SkillStatus(Enum):
     """Skill 状态"""
+
     ACTIVE = "active"
     INACTIVE = "inactive"
     LOADING = "loading"
     ERROR = "error"
 
+
 @dataclass
 class SkillResult:
     """Skill 执行结果"""
+
     success: bool = True
     data: Any = None
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     execution_time: float = 0.0
 
+
 @dataclass
 class SkillInfo:
     """Skill 信息"""
+
     name: str
     description: str
     version: str = "1.0.0"
@@ -48,6 +52,7 @@ class SkillInfo:
     status: SkillStatus = SkillStatus.ACTIVE
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+
 
 class SkillEvent:
     """Skill 事件"""
@@ -65,6 +70,7 @@ class SkillEvent:
             "data": self.data,
             "timestamp": self.timestamp.isoformat(),
         }
+
 
 class Skill:
     """Skill 基类"""
@@ -108,6 +114,7 @@ class Skill:
                 handler(event)
             except Exception as e:
                 logging.getLogger(__name__).error(f"事件处理失败: {e}")
+
 
 class MemorySkill(Skill):
     """记忆 Skill"""
@@ -163,6 +170,7 @@ class MemorySkill(Skill):
         # 这里应该调用记忆管理器
         return {"stored": True}
 
+
 class WebSearchSkill(Skill):
     """网络搜索 Skill"""
 
@@ -192,6 +200,7 @@ class WebSearchSkill(Skill):
         """搜索网络"""
         # 这里应该实现网络搜索逻辑
         return []
+
 
 class FileOperationSkill(Skill):
     """文件操作 Skill"""
@@ -240,7 +249,7 @@ class FileOperationSkill(Skill):
     async def _read_file(self, file_path: str, params: Dict) -> Dict:
         """读取文件"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
                 return {"content": content, "file_path": file_path}
         except Exception as e:
@@ -249,11 +258,12 @@ class FileOperationSkill(Skill):
     async def _write_file(self, file_path: str, content: str, params: Dict) -> Dict:
         """写入文件"""
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
                 return {"success": True, "file_path": file_path}
         except Exception as e:
             return {"error": str(e)}
+
 
 class SkillRegistry:
     """Skill 注册表"""
@@ -289,7 +299,9 @@ class SkillRegistry:
         """获取所有 Skill 名称"""
         return list(self._skills.keys())
 
-    async def execute_skill(self, skill_name: str, params: Dict[str, Any], context: Optional[Dict] = None) -> SkillResult:
+    async def execute_skill(
+        self, skill_name: str, params: Dict[str, Any], context: Optional[Dict] = None
+    ) -> SkillResult:
         """执行 Skill"""
         skill = self.get_skill(skill_name)
         if not skill:
@@ -316,6 +328,7 @@ class SkillRegistry:
         if self._runtime_manager is None:
             try:
                 from neurova.execution_layers import get_runtime_manager
+
                 self._runtime_manager = get_runtime_manager()
             except ImportError:
                 logger.debug("execution_layers 模块不可用")
@@ -352,7 +365,7 @@ class SkillRegistry:
             return await self.execute_skill(skill_name, params, context)
 
         try:
-            from neurova.execution_layers import RuntimeType, RuntimeFactory
+            from neurova.execution_layers import RuntimeFactory, RuntimeType
 
             rt = RuntimeType.DOCKER if runtime_type == "docker" else RuntimeType.LOCAL
             runtime = RuntimeFactory.create(rt, runtime_id=f"skill_{skill_name}_{int(time.time())}")
@@ -360,7 +373,7 @@ class SkillRegistry:
 
             try:
                 import json as _json
-                import os as _os
+
                 exec_env = {
                     "NEUROVA_SKILL_NAME": skill_name,
                     "NEUROVA_SKILL_ARGS": _json.dumps(params),
@@ -370,13 +383,16 @@ class SkillRegistry:
 
                 exec_result = await runtime.exec(
                     command="python",
-                    args=["-c", (
-                        "import asyncio, json, os; "
-                        f"from neurova.skill_system import SkillRegistry; "
-                        f"args = json.loads(os.environ.get('NEUROVA_SKILL_ARGS', '{{}}')); "
-                        f"result = asyncio.run(SkillRegistry().execute_skill('{skill_name}', args)); "
-                        "print(json.dumps({'success': result.success, 'data': result.data}))"
-                    )],
+                    args=[
+                        "-c",
+                        (
+                            "import asyncio, json, os; "
+                            f"from neurova.skill_system import SkillRegistry; "
+                            f"args = json.loads(os.environ.get('NEUROVA_SKILL_ARGS', '{{}}')); "
+                            f"result = asyncio.run(SkillRegistry().execute_skill('{skill_name}', args)); "
+                            "print(json.dumps({'success': result.success, 'data': result.data}))"
+                        ),
+                    ],
                     env=exec_env,
                     timeout=params.get("timeout", 60),
                 )
@@ -400,7 +416,7 @@ class SkillRegistry:
 
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
-            logger.error(f"隔离执行 Skill 失败: {e}")
+            logger.error("隔离执行 Skill 失败: %s", e)
             return await self.execute_skill(skill_name, params, context)
 
     def add_event_handler(self, handler: Callable):
@@ -423,6 +439,7 @@ class SkillRegistry:
                 handler(event)
             except Exception as e:
                 logging.getLogger(__name__).error(f"事件处理失败: {e}")
+
 
 def create_default_skills(memory_manager=None) -> SkillRegistry:
     """

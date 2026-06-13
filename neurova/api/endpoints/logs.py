@@ -11,12 +11,10 @@ from __future__ import annotations
 """
 
 import logging
-import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -26,6 +24,7 @@ router = APIRouter()
 
 class LogEntry(BaseModel):
     """日志条目"""
+
     log_id: str
     level: str
     message: str
@@ -36,6 +35,7 @@ class LogEntry(BaseModel):
 
 class SearchLogsRequest(BaseModel):
     """搜索日志请求"""
+
     query: str = Field(default="", description="搜索查询")
     level: Optional[str] = Field(default=None, description="日志级别过滤")
     source: Optional[str] = Field(default=None, description="来源过滤")
@@ -58,7 +58,7 @@ async def list_logs(
     offset: int = Query(default=0, ge=0),
 ):
     """获取日志列表"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     # TODO: 从日志存储获取日志
     # 这里返回内存中的日志缓冲区内容
@@ -67,21 +67,28 @@ async def list_logs(
     # 获取最近的日志记录
     try:
         from neurova.core.event_bus import get_event_bus
+
         event_bus = get_event_bus()
         event_log = event_bus.get_event_log(limit=limit)
 
         for entry in event_log:
             if level and entry.get("priority", "").name.lower() != level.lower():
                 continue
-            logs.append(LogEntry(
-                log_id=str(uuid.uuid4())[:8],
-                level=entry.get("priority", "INFO").name if hasattr(entry.get("priority", ""), "name") else str(entry.get("priority", "INFO")),
-                message=f"Event: {entry.get('event', 'unknown')}",
-                source=entry.get("source", ""),
-                timestamp=entry.get("timestamp", 0),
-            ))
+            logs.append(
+                LogEntry(
+                    log_id=str(uuid.uuid4())[:8],
+                    level=(
+                        entry.get("priority", "INFO").name
+                        if hasattr(entry.get("priority", ""), "name")
+                        else str(entry.get("priority", "INFO"))
+                    ),
+                    message=f"Event: {entry.get('event', 'unknown')}",
+                    source=entry.get("source", ""),
+                    timestamp=entry.get("timestamp", 0),
+                )
+            )
     except Exception as e:
-        logger.warning(f"Get logs error: {e}")
+        logger.warning("Get logs error: %s", e)
 
     return logs
 
@@ -89,18 +96,23 @@ async def list_logs(
 @router.post("/search", response_model=List[LogEntry])
 async def search_logs(request: Request, body: SearchLogsRequest):
     """搜索日志"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     logs = []
     try:
         from neurova.core.event_bus import get_event_bus
+
         event_bus = get_event_bus()
         event_log = event_bus.get_event_log(limit=body.limit)
 
         for entry in event_log:
             # 过滤
             if body.level:
-                entry_level = entry.get("priority", "").name if hasattr(entry.get("priority", ""), "name") else str(entry.get("priority", ""))
+                entry_level = (
+                    entry.get("priority", "").name
+                    if hasattr(entry.get("priority", ""), "name")
+                    else str(entry.get("priority", ""))
+                )
                 if entry_level.lower() != body.level.lower():
                     continue
 
@@ -118,15 +130,21 @@ async def search_logs(request: Request, body: SearchLogsRequest):
             if body.query and body.query.lower() not in message.lower():
                 continue
 
-            logs.append(LogEntry(
-                log_id=str(uuid.uuid4())[:8],
-                level=entry.get("priority", "INFO").name if hasattr(entry.get("priority", ""), "name") else str(entry.get("priority", "INFO")),
-                message=message,
-                source=entry.get("source", ""),
-                timestamp=entry.get("timestamp", 0),
-            ))
+            logs.append(
+                LogEntry(
+                    log_id=str(uuid.uuid4())[:8],
+                    level=(
+                        entry.get("priority", "INFO").name
+                        if hasattr(entry.get("priority", ""), "name")
+                        else str(entry.get("priority", "INFO"))
+                    ),
+                    message=message,
+                    source=entry.get("source", ""),
+                    timestamp=entry.get("timestamp", 0),
+                )
+            )
     except Exception as e:
-        logger.warning(f"Search logs error: {e}")
+        logger.warning("Search logs error: %s", e)
 
     return logs
 
@@ -134,14 +152,15 @@ async def search_logs(request: Request, body: SearchLogsRequest):
 @router.delete("")
 async def clear_logs(request: Request):
     """清空日志"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     try:
         from neurova.core.event_bus import get_event_bus
+
         event_bus = get_event_bus()
         event_bus.clear_event_log()
     except Exception as e:
-        logger.warning(f"Clear logs error: {e}")
+        logger.warning("Clear logs error: %s", e)
 
     return {"code": 0, "message": "Logs cleared"}
 
@@ -149,7 +168,7 @@ async def clear_logs(request: Request):
 @router.get("/levels")
 async def get_log_levels(request: Request):
     """获取可用的日志级别"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     return {
         "code": 0,

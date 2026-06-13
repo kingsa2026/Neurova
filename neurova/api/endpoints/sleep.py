@@ -13,17 +13,13 @@ from __future__ import annotations
 7. 获取冲突解决历史 (GET /api/v1/sleep/{agent_id}/conflicts)
 """
 
-import datetime
-import json
 import logging
 import time
-import typing
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Path, Query, Request
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +28,7 @@ router = APIRouter()
 
 class SleepStatusResponse(BaseModel):
     """睡眠状态响应"""
+
     agent_id: str
     is_sleeping: bool = False
     sleep_phase: str = "awake"
@@ -43,6 +40,7 @@ class SleepStatusResponse(BaseModel):
 
 class SleepSettings(BaseModel):
     """睡眠设置"""
+
     auto_sleep_enabled: bool = True
     sleep_threshold_minutes: int = 30
     sleep_duration_minutes: int = 60
@@ -53,6 +51,7 @@ class SleepSettings(BaseModel):
 
 class SleepSettingsRequest(BaseModel):
     """睡眠设置更新请求"""
+
     auto_sleep_enabled: Optional[bool] = None
     sleep_threshold_minutes: Optional[int] = None
     sleep_duration_minutes: Optional[int] = None
@@ -63,6 +62,7 @@ class SleepSettingsRequest(BaseModel):
 
 class DreamLogItem(BaseModel):
     """梦境日志条目"""
+
     dream_id: str
     agent_id: str
     timestamp: float
@@ -75,6 +75,7 @@ class DreamLogItem(BaseModel):
 
 class DreamInsightItem(BaseModel):
     """梦境洞察条目"""
+
     insight_id: str
     dream_id: str
     agent_id: str
@@ -87,6 +88,7 @@ class DreamInsightItem(BaseModel):
 
 class MemoryMergeItem(BaseModel):
     """记忆合并条目"""
+
     merge_id: str
     agent_id: str
     timestamp: float
@@ -99,6 +101,7 @@ class MemoryMergeItem(BaseModel):
 
 class ConflictResolutionItem(BaseModel):
     """冲突解决条目"""
+
     resolution_id: str
     agent_id: str
     timestamp: float
@@ -117,6 +120,7 @@ def _get_request_id(request: Request) -> str:
 def _get_agent(agent_id: str = "default"):
     """获取 Agent 实例"""
     from neurova.api.endpoints import get_agent_instance
+
     return get_agent_instance(agent_id)
 
 
@@ -125,13 +129,13 @@ def _get_sleep_manager(agent_id: str = "default"):
     agent = _get_agent(agent_id)
     if not agent:
         return None
-    
+
     # 尝试获取睡眠管理器
     if hasattr(agent, "sleep_manager"):
         return agent.sleep_manager
     if hasattr(agent, "sleep_consolidation"):
         return agent.sleep_consolidation
-    
+
     return None
 
 
@@ -139,16 +143,18 @@ def _generate_mock_dreams(agent_id: str, limit: int = 10) -> List[DreamLogItem]:
     """生成模拟梦境数据"""
     dreams = []
     for i in range(min(limit, 5)):
-        dreams.append(DreamLogItem(
-            dream_id=str(uuid.uuid4()),
-            agent_id=agent_id,
-            timestamp=time.time() - (i * 3600),
-            dream_type="replay",
-            content=f"Dream replay of conversation about topic {i+1}",
-            memories_involved=[f"memory_{j}" for j in range(3)],
-            insights_generated=i % 3,
-            duration=60.0 + i * 10,
-        ))
+        dreams.append(
+            DreamLogItem(
+                dream_id=str(uuid.uuid4()),
+                agent_id=agent_id,
+                timestamp=time.time() - (i * 3600),
+                dream_type="replay",
+                content=f"Dream replay of conversation about topic {i+1}",
+                memories_involved=[f"memory_{j}" for j in range(3)],
+                insights_generated=i % 3,
+                duration=60.0 + i * 10,
+            )
+        )
     return dreams
 
 
@@ -156,16 +162,18 @@ def _generate_mock_insights(agent_id: str, limit: int = 10) -> List[DreamInsight
     """生成模拟梦境洞察数据"""
     insights = []
     for i in range(min(limit, 3)):
-        insights.append(DreamInsightItem(
-            insight_id=str(uuid.uuid4()),
-            dream_id=str(uuid.uuid4()),
-            agent_id=agent_id,
-            timestamp=time.time() - (i * 7200),
-            insight_type="pattern",
-            content=f"Discovered pattern in user preferences: pattern_{i+1}",
-            confidence=0.8 - i * 0.1,
-            related_memories=[f"memory_{j}" for j in range(2)],
-        ))
+        insights.append(
+            DreamInsightItem(
+                insight_id=str(uuid.uuid4()),
+                dream_id=str(uuid.uuid4()),
+                agent_id=agent_id,
+                timestamp=time.time() - (i * 7200),
+                insight_type="pattern",
+                content=f"Discovered pattern in user preferences: pattern_{i+1}",
+                confidence=0.8 - i * 0.1,
+                related_memories=[f"memory_{j}" for j in range(2)],
+            )
+        )
     return insights
 
 
@@ -173,16 +181,18 @@ def _generate_mock_merges(agent_id: str, limit: int = 10) -> List[MemoryMergeIte
     """生成模拟记忆合并数据"""
     merges = []
     for i in range(min(limit, 4)):
-        merges.append(MemoryMergeItem(
-            merge_id=str(uuid.uuid4()),
-            agent_id=agent_id,
-            timestamp=time.time() - (i * 1800),
-            source_memories=[f"memory_{j}" for j in range(2, 4)],
-            target_memory=f"consolidated_memory_{i}",
-            merge_type="consolidation",
-            success=True,
-            conflicts_resolved=i % 2,
-        ))
+        merges.append(
+            MemoryMergeItem(
+                merge_id=str(uuid.uuid4()),
+                agent_id=agent_id,
+                timestamp=time.time() - (i * 1800),
+                source_memories=[f"memory_{j}" for j in range(2, 4)],
+                target_memory=f"consolidated_memory_{i}",
+                merge_type="consolidation",
+                success=True,
+                conflicts_resolved=i % 2,
+            )
+        )
     return merges
 
 
@@ -190,16 +200,18 @@ def _generate_mock_conflicts(agent_id: str, limit: int = 10) -> List[ConflictRes
     """生成模拟冲突解决数据"""
     conflicts = []
     for i in range(min(limit, 2)):
-        conflicts.append(ConflictResolutionItem(
-            resolution_id=str(uuid.uuid4()),
-            agent_id=agent_id,
-            timestamp=time.time() - (i * 3600),
-            conflict_type="memory",
-            source_memories=[f"memory_{j}" for j in range(2)],
-            resolution_strategy="merge",
-            resolution_result="Successfully merged conflicting memories",
-            success=True,
-        ))
+        conflicts.append(
+            ConflictResolutionItem(
+                resolution_id=str(uuid.uuid4()),
+                agent_id=agent_id,
+                timestamp=time.time() - (i * 3600),
+                conflict_type="memory",
+                source_memories=[f"memory_{j}" for j in range(2)],
+                resolution_strategy="merge",
+                resolution_result="Successfully merged conflicting memories",
+                success=True,
+            )
+        )
     return conflicts
 
 
@@ -209,22 +221,22 @@ async def get_sleep_status(
     agent_id: str = Path(..., description="Agent ID"),
 ):
     """获取 Agent 的睡眠状态"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     # 获取睡眠状态
     sleep_manager = _get_sleep_manager(agent_id)
-    
+
     is_sleeping = False
     sleep_phase = "awake"
     last_sleep_time = None
     last_wake_time = None
     total_sleep_duration = 0
     sleep_cycles = 0
-    
+
     if sleep_manager:
         if hasattr(sleep_manager, "is_sleeping"):
             is_sleeping = sleep_manager.is_sleeping()
@@ -238,7 +250,7 @@ async def get_sleep_status(
             total_sleep_duration = sleep_manager.get_total_sleep_duration()
         if hasattr(sleep_manager, "get_sleep_cycles"):
             sleep_cycles = sleep_manager.get_sleep_cycles()
-    
+
     return SleepStatusResponse(
         agent_id=agent_id,
         is_sleeping=is_sleeping,
@@ -259,20 +271,20 @@ async def get_sleep_settings(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     sleep_manager = _get_sleep_manager(agent_id)
-    
+
     # 获取设置
     settings = SleepSettings()
-    
+
     if sleep_manager and hasattr(sleep_manager, "get_settings"):
         try:
             manager_settings = sleep_manager.get_settings()
             if isinstance(manager_settings, dict):
                 settings = SleepSettings(**manager_settings)
         except Exception as e:
-            logger.warning(f"Failed to get sleep settings: {e}")
-    
+            logger.warning("Failed to get sleep settings: %s", e)
+
     return settings
 
 
@@ -286,17 +298,17 @@ async def update_sleep_settings(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     sleep_manager = _get_sleep_manager(agent_id)
-    
+
     # 更新设置
     if sleep_manager and hasattr(sleep_manager, "update_settings"):
         try:
             update_data = body.dict(exclude_unset=True)
             sleep_manager.update_settings(update_data)
         except Exception as e:
-            logger.warning(f"Failed to update sleep settings: {e}")
-    
+            logger.warning("Failed to update sleep settings: %s", e)
+
     # 返回更新后的设置
     return await get_sleep_settings(request, agent_id)
 
@@ -312,21 +324,21 @@ async def get_dream_logs(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     sleep_manager = _get_sleep_manager(agent_id)
-    
+
     # 获取梦境日志
     dreams = []
     if sleep_manager and hasattr(sleep_manager, "get_dream_logs"):
         try:
             dreams = sleep_manager.get_dream_logs(limit=limit, offset=offset)
         except Exception as e:
-            logger.warning(f"Failed to get dream logs: {e}")
-    
+            logger.warning("Failed to get dream logs: %s", e)
+
     # 如果没有数据，返回模拟数据
     if not dreams:
         dreams = _generate_mock_dreams(agent_id, limit)
-    
+
     return dreams
 
 
@@ -340,13 +352,13 @@ async def get_dream_log(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     # 获取梦境详情
     dreams = _generate_mock_dreams(agent_id, 100)
     for dream in dreams:
         if dream.dream_id == dream_id:
             return dream
-    
+
     raise HTTPException(status_code=404, detail=f"Dream '{dream_id}' not found")
 
 
@@ -361,21 +373,21 @@ async def get_dream_insights(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     sleep_manager = _get_sleep_manager(agent_id)
-    
+
     # 获取梦境洞察
     insights = []
     if sleep_manager and hasattr(sleep_manager, "get_dream_insights"):
         try:
             insights = sleep_manager.get_dream_insights(limit=limit, offset=offset)
         except Exception as e:
-            logger.warning(f"Failed to get dream insights: {e}")
-    
+            logger.warning("Failed to get dream insights: %s", e)
+
     # 如果没有数据，返回模拟数据
     if not insights:
         insights = _generate_mock_insights(agent_id, limit)
-    
+
     return insights
 
 
@@ -389,13 +401,13 @@ async def get_dream_insight(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     # 获取洞察详情
     insights = _generate_mock_insights(agent_id, 100)
     for insight in insights:
         if insight.insight_id == insight_id:
             return insight
-    
+
     raise HTTPException(status_code=404, detail=f"Insight '{insight_id}' not found")
 
 
@@ -410,21 +422,21 @@ async def get_memory_merges(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     sleep_manager = _get_sleep_manager(agent_id)
-    
+
     # 获取记忆合并历史
     merges = []
     if sleep_manager and hasattr(sleep_manager, "get_memory_merges"):
         try:
             merges = sleep_manager.get_memory_merges(limit=limit, offset=offset)
         except Exception as e:
-            logger.warning(f"Failed to get memory merges: {e}")
-    
+            logger.warning("Failed to get memory merges: %s", e)
+
     # 如果没有数据，返回模拟数据
     if not merges:
         merges = _generate_mock_merges(agent_id, limit)
-    
+
     return merges
 
 
@@ -438,13 +450,13 @@ async def get_memory_merge(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     # 获取合并详情
     merges = _generate_mock_merges(agent_id, 100)
     for merge in merges:
         if merge.merge_id == merge_id:
             return merge
-    
+
     raise HTTPException(status_code=404, detail=f"Merge '{merge_id}' not found")
 
 
@@ -459,21 +471,21 @@ async def get_conflict_resolutions(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     sleep_manager = _get_sleep_manager(agent_id)
-    
+
     # 获取冲突解决历史
     conflicts = []
     if sleep_manager and hasattr(sleep_manager, "get_conflict_resolutions"):
         try:
             conflicts = sleep_manager.get_conflict_resolutions(limit=limit, offset=offset)
         except Exception as e:
-            logger.warning(f"Failed to get conflict resolutions: {e}")
-    
+            logger.warning("Failed to get conflict resolutions: %s", e)
+
     # 如果没有数据，返回模拟数据
     if not conflicts:
         conflicts = _generate_mock_conflicts(agent_id, limit)
-    
+
     return conflicts
 
 
@@ -487,13 +499,13 @@ async def get_conflict_resolution(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     # 获取冲突详情
     conflicts = _generate_mock_conflicts(agent_id, 100)
     for conflict in conflicts:
         if conflict.resolution_id == resolution_id:
             return conflict
-    
+
     raise HTTPException(status_code=404, detail=f"Conflict resolution '{resolution_id}' not found")
 
 
@@ -504,20 +516,20 @@ async def wake_agent(
 ):
     """唤醒 Agent"""
     request_id = _get_request_id(request)
-    
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     sleep_manager = _get_sleep_manager(agent_id)
-    
+
     # 唤醒 Agent
     if sleep_manager and hasattr(sleep_manager, "wake"):
         try:
             sleep_manager.wake()
         except Exception as e:
-            logger.warning(f"Failed to wake agent: {e}")
-    
+            logger.warning("Failed to wake agent: %s", e)
+
     return {
         "code": 0,
         "message": f"Agent '{agent_id}' woken up",
@@ -534,20 +546,20 @@ async def start_sleep(
 ):
     """启动 Agent 睡眠"""
     request_id = _get_request_id(request)
-    
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     sleep_manager = _get_sleep_manager(agent_id)
-    
+
     # 启动睡眠
     if sleep_manager and hasattr(sleep_manager, "start_sleep"):
         try:
             sleep_manager.start_sleep(duration_minutes=duration_minutes)
         except Exception as e:
-            logger.warning(f"Failed to start sleep: {e}")
-    
+            logger.warning("Failed to start sleep: %s", e)
+
     return {
         "code": 0,
         "message": f"Agent '{agent_id}' started sleeping",

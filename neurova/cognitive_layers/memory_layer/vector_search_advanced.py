@@ -5,36 +5,39 @@
 - ChromaDB (本地向量数据库)
 """
 
-from collections import Counter
 import json
 import logging
 import math
 import os
-from pathlib import Path
 import pickle
 import threading
+from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import chromadb
+
     HAS_CHROMADB = True
 except ImportError:
     HAS_CHROMADB = False
 
 try:
     import faiss
+
     HAS_FAISS = True
 except ImportError:
     HAS_FAISS = False
 
 try:
-    import numpy as np
+    pass
+
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
 
 try:
     from sentence_transformers import SentenceTransformer
+
     HAS_SENTENCE_TRANSFORMERS = True
 except ImportError:
     HAS_SENTENCE_TRANSFORMERS = False
@@ -44,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 # ────── 基类 ──────
 
+
 class VectorSearchBackend:
     """向量搜索后端抽象基类"""
 
@@ -51,16 +55,15 @@ class VectorSearchBackend:
         self.name = name
         self._lock = threading.RLock()
 
-    def add_texts(self, texts: List[str], ids: List[str],
-                  metadatas: Optional[List[Dict[str, Any]]] = None) -> int:
+    def add_texts(self, texts: List[str], ids: List[str], metadatas: Optional[List[Dict[str, Any]]] = None) -> int:
         raise NotImplementedError
 
-    def add_text(self, text: str, doc_id: str,
-                 metadata: Optional[Dict[str, Any]] = None) -> bool:
+    def add_text(self, text: str, doc_id: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
         raise NotImplementedError
 
-    def search(self, query: str, top_k: int = 10,
-               filters: Optional[Dict[str, Any]] = None) -> List[Tuple[str, float, Dict[str, Any]]]:
+    def search(
+        self, query: str, top_k: int = 10, filters: Optional[Dict[str, Any]] = None
+    ) -> List[Tuple[str, float, Dict[str, Any]]]:
         raise NotImplementedError
 
     def remove(self, doc_id: str) -> bool:
@@ -89,6 +92,7 @@ class VectorSearchBackend:
 
 
 # ────── 同义词字典 ──────
+
 
 class SynonymDictionary:
     """同义词字典，用于查询扩展"""
@@ -128,9 +132,7 @@ class SynonymDictionary:
     def remove_synonym(self, word: str, synonym: str):
         word_lower = word.lower()
         if word_lower in self._synonyms:
-            self._synonyms[word_lower] = [
-                s for s in self._synonyms[word_lower] if s != synonym.lower()
-            ]
+            self._synonyms[word_lower] = [s for s in self._synonyms[word_lower] if s != synonym.lower()]
 
     def set_synonyms(self, word: str, synonyms: List[str]):
         self._synonyms[word.lower()] = [s.lower() for s in synonyms]
@@ -170,6 +172,7 @@ class SynonymDictionary:
 
 # ────── TF-IDF 后端 ──────
 
+
 class TFIDFBackend(VectorSearchBackend):
     """纯 Python TF-IDF 后端"""
 
@@ -186,6 +189,7 @@ class TFIDFBackend(VectorSearchBackend):
     def _tokenize(self, text: str) -> List[str]:
         """简单分词"""
         import re
+
         text = text.lower()
         # 中文按字符分，英文按空格分
         tokens = []
@@ -222,8 +226,7 @@ class TFIDFBackend(VectorSearchBackend):
                 doc_freq[t] = doc_freq.get(t, 0) + 1
         self._idf = {t: math.log((n_docs + 1) / (df + 1)) + 1 for t, df in doc_freq.items()}
 
-    def add_texts(self, texts: List[str], ids: List[str],
-                  metadatas: Optional[List[Dict[str, Any]]] = None) -> int:
+    def add_texts(self, texts: List[str], ids: List[str], metadatas: Optional[List[Dict[str, Any]]] = None) -> int:
         with self._lock:
             count = 0
             for i, (text, doc_id) in enumerate(zip(texts, ids)):
@@ -234,8 +237,7 @@ class TFIDFBackend(VectorSearchBackend):
             self._fitted = False
             return count
 
-    def add_text(self, text: str, doc_id: str,
-                 metadata: Optional[Dict[str, Any]] = None) -> bool:
+    def add_text(self, text: str, doc_id: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
         with self._lock:
             self._corpus[doc_id] = text
             if metadata:
@@ -251,9 +253,7 @@ class TFIDFBackend(VectorSearchBackend):
             for doc_id, text in self._corpus.items():
                 tokens = self._tokenize(text)
                 tf = self._compute_tf(tokens)
-                self._tf_idf[doc_id] = {
-                    t: tf_val * self._idf.get(t, 1.0) for t, tf_val in tf.items()
-                }
+                self._tf_idf[doc_id] = {t: tf_val * self._idf.get(t, 1.0) for t, tf_val in tf.items()}
             self._fitted = True
 
     def _cosine_similarity(self, vec1: Dict[str, float], vec2: Dict[str, float]) -> float:
@@ -263,8 +263,9 @@ class TFIDFBackend(VectorSearchBackend):
         norm2 = math.sqrt(sum(v * v for v in vec2.values())) or 1e-10
         return dot / (norm1 * norm2)
 
-    def search(self, query: str, top_k: int = 10,
-               filters: Optional[Dict[str, Any]] = None) -> List[Tuple[str, float, Dict[str, Any]]]:
+    def search(
+        self, query: str, top_k: int = 10, filters: Optional[Dict[str, Any]] = None
+    ) -> List[Tuple[str, float, Dict[str, Any]]]:
         with self._lock:
             if not self._fitted:
                 self.rebuild_index()
@@ -349,6 +350,7 @@ class TFIDFBackend(VectorSearchBackend):
 
 # ────── FAISS 后端 ──────
 
+
 class FaissBackend(VectorSearchBackend):
     """FAISS 向量搜索后端"""
 
@@ -380,15 +382,14 @@ class FaissBackend(VectorSearchBackend):
             try:
                 self._model = SentenceTransformer("all-MiniLM-L6-v2")
             except Exception as e:
-                logger.warning(f"Failed to load sentence transformer: {e}")
+                logger.warning("Failed to load sentence transformer: %s", e)
 
     def _get_embeddings(self, texts: List[str]) -> Any:
         if self._model and HAS_NUMPY:
             return self._model.encode(texts, normalize_embeddings=True)
         raise RuntimeError("No embedding model available")
 
-    def add_texts(self, texts: List[str], ids: List[str],
-                  metadatas: Optional[List[Dict[str, Any]]] = None) -> int:
+    def add_texts(self, texts: List[str], ids: List[str], metadatas: Optional[List[Dict[str, Any]]] = None) -> int:
         with self._lock:
             embeddings = self._get_embeddings(texts)
             self._index.add(embeddings)
@@ -398,12 +399,12 @@ class FaissBackend(VectorSearchBackend):
                     self._metadatas[doc_id] = metadatas[i]
             return len(texts)
 
-    def add_text(self, text: str, doc_id: str,
-                 metadata: Optional[Dict[str, Any]] = None) -> bool:
+    def add_text(self, text: str, doc_id: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
         return self.add_texts([text], [doc_id], [metadata] if metadata else None) > 0
 
-    def search(self, query: str, top_k: int = 10,
-               filters: Optional[Dict[str, Any]] = None) -> List[Tuple[str, float, Dict[str, Any]]]:
+    def search(
+        self, query: str, top_k: int = 10, filters: Optional[Dict[str, Any]] = None
+    ) -> List[Tuple[str, float, Dict[str, Any]]]:
         with self._lock:
             if self._index.ntotal == 0:
                 return []
@@ -452,11 +453,11 @@ class FaissBackend(VectorSearchBackend):
 
 # ────── ChromaDB 后端 ──────
 
+
 class ChromaDBBackend(VectorSearchBackend):
     """ChromaDB 向量搜索后端"""
 
-    def __init__(self, collection_name: str = "neurova_memories",
-                 persist_directory: Optional[str] = None):
+    def __init__(self, collection_name: str = "neurova_memories", persist_directory: Optional[str] = None):
         super().__init__("chromadb")
         if not HAS_CHROMADB:
             raise ImportError("chromadb 库未安装")
@@ -467,22 +468,18 @@ class ChromaDBBackend(VectorSearchBackend):
             self._client = chromadb.Client()
         self._collection = self._client.get_or_create_collection(collection_name)
 
-    def add_texts(self, texts: List[str], ids: List[str],
-                  metadatas: Optional[List[Dict[str, Any]]] = None) -> int:
+    def add_texts(self, texts: List[str], ids: List[str], metadatas: Optional[List[Dict[str, Any]]] = None) -> int:
         self._collection.add(documents=texts, ids=ids, metadatas=metadatas)
         return len(texts)
 
-    def add_text(self, text: str, doc_id: str,
-                 metadata: Optional[Dict[str, Any]] = None) -> bool:
-        self._collection.add(documents=[text], ids=[doc_id],
-                            metadatas=[metadata] if metadata else None)
+    def add_text(self, text: str, doc_id: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
+        self._collection.add(documents=[text], ids=[doc_id], metadatas=[metadata] if metadata else None)
         return True
 
-    def search(self, query: str, top_k: int = 10,
-               filters: Optional[Dict[str, Any]] = None) -> List[Tuple[str, float, Dict[str, Any]]]:
-        results = self._collection.query(
-            query_texts=[query], n_results=top_k, where=filters
-        )
+    def search(
+        self, query: str, top_k: int = 10, filters: Optional[Dict[str, Any]] = None
+    ) -> List[Tuple[str, float, Dict[str, Any]]]:
+        results = self._collection.query(query_texts=[query], n_results=top_k, where=filters)
         output = []
         if results and results["ids"]:
             for i, doc_id in enumerate(results["ids"][0]):
@@ -522,13 +519,14 @@ class ChromaDBBackend(VectorSearchBackend):
 
 # ────── 统一接口 ──────
 
+
 class AdvancedVectorSearch:
     """高级向量搜索统一接口"""
 
     def __init__(self, backend: str = "auto", **kwargs):
         self._backend_name = backend
         self._backend: VectorSearchBackend = self._create_backend(backend, **kwargs)
-        logger.info(f"AdvancedVectorSearch created with backend={self._backend.name}")
+        logger.info("AdvancedVectorSearch created with backend=%s", self._backend.name)
 
     def _create_backend(self, backend: str, **kwargs) -> VectorSearchBackend:
         backend = backend.lower()
@@ -546,23 +544,21 @@ class AdvancedVectorSearch:
                 return FaissBackend(**kwargs)
             return TFIDFBackend(**kwargs)
         # fallback
-        logger.warning(f"Backend '{backend}' not available, falling back to TF-IDF")
+        logger.warning("Backend '%s' not available, falling back to TF-IDF", backend)
         return TFIDFBackend(**kwargs)
 
-    def add_texts(self, texts: List[str], ids: List[str],
-                  metadatas: Optional[List[Dict[str, Any]]] = None) -> int:
+    def add_texts(self, texts: List[str], ids: List[str], metadatas: Optional[List[Dict[str, Any]]] = None) -> int:
         return self._backend.add_texts(texts, ids, metadatas)
 
-    def add_text(self, text: str, doc_id: str,
-                 metadata: Optional[Dict[str, Any]] = None) -> bool:
+    def add_text(self, text: str, doc_id: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
         return self._backend.add_text(text, doc_id, metadata)
 
-    def add(self, text: str, doc_id: str,
-            metadata: Optional[Dict[str, Any]] = None) -> bool:
+    def add(self, text: str, doc_id: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
         return self.add_text(text, doc_id, metadata)
 
-    def search(self, query: str, top_k: int = 10,
-               filters: Optional[Dict[str, Any]] = None) -> List[Tuple[str, float, Dict[str, Any]]]:
+    def search(
+        self, query: str, top_k: int = 10, filters: Optional[Dict[str, Any]] = None
+    ) -> List[Tuple[str, float, Dict[str, Any]]]:
         return self._backend.search(query, top_k, filters)
 
     def remove(self, doc_id: str) -> bool:
@@ -600,6 +596,7 @@ class AdvancedVectorSearch:
 
 
 # ────── 工具函数 ──────
+
 
 def get_available_backends() -> List[str]:
     """获取可用的后端列表"""

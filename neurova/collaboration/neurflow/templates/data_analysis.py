@@ -9,26 +9,24 @@
 - 报告生成
 - 数据挖掘
 """
+
 import time
 import uuid
-from typing import Dict, List, Any
+from typing import List
 
-from ..models import (
-    WorkflowDefinition, WorkflowNode, WorkflowEdge, WorkflowVariable,
-    WorkflowStatus, NodeCategory
-)
+from ..models import WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus, WorkflowVariable
 
 
 def get_data_analysis_template() -> WorkflowDefinition:
     """获取数据分析工作流模板
-    
+
     Returns:
         预定义的数据分析工作流定义
     """
     nodes = _create_nodes()
     edges = _create_edges()
     variables = _create_variables()
-    
+
     return WorkflowDefinition(
         id=f"template_data_analysis_{uuid.uuid4().hex[:8]}",
         name="数据分析",
@@ -50,7 +48,7 @@ def get_data_analysis_template() -> WorkflowDefinition:
             "estimated_time": "20-40 minutes",
             "required_skills": ["data-analysis", "statistics", "visualization"],
             "description": "自动化数据分析流程",
-        }
+        },
     )
 
 
@@ -78,12 +76,11 @@ def _create_nodes() -> List[WorkflowNode]:
                         "options": ["HTML报告", "PDF报告", "Markdown", "JSON数据"],
                         "default": "HTML报告",
                         "description": "输出格式",
-                    }
+                    },
                 }
             },
             label="开始",
         ),
-        
         WorkflowNode(
             id="fetch_data",
             type="builtin:web-scrape",
@@ -95,7 +92,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="数据抓取",
         ),
-        
         WorkflowNode(
             id="clean_data",
             type="builtin:llm",
@@ -118,7 +114,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="数据清洗",
         ),
-        
         WorkflowNode(
             id="analyze_data",
             type="builtin:data-analyze",
@@ -130,7 +125,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="数据分析",
         ),
-        
         WorkflowNode(
             id="visualize",
             type="builtin:data-visualize",
@@ -143,7 +137,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="数据可视化",
         ),
-        
         WorkflowNode(
             id="generate_report",
             type="builtin:llm",
@@ -168,7 +161,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="报告生成",
         ),
-        
         WorkflowNode(
             id="end",
             type="builtin:end",

@@ -9,10 +9,8 @@
 由 WeChatAdapter 通过多继承使用，所有属性都来自主类。
 """
 
-import json
 import logging
 import os
-import tempfile
 from typing import Any, Dict, Optional
 
 import requests
@@ -55,7 +53,7 @@ class MediaMixin:
         elif auth_type == "official":
             return await self._get_official_user_info(user_id)
         else:
-            logger.error(f"Unknown auth type for get_user_info: {auth_type}")
+            logger.error("Unknown auth type for get_user_info: %s", auth_type)
             return None
 
     async def _get_wecom_user_info(self, userid: str) -> Optional[Dict[str, Any]]:
@@ -79,11 +77,11 @@ class MediaMixin:
                     "status": response.get("status"),
                 }
             else:
-                logger.error(f"Get WeCom user info failed: {response}")
+                logger.error("Get WeCom user info failed: %s", response)
                 return None
 
         except Exception as e:
-            logger.exception(f"Get WeCom user info error: {e}")
+            logger.exception("Get WeCom user info error: %s", e)
             return None
 
     async def _get_official_user_info(self, openid: str) -> Optional[Dict[str, Any]]:
@@ -108,11 +106,11 @@ class MediaMixin:
                     "unionid": response.get("unionid"),
                 }
             else:
-                logger.error(f"Get official user info failed: {response}")
+                logger.error("Get official user info failed: %s", response)
                 return None
 
         except Exception as e:
-            logger.exception(f"Get official user info error: {e}")
+            logger.exception("Get official user info error: %s", e)
             return None
 
     async def upload_media(
@@ -139,7 +137,7 @@ class MediaMixin:
         elif auth_type == "ilink":
             return await self._upload_ilink_media(file_path, media_type)
         else:
-            logger.error(f"Unknown auth type for upload_media: {auth_type}")
+            logger.error("Unknown auth type for upload_media: %s", auth_type)
             return None
 
     async def _upload_wecom_media(
@@ -150,7 +148,7 @@ class MediaMixin:
         """企业微信媒体上传"""
         try:
             if not os.path.exists(file_path):
-                logger.error(f"File not found: {file_path}")
+                logger.error("File not found: %s", file_path)
                 return None
 
             # 获取 access_token
@@ -169,14 +167,14 @@ class MediaMixin:
 
             if data.get("errcode") == 0:
                 media_id = data.get("media_id")
-                logger.info(f"Media uploaded: {media_id}")
+                logger.info("Media uploaded: %s", media_id)
                 return media_id
             else:
-                logger.error(f"Media upload failed: {data}")
+                logger.error("Media upload failed: %s", data)
                 return None
 
         except Exception as e:
-            logger.exception(f"WeCom media upload error: {e}")
+            logger.exception("WeCom media upload error: %s", e)
             return None
 
     async def _upload_official_media(
@@ -187,7 +185,7 @@ class MediaMixin:
         """公众号媒体上传"""
         try:
             if not os.path.exists(file_path):
-                logger.error(f"File not found: {file_path}")
+                logger.error("File not found: %s", file_path)
                 return None
 
             # 获取 access_token
@@ -206,14 +204,14 @@ class MediaMixin:
 
             if "errcode" not in data:
                 media_id = data.get("media_id")
-                logger.info(f"Media uploaded: {media_id}")
+                logger.info("Media uploaded: %s", media_id)
                 return media_id
             else:
-                logger.error(f"Media upload failed: {data}")
+                logger.error("Media upload failed: %s", data)
                 return None
 
         except Exception as e:
-            logger.exception(f"Official media upload error: {e}")
+            logger.exception("Official media upload error: %s", e)
             return None
 
     async def _upload_ilink_media(
@@ -250,7 +248,7 @@ class MediaMixin:
         elif auth_type == "ilink":
             return await self._download_ilink_media(media_id, save_path)
         else:
-            logger.error(f"Unknown auth type for download_media: {auth_type}")
+            logger.error("Unknown auth type for download_media: %s", auth_type)
             return False
 
     async def _download_wecom_media(
@@ -276,11 +274,11 @@ class MediaMixin:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-            logger.info(f"Media downloaded to {save_path}")
+            logger.info("Media downloaded to %s", save_path)
             return True
 
         except Exception as e:
-            logger.exception(f"WeCom media download error: {e}")
+            logger.exception("WeCom media download error: %s", e)
             return False
 
     async def _download_official_media(
@@ -306,11 +304,11 @@ class MediaMixin:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-            logger.info(f"Media downloaded to {save_path}")
+            logger.info("Media downloaded to %s", save_path)
             return True
 
         except Exception as e:
-            logger.exception(f"Official media download error: {e}")
+            logger.exception("Official media download error: %s", e)
             return False
 
     async def _download_ilink_media(

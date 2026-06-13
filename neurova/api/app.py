@@ -16,24 +16,15 @@ Neurova API Server - 应用入口
 8. Prometheus 指标
 """
 
-import contextlib
-import datetime
-import json
 import logging
 import os
-from pathlib import Path
-import shutil
-import sys
 import threading
 import time
-import traceback
-import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
-from fastapi import APIRouter
 import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +89,7 @@ def _register_default_health_checks(health_checker) -> None:
     """
     注册默认的系统健康检查
     """
-    from neurova.core.health_checker import CheckType, RecoveryAction
+    from neurova.core.health_checker import CheckType
 
     # 数据库检查
     health_checker.register(
@@ -113,6 +104,7 @@ def _register_default_health_checks(health_checker) -> None:
     def check_memory():
         try:
             import psutil
+
             mem = psutil.virtual_memory()
             if mem.percent > 90:
                 return False, f"Memory usage critical: {mem.percent}%"
@@ -133,6 +125,7 @@ def _register_default_health_checks(health_checker) -> None:
     def check_disk():
         try:
             import psutil
+
             disk = psutil.disk_usage("/")
             if disk.percent > 95:
                 return False, f"Disk usage critical: {disk.percent}%"
@@ -157,59 +150,70 @@ def _initialize_components(app_state: AppState) -> None:
     # 初始化启动管理器
     try:
         from neurova.core.startup_manager import StartupManager
+
         app_state.startup_manager = StartupManager()
     except Exception as e:
-        logger.warning(f"StartupManager init failed: {e}")
+        logger.warning("StartupManager init failed: %s", e)
 
     # 初始化健康检查器
     try:
         from neurova.core.health_checker import HealthChecker
+
         app_state.health_checker = HealthChecker()
         _register_default_health_checks(app_state.health_checker)
     except Exception as e:
-        logger.warning(f"HealthChecker init failed: {e}")
+        logger.warning("HealthChecker init failed: %s", e)
 
     # 初始化 LLM Provider Manager
     try:
         from neurova.llm.provider_manager import get_provider_manager
+
         app_state.provider_manager = get_provider_manager()
     except Exception as e:
-        logger.warning(f"LLMProviderManager init failed: {e}")
+        logger.warning("LLMProviderManager init failed: %s", e)
 
     # 初始化 LLM Router
     try:
         from neurova.llm.llm_router import LLMRouter
+
         app_state.llm_router = LLMRouter()
     except Exception as e:
-        logger.warning(f"LLMRouter init failed: {e}")
+        logger.warning("LLMRouter init failed: %s", e)
 
     # 初始化 Channel Manager
     try:
         from neurova.channels.manager import ChannelManager
+
         app_state.channel_manager = ChannelManager.get_instance()
     except Exception as e:
-        logger.warning(f"ChannelManager init failed: {e}")
+        logger.warning("ChannelManager init failed: %s", e)
 
     # 初始化 Admin Service
     try:
-        from neurova.admin.admin_service import AdminService
         import os as _os
+
+        from neurova.admin.admin_service import AdminService
+
         admin_storage = _os.path.join(_os.getcwd(), "data", "admin")
         app_state.admin_service = AdminService(storage_dir=admin_storage)
     except Exception as e:
-        logger.warning(f"AdminService init failed: {e}")
+        logger.warning("AdminService init failed: %s", e)
 
     # 初始化 Token Manager
     try:
         from neurova.security.neu_token_manager import NEUTokenManager
+
         app_state.token_manager = NEUTokenManager()
     except Exception as e:
-        logger.warning(f"NEUTokenManager init failed: {e}")
+        logger.warning("NEUTokenManager init failed: %s", e)
 
     # 初始化默认 Agent
     try:
         from neurova.agent_core import Agent, AgentConfig
-        default_workspace = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "agent_workspaces", "default")
+
+        default_workspace = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", "agent_workspaces", "default"
+        )
         os.makedirs(default_workspace, exist_ok=True)
         config = AgentConfig(
             name="Neurova",
@@ -221,11 +225,12 @@ def _initialize_components(app_state: AppState) -> None:
         app_state.add_agent("default", agent)
         logger.info("Default Agent initialized")
     except Exception as e:
-        logger.warning(f"Default Agent init failed: {e}")
+        logger.warning("Default Agent init failed: %s", e)
 
     # 初始化 TTS Manager
     try:
-        from neurova.tts.manager import TTSManager, TTSConfig
+        from neurova.tts.manager import TTSConfig, TTSManager
+
         tts_config = TTSConfig(
             engine=app_state.config.get("tts_engine", "auto"),
             model_path=app_state.config.get("tts_model_path"),  # None = 自动检测
@@ -235,20 +240,21 @@ def _initialize_components(app_state: AppState) -> None:
         )
         app_state.tts_manager = TTSManager(config=tts_config)
     except Exception as e:
-        logger.warning(f"TTSManager init failed: {e}")
+        logger.warning("TTSManager init failed: %s", e)
 
     # 初始化 ASR Manager（可选）
     try:
-        from neurova.asr.manager import ASRManager, ASRConfig
+        from neurova.asr.manager import ASRConfig, ASRManager
+
         asr_config = ASRConfig(
             engine=app_state.config.get("asr_engine", "auto"),
             model_path=app_state.config.get("asr_model_path"),  # None = 自动检测
             auto_download=app_state.config.get("asr_auto_download", True),
         )
         app_state.asr_manager = ASRManager(asr_config)
-        logger.info(f"ASR Manager init success (engine={asr_config.engine})")
+        logger.info("ASR Manager init success (engine=%s)", asr_config.engine)
     except Exception as e:
-        logger.warning(f"ASR Manager init failed: {e}")
+        logger.warning("ASR Manager init failed: %s", e)
 
     logger.info("Core components initialized")
 
@@ -281,32 +287,38 @@ def _register_core_modules(app_state: AppState) -> None:
 
         sm.register_module("agent", AgentModule, dependencies=[])
     except Exception as e:
-        logger.warning(f"Failed to register agent module: {e}")
+        logger.warning("Failed to register agent module: %s", e)
 
 
 def _register_routes(app: FastAPI, app_state: AppState) -> None:
     """注册所有 API 路由"""
     from neurova.api.endpoints import (
-        router, acp_router, evolution_router, rag_router,
-        set_app_state, register_endpoint_routers,
+        acp_router,
+        evolution_router,
+        rag_router,
+        register_endpoint_routers,
+        router,
+        set_app_state,
     )
 
     # 设置全局应用状态
-    set_app_state({
-        "startup_manager": app_state.startup_manager,
-        "health_checker": app_state.health_checker,
-        "agents": app_state.agents,
-        "llm_client": app_state.llm_client,
-        "provider_manager": app_state.provider_manager,
-        "llm_router": app_state.llm_router,
-        "channel_manager": app_state.channel_manager,
-        "admin_service": app_state.admin_service,
-        "token_manager": app_state.token_manager,
-        "tts_manager": app_state.tts_manager,
-        "audio_engine": app_state.audio_engine,
-        "asr_manager": app_state.asr_manager,
-        "voice_engines": app_state.voice_engines,
-    })
+    set_app_state(
+        {
+            "startup_manager": app_state.startup_manager,
+            "health_checker": app_state.health_checker,
+            "agents": app_state.agents,
+            "llm_client": app_state.llm_client,
+            "provider_manager": app_state.provider_manager,
+            "llm_router": app_state.llm_router,
+            "channel_manager": app_state.channel_manager,
+            "admin_service": app_state.admin_service,
+            "token_manager": app_state.token_manager,
+            "tts_manager": app_state.tts_manager,
+            "audio_engine": app_state.audio_engine,
+            "asr_manager": app_state.asr_manager,
+            "voice_engines": app_state.voice_engines,
+        }
+    )
 
     # 注册主路由
     app.include_router(router, prefix="/api")
@@ -345,49 +357,49 @@ def _register_metrics_endpoint(app: FastAPI) -> None:
     async def get_metrics():
         metrics = []
         # 基础指标
-        metrics.append(f'# HELP neurova_uptime_seconds Neurova uptime in seconds')
-        metrics.append(f'# TYPE neurova_uptime_seconds gauge')
+        metrics.append(f"# HELP neurova_uptime_seconds Neurova uptime in seconds")
+        metrics.append(f"# TYPE neurova_uptime_seconds gauge")
         uptime = _app_state.get_uptime() if _app_state else 0
-        metrics.append(f'neurova_uptime_seconds {uptime}')
+        metrics.append(f"neurova_uptime_seconds {uptime}")
 
-        metrics.append(f'# HELP neurova_agents_total Total number of agents')
-        metrics.append(f'# TYPE neurova_agents_total gauge')
+        metrics.append(f"# HELP neurova_agents_total Total number of agents")
+        metrics.append(f"# TYPE neurova_agents_total gauge")
         agent_count = len(_app_state.agents) if _app_state else 0
-        metrics.append(f'neurova_agents_total {agent_count}')
+        metrics.append(f"neurova_agents_total {agent_count}")
 
         # P3: 语音性能指标
-        metrics.append(f'# HELP neurova_voice_engines_total Total number of voice engines')
-        metrics.append(f'# TYPE neurova_voice_engines_total gauge')
+        metrics.append(f"# HELP neurova_voice_engines_total Total number of voice engines")
+        metrics.append(f"# TYPE neurova_voice_engines_total gauge")
         voice_count = len(_app_state.voice_engines) if _app_state else 0
-        metrics.append(f'neurova_voice_engines_total {voice_count}')
+        metrics.append(f"neurova_voice_engines_total {voice_count}")
 
-        metrics.append(f'# HELP neurova_voice_tts_available TTS engine availability (1=available, 0=unavailable)')
-        metrics.append(f'# TYPE neurova_voice_tts_available gauge')
+        metrics.append(f"# HELP neurova_voice_tts_available TTS engine availability (1=available, 0=unavailable)")
+        metrics.append(f"# TYPE neurova_voice_tts_available gauge")
         tts_available = 0
         if _app_state and "tts" in _app_state.voice_engines:
             try:
                 tts_available = 1 if _app_state.voice_engines["tts"].is_available() else 0
             except Exception:
                 tts_available = 0
-        metrics.append(f'neurova_voice_tts_available {tts_available}')
+        metrics.append(f"neurova_voice_tts_available {tts_available}")
 
-        metrics.append(f'# HELP neurova_voice_asr_available ASR engine availability (1=available, 0=unavailable)')
-        metrics.append(f'# TYPE neurova_voice_asr_available gauge')
+        metrics.append(f"# HELP neurova_voice_asr_available ASR engine availability (1=available, 0=unavailable)")
+        metrics.append(f"# TYPE neurova_voice_asr_available gauge")
         asr_available = 0
         if _app_state and "asr" in _app_state.voice_engines:
             try:
                 asr_available = 1 if _app_state.voice_engines["asr"].is_available() else 0
             except Exception:
                 asr_available = 0
-        metrics.append(f'neurova_voice_asr_available {asr_available}')
+        metrics.append(f"neurova_voice_asr_available {asr_available}")
 
         # 渠道指标
-        metrics.append(f'# HELP neurova_channels_total Total number of registered channels')
-        metrics.append(f'# TYPE neurova_channels_total gauge')
+        metrics.append(f"# HELP neurova_channels_total Total number of registered channels")
+        metrics.append(f"# TYPE neurova_channels_total gauge")
         channel_count = 0
         if _app_state and _app_state.channel_manager:
             channel_count = len(_app_state.channel_manager._adapters)
-        metrics.append(f'neurova_channels_total {channel_count}')
+        metrics.append(f"neurova_channels_total {channel_count}")
 
         return PlainTextResponse("\n".join(metrics), media_type="text/plain")
 
@@ -436,11 +448,11 @@ async def _on_startup(app_state: AppState) -> None:
         try:
             success = await app_state.tts_manager.initialize()
             if success:
-                logger.info(f"TTS engine ready: {app_state.tts_manager.get_engine_name()}")
+                logger.info("TTS engine ready: %s", app_state.tts_manager.get_engine_name())
             else:
                 logger.warning("TTS engine initialization failed, fallback will be used")
         except Exception as e:
-            logger.warning(f"TTS engine init error: {e}")
+            logger.warning("TTS engine init error: %s", e)
 
     # 初始化 Audio Engine（可选）
     if hasattr(app_state, "audio_engine") and app_state.audio_engine:
@@ -454,7 +466,7 @@ async def _on_startup(app_state: AppState) -> None:
             else:
                 logger.info("Audio engine skipped (no GPU available)")
         except Exception as e:
-            logger.warning(f"Audio engine init error: {e}")
+            logger.warning("Audio engine init error: %s", e)
 
     # P2-5: 创建 VoiceEngine 统一接口实例，替代旧的 TTSManager/ASRManager 直接调用
     try:
@@ -474,12 +486,12 @@ async def _on_startup(app_state: AppState) -> None:
             )
             logger.info("VoiceEngine[ASR] created from ASRManager")
     except Exception as e:
-        logger.debug(f"VoiceEngine creation skipped: {e}")
+        logger.debug("VoiceEngine creation skipped: %s", e)
 
     # P2-4: 注册 VoiceAdapter 到 ChannelManager（语音通话渠道）
     try:
-        from neurova.channels.voice import VoiceAdapter, create_voice_adapter
         from neurova.channels.base import ChannelConfig
+        from neurova.channels.voice import create_voice_adapter
 
         voice_config = ChannelConfig(
             channel_type="voice",
@@ -495,25 +507,28 @@ async def _on_startup(app_state: AppState) -> None:
             app_state.channel_manager.register_adapter(voice_adapter)
             logger.info("VoiceAdapter registered to ChannelManager")
     except Exception as e:
-        logger.debug(f"VoiceAdapter registration skipped: {e}")
+        logger.debug("VoiceAdapter registration skipped: %s", e)
 
     # 更新全局应用状态（TTS/Audio/VoiceEngine 已初始化）
     from neurova.api.endpoints import set_app_state as _update_app_state
-    _update_app_state({
-        "startup_manager": app_state.startup_manager,
-        "health_checker": app_state.health_checker,
-        "agents": app_state.agents,
-        "llm_client": app_state.llm_client,
-        "provider_manager": app_state.provider_manager,
-        "llm_router": app_state.llm_router,
-        "channel_manager": app_state.channel_manager,
-        "admin_service": app_state.admin_service,
-        "token_manager": app_state.token_manager,
-        "tts_manager": app_state.tts_manager,
-        "audio_engine": app_state.audio_engine,
-        "asr_manager": app_state.asr_manager,
-        "voice_engines": app_state.voice_engines,
-    })
+
+    _update_app_state(
+        {
+            "startup_manager": app_state.startup_manager,
+            "health_checker": app_state.health_checker,
+            "agents": app_state.agents,
+            "llm_client": app_state.llm_client,
+            "provider_manager": app_state.provider_manager,
+            "llm_router": app_state.llm_router,
+            "channel_manager": app_state.channel_manager,
+            "admin_service": app_state.admin_service,
+            "token_manager": app_state.token_manager,
+            "tts_manager": app_state.tts_manager,
+            "audio_engine": app_state.audio_engine,
+            "asr_manager": app_state.asr_manager,
+            "voice_engines": app_state.voice_engines,
+        }
+    )
 
     # 注册核心模块
     _register_core_modules(app_state)
@@ -522,9 +537,9 @@ async def _on_startup(app_state: AppState) -> None:
     if app_state.startup_manager:
         result = app_state.startup_manager.start()
         if result.success:
-            logger.info(f"Startup completed in {result.duration:.2f}s")
+            logger.info("Startup completed in %.2fs", result.duration)
         else:
-            logger.warning(f"Startup had errors: {result.errors}")
+            logger.warning("Startup had errors: %s", result.errors)
 
     # 启动渠道管理器（注意：start() 是 async 方法）
     if app_state.channel_manager:
@@ -532,7 +547,7 @@ async def _on_startup(app_state: AppState) -> None:
             await app_state.channel_manager.start()
             logger.info("Channel manager started")
         except Exception as e:
-            logger.warning(f"Channel manager start failed: {e}")
+            logger.warning("Channel manager start failed: %s", e)
 
     logger.info("=" * 60)
     logger.info("Neurova API Server started successfully")
@@ -555,16 +570,16 @@ async def _on_shutdown(app_state: AppState) -> None:
             await app_state.channel_manager.stop()
             logger.info("Channel manager stopped")
         except Exception as e:
-            logger.warning(f"Channel manager stop error: {e}")
+            logger.warning("Channel manager stop error: %s", e)
 
     # 关闭所有 Agent
     for agent_id, agent in app_state.agents.items():
         try:
             if hasattr(agent, "shutdown"):
                 agent.shutdown()
-                logger.info(f"Agent '{agent_id}' shut down")
+                logger.info("Agent '%s' shut down", agent_id)
         except Exception as e:
-            logger.warning(f"Agent '{agent_id}' shutdown error: {e}")
+            logger.warning("Agent '%s' shutdown error: %s", agent_id, e)
 
     # 停止启动管理器
     if app_state.startup_manager:
@@ -619,6 +634,7 @@ def create_app(
 
         # 设置中间件
         from neurova.api.middleware import setup_middleware
+
         setup_middleware(app)
 
         # 注册路由
@@ -680,6 +696,7 @@ def run_server(
     # 加载环境变量
     try:
         from dotenv import load_dotenv
+
         load_dotenv()
     except ImportError:
         pass
@@ -692,7 +709,7 @@ def run_server(
     # 创建应用
     app = create_app(host=host, port=port, debug=debug)
 
-    logger.info(f"Starting server on {host}:{port}")
+    logger.info("Starting server on %s:%s", host, port)
 
     # 运行服务器
     uvicorn.run(

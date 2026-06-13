@@ -10,16 +10,18 @@
 """
 
 import logging
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Dict, Optional, Any
-from collections import deque
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class MemoryItem:
     """内存项"""
+
     id: str
     content: str
     timestamp: datetime
@@ -28,13 +30,16 @@ class MemoryItem:
     categories: List[str] = field(default_factory=list)
     meta_trace: Optional[Dict[str, Any]] = None
 
+
 @dataclass
 class ConversationTurn:
     """对话轮次"""
+
     user_message: str
     agent_message: str
     timestamp: datetime
     is_complete: bool = True
+
 
 class ConversationBuffer:
     """对话缓冲区
@@ -45,10 +50,7 @@ class ConversationBuffer:
     - 超时自动刷新
     """
 
-    def __init__(self,
-                 memory_limit_bytes: int = 131072,  # 128KB
-                 turn_limit: int = 20,
-                 timeout_seconds: int = 180):
+    def __init__(self, memory_limit_bytes: int = 131072, turn_limit: int = 20, timeout_seconds: int = 180):  # 128KB
         """初始化对话缓冲区
 
         Args:
@@ -66,8 +68,10 @@ class ConversationBuffer:
         self._last_flush_time = datetime.now()
         self._total_bytes = 0
 
-        logger.debug(f"ConversationBuffer 初始化: memory_limit={memory_limit_bytes}, "
-                    f"turn_limit={turn_limit}, timeout={timeout_seconds}")
+        logger.debug(
+            f"ConversationBuffer 初始化: memory_limit={memory_limit_bytes}, "
+            f"turn_limit={turn_limit}, timeout={timeout_seconds}"
+        )
 
     def add_user_message(self, message: str) -> bool:
         """添加用户消息
@@ -84,29 +88,26 @@ class ConversationBuffer:
                 id=f"user_{datetime.now().timestamp()}",
                 content=message,
                 timestamp=datetime.now(),
-                classification="user_message"
+                classification="user_message",
             )
 
             # 添加到缓冲区
             self._buffer.append(item)
-            self._total_bytes += len(message.encode('utf-8'))
+            self._total_bytes += len(message.encode("utf-8"))
 
             # 更新当前轮次
             if self._current_turn is None:
                 self._current_turn = ConversationTurn(
-                    user_message=message,
-                    agent_message="",
-                    timestamp=datetime.now(),
-                    is_complete=False
+                    user_message=message, agent_message="", timestamp=datetime.now(), is_complete=False
                 )
             else:
                 self._current_turn.user_message = message
 
-            logger.debug(f"添加用户消息: {len(message)} 字节")
+            logger.debug("添加用户消息: %s 字节", len(message))
             return True
 
         except Exception as e:
-            logger.error(f"添加用户消息失败: {e}")
+            logger.error("添加用户消息失败: %s", e)
             return False
 
     def add_agent_message(self, message: str) -> bool:
@@ -124,12 +125,12 @@ class ConversationBuffer:
                 id=f"agent_{datetime.now().timestamp()}",
                 content=message,
                 timestamp=datetime.now(),
-                classification="agent_message"
+                classification="agent_message",
             )
 
             # 添加到缓冲区
             self._buffer.append(item)
-            self._total_bytes += len(message.encode('utf-8'))
+            self._total_bytes += len(message.encode("utf-8"))
 
             # 更新当前轮次
             if self._current_turn is not None:
@@ -140,11 +141,11 @@ class ConversationBuffer:
                 self._turns.append(self._current_turn)
                 self._current_turn = None
 
-            logger.debug(f"添加AI消息: {len(message)} 字节")
+            logger.debug("添加AI消息: %s 字节", len(message))
             return True
 
         except Exception as e:
-            logger.error(f"添加AI消息失败: {e}")
+            logger.error("添加AI消息失败: %s", e)
             return False
 
     def is_full(self) -> bool:
@@ -181,7 +182,7 @@ class ConversationBuffer:
         self._total_bytes = 0
         self._last_flush_time = datetime.now()
 
-        logger.debug(f"刷新缓冲区: {len(items)} 个项目")
+        logger.debug("刷新缓冲区: %s 个项目", len(items))
         return items
 
     def get_stats(self) -> Dict[str, Any]:
@@ -200,6 +201,7 @@ class ConversationBuffer:
             "has_current_turn": self._current_turn is not None,
             "last_flush_time": self._last_flush_time.isoformat(),
         }
+
 
 class MemoryWriteQueue:
     """内存写入队列
@@ -221,7 +223,9 @@ class MemoryWriteQueue:
         self._queue: List[MemoryItem] = []
         self._lock = None
 
-        logger.debug(f"MemoryWriteQueue 初始化: agent_id={agent_id}, storage={'有' if storage else '无'}, memory_manager={'有' if memory_manager else '无'}")
+        logger.debug(
+            f"MemoryWriteQueue 初始化: agent_id={agent_id}, storage={'有' if storage else '无'}, memory_manager={'有' if memory_manager else '无'}"
+        )
 
     def __bool__(self) -> bool:
         """检查队列是否非空"""
@@ -238,10 +242,10 @@ class MemoryWriteQueue:
         """
         try:
             self._queue.append(item)
-            logger.debug(f"添加项目到队列: {item.id}")
+            logger.debug("添加项目到队列: %s", item.id)
             return True
         except Exception as e:
-            logger.error(f"添加项目到队列失败: {e}")
+            logger.error("添加项目到队列失败: %s", e)
             return False
 
     def enqueue_batch(self, items: List[MemoryItem]) -> bool:
@@ -255,10 +259,10 @@ class MemoryWriteQueue:
         """
         try:
             self._queue.extend(items)
-            logger.debug(f"批量添加项目到队列: {len(items)} 个项目")
+            logger.debug("批量添加项目到队列: %s 个项目", len(items))
             return True
         except Exception as e:
-            logger.error(f"批量添加项目到队列失败: {e}")
+            logger.error("批量添加项目到队列失败: %s", e)
             return False
 
     def flush_to_storage(self) -> int:
@@ -272,7 +276,7 @@ class MemoryWriteQueue:
 
         # 优先使用 CognitiveStorageEngine，降级使用 MemoryManager
         storage = self.storage
-        memory_manager = getattr(self, '_memory_manager', None)
+        memory_manager = getattr(self, "_memory_manager", None)
 
         if not storage and not memory_manager:
             logger.warning("存储和记忆管理器均不可用，无法刷新队列")
@@ -284,39 +288,39 @@ class MemoryWriteQueue:
 
         for item in items_to_write:
             try:
-                content = item.content if hasattr(item, 'content') else str(item.get('content', ''))
+                content = item.content if hasattr(item, "content") else str(item.get("content", ""))
                 if not content:
                     continue
 
                 # 提取分类信息
-                classification = getattr(item, 'classification', None) or (
-                    item.get('classification', 'conversation') if isinstance(item, dict) else 'conversation'
+                classification = getattr(item, "classification", None) or (
+                    item.get("classification", "conversation") if isinstance(item, dict) else "conversation"
                 )
-                categories = getattr(item, 'categories', None) or (
-                    item.get('categories', []) if isinstance(item, dict) else []
+                categories = getattr(item, "categories", None) or (
+                    item.get("categories", []) if isinstance(item, dict) else []
                 )
-                category = categories[0] if categories else classification or 'conversation'
+                category = categories[0] if categories else classification or "conversation"
 
                 # 提取元数据
                 metadata = {}
-                meta_trace = getattr(item, 'meta_trace', None) or (
-                    item.get('meta_trace', None) if isinstance(item, dict) else None
+                meta_trace = getattr(item, "meta_trace", None) or (
+                    item.get("meta_trace", None) if isinstance(item, dict) else None
                 )
                 if meta_trace:
-                    metadata['meta_trace'] = meta_trace
+                    metadata["meta_trace"] = meta_trace
 
                 # 添加时间戳
-                timestamp = getattr(item, 'timestamp', None) or (
-                    item.get('timestamp', None) if isinstance(item, dict) else None
+                timestamp = getattr(item, "timestamp", None) or (
+                    item.get("timestamp", None) if isinstance(item, dict) else None
                 )
                 if timestamp:
-                    if hasattr(timestamp, 'isoformat'):
-                        metadata['timestamp'] = timestamp.isoformat()
+                    if hasattr(timestamp, "isoformat"):
+                        metadata["timestamp"] = timestamp.isoformat()
                     else:
-                        metadata['timestamp'] = str(timestamp)
+                        metadata["timestamp"] = str(timestamp)
 
                 # 写入 CognitiveStorageEngine
-                if storage and hasattr(storage, 'save'):
+                if storage and hasattr(storage, "save"):
                     storage.save(
                         content=content,
                         memory_type=classification,
@@ -327,7 +331,7 @@ class MemoryWriteQueue:
                     )
                     written += 1
                 # 降级写入 MemoryManager
-                elif memory_manager and hasattr(memory_manager, 'remember'):
+                elif memory_manager and hasattr(memory_manager, "remember"):
                     memory_manager.remember(
                         content=content,
                         memory_type=classification,
@@ -338,15 +342,15 @@ class MemoryWriteQueue:
 
             except Exception as e:
                 errors += 1
-                logger.warning(f"写入单条记忆失败: {e}")
+                logger.warning("写入单条记忆失败: %s", e)
 
         # 清空已写入的队列
         self._queue.clear()
 
         if written > 0:
-            logger.info(f"批量写入 {written} 条记忆到存储" + (f"，{errors} 条失败" if errors else ""))
+            logger.info("批量写入 %s 条记忆到存储" + (f"，%s 条失败" if errors else "", written, errors))
         elif errors > 0:
-            logger.warning(f"批量写入全部失败: {errors} 条")
+            logger.warning("批量写入全部失败: %s 条", errors)
 
         return written
 
@@ -370,6 +374,7 @@ class MemoryWriteQueue:
             int: 队列中的项目数量
         """
         return len(self._queue)
+
 
 # 兼容性别名
 ConversationMemoryBuffer = ConversationBuffer

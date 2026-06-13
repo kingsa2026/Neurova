@@ -10,16 +10,14 @@ Neurova 合规报告生成模块
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import datetime
-import enum
 import json
 import logging
 import os
 import sqlite3
 import threading
-import time
 import uuid
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,25 +27,28 @@ logger = logging.getLogger(__name__)
 
 class ReportTemplate(str, Enum):
     """报告模板类型"""
-    SECURITY_OVERVIEW = "security_overview"      # 安全概览
-    GDPR_COMPLIANCE = "gdpr_compliance"          # GDPR 合规
-    EQUAL_PROTECTION = "equal_protection"        # 等保合规
-    AUDIT_SUMMARY = "audit_summary"              # 审计摘要
-    ACCESS_CONTROL = "access_control"            # 访问控制
-    CUSTOM = "custom"                            # 自定义
+
+    SECURITY_OVERVIEW = "security_overview"  # 安全概览
+    GDPR_COMPLIANCE = "gdpr_compliance"  # GDPR 合规
+    EQUAL_PROTECTION = "equal_protection"  # 等保合规
+    AUDIT_SUMMARY = "audit_summary"  # 审计摘要
+    ACCESS_CONTROL = "access_control"  # 访问控制
+    CUSTOM = "custom"  # 自定义
 
 
 class ReportStatus(str, Enum):
     """报告状态"""
-    PENDING = "pending"          # 等待生成
-    GENERATING = "generating"    # 生成中
-    COMPLETED = "completed"      # 已完成
-    FAILED = "failed"            # 生成失败
+
+    PENDING = "pending"  # 等待生成
+    GENERATING = "generating"  # 生成中
+    COMPLETED = "completed"  # 已完成
+    FAILED = "failed"  # 生成失败
 
 
 @dataclass
 class ComplianceReport:
     """合规报告"""
+
     report_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     title: str = ""
     template: ReportTemplate = ReportTemplate.SECURITY_OVERVIEW
@@ -79,7 +80,11 @@ class ComplianceReport:
             title=data.get("title", ""),
             template=ReportTemplate(data.get("template", "security_overview")),
             status=ReportStatus(data.get("status", "pending")),
-            created_at=datetime.datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.datetime.now(datetime.timezone.utc),
+            created_at=(
+                datetime.datetime.fromisoformat(data["created_at"])
+                if data.get("created_at")
+                else datetime.datetime.now(datetime.timezone.utc)
+            ),
             completed_at=datetime.datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
             content=data.get("content"),
             file_path=data.get("file_path"),
@@ -91,6 +96,7 @@ class ComplianceReport:
 @dataclass
 class ReportSubscription:
     """报告订阅"""
+
     subscription_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     template: ReportTemplate = ReportTemplate.SECURITY_OVERVIEW
     frequency: str = "weekly"  # daily, weekly, monthly
@@ -118,8 +124,14 @@ class ReportSubscription:
             frequency=data.get("frequency", "weekly"),
             recipients=data.get("recipients", []),
             enabled=data.get("enabled", True),
-            created_at=datetime.datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.datetime.now(datetime.timezone.utc),
-            last_generated=datetime.datetime.fromisoformat(data["last_generated"]) if data.get("last_generated") else None,
+            created_at=(
+                datetime.datetime.fromisoformat(data["created_at"])
+                if data.get("created_at")
+                else datetime.datetime.now(datetime.timezone.utc)
+            ),
+            last_generated=(
+                datetime.datetime.fromisoformat(data["last_generated"]) if data.get("last_generated") else None
+            ),
         )
 
 
@@ -138,7 +150,7 @@ class ComplianceReporter:
         # 初始化数据库
         self._init_db()
 
-        logger.info(f"合规报告生成器初始化完成，报告目录: {self._reports_dir}")
+        logger.info("合规报告生成器初始化完成，报告目录: %s", self._reports_dir)
 
     def _ensure_reports_dir(self):
         """确保报告目录存在"""
@@ -208,14 +220,20 @@ class ComplianceReporter:
             try:
                 conn.execute(
                     "INSERT INTO reports (report_id, title, template, status, created_at, metadata) VALUES (?, ?, ?, ?, ?, ?)",
-                    (report.report_id, report.title, report.template.value, report.status.value,
-                     report.created_at.isoformat(), json.dumps(report.metadata))
+                    (
+                        report.report_id,
+                        report.title,
+                        report.template.value,
+                        report.status.value,
+                        report.created_at.isoformat(),
+                        json.dumps(report.metadata),
+                    ),
                 )
                 conn.commit()
             finally:
                 self._close_conn(conn)
 
-            logger.info(f"创建报告: {report.report_id}, 标题: {title}")
+            logger.info("创建报告: %s, 标题: %s", report.report_id, title)
 
             return report
 
@@ -239,7 +257,7 @@ class ComplianceReporter:
                 file_name = f"{report.report_id}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
                 file_path = self._reports_dir / file_name
 
-                with open(file_path, 'w', encoding='utf-8') as f:
+                with open(file_path, "w", encoding="utf-8") as f:
                     f.write(content)
 
                 # 更新报告状态
@@ -250,13 +268,13 @@ class ComplianceReporter:
 
                 self._update_report_status(report)
 
-                logger.info(f"报告生成完成: {report_id}")
+                logger.info("报告生成完成: %s", report_id)
 
             except Exception as e:
                 report.status = ReportStatus.FAILED
                 report.error_message = str(e)
                 self._update_report_status(report)
-                logger.error(f"报告生成失败: {report_id}, 错误: {e}")
+                logger.error("报告生成失败: %s, 错误: %s", report_id, e)
 
             return report
 
@@ -266,11 +284,13 @@ class ComplianceReporter:
         try:
             conn.execute(
                 "UPDATE reports SET status=?, completed_at=?, file_path=?, error_message=? WHERE report_id=?",
-                (report.status.value,
-                 report.completed_at.isoformat() if report.completed_at else None,
-                 report.file_path,
-                 report.error_message,
-                 report.report_id)
+                (
+                    report.status.value,
+                    report.completed_at.isoformat() if report.completed_at else None,
+                    report.file_path,
+                    report.error_message,
+                    report.report_id,
+                ),
             )
             conn.commit()
         finally:
@@ -609,10 +629,7 @@ class ComplianceReporter:
         with self._lock:
             conn = self._get_conn()
             try:
-                cursor = conn.execute(
-                    "SELECT * FROM reports ORDER BY created_at DESC LIMIT ?",
-                    (limit,)
-                )
+                cursor = conn.execute("SELECT * FROM reports ORDER BY created_at DESC LIMIT ?", (limit,))
                 rows = cursor.fetchall()
             finally:
                 self._close_conn(conn)
@@ -639,10 +656,7 @@ class ComplianceReporter:
         with self._lock:
             conn = self._get_conn()
             try:
-                cursor = conn.execute(
-                    "SELECT * FROM reports WHERE report_id=?",
-                    (report_id,)
-                )
+                cursor = conn.execute("SELECT * FROM reports WHERE report_id=?", (report_id,))
                 row = cursor.fetchone()
             finally:
                 self._close_conn(conn)
@@ -692,7 +706,7 @@ class ComplianceReporter:
             finally:
                 self._close_conn(conn)
 
-            logger.info(f"删除报告: {report_id}")
+            logger.info("删除报告: %s", report_id)
 
             return True
 
@@ -714,14 +728,20 @@ class ComplianceReporter:
             try:
                 conn.execute(
                     "INSERT INTO subscriptions (subscription_id, template, frequency, recipients, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (subscription.subscription_id, subscription.template.value, subscription.frequency,
-                     json.dumps(subscription.recipients), 1, subscription.created_at.isoformat())
+                    (
+                        subscription.subscription_id,
+                        subscription.template.value,
+                        subscription.frequency,
+                        json.dumps(subscription.recipients),
+                        1,
+                        subscription.created_at.isoformat(),
+                    ),
                 )
                 conn.commit()
             finally:
                 self._close_conn(conn)
 
-            logger.info(f"创建订阅: {subscription.subscription_id}")
+            logger.info("创建订阅: %s", subscription.subscription_id)
 
             return subscription
 
@@ -744,7 +764,9 @@ class ComplianceReporter:
                     recipients=json.loads(row["recipients"]) if row["recipients"] else [],
                     enabled=bool(row["enabled"]),
                     created_at=datetime.datetime.fromisoformat(row["created_at"]),
-                    last_generated=datetime.datetime.fromisoformat(row["last_generated"]) if row["last_generated"] else None,
+                    last_generated=(
+                        datetime.datetime.fromisoformat(row["last_generated"]) if row["last_generated"] else None
+                    ),
                 )
                 subscriptions.append(subscription)
 

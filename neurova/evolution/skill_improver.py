@@ -15,44 +15,48 @@
 - 功能扩展：添加缺失的功能或能力
 """
 
-from dataclasses import dataclass, field
 import datetime
 import logging
-import re
-import time
 import threading
+import time
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 # ────── Enums ──────
 
+
 class ImprovementType(Enum):
     """改进类型"""
-    PARAMETER_TUNING = "parameter_tuning"       # 参数调优
-    ERROR_HANDLING = "error_handling"           # 错误处理增强
-    PERFORMANCE = "performance"                 # 性能优化
-    FUNCTIONALITY = "functionality"             # 功能扩展
-    RELIABILITY = "reliability"                 # 可靠性提升
+
+    PARAMETER_TUNING = "parameter_tuning"  # 参数调优
+    ERROR_HANDLING = "error_handling"  # 错误处理增强
+    PERFORMANCE = "performance"  # 性能优化
+    FUNCTIONALITY = "functionality"  # 功能扩展
+    RELIABILITY = "reliability"  # 可靠性提升
 
 
 class FailurePattern(Enum):
     """失败模式"""
-    TIMEOUT = "timeout"                         # 超时
-    INVALID_INPUT = "invalid_input"            # 输入无效
-    RESOURCE_ERROR = "resource_error"           # 资源错误
-    DEPENDENCY_FAILURE = "dependency_failure"   # 依赖失败
-    LOGIC_ERROR = "logic_error"                # 逻辑错误
-    UNKNOWN = "unknown"                        # 未知错误
+
+    TIMEOUT = "timeout"  # 超时
+    INVALID_INPUT = "invalid_input"  # 输入无效
+    RESOURCE_ERROR = "resource_error"  # 资源错误
+    DEPENDENCY_FAILURE = "dependency_failure"  # 依赖失败
+    LOGIC_ERROR = "logic_error"  # 逻辑错误
+    UNKNOWN = "unknown"  # 未知错误
 
 
 # ────── Data Models ──────
 
+
 @dataclass
 class SkillImprovement:
     """技能改进记录"""
+
     improvement_id: str = ""
     skill_id: str = ""
     improvement_type: ImprovementType = ImprovementType.PARAMETER_TUNING
@@ -68,6 +72,7 @@ class SkillImprovement:
 @dataclass
 class SkillVariant:
     """技能变体"""
+
     variant_id: str = ""
     original_skill_id: str = ""
     name: str = ""
@@ -85,6 +90,7 @@ class SkillVariant:
 @dataclass
 class UsageRecord:
     """使用记录"""
+
     skill_id: str = ""
     variant_id: str = ""
     success: bool = False
@@ -99,6 +105,7 @@ class UsageRecord:
 @dataclass
 class FailureAnalysis:
     """失败分析结果"""
+
     pattern: FailurePattern = FailurePattern.UNKNOWN
     frequency: int = 0
     examples: List[str] = field(default_factory=list)
@@ -108,6 +115,7 @@ class FailureAnalysis:
 
 # ────── 主类 ──────
 
+
 class AutoSkillImprover:
     """
     技能自动改进器
@@ -115,9 +123,9 @@ class AutoSkillImprover:
     基于使用反馈自动分析失败模式、生成改进建议、创建变体并进行 A/B 测试。
     """
 
-    def __init__(self, min_records_for_analysis: int = 10,
-                 failure_threshold: float = 0.3,
-                 max_variants_per_skill: int = 5):
+    def __init__(
+        self, min_records_for_analysis: int = 10, failure_threshold: float = 0.3, max_variants_per_skill: int = 5
+    ):
         """
         初始化技能改进器
 
@@ -142,10 +150,17 @@ class AutoSkillImprover:
 
         logger.info("AutoSkillImprover initialized")
 
-    def record_usage(self, skill_id: str, success: bool, duration: float = 0.0,
-                    error_message: str = "", input_summary: str = "",
-                    output_summary: str = "", variant_id: str = "",
-                    metadata: Optional[Dict[str, Any]] = None):
+    def record_usage(
+        self,
+        skill_id: str,
+        success: bool,
+        duration: float = 0.0,
+        error_message: str = "",
+        input_summary: str = "",
+        output_summary: str = "",
+        variant_id: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
         """
         记录技能使用
 
@@ -191,9 +206,8 @@ class AutoSkillImprover:
                         variant.failure_count += 1
                     # 更新平均时长
                     variant.avg_duration = (
-                        (variant.avg_duration * (variant.total_uses - 1) + duration)
-                        / variant.total_uses
-                    )
+                        variant.avg_duration * (variant.total_uses - 1) + duration
+                    ) / variant.total_uses
                     variant.last_used = datetime.datetime.now(datetime.timezone.utc)
                     return
 
@@ -284,8 +298,7 @@ class AutoSkillImprover:
         else:
             return FailurePattern.UNKNOWN.value
 
-    def _suggest_fix(self, pattern: FailurePattern,
-                    records: List[UsageRecord]) -> str:
+    def _suggest_fix(self, pattern: FailurePattern, records: List[UsageRecord]) -> str:
         """生成修复建议"""
         suggestions = {
             FailurePattern.TIMEOUT: "增加超时时间或优化执行路径",
@@ -297,8 +310,7 @@ class AutoSkillImprover:
         }
         return suggestions.get(pattern, "需要进一步分析")
 
-    def _generate_improvement(self, skill_id: str,
-                             analysis: FailureAnalysis) -> Optional[SkillImprovement]:
+    def _generate_improvement(self, skill_id: str, analysis: FailureAnalysis) -> Optional[SkillImprovement]:
         """根据分析生成改进建议"""
         improvement_type = {
             FailurePattern.TIMEOUT: ImprovementType.PERFORMANCE,
@@ -318,9 +330,7 @@ class AutoSkillImprover:
             expected_impact=min(1.0, analysis.frequency / 10.0),
         )
 
-    def create_variant(self, skill_id: str, name: str,
-                      changes: Dict[str, Any],
-                      description: str = "") -> SkillVariant:
+    def create_variant(self, skill_id: str, name: str, changes: Dict[str, Any], description: str = "") -> SkillVariant:
         """
         创建技能变体
 
@@ -351,7 +361,7 @@ class AutoSkillImprover:
 
             self._variants.setdefault(skill_id, []).append(variant)
 
-            logger.info(f"Created variant {variant.variant_id} for skill {skill_id}")
+            logger.info("Created variant %s for skill %s", variant.variant_id, skill_id)
             return variant
 
     def get_improvement_history(self, skill_id: str) -> List[SkillImprovement]:
@@ -375,13 +385,15 @@ class AutoSkillImprover:
             variants = self._variants.get(skill_id, [])
             variant_stats = []
             for v in variants:
-                variant_stats.append({
-                    "variant_id": v.variant_id,
-                    "name": v.name,
-                    "success_rate": v.success_count / max(1, v.total_uses),
-                    "total_uses": v.total_uses,
-                    "avg_duration": v.avg_duration,
-                })
+                variant_stats.append(
+                    {
+                        "variant_id": v.variant_id,
+                        "name": v.name,
+                        "success_rate": v.success_count / max(1, v.total_uses),
+                        "total_uses": v.total_uses,
+                        "avg_duration": v.avg_duration,
+                    }
+                )
 
             return {
                 "skill_id": skill_id,
@@ -418,13 +430,15 @@ class AutoSkillImprover:
             variant_stats = []
             for v in variants:
                 variant_records = [r for r in records if r.variant_id == v.variant_id]
-                variant_stats.append({
-                    "variant_id": v.variant_id,
-                    "name": v.name,
-                    "total_uses": len(variant_records),
-                    "success_rate": v.success_count / max(1, v.total_uses),
-                    "avg_duration": v.avg_duration,
-                })
+                variant_stats.append(
+                    {
+                        "variant_id": v.variant_id,
+                        "name": v.name,
+                        "total_uses": len(variant_records),
+                        "success_rate": v.success_count / max(1, v.total_uses),
+                        "avg_duration": v.avg_duration,
+                    }
+                )
 
             return {
                 "skill_id": skill_id,

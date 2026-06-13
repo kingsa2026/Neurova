@@ -11,45 +11,49 @@
 基于关键词规则和上下文分析进行智能分类
 """
 
+import logging
 import re
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
-import logging
 
-from .models import Memory, MemoryType, MemoryCategory, MemoryPerspective, EmotionType
+from .models import EmotionType, MemoryType
 
 logger = logging.getLogger(__name__)
 
 
 # ────── Enums ──────
 
+
 class CategoryType(Enum):
     """记忆分类类型"""
-    GENERAL = "general"           # 通用
-    CONVERSATION = "conversation" # 对话
-    KNOWLEDGE = "knowledge"       # 知识
-    EXPERIENCE = "experience"     # 经验
-    TOOL_USAGE = "tool_usage"     # 工具使用
-    REFLECTION = "reflection"     # 反思
+
+    GENERAL = "general"  # 通用
+    CONVERSATION = "conversation"  # 对话
+    KNOWLEDGE = "knowledge"  # 知识
+    EXPERIENCE = "experience"  # 经验
+    TOOL_USAGE = "tool_usage"  # 工具使用
+    REFLECTION = "reflection"  # 反思
     USER_PREFERENCE = "user_preference"  # 用户偏好
 
 
 class MemoryTypeEnum(Enum):
     """记忆类型枚举"""
-    SEMANTIC = "semantic"         # 语义记忆（事实知识）
-    EPISODIC = "episodic"         # 情景记忆（事件经历）
-    PROCEDURAL = "procedural"     # 程序记忆（技能操作）
-    PATTERN = "pattern"           # 模式记忆（行为模式）
-    EMOTIONAL = "emotional"       # 情感记忆
-    WORKING = "working"           # 工作记忆
+
+    SEMANTIC = "semantic"  # 语义记忆（事实知识）
+    EPISODIC = "episodic"  # 情景记忆（事件经历）
+    PROCEDURAL = "procedural"  # 程序记忆（技能操作）
+    PATTERN = "pattern"  # 模式记忆（行为模式）
+    EMOTIONAL = "emotional"  # 情感记忆
+    WORKING = "working"  # 工作记忆
 
 
 class PerspectiveType(Enum):
     """记忆视角类型"""
-    FIRST_PERSON = "first_person"    # 第一人称
+
+    FIRST_PERSON = "first_person"  # 第一人称
     SECOND_PERSON = "second_person"  # 第二人称
-    THIRD_PERSON = "third_person"    # 第三人称
-    SYSTEM = "system"                # 系统视角
+    THIRD_PERSON = "third_person"  # 第三人称
+    SYSTEM = "system"  # 系统视角
 
 
 # ────── Keywords Rules ──────
@@ -162,16 +166,16 @@ _CRYSTALLIZE_KEYWORDS = [
 class MemoryAutoClassifier:
     """
     记忆自动分类器
-    
+
     基于关键词规则和上下文分析进行智能分类。
     """
-    
+
     def __init__(self):
         """初始化分类器"""
         self._compiled_patterns: Dict[str, List[re.Pattern]] = {}
         self._compile_patterns()
         logger.info("MemoryAutoClassifier 初始化完成")
-    
+
     def _compile_patterns(self):
         """预编译所有关键词模式"""
         all_keywords = {
@@ -181,30 +185,30 @@ class MemoryAutoClassifier:
             "important": _IMPORTANT_KEYWORDS,
             "crystallize": _CRYSTALLIZE_KEYWORDS,
         }
-        
+
         for key, patterns in all_keywords.items():
             compiled = []
             for pattern in patterns:
                 try:
                     compiled.append(re.compile(pattern, re.IGNORECASE))
                 except re.error:
-                    logger.warning(f"无法编译正则表达式: {pattern}")
+                    logger.warning("无法编译正则表达式: %s", pattern)
             self._compiled_patterns[key] = compiled
-    
+
     def classify(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         分类记忆内容
-        
+
         Args:
             content: 记忆内容
             metadata: 可选的元数据
-            
+
         Returns:
             分类结果字典
         """
         if not content or not content.strip():
             return self._default_classification()
-        
+
         # 分类各个维度
         category, category_confidence = self.classify_category(content)
         memory_type, type_confidence = self.classify_type(content)
@@ -212,21 +216,19 @@ class MemoryAutoClassifier:
         emotion = self.classify_emotion(content)
         important = self.is_important(content)
         crystallize = self.should_crystallize(content)
-        
+
         # 计算总体置信度
         overall_confidence = self._calculate_overall_confidence(
             category_confidence, type_confidence, perspective_confidence
         )
-        
+
         # 生成推理过程
-        reasoning = self._generate_reasoning(
-            content, category, memory_type, perspective, important, crystallize
-        )
-        
+        reasoning = self._generate_reasoning(content, category, memory_type, perspective, important, crystallize)
+
         # 使用情感亲和性增强分类
         if metadata and "emotion" in metadata:
             category = self._enhance_with_emotion_affinity(category, metadata["emotion"])
-        
+
         return {
             "category": category,
             "memory_type": memory_type,
@@ -242,7 +244,7 @@ class MemoryAutoClassifier:
                 "perspective_confidence": perspective_confidence,
             },
         }
-    
+
     def _enhance_with_emotion_affinity(self, category: CategoryType, emotion: str) -> CategoryType:
         """使用情感亲和性增强分类"""
         # 情感与分类的亲和性映射
@@ -264,32 +266,32 @@ class MemoryAutoClassifier:
             "shame": {CategoryType.EXPERIENCE: 0.4, CategoryType.REFLECTION: 0.4},
             "empathy": {CategoryType.CONVERSATION: 0.4, CategoryType.EXPERIENCE: 0.3},
         }
-        
+
         if emotion in emotion_affinity:
             affinity = emotion_affinity[emotion]
             # 如果当前分类有情感亲和性加成，保持不变
             if category in affinity:
                 return category
-            
+
             # 否则，考虑是否有更高亲和性的分类
             best_affinity_category = max(affinity.items(), key=lambda x: x[1])
             if best_affinity_category[1] > 0.4:  # 阈值
                 return best_affinity_category[0]
-        
+
         return category
-    
+
     def classify_category(self, content: str) -> Tuple[CategoryType, float]:
         """
         分类记忆分类
-        
+
         Args:
             content: 记忆内容
-            
+
         Returns:
             (分类类型, 置信度)
         """
         scores: Dict[CategoryType, float] = {cat: 0.0 for cat in CategoryType}
-        
+
         for category, patterns in _CATEGORY_KEYWORDS.items():
             key = f"category_{category.value}"
             if key in self._compiled_patterns:
@@ -298,32 +300,32 @@ class MemoryAutoClassifier:
                     if matches:
                         # 每个匹配增加分数，但有上限
                         scores[category] += min(len(matches) * 0.2, 0.8)
-        
+
         # 找到最高分
         if not any(scores.values()):
             return CategoryType.GENERAL, 0.5
-        
+
         best_category = max(scores.items(), key=lambda x: x[1])
-        
+
         # 归一化置信度
         total = sum(scores.values())
         confidence = best_category[1] / total if total > 0 else 0.5
-        
+
         return best_category[0], confidence
-    
+
     def classify_category_multi_label(self, content: str, threshold: float = 0.3) -> List[Tuple[CategoryType, float]]:
         """
         多标签分类
-        
+
         Args:
             content: 记忆内容
             threshold: 阈值
-            
+
         Returns:
             超过阈值的分类列表
         """
         scores: Dict[CategoryType, float] = {cat: 0.0 for cat in CategoryType}
-        
+
         for category, patterns in _CATEGORY_KEYWORDS.items():
             key = f"category_{category.value}"
             if key in self._compiled_patterns:
@@ -331,30 +333,30 @@ class MemoryAutoClassifier:
                     matches = pattern.findall(content)
                     if matches:
                         scores[category] += min(len(matches) * 0.2, 0.8)
-        
+
         # 归一化
         total = sum(scores.values())
         if total > 0:
             scores = {k: v / total for k, v in scores.items()}
-        
+
         # 过滤超过阈值的
         results = [(cat, score) for cat, score in scores.items() if score >= threshold]
         results.sort(key=lambda x: x[1], reverse=True)
-        
+
         return results
-    
+
     def classify_type(self, content: str) -> Tuple[MemoryTypeEnum, float]:
         """
         分类记忆类型
-        
+
         Args:
             content: 记忆内容
-            
+
         Returns:
             (记忆类型, 置信度)
         """
         scores: Dict[MemoryTypeEnum, float] = {t: 0.0 for t in MemoryTypeEnum}
-        
+
         for memory_type, patterns in _TYPE_KEYWORDS.items():
             key = f"type_{memory_type.value}"
             if key in self._compiled_patterns:
@@ -362,31 +364,31 @@ class MemoryAutoClassifier:
                     matches = pattern.findall(content)
                     if matches:
                         scores[memory_type] += min(len(matches) * 0.2, 0.8)
-        
+
         # 找到最高分
         if not any(scores.values()):
             return MemoryTypeEnum.SEMANTIC, 0.5
-        
+
         best_type = max(scores.items(), key=lambda x: x[1])
-        
+
         # 归一化置信度
         total = sum(scores.values())
         confidence = best_type[1] / total if total > 0 else 0.5
-        
+
         return best_type[0], confidence
-    
+
     def classify_perspective(self, content: str) -> Tuple[PerspectiveType, float]:
         """
         分类记忆视角
-        
+
         Args:
             content: 记忆内容
-            
+
         Returns:
             (视角类型, 置信度)
         """
         scores: Dict[PerspectiveType, float] = {p: 0.0 for p in PerspectiveType}
-        
+
         for perspective, patterns in _PERSPECTIVE_KEYWORDS.items():
             key = f"perspective_{perspective.value}"
             if key in self._compiled_patterns:
@@ -394,26 +396,26 @@ class MemoryAutoClassifier:
                     matches = pattern.findall(content)
                     if matches:
                         scores[perspective] += min(len(matches) * 0.3, 0.9)
-        
+
         # 找到最高分
         if not any(scores.values()):
             return PerspectiveType.FIRST_PERSON, 0.5
-        
+
         best_perspective = max(scores.items(), key=lambda x: x[1])
-        
+
         # 归一化置信度
         total = sum(scores.values())
         confidence = best_perspective[1] / total if total > 0 else 0.5
-        
+
         return best_perspective[0], confidence
-    
+
     def classify_emotion(self, content: str) -> EmotionType:
         """
         分类情感类型
-        
+
         Args:
             content: 记忆内容
-            
+
         Returns:
             情感类型
         """
@@ -428,27 +430,27 @@ class MemoryAutoClassifier:
             EmotionType.TRUST: ["信任", "相信", "信赖", "trust", "believe"],
             EmotionType.ANTICIPATION: ["期待", "盼望", "期望", "anticipate", "expect"],
         }
-        
+
         content_lower = content.lower()
         scores: Dict[EmotionType, float] = {e: 0.0 for e in EmotionType}
-        
+
         for emotion, keywords in emotion_keywords.items():
             for keyword in keywords:
                 if keyword.lower() in content_lower:
                     scores[emotion] += 1.0
-        
+
         if not any(scores.values()):
             return EmotionType.NEUTRAL
-        
+
         return max(scores.items(), key=lambda x: x[1])[0]
-    
+
     def is_important(self, content: str) -> bool:
         """
         判断记忆是否重要
-        
+
         Args:
             content: 记忆内容
-            
+
         Returns:
             是否重要
         """
@@ -457,14 +459,14 @@ class MemoryAutoClassifier:
                 if pattern.search(content):
                     return True
         return False
-    
+
     def should_crystallize(self, content: str) -> bool:
         """
         判断记忆是否应该固化
-        
+
         Args:
             content: 记忆内容
-            
+
         Returns:
             是否应该固化
         """
@@ -473,7 +475,7 @@ class MemoryAutoClassifier:
                 if pattern.search(content):
                     return True
         return False
-    
+
     def _default_classification(self) -> Dict[str, Any]:
         """默认分类结果"""
         return {
@@ -491,7 +493,7 @@ class MemoryAutoClassifier:
                 "perspective_confidence": 0.5,
             },
         }
-    
+
     def _calculate_overall_confidence(
         self,
         category_confidence: float,
@@ -502,10 +504,10 @@ class MemoryAutoClassifier:
         # 加权平均
         weights = [0.4, 0.4, 0.2]  # 分类和类型权重更高
         confidences = [category_confidence, type_confidence, perspective_confidence]
-        
+
         weighted_sum = sum(w * c for w, c in zip(weights, confidences))
         return weighted_sum
-    
+
     def _generate_reasoning(
         self,
         content: str,
@@ -517,7 +519,7 @@ class MemoryAutoClassifier:
     ) -> str:
         """生成推理过程"""
         reasoning_parts = []
-        
+
         # 分类推理
         reasoning_parts.append(f"分类为 {category.value}：")
         key = f"category_{category.value}"
@@ -526,7 +528,7 @@ class MemoryAutoClassifier:
                 matches = pattern.findall(content)
                 if matches:
                     reasoning_parts.append(f"  - 匹配关键词: {matches[:3]}")
-        
+
         # 类型推理
         reasoning_parts.append(f"类型为 {memory_type.value}：")
         key = f"type_{memory_type.value}"
@@ -535,13 +537,13 @@ class MemoryAutoClassifier:
                 matches = pattern.findall(content)
                 if matches:
                     reasoning_parts.append(f"  - 匹配关键词: {matches[:3]}")
-        
+
         # 重要性推理
         if is_important:
             reasoning_parts.append("标记为重要：匹配重要性关键词")
-        
+
         # 固化推理
         if should_crystallize:
             reasoning_parts.append("建议固化：匹配固化关键词")
-        
+
         return "\n".join(reasoning_parts)

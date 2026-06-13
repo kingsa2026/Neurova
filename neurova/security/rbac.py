@@ -9,23 +9,22 @@ Neurova 权限管理增强模块 (RBAC)
 3. 权限变更审批流程
 """
 
-from dataclasses import dataclass, field
 import datetime
 import json
 import logging
-import os
-from pathlib import Path
-import threading
-from typing import Dict, Any, List, Optional, Set
-from enum import Enum
 import sqlite3
-import time
+import threading
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 
 class Permission(str, Enum):
     """权限枚举"""
+
     SYSTEM_READ = "system:read"
     SYSTEM_WRITE = "system:write"
     USER_READ = "user:read"
@@ -57,24 +56,45 @@ class Permission(str, Enum):
 ROLE_PERMISSIONS: Dict[str, Set[str]] = {
     "admin": {p.value for p in Permission},
     "operator": {
-        Permission.SYSTEM_READ.value, Permission.USER_READ.value, Permission.USER_WRITE.value,
-        Permission.API_KEY_READ.value, Permission.API_KEY_WRITE.value, Permission.AUDIT_READ.value,
-        Permission.CONFIG_READ.value, Permission.SKILL_READ.value, Permission.SKILL_WRITE.value,
-        Permission.WORKFLOW_READ.value, Permission.WORKFLOW_WRITE.value,
-        Permission.CHANNEL_READ.value, Permission.CHANNEL_WRITE.value,
+        Permission.SYSTEM_READ.value,
+        Permission.USER_READ.value,
+        Permission.USER_WRITE.value,
+        Permission.API_KEY_READ.value,
+        Permission.API_KEY_WRITE.value,
+        Permission.AUDIT_READ.value,
+        Permission.CONFIG_READ.value,
+        Permission.SKILL_READ.value,
+        Permission.SKILL_WRITE.value,
+        Permission.WORKFLOW_READ.value,
+        Permission.WORKFLOW_WRITE.value,
+        Permission.CHANNEL_READ.value,
+        Permission.CHANNEL_WRITE.value,
     },
     "developer": {
-        Permission.SYSTEM_READ.value, Permission.USER_READ.value, Permission.API_KEY_READ.value,
-        Permission.CONFIG_READ.value, Permission.SKILL_READ.value, Permission.SKILL_WRITE.value,
-        Permission.WORKFLOW_READ.value, Permission.WORKFLOW_WRITE.value, Permission.CHANNEL_READ.value,
+        Permission.SYSTEM_READ.value,
+        Permission.USER_READ.value,
+        Permission.API_KEY_READ.value,
+        Permission.CONFIG_READ.value,
+        Permission.SKILL_READ.value,
+        Permission.SKILL_WRITE.value,
+        Permission.WORKFLOW_READ.value,
+        Permission.WORKFLOW_WRITE.value,
+        Permission.CHANNEL_READ.value,
     },
     "viewer": {
-        Permission.SYSTEM_READ.value, Permission.USER_READ.value, Permission.API_KEY_READ.value,
-        Permission.AUDIT_READ.value, Permission.CONFIG_READ.value, Permission.SKILL_READ.value,
-        Permission.WORKFLOW_READ.value, Permission.CHANNEL_READ.value, Permission.COMPLIANCE_READ.value,
+        Permission.SYSTEM_READ.value,
+        Permission.USER_READ.value,
+        Permission.API_KEY_READ.value,
+        Permission.AUDIT_READ.value,
+        Permission.CONFIG_READ.value,
+        Permission.SKILL_READ.value,
+        Permission.WORKFLOW_READ.value,
+        Permission.CHANNEL_READ.value,
+        Permission.COMPLIANCE_READ.value,
     },
     "guest": {
-        Permission.SYSTEM_READ.value, Permission.SKILL_READ.value,
+        Permission.SYSTEM_READ.value,
+        Permission.SKILL_READ.value,
     },
 }
 
@@ -82,6 +102,7 @@ ROLE_PERMISSIONS: Dict[str, Set[str]] = {
 @dataclass
 class Role:
     """角色数据类"""
+
     id: str
     name: str
     description: str = ""
@@ -92,15 +113,20 @@ class Role:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "id": self.id, "name": self.name, "description": self.description,
-            "permissions": list(self.permissions), "is_system": self.is_system,
-            "created_at": self.created_at.isoformat(), "updated_at": self.updated_at.isoformat(),
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "permissions": list(self.permissions),
+            "is_system": self.is_system,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
         }
 
 
 @dataclass
 class PermissionChangeRequest:
     """权限变更请求数据类"""
+
     id: int
     requester_id: str
     target_user_id: str
@@ -116,10 +142,15 @@ class PermissionChangeRequest:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "id": self.id, "requester_id": self.requester_id, "target_user_id": self.target_user_id,
-            "action": self.action, "role_id": self.role_id,
+            "id": self.id,
+            "requester_id": self.requester_id,
+            "target_user_id": self.target_user_id,
+            "action": self.action,
+            "role_id": self.role_id,
             "permissions": list(self.permissions) if self.permissions else None,
-            "reason": self.reason, "status": self.status, "approver_id": self.approver_id,
+            "reason": self.reason,
+            "status": self.status,
+            "approver_id": self.approver_id,
             "approver_comment": self.approver_comment,
             "created_at": self.created_at.isoformat(),
             "processed_at": self.processed_at.isoformat() if self.processed_at else None,
@@ -129,7 +160,7 @@ class PermissionChangeRequest:
 class RBACManager:
     """RBAC 管理器（单例）"""
 
-    _instance: Optional['RBACManager'] = None
+    _instance: Optional["RBACManager"] = None
     _lock = threading.Lock()
 
     def __new__(cls, db_path: Optional[str] = None):
@@ -148,7 +179,7 @@ class RBACManager:
         self._init_system_roles()
         self._load_cache()
         self._initialized = True
-        logger.info(f"RBACManager initialized: {self._db_path}")
+        logger.info("RBACManager initialized: %s", self._db_path)
 
     def _ensure_db_dir(self):
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -212,16 +243,18 @@ class RBACManager:
         cursor.execute("SELECT * FROM roles")
         for row in cursor.fetchall():
             role = Role(
-                id=row['id'], name=row['name'], description=row['description'] or "",
-                permissions=set(json.loads(row['permissions'])) if row['permissions'] else set(),
-                is_system=bool(row['is_system']),
-                created_at=datetime.datetime.fromisoformat(row['created_at']),
-                updated_at=datetime.datetime.fromisoformat(row['updated_at']),
+                id=row["id"],
+                name=row["name"],
+                description=row["description"] or "",
+                permissions=set(json.loads(row["permissions"])) if row["permissions"] else set(),
+                is_system=bool(row["is_system"]),
+                created_at=datetime.datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.datetime.fromisoformat(row["updated_at"]),
             )
             self._roles_cache[role.id] = role
         cursor.execute("SELECT user_id, role_id FROM user_roles")
         for row in cursor.fetchall():
-            self._user_roles_cache.setdefault(row['user_id'], set()).add(row['role_id'])
+            self._user_roles_cache.setdefault(row["user_id"], set()).add(row["role_id"])
         conn.close()
 
     def _invalidate_cache(self):
@@ -229,8 +262,9 @@ class RBACManager:
         self._user_roles_cache.clear()
         self._load_cache()
 
-    def create_role(self, name: str, description: str = "", permissions: Set[str] = None,
-                    is_system: bool = False) -> Optional[Role]:
+    def create_role(
+        self, name: str, description: str = "", permissions: Set[str] = None, is_system: bool = False
+    ) -> Optional[Role]:
         role_id = name.lower().replace(" ", "_")
         if role_id in self._roles_cache:
             return None
@@ -238,20 +272,33 @@ class RBACManager:
             if r.name == name:
                 return None
         now = datetime.datetime.now()
-        role = Role(id=role_id, name=name, description=description,
-                    permissions=permissions or set(), is_system=is_system,
-                    created_at=now, updated_at=now)
+        role = Role(
+            id=role_id,
+            name=name,
+            description=description,
+            permissions=permissions or set(),
+            is_system=is_system,
+            created_at=now,
+            updated_at=now,
+        )
         conn = self._get_conn()
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO roles (id,name,description,permissions,is_system,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-            (role.id, role.name, role.description, json.dumps(list(role.permissions)),
-             1 if role.is_system else 0, role.created_at.isoformat(), role.updated_at.isoformat()),
+            (
+                role.id,
+                role.name,
+                role.description,
+                json.dumps(list(role.permissions)),
+                1 if role.is_system else 0,
+                role.created_at.isoformat(),
+                role.updated_at.isoformat(),
+            ),
         )
         conn.commit()
         conn.close()
         self._roles_cache[role.id] = role
-        logger.info(f"Created role: {name}")
+        logger.info("Created role: %s", name)
         return role
 
     def _get_role(self, role_id: str) -> Optional[Role]:
@@ -269,8 +316,13 @@ class RBACManager:
     def list_roles(self) -> List[Role]:
         return list(self._roles_cache.values())
 
-    def update_role(self, role_id: str, name: Optional[str] = None,
-                    description: Optional[str] = None, permissions: Optional[Set[str]] = None) -> Optional[Role]:
+    def update_role(
+        self,
+        role_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        permissions: Optional[Set[str]] = None,
+    ) -> Optional[Role]:
         role = self._get_role(role_id)
         if not role or role.is_system:
             return None
@@ -286,9 +338,10 @@ class RBACManager:
         role.updated_at = datetime.datetime.now()
         conn = self._get_conn()
         cursor = conn.cursor()
-        cursor.execute("UPDATE roles SET name=?,description=?,permissions=?,updated_at=? WHERE id=?",
-                       (role.name, role.description, json.dumps(list(role.permissions)),
-                        role.updated_at.isoformat(), role.id))
+        cursor.execute(
+            "UPDATE roles SET name=?,description=?,permissions=?,updated_at=? WHERE id=?",
+            (role.name, role.description, json.dumps(list(role.permissions)), role.updated_at.isoformat(), role.id),
+        )
         conn.commit()
         conn.close()
         self._roles_cache[role.id] = role
@@ -309,7 +362,7 @@ class RBACManager:
             self._user_roles_cache[uid].discard(role_id)
             if not self._user_roles_cache[uid]:
                 del self._user_roles_cache[uid]
-        logger.info(f"Deleted role: {role.name}")
+        logger.info("Deleted role: %s", role.name)
         return True
 
     def has_permission(self, user_id: str, permission: str) -> bool:
@@ -338,12 +391,14 @@ class RBACManager:
             return False
         conn = self._get_conn()
         cursor = conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO user_roles (user_id,role_id,assigned_by,assigned_at) VALUES (?,?,?,?)",
-                       (user_id, role_id, assigned_by, datetime.datetime.now().isoformat()))
+        cursor.execute(
+            "INSERT OR REPLACE INTO user_roles (user_id,role_id,assigned_by,assigned_at) VALUES (?,?,?,?)",
+            (user_id, role_id, assigned_by, datetime.datetime.now().isoformat()),
+        )
         conn.commit()
         conn.close()
         self._user_roles_cache.setdefault(user_id, set()).add(role_id)
-        logger.info(f"Assigned role {role_id} to user {user_id}")
+        logger.info("Assigned role %s to user %s", role_id, user_id)
         return True
 
     def revoke_role(self, user_id: str, role_id: str) -> bool:
@@ -357,7 +412,7 @@ class RBACManager:
         self._user_roles_cache[user_id].discard(role_id)
         if not self._user_roles_cache[user_id]:
             del self._user_roles_cache[user_id]
-        logger.info(f"Revoked role {role_id} from user {user_id}")
+        logger.info("Revoked role %s from user %s", role_id, user_id)
         return True
 
     def get_user_roles(self, user_id: str) -> List[Role]:
@@ -371,16 +426,29 @@ class RBACManager:
     def get_role_users(self, role_id: str) -> List[str]:
         return [uid for uid, rids in self._user_roles_cache.items() if role_id in rids]
 
-    def create_permission_request(self, requester_id: str, target_user_id: str, action: str,
-                                  reason: str = "", role_id: Optional[str] = None,
-                                  permissions: Optional[Set[str]] = None) -> Optional[int]:
+    def create_permission_request(
+        self,
+        requester_id: str,
+        target_user_id: str,
+        action: str,
+        reason: str = "",
+        role_id: Optional[str] = None,
+        permissions: Optional[Set[str]] = None,
+    ) -> Optional[int]:
         conn = self._get_conn()
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO permission_requests (requester_id,target_user_id,action,role_id,permissions,reason,status,created_at) VALUES (?,?,?,?,?,?,?,?)",
-            (requester_id, target_user_id, action, role_id,
-             json.dumps(list(permissions)) if permissions else None, reason, "pending",
-             datetime.datetime.now().isoformat()),
+            (
+                requester_id,
+                target_user_id,
+                action,
+                role_id,
+                json.dumps(list(permissions)) if permissions else None,
+                reason,
+                "pending",
+                datetime.datetime.now().isoformat(),
+            ),
         )
         request_id = cursor.lastrowid
         conn.commit()
@@ -395,16 +463,22 @@ class RBACManager:
         conn.close()
         requests = []
         for row in results:
-            requests.append(PermissionChangeRequest(
-                id=row['id'], requester_id=row['requester_id'],
-                target_user_id=row['target_user_id'], action=row['action'],
-                role_id=row['role_id'],
-                permissions=set(json.loads(row['permissions'])) if row['permissions'] else None,
-                reason=row['reason'] or "", status=row['status'],
-                approver_id=row['approver_id'], approver_comment=row['approver_comment'],
-                created_at=datetime.datetime.fromisoformat(row['created_at']),
-                processed_at=datetime.datetime.fromisoformat(row['processed_at']) if row['processed_at'] else None,
-            ))
+            requests.append(
+                PermissionChangeRequest(
+                    id=row["id"],
+                    requester_id=row["requester_id"],
+                    target_user_id=row["target_user_id"],
+                    action=row["action"],
+                    role_id=row["role_id"],
+                    permissions=set(json.loads(row["permissions"])) if row["permissions"] else None,
+                    reason=row["reason"] or "",
+                    status=row["status"],
+                    approver_id=row["approver_id"],
+                    approver_comment=row["approver_comment"],
+                    created_at=datetime.datetime.fromisoformat(row["created_at"]),
+                    processed_at=datetime.datetime.fromisoformat(row["processed_at"]) if row["processed_at"] else None,
+                )
+            )
         return requests
 
     def approve_request(self, request_id: int, approver_id: str, comment: str = "") -> bool:
@@ -412,19 +486,21 @@ class RBACManager:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM permission_requests WHERE id=?", (request_id,))
         row = cursor.fetchone()
-        if not row or row['status'] != 'pending':
+        if not row or row["status"] != "pending":
             conn.close()
             return False
         now = datetime.datetime.now().isoformat()
-        cursor.execute("UPDATE permission_requests SET status='approved',approver_id=?,approver_comment=?,processed_at=? WHERE id=?",
-                       (approver_id, comment, now, request_id))
+        cursor.execute(
+            "UPDATE permission_requests SET status='approved',approver_id=?,approver_comment=?,processed_at=? WHERE id=?",
+            (approver_id, comment, now, request_id),
+        )
         conn.commit()
         conn.close()
-        if row['action'] == 'assign_role' and row['role_id']:
-            self.assign_role(row['target_user_id'], row['role_id'], assigned_by=approver_id)
-        elif row['action'] == 'revoke_role' and row['role_id']:
-            self.revoke_role(row['target_user_id'], row['role_id'])
-        logger.info(f"Approved request {request_id}")
+        if row["action"] == "assign_role" and row["role_id"]:
+            self.assign_role(row["target_user_id"], row["role_id"], assigned_by=approver_id)
+        elif row["action"] == "revoke_role" and row["role_id"]:
+            self.revoke_role(row["target_user_id"], row["role_id"])
+        logger.info("Approved request %s", request_id)
         return True
 
     def reject_request(self, request_id: int, approver_id: str, comment: str = "") -> bool:
@@ -432,29 +508,47 @@ class RBACManager:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM permission_requests WHERE id=?", (request_id,))
         row = cursor.fetchone()
-        if not row or row['status'] != 'pending':
+        if not row or row["status"] != "pending":
             conn.close()
             return False
         now = datetime.datetime.now().isoformat()
-        cursor.execute("UPDATE permission_requests SET status='rejected',approver_id=?,approver_comment=?,processed_at=? WHERE id=?",
-                       (approver_id, comment, now, request_id))
+        cursor.execute(
+            "UPDATE permission_requests SET status='rejected',approver_id=?,approver_comment=?,processed_at=? WHERE id=?",
+            (approver_id, comment, now, request_id),
+        )
         conn.commit()
         conn.close()
-        logger.info(f"Rejected request {request_id}")
+        logger.info("Rejected request %s", request_id)
         return True
 
     def get_all_permissions(self) -> List[Dict[str, str]]:
         descriptions = {
-            "system:read": "读取系统信息", "system:write": "修改系统配置",
-            "user:read": "读取用户信息", "user:write": "修改用户信息", "user:delete": "删除用户",
-            "role:read": "读取角色信息", "role:write": "修改角色信息", "role:delete": "删除角色",
-            "api_key:read": "读取 API Key", "api_key:write": "创建/修改 API Key", "api_key:delete": "删除 API Key",
-            "audit:read": "查看审计日志", "audit:export": "导出审计日志",
-            "config:read": "读取配置", "config:write": "修改配置",
-            "skill:read": "读取技能", "skill:write": "创建/修改技能", "skill:delete": "删除技能",
-            "workflow:read": "读取工作流", "workflow:write": "创建/修改工作流", "workflow:delete": "删除工作流",
-            "channel:read": "读取渠道", "channel:write": "创建/修改渠道", "channel:delete": "删除渠道",
-            "compliance:read": "查看合规报告", "compliance:write": "修改合规设置",
+            "system:read": "读取系统信息",
+            "system:write": "修改系统配置",
+            "user:read": "读取用户信息",
+            "user:write": "修改用户信息",
+            "user:delete": "删除用户",
+            "role:read": "读取角色信息",
+            "role:write": "修改角色信息",
+            "role:delete": "删除角色",
+            "api_key:read": "读取 API Key",
+            "api_key:write": "创建/修改 API Key",
+            "api_key:delete": "删除 API Key",
+            "audit:read": "查看审计日志",
+            "audit:export": "导出审计日志",
+            "config:read": "读取配置",
+            "config:write": "修改配置",
+            "skill:read": "读取技能",
+            "skill:write": "创建/修改技能",
+            "skill:delete": "删除技能",
+            "workflow:read": "读取工作流",
+            "workflow:write": "创建/修改工作流",
+            "workflow:delete": "删除工作流",
+            "channel:read": "读取渠道",
+            "channel:write": "创建/修改渠道",
+            "channel:delete": "删除渠道",
+            "compliance:read": "查看合规报告",
+            "compliance:write": "修改合规设置",
         }
         return [{"id": p.value, "name": p.name, "description": descriptions.get(p.value, p.value)} for p in Permission]
 

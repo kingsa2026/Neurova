@@ -79,10 +79,11 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import * as schedulerApi from '@/api/modules/scheduler'
+import { useAgentPage } from '@/composables/useAgentPage'
 
 const { t } = useI18n()
 
@@ -99,6 +100,7 @@ interface ScheduledTask {
   interval?: number
 }
 
+const { agentId } = useAgentPage()
 const tasks = ref<ScheduledTask[]>([])
 const loading = ref(false)
 const showModal = ref(false)
@@ -141,8 +143,20 @@ function openEdit(task: ScheduledTask) {
 async function fetchTasks() {
   loading.value = true
   try {
-    const res = await request.get('/scheduler/tasks') as unknown as ScheduledTask[]
-    tasks.value = res ?? []
+    const res = await schedulerApi.getScheduledTasks({ agent_id: agentId.value })
+    const data = res?.data
+    const items = data?.items ?? (Array.isArray(data) ? data : [])
+    tasks.value = items.map((t: any) => ({
+      id: t.id,
+      name: t.name,
+      schedule: t.cron_expr || t.schedule || '',
+      enabled: t.enabled,
+      nextRun: t.next_run,
+      lastRun: t.last_run,
+      action: t.action,
+      description: t.description,
+      cron: t.cron_expr,
+    }))
   } catch { tasks.value = [] } finally { loading.value = false }
 }
 
@@ -150,18 +164,22 @@ async function handleSave() {
   if (!form.name) return
   saving.value = true
   try {
-    const payload = {
-      name: form.name,
-      scheduleType: form.scheduleType,
-      cron: form.scheduleType === 'cron' ? form.cron : undefined,
-      interval: form.scheduleType === 'interval' ? Number(form.interval) : undefined,
-      action: form.action,
-      description: form.description,
-    }
+    const cronExpr = form.scheduleType === 'cron' ? form.cron : `*/${form.interval || 5} * * * *`
     if (editingId.value) {
-      await request.put(`/scheduler/tasks/${editingId.value}`, payload)
+      await schedulerApi.updateScheduledTask(editingId.value, {
+        name: form.name,
+        cron_expr: cronExpr,
+        action: form.action,
+        description: form.description,
+      })
     } else {
-      await request.post('/scheduler/tasks', payload)
+      await schedulerApi.createScheduledTask({
+        name: form.name,
+        cron_expr: cronExpr,
+        action: form.action,
+        description: form.description,
+        agent_id: agentId.value,
+      })
     }
     showModal.value = false
     resetForm()
@@ -171,22 +189,20 @@ async function handleSave() {
 
 async function handleToggle(id: string, enabled: boolean) {
   try {
-    await request.put(`/scheduler/tasks/${id}`, { enabled })
+    await schedulerApi.updateScheduledTask(id, { enabled })
     await fetchTasks()
   } catch { /* handled */ }
 }
 
-async function handleRunNow(id: string) {
-  runningId.value = id
-  try {
-    await request.post(`/scheduler/tasks/${id}/run`)
-    await fetchTasks()
-  } catch { /* handled */ } finally { runningId.value = null }
+async function handleRunNow(_id: string) {
+  // Run-now not directly in scheduler API; could trigger via console push
+  // Placeholder: just refresh
+  await fetchTasks()
 }
 
 async function handleDelete(id: string) {
   try {
-    await request.delete(`/scheduler/tasks/${id}`)
+    await schedulerApi.deleteScheduledTask(id)
     await fetchTasks()
   } catch { /* handled */ }
 }

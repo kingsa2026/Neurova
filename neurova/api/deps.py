@@ -46,7 +46,7 @@ async def get_current_user(
     try:
         payload = verify_access_token(token)
     except Exception as e:
-        logger.warning(f"Token verification failed: {e}")
+        logger.warning("Token verification failed: %s", e)
         payload = None
 
     if not payload:
@@ -115,7 +115,7 @@ def get_agent_instance(agent_id: str = "default"):
             if agent:
                 return agent
     except Exception as e:
-        logger.warning(f"Failed to get agent from app state: {e}")
+        logger.warning("Failed to get agent from app state: %s", e)
 
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -174,7 +174,7 @@ def get_memory_manager(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get memory manager: {e}")
+        logger.error("Failed to get memory manager: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get memory manager",
@@ -198,7 +198,7 @@ def get_provider_manager():
             if provider_manager:
                 return provider_manager
     except Exception as e:
-        logger.warning(f"Failed to get provider manager: {e}")
+        logger.warning("Failed to get provider manager: %s", e)
 
     raise HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -218,9 +218,10 @@ def get_channel_manager():
     """
     try:
         from neurova.channels.manager import get_channel_manager as _get
+
         return _get()
     except Exception as e:
-        logger.error(f"Failed to get channel manager: {e}")
+        logger.error("Failed to get channel manager: %s", e)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Channel manager not available",
@@ -239,9 +240,10 @@ def get_event_bus():
     """
     try:
         from neurova.core.event_bus import get_event_bus as _get
+
         return _get()
     except Exception as e:
-        logger.error(f"Failed to get event bus: {e}")
+        logger.error("Failed to get event bus: %s", e)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Event bus not available",
@@ -260,9 +262,10 @@ def get_health_checker():
     """
     try:
         from neurova.api.endpoints import get_health_checker as _get
+
         return _get()
     except Exception as e:
-        logger.error(f"Failed to get health checker: {e}")
+        logger.error("Failed to get health checker: %s", e)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Health checker not available",
@@ -281,9 +284,10 @@ def get_startup_manager():
     """
     try:
         from neurova.api.endpoints import get_startup_manager as _get
+
         return _get()
     except Exception as e:
-        logger.error(f"Failed to get startup manager: {e}")
+        logger.error("Failed to get startup manager: %s", e)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Startup manager not available",
@@ -302,9 +306,10 @@ def get_llm_client():
     """
     try:
         from neurova.api.endpoints import get_llm_client as _get
+
         return _get()
     except Exception as e:
-        logger.error(f"Failed to get LLM client: {e}")
+        logger.error("Failed to get LLM client: %s", e)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="LLM client not available",
@@ -314,6 +319,7 @@ def get_llm_client():
 # ============================================================
 # 权限检查依赖
 # ============================================================
+
 
 def require_role(required_role: str):
     """
@@ -325,6 +331,7 @@ def require_role(required_role: str):
     Returns:
         依赖函数
     """
+
     async def check_role(
         user: Dict[str, Any] = Depends(get_current_user),
     ) -> Dict[str, Any]:
@@ -352,6 +359,7 @@ def require_admin():
 # ============================================================
 # 分页依赖
 # ============================================================
+
 
 class PaginationParams:
     """分页参数"""
@@ -407,6 +415,7 @@ async def get_pagination(
 # ============================================================
 # 请求上下文依赖
 # ============================================================
+
 
 class RequestContext:
     """请求上下文"""

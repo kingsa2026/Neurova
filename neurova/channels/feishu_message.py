@@ -194,7 +194,7 @@ class MessageMixin:
                 return f"[{message_type} 消息]"
 
         except (json.JSONDecodeError, TypeError) as e:
-            logger.warning(f"Failed to parse message content: {e}")
+            logger.warning("Failed to parse message content: %s", e)
             return content
 
     def filter_message(self, message: Dict[str, Any]) -> bool:
@@ -215,7 +215,7 @@ class MessageMixin:
         # 过滤非文本消息（可配置）
         message_type = message.get("message_type", "")
         if message_type not in MESSAGE_TYPE_MAP:
-            logger.debug(f"Unsupported message type: {message_type}")
+            logger.debug("Unsupported message type: %s", message_type)
             return False
 
         return True

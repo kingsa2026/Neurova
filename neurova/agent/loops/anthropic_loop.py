@@ -4,14 +4,16 @@ Anthropic Loop - Anthropic 模型适配循环
 支持: Claude-3 系列 (opus, sonnet, haiku)
 特殊能力: computer_use_preview (通过 tools 参数)
 """
+
 import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from neurova.agent.loops.base import BaseAgentLoop
 from neurova.llm_client import LLMResponse
 
 logger = logging.getLogger(__name__)
+
 
 class AnthropicLoop(BaseAgentLoop):
     """
@@ -21,16 +23,12 @@ class AnthropicLoop(BaseAgentLoop):
     支持 computer_use_preview 工具。
     """
 
-    def __init__(self, agent: 'Agent'):
+    def __init__(self, agent: "Agent"):
         super().__init__(agent)
-        logger.info(f"AnthropicLoop initialized for agent: {agent.config.name}")
+        logger.info("AnthropicLoop initialized for agent: %s", agent.config.name)
 
     async def predict_step(
-        self,
-        messages: List[Dict],
-        tools: Optional[List[Dict]] = None,
-        computer_handler: Optional[Any] = None,
-        **kwargs
+        self, messages: List[Dict], tools: Optional[List[Dict]] = None, computer_handler: Optional[Any] = None, **kwargs
     ) -> Any:
         """
         执行一步预测 (Anthropic 格式)
@@ -69,7 +67,7 @@ class AnthropicLoop(BaseAgentLoop):
 
         # 处理 tool_calls (包括 computer 工具)
         if response.tool_calls:
-            logger.info(f"LLM returned {len(response.tool_calls)} tool calls")
+            logger.info("LLM returned %s tool calls", len(response.tool_calls))
 
             # 执行工具
             tool_messages = await self.handle_tool_calls(response.tool_calls, messages)
@@ -112,10 +110,7 @@ class AnthropicLoop(BaseAgentLoop):
             else:
                 ant_content = content  # 已经是正确格式
 
-            anthropic_messages.append({
-                "role": ant_role,
-                "content": ant_content
-            })
+            anthropic_messages.append({"role": ant_role, "content": ant_content})
 
         return anthropic_messages
 
@@ -131,11 +126,13 @@ class AnthropicLoop(BaseAgentLoop):
         for tool in tools:
             if tool.get("type") == "function":
                 func = tool["function"]
-                ant_tools.append({
-                    "name": func["name"],
-                    "description": func.get("description", ""),
-                    "input_schema": func.get("parameters", {"type": "object", "properties": {}})
-                })
+                ant_tools.append(
+                    {
+                        "name": func["name"],
+                        "description": func.get("description", ""),
+                        "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
+                    }
+                )
 
         return ant_tools
 
@@ -153,9 +150,9 @@ class AnthropicLoop(BaseAgentLoop):
 
         # 获取环境
         try:
-            environment = await computer_handler.get_environment()
+            await computer_handler.get_environment()
         except Exception:
-            environment = "linux"
+            pass
 
         return {
             "type": "computer_20241022",
@@ -192,16 +189,12 @@ class AnthropicLoop(BaseAgentLoop):
                 continue
 
             # 构建 tool_result message
-            new_messages.append({
-                "role": "user",
-                "content": [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_call["id"],
-                        "content": result
-                    }
-                ]
-            })
+            new_messages.append(
+                {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": tool_call["id"], "content": result}],
+                }
+            )
 
         return new_messages
 
@@ -215,7 +208,7 @@ class AnthropicLoop(BaseAgentLoop):
         action = args["action"]
 
         # 获取 computer_handler (假设从 agent 获取)
-        computer_handler = getattr(self.agent, 'computer_handler', None)
+        computer_handler = getattr(self.agent, "computer_handler", None)
 
         if not computer_handler:
             return {"type": "text", "text": "Computer handler not available"}
@@ -225,11 +218,7 @@ class AnthropicLoop(BaseAgentLoop):
                 screenshot = await computer_handler.screenshot()
                 return {
                     "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": screenshot["image_base64"]
-                    }
+                    "source": {"type": "base64", "media_type": "image/png", "data": screenshot["image_base64"]},
                 }
 
             elif action == "click":
@@ -251,8 +240,9 @@ class AnthropicLoop(BaseAgentLoop):
                 return {"type": "text", "text": f"Unknown action: {action}"}
 
         except Exception as e:
-            logger.error(f"Computer tool execution failed: {e}")
+            logger.error("Computer tool execution failed: %s", e)
             return {"type": "text", "text": f"Error: {str(e)}"}
+
 
 # 注册到全局注册表
 try:
@@ -261,7 +251,7 @@ try:
     @register_loop(r"claude-.*|anthropic/.*", priority=20)
     class RegisteredAnthropicLoop(AnthropicLoop):
         """注册到全局注册表的 Anthropic Loop"""
-        pass
+
 
     logger.info("AnthropicLoop registered to global registry")
 except ImportError:

@@ -14,46 +14,49 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 
 class NodeType(str, Enum):
     """节点类型"""
-    CONCEPT = "concept"        # 概念
-    ENTITY = "entity"          # 实体
-    EVENT = "event"            # 事件
-    MEMORY = "memory"          # 记忆
-    SKILL = "skill"            # 技能
-    TOOL = "tool"              # 工具
-    PERSON = "person"          # 人物
-    LOCATION = "location"      # 地点
-    TIME = "time"              # 时间
-    CUSTOM = "custom"          # 自定义
+
+    CONCEPT = "concept"  # 概念
+    ENTITY = "entity"  # 实体
+    EVENT = "event"  # 事件
+    MEMORY = "memory"  # 记忆
+    SKILL = "skill"  # 技能
+    TOOL = "tool"  # 工具
+    PERSON = "person"  # 人物
+    LOCATION = "location"  # 地点
+    TIME = "time"  # 时间
+    CUSTOM = "custom"  # 自定义
 
 
 class RelationType(str, Enum):
     """关系类型"""
-    IS_A = "is_a"                    # 是一种
-    HAS_A = "has_a"                  # 拥有
-    PART_OF = "part_of"              # 属于
-    RELATED_TO = "related_to"        # 相关
-    CAUSES = "causes"                # 导致
-    SIMILAR_TO = "similar_to"        # 相似
-    OPPOSITE_OF = "opposite_of"      # 相反
-    TEMPORAL = "temporal"            # 时间关系
-    SPATIAL = "spatial"              # 空间关系
-    CAUSAL = "causal"                # 因果
-    DEPENDS_ON = "depends_on"        # 依赖
-    USED_BY = "used_by"              # 被使用
-    CONTAINS = "contains"            # 包含
-    CUSTOM = "custom"                # 自定义
+
+    IS_A = "is_a"  # 是一种
+    HAS_A = "has_a"  # 拥有
+    PART_OF = "part_of"  # 属于
+    RELATED_TO = "related_to"  # 相关
+    CAUSES = "causes"  # 导致
+    SIMILAR_TO = "similar_to"  # 相似
+    OPPOSITE_OF = "opposite_of"  # 相反
+    TEMPORAL = "temporal"  # 时间关系
+    SPATIAL = "spatial"  # 空间关系
+    CAUSAL = "causal"  # 因果
+    DEPENDS_ON = "depends_on"  # 依赖
+    USED_BY = "used_by"  # 被使用
+    CONTAINS = "contains"  # 包含
+    CUSTOM = "custom"  # 自定义
 
 
 @dataclass
 class GraphNode:
     """图谱节点"""
+
     node_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     label: str = ""
     node_type: NodeType = NodeType.CONCEPT
@@ -97,6 +100,7 @@ class GraphNode:
 @dataclass
 class GraphEdge:
     """图谱边（关系）"""
+
     edge_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     source_id: str = ""
     target_id: str = ""
@@ -140,6 +144,7 @@ class GraphEdge:
 @dataclass
 class GraphPath:
     """图谱路径"""
+
     nodes: List[GraphNode] = field(default_factory=list)
     edges: List[GraphEdge] = field(default_factory=list)
     total_weight: float = 0.0
@@ -157,6 +162,7 @@ class GraphPath:
 @dataclass
 class GraphStats:
     """图谱统计信息"""
+
     node_count: int = 0
     edge_count: int = 0
     node_type_counts: Dict[str, int] = field(default_factory=dict)
@@ -230,7 +236,7 @@ class KnowledgeGraphManager:
             self._storage_dir.mkdir(parents=True, exist_ok=True)
             self._load()
 
-        logger.info(f"KnowledgeGraphManager initialized: {len(self._nodes)} nodes, {len(self._edges)} edges")
+        logger.info("KnowledgeGraphManager initialized: %s nodes, %s edges", len(self._nodes), len(self._edges))
 
     def _load(self):
         """从存储加载数据"""
@@ -251,7 +257,7 @@ class KnowledgeGraphManager:
                     for tag in node.tags:
                         self._tag_index[tag.lower()].add(node.node_id)
             except Exception as e:
-                logger.warning(f"Failed to load nodes: {e}")
+                logger.warning("Failed to load nodes: %s", e)
 
         if edges_file.exists():
             try:
@@ -264,7 +270,7 @@ class KnowledgeGraphManager:
                     self._source_index[edge.source_id].add(edge.edge_id)
                     self._target_index[edge.target_id].add(edge.edge_id)
             except Exception as e:
-                logger.warning(f"Failed to load edges: {e}")
+                logger.warning("Failed to load edges: %s", e)
 
     def _save(self):
         """保存数据到存储"""
@@ -287,7 +293,7 @@ class KnowledgeGraphManager:
                 encoding="utf-8",
             )
         except Exception as e:
-            logger.error(f"Failed to save knowledge graph: {e}")
+            logger.error("Failed to save knowledge graph: %s", e)
 
     def _rebuild_indexes(self):
         """重建索引"""
@@ -613,7 +619,7 @@ class KnowledgeGraphManager:
         """
         with self._lock:
             if source_id not in self._nodes or target_id not in self._nodes:
-                logger.warning(f"Cannot add edge: node not found ({source_id} or {target_id})")
+                logger.warning("Cannot add edge: node not found (%s or %s)", source_id, target_id)
                 return None
 
             edge = GraphEdge(
@@ -857,8 +863,7 @@ class KnowledgeGraphManager:
             # 获取相关边
             node_id_set = {n.node_id for n in nodes}
             edges = [
-                edge for edge in self._edges.values()
-                if edge.source_id in node_id_set and edge.target_id in node_id_set
+                edge for edge in self._edges.values() if edge.source_id in node_id_set and edge.target_id in node_id_set
             ]
 
             return {
@@ -870,9 +875,7 @@ class KnowledgeGraphManager:
     def get_stats(self) -> GraphStats:
         """获取图谱统计信息"""
         with self._lock:
-            node_type_counts = {
-                k: len(v) for k, v in self._node_type_index.items()
-            }
+            node_type_counts = {k: len(v) for k, v in self._node_type_index.items()}
             relation_type_counts = {}
             degrees = defaultdict(int)
 
@@ -916,7 +919,8 @@ class KnowledgeGraphManager:
             edges = []
             if include_edges:
                 edges = [
-                    edge for edge in self._edges.values()
+                    edge
+                    for edge in self._edges.values()
                     if edge.source_id in node_id_set and edge.target_id in node_id_set
                 ]
 

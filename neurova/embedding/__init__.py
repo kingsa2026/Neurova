@@ -9,9 +9,9 @@ import logging
 _logger = logging.getLogger(__name__)
 
 try:
-    from neurova.embedding.onnx_embedding import ONNXEmbeddingEngine, EmbeddingResult
+    from neurova.embedding.onnx_embedding import EmbeddingResult, ONNXEmbeddingEngine
 except ImportError as _e:
-    _logger.debug(f"ONNXEmbeddingEngine/EmbeddingResult 未可用: {_e}")
+    _logger.debug("ONNXEmbeddingEngine/EmbeddingResult 未可用: %s", _e)
     ONNXEmbeddingEngine = None
     EmbeddingResult = None
 

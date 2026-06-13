@@ -9,10 +9,11 @@ Neurflow 适配器模块 — 自动发现适配器
 - 使用 graceful degradation 设计，导入失败时返回空结果
 - 遵循 TDD 原则，所有转换逻辑可独立测试
 """
-from typing import Dict, List, Any, Optional, Callable
-import logging
 
-from .models import NodeDefinition, SubBlockConfig, NodePort
+import logging
+from typing import Any, Dict
+
+from .models import NodeDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ TYPE_MAP: Dict[str, str] = {
 
 
 # ==================== 参数转换 ====================
+
 
 def param_to_sub_block(param: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -76,8 +78,7 @@ def param_to_sub_block(param: Dict[str, Any]) -> Dict[str, Any]:
     # enum 类型添加 options
     if param_type == "enum" and "enum" in param:
         sub_block["options"] = [
-            {"label": opt if isinstance(opt, str) else str(opt), "value": opt}
-            for opt in param["enum"]
+            {"label": opt if isinstance(opt, str) else str(opt), "value": opt} for opt in param["enum"]
         ]
 
     # boolean 类型默认值处理
@@ -88,6 +89,7 @@ def param_to_sub_block(param: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ==================== 组件转换 ====================
+
 
 def tool_to_node(tool_def: Dict[str, Any]) -> NodeDefinition:
     """
@@ -115,10 +117,7 @@ def tool_to_node(tool_def: Dict[str, Any]) -> NodeDefinition:
         description=tool_def.get("description", f"工具: {name}"),
         sub_blocks=[param_to_sub_block(p) for p in parameters],
         inputs=[{"id": "input", "label": "输入"}],
-        outputs=[
-            {"id": "output", "label": "输出"},
-            {"id": "error", "label": "错误"}
-        ],
+        outputs=[{"id": "output", "label": "输出"}, {"id": "error", "label": "错误"}],
         source="tool",
         source_id=name,
         version=tool_def.get("version", "1.0.0"),
@@ -195,10 +194,12 @@ def mcp_tool_to_node(server: str, tool_info: Dict[str, Any]) -> NodeDefinition:
 
 # ==================== 同步函数 ====================
 
+
 def _get_tool_engine():
     """延迟加载 ToolEngine"""
     try:
         from neurova.execution_engine.tool_engine import get_tool_engine
+
         return get_tool_engine()
     except ImportError:
         logger.debug("ToolEngine 未可用")
@@ -209,6 +210,7 @@ def _get_skill_registry():
     """延迟加载 SkillRegistry"""
     try:
         from neurova.skill_system import get_skill_registry
+
         return get_skill_registry()
     except ImportError:
         logger.debug("SkillRegistry 未可用")
@@ -219,6 +221,7 @@ def _get_mcp_client():
     """延迟加载 MCPToolClient"""
     try:
         from neurova.mcp_client import get_mcp_client
+
         return get_mcp_client()
     except ImportError:
         logger.debug("MCPToolClient 未可用")
@@ -247,7 +250,7 @@ def sync_tools(registry) -> int:
             count += 1
         return count
     except Exception as e:
-        logger.warning(f"同步工具失败: {e}")
+        logger.warning("同步工具失败: %s", e)
         return 0
 
 
@@ -273,7 +276,7 @@ def sync_skills(registry) -> int:
             count += 1
         return count
     except Exception as e:
-        logger.warning(f"同步技能失败: {e}")
+        logger.warning("同步技能失败: %s", e)
         return 0
 
 
@@ -301,7 +304,7 @@ def sync_mcp(registry) -> int:
             count += 1
         return count
     except Exception as e:
-        logger.warning(f"同步 MCP 工具失败: {e}")
+        logger.warning("同步 MCP 工具失败: %s", e)
         return 0
 
 

@@ -7,13 +7,10 @@ Neurova 工具守卫 (Tool Guard) 2.0
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import datetime
-import enum
 import logging
 import re
-import time
-import typing
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Pattern, Set
 
@@ -22,27 +19,30 @@ logger = logging.getLogger(__name__)
 
 class GuardSeverity(str, Enum):
     """威胁严重程度"""
-    CRITICAL = "critical"   # 必须阻止
-    HIGH = "high"          # 高风险
-    MEDIUM = "medium"      # 中等风险
-    LOW = "low"            # 低风险
-    INFO = "info"          # 信息性
+
+    CRITICAL = "critical"  # 必须阻止
+    HIGH = "high"  # 高风险
+    MEDIUM = "medium"  # 中等风险
+    LOW = "low"  # 低风险
+    INFO = "info"  # 信息性
 
 
 class GuardThreatCategory(str, Enum):
     """威胁类别"""
-    COMMAND_INJECTION = "command_injection"     # 命令注入
-    PATH_TRAVERSAL = "path_traversal"           # 路径遍历
-    SHELL_EVASION = "shell_evasion"             # Shell 逃逸
-    FILE_DESTRUCTION = "file_destruction"       # 文件破坏
+
+    COMMAND_INJECTION = "command_injection"  # 命令注入
+    PATH_TRAVERSAL = "path_traversal"  # 路径遍历
+    SHELL_EVASION = "shell_evasion"  # Shell 逃逸
+    FILE_DESTRUCTION = "file_destruction"  # 文件破坏
     NETWORK_EXFILTRATION = "network_exfiltration"  # 网络外泄
     PRIVILEGE_ESCALATION = "privilege_escalation"  # 权限提升
-    DATA_LEAKAGE = "data_leakage"               # 数据泄漏
+    DATA_LEAKAGE = "data_leakage"  # 数据泄漏
 
 
 @dataclass
 class GuardFinding:
     """守卫发现"""
+
     rule_id: str = ""
     severity: GuardSeverity = GuardSeverity.INFO
     category: GuardThreatCategory = GuardThreatCategory.COMMAND_INJECTION
@@ -67,12 +67,11 @@ class GuardFinding:
 @dataclass
 class ToolGuardResult:
     """工具守卫结果"""
+
     tool_name: str = ""
     safe: bool = True
     findings: List[GuardFinding] = field(default_factory=list)
-    checked_at: datetime.datetime = field(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
-    )
+    checked_at: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -100,6 +99,7 @@ class ToolGuardResult:
 @dataclass
 class ToolGuardRule:
     """工具守卫规则"""
+
     rule_id: str = ""
     name: str = ""
     pattern: str = ""
@@ -362,9 +362,14 @@ class FilePathGuardian(BaseGuardian):
 
     def __init__(self):
         self._protected_paths = {
-            "/etc/passwd", "/etc/shadow", "/etc/sudoers",
-            "/etc/ssh", "/root", "/boot",
-            "/proc/self/environ", "/proc/self/mem",
+            "/etc/passwd",
+            "/etc/shadow",
+            "/etc/sudoers",
+            "/etc/ssh",
+            "/root",
+            "/boot",
+            "/proc/self/environ",
+            "/proc/self/mem",
         }
         self._safe_paths = {"/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"}
 
@@ -384,7 +389,7 @@ class FilePathGuardian(BaseGuardian):
         path = context.get("path", "")
         if not path:
             # 尝试从工具输入中提取路径
-            path_match = re.search(r'(?:path|file|dir)=([^\s]+)', tool_input)
+            path_match = re.search(r"(?:path|file|dir)=([^\s]+)", tool_input)
             if path_match:
                 path = path_match.group(1)
 
@@ -393,48 +398,55 @@ class FilePathGuardian(BaseGuardian):
 
         # 检查路径遍历
         if ".." in path:
-            findings.append(GuardFinding(
-                rule_id="path_traversal",
-                severity=GuardSeverity.HIGH,
-                category=GuardThreatCategory.PATH_TRAVERSAL,
-                message=f"检测到路径遍历: {path}",
-                evidence=path,
-                suggestion="使用绝对路径或验证路径合法性",
-            ))
+            findings.append(
+                GuardFinding(
+                    rule_id="path_traversal",
+                    severity=GuardSeverity.HIGH,
+                    category=GuardThreatCategory.PATH_TRAVERSAL,
+                    message=f"检测到路径遍历: {path}",
+                    evidence=path,
+                    suggestion="使用绝对路径或验证路径合法性",
+                )
+            )
 
         # 检查系统保护路径
         if path not in self._safe_paths:
             for protected in self._protected_paths:
                 if path.startswith(protected):
-                    findings.append(GuardFinding(
-                        rule_id="protected_path",
-                        severity=GuardSeverity.HIGH,
-                        category=GuardThreatCategory.PATH_TRAVERSAL,
-                        message=f"访问受保护路径: {protected}",
-                        evidence=path,
-                        suggestion=f"路径 {protected} 受系统保护",
-                    ))
+                    findings.append(
+                        GuardFinding(
+                            rule_id="protected_path",
+                            severity=GuardSeverity.HIGH,
+                            category=GuardThreatCategory.PATH_TRAVERSAL,
+                            message=f"访问受保护路径: {protected}",
+                            evidence=path,
+                            suggestion=f"路径 {protected} 受系统保护",
+                        )
+                    )
                     break
 
         # 检查通配符
         if "*" in path or "?" in path:
-            findings.append(GuardFinding(
-                rule_id="wildcard_path",
-                severity=GuardSeverity.MEDIUM,
-                category=GuardThreatCategory.PATH_TRAVERSAL,
-                message=f"检测到路径通配符: {path}",
-                evidence=path,
-                suggestion="避免在路径中使用通配符",
-            ))
+            findings.append(
+                GuardFinding(
+                    rule_id="wildcard_path",
+                    severity=GuardSeverity.MEDIUM,
+                    category=GuardThreatCategory.PATH_TRAVERSAL,
+                    message=f"检测到路径通配符: {path}",
+                    evidence=path,
+                    suggestion="避免在路径中使用通配符",
+                )
+            )
 
         return findings
 
 
 class ApprovalMode(str, Enum):
     """审批模式"""
-    AUTO = "auto"       # 自动审批（安全通过，危险阻止）
-    MANUAL = "manual"   # 手动审批（所有操作等待人工）
-    STRICT = "strict"   # 严格模式（低风险也阻止）
+
+    AUTO = "auto"  # 自动审批（安全通过，危险阻止）
+    MANUAL = "manual"  # 手动审批（所有操作等待人工）
+    STRICT = "strict"  # 严格模式（低风险也阻止）
 
 
 class ToolGuardEngine:
@@ -492,13 +504,15 @@ class ToolGuardEngine:
 
         # 检查拒绝列表
         if tool_name in self._denied_tools:
-            all_findings.append(GuardFinding(
-                rule_id="denied_tool",
-                severity=GuardSeverity.CRITICAL,
-                category=GuardThreatCategory.PRIVILEGE_ESCALATION,
-                message=f"工具 {tool_name} 在拒绝列表中",
-                suggestion="联系管理员将工具从拒绝列表中移除",
-            ))
+            all_findings.append(
+                GuardFinding(
+                    rule_id="denied_tool",
+                    severity=GuardSeverity.CRITICAL,
+                    category=GuardThreatCategory.PRIVILEGE_ESCALATION,
+                    message=f"工具 {tool_name} 在拒绝列表中",
+                    suggestion="联系管理员将工具从拒绝列表中移除",
+                )
+            )
 
         # 构建工具输入文本
         tool_input = self._build_tool_input(tool_name, tool_params)
@@ -509,7 +523,7 @@ class ToolGuardEngine:
                 findings = guardian.guard(tool_input, tool_params)
                 all_findings.extend(findings)
             except Exception as e:
-                logger.warning(f"守护者 {guardian.name} 异常: {e}")
+                logger.warning("守护者 %s 异常: %s", guardian.name, e)
 
         # 根据审批模式判断安全性
         safe = self._evaluate_safety(all_findings)
@@ -521,10 +535,7 @@ class ToolGuardEngine:
         )
 
         if not safe:
-            logger.warning(
-                f"工具守卫阻止: {tool_name}, "
-                f"发现 {len(all_findings)} 个问题"
-            )
+            logger.warning("工具守卫阻止: %s, " f"发现 %s 个问题", tool_name, len(all_findings))
 
         return result
 

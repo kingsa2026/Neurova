@@ -18,8 +18,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.endpoints import get_agent_instance
@@ -31,6 +30,7 @@ router = APIRouter()
 
 class MemoryItem(BaseModel):
     """记忆项"""
+
     memory_id: str
     content: str
     memory_type: str = "conversation"
@@ -43,6 +43,7 @@ class MemoryItem(BaseModel):
 
 class CreateMemoryRequest(BaseModel):
     """创建记忆请求"""
+
     content: str = Field(..., description="记忆内容")
     memory_type: str = Field(default="conversation", description="记忆类型")
     importance: float = Field(default=0.5, description="重要性", ge=0, le=1)
@@ -52,6 +53,7 @@ class CreateMemoryRequest(BaseModel):
 
 class SearchMemoryRequest(BaseModel):
     """搜索记忆请求"""
+
     query: str = Field(..., description="搜索查询")
     memory_type: Optional[str] = Field(default=None, description="记忆类型过滤")
     tags: List[str] = Field(default=[], description="标签过滤")
@@ -61,6 +63,7 @@ class SearchMemoryRequest(BaseModel):
 
 class MemoryStats(BaseModel):
     """记忆统计"""
+
     total_count: int = 0
     by_type: Dict[str, int] = {}
     avg_importance: float = 0
@@ -87,7 +90,7 @@ async def list_memories(
     offset: int = Query(default=0, ge=0),
 ):
     """查询记忆列表"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
@@ -111,14 +114,18 @@ async def list_memories(
                 )
             else:
                 results = []
-            
+
             for mem in results:
                 # get_memories() 返回 dict 列表，用 dict.get() 而非 getattr()
-                mem_dict = mem if isinstance(mem, dict) else getattr(mem, '__dict__', mem)
+                mem_dict = mem if isinstance(mem, dict) else getattr(mem, "__dict__", mem)
 
                 # 处理 memory_type 过滤
-                mem_type = mem_dict.get("memory_type", "semantic") if isinstance(mem_dict, dict) else getattr(mem, "memory_type", "semantic")
-                if hasattr(mem_type, 'value'):
+                mem_type = (
+                    mem_dict.get("memory_type", "semantic")
+                    if isinstance(mem_dict, dict)
+                    else getattr(mem, "memory_type", "semantic")
+                )
+                if hasattr(mem_type, "value"):
                     mem_type = mem_type.value
                 elif not isinstance(mem_type, str):
                     mem_type = str(mem_type)
@@ -127,45 +134,79 @@ async def list_memories(
                     continue
 
                 # 处理 category 字段
-                mem_category = mem_dict.get("category", "general") if isinstance(mem_dict, dict) else getattr(mem, "category", "general")
-                if hasattr(mem_category, 'value'):
+                mem_category = (
+                    mem_dict.get("category", "general")
+                    if isinstance(mem_dict, dict)
+                    else getattr(mem, "category", "general")
+                )
+                if hasattr(mem_category, "value"):
                     mem_category = mem_category.value
                 elif not isinstance(mem_category, str):
                     mem_category = str(mem_category)
 
                 # 处理时间戳
-                created_at = mem_dict.get("created_at", "") if isinstance(mem_dict, dict) else getattr(mem, "created_at", "")
-                if hasattr(created_at, 'isoformat'):
+                created_at = (
+                    mem_dict.get("created_at", "") if isinstance(mem_dict, dict) else getattr(mem, "created_at", "")
+                )
+                if hasattr(created_at, "isoformat"):
                     created_at = created_at.isoformat()
                 else:
                     created_at = str(created_at)
 
-                updated_at = mem_dict.get("updated_at", "") if isinstance(mem_dict, dict) else getattr(mem, "updated_at", "")
-                if hasattr(updated_at, 'isoformat'):
+                updated_at = (
+                    mem_dict.get("updated_at", "") if isinstance(mem_dict, dict) else getattr(mem, "updated_at", "")
+                )
+                if hasattr(updated_at, "isoformat"):
                     updated_at = updated_at.isoformat()
                 else:
                     updated_at = str(updated_at)
 
                 content = mem_dict.get("content", "") if isinstance(mem_dict, dict) else getattr(mem, "content", "")
 
-                memories.append({
-                    "id": mem_dict.get("id", str(uuid.uuid4())) if isinstance(mem_dict, dict) else getattr(mem, "id", str(uuid.uuid4())),
-                    "content": content,
-                    "type": mem_type,
-                    "category": mem_category,
-                    "importance": mem_dict.get("importance", 0.5) if isinstance(mem_dict, dict) else getattr(mem, "importance", 0.5),
-                    "tags": mem_dict.get("tags", []) if isinstance(mem_dict, dict) else getattr(mem, "tags", []),
-                    "shared": mem_dict.get("shared", False) if isinstance(mem_dict, dict) else getattr(mem, "shared", False),
-                    "agent_id": mem_dict.get("agent_id", "") if isinstance(mem_dict, dict) else getattr(mem, "agent_id", ""),
-                    "share_group_ids": mem_dict.get("share_group_ids", []) if isinstance(mem_dict, dict) else getattr(mem, "share_group_ids", []),
-                    "created_at": created_at,
-                    "updated_at": updated_at,
-                    "summary": content[:100] if content else "",
-                    "timestamp": mem_dict.get("timestamp", time.time() * 1000) if isinstance(mem_dict, dict) else getattr(mem, "timestamp", time.time() * 1000),
-                    "metadata": mem_dict.get("metadata", {}) if isinstance(mem_dict, dict) else getattr(mem, "metadata", {}),
-                })
+                memories.append(
+                    {
+                        "id": (
+                            mem_dict.get("id", str(uuid.uuid4()))
+                            if isinstance(mem_dict, dict)
+                            else getattr(mem, "id", str(uuid.uuid4()))
+                        ),
+                        "content": content,
+                        "type": mem_type,
+                        "category": mem_category,
+                        "importance": (
+                            mem_dict.get("importance", 0.5)
+                            if isinstance(mem_dict, dict)
+                            else getattr(mem, "importance", 0.5)
+                        ),
+                        "tags": mem_dict.get("tags", []) if isinstance(mem_dict, dict) else getattr(mem, "tags", []),
+                        "shared": (
+                            mem_dict.get("shared", False)
+                            if isinstance(mem_dict, dict)
+                            else getattr(mem, "shared", False)
+                        ),
+                        "agent_id": (
+                            mem_dict.get("agent_id", "") if isinstance(mem_dict, dict) else getattr(mem, "agent_id", "")
+                        ),
+                        "share_group_ids": (
+                            mem_dict.get("share_group_ids", [])
+                            if isinstance(mem_dict, dict)
+                            else getattr(mem, "share_group_ids", [])
+                        ),
+                        "created_at": created_at,
+                        "updated_at": updated_at,
+                        "summary": content[:100] if content else "",
+                        "timestamp": (
+                            mem_dict.get("timestamp", time.time() * 1000)
+                            if isinstance(mem_dict, dict)
+                            else getattr(mem, "timestamp", time.time() * 1000)
+                        ),
+                        "metadata": (
+                            mem_dict.get("metadata", {}) if isinstance(mem_dict, dict) else getattr(mem, "metadata", {})
+                        ),
+                    }
+                )
     except Exception as e:
-        logger.warning(f"List memories error: {e}")
+        logger.warning("List memories error: %s", e)
 
     return {"data": {"total": len(memories), "memories": memories}}
 
@@ -173,7 +214,7 @@ async def list_memories(
 @router.get("/{memory_id}", response_model=MemoryItem)
 async def get_memory(request: Request, memory_id: str = Path(...), agent_id: str = Query(default="default")):
     """获取记忆详情"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
@@ -195,7 +236,7 @@ async def get_memory(request: Request, memory_id: str = Path(...), agent_id: str
                         metadata=getattr(mem, "metadata", {}),
                     )
     except Exception as e:
-        logger.warning(f"Get memory error: {e}")
+        logger.warning("Get memory error: %s", e)
 
     raise HTTPException(status_code=404, detail=f"Memory '{memory_id}' not found")
 
@@ -203,7 +244,7 @@ async def get_memory(request: Request, memory_id: str = Path(...), agent_id: str
 @router.post("", response_model=MemoryItem)
 async def create_memory(request: Request, body: CreateMemoryRequest, agent_id: str = Query(default="default")):
     """创建记忆"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
@@ -223,7 +264,7 @@ async def create_memory(request: Request, body: CreateMemoryRequest, agent_id: s
                     metadata=body.metadata,
                 )
     except Exception as e:
-        logger.warning(f"Create memory error: {e}")
+        logger.warning("Create memory error: %s", e)
 
     return MemoryItem(
         memory_id=memory_id,
@@ -239,7 +280,7 @@ async def create_memory(request: Request, body: CreateMemoryRequest, agent_id: s
 @router.post("/search", response_model=List[MemoryItem])
 async def search_memories(request: Request, body: SearchMemoryRequest, agent_id: str = Query(default="default")):
     """搜索记忆"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
@@ -258,17 +299,19 @@ async def search_memories(request: Request, body: SearchMemoryRequest, agent_id:
                 for mem in results:
                     importance = getattr(mem, "importance", 0)
                     if importance >= body.min_importance:
-                        memories.append(MemoryItem(
-                            memory_id=getattr(mem, "id", str(uuid.uuid4())),
-                            content=getattr(mem, "content", ""),
-                            memory_type=getattr(mem, "memory_type", "conversation"),
-                            importance=importance,
-                            tags=getattr(mem, "tags", []),
-                            created_at=str(getattr(mem, "created_at", "")),
-                            metadata=getattr(mem, "metadata", {}),
-                        ))
+                        memories.append(
+                            MemoryItem(
+                                memory_id=getattr(mem, "id", str(uuid.uuid4())),
+                                content=getattr(mem, "content", ""),
+                                memory_type=getattr(mem, "memory_type", "conversation"),
+                                importance=importance,
+                                tags=getattr(mem, "tags", []),
+                                created_at=str(getattr(mem, "created_at", "")),
+                                metadata=getattr(mem, "metadata", {}),
+                            )
+                        )
     except Exception as e:
-        logger.warning(f"Search memories error: {e}")
+        logger.warning("Search memories error: %s", e)
 
     return memories
 
@@ -276,7 +319,7 @@ async def search_memories(request: Request, body: SearchMemoryRequest, agent_id:
 @router.delete("/{memory_id}")
 async def delete_memory(request: Request, memory_id: str = Path(...), agent_id: str = Query(default="default")):
     """删除记忆"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
@@ -288,7 +331,7 @@ async def delete_memory(request: Request, memory_id: str = Path(...), agent_id: 
             if hasattr(mem_core, "forget"):
                 mem_core.forget(memory_id)
     except Exception as e:
-        logger.warning(f"Delete memory error: {e}")
+        logger.warning("Delete memory error: %s", e)
 
     return {"code": 0, "message": f"Memory '{memory_id}' deleted"}
 
@@ -296,7 +339,7 @@ async def delete_memory(request: Request, memory_id: str = Path(...), agent_id: 
 @router.get("/stats/overview", response_model=MemoryStats)
 async def get_memory_stats(request: Request, agent_id: str = Query(default="default")):
     """获取记忆统计"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
@@ -312,6 +355,6 @@ async def get_memory_stats(request: Request, agent_id: str = Query(default="defa
                 stats.by_type = raw_stats.get("by_type", {})
                 stats.avg_importance = raw_stats.get("avg_importance", 0)
     except Exception as e:
-        logger.warning(f"Get memory stats error: {e}")
+        logger.warning("Get memory stats error: %s", e)
 
     return stats

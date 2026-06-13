@@ -7,12 +7,8 @@ import logging
 import typing
 import uuid
 
-from fastapi import APIRouter
-from fastapi import HTTPException
-from fastapi import Query
-from fastapi import Request
-from pydantic import BaseModel
-from pydantic import Field
+from fastapi import APIRouter, Request
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -24,9 +20,11 @@ class RAGRetrieveRequest(BaseModel):
     include_memory: bool = True
     include_knowledge: bool = True
 
+
 class AnalyzeGapsRequest(BaseModel):
     topic: typing.Optional[str] = None
     min_access_count: int = 3
+
 
 class LearnRequest(BaseModel):
     topic: str
@@ -43,7 +41,12 @@ async def sync_knowledge_to_memory(body: dict, request: Request):
     """将知识库检索结果同步到记忆系统"""
     knowledge_id = body.get("knowledge_id", "")
     memory_id = str(uuid.uuid4())[:12]
-    link = {"knowledge_id": knowledge_id, "memory_id": memory_id, "synced_at": datetime.datetime.utcnow().isoformat(), "user_id": getattr(request.state, "user_id", "anonymous")}
+    link = {
+        "knowledge_id": knowledge_id,
+        "memory_id": memory_id,
+        "synced_at": datetime.datetime.utcnow().isoformat(),
+        "user_id": getattr(request.state, "user_id", "anonymous"),
+    }
     _sync_links.append(link)
     return {"code": 0, "message": "Synced to memory", "data": link}
 
@@ -53,7 +56,12 @@ async def sync_memory_to_kb(body: dict, request: Request):
     """将记忆同步到知识库"""
     memory_id = body.get("memory_id", "")
     knowledge_id = str(uuid.uuid4())[:12]
-    link = {"memory_id": memory_id, "knowledge_id": knowledge_id, "synced_at": datetime.datetime.utcnow().isoformat(), "user_id": getattr(request.state, "user_id", "anonymous")}
+    link = {
+        "memory_id": memory_id,
+        "knowledge_id": knowledge_id,
+        "synced_at": datetime.datetime.utcnow().isoformat(),
+        "user_id": getattr(request.state, "user_id", "anonymous"),
+    }
     _sync_links.append(link)
     return {"code": 0, "message": "Synced to knowledge base", "data": link}
 
@@ -65,7 +73,7 @@ async def get_memory_knowledge_links(request: Request, page: int = 1, size: int 
     links = [l for l in _sync_links if l.get("user_id") == user_id]
     total = len(links)
     start = (page - 1) * size
-    return {"code": 0, "message": "success", "data": {"items": links[start:start+size], "total": total}}
+    return {"code": 0, "message": "success", "data": {"items": links[start : start + size], "total": total}}
 
 
 @router.post("/rag/retrieve")
@@ -92,17 +100,31 @@ async def batch_rag_retrieve(body: dict, request: Request):
 @router.post("/gaps/analyze")
 async def analyze_knowledge_gaps(body: AnalyzeGapsRequest, request: Request):
     """分析知识盲点"""
-    gaps = [{"topic": body.topic or "general", "access_count": 10, "knowledge_depth": "low", "suggestion": "Consider adding more structured knowledge on this topic"}]
-    return {"code": 0, "message": "success", "data": {"gaps": gaps, "analyzed_at": datetime.datetime.utcnow().isoformat()}}
+    gaps = [
+        {
+            "topic": body.topic or "general",
+            "access_count": 10,
+            "knowledge_depth": "low",
+            "suggestion": "Consider adding more structured knowledge on this topic",
+        }
+    ]
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"gaps": gaps, "analyzed_at": datetime.datetime.utcnow().isoformat()},
+    }
 
 
 @router.post("/learn")
 async def learn_from_knowledge(body: LearnRequest, request: Request):
     """从知识库学习特定主题"""
     record = {
-        "id": str(uuid.uuid4())[:12], "topic": body.topic, "depth": body.depth,
+        "id": str(uuid.uuid4())[:12],
+        "topic": body.topic,
+        "depth": body.depth,
         "learned_at": datetime.datetime.utcnow().isoformat(),
-        "items_learned": 0, "status": "completed",
+        "items_learned": 0,
+        "status": "completed",
     }
     _learning_records.append(record)
     return {"code": 0, "message": "Learning complete", "data": record}
@@ -112,8 +134,14 @@ async def learn_from_knowledge(body: LearnRequest, request: Request):
 async def get_evolution_progress(request: Request):
     """获取进化进度统计"""
     return {
-        "code": 0, "message": "success",
-        "data": {"sync_count": len(_sync_links), "learning_count": len(_learning_records), "gaps_identified": len(_knowledge_gaps), "evolution_score": 0.0},
+        "code": 0,
+        "message": "success",
+        "data": {
+            "sync_count": len(_sync_links),
+            "learning_count": len(_learning_records),
+            "gaps_identified": len(_knowledge_gaps),
+            "evolution_score": 0.0,
+        },
     }
 
 
@@ -122,7 +150,7 @@ async def get_knowledge_gaps(request: Request, page: int = 1, size: int = 20):
     """获取知识盲点列表"""
     total = len(_knowledge_gaps)
     start = (page - 1) * size
-    return {"code": 0, "message": "success", "data": {"items": _knowledge_gaps[start:start+size], "total": total}}
+    return {"code": 0, "message": "success", "data": {"items": _knowledge_gaps[start : start + size], "total": total}}
 
 
 @router.get("/learning-records")
@@ -130,4 +158,4 @@ async def get_learning_records(request: Request, page: int = 1, size: int = 20):
     """获取学习记录列表"""
     total = len(_learning_records)
     start = (page - 1) * size
-    return {"code": 0, "message": "success", "data": {"items": _learning_records[start:start+size], "total": total}}
+    return {"code": 0, "message": "success", "data": {"items": _learning_records[start : start + size], "total": total}}

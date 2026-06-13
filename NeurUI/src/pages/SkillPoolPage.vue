@@ -128,10 +128,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
-import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import * as skillPoolApi from '@/api/modules/skill-pool'
 
 interface PoolSkill {
   id: string
@@ -198,8 +198,8 @@ function editSkill(skill: PoolSkill) {
 async function fetchPublic() {
   publicLoading.value = true
   try {
-    const res: any = await request.get('/skill-pool/public')
-    const data = res?.data ?? res
+    const res = await skillPoolApi.getPublicSkills({ search: publicSearch.value || undefined })
+    const data = res?.data
     publicSkills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({ ...s, _installing: false }))
   } catch {
     message.error(t('skillPool.loadError'))
@@ -211,8 +211,8 @@ async function fetchPublic() {
 async function fetchPrivate() {
   privateLoading.value = true
   try {
-    const res: any = await request.get('/skill-pool/private')
-    const data = res?.data ?? res
+    const res = await skillPoolApi.getPrivateSkills('_all')
+    const data = res?.data
     privateSkills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({ ...s, _installing: false }))
   } catch {
     message.error(t('skillPool.loadError'))
@@ -229,10 +229,10 @@ async function saveSkill() {
   saving.value = true
   try {
     if (editingSkill.value) {
-      await request.put(`/skill-pool/private/${editingSkill.value.id}`, form.value)
+      await skillPoolApi.updateSkill(editingSkill.value.id, { name: form.value.name, description: form.value.description, category: form.value.category })
       message.success(t('skillPool.updateSuccess'))
     } else {
-      await request.post('/skill-pool/private', form.value)
+      await skillPoolApi.createSkill({ name: form.value.name, description: form.value.description, category: form.value.category })
       message.success(t('skillPool.createSuccess'))
     }
     modalVisible.value = false
@@ -247,7 +247,7 @@ async function saveSkill() {
 async function installPublic(skill: PoolSkill) {
   skill._installing = true
   try {
-    await request.post('/skill-pool/install', { skill_id: skill.id })
+    await skillPoolApi.installSkill(skill.id, '_current')
     skill.install_count = (skill.install_count ?? 0) + 1
     message.success(t('skillPool.installSuccess'))
   } catch {
@@ -259,7 +259,12 @@ async function installPublic(skill: PoolSkill) {
 
 async function toggleShare(skill: PoolSkill) {
   try {
-    await request.put(`/skill-pool/private/${skill.id}/share`, { shared: !skill.shared })
+    if (skill.shared) {
+      // Unshare not directly supported by API, use update
+      await skillPoolApi.updateSkill(skill.id, { config: { shared: false } })
+    } else {
+      await skillPoolApi.shareSkill(skill.id)
+    }
     skill.shared = !skill.shared
     message.success(skill.shared ? t('skillPool.shareSuccess') : t('skillPool.unshareSuccess'))
   } catch {
@@ -269,7 +274,7 @@ async function toggleShare(skill: PoolSkill) {
 
 async function pushToPool(skill: PoolSkill) {
   try {
-    await request.post('/skill-pool/push', { skill_id: skill.id })
+    await skillPoolApi.pushSkill(skill.id)
     message.success(t('skillPool.pushSuccess'))
   } catch {
     message.error(t('skillPool.pushError'))
@@ -284,7 +289,7 @@ function deleteSkill(skill: PoolSkill) {
     cancelText: t('common.cancel'),
     onOk: async () => {
       try {
-        await request.delete(`/skill-pool/private/${skill.id}`)
+        await skillPoolApi.deleteSkill(skill.id)
         privateSkills.value = privateSkills.value.filter((s) => s.id !== skill.id)
         message.success(t('skillPool.deleteSuccess'))
       } catch {

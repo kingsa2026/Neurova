@@ -11,12 +11,10 @@ from __future__ import annotations
 """
 
 import logging
-import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.endpoints import get_agent_instance, get_app_state
@@ -28,6 +26,7 @@ router = APIRouter()
 
 class TextGenerationRequest(BaseModel):
     """文本生成请求"""
+
     prompt: str = Field(..., description="生成提示")
     model: Optional[str] = Field(default=None, description="指定模型")
     max_tokens: int = Field(default=1000, description="最大 token 数")
@@ -37,6 +36,7 @@ class TextGenerationRequest(BaseModel):
 
 class ImageGenerationRequest(BaseModel):
     """图像生成请求"""
+
     prompt: str = Field(..., description="生成提示")
     model: Optional[str] = Field(default=None, description="指定模型")
     width: int = Field(default=512, description="图像宽度")
@@ -46,6 +46,7 @@ class ImageGenerationRequest(BaseModel):
 
 class AudioGenerationRequest(BaseModel):
     """音频生成请求"""
+
     text: str = Field(..., description="文本内容")
     model: Optional[str] = Field(default=None, description="指定模型")
     voice: str = Field(default="default", description="语音")
@@ -54,6 +55,7 @@ class AudioGenerationRequest(BaseModel):
 
 class VideoGenerationRequest(BaseModel):
     """视频生成请求"""
+
     prompt: str = Field(..., description="生成提示")
     model: Optional[str] = Field(default=None, description="指定模型")
     duration: int = Field(default=5, description="视频时长(秒)")
@@ -171,11 +173,7 @@ async def generate_audio(request: Request, body: AudioGenerationRequest):
                 "data": {"request_id": request_id},
             }
 
-        audio_bytes = await tts_manager.synthesize(
-            body.text,
-            voice=body.voice,
-            speed=body.speed
-        )
+        audio_bytes = await tts_manager.synthesize(body.text, voice=body.voice, speed=body.speed)
 
         if not audio_bytes:
             return {

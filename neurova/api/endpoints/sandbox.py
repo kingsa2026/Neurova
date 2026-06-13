@@ -6,11 +6,8 @@ import datetime
 import typing
 import uuid
 
-from fastapi import APIRouter
-from fastapi import HTTPException
-from fastapi import Query
-from pydantic import BaseModel
-from pydantic import Field
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from neurova.api.endpoints import get_agent_instance
 
@@ -18,6 +15,7 @@ router = APIRouter()
 
 
 # ── Models ─────────────────────────────────────────────
+
 
 class SandboxStartRequest(BaseModel):
     agent_id: str
@@ -44,6 +42,7 @@ _SANDBOXES: typing.Dict[str, dict] = {}  # sandbox_id -> sandbox data
 
 
 # ── Endpoints ──────────────────────────────────────────
+
 
 @router.get("")
 async def list_all_sandboxes(status: typing.Optional[str] = None):
@@ -134,7 +133,11 @@ async def execute_step(sandbox_id: str, body: StepRequest):
     sandbox["current_step"] += 1
     sandbox["updated_at"] = datetime.datetime.utcnow().isoformat()
 
-    return {"code": 0, "message": "Step executed", "data": {"step": step_data, "remaining_steps": sandbox["max_steps"] - sandbox["current_step"]}}
+    return {
+        "code": 0,
+        "message": "Step executed",
+        "data": {"step": step_data, "remaining_steps": sandbox["max_steps"] - sandbox["current_step"]},
+    }
 
 
 @router.post("/{sandbox_id}/commit")
@@ -158,11 +161,18 @@ async def commit_sandbox(sandbox_id: str, body: SandboxCommitRequest):
                     await agent.memory_manager.remember(memory_content, tags=body.tags + ["sandbox", "conclusion"])
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning("Failed to save sandbox to memory: %s", e)
 
     return {
-        "code": 0, "message": "Sandbox committed",
-        "data": {"sandbox_id": sandbox_id, "conclusion": body.conclusion, "steps_count": len(sandbox["steps"]), "saved_to_memory": body.save_to_memory},
+        "code": 0,
+        "message": "Sandbox committed",
+        "data": {
+            "sandbox_id": sandbox_id,
+            "conclusion": body.conclusion,
+            "steps_count": len(sandbox["steps"]),
+            "saved_to_memory": body.save_to_memory,
+        },
     }
 
 

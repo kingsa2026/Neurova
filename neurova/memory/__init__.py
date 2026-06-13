@@ -5,25 +5,25 @@ Memory模块兼容性层
 这是为了兼容现有测试代码中的导入语句。
 """
 
-import sys
 import importlib
 import logging
+import sys
 
 logger = logging.getLogger(__name__)
 
 # 从 neurova.cognitive_layers.memory_layer 重新导出主要类（全部用 try/except 保护 + 回退值）
 try:
     from neurova.cognitive_layers.memory_layer import (
-        MoEMemoryRouter,
-        UnifiedVectorStore,
         ConflictDetector,
-        TemperatureEngine,
         ConversationMemoryBuffer,
-        SleepConsolidation,
         GraphTraversal,
+        MoEMemoryRouter,
+        SleepConsolidation,
+        TemperatureEngine,
+        UnifiedVectorStore,
     )
 except ImportError as e:
-    logger.debug(f"部分 cognitive_layers.memory_layer 导入失败: {e}")
+    logger.debug("部分 cognitive_layers.memory_layer 导入失败: %s", e)
     MoEMemoryRouter = None
     UnifiedVectorStore = None
     ConflictDetector = None
@@ -49,7 +49,7 @@ except ImportError:
     MemoryStorage = None
 
 try:
-    from neurova.cognitive_layers.memory_layer.agent_self import SelfModel, AgentSelfManager
+    from neurova.cognitive_layers.memory_layer.agent_self import AgentSelfManager, SelfModel
 except ImportError:
     SelfModel = None
     AgentSelfManager = None
@@ -120,7 +120,7 @@ except ImportError:
     MetaCognition = None
 
 try:
-    from neurova.cognitive_layers.memory_layer.models import MemoryCategory, MemoryType, LifecycleStage
+    from neurova.cognitive_layers.memory_layer.models import LifecycleStage, MemoryCategory, MemoryType
 except ImportError:
     MemoryCategory = None
     MemoryType = None
@@ -168,7 +168,7 @@ for alias, target in _MODULE_MAP.items():
     try:
         sys.modules[__name__ + "." + alias] = importlib.import_module(target)
     except ImportError as _e:
-        logger.debug(f"memory 子模块别名 {alias} -> {target} 映射失败: {_e}")
+        logger.debug("memory 子模块别名 %s -> %s 映射失败: %s", alias, target, _e)
 
 __all__ = [
     "WorkingMemoryAugmenter",

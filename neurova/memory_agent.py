@@ -5,9 +5,5 @@ MemoryAgent — 向后兼容重导出
 保留此文件以兼容旧的导入路径。
 """
 
-from neurova.mem_core import Memory
-
 # mem_core imports
-import neurova.mem_core
 
-pass

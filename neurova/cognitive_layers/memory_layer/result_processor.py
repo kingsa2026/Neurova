@@ -10,24 +10,25 @@ ResultProcessor — 结果处理器
 """
 
 import logging
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from neurova.cognitive_layers.memory_layer.conflict_detector_v2 import (
-    ConflictDetector, ConflictGroup
-)
+from neurova.cognitive_layers.memory_layer.conflict_detector_v2 import ConflictDetector, ConflictGroup
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ProcessedResults:
     """处理后的结果"""
+
     independent: List[Dict[str, Any]] = field(default_factory=list)
     conflict_groups: List[ConflictGroup] = field(default_factory=list)
     evolution_chains: List[List[Dict]] = field(default_factory=list)
     injection_text: str = ""
     has_conflicts: bool = False
+
 
 class ResultProcessor:
     """
@@ -41,10 +42,13 @@ class ResultProcessor:
       5. 构建注入内容
     """
 
-    def __init__(self, max_results: int = 5,
-                 dedup_threshold: float = 0.95,
-                 sim_threshold: float = 0.8,
-                 entity_threshold: float = 0.5):
+    def __init__(
+        self,
+        max_results: int = 5,
+        dedup_threshold: float = 0.95,
+        sim_threshold: float = 0.8,
+        entity_threshold: float = 0.5,
+    ):
         """
         初始化结果处理器
 
@@ -90,16 +94,13 @@ class ResultProcessor:
         unique.sort(key=lambda x: x.get("score", 0), reverse=True)
 
         # Step 3: 取前 N 条
-        top_results = unique[:self.max_results]
+        top_results = unique[: self.max_results]
 
         # Step 4: 冲突检测
-        conflict_groups, independent, evolution_chains = \
-            self.conflict_detector.detect(top_results)
+        conflict_groups, independent, evolution_chains = self.conflict_detector.detect(top_results)
 
         # Step 5: 构建注入内容
-        injection_text = self._build_injection_text(
-            independent, conflict_groups, evolution_chains
-        )
+        injection_text = self._build_injection_text(independent, conflict_groups, evolution_chains)
 
         return ProcessedResults(
             independent=independent,
@@ -159,17 +160,16 @@ class ResultProcessor:
 
         return len(intersection) / len(union) if union else 0.0
 
-    def _build_injection_text(self,
-                              independent: List[Dict],
-                              conflict_groups: List[ConflictGroup],
-                              evolution_chains: List[List[Dict]]) -> str:
+    def _build_injection_text(
+        self, independent: List[Dict], conflict_groups: List[ConflictGroup], evolution_chains: List[List[Dict]]
+    ) -> str:
         """构建注入文本"""
         parts = []
 
         # 独立记忆
         for mem in independent:
             content = mem.get("content", "")
-            score = mem.get("score", 0)
+            mem.get("score", 0)
             parts.append(f"[记忆] {content}")
 
         # 演进链（注入最新版本）
@@ -180,10 +180,7 @@ class ResultProcessor:
                 first = min(chain, key=lambda x: x.get("created_at", ""))
                 first_date = first.get("created_at", "未知")
                 latest_date = latest.get("created_at", "未知")
-                parts.append(
-                    f"[记忆-已更新] {content} "
-                    f"(从 {first_date} 更新至 {latest_date})"
-                )
+                parts.append(f"[记忆-已更新] {content} " f"(从 {first_date} 更新至 {latest_date})")
 
         # 冲突组
         if conflict_groups:
@@ -221,6 +218,7 @@ class ResultProcessor:
 
         return "\n\n".join(prompts)
 
+
 class ConflictPresenter:
     """冲突呈现器"""
 
@@ -232,8 +230,9 @@ class ConflictPresenter:
         processor = ResultProcessor()
         return processor._build_conflict_prompt(conflict_groups)
 
-    def handle_user_choice(self, group: ConflictGroup, choice: str,
-                           new_content: Optional[str] = None) -> Dict[str, Any]:
+    def handle_user_choice(
+        self, group: ConflictGroup, choice: str, new_content: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         处理用户选择
 
@@ -275,13 +274,13 @@ class ConflictPresenter:
 
         return selected
 
+
 class ConflictResolution:
     """冲突解决后的记忆更新"""
 
-    async def resolve_and_update(self, group: ConflictGroup,
-                                  user_choice: str,
-                                  memory_manager: Any,
-                                  new_content: Optional[str] = None) -> Dict[str, Any]:
+    async def resolve_and_update(
+        self, group: ConflictGroup, user_choice: str, memory_manager: Any, new_content: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         用户选择后更新记忆库
 
@@ -302,7 +301,7 @@ class ConflictResolution:
             if option.get("id") != selected.get("id"):
                 try:
                     # 更新元数据
-                    if hasattr(memory_manager, 'update_memory'):
+                    if hasattr(memory_manager, "update_memory"):
                         await memory_manager.update_memory(
                             option.get("id"),
                             metadata={
@@ -310,25 +309,25 @@ class ConflictResolution:
                                 "status": "superseded",
                                 "superseded_by": selected.get("id"),
                                 "superseded_at": datetime.now().isoformat(),
-                            }
+                            },
                         )
                 except Exception as e:
-                    logger.warning(f"更新记忆 {option.get('id')} 失败: {e}")
+                    logger.warning("更新记忆 %s 失败: %s", option.get('id'), e)
 
         # 如果用户提供新内容，写入新记忆
         if user_choice.upper() == "C" and new_content:
             try:
-                if hasattr(memory_manager, 'remember'):
+                if hasattr(memory_manager, "remember"):
                     memory_id = await memory_manager.remember(
                         content=new_content,
                         category="resolved_conflict",
                         metadata={
                             "resolved_from": [m.get("id") for m in group.options],
                             "resolution_type": "user_override",
-                        }
+                        },
                     )
                     selected["id"] = memory_id
             except Exception as e:
-                logger.warning(f"写入新记忆失败: {e}")
+                logger.warning("写入新记忆失败: %s", e)
 
         return selected

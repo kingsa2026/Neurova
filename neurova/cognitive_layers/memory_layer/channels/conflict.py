@@ -3,9 +3,10 @@ ConflictDetector — 冲突检测器
 
 检测语义矛盾的记忆对。
 """
+
 import logging
-from dataclasses import dataclass, field
-from typing import List, Tuple
+from dataclasses import dataclass
+from typing import List
 
 from .base import ChannelResult
 
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ConflictPair:
     """冲突对"""
+
     result_a: ChannelResult
     result_b: ChannelResult
     reason: str = ""
@@ -27,10 +29,31 @@ class ConflictDetector:
     """
 
     NEGATION_WORDS = {
-        "不", "没", "无", "非", "未", "别", "莫", "勿",
-        "not", "no", "never", "neither", "nor", "without",
-        "isn't", "aren't", "wasn't", "weren't", "don't", "doesn't",
-        "didn't", "won't", "wouldn't", "can't", "cannot",
+        "不",
+        "没",
+        "无",
+        "非",
+        "未",
+        "别",
+        "莫",
+        "勿",
+        "not",
+        "no",
+        "never",
+        "neither",
+        "nor",
+        "without",
+        "isn't",
+        "aren't",
+        "wasn't",
+        "weren't",
+        "don't",
+        "doesn't",
+        "didn't",
+        "won't",
+        "wouldn't",
+        "can't",
+        "cannot",
     }
 
     def __init__(self, min_overlap: int = 2):
@@ -50,9 +73,7 @@ class ConflictDetector:
 
         return conflicts
 
-    def _check_pair(
-        self, a: ChannelResult, b: ChannelResult
-    ) -> Optional[ConflictPair]:
+    def _check_pair(self, a: ChannelResult, b: ChannelResult) -> Optional[ConflictPair]:
         """检查一对结果是否冲突"""
         words_a = set(a.content.lower().split())
         words_b = set(b.content.lower().split())

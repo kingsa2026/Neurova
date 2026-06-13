@@ -7,12 +7,10 @@ TTS Manager - TTS 引擎管理器
 3. mock: 模拟 TTS（测试用）
 """
 
-import asyncio
 import logging
-from pathlib import Path
-from typing import Literal, Optional, Dict, Any
+from typing import Any, Dict, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from neurova.tts.base import TTSBase
 from neurova.tts.edge_tts import EdgeTTS
@@ -31,6 +29,7 @@ FALLBACK_CHAIN = ["moss-nano", "edge-tts", "mock"]
 
 class TTSConfig(BaseModel):
     """TTS 配置"""
+
     engine: Literal["edge-tts", "moss-nano", "mock", "auto"] = "auto"
     voice: str = "zh-CN-XiaoxiaoNeural"
     rate: str = "+0%"
@@ -94,7 +93,7 @@ class TTSManager:
     async def _initialize_with_fallback(self) -> bool:
         """按 fallback 链初始化"""
         for engine_name in FALLBACK_CHAIN:
-            logger.info(f"尝试初始化 TTS 引擎: {engine_name}")
+            logger.info("尝试初始化 TTS 引擎: %s", engine_name)
             success = await self._initialize_engine(engine_name)
             if success:
                 self._fallback_index = FALLBACK_CHAIN.index(engine_name)
@@ -125,7 +124,7 @@ class TTSManager:
             elif engine_name == "mock":
                 engine = MockTTSSimple()
             else:
-                logger.error(f"未知引擎: {engine_name}")
+                logger.error("未知引擎: %s", engine_name)
                 return False
 
             success = await engine.initialize()
@@ -134,16 +133,16 @@ class TTSManager:
                 self._engine_name = engine_name
                 self._initialized = True
                 self._available_engines[engine_name] = True
-                logger.info(f"TTS 引擎初始化成功: {engine_name}")
+                logger.info("TTS 引擎初始化成功: %s", engine_name)
                 return True
             else:
                 self._available_engines[engine_name] = False
-                logger.warning(f"TTS 引擎初始化失败: {engine_name}")
+                logger.warning("TTS 引擎初始化失败: %s", engine_name)
                 return False
 
         except Exception as e:
             self._available_engines[engine_name] = False
-            logger.error(f"TTS 引擎初始化异常: {engine_name} - {e}")
+            logger.error("TTS 引擎初始化异常: %s - %s", engine_name, e)
             return False
 
     async def synthesize(self, text: str, **kwargs) -> bytes:
@@ -160,7 +159,7 @@ class TTSManager:
 
         # Fallback: 如果返回空数据且启用 fallback
         if not result and self._config.fallback_enabled:
-            logger.warning(f"引擎 {self._engine_name} 合成失败，尝试 fallback")
+            logger.warning("引擎 %s 合成失败，尝试 fallback", self._engine_name)
             return await self._fallback_synthesize(text, **kwargs)
 
         return result
@@ -169,8 +168,8 @@ class TTSManager:
         """fallback 合成"""
         current_index = FALLBACK_CHAIN.index(self._engine_name) if self._engine_name in FALLBACK_CHAIN else -1
 
-        for engine_name in FALLBACK_CHAIN[current_index + 1:]:
-            logger.info(f"Fallback 到: {engine_name}")
+        for engine_name in FALLBACK_CHAIN[current_index + 1 :]:
+            logger.info("Fallback 到: %s", engine_name)
             success = await self._initialize_engine(engine_name)
             if success:
                 result = await self._engine.synthesize(text, **kwargs)

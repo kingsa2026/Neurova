@@ -7,16 +7,13 @@ Neurova 技能扫描器 (Skill Scanner) 2.0
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import datetime
-import enum
 import hashlib
 import json
 import logging
-import os
 import re
 import time
-import typing
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Pattern
@@ -26,23 +23,26 @@ logger = logging.getLogger(__name__)
 
 class ScanMode(str, Enum):
     """扫描模式"""
-    QUICK = "quick"   # 快速扫描（只扫描主要文件）
-    FULL = "full"     # 完整扫描（扫描所有文件）
-    DEEP = "deep"     # 深度扫描（包括依赖分析）
+
+    QUICK = "quick"  # 快速扫描（只扫描主要文件）
+    FULL = "full"  # 完整扫描（扫描所有文件）
+    DEEP = "deep"  # 深度扫描（包括依赖分析）
 
 
 class ScanPolicy(str, Enum):
     """扫描策略"""
-    ALLOW = "allow"   # 允许通过
-    WARN = "warn"     # 发出警告但允许
-    DENY = "deny"     # 拒绝执行
+
+    ALLOW = "allow"  # 允许通过
+    WARN = "warn"  # 发出警告但允许
+    DENY = "deny"  # 拒绝执行
 
 
 @dataclass
 class Finding:
     """扫描发现"""
+
     rule_id: str = ""
-    severity: str = "info"       # critical, high, medium, low, info
+    severity: str = "info"  # critical, high, medium, low, info
     message: str = ""
     file_path: Optional[str] = None
     line_number: Optional[int] = None
@@ -69,14 +69,13 @@ class Finding:
 @dataclass
 class ScanResult:
     """扫描结果"""
+
     skill_id: str = ""
     passed: bool = True
     findings: List[Finding] = field(default_factory=list)
     scan_mode: ScanMode = ScanMode.QUICK
     content_hash: Optional[str] = None
-    scanned_at: datetime.datetime = field(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
-    )
+    scanned_at: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
     scan_duration: float = 0.0
     file_count: int = 0
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -103,6 +102,7 @@ class ScanResult:
 @dataclass
 class SkillFile:
     """技能文件"""
+
     path: str = ""
     content: str = ""
     hash: str = ""
@@ -119,6 +119,7 @@ class SkillFile:
 @dataclass
 class ScanRule:
     """扫描规则"""
+
     rule_id: str = ""
     name: str = ""
     pattern: str = ""
@@ -297,7 +298,7 @@ class PatternAnalyzer(BaseAnalyzer):
     def add_rule(self, rule: ScanRule):
         """添加规则"""
         if rule.rule_id in self.rules:
-            logger.debug(f"规则已存在，覆盖: {rule.rule_id}")
+            logger.debug("规则已存在，覆盖: %s", rule.rule_id)
         self.rules[rule.rule_id] = rule
 
     def remove_rule(self, rule_id: str) -> bool:
@@ -388,7 +389,7 @@ class WhitelistManager:
                     data = json.load(f)
                 self._entries = data.get("entries", {})
             except (json.JSONDecodeError, OSError) as e:
-                logger.warning(f"加载白名单失败: {e}")
+                logger.warning("加载白名单失败: %s", e)
                 self._entries = {}
 
     def _save(self):
@@ -398,7 +399,7 @@ class WhitelistManager:
             with open(self._config_path, "w", encoding="utf-8") as f:
                 json.dump({"entries": self._entries}, f, indent=2, ensure_ascii=False)
         except OSError as e:
-            logger.error(f"保存白名单失败: {e}")
+            logger.error("保存白名单失败: %s", e)
 
     def is_whitelisted(self, skill_id: str) -> bool:
         return skill_id in self._entries
@@ -426,10 +427,7 @@ class WhitelistManager:
         return len(self._entries)
 
     def list_all(self) -> List[Dict[str, Any]]:
-        return [
-            {"skill_id": sid, **info}
-            for sid, info in self._entries.items()
-        ]
+        return [{"skill_id": sid, **info} for sid, info in self._entries.items()]
 
 
 class SkillScanner:
@@ -443,9 +441,7 @@ class SkillScanner:
         self.policy: ScanPolicy = ScanPolicy.WARN
         self.analyzers: List[BaseAnalyzer] = []
         self._cache = ScanCache(ttl=cache_ttl)
-        self._whitelist = WhitelistManager(
-            config_path=str(self._config_dir / "whitelist.json")
-        )
+        self._whitelist = WhitelistManager(config_path=str(self._config_dir / "whitelist.json"))
         self._custom_rules: Dict[str, ScanRule] = {}
 
         # 添加默认模式分析器
@@ -483,7 +479,7 @@ class SkillScanner:
     def whitelist_skill(self, skill_id: str, hash: str = "", reason: str = ""):
         """将技能加入白名单"""
         self._whitelist.add(skill_id, hash=hash, reason=reason)
-        logger.info(f"技能 {skill_id} 已加入白名单")
+        logger.info("技能 %s 已加入白名单", skill_id)
 
     def is_skill_whitelisted(self, skill_id: str) -> bool:
         """检查技能是否在白名单中"""
@@ -502,7 +498,22 @@ class SkillScanner:
             return files
 
         # 可扫描的文件类型
-        scannable_suffixes = {".py", ".js", ".ts", ".jsx", ".tsx", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini", ".sh", ".bat", ".ps1"}
+        scannable_suffixes = {
+            ".py",
+            ".js",
+            ".ts",
+            ".jsx",
+            ".tsx",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".cfg",
+            ".ini",
+            ".sh",
+            ".bat",
+            ".ps1",
+        }
 
         for file_path in sorted(path.rglob("*")):
             if not file_path.is_file():
@@ -531,7 +542,7 @@ class SkillScanner:
                 )
                 files.append(sf)
             except (OSError, UnicodeDecodeError) as e:
-                logger.debug(f"无法读取文件 {file_path}: {e}")
+                logger.debug("无法读取文件 %s: %s", file_path, e)
 
         return files
 
@@ -546,7 +557,7 @@ class SkillScanner:
 
         # 检查白名单
         if self._whitelist.is_whitelisted(skill_id):
-            logger.info(f"技能 {skill_id} 在白名单中，跳过扫描")
+            logger.info("技能 %s 在白名单中，跳过扫描", skill_id)
             return ScanResult(
                 skill_id=skill_id,
                 passed=True,
@@ -578,7 +589,7 @@ class SkillScanner:
         # 检查缓存
         cached = self._cache.get(skill_id, content_hash)
         if cached:
-            logger.debug(f"缓存命中: {skill_id}")
+            logger.debug("缓存命中: %s", skill_id)
             return cached
 
         # 执行扫描
@@ -610,9 +621,6 @@ class SkillScanner:
         # 缓存结果
         self._cache.set(skill_id, content_hash, result)
 
-        logger.info(
-            f"技能扫描完成: {skill_id}, 通过={passed}, "
-            f"文件数={len(files)}, 发现={len(all_findings)}"
-        )
+        logger.info("技能扫描完成: %s, 通过=%s, " f"文件数=%s, 发现=%s", skill_id, passed, len(files), len(all_findings))
 
         return result

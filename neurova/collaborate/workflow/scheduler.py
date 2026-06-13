@@ -8,12 +8,12 @@ Agent 调度器
 import logging
 import threading
 import time
-from typing import Dict, List, Optional, Any, Callable
-from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
 
-from .models import ScheduledTask, FlowContext
+from .models import FlowContext, ScheduledTask
 
 logger = logging.getLogger(__name__)
+
 
 class AgentScheduler:
     """Agent 调度器
@@ -32,7 +32,7 @@ class AgentScheduler:
         return cls._instance
 
     def __init__(self):
-        if hasattr(self, '_initialized'):
+        if hasattr(self, "_initialized"):
             return
 
         self._initialized = True
@@ -53,7 +53,7 @@ class AgentScheduler:
             handler: 处理函数，签名: (task: ScheduledTask, context: FlowContext) -> Any
         """
         self._task_handlers[action] = handler
-        logger.info(f"Registered handler for action: {action}")
+        logger.info("Registered handler for action: %s", action)
 
     def add_task(self, task: ScheduledTask) -> bool:
         """添加任务
@@ -66,11 +66,11 @@ class AgentScheduler:
         """
         with self._task_lock:
             if task.task_id in self._tasks:
-                logger.warning(f"Task already exists: {task.task_id}")
+                logger.warning("Task already exists: %s", task.task_id)
                 return False
 
             self._tasks[task.task_id] = task
-            logger.info(f"Task added: {task.task_id} ({task.name})")
+            logger.info("Task added: %s (%s)", task.task_id, task.name)
             self._emit_event("task_added", task)
             return True
 
@@ -88,7 +88,7 @@ class AgentScheduler:
                 return False
 
             task = self._tasks.pop(task_id)
-            logger.info(f"Task removed: {task_id} ({task.name})")
+            logger.info("Task removed: %s (%s)", task_id, task.name)
             self._emit_event("task_removed", task)
             return True
 
@@ -110,9 +110,15 @@ class AgentScheduler:
             tasks = [t for t in tasks if t.status == status]
         return tasks
 
-    def schedule_task(self, name: str, action: str, agent_id: str = "",
-                     scheduled_at: float = None, interval_seconds: int = None,
-                     parameters: Dict[str, Any] = None) -> ScheduledTask:
+    def schedule_task(
+        self,
+        name: str,
+        action: str,
+        agent_id: str = "",
+        scheduled_at: float = None,
+        interval_seconds: int = None,
+        parameters: Dict[str, Any] = None,
+    ) -> ScheduledTask:
         """创建并添加任务
 
         Args:
@@ -163,7 +169,7 @@ class AgentScheduler:
                 self._check_and_execute_tasks()
                 time.sleep(1)  # 每秒检查一次
             except Exception as e:
-                logger.exception(f"Error in scheduler loop: {e}")
+                logger.exception("Error in scheduler loop: %s", e)
                 time.sleep(5)  # 出错后等待更长时间
 
     def _check_and_execute_tasks(self) -> None:
@@ -178,7 +184,7 @@ class AgentScheduler:
         """执行任务"""
         handler = self._task_handlers.get(task.action)
         if not handler:
-            logger.error(f"No handler registered for action: {task.action}")
+            logger.error("No handler registered for action: %s", task.action)
             task.mark_failed(f"No handler for action: {task.action}")
             return
 
@@ -194,12 +200,12 @@ class AgentScheduler:
 
             task.mark_completed(result)
             self._emit_event("task_completed", task)
-            logger.info(f"Task completed: {task.task_id} ({task.name})")
+            logger.info("Task completed: %s (%s)", task.task_id, task.name)
 
         except Exception as e:
             task.mark_failed(str(e))
             self._emit_event("task_failed", task, {"error": str(e)})
-            logger.exception(f"Task failed: {task.task_id} ({task.name}): {e}")
+            logger.exception("Task failed: %s (%s): %s", task.task_id, task.name, e)
 
     def add_event_handler(self, handler: Callable) -> None:
         """添加事件处理器"""
@@ -219,7 +225,7 @@ class AgentScheduler:
             try:
                 handler(event_data)
             except Exception as e:
-                logger.exception(f"Error in event handler: {e}")
+                logger.exception("Error in event handler: %s", e)
 
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
@@ -234,8 +240,10 @@ class AgentScheduler:
             "is_running": self._running,
         }
 
+
 # 全局调度器实例
 _global_scheduler: Optional[AgentScheduler] = None
+
 
 def get_scheduler() -> AgentScheduler:
     """获取全局调度器"""

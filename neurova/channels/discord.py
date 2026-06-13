@@ -6,20 +6,20 @@ API 文档: https://discord.com/developers/docs/intro
 
 import json
 import logging
-import time
 import threading
-from typing import Optional, Dict, Any
+import time
 from datetime import datetime
+from typing import Any, Dict, Optional
 
 try:
-    import re
+    pass
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
 
-from neurova.channels import (
-    ChannelAdapter, MessageChannel, UnifiedMessage, ContentType
-)
+from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+
 
 class DiscordAdapter(ChannelAdapter):
     """
@@ -55,7 +55,7 @@ class DiscordAdapter(ChannelAdapter):
         # 消息策略
         self.receive_bot_messages = False  # 是否接收其他机器人的消息
         self.private_chat_strategy = "open"  # open/closed/whitelist
-        self.group_chat_strategy = "open"    # open/closed/whitelist
+        self.group_chat_strategy = "open"  # open/closed/whitelist
         self.require_mention = False
         self.whitelist_users = []
 
@@ -152,21 +152,23 @@ class DiscordAdapter(ChannelAdapter):
             url = f"{self.API_BASE}/users/@me"
             headers = {
                 "Authorization": f"Bot {self.bot_token}",
-                "User-Agent": "DiscordBot (https://github.com/neurova, 1.0)"
+                "User-Agent": "DiscordBot (https://github.com/neurova, 1.0)",
             }
 
             resp = self.session.get(url, headers=headers, timeout=10)
             data = resp.json()
 
             if resp.status_code == 200:
-                logging.info(f"Discord认证成功 - 用户: {data.get('username', 'Unknown')}#{data.get('discriminator', '0000')}")
+                logging.info(
+                    f"Discord认证成功 - 用户: {data.get('username', 'Unknown')}#{data.get('discriminator', '0000')}"
+                )
                 self._initialized = True
                 return True
             else:
-                logging.error(f"Discord认证失败: {data}")
+                logging.error("Discord认证失败: %s", data)
                 return False
         except Exception as e:
-            logging.error(f"Discord认证异常: {e}")
+            logging.error("Discord认证异常: %s", e)
             return False
 
     def _ensure_authenticated(self) -> bool:
@@ -183,7 +185,7 @@ class DiscordAdapter(ChannelAdapter):
             return False
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[Discord模拟] 发送消息到 {message.chat_id}: {message.content[:50]}")
+            logging.info("[Discord模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
             return True
 
         try:
@@ -194,7 +196,7 @@ class DiscordAdapter(ChannelAdapter):
             headers = {
                 "Authorization": f"Bot {self.bot_token}",
                 "Content-Type": "application/json",
-                "User-Agent": "DiscordBot (https://github.com/neurova, 1.0)"
+                "User-Agent": "DiscordBot (https://github.com/neurova, 1.0)",
             }
 
             payload = {
@@ -202,10 +204,8 @@ class DiscordAdapter(ChannelAdapter):
             }
 
             # 如果是回复消息，携带消息引用
-            if hasattr(message, 'reply_to_message_id'):
-                payload["message_reference"] = {
-                    "message_id": message.reply_to_message_id
-                }
+            if hasattr(message, "reply_to_message_id"):
+                payload["message_reference"] = {"message_id": message.reply_to_message_id}
 
             resp = self.session.post(url, headers=headers, json=payload, timeout=10)
 
@@ -213,16 +213,16 @@ class DiscordAdapter(ChannelAdapter):
                 return True
             else:
                 data = resp.json()
-                logging.error(f"Discord消息发送失败: {data}")
+                logging.error("Discord消息发送失败: %s", data)
                 return False
         except requests.exceptions.Timeout as e:
-            logging.error(f"Discord消息发送超时: {e}")
+            logging.error("Discord消息发送超时: %s", e)
             return False
         except requests.exceptions.RequestException as e:
-            logging.error(f"Discord消息发送请求异常: {e}")
+            logging.error("Discord消息发送请求异常: %s", e)
             return False
         except Exception as e:
-            logging.error(f"Discord消息发送异常: {e}")
+            logging.error("Discord消息发送异常: %s", e)
             return False
 
     def receive_message(self) -> Optional[UnifiedMessage]:
@@ -277,7 +277,7 @@ class DiscordAdapter(ChannelAdapter):
         if timestamp_str:
             try:
                 # Discord使用ISO 8601格式
-                timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
             except ValueError:
                 timestamp = datetime.now()
 
@@ -308,7 +308,7 @@ class DiscordAdapter(ChannelAdapter):
                 return None
             elif self.private_chat_strategy == "whitelist":
                 if user_id not in self.whitelist_users:
-                    logging.debug(f"用户 {user_id} 不在白名单中")
+                    logging.debug("用户 %s 不在白名单中", user_id)
                     return None
         else:
             if self.group_chat_strategy == "closed":
@@ -316,7 +316,7 @@ class DiscordAdapter(ChannelAdapter):
                 return None
             elif self.group_chat_strategy == "whitelist":
                 if user_id not in self.whitelist_users:
-                    logging.debug(f"用户 {user_id} 不在白名单中")
+                    logging.debug("用户 %s 不在白名单中", user_id)
                     return None
 
         return UnifiedMessage(
@@ -379,7 +379,7 @@ class DiscordAdapter(ChannelAdapter):
         # 检查是否需要 @提及
         if self.require_mention:
             content = raw_data.get("content", "")
-            bot_id = self.bot_token.split('.')[0]  # 从token中提取bot id
+            bot_id = self.bot_token.split(".")[0]  # 从token中提取bot id
             bot_mentioned = f"<@{bot_id}>" in content or f"<@!{bot_id}>" in content
             if not bot_mentioned:
                 return False
@@ -400,6 +400,7 @@ class DiscordAdapter(ChannelAdapter):
                 return user_id in self.whitelist_users
 
         return True
+
 
 def create_discord_adapter(bot_token: str = "") -> DiscordAdapter:
     """创建Discord适配器"""

@@ -17,35 +17,36 @@ API 文档:
 - 微信公众号: https://developers.weixin.qq.com/doc/offiaccount/Getting_Started/Overview.html
 """
 
+import hashlib
 import json
 import logging
-import time
-import hashlib
+import os
 import re
 import tempfile
-import os
-from typing import Optional, Dict, Any, List
+import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 from xml.etree import ElementTree as ET
 
 try:
     import re
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
     logging.warning("requests 库未安装，微信适配器将使用模拟模式")
 
 try:
-    import http
+    pass
+
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
     logging.warning("httpx 库未安装，部分AI生成功能可能不可用")
 
-from neurova.channels import (
-    ChannelAdapter, MessageChannel, UnifiedMessage, ContentType
-)
+from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+
 
 class WeChatAdapter(ChannelAdapter):
     """
@@ -236,10 +237,10 @@ class WeChatAdapter(ChannelAdapter):
                 logging.info("企业微信认证成功")
                 return True
             else:
-                logging.error(f"企业微信认证失败: {data}")
+                logging.error("企业微信认证失败: %s", data)
                 return False
         except (requests.RequestException, json.JSONDecodeError) as e:
-            logging.error(f"企业微信认证异常: {e}")
+            logging.error("企业微信认证异常: %s", e)
             return False
 
     def _ensure_wecom_token(self) -> bool:
@@ -286,13 +287,13 @@ class WeChatAdapter(ChannelAdapter):
         token_path = Path(self.ilink_token_file)
         if token_path.exists():
             try:
-                with open(token_path, 'r') as f:
+                with open(token_path, "r") as f:
                     self.ilink_bot_token = f.read().strip()
                 if self.ilink_bot_token:
-                    logging.info(f"从文件加载 iLink Token: {self.ilink_token_file}")
+                    logging.info("从文件加载 iLink Token: %s", self.ilink_token_file)
                     return self._verify_ilink_token()
             except (OSError, IOError) as e:
-                logging.warning(f"加载 Token 文件失败: {e}")
+                logging.warning("加载 Token 文件失败: %s", e)
 
         # 首次启动，需要扫码登录
         logging.info("iLink 协议首次启动，需要扫码登录")
@@ -318,16 +319,16 @@ class WeChatAdapter(ChannelAdapter):
             if data.get("success"):
                 qr_url = data.get("qr_code_url", "")
                 qr_id = data.get("qr_id", "")
-                logging.info(f"iLink 登录二维码: {qr_url}")
-                logging.info(f"请扫码登录，QR ID: {qr_id}")
+                logging.info("iLink 登录二维码: %s", qr_url)
+                logging.info("请扫码登录，QR ID: %s", qr_id)
 
                 # 轮询等待扫码
                 return self._wait_for_scan(qr_id)
             else:
-                logging.error(f"生成二维码失败: {data}")
+                logging.error("生成二维码失败: %s", data)
                 return False
         except (requests.RequestException, json.JSONDecodeError) as e:
-            logging.error(f"生成二维码异常: {e}")
+            logging.error("生成二维码异常: %s", e)
             return False
 
     def _wait_for_scan(self, qr_id: str, timeout: int = 300) -> bool:
@@ -366,7 +367,7 @@ class WeChatAdapter(ChannelAdapter):
 
                 time.sleep(poll_interval)
             except (requests.RequestException, json.JSONDecodeError) as e:
-                logging.error(f"轮询扫码状态异常: {e}")
+                logging.error("轮询扫码状态异常: %s", e)
                 time.sleep(poll_interval)
 
         logging.error("扫码登录超时")
@@ -393,7 +394,7 @@ class WeChatAdapter(ChannelAdapter):
                 self.ilink_bot_token = ""
                 return False
         except (requests.RequestException, json.JSONDecodeError) as e:
-            logging.error(f"验证 Token 异常: {e}")
+            logging.error("验证 Token 异常: %s", e)
             return False
 
     def _save_ilink_token(self):
@@ -404,11 +405,11 @@ class WeChatAdapter(ChannelAdapter):
         try:
             token_path = Path(self.ilink_token_file)
             token_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(token_path, 'w') as f:
+            with open(token_path, "w") as f:
                 f.write(self.ilink_bot_token)
-            logging.info(f"iLink Token 已保存到: {self.ilink_token_file}")
+            logging.info("iLink Token 已保存到: %s", self.ilink_token_file)
         except (OSError, IOError) as e:
-            logging.error(f"保存 Token 失败: {e}")
+            logging.error("保存 Token 失败: %s", e)
 
     # ============================================================
     # 微信公众号认证
@@ -450,10 +451,10 @@ class WeChatAdapter(ChannelAdapter):
                 logging.info("微信公众号认证成功")
                 return True
             else:
-                logging.error(f"微信公众号认证失败: {data}")
+                logging.error("微信公众号认证失败: %s", data)
                 return False
         except Exception as e:
-            logging.error(f"微信公众号认证异常: {e}")
+            logging.error("微信公众号认证异常: %s", e)
             return False
 
     def _ensure_official_token(self) -> bool:
@@ -468,8 +469,7 @@ class WeChatAdapter(ChannelAdapter):
     # 统一 API 请求方法
     # ============================================================
 
-    def _api_request(self, base_url: str, method: str, path: str,
-                    params: Dict = None, **kwargs) -> Dict[str, Any]:
+    def _api_request(self, base_url: str, method: str, path: str, params: Dict = None, **kwargs) -> Dict[str, Any]:
         """
         统一的 API 请求方法
 
@@ -494,13 +494,13 @@ class WeChatAdapter(ChannelAdapter):
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.Timeout:
-            logging.error(f"微信 API 请求超时: {url}")
+            logging.error("微信 API 请求超时: %s", url)
             return {"errcode": -1, "errmsg": "请求超时"}
         except requests.exceptions.HTTPError as e:
-            logging.error(f"微信 API HTTP 错误: {e}")
+            logging.error("微信 API HTTP 错误: %s", e)
             return {"errcode": -1, "errmsg": f"HTTP 错误: {e.response.status_code}"}
         except Exception as e:
-            logging.error(f"微信 API 请求异常: {e}")
+            logging.error("微信 API 请求异常: %s", e)
             return {"errcode": -1, "errmsg": str(e)}
 
     # ============================================================
@@ -530,7 +530,7 @@ class WeChatAdapter(ChannelAdapter):
             return False
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[企微模拟] 发送消息到 {message.chat_id}: {message.content[:50]}")
+            logging.info("[企微模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
             return True
 
         try:
@@ -539,7 +539,7 @@ class WeChatAdapter(ChannelAdapter):
             else:
                 return self._send_app_message(message)
         except Exception as e:
-            logging.error(f"企业微信消息发送异常: {e}")
+            logging.error("企业微信消息发送异常: %s", e)
             return False
 
     def _send_app_message(self, message: UnifiedMessage) -> bool:
@@ -575,10 +575,10 @@ class WeChatAdapter(ChannelAdapter):
         data = resp.json()
 
         if data.get("errcode") == 0:
-            logging.info(f"企业微信消息发送成功: {message.chat_id}")
+            logging.info("企业微信消息发送成功: %s", message.chat_id)
             return True
         else:
-            logging.error(f"企业微信消息发送失败: {data}")
+            logging.error("企业微信消息发送失败: %s", data)
             return False
 
     def _send_kf_message(self, message: UnifiedMessage) -> bool:
@@ -597,10 +597,10 @@ class WeChatAdapter(ChannelAdapter):
         data = resp.json()
 
         if data.get("errcode") == 0:
-            logging.info(f"微信客服消息发送成功: {message.chat_id}")
+            logging.info("微信客服消息发送成功: %s", message.chat_id)
             return True
         else:
-            logging.error(f"微信客服消息发送失败: {data}")
+            logging.error("微信客服消息发送失败: %s", data)
             return False
 
     def _send_ilink_message(self, message: UnifiedMessage) -> bool:
@@ -618,11 +618,11 @@ class WeChatAdapter(ChannelAdapter):
         session_key = f"{message.chat_id}:{message.session_id}"
         reply_count = self._reply_counts.get(session_key, 0)
         if reply_count >= 10:
-            logging.warning(f"iLink 回复次数已达上限 (10次): {session_key}")
+            logging.warning("iLink 回复次数已达上限 (10次): %s", session_key)
             return False
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[iLink 模拟] 发送消息到 {message.chat_id}: {message.content[:50]}")
+            logging.info("[iLink 模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
             self._reply_counts[session_key] = reply_count + 1
             return True
 
@@ -647,10 +647,10 @@ class WeChatAdapter(ChannelAdapter):
                 self._reply_counts[session_key] = reply_count + 1
                 return True
             else:
-                logging.error(f"iLink 消息发送失败: {data}")
+                logging.error("iLink 消息发送失败: %s", data)
                 return False
         except Exception as e:
-            logging.error(f"iLink 消息发送异常: {e}")
+            logging.error("iLink 消息发送异常: %s", e)
             return False
 
     def _send_official_message(self, message: UnifiedMessage) -> bool:
@@ -659,7 +659,7 @@ class WeChatAdapter(ChannelAdapter):
             return False
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[公众号模拟] 发送消息到 {message.chat_id}: {message.content[:50]}")
+            logging.info("[公众号模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
             return True
 
         try:
@@ -702,13 +702,13 @@ class WeChatAdapter(ChannelAdapter):
             data = resp.json()
 
             if data.get("errcode", 0) == 0:
-                logging.info(f"微信公众号客服消息发送成功: {message.chat_id}")
+                logging.info("微信公众号客服消息发送成功: %s", message.chat_id)
                 return True
             else:
-                logging.error(f"微信公众号客服消息发送失败: {data}")
+                logging.error("微信公众号客服消息发送失败: %s", data)
                 return False
         except Exception as e:
-            logging.error(f"微信公众号消息发送异常: {e}")
+            logging.error("微信公众号消息发送异常: %s", e)
             return False
 
     # ============================================================
@@ -874,7 +874,7 @@ class WeChatAdapter(ChannelAdapter):
 
         # 检查策略
         if not self.should_process_message(raw_data):
-            logging.debug(f"消息被策略过滤: {chat_type}, user={from_user}")
+            logging.debug("消息被策略过滤: %s, user=%s", chat_type, from_user)
 
         return UnifiedMessage(
             message_id=raw_data.get("msg_id", str(int(time.time()))),
@@ -1022,7 +1022,7 @@ class WeChatAdapter(ChannelAdapter):
                 },
             )
         except ET.ParseError as e:
-            logging.error(f"XML 解析失败: {e}")
+            logging.error("XML 解析失败: %s", e)
             return UnifiedMessage(
                 message_id=str(int(time.time())),
                 channel=MessageChannel.WECHAT,
@@ -1128,8 +1128,7 @@ class WeChatAdapter(ChannelAdapter):
     # 签名验证 (企业微信/公众号回调)
     # ============================================================
 
-    def verify_signature(self, msg_signature: str, timestamp: str,
-                        nonce: str, echostr: str = "") -> Optional[str]:
+    def verify_signature(self, msg_signature: str, timestamp: str, nonce: str, echostr: str = "") -> Optional[str]:
         """
         验证企业微信/公众号回调签名
 
@@ -1203,8 +1202,9 @@ class WeChatAdapter(ChannelAdapter):
     # 媒体上传与下载
     # ============================================================
 
-    def upload_media(self, file_path: str, media_type: str = "image",
-                     title: str = "", description: str = "") -> Optional[str]:
+    def upload_media(
+        self, file_path: str, media_type: str = "image", title: str = "", description: str = ""
+    ) -> Optional[str]:
         """
         上传媒体文件到微信服务器
 
@@ -1224,20 +1224,21 @@ class WeChatAdapter(ChannelAdapter):
         else:
             return self._upload_wecom_media(file_path, media_type, title, description)
 
-    def _upload_wecom_media(self, file_path: str, media_type: str,
-                           title: str = "", description: str = "") -> Optional[str]:
+    def _upload_wecom_media(
+        self, file_path: str, media_type: str, title: str = "", description: str = ""
+    ) -> Optional[str]:
         """上传媒体文件到企业微信"""
         if not self._ensure_wecom_token():
             logging.error("企业微信 Token 获取失败")
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[企微模拟] 上传媒体: {file_path}, 类型: {media_type}")
+            logging.info("[企微模拟] 上传媒体: %s, 类型: %s", file_path, media_type)
             return f"mock_media_id_{int(time.time())}"
 
         file_path_obj = Path(file_path)
         if not file_path_obj.exists():
-            logging.error(f"媒体文件不存在: {file_path}")
+            logging.error("媒体文件不存在: %s", file_path)
             return None
 
         try:
@@ -1251,10 +1252,14 @@ class WeChatAdapter(ChannelAdapter):
                 files = {"media": (file_path_obj.name, f)}
 
                 if media_type == "video":
-                    data = {"description": json.dumps({
-                        "title": title or file_path_obj.stem,
-                        "introduction": description or "",
-                    })}
+                    data = {
+                        "description": json.dumps(
+                            {
+                                "title": title or file_path_obj.stem,
+                                "introduction": description or "",
+                            }
+                        )
+                    }
                     resp = requests.post(url, params=params, files=files, data=data, timeout=30)
                 else:
                     resp = requests.post(url, params=params, files=files, timeout=30)
@@ -1263,22 +1268,22 @@ class WeChatAdapter(ChannelAdapter):
 
             if result.get("errcode") == 0:
                 media_id = result.get("media_id")
-                logging.info(f"企业微信媒体上传成功: {media_id}")
+                logging.info("企业微信媒体上传成功: %s", media_id)
                 return media_id
             else:
-                logging.error(f"企业微信媒体上传失败: {result}")
+                logging.error("企业微信媒体上传失败: %s", result)
                 return None
         except requests.exceptions.Timeout:
-            logging.error(f"媒体上传超时: {file_path}")
+            logging.error("媒体上传超时: %s", file_path)
             return None
         except requests.exceptions.HTTPError as e:
-            logging.error(f"媒体上传 HTTP 错误: {e}")
+            logging.error("媒体上传 HTTP 错误: %s", e)
             return None
         except IOError as e:
-            logging.error(f"读取媒体文件失败: {e}")
+            logging.error("读取媒体文件失败: %s", e)
             return None
         except Exception as e:
-            logging.error(f"媒体上传异常: {e}")
+            logging.error("媒体上传异常: %s", e)
             return None
 
     def _upload_official_media(self, file_path: str, media_type: str) -> Optional[str]:
@@ -1288,12 +1293,12 @@ class WeChatAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[公众号模拟] 上传媒体: {file_path}, 类型: {media_type}")
+            logging.info("[公众号模拟] 上传媒体: %s, 类型: %s", file_path, media_type)
             return f"mock_official_media_id_{int(time.time())}"
 
         file_path_obj = Path(file_path)
         if not file_path_obj.exists():
-            logging.error(f"媒体文件不存在: {file_path}")
+            logging.error("媒体文件不存在: %s", file_path)
             return None
 
         try:
@@ -1311,13 +1316,13 @@ class WeChatAdapter(ChannelAdapter):
 
             if result.get("errcode") == 0:
                 media_id = result.get("media_id")
-                logging.info(f"微信公众号媒体上传成功: {media_id}")
+                logging.info("微信公众号媒体上传成功: %s", media_id)
                 return media_id
             else:
-                logging.error(f"微信公众号媒体上传失败: {result}")
+                logging.error("微信公众号媒体上传失败: %s", result)
                 return None
         except Exception as e:
-            logging.error(f"微信公众号媒体上传异常: {e}")
+            logging.error("微信公众号媒体上传异常: %s", e)
             return None
 
     def _upload_ilink_media(self, file_path: str, media_type: str) -> Optional[str]:
@@ -1327,12 +1332,12 @@ class WeChatAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[iLink 模拟] 上传媒体: {file_path}, 类型: {media_type}")
+            logging.info("[iLink 模拟] 上传媒体: %s, 类型: %s", file_path, media_type)
             return f"mock_ilink_media_id_{int(time.time())}"
 
         file_path_obj = Path(file_path)
         if not file_path_obj.exists():
-            logging.error(f"媒体文件不存在: {file_path}")
+            logging.error("媒体文件不存在: %s", file_path)
             return None
 
         try:
@@ -1348,13 +1353,13 @@ class WeChatAdapter(ChannelAdapter):
 
             if result.get("success"):
                 media_id = result.get("media_id")
-                logging.info(f"iLink 媒体上传成功: {media_id}")
+                logging.info("iLink 媒体上传成功: %s", media_id)
                 return media_id
             else:
-                logging.error(f"iLink 媒体上传失败: {result}")
+                logging.error("iLink 媒体上传失败: %s", result)
                 return None
         except Exception as e:
-            logging.error(f"iLink 媒体上传异常: {e}")
+            logging.error("iLink 媒体上传异常: %s", e)
             return None
 
     def download_media(self, media_id: str, save_path: str = "") -> Optional[bytes]:
@@ -1382,7 +1387,7 @@ class WeChatAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[企微模拟] 下载媒体: {media_id}")
+            logging.info("[企微模拟] 下载媒体: %s", media_id)
             return b"mock_media_data"
 
         try:
@@ -1398,7 +1403,7 @@ class WeChatAdapter(ChannelAdapter):
 
             if "application/json" in content_type:
                 result = resp.json()
-                logging.error(f"企业微信媒体下载失败: {result}")
+                logging.error("企业微信媒体下载失败: %s", result)
                 return None
 
             media_data = resp.content
@@ -1408,20 +1413,20 @@ class WeChatAdapter(ChannelAdapter):
                 save_path_obj.parent.mkdir(parents=True, exist_ok=True)
                 with open(save_path_obj, "wb") as f:
                     f.write(media_data)
-                logging.info(f"企业微信媒体已保存: {save_path}")
+                logging.info("企业微信媒体已保存: %s", save_path)
 
             return media_data
         except requests.exceptions.Timeout:
-            logging.error(f"媒体下载超时: {media_id}")
+            logging.error("媒体下载超时: %s", media_id)
             return None
         except requests.exceptions.HTTPError as e:
-            logging.error(f"媒体下载 HTTP 错误: {e}")
+            logging.error("媒体下载 HTTP 错误: %s", e)
             return None
         except IOError as e:
-            logging.error(f"保存媒体文件失败: {e}")
+            logging.error("保存媒体文件失败: %s", e)
             return None
         except Exception as e:
-            logging.error(f"媒体下载异常: {e}")
+            logging.error("媒体下载异常: %s", e)
             return None
 
     def _download_official_media(self, media_id: str, save_path: str = "") -> Optional[bytes]:
@@ -1431,7 +1436,7 @@ class WeChatAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[公众号模拟] 下载媒体: {media_id}")
+            logging.info("[公众号模拟] 下载媒体: %s", media_id)
             return b"mock_official_media_data"
 
         try:
@@ -1447,7 +1452,7 @@ class WeChatAdapter(ChannelAdapter):
 
             if "application/json" in content_type:
                 result = resp.json()
-                logging.error(f"微信公众号媒体下载失败: {result}")
+                logging.error("微信公众号媒体下载失败: %s", result)
                 return None
 
             media_data = resp.content
@@ -1457,11 +1462,11 @@ class WeChatAdapter(ChannelAdapter):
                 save_path_obj.parent.mkdir(parents=True, exist_ok=True)
                 with open(save_path_obj, "wb") as f:
                     f.write(media_data)
-                logging.info(f"微信公众号媒体已保存: {save_path}")
+                logging.info("微信公众号媒体已保存: %s", save_path)
 
             return media_data
         except Exception as e:
-            logging.error(f"微信公众号媒体下载异常: {e}")
+            logging.error("微信公众号媒体下载异常: %s", e)
             return None
 
     def _download_ilink_media(self, media_id: str, save_path: str = "") -> Optional[bytes]:
@@ -1471,7 +1476,7 @@ class WeChatAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[iLink 模拟] 下载媒体: {media_id}")
+            logging.info("[iLink 模拟] 下载媒体: %s", media_id)
             return b"mock_ilink_media_data"
 
         try:
@@ -1483,7 +1488,7 @@ class WeChatAdapter(ChannelAdapter):
             result = resp.json()
 
             if not result.get("success"):
-                logging.error(f"iLink 媒体下载失败: {result}")
+                logging.error("iLink 媒体下载失败: %s", result)
                 return None
 
             media_url = result.get("url")
@@ -1499,11 +1504,11 @@ class WeChatAdapter(ChannelAdapter):
                 save_path_obj.parent.mkdir(parents=True, exist_ok=True)
                 with open(save_path_obj, "wb") as f:
                     f.write(media_data)
-                logging.info(f"iLink 媒体已保存: {save_path}")
+                logging.info("iLink 媒体已保存: %s", save_path)
 
             return media_data
         except Exception as e:
-            logging.error(f"iLink 媒体下载异常: {e}")
+            logging.error("iLink 媒体下载异常: %s", e)
             return None
 
     # ============================================================
@@ -1529,7 +1534,9 @@ class WeChatAdapter(ChannelAdapter):
                 self.ilink_require_mention = config_updates["require_mention"]
             if "whitelist_users" in config_updates:
                 whitelist = config_updates["whitelist_users"]
-                self.ilink_whitelist_users = [u.strip() for u in str(whitelist).split(",") if u.strip()] if whitelist else []
+                self.ilink_whitelist_users = (
+                    [u.strip() for u in str(whitelist).split(",") if u.strip()] if whitelist else []
+                )
         elif self.mode == "wecom":
             if "corpid" in config_updates:
                 self.corpid = config_updates["corpid"]
@@ -1580,23 +1587,29 @@ class WeChatAdapter(ChannelAdapter):
         }
 
         if self.mode == "ilink":
-            base_config.update({
-                "token_file": self.ilink_token_file,
-                "message_merge": self.ilink_message_merge,
-                "authenticated": self._ilink_initialized,
-            })
+            base_config.update(
+                {
+                    "token_file": self.ilink_token_file,
+                    "message_merge": self.ilink_message_merge,
+                    "authenticated": self._ilink_initialized,
+                }
+            )
         elif self.mode == "wecom":
-            base_config.update({
-                "corpid": self.corpid,
-                "agentid": self.agentid,
-                "kf_mode": self.kf_mode,
-                "authenticated": self._wecom_initialized,
-            })
+            base_config.update(
+                {
+                    "corpid": self.corpid,
+                    "agentid": self.agentid,
+                    "kf_mode": self.kf_mode,
+                    "authenticated": self._wecom_initialized,
+                }
+            )
         elif self.mode == "official":
-            base_config.update({
-                "appid": self.official_appid,
-                "authenticated": self._official_initialized,
-            })
+            base_config.update(
+                {
+                    "appid": self.official_appid,
+                    "authenticated": self._official_initialized,
+                }
+            )
 
         return base_config
 
@@ -1627,7 +1640,7 @@ class WeChatAdapter(ChannelAdapter):
             成功返回图片二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("text_to_image", kwargs.get("model"))
@@ -1651,14 +1664,16 @@ class WeChatAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"图片生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"图片生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"AI图片生成异常: {e}")
+            logger.exception("AI图片生成异常: %s", e)
             return None
 
     async def generate_image_to_image(self, image_url: str, prompt: str, **kwargs) -> Optional[bytes]:
@@ -1673,7 +1688,7 @@ class WeChatAdapter(ChannelAdapter):
             成功返回图片二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("image_to_image", kwargs.get("model"))
@@ -1683,7 +1698,7 @@ class WeChatAdapter(ChannelAdapter):
 
             image_data = await self._download_url(image_url)
             if not image_data:
-                logger.error(f"下载参考图片失败: {image_url}")
+                logger.error("下载参考图片失败: %s", image_url)
                 return None
 
             config = GenerationConfig(
@@ -1705,14 +1720,16 @@ class WeChatAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"图生图生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"图生图生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"图生图生成异常: {e}")
+            logger.exception("图生图生成异常: %s", e)
             return None
 
     async def generate_text_to_video(self, prompt: str, **kwargs) -> Optional[bytes]:
@@ -1726,7 +1743,7 @@ class WeChatAdapter(ChannelAdapter):
             成功返回视频二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("text_to_video", kwargs.get("model"))
@@ -1751,14 +1768,16 @@ class WeChatAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"AI视频生成异常: {e}")
+            logger.exception("AI视频生成异常: %s", e)
             return None
 
     async def generate_image_to_video(self, image_url: str, prompt: str, **kwargs) -> Optional[bytes]:
@@ -1773,7 +1792,7 @@ class WeChatAdapter(ChannelAdapter):
             成功返回视频二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("image_to_video", kwargs.get("model"))
@@ -1783,7 +1802,7 @@ class WeChatAdapter(ChannelAdapter):
 
             image_data = await self._download_url(image_url)
             if not image_data:
-                logger.error(f"下载参考图片失败: {image_url}")
+                logger.error("下载参考图片失败: %s", image_url)
                 return None
 
             config = GenerationConfig(
@@ -1804,14 +1823,16 @@ class WeChatAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"图生视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"图生视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"图生视频生成异常: {e}")
+            logger.exception("图生视频生成异常: %s", e)
             return None
 
     async def generate_keyframe_to_video(self, start_url: str, end_url: str, **kwargs) -> Optional[bytes]:
@@ -1826,7 +1847,7 @@ class WeChatAdapter(ChannelAdapter):
             成功返回视频二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("keyframe_to_video", kwargs.get("model"))
@@ -1859,14 +1880,16 @@ class WeChatAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"首尾帧生成视频失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"首尾帧生成视频失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"首尾帧生成视频异常: {e}")
+            logger.exception("首尾帧生成视频异常: %s", e)
             return None
 
     async def generate_video_to_video(self, video_url: str, prompt: str, **kwargs) -> Optional[bytes]:
@@ -1881,7 +1904,7 @@ class WeChatAdapter(ChannelAdapter):
             成功返回视频二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("video_to_video", kwargs.get("model"))
@@ -1891,7 +1914,7 @@ class WeChatAdapter(ChannelAdapter):
 
             video_data = await self._download_url(video_url)
             if not video_data:
-                logger.error(f"下载参考视频失败: {video_url}")
+                logger.error("下载参考视频失败: %s", video_url)
                 return None
 
             config = GenerationConfig(
@@ -1915,14 +1938,16 @@ class WeChatAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"视频生成异常: {e}")
+            logger.exception("视频生成异常: %s", e)
             return None
 
     async def _download_url(self, url: str, timeout: int = 60) -> Optional[bytes]:
@@ -1942,10 +1967,10 @@ class WeChatAdapter(ChannelAdapter):
                     if response.status_code == 200:
                         return response.content
                     else:
-                        logging.error(f"下载失败 HTTP {response.status_code}: {url}")
+                        logging.error("下载失败 HTTP %s: %s", response.status_code, url)
                         return None
             except Exception as e:
-                logging.error(f"httpx下载异常: {e}")
+                logging.error("httpx下载异常: %s", e)
                 return None
         elif REQUESTS_AVAILABLE:
             try:
@@ -1953,10 +1978,10 @@ class WeChatAdapter(ChannelAdapter):
                 if response.status_code == 200:
                     return response.content
                 else:
-                    logging.error(f"下载失败 HTTP {response.status_code}: {url}")
+                    logging.error("下载失败 HTTP %s: %s", response.status_code, url)
                     return None
             except Exception as e:
-                logging.error(f"requests下载异常: {e}")
+                logging.error("requests下载异常: %s", e)
                 return None
         else:
             logging.error("无可用的HTTP客户端")
@@ -1976,10 +2001,10 @@ class WeChatAdapter(ChannelAdapter):
             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{extension}") as f:
                 f.write(data)
                 temp_path = f.name
-            logging.info(f"临时文件已保存: {temp_path}")
+            logging.info("临时文件已保存: %s", temp_path)
             return temp_path
         except Exception as e:
-            logging.error(f"保存临时文件失败: {e}")
+            logging.error("保存临时文件失败: %s", e)
             return None
 
     def _extract_prompt(self, content: str) -> str:
@@ -2026,16 +2051,18 @@ class WeChatAdapter(ChannelAdapter):
                 prompt = self._extract_prompt(message.content) or ""
                 if image_url:
                     if self.mode == "wecom":
-                        self._send_app_message(UnifiedMessage(
-                            message_id="temp",
-                            channel=MessageChannel.WECHAT,
-                            chat_id=message.chat_id,
-                            user_id=message.user_id,
-                            agent_id="",
-                            content="正在生成图片，请稍候...",
-                            content_type=ContentType.TEXT,
-                            timestamp=datetime.now(),
-                        ))
+                        self._send_app_message(
+                            UnifiedMessage(
+                                message_id="temp",
+                                channel=MessageChannel.WECHAT,
+                                chat_id=message.chat_id,
+                                user_id=message.user_id,
+                                agent_id="",
+                                content="正在生成图片，请稍候...",
+                                content_type=ContentType.TEXT,
+                                timestamp=datetime.now(),
+                            )
+                        )
                     image_data = await self.generate_image_to_image(image_url, prompt)
                     if image_data:
                         temp_path = await self._save_temp_file(image_data, "png")
@@ -2043,22 +2070,39 @@ class WeChatAdapter(ChannelAdapter):
                             media_id = self.upload_media(temp_path, "image")
                             if media_id:
                                 if self.mode == "wecom":
-                                    self._send_app_message(UnifiedMessage(
-                                        message_id="temp",
-                                        channel=MessageChannel.WECHAT,
-                                        chat_id=message.chat_id,
-                                        user_id=message.user_id,
-                                        agent_id="",
-                                        content="",
-                                        content_type=ContentType.IMAGE,
-                                        timestamp=datetime.now(),
-                                        file_url=media_id,
-                                    ))
+                                    self._send_app_message(
+                                        UnifiedMessage(
+                                            message_id="temp",
+                                            channel=MessageChannel.WECHAT,
+                                            chat_id=message.chat_id,
+                                            user_id=message.user_id,
+                                            agent_id="",
+                                            content="",
+                                            content_type=ContentType.IMAGE,
+                                            timestamp=datetime.now(),
+                                            file_url=media_id,
+                                        )
+                                    )
                                 os.unlink(temp_path)
                                 return True
                             os.unlink(temp_path)
                         if self.mode == "wecom":
-                            self._send_app_message(UnifiedMessage(
+                            self._send_app_message(
+                                UnifiedMessage(
+                                    message_id="temp",
+                                    channel=MessageChannel.WECHAT,
+                                    chat_id=message.chat_id,
+                                    user_id=message.user_id,
+                                    agent_id="",
+                                    content="图片生成失败",
+                                    content_type=ContentType.TEXT,
+                                    timestamp=datetime.now(),
+                                )
+                            )
+                        return False
+                    if self.mode == "wecom":
+                        self._send_app_message(
+                            UnifiedMessage(
                                 message_id="temp",
                                 channel=MessageChannel.WECHAT,
                                 chat_id=message.chat_id,
@@ -2067,25 +2111,85 @@ class WeChatAdapter(ChannelAdapter):
                                 content="图片生成失败",
                                 content_type=ContentType.TEXT,
                                 timestamp=datetime.now(),
-                            ))
-                        return False
-                    if self.mode == "wecom":
-                        self._send_app_message(UnifiedMessage(
-                            message_id="temp",
-                            channel=MessageChannel.WECHAT,
-                            chat_id=message.chat_id,
-                            user_id=message.user_id,
-                            agent_id="",
-                            content="图片生成失败",
-                            content_type=ContentType.TEXT,
-                            timestamp=datetime.now(),
-                        ))
+                            )
+                        )
                     return False
             else:
                 prompt = self._extract_prompt(message.content)
                 if prompt:
                     if self.mode == "wecom":
-                        self._send_app_message(UnifiedMessage(
+                        self._send_app_message(
+                            UnifiedMessage(
+                                message_id="temp",
+                                channel=MessageChannel.WECHAT,
+                                chat_id=message.chat_id,
+                                user_id=message.user_id,
+                                agent_id="",
+                                content="正在生成图片，请稍候...",
+                                content_type=ContentType.TEXT,
+                                timestamp=datetime.now(),
+                            )
+                        )
+                    image_data = await self.generate_text_to_image(prompt)
+                    if image_data:
+                        temp_path = await self._save_temp_file(image_data, "png")
+                        if temp_path:
+                            media_id = self.upload_media(temp_path, "image")
+                            if media_id:
+                                if self.mode == "wecom":
+                                    self._send_app_message(
+                                        UnifiedMessage(
+                                            message_id="temp",
+                                            channel=MessageChannel.WECHAT,
+                                            chat_id=message.chat_id,
+                                            user_id=message.user_id,
+                                            agent_id="",
+                                            content="",
+                                            content_type=ContentType.IMAGE,
+                                            timestamp=datetime.now(),
+                                            file_url=media_id,
+                                        )
+                                    )
+                                os.unlink(temp_path)
+                                return True
+                            os.unlink(temp_path)
+                        if self.mode == "wecom":
+                            self._send_app_message(
+                                UnifiedMessage(
+                                    message_id="temp",
+                                    channel=MessageChannel.WECHAT,
+                                    chat_id=message.chat_id,
+                                    user_id=message.user_id,
+                                    agent_id="",
+                                    content="图片生成失败",
+                                    content_type=ContentType.TEXT,
+                                    timestamp=datetime.now(),
+                                )
+                            )
+                        return False
+                    if self.mode == "wecom":
+                        self._send_app_message(
+                            UnifiedMessage(
+                                message_id="temp",
+                                channel=MessageChannel.WECHAT,
+                                chat_id=message.chat_id,
+                                user_id=message.user_id,
+                                agent_id="",
+                                content="图片生成失败",
+                                content_type=ContentType.TEXT,
+                                timestamp=datetime.now(),
+                            )
+                        )
+                    return False
+
+        elif has_image and (
+            "图生图" in content or "以图生图" in content or "生成相似图片" in content or "生成新图片" in content
+        ):
+            prompt = self._extract_prompt(message.content) or ""
+            if image_url:
+                if self.mode == "wecom":
+                    self._send_app_message(
+                        UnifiedMessage(
                             message_id="temp",
                             channel=MessageChannel.WECHAT,
                             chat_id=message.chat_id,
@@ -2094,15 +2198,17 @@ class WeChatAdapter(ChannelAdapter):
                             content="正在生成图片，请稍候...",
                             content_type=ContentType.TEXT,
                             timestamp=datetime.now(),
-                        ))
-                    image_data = await self.generate_text_to_image(prompt)
-                    if image_data:
-                        temp_path = await self._save_temp_file(image_data, "png")
-                        if temp_path:
-                            media_id = self.upload_media(temp_path, "image")
-                            if media_id:
-                                if self.mode == "wecom":
-                                    self._send_app_message(UnifiedMessage(
+                        )
+                    )
+                image_data = await self.generate_image_to_image(image_url, prompt)
+                if image_data:
+                    temp_path = await self._save_temp_file(image_data, "png")
+                    if temp_path:
+                        media_id = self.upload_media(temp_path, "image")
+                        if media_id:
+                            if self.mode == "wecom":
+                                self._send_app_message(
+                                    UnifiedMessage(
                                         message_id="temp",
                                         channel=MessageChannel.WECHAT,
                                         chat_id=message.chat_id,
@@ -2112,12 +2218,14 @@ class WeChatAdapter(ChannelAdapter):
                                         content_type=ContentType.IMAGE,
                                         timestamp=datetime.now(),
                                         file_url=media_id,
-                                    ))
-                                os.unlink(temp_path)
-                                return True
+                                    )
+                                )
                             os.unlink(temp_path)
-                        if self.mode == "wecom":
-                            self._send_app_message(UnifiedMessage(
+                            return True
+                        os.unlink(temp_path)
+                    if self.mode == "wecom":
+                        self._send_app_message(
+                            UnifiedMessage(
                                 message_id="temp",
                                 channel=MessageChannel.WECHAT,
                                 chat_id=message.chat_id,
@@ -2126,10 +2234,12 @@ class WeChatAdapter(ChannelAdapter):
                                 content="图片生成失败",
                                 content_type=ContentType.TEXT,
                                 timestamp=datetime.now(),
-                            ))
-                        return False
-                    if self.mode == "wecom":
-                        self._send_app_message(UnifiedMessage(
+                            )
+                        )
+                    return False
+                if self.mode == "wecom":
+                    self._send_app_message(
+                        UnifiedMessage(
                             message_id="temp",
                             channel=MessageChannel.WECHAT,
                             chat_id=message.chat_id,
@@ -2138,83 +2248,28 @@ class WeChatAdapter(ChannelAdapter):
                             content="图片生成失败",
                             content_type=ContentType.TEXT,
                             timestamp=datetime.now(),
-                        ))
-                    return False
-
-        elif has_image and ("图生图" in content or "以图生图" in content or "生成相似图片" in content or "生成新图片" in content):
-            prompt = self._extract_prompt(message.content) or ""
-            if image_url:
-                if self.mode == "wecom":
-                    self._send_app_message(UnifiedMessage(
-                        message_id="temp",
-                        channel=MessageChannel.WECHAT,
-                        chat_id=message.chat_id,
-                        user_id=message.user_id,
-                        agent_id="",
-                        content="正在生成图片，请稍候...",
-                        content_type=ContentType.TEXT,
-                        timestamp=datetime.now(),
-                    ))
-                image_data = await self.generate_image_to_image(image_url, prompt)
-                if image_data:
-                    temp_path = await self._save_temp_file(image_data, "png")
-                    if temp_path:
-                        media_id = self.upload_media(temp_path, "image")
-                        if media_id:
-                            if self.mode == "wecom":
-                                self._send_app_message(UnifiedMessage(
-                                    message_id="temp",
-                                    channel=MessageChannel.WECHAT,
-                                    chat_id=message.chat_id,
-                                    user_id=message.user_id,
-                                    agent_id="",
-                                    content="",
-                                    content_type=ContentType.IMAGE,
-                                    timestamp=datetime.now(),
-                                    file_url=media_id,
-                                ))
-                            os.unlink(temp_path)
-                            return True
-                        os.unlink(temp_path)
-                    if self.mode == "wecom":
-                        self._send_app_message(UnifiedMessage(
-                            message_id="temp",
-                            channel=MessageChannel.WECHAT,
-                            chat_id=message.chat_id,
-                            user_id=message.user_id,
-                            agent_id="",
-                            content="图片生成失败",
-                            content_type=ContentType.TEXT,
-                            timestamp=datetime.now(),
-                        ))
-                    return False
-                if self.mode == "wecom":
-                    self._send_app_message(UnifiedMessage(
-                        message_id="temp",
-                        channel=MessageChannel.WECHAT,
-                        chat_id=message.chat_id,
-                        user_id=message.user_id,
-                        agent_id="",
-                        content="图片生成失败",
-                        content_type=ContentType.TEXT,
-                        timestamp=datetime.now(),
-                    ))
+                        )
+                    )
                 return False
 
-        elif has_image and ("图生视频" in content or "图片转视频" in content or "让图片动起来" in content or "图片生成视频" in content):
+        elif has_image and (
+            "图生视频" in content or "图片转视频" in content or "让图片动起来" in content or "图片生成视频" in content
+        ):
             prompt = self._extract_prompt(message.content) or ""
             if image_url:
                 if self.mode == "wecom":
-                    self._send_app_message(UnifiedMessage(
-                        message_id="temp",
-                        channel=MessageChannel.WECHAT,
-                        chat_id=message.chat_id,
-                        user_id=message.user_id,
-                        agent_id="",
-                        content="正在生成视频，请稍候...",
-                        content_type=ContentType.TEXT,
-                        timestamp=datetime.now(),
-                    ))
+                    self._send_app_message(
+                        UnifiedMessage(
+                            message_id="temp",
+                            channel=MessageChannel.WECHAT,
+                            chat_id=message.chat_id,
+                            user_id=message.user_id,
+                            agent_id="",
+                            content="正在生成视频，请稍候...",
+                            content_type=ContentType.TEXT,
+                            timestamp=datetime.now(),
+                        )
+                    )
                 video_data = await self.generate_image_to_video(image_url, prompt)
                 if video_data:
                     temp_path = await self._save_temp_file(video_data, "mp4")
@@ -2222,22 +2277,39 @@ class WeChatAdapter(ChannelAdapter):
                         media_id = self.upload_media(temp_path, "video")
                         if media_id:
                             if self.mode == "wecom":
-                                self._send_app_message(UnifiedMessage(
-                                    message_id="temp",
-                                    channel=MessageChannel.WECHAT,
-                                    chat_id=message.chat_id,
-                                    user_id=message.user_id,
-                                    agent_id="",
-                                    content="",
-                                    content_type=ContentType.VIDEO,
-                                    timestamp=datetime.now(),
-                                    file_url=media_id,
-                                ))
+                                self._send_app_message(
+                                    UnifiedMessage(
+                                        message_id="temp",
+                                        channel=MessageChannel.WECHAT,
+                                        chat_id=message.chat_id,
+                                        user_id=message.user_id,
+                                        agent_id="",
+                                        content="",
+                                        content_type=ContentType.VIDEO,
+                                        timestamp=datetime.now(),
+                                        file_url=media_id,
+                                    )
+                                )
                             os.unlink(temp_path)
                             return True
                         os.unlink(temp_path)
                     if self.mode == "wecom":
-                        self._send_app_message(UnifiedMessage(
+                        self._send_app_message(
+                            UnifiedMessage(
+                                message_id="temp",
+                                channel=MessageChannel.WECHAT,
+                                chat_id=message.chat_id,
+                                user_id=message.user_id,
+                                agent_id="",
+                                content="视频生成失败",
+                                content_type=ContentType.TEXT,
+                                timestamp=datetime.now(),
+                            )
+                        )
+                    return False
+                if self.mode == "wecom":
+                    self._send_app_message(
+                        UnifiedMessage(
                             message_id="temp",
                             channel=MessageChannel.WECHAT,
                             chat_id=message.chat_id,
@@ -2246,36 +2318,29 @@ class WeChatAdapter(ChannelAdapter):
                             content="视频生成失败",
                             content_type=ContentType.TEXT,
                             timestamp=datetime.now(),
-                        ))
-                    return False
-                if self.mode == "wecom":
-                    self._send_app_message(UnifiedMessage(
-                        message_id="temp",
-                        channel=MessageChannel.WECHAT,
-                        chat_id=message.chat_id,
-                        user_id=message.user_id,
-                        agent_id="",
-                        content="视频生成失败",
-                        content_type=ContentType.TEXT,
-                        timestamp=datetime.now(),
-                    ))
+                        )
+                    )
                 return False
 
-        elif ("首尾帧" in content or "首帧到尾帧" in content or "首尾帧生成视频" in content) and message.metadata.get("images_count", 0) >= 2:
+        elif ("首尾帧" in content or "首帧到尾帧" in content or "首尾帧生成视频" in content) and message.metadata.get(
+            "images_count", 0
+        ) >= 2:
             start_url = message.metadata.get("first_image_url", "")
             end_url = message.metadata.get("last_image_url", "")
             if start_url and end_url:
                 if self.mode == "wecom":
-                    self._send_app_message(UnifiedMessage(
-                        message_id="temp",
-                        channel=MessageChannel.WECHAT,
-                        chat_id=message.chat_id,
-                        user_id=message.user_id,
-                        agent_id="",
-                        content="正在生成视频，请稍候...",
-                        content_type=ContentType.TEXT,
-                        timestamp=datetime.now(),
-                    ))
+                    self._send_app_message(
+                        UnifiedMessage(
+                            message_id="temp",
+                            channel=MessageChannel.WECHAT,
+                            chat_id=message.chat_id,
+                            user_id=message.user_id,
+                            agent_id="",
+                            content="正在生成视频，请稍候...",
+                            content_type=ContentType.TEXT,
+                            timestamp=datetime.now(),
+                        )
+                    )
                 video_data = await self.generate_keyframe_to_video(start_url, end_url)
                 if video_data:
                     temp_path = await self._save_temp_file(video_data, "mp4")
@@ -2283,22 +2348,39 @@ class WeChatAdapter(ChannelAdapter):
                         media_id = self.upload_media(temp_path, "video")
                         if media_id:
                             if self.mode == "wecom":
-                                self._send_app_message(UnifiedMessage(
-                                    message_id="temp",
-                                    channel=MessageChannel.WECHAT,
-                                    chat_id=message.chat_id,
-                                    user_id=message.user_id,
-                                    agent_id="",
-                                    content="",
-                                    content_type=ContentType.VIDEO,
-                                    timestamp=datetime.now(),
-                                    file_url=media_id,
-                                ))
+                                self._send_app_message(
+                                    UnifiedMessage(
+                                        message_id="temp",
+                                        channel=MessageChannel.WECHAT,
+                                        chat_id=message.chat_id,
+                                        user_id=message.user_id,
+                                        agent_id="",
+                                        content="",
+                                        content_type=ContentType.VIDEO,
+                                        timestamp=datetime.now(),
+                                        file_url=media_id,
+                                    )
+                                )
                             os.unlink(temp_path)
                             return True
                         os.unlink(temp_path)
                     if self.mode == "wecom":
-                        self._send_app_message(UnifiedMessage(
+                        self._send_app_message(
+                            UnifiedMessage(
+                                message_id="temp",
+                                channel=MessageChannel.WECHAT,
+                                chat_id=message.chat_id,
+                                user_id=message.user_id,
+                                agent_id="",
+                                content="视频生成失败",
+                                content_type=ContentType.TEXT,
+                                timestamp=datetime.now(),
+                            )
+                        )
+                    return False
+                if self.mode == "wecom":
+                    self._send_app_message(
+                        UnifiedMessage(
                             message_id="temp",
                             channel=MessageChannel.WECHAT,
                             chat_id=message.chat_id,
@@ -2307,35 +2389,28 @@ class WeChatAdapter(ChannelAdapter):
                             content="视频生成失败",
                             content_type=ContentType.TEXT,
                             timestamp=datetime.now(),
-                        ))
-                    return False
-                if self.mode == "wecom":
-                    self._send_app_message(UnifiedMessage(
-                        message_id="temp",
-                        channel=MessageChannel.WECHAT,
-                        chat_id=message.chat_id,
-                        user_id=message.user_id,
-                        agent_id="",
-                        content="视频生成失败",
-                        content_type=ContentType.TEXT,
-                        timestamp=datetime.now(),
-                    ))
+                        )
+                    )
                 return False
 
-        elif has_video and ("视频生成" in content or "视频风格" in content or "修改视频" in content or "视频转视频" in content):
+        elif has_video and (
+            "视频生成" in content or "视频风格" in content or "修改视频" in content or "视频转视频" in content
+        ):
             prompt = self._extract_prompt(message.content) or ""
             if video_url:
                 if self.mode == "wecom":
-                    self._send_app_message(UnifiedMessage(
-                        message_id="temp",
-                        channel=MessageChannel.WECHAT,
-                        chat_id=message.chat_id,
-                        user_id=message.user_id,
-                        agent_id="",
-                        content="正在生成视频，请稍候...",
-                        content_type=ContentType.TEXT,
-                        timestamp=datetime.now(),
-                    ))
+                    self._send_app_message(
+                        UnifiedMessage(
+                            message_id="temp",
+                            channel=MessageChannel.WECHAT,
+                            chat_id=message.chat_id,
+                            user_id=message.user_id,
+                            agent_id="",
+                            content="正在生成视频，请稍候...",
+                            content_type=ContentType.TEXT,
+                            timestamp=datetime.now(),
+                        )
+                    )
                 video_data = await self.generate_video_to_video(video_url, prompt)
                 if video_data:
                     temp_path = await self._save_temp_file(video_data, "mp4")
@@ -2343,22 +2418,39 @@ class WeChatAdapter(ChannelAdapter):
                         media_id = self.upload_media(temp_path, "video")
                         if media_id:
                             if self.mode == "wecom":
-                                self._send_app_message(UnifiedMessage(
-                                    message_id="temp",
-                                    channel=MessageChannel.WECHAT,
-                                    chat_id=message.chat_id,
-                                    user_id=message.user_id,
-                                    agent_id="",
-                                    content="",
-                                    content_type=ContentType.VIDEO,
-                                    timestamp=datetime.now(),
-                                    file_url=media_id,
-                                ))
+                                self._send_app_message(
+                                    UnifiedMessage(
+                                        message_id="temp",
+                                        channel=MessageChannel.WECHAT,
+                                        chat_id=message.chat_id,
+                                        user_id=message.user_id,
+                                        agent_id="",
+                                        content="",
+                                        content_type=ContentType.VIDEO,
+                                        timestamp=datetime.now(),
+                                        file_url=media_id,
+                                    )
+                                )
                             os.unlink(temp_path)
                             return True
                         os.unlink(temp_path)
                     if self.mode == "wecom":
-                        self._send_app_message(UnifiedMessage(
+                        self._send_app_message(
+                            UnifiedMessage(
+                                message_id="temp",
+                                channel=MessageChannel.WECHAT,
+                                chat_id=message.chat_id,
+                                user_id=message.user_id,
+                                agent_id="",
+                                content="视频生成失败",
+                                content_type=ContentType.TEXT,
+                                timestamp=datetime.now(),
+                            )
+                        )
+                    return False
+                if self.mode == "wecom":
+                    self._send_app_message(
+                        UnifiedMessage(
                             message_id="temp",
                             channel=MessageChannel.WECHAT,
                             chat_id=message.chat_id,
@@ -2367,35 +2459,26 @@ class WeChatAdapter(ChannelAdapter):
                             content="视频生成失败",
                             content_type=ContentType.TEXT,
                             timestamp=datetime.now(),
-                        ))
-                    return False
-                if self.mode == "wecom":
-                    self._send_app_message(UnifiedMessage(
-                        message_id="temp",
-                        channel=MessageChannel.WECHAT,
-                        chat_id=message.chat_id,
-                        user_id=message.user_id,
-                        agent_id="",
-                        content="视频生成失败",
-                        content_type=ContentType.TEXT,
-                        timestamp=datetime.now(),
-                    ))
+                        )
+                    )
                 return False
 
         elif "生成视频" in content or "生成一段视频" in content:
             prompt = self._extract_prompt(message.content)
             if prompt:
                 if self.mode == "wecom":
-                    self._send_app_message(UnifiedMessage(
-                        message_id="temp",
-                        channel=MessageChannel.WECHAT,
-                        chat_id=message.chat_id,
-                        user_id=message.user_id,
-                        agent_id="",
-                        content="正在生成视频，请稍候...",
-                        content_type=ContentType.TEXT,
-                        timestamp=datetime.now(),
-                    ))
+                    self._send_app_message(
+                        UnifiedMessage(
+                            message_id="temp",
+                            channel=MessageChannel.WECHAT,
+                            chat_id=message.chat_id,
+                            user_id=message.user_id,
+                            agent_id="",
+                            content="正在生成视频，请稍候...",
+                            content_type=ContentType.TEXT,
+                            timestamp=datetime.now(),
+                        )
+                    )
                 video_data = await self.generate_text_to_video(prompt)
                 if video_data:
                     temp_path = await self._save_temp_file(video_data, "mp4")
@@ -2403,22 +2486,39 @@ class WeChatAdapter(ChannelAdapter):
                         media_id = self.upload_media(temp_path, "video")
                         if media_id:
                             if self.mode == "wecom":
-                                self._send_app_message(UnifiedMessage(
-                                    message_id="temp",
-                                    channel=MessageChannel.WECHAT,
-                                    chat_id=message.chat_id,
-                                    user_id=message.user_id,
-                                    agent_id="",
-                                    content="",
-                                    content_type=ContentType.VIDEO,
-                                    timestamp=datetime.now(),
-                                    file_url=media_id,
-                                ))
+                                self._send_app_message(
+                                    UnifiedMessage(
+                                        message_id="temp",
+                                        channel=MessageChannel.WECHAT,
+                                        chat_id=message.chat_id,
+                                        user_id=message.user_id,
+                                        agent_id="",
+                                        content="",
+                                        content_type=ContentType.VIDEO,
+                                        timestamp=datetime.now(),
+                                        file_url=media_id,
+                                    )
+                                )
                             os.unlink(temp_path)
                             return True
                         os.unlink(temp_path)
                     if self.mode == "wecom":
-                        self._send_app_message(UnifiedMessage(
+                        self._send_app_message(
+                            UnifiedMessage(
+                                message_id="temp",
+                                channel=MessageChannel.WECHAT,
+                                chat_id=message.chat_id,
+                                user_id=message.user_id,
+                                agent_id="",
+                                content="视频生成失败",
+                                content_type=ContentType.TEXT,
+                                timestamp=datetime.now(),
+                            )
+                        )
+                    return False
+                if self.mode == "wecom":
+                    self._send_app_message(
+                        UnifiedMessage(
                             message_id="temp",
                             channel=MessageChannel.WECHAT,
                             chat_id=message.chat_id,
@@ -2427,25 +2527,16 @@ class WeChatAdapter(ChannelAdapter):
                             content="视频生成失败",
                             content_type=ContentType.TEXT,
                             timestamp=datetime.now(),
-                        ))
-                    return False
-                if self.mode == "wecom":
-                    self._send_app_message(UnifiedMessage(
-                        message_id="temp",
-                        channel=MessageChannel.WECHAT,
-                        chat_id=message.chat_id,
-                        user_id=message.user_id,
-                        agent_id="",
-                        content="视频生成失败",
-                        content_type=ContentType.TEXT,
-                        timestamp=datetime.now(),
-                    ))
+                        )
+                    )
                 return False
 
         return False
 
-def create_wechat_adapter(corpid: str = "", corpsecret: str = "",
-                         agentid: str = "", mode: str = "wecom", **kwargs) -> WeChatAdapter:
+
+def create_wechat_adapter(
+    corpid: str = "", corpsecret: str = "", agentid: str = "", mode: str = "wecom", **kwargs
+) -> WeChatAdapter:
     """
     创建微信适配器
 
@@ -2471,12 +2562,14 @@ def create_wechat_adapter(corpid: str = "", corpsecret: str = "",
         if kwargs:
             adapter.authenticate({"mode": "official", **kwargs})
     elif corpid and corpsecret:
-        adapter.authenticate({
-            "mode": "wecom",
-            "corpid": corpid,
-            "corpsecret": corpsecret,
-            "agentid": agentid,
-            **kwargs,
-        })
+        adapter.authenticate(
+            {
+                "mode": "wecom",
+                "corpid": corpid,
+                "corpsecret": corpsecret,
+                "agentid": agentid,
+                **kwargs,
+            }
+        )
 
     return adapter

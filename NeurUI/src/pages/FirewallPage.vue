@@ -131,9 +131,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
+import * as firewallApi from '@/api/modules/firewall'
 
 const { t } = useI18n()
 
@@ -176,8 +176,9 @@ const blockedColumns = computed(() => [
 const fetchRules = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/firewall/rules')
-    rules.value = res?.data ?? res ?? []
+    const res = await firewallApi.getFirewallRules()
+    const data = res?.data
+    rules.value = data?.items ?? (Array.isArray(data) ? data : [])
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -188,8 +189,9 @@ const fetchRules = async () => {
 const fetchBlocked = async () => {
   loadingBlocked.value = true
   try {
-    const res: any = await request.get('/firewall/blocked')
-    blockedLogs.value = res?.data ?? res ?? []
+    const res = await firewallApi.getBlockedEntries()
+    const data = res?.data
+    blockedLogs.value = data?.items ?? (Array.isArray(data) ? data : [])
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -212,10 +214,18 @@ const editRule = (rule: any) => {
 const saveRule = async () => {
   saving.value = true
   try {
+    const payload = {
+      name: ruleForm.value.name,
+      pattern: ruleForm.value.pattern,
+      type: ruleForm.value.action === 'block' ? 'deny' : 'allow' as 'allow' | 'deny',
+      scope: 'action',
+      priority: ruleForm.value.priority,
+      enabled: ruleForm.value.active,
+    }
     if (editingRule.value) {
-      await request.put(`/firewall/rules/${editingRule.value.id}`, ruleForm.value)
+      await firewallApi.updateFirewallRule(editingRule.value.id, payload)
     } else {
-      await request.post('/firewall/rules', ruleForm.value)
+      await firewallApi.createFirewallRule(payload)
     }
     message.success(t('common.success'))
     showForm.value = false
@@ -229,7 +239,7 @@ const saveRule = async () => {
 
 const toggleRule = async (id: string, active: boolean) => {
   try {
-    await request.put(`/firewall/rules/${id}`, { active })
+    await firewallApi.updateFirewallRule(id, { enabled: active })
     message.success(t('common.success'))
     await fetchRules()
   } catch {
@@ -243,7 +253,7 @@ const deleteRule = (id: string) => {
     content: t('agent.deleteConfirm'),
     onOk: async () => {
       try {
-        await request.delete(`/firewall/rules/${id}`)
+        await firewallApi.deleteFirewallRule(id)
         message.success(t('common.success'))
         await fetchRules()
       } catch {

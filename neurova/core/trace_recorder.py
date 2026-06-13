@@ -6,26 +6,26 @@
 
 import json
 import logging
-import os
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Dict, List, Any, Optional
 from collections import defaultdict
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from neurova.core.trace_models import (
     Trajectory,
-    TrajectorySpan,
     TrajectoryEvent,
     TrajectoryEventType,
+    TrajectorySpan,
 )
 
 logger = logging.getLogger(__name__)
+
 
 class TrajectoryRecorder:
     """轨迹记录器（单例模式）
 
     记录 Agent 执行过程中的所有关键事件，支持保存和回放。
     """
+
     _instance = None
     _initialized = False
 
@@ -53,20 +53,20 @@ class TrajectoryRecorder:
         index_file = self._storage_dir / "index.json"
         if index_file.exists():
             try:
-                with open(index_file, 'r') as f:
+                with open(index_file, "r") as f:
                     self._saved_traces = json.load(f)
-                logger.info(f"Loaded {len(self._saved_traces)} saved traces")
+                logger.info("Loaded %s saved traces", len(self._saved_traces))
             except Exception as e:
-                logger.error(f"Failed to load traces index: {e}")
+                logger.error("Failed to load traces index: %s", e)
 
     def _save_traces_index(self):
         """保存轨迹索引"""
         index_file = self._storage_dir / "index.json"
         try:
-            with open(index_file, 'w') as f:
+            with open(index_file, "w") as f:
                 json.dump(self._saved_traces, f, indent=2)
         except Exception as e:
-            logger.error(f"Failed to save traces index: {e}")
+            logger.error("Failed to save traces index: %s", e)
 
     def start_trace(
         self,
@@ -101,28 +101,28 @@ class TrajectoryRecorder:
         self._active_spans[root_span.span_id] = root_span
 
         # 按用户分组存储
-        if not hasattr(self, '_active_traces_by_user'):
+        if not hasattr(self, "_active_traces_by_user"):
             self._active_traces_by_user = defaultdict(list)
         self._active_traces_by_user[user_id].append(trace.trace_id)
 
-        logger.info(f"Started trace {trace.trace_id} for session {session_id}")
+        logger.info("Started trace %s for session %s", trace.trace_id, session_id)
         return trace.trace_id
 
     def end_trace(self, trace_id: str) -> None:
         """结束一个轨迹"""
         if trace_id not in self._active_traces:
-            logger.warning(f"Trace {trace_id} not found in active traces")
+            logger.warning("Trace %s not found in active traces", trace_id)
             return
 
         trace = self._active_traces[trace_id]
 
         # 结束所有活跃的 span
         for span in list(trace.spans.values()):
-            if span.status == 'running':
-                span.end(status='completed')
+            if span.status == "running":
+                span.end(status="completed")
 
         trace.end()
-        logger.info(f"Ended trace {trace_id}, duration: {trace.total_duration_ms:.2f}ms")
+        logger.info("Ended trace %s, duration: %.2fms", trace_id, trace.total_duration_ms)
 
         # 自动保存
         if self._auto_save:
@@ -140,7 +140,7 @@ class TrajectoryRecorder:
             return None
 
         if trace_id not in self._active_traces:
-            logger.warning(f"Trace {trace_id} not found")
+            logger.warning("Trace %s not found", trace_id)
             return None
 
         trace = self._active_traces[trace_id]
@@ -157,20 +157,20 @@ class TrajectoryRecorder:
         trace.add_span(span)
         self._active_spans[span.span_id] = span
 
-        logger.debug(f"Started span {span.span_id} ({operation_name})")
+        logger.debug("Started span %s (%s)", span.span_id, operation_name)
         return span.span_id
 
     def end_span(
         self,
         span_id: str,
-        status: str = 'completed',
+        status: str = "completed",
         error_message: Optional[str] = None,
     ) -> None:
         """结束一个 span"""
         if span_id in self._active_spans:
             span = self._active_spans[span_id]
             span.end(status=status, error_message=error_message)
-            logger.debug(f"Ended span {span_id}, status: {status}")
+            logger.debug("Ended span %s, status: %s", span_id, status)
 
     def record_event(
         self,
@@ -195,7 +195,7 @@ class TrajectoryRecorder:
         else:
             # 找到最近活跃的 span
             for span in reversed(list(trace.spans.values())):
-                if span.status == 'running':
+                if span.status == "running":
                     target_span = span
                     break
 
@@ -226,10 +226,10 @@ class TrajectoryRecorder:
             trace_id,
             TrajectoryEventType.LLM_CALL_END,
             data={
-                'model_name': model_name,
-                'input_tokens': input_tokens,
-                'output_tokens': output_tokens,
-                'total_tokens': input_tokens + output_tokens,
+                "model_name": model_name,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
             },
         )
 
@@ -249,19 +249,19 @@ class TrajectoryRecorder:
             trace_id,
             event_type,
             data={
-                'tool_name': tool_name,
-                'tool_source': tool_source,
-                'parameters': parameters,
-                'execution_time': execution_time,
-                'success': success,
-                'error_message': error_message,
+                "tool_name": tool_name,
+                "tool_source": tool_source,
+                "parameters": parameters,
+                "execution_time": execution_time,
+                "success": success,
+                "error_message": error_message,
             },
         )
 
     def save_trace(self, trace_id: str, file_path: Optional[str] = None) -> Optional[str]:
         """保存轨迹到文件"""
         if trace_id not in self._active_traces:
-            logger.error(f"Trace {trace_id} not found")
+            logger.error("Trace %s not found", trace_id)
             return None
 
         trace = self._active_traces[trace_id]
@@ -270,32 +270,34 @@ class TrajectoryRecorder:
         if file_path:
             save_path = Path(file_path)
         else:
-            user_id = trace.user_id or 'unknown'
-            agent_id = trace.agent_id or 'unknown'
-            session_id = trace.session_id or 'unknown'
+            user_id = trace.user_id or "unknown"
+            agent_id = trace.agent_id or "unknown"
+            session_id = trace.session_id or "unknown"
             trace_dir = self._storage_dir / user_id / agent_id / session_id
             trace_dir.mkdir(parents=True, exist_ok=True)
             save_path = trace_dir / f"{trace_id}.json"
 
         try:
-            with open(save_path, 'w', encoding='utf-8') as f:
+            with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(trace.to_dict(), f, indent=2, ensure_ascii=False)
 
             # 更新索引
-            self._saved_traces.append({
-                'trace_id': trace_id,
-                'file_path': str(save_path),
-                'user_id': trace.user_id,
-                'agent_id': trace.agent_id,
-                'session_id': trace.session_id,
-                'created_at': trace.start_time,
-            })
+            self._saved_traces.append(
+                {
+                    "trace_id": trace_id,
+                    "file_path": str(save_path),
+                    "user_id": trace.user_id,
+                    "agent_id": trace.agent_id,
+                    "session_id": trace.session_id,
+                    "created_at": trace.start_time,
+                }
+            )
             self._save_traces_index()
 
-            logger.info(f"Saved trace {trace_id} to {save_path}")
+            logger.info("Saved trace %s to %s", trace_id, save_path)
             return str(save_path)
         except Exception as e:
-            logger.error(f"Failed to save trace {trace_id}: {e}")
+            logger.error("Failed to save trace %s: %s", trace_id, e)
             return None
 
     def load_trace(self, trace_id: str, user_id: Optional[str] = None) -> Optional[Trajectory]:
@@ -304,7 +306,7 @@ class TrajectoryRecorder:
         if trace_id in self._active_traces:
             trace = self._active_traces[trace_id]
             if user_id and trace.user_id != user_id:
-                logger.warning(f"Trace {trace_id} belongs to user {trace.user_id}, not {user_id}")
+                logger.warning("Trace %s belongs to user %s, not %s", trace_id, trace.user_id, user_id)
                 return None
             return trace
 
@@ -320,15 +322,15 @@ class TrajectoryRecorder:
                     trace_file = subpath / f"{trace_id}.json"
                     if trace_file.exists():
                         try:
-                            with open(trace_file, 'r', encoding='utf-8') as f:
+                            with open(trace_file, "r", encoding="utf-8") as f:
                                 data = json.load(f)
                             trace = Trajectory.from_dict(data)
                             if user_id and trace.user_id != user_id:
-                                logger.warning(f"Trace {trace_id} belongs to user {trace.user_id}, not {user_id}")
+                                logger.warning("Trace %s belongs to user %s, not %s", trace_id, trace.user_id, user_id)
                                 return None
                             return trace
                         except Exception as e:
-                            logger.error(f"Failed to load trace {trace_id}: {e}")
+                            logger.error("Failed to load trace %s: %s", trace_id, e)
                             return None
         return None
 
@@ -353,7 +355,7 @@ class TrajectoryRecorder:
                         if trace_file.name == "index.json":
                             continue
                         try:
-                            with open(trace_file, 'r', encoding='utf-8') as f:
+                            with open(trace_file, "r", encoding="utf-8") as f:
                                 data = json.load(f)
                             trace = Trajectory.from_dict(data)
 
@@ -365,20 +367,22 @@ class TrajectoryRecorder:
                             if session_id and trace.session_id != session_id:
                                 continue
 
-                            traces.append({
-                                'trace_id': trace.trace_id,
-                                'file_path': str(trace_file),
-                                'user_id': trace.user_id,
-                                'agent_id': trace.agent_id,
-                                'session_id': trace.session_id,
-                                'created_at': trace.start_time,
-                                'duration_ms': trace.total_duration_ms,
-                            })
+                            traces.append(
+                                {
+                                    "trace_id": trace.trace_id,
+                                    "file_path": str(trace_file),
+                                    "user_id": trace.user_id,
+                                    "agent_id": trace.agent_id,
+                                    "session_id": trace.session_id,
+                                    "created_at": trace.start_time,
+                                    "duration_ms": trace.total_duration_ms,
+                                }
+                            )
 
                             if len(traces) >= limit:
                                 return traces
                         except Exception as e:
-                            logger.error(f"Failed to read trace file {trace_file}: {e}")
+                            logger.error("Failed to read trace file %s: %s", trace_file, e)
         return traces
 
     def delete_trace(self, trace_id: str, user_id: Optional[str] = None) -> bool:
@@ -387,32 +391,32 @@ class TrajectoryRecorder:
         if trace_id in self._active_traces:
             trace = self._active_traces[trace_id]
             if user_id and trace.user_id != user_id:
-                logger.warning(f"Trace {trace_id} belongs to user {trace.user_id}, not {user_id}")
+                logger.warning("Trace %s belongs to user %s, not %s", trace_id, trace.user_id, user_id)
                 return False
             del self._active_traces[trace_id]
 
         # 从文件中删除
         trace_info = None
         for info in self._saved_traces:
-            if info['trace_id'] == trace_id:
+            if info["trace_id"] == trace_id:
                 trace_info = info
                 break
 
         if trace_info:
-            file_path = Path(trace_info['file_path'])
+            file_path = Path(trace_info["file_path"])
             if file_path.exists():
                 try:
                     file_path.unlink()
-                    logger.info(f"Deleted trace file {file_path}")
+                    logger.info("Deleted trace file %s", file_path)
                 except Exception as e:
-                    logger.error(f"Failed to delete trace file {file_path}: {e}")
+                    logger.error("Failed to delete trace file %s: %s", file_path, e)
                     return False
 
             self._saved_traces.remove(trace_info)
             self._save_traces_index()
 
         # 从用户索引中删除
-        if hasattr(self, '_active_traces_by_user') and user_id:
+        if hasattr(self, "_active_traces_by_user") and user_id:
             if user_id in self._active_traces_by_user:
                 if trace_id in self._active_traces_by_user[user_id]:
                     self._active_traces_by_user[user_id].remove(trace_id)
@@ -428,10 +432,10 @@ class TrajectoryRecorder:
         """回放轨迹"""
         trace = self.load_trace(trace_id)
         if not trace:
-            logger.error(f"Cannot load trace {trace_id}")
+            logger.error("Cannot load trace %s", trace_id)
             return
 
-        logger.info(f"Replaying trace {trace_id}, {len(trace.spans)} spans")
+        logger.info("Replaying trace %s, %s spans", trace_id, len(trace.spans))
 
         # 收集所有事件并按时间排序
         all_events = []
@@ -447,12 +451,13 @@ class TrajectoryRecorder:
             # 模拟延迟（可选）
             if speed > 0:
                 import time
+
                 time.sleep(0.1 / speed)
 
     def set_enabled(self, enabled: bool) -> None:
         """设置启用状态"""
         self._enabled = enabled
-        logger.info(f"Trajectory recorder {'enabled' if enabled else 'disabled'}")
+        logger.info("Trajectory recorder %s", 'enabled' if enabled else 'disabled')
 
     def set_auto_save(self, auto_save: bool) -> None:
         """设置自动保存"""
@@ -462,24 +467,26 @@ class TrajectoryRecorder:
         """设置存储目录"""
         self._storage_dir = Path(directory)
         self._storage_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Trajectory storage directory set to {self._storage_dir}")
+        logger.info("Trajectory storage directory set to %s", self._storage_dir)
 
     def get_status(self) -> Dict[str, Any]:
         """获取状态信息"""
         return {
-            'enabled': self._enabled,
-            'auto_save': self._auto_save,
-            'storage_dir': str(self._storage_dir),
-            'active_traces': len(self._active_traces),
-            'active_spans': len(self._active_spans),
-            'saved_traces': len(self._saved_traces),
+            "enabled": self._enabled,
+            "auto_save": self._auto_save,
+            "storage_dir": str(self._storage_dir),
+            "active_traces": len(self._active_traces),
+            "active_spans": len(self._active_spans),
+            "saved_traces": len(self._saved_traces),
         }
+
 
 def get_trajectory_recorder() -> TrajectoryRecorder:
     """获取 TrajectoryRecorder 单例"""
     return TrajectoryRecorder()
 
+
 __all__ = [
-    'TrajectoryRecorder',
-    'get_trajectory_recorder',
+    "TrajectoryRecorder",
+    "get_trajectory_recorder",
 ]

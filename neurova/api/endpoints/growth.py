@@ -12,15 +12,12 @@ from __future__ import annotations
 6. 宪法系统 (GET/PUT /api/v1/growth/constitution)
 """
 
-import datetime
 import logging
 import time
-import typing
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -30,6 +27,7 @@ router = APIRouter()
 
 class ReflectionLog(BaseModel):
     """反思日志"""
+
     log_id: str
     agent_id: str
     timestamp: float
@@ -42,6 +40,7 @@ class ReflectionLog(BaseModel):
 
 class ReflectionLogCreate(BaseModel):
     """创建反思日志请求"""
+
     reflection_type: str = Field(default="general", description="反思类型")
     content: str = Field(..., description="反思内容")
     insights: List[str] = Field(default_factory=list, description="洞察")
@@ -51,6 +50,7 @@ class ReflectionLogCreate(BaseModel):
 
 class QuestionItem(BaseModel):
     """问题条目"""
+
     question_id: str
     agent_id: str
     timestamp: float
@@ -63,6 +63,7 @@ class QuestionItem(BaseModel):
 
 class QuestionCreate(BaseModel):
     """创建问题请求"""
+
     question_type: str = Field(default="curiosity", description="问题类型")
     question: str = Field(..., description="问题内容")
     priority: int = Field(default=0, ge=0, le=10, description="优先级")
@@ -70,6 +71,7 @@ class QuestionCreate(BaseModel):
 
 class ProactiveAction(BaseModel):
     """主动行为记录"""
+
     action_id: str
     agent_id: str
     timestamp: float
@@ -82,6 +84,7 @@ class ProactiveAction(BaseModel):
 
 class ProactiveActionCreate(BaseModel):
     """触发主动行为请求"""
+
     action_type: str = Field(default="communication", description="行为类型")
     trigger: str = Field(default="", description="触发条件")
     content: str = Field(..., description="行为内容")
@@ -89,6 +92,7 @@ class ProactiveActionCreate(BaseModel):
 
 class MotivationLevel(BaseModel):
     """动机水平"""
+
     agent_id: str
     timestamp: float
     overall_motivation: float = 0.5
@@ -101,6 +105,7 @@ class MotivationLevel(BaseModel):
 
 class MotivationLevelUpdate(BaseModel):
     """更新动机水平请求"""
+
     overall_motivation: Optional[float] = None
     curiosity: Optional[float] = None
     creativity: Optional[float] = None
@@ -110,6 +115,7 @@ class MotivationLevelUpdate(BaseModel):
 
 class Personality(BaseModel):
     """人格信息"""
+
     agent_id: str
     timestamp: float
     traits: Dict[str, float] = {}
@@ -120,6 +126,7 @@ class Personality(BaseModel):
 
 class PersonalityUpdate(BaseModel):
     """更新人格请求"""
+
     traits: Optional[Dict[str, float]] = None
     values: Optional[List[str]] = None
     communication_style: Optional[str] = None
@@ -128,6 +135,7 @@ class PersonalityUpdate(BaseModel):
 
 class ConstitutionRule(BaseModel):
     """宪法规则"""
+
     rule_id: str
     agent_id: str
     timestamp: float
@@ -139,6 +147,7 @@ class ConstitutionRule(BaseModel):
 
 class ConstitutionRuleCreate(BaseModel):
     """创建宪法规则请求"""
+
     rule_type: str = Field(default="behavior", description="规则类型")
     content: str = Field(..., description="规则内容")
     priority: int = Field(default=0, ge=0, le=10, description="优先级")
@@ -152,6 +161,7 @@ def _get_request_id(request: Request) -> str:
 def _get_agent(agent_id: str = "default"):
     """获取 Agent 实例"""
     from neurova.api.endpoints import get_agent_instance
+
     return get_agent_instance(agent_id)
 
 
@@ -160,13 +170,13 @@ def _get_growth_manager(agent_id: str = "default"):
     agent = _get_agent(agent_id)
     if not agent:
         return None
-    
+
     # 尝试获取成长管理器
     if hasattr(agent, "growth_log_manager"):
         return agent.growth_log_manager
     if hasattr(agent, "proactive_behavior_engine"):
         return agent.proactive_behavior_engine
-    
+
     return None
 
 
@@ -177,11 +187,11 @@ async def get_agent_growth(
 ):
     """获取 Agent 的成长数据（前端 GrowthPage.vue 调用）"""
     request_id = _get_request_id(request)
-    
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     # 收集成长数据
     growth_data = {
         "agent_id": agent_id,
@@ -193,39 +203,39 @@ async def get_agent_growth(
         "personality": None,
         "constitution": [],
     }
-    
+
     # 获取反思日志
     if hasattr(agent, "growth_log_manager") and agent.growth_log_manager:
         try:
             if hasattr(agent.growth_log_manager, "get_recent_logs"):
                 growth_data["reflection_logs"] = agent.growth_log_manager.get_recent_logs(limit=10)
         except Exception as e:
-            logger.warning(f"Failed to get reflection logs: {e}")
-    
+            logger.warning("Failed to get reflection logs: %s", e)
+
     # 获取问题队列
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
             if hasattr(agent.question_queue_manager, "get_pending_questions"):
                 growth_data["questions"] = agent.question_queue_manager.get_pending_questions(limit=10)
         except Exception as e:
-            logger.warning(f"Failed to get questions: {e}")
-    
+            logger.warning("Failed to get questions: %s", e)
+
     # 获取主动行为
     if hasattr(agent, "proactive_behavior_engine") and agent.proactive_behavior_engine:
         try:
             if hasattr(agent.proactive_behavior_engine, "get_recent_actions"):
                 growth_data["proactive_actions"] = agent.proactive_behavior_engine.get_recent_actions(limit=10)
         except Exception as e:
-            logger.warning(f"Failed to get proactive actions: {e}")
-    
+            logger.warning("Failed to get proactive actions: %s", e)
+
     # 获取动机水平
     if hasattr(agent, "proactive_behavior_engine") and agent.proactive_behavior_engine:
         try:
             if hasattr(agent.proactive_behavior_engine, "get_motivation_level"):
                 growth_data["motivation_level"] = agent.proactive_behavior_engine.get_motivation_level()
         except Exception as e:
-            logger.warning(f"Failed to get motivation level: {e}")
-    
+            logger.warning("Failed to get motivation level: %s", e)
+
     # 获取人格
     if hasattr(agent, "personality") and agent.personality:
         growth_data["personality"] = {
@@ -234,11 +244,11 @@ async def get_agent_growth(
             "communication_style": agent.personality.get("communication_style", "balanced"),
             "decision_style": agent.personality.get("decision_style", "analytical"),
         }
-    
+
     # 获取宪法
     if hasattr(agent, "constitution") and agent.constitution:
         growth_data["constitution"] = agent.constitution
-    
+
     return {
         "code": 0,
         "message": "success",
@@ -258,29 +268,31 @@ async def get_reflection_logs(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     logs = []
     if hasattr(agent, "growth_log_manager") and agent.growth_log_manager:
         try:
             if hasattr(agent.growth_log_manager, "get_recent_logs"):
                 logs = agent.growth_log_manager.get_recent_logs(limit=limit, offset=offset)
         except Exception as e:
-            logger.warning(f"Failed to get reflection logs: {e}")
-    
+            logger.warning("Failed to get reflection logs: %s", e)
+
     # 如果没有数据，返回模拟数据
     if not logs:
         for i in range(min(limit, 5)):
-            logs.append(ReflectionLog(
-                log_id=str(uuid.uuid4()),
-                agent_id=agent_id,
-                timestamp=time.time() - (i * 3600),
-                reflection_type="general",
-                content=f"Reflection on conversation topic {i+1}",
-                insights=[f"Insight {j+1}" for j in range(2)],
-                confidence=0.7 - i * 0.1,
-                related_memories=[f"memory_{j}" for j in range(2)],
-            ))
-    
+            logs.append(
+                ReflectionLog(
+                    log_id=str(uuid.uuid4()),
+                    agent_id=agent_id,
+                    timestamp=time.time() - (i * 3600),
+                    reflection_type="general",
+                    content=f"Reflection on conversation topic {i+1}",
+                    insights=[f"Insight {j+1}" for j in range(2)],
+                    confidence=0.7 - i * 0.1,
+                    related_memories=[f"memory_{j}" for j in range(2)],
+                )
+            )
+
     return logs
 
 
@@ -291,16 +303,16 @@ async def create_reflection_log(
     body: ReflectionLogCreate = ReflectionLogCreate(content=""),
 ):
     """创建新的反思日志"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     # 创建反思日志
     log_id = str(uuid.uuid4())
     timestamp = time.time()
-    
+
     if hasattr(agent, "growth_log_manager") and agent.growth_log_manager:
         try:
             if hasattr(agent.growth_log_manager, "add_log"):
@@ -313,8 +325,8 @@ async def create_reflection_log(
                     related_memories=body.related_memories,
                 )
         except Exception as e:
-            logger.warning(f"Failed to create reflection log: {e}")
-    
+            logger.warning("Failed to create reflection log: %s", e)
+
     return ReflectionLog(
         log_id=log_id,
         agent_id=agent_id,
@@ -336,21 +348,21 @@ async def get_reflection_stats(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     stats = {
         "total_reflections": 0,
         "average_confidence": 0,
         "reflection_types": {},
         "recent_insights": [],
     }
-    
+
     if hasattr(agent, "growth_log_manager") and agent.growth_log_manager:
         try:
             if hasattr(agent.growth_log_manager, "get_stats"):
                 stats = agent.growth_log_manager.get_stats()
         except Exception as e:
-            logger.warning(f"Failed to get reflection stats: {e}")
-    
+            logger.warning("Failed to get reflection stats: %s", e)
+
     return {
         "code": 0,
         "message": "success",
@@ -369,7 +381,7 @@ async def get_question_queue(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     questions = []
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
@@ -379,21 +391,23 @@ async def get_question_queue(
                     limit=limit,
                 )
         except Exception as e:
-            logger.warning(f"Failed to get questions: {e}")
-    
+            logger.warning("Failed to get questions: %s", e)
+
     # 如果没有数据，返回模拟数据
     if not questions:
         for i in range(min(limit, 3)):
-            questions.append(QuestionItem(
-                question_id=str(uuid.uuid4()),
-                agent_id=agent_id,
-                timestamp=time.time() - (i * 1800),
-                question_type="curiosity",
-                question=f"What is the meaning of concept {i+1}?",
-                status="pending",
-                priority=i,
-            ))
-    
+            questions.append(
+                QuestionItem(
+                    question_id=str(uuid.uuid4()),
+                    agent_id=agent_id,
+                    timestamp=time.time() - (i * 1800),
+                    question_type="curiosity",
+                    question=f"What is the meaning of concept {i+1}?",
+                    status="pending",
+                    priority=i,
+                )
+            )
+
     return questions
 
 
@@ -404,15 +418,15 @@ async def add_question(
     body: QuestionCreate = QuestionCreate(question=""),
 ):
     """添加新问题"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     question_id = str(uuid.uuid4())
     timestamp = time.time()
-    
+
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
             if hasattr(agent.question_queue_manager, "add_question"):
@@ -423,8 +437,8 @@ async def add_question(
                     priority=body.priority,
                 )
         except Exception as e:
-            logger.warning(f"Failed to add question: {e}")
-    
+            logger.warning("Failed to add question: %s", e)
+
     return QuestionItem(
         question_id=question_id,
         agent_id=agent_id,
@@ -445,7 +459,7 @@ async def get_next_question(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
             if hasattr(agent.question_queue_manager, "get_next_question"):
@@ -457,8 +471,8 @@ async def get_next_question(
                         "data": question,
                     }
         except Exception as e:
-            logger.warning(f"Failed to get next question: {e}")
-    
+            logger.warning("Failed to get next question: %s", e)
+
     return {
         "code": 0,
         "message": "No pending questions",
@@ -475,18 +489,18 @@ async def mark_question_answered(
 ):
     """标记问题已回答"""
     request_id = _get_request_id(request)
-    
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
             if hasattr(agent.question_queue_manager, "mark_answered"):
                 agent.question_queue_manager.mark_answered(question_id, answer)
         except Exception as e:
-            logger.warning(f"Failed to mark question answered: {e}")
-    
+            logger.warning("Failed to mark question answered: %s", e)
+
     return {
         "code": 0,
         "message": f"Question '{question_id}' marked as answered",
@@ -505,29 +519,31 @@ async def get_proactive_actions(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     actions = []
     if hasattr(agent, "proactive_behavior_engine") and agent.proactive_behavior_engine:
         try:
             if hasattr(agent.proactive_behavior_engine, "get_recent_actions"):
                 actions = agent.proactive_behavior_engine.get_recent_actions(limit=limit)
         except Exception as e:
-            logger.warning(f"Failed to get proactive actions: {e}")
-    
+            logger.warning("Failed to get proactive actions: %s", e)
+
     # 如果没有数据，返回模拟数据
     if not actions:
         for i in range(min(limit, 3)):
-            actions.append(ProactiveAction(
-                action_id=str(uuid.uuid4()),
-                agent_id=agent_id,
-                timestamp=time.time() - (i * 7200),
-                action_type="communication",
-                trigger="inactivity",
-                content=f"Proactive message about topic {i+1}",
-                success=True,
-                response_received=i % 2 == 0,
-            ))
-    
+            actions.append(
+                ProactiveAction(
+                    action_id=str(uuid.uuid4()),
+                    agent_id=agent_id,
+                    timestamp=time.time() - (i * 7200),
+                    action_type="communication",
+                    trigger="inactivity",
+                    content=f"Proactive message about topic {i+1}",
+                    success=True,
+                    response_received=i % 2 == 0,
+                )
+            )
+
     return actions
 
 
@@ -538,15 +554,15 @@ async def trigger_proactive_action(
     body: ProactiveActionCreate = ProactiveActionCreate(content=""),
 ):
     """触发主动行为"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     action_id = str(uuid.uuid4())
     timestamp = time.time()
-    
+
     if hasattr(agent, "proactive_behavior_engine") and agent.proactive_behavior_engine:
         try:
             if hasattr(agent.proactive_behavior_engine, "trigger_action"):
@@ -557,8 +573,8 @@ async def trigger_proactive_action(
                     content=body.content,
                 )
         except Exception as e:
-            logger.warning(f"Failed to trigger proactive action: {e}")
-    
+            logger.warning("Failed to trigger proactive action: %s", e)
+
     return ProactiveAction(
         action_id=action_id,
         agent_id=agent_id,
@@ -580,12 +596,12 @@ async def get_motivation_level(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     motivation = MotivationLevel(
         agent_id=agent_id,
         timestamp=time.time(),
     )
-    
+
     if hasattr(agent, "proactive_behavior_engine") and agent.proactive_behavior_engine:
         try:
             if hasattr(agent.proactive_behavior_engine, "get_motivation_level"):
@@ -597,8 +613,8 @@ async def get_motivation_level(
                         **data,
                     )
         except Exception as e:
-            logger.warning(f"Failed to get motivation level: {e}")
-    
+            logger.warning("Failed to get motivation level: %s", e)
+
     return motivation
 
 
@@ -612,15 +628,15 @@ async def update_motivation_level(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     if hasattr(agent, "proactive_behavior_engine") and agent.proactive_behavior_engine:
         try:
             if hasattr(agent.proactive_behavior_engine, "update_motivation"):
                 update_data = body.dict(exclude_unset=True)
                 agent.proactive_behavior_engine.update_motivation(update_data)
         except Exception as e:
-            logger.warning(f"Failed to update motivation level: {e}")
-    
+            logger.warning("Failed to update motivation level: %s", e)
+
     return await get_motivation_level(request, agent_id)
 
 
@@ -633,12 +649,12 @@ async def get_personality(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     personality = Personality(
         agent_id=agent_id,
         timestamp=time.time(),
     )
-    
+
     if hasattr(agent, "personality") and agent.personality:
         if isinstance(agent.personality, dict):
             personality = Personality(
@@ -649,7 +665,7 @@ async def get_personality(
                 communication_style=agent.personality.get("communication_style", "balanced"),
                 decision_style=agent.personality.get("decision_style", "analytical"),
             )
-    
+
     return personality
 
 
@@ -663,12 +679,12 @@ async def update_personality(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     if hasattr(agent, "personality") and agent.personality:
         if isinstance(agent.personality, dict):
             update_data = body.dict(exclude_unset=True)
             agent.personality.update(update_data)
-    
+
     return await get_personality(request, agent_id)
 
 
@@ -681,12 +697,12 @@ async def get_personality_traits(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     traits = {}
     if hasattr(agent, "personality") and agent.personality:
         if isinstance(agent.personality, dict):
             traits = agent.personality.get("traits", {})
-    
+
     return {
         "code": 0,
         "message": "success",
@@ -702,11 +718,11 @@ async def evolve_personality(
 ):
     """根据学习数据进化人格"""
     request_id = _get_request_id(request)
-    
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     # TODO: 实现人格进化逻辑
     return {
         "code": 0,
@@ -728,11 +744,11 @@ async def get_constitution(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     constitution = []
     if hasattr(agent, "constitution") and agent.constitution:
         constitution = agent.constitution
-    
+
     return {
         "code": 0,
         "message": "success",
@@ -748,14 +764,14 @@ async def update_constitution(
 ):
     """更新宪法"""
     request_id = _get_request_id(request)
-    
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     if hasattr(agent, "constitution"):
         agent.constitution = constitution
-    
+
     return {
         "code": 0,
         "message": "Constitution updated",
@@ -773,21 +789,23 @@ async def get_constitution_rules(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     rules = []
     if hasattr(agent, "constitution") and agent.constitution:
         for i, rule in enumerate(agent.constitution):
             if isinstance(rule, dict):
-                rules.append(ConstitutionRule(
-                    rule_id=rule.get("rule_id", str(uuid.uuid4())),
-                    agent_id=agent_id,
-                    timestamp=rule.get("timestamp", time.time()),
-                    rule_type=rule.get("rule_type", "behavior"),
-                    content=rule.get("content", ""),
-                    priority=rule.get("priority", 0),
-                    enabled=rule.get("enabled", True),
-                ))
-    
+                rules.append(
+                    ConstitutionRule(
+                        rule_id=rule.get("rule_id", str(uuid.uuid4())),
+                        agent_id=agent_id,
+                        timestamp=rule.get("timestamp", time.time()),
+                        rule_type=rule.get("rule_type", "behavior"),
+                        content=rule.get("content", ""),
+                        priority=rule.get("priority", 0),
+                        enabled=rule.get("enabled", True),
+                    )
+                )
+
     return rules
 
 
@@ -798,18 +816,18 @@ async def add_constitution_rule(
     body: ConstitutionRuleCreate = ConstitutionRuleCreate(content=""),
 ):
     """添加宪法规则"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     rule_id = str(uuid.uuid4())
     timestamp = time.time()
-    
+
     if not hasattr(agent, "constitution") or agent.constitution is None:
         agent.constitution = []
-    
+
     new_rule = {
         "rule_id": rule_id,
         "timestamp": timestamp,
@@ -819,7 +837,7 @@ async def add_constitution_rule(
         "enabled": True,
     }
     agent.constitution.append(new_rule)
-    
+
     return ConstitutionRule(
         rule_id=rule_id,
         agent_id=agent_id,
@@ -839,23 +857,25 @@ async def update_constitution_rule(
     body: ConstitutionRuleCreate = ConstitutionRuleCreate(content=""),
 ):
     """更新宪法规则"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     if not hasattr(agent, "constitution") or agent.constitution is None:
         raise HTTPException(status_code=404, detail="No constitution rules found")
-    
+
     # 查找并更新规则
     for rule in agent.constitution:
         if isinstance(rule, dict) and rule.get("rule_id") == rule_id:
-            rule.update({
-                "rule_type": body.rule_type,
-                "content": body.content,
-                "priority": body.priority,
-            })
+            rule.update(
+                {
+                    "rule_type": body.rule_type,
+                    "content": body.content,
+                    "priority": body.priority,
+                }
+            )
             return ConstitutionRule(
                 rule_id=rule_id,
                 agent_id=agent_id,
@@ -865,7 +885,7 @@ async def update_constitution_rule(
                 priority=body.priority,
                 enabled=rule.get("enabled", True),
             )
-    
+
     raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
 
 
@@ -877,14 +897,14 @@ async def delete_constitution_rule(
 ):
     """删除宪法规则"""
     request_id = _get_request_id(request)
-    
+
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     if not hasattr(agent, "constitution") or agent.constitution is None:
         raise HTTPException(status_code=404, detail="No constitution rules found")
-    
+
     # 查找并删除规则
     for i, rule in enumerate(agent.constitution):
         if isinstance(rule, dict) and rule.get("rule_id") == rule_id:
@@ -895,7 +915,7 @@ async def delete_constitution_rule(
                 "data": {"rule_id": rule_id},
                 "request_id": request_id,
             }
-    
+
     raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
 
 
@@ -909,17 +929,17 @@ async def evaluate_against_constitution(
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-    
+
     # 简单评估逻辑
     is_compliant = True
     violations = []
-    
+
     if hasattr(agent, "constitution") and agent.constitution:
         for rule in agent.constitution:
             if isinstance(rule, dict) and rule.get("enabled", True):
                 # TODO: 实现真正的规则评估逻辑
                 pass
-    
+
     return {
         "code": 0,
         "message": "success",

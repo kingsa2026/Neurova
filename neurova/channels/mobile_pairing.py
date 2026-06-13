@@ -17,7 +17,6 @@
 
 import hashlib
 import hmac
-import json
 import logging
 import secrets
 import time
@@ -33,23 +32,25 @@ PAIRING_CODE_TTL = 300  # 5 分钟
 
 class PairingStatus(str, Enum):
     """配对状态"""
-    PENDING = "pending"          # 等待确认
-    CONFIRMED = "confirmed"      # 已确认
-    EXPIRED = "expired"          # 已过期
-    REVOKED = "revoked"          # 已撤销
+
+    PENDING = "pending"  # 等待确认
+    CONFIRMED = "confirmed"  # 已确认
+    EXPIRED = "expired"  # 已过期
+    REVOKED = "revoked"  # 已撤销
 
 
 @dataclass
 class PairingSession:
     """配对会话"""
-    code: str                          # 6位数字配对码
-    user_id: str                       # 用户ID
+
+    code: str  # 6位数字配对码
+    user_id: str  # 用户ID
     created_at: float = field(default_factory=time.time)
-    expires_at: float = 0.0            # 过期时间戳
+    expires_at: float = 0.0  # 过期时间戳
     status: PairingStatus = PairingStatus.PENDING
     device_info: Dict[str, Any] = field(default_factory=dict)
-    ws_token: Optional[str] = None     # WebSocket Token
-    pairing_id: str = ""               # 配对ID
+    ws_token: Optional[str] = None  # WebSocket Token
+    pairing_id: str = ""  # 配对ID
 
     def __post_init__(self):
         if not self.expires_at:
@@ -94,6 +95,7 @@ class PairingSession:
 @dataclass
 class PairingResult:
     """配对结果"""
+
     success: bool
     pairing_session: Optional[PairingSession] = None
     error_message: str = ""
@@ -119,7 +121,7 @@ class MobilePairingManager:
     def __init__(self, secret_key: str = ""):
         self._secret_key = secret_key or secrets.token_hex(32)
         self._sessions: Dict[str, PairingSession] = {}  # code -> session
-        self._user_sessions: Dict[str, List[str]] = {}   # user_id -> [code]
+        self._user_sessions: Dict[str, List[str]] = {}  # user_id -> [code]
         self._ws_tokens: Dict[str, PairingSession] = {}  # ws_token -> session
 
     def generate_pairing_code(self, user_id: str) -> PairingSession:
@@ -144,7 +146,7 @@ class MobilePairingManager:
             self._user_sessions[user_id] = []
         self._user_sessions[user_id].append(code)
 
-        logger.info(f"Generated pairing code {code} for user {user_id}")
+        logger.info("Generated pairing code %s for user %s", code, user_id)
         return session
 
     def confirm_pairing(
@@ -192,7 +194,7 @@ class MobilePairingManager:
         ws_token = self._issue_ws_token(session)
         session.ws_token = ws_token
 
-        logger.info(f"Pairing confirmed for code {code}, user {session.user_id}")
+        logger.info("Pairing confirmed for code %s, user %s", code, session.user_id)
         return PairingResult(
             success=True,
             pairing_session=session,
@@ -234,7 +236,7 @@ class MobilePairingManager:
                 if session.ws_token and session.ws_token in self._ws_tokens:
                     del self._ws_tokens[session.ws_token]
                     session.ws_token = None
-                logger.info(f"Pairing {pairing_id} revoked for user {user_id}")
+                logger.info("Pairing %s revoked for user %s", pairing_id, user_id)
                 return True
         return False
 

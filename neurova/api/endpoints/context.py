@@ -15,15 +15,14 @@ from __future__ import annotations
 
 import logging
 import time
-import typing
 import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+
 from neurova.api.auth import get_current_user
-from neurova.context_pool import ContextPool, ContextInput, ContextSource
+from neurova.context_pool import ContextInput, ContextSource
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +31,7 @@ router = APIRouter()
 
 class BuildContextRequest(BaseModel):
     """构建上下文请求"""
+
     agent_id: str = Field(default="default", description="Agent ID")
     user_input: str = Field(default="", description="用户输入")
     session_id: Optional[str] = Field(default=None, description="会话 ID")
@@ -44,6 +44,7 @@ class BuildContextRequest(BaseModel):
 
 class BuildContextResponse(BaseModel):
     """构建上下文响应"""
+
     context_id: str
     content: str
     token_count: int
@@ -53,6 +54,7 @@ class BuildContextResponse(BaseModel):
 
 class ContextStats(BaseModel):
     """上下文统计"""
+
     total_contexts: int = 0
     average_tokens: float = 0
     cache_hit_rate: float = 0
@@ -61,6 +63,7 @@ class ContextStats(BaseModel):
 
 class ContextPreview(BaseModel):
     """上下文预览"""
+
     context_id: str
     content: str
     token_count: int
@@ -75,12 +78,13 @@ def _get_request_id(request: Request) -> str:
 def _get_agent(agent_id: str = "default"):
     """获取 Agent 实例"""
     from neurova.api.endpoints import get_agent_instance
+
     return get_agent_instance(agent_id)
 
 
 def _get_context_builder(user_id: str = None, agent_id: str = None, session_id: str = None):
     """获取上下文构建器（隔离版本）
-    
+
     Args:
         user_id: 用户ID（必需）
         agent_id: Agent ID（必需）
@@ -88,13 +92,14 @@ def _get_context_builder(user_id: str = None, agent_id: str = None, session_id: 
     """
     try:
         from neurova.context_pool import ContextPool
+
         if user_id is None or agent_id is None:
             logger.warning("ContextPool requires user_id and agent_id for isolation. Using default values.")
             user_id = user_id or "default_user"
             agent_id = agent_id or "default_agent"
         return ContextPool(user_id=user_id, agent_id=agent_id, session_id=session_id)
     except Exception as e:
-        logger.warning(f"ContextPool not available: {e}")
+        logger.warning("ContextPool not available: %s", e)
         return None
 
 
@@ -105,23 +110,19 @@ async def build_context(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """构建上下文（带用户隔离）"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
     start_time = time.time()
     context_id = str(uuid.uuid4())
-    
+
     try:
         # 从JWT获取用户ID，确保隔离
         user_id = current_user.get("user_id", "unknown")
         agent_id = body.agent_id
         session_id = body.session_id
-        
+
         # 使用隔离的上下文构建器
-        context_builder = _get_context_builder(
-            user_id=user_id,
-            agent_id=agent_id,
-            session_id=session_id
-        )
-        
+        context_builder = _get_context_builder(user_id=user_id, agent_id=agent_id, session_id=session_id)
+
         if context_builder:
             # 使用 ContextPool 构建上下文
             try:
@@ -132,31 +133,30 @@ async def build_context(
                     priority=10,  # 高优先级
                 )
                 context_builder.add_context(user_context)
-                
+
                 # 构建上下文（使用默认模型名称）
                 context_messages = context_builder.build_context_for_model("default")
-                
+
                 # 转换为字符串格式
                 context_content = "\n".join(
-                    f"{msg.get('role', 'unknown')}: {msg.get('content', '')}"
-                    for msg in context_messages
+                    f"{msg.get('role', 'unknown')}: {msg.get('content', '')}" for msg in context_messages
                 )
-                sources = [msg.get('source', 'context_pool') for msg in context_messages]
-                
+                sources = [msg.get("source", "context_pool") for msg in context_messages]
+
             except Exception as e:
-                logger.warning(f"ContextPool failed, falling back: {e}")
+                logger.warning("ContextPool failed, falling back: %s", e)
                 # 降级到原有逻辑
                 context_builder = None
-        
+
         if not context_builder:
             # 降级：使用原有的 Agent 构建器
             agent = _get_agent(agent_id)
             if not agent:
                 raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-            
+
             context_content = ""
             sources = []
-            
+
             if hasattr(agent, "build_context"):
                 result = await agent.build_context(
                     user_input=body.user_input,
@@ -175,7 +175,7 @@ async def build_context(
                 # 降级：构建基础上下文
                 context_content = f"User: {body.user_input}\n\nSystem: Processing request..."
                 sources = ["user_input"]
-        
+
         return BuildContextResponse(
             context_id=context_id,
             content=context_content,
@@ -197,23 +197,19 @@ async def build_context_v2(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """构建上下文 V2（增强版，带用户隔离）"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
     start_time = time.time()
     context_id = str(uuid.uuid4())
-    
+
     try:
         # 从JWT获取用户ID，确保隔离
         user_id = current_user.get("user_id", "unknown")
         agent_id = body.agent_id
         session_id = body.session_id
-        
+
         # 使用隔离的上下文构建器
-        context_builder = _get_context_builder(
-            user_id=user_id,
-            agent_id=agent_id,
-            session_id=session_id
-        )
-        
+        context_builder = _get_context_builder(user_id=user_id, agent_id=agent_id, session_id=session_id)
+
         if context_builder:
             # 使用 ContextPool 构建上下文
             try:
@@ -224,32 +220,31 @@ async def build_context_v2(
                     priority=10,  # 高优先级
                 )
                 context_builder.add_context(user_context)
-                
+
                 # 构建上下文（使用默认模型名称）
                 context_messages = context_builder.build_context_for_model("default")
-                
+
                 # 转换为字符串格式
                 context_content = "\n".join(
-                    f"{msg.get('role', 'unknown')}: {msg.get('content', '')}"
-                    for msg in context_messages
+                    f"{msg.get('role', 'unknown')}: {msg.get('content', '')}" for msg in context_messages
                 )
-                sources = [msg.get('source', 'context_pool') for msg in context_messages]
-                
+                sources = [msg.get("source", "context_pool") for msg in context_messages]
+
             except Exception as e:
-                logger.warning(f"ContextPool failed, falling back: {e}")
+                logger.warning("ContextPool failed, falling back: %s", e)
                 # 降级到原有逻辑
                 context_builder = None
-        
+
         if not context_builder:
             # 降级：使用原有的 Agent 构建器
             agent = _get_agent(agent_id)
             if not agent:
                 raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-            
+
             # 使用 UnifiedContextInjector
             context_content = ""
             sources = []
-            
+
             if hasattr(agent, "unified_injector") and agent.unified_injector:
                 result = await agent.unified_injector.build_context(
                     user_input=body.user_input,
@@ -273,7 +268,7 @@ async def build_context_v2(
             else:
                 context_content = f"User: {body.user_input}"
                 sources = ["user_input"]
-        
+
         return BuildContextResponse(
             context_id=context_id,
             content=context_content,
@@ -322,7 +317,7 @@ async def compress_context(
 ):
     """压缩上下文"""
     request_id = _get_request_id(request)
-    
+
     try:
         # TODO: 实现上下文压缩
         return {
@@ -347,17 +342,17 @@ async def inject_reflection_log(
 ):
     """注入反思日志到上下文"""
     request_id = _get_request_id(request)
-    
+
     try:
         agent = _get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-        
+
         # 获取反思日志
         reflection_logs = []
         if hasattr(agent, "growth_log_manager") and agent.growth_log_manager:
             reflection_logs = agent.growth_log_manager.get_recent_logs(limit=limit)
-        
+
         return {
             "code": 0,
             "message": "success",
@@ -383,12 +378,12 @@ async def inject_memories(
 ):
     """注入相关记忆到上下文"""
     request_id = _get_request_id(request)
-    
+
     try:
         agent = _get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-        
+
         # 搜索记忆
         memories = []
         if hasattr(agent, "memory_manager") and agent.memory_manager:
@@ -396,7 +391,7 @@ async def inject_memories(
                 memories = agent.memory_manager.search(query=query, limit=limit)
             else:
                 memories = agent.memory_manager.get_recent(limit=limit)
-        
+
         return {
             "code": 0,
             "message": "success",
@@ -421,17 +416,17 @@ async def inject_hot_memories(
 ):
     """注入高温记忆到上下文"""
     request_id = _get_request_id(request)
-    
+
     try:
         agent = _get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-        
+
         # 获取高温记忆
         hot_memories = []
         if hasattr(agent, "memory_manager") and agent.memory_manager:
             hot_memories = agent.memory_manager.get_hot_memories(limit=limit)
-        
+
         return {
             "code": 0,
             "message": "success",
@@ -455,23 +450,23 @@ async def get_token_budget(
 ):
     """获取 Token 预算信息"""
     request_id = _get_request_id(request)
-    
+
     try:
         agent = _get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-        
+
         # 获取 Token 预算
         budget = {
             "max_tokens": 16000,
             "used_tokens": 0,
             "available_tokens": 16000,
         }
-        
+
         if hasattr(agent, "unified_injector") and agent.unified_injector:
             if hasattr(agent.unified_injector, "get_token_budget"):
                 budget = agent.unified_injector.get_token_budget()
-        
+
         return {
             "code": 0,
             "message": "success",
@@ -493,17 +488,17 @@ async def set_token_budget(
 ):
     """设置 Token 预算"""
     request_id = _get_request_id(request)
-    
+
     try:
         agent = _get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-        
+
         # 设置 Token 预算
         if hasattr(agent, "unified_injector") and agent.unified_injector:
             if hasattr(agent.unified_injector, "set_token_budget"):
                 agent.unified_injector.set_token_budget(max_tokens)
-        
+
         return {
             "code": 0,
             "message": "Token budget updated",

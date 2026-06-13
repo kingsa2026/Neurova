@@ -7,33 +7,36 @@ Agent 能力矩阵模块
 
 import logging
 import time
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 from ..protocols.capability_discovery import (
-    CapabilityDiscovery,
     AgentCapability,
     CapabilityCategory,
+    CapabilityDiscovery,
     CapabilityLevel,
-    Capability,
     get_capability_discovery,
 )
 
 logger = logging.getLogger(__name__)
 
+
 class AgentStatus(str, Enum):
     """Agent 状态"""
-    ONLINE = "online"       # 在线
-    OFFLINE = "offline"     # 离线
-    BUSY = "busy"           # 忙碌
-    IDLE = "idle"           # 空闲
-    ERROR = "error"         # 错误
+
+    ONLINE = "online"  # 在线
+    OFFLINE = "offline"  # 离线
+    BUSY = "busy"  # 忙碌
+    IDLE = "idle"  # 空闲
+    ERROR = "error"  # 错误
+
 
 @dataclass
 class RadarChartData:
     """雷达图数据"""
-    labels: List[str]           # 维度标签
+
+    labels: List[str]  # 维度标签
     datasets: List[Dict[str, Any]]  # 数据集
 
     def to_dict(self) -> Dict[str, Any]:
@@ -43,16 +46,18 @@ class RadarChartData:
             "datasets": self.datasets,
         }
 
+
 @dataclass
 class AgentMatrixData:
     """Agent 能力矩阵数据"""
+
     agent_id: str
     agent_name: str
     status: AgentStatus
 
     # 能力数据
     capabilities: List[Dict[str, Any]]  # 能力列表
-    radar_chart: RadarChartData         # 雷达图数据
+    radar_chart: RadarChartData  # 雷达图数据
 
     # 统计信息
     total_capabilities: int
@@ -96,17 +101,19 @@ class AgentMatrixData:
             },
         }
 
+
 @dataclass
 class TaskRecommendation:
     """任务推荐"""
+
     agent_id: str
     agent_name: str
-    match_score: float           # 匹配度 0-1
+    match_score: float  # 匹配度 0-1
     recommended_capabilities: List[str]
     missing_capabilities: List[str]
-    estimated_time: float        # 预计时间（秒）
-    confidence: float            # 置信度 0-1
-    reason: str                  # 推荐理由
+    estimated_time: float  # 预计时间（秒）
+    confidence: float  # 置信度 0-1
+    reason: str  # 推荐理由
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -120,6 +127,7 @@ class TaskRecommendation:
             "confidence": self.confidence,
             "reason": self.reason,
         }
+
 
 class AgentMatrix:
     """Agent 能力矩阵"""
@@ -260,16 +268,18 @@ class AgentMatrix:
                 else:
                     reason = f"该 Agent 具备部分能力，但缺少: {', '.join(missing[:2])}"
 
-                recommendations.append(TaskRecommendation(
-                    agent_id=agent_cap.agent_id,
-                    agent_name=agent_cap.agent_name,
-                    match_score=match_score,
-                    recommended_capabilities=matched,
-                    missing_capabilities=missing,
-                    estimated_time=estimated_time,
-                    confidence=confidence,
-                    reason=reason,
-                ))
+                recommendations.append(
+                    TaskRecommendation(
+                        agent_id=agent_cap.agent_id,
+                        agent_name=agent_cap.agent_name,
+                        match_score=match_score,
+                        recommended_capabilities=matched,
+                        missing_capabilities=missing,
+                        estimated_time=estimated_time,
+                        confidence=confidence,
+                        reason=reason,
+                    )
+                )
 
         # 按匹配度排序
         recommendations.sort(key=lambda x: x.match_score, reverse=True)
@@ -343,10 +353,7 @@ class AgentMatrix:
             category_levels[cat].append(cap.level.value_int)
 
         # 计算各类别的平均等级
-        category_avg = {
-            cat: sum(levels) / len(levels) if levels else 0
-            for cat, levels in category_levels.items()
-        }
+        category_avg = {cat: sum(levels) / len(levels) if levels else 0 for cat, levels in category_levels.items()}
 
         # 找出最强和最弱类别
         strongest = max(category_avg.items(), key=lambda x: x[1]) if category_avg else ("N/A", 0)
@@ -380,14 +387,16 @@ class AgentMatrix:
         capabilities = []
         for cap in agent_cap.capabilities:
             cat = cap.category.value if isinstance(cap.category, CapabilityCategory) else cap.category
-            capabilities.append({
-                "name": cap.name,
-                "category": cat,
-                "level": cap.level.value if isinstance(cap.level, CapabilityLevel) else cap.level,
-                "level_int": cap.level.value_int,
-                "description": cap.description,
-                "metrics": cap.metrics,
-            })
+            capabilities.append(
+                {
+                    "name": cap.name,
+                    "category": cat,
+                    "level": cap.level.value if isinstance(cap.level, CapabilityLevel) else cap.level,
+                    "level_int": cap.level.value_int,
+                    "description": cap.description,
+                    "metrics": cap.metrics,
+                }
+            )
 
         return AgentMatrixData(
             agent_id=agent_cap.agent_id,
@@ -404,6 +413,7 @@ class AgentMatrix:
             success_rate=agent_cap.success_rate,
             average_response_time=agent_cap.average_response_time,
         )
+
 
 class MatrixRenderer:
     """能力矩阵渲染器"""
@@ -493,13 +503,15 @@ class MatrixRenderer:
             color = cls.CATEGORY_COLORS.get(cat, "#999999")
             level_int = cap.get("level_int", 0)
 
-            bars.append({
-                "name": cap.get("name", ""),
-                "category": cat,
-                "level": level_int,
-                "percentage": level_int / 5.0 * 100,
-                "color": color,
-            })
+            bars.append(
+                {
+                    "name": cap.get("name", ""),
+                    "category": cat,
+                    "level": level_int,
+                    "percentage": level_int / 5.0 * 100,
+                    "color": color,
+                }
+            )
 
         # 按等级排序
         bars.sort(key=lambda x: x["level"], reverse=True)
@@ -537,8 +549,10 @@ class MatrixRenderer:
             "pulse": status_str == "online",
         }
 
+
 # 全局能力矩阵实例
 _global_matrix: Optional[AgentMatrix] = None
+
 
 def get_agent_matrix() -> AgentMatrix:
     """获取全局能力矩阵"""

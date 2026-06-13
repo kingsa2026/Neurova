@@ -13,7 +13,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -37,9 +36,10 @@ def _run_async(coro: Any) -> Any:
 
     if loop and loop.is_running():
         # 已在事件循环中（如 Jupyter），用新线程
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, coro).result()
+        from neurova.core.thread_pool import get_thread_pool
+
+        pool = get_thread_pool()
+        return pool.submit(asyncio.run, coro).result()
     else:
         return asyncio.run(coro)
 
@@ -129,9 +129,7 @@ class MemorySync:
             memory_id = None
             memory_content = ""
             if memory is not None:
-                memory_id = getattr(memory, "id", None) or (
-                    memory.get("id") if isinstance(memory, dict) else None
-                )
+                memory_id = getattr(memory, "id", None) or (memory.get("id") if isinstance(memory, dict) else None)
                 memory_content = getattr(memory, "content", "") or (
                     memory.get("content", "") if isinstance(memory, dict) else ""
                 )
@@ -198,9 +196,7 @@ class MemorySync:
                 for k_id in matched_knowledge_ids:
                     # 避免重复 link
                     existing = self.get_memory_links(memory_id)
-                    already_linked = any(
-                        lk.get("knowledge_id") == k_id for lk in existing
-                    )
+                    already_linked = any(lk.get("knowledge_id") == k_id for lk in existing)
                     if not already_linked:
                         self._add_memory_knowledge_link(
                             memory_id=memory_id,
@@ -216,7 +212,9 @@ class MemorySync:
 
             logger.info(
                 "sync_memory_to_knowledge: memory_id=%s, matched=%d, links=%d",
-                memory_id, len(matched_knowledge_ids), links_created,
+                memory_id,
+                len(matched_knowledge_ids),
+                links_created,
             )
             return entry
 
@@ -288,9 +286,7 @@ class MemorySync:
                             mem_id = mem.get("id") if isinstance(mem, dict) else getattr(mem, "id", None)
                             if mem_id and k_id:
                                 existing = self.get_knowledge_links(k_id)
-                                already_linked = any(
-                                    lk.get("memory_id") == mem_id for lk in existing
-                                )
+                                already_linked = any(lk.get("memory_id") == mem_id for lk in existing)
                                 if not already_linked:
                                     self._add_memory_knowledge_link(
                                         memory_id=mem_id,
@@ -345,7 +341,9 @@ class MemorySync:
 
             logger.info(
                 "sync_knowledge_to_memory: knowledge_id=%s, synced=%d, links=%d",
-                k_id, entry["synced_count"], entry["links_created"],
+                k_id,
+                entry["synced_count"],
+                entry["links_created"],
             )
             return entry
 
@@ -363,9 +361,7 @@ class MemorySync:
 
         if direction in ("memory_to_knowledge", "both") and self._memory_system:
             try:
-                memories = self._memory_system.retrieve_memories(
-                    query="全部记忆", limit=limit
-                )
+                memories = self._memory_system.retrieve_memories(query="全部记忆", limit=limit)
                 for mem in memories:
                     r = self.sync_memory_to_knowledge(mem)
                     results["memory_to_knowledge"] += r.get("synced_count", 0)
@@ -375,9 +371,7 @@ class MemorySync:
 
         if direction in ("knowledge_to_memory", "both") and self._knowledge_base:
             try:
-                docs = _run_async(
-                    self._knowledge_base.list_documents(limit=limit)
-                )
+                docs = _run_async(self._knowledge_base.list_documents(limit=limit))
                 for doc in docs:
                     r = self.sync_knowledge_to_memory(doc)
                     results["knowledge_to_memory"] += r.get("synced_count", 0)
@@ -388,9 +382,7 @@ class MemorySync:
         logger.info("sync_batch: %s", results)
         return results
 
-    def _add_memory_knowledge_link(
-        self, memory_id: str, knowledge_id: str, link_type: str = "related"
-    ) -> str:
+    def _add_memory_knowledge_link(self, memory_id: str, knowledge_id: str, link_type: str = "related") -> str:
         with self._lock:
             lid = _new_id("lnk_")
             self._links[lid] = {
@@ -405,19 +397,11 @@ class MemorySync:
 
     def get_memory_links(self, memory_id: str) -> List[Dict[str, Any]]:
         with self._lock:
-            return [
-                dict(link)
-                for link in self._links.values()
-                if link.get("memory_id") == memory_id
-            ]
+            return [dict(link) for link in self._links.values() if link.get("memory_id") == memory_id]
 
     def get_knowledge_links(self, knowledge_id: str) -> List[Dict[str, Any]]:
         with self._lock:
-            return [
-                dict(link)
-                for link in self._links.values()
-                if link.get("knowledge_id") == knowledge_id
-            ]
+            return [dict(link) for link in self._links.values() if link.get("knowledge_id") == knowledge_id]
 
     def remove_link(self, link_id: str) -> bool:
         with self._lock:

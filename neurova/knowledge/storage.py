@@ -13,7 +13,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -132,10 +131,7 @@ class KnowledgeStorage:
 
     def get_configs_by_user(self, user_id: str) -> List[Dict[str, Any]]:
         with self._lock:
-            return [
-                dict(c) for c in self._configs.values()
-                if c.get("user_id") == user_id
-            ]
+            return [dict(c) for c in self._configs.values() if c.get("user_id") == user_id]
 
     def get_default_config(self, user_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -194,10 +190,7 @@ class KnowledgeStorage:
 
     def get_user_collections(self, user_id: str) -> List[Dict[str, Any]]:
         with self._lock:
-            return [
-                dict(m) for m in self._collections.values()
-                if m.get("user_id") == user_id
-            ]
+            return [dict(m) for m in self._collections.values() if m.get("user_id") == user_id]
 
     def delete_collection_mapping(self, mapping_id: str) -> bool:
         with self._lock:
@@ -228,10 +221,7 @@ class KnowledgeStorage:
         with self._lock:
             if memory_id is None:
                 return [dict(m) for m in self._memory_links.values()]
-            return [
-                dict(m) for m in self._memory_links.values()
-                if m.get("memory_id") == memory_id
-            ]
+            return [dict(m) for m in self._memory_links.values() if m.get("memory_id") == memory_id]
 
     def delete_memory_link(self, link_id: str) -> bool:
         with self._lock:

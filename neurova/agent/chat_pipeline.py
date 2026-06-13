@@ -18,11 +18,17 @@ ChatPipeline — 对话流程管线
 
 import logging
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any
-from neurova.agent.tool_execution_manager import ToolExecutionManager, TimeoutStrategy, ExecutionStatus
+from typing import Any, Dict, List, Optional
+
+from neurova.agent.crystallized_experience_manager import CrystallizedExperienceManager
 from neurova.agent.memory_retrieval_chain import MemoryRetrievalChain, RetrievalContext, RetrievalStrategy
-from neurova.agent.retriever_adapters import UnifiedRetrieverAdapter, MoERetrieverAdapter, CacheRetrieverAdapter, FallbackRetrieverAdapter
-from neurova.agent.crystallized_experience_manager import CrystallizedExperienceManager, RetrievalStatus
+from neurova.agent.retriever_adapters import (
+    CacheRetrieverAdapter,
+    FallbackRetrieverAdapter,
+    MoERetrieverAdapter,
+    UnifiedRetrieverAdapter,
+)
+from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +36,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ChatContext:
     """对话上下文，贯穿整个管线"""
+
     user_input: str
     stream: bool = False
     save_memory: bool = True
@@ -75,40 +82,44 @@ class ChatPipeline:
         # 初始化 CrystallizedExperienceManager（深度模块）
         self._crystallized_experience_manager = CrystallizedExperienceManager(
             crystallizer=self.crystallizer,
-            memory_manager=getattr(self._agent, 'memory_agent', None),
+            memory_manager=getattr(self._agent, "memory_agent", None),
         )
-        logger.debug("ChatPipeline initialized with ToolExecutionManager, MemoryRetrievalChain, and CrystallizedExperienceManager")
-    
+        logger.debug(
+            "ChatPipeline initialized with ToolExecutionManager, MemoryRetrievalChain, and CrystallizedExperienceManager"
+        )
+
     def _init_memory_retrieval_chain(self):
         """初始化记忆检索责任链"""
         # 添加检索器（按优先级排序）
-        
+
         # 1. UnifiedRetriever（最高优先级）
         if self.unified_retriever:
             adapter = UnifiedRetrieverAdapter(self.unified_retriever)
             self._memory_retrieval_chain.add_retriever(adapter)
             logger.debug("Added UnifiedRetrieverAdapter to retrieval chain")
-        
+
         # 2. MoERetriever（中等优先级）
-        if hasattr(self._agent, 'memory_agent') and self._agent.memory_agent:
-            moe_router = getattr(self._agent.memory_agent, 'moe_router', None)
+        if hasattr(self._agent, "memory_agent") and self._agent.memory_agent:
+            moe_router = getattr(self._agent.memory_agent, "moe_router", None)
             if moe_router:
                 adapter = MoERetrieverAdapter(moe_router)
                 self._memory_retrieval_chain.add_retriever(adapter)
                 logger.debug("Added MoERetrieverAdapter to retrieval chain")
-        
+
         # 3. CacheRetriever（低优先级）
         cache_adapter = CacheRetrieverAdapter()
         self._memory_retrieval_chain.add_retriever(cache_adapter)
         logger.debug("Added CacheRetrieverAdapter to retrieval chain")
-        
+
         # 4. FallbackRetriever（最低优先级）
-        if hasattr(self._agent, 'memory_agent') and self._agent.memory_agent:
+        if hasattr(self._agent, "memory_agent") and self._agent.memory_agent:
             adapter = FallbackRetrieverAdapter(self._agent.memory_agent)
             self._memory_retrieval_chain.add_retriever(adapter)
             logger.debug("Added FallbackRetrieverAdapter to retrieval chain")
-        
-        logger.info(f"MemoryRetrievalChain initialized with {len(self._memory_retrieval_chain.get_retrievers())} retrievers")
+
+        logger.info(
+            f"MemoryRetrievalChain initialized with {len(self._memory_retrieval_chain.get_retrievers())} retrievers"
+        )
 
     # ---- 属性代理 ----
     @property
@@ -125,23 +136,23 @@ class ChatPipeline:
 
     @property
     def tool_memory(self):
-        return getattr(self._agent, 'tool_memory', None)
+        return getattr(self._agent, "tool_memory", None)
 
     @property
     def skill_manager(self):
-        return getattr(self._agent, 'skill_manager', None)
+        return getattr(self._agent, "skill_manager", None)
 
     @property
     def tool_synthesizer(self):
-        return getattr(self._agent, 'tool_synthesizer', None)
+        return getattr(self._agent, "tool_synthesizer", None)
 
     @property
     def unified_retriever(self):
-        return getattr(self._agent, 'unified_retriever', None)
+        return getattr(self._agent, "unified_retriever", None)
 
     @property
     def crystallizer(self):
-        return getattr(self._agent, 'crystallizer', None)
+        return getattr(self._agent, "crystallizer", None)
 
     @property
     def crystallized_experience_manager(self):
@@ -149,23 +160,23 @@ class ChatPipeline:
 
     @property
     def trace_manager(self):
-        return getattr(self._agent, 'trace_manager', None)
+        return getattr(self._agent, "trace_manager", None)
 
     @property
     def neuHebb_manager(self):
-        return getattr(self._agent, 'neuHebb_manager', None)
+        return getattr(self._agent, "neuHebb_manager", None)
 
     @property
     def loop(self):
-        return getattr(self._agent, 'loop', None)
+        return getattr(self._agent, "loop", None)
 
     @property
     def llm_client(self):
-        return getattr(self._agent, 'llm_client', None)
+        return getattr(self._agent, "llm_client", None)
 
     @property
     def tool_executor(self):
-        return getattr(self._agent, 'tool_executor', None)
+        return getattr(self._agent, "tool_executor", None)
 
     @property
     def tool_execution_manager(self):
@@ -179,28 +190,29 @@ class ChatPipeline:
 
     @property
     def post_chat_pipeline(self):
-        return getattr(self._agent, 'post_chat_pipeline', None)
+        return getattr(self._agent, "post_chat_pipeline", None)
 
     @property
     def idle_tracker(self):
-        return getattr(self._agent, 'idle_tracker', None)
+        return getattr(self._agent, "idle_tracker", None)
 
     @property
     def session_manager(self):
-        return getattr(self._agent, 'session_manager', None)
+        return getattr(self._agent, "session_manager", None)
 
     @property
     def _trajectory_recorder(self):
-        return getattr(self._agent, '_trajectory_recorder', None)
+        return getattr(self._agent, "_trajectory_recorder", None)
 
     @property
     def session_sync_manager(self):
         """获取 SessionSyncManager（延迟导入）"""
         try:
             from neurova.sync.session_sync_manager import get_session_sync_manager
+
             return get_session_sync_manager()
         except Exception as e:
-            logger.debug(f"SessionSyncManager 导入失败: {e}")
+            logger.debug("SessionSyncManager 导入失败: %s", e)
             return None
 
     # ══════════════════════════════════════════════════════════════
@@ -240,12 +252,17 @@ class ChatPipeline:
             return
 
         from neurova.sync.session_sync_manager import EventType as _ET
-        await self._sync_event(ctx, _ET.AGENT_REPLY, {
-            "content": ctx.reply,
-            "reasoning": getattr(self._agent, '_current_reasoning', None),
-            "tool_messages": self._collect_tool_messages(),
-            "metadata": ctx.metadata,
-        })
+
+        await self._sync_event(
+            ctx,
+            _ET.AGENT_REPLY,
+            {
+                "content": ctx.reply,
+                "reasoning": getattr(self._agent, "_current_reasoning", None),
+                "tool_messages": self._collect_tool_messages(),
+                "metadata": ctx.metadata,
+            },
+        )
 
     async def _sync_event(self, ctx: ChatContext, event_type: Any, payload: Dict[str, Any]):
         """通用事件广播方法"""
@@ -254,35 +271,28 @@ class ChatPipeline:
             return
 
         try:
-            from neurova.sync.session_sync_manager import EventType, SessionEvent
+            from neurova.sync.session_sync_manager import SessionEvent
 
             # 查找或创建会话
             session_id = ctx.session_id or "default"
             session = sync_manager.get_session(session_id)
-            
+
             if not session:
                 # 创建新会话
                 user_id = (ctx.metadata or {}).get("user_id", "anonymous")
                 session = sync_manager.create_session(
-                    user_id=user_id,
-                    agent_id=self.config.agent_id,
-                    metadata={"source": "chat_pipeline"}
+                    user_id=user_id, agent_id=self.config.agent_id, metadata={"source": "chat_pipeline"}
                 )
                 session_id = session.session_id
 
             # 创建事件
-            event = SessionEvent(
-                event_type=event_type,
-                session_id=session_id,
-                source_channel="agent",
-                payload=payload
-            )
+            event = SessionEvent(event_type=event_type, session_id=session_id, source_channel="agent", payload=payload)
 
             # 广播事件
             await sync_manager.broadcast_event(session_id, event)
 
         except Exception as e:
-            logger.debug(f"SessionSyncManager event sync failed: {e}")
+            logger.debug("SessionSyncManager event sync failed: %s", e)
 
     # ══════════════════════════════════════════════════════════════
     # Step 0: 初始化 Agent 状态
@@ -301,7 +311,7 @@ class ChatPipeline:
     async def _step_activity_tracking(self, ctx: ChatContext):
         """记录活动、会话恢复、轨迹启动"""
         # 递增对话轮次
-        if not hasattr(self._agent, '_turn_count'):
+        if not hasattr(self._agent, "_turn_count"):
             self._agent._turn_count = 0
         self._agent._turn_count += 1
 
@@ -334,14 +344,11 @@ class ChatPipeline:
                 agent_id=self.config.agent_id,
                 session_id=ctx.session_id,
             )
-            if record and hasattr(record, 'messages') and len(record.messages) > 0:
-                saved_messages = [
-                    {"role": msg.role, "content": msg.content}
-                    for msg in record.messages
-                ]
+            if record and hasattr(record, "messages") and len(record.messages) > 0:
+                saved_messages = [{"role": msg.role, "content": msg.content} for msg in record.messages]
                 if len(saved_messages) > len(self._agent.conversation_history):
                     self._agent.conversation_history = saved_messages
-                    logger.info(f"从 session {ctx.session_id} 恢复了 {len(saved_messages)} 条对话历史")
+                    logger.info("从 session %s 恢复了 %s 条对话历史", ctx.session_id, len(saved_messages))
 
             ctx.session_context = self.session_manager.get_recent_context(
                 agent_id=self.config.agent_id,
@@ -349,7 +356,7 @@ class ChatPipeline:
                 max_messages=20,
             )
         except Exception as e:
-            logger.warning(f"恢复 session {ctx.session_id} 失败: {e}")
+            logger.warning("恢复 session %s 失败: %s", ctx.session_id, e)
 
     # ══════════════════════════════════════════════════════════════
     # Step 0.5: Pre-LLM 检查
@@ -381,84 +388,84 @@ class ChatPipeline:
                 await self._auto_execute_tool(ctx)
 
         except Exception as e:
-            logger.warning(f"ToolMemory 检查失败: {e}")
+            logger.warning("ToolMemory 检查失败: %s", e)
 
     async def _auto_execute_tool(self, ctx: ChatContext):
         """自动执行肌肉记忆工具（使用 ToolExecutionManager 深度模块）"""
-        tool_name = ctx.tool_memory_result.get('tool_name')
-        confidence = ctx.tool_memory_result.get('confidence', 0)
+        tool_name = ctx.tool_memory_result.get("tool_name")
+        confidence = ctx.tool_memory_result.get("confidence", 0)
 
         if confidence < 0.7:
-            logger.info(f"工具 {tool_name} 置信度 {confidence:.2f} < 0.7，转为建议模式")
+            logger.info("工具 %s 置信度 %.2f < 0.7，转为建议模式", tool_name, confidence)
             ctx.tool_decision = "suggest"
             return
 
         # 使用 ToolExecutionManager 执行工具（支持超时策略、优雅取消、状态回调）
-        logger.info(f"自动执行工具: {tool_name} (使用 ToolExecutionManager)")
-        
+        logger.info("自动执行工具: %s (使用 ToolExecutionManager)", tool_name)
+
         try:
             # 通过 ToolExecutionManager 执行工具
             execution_context = await self.tool_execution_manager.execute(
                 tool_name=tool_name,
-                params=ctx.tool_memory_result.get('params', {}),
+                params=ctx.tool_memory_result.get("params", {}),
                 user_input=ctx.user_input,
                 executor=self.tool_executor,
                 timeout=5.0,  # 默认5秒超时
                 strategy=TimeoutStrategy.STRICT,
                 max_retries=3,
                 metadata={
-                    'source': 'muscle_memory',
-                    'confidence': confidence,
-                    'session_id': ctx.session_id,
+                    "source": "muscle_memory",
+                    "confidence": confidence,
+                    "session_id": ctx.session_id,
                 },
                 callback=self._on_tool_execution_status_change,
             )
-            
+
             # 检查执行结果
             if execution_context.status == ExecutionStatus.COMPLETED:
                 ctx.auto_execute_result = execution_context.result
                 exec_status = ctx.auto_execute_result.get("status") if ctx.auto_execute_result else None
                 if exec_status == "success":
-                    logger.info(f"工具自动执行成功: {tool_name}")
+                    logger.info("工具自动执行成功: %s", tool_name)
                     ctx.tool_decision = "auto_executed"
                 elif exec_status == "failure":
                     error_msg = ctx.auto_execute_result.get("error", "未知错误")
-                    logger.warning(f"工具自动执行失败: {tool_name}, 错误: {error_msg}")
+                    logger.warning("工具自动执行失败: %s, 错误: %s", tool_name, error_msg)
                     ctx.tool_decision = "failed"
                     await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
             elif execution_context.status == ExecutionStatus.TIMEOUT:
-                logger.warning(f"工具自动执行超时: {tool_name} (>{execution_context.timeout}s)")
+                logger.warning("工具自动执行超时: %s (>%ss)", tool_name, execution_context.timeout)
                 ctx.tool_decision = "timeout"
                 ctx.auto_execute_result = None
             elif execution_context.status == ExecutionStatus.CANCELLED:
-                logger.warning(f"工具自动执行被取消: {tool_name}")
+                logger.warning("工具自动执行被取消: %s", tool_name)
                 ctx.tool_decision = "cancelled"
                 ctx.auto_execute_result = None
             elif execution_context.status == ExecutionStatus.FAILED:
                 error_msg = execution_context.error or "未知错误"
-                logger.warning(f"工具自动执行失败: {tool_name}, 错误: {error_msg}")
+                logger.warning("工具自动执行失败: %s, 错误: %s", tool_name, error_msg)
                 ctx.tool_decision = "failed"
                 ctx.auto_execute_result = {"status": "failure", "error": error_msg}
                 await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
             else:
-                logger.warning(f"工具自动执行未知状态: {tool_name}, 状态: {execution_context.status}")
+                logger.warning("工具自动执行未知状态: %s, 状态: %s", tool_name, execution_context.status)
                 ctx.tool_decision = "failed"
                 ctx.auto_execute_result = None
-                
+
         except Exception as e:
-            logger.error(f"工具自动执行异常: {tool_name}, 错误: {e}")
+            logger.error("工具自动执行异常: %s, 错误: %s", tool_name, e)
             ctx.tool_decision = "failed"
             ctx.auto_execute_result = {"status": "failure", "error": str(e)}
 
     def _on_tool_execution_status_change(self, event):
         """工具执行状态变更回调"""
-        logger.debug(f"工具执行状态变更: {event.context_id} {event.old_status.value} -> {event.new_status.value}")
+        logger.debug("工具执行状态变更: %s %s -> %s", event.context_id, event.old_status.value, event.new_status.value)
         # 可以在这里添加状态变更日志、指标收集等
 
     async def _record_tool_failure(self, tool_name: str, user_input: str, error_msg: str):
         """记录工具失败教训"""
         try:
-            if hasattr(self._agent, '_record_tool_failure_lesson'):
+            if hasattr(self._agent, "_record_tool_failure_lesson"):
                 await self._agent._record_tool_failure_lesson(tool_name, user_input, error_msg)
         except Exception as e:
             logger.warning(f"记录工具失败教训时出错: {tool_name}, 错误: {e}", exc_info=True)
@@ -474,11 +481,11 @@ class ChatPipeline:
                 sc = result.get("success_count", 0)
                 if sc > 0:
                     acquired = [r.get("skill_name") for r in result.get("acquisition_results", []) if r.get("success")]
-                    logger.info(f"主动技能获取: 成功安装 {sc} 个技能 {acquired}")
+                    logger.info("主动技能获取: 成功安装 %s 个技能 %s", sc, acquired)
                 elif result.get("missing_skills"):
-                    logger.info(f"需要技能: {result['missing_skills']}，但未在市场中找到")
+                    logger.info("需要技能: %s，但未在市场中找到", result['missing_skills'])
         except Exception as e:
-            logger.warning(f"主动技能获取检查失败: {e}")
+            logger.warning("主动技能获取检查失败: %s", e)
 
     async def _check_nl_synthesis(self, ctx: ChatContext):
         """NL 工具合成检查"""
@@ -488,12 +495,25 @@ class ChatPipeline:
             return
 
         try:
-            action_keywords = ["帮我", "读取", "写入", "搜索", "下载", "转换", "生成",
-                               "read", "write", "search", "download", "convert", "generate"]
+            action_keywords = [
+                "帮我",
+                "读取",
+                "写入",
+                "搜索",
+                "下载",
+                "转换",
+                "生成",
+                "read",
+                "write",
+                "search",
+                "download",
+                "convert",
+                "generate",
+            ]
             if not any(kw in ctx.user_input.lower() for kw in action_keywords):
                 return
 
-            skill_registry = getattr(self._agent, '_skill_registry', None)
+            skill_registry = getattr(self._agent, "_skill_registry", None)
             has_tool = False
             if skill_registry:
                 has_tool = any(
@@ -508,12 +528,9 @@ class ChatPipeline:
                     author_id=self.config.agent_id,
                 )
                 if synth_result and synth_result.stage.value == "COMPLETED":
-                    logger.info(
-                        f"NL工具合成: {synth_result.tool.name} "
-                        f"(置信度={synth_result.confidence:.2f})"
-                    )
+                    logger.info("NL工具合成: %s (置信度=%.2f)", synth_result.tool.name, synth_result.confidence)
         except Exception as e:
-            logger.warning(f"NL工具合成检查失败: {e}")
+            logger.warning("NL工具合成检查失败: %s", e)
 
     # ══════════════════════════════════════════════════════════════
     # Step 1: 检索与上下文构建
@@ -536,7 +553,7 @@ class ChatPipeline:
         voice_context = None
         if ctx.metadata and isinstance(ctx.metadata, dict):
             voice_context = ctx.metadata.get("voice_context")
-        
+
         ctx.context = await self.context_orchestrator.build_context(
             user_input=ctx.user_input,
             tool_memory_result=ctx.tool_memory_result,
@@ -555,7 +572,7 @@ class ChatPipeline:
         retrieval_context = RetrievalContext(
             query=ctx.user_input,
             limit=10,
-            user_id=getattr(ctx, 'user_id', None),
+            user_id=getattr(ctx, "user_id", None),
             session_id=ctx.session_id,
             strategy=RetrievalStrategy.CHAIN,  # 责任链策略（按优先级降级）
             min_quality=0.3,  # 最低质量要求
@@ -564,21 +581,25 @@ class ChatPipeline:
                 "trace_id": ctx.trace_id,
             },
         )
-        
+
         # 使用 MemoryRetrievalChain 执行检索
         result = await self.memory_retrieval_chain.retrieve(retrieval_context)
-        
+
         # 提取记忆内容
         ctx.relevant_memories = result.memories
-        
+
         # 记录检索统计
-        logger.info(f"Memory retrieval completed: source={result.source}, quality={result.quality_level.value}, memories={len(result.memories)}")
-        
+        logger.info(
+            f"Memory retrieval completed: source={result.source}, quality={result.quality_level.value}, memories={len(result.memories)}"
+        )
+
         # 记录到追踪系统
         if ctx.trace_id and self.trace_manager:
             self.trace_manager.add_step(
-                ctx.trace_id, "retrieve",
-                ctx.user_input, f"找到 {len(ctx.relevant_memories)} 条记忆 (质量: {result.quality_level.value})"
+                ctx.trace_id,
+                "retrieve",
+                ctx.user_input,
+                f"找到 {len(ctx.relevant_memories)} 条记忆 (质量: {result.quality_level.value})",
             )
 
     async def _retrieve_crystallized_patterns(self, ctx: ChatContext):
@@ -598,12 +619,12 @@ class ChatPipeline:
         if result.experiences:
             ctx.crystallized_patterns = [
                 {
-                    'id': exp.id,
-                    'content': exp.content,
-                    'method': exp.method,
-                    'confidence': exp.confidence,
-                    'score': exp.score,
-                    'source': exp.source,
+                    "id": exp.id,
+                    "content": exp.content,
+                    "method": exp.method,
+                    "confidence": exp.confidence,
+                    "score": exp.score,
+                    "source": exp.source,
                 }
                 for exp in result.experiences
             ]
@@ -618,9 +639,10 @@ class ChatPipeline:
         # 记录到追踪系统
         if ctx.trace_id and self.trace_manager:
             self.trace_manager.add_step(
-                ctx.trace_id, "crystallize",
+                ctx.trace_id,
+                "crystallize",
                 ctx.user_input,
-                f"检索到 {len(ctx.crystallized_patterns)} 条结晶经验 (状态: {result.status.value})"
+                f"检索到 {len(ctx.crystallized_patterns)} 条结晶经验 (状态: {result.status.value})",
             )
 
     # ══════════════════════════════════════════════════════════════
@@ -646,7 +668,7 @@ class ChatPipeline:
                         msg["content"] += f"\n\n## Retrieved Knowledge (Neurova Hebb)\n{hebb_context}"
                         break
         except Exception as e:
-            logger.warning(f"Neurova Hebb 检索失败: {e}")
+            logger.warning("Neurova Hebb 检索失败: %s", e)
 
     # ══════════════════════════════════════════════════════════════
     # Step 3: LLM 调用（含自动续写）
@@ -660,20 +682,22 @@ class ChatPipeline:
         if ctx.tool_decision == "auto_executed" and ctx.auto_execute_result and tools_for_llm:
             executed_tool = ctx.auto_execute_result.get("tool_name", "")
             original_count = len(tools_for_llm)
-            tools_for_llm = [
-                t for t in tools_for_llm
-                if t.get("function", {}).get("name", "") != executed_tool
-            ]
+            tools_for_llm = [t for t in tools_for_llm if t.get("function", {}).get("name", "") != executed_tool]
             if len(tools_for_llm) < original_count:
-                logger.info(f"已从工具列表移除已执行工具: {executed_tool}")
+                logger.info("已从工具列表移除已执行工具: %s", executed_tool)
 
         # 广播 AGENT_THINKING 事件
         try:
             from neurova.sync.session_sync_manager import EventType
-            await self._sync_event(ctx, EventType.AGENT_THINKING, {
-                "stage": "llm_call",
-                "tools_count": len(tools_for_llm) if tools_for_llm else 0,
-            })
+
+            await self._sync_event(
+                ctx,
+                EventType.AGENT_THINKING,
+                {
+                    "stage": "llm_call",
+                    "tools_count": len(tools_for_llm) if tools_for_llm else 0,
+                },
+            )
         except ImportError:
             logger.debug("EventType 导入失败，跳过事件广播")
 
@@ -690,9 +714,14 @@ class ChatPipeline:
         if tool_messages:
             try:
                 from neurova.sync.session_sync_manager import EventType
-                await self._sync_event(ctx, EventType.AGENT_TOOL_RESULT, {
-                    "tool_messages": tool_messages,
-                })
+
+                await self._sync_event(
+                    ctx,
+                    EventType.AGENT_TOOL_RESULT,
+                    {
+                        "tool_messages": tool_messages,
+                    },
+                )
             except ImportError:
                 logger.debug("EventType 导入失败，跳过事件广播")
 
@@ -706,10 +735,10 @@ class ChatPipeline:
         except Exception as e:
             # API 配置错误不 fallback
             if self._is_api_config_error(e):
-                logger.error(f"Agent Loop API 配置错误: {e}")
+                logger.error("Agent Loop API 配置错误: %s", e)
                 raise
             # Loop 特定错误 fallback 到 legacy
-            logger.warning(f"Agent Loop failed: {e}, falling back to legacy")
+            logger.warning("Agent Loop failed: %s, falling back to legacy", e)
             return await self._call_legacy(ctx)
 
     async def _call_loop_stream(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
@@ -725,13 +754,11 @@ class ChatPipeline:
 
     async def _call_loop_normal(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
         """非流式调用 Agent Loop（含自动续写）"""
-        response = await self.loop.predict_step(
-            messages=ctx.context, tools=tools_for_llm, stream=False
-        )
+        response = await self.loop.predict_step(messages=ctx.context, tools=tools_for_llm, stream=False)
         reply = response.content if response else ""
 
         # 捕获思考过程
-        if response and hasattr(response, 'reasoning_content') and response.reasoning_content:
+        if response and hasattr(response, "reasoning_content") and response.reasoning_content:
             self._agent._current_reasoning = response.reasoning_content
 
         # 自动续写
@@ -739,12 +766,10 @@ class ChatPipeline:
 
         return reply
 
-    async def _auto_continue(
-        self, ctx: ChatContext, response, reply: str, tools_for_llm: Optional[List]
-    ) -> str:
+    async def _auto_continue(self, ctx: ChatContext, response, reply: str, tools_for_llm: Optional[List]) -> str:
         """截断自动续写逻辑"""
         MAX_CONTINUE_ROUNDS = 100
-        MAX_TOTAL_CHARS = getattr(self.llm_client.config, 'max_tokens', 8192) * 10
+        MAX_TOTAL_CHARS = getattr(self.llm_client.config, "max_tokens", 8192) * 10
         OVERLAP_CHECK_LEN = 200
         OVERLAP_THRESHOLD = 0.6
         MIN_CONTINUE_LEN = 10
@@ -760,14 +785,16 @@ class ChatPipeline:
         recent_contents = []
         tool_call_rounds = 0
 
-        while (response
-               and getattr(response, 'finish_reason', '') == 'length'
-               and not getattr(response, 'tool_calls', None)
-               and continue_round < MAX_CONTINUE_ROUNDS
-               and len(reply) < MAX_TOTAL_CHARS):
+        while (
+            response
+            and getattr(response, "finish_reason", "") == "length"
+            and not getattr(response, "tool_calls", None)
+            and continue_round < MAX_CONTINUE_ROUNDS
+            and len(reply) < MAX_TOTAL_CHARS
+        ):
 
             continue_round += 1
-            tail_text = (response.content or '')[-TAIL_CONTEXT_CHARS:].strip()
+            tail_text = (response.content or "")[-TAIL_CONTEXT_CHARS:].strip()
 
             if tail_text:
                 full_hint = f"{hint}\n\n<previous-tail>\n{tail_text}\n</previous-tail>"
@@ -779,17 +806,15 @@ class ChatPipeline:
 
             _tools = tools_for_llm if continue_round == 1 else None
 
-            if _tools and getattr(response, 'tool_calls', None):
+            if _tools and getattr(response, "tool_calls", None):
                 tool_call_rounds += 1
                 if tool_call_rounds >= MAX_TOOL_CALL_ROUNDS:
                     _tools = None
 
-            logger.info(f"截断续写第 {continue_round} 轮 (tools={'on' if _tools else 'off'}, 已输出 {len(reply)} 字符)")
+            logger.info("截断续写第 %s 轮 (tools=%s, 已输出 %s 字符)", continue_round, 'on' if _tools else 'off', len(reply))
 
-            response = await self.loop.predict_step(
-                messages=ctx.context, tools=_tools, stream=False
-            )
-            new_content = getattr(response, 'content', '') if response else ''
+            response = await self.loop.predict_step(messages=ctx.context, tools=_tools, stream=False)
+            new_content = getattr(response, "content", "") if response else ""
 
             # 护栏 A: 续写过短
             if not new_content or len(new_content.strip()) < MIN_CONTINUE_LEN:
@@ -812,7 +837,7 @@ class ChatPipeline:
                     break
 
             # 护栏 D: 工具调用循环
-            if getattr(response, 'tool_calls', None):
+            if getattr(response, "tool_calls", None):
                 tool_call_rounds += 1
                 if tool_call_rounds >= MAX_TOOL_CALL_ROUNDS:
                     _tools = None
@@ -823,8 +848,8 @@ class ChatPipeline:
 
     def _build_continue_hint(self, user_input: str, reply: str) -> str:
         """构建自适应续写提示（中英文）"""
-        sample = (user_input or '') + (reply or '')
-        cjk = sum(1 for c in sample if '\u4e00' <= c <= '\u9fff')
+        sample = (user_input or "") + (reply or "")
+        cjk = sum(1 for c in sample if "\u4e00" <= c <= "\u9fff")
         is_cjk = cjk > len(sample) * 0.15 if sample else False
 
         if is_cjk:
@@ -860,17 +885,17 @@ class ChatPipeline:
         """非流式 fallback"""
         response = await self.llm_client.chat(ctx.context)
         if isinstance(response, dict):
-            if response.get('success'):
-                raw = response.get('response', '')
-                if hasattr(raw, 'content'):
+            if response.get("success"):
+                raw = response.get("response", "")
+                if hasattr(raw, "content"):
                     reply = raw.content
                 elif isinstance(raw, dict):
-                    reply = raw.get('content', raw.get('text', str(raw)))
+                    reply = raw.get("content", raw.get("text", str(raw)))
                 else:
                     reply = str(raw)
             else:
                 reply = f"[LLM Error] {response.get('error', 'Unknown error')}"
-        elif hasattr(response, 'content'):
+        elif hasattr(response, "content"):
             reply = response.content
         else:
             reply = str(response)
@@ -887,12 +912,13 @@ class ChatPipeline:
     def _is_api_config_error(exc: Exception) -> bool:
         """判断是否为 API 配置类错误（不应 fallback）"""
         try:
-            from openai import BadRequestError, AuthenticationError
+            from openai import AuthenticationError, BadRequestError
+
             if isinstance(exc, (BadRequestError, AuthenticationError)):
                 return True
         except ImportError:
             pass
-        status = getattr(exc, 'status_code', None) or getattr(exc, 'code', None)
+        status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
         return status in (400, 401, 403)
 
     # ══════════════════════════════════════════════════════════════
@@ -921,29 +947,30 @@ class ChatPipeline:
                 total_tokens = len(ctx.user_input) + len(ctx.reply) if ctx.reply else len(ctx.user_input)
                 self.trace_manager.finish_trace(ctx.trace_id, ctx.reply or "", total_tokens=total_tokens)
             except Exception as e:
-                logger.warning(f"推理链记录失败: {e}")
+                logger.warning("推理链记录失败: %s", e)
 
         # 结晶器观察
         if self.crystallizer:
-            last_tool = getattr(self._agent, '_last_tool_used', None)
+            last_tool = getattr(self._agent, "_last_tool_used", None)
             if last_tool:
                 try:
                     self.crystallizer.observe(tool_name=last_tool, context=ctx.user_input, success=True)
                 except Exception as e:
-                    logger.warning(f"结晶器观察失败: {e}")
+                    logger.warning("结晶器观察失败: %s", e)
 
         # PostChatPipeline - 优先使用 PipelineExecutor
-        pipeline_executor = getattr(self._agent, 'pipeline_executor', None)
+        pipeline_executor = getattr(self._agent, "pipeline_executor", None)
         if pipeline_executor:
             try:
                 from neurova.pipeline_executor import PipelineRequest
+
                 request = PipelineRequest(
                     user_input=ctx.user_input,
                     reply=ctx.reply,
                     session_id=ctx.session_id,
                     save_memory=ctx.save_memory,
                     enable_tts=ctx.enable_tts,
-                    metadata=ctx.metadata or {}
+                    metadata=ctx.metadata or {},
                 )
                 response = await pipeline_executor.execute(request)
                 # 转换为旧格式以保持兼容性
@@ -955,7 +982,7 @@ class ChatPipeline:
                     "proactive_question": response.metadata.get("proactive_question"),
                 }
             except Exception as e:
-                logger.warning(f"PipelineExecutor 执行失败，fallback 到 post_chat_pipeline: {e}")
+                logger.warning("PipelineExecutor 执行失败，fallback 到 post_chat_pipeline: %s", e)
                 # Fallback 到旧的 post_chat_pipeline
                 post_result = await self.post_chat_pipeline.process(
                     user_input=ctx.user_input,
@@ -986,7 +1013,7 @@ class ChatPipeline:
             "experience_used": len(ctx.experience_items) > 0,
             "experience_count": len(ctx.experience_items),
             "session_id": post_result.get("actual_session_id"),
-            "reasoning": getattr(self._agent, '_current_reasoning', None),
+            "reasoning": getattr(self._agent, "_current_reasoning", None),
             "tool_messages": self._collect_tool_messages(),
             "proactive_question": post_result.get("proactive_question"),
         }
@@ -1002,4 +1029,4 @@ class ChatPipeline:
 
     def _collect_tool_messages(self) -> List[Dict]:
         """收集工具调用消息"""
-        return getattr(self._agent, '_tool_messages_list', []) or []
+        return getattr(self._agent, "_tool_messages_list", []) or []

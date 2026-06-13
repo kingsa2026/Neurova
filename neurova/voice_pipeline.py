@@ -14,9 +14,9 @@ UnifiedVoicePipeline — 统一语音处理管线
 """
 
 import logging
-from typing import Dict, Optional, Any, List
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class VoicePipelineResult:
     """语音管线处理结果"""
+
     # ASR 结果
     text: str = ""
     confidence: float = 0.0
@@ -84,28 +85,32 @@ class UnifiedVoicePipeline:
 
         try:
             from neurova.voice_context_module import get_voice_context_module
+
             self._voice_context_module = get_voice_context_module()
         except Exception as e:
-            logger.debug(f"VoiceContextModule 初始化跳过: {e}")
+            logger.debug("VoiceContextModule 初始化跳过: %s", e)
 
         try:
             from neurova.voice_memory_bridge import VoiceMemoryBridge, VoiceMemoryConfig
+
             config = VoiceMemoryConfig()
             self._voice_memory_bridge = VoiceMemoryBridge(config=config)
         except Exception as e:
-            logger.debug(f"VoiceMemoryBridge 初始化跳过: {e}")
+            logger.debug("VoiceMemoryBridge 初始化跳过: %s", e)
 
         try:
             from neurova.asr.manager import ASRManager
+
             self._asr_manager = ASRManager()
         except Exception as e:
-            logger.debug(f"ASRManager 初始化跳过: {e}")
+            logger.debug("ASRManager 初始化跳过: %s", e)
 
         try:
             from neurova.tts.manager import TTSManager
+
             self._tts_manager = TTSManager()
         except Exception as e:
-            logger.debug(f"TTSManager 初始化跳过: {e}")
+            logger.debug("TTSManager 初始化跳过: %s", e)
 
         self._initialized = True
 
@@ -178,7 +183,7 @@ class UnifiedVoicePipeline:
                 result.context_injected = True
                 logger.debug(f"语音上下文已注入 ContextPool")
             except Exception as e:
-                logger.warning(f"语音上下文注入失败: {e}")
+                logger.warning("语音上下文注入失败: %s", e)
 
         # 4. 记录到语音记忆
         if self._voice_memory_bridge and user_id and agent_id:
@@ -191,7 +196,7 @@ class UnifiedVoicePipeline:
                 result.memory_recorded = memory_result.success
                 logger.debug(f"ASR 结果已记录到语音记忆")
             except Exception as e:
-                logger.warning(f"语音记忆记录失败: {e}")
+                logger.warning("语音记忆记录失败: %s", e)
 
         result.metadata = {
             "asr_dict": asr_dict,
@@ -239,8 +244,8 @@ class UnifiedVoicePipeline:
 
                 elapsed_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
                 result.tts_duration_ms = elapsed_ms
-                result.tts_engine = getattr(self._tts_manager, '_active_engine_name', 'unknown')
-                result.tts_voice = voice or 'default'
+                result.tts_engine = getattr(self._tts_manager, "_active_engine_name", "unknown")
+                result.tts_voice = voice or "default"
             else:
                 result.error = "TTSManager 不可用"
                 return result
@@ -266,7 +271,7 @@ class UnifiedVoicePipeline:
                 result.context_injected = True
                 logger.debug(f"TTS 上下文已注入 ContextPool")
             except Exception as e:
-                logger.warning(f"TTS 上下文注入失败: {e}")
+                logger.warning("TTS 上下文注入失败: %s", e)
 
         # 3. 记录 TTS 使用
         if self._voice_memory_bridge and user_id and agent_id:
@@ -279,7 +284,7 @@ class UnifiedVoicePipeline:
                 result.memory_recorded = memory_result.success
                 logger.debug(f"TTS 使用已记录到语音记忆")
             except Exception as e:
-                logger.warning(f"TTS 使用记录失败: {e}")
+                logger.warning("TTS 使用记录失败: %s", e)
 
         result.metadata = {
             "tts_dict": tts_dict,
@@ -294,7 +299,7 @@ class UnifiedVoicePipeline:
         try:
             return self._voice_context_module.analyze_emotion(text)
         except Exception as e:
-            logger.debug(f"情感分析失败: {e}")
+            logger.debug("情感分析失败: %s", e)
             return None
 
     def get_pipeline_stats(self) -> Dict[str, Any]:

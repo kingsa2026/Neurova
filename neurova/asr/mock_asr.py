@@ -5,8 +5,7 @@ Mock ASR Engine - 模拟 ASR 引擎
 """
 
 import logging
-import time
-from typing import Dict, Any
+from typing import Any, Dict
 
 from neurova.asr.base import ASRBase
 
@@ -59,4 +58,5 @@ class MockASREngine(ASRBase):
 # 异步 sleep（避免在同步上下文中使用 asyncio.sleep）
 async def asyncio_sleep(seconds: float):
     import asyncio
+
     await asyncio.sleep(seconds)

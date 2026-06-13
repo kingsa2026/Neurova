@@ -16,7 +16,7 @@ from neurova.skills.builtin.github_push.skill import (
 
 __all__ = [
     "GitHubPushSkill",
-    "create_github_push_skill", 
+    "create_github_push_skill",
     "push_to_github",
 ]
 

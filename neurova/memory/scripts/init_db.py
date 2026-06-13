@@ -4,15 +4,17 @@
 运行: cd Neurova && python -m memory.scripts.init_db
 """
 
-import sqlite3
 import os
+import sqlite3
 import sys
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.insert(0, project_root)
 
+
 def get_db_path() -> str:
-    return os.path.join(project_root, 'memory', 'data', 'yi_ling_memory.db')
+    return os.path.join(project_root, "memory", "data", "yi_ling_memory.db")
+
 
 def create_all_tables(conn: sqlite3.Connection):
     """按蓝图创建所有表结构"""
@@ -407,6 +409,7 @@ def create_all_tables(conn: sqlite3.Connection):
 
     conn.commit()
 
+
 def create_all_indexes(conn: sqlite3.Connection):
     """按蓝图创建所有索引"""
     conn.executescript("""
@@ -434,6 +437,7 @@ def create_all_indexes(conn: sqlite3.Connection):
         -- 副表外键与查询索引
         CREATE INDEX IF NOT EXISTS idx_emotions_memory ON memory_emotions(memory_id);
         CREATE INDEX IF NOT EXISTS idx_emotions_type ON memory_emotions(memory_id, emotion_type, intensity DESC);
+        CREATE INDEX IF NOT EXISTS idx_emotions_created ON memory_emotions(created_at);
         CREATE INDEX IF NOT EXISTS idx_relations_source ON memory_relations(source_memory_id, relation_type, strength DESC);
         CREATE INDEX IF NOT EXISTS idx_relations_target ON memory_relations(target_memory_id);
         CREATE INDEX IF NOT EXISTS idx_keywords_lookup ON memory_keywords(keyword, relevance DESC, memory_id);
@@ -468,6 +472,7 @@ def create_all_indexes(conn: sqlite3.Connection):
 
     conn.commit()
 
+
 def init_db(db_path: str = None):
     """初始化数据库"""
     if db_path is None:
@@ -477,8 +482,9 @@ def init_db(db_path: str = None):
 
     # 如果数据库已存在，先备份
     if os.path.exists(db_path):
-        backup_path = db_path + '.backup'
+        backup_path = db_path + ".backup"
         import shutil
+
         shutil.copy2(db_path, backup_path)
         os.remove(db_path)
         print(f"  已备份旧数据库到: {backup_path}")
@@ -518,6 +524,7 @@ def init_db(db_path: str = None):
         print(f"    - {t}")
 
     return db_path
+
 
 if __name__ == "__main__":
     print("忆灵，正在初始化数据库...\n")

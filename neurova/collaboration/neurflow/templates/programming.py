@@ -9,31 +9,29 @@
 - 测试驱动开发
 - 代码审查和改进
 """
+
 import time
 import uuid
-from typing import Dict, List, Any
+from typing import List
 
-from ..models import (
-    WorkflowDefinition, WorkflowNode, WorkflowEdge, WorkflowVariable,
-    WorkflowStatus, NodeCategory
-)
+from ..models import WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus, WorkflowVariable
 
 
 def get_programming_template() -> WorkflowDefinition:
     """获取编程助手工作流模板
-    
+
     Returns:
         预定义的编程助手工作流定义
     """
     # 创建节点
     nodes = _create_nodes()
-    
+
     # 创建边
     edges = _create_edges()
-    
+
     # 创建变量
     variables = _create_variables()
-    
+
     # 创建工作流定义
     return WorkflowDefinition(
         id=f"template_programming_{uuid.uuid4().hex[:8]}",
@@ -56,7 +54,7 @@ def get_programming_template() -> WorkflowDefinition:
             "estimated_time": "15-30 minutes",
             "required_skills": ["programming", "testing"],
             "description": "使用 TDD 方法自动生成和优化代码",
-        }
+        },
     )
 
 
@@ -86,13 +84,12 @@ def _create_nodes() -> List[WorkflowNode]:
                         "options": ["pytest", "jest", "junit", "go test"],
                         "default": "pytest",
                         "description": "测试框架",
-                    }
+                    },
                 }
             },
             label="开始",
-            metadata={"category": "flow"}
+            metadata={"category": "flow"},
         ),
-        
         # 需求分析节点（LLM）
         WorkflowNode(
             id="analyze_requirements",
@@ -116,9 +113,8 @@ def _create_nodes() -> List[WorkflowNode]:
                 "max_tokens": 2000,
             },
             label="需求分析",
-            metadata={"category": "ai"}
+            metadata={"category": "ai"},
         ),
-        
         # TDD 实现节点
         WorkflowNode(
             id="tdd_implementation",
@@ -153,9 +149,8 @@ def _create_nodes() -> List[WorkflowNode]:
                 "pass_threshold": 0.9,
             },
             label="TDD 实现",
-            metadata={"category": "ai"}
+            metadata={"category": "ai"},
         ),
-        
         # 代码审查节点（LLM）
         WorkflowNode(
             id="code_review",
@@ -182,9 +177,8 @@ def _create_nodes() -> List[WorkflowNode]:
                 "max_tokens": 1500,
             },
             label="代码审查",
-            metadata={"category": "ai"}
+            metadata={"category": "ai"},
         ),
-        
         # 条件节点（检查代码质量）
         WorkflowNode(
             id="quality_check",
@@ -198,9 +192,8 @@ def _create_nodes() -> List[WorkflowNode]:
                 ],
             },
             label="质量检查",
-            metadata={"category": "flow"}
+            metadata={"category": "flow"},
         ),
-        
         # 进化学习节点（代码质量高时）
         WorkflowNode(
             id="evolution_learning",
@@ -218,9 +211,8 @@ def _create_nodes() -> List[WorkflowNode]:
                 },
             },
             label="进化学习",
-            metadata={"category": "ai"}
+            metadata={"category": "ai"},
         ),
-        
         # 代码优化节点（代码质量低时）
         WorkflowNode(
             id="code_optimization",
@@ -245,9 +237,8 @@ def _create_nodes() -> List[WorkflowNode]:
                 "max_tokens": 2000,
             },
             label="代码优化",
-            metadata={"category": "ai"}
+            metadata={"category": "ai"},
         ),
-        
         # 合并节点
         WorkflowNode(
             id="merge_results",
@@ -257,9 +248,8 @@ def _create_nodes() -> List[WorkflowNode]:
                 "strategy": "first",
             },
             label="合并结果",
-            metadata={"category": "flow"}
+            metadata={"category": "flow"},
         ),
-        
         # 结束节点
         WorkflowNode(
             id="end",
@@ -275,7 +265,7 @@ def _create_nodes() -> List[WorkflowNode]:
                 },
             },
             label="结束",
-            metadata={"category": "flow"}
+            metadata={"category": "flow"},
         ),
     ]
 
@@ -289,28 +279,24 @@ def _create_edges() -> List[WorkflowEdge]:
             source="start",
             target="analyze_requirements",
         ),
-        
         # 需求分析 → TDD 实现
         WorkflowEdge(
             id="analyze_to_tdd",
             source="analyze_requirements",
             target="tdd_implementation",
         ),
-        
         # TDD 实现 → 代码审查
         WorkflowEdge(
             id="tdd_to_review",
             source="tdd_implementation",
             target="code_review",
         ),
-        
         # 代码审查 → 质量检查
         WorkflowEdge(
             id="review_to_check",
             source="code_review",
             target="quality_check",
         ),
-        
         # 质量检查 → 进化学习（高质量）
         WorkflowEdge(
             id="check_to_evolution",
@@ -318,7 +304,6 @@ def _create_edges() -> List[WorkflowEdge]:
             target="evolution_learning",
             source_handle="true",
         ),
-        
         # 质量检查 → 代码优化（需要改进）
         WorkflowEdge(
             id="check_to_optimization",
@@ -326,21 +311,18 @@ def _create_edges() -> List[WorkflowEdge]:
             target="code_optimization",
             source_handle="false",
         ),
-        
         # 进化学习 → 合并结果
         WorkflowEdge(
             id="evolution_to_merge",
             source="evolution_learning",
             target="merge_results",
         ),
-        
         # 代码优化 → 合并结果
         WorkflowEdge(
             id="optimization_to_merge",
             source="code_optimization",
             target="merge_results",
         ),
-        
         # 合并结果 → 结束
         WorkflowEdge(
             id="merge_to_end",

@@ -17,7 +17,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -108,9 +107,7 @@ class ResourceQuotaManager:
         self._usage_path = self._dir / "usage.json"
         self._usage: Dict[str, Dict[str, Any]] = {}
         self._custom_limits: Dict[str, int] = dict(custom_limits) if custom_limits else {}
-        self._group_limits: Dict[str, Dict[str, int]] = {
-            g: dict(limits) for g, limits in (group_limits or {}).items()
-        }
+        self._group_limits: Dict[str, Dict[str, int]] = {g: dict(limits) for g, limits in (group_limits or {}).items()}
         self._lock = threading.RLock()
         self._load()
 
@@ -140,9 +137,7 @@ class ResourceQuotaManager:
             return ResourceUsage.from_dict(existing)
         return ResourceUsage(user_id=user_id, group_type=group_type)
 
-    def _get_or_create_usage(
-        self, user_id: str, group_type: str = "user"
-    ) -> ResourceUsage:
+    def _get_or_create_usage(self, user_id: str, group_type: str = "user") -> ResourceUsage:
         existing = self._usage.get(user_id)
         if existing is not None:
             return ResourceUsage.from_dict(existing)
@@ -150,9 +145,7 @@ class ResourceQuotaManager:
         self._persist(usage)
         return usage
 
-    def get_user_quota(
-        self, user_id: str, group_type: str = "user"
-    ) -> Dict[str, int]:
+    def get_user_quota(self, user_id: str, group_type: str = "user") -> Dict[str, int]:
         with self._lock:
             quota: Dict[str, int] = dict(DEFAULT_LIMITS)
             quota.update(self._custom_limits)
@@ -207,21 +200,13 @@ class ResourceQuotaManager:
         with self._lock:
             return self._check(user_id, "llm_token_count", "max_llm_tokens_per_day")
 
-    def check_storage_quota(
-        self, user_id: str, additional_bytes: int = 0
-    ) -> Dict[str, Any]:
+    def check_storage_quota(self, user_id: str, additional_bytes: int = 0) -> Dict[str, Any]:
         with self._lock:
-            return self._check(
-                user_id, "storage_bytes", "max_storage_bytes", additional_bytes
-            )
+            return self._check(user_id, "storage_bytes", "max_storage_bytes", additional_bytes)
 
-    def check_file_size_quota(
-        self, user_id: str, file_size_bytes: int = 0
-    ) -> Dict[str, Any]:
+    def check_file_size_quota(self, user_id: str, file_size_bytes: int = 0) -> Dict[str, Any]:
         with self._lock:
-            return self._check(
-                user_id, "file_size_bytes", "max_file_size_bytes", file_size_bytes
-            )
+            return self._check(user_id, "file_size_bytes", "max_file_size_bytes", file_size_bytes)
 
     def check_private_skill_quota(self, user_id: str) -> Dict[str, Any]:
         with self._lock:
@@ -229,21 +214,15 @@ class ResourceQuotaManager:
 
     def check_collab_project_quota(self, user_id: str) -> Dict[str, Any]:
         with self._lock:
-            return self._check(
-                user_id, "collab_project_count", "max_collab_projects"
-            )
+            return self._check(user_id, "collab_project_count", "max_collab_projects")
 
     def check_api_call_quota(self, user_id: str) -> Dict[str, Any]:
         with self._lock:
-            return self._check(
-                user_id, "api_call_count", "max_api_calls_per_minute"
-            )
+            return self._check(user_id, "api_call_count", "max_api_calls_per_minute")
 
     def check_concurrent_session_quota(self, user_id: str) -> Dict[str, Any]:
         with self._lock:
-            return self._check(
-                user_id, "concurrent_session_count", "max_concurrent_sessions"
-            )
+            return self._check(user_id, "concurrent_session_count", "max_concurrent_sessions")
 
     def _add(self, user_id: str, field: str, delta: int, floor: int = 0) -> None:
         with self._lock:
@@ -318,9 +297,7 @@ class ResourceQuotaManager:
                 "usage": usage.to_dict(),
             }
 
-    def list_users_near_limits(
-        self, threshold: float = 0.8
-    ) -> List[Dict[str, Any]]:
+    def list_users_near_limits(self, threshold: float = 0.8) -> List[Dict[str, Any]]:
         with self._lock:
             results: List[Dict[str, Any]] = []
             for user_id, payload in self._usage.items():
@@ -336,18 +313,18 @@ class ResourceQuotaManager:
                     continue
                 max_ratio = max(ratios.values())
                 if max_ratio >= threshold:
-                    results.append({
-                        "user_id": user_id,
-                        "max_ratio": max_ratio,
-                        "ratios": ratios,
-                        "usage": usage.to_dict(),
-                        "limits": quota,
-                    })
+                    results.append(
+                        {
+                            "user_id": user_id,
+                            "max_ratio": max_ratio,
+                            "ratios": ratios,
+                            "usage": usage.to_dict(),
+                            "limits": quota,
+                        }
+                    )
             return results
 
-    def try_consume(
-        self, user_id: str, usage_field: str, limit_field: str
-    ) -> bool:
+    def try_consume(self, user_id: str, usage_field: str, limit_field: str) -> bool:
         with self._lock:
             quota = self.get_user_quota(user_id)
             usage = self._get_or_create_usage(user_id)
@@ -372,10 +349,7 @@ class ResourceQuotaManager:
 
     def get_all_usage(self) -> Dict[str, Dict[str, Any]]:
         with self._lock:
-            return {
-                uid: ResourceUsage.from_dict(data).to_dict()
-                for uid, data in self._usage.items()
-            }
+            return {uid: ResourceUsage.from_dict(data).to_dict() for uid, data in self._usage.items()}
 
     def get_stats(self) -> Dict[str, Any]:
         with self._lock:

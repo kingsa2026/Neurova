@@ -5,15 +5,13 @@
 导入路径保持不变: from neurova.api.endpoints.memory import router as memory_router
 """
 
-from .base import router
-
 # 导入子模块以注册路由
 from . import crud  # noqa: F401
-from . import reflection  # noqa: F401
-from . import questions  # noqa: F401
-from . import emotion  # noqa: F401
 from . import eki  # noqa: F401
-from . import profile  # noqa: F401
+from . import emotion  # noqa: F401
 from . import metacognition  # noqa: F401
+from . import profile  # noqa: F401
+from . import questions  # noqa: F401
+from . import reflection  # noqa: F401
 from . import tkg  # noqa: F401
 from . import working_memory  # noqa: F401

@@ -14,7 +14,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -53,9 +53,14 @@ for _gid, _gname, _perms in [
     ("readonly", "只读用户", ["chat:read"]),
 ]:
     _groups_store[_gid] = {
-        "group_id": _gid, "name": _gname, "description": f"系统内置{_gname}组",
-        "is_system": True, "permissions": _perms, "users_count": 0,
-        "created_at": time.time(), "updated_at": time.time(),
+        "group_id": _gid,
+        "name": _gname,
+        "description": f"系统内置{_gname}组",
+        "is_system": True,
+        "permissions": _perms,
+        "users_count": 0,
+        "created_at": time.time(),
+        "updated_at": time.time(),
     }
 
 
@@ -80,9 +85,14 @@ async def create_user_group(body: UserGroupCreate):
     gid = str(uuid.uuid4())
     now = time.time()
     group = {
-        "group_id": gid, "name": body.name, "description": body.description,
-        "is_system": False, "permissions": body.permissions, "users_count": 0,
-        "created_at": now, "updated_at": now,
+        "group_id": gid,
+        "name": body.name,
+        "description": body.description,
+        "is_system": False,
+        "permissions": body.permissions,
+        "users_count": 0,
+        "created_at": now,
+        "updated_at": now,
     }
     _groups_store[gid] = group
     return UserGroupInfo(**group)

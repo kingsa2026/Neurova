@@ -7,13 +7,13 @@
 
 import logging
 import time
-from typing import Dict, List, Optional, Any, Callable
+from typing import Any, Callable, Dict, List, Optional
 
-from ..models import WorkflowDefinition, TaskStep, AgentRole
-from .models import FlowPhase, FlowEvent, FlowContext, ScheduledTask
-from .scheduler import get_scheduler
+from ..models import AgentRole, TaskStep, WorkflowDefinition
+from .models import FlowContext, FlowEvent, FlowPhase
 
 logger = logging.getLogger(__name__)
+
 
 class FlowOrchestrator:
     """流程编排器
@@ -41,7 +41,7 @@ class FlowOrchestrator:
             handler: 处理函数，签名: (step: TaskStep, context: FlowContext) -> Any
         """
         self._step_handlers[step_name] = handler
-        logger.info(f"Registered handler for step: {step_name}")
+        logger.info("Registered handler for step: %s", step_name)
 
     def register_agent(self, agent_id: str, capabilities: List[str]) -> None:
         """注册 Agent 及其能力
@@ -51,10 +51,11 @@ class FlowOrchestrator:
             capabilities: Agent 能力列表
         """
         self._agent_capabilities[agent_id] = capabilities
-        logger.info(f"Registered agent: {agent_id} with capabilities: {capabilities}")
+        logger.info("Registered agent: %s with capabilities: %s", agent_id, capabilities)
 
-    def create_flow(self, workflow: WorkflowDefinition, template_id: str = "",
-                   participants: Dict[str, AgentRole] = None) -> FlowContext:
+    def create_flow(
+        self, workflow: WorkflowDefinition, template_id: str = "", participants: Dict[str, AgentRole] = None
+    ) -> FlowContext:
         """创建工作流实例
 
         Args:
@@ -73,12 +74,15 @@ class FlowOrchestrator:
         self._flows[context.flow_id] = context
 
         # 初始化事件
-        context.add_event(FlowEvent.PHASE_CHANGED, {
-            "old_phase": "none",
-            "new_phase": FlowPhase.INITIALIZATION.value,
-        })
+        context.add_event(
+            FlowEvent.PHASE_CHANGED,
+            {
+                "old_phase": "none",
+                "new_phase": FlowPhase.INITIALIZATION.value,
+            },
+        )
 
-        logger.info(f"Flow created: {context.flow_id}")
+        logger.info("Flow created: %s", context.flow_id)
         self._emit_event("flow_created", context)
 
         return context
@@ -95,13 +99,13 @@ class FlowOrchestrator:
         """
         context = self._flows.get(flow_id)
         if not context:
-            logger.error(f"Flow not found: {flow_id}")
+            logger.error("Flow not found: %s", flow_id)
             return False
 
         # 验证工作流
         valid, errors = workflow.validate()
         if not valid:
-            logger.error(f"Workflow validation failed: {errors}")
+            logger.error("Workflow validation failed: %s", errors)
             context.fail(f"Workflow validation failed: {errors}")
             return False
 
@@ -114,7 +118,7 @@ class FlowOrchestrator:
         # 进入执行阶段
         context.set_phase(FlowPhase.EXECUTION)
 
-        logger.info(f"Flow started: {flow_id}")
+        logger.info("Flow started: %s", flow_id)
         self._emit_event("flow_started", context)
 
         return True
@@ -132,17 +136,17 @@ class FlowOrchestrator:
         """
         context = self._flows.get(flow_id)
         if not context:
-            logger.error(f"Flow not found: {flow_id}")
+            logger.error("Flow not found: %s", flow_id)
             return None
 
         step = workflow.get_step(step_id)
         if not step:
-            logger.error(f"Step not found: {step_id}")
+            logger.error("Step not found: %s", step_id)
             return None
 
         # 检查依赖是否满足
         if not self._check_dependencies(step, context):
-            logger.warning(f"Dependencies not met for step: {step_id}")
+            logger.warning("Dependencies not met for step: %s", step_id)
             return None
 
         # 设置当前步骤
@@ -155,7 +159,7 @@ class FlowOrchestrator:
         # 查找处理器
         handler = self._step_handlers.get(step.name)
         if not handler:
-            logger.error(f"No handler for step: {step.name}")
+            logger.error("No handler for step: %s", step.name)
             context.fail_step(step_id, f"No handler for step: {step.name}")
             return None
 
@@ -166,14 +170,14 @@ class FlowOrchestrator:
             # 标记步骤完成
             context.complete_step(step_id, result)
 
-            logger.info(f"Step completed: {step_id}")
+            logger.info("Step completed: %s", step_id)
             self._emit_event("step_completed", context, {"step_id": step_id, "result": result})
 
             return result
 
         except Exception as e:
             context.fail_step(step_id, str(e))
-            logger.exception(f"Step failed: {step_id}: {e}")
+            logger.exception("Step failed: %s: %s", step_id, e)
             self._emit_event("step_failed", context, {"step_id": step_id, "error": str(e)})
             return None
 
@@ -191,7 +195,7 @@ class FlowOrchestrator:
             return False
 
         context.complete()
-        logger.info(f"Flow completed: {flow_id}")
+        logger.info("Flow completed: %s", flow_id)
         self._emit_event("flow_completed", context)
         return True
 
@@ -210,7 +214,7 @@ class FlowOrchestrator:
             return False
 
         context.fail(error)
-        logger.info(f"Flow failed: {flow_id}")
+        logger.info("Flow failed: %s", flow_id)
         self._emit_event("flow_failed", context, {"error": error})
         return True
 
@@ -228,7 +232,7 @@ class FlowOrchestrator:
             return False
 
         context.cancel()
-        logger.info(f"Flow cancelled: {flow_id}")
+        logger.info("Flow cancelled: %s", flow_id)
         self._emit_event("flow_cancelled", context)
         return True
 
@@ -257,11 +261,14 @@ class FlowOrchestrator:
             assigned_agent = self._find_agent_for_step(step, context)
             if assigned_agent:
                 context.participants[assigned_agent] = step.assigned_role.value
-                context.add_event(FlowEvent.TASK_ASSIGNED, {
-                    "step_id": step.step_id,
-                    "agent_id": assigned_agent,
-                    "role": step.assigned_role.value,
-                })
+                context.add_event(
+                    FlowEvent.TASK_ASSIGNED,
+                    {
+                        "step_id": step.step_id,
+                        "agent_id": assigned_agent,
+                        "role": step.assigned_role.value,
+                    },
+                )
 
     def _find_agent_for_step(self, step: TaskStep, context: FlowContext) -> Optional[str]:
         """为步骤找到合适的 Agent"""
@@ -297,7 +304,9 @@ class FlowOrchestrator:
         event_data = {
             "event_type": event_type,
             "flow_id": context.flow_id,
-            "phase": context.current_phase.value if isinstance(context.current_phase, FlowPhase) else context.current_phase,
+            "phase": (
+                context.current_phase.value if isinstance(context.current_phase, FlowPhase) else context.current_phase
+            ),
             "timestamp": time.time(),
             **(data or {}),
         }
@@ -306,7 +315,7 @@ class FlowOrchestrator:
             try:
                 handler(event_data)
             except Exception as e:
-                logger.exception(f"Error in event handler: {e}")
+                logger.exception("Error in event handler: %s", e)
 
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
@@ -319,8 +328,10 @@ class FlowOrchestrator:
             "cancelled_flows": len([f for f in flows if f.current_phase == FlowPhase.CANCELLED]),
         }
 
+
 # 全局编排器实例
 _global_orchestrator: Optional[FlowOrchestrator] = None
+
 
 def get_orchestrator() -> FlowOrchestrator:
     """获取全局编排器"""

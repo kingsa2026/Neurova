@@ -27,6 +27,7 @@ router = APIRouter()
 
 class RuleInfo(BaseModel):
     """规则信息"""
+
     rule_id: str
     name: str
     description: str = ""
@@ -43,6 +44,7 @@ class RuleInfo(BaseModel):
 
 class RuleCreate(BaseModel):
     """创建规则请求"""
+
     name: str = Field(..., description="规则名称")
     description: str = Field(default="", description="规则描述")
     rule_type: str = Field(default="custom", description="规则类型")
@@ -53,6 +55,7 @@ class RuleCreate(BaseModel):
 
 class RuleUpdate(BaseModel):
     """更新规则请求"""
+
     name: Optional[str] = None
     description: Optional[str] = None
     trigger: Optional[str] = None
@@ -62,6 +65,7 @@ class RuleUpdate(BaseModel):
 
 class RuleTestResult(BaseModel):
     """规则测试结果"""
+
     rule_id: str
     success: bool
     output: str = ""
@@ -70,6 +74,7 @@ class RuleTestResult(BaseModel):
 
 class RuleLog(BaseModel):
     """规则执行日志"""
+
     log_id: str
     rule_id: str
     trigger: str = ""
@@ -90,6 +95,7 @@ def _get_pm():
     """获取 ProjectManager"""
     try:
         from neurova.projects.project_manager import ProjectManager
+
         return ProjectManager()
     except Exception:
         return None
@@ -98,6 +104,7 @@ def _get_pm():
 # ---------------------------------------------------------------------------
 # 路由
 # ---------------------------------------------------------------------------
+
 
 @router.post("", response_model=RuleInfo)
 async def create_rule(body: RuleCreate):

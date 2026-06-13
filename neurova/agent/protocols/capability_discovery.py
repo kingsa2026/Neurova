@@ -9,38 +9,40 @@ Agent 能力发现协议模块
 4. 任务-能力匹配
 """
 
-import json
 import logging
 import time
-from typing import Dict, List, Optional, Any, Set, Tuple
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from .message_protocol import AgentMessage, MessagePriority
 
 logger = logging.getLogger(__name__)
 
+
 class CapabilityCategory(str, Enum):
     """能力类别枚举"""
-    COGNITION = "cognition"         # 认知能力
-    EXECUTION = "execution"        # 执行能力
-    ANALYSIS = "analysis"          # 分析能力
-    CREATION = "creation"          # 创造能力
-    COMMUNICATION = "communication" # 沟通能力
-    LEARNING = "learning"          # 学习能力
-    REASONING = "reasoning"        # 推理能力
-    PLANNING = "planning"          # 规划能力
-    CREATIVE = "creative"          # 创意能力
-    TECHNICAL = "technical"        # 技术能力
-    DOMAIN = "domain"              # 领域知识
+
+    COGNITION = "cognition"  # 认知能力
+    EXECUTION = "execution"  # 执行能力
+    ANALYSIS = "analysis"  # 分析能力
+    CREATION = "creation"  # 创造能力
+    COMMUNICATION = "communication"  # 沟通能力
+    LEARNING = "learning"  # 学习能力
+    REASONING = "reasoning"  # 推理能力
+    PLANNING = "planning"  # 规划能力
+    CREATIVE = "creative"  # 创意能力
+    TECHNICAL = "technical"  # 技术能力
+    DOMAIN = "domain"  # 领域知识
+
 
 class CapabilityLevel(str, Enum):
     """能力等级枚举"""
-    BEGINNER = "beginner"      # 初级
+
+    BEGINNER = "beginner"  # 初级
     INTERMEDIATE = "intermediate"  # 中级
-    ADVANCED = "advanced"      # 高级
-    EXPERT = "expert"          # 专家
-    MASTER = "master"          # 大师
+    ADVANCED = "advanced"  # 高级
+    EXPERT = "expert"  # 专家
+    MASTER = "master"  # 大师
 
     @property
     def value_int(self) -> int:
@@ -54,15 +56,17 @@ class CapabilityLevel(str, Enum):
         }
         return level_map.get(self, 1)
 
+
 @dataclass
 class Capability:
     """单个能力定义"""
-    name: str                           # 能力名称
-    category: CapabilityCategory        # 能力类别
+
+    name: str  # 能力名称
+    category: CapabilityCategory  # 能力类别
     level: CapabilityLevel = CapabilityLevel.INTERMEDIATE  # 能力等级
-    description: str = ""                # 能力描述
+    description: str = ""  # 能力描述
     keywords: List[str] = field(default_factory=list)  # 关键词（用于搜索）
-    examples: List[str] = field(default_factory=list)   # 示例场景
+    examples: List[str] = field(default_factory=list)  # 示例场景
     metrics: Dict[str, float] = field(default_factory=dict)  # 性能指标
 
     def matches_query(self, query: str) -> bool:
@@ -96,9 +100,11 @@ class Capability:
             "metrics": self.metrics,
         }
 
+
 @dataclass
 class AgentCapability:
     """Agent 能力集合"""
+
     agent_id: str
     agent_name: str = ""
     capabilities: List[Capability] = field(default_factory=list)
@@ -177,9 +183,11 @@ class AgentCapability:
             },
         }
 
+
 @dataclass
 class CapabilityMatch:
     """能力匹配结果"""
+
     agent_capability: AgentCapability
     matched_capabilities: List[Tuple[Capability, float]]  # (能力, 匹配度)
     overall_score: float  # 总体匹配度 0-1
@@ -192,36 +200,34 @@ class CapabilityMatch:
             "agent_id": self.agent_capability.agent_id,
             "agent_name": self.agent_capability.agent_name,
             "matched_capabilities": [
-                {"name": cap.name, "level": cap.level.value, "score": score}
-                for cap, score in self.matched_capabilities
+                {"name": cap.name, "level": cap.level.value, "score": score} for cap, score in self.matched_capabilities
             ],
             "overall_score": self.overall_score,
             "missing_capabilities": self.missing_capabilities,
             "recommendation": self.recommendation,
         }
 
+
 class CapabilityDiscovery:
     """Agent 能力发现服务"""
 
     def __init__(self):
         self._registry: Dict[str, AgentCapability] = {}  # agent_id -> AgentCapability
-        self._category_index: Dict[CapabilityCategory, Set[str]] = {
-            cat: set() for cat in CapabilityCategory
-        }
+        self._category_index: Dict[CapabilityCategory, Set[str]] = {cat: set() for cat in CapabilityCategory}
         self._keyword_index: Dict[str, Set[str]] = {}  # keyword -> set of agent_ids
 
     def register_agent(self, capability: AgentCapability) -> None:
         """注册 Agent 能力"""
         self._registry[capability.agent_id] = capability
         self._update_index(capability)
-        logger.info(f"Agent 能力已注册: {capability.agent_id} ({len(capability.capabilities)} 个能力)")
+        logger.info("Agent 能力已注册: %s (%s 个能力)", capability.agent_id, len(capability.capabilities))
 
     def unregister_agent(self, agent_id: str) -> bool:
         """取消注册 Agent"""
         if agent_id in self._registry:
             cap = self._registry.pop(agent_id)
             self._remove_from_index(cap)
-            logger.info(f"Agent 能力已取消注册: {agent_id}")
+            logger.info("Agent 能力已取消注册: %s", agent_id)
             return True
         return False
 
@@ -431,8 +437,10 @@ class CapabilityDiscovery:
                 return f"不推荐：缺少关键能力 {', '.join(missing)}"
             return "不推荐：该 Agent 不满足任务需求"
 
+
 # 全局能力发现服务实例
 _global_discovery: Optional[CapabilityDiscovery] = None
+
 
 def get_capability_discovery() -> CapabilityDiscovery:
     """获取全局能力发现服务"""

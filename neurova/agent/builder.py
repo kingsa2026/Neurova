@@ -3,26 +3,27 @@ Agent Builder v1.0.0 — 声明式 Agent 构建器
 
 隔离层级: 工具全局 + 产物用户层
 """
-import json
+
 import logging
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
+from typing import Any, Dict, List
 
 from .templates.personality_templates import PersonalityTemplate
-from ..core.firewall import get_firewall
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class AgentBuildConfig:
     """Agent 构建配置"""
+
     name: str
     user_id: str = ""
     personality: Dict = field(default_factory=dict)
     skills: List[str] = field(default_factory=list)
-    memory_types: List[str] = field(default_factory=lambda: [
-        "conversation", "emotional", "experience", "skill", "tool_usage"
-    ])
+    memory_types: List[str] = field(
+        default_factory=lambda: ["conversation", "emotional", "experience", "skill", "tool_usage"]
+    )
     emotion_baseline: str = "joy"
     emotion_sensitivity: float = 0.8
     constitution: List[str] = field(default_factory=list)
@@ -31,6 +32,7 @@ class AgentBuildConfig:
     enable_memory: bool = True
     enable_evolution: bool = True
     enable_cognitive: bool = True
+
 
 class AgentBuilder:
     """声明式 Agent 构建器 v1.0.0
@@ -48,7 +50,7 @@ class AgentBuilder:
 
     def __init__(self, name: str):
         self._config = AgentBuildConfig(name=name)
-        logger.debug(f"AgentBuilder: 开始构建 {name}")
+        logger.debug("AgentBuilder: 开始构建 %s", name)
 
     def personality(self, template_or_dict):
         """设置人格 — 接受模板或自定义字典"""
@@ -56,14 +58,9 @@ class AgentBuilder:
             self._config.personality = template_or_dict
         else:
             # 尝试从 PersonalityTemplate 获取
-            attr_name = [
-                k for k in dir(PersonalityTemplate)
-                if getattr(PersonalityTemplate, k) == template_or_dict
-            ]
+            attr_name = [k for k in dir(PersonalityTemplate) if getattr(PersonalityTemplate, k) == template_or_dict]
             if attr_name:
-                self._config.personality = getattr(
-                    PersonalityTemplate, attr_name[0]
-                )
+                self._config.personality = getattr(PersonalityTemplate, attr_name[0])
             else:
                 self._config.personality = template_or_dict
         return self
@@ -131,7 +128,7 @@ class AgentBuilder:
             "skills": self._config.skills,
             "memory": {
                 "types": self._config.memory_types,
-                "temperature_base": getattr(self, '_memory_temp_base', 60.0),
+                "temperature_base": getattr(self, "_memory_temp_base", 60.0),
             },
             "emotion": {
                 "baseline": self._config.emotion_baseline,

@@ -11,25 +11,25 @@
 
 使用方式：
     from neurova.sync import get_session_sync_manager
-    
+
     manager = get_session_sync_manager()
-    
+
     # 创建会话
     session = manager.create_session(user_id="user_1", agent_id="agent_1")
-    
+
     # 注册渠道
     manager.register_channel(session.session_id, "web", send_callback)
-    
+
     # 广播事件
     await manager.broadcast_event(session.session_id, event)
 """
 
 from .session_sync_manager import (
-    SessionSyncManager,
-    UnifiedSession,
-    SessionEvent,
     ChannelConnection,
     EventType,
+    SessionEvent,
+    SessionSyncManager,
+    UnifiedSession,
     get_session_sync_manager,
     reset_session_sync_manager,
 )

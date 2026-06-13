@@ -253,23 +253,60 @@ _DEFAULT_PREFERENCES: List[Dict[str, Any]] = [
 
 
 _RISKY_ACTION_KEYWORDS: List[str] = [
-    "delete", "drop", "remove", "destroy", "shutdown", "kill",
-    "production", "database", "truncate", "rm -rf", "format",
-    "drop_table", "drop_db", "sudo", "admin", "wipe", "reset_all",
-    "terminate", "halt_system", "exec_code",
+    "delete",
+    "drop",
+    "remove",
+    "destroy",
+    "shutdown",
+    "kill",
+    "production",
+    "database",
+    "truncate",
+    "rm -rf",
+    "format",
+    "drop_table",
+    "drop_db",
+    "sudo",
+    "admin",
+    "wipe",
+    "reset_all",
+    "terminate",
+    "halt_system",
+    "exec_code",
 ]
 
 _URGENT_KEYWORDS: List[str] = [
-    "emergency", "urgent", "asap", "immediate", "critical", "fire", "outage", "down",
+    "emergency",
+    "urgent",
+    "asap",
+    "immediate",
+    "critical",
+    "fire",
+    "outage",
+    "down",
 ]
 
 _MEDIUM_URGENCY_KEYWORDS: List[str] = [
-    "soon", "today", "quick", "fast", "deadline", "rush",
+    "soon",
+    "today",
+    "quick",
+    "fast",
+    "deadline",
+    "rush",
 ]
 
 _COMPLEX_KEYWORDS: List[str] = [
-    "integrate", "architect", "design", "migrate", "refactor", "deploy", "multi",
-    "distributed", "concurrent", "pipeline", "scale",
+    "integrate",
+    "architect",
+    "design",
+    "migrate",
+    "refactor",
+    "deploy",
+    "multi",
+    "distributed",
+    "concurrent",
+    "pipeline",
+    "scale",
 ]
 
 
@@ -907,9 +944,7 @@ class AgentAutonomySystem(BaseModule):
             if self._history_path and self._history_path.exists():
                 data = json.loads(self._history_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict) and isinstance(data.get("items"), list):
-                    self._decision_history = [
-                        dict(x) for x in data["items"] if isinstance(x, dict)
-                    ]
+                    self._decision_history = [dict(x) for x in data["items"] if isinstance(x, dict)]
             if self._constraints_path and self._constraints_path.exists():
                 data = json.loads(self._constraints_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict) and isinstance(data.get("items"), list):

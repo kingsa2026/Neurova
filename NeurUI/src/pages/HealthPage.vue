@@ -64,11 +64,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
+import * as healthApi from '@/api/modules/health'
 
 const { t } = useI18n()
 
@@ -88,10 +88,10 @@ const formatTime = (ts: string) => {
 const fetchHealth = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/health')
-    const data = res?.data ?? res ?? {}
-    checks.value = data.checks ?? (Array.isArray(data) ? data : [])
-    overallStatus.value = data.status ?? data.overall ?? (checks.value.every((c: any) => c.status === 'healthy') ? 'healthy' : 'degraded')
+    const res = await healthApi.getHealthChecks()
+    const data = res?.data
+    checks.value = Array.isArray(data) ? data : []
+    overallStatus.value = checks.value.every((c: any) => c.status === 'pass') ? 'healthy' : checks.value.some((c: any) => c.status === 'fail') ? 'unhealthy' : 'degraded'
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -102,7 +102,7 @@ const fetchHealth = async () => {
 const fetchReport = async () => {
   reportLoading.value = true
   try {
-    const res: any = await request.get('/health/report')
+    const res = await healthApi.getHealthReport()
     reportText.value = JSON.stringify(res?.data ?? res, null, 2)
     showReport.value = true
   } catch {
@@ -115,7 +115,7 @@ const fetchReport = async () => {
 const runCheck = async (name: string) => {
   runningCheck.value = name
   try {
-    await request.post(`/health/check/${name}`)
+    await healthApi.recoverSubsystem(name)
     message.success(t('common.success'))
     await fetchHealth()
   } catch {

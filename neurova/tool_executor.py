@@ -13,12 +13,11 @@ ToolExecutor — 统一工具执行器
 - 可独立测试：不依赖 Agent 类的完整初始化
 """
 
-import re
 import json
-import time
 import logging
+import time
 from datetime import datetime
-from typing import List, Dict, Optional, Any
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,17 +25,20 @@ logger = logging.getLogger(__name__)
 _TOOL_ENGINE_AVAILABLE = False
 _ToolEngine = None
 
+
 def _get_tool_engine_class():
     """延迟导入 ToolEngine 类"""
     global _TOOL_ENGINE_AVAILABLE, _ToolEngine
     if _ToolEngine is None:
         try:
             from neurova.execution_engine.tool_engine import ToolEngine
+
             _ToolEngine = ToolEngine
             _TOOL_ENGINE_AVAILABLE = True
         except ImportError:
             _TOOL_ENGINE_AVAILABLE = False
     return _ToolEngine
+
 
 class ToolExecutor:
     """统一工具执行器
@@ -64,14 +66,15 @@ class ToolExecutor:
             # 首先尝试从 ExecutionEngine 获取
             try:
                 from neurova.shared_core.execution_engine import ExecutionEngine
+
                 engine = ExecutionEngine()
-                if hasattr(engine, '_tool_engine') and engine._tool_engine is not None:
+                if hasattr(engine, "_tool_engine") and engine._tool_engine is not None:
                     self._tool_engine = engine._tool_engine
                     logger.debug("从 ExecutionEngine 获取 ToolEngine")
                     return self._tool_engine
             except Exception as e:
-                logger.debug(f"从 ExecutionEngine 获取 ToolEngine 失败: {e}")
-            
+                logger.debug("从 ExecutionEngine 获取 ToolEngine 失败: %s", e)
+
             # 如果 ExecutionEngine 不可用，创建新的 ToolEngine
             ToolEngineClass = _get_tool_engine_class()
             if ToolEngineClass:
@@ -79,38 +82,38 @@ class ToolExecutor:
                     self._tool_engine = ToolEngineClass()
                     logger.debug("创建新的 ToolEngine 实例")
                 except Exception as e:
-                    logger.warning(f"创建 ToolEngine 失败: {e}")
+                    logger.warning("创建 ToolEngine 失败: %s", e)
         return self._tool_engine
 
     @property
     def _skill_registry(self):
         """获取 skill 注册表"""
-        return getattr(self._agent, '_skill_registry', None)
+        return getattr(self._agent, "_skill_registry", None)
 
     @property
     def tool_router(self):
         """获取工具路由器"""
-        return getattr(self._agent, 'tool_router', None)
+        return getattr(self._agent, "tool_router", None)
 
     @property
     def tool_memory(self):
         """获取工具记忆"""
-        return getattr(self._agent, 'tool_memory', None)
+        return getattr(self._agent, "tool_memory", None)
 
     @property
     def tool_lifecycle(self):
         """获取工具生命周期"""
-        return getattr(self._agent, 'tool_lifecycle', None)
+        return getattr(self._agent, "tool_lifecycle", None)
 
     @property
     def skill_packer(self):
         """获取 skill 打包器"""
-        return getattr(self._agent, 'skill_packer', None)
+        return getattr(self._agent, "skill_packer", None)
 
     @property
     def config(self):
         """获取配置"""
-        return getattr(self._agent, 'config', None)
+        return getattr(self._agent, "config", None)
 
     def _ensure_messages_list(self, messages: Optional[List[Dict]] = None) -> List[Dict]:
         """确保消息列表存在"""
@@ -120,7 +123,9 @@ class ToolExecutor:
             return self._messages_list
         return messages
 
-    async def execute_text_tool_calls(self, tool_calls: List[Dict], messages: Optional[List[Dict]] = None) -> List[Dict]:
+    async def execute_text_tool_calls(
+        self, tool_calls: List[Dict], messages: Optional[List[Dict]] = None
+    ) -> List[Dict]:
         """
         执行文本工具调用
 
@@ -149,28 +154,34 @@ class ToolExecutor:
 
                 # 执行工具
                 result = await self._execute_single_tool(tool_name, arguments)
-                results.append({
-                    "tool_call_id": tool_call.get("id", ""),
-                    "name": tool_name,
-                    "result": result,
-                    "success": True,
-                })
+                results.append(
+                    {
+                        "tool_call_id": tool_call.get("id", ""),
+                        "name": tool_name,
+                        "result": result,
+                        "success": True,
+                    }
+                )
 
                 # 记录到消息列表
-                self._messages_list.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.get("id", ""),
-                    "content": json.dumps(result, ensure_ascii=False),
-                })
+                self._messages_list.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.get("id", ""),
+                        "content": json.dumps(result, ensure_ascii=False),
+                    }
+                )
 
             except Exception as e:
-                logger.error(f"工具执行失败: {e}")
-                results.append({
-                    "tool_call_id": tool_call.get("id", ""),
-                    "name": tool_name if 'tool_name' in locals() else "unknown",
-                    "error": str(e),
-                    "success": False,
-                })
+                logger.error("工具执行失败: %s", e)
+                results.append(
+                    {
+                        "tool_call_id": tool_call.get("id", ""),
+                        "name": tool_name if "tool_name" in locals() else "unknown",
+                        "error": str(e),
+                        "success": False,
+                    }
+                )
 
         return results
 
@@ -195,7 +206,7 @@ class ToolExecutor:
                     # 使用记忆中的结果
                     return memory_result.get("result", {})
             except Exception as e:
-                logger.debug(f"工具记忆检查失败: {e}")
+                logger.debug("工具记忆检查失败: %s", e)
 
         # 执行工具
         result = await self._execute_single_tool(tool_name, params)
@@ -209,7 +220,7 @@ class ToolExecutor:
                     tool_params=params,
                 )
             except Exception as e:
-                logger.debug(f"工具记忆记录失败: {e}")
+                logger.debug("工具记忆记录失败: %s", e)
 
         return result
 
@@ -237,15 +248,17 @@ class ToolExecutor:
         if not tool_name:
             return {"status": "failure", "error": "ToolMemory 结果缺少 tool_name", "tool_name": ""}
 
-        logger.info(f"自动执行工具（异步）: {tool_name} (来源: {tool_source})")
+        logger.info("自动执行工具（异步）: %s (来源: %s)", tool_name, tool_source)
 
-        self._messages_list.append({
-            "type": "tool_call",
-            "tool_name": tool_name,
-            "tool_source": tool_source,
-            "params": tool_params,
-            "timestamp": datetime.now().isoformat(),
-        })
+        self._messages_list.append(
+            {
+                "type": "tool_call",
+                "tool_name": tool_name,
+                "tool_source": tool_source,
+                "params": tool_params,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
         try:
             result = await self._execute_single_tool(tool_name, tool_params)
@@ -262,7 +275,7 @@ class ToolExecutor:
                         tool_params=tool_params,
                     )
                 except Exception as e:
-                    logger.debug(f"工具记忆记录失败: {e}")
+                    logger.debug("工具记忆记录失败: %s", e)
 
             if success:
                 return {"status": "success", "result": result, "tool_name": tool_name}
@@ -271,7 +284,7 @@ class ToolExecutor:
                 return {"status": "failure", "error": error_msg, "tool_name": tool_name, "result": result}
 
         except Exception as e:
-            logger.error(f"工具自动执行异常: {tool_name}, {e}")
+            logger.error("工具自动执行异常: %s, %s", tool_name, e)
             return {"status": "failure", "error": str(e), "tool_name": tool_name}
 
     async def execute_skill_tool(self, skill_name: str, params: Dict, context: Optional[Dict] = None) -> Dict:
@@ -300,7 +313,7 @@ class ToolExecutor:
             return result
 
         except Exception as e:
-            logger.error(f"Skill 执行失败: {e}")
+            logger.error("Skill 执行失败: %s", e)
             return {"error": str(e)}
 
     async def execute_cli_tool(self, command: str, args: Optional[Dict] = None) -> Dict:
@@ -328,12 +341,13 @@ class ToolExecutor:
                 full_command = f"{command} {' '.join(arg_parts)}"
             else:
                 full_command = command
-            
+
             # 使用 ComputerUseManager 执行命令
             from neurova.computer_use import get_computer_use_manager
+
             manager = get_computer_use_manager()
             result = manager.shell(full_command)
-            
+
             return {
                 "success": result.get("returncode", -1) == 0,
                 "returncode": result.get("returncode", -1),
@@ -343,7 +357,7 @@ class ToolExecutor:
                 "tool_name": command,
             }
         except Exception as e:
-            logger.error(f"CLI 工具执行失败: {e}")
+            logger.error("CLI 工具执行失败: %s", e)
             return {"error": f"CLI 工具执行失败: {str(e)}"}
 
     async def _execute_single_tool(self, tool_name: str, params: Dict) -> Dict:
@@ -361,30 +375,38 @@ class ToolExecutor:
         if self.tool_engine:
             try:
                 # 获取 user_id 和 agent_id（如果可用）
-                user_id = getattr(self._agent, 'user_id', None)
-                agent_id = getattr(self._agent, 'agent_id', None)
-                
+                user_id = getattr(self._agent, "user_id", None)
+                agent_id = getattr(self._agent, "agent_id", None)
+
                 result = await self.tool_engine.execute_with_safeguards(
-                    tool_name=tool_name,
-                    parameters=params,
-                    user_id=user_id,
-                    agent_id=agent_id
+                    tool_name=tool_name, parameters=params, user_id=user_id, agent_id=agent_id
                 )
-                logger.debug(f"ToolEngine 执行成功: {tool_name}")
+                logger.debug("ToolEngine 执行成功: %s", tool_name)
                 return result
             except ValueError as e:
                 # 工具未注册或不可用，回退到其他方式
-                logger.debug(f"ToolEngine 工具 {tool_name} 未注册或不可用: {e}")
+                logger.debug("ToolEngine 工具 %s 未注册或不可用: %s", tool_name, e)
             except Exception as e:
-                logger.warning(f"ToolEngine 执行失败: {tool_name}, {e}")
-        
+                logger.warning("ToolEngine 执行失败: %s, %s", tool_name, e)
+
         # 回退到原有逻辑
         # 内置工具
         builtin_tools = [
-            "memory_search", "file_read", "file_write", "file_create",
-            "file_delete", "file_edit", "computer_screenshot", "computer_click",
-            "computer_type", "computer_scroll", "computer_shell", "emotion_analyze",
-            "voice_memory_search", "run_code", "execute_code",
+            "memory_search",
+            "file_read",
+            "file_write",
+            "file_create",
+            "file_delete",
+            "file_edit",
+            "computer_screenshot",
+            "computer_click",
+            "computer_type",
+            "computer_scroll",
+            "computer_shell",
+            "emotion_analyze",
+            "voice_memory_search",
+            "run_code",
+            "execute_code",
         ]
 
         if tool_name in builtin_tools:
@@ -400,7 +422,7 @@ class ToolExecutor:
                 result = await self.tool_router.route(tool_name, params)
                 return result
             except Exception as e:
-                logger.debug(f"工具路由器执行失败: {e}")
+                logger.debug("工具路由器执行失败: %s", e)
 
         return {"error": f"未知工具: {tool_name}"}
 
@@ -444,37 +466,40 @@ class ToolExecutor:
             query = params.get("query", "")
             category = params.get("category")
             limit = params.get("limit", 5)
-            
+
             if not query:
                 return {"error": "缺少搜索查询"}
-            
+
             # 获取 MemoryManager
             memory_manager = None
-            if hasattr(self._agent, 'memory_manager') and self._agent.memory_manager:
+            if hasattr(self._agent, "memory_manager") and self._agent.memory_manager:
                 memory_manager = self._agent.memory_manager
             else:
                 # 创建临时 MemoryManager（降级模式）
                 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+
                 memory_manager = MemoryManager()
-            
+
             # 执行搜索
             memories = memory_manager.recall(
                 query=query,
                 category=category,
                 limit=limit,
             )
-            
+
             # 格式化结果
             results = []
             for memory in memories:
-                results.append({
-                    "id": memory.get("id", ""),
-                    "content": memory.get("content", ""),
-                    "category": memory.get("category", ""),
-                    "temperature": memory.get("temperature", 0.0),
-                    "created_at": memory.get("created_at", ""),
-                })
-            
+                results.append(
+                    {
+                        "id": memory.get("id", ""),
+                        "content": memory.get("content", ""),
+                        "category": memory.get("category", ""),
+                        "temperature": memory.get("temperature", 0.0),
+                        "created_at": memory.get("created_at", ""),
+                    }
+                )
+
             return {
                 "success": True,
                 "results": results,
@@ -484,7 +509,7 @@ class ToolExecutor:
                 "count": len(results),
             }
         except Exception as e:
-            logger.error(f"记忆搜索执行失败: {e}")
+            logger.error("记忆搜索执行失败: %s", e)
             return {"error": f"记忆搜索执行失败: {str(e)}"}
 
     async def _execute_file_read(self, params: Dict) -> Dict:
@@ -494,11 +519,11 @@ class ToolExecutor:
         encoding = params.get("encoding", "utf-8")
 
         try:
-            with open(file_path, 'r', encoding=encoding) as f:
+            with open(file_path, "r", encoding=encoding) as f:
                 lines = f.readlines()
                 if offset > 0:
-                    lines = lines[offset-1:]  # offset 从 1 开始
-                content = ''.join(lines)
+                    lines = lines[offset - 1 :]  # offset 从 1 开始
+                content = "".join(lines)
                 return {"content": content, "lines": len(lines)}
         except Exception as e:
             return {"error": str(e)}
@@ -510,7 +535,7 @@ class ToolExecutor:
         encoding = params.get("encoding", "utf-8")
 
         try:
-            with open(file_path, 'w', encoding=encoding) as f:
+            with open(file_path, "w", encoding=encoding) as f:
                 f.write(content)
                 return {"success": True, "file_path": file_path}
         except Exception as e:
@@ -522,7 +547,7 @@ class ToolExecutor:
         content = params.get("content", "")
 
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
                 return {"success": True, "file_path": file_path}
         except Exception as e:
@@ -531,6 +556,7 @@ class ToolExecutor:
     async def _execute_file_delete(self, params: Dict) -> Dict:
         """执行文件删除"""
         import os
+
         file_path = params.get("file_path", "")
 
         try:
@@ -549,12 +575,12 @@ class ToolExecutor:
         new_str = params.get("new_str", "")
 
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
             if old_str in content:
                 new_content = content.replace(old_str, new_str, 1)
-                with open(file_path, 'w', encoding='utf-8') as f:
+                with open(file_path, "w", encoding="utf-8") as f:
                     f.write(new_content)
                 return {"success": True, "file_path": file_path}
             else:
@@ -566,16 +592,18 @@ class ToolExecutor:
         """执行屏幕截图"""
         try:
             from neurova.computer_use import get_computer_use_manager
+
             manager = get_computer_use_manager()
             screenshot_data = manager.screenshot()
             if screenshot_data:
                 import base64
-                b64_str = base64.b64encode(screenshot_data).decode('utf-8')
+
+                b64_str = base64.b64encode(screenshot_data).decode("utf-8")
                 return {"success": True, "image_base64": b64_str, "format": "png"}
             else:
                 return {"error": "截图失败：无可用后端"}
         except Exception as e:
-            logger.error(f"截图执行失败: {e}")
+            logger.error("截图执行失败: %s", e)
             return {"error": f"截图执行失败: {str(e)}"}
 
     async def _execute_computer_click(self, params: Dict) -> Dict:
@@ -584,20 +612,21 @@ class ToolExecutor:
             x = params.get("x")
             y = params.get("y")
             button = params.get("button", "left")
-            
+
             if x is None or y is None:
                 return {"error": "缺少必要的坐标参数 x, y"}
-            
+
             from neurova.computer_use import get_computer_use_manager
+
             manager = get_computer_use_manager()
             success = manager.click(int(x), int(y), button)
-            
+
             if success:
                 return {"success": True, "x": x, "y": y, "button": button}
             else:
                 return {"error": "点击操作失败"}
         except Exception as e:
-            logger.error(f"点击执行失败: {e}")
+            logger.error("点击执行失败: %s", e)
             return {"error": f"点击执行失败: {str(e)}"}
 
     async def _execute_computer_type(self, params: Dict) -> Dict:
@@ -606,17 +635,18 @@ class ToolExecutor:
             text = params.get("text", "")
             if not text:
                 return {"error": "缺少输入文本"}
-            
+
             from neurova.computer_use import get_computer_use_manager
+
             manager = get_computer_use_manager()
             success = manager.type_text(text)
-            
+
             if success:
                 return {"success": True, "text": text, "length": len(text)}
             else:
                 return {"error": "输入操作失败"}
         except Exception as e:
-            logger.error(f"输入执行失败: {e}")
+            logger.error("输入执行失败: %s", e)
             return {"error": f"输入执行失败: {str(e)}"}
 
     async def _execute_computer_scroll(self, params: Dict) -> Dict:
@@ -624,24 +654,26 @@ class ToolExecutor:
         try:
             scroll_x = params.get("scroll_x", 0)
             scroll_y = params.get("scroll_y", 0)
-            
+
             # 计算点击位置（默认屏幕中心）
             import pyautogui
+
             screen_width, screen_height = pyautogui.size()
             x = screen_width // 2
             y = screen_height // 2
-            
+
             from neurova.computer_use import get_computer_use_manager
+
             manager = get_computer_use_manager()
             # ComputerUseManager.scroll 只支持垂直滚动，这里我们简化实现
             success = manager.scroll(x, y, scroll_y)
-            
+
             if success:
                 return {"success": True, "scroll_x": scroll_x, "scroll_y": scroll_y}
             else:
                 return {"error": "滚动操作失败"}
         except Exception as e:
-            logger.error(f"滚动执行失败: {e}")
+            logger.error("滚动执行失败: %s", e)
             return {"error": f"滚动执行失败: {str(e)}"}
 
     async def _execute_computer_shell(self, params: Dict) -> Dict:
@@ -650,11 +682,12 @@ class ToolExecutor:
             command = params.get("command", "")
             if not command:
                 return {"error": "缺少命令参数"}
-            
+
             from neurova.computer_use import get_computer_use_manager
+
             manager = get_computer_use_manager()
             result = manager.shell(command)
-            
+
             return {
                 "success": result.get("returncode", -1) == 0,
                 "returncode": result.get("returncode", -1),
@@ -663,7 +696,7 @@ class ToolExecutor:
                 "command": command,
             }
         except Exception as e:
-            logger.error(f"Shell 命令执行失败: {e}")
+            logger.error("Shell 命令执行失败: %s", e)
             return {"error": f"Shell 命令执行失败: {str(e)}"}
 
     async def _execute_emotion_analyze(self, params: Dict) -> Dict:
@@ -672,24 +705,25 @@ class ToolExecutor:
             text = params.get("text", "")
             if not text:
                 return {"error": "缺少分析文本"}
-            
+
             # 优先使用 Agent 的 memory_manager 中的情感分析器
             emotion_analyzer = None
-            if hasattr(self._agent, 'memory_manager') and self._agent.memory_manager:
-                emotion_analyzer = getattr(self._agent.memory_manager, '_emotion_analyzer', None)
-            
+            if hasattr(self._agent, "memory_manager") and self._agent.memory_manager:
+                emotion_analyzer = getattr(self._agent.memory_manager, "_emotion_analyzer", None)
+
             # 如果没有，使用全局实例
             if not emotion_analyzer:
                 try:
                     from neurova.cognitive_layers.memory_layer.emotion import get_emotion_analyzer_instance
+
                     emotion_analyzer = get_emotion_analyzer_instance()
                 except ImportError:
                     logger.warning("情感分析器模块不可用，使用简化实现")
                     return self._fallback_emotion_analyze(text)
-            
+
             # 执行情感分析
             result = emotion_analyzer.analyze(text)
-            
+
             return {
                 "success": True,
                 "primary_emotion": result.get("primary_emotion", "neutral"),
@@ -700,13 +734,13 @@ class ToolExecutor:
                 "text": text,
             }
         except Exception as e:
-            logger.error(f"情感分析执行失败: {e}")
+            logger.error("情感分析执行失败: %s", e)
             return self._fallback_emotion_analyze(text)
-    
+
     def _fallback_emotion_analyze(self, text: str) -> Dict:
         """简化情感分析回退实现"""
         text_lower = text.lower()
-        
+
         # 简单关键词匹配
         emotion_keywords = {
             "happy": ["开心", "高兴", "快乐", "愉快", "欣喜", "happy", "joy", "glad"],
@@ -716,10 +750,10 @@ class ToolExecutor:
             "fear": ["害怕", "恐惧", "担心", "afraid", "fear", "scared"],
             "disgust": ["厌恶", "讨厌", "恶心", "disgust", "dislike"],
         }
-        
+
         detected_emotion = "neutral"
         max_score = 0.0
-        
+
         for emotion, keywords in emotion_keywords.items():
             for keyword in keywords:
                 if keyword in text_lower:
@@ -727,7 +761,7 @@ class ToolExecutor:
                     if score > max_score:
                         max_score = score
                         detected_emotion = emotion
-        
+
         if detected_emotion == "neutral":
             return {
                 "success": True,
@@ -738,7 +772,7 @@ class ToolExecutor:
                 "score": 0.0,
                 "text": text,
             }
-        
+
         return {
             "success": True,
             "primary_emotion": detected_emotion,
@@ -748,46 +782,49 @@ class ToolExecutor:
             "score": max_score - 0.5,
             "text": text,
         }
-    
+
     async def _execute_voice_memory_search(self, params: Dict) -> Dict:
         """执行语音转写记忆搜索"""
         try:
             query = params.get("query", "")
             limit = params.get("limit", 5)
-            
+
             if not query:
                 return {"error": "缺少搜索查询"}
-            
+
             # 获取 MemoryManager
             memory_manager = None
-            if hasattr(self._agent, 'memory_manager') and self._agent.memory_manager:
+            if hasattr(self._agent, "memory_manager") and self._agent.memory_manager:
                 memory_manager = self._agent.memory_manager
             else:
                 try:
                     from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+
                     memory_manager = MemoryManager()
                 except ImportError:
                     logger.warning("MemoryManager 模块不可用")
                     return {"results": [], "query": query, "count": 0}
-            
+
             # 搜索语音转写记忆（使用 category 过滤）
             memories = memory_manager.recall(
                 query=query,
                 category="voice_transcription",  # 语音转写类别
                 limit=limit,
             )
-            
+
             # 格式化结果
             results = []
             for memory in memories:
-                results.append({
-                    "id": memory.get("id", ""),
-                    "content": memory.get("content", ""),
-                    "category": memory.get("category", ""),
-                    "transcription": memory.get("metadata", {}).get("transcription", ""),
-                    "timestamp": memory.get("created_at", ""),
-                })
-            
+                results.append(
+                    {
+                        "id": memory.get("id", ""),
+                        "content": memory.get("content", ""),
+                        "category": memory.get("category", ""),
+                        "transcription": memory.get("metadata", {}).get("transcription", ""),
+                        "timestamp": memory.get("created_at", ""),
+                    }
+                )
+
             return {
                 "success": True,
                 "results": results,
@@ -795,7 +832,7 @@ class ToolExecutor:
                 "count": len(results),
             }
         except Exception as e:
-            logger.error(f"语音记忆搜索执行失败: {e}")
+            logger.error("语音记忆搜索执行失败: %s", e)
             return {"error": f"语音记忆搜索执行失败: {str(e)}", "results": [], "count": 0}
 
     async def _execute_run_code(self, params: Dict) -> Dict:
@@ -826,8 +863,8 @@ class ToolExecutor:
             from neurova.execution_layers import (
                 LocalExecutor,
                 RuntimeManager,
-                get_runtime_manager,
                 RuntimeType,
+                get_runtime_manager,
             )
 
             # 确定运行时类型
@@ -848,7 +885,11 @@ class ToolExecutor:
             owns_runtime = False
             if runtime is None:
                 if runtime_type == RuntimeType.DOCKER:
-                    runtime = RuntimeManager.create_runtime_class(RuntimeType.DOCKER) if hasattr(RuntimeManager, 'create_runtime_class') else None
+                    runtime = (
+                        RuntimeManager.create_runtime_class(RuntimeType.DOCKER)
+                        if hasattr(RuntimeManager, "create_runtime_class")
+                        else None
+                    )
                 if runtime is None:
                     runtime = LocalExecutor(runtime_id=f"run_code_{int(time.time())}")
                 owns_runtime = True
@@ -891,7 +932,7 @@ class ToolExecutor:
 
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
-            logger.error(f"代码执行失败: {e}")
+            logger.error("代码执行失败: %s", e)
             return {
                 "success": False,
                 "error": f"代码执行失败: {str(e)}",
@@ -916,14 +957,14 @@ class ToolExecutor:
                     tool_params=result,
                 )
             except Exception as e:
-                logger.debug(f"工具记忆记录失败: {e}")
+                logger.debug("工具记忆记录失败: %s", e)
 
         # 更新工具生命周期
         if self.tool_lifecycle:
             try:
                 self.tool_lifecycle.update_usage(tool_name, success)
             except Exception as e:
-                logger.debug(f"工具生命周期更新失败: {e}")
+                logger.debug("工具生命周期更新失败: %s", e)
 
     def _get_builtin_tool_params(self, tool_name: str) -> Optional[Dict]:
         """
@@ -937,9 +978,10 @@ class ToolExecutor:
         """
         try:
             from neurova.builtin_tools import get_builtin_tool_params
+
             return get_builtin_tool_params(tool_name)
         except ImportError as e:
-            logger.debug(f"get_builtin_tool_params 延迟导入失败: {e}")
+            logger.debug("get_builtin_tool_params 延迟导入失败: %s", e)
             return {}
 
     def get_tool_messages(self) -> List[Dict]:

@@ -25,6 +25,7 @@ router = APIRouter()
 
 class ProjectInfo(BaseModel):
     """项目信息"""
+
     project_id: str
     name: str
     description: str = ""
@@ -38,12 +39,14 @@ class ProjectInfo(BaseModel):
 
 class ProjectCreate(BaseModel):
     """创建项目请求"""
+
     name: str = Field(..., description="项目名称")
     description: str = Field(default="", description="项目描述")
 
 
 class ProjectUpdate(BaseModel):
     """更新项目请求"""
+
     name: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
@@ -51,6 +54,7 @@ class ProjectUpdate(BaseModel):
 
 class ProjectStats(BaseModel):
     """项目统计"""
+
     project_id: str
     teams_count: int = 0
     tasks_count: int = 0
@@ -70,6 +74,7 @@ def _get_pm():
     """获取 ProjectManager"""
     try:
         from neurova.projects.project_manager import ProjectManager
+
         return ProjectManager()
     except Exception:
         return None
@@ -78,6 +83,7 @@ def _get_pm():
 # ---------------------------------------------------------------------------
 # 路由
 # ---------------------------------------------------------------------------
+
 
 @router.post("", response_model=ProjectInfo)
 async def create_project(body: ProjectCreate):
@@ -91,7 +97,7 @@ async def create_project(body: ProjectCreate):
             result = await pm.create_project(name=body.name, description=body.description)
             return ProjectInfo(**result)
         except Exception as e:
-            logger.warning(f"ProjectManager.create_project failed: {e}")
+            logger.warning("ProjectManager.create_project failed: %s", e)
 
     project = {
         "project_id": project_id,
@@ -119,7 +125,7 @@ async def list_projects(
             projects = await pm.list_projects(status=status)
             return [ProjectInfo(**p) for p in projects]
         except Exception as e:
-            logger.warning(f"ProjectManager.list_projects failed: {e}")
+            logger.warning("ProjectManager.list_projects failed: %s", e)
 
     projects = list(_projects_store.values())
     if status:
@@ -137,7 +143,7 @@ async def get_project(project_id: str):
             if project:
                 return ProjectInfo(**project)
         except Exception as e:
-            logger.warning(f"ProjectManager.get_project failed: {e}")
+            logger.warning("ProjectManager.get_project failed: %s", e)
 
     project = _projects_store.get(project_id)
     if not project:

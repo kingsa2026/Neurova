@@ -2,22 +2,25 @@
 Neurflow API — 工作流管理端点
 提供工作流 CRUD、执行、节点注册、DAG 验证等 RESTful 接口
 """
-import time
+
 import logging
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, Body, HTTPException, Query
 
-from neurova.collaboration.neurflow.models import (
-    WorkflowDefinition, WorkflowNode, WorkflowEdge, WorkflowVariable,
-    WorkflowStatus, NodeDefinition, SubBlockConfig, NodePort,
-    ExecutionInstance, NodeExecutionResult
-)
-from neurova.collaboration.neurflow.storage import NeurflowStorage
-from neurova.collaboration.neurflow.node_registry import get_node_registry
+from neurova.api.endpoints import get_agent_instance
 from neurova.collaboration.neurflow.dag import get_dag_validator
 from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
-from neurova.api.endpoints import get_agent_instance
+from neurova.collaboration.neurflow.models import (
+    WorkflowDefinition,
+    WorkflowEdge,
+    WorkflowNode,
+    WorkflowStatus,
+    WorkflowVariable,
+)
+from neurova.collaboration.neurflow.node_registry import get_node_registry
+from neurova.collaboration.neurflow.storage import NeurflowStorage
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,7 @@ def _get_storage() -> NeurflowStorage:
 
 # ==================== 工作流 CRUD ====================
 
+
 @router.get("/workflows")
 async def list_workflows(
     category: Optional[str] = Query(None, description="按分类过滤"),
@@ -43,9 +47,7 @@ async def list_workflows(
     """列出工作流"""
     storage = _get_storage()
     ws_status = WorkflowStatus(status) if status else None
-    workflows = storage.list_workflows(
-        category=category, status=ws_status, limit=limit, offset=offset
-    )
+    workflows = storage.list_workflows(category=category, status=ws_status, limit=limit, offset=offset)
     return {"workflows": [w.to_dict() for w in workflows], "total": len(workflows)}
 
 
@@ -57,8 +59,9 @@ async def create_workflow(data: Dict[str, Any] = Body(...)):
         # 如果前端没有提供 id，则生成一个新的 UUID
         if "id" not in data or not data["id"]:
             import uuid
+
             data["id"] = str(uuid.uuid4())
-        
+
         workflow = WorkflowDefinition.from_dict(data)
         workflow.created_at = time.time()
         workflow.updated_at = time.time()
@@ -115,6 +118,7 @@ async def search_workflows(query: str):
 
 # ==================== 工作流验证 ====================
 
+
 @router.post("/workflows/{workflow_id}/validate")
 async def validate_workflow(workflow_id: str):
     """验证工作流"""
@@ -122,7 +126,7 @@ async def validate_workflow(workflow_id: str):
     workflow = storage.get_workflow(workflow_id)
     if not workflow:
         raise HTTPException(status_code=404, detail="工作流不存在")
-    
+
     validator = get_dag_validator()
     result = validator.validate(workflow.nodes, workflow.edges)
     return {
@@ -131,11 +135,12 @@ async def validate_workflow(workflow_id: str):
         "has_start": result.has_start,
         "has_end": result.has_end,
         "errors": result.errors,
-        "warnings": result.warnings
+        "warnings": result.warnings,
     }
 
 
 # ==================== 工作流执行 ====================
+
 
 @router.post("/workflows/{workflow_id}/execute")
 async def execute_workflow(
@@ -149,13 +154,13 @@ async def execute_workflow(
     workflow = storage.get_workflow(workflow_id)
     if not workflow:
         raise HTTPException(status_code=404, detail="工作流不存在")
-    
+
     # 获取外部系统引用（从 Agent 实例）
     memory_manager = None
     context_pool = None
     emotion_module = None
     crystallizer = None
-    
+
     # 尝试获取 Agent 实例：优先使用指定的 agent_id，否则尝试默认
     agent = None
     if agent_id:
@@ -163,67 +168,65 @@ async def execute_workflow(
     if agent is None:
         # 尝试获取默认 Agent
         agent = get_agent_instance("default")
-    
+
     if agent:
-        memory_manager = getattr(agent, 'memory_manager', None)
+        memory_manager = getattr(agent, "memory_manager", None)
         # context_pool: 尝试从 context_orchestrator 获取，或使用 Agent 的 context_pool 属性
-        context_pool = getattr(agent, 'context_pool', None)
-        if context_pool is None and hasattr(agent, 'context_orchestrator'):
+        context_pool = getattr(agent, "context_pool", None)
+        if context_pool is None and hasattr(agent, "context_orchestrator"):
             # context_orchestrator 可能有 pool 属性
-            context_pool = getattr(agent.context_orchestrator, 'pool', None)
+            context_pool = getattr(agent.context_orchestrator, "pool", None)
         # emotion_module: 从 memory_manager 获取
         if memory_manager:
-            emotion_module = getattr(memory_manager, '_emotion_module', None)
-        crystallizer = getattr(agent, 'crystallizer', None)
-    
+            emotion_module = getattr(memory_manager, "_emotion_module", None)
+        crystallizer = getattr(agent, "crystallizer", None)
+
     # 降级机制：当 Agent 不可用时，创建默认实例
     # memory_manager
     if memory_manager is None:
         try:
             from neurova.cognitive_layers.memory_layer.manager import MemoryManager
-            memory_manager = MemoryManager(
-                agent_id=agent_id or "default",
-                user_id=user_id or "default"
-            )
+
+            memory_manager = MemoryManager(agent_id=agent_id or "default", user_id=user_id or "default")
             logger.info("Agent 不可用，已创建默认 MemoryManager 用于 $memory 变量解析")
         except Exception as e:
-            logger.warning(f"创建默认 MemoryManager 失败: {e}")
-    
+            logger.warning("创建默认 MemoryManager 失败: %s", e)
+
     # emotion_module: 优先从 memory_manager 提取，否则创建独立实例
     if emotion_module is None:
-        if memory_manager and hasattr(memory_manager, '_emotion_module'):
+        if memory_manager and hasattr(memory_manager, "_emotion_module"):
             emotion_module = memory_manager._emotion_module
         if emotion_module is None:
             try:
                 from neurova.cognitive_layers.memory_layer.modules.emotion_module import EmotionModule
+
                 emotion_module = EmotionModule(db_path=None)  # 纯内存模式
                 logger.info("Agent 不可用，已创建默认 EmotionModule 用于 $emotion 变量解析")
             except Exception as e:
-                logger.warning(f"创建默认 EmotionModule 失败: {e}")
-    
+                logger.warning("创建默认 EmotionModule 失败: %s", e)
+
     # crystallizer: 尝试创建带默认存储引擎的结晶器
     if crystallizer is None:
         try:
             from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
             from neurova.cognitive_layers.memory_layer.pattern_crystallizer import PatternCrystallizer
+
             engine = CognitiveStorageEngine(agent_id=agent_id or "default")
             crystallizer = PatternCrystallizer(engine=engine)
             logger.info("Agent 不可用，已创建默认 PatternCrystallizer 用于 $crystal 变量解析")
         except Exception as e:
-            logger.warning(f"创建默认 PatternCrystallizer 失败: {e}")
-    
+            logger.warning("创建默认 PatternCrystallizer 失败: %s", e)
+
     # context_pool: 保持原有降级逻辑
     if context_pool is None:
         try:
             from neurova.context_pool import ContextPool
-            context_pool = ContextPool(
-                user_id=user_id or "default",
-                agent_id=agent_id or "default"
-            )
+
+            context_pool = ContextPool(user_id=user_id or "default", agent_id=agent_id or "default")
             logger.info("Agent 不可用，已创建默认 ContextPool 用于 $context 变量解析")
         except Exception as e:
-            logger.warning(f"创建默认 ContextPool 失败: {e}")
-    
+            logger.warning("创建默认 ContextPool 失败: %s", e)
+
     executor = get_workflow_executor()
     instance = await executor.execute(
         workflow=workflow,
@@ -233,25 +236,27 @@ async def execute_workflow(
         memory_manager=memory_manager,
         context_pool=context_pool,
         emotion_module=emotion_module,
-        crystallizer=crystallizer
+        crystallizer=crystallizer,
     )
-    
+
     # 保存执行实例
     storage.save_execution(instance)
-    
-    return {"instance": {
-        "id": instance.id,
-        "workflow_id": instance.workflow_id,
-        "status": instance.status.value,
-        "inputs": instance.inputs,
-        "outputs": instance.outputs,
-        "node_results": {k: v.__dict__ for k, v in instance.node_results.items()},
-        "variables": instance.variables,
-        "started_at": instance.started_at,
-        "finished_at": instance.finished_at,
-        "duration": instance.duration,
-        "error": instance.error,
-    }}
+
+    return {
+        "instance": {
+            "id": instance.id,
+            "workflow_id": instance.workflow_id,
+            "status": instance.status.value,
+            "inputs": instance.inputs,
+            "outputs": instance.outputs,
+            "node_results": {k: v.__dict__ for k, v in instance.node_results.items()},
+            "variables": instance.variables,
+            "started_at": instance.started_at,
+            "finished_at": instance.finished_at,
+            "duration": instance.duration,
+            "error": instance.error,
+        }
+    }
 
 
 @router.get("/executions")
@@ -264,18 +269,21 @@ async def list_executions(
     """列出执行记录"""
     storage = _get_storage()
     ws_status = WorkflowStatus(status) if status else None
-    executions = storage.list_executions(
-        workflow_id=workflow_id, status=ws_status, limit=limit, offset=offset
-    )
-    return {"executions": [{
-        "id": e.id,
-        "workflow_id": e.workflow_id,
-        "status": e.status.value,
-        "started_at": e.started_at,
-        "finished_at": e.finished_at,
-        "duration": e.duration,
-        "error": e.error,
-    } for e in executions]}
+    executions = storage.list_executions(workflow_id=workflow_id, status=ws_status, limit=limit, offset=offset)
+    return {
+        "executions": [
+            {
+                "id": e.id,
+                "workflow_id": e.workflow_id,
+                "status": e.status.value,
+                "started_at": e.started_at,
+                "finished_at": e.finished_at,
+                "duration": e.duration,
+                "error": e.error,
+            }
+            for e in executions
+        ]
+    }
 
 
 @router.get("/executions/{execution_id}")
@@ -285,22 +293,25 @@ async def get_execution(execution_id: str):
     execution = storage.get_execution(execution_id)
     if not execution:
         raise HTTPException(status_code=404, detail="执行记录不存在")
-    return {"execution": {
-        "id": execution.id,
-        "workflow_id": execution.workflow_id,
-        "status": execution.status.value,
-        "inputs": execution.inputs,
-        "outputs": execution.outputs,
-        "node_results": {k: v.__dict__ for k, v in execution.node_results.items()},
-        "variables": execution.variables,
-        "started_at": execution.started_at,
-        "finished_at": execution.finished_at,
-        "duration": execution.duration,
-        "error": execution.error,
-    }}
+    return {
+        "execution": {
+            "id": execution.id,
+            "workflow_id": execution.workflow_id,
+            "status": execution.status.value,
+            "inputs": execution.inputs,
+            "outputs": execution.outputs,
+            "node_results": {k: v.__dict__ for k, v in execution.node_results.items()},
+            "variables": execution.variables,
+            "started_at": execution.started_at,
+            "finished_at": execution.finished_at,
+            "duration": execution.duration,
+            "error": execution.error,
+        }
+    }
 
 
 # ==================== 节点注册表 ====================
+
 
 @router.get("/nodes")
 async def list_nodes(
@@ -309,24 +320,30 @@ async def list_nodes(
 ):
     """列出所有已注册节点"""
     registry = get_node_registry()
-    
+
     if category:
         nodes = registry.list_by_category(category)
     elif source:
         nodes = registry.list_by_source(source)
     else:
         nodes = registry.list_all()
-    
-    return {"nodes": [{
-        "type": n.type,
-        "label": n.label,
-        "icon": n.icon,
-        "category": n.category,
-        "description": n.description,
-        "source": n.source,
-        "version": n.version,
-        "tags": n.tags,
-    } for n in nodes], "total": len(nodes)}
+
+    return {
+        "nodes": [
+            {
+                "type": n.type,
+                "label": n.label,
+                "icon": n.icon,
+                "category": n.category,
+                "description": n.description,
+                "source": n.source,
+                "version": n.version,
+                "tags": n.tags,
+            }
+            for n in nodes
+        ],
+        "total": len(nodes),
+    }
 
 
 @router.get("/nodes/search/{query}")
@@ -334,15 +351,21 @@ async def search_nodes(query: str):
     """搜索节点"""
     registry = get_node_registry()
     results = registry.search(query)
-    return {"nodes": [{
-        "type": n.type,
-        "label": n.label,
-        "icon": n.icon,
-        "category": n.category,
-        "description": n.description,
-        "source": n.source,
-        "tags": n.tags,
-    } for n in results], "total": len(results)}
+    return {
+        "nodes": [
+            {
+                "type": n.type,
+                "label": n.label,
+                "icon": n.icon,
+                "category": n.category,
+                "description": n.description,
+                "source": n.source,
+                "tags": n.tags,
+            }
+            for n in results
+        ],
+        "total": len(results),
+    }
 
 
 @router.post("/nodes/sync")
@@ -368,22 +391,25 @@ async def get_node(node_type: str):
     node = registry.get(node_type)
     if not node:
         raise HTTPException(status_code=404, detail="节点不存在")
-    return {"node": {
-        "type": node.type,
-        "label": node.label,
-        "icon": node.icon,
-        "category": node.category,
-        "description": node.description,
-        "sub_blocks": [s.__dict__ for s in node.sub_blocks],
-        "inputs": [i.__dict__ for i in node.inputs],
-        "outputs": [o.__dict__ for o in node.outputs],
-        "source": node.source,
-        "version": node.version,
-        "tags": node.tags,
-    }}
+    return {
+        "node": {
+            "type": node.type,
+            "label": node.label,
+            "icon": node.icon,
+            "category": node.category,
+            "description": node.description,
+            "sub_blocks": [s.__dict__ for s in node.sub_blocks],
+            "inputs": [i.__dict__ for i in node.inputs],
+            "outputs": [o.__dict__ for o in node.outputs],
+            "source": node.source,
+            "version": node.version,
+            "tags": node.tags,
+        }
+    }
 
 
 # ==================== 工作流扩展 API ====================
+
 
 @router.post("/workflows/{workflow_id}/duplicate")
 async def duplicate_workflow(workflow_id: str):
@@ -392,7 +418,7 @@ async def duplicate_workflow(workflow_id: str):
     existing = storage.get_workflow(workflow_id)
     if not existing:
         raise HTTPException(status_code=404, detail="工作流不存在")
-    
+
     try:
         # 创建副本
         new_workflow = WorkflowDefinition(
@@ -411,7 +437,7 @@ async def duplicate_workflow(workflow_id: str):
             status=WorkflowStatus.DRAFT,  # 副本总是草稿状态
             template=existing.template,
             public=False,  # 副本默认不公开
-            metadata=existing.metadata.copy()
+            metadata=existing.metadata.copy(),
         )
         storage.save_workflow(new_workflow)
         return {"workflow": new_workflow.to_dict(), "message": "工作流复制成功"}
@@ -426,7 +452,7 @@ async def get_workflow_definition(workflow_id: str):
     workflow = storage.get_workflow(workflow_id)
     if not workflow:
         raise HTTPException(status_code=404, detail="工作流不存在")
-    
+
     return {
         "nodes": [n.__dict__ for n in workflow.nodes],
         "edges": [e.__dict__ for e in workflow.edges],
@@ -441,20 +467,20 @@ async def update_workflow_definition(workflow_id: str, data: Dict[str, Any] = Bo
     existing = storage.get_workflow(workflow_id)
     if not existing:
         raise HTTPException(status_code=404, detail="工作流不存在")
-    
+
     try:
         # 更新节点
         if "nodes" in data:
             existing.nodes = [WorkflowNode(**n) for n in data["nodes"]]
-        
+
         # 更新边
         if "edges" in data:
             existing.edges = [WorkflowEdge(**e) for e in data["edges"]]
-        
+
         # 更新变量
         if "variables" in data:
             existing.variables = [WorkflowVariable(**v) for v in data["variables"]]
-        
+
         existing.updated_at = time.time()
         storage.save_workflow(existing)
         return {"message": "工作流定义更新成功", "workflow": existing.to_dict()}
@@ -469,14 +495,10 @@ async def save_workflow_viewport(workflow_id: str, data: Dict[str, Any] = Body(.
     existing = storage.get_workflow(workflow_id)
     if not existing:
         raise HTTPException(status_code=404, detail="工作流不存在")
-    
+
     try:
         # 保存视口状态到 metadata
-        existing.metadata["viewport"] = {
-            "x": data.get("x", 0),
-            "y": data.get("y", 0),
-            "zoom": data.get("zoom", 1)
-        }
+        existing.metadata["viewport"] = {"x": data.get("x", 0), "y": data.get("y", 0), "zoom": data.get("zoom", 1)}
         existing.updated_at = time.time()
         storage.save_workflow(existing)
         return {"message": "视口状态保存成功"}
@@ -491,18 +513,15 @@ async def publish_workflow(workflow_id: str):
     existing = storage.get_workflow(workflow_id)
     if not existing:
         raise HTTPException(status_code=404, detail="工作流不存在")
-    
+
     try:
         # 验证工作流
         validator = get_dag_validator()
         validation_result = validator.validate(existing.nodes, existing.edges)
-        
+
         if not validation_result.is_valid:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"工作流验证失败: {', '.join(validation_result.errors)}"
-            )
-        
+            raise HTTPException(status_code=400, detail=f"工作流验证失败: {', '.join(validation_result.errors)}")
+
         # 更新状态为已发布
         existing.status = WorkflowStatus.PUBLISHED
         existing.updated_at = time.time()
@@ -516,6 +535,7 @@ async def publish_workflow(workflow_id: str):
 
 # ==================== 执行控制 API ====================
 
+
 @router.post("/executions/{execution_id}/cancel")
 async def cancel_execution(execution_id: str):
     """取消执行"""
@@ -523,7 +543,7 @@ async def cancel_execution(execution_id: str):
     execution = storage.get_execution(execution_id)
     if not execution:
         raise HTTPException(status_code=404, detail="执行记录不存在")
-    
+
     try:
         executor = get_workflow_executor()
         success = executor.cancel(execution_id)
@@ -549,10 +569,10 @@ async def resume_execution(execution_id: str):
     execution = storage.get_execution(execution_id)
     if not execution:
         raise HTTPException(status_code=404, detail="执行记录不存在")
-    
+
     if execution.status != WorkflowStatus.PAUSED:
         raise HTTPException(status_code=400, detail="只能恢复暂停的执行")
-    
+
     try:
         executor = get_workflow_executor()
         success = executor.resume(execution_id)
@@ -571,6 +591,7 @@ async def resume_execution(execution_id: str):
 
 # ==================== 团队 Agent API ====================
 
+
 @router.get("/agents")
 async def list_agents(
     flow_id: Optional[str] = Query(None, description="按工作流过滤"),
@@ -579,6 +600,7 @@ async def list_agents(
     """列出团队 Agent"""
     try:
         from neurova.collaboration.neurflow.agent_manager import get_agent_manager
+
         manager = get_agent_manager()
         agents = manager.list_agents(flow_id=flow_id, include_archived=include_archived)
         return {"agents": [a.__dict__ for a in agents], "total": len(agents)}
@@ -591,33 +613,31 @@ async def create_agent(data: Dict[str, Any] = Body(...)):
     """创建临时团队 Agent"""
     try:
         from neurova.collaboration.neurflow.agent_manager import get_agent_manager
+
         manager = get_agent_manager()
-        
+
         name = data.get("name")
         role = data.get("role")
         if not name or not role:
             raise HTTPException(status_code=400, detail="名称和角色是必填字段")
-        
+
         import logging
+
         logger = logging.getLogger(__name__)
-        logger.error(f"DEBUG: name={name}, role={role}, manager={manager}")
-        
-        agent = manager.create_agent(
-            name=name,
-            role=role,
-            config=data.get("config", {}),
-            flow_id=data.get("flow_id")
-        )
+        logger.error("DEBUG: name=%s, role=%s, manager=%s", name, role, manager)
+
+        agent = manager.create_agent(name=name, role=role, config=data.get("config", {}), flow_id=data.get("flow_id"))
         from starlette.responses import JSONResponse
+
         # 构建响应数据
         agent_data = {
-            "id": str(agent.agent_id) if hasattr(agent, 'agent_id') else None,
-            "name": str(agent.name) if hasattr(agent, 'name') else name,
-            "role": str(agent.role) if hasattr(agent, 'role') else role,
-            "config": dict(agent.config) if hasattr(agent, 'config') else data.get("config", {}),
-            "flow_id": str(agent.flow_id) if hasattr(agent, 'flow_id') else data.get("flow_id"),
-            "status": str(agent.status) if hasattr(agent, 'status') else "active",
-            "created_at": float(agent.created_at) if hasattr(agent, 'created_at') else None
+            "id": str(agent.agent_id) if hasattr(agent, "agent_id") else None,
+            "name": str(agent.name) if hasattr(agent, "name") else name,
+            "role": str(agent.role) if hasattr(agent, "role") else role,
+            "config": dict(agent.config) if hasattr(agent, "config") else data.get("config", {}),
+            "flow_id": str(agent.flow_id) if hasattr(agent, "flow_id") else data.get("flow_id"),
+            "status": str(agent.status) if hasattr(agent, "status") else "active",
+            "created_at": float(agent.created_at) if hasattr(agent, "created_at") else None,
         }
         return JSONResponse(content={"agent": agent_data, "message": "Agent 创建成功"}, status_code=201)
     except HTTPException:
@@ -631,6 +651,7 @@ async def archive_agent(agent_id: str):
     """归档 Agent"""
     try:
         from neurova.collaboration.neurflow.agent_manager import get_agent_manager
+
         manager = get_agent_manager()
         success = manager.archive_agent(agent_id)
         if success:
@@ -648,6 +669,7 @@ async def restore_agent(agent_id: str):
     """恢复 Agent"""
     try:
         from neurova.collaboration.neurflow.agent_manager import get_agent_manager
+
         manager = get_agent_manager()
         success = manager.restore_agent(agent_id)
         if success:
@@ -661,6 +683,7 @@ async def restore_agent(agent_id: str):
 
 
 # ==================== 模板 API ====================
+
 
 @router.get("/templates")
 async def list_templates(
@@ -684,11 +707,11 @@ async def create_template(data: Dict[str, Any] = Body(...)):
         workflow_id = data.get("workflow_id")
         if not workflow_id:
             raise HTTPException(status_code=400, detail="workflow_id 是必填字段")
-        
+
         existing = storage.get_workflow(workflow_id)
         if not existing:
             raise HTTPException(status_code=404, detail="工作流不存在")
-        
+
         # 创建模板
         template = WorkflowDefinition(
             id=f"tmpl_{int(time.time())}",
@@ -706,10 +729,11 @@ async def create_template(data: Dict[str, Any] = Body(...)):
             status=WorkflowStatus.PUBLISHED,
             template=True,  # 标记为模板
             public=data.get("public", False),
-            metadata=existing.metadata.copy()
+            metadata=existing.metadata.copy(),
         )
         storage.save_workflow(template)
         from starlette.responses import JSONResponse
+
         return JSONResponse(content={"template": template.to_dict(), "message": "模板创建成功"}, status_code=201)
     except HTTPException:
         raise
@@ -726,7 +750,7 @@ async def instantiate_template(template_id: str, data: Dict[str, Any] = Body(...
         template = storage.get_workflow(template_id)
         if not template or not template.template:
             raise HTTPException(status_code=404, detail="模板不存在")
-        
+
         # 创建新工作流
         new_workflow = WorkflowDefinition(
             id=f"wf_{int(time.time())}",
@@ -744,18 +768,21 @@ async def instantiate_template(template_id: str, data: Dict[str, Any] = Body(...
             status=WorkflowStatus.DRAFT,
             template=False,
             public=False,
-            metadata=template.metadata.copy()
+            metadata=template.metadata.copy(),
         )
-        
+
         # 应用变量覆盖
         if "variables" in data:
             for var in new_workflow.variables:
                 if var.name in data["variables"]:
                     var.default_value = data["variables"][var.name]
-        
+
         storage.save_workflow(new_workflow)
         from starlette.responses import JSONResponse
-        return JSONResponse(content={"workflow": new_workflow.to_dict(), "message": "从模板创建工作流成功"}, status_code=201)
+
+        return JSONResponse(
+            content={"workflow": new_workflow.to_dict(), "message": "从模板创建工作流成功"}, status_code=201
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -764,13 +791,11 @@ async def instantiate_template(template_id: str, data: Dict[str, Any] = Body(...
 
 # ==================== 统计 ====================
 
+
 @router.get("/stats")
 async def get_stats():
     """获取 Neurflow 统计信息"""
     storage = _get_storage()
     registry = get_node_registry()
     registry.ensure_builtin()
-    return {
-        "storage": storage.get_statistics(),
-        "nodes": registry.get_summary()
-    }
+    return {"storage": storage.get_statistics(), "nodes": registry.get_summary()}

@@ -30,8 +30,10 @@ router = APIRouter()
 # Pydantic 模型
 # ---------------------------------------------------------------------------
 
+
 class TeamInfo(BaseModel):
     """团队信息"""
+
     team_id: str
     name: str
     description: str = ""
@@ -44,6 +46,7 @@ class TeamInfo(BaseModel):
 
 class TeamCreate(BaseModel):
     """创建团队请求"""
+
     name: str = Field(..., description="团队名称")
     description: str = Field(default="", description="团队描述")
     project_id: Optional[str] = Field(default=None, description="所属项目ID")
@@ -51,12 +54,14 @@ class TeamCreate(BaseModel):
 
 class TeamUpdate(BaseModel):
     """更新团队请求"""
+
     name: Optional[str] = None
     description: Optional[str] = None
 
 
 class MemberInfo(BaseModel):
     """成员信息"""
+
     member_id: str
     name: str
     role: str = "member"
@@ -66,6 +71,7 @@ class MemberInfo(BaseModel):
 
 class MemberAdd(BaseModel):
     """添加成员请求"""
+
     user_id: str = Field(..., description="用户ID")
     name: str = Field(default="", description="成员名称")
     role: str = Field(default="member", description="角色")
@@ -74,6 +80,7 @@ class MemberAdd(BaseModel):
 
 class MemberPromptUpdate(BaseModel):
     """更新成员职责描述"""
+
     prompt: str = Field(..., description="职责描述")
 
 
@@ -88,6 +95,7 @@ def _get_tm():
     """获取 TeamManager（后端模块不可用时使用内存存储）"""
     try:
         from neurova.projects.team_manager import TeamManager
+
         return TeamManager()
     except Exception:
         return None
@@ -96,6 +104,7 @@ def _get_tm():
 # ---------------------------------------------------------------------------
 # 路由
 # ---------------------------------------------------------------------------
+
 
 @router.post("", response_model=TeamInfo)
 async def create_team(body: TeamCreate):
@@ -113,7 +122,7 @@ async def create_team(body: TeamCreate):
             )
             return TeamInfo(**result)
         except Exception as e:
-            logger.warning(f"TeamManager.create_team failed: {e}")
+            logger.warning("TeamManager.create_team failed: %s", e)
 
     team = {
         "team_id": team_id,
@@ -141,7 +150,7 @@ async def list_teams(
             teams = await tm.list_teams(project_id=project_id)
             return [TeamInfo(**t) for t in teams]
         except Exception as e:
-            logger.warning(f"TeamManager.list_teams failed: {e}")
+            logger.warning("TeamManager.list_teams failed: %s", e)
 
     teams = list(_teams_store.values())
     if project_id:
@@ -159,7 +168,7 @@ async def get_team(team_id: str):
             if team:
                 return TeamInfo(**team)
         except Exception as e:
-            logger.warning(f"TeamManager.get_team failed: {e}")
+            logger.warning("TeamManager.get_team failed: %s", e)
 
     team = _teams_store.get(team_id)
     if not team:
@@ -176,7 +185,7 @@ async def delete_team(team_id: str):
             await tm.delete_team(team_id)
             return {"code": 0, "message": "Team deleted"}
         except Exception as e:
-            logger.warning(f"TeamManager.delete_team failed: {e}")
+            logger.warning("TeamManager.delete_team failed: %s", e)
 
     if team_id not in _teams_store:
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")

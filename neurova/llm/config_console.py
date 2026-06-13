@@ -19,7 +19,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -315,10 +314,7 @@ class LLMConfigConsole:
 
     def get_token_stats(self, provider_id: Optional[str] = None) -> Dict[str, Any]:
         with self._lock:
-            entries = [
-                e for e in self._token_usage
-                if provider_id is None or e.get("provider_id") == provider_id
-            ]
+            entries = [e for e in self._token_usage if provider_id is None or e.get("provider_id") == provider_id]
             total_prompt = sum(int(e.get("prompt_tokens", 0)) for e in entries)
             total_completion = sum(int(e.get("completion_tokens", 0)) for e in entries)
             total_cost = float(sum(float(e.get("cost", 0.0)) for e in entries))
@@ -326,12 +322,15 @@ class LLMConfigConsole:
             by_provider: Dict[str, Dict[str, Any]] = {}
             for e in entries:
                 pid = e.get("provider_id", "unknown")
-                bucket = by_provider.setdefault(pid, {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "cost": 0.0,
-                    "requests": 0,
-                })
+                bucket = by_provider.setdefault(
+                    pid,
+                    {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "cost": 0.0,
+                        "requests": 0,
+                    },
+                )
                 bucket["prompt_tokens"] += int(e.get("prompt_tokens", 0))
                 bucket["completion_tokens"] += int(e.get("completion_tokens", 0))
                 bucket["cost"] = float(bucket["cost"]) + float(e.get("cost", 0.0))

@@ -2,17 +2,10 @@
 知识图谱接口 - Knowledge Graph API Endpoint
 """
 
-import datetime
 import logging
 import typing
-import uuid
 
-from fastapi import APIRouter
-from fastapi import HTTPException
-from fastapi import Query
-from fastapi import Request
-from pydantic import BaseModel
-from pydantic import Field
+from fastapi import APIRouter, HTTPException, Query, Request
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -21,11 +14,46 @@ router = APIRouter()
 # ── Demo graph data ────────────────────────────────────
 
 _DEMO_NODES = [
-    {"id": "n1", "label": "Machine Learning", "type": "concept", "description": "Field of AI that learns from data", "weight": 0.9, "created_at": "2026-01-01T00:00:00"},
-    {"id": "n2", "label": "Neural Networks", "type": "concept", "description": "Computational models inspired by brain", "weight": 0.85, "created_at": "2026-01-01T00:00:00"},
-    {"id": "n3", "label": "Python", "type": "tool", "description": "Programming language", "weight": 0.8, "created_at": "2026-01-02T00:00:00"},
-    {"id": "n4", "label": "Transformer", "type": "architecture", "description": "Attention-based neural network", "weight": 0.95, "created_at": "2026-01-03T00:00:00"},
-    {"id": "n5", "label": "Fine-tuning", "type": "technique", "description": "Adapting pre-trained models", "weight": 0.7, "created_at": "2026-01-04T00:00:00"},
+    {
+        "id": "n1",
+        "label": "Machine Learning",
+        "type": "concept",
+        "description": "Field of AI that learns from data",
+        "weight": 0.9,
+        "created_at": "2026-01-01T00:00:00",
+    },
+    {
+        "id": "n2",
+        "label": "Neural Networks",
+        "type": "concept",
+        "description": "Computational models inspired by brain",
+        "weight": 0.85,
+        "created_at": "2026-01-01T00:00:00",
+    },
+    {
+        "id": "n3",
+        "label": "Python",
+        "type": "tool",
+        "description": "Programming language",
+        "weight": 0.8,
+        "created_at": "2026-01-02T00:00:00",
+    },
+    {
+        "id": "n4",
+        "label": "Transformer",
+        "type": "architecture",
+        "description": "Attention-based neural network",
+        "weight": 0.95,
+        "created_at": "2026-01-03T00:00:00",
+    },
+    {
+        "id": "n5",
+        "label": "Fine-tuning",
+        "type": "technique",
+        "description": "Adapting pre-trained models",
+        "weight": 0.7,
+        "created_at": "2026-01-04T00:00:00",
+    },
 ]
 _DEMO_EDGES = [
     {"source": "n1", "target": "n2", "relation": "includes", "weight": 0.9},
@@ -49,14 +77,19 @@ async def get_knowledge_graph(agent_id: str, request: Request, limit: int = Quer
     if not graph:
         # Return demo data
         nodes = _DEMO_NODES[:limit]
-        edges = [e for e in _DEMO_EDGES if e["source"] in [n["id"] for n in nodes] and e["target"] in [n["id"] for n in nodes]]
+        edges = [
+            e
+            for e in _DEMO_EDGES
+            if e["source"] in [n["id"] for n in nodes] and e["target"] in [n["id"] for n in nodes]
+        ]
     else:
         nodes = graph.get("nodes", [])[:limit]
         node_ids = {n["id"] for n in nodes}
         edges = [e for e in graph.get("edges", []) if e["source"] in node_ids and e["target"] in node_ids]
 
     return {
-        "code": 0, "message": "success",
+        "code": 0,
+        "message": "success",
         "data": {"nodes": nodes, "edges": edges, "total_nodes": len(nodes), "total_edges": len(edges)},
     }
 
@@ -90,6 +123,7 @@ async def get_graph_node_detail(agent_id: str, node_id: str):
     related_nodes = [n for n in nodes if n["id"] in related_node_ids]
 
     return {
-        "code": 0, "message": "success",
+        "code": 0,
+        "message": "success",
         "data": {"node": node, "edges": related, "related_nodes": related_nodes},
     }

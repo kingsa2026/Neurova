@@ -7,9 +7,7 @@ Skill Manifest定义
 
 from __future__ import annotations
 
-from neurova.skills.models import Skill, SkillManifest, PluginEntryPoints, SkillRecord
-
 # skills imports
-import neurova.skills.models
+from neurova.skills.models import PluginEntryPoints, Skill, SkillManifest, SkillRecord
 
 __all__ = ["SkillManifest", "PluginEntryPoints", "SkillRecord", "Skill"]

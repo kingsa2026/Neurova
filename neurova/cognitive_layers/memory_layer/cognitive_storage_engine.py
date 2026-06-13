@@ -19,7 +19,7 @@ import logging
 import sqlite3
 import threading
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -30,39 +30,43 @@ logger = logging.getLogger(__name__)
 
 # ── 数据模型 ──────────────────────────────────────────────────────────────────
 
+
 class MemoryType(Enum):
     """记忆类型"""
-    EPISODIC = "episodic"        # 事件记忆
-    SEMANTIC = "semantic"        # 语义知识
-    PROCEDURAL = "procedural"    # 程序性知识（工具使用）
-    PATTERN = "pattern"          # 结晶经验
+
+    EPISODIC = "episodic"  # 事件记忆
+    SEMANTIC = "semantic"  # 语义知识
+    PROCEDURAL = "procedural"  # 程序性知识（工具使用）
+    PATTERN = "pattern"  # 结晶经验
     TOOL_MEMORY = "tool_memory"  # 工具记忆
 
 
 class StorageLayer(Enum):
     """存储层级"""
-    L0_BUFFER = 0   # WAL 缓冲区（秒级）
-    L1_HOT = 1      # SQLite 热存储（分钟级）
-    L2_WARM = 2     # JSON 温存储（小时级）
-    L3_COLD = 3     # 压缩冷存储（天级）
+
+    L0_BUFFER = 0  # WAL 缓冲区（秒级）
+    L1_HOT = 1  # SQLite 热存储（分钟级）
+    L2_WARM = 2  # JSON 温存储（小时级）
+    L3_COLD = 3  # 压缩冷存储（天级）
     L4_CRYSTAL = 4  # 结晶经验（永久）
 
 
 @dataclass
 class UnifiedMemoryNode:
     """统一记忆节点 — 所有记忆类型的唯一数据模型"""
+
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     content: str = ""
     memory_type: MemoryType = MemoryType.SEMANTIC
     category: str = "general"
-    temperature: float = 100.0          # 0-100 scale，统一
+    temperature: float = 100.0  # 0-100 scale，统一
     layer: StorageLayer = StorageLayer.L1_HOT
     metadata: Dict[str, Any] = field(default_factory=dict)
     embedding: Optional[List[float]] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     access_count: int = 0
-    trace_id: Optional[str] = None    # 推理链溯源
+    trace_id: Optional[str] = None  # 推理链溯源
 
     def touch(self):
         """访问一次，温度升高"""
@@ -214,24 +218,22 @@ class CognitiveStorageEngine:
                         data = json.loads(line)
                         node = UnifiedMemoryNode.from_dict(data)
                         # Only recover nodes not already in L1
-                        existing = self._db.execute(
-                            "SELECT id FROM memories WHERE id = ?", (node.id,)
-                        ).fetchone()
+                        existing = self._db.execute("SELECT id FROM memories WHERE id = ?", (node.id,)).fetchone()
                         if existing is None:
                             self._l0_buffer.append(node)
                             if node.embedding:
                                 self._vector_index[node.id] = node.embedding
                             recovered += 1
                     except (json.JSONDecodeError, Exception) as e:
-                        logger.warning(f"WAL recovery: skip bad entry: {e}")
+                        logger.warning("WAL recovery: skip bad entry: %s", e)
             # Rewrite WAL with only recovered entries
             if recovered > 0:
                 with open(self._wal_path, "w", encoding="utf-8") as f:
                     for node in self._l0_buffer:
                         f.write(json.dumps(node.to_dict(), ensure_ascii=False) + "\n")
-                logger.info(f"WAL recovery: restored {recovered} nodes")
+                logger.info("WAL recovery: restored %s nodes", recovered)
         except Exception as e:
-            logger.error(f"WAL recovery failed: {e}")
+            logger.error("WAL recovery failed: %s", e)
 
     def _wal_append(self, node: UnifiedMemoryNode):
         """追加到 WAL 文件"""
@@ -240,7 +242,7 @@ class CognitiveStorageEngine:
                 with open(self._wal_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(node.to_dict(), ensure_ascii=False) + "\n")
             except Exception as e:
-                logger.error(f"WAL append failed: {e}")
+                logger.error("WAL append failed: %s", e)
 
     def _flush_l0_to_l1(self):
         """将 L0 缓冲区 flush 到 L1 SQLite"""
@@ -277,8 +279,8 @@ class CognitiveStorageEngine:
                 with open(self._wal_path, "w", encoding="utf-8") as f:
                     pass  # truncate
             except Exception as e:
-                logger.error(f"WAL clear failed: {e}")
-        logger.debug(f"Flushed {len(nodes)} nodes from L0 to L1")
+                logger.error("WAL clear failed: %s", e)
+        logger.debug("Flushed %s nodes from L0 to L1", len(nodes))
 
     def store(self, node: UnifiedMemoryNode) -> str:
         """写入记忆节点"""
@@ -306,8 +308,7 @@ class CognitiveStorageEngine:
                     return True
         return False
 
-    def retrieve(self, query: str, limit: int = 10,
-                 filters: Dict = None) -> List[UnifiedMemoryNode]:
+    def retrieve(self, query: str, limit: int = 10, filters: Dict = None) -> List[UnifiedMemoryNode]:
         """跨层检索"""
         results: List[UnifiedMemoryNode] = []
 

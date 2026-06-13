@@ -13,16 +13,14 @@ Neurova JWT 认证模块
 import datetime
 import logging
 import os
-from pathlib import Path
 import secrets
-import time
-import typing
 import uuid
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import jwt
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +35,7 @@ security = HTTPBearer(auto_error=False)
 
 class AuthError(Exception):
     """认证错误"""
+
     def __init__(self, message: str, code: int = 401):
         self.message = message
         self.code = code
@@ -70,7 +69,7 @@ def _load_or_create_secret_key() -> str:
     try:
         secret_file.write_text(secret)
     except Exception as e:
-        logger.warning(f"Failed to save JWT secret: {e}")
+        logger.warning("Failed to save JWT secret: %s", e)
 
     return secret
 
@@ -101,12 +100,14 @@ def create_access_token(
     else:
         expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    to_encode.update({
-        "exp": expire,
-        "type": "access",
-        "iat": datetime.datetime.now(datetime.timezone.utc),
-        "jti": str(uuid.uuid4()),
-    })
+    to_encode.update(
+        {
+            "exp": expire,
+            "type": "access",
+            "iat": datetime.datetime.now(datetime.timezone.utc),
+            "jti": str(uuid.uuid4()),
+        }
+    )
 
     return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
@@ -132,12 +133,14 @@ def create_refresh_token(
     else:
         expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
 
-    to_encode.update({
-        "exp": expire,
-        "type": "refresh",
-        "iat": datetime.datetime.now(datetime.timezone.utc),
-        "jti": str(uuid.uuid4()),
-    })
+    to_encode.update(
+        {
+            "exp": expire,
+            "type": "refresh",
+            "iat": datetime.datetime.now(datetime.timezone.utc),
+            "jti": str(uuid.uuid4()),
+        }
+    )
 
     return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
@@ -182,7 +185,7 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
         logger.warning("Token expired")
         return None
     except jwt.InvalidTokenError as e:
-        logger.warning(f"Invalid token: {e}")
+        logger.warning("Invalid token: %s", e)
         return None
 
 
@@ -203,7 +206,7 @@ def verify_token(token: str, token_type: str = "access") -> Optional[Dict[str, A
 
     # 检查 token 类型
     if payload.get("type") != token_type:
-        logger.warning(f"Token type mismatch: expected {token_type}, got {payload.get('type')}")
+        logger.warning("Token type mismatch: expected %s, got %s", token_type, payload.get('type'))
         return None
 
     return payload
@@ -250,12 +253,14 @@ def hash_password(password: str) -> str:
     """
     try:
         import bcrypt
+
         salt = bcrypt.gensalt()
         return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
     except ImportError:
         # bcrypt 不可用时，使用 PBKDF2-SHA256（NIST 推荐的 KDF）
-        import hashlib
         import base64
+        import hashlib
+
         salt = secrets.token_bytes(16)
         dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations=260000)
         # 格式: pbkdf2:sha256:260000:<salt_b64>:<dk_b64>
@@ -275,11 +280,13 @@ def verify_password(password: str, hashed: str) -> bool:
     """
     try:
         import bcrypt
+
         return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
     except ImportError:
         # bcrypt 不可用时，使用 PBKDF2-SHA256 验证
-        import hashlib
         import base64
+        import hashlib
+
         if not hashed.startswith("pbkdf2:sha256:"):
             # 兼容旧的无盐 SHA-256 哈希（仅用于验证已有密码）
             return hashlib.sha256(password.encode("utf-8")).hexdigest() == hashed
