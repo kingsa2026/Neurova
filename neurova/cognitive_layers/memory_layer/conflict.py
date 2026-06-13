@@ -1,5 +1,9 @@
 """
 冲突检测引擎 - 检测新记忆与已有记忆的冲突
+
+支持两种检测模式：
+1. 语义模式：使用语义相似度检测（需要SemanticSearch）
+2. 规则模式：基于字符重叠和否定词检测（无需模型）
 """
 
 import datetime
@@ -18,10 +22,26 @@ class ConflictDetector:
     检测新记忆与已有记忆的冲突。
     """
 
-    def __init__(self):
-        """初始化冲突检测器"""
+    def __init__(self, use_semantic: bool = True):
+        """
+        初始化冲突检测器
+        
+        Args:
+            use_semantic: 是否使用语义相似度检测
+        """
         self._conflict_history: List[Dict[str, Any]] = []
-        logger.info("ConflictDetector 初始化完成")
+        self._use_semantic = use_semantic
+        self._semantic_search = None
+        
+        # 延迟初始化语义搜索
+        if use_semantic:
+            try:
+                from .semantic_search import get_semantic_search
+                self._semantic_search = get_semantic_search()
+            except Exception as e:
+                logger.warning("语义搜索初始化失败，降级到规则模式: %s", e)
+        
+        logger.info("ConflictDetector 初始化完成 (semantic=%s)", use_semantic)
 
     def detect_conflict(self, new_memory: Memory, existing_memories: List[Memory]) -> List[Dict[str, Any]]:
         """
@@ -46,15 +66,71 @@ class ConflictDetector:
 
     def _check_pair_conflict(self, memory1: Memory, memory2: Memory) -> Optional[Dict[str, Any]]:
         """检查两个记忆之间的冲突"""
-        # 简单实现：检查内容相似度和否定词
         content1 = memory1.content.lower()
         content2 = memory2.content.lower()
 
-        # 计算简单相似度
-        similarity = self._calculate_similarity(content1, content2)
+        # 计算相似度
+        if self._use_semantic and self._semantic_search:
+            similarity = self._semantic_search.compute_similarity(content1, content2)
+        else:
+            similarity = self._calculate_similarity(content1, content2)
 
-        if similarity < 0.3:
+        # 检查矛盾词（即使相似度低，如果有矛盾词也可能是冲突）
+        contradiction_score = self._check_contradiction(content1, content2)
+        
+        # 综合判断
+        is_conflict = similarity >= 0.3 or contradiction_score >= 0.5
+        
+        if not is_conflict:
             return None
+
+        # 检查否定词
+        negations1 = self._has_negation(content1)
+        negations2 = self._has_negation(content2)
+
+        # 确定冲突类型
+        conflict_type = "negation_conflict"
+        description = "一个记忆包含否定词，另一个不包含"
+        
+        if contradiction_score >= 0.5:
+            conflict_type = "semantic_contradiction"
+            description = "两个记忆存在语义矛盾"
+
+        # 如果一个有否定词，另一个没有，可能是冲突
+        if (negations1 and not negations2) or (negations2 and not negations1):
+            conflict_type = "negation_conflict"
+            description = "一个记忆包含否定词，另一个不包含"
+
+        return {
+            "type": conflict_type,
+            "memory1_id": memory1.id,
+            "memory2_id": memory2.id,
+            "similarity": similarity,
+            "contradiction_score": contradiction_score,
+            "detection_mode": "semantic" if self._semantic_search else "rule",
+            "description": description,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+    
+    def _check_contradiction(self, text1: str, text2: str) -> float:
+        """检查两个文本是否存在矛盾"""
+        # 矛盾词对
+        contradiction_pairs = [
+            ("正常", "挂了"), ("正常", "故障"), ("正常", "失败"),
+            ("成功", "失败"), ("开启", "关闭"), ("增加", "减少"),
+            ("快", "慢"), ("好", "差"), ("多", "少"),
+            ("是", "不是"), ("有", "没有"), ("能", "不能"),
+        ]
+        
+        score = 0.0
+        
+        for word1, word2 in contradiction_pairs:
+            if word1 in text1 and word2 in text2:
+                score += 0.5
+            elif word2 in text1 and word1 in text2:
+                score += 0.5
+        
+        return min(1.0, score)
 
         # 检查否定词
         negations1 = self._has_negation(content1)
@@ -67,6 +143,7 @@ class ConflictDetector:
                 "memory1_id": memory1.id,
                 "memory2_id": memory2.id,
                 "similarity": similarity,
+                "detection_mode": "semantic" if self._semantic_search else "rule",
                 "description": "一个记忆包含否定词，另一个不包含",
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
