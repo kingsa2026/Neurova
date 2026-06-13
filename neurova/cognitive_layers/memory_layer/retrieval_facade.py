@@ -376,12 +376,15 @@ class MemoryRetrievalFacade:
         query: str,
         intent,
         limit: int,
+        agent_id: Optional[str] = None,
+        neuser_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> UnifiedRecallResult:
         """Level 1: 传统融合（加权求和）"""
         if not self._recall_engine:
             raise ValueError("RecallEngine not available")
         
-        result = self._recall_engine.retrieve(query, limit)
+        result = self._recall_engine.retrieve(query, limit, agent_id=agent_id, neuser_id=neuser_id, user_id=user_id)
         memories = self._channel_to_dict(result, limit)
         
         return UnifiedRecallResult(
@@ -396,6 +399,9 @@ class MemoryRetrievalFacade:
         self,
         query: str,
         limit: int,
+        agent_id: Optional[str] = None,
+        neuser_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> UnifiedRecallResult:
         """Level 2: 简单检索（文本通道）"""
         if not self._recall_engine:

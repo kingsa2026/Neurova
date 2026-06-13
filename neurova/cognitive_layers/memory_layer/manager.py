@@ -335,12 +335,50 @@ class MemoryManager:
                     payload={"memory_id": mem_id, "content": content, "category": category},
                 )
             )
+
+            # NEURON: 提取依赖关系到依赖图谱
+            self._extract_dependency_async(mem_id, content, metadata)
+
             return mem_id
+
+    def _extract_dependency_async(
+        self, memory_id: str, content: str, metadata: Optional[Dict[str, Any]]
+    ) -> None:
+        """后台异步提取依赖关系（失败不影响主流程）"""
+        try:
+            from .moe_dependency_extractor import MOEDependencyExtractor
+
+            if not hasattr(self, "_dependency_extractor"):
+                self._dependency_extractor = MOEDependencyExtractor()
+
+            import asyncio
+
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 已在事件循环中，用 create_task 包装
+                asyncio.ensure_future(
+                    self._dependency_extractor.extract_from_memory(
+                        memory_id=memory_id, content=content, metadata=metadata,
+                    )
+                )
+            else:
+                loop.run_until_complete(
+                    self._dependency_extractor.extract_from_memory(
+                        memory_id=memory_id, content=content, metadata=metadata,
+                    )
+                )
+        except Exception as e:
+            logger.debug("依赖提取失败（不影响记忆存储）: %s", e)
 
     def recall(
         self, query: str = "", category: Optional[str] = None, limit: int = 10, min_temperature: float = 0.0, **kwargs
     ) -> List[Dict[str, Any]]:
-        """检索记忆"""
+        """检索记忆
+        
+        支持两种检索模式：
+        1. 语义搜索（默认）：使用语义相似度匹配
+        2. 关键词搜索：使用子字符串匹配（兼容旧版）
+        """
         with self._lock:
             self._stats["recall_count"] += 1
             results = list(self._memories.values())
@@ -353,13 +391,21 @@ class MemoryManager:
             if min_temperature > 0:
                 results = [m for m in results if m.temperature >= min_temperature]
 
-            # 简单关键词匹配
+            # 检索模式
+            use_semantic = kwargs.get("use_semantic", True)
+            
             if query:
-                query_lower = query.lower()
-                results = [m for m in results if query_lower in m.content.lower()]
+                if use_semantic:
+                    # 语义搜索模式
+                    results = self._semantic_recall(query, results, limit)
+                else:
+                    # 兼容旧版：简单关键词匹配
+                    query_lower = query.lower()
+                    results = [m for m in results if query_lower in m.content.lower()]
 
-            # 按温度排序
-            results.sort(key=lambda m: m.temperature, reverse=True)
+            # 按温度排序（如果没有语义分数）
+            if not use_semantic or not query:
+                results.sort(key=lambda m: m.temperature, reverse=True)
 
             # 发射事件
             for m in results[:limit]:
@@ -373,6 +419,38 @@ class MemoryManager:
                 )
 
             return [m.to_dict() for m in results[:limit]]
+    
+    def _semantic_recall(self, query: str, memories: list, limit: int) -> list:
+        """语义搜索检索"""
+        try:
+            from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
+            
+            search = get_semantic_search()
+            
+            # 构建记忆字典列表
+            memory_dicts = [m.to_dict() for m in memories]
+            
+            # 构建关键词索引（如果尚未构建）
+            if not search._keyword_index:
+                search.build_keyword_index(memory_dicts)
+            
+            # 使用关键词搜索
+            matching_ids = search.search_by_keywords(query, limit=limit * 2)
+            
+            # 按匹配顺序排序记忆
+            id_to_memory = {m.id: m for m in memories}
+            sorted_memories = []
+            for mid in matching_ids:
+                if mid in id_to_memory:
+                    sorted_memories.append(id_to_memory[mid])
+            
+            return sorted_memories[:limit]
+            
+        except Exception as e:
+            logger.warning("语义搜索失败，降级到关键词匹配: %s", e)
+            # 降级到简单关键词匹配
+            query_lower = query.lower()
+            return [m for m in memories if query_lower in m.content.lower()][:limit]
 
     def get_memory(self, memory_id: str) -> Optional[Dict[str, Any]]:
         """获取单条记忆"""

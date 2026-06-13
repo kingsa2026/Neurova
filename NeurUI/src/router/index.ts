@@ -54,12 +54,6 @@ const routes: RouteRecordRaw[] = [
 
       // ----- Agent-scoped routes (under agent/:agentId) -----
       {
-        path: 'agent/:agentId/chat',
-        name: 'AgentChat',
-        component: () => import('@/pages/ChatPage.vue'),
-        props: true,
-      },
-      {
         path: 'agent/:agentId/memory',
         name: 'AgentMemory',
         component: () => import('@/pages/MemoryPage.vue'),
@@ -186,11 +180,24 @@ const routes: RouteRecordRaw[] = [
         props: true,
       },
 
+      // ----- NEURON 系统路由 -----
+      {
+        path: 'neuron',
+        name: 'Neuron',
+        component: () => import('@/views/NeuronPage.vue'),
+      },
+
       // ----- Global routes -----
       {
         path: 'chat',
-        name: 'ChatRedirect',
-        redirect: '/dashboard',
+        name: 'Chat',
+        component: () => import('@/pages/ChatPage.vue'),
+        props: { layoutMode: 'main' },
+      },
+      {
+        path: 'channels',
+        name: 'Channels',
+        component: () => import('@/pages/ChannelIntegrationPage.vue'),
       },
       {
         path: 'knowledge',
@@ -201,6 +208,11 @@ const routes: RouteRecordRaw[] = [
         path: 'memory/search-settings',
         name: 'MemorySearchSettings',
         component: () => import('@/pages/MemorySearchSettingsPage.vue'),
+      },
+      {
+        path: 'memory/settings',
+        name: 'MemorySettings',
+        component: () => import('@/pages/MemorySettingsPage.vue'),
       },
 
       // ----- Skills & AIGC -----
@@ -363,6 +375,23 @@ const routes: RouteRecordRaw[] = [
         path: 'firewall',
         name: 'Firewall',
         component: () => import('@/pages/FirewallPage.vue'),
+      },
+    ],
+  },
+
+  // ---------------------------------------------------------------------------
+  // Chat route with its own layout (independent sidebar + agent switcher)
+  // ---------------------------------------------------------------------------
+  {
+    path: '/',
+    component: () => import('@/layouts/ChatLayout.vue'),
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: 'agent/:agentId/chat',
+        name: 'AgentChat',
+        component: () => import('@/pages/ChatPage.vue'),
+        props: true,
       },
     ],
   },

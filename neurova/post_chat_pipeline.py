@@ -1675,3 +1675,96 @@ class PostChatPipeline:
                     duration_ms=(time.time() - start_time) * 1000,
                 )
             )
+
+    async def _step_extract_conversation_rules(
+        self,
+        user_input: str,
+        reply: str,
+        session_id: str,
+    ):
+        """Step 9.96: 从对话提取规则并关联经验记忆
+
+        1. 使用 LLM 提取对话中的因果/条件关系
+        2. 注入 DependencyGraph
+        3. 关联经验记忆
+        4. 更新模式挖掘器
+        """
+        step_name = "extract_conversation_rules"
+        start_time = time.time()
+
+        try:
+            # 获取依赖组件
+            dependency_graph = self._get_dependency("dependency_graph")
+            rule_extractor = self._get_dependency("rule_extractor")
+            
+            if not rule_extractor:
+                # 创建规则提取器
+                from neurova.cognitive_layers.memory_layer.conversation_rule_extractor import (
+                    ConversationRuleExtractor,
+                )
+                llm_client = self._get_dependency("llm_client")
+                if not llm_client:
+                    self._step_results.append(
+                        StepResult(
+                            step_name=step_name,
+                            status=StepStatus.SKIPPED,
+                            message="llm_client not available",
+                            duration_ms=(time.time() - start_time) * 1000,
+                        )
+                    )
+                    return
+                
+                rule_extractor = ConversationRuleExtractor(llm_client, dependency_graph)
+            
+            # 1. 提取对话规则
+            rules = await rule_extractor.extract(user_input, reply, session_id)
+            logger.info("从对话提取到 %d 个规则", len(rules))
+            
+            # 2. 关联经验记忆（这个对话用到了什么工具？）
+            tools_used = self._collect_tool_messages()
+            tool_names = list(set(tm.get("tool_name", "unknown") for tm in tools_used))
+            
+            # 3. 更新经验记忆融合器
+            fusion = self._get_dependency("experience_fusion")
+            if fusion and tool_names:
+                for tool_name in tool_names:
+                    fusion.fuse(
+                        tool_result={
+                            "tool_name": tool_name,
+                            "success": True,
+                            "problem_text": user_input[:100],
+                        },
+                        graph_context={
+                            "related_entities": [r.source_entity for r in rules],
+                            "causal_chains": [f"{r.source_entity}→{r.target_entity}" for r in rules],
+                        },
+                    )
+            
+            # 4. 更新模式挖掘器
+            pattern_miner = self._get_dependency("pattern_miner")
+            if pattern_miner and len(tool_names) > 1:
+                pattern_miner.add_sequence(tool_names)
+            
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.EXECUTED,
+                    message=f"Extracted {len(rules)} rules, {len(tool_names)} tools",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={
+                        "rules_count": len(rules),
+                        "tools_used": tool_names,
+                    },
+                )
+            )
+
+        except Exception as e:
+            logger.warning("Step 9.96 对话规则提取失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )

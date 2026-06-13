@@ -562,6 +562,12 @@ class NeurovaRecallEngine:
 
             self._volume_renderer = VolumeRenderer(density_scale=density_scale)
 
+        # NEURON 依赖图谱组件（图通道 + 级联推理）
+        self._dependency_graph = None
+        self._cascade_engine = None
+        self._absence_reasoner = None
+        self._dependency_extractor = None
+
         # 默认通道权重（无意图时的 fallback）
         self._channel_weights = {
             RecallChannel.TEMPERATURE: 0.25,
@@ -887,27 +893,210 @@ class NeurovaRecallEngine:
 
     def _channel_temperature(self, query: str, limit: int) -> List[RecalledMemory]:
         """温度通道（热记忆优先）"""
-        # 简化实现
-        logger.debug("温度通道检索: %s", query)
-        return []
+        results = []
+        
+        # 从记忆管理器获取所有记忆
+        if not self.memory_manager:
+            return results
+        
+        try:
+            all_memories = self.memory_manager.get_all_memories()
+            
+            # 按温度排序（高温优先）
+            sorted_memories = sorted(
+                all_memories,
+                key=lambda m: m.get("temperature", 50),
+                reverse=True
+            )
+            
+            # 转换为RecalledMemory
+            for mem in sorted_memories[:limit]:
+                results.append(RecalledMemory(
+                    memory_id=mem.get("id", ""),
+                    content=mem.get("content", ""),
+                    score=mem.get("temperature", 50) / 100.0,
+                    channel=RecallChannel.TEMPERATURE,
+                    metadata={"temperature": mem.get("temperature", 50)},
+                ))
+            
+            logger.debug("温度通道检索: %s, 返回 %d 条", query, len(results))
+            
+        except Exception as e:
+            logger.warning("温度通道检索失败: %s", e)
+        
+        return results
 
     def _channel_text(self, query: str, limit: int) -> List[RecalledMemory]:
         """文本通道（语义相似度）"""
-        # 简化实现
-        logger.debug("文本通道检索: %s", query)
-        return []
+        results = []
+        
+        if not self.memory_manager:
+            return results
+        
+        try:
+            # 使用语义搜索
+            from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
+            
+            search = get_semantic_search()
+            all_memories = self.memory_manager.get_all_memories()
+            
+            # 构建关键词索引
+            memory_dicts = [m.to_dict() if hasattr(m, 'to_dict') else m for m in all_memories]
+            if not search._keyword_index:
+                search.build_keyword_index(memory_dicts)
+            
+            # 搜索
+            matching_ids = search.search_by_keywords(query, limit=limit)
+            
+            # 转换为RecalledMemory
+            id_to_memory = {m.get("id", ""): m for m in all_memories}
+            for mid in matching_ids:
+                if mid in id_to_memory:
+                    mem = id_to_memory[mid]
+                    results.append(RecalledMemory(
+                        memory_id=mid,
+                        content=mem.get("content", ""),
+                        score=0.8,
+                        channel=RecallChannel.TEXT,
+                        metadata={"match_type": "semantic"},
+                    ))
+            
+            logger.debug("文本通道检索: %s, 返回 %d 条", query, len(results))
+            
+        except Exception as e:
+            logger.warning("文本通道检索失败: %s", e)
+        
+        return results
 
     def _channel_category(self, query: str, limit: int) -> List[RecalledMemory]:
         """分类通道（同类别记忆）"""
-        # 简化实现
-        logger.debug("分类通道检索: %s", query)
-        return []
+        results = []
+        
+        if not self.memory_manager:
+            return results
+        
+        try:
+            # 从查询中推断类别
+            category = self._infer_category(query)
+            
+            # 获取同类别记忆
+            all_memories = self.memory_manager.get_all_memories()
+            
+            for mem in all_memories:
+                mem_category = mem.get("category", "")
+                if mem_category == category:
+                    results.append(RecalledMemory(
+                        memory_id=mem.get("id", ""),
+                        content=mem.get("content", ""),
+                        score=0.7,
+                        channel=RecallChannel.CATEGORY,
+                        metadata={"category": category},
+                    ))
+            
+            # 限制结果数量
+            results = results[:limit]
+            
+            logger.debug("分类通道检索: %s (category=%s), 返回 %d 条", query, category, len(results))
+            
+        except Exception as e:
+            logger.warning("分类通道检索失败: %s", e)
+        
+        return results
+    
+    def _infer_category(self, query: str) -> str:
+        """从查询推断类别"""
+        # 简单规则推断
+        category_keywords = {
+            "conversation": ["对话", "聊天", "说", "问", "答"],
+            "technical": ["代码", "编程", "API", "数据库", "服务器"],
+            "experience": ["经验", "教训", "学习", "实践"],
+            "fact": ["事实", "数据", "统计", "信息"],
+        }
+        
+        for category, keywords in category_keywords.items():
+            for kw in keywords:
+                if kw in query:
+                    return category
+        
+        return "general"
+
+    def _ensure_neuron_components(self) -> bool:
+        """惰性初始化 NEURON 组件，返回是否可用"""
+        if self._dependency_graph is not None:
+            return True
+        try:
+            from .dependency_graph import DependencyGraph
+            from .cascade_engine import CascadeEngine
+            from .absence_reasoner import AbsenceReasoner
+            from .moe_dependency_extractor import MOEDependencyExtractor
+
+            self._dependency_graph = DependencyGraph()
+            self._cascade_engine = CascadeEngine(self._dependency_graph)
+            self._absence_reasoner = AbsenceReasoner(self._dependency_graph)
+            self._dependency_extractor = MOEDependencyExtractor()
+            return True
+        except Exception as e:
+            logger.debug("NEURON 组件初始化失败: %s", e)
+            return False
 
     def _channel_graph(self, query: str, limit: int) -> List[RecalledMemory]:
-        """图通道（关系图谱）"""
-        # 简化实现
-        logger.debug("图通道检索: %s", query)
-        return []
+        """图通道（NEURON 依赖图谱检索）
+
+        流程:
+            1. 从查询中提取实体
+            2. 查询下游/上游依赖实体
+            3. 正向级联推理
+            4. 去重并排序返回
+        """
+        if not self._ensure_neuron_components():
+            return []
+
+        recalled_memories: List[RecalledMemory] = []
+
+        try:
+            entities = self._dependency_extractor.entity_extractor.extract(query)
+
+            for entity in entities:
+                # 下游查询（受该实体影响的）
+                downstream = self._dependency_graph.get_downstream(entity["id"])
+                # 上游查询（影响该实体的）
+                upstream = [
+                    edge.source_id
+                    for edge in self._dependency_graph.reverse_adjacency.get(entity["id"], [])
+                ]
+
+                for entity_id in downstream + upstream:
+                    entity_node = self._dependency_graph.entities.get(entity_id)
+                    if entity_node and "memory_id" in entity_node.metadata:
+                        recalled_memories.append(RecalledMemory(
+                            memory_id=entity_node.metadata["memory_id"],
+                            content=entity_node.name,
+                            score=0.8,
+                            channel=RecallChannel.GRAPH,
+                        ))
+
+            # 正向级联推理
+            if entities:
+                cascade_result = self._cascade_engine.forward_cascade(entities[0]["id"])
+                for effect in cascade_result.effects:
+                    entity_node = self._dependency_graph.entities.get(effect.entity_id)
+                    if entity_node and "memory_id" in entity_node.metadata:
+                        recalled_memories.append(RecalledMemory(
+                            memory_id=entity_node.metadata["memory_id"],
+                            content=entity_node.name,
+                            score=effect.confidence,
+                            channel=RecallChannel.GRAPH,
+                        ))
+        except Exception as e:
+            logger.debug("图通道检索异常: %s", e)
+
+        # 去重
+        unique_memories: Dict[str, RecalledMemory] = {}
+        for m in recalled_memories:
+            if m.memory_id not in unique_memories or m.score > unique_memories[m.memory_id].score:
+                unique_memories[m.memory_id] = m
+
+        return sorted(unique_memories.values(), key=lambda x: x.score, reverse=True)[:limit]
 
     def _channel_emotion(self, query: str, limit: int) -> List[RecalledMemory]:
         """情感通道（情感相似度）
@@ -1252,26 +1441,221 @@ class NeurovaRecallEngine:
         return channel_mapping.get(intent, list(RecallChannel))
 
     def _drill_explore(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
-        """探索钻取"""
-        # 简化实现：返回种子记忆
-        return seed_memories[:limit]
+        """探索钻取 - 查找与种子记忆相关但不同类别的记忆"""
+        results = []
+        
+        if not self.memory_manager or not seed_memories:
+            return seed_memories[:limit]
+        
+        try:
+            # 获取种子记忆的类别
+            seed_categories = set()
+            for mem in seed_memories:
+                category = mem.metadata.get("category", "")
+                if category:
+                    seed_categories.add(category)
+            
+            # 查找不同类别的记忆
+            all_memories = self.memory_manager.get_all_memories()
+            for mem in all_memories:
+                mem_category = mem.get("category", "")
+                mem_id = mem.get("id", "")
+                
+                # 排除已有的种子记忆
+                seed_ids = {m.memory_id for m in seed_memories}
+                if mem_id in seed_ids:
+                    continue
+                
+                # 查找不同类别的记忆
+                if mem_category and mem_category not in seed_categories:
+                    results.append(RecalledMemory(
+                        memory_id=mem_id,
+                        content=mem.get("content", ""),
+                        score=0.6,
+                        channel=RecallChannel.GRAPH,
+                        metadata={"drill_type": "explore", "category": mem_category},
+                    ))
+            
+            logger.debug("探索钻取: 返回 %d 条新类别记忆", len(results))
+            
+        except Exception as e:
+            logger.warning("探索钻取失败: %s", e)
+        
+        return results[:limit]
 
     def _drill_deepen(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
-        """深化钻取"""
-        # 简化实现：返回种子记忆
-        return seed_memories[:limit]
+        """深化钻取 - 查找与种子记忆更深层相关的记忆"""
+        results = []
+        
+        if not self.memory_manager or not seed_memories:
+            return seed_memories[:limit]
+        
+        try:
+            # 获取种子记忆的ID
+            seed_ids = {m.memory_id for m in seed_memories}
+            
+            # 查找与种子记忆有共同关键词的记忆
+            all_memories = self.memory_manager.get_all_memories()
+            
+            for mem in all_memories:
+                mem_id = mem.get("id", "")
+                content = mem.get("content", "")
+                
+                # 排除已有的种子记忆
+                if mem_id in seed_ids:
+                    continue
+                
+                # 检查是否有共同关键词
+                for seed_mem in seed_memories:
+                    seed_content = seed_mem.content
+                    # 简单的关键词重叠检查
+                    seed_words = set(seed_content.split())
+                    mem_words = set(content.split())
+                    overlap = len(seed_words & mem_words)
+                    
+                    if overlap >= 2:  # 至少2个共同关键词
+                        results.append(RecalledMemory(
+                            memory_id=mem_id,
+                            content=content,
+                            score=0.7,
+                            channel=RecallChannel.GRAPH,
+                            metadata={"drill_type": "deepen", "overlap": overlap},
+                        ))
+                        break
+            
+            logger.debug("深化钻取: 返回 %d 条相关记忆", len(results))
+            
+        except Exception as e:
+            logger.warning("深化钻取失败: %s", e)
+        
+        return results[:limit]
 
     def _drill_connect(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
-        """连接钻取"""
-        # 简化实现：返回种子记忆
-        return seed_memories[:limit]
+        """连接钻取 - 查找连接两个种子记忆的中间记忆"""
+        results = []
+        
+        if not self.memory_manager or len(seed_memories) < 2:
+            return seed_memories[:limit]
+        
+        try:
+            # 获取前两个种子记忆
+            seed1 = seed_memories[0]
+            seed2 = seed_memories[1]
+            
+            # 查找同时包含两个种子记忆关键词的记忆
+            seed1_words = set(seed1.content.split())
+            seed2_words = set(seed2.content.split())
+            
+            all_memories = self.memory_manager.get_all_memories()
+            seed_ids = {m.memory_id for m in seed_memories}
+            
+            for mem in all_memories:
+                mem_id = mem.get("id", "")
+                content = mem.get("content", "")
+                
+                # 排除已有的种子记忆
+                if mem_id in seed_ids:
+                    continue
+                
+                # 检查是否同时包含两个种子记忆的关键词
+                mem_words = set(content.split())
+                overlap1 = len(seed1_words & mem_words)
+                overlap2 = len(seed2_words & mem_words)
+                
+                if overlap1 >= 1 and overlap2 >= 1:
+                    results.append(RecalledMemory(
+                        memory_id=mem_id,
+                        content=content,
+                        score=0.75,
+                        channel=RecallChannel.GRAPH,
+                        metadata={"drill_type": "connect", "bridge": True},
+                    ))
+            
+            logger.debug("连接钻取: 返回 %d 条桥接记忆", len(results))
+            
+        except Exception as e:
+            logger.warning("连接钻取失败: %s", e)
+        
+        return results[:limit]
 
     def _drill_contrast(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
-        """对比钻取"""
-        # 简化实现：返回种子记忆
-        return seed_memories[:limit]
+        """对比钻取 - 查找与种子记忆矛盾或对比的记忆"""
+        results = []
+        
+        if not self.memory_manager or not seed_memories:
+            return seed_memories[:limit]
+        
+        try:
+            # 查找包含否定词或对比词的记忆
+            contrast_keywords = ["不", "没有", "但是", "然而", "相反", "对比", "差异"]
+            
+            all_memories = self.memory_manager.get_all_memories()
+            seed_ids = {m.memory_id for m in seed_memories}
+            
+            for mem in all_memories:
+                mem_id = mem.get("id", "")
+                content = mem.get("content", "")
+                
+                # 排除已有的种子记忆
+                if mem_id in seed_ids:
+                    continue
+                
+                # 检查是否包含对比关键词
+                for keyword in contrast_keywords:
+                    if keyword in content:
+                        results.append(RecalledMemory(
+                            memory_id=mem_id,
+                            content=content,
+                            score=0.65,
+                            channel=RecallChannel.GRAPH,
+                            metadata={"drill_type": "contrast", "keyword": keyword},
+                        ))
+                        break
+            
+            logger.debug("对比钻取: 返回 %d 条对比记忆", len(results))
+            
+        except Exception as e:
+            logger.warning("对比钻取失败: %s", e)
+        
+        return results[:limit]
 
     def _drill_validate(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
-        """验证钻取"""
-        # 简化实现：返回种子记忆
-        return seed_memories[:limit]
+        """验证钻取 - 查找验证种子记忆正确性的记忆"""
+        results = []
+        
+        if not self.memory_manager or not seed_memories:
+            return seed_memories[:limit]
+        
+        try:
+            # 查找包含验证关键词的记忆
+            validate_keywords = ["验证", "确认", "测试", "检查", "证明", "证据"]
+            
+            all_memories = self.memory_manager.get_all_memories()
+            seed_ids = {m.memory_id for m in seed_memories}
+            
+            for mem in all_memories:
+                mem_id = mem.get("id", "")
+                content = mem.get("content", "")
+                
+                # 排除已有的种子记忆
+                if mem_id in seed_ids:
+                    continue
+                
+                # 检查是否包含验证关键词
+                for keyword in validate_keywords:
+                    if keyword in content:
+                        results.append(RecalledMemory(
+                            memory_id=mem_id,
+                            content=content,
+                            score=0.6,
+                            channel=RecallChannel.GRAPH,
+                            metadata={"drill_type": "validate", "keyword": keyword},
+                        ))
+                        break
+            
+            logger.debug("验证钻取: 返回 %d 条验证记忆", len(results))
+            
+        except Exception as e:
+            logger.warning("验证钻取失败: %s", e)
+        
+        return results[:limit]
