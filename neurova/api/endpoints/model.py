@@ -12,12 +12,10 @@ from __future__ import annotations
 """
 
 import logging
-import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import List
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -27,6 +25,7 @@ router = APIRouter()
 
 class ModelInfo(BaseModel):
     """模型信息"""
+
     model_id: str
     name: str
     provider: str = ""
@@ -37,12 +36,14 @@ class ModelInfo(BaseModel):
 
 class SwitchModelRequest(BaseModel):
     """切换模型请求"""
+
     model_id: str = Field(..., description="模型 ID")
     agent_id: str = Field(default="default", description="Agent ID")
 
 
 class ProbeRequest(BaseModel):
     """探测请求"""
+
     model_id: str = Field(..., description="模型 ID")
     probe_type: str = Field(default="multimodal", description="探测类型")
 
@@ -55,19 +56,21 @@ def _get_request_id(request: Request) -> str:
 def _get_provider_manager():
     """获取 Provider 管理器"""
     from neurova.api.endpoints import get_provider_manager
+
     return get_provider_manager()
 
 
 def _get_agent(agent_id: str = "default"):
     """获取 Agent 实例"""
     from neurova.api.endpoints import get_agent_instance
+
     return get_agent_instance(agent_id)
 
 
 @router.get("", response_model=List[ModelInfo])
 async def list_models(request: Request):
     """列出可用模型"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     models = []
     provider_manager = _get_provider_manager()
@@ -77,16 +80,18 @@ async def list_models(request: Request):
             if hasattr(provider_manager, "get_all_models"):
                 all_models = provider_manager.get_all_models()
                 for model in all_models:
-                    models.append(ModelInfo(
-                        model_id=getattr(model, "model_id", "unknown"),
-                        name=getattr(model, "name", "Unknown"),
-                        provider=getattr(model, "provider", ""),
-                        capabilities=getattr(model, "capabilities", []),
-                        is_active=getattr(model, "is_active", False),
-                        status=getattr(model, "status", "unknown"),
-                    ))
+                    models.append(
+                        ModelInfo(
+                            model_id=getattr(model, "model_id", "unknown"),
+                            name=getattr(model, "name", "Unknown"),
+                            provider=getattr(model, "provider", ""),
+                            capabilities=getattr(model, "capabilities", []),
+                            is_active=getattr(model, "is_active", False),
+                            status=getattr(model, "status", "unknown"),
+                        )
+                    )
         except Exception as e:
-            logger.warning(f"List models error: {e}")
+            logger.warning("List models error: %s", e)
 
     # 如果没有找到模型，返回默认列表
     if not models:
@@ -107,7 +112,7 @@ async def list_models(request: Request):
 @router.get("/active", response_model=ModelInfo)
 async def get_active_model(request: Request, agent_id: str = Query(default="default")):
     """获取当前活跃模型"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if agent:
@@ -124,7 +129,7 @@ async def get_active_model(request: Request, agent_id: str = Query(default="defa
                 status="active",
             )
         except Exception as e:
-            logger.warning(f"Get active model error: {e}")
+            logger.warning("Get active model error: %s", e)
 
     return ModelInfo(
         model_id="unknown",
@@ -137,7 +142,7 @@ async def get_active_model(request: Request, agent_id: str = Query(default="defa
 @router.post("/switch")
 async def switch_model(request: Request, body: SwitchModelRequest):
     """切换模型"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     agent = _get_agent(body.agent_id)
     if not agent:
@@ -165,7 +170,7 @@ async def switch_model(request: Request, body: SwitchModelRequest):
 @router.post("/probe-multimodal")
 async def probe_multimodal(request: Request, body: ProbeRequest):
     """模型多模态探测"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     provider_manager = _get_provider_manager()
     if not provider_manager:
@@ -192,7 +197,7 @@ async def probe_multimodal(request: Request, body: ProbeRequest):
 @router.post("/check-connection")
 async def check_connection(request: Request, model_id: str = Query(...)):
     """检查模型连接"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     provider_manager = _get_provider_manager()
     if not provider_manager:

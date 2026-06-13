@@ -11,26 +11,23 @@ Muscle Memory - 真正的肌肉记忆系统（条件反射级）
 遗忘机制：30天未使用自动降级L2→L3
 """
 
-from dataclasses import dataclass, field
-import datetime
-import enum
 import hashlib
 import json
 import logging
-from pathlib import Path
 import re
 import threading
 import time
-import typing
-from typing import Any, Dict, List, Optional, Tuple
-
+from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class MemoryLevel(Enum):
     """记忆层级"""
+
     L1 = "l1"  # 条件反射级（毫秒响应）
     L2 = "l2"  # 热路径缓存（秒级响应）
     L3 = "l3"  # 工具记忆（需要检索）
@@ -39,10 +36,11 @@ class MemoryLevel(Enum):
 @dataclass
 class MuscleMemoryItem:
     """肌肉记忆条目"""
+
     id: str
     tool_name: str
-    query_fingerprint: str         # 查询关键词指纹
-    vector_fingerprint: str = ""   # 向量指纹（可选）
+    query_fingerprint: str  # 查询关键词指纹
+    vector_fingerprint: str = ""  # 向量指纹（可选）
     parameters: Dict[str, Any] = field(default_factory=dict)
     result_summary: str = ""
     level: MemoryLevel = MemoryLevel.L3
@@ -91,9 +89,9 @@ class MuscleMemoryItem:
 
 # 遗忘阈值（秒）
 _FORGET_THRESHOLDS = {
-    MemoryLevel.L1: 30 * 86400,   # L1: 30天未使用降级到L2
-    MemoryLevel.L2: 30 * 86400,   # L2: 30天未使用降级到L3
-    MemoryLevel.L3: 90 * 86400,   # L3: 90天未使用删除
+    MemoryLevel.L1: 30 * 86400,  # L1: 30天未使用降级到L2
+    MemoryLevel.L2: 30 * 86400,  # L2: 30天未使用降级到L3
+    MemoryLevel.L3: 90 * 86400,  # L3: 90天未使用删除
 }
 
 # 固化阈值：连续成功次数
@@ -225,9 +223,7 @@ class MuscleMemory:
         unique_results.sort(key=lambda x: x[1], reverse=True)
         return unique_results[:top_k]
 
-    def _match_l1(
-        self, tool_name: str, fingerprint: str, vector_fp: str
-    ) -> List[Tuple[MuscleMemoryItem, float]]:
+    def _match_l1(self, tool_name: str, fingerprint: str, vector_fp: str) -> List[Tuple[MuscleMemoryItem, float]]:
         """L1 精确匹配"""
         results = []
         for item_id, item in self._l1.items():
@@ -238,9 +234,7 @@ class MuscleMemory:
                 results.append((item, conf))
         return results
 
-    def _match_l2(
-        self, tool_name: str, fingerprint: str, vector_fp: str
-    ) -> List[Tuple[MuscleMemoryItem, float]]:
+    def _match_l2(self, tool_name: str, fingerprint: str, vector_fp: str) -> List[Tuple[MuscleMemoryItem, float]]:
         """L2 模糊匹配"""
         results = []
         for item_id, item in self._l2.items():
@@ -251,9 +245,7 @@ class MuscleMemory:
                 results.append((item, conf))
         return results
 
-    def _match_l3(
-        self, tool_name: str, fingerprint: str, vector_fp: str
-    ) -> List[Tuple[MuscleMemoryItem, float]]:
+    def _match_l3(self, tool_name: str, fingerprint: str, vector_fp: str) -> List[Tuple[MuscleMemoryItem, float]]:
         """L3 广泛检索"""
         results = []
         tool_items = self._tool_index.get(tool_name, set())
@@ -280,9 +272,7 @@ class MuscleMemory:
             score += 0.6
         else:
             # 部分匹配
-            overlap = len(
-                set(item.query_fingerprint.split(",")) & set(fingerprint.split(","))
-            )
+            overlap = len(set(item.query_fingerprint.split(",")) & set(fingerprint.split(",")))
             total = max(
                 len(set(item.query_fingerprint.split(","))),
                 len(set(fingerprint.split(","))),
@@ -362,7 +352,7 @@ class MuscleMemory:
             self._add_to_tool_index(item)
             self._save_all()
 
-            logger.debug(f"New muscle memory item: {item_id[:8]}... (L3)")
+            logger.debug("New muscle memory item: %s... (L3)", item_id[:8])
             return item
 
     def _update_existing_item(
@@ -399,13 +389,13 @@ class MuscleMemory:
             self._l3.pop(item.id, None)
             item.level = MemoryLevel.L2
             self._l2[item.id] = item
-            logger.info(f"Promoted {item.id[:8]}... L3 -> L2")
+            logger.info("Promoted %s... L3 -> L2", item.id[:8])
         elif item.level == MemoryLevel.L2:
             # L2 -> L1
             self._l2.pop(item.id, None)
             item.level = MemoryLevel.L1
             self._l1[item.id] = item
-            logger.info(f"Promoted {item.id[:8]}... L2 -> L1")
+            logger.info("Promoted %s... L2 -> L1", item.id[:8])
 
     def check_forgotten(self) -> int:
         """
@@ -453,7 +443,7 @@ class MuscleMemory:
                 demoted += 1
 
         if demoted > 0:
-            logger.info(f"Forgot {demoted} muscle memory items")
+            logger.info("Forgot %s muscle memory items", demoted)
             self._save_all()
 
         return demoted
@@ -463,11 +453,11 @@ class MuscleMemory:
         if item.level == MemoryLevel.L1:
             item.level = MemoryLevel.L2
             self._l2[item.id] = item
-            logger.debug(f"Demoted {item.id[:8]}... L1 -> L2")
+            logger.debug("Demoted %s... L1 -> L2", item.id[:8])
         elif item.level == MemoryLevel.L2:
             item.level = MemoryLevel.L3
             self._l3[item.id] = item
-            logger.debug(f"Demoted {item.id[:8]}... L2 -> L3")
+            logger.debug("Demoted %s... L2 -> L3", item.id[:8])
 
     def create_from_skill(
         self,
@@ -534,9 +524,7 @@ class MuscleMemory:
                 template[key] = "<any>"
         return template
 
-    def _find_item(
-        self, tool_name: str, fingerprint: str, vector_fp: str
-    ) -> Optional[MuscleMemoryItem]:
+    def _find_item(self, tool_name: str, fingerprint: str, vector_fp: str) -> Optional[MuscleMemoryItem]:
         """查找已有条目"""
         # 先从工具索引查找
         tool_items = self._tool_index.get(tool_name, set())
@@ -601,7 +589,7 @@ class MuscleMemory:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
         except Exception as e:
-            logger.warning(f"Failed to save {level_name}: {e}")
+            logger.warning("Failed to save %s: %s", level_name, e)
 
     def _load_all(self) -> None:
         """加载所有层级"""
@@ -618,7 +606,7 @@ class MuscleMemory:
                 self._add_to_tool_index(item)
 
         total = len(self._l1) + len(self._l2) + len(self._l3)
-        logger.info(f"Loaded {total} muscle memory items")
+        logger.info("Loaded %s muscle memory items", total)
 
     def _load_level(self, level_name: str) -> Dict[str, MuscleMemoryItem]:
         """加载单个层级"""
@@ -632,7 +620,7 @@ class MuscleMemory:
                 data = json.load(f)
             return {item["id"]: MuscleMemoryItem.from_dict(item) for item in data}
         except Exception as e:
-            logger.warning(f"Failed to load {level_name}: {e}")
+            logger.warning("Failed to load %s: %s", level_name, e)
             return {}
 
     def get_stats(self) -> Dict[str, Any]:

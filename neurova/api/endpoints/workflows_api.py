@@ -100,13 +100,25 @@ async def create_workflow(body: WorkflowCreate):
     wf_id = str(uuid.uuid4())
     now = time.time()
     steps = [
-        WorkflowStep(step_id=str(uuid.uuid4()), name=s.get("name", f"Step {i+1}"),
-                     step_type=s.get("step_type", "action"), config=s.get("config", {}), order=i)
+        WorkflowStep(
+            step_id=str(uuid.uuid4()),
+            name=s.get("name", f"Step {i+1}"),
+            step_type=s.get("step_type", "action"),
+            config=s.get("config", {}),
+            order=i,
+        )
         for i, s in enumerate(body.steps)
     ]
-    wf = {"workflow_id": wf_id, "name": body.name, "description": body.description,
-          "status": "draft", "project_id": body.project_id, "steps": [s.model_dump() for s in steps],
-          "created_at": now, "updated_at": now}
+    wf = {
+        "workflow_id": wf_id,
+        "name": body.name,
+        "description": body.description,
+        "status": "draft",
+        "project_id": body.project_id,
+        "steps": [s.model_dump() for s in steps],
+        "created_at": now,
+        "updated_at": now,
+    }
     _workflows[wf_id] = wf
     return WorkflowInfo(**wf)
 
@@ -153,8 +165,15 @@ async def execute_workflow(workflow_id: str, body: WorkflowExecute):
         raise HTTPException(status_code=404, detail="Workflow not found")
     ex_id = str(uuid.uuid4())
     now = time.time()
-    ex = {"execution_id": ex_id, "workflow_id": workflow_id, "status": "completed",
-          "inputs": body.inputs, "outputs": {}, "started_at": now, "finished_at": now}
+    ex = {
+        "execution_id": ex_id,
+        "workflow_id": workflow_id,
+        "status": "completed",
+        "inputs": body.inputs,
+        "outputs": {},
+        "started_at": now,
+        "finished_at": now,
+    }
     _executions[ex_id] = ex
     return ExecutionInfo(**ex)
 
@@ -170,8 +189,9 @@ async def add_step(workflow_id: str, body: WorkflowStepCreate):
     wf = _workflows.get(workflow_id)
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
-    step = WorkflowStep(step_id=str(uuid.uuid4()), name=body.name, step_type=body.step_type,
-                        config=body.config, order=body.order)
+    step = WorkflowStep(
+        step_id=str(uuid.uuid4()), name=body.name, step_type=body.step_type, config=body.config, order=body.order
+    )
     wf["steps"].append(step.model_dump())
     wf["updated_at"] = time.time()
     return {"code": 0, "data": step.model_dump()}

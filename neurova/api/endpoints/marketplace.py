@@ -12,14 +12,11 @@ from __future__ import annotations
 """
 
 import logging
-import time
-import typing
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Path, Query, Request, status
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +24,7 @@ router = APIRouter()
 
 # 导入技能市场导入器
 try:
-    from neurova.skills.market_importer import get_market_importer, MarketImporter, MarketSkill, ImportStatus
+    from neurova.skills.market_importer import ImportStatus, MarketImporter, MarketSkill, get_market_importer
 except ImportError:
     logger.warning("Market importer service not available")
     get_market_importer = None
@@ -38,6 +35,7 @@ except ImportError:
 
 class MarketplaceSkill(BaseModel):
     """市场技能"""
+
     skill_id: str
     name: str
     description: str = ""
@@ -55,6 +53,7 @@ class MarketplaceSkill(BaseModel):
 
 class SkillInstallRequest(BaseModel):
     """安装技能请求"""
+
     version: Optional[str] = None
     config: Dict[str, Any] = {}
 
@@ -68,10 +67,9 @@ def _convert_market_skill_to_api(skill: MarketSkill, installed: bool = False) ->
     """将MarketSkill转换为API响应格式"""
     if MarketSkill is None:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Market importer service not available"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Market importer service not available"
         )
-    
+
     return MarketplaceSkill(
         skill_id=skill.skill_id,
         name=skill.name,
@@ -102,34 +100,33 @@ async def get_marketplace_skills(
         if get_market_importer is None:
             logger.warning("Market importer service not available")
             return []
-        
+
         # 获取市场导入器
         importer = get_market_importer()
-        
+
         # 搜索技能
         skills = importer.search_skills(
             query=search or "",
             category=category,
             tags=None,  # 标签筛选可后续扩展
         )
-        
+
         # 获取已安装技能列表
         installed_skills = importer.list_installed()
         installed_ids = {item["skill_id"] for item in installed_skills}
-        
+
         # 转换为API格式并过滤
         result = []
-        for skill in skills[offset:offset + limit]:
+        for skill in skills[offset : offset + limit]:
             installed = skill.skill_id in installed_ids
             result.append(_convert_market_skill_to_api(skill, installed))
-        
+
         return result
-        
+
     except Exception as e:
-        logger.exception(f"Failed to get marketplace skills: {e}")
+        logger.exception("Failed to get marketplace skills: %s", e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get marketplace skills: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get marketplace skills: {str(e)}"
         )
 
 
@@ -142,23 +139,22 @@ async def get_marketplace_skill(
     try:
         if get_market_importer is None:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Market importer service not available"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Market importer service not available"
             )
-        
+
         # 获取市场导入器
         importer = get_market_importer()
-        
+
         # 搜索技能（使用skill_id作为查询）
         skills = importer.search_skills(query=skill_id)
-        
+
         # 查找匹配的技能
         target_skill = None
         for skill in skills:
             if skill.skill_id == skill_id:
                 target_skill = skill
                 break
-        
+
         if not target_skill:
             # 尝试按名称搜索
             skills = importer.search_skills(query=skill_id)
@@ -166,27 +162,23 @@ async def get_marketplace_skill(
                 if skill.name.lower() == skill_id.lower():
                     target_skill = skill
                     break
-        
+
         if not target_skill:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Skill '{skill_id}' not found"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill '{skill_id}' not found")
+
         # 检查是否已安装
         installed_skills = importer.list_installed()
         installed_ids = {item["skill_id"] for item in installed_skills}
         installed = target_skill.skill_id in installed_ids
-        
+
         return _convert_market_skill_to_api(target_skill, installed)
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Failed to get skill details: {e}")
+        logger.exception("Failed to get skill details: %s", e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get skill details: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get skill details: {str(e)}"
         )
 
 
@@ -198,17 +190,16 @@ async def install_skill(
 ):
     """安装技能"""
     request_id = _get_request_id(request)
-    
+
     try:
         if get_market_importer is None:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Market importer service not available"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Market importer service not available"
             )
-        
+
         # 获取市场导入器
         importer = get_market_importer()
-        
+
         # 先搜索技能获取下载URL
         skills = importer.search_skills(query=skill_id)
         target_skill = None
@@ -216,7 +207,7 @@ async def install_skill(
             if skill.skill_id == skill_id:
                 target_skill = skill
                 break
-        
+
         if not target_skill:
             # 尝试按名称搜索
             skills = importer.search_skills(query=skill_id)
@@ -224,17 +215,16 @@ async def install_skill(
                 if skill.name.lower() == skill_id.lower():
                     target_skill = skill
                     break
-        
+
         if not target_skill:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Skill '{skill_id}' not found in marketplace"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill '{skill_id}' not found in marketplace"
             )
-        
+
         # 检查是否已安装
         installed_skills = importer.list_installed()
         installed_ids = {item["skill_id"] for item in installed_skills}
-        
+
         if target_skill.skill_id in installed_ids:
             return {
                 "code": 0,
@@ -242,20 +232,20 @@ async def install_skill(
                 "data": {"skill_id": target_skill.skill_id, "already_installed": True},
                 "request_id": request_id,
             }
-        
+
         # 安装技能
         task = importer.import_skill(
             skill_id=target_skill.skill_id,
             version=body.version,
         )
-        
+
         # 检查导入状态
         if ImportStatus and task.status == ImportStatus.FAILED:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to install skill '{skill_id}': {task.error_message}"
+                detail=f"Failed to install skill '{skill_id}': {task.error_message}",
             )
-        
+
         # 如果导入还在进行中，返回进行中状态
         if ImportStatus and task.status != ImportStatus.COMPLETED:
             return {
@@ -268,7 +258,7 @@ async def install_skill(
                 },
                 "request_id": request_id,
             }
-        
+
         return {
             "code": 0,
             "message": f"Skill '{skill_id}' installed successfully",
@@ -278,14 +268,13 @@ async def install_skill(
             },
             "request_id": request_id,
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Failed to install skill: {e}")
+        logger.exception("Failed to install skill: %s", e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to install skill: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to install skill: {str(e)}"
         )
 
 
@@ -296,50 +285,44 @@ async def uninstall_skill(
 ):
     """卸载技能"""
     request_id = _get_request_id(request)
-    
+
     try:
         if get_market_importer is None:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Market importer service not available"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Market importer service not available"
             )
-        
+
         # 获取市场导入器
         importer = get_market_importer()
-        
+
         # 检查技能是否已安装
         installed_skills = importer.list_installed()
         installed_ids = {item["skill_id"] for item in installed_skills}
-        
+
         if skill_id not in installed_ids:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Skill '{skill_id}' is not installed"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill '{skill_id}' is not installed")
+
         # 卸载技能
         success = importer.uninstall_skill(skill_id)
-        
+
         if not success:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to uninstall skill '{skill_id}'"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to uninstall skill '{skill_id}'"
             )
-        
+
         return {
             "code": 0,
             "message": f"Skill '{skill_id}' uninstalled successfully",
             "data": {"skill_id": skill_id},
             "request_id": request_id,
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Failed to uninstall skill: {e}")
+        logger.exception("Failed to uninstall skill: %s", e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to uninstall skill: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to uninstall skill: {str(e)}"
         )
 
 
@@ -353,13 +336,13 @@ async def get_installed_skills(
         if get_market_importer is None:
             logger.warning("Market importer service not available")
             return []
-        
+
         # 获取市场导入器
         importer = get_market_importer()
-        
+
         # 获取已安装技能列表
         installed_skills = importer.list_installed()
-        
+
         # 转换为API格式
         result = []
         for item in installed_skills[:limit]:
@@ -380,12 +363,11 @@ async def get_installed_skills(
                 updated_at=None,
             )
             result.append(skill)
-        
+
         return result
-        
+
     except Exception as e:
-        logger.exception(f"Failed to get installed skills: {e}")
+        logger.exception("Failed to get installed skills: %s", e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get installed skills: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get installed skills: {str(e)}"
         )

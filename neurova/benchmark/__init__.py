@@ -11,14 +11,11 @@ Benchmark 基准测试框架 v1.0.0 - 真实测试数据版本
 5. 查看某 Agent 的评测历史
 """
 
-from dataclasses import dataclass, field
-import datetime
-import json
 import logging
-import os
 import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
@@ -27,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 class BenchmarkStatus(Enum):
     """基准测试状态"""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -36,6 +34,7 @@ class BenchmarkStatus(Enum):
 
 class BenchmarkCategory(Enum):
     """基准测试类别"""
+
     REASONING = "reasoning"
     MEMORY = "memory"
     TOOL_USE = "tool_use"
@@ -47,6 +46,7 @@ class BenchmarkCategory(Enum):
 @dataclass
 class TestCase:
     """测试用例"""
+
     test_id: str
     name: str
     description: str
@@ -74,6 +74,7 @@ class TestCase:
 @dataclass
 class BenchmarkSuite:
     """基准测试套件"""
+
     suite_id: str
     name: str
     description: str
@@ -100,6 +101,7 @@ class BenchmarkSuite:
 @dataclass
 class TestResult:
     """单个测试结果"""
+
     test_id: str
     status: BenchmarkStatus
     score: float = 0.0
@@ -130,6 +132,7 @@ class TestResult:
 @dataclass
 class BenchmarkResult:
     """基准测试运行结果"""
+
     run_id: str
     suite_id: str
     agent_id: Optional[str]
@@ -273,7 +276,7 @@ _DEFAULT_SUITES = [
 
 class BenchmarkFramework:
     """基准测试框架"""
-    
+
     def __init__(self, storage_dir: Optional[str] = None):
         self._storage_dir = storage_dir or ".neurova/benchmark"
         self._suites: Dict[str, BenchmarkSuite] = {}
@@ -288,7 +291,7 @@ class BenchmarkFramework:
         for suite_data in _DEFAULT_SUITES:
             category = BenchmarkCategory(suite_data["category"])
             tests = []
-            
+
             for test_data in suite_data.get("tests", []):
                 test = TestCase(
                     test_id=test_data["test_id"],
@@ -301,7 +304,7 @@ class BenchmarkFramework:
                     weight=test_data.get("weight", 1.0),
                 )
                 tests.append(test)
-            
+
             suite = BenchmarkSuite(
                 suite_id=suite_data["suite_id"],
                 name=suite_data["name"],
@@ -314,19 +317,19 @@ class BenchmarkFramework:
     def list_suites(self, category: Optional[BenchmarkCategory] = None) -> List[Dict[str, Any]]:
         """
         列出可用的基准测试套件
-        
+
         Args:
             category: 可选的类别过滤
-            
+
         Returns:
             套件列表
         """
         with self._lock:
             suites = list(self._suites.values())
-            
+
             if category:
                 suites = [s for s in suites if s.category == category]
-            
+
             return [s.to_dict() for s in suites]
 
     async def run_benchmark(
@@ -338,25 +341,25 @@ class BenchmarkFramework:
     ) -> Dict[str, Any]:
         """
         执行基准测试
-        
+
         Args:
             suite_id: 测试套件 ID
             agent_id: Agent ID（可选）
             test_ids: 指定要运行的测试 ID（可选）
             custom_runner: 自定义测试运行器
-            
+
         Returns:
             运行结果
         """
         start_time = time.time()
-        
+
         with self._lock:
             suite = self._suites.get(suite_id)
             if not suite:
                 return {"success": False, "error": f"Suite not found: {suite_id}"}
-            
+
             run_id = f"run_{uuid.uuid4().hex[:12]}"
-            
+
             result = BenchmarkResult(
                 run_id=run_id,
                 suite_id=suite_id,
@@ -365,35 +368,32 @@ class BenchmarkFramework:
                 started_at=start_time,
                 max_score=sum(t.weight for t in suite.tests),
             )
-            
+
             self._runs.append(result)
-        
+
         try:
             # 运行测试
             tests_to_run = suite.tests
             if test_ids:
                 tests_to_run = [t for t in suite.tests if t.test_id in test_ids]
-            
+
             for test in tests_to_run:
                 test_result = await self._run_real_test(test, agent_id, custom_runner)
                 result.test_results.append(test_result)
                 result.total_score += test_result.score * test.weight
-            
+
             result.status = BenchmarkStatus.COMPLETED
             result.completed_at = time.time()
-            
-            logger.info(
-                "Benchmark completed: %s, score=%.2f/%.2f",
-                run_id, result.total_score, result.max_score
-            )
-            
+
+            logger.info("Benchmark completed: %s, score=%.2f/%.2f", run_id, result.total_score, result.max_score)
+
             return {"success": True, "result": result.to_dict()}
-            
+
         except Exception as e:
             result.status = BenchmarkStatus.FAILED
             result.completed_at = time.time()
             result.error = str(e)
-            
+
             logger.error("Benchmark failed: %s", str(e))
             return {"success": False, "error": str(e), "result": result.to_dict()}
 
@@ -405,7 +405,7 @@ class BenchmarkFramework:
     ) -> TestResult:
         """运行单个测试"""
         start_time = time.time()
-        
+
         try:
             # 使用自定义运行器或默认行为
             if custom_runner:
@@ -415,9 +415,9 @@ class BenchmarkFramework:
                 # 默认：模拟测试执行
                 output = {"simulated": True}
                 score = 1.0
-            
+
             duration_ms = (time.time() - start_time) * 1000
-            
+
             return TestResult(
                 test_id=test.test_id,
                 status=BenchmarkStatus.COMPLETED,
@@ -426,10 +426,10 @@ class BenchmarkFramework:
                 duration_ms=duration_ms,
                 output=output,
             )
-            
+
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
-            
+
             return TestResult(
                 test_id=test.test_id,
                 status=BenchmarkStatus.FAILED,
@@ -442,12 +442,12 @@ class BenchmarkFramework:
     async def _run_mock_test(self, test: TestCase) -> TestResult:
         """运行模拟测试（用于测试框架本身）"""
         start_time = time.time()
-        
+
         # 模拟执行时间
         await asyncio.sleep(0.1)
-        
+
         duration_ms = (time.time() - start_time) * 1000
-        
+
         return TestResult(
             test_id=test.test_id,
             status=BenchmarkStatus.COMPLETED,
@@ -460,10 +460,10 @@ class BenchmarkFramework:
     def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
         """
         获取运行详情
-        
+
         Args:
             run_id: 运行 ID
-            
+
         Returns:
             运行详情或 None
         """
@@ -481,55 +481,57 @@ class BenchmarkFramework:
     ) -> List[Dict[str, Any]]:
         """
         列出运行历史
-        
+
         Args:
             suite_id: 可选的套件过滤
             agent_id: 可选的 Agent 过滤
             limit: 返回数量限制
-            
+
         Returns:
             运行列表
         """
         with self._lock:
             runs = self._runs.copy()
-            
+
             if suite_id:
                 runs = [r for r in runs if r.suite_id == suite_id]
-            
+
             if agent_id:
                 runs = [r for r in runs if r.agent_id == agent_id]
-            
+
             # 按时间倒序
             runs.sort(key=lambda r: r.started_at, reverse=True)
-            
+
             return [r.to_dict() for r in runs[:limit]]
 
     def get_agent_benchmarks(self, agent_id: str) -> Dict[str, Any]:
         """
         获取 Agent 的评测历史
-        
+
         Args:
             agent_id: Agent ID
-            
+
         Returns:
             Agent 评测统计
         """
         with self._lock:
             agent_runs = [r for r in self._runs if r.agent_id == agent_id]
-            
+
             if not agent_runs:
                 return {"agent_id": agent_id, "runs": [], "statistics": {}}
-            
+
             completed_runs = [r for r in agent_runs if r.status == BenchmarkStatus.COMPLETED]
-            
+
             statistics = {
                 "total_runs": len(agent_runs),
                 "completed_runs": len(completed_runs),
-                "average_score": sum(r.overall_score for r in completed_runs) / len(completed_runs) if completed_runs else 0,
+                "average_score": (
+                    sum(r.overall_score for r in completed_runs) / len(completed_runs) if completed_runs else 0
+                ),
                 "best_score": max((r.overall_score for r in completed_runs), default=0),
                 "worst_score": min((r.overall_score for r in completed_runs), default=0),
             }
-            
+
             return {
                 "agent_id": agent_id,
                 "runs": [r.to_dict() for r in agent_runs],

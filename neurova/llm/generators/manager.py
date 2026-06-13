@@ -9,7 +9,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GeneratorResult:
     """生成器执行结果"""
+
     success: bool
     data: Optional[Any] = None
     error: Optional[str] = None
@@ -39,19 +40,19 @@ class GeneratorResult:
 
 class GeneratorManager:
     """生成器统一管理器"""
-    
+
     _instance: Optional["GeneratorManager"] = None
     _lock = threading.Lock()
-    
+
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
         return cls._instance
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        if hasattr(self, '_initialized'):
+        if hasattr(self, "_initialized"):
             return
         self._initialized = True
         self._config = config or {}
@@ -66,12 +67,14 @@ class GeneratorManager:
         # 延迟导入避免循环依赖
         try:
             from neurova.llm.llm_router import LLMRouter
+
             self._llm_router = LLMRouter()
         except ImportError:
             logger.warning("LLMRouter not available")
-        
+
         try:
             from neurova.llm.provider_manager import get_provider_manager
+
             self._provider_manager = get_provider_manager()
         except ImportError:
             logger.warning("ProviderManager not available")
@@ -88,46 +91,39 @@ class GeneratorManager:
     def get_generator(self, generator_type: str) -> Optional[Any]:
         """
         获取指定类型的生成器
-        
+
         Args:
             generator_type: 生成器类型 (text_to_image, text_to_video, etc.)
-            
+
         Returns:
             生成器实例或 None
         """
         return self._generators.get(generator_type)
 
     async def generate(
-        self,
-        generator_type: str,
-        prompt: str,
-        model: Optional[str] = None,
-        provider: Optional[str] = None,
-        **kwargs
+        self, generator_type: str, prompt: str, model: Optional[str] = None, provider: Optional[str] = None, **kwargs
     ) -> GeneratorResult:
         """
         执行生成任务
-        
+
         Args:
             generator_type: 生成器类型
             prompt: 生成提示
             model: 指定模型（可选）
             provider: 指定提供者（可选）
             **kwargs: 其他参数
-            
+
         Returns:
             GeneratorResult 执行结果
         """
         start_time = time.time()
-        
+
         try:
             # 获取生成器
             generator = self.get_generator(generator_type)
             if generator is None:
-                return self._create_error_result(
-                    f"Generator type '{generator_type}' not available"
-                )
-            
+                return self._create_error_result(f"Generator type '{generator_type}' not available")
+
             # 如果未指定模型，使用 LLMRouter 选择
             if model is None and self._llm_router:
                 request_type = self._map_to_llm_request_type(generator_type)
@@ -136,17 +132,12 @@ class GeneratorManager:
                     if model_info:
                         model = model_info.get("model")
                         provider = model_info.get("provider")
-            
+
             # 执行生成
-            result = await generator.generate(
-                prompt=prompt,
-                model=model,
-                provider=provider,
-                **kwargs
-            )
-            
+            result = await generator.generate(prompt=prompt, model=model, provider=provider, **kwargs)
+
             duration_ms = (time.time() - start_time) * 1000
-            
+
             return GeneratorResult(
                 success=True,
                 data=result,
@@ -154,7 +145,7 @@ class GeneratorManager:
                 provider_used=provider,
                 duration_ms=duration_ms,
             )
-            
+
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
             logger.error("Generation failed: %s", str(e))
@@ -194,11 +185,7 @@ class GeneratorManager:
         """刷新提供者列表"""
         self._load_providers()
 
-    def _create_error_result(
-        self,
-        error: str,
-        duration_ms: float = 0.0
-    ) -> GeneratorResult:
+    def _create_error_result(self, error: str, duration_ms: float = 0.0) -> GeneratorResult:
         """创建错误结果"""
         return GeneratorResult(
             success=False,

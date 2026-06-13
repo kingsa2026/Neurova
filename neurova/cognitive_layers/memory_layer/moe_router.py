@@ -9,19 +9,23 @@ MoE Memory Router — 稀疏门控专家混合记忆路由器
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
-from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.cognitive_layers.memory_layer.unified_vector_store import (
-    UnifiedVectorStore, cosine_similarity, vector_norm, vector_normalize
+    UnifiedVectorStore,
+    cosine_similarity,
+    vector_norm,
+    vector_normalize,
 )
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class QueryTags:
     """从查询中提取的结构化标签"""
+
     categories: List[Tuple[str, float]] = field(default_factory=list)
     emotions: List[Tuple[str, float]] = field(default_factory=list)
     time_range: Optional[Tuple[str, float]] = None
@@ -29,14 +33,17 @@ class QueryTags:
     memory_types: List[Tuple[str, float]] = field(default_factory=list)
     is_tool_query: bool = False
 
+
 @dataclass
 class ProcessedResults:
     """处理后的结果"""
+
     independent: List[Dict[str, Any]] = field(default_factory=list)
     conflict_groups: List[Any] = field(default_factory=list)
     evolution_chains: List[List[Dict]] = field(default_factory=list)
     injection_text: str = ""
     has_conflicts: bool = False
+
 
 class VectorGatingNetwork:
     """
@@ -47,9 +54,7 @@ class VectorGatingNetwork:
       activated = {i | activation_i >= threshold, i in top_k}
     """
 
-    def __init__(self, vector_store: UnifiedVectorStore,
-                 top_k: int = 3,
-                 activation_threshold: float = 0.3):
+    def __init__(self, vector_store: UnifiedVectorStore, top_k: int = 3, activation_threshold: float = 0.3):
         """
         初始化向量门控网络
 
@@ -88,7 +93,8 @@ class VectorGatingNetwork:
 
         # Top-K 稀疏选择
         sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        return dict(sorted_scores[:self.top_k])
+        return dict(sorted_scores[: self.top_k])
+
 
 class ExpertDrilldownRetriever:
     """
@@ -101,9 +107,7 @@ class ExpertDrilldownRetriever:
       L3: 向量兜底 (100-500ms)
     """
 
-    def __init__(self, expert_def: Dict[str, Any],
-                 store: Any,
-                 vector_store: Optional[UnifiedVectorStore] = None):
+    def __init__(self, expert_def: Dict[str, Any], store: Any, vector_store: Optional[UnifiedVectorStore] = None):
         """
         初始化下钻检索器
 
@@ -117,8 +121,7 @@ class ExpertDrilldownRetriever:
         self.vector_store = vector_store
         self._l0_cache: Dict[str, List] = {}
 
-    async def retrieve(self, query: str, query_vec: List[float],
-                       limit: int = 10) -> List[Dict[str, Any]]:
+    async def retrieve(self, query: str, query_vec: List[float], limit: int = 10) -> List[Dict[str, Any]]:
         """
         递进检索
 
@@ -185,13 +188,12 @@ class ExpertDrilldownRetriever:
 
         try:
             result = self.store.execute(sql, params)
-            return result.fetchall() if hasattr(result, 'fetchall') else []
+            return result.fetchall() if hasattr(result, "fetchall") else []
         except Exception as e:
-            logger.warning(f"Layer 0 查询失败: {e}")
+            logger.warning("Layer 0 查询失败: %s", e)
             return []
 
-    def _layer1_structured_drilldown(self, candidates: List[Dict],
-                                     min_floor: int = 5) -> List[Dict]:
+    def _layer1_structured_drilldown(self, candidates: List[Dict], min_floor: int = 5) -> List[Dict]:
         """Layer 1: 逐层过滤"""
         drill_steps = [
             ("emotion_tags", self._filter_emotion),
@@ -208,22 +210,15 @@ class ExpertDrilldownRetriever:
     def _filter_emotion(self, candidates: List[Dict]) -> List[Dict]:
         """按情感标签过滤"""
         # 简单实现：保留高情感分数的记忆
-        return [c for c in candidates
-                if float(c.get("emotion_score", 0)) > 0.3
-                or c.get("emotion_tags") != '[]']
+        return [c for c in candidates if float(c.get("emotion_score", 0)) > 0.3 or c.get("emotion_tags") != "[]"]
 
     def _filter_temperature(self, candidates: List[Dict]) -> List[Dict]:
         """按温度过滤"""
         # 按温度排序，保留前 50%
-        sorted_candidates = sorted(
-            candidates,
-            key=lambda x: float(x.get("temperature", 50)),
-            reverse=True
-        )
-        return sorted_candidates[:max(len(sorted_candidates) // 2, 5)]
+        sorted_candidates = sorted(candidates, key=lambda x: float(x.get("temperature", 50)), reverse=True)
+        return sorted_candidates[: max(len(sorted_candidates) // 2, 5)]
 
-    def _layer2_tfidf_rerank(self, candidates: List[Dict],
-                              query: str) -> List[Dict]:
+    def _layer2_tfidf_rerank(self, candidates: List[Dict], query: str) -> List[Dict]:
         """Layer 2: TF-IDF 关键词重排"""
         if not candidates:
             return []
@@ -242,28 +237,19 @@ class ExpertDrilldownRetriever:
         scored.sort(key=lambda x: x[1], reverse=True)
         return [mem for mem, _ in scored]
 
-    async def _layer3_vector_fallback(self, query_vec: List[float],
-                                       limit: int) -> List[Dict]:
+    async def _layer3_vector_fallback(self, query_vec: List[float], limit: int) -> List[Dict]:
         """Layer 3: 向量兜底"""
         if not self.vector_store:
             return []
 
-        return self.vector_store.search_in_expert(
-            query="",
-            expert_def=self.expert_def,
-            limit=limit
-        )
+        return self.vector_store.search_in_expert(query="", expert_def=self.expert_def, limit=limit)
 
-    def _rank_and_limit(self, candidates: List[Dict],
-                        query: str, limit: int) -> List[Dict]:
+    def _rank_and_limit(self, candidates: List[Dict], query: str, limit: int) -> List[Dict]:
         """排序并限制数量"""
         # 简单实现：按温度排序
-        sorted_candidates = sorted(
-            candidates,
-            key=lambda x: float(x.get("temperature", 50)),
-            reverse=True
-        )
+        sorted_candidates = sorted(candidates, key=lambda x: float(x.get("temperature", 50)), reverse=True)
         return sorted_candidates[:limit]
+
 
 class MoEMemoryRouter:
     """
@@ -296,15 +282,17 @@ class MoEMemoryRouter:
         "category": "hint",
     }
 
-    def __init__(self,
-                 experts: Dict[str, Dict[str, Any]],
-                 storage: Any,
-                 vector_store: Optional[UnifiedVectorStore] = None,
-                 backend: str = "tfidf",
-                 top_k: int = 3,
-                 activation_threshold: float = 0.3,
-                 min_expert_results: int = 3,
-                 min_relevance: float = 0.4):
+    def __init__(
+        self,
+        experts: Dict[str, Dict[str, Any]],
+        storage: Any,
+        vector_store: Optional[UnifiedVectorStore] = None,
+        backend: str = "tfidf",
+        top_k: int = 3,
+        activation_threshold: float = 0.3,
+        min_expert_results: int = 3,
+        min_relevance: float = 0.4,
+    ):
         """
         初始化 MoE 路由器
 
@@ -337,7 +325,7 @@ class MoEMemoryRouter:
         if not self.vector_store.get_expert_centroids():
             self.vector_store.initialize_centroids(experts)
 
-        logger.info(f"MoEMemoryRouter 初始化完成，{len(experts)} 个专家，top_k={top_k}")
+        logger.info("MoEMemoryRouter 初始化完成，%s 个专家，top_k=%s", len(experts), top_k)
 
     async def retrieve(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
@@ -355,7 +343,7 @@ class MoEMemoryRouter:
 
         # Step 2: 向量路由
         activated_experts = await self.gating_network.route(query_vec)
-        logger.debug(f"激活专家: {activated_experts}")
+        logger.debug("激活专家: %s", activated_experts)
 
         # Step 3: 专家内部下钻
         all_results = []

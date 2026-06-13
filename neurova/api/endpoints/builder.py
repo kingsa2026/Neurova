@@ -9,16 +9,15 @@ import logging
 import typing
 import uuid
 
-from fastapi import APIRouter
-from fastapi import HTTPException
-from pydantic import BaseModel
-from pydantic import Field
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 # ── Models ─────────────────────────────────────────────
+
 
 class TemplateInfo(BaseModel):
     id: str = ""
@@ -57,17 +56,58 @@ class ValidateRequest(BaseModel):
 # ── In-memory store ────────────────────────────────────
 
 _TEMPLATES: typing.List[dict] = [
-    {"id": "assistant", "name": "General Assistant", "description": "A helpful general-purpose assistant", "personality": "Helpful, friendly, and knowledgeable", "system_prompt": "You are a helpful assistant.", "tags": ["general", "assistant"], "category": "general"},
-    {"id": "coder", "name": "Code Expert", "description": "Specialized in programming and software development", "personality": "Technical, precise, and detail-oriented", "system_prompt": "You are an expert software developer.", "tags": ["coding", "development"], "category": "technical"},
-    {"id": "researcher", "name": "Research Analyst", "description": "Focused on research and data analysis", "personality": "Analytical, thorough, and evidence-based", "system_prompt": "You are a research analyst.", "tags": ["research", "analysis"], "category": "analytical"},
-    {"id": "creative", "name": "Creative Writer", "description": "Specialized in creative writing and content creation", "personality": "Imaginative, expressive, and eloquent", "system_prompt": "You are a creative writer.", "tags": ["writing", "creative"], "category": "creative"},
-    {"id": "teacher", "name": "Educator", "description": "Focused on teaching and explaining concepts", "personality": "Patient, clear, and encouraging", "system_prompt": "You are an educator who explains concepts clearly.", "tags": ["education", "teaching"], "category": "education"},
+    {
+        "id": "assistant",
+        "name": "General Assistant",
+        "description": "A helpful general-purpose assistant",
+        "personality": "Helpful, friendly, and knowledgeable",
+        "system_prompt": "You are a helpful assistant.",
+        "tags": ["general", "assistant"],
+        "category": "general",
+    },
+    {
+        "id": "coder",
+        "name": "Code Expert",
+        "description": "Specialized in programming and software development",
+        "personality": "Technical, precise, and detail-oriented",
+        "system_prompt": "You are an expert software developer.",
+        "tags": ["coding", "development"],
+        "category": "technical",
+    },
+    {
+        "id": "researcher",
+        "name": "Research Analyst",
+        "description": "Focused on research and data analysis",
+        "personality": "Analytical, thorough, and evidence-based",
+        "system_prompt": "You are a research analyst.",
+        "tags": ["research", "analysis"],
+        "category": "analytical",
+    },
+    {
+        "id": "creative",
+        "name": "Creative Writer",
+        "description": "Specialized in creative writing and content creation",
+        "personality": "Imaginative, expressive, and eloquent",
+        "system_prompt": "You are a creative writer.",
+        "tags": ["writing", "creative"],
+        "category": "creative",
+    },
+    {
+        "id": "teacher",
+        "name": "Educator",
+        "description": "Focused on teaching and explaining concepts",
+        "personality": "Patient, clear, and encouraging",
+        "system_prompt": "You are an educator who explains concepts clearly.",
+        "tags": ["education", "teaching"],
+        "category": "education",
+    },
 ]
 
 _BUILT_AGENTS: typing.Dict[str, dict] = {}
 
 
 # ── Endpoints ──────────────────────────────────────────
+
 
 @router.get("/templates")
 async def list_templates():
@@ -96,7 +136,8 @@ async def validate_config(body: ValidateRequest):
         errors.append("System prompt must be <= 10000 characters")
 
     return {
-        "code": 0, "message": "Validation complete",
+        "code": 0,
+        "message": "Validation complete",
         "data": {"valid": len(errors) == 0, "errors": errors},
     }
 
@@ -122,6 +163,7 @@ async def build_agent(body: BuildRequest, request):
     agent_created = False
     try:
         from neurova.api.endpoints import get_agent_instance
+
         existing = get_agent_instance()
         if existing:
             agent_created = True

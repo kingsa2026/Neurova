@@ -11,14 +11,12 @@ Webhook 管理 API
 - GET    /v1/webhooks/{webhook_id}/deliveries   投递记录
 """
 
-import hashlib
-import hmac
 import logging
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -81,9 +79,14 @@ async def create_webhook(body: WebhookCreate):
     wh_id = str(uuid.uuid4())
     now = time.time()
     wh = {
-        "webhook_id": wh_id, "name": body.name, "url": body.url,
-        "events": body.events, "enabled": True, "user_id": "default",
-        "created_at": now, "updated_at": now,
+        "webhook_id": wh_id,
+        "name": body.name,
+        "url": body.url,
+        "events": body.events,
+        "enabled": True,
+        "user_id": "default",
+        "created_at": now,
+        "updated_at": now,
     }
     _webhooks[wh_id] = wh
     return WebhookInfo(**wh)
@@ -127,9 +130,13 @@ async def test_webhook(webhook_id: str, body: WebhookTestRequest):
         raise HTTPException(status_code=404, detail="Webhook not found")
     delivery_id = str(uuid.uuid4())
     _deliveries[delivery_id] = {
-        "delivery_id": delivery_id, "webhook_id": webhook_id,
-        "event_type": body.event_type, "status": "delivered",
-        "response_code": 200, "attempts": 1, "created_at": time.time(),
+        "delivery_id": delivery_id,
+        "webhook_id": webhook_id,
+        "event_type": body.event_type,
+        "status": "delivered",
+        "response_code": 200,
+        "attempts": 1,
+        "created_at": time.time(),
     }
     return {"code": 0, "message": "Test event sent", "data": {"delivery_id": delivery_id}}
 

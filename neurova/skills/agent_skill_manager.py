@@ -5,10 +5,10 @@ Agent 技能管理器
 """
 
 import logging
-import typing
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
 
 class AgentSkillManager:
     """
@@ -42,18 +42,17 @@ class AgentSkillManager:
 
         # 初始化子模块（占位符实现）
         try:
-            from neurova.skills.task_decomposer import TaskDecomposer, TaskDecompositionResult
-            from neurova.skills.skill_need_analyzer import SkillNeedAnalyzer, SkillAcquisitionResult
-            from neurova.skills.market_searcher import SkillMarketSearcher, SearchResult
             from neurova.skills.market_importer import SkillMarketImporter
-            from neurova.skills.registry import SkillRegistry
+            from neurova.skills.market_searcher import SkillMarketSearcher
+            from neurova.skills.skill_need_analyzer import SkillNeedAnalyzer
+            from neurova.skills.task_decomposer import TaskDecomposer
 
             self.decomposer = TaskDecomposer()
             self.searcher = SkillMarketSearcher()
             self.importer = SkillMarketImporter()
             self.analyzer = SkillNeedAnalyzer(skill_registry=skill_registry)
         except ImportError as e:
-            logger.warning(f"Could not initialize skill modules: {e}")
+            logger.warning("Could not initialize skill modules: %s", e)
             self.decomposer = None
             self.searcher = None
             self.importer = None
@@ -74,13 +73,13 @@ class AgentSkillManager:
         Returns:
             包含任务分析结果的字典
         """
-        logger.info(f"Agent {self.agent_id} analyzing task: {task[:50]}...")
+        logger.info("Agent %s analyzing task: %s...", self.agent_id, task[:50])
 
         if not self.analyzer:
             return {
-                'success': False,
-                'error': 'Skill analyzer not available',
-                'skills_needed': [],
+                "success": False,
+                "error": "Skill analyzer not available",
+                "skills_needed": [],
             }
 
         # 分析技能需求
@@ -90,7 +89,7 @@ class AgentSkillManager:
             auto_acquire=self.auto_acquire,
         )
 
-        logger.info(f"Task analysis completed, found {len(analysis.get('skills_needed', []))} skills needed")
+        logger.info("Task analysis completed, found %s skills needed", len(analysis.get('skills_needed', [])))
         return analysis
 
     async def suggest_skills_for_task(
@@ -108,7 +107,7 @@ class AgentSkillManager:
         Returns:
             建议的技能列表
         """
-        logger.info(f"Agent {self.agent_id} suggesting skills for task: {task[:50]}...")
+        logger.info("Agent %s suggesting skills for task: %s...", self.agent_id, task[:50])
 
         if not self.analyzer:
             return []
@@ -118,7 +117,7 @@ class AgentSkillManager:
             context=context,
         )
 
-        logger.info(f"Suggested {len(suggestions)} skills")
+        logger.info("Suggested %s skills", len(suggestions))
         return suggestions
 
     async def search_skill_in_markets(
@@ -138,7 +137,7 @@ class AgentSkillManager:
         Returns:
             搜索结果列表
         """
-        logger.info(f"Agent {self.agent_id} searching for skill: {skill_name}")
+        logger.info("Agent %s searching for skill: %s", self.agent_id, skill_name)
 
         if not self.searcher:
             return []
@@ -149,7 +148,7 @@ class AgentSkillManager:
             limit_per_market=limit_per_market,
         )
 
-        logger.info(f"Found {len(results)} results for skill: {skill_name}")
+        logger.info("Found %s results for skill: %s", len(results), skill_name)
         return results
 
     async def acquire_skill(
@@ -167,12 +166,12 @@ class AgentSkillManager:
         Returns:
             获取结果
         """
-        logger.info(f"Agent {self.agent_id} acquiring skill: {skill_name}")
+        logger.info("Agent %s acquiring skill: %s", self.agent_id, skill_name)
 
         if not self.searcher or not self.importer:
             return {
-                'success': False,
-                'error': 'Market modules not available',
+                "success": False,
+                "error": "Market modules not available",
             }
 
         # 搜索技能
@@ -189,10 +188,10 @@ class AgentSkillManager:
             )
 
         if not results:
-            logger.warning(f"Skill {skill_name} not found in any market")
+            logger.warning("Skill %s not found in any market", skill_name)
             return {
-                'success': False,
-                'error': f'Skill {skill_name} not found',
+                "success": False,
+                "error": f"Skill {skill_name} not found",
             }
 
         # 获取第一个结果
@@ -200,40 +199,43 @@ class AgentSkillManager:
 
         # 导入技能
         import_result = await self.importer.import_from_market(
-            market=skill_info.get('market', 'unknown'),
-            skill_id=skill_info.get('id', ''),
+            market=skill_info.get("market", "unknown"),
+            skill_id=skill_info.get("id", ""),
             skill_data=skill_info,
         )
 
-        logger.info(f"Skill {skill_name} acquired successfully")
+        logger.info("Skill %s acquired successfully", skill_name)
         return {
-            'success': True,
-            'skill_name': skill_name,
-            'import_result': import_result,
+            "success": True,
+            "skill_name": skill_name,
+            "import_result": import_result,
         }
 
     def get_skill_status(self) -> Dict[str, Any]:
         """获取技能状态"""
         if not self.skill_registry:
             return {
-                'agent_id': self.agent_id,
-                'skills': [],
-                'auto_acquire': self.auto_acquire,
+                "agent_id": self.agent_id,
+                "skills": [],
+                "auto_acquire": self.auto_acquire,
             }
 
         skills = []
         for skill in self.skill_registry.list_skills():
-            skills.append({
-                'name': skill.name,
-                'status': skill.status,
-                'version': skill.version,
-            })
+            skills.append(
+                {
+                    "name": skill.name,
+                    "status": skill.status,
+                    "version": skill.version,
+                }
+            )
 
         return {
-            'agent_id': self.agent_id,
-            'skills': skills,
-            'auto_acquire': self.auto_acquire,
-            'available_markets': self.searcher.list_markets() if self.searcher else [],
+            "agent_id": self.agent_id,
+            "skills": skills,
+            "auto_acquire": self.auto_acquire,
+            "available_markets": self.searcher.list_markets() if self.searcher else [],
         }
 
-__all__ = ['AgentSkillManager']
+
+__all__ = ["AgentSkillManager"]

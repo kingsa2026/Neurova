@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -93,9 +92,7 @@ class AdminService:
         self._backups_dir.mkdir(parents=True, exist_ok=True)
         self._users: Dict[str, Dict[str, Any]] = {}
         self._backups: Dict[str, Dict[str, Any]] = {}
-        self._groups: Dict[str, Dict[str, Any]] = {
-            "default": {"name": "default", "members": []}
-        }
+        self._groups: Dict[str, Dict[str, Any]] = {"default": {"name": "default", "members": []}}
         self._lock = threading.RLock()
         self._quota = ResourceQuotaManager()
         self._load()
@@ -134,9 +131,7 @@ class AdminService:
             encoding="utf-8",
         )
 
-    def _username_exists(
-        self, username: str, exclude_id: Optional[str] = None
-    ) -> bool:
+    def _username_exists(self, username: str, exclude_id: Optional[str] = None) -> bool:
         for uid, u in self._users.items():
             if uid == exclude_id:
                 continue
@@ -195,9 +190,7 @@ class AdminService:
                 old_members = self._groups.get(old_group, {}).get("members", [])
                 if user_id in old_members:
                     old_members.remove(user_id)
-                grp = self._groups.setdefault(
-                    new_group, {"name": new_group, "members": []}
-                )
+                grp = self._groups.setdefault(new_group, {"name": new_group, "members": []})
                 new_members = grp.setdefault("members", [])
                 if user_id not in new_members:
                     new_members.append(user_id)
@@ -232,9 +225,7 @@ class AdminService:
         with self._lock:
             return [dict(u) for u in self._users.values()]
 
-    def backup_user(
-        self, user_id: str, description: str = ""
-    ) -> UserBackup:
+    def backup_user(self, user_id: str, description: str = "") -> UserBackup:
         with self._lock:
             if user_id not in self._users:
                 raise ValueError(f"User not found: {user_id}")
@@ -268,9 +259,7 @@ class AdminService:
             self._save()
             return UserBackup.from_dict(entry)
 
-    def list_backups(
-        self, user_id: Optional[str] = None
-    ) -> List[UserBackup]:
+    def list_backups(self, user_id: Optional[str] = None) -> List[UserBackup]:
         with self._lock:
             items: List[UserBackup] = []
             for b in self._backups.values():

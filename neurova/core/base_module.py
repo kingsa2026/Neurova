@@ -9,16 +9,19 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, Dict, Optional
 
+
 class ModuleState(Enum):
     """模块状态"""
-    UNINITIALIZED = 'uninitialized'
-    INITIALIZING = 'initializing'
-    INITIALIZED = 'initialized'
-    STARTING = 'starting'
-    RUNNING = 'running'
-    STOPPING = 'stopping'
-    STOPPED = 'stopped'
-    ERROR = 'error'
+
+    UNINITIALIZED = "uninitialized"
+    INITIALIZING = "initializing"
+    INITIALIZED = "initialized"
+    STARTING = "starting"
+    RUNNING = "running"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    ERROR = "error"
+
 
 class BaseModule(ABC):
     """基础模块基类
@@ -30,16 +33,24 @@ class BaseModule(ABC):
     MODULE_NAME: str = "Base Module"
     MODULE_VERSION: str = "1.0.0"
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, event_bus=None, 
-                 module_id: str = None, name: str = None, version: str = None,
-                 description: str = None, dependencies: list = None, **kwargs):
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        event_bus=None,
+        module_id: str = None,
+        name: str = None,
+        version: str = None,
+        description: str = None,
+        dependencies: list = None,
+        **kwargs,
+    ):
         self._config = config or {}
         self._event_bus = event_bus
         self._state = ModuleState.UNINITIALIZED
         self._state_manager = None
         self._log_manager = None
         self._error_handler = None
-        
+
         # 允许通过参数覆盖类属性
         if module_id:
             self.MODULE_ID = module_id
@@ -47,7 +58,7 @@ class BaseModule(ABC):
             self.MODULE_NAME = name
         if version:
             self.MODULE_VERSION = version
-            
+
         self._logger = logging.getLogger(f"{self.MODULE_ID}")
 
         # 状态值存储
@@ -65,15 +76,18 @@ class BaseModule(ABC):
         """设置模块状态"""
         old_state = self._state
         self._state = new_state
-        self._logger.debug(f"State changed: {old_state.value} -> {new_state.value}")
+        self._logger.debug("State changed: %s -> %s", old_state.value, new_state.value)
 
         # 发送状态变更事件
         if self._event_bus:
-            self._event_bus.emit('module.state_changed', {
-                'module_id': self.MODULE_ID,
-                'old_state': old_state.value,
-                'new_state': new_state.value,
-            })
+            self._event_bus.emit(
+                "module.state_changed",
+                {
+                    "module_id": self.MODULE_ID,
+                    "old_state": old_state.value,
+                    "new_state": new_state.value,
+                },
+            )
 
     def get_state(self) -> ModuleState:
         """获取模块状态"""
@@ -98,30 +112,30 @@ class BaseModule(ABC):
     def emit_event(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
         """发送事件"""
         if self._event_bus:
-            self._event_bus.emit(event_type, {
-                'module_id': self.MODULE_ID,
-                **(data or {}),
-            })
+            self._event_bus.emit(
+                event_type,
+                {
+                    "module_id": self.MODULE_ID,
+                    **(data or {}),
+                },
+            )
 
     @abstractmethod
     def on_initialize(self) -> None:
         """初始化模块"""
-        pass
 
     @abstractmethod
     def on_start(self) -> None:
         """启动模块"""
-        pass
 
     @abstractmethod
     def on_stop(self) -> None:
         """停止模块"""
-        pass
 
     def initialize(self) -> None:
         """初始化模块（带状态管理）"""
         if self._state != ModuleState.UNINITIALIZED:
-            self._logger.warning(f"Module {self.MODULE_ID} already initialized")
+            self._logger.warning("Module %s already initialized", self.MODULE_ID)
             return
 
         self.set_state(ModuleState.INITIALIZING)
@@ -135,7 +149,7 @@ class BaseModule(ABC):
     def start(self) -> None:
         """启动模块（带状态管理）"""
         if self._state != ModuleState.INITIALIZED:
-            self._logger.warning(f"Module {self.MODULE_ID} not initialized")
+            self._logger.warning("Module %s not initialized", self.MODULE_ID)
             return
 
         self.set_state(ModuleState.STARTING)
@@ -149,7 +163,7 @@ class BaseModule(ABC):
     def stop(self) -> None:
         """停止模块（带状态管理）"""
         if self._state != ModuleState.RUNNING:
-            self._logger.warning(f"Module {self.MODULE_ID} not running")
+            self._logger.warning("Module %s not running", self.MODULE_ID)
             return
 
         self.set_state(ModuleState.STOPPING)
@@ -160,7 +174,8 @@ class BaseModule(ABC):
             self.set_state(ModuleState.ERROR)
             raise
 
+
 __all__ = [
-    'ModuleState',
-    'BaseModule',
+    "ModuleState",
+    "BaseModule",
 ]

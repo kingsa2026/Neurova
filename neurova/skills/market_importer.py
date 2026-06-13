@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 class ImportStatus(str, Enum):
     """导入状态"""
+
     PENDING = "pending"
     DOWNLOADING = "downloading"
     INSTALLING = "installing"
@@ -30,6 +31,7 @@ class ImportStatus(str, Enum):
 @dataclass
 class MarketSkill:
     """市场技能信息"""
+
     skill_id: str
     name: str
     version: str
@@ -41,7 +43,7 @@ class MarketSkill:
     rating: float = 0.0
     downloads: int = 0
     updated_at: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "skill_id": self.skill_id,
@@ -61,13 +63,14 @@ class MarketSkill:
 @dataclass
 class ImportTask:
     """导入任务"""
+
     skill_id: str
     status: ImportStatus = ImportStatus.PENDING
     progress: float = 0.0
     error_message: Optional[str] = None
     started_at: Optional[datetime.datetime] = None
     completed_at: Optional[datetime.datetime] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "skill_id": self.skill_id,
@@ -82,10 +85,10 @@ class ImportTask:
 class MarketImporter:
     """
     技能市场导入器
-    
+
     支持从技能市场导入、更新和管理技能。
     """
-    
+
     def __init__(self, skills_dir: Path, market_url: Optional[str] = None):
         """
         Args:
@@ -98,7 +101,7 @@ class MarketImporter:
         self._import_tasks: Dict[str, ImportTask] = {}
         self._installed: Dict[str, str] = {}  # skill_id -> version
         self._skills_dir.mkdir(parents=True, exist_ok=True)
-    
+
     def search_skills(
         self,
         query: str = "",
@@ -107,18 +110,18 @@ class MarketImporter:
     ) -> List[MarketSkill]:
         """
         搜索市场技能
-        
+
         Args:
             query: 搜索关键词
             category: 分类过滤
             tags: 标签过滤
-            
+
         Returns:
             匹配的技能列表
         """
         # 模拟搜索结果（实际实现应调用市场API）
-        logger.info(f"Searching skills: query='{query}', category={category}, tags={tags}")
-        
+        logger.info("Searching skills: query='%s', category=%s, tags=%s", query, category, tags)
+
         # 返回示例数据
         return [
             MarketSkill(
@@ -146,7 +149,7 @@ class MarketImporter:
                 downloads=500,
             ),
         ]
-    
+
     def import_skill(
         self,
         skill_id: str,
@@ -155,22 +158,22 @@ class MarketImporter:
     ) -> ImportTask:
         """
         导入技能
-        
+
         Args:
             skill_id: 技能ID
             version: 指定版本，默认最新
             force: 强制重新安装
-            
+
         Returns:
             导入任务
         """
         with self._lock:
             # 检查是否已安装
             if not force and skill_id in self._installed:
-                logger.info(f"Skill '{skill_id}' already installed (v{self._installed[skill_id]})")
+                logger.info("Skill '%s' already installed (v%s)", skill_id, self._installed[skill_id])
                 task = ImportTask(skill_id=skill_id, status=ImportStatus.COMPLETED)
                 return task
-            
+
             # 创建导入任务
             task = ImportTask(
                 skill_id=skill_id,
@@ -178,20 +181,20 @@ class MarketImporter:
                 started_at=datetime.datetime.now(datetime.timezone.utc),
             )
             self._import_tasks[skill_id] = task
-            
+
             # 模拟导入过程（实际实现应下载和安装）
             try:
                 task.status = ImportStatus.DOWNLOADING
                 task.progress = 0.3
-                
+
                 # 模拟下载完成
                 task.status = ImportStatus.INSTALLING
                 task.progress = 0.7
-                
+
                 # 模拟安装完成
                 skill_dir = self._skills_dir / skill_id
                 skill_dir.mkdir(parents=True, exist_ok=True)
-                
+
                 # 写入简单的 skill.json
                 skill_meta = {
                     "skill_id": skill_id,
@@ -202,61 +205,61 @@ class MarketImporter:
                     json.dumps(skill_meta, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
-                
+
                 task.status = ImportStatus.COMPLETED
                 task.progress = 1.0
                 task.completed_at = datetime.datetime.now(datetime.timezone.utc)
                 self._installed[skill_id] = version or "1.0.0"
-                
-                logger.info(f"Successfully imported skill '{skill_id}'")
-                
+
+                logger.info("Successfully imported skill '%s'", skill_id)
+
             except Exception as e:
                 task.status = ImportStatus.FAILED
                 task.error_message = str(e)
-                logger.error(f"Failed to import skill '{skill_id}': {e}")
-            
+                logger.error("Failed to import skill '%s': %s", skill_id, e)
+
             return task
-    
+
     def get_import_status(self, skill_id: str) -> Optional[ImportTask]:
         """获取导入状态"""
         with self._lock:
             return self._import_tasks.get(skill_id)
-    
+
     def list_installed(self) -> List[Dict[str, str]]:
         """列出已安装的技能"""
         with self._lock:
-            return [
-                {"skill_id": sid, "version": ver}
-                for sid, ver in self._installed.items()
-            ]
-    
+            return [{"skill_id": sid, "version": ver} for sid, ver in self._installed.items()]
+
     def uninstall_skill(self, skill_id: str) -> bool:
         """卸载技能"""
         with self._lock:
             if skill_id not in self._installed:
                 return False
-            
+
             skill_dir = self._skills_dir / skill_id
             if skill_dir.exists():
                 import shutil
+
                 shutil.rmtree(skill_dir)
-            
+
             del self._installed[skill_id]
-            logger.info(f"Uninstalled skill '{skill_id}'")
+            logger.info("Uninstalled skill '%s'", skill_id)
             return True
-    
+
     def check_updates(self) -> List[Dict[str, str]]:
         """检查技能更新"""
         updates = []
         with self._lock:
             for skill_id, current_version in self._installed.items():
                 # 模拟版本检查（实际实现应调用市场API）
-                updates.append({
-                    "skill_id": skill_id,
-                    "current_version": current_version,
-                    "latest_version": current_version,  # 模拟无更新
-                    "update_available": False,
-                })
+                updates.append(
+                    {
+                        "skill_id": skill_id,
+                        "current_version": current_version,
+                        "latest_version": current_version,  # 模拟无更新
+                        "update_available": False,
+                    }
+                )
         return updates
 
 

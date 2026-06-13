@@ -6,15 +6,17 @@ BaseChannel 抽象接口 — 所有检索通道的基类
 2. 返回标准化的 ChannelResult 列表
 3. 管理自身生命周期
 """
+
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
-import logging
 
 
 class ChannelState(Enum):
     """通道状态"""
+
     INACTIVE = "inactive"
     ACTIVE = "active"
     ERROR = "error"
@@ -24,6 +26,7 @@ class ChannelState(Enum):
 @dataclass
 class ChannelMetadata:
     """通道元数据"""
+
     name: str
     display_name: str
     description: str
@@ -36,6 +39,7 @@ class ChannelMetadata:
 @dataclass
 class ChannelResult:
     """通道检索结果"""
+
     memory_id: str
     content: str
     score: float
@@ -58,13 +62,7 @@ class BaseChannel(ABC):
         pass
 
     @abstractmethod
-    async def retrieve(
-        self,
-        query: str,
-        limit: int = 10,
-        weight: float = 1.0,
-        **kwargs
-    ) -> List[ChannelResult]:
+    async def retrieve(self, query: str, limit: int = 10, weight: float = 1.0, **kwargs) -> List[ChannelResult]:
         pass
 
     async def initialize(self) -> bool:

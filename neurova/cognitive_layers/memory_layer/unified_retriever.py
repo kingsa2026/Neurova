@@ -7,8 +7,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
+from typing import Any, Dict, List
 
 from .cognitive_storage_engine import CognitiveStorageEngine, UnifiedMemoryNode
 
@@ -45,7 +44,7 @@ class UnifiedRetriever:
         self._moe = moe_router
         self._recall = recall_engine
         self._hebb = hebb_manager
-        
+
         logger.info(
             "UnifiedRetriever 初始化完成，"
             f"MoE: {'是' if moe_router else '否'}, "
@@ -82,19 +81,19 @@ class UnifiedRetriever:
                 moe_results = self._moe.retrieve(query)
                 results.extend(moe_results)
             except Exception as e:
-                logger.warning(f"MoE 检索失败: {e}")
+                logger.warning("MoE 检索失败: %s", e)
 
         if self._recall:
             try:
                 recall_results = self._recall.recall_flat(query, limit=limit)
                 # RecalledMemory 对象需要转换为字典格式
                 for rm in recall_results:
-                    if hasattr(rm, 'to_dict'):
+                    if hasattr(rm, "to_dict"):
                         results.append(rm.to_dict())
                     else:
                         results.append(rm)
             except Exception as e:
-                logger.warning(f"Recall 检索失败: {e}")
+                logger.warning("Recall 检索失败: %s", e)
 
         if self._hebb:
             try:
@@ -102,7 +101,7 @@ class UnifiedRetriever:
                 hebb_results = [self._hebb.convert_to_recall_format(h) for h in hebbs]
                 results.extend(hebb_results)
             except Exception as e:
-                logger.warning(f"Hebb 检索失败: {e}")
+                logger.warning("Hebb 检索失败: %s", e)
 
         # 去重 + 排序
         return self._dedup_rank(results, limit)
@@ -118,13 +117,13 @@ class UnifiedRetriever:
             标准字典格式
         """
         return {
-            'id': node.id,
-            'content': node.content,
-            'score': node.temperature,
-            'source': node.memory_type.value,
-            'temperature': node.temperature,
-            'category': node.category,
-            'metadata': node.metadata,
+            "id": node.id,
+            "content": node.content,
+            "score": node.temperature,
+            "source": node.memory_type.value,
+            "temperature": node.temperature,
+            "category": node.category,
+            "metadata": node.metadata,
         }
 
     def _dedup_rank(
@@ -144,15 +143,15 @@ class UnifiedRetriever:
         """
         seen: set = set()
         unique: List[Dict[str, Any]] = []
-        
+
         for r in results:
             # 使用内容前100字符作为去重键
-            key = r.get('content', '')[:100]
+            key = r.get("content", "")[:100]
             if key not in seen:
                 seen.add(key)
                 unique.append(r)
-        
+
         # 按分数降序排序
-        unique.sort(key=lambda x: x.get('score', 0), reverse=True)
-        
+        unique.sort(key=lambda x: x.get("score", 0), reverse=True)
+
         return unique[:limit]

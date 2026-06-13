@@ -15,14 +15,12 @@ from __future__ import annotations
 import datetime
 import json
 import logging
-import re
 import threading
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +146,11 @@ class TaskExecutionRecord:
             task_id=data["task_id"],
             task_type=data["task_type"],
             skill_id=data.get("skill_id", ""),
-            start_time=datetime.datetime.fromisoformat(data["start_time"]) if data.get("start_time") else datetime.datetime.now(),
+            start_time=(
+                datetime.datetime.fromisoformat(data["start_time"])
+                if data.get("start_time")
+                else datetime.datetime.now()
+            ),
             end_time=datetime.datetime.fromisoformat(data["end_time"]) if data.get("end_time") else None,
             success=bool(data.get("success", False)),
             input_data=dict(data.get("input_data", {})),

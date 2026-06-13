@@ -17,15 +17,13 @@ Media Storage API - 媒体存储管理接口
 
 from __future__ import annotations
 
-import datetime
 import logging
 import os
-import tempfile
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -36,8 +34,10 @@ router = APIRouter()
 # Pydantic Models
 # ---------------------------------------------------------------------------
 
+
 class SaveMediaRequest(BaseModel):
     """保存媒体请求"""
+
     media_type: str = Field(..., description="媒体类型 (image, audio, video, file)")
     agent_id: str = Field(default="default", description="Agent ID")
     user_id: Optional[str] = Field(default=None, description="用户 ID")
@@ -47,6 +47,7 @@ class SaveMediaRequest(BaseModel):
 
 class MediaListRequest(BaseModel):
     """媒体列表请求"""
+
     agent_id: str = Field(default="default", description="Agent ID")
     media_type: Optional[str] = Field(default=None, description="媒体类型筛选")
     limit: int = Field(default=50, le=200, description="返回数量")
@@ -55,6 +56,7 @@ class MediaListRequest(BaseModel):
 
 class UpdateConfigRequest(BaseModel):
     """更新配置请求"""
+
     max_file_size: Optional[int] = Field(default=None, description="最大文件大小 (bytes)")
     allowed_types: Optional[List[str]] = Field(default=None, description="允许的媒体类型")
     storage_path: Optional[str] = Field(default=None, description="存储路径")
@@ -63,6 +65,7 @@ class UpdateConfigRequest(BaseModel):
 
 class MediaInfo(BaseModel):
     """媒体信息"""
+
     media_id: str
     filename: str
     media_type: str
@@ -78,6 +81,7 @@ class MediaInfo(BaseModel):
 
 class MediaStats(BaseModel):
     """媒体统计"""
+
     total_files: int
     total_size: int
     by_type: Dict[str, Dict[str, Any]]
@@ -105,6 +109,7 @@ _file_contents: Dict[str, bytes] = {}
 # ---------------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------------
+
 
 def _generate_media_id() -> str:
     """生成媒体 ID"""
@@ -137,6 +142,7 @@ def _get_media_manager():
     """获取或创建 MediaManager 实例"""
     try:
         from neurova.media import MediaManager
+
         return MediaManager.get_instance()
     except Exception:
         return None
@@ -145,6 +151,7 @@ def _get_media_manager():
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 
 @router.post("/save")
 async def save_media(
@@ -160,39 +167,34 @@ async def save_media(
     if media_type not in _media_config.get("allowed_types", []):
         raise HTTPException(
             status_code=400,
-            detail=f"不支持的媒体类型: {media_type}。允许的类型: {_media_config.get('allowed_types', [])}"
+            detail=f"不支持的媒体类型: {media_type}。允许的类型: {_media_config.get('allowed_types', [])}",
         )
-    
+
     # 检查文件大小
     content = await file.read()
     max_size = _media_config.get("max_file_size", 50 * 1024 * 1024)
     if len(content) > max_size:
-        raise HTTPException(
-            status_code=413,
-            detail=f"文件大小超过限制 ({len(content)} > {max_size} bytes)"
-        )
-    
+        raise HTTPException(status_code=413, detail=f"文件大小超过限制 ({len(content)} > {max_size} bytes)")
+
     media_id = _generate_media_id()
     filename = file.filename or f"unnamed_{media_id}"
     mime_type = _get_mime_type(media_type, filename)
-    
+
     # 模拟存储路径
     storage_path = os.path.join(
-        _media_config.get("storage_path", "media_storage"),
-        agent_id,
-        media_type,
-        f"{media_id}_{filename}"
+        _media_config.get("storage_path", "media_storage"), agent_id, media_type, f"{media_id}_{filename}"
     )
-    
+
     # 解析元数据
     meta = {}
     if metadata:
         try:
             import json
+
             meta = json.loads(metadata)
         except Exception:
             meta = {"raw_metadata": metadata}
-    
+
     now = time.time()
     media_info = {
         "media_id": media_id,
@@ -207,10 +209,10 @@ async def save_media(
         "created_at": now,
         "metadata": meta,
     }
-    
+
     _media_store[media_id] = media_info
     _file_contents[media_id] = content
-    
+
     return {
         "code": 0,
         "message": f"媒体文件 '{filename}' 保存成功",
@@ -224,12 +226,13 @@ async def get_media(media_id: str):
     media = _media_store.get(media_id)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
-    
+
     content = _file_contents.get(media_id)
     if not content:
         raise HTTPException(status_code=404, detail=f"Media content not found")
-    
+
     from fastapi.responses import Response
+
     return Response(
         content=content,
         media_type=media.get("mime_type", "application/octet-stream"),
@@ -246,7 +249,7 @@ async def get_media_metadata(media_id: str):
     media = _media_store.get(media_id)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
-    
+
     return {
         "code": 0,
         "data": {
@@ -269,20 +272,17 @@ async def list_media(
     offset: int = Query(default=0),
 ):
     """列出媒体文件"""
-    media_list = [
-        m for m in _media_store.values()
-        if m.get("agent_id") == agent_id
-    ]
-    
+    media_list = [m for m in _media_store.values() if m.get("agent_id") == agent_id]
+
     if media_type:
         media_list = [m for m in media_list if m.get("media_type") == media_type]
-    
+
     # 按创建时间降序排序
     media_list.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-    
+
     total = len(media_list)
-    paginated = media_list[offset:offset + limit]
-    
+    paginated = media_list[offset : offset + limit]
+
     return {
         "code": 0,
         "data": {
@@ -300,12 +300,13 @@ async def download_attachment(media_id: str):
     media = _media_store.get(media_id)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
-    
+
     content = _file_contents.get(media_id)
     if not content:
         raise HTTPException(status_code=404, detail=f"Media content not found")
-    
+
     from fastapi.responses import Response
+
     return Response(
         content=content,
         media_type=media.get("mime_type", "application/octet-stream"),
@@ -321,13 +322,13 @@ async def delete_media(media_id: str):
     media = _media_store.get(media_id)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
-    
+
     # 删除文件内容
     _file_contents.pop(media_id, None)
-    
+
     # 删除元数据
     del _media_store[media_id]
-    
+
     return {
         "code": 0,
         "message": f"媒体文件 '{media.get('filename')}' 已删除",
@@ -337,14 +338,11 @@ async def delete_media(media_id: str):
 @router.get("/stats/{agent_id}")
 async def get_media_stats(agent_id: str):
     """获取媒体存储统计信息"""
-    agent_media = [
-        m for m in _media_store.values()
-        if m.get("agent_id") == agent_id
-    ]
-    
+    agent_media = [m for m in _media_store.values() if m.get("agent_id") == agent_id]
+
     total_files = len(agent_media)
     total_size = sum(m.get("size", 0) for m in agent_media)
-    
+
     # 按类型统计
     by_type: Dict[str, Dict[str, Any]] = {}
     for m in agent_media:
@@ -353,12 +351,10 @@ async def get_media_stats(agent_id: str):
             by_type[media_type] = {"count": 0, "size": 0}
         by_type[media_type]["count"] += 1
         by_type[media_type]["size"] += m.get("size", 0)
-    
+
     # 按 Agent 统计（这里只有一个 agent）
-    by_agent: Dict[str, Dict[str, Any]] = {
-        agent_id: {"count": total_files, "size": total_size}
-    }
-    
+    by_agent: Dict[str, Dict[str, Any]] = {agent_id: {"count": total_files, "size": total_size}}
+
     return {
         "code": 0,
         "data": {
@@ -374,11 +370,8 @@ async def get_media_stats(agent_id: str):
 @router.get("/memory/{memory_id}")
 async def get_memory_media(memory_id: str):
     """获取与指定记忆关联的媒体文件"""
-    memory_media = [
-        m for m in _media_store.values()
-        if m.get("memory_id") == memory_id
-    ]
-    
+    memory_media = [m for m in _media_store.values() if m.get("memory_id") == memory_id]
+
     return {
         "code": 0,
         "data": {
@@ -409,9 +402,9 @@ async def update_config(body: UpdateConfigRequest):
         _media_config["storage_path"] = body.storage_path
     if body.enable_compression is not None:
         _media_config["enable_compression"] = body.enable_compression
-    
+
     _media_config["updated_at"] = time.time()
-    
+
     return {
         "code": 0,
         "message": "媒体存储配置已更新",
@@ -441,12 +434,12 @@ async def get_user_storage_path(
 ):
     """获取用户指定媒体类型的存储路径"""
     base_path = _media_config.get("storage_path", "media_storage")
-    
+
     if user_id:
         path = os.path.join(base_path, agent_id, user_id, media_type)
     else:
         path = os.path.join(base_path, agent_id, media_type)
-    
+
     return {
         "code": 0,
         "data": {

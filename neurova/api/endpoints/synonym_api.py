@@ -19,8 +19,10 @@ router = APIRouter()
 # Pydantic Models
 # ---------------------------------------------------------------------------
 
+
 class SynonymInfo(BaseModel):
     """同义词信息"""
+
     word: str
     synonyms: List[str] = []
     category: str = "general"
@@ -30,6 +32,7 @@ class SynonymInfo(BaseModel):
 
 class AddSynonymRequest(BaseModel):
     """添加同义词请求"""
+
     word: str = Field(..., description="词语")
     synonyms: List[str] = Field(..., description="同义词列表")
     category: str = Field(default="general", description="分类")
@@ -37,6 +40,7 @@ class AddSynonymRequest(BaseModel):
 
 class SetSynonymsRequest(BaseModel):
     """设置同义词请求（覆盖）"""
+
     word: str = Field(..., description="词语")
     synonyms: List[str] = Field(..., description="同义词列表")
     category: str = Field(default="general", description="分类")
@@ -44,6 +48,7 @@ class SetSynonymsRequest(BaseModel):
 
 class SynonymConfigRequest(BaseModel):
     """同义词配置请求"""
+
     enabled: bool = Field(default=True, description="是否启用同义词扩展")
     max_expansions: int = Field(default=5, description="最大扩展数量")
     boost_exact: bool = Field(default=True, description="是否提升精确匹配权重")
@@ -51,6 +56,7 @@ class SynonymConfigRequest(BaseModel):
 
 class TestSearchRequest(BaseModel):
     """测试搜索请求"""
+
     query: str = Field(..., description="查询文本")
     use_synonyms: bool = Field(default=True, description="是否使用同义词扩展")
 
@@ -71,6 +77,7 @@ def _get_vsa():
     """获取向量搜索高级模块"""
     try:
         from neurova.cognitive_layers.memory_layer.vector_search_advanced import VectorSearchAdvanced
+
         return VectorSearchAdvanced()
     except Exception:
         return None
@@ -79,6 +86,7 @@ def _get_vsa():
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 
 @router.get("/stats")
 async def get_stats():
@@ -123,7 +131,7 @@ async def add_synonyms(body: AddSynonymRequest):
     """添加同义词"""
     word = body.word.lower()
     now = time.time()
-    
+
     if word in _synonyms_store:
         # 合并同义词
         existing = _synonyms_store[word]
@@ -132,7 +140,7 @@ async def add_synonyms(body: AddSynonymRequest):
         existing["synonyms"] = list(existing_synonyms)
         existing["updated_at"] = now
         return SynonymInfo(**existing)
-    
+
     entry = {
         "word": word,
         "synonyms": body.synonyms,
@@ -149,11 +157,11 @@ async def set_synonyms(body: SetSynonymsRequest):
     """设置同义词列表（覆盖）"""
     word = body.word.lower()
     now = time.time()
-    
+
     entry = _synonyms_store.get(word)
     if not entry:
         entry = {"word": word, "created_at": now}
-    
+
     entry["synonyms"] = body.synonyms
     entry["category"] = body.category
     entry["updated_at"] = now
@@ -167,11 +175,11 @@ async def remove_synonym(word: str, synonym: str):
     entry = _synonyms_store.get(word.lower())
     if not entry:
         raise HTTPException(status_code=404, detail=f"Word '{word}' not found")
-    
+
     synonyms = entry.get("synonyms", [])
     if synonym not in synonyms:
         raise HTTPException(status_code=404, detail=f"Synonym '{synonym}' not found")
-    
+
     synonyms.remove(synonym)
     entry["synonyms"] = synonyms
     entry["updated_at"] = time.time()
@@ -193,13 +201,14 @@ async def load_from_file(file_path: str = Query(..., description="文件路径")
     try:
         import json
         from pathlib import Path
+
         path = Path(file_path)
         if not path.exists():
             raise HTTPException(status_code=404, detail=f"File '{file_path}' not found")
-        
+
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        
+
         now = time.time()
         count = 0
         for word, synonyms in data.items():
@@ -212,7 +221,7 @@ async def load_from_file(file_path: str = Query(..., description="文件路径")
                     "updated_at": now,
                 }
                 count += 1
-        
+
         return {"code": 0, "message": f"Loaded {count} words from '{file_path}'"}
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON file")
@@ -226,14 +235,14 @@ async def save_to_file(file_path: str = Query(..., description="文件路径")):
     try:
         import json
         from pathlib import Path
-        
+
         data = {word: entry.get("synonyms", []) for word, entry in _synonyms_store.items()}
-        
+
         path = Path(file_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        
+
         return {"code": 0, "message": f"Saved {len(data)} words to '{file_path}'"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -269,8 +278,8 @@ async def test_semantic_search(body: TestSearchRequest):
         query_lower = body.query.lower()
         for word, entry in _synonyms_store.items():
             if word in query_lower or query_lower in word:
-                expanded_terms.extend(entry.get("synonyms", [])[:_config.get("max_expansions", 5)])
-    
+                expanded_terms.extend(entry.get("synonyms", [])[: _config.get("max_expansions", 5)])
+
     return {
         "code": 0,
         "data": {

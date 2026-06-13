@@ -11,34 +11,32 @@ from __future__ import annotations
 - 配置导入/导出
 """
 
-import copy
-from dataclasses import dataclass, field
-import enum
 import json
 import logging
 import os
-from pathlib import Path
 import threading
 import time
-import typing
-from typing import Any, Callable, Dict, List, Optional, Set
-
+from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 
 class ConfigLevel(Enum):
     """配置层级"""
-    DEFAULT = 0       # 默认配置（最低优先级）
+
+    DEFAULT = 0  # 默认配置（最低优先级）
     APPLICATION = 10  # 应用级配置
-    MODULE = 20       # 模块级配置
+    MODULE = 20  # 模块级配置
     ENVIRONMENT = 30  # 环境变量配置（最高优先级）
 
 
 @dataclass
 class ConfigEntry:
     """配置条目"""
+
     key: str
     value: Any
     level: ConfigLevel = ConfigLevel.APPLICATION
@@ -129,7 +127,7 @@ class ConfigManager:
         """
         with self._lock:
             if key in self._read_only_keys:
-                logger.warning(f"Attempted to set read-only config: {key}")
+                logger.warning("Attempted to set read-only config: %s", key)
                 return
 
             # 验证
@@ -205,10 +203,7 @@ class ConfigManager:
             else:
                 result = {}
                 for key, levels in self._configs.items():
-                    result[key] = {
-                        level: entry.value
-                        for level, entry in levels.items()
-                    }
+                    result[key] = {level: entry.value for level, entry in levels.items()}
                 return result
 
     def bulk_set(
@@ -273,7 +268,7 @@ class ConfigManager:
             try:
                 cb(key, old_value, new_value)
             except Exception as e:
-                logger.error(f"Config change callback error: {e}")
+                logger.error("Config change callback error: %s", e)
 
     def _notify_bulk_change(self, changes: List[tuple]) -> None:
         """通知批量配置变更"""
@@ -282,7 +277,7 @@ class ConfigManager:
 
     def _emit_config_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """发出配置事件"""
-        logger.debug(f"Config event: {event_type} - {data}")
+        logger.debug("Config event: %s - %s", event_type, data)
 
     def save(self, path: Optional[str] = None) -> None:
         """
@@ -307,9 +302,9 @@ class ConfigManager:
             Path(save_path).parent.mkdir(parents=True, exist_ok=True)
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            logger.info(f"Config saved to {save_path}")
+            logger.info("Config saved to %s", save_path)
         except Exception as e:
-            logger.error(f"Failed to save config: {e}")
+            logger.error("Failed to save config: %s", e)
 
     def load(self, path: Optional[str] = None) -> None:
         """
@@ -326,13 +321,11 @@ class ConfigManager:
             with open(load_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.load_from_dict(data, ConfigLevel.APPLICATION)
-            logger.info(f"Config loaded from {load_path}")
+            logger.info("Config loaded from %s", load_path)
         except Exception as e:
-            logger.error(f"Failed to load config: {e}")
+            logger.error("Failed to load config: %s", e)
 
-    def load_from_dict(
-        self, data: Dict[str, Any], level: ConfigLevel = ConfigLevel.APPLICATION
-    ) -> None:
+    def load_from_dict(self, data: Dict[str, Any], level: ConfigLevel = ConfigLevel.APPLICATION) -> None:
         """
         从字典加载配置
 
@@ -346,9 +339,7 @@ class ConfigManager:
                 old_value = self.get(key)
                 if key not in self._configs:
                     self._configs[key] = {}
-                self._configs[key][level.value] = ConfigEntry(
-                    key=key, value=value, level=level
-                )
+                self._configs[key][level.value] = ConfigEntry(key=key, value=value, level=level)
                 if old_value != value:
                     changes.append((key, old_value, value))
 
@@ -379,7 +370,7 @@ class ConfigManager:
         count = 0
         for env_key, env_value in os.environ.items():
             if env_key.startswith(prefix):
-                config_key = env_key[len(prefix):].lower()
+                config_key = env_key[len(prefix) :].lower()
                 value = self._convert_env_value(env_value)
                 self.set(config_key, value, ConfigLevel.ENVIRONMENT)
                 count += 1

@@ -13,7 +13,6 @@ import logging
 import os
 import threading
 import time
-import typing
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
@@ -44,9 +43,7 @@ class NEUTokenManager:
             refresh_token_ttl: 刷新令牌有效期（秒），默认 7 天
             issuer: 令牌签发者标识
         """
-        self._secret_key = secret_key or os.environ.get(
-            "NEU_TOKEN_SECRET", self._generate_secret()
-        )
+        self._secret_key = secret_key or os.environ.get("NEU_TOKEN_SECRET", self._generate_secret())
         self._access_token_ttl = access_token_ttl
         self._refresh_token_ttl = refresh_token_ttl
         self._issuer = issuer
@@ -163,7 +160,7 @@ class NEUTokenManager:
             "token_type": "Bearer",
         }
 
-        logger.info(f"Generated tokens for user {user_id}")
+        logger.info("Generated tokens for user %s", user_id)
         return access_token, refresh_token, token_info
 
     def validate_token(self, token: str) -> Optional[Dict[str, Any]]:
@@ -183,20 +180,18 @@ class NEUTokenManager:
         # 检查是否在黑名单中
         jti = payload.get("jti")
         if jti and self.is_token_blacklisted(jti):
-            logger.debug(f"Token {jti} is blacklisted")
+            logger.debug("Token %s is blacklisted", jti)
             return None
 
         # 检查过期时间
         exp = payload.get("exp", 0)
         if time.time() > exp:
-            logger.debug(f"Token {jti} has expired")
+            logger.debug("Token %s has expired", jti)
             return None
 
         return payload
 
-    def refresh_tokens(
-        self, refresh_token: str
-    ) -> Optional[Tuple[str, str, Dict[str, Any]]]:
+    def refresh_tokens(self, refresh_token: str) -> Optional[Tuple[str, str, Dict[str, Any]]]:
         """
         使用刷新令牌获取新的令牌对
 
@@ -221,7 +216,7 @@ class NEUTokenManager:
 
         # 检查黑名单
         if self.is_token_blacklisted(refresh_jti):
-            logger.warning(f"Refresh token {refresh_jti} is blacklisted")
+            logger.warning("Refresh token %s is blacklisted", refresh_jti)
             return None
 
         # 查找并移除旧的刷新令牌
@@ -229,7 +224,7 @@ class NEUTokenManager:
             refresh_data = self._refresh_tokens.pop(refresh_jti, None)
 
         if refresh_data is None:
-            logger.warning(f"Refresh token {refresh_jti} not found in storage")
+            logger.warning("Refresh token %s not found in storage", refresh_jti)
             return None
 
         user_id = refresh_data["user_id"]
@@ -240,7 +235,7 @@ class NEUTokenManager:
             self.revoke_token_by_jti(old_access_jti)
 
         # 生成新的令牌对
-        logger.info(f"Refreshed tokens for user {user_id}")
+        logger.info("Refreshed tokens for user %s", user_id)
         return self.generate_tokens(user_id)
 
     def revoke_token(self, token: str) -> bool:
@@ -278,7 +273,7 @@ class NEUTokenManager:
             if jti in self._blacklist:
                 return False
             self._blacklist[jti] = expires_at or (time.time() + self._refresh_token_ttl)
-            logger.info(f"Token {jti} revoked")
+            logger.info("Token %s revoked", jti)
             return True
 
     def is_token_blacklisted(self, jti: str) -> bool:
@@ -322,9 +317,7 @@ class NEUTokenManager:
         payload_b64 = self._base64url_encode(json.dumps(payload).encode())
 
         signing_input = f"{header_b64}.{payload_b64}"
-        signature = hmac.new(
-            self._secret_key.encode(), signing_input.encode(), hashlib.sha256
-        ).digest()
+        signature = hmac.new(self._secret_key.encode(), signing_input.encode(), hashlib.sha256).digest()
         signature_b64 = self._base64url_encode(signature)
 
         return f"{header_b64}.{payload_b64}.{signature_b64}"
@@ -350,9 +343,7 @@ class NEUTokenManager:
 
         # 验证签名
         signing_input = f"{header_b64}.{payload_b64}"
-        expected_sig = hmac.new(
-            self._secret_key.encode(), signing_input.encode(), hashlib.sha256
-        ).digest()
+        expected_sig = hmac.new(self._secret_key.encode(), signing_input.encode(), hashlib.sha256).digest()
         expected_sig_b64 = self._base64url_encode(expected_sig)
 
         if not hmac.compare_digest(signature_b64, expected_sig_b64):
@@ -365,7 +356,7 @@ class NEUTokenManager:
             payload = json.loads(payload_bytes)
             return payload
         except (json.JSONDecodeError, Exception) as e:
-            logger.warning(f"Failed to decode token payload: {e}")
+            logger.warning("Failed to decode token payload: %s", e)
             return None
 
     def cleanup_expired(self) -> int:
@@ -380,25 +371,19 @@ class NEUTokenManager:
 
         with self._lock:
             # 清理过期的黑名单条目
-            expired_bl = [
-                jti for jti, exp in self._blacklist.items() if now > exp
-            ]
+            expired_bl = [jti for jti, exp in self._blacklist.items() if now > exp]
             for jti in expired_bl:
                 del self._blacklist[jti]
                 cleaned += 1
 
             # 清理过期的刷新令牌
-            expired_rt = [
-                jti
-                for jti, data in self._refresh_tokens.items()
-                if now > data.get("expires_at", 0)
-            ]
+            expired_rt = [jti for jti, data in self._refresh_tokens.items() if now > data.get("expires_at", 0)]
             for jti in expired_rt:
                 del self._refresh_tokens[jti]
                 cleaned += 1
 
         if cleaned > 0:
-            logger.info(f"Cleaned up {cleaned} expired token entries")
+            logger.info("Cleaned up %s expired token entries", cleaned)
 
         return cleaned
 

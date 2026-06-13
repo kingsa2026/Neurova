@@ -10,15 +10,10 @@ ASR Module - 语音识别与音频理解模块
 - 基于 ASR + LLM 的音频理解
 """
 
-import neurova.asr.base
-import neurova.asr.manager
-import neurova.asr.whisper_engine
-import neurova.asr.mock_asr
-
 from neurova.asr.base import ASRBase
-from neurova.asr.manager import ASRManager, ASRConfig
-from neurova.asr.whisper_engine import WhisperEngine
+from neurova.asr.manager import ASRConfig, ASRManager
 from neurova.asr.mock_asr import MockASREngine
+from neurova.asr.whisper_engine import WhisperEngine
 
 __all__ = [
     "ASRBase",
@@ -30,7 +25,8 @@ __all__ = [
 
 # 条件导入 FunASR（可能需要额外依赖）
 try:
-    from neurova.asr.funasr_engine import FunASREngine
+    pass
+
     __all__.append("FunASREngine")
 except ImportError:
     pass

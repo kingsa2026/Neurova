@@ -10,22 +10,22 @@ Image 定义管道 v1.0.0 (技能/环境预配)
 4. 查看构建历史
 """
 
-from dataclasses import dataclass, field
-import datetime
 import logging
 import threading
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-from .docker_builder import DockerBuilder, BuildResult, get_docker_builder
+from typing import Any, Dict, List, Optional
+
+from .docker_builder import get_docker_builder
 
 logger = logging.getLogger(__name__)
 
 
 class BuildStatus(Enum):
     """构建状态"""
+
     PENDING = "pending"
     BUILDING = "building"
     SUCCESS = "success"
@@ -36,6 +36,7 @@ class BuildStatus(Enum):
 @dataclass
 class ImageTemplate:
     """镜像模板"""
+
     template_id: str
     name: str
     description: str
@@ -74,6 +75,7 @@ class ImageTemplate:
 @dataclass
 class BuildRecord:
     """构建记录"""
+
     build_id: str
     template_id: str
     status: BuildStatus
@@ -166,17 +168,17 @@ _DEFAULT_TEMPLATES = [
 
 class ImagePipelineManager:
     """镜像管道管理器"""
-    
+
     def __init__(self, storage_dir: Optional[str] = None):
         self._storage_dir = storage_dir or ".neurova/image_pipeline"
         self._templates: Dict[str, ImageTemplate] = {}
         self._builds: List[BuildRecord] = []
         self._lock = threading.RLock()
         self._init_default_templates()
-        
+
         # 初始化 Docker 构建器
         self._docker_builder = get_docker_builder()
-        
+
         logger.info("ImagePipelineManager initialized with %d templates", len(self._templates))
 
     def _init_default_templates(self) -> None:
@@ -188,28 +190,28 @@ class ImagePipelineManager:
     def list_templates(self, tag: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         列出可用的镜像模板
-        
+
         Args:
             tag: 可选的标签过滤
-            
+
         Returns:
             模板列表
         """
         with self._lock:
             templates = list(self._templates.values())
-            
+
             if tag:
                 templates = [t for t in templates if tag in t.tags]
-            
+
             return [t.to_dict() for t in templates]
 
     def get_template(self, template_id: str) -> Optional[Dict[str, Any]]:
         """
         获取模板详情
-        
+
         Args:
             template_id: 模板 ID
-            
+
         Returns:
             模板详情或 None
         """
@@ -226,24 +228,24 @@ class ImagePipelineManager:
     ) -> Dict[str, Any]:
         """
         构建镜像
-        
+
         Args:
             template_id: 模板 ID
             custom_tags: 自定义标签
             build_args: 构建参数
-            
+
         Returns:
             构建记录
         """
         start_time = time.time()
-        
+
         with self._lock:
             template = self._templates.get(template_id)
             if not template:
                 return {"success": False, "error": f"Template not found: {template_id}"}
-            
+
             build_id = f"build_{uuid.uuid4().hex[:12]}"
-            
+
             record = BuildRecord(
                 build_id=build_id,
                 template_id=template_id,
@@ -254,9 +256,9 @@ class ImagePipelineManager:
                     "build_args": build_args or {},
                 },
             )
-            
+
             self._builds.append(record)
-            
+
             # 使用 DockerBuilder 构建镜像
             try:
                 # 生成 Dockerfile
@@ -266,25 +268,25 @@ class ImagePipelineManager:
                     layers=template.layers,
                     build_args=build_args,
                 )
-                
+
                 # 创建临时 Dockerfile
-                import tempfile
                 import os
-                
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.dockerfile', delete=False) as f:
+                import tempfile
+
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".dockerfile", delete=False) as f:
                     f.write(dockerfile_content)
                     dockerfile_path = f.name
-                
+
                 try:
                     # 确定镜像标签
                     if custom_tags:
                         image_tag = f"{template.name.lower().replace(' ', '-')}:{custom_tags[0]}"
                     else:
                         image_tag = f"{template.name.lower().replace(' ', '-')}:{uuid.uuid4().hex[:8]}"
-                    
+
                     record.logs.append(f"Build started for template: {template.name}")
                     record.logs.append(f"Base image: {template.base_image}")
-                    
+
                     # 调用 Docker 构建
                     build_result = self._docker_builder.build(
                         dockerfile_path=dockerfile_path,
@@ -293,36 +295,36 @@ class ImagePipelineManager:
                         platform=platform,
                         rm=True,
                     )
-                    
+
                     # 更新构建记录
                     record.completed_at = time.time()
                     record.logs.extend(build_result.logs)
-                    
+
                     if build_result.success:
                         record.status = BuildStatus.SUCCESS
                         record.image_tag = build_result.image_tag
                         record.metadata["image_id"] = build_result.image_id
-                        
+
                         logger.info("Image built: %s", build_result.image_tag)
                         return {"success": True, "build": record.to_dict()}
                     else:
                         record.status = BuildStatus.FAILED
                         record.error = build_result.error
-                        
+
                         logger.error("Image build failed: %s", build_result.error)
                         return {"success": False, "error": build_result.error, "build": record.to_dict()}
-                        
+
                 finally:
                     # 清理临时文件
                     if os.path.exists(dockerfile_path):
                         os.unlink(dockerfile_path)
-                
+
             except Exception as e:
                 record.status = BuildStatus.FAILED
                 record.completed_at = time.time()
                 record.error = str(e)
                 record.logs.append(f"Build failed: {str(e)}")
-                
+
                 logger.error("Image build failed: %s", str(e))
                 return {"success": False, "error": str(e), "build": record.to_dict()}
 
@@ -334,27 +336,27 @@ class ImagePipelineManager:
     ) -> List[Dict[str, Any]]:
         """
         获取构建历史
-        
+
         Args:
             template_id: 可选的模板过滤
             status: 可选的状态过滤
             limit: 返回数量限制
-            
+
         Returns:
             构建记录列表
         """
         with self._lock:
             builds = self._builds.copy()
-            
+
             if template_id:
                 builds = [b for b in builds if b.template_id == template_id]
-            
+
             if status:
                 builds = [b for b in builds if b.status == status]
-            
+
             # 按时间倒序
             builds.sort(key=lambda b: b.started_at, reverse=True)
-            
+
             return [b.to_dict() for b in builds[:limit]]
 
 

@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import json
@@ -21,9 +20,9 @@ import logging
 import os
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Optional, Set
 
-from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -36,14 +35,17 @@ security = HTTPBearer(auto_error=False)
 # Pydantic Models
 # ---------------------------------------------------------------------------
 
+
 class GeneratePairingRequest(BaseModel):
     """生成配对请求"""
+
     device_name: Optional[str] = Field(default=None, description="设备名称")
     device_type: str = Field(default="mobile", description="设备类型")
 
 
 class GeneratePairingResponse(BaseModel):
     """生成配对响应"""
+
     code: str
     qr_code_url: str
     expires_in: int
@@ -52,6 +54,7 @@ class GeneratePairingResponse(BaseModel):
 
 class ConfirmPairingRequest(BaseModel):
     """确认配对请求"""
+
     code: str = Field(..., description="配对码")
     device_name: Optional[str] = Field(default=None, description="设备名称")
     device_id: Optional[str] = Field(default=None, description="设备 ID")
@@ -59,6 +62,7 @@ class ConfirmPairingRequest(BaseModel):
 
 class ConfirmPairingResponse(BaseModel):
     """确认配对响应"""
+
     success: bool
     ws_token: Optional[str] = None
     ws_url: Optional[str] = None
@@ -68,6 +72,7 @@ class ConfirmPairingResponse(BaseModel):
 
 class PairingStatusResponse(BaseModel):
     """配对状态响应"""
+
     code: str
     status: str  # pending, confirmed, expired, revoked
     device_name: Optional[str] = None
@@ -76,6 +81,7 @@ class PairingStatusResponse(BaseModel):
 
 class PairedDeviceResponse(BaseModel):
     """已配对设备响应"""
+
     pairing_id: str
     device_name: str
     device_type: str
@@ -104,20 +110,18 @@ _WS_SECRET = os.environ.get("NEUROVA_WS_SECRET", "neurova-ws-secret-key-2026")
 # Helper Functions
 # ---------------------------------------------------------------------------
 
+
 def _generate_pairing_code() -> str:
     """生成 6 位数字配对码"""
     import random
-    return ''.join([str(random.randint(0, 9)) for _ in range(6)])
+
+    return "".join([str(random.randint(0, 9)) for _ in range(6)])
 
 
 def _generate_ws_token(user_id: str, pairing_id: str) -> str:
     """生成 WebSocket Token（HMAC 签名）"""
     message = f"{user_id}:{pairing_id}:{int(time.time())}"
-    signature = hmac.new(
-        _WS_SECRET.encode(),
-        message.encode(),
-        hashlib.sha256
-    ).hexdigest()
+    signature = hmac.new(_WS_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
     return f"{message}:{signature}"
 
 
@@ -127,22 +131,18 @@ def _verify_ws_token(token: str) -> Optional[Dict[str, str]]:
         parts = token.split(":")
         if len(parts) != 4:
             return None
-        
+
         user_id, pairing_id, timestamp, signature = parts
         message = f"{user_id}:{pairing_id}:{timestamp}"
-        expected_signature = hmac.new(
-            _WS_SECRET.encode(),
-            message.encode(),
-            hashlib.sha256
-        ).hexdigest()
-        
+        expected_signature = hmac.new(_WS_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+
         if not hmac.compare_digest(signature, expected_signature):
             return None
-        
+
         # 检查是否过期（24 小时）
         if time.time() - float(timestamp) > 86400:
             return None
-        
+
         return {"user_id": user_id, "pairing_id": pairing_id}
     except Exception:
         return None
@@ -152,9 +152,9 @@ def _get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(sec
     """从 JWT Token 提取 user_id（用户隔离）"""
     if not credentials:
         raise HTTPException(status_code=401, detail="Missing authorization")
-    
+
     # 这里简化处理，实际应该验证 JWT
-    token = credentials.credentials
+    credentials.credentials
     # 模拟从 JWT 中提取 user_id
     # 实际实现应该使用 jwt.decode()
     return "default-user"
@@ -164,34 +164,35 @@ def _get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(sec
 # MobileConnectionManager
 # ---------------------------------------------------------------------------
 
+
 class MobileConnectionManager:
     """移动设备 WebSocket 连接管理器"""
-    
+
     _instance: Optional["MobileConnectionManager"] = None
-    
+
     def __init__(self):
         if MobileConnectionManager._instance is not None:
             raise RuntimeError("Use get_instance() instead")
         self._connections: Dict[str, WebSocket] = {}
         self._user_connections: Dict[str, Set[str]] = {}  # user_id -> set of connection_ids
-    
+
     @classmethod
     def get_instance(cls) -> "MobileConnectionManager":
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
-    
+
     async def connect(self, websocket: WebSocket, user_id: str, connection_id: str):
         """建立连接"""
         await websocket.accept()
         self._connections[connection_id] = websocket
-        
+
         if user_id not in self._user_connections:
             self._user_connections[user_id] = set()
         self._user_connections[user_id].add(connection_id)
-        
-        logger.info(f"Mobile WebSocket connected: {connection_id} for user {user_id}")
-    
+
+        logger.info("Mobile WebSocket connected: %s for user %s", connection_id, user_id)
+
     def disconnect(self, connection_id: str, user_id: str):
         """断开连接"""
         self._connections.pop(connection_id, None)
@@ -199,14 +200,14 @@ class MobileConnectionManager:
             self._user_connections[user_id].discard(connection_id)
             if not self._user_connections[user_id]:
                 del self._user_connections[user_id]
-        
-        logger.info(f"Mobile WebSocket disconnected: {connection_id}")
-    
+
+        logger.info("Mobile WebSocket disconnected: %s", connection_id)
+
     async def send_to_user(self, user_id: str, message: dict):
         """向指定用户的所有连接发送消息"""
         if user_id not in self._user_connections:
             return
-        
+
         connection_ids = list(self._user_connections[user_id])
         for conn_id in connection_ids:
             ws = self._connections.get(conn_id)
@@ -215,7 +216,7 @@ class MobileConnectionManager:
                     await ws.send_json(message)
                 except Exception:
                     self.disconnect(conn_id, user_id)
-    
+
     async def broadcast(self, message: dict):
         """向所有连接广播消息"""
         for conn_id, ws in list(self._connections.items()):
@@ -230,7 +231,7 @@ class MobileConnectionManager:
                         break
                 if user_id:
                     self.disconnect(conn_id, user_id)
-    
+
     def get_online_count(self) -> int:
         """获取在线连接数"""
         return len(self._connections)
@@ -239,6 +240,7 @@ class MobileConnectionManager:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 
 @router.post("/pairing/generate", response_model=GeneratePairingResponse)
 async def generate_pairing(
@@ -249,7 +251,7 @@ async def generate_pairing(
     code = _generate_pairing_code()
     pairing_id = f"pair-{uuid.uuid4().hex[:12]}"
     expires_in = 300  # 5 分钟
-    
+
     _pairing_codes[code] = {
         "code": code,
         "pairing_id": pairing_id,
@@ -260,11 +262,11 @@ async def generate_pairing(
         "created_at": time.time(),
         "expires_at": time.time() + expires_in,
     }
-    
+
     # 生成二维码 URL（包含 WS 连接信息）
     ws_url = f"ws://localhost:8000/mobile/ws?code={code}"
     qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={ws_url}"
-    
+
     return GeneratePairingResponse(
         code=code,
         qr_code_url=qr_code_url,
@@ -279,27 +281,28 @@ async def get_pairing_qrcode(code: str):
     pairing = _pairing_codes.get(code)
     if not pairing:
         raise HTTPException(status_code=404, detail="Pairing code not found")
-    
+
     # 尝试生成 PNG 二维码
     try:
-        import qrcode
         import io
+
+        import qrcode
         from fastapi.responses import Response
-        
+
         ws_url = f"ws://localhost:8000/mobile/ws?code={code}"
         qr = qrcode.QRCode(version=1, box_size=10, border=5)
         qr.add_data(ws_url)
         qr.make(fit=True)
-        
+
         img = qr.make_image(fill_color="black", back_color="white")
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
         buffer.seek(0)
-        
+
         return Response(
             content=buffer.getvalue(),
             media_type="image/png",
-            headers={"Content-Disposition": f"inline; filename=\"qr-{code}.png\""},
+            headers={"Content-Disposition": f'inline; filename="qr-{code}.png"'},
         )
     except ImportError:
         # 降级为 SVG
@@ -309,7 +312,7 @@ async def get_pairing_qrcode(code: str):
 def _generate_svg_qrcode(code: str):
     """生成简单的 SVG 二维码占位图（降级方案）"""
     from fastapi.responses import Response
-    
+
     svg_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
   <rect width="200" height="200" fill="white"/>
@@ -321,11 +324,11 @@ def _generate_svg_qrcode(code: str):
     请使用手机 App 扫描
   </text>
 </svg>"""
-    
+
     return Response(
         content=svg_content,
         media_type="image/svg+xml",
-        headers={"Content-Disposition": f"inline; filename=\"qr-{code}.svg\""},
+        headers={"Content-Disposition": f'inline; filename="qr-{code}.svg"'},
     )
 
 
@@ -335,23 +338,23 @@ async def confirm_pairing(body: ConfirmPairingRequest):
     pairing = _pairing_codes.get(body.code)
     if not pairing:
         raise HTTPException(status_code=404, detail="Invalid pairing code")
-    
+
     if pairing["status"] != "pending":
         raise HTTPException(status_code=400, detail=f"Pairing code is {pairing['status']}")
-    
+
     if time.time() > pairing["expires_at"]:
         pairing["status"] = "expired"
         raise HTTPException(status_code=410, detail="Pairing code expired")
-    
+
     # 确认配对
     pairing["status"] = "confirmed"
     pairing["confirmed_at"] = time.time()
     pairing["device_name"] = body.device_name or pairing.get("device_name", "Unknown Device")
     pairing["device_id"] = body.device_id
-    
+
     # 生成 WS Token
     ws_token = _generate_ws_token(pairing["user_id"], pairing["pairing_id"])
-    
+
     # 添加到已配对设备
     _paired_devices[pairing["pairing_id"]] = {
         "pairing_id": pairing["pairing_id"],
@@ -363,13 +366,13 @@ async def confirm_pairing(body: ConfirmPairingRequest):
         "last_active": None,
         "is_online": False,
     }
-    
+
     # 更新用户设备列表
     user_id = pairing["user_id"]
     if user_id not in _user_devices:
         _user_devices[user_id] = set()
     _user_devices[user_id].add(pairing["pairing_id"])
-    
+
     return ConfirmPairingResponse(
         success=True,
         ws_token=ws_token,
@@ -385,11 +388,11 @@ async def get_pairing_status(code: str):
     pairing = _pairing_codes.get(code)
     if not pairing:
         raise HTTPException(status_code=404, detail="Pairing code not found")
-    
+
     # 检查是否过期
     if pairing["status"] == "pending" and time.time() > pairing["expires_at"]:
         pairing["status"] = "expired"
-    
+
     return PairingStatusResponse(
         code=code,
         status=pairing["status"],
@@ -405,14 +408,14 @@ async def list_paired_devices(
     """列出已配对设备（需 JWT 认证）"""
     device_ids = _user_devices.get(user_id, set())
     devices = []
-    
+
     for pairing_id in device_ids:
         device = _paired_devices.get(pairing_id)
         if device:
             # 检查是否在线
             device["is_online"] = pairing_id in _ws_connections
             devices.append(device)
-    
+
     return {
         "code": 0,
         "data": {
@@ -431,15 +434,15 @@ async def revoke_pairing(
     device = _paired_devices.get(pairing_id)
     if not device:
         raise HTTPException(status_code=404, detail="Pairing not found")
-    
+
     if device["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="Not your device")
-    
+
     # 移除设备
     del _paired_devices[pairing_id]
     if user_id in _user_devices:
         _user_devices[user_id].discard(pairing_id)
-    
+
     # 关闭 WebSocket 连接
     if pairing_id in _ws_connections:
         ws = _ws_connections.pop(pairing_id)
@@ -447,7 +450,7 @@ async def revoke_pairing(
             await ws.close()
         except Exception:
             pass
-    
+
     return {
         "code": 0,
         "message": f"设备 '{device['device_name']}' 已解除配对",
@@ -460,10 +463,10 @@ async def mobile_websocket(websocket: WebSocket):
     # 从查询参数获取认证信息
     code = websocket.query_params.get("code")
     token = websocket.query_params.get("token")
-    
+
     user_id = None
     pairing_id = None
-    
+
     if code:
         # 通过配对码认证
         pairing = _pairing_codes.get(code)
@@ -483,46 +486,46 @@ async def mobile_websocket(websocket: WebSocket):
     else:
         await websocket.close(code=4001, reason="Missing authentication")
         return
-    
+
     # 建立连接
     connection_id = f"ws-{uuid.uuid4().hex[:12]}"
     manager = MobileConnectionManager.get_instance()
-    
+
     await manager.connect(websocket, user_id, connection_id)
     _ws_connections[pairing_id] = websocket
-    
+
     # 更新设备在线状态
     if pairing_id in _paired_devices:
         _paired_devices[pairing_id]["is_online"] = True
         _paired_devices[pairing_id]["last_active"] = time.time()
-    
+
     try:
         # 消息循环
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
-            
+
             # 处理心跳
             if message.get("type") == "ping":
                 await websocket.send_json({"type": "pong", "timestamp": time.time()})
                 continue
-            
+
             # 更新最后活跃时间
             if pairing_id in _paired_devices:
                 _paired_devices[pairing_id]["last_active"] = time.time()
-            
+
             # 处理其他消息（这里可以扩展）
-            logger.info(f"Received message from {pairing_id}: {message}")
-            
+            logger.info("Received message from %s: %s", pairing_id, message)
+
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected: {connection_id}")
+        logger.info("WebSocket disconnected: %s", connection_id)
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.error("WebSocket error: %s", e)
     finally:
         # 清理连接
         manager.disconnect(connection_id, user_id)
         _ws_connections.pop(pairing_id, None)
-        
+
         # 更新设备在线状态
         if pairing_id in _paired_devices:
             _paired_devices[pairing_id]["is_online"] = False

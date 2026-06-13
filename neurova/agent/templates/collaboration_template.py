@@ -9,45 +9,51 @@ import json
 import logging
 import time
 import uuid
-from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
 class TemplateType(str, Enum):
     """协作模板类型"""
-    CODE_REVIEW = "code_review"           # 代码评审
+
+    CODE_REVIEW = "code_review"  # 代码评审
     PAIR_PROGRAMMING = "pair_programming"  # 结对编程
-    DIAGNOSTIC = "diagnostic"              # 问题诊断
+    DIAGNOSTIC = "diagnostic"  # 问题诊断
     KNOWLEDGE_SHARING = "knowledge_sharing"  # 知识共享
-    CUSTOM = "custom"                      # 自定义模板
+    CUSTOM = "custom"  # 自定义模板
+
 
 class AgentRole(str, Enum):
     """Agent 角色"""
-    COORDINATOR = "coordinator"           # 协调者
-    REVIEWER = "reviewer"                 # 评审者
-    AUTHOR = "author"                     # 作者/执行者
-    TEACHER = "teacher"                   # 教师
-    LEARNER = "learner"                   # 学习者
-    DIAGNOSTIC = "diagnostic"             # 诊断者
-    SOLVER = "solver"                     # 解决者
-    OBSERVER = "observer"                 # 观察者
-    PARTICIPANT = "participant"           # 参与者
+
+    COORDINATOR = "coordinator"  # 协调者
+    REVIEWER = "reviewer"  # 评审者
+    AUTHOR = "author"  # 作者/执行者
+    TEACHER = "teacher"  # 教师
+    LEARNER = "learner"  # 学习者
+    DIAGNOSTIC = "diagnostic"  # 诊断者
+    SOLVER = "solver"  # 解决者
+    OBSERVER = "observer"  # 观察者
+    PARTICIPANT = "participant"  # 参与者
+
 
 @dataclass
 class TaskStep:
     """协作任务步骤"""
-    step_id: str = ""                                    # 步骤ID
-    name: str = ""                                       # 步骤名称
-    description: str = ""                                # 步骤描述
-    assigned_role: AgentRole = AgentRole.PARTICIPANT     # 负责角色
+
+    step_id: str = ""  # 步骤ID
+    name: str = ""  # 步骤名称
+    description: str = ""  # 步骤描述
+    assigned_role: AgentRole = AgentRole.PARTICIPANT  # 负责角色
     required_capabilities: List[str] = field(default_factory=list)  # 所需能力
     input_requirements: Dict[str, Any] = field(default_factory=dict)  # 输入要求
     output_produces: List[str] = field(default_factory=list)  # 输出产物
-    depends_on: List[str] = field(default_factory=list)   # 依赖步骤
-    timeout_seconds: int = 300                            # 超时时间
-    optional: bool = False                               # 是否可选
+    depends_on: List[str] = field(default_factory=list)  # 依赖步骤
+    timeout_seconds: int = 300  # 超时时间
+    optional: bool = False  # 是否可选
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -55,7 +61,9 @@ class TaskStep:
             "step_id": self.step_id,
             "name": self.name,
             "description": self.description,
-            "assigned_role": self.assigned_role.value if isinstance(self.assigned_role, AgentRole) else self.assigned_role,
+            "assigned_role": (
+                self.assigned_role.value if isinstance(self.assigned_role, AgentRole) else self.assigned_role
+            ),
             "required_capabilities": self.required_capabilities,
             "input_requirements": self.input_requirements,
             "output_produces": self.output_produces,
@@ -64,16 +72,18 @@ class TaskStep:
             "optional": self.optional,
         }
 
+
 @dataclass
 class WorkflowDefinition:
     """工作流定义"""
-    workflow_id: str = ""                              # 工作流ID
-    name: str = ""                                      # 工作流名称
-    description: str = ""                               # 工作流描述
-    steps: List[TaskStep] = field(default_factory=list) # 任务步骤
-    parallel_allowed: bool = False                      # 是否允许并行
-    max_concurrent_steps: int = 2                       # 最大并行步骤数
-    rollback_on_failure: bool = True                    # 失败时是否回滚
+
+    workflow_id: str = ""  # 工作流ID
+    name: str = ""  # 工作流名称
+    description: str = ""  # 工作流描述
+    steps: List[TaskStep] = field(default_factory=list)  # 任务步骤
+    parallel_allowed: bool = False  # 是否允许并行
+    max_concurrent_steps: int = 2  # 最大并行步骤数
+    rollback_on_failure: bool = True  # 失败时是否回滚
 
     def get_step(self, step_id: str) -> Optional[TaskStep]:
         """获取指定步骤"""
@@ -145,34 +155,36 @@ class WorkflowDefinition:
             "rollback_on_failure": self.rollback_on_failure,
         }
 
+
 @dataclass
 class CollaborationTemplate:
     """Agent 协作模板"""
+
     template_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    name: str = ""                                        # 模板名称
-    description: str = ""                                 # 模板描述
-    template_type: TemplateType = TemplateType.CUSTOM     # 模板类型
-    version: str = "1.0"                                 # 模板版本
+    name: str = ""  # 模板名称
+    description: str = ""  # 模板描述
+    template_type: TemplateType = TemplateType.CUSTOM  # 模板类型
+    version: str = "1.0"  # 模板版本
 
     # Agent 配置
     roles: Dict[str, AgentRole] = field(default_factory=dict)  # agent_id -> role
     role_requirements: Dict[str, List[str]] = field(default_factory=dict)  # role -> required capabilities
 
     # 工作流定义
-    workflow: WorkflowDefinition = None                   # 工作流定义
+    workflow: WorkflowDefinition = None  # 工作流定义
 
     # 模板配置
-    max_participants: int = 5                             # 最大参与者数
-    min_participants: int = 2                             # 最小参与者数
-    timeout_seconds: int = 3600                           # 默认超时时间
-    allow_observer: bool = True                          # 是否允许观察者
+    max_participants: int = 5  # 最大参与者数
+    min_participants: int = 2  # 最小参与者数
+    timeout_seconds: int = 3600  # 默认超时时间
+    allow_observer: bool = True  # 是否允许观察者
 
     # 元数据
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
-    created_by: str = "system"                            # 创建者
-    tags: List[str] = field(default_factory=list)        # 标签
-    is_preset: bool = False                              # 是否为预设模板
+    created_by: str = "system"  # 创建者
+    tags: List[str] = field(default_factory=list)  # 标签
+    is_preset: bool = False  # 是否为预设模板
 
     def __post_init__(self):
         """初始化后处理"""
@@ -181,10 +193,7 @@ class CollaborationTemplate:
 
     def get_role_agents(self, role: AgentRole) -> List[str]:
         """获取指定角色的所有 Agent"""
-        return [
-            agent_id for agent_id, r in self.roles.items()
-            if r == role
-        ]
+        return [agent_id for agent_id, r in self.roles.items() if r == role]
 
     def assign_role(self, agent_id: str, role: AgentRole) -> None:
         """分配角色"""
@@ -240,7 +249,9 @@ class CollaborationTemplate:
             "template_id": self.template_id,
             "name": self.name,
             "description": self.description,
-            "template_type": self.template_type.value if isinstance(self.template_type, TemplateType) else self.template_type,
+            "template_type": (
+                self.template_type.value if isinstance(self.template_type, TemplateType) else self.template_type
+            ),
             "version": self.version,
             "roles": {k: v.value for k, v in self.roles.items()},
             "role_requirements": self.role_requirements,
@@ -324,6 +335,7 @@ class CollaborationTemplate:
         """从 JSON 字符串创建"""
         return cls.from_dict(json.loads(json_str))
 
+
 class TemplateManager:
     """协作模板管理器"""
 
@@ -345,7 +357,7 @@ class TemplateManager:
         # 验证模板
         valid, errors = template.validate()
         if not valid:
-            logger.error(f"模板验证失败: {errors}")
+            logger.error("模板验证失败: %s", errors)
             return False
 
         self._templates[template.template_id] = template
@@ -354,7 +366,7 @@ class TemplateManager:
         self._update_type_index(template)
         self._update_tag_index(template)
 
-        logger.info(f"模板已注册: {template.name} ({template.template_id})")
+        logger.info("模板已注册: %s (%s)", template.name, template.template_id)
         return True
 
     def unregister_template(self, template_id: str) -> bool:
@@ -368,15 +380,14 @@ class TemplateManager:
         self._remove_from_type_index(template)
         self._remove_from_tag_index(template)
 
-        logger.info(f"模板已取消注册: {template.name}")
+        logger.info("模板已取消注册: %s", template.name)
         return True
 
     def get_template(self, template_id: str) -> Optional[CollaborationTemplate]:
         """获取指定模板"""
         return self._templates.get(template_id)
 
-    def list_templates(self, template_type: TemplateType = None,
-                      tags: List[str] = None) -> List[CollaborationTemplate]:
+    def list_templates(self, template_type: TemplateType = None, tags: List[str] = None) -> List[CollaborationTemplate]:
         """
         列出模板
 
@@ -480,8 +491,10 @@ class TemplateManager:
             if tag in self._tag_index:
                 self._tag_index[tag].remove(template.template_id)
 
+
 # 全局模板管理器实例
 _global_template_manager: Optional[TemplateManager] = None
+
 
 def get_template_manager() -> TemplateManager:
     """获取全局模板管理器"""
@@ -490,6 +503,7 @@ def get_template_manager() -> TemplateManager:
         _global_template_manager = TemplateManager()
         # 注册预设模板
         from .preset_templates import PRESET_TEMPLATES
+
         for template in PRESET_TEMPLATES:
             _global_template_manager.register_template(template)
     return _global_template_manager

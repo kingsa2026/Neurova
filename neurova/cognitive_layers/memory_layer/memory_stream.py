@@ -11,7 +11,6 @@ import datetime
 import json
 import logging
 import threading
-import typing
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -22,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class MemoryEventType(str, Enum):
     """记忆事件类型"""
+
     STORE = "store"
     RETRIEVE = "retrieve"
     UPDATE = "update"
@@ -37,6 +37,7 @@ class MemoryEventType(str, Enum):
 @dataclass
 class MemoryEvent:
     """记忆事件数据结构"""
+
     event_type: MemoryEventType
     memory_id: str
     agent_id: str
@@ -72,14 +73,14 @@ class MemoryEvent:
 class MemoryStream:
     """
     实时记忆流引擎
-    
+
     记录记忆系统的所有操作，支持：
     - 事件记录与订阅
     - 时间窗口查询
     - 按类型/agent过滤
     - JSON导出
     """
-    
+
     def __init__(self, max_size: int = 10000):
         self._events: Deque[MemoryEvent] = deque(maxlen=max_size)
         self._lock = threading.RLock()
@@ -87,31 +88,31 @@ class MemoryStream:
         self._max_size = max_size
         self._event_counts: Dict[str, int] = collections.Counter()
         self._agent_counts: Dict[str, int] = collections.Counter()
-    
+
     @property
     def size(self) -> int:
         """当前事件数量"""
         return len(self._events)
-    
+
     @property
     def max_size(self) -> int:
         """最大事件容量"""
         return self._max_size
-    
+
     def record_event(self, event: MemoryEvent) -> None:
         """记录一个事件"""
         with self._lock:
             self._events.append(event)
             self._event_counts[event.event_type.value] += 1
             self._agent_counts[event.agent_id] += 1
-            
+
             # 通知订阅者
             for subscriber in self._subscribers:
                 try:
                     subscriber(event)
                 except Exception as e:
-                    logger.warning(f"Subscriber callback failed: {e}")
-    
+                    logger.warning("Subscriber callback failed: %s", e)
+
     def record(
         self,
         event_type: MemoryEventType,
@@ -135,7 +136,7 @@ class MemoryStream:
             error_message=error_message,
         )
         self.record_event(event)
-    
+
     def get_stream(
         self,
         limit: int = 100,
@@ -146,7 +147,7 @@ class MemoryStream:
         """获取事件流"""
         with self._lock:
             events = list(self._events)
-        
+
         # 过滤
         if event_type:
             events = [e for e in events if e.event_type == event_type]
@@ -154,11 +155,11 @@ class MemoryStream:
             events = [e for e in events if e.agent_id == agent_id]
         if since:
             events = [e for e in events if e.timestamp >= since]
-        
+
         # 最新的在前
         events.reverse()
         return events[:limit]
-    
+
     def get_recent(
         self,
         count: int = 20,
@@ -166,7 +167,7 @@ class MemoryStream:
     ) -> List[MemoryEvent]:
         """获取最近的事件"""
         return self.get_stream(limit=count, event_type=event_type)
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
         with self._lock:
@@ -178,13 +179,13 @@ class MemoryStream:
                 "oldest_event": self._events[0].timestamp.isoformat() if self._events else None,
                 "newest_event": self._events[-1].timestamp.isoformat() if self._events else None,
             }
-    
+
     def subscribe(self, callback: Callable[[MemoryEvent], None]) -> None:
         """订阅事件流"""
         with self._lock:
             if callback not in self._subscribers:
                 self._subscribers.append(callback)
-    
+
     def unsubscribe(self, callback: Callable[[MemoryEvent], None]) -> None:
         """取消订阅"""
         with self._lock:
@@ -192,7 +193,7 @@ class MemoryStream:
                 self._subscribers.remove(callback)
             except ValueError:
                 pass
-    
+
     def clear(self) -> int:
         """清空事件流，返回清除的事件数"""
         with self._lock:
@@ -201,7 +202,7 @@ class MemoryStream:
             self._event_counts.clear()
             self._agent_counts.clear()
             return count
-    
+
     def export_json(self, limit: Optional[int] = None) -> str:
         """导出为JSON"""
         events = self.get_stream(limit=limit or self._max_size)

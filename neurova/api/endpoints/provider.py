@@ -18,12 +18,10 @@ LLM 服务商管理接口 - Provider Endpoint
 """
 
 import logging
-import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Body, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -33,6 +31,7 @@ router = APIRouter()
 
 class ProviderInfo(BaseModel):
     """服务商信息"""
+
     provider_id: str
     name: str
     provider_type: str = ""
@@ -45,6 +44,7 @@ class ProviderInfo(BaseModel):
 
 class CreateProviderRequest(BaseModel):
     """创建服务商请求"""
+
     name: str = Field(..., description="服务商名称")
     provider_type: str = Field(..., description="服务商类型 (openai, anthropic, gemini, ollama, openrouter)")
     base_url: Optional[str] = Field(default=None, description="API 基础 URL")
@@ -54,6 +54,7 @@ class CreateProviderRequest(BaseModel):
 
 class UpdateProviderRequest(BaseModel):
     """更新服务商请求"""
+
     name: Optional[str] = Field(default=None, description="服务商名称")
     base_url: Optional[str] = Field(default=None, description="API 基础 URL")
     api_key: Optional[str] = Field(default=None, description="API Key")
@@ -62,6 +63,7 @@ class UpdateProviderRequest(BaseModel):
 
 class ActivateModelRequest(BaseModel):
     """激活模型请求"""
+
     provider_id: str = Field(..., description="服务商 ID")
     model_id: str = Field(..., description="模型 ID")
 
@@ -74,13 +76,14 @@ def _get_request_id(request: Request) -> str:
 def _get_provider_manager():
     """获取 Provider 管理器"""
     from neurova.api.endpoints import get_provider_manager
+
     return get_provider_manager()
 
 
 @router.get("", response_model=List[ProviderInfo])
 async def list_providers(request: Request):
     """列出所有服务商"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     providers = []
     provider_manager = _get_provider_manager()
@@ -90,17 +93,19 @@ async def list_providers(request: Request):
             if hasattr(provider_manager, "get_all_providers"):
                 all_providers = provider_manager.get_all_providers()
                 for provider in all_providers:
-                    providers.append(ProviderInfo(
-                        provider_id=getattr(provider, "provider_id", "unknown"),
-                        name=getattr(provider, "name", "Unknown"),
-                        provider_type=getattr(provider, "provider_type", ""),
-                        base_url=getattr(provider, "base_url", ""),
-                        is_active=getattr(provider, "is_active", False),
-                        status=getattr(provider, "status", "unknown"),
-                        models_count=getattr(provider, "models_count", 0),
-                    ))
+                    providers.append(
+                        ProviderInfo(
+                            provider_id=getattr(provider, "provider_id", "unknown"),
+                            name=getattr(provider, "name", "Unknown"),
+                            provider_type=getattr(provider, "provider_type", ""),
+                            base_url=getattr(provider, "base_url", ""),
+                            is_active=getattr(provider, "is_active", False),
+                            status=getattr(provider, "status", "unknown"),
+                            models_count=getattr(provider, "models_count", 0),
+                        )
+                    )
         except Exception as e:
-            logger.warning(f"List providers error: {e}")
+            logger.warning("List providers error: %s", e)
 
     return providers
 
@@ -108,7 +113,7 @@ async def list_providers(request: Request):
 @router.get("/{provider_id}", response_model=ProviderInfo)
 async def get_provider(request: Request, provider_id: str = Path(...)):
     """获取服务商详情"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     provider_manager = _get_provider_manager()
     if not provider_manager:
@@ -128,7 +133,7 @@ async def get_provider(request: Request, provider_id: str = Path(...)):
                     models_count=getattr(provider, "models_count", 0),
                 )
     except Exception as e:
-        logger.warning(f"Get provider error: {e}")
+        logger.warning("Get provider error: %s", e)
 
     raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
 
@@ -136,7 +141,7 @@ async def get_provider(request: Request, provider_id: str = Path(...)):
 @router.post("", response_model=ProviderInfo)
 async def create_provider(request: Request, body: CreateProviderRequest):
     """添加服务商"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     provider_manager = _get_provider_manager()
     if not provider_manager:
@@ -177,7 +182,7 @@ async def update_provider(
     body: UpdateProviderRequest = Body(...),
 ):
     """更新服务商"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     provider_manager = _get_provider_manager()
     if not provider_manager:
@@ -212,7 +217,7 @@ async def update_provider(
 @router.delete("/{provider_id}")
 async def delete_provider(request: Request, provider_id: str = Path(...)):
     """删除服务商"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     provider_manager = _get_provider_manager()
     if not provider_manager:
@@ -233,7 +238,7 @@ async def delete_provider(request: Request, provider_id: str = Path(...)):
 @router.post("/activate-model")
 async def activate_model(request: Request, body: ActivateModelRequest):
     """激活模型"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     provider_manager = _get_provider_manager()
     if not provider_manager:
@@ -261,7 +266,7 @@ async def activate_model(request: Request, body: ActivateModelRequest):
 @router.get("/active-model")
 async def get_active_model(request: Request):
     """获取当前活跃模型"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     provider_manager = _get_provider_manager()
     if not provider_manager:
@@ -272,7 +277,7 @@ async def get_active_model(request: Request):
             active = provider_manager.get_active_model()
             return {"code": 0, "data": active}
     except Exception as e:
-        logger.warning(f"Get active model error: {e}")
+        logger.warning("Get active model error: %s", e)
 
     return {"code": 0, "data": {"model": None, "provider": None}}
 
@@ -280,7 +285,7 @@ async def get_active_model(request: Request):
 @router.get("/{provider_id}/models/discover")
 async def discover_models(request: Request, provider_id: str = Path(...)):
     """发现模型"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     provider_manager = _get_provider_manager()
     if not provider_manager:
@@ -306,7 +311,7 @@ async def discover_models(request: Request, provider_id: str = Path(...)):
 @router.post("/{provider_id}/check-connection")
 async def check_provider_connection(request: Request, provider_id: str = Path(...)):
     """检查服务商连接"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     provider_manager = _get_provider_manager()
     if not provider_manager:

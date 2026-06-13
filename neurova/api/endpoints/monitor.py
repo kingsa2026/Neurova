@@ -13,10 +13,9 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
 from neurova.api.endpoints import get_app_state
@@ -28,6 +27,7 @@ router = APIRouter()
 
 class SystemStatus(BaseModel):
     """系统状态"""
+
     status: str = "running"
     uptime: float = 0
     version: str = "5.0.0"
@@ -37,6 +37,7 @@ class SystemStatus(BaseModel):
 
 class ResourceUsage(BaseModel):
     """资源使用"""
+
     cpu_percent: float = 0
     memory_percent: float = 0
     memory_used: int = 0
@@ -48,6 +49,7 @@ class ResourceUsage(BaseModel):
 
 class ConnectionStatus(BaseModel):
     """连接状态"""
+
     active_connections: int = 0
     total_connections: int = 0
     websocket_connections: int = 0
@@ -56,6 +58,7 @@ class ConnectionStatus(BaseModel):
 
 class Alert(BaseModel):
     """告警信息"""
+
     alert_id: str
     level: str
     message: str
@@ -77,7 +80,7 @@ def _get_app_state():
 @router.get("/status", response_model=SystemStatus)
 async def get_system_status(request: Request):
     """获取系统状态"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     import sys
 
@@ -96,7 +99,7 @@ async def get_system_status(request: Request):
 @router.get("/resources", response_model=ResourceUsage)
 async def get_resource_usage(request: Request):
     """获取资源使用"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     usage = ResourceUsage()
 
@@ -127,7 +130,7 @@ async def get_resource_usage(request: Request):
 @router.get("/connections", response_model=ConnectionStatus)
 async def get_connection_status(request: Request):
     """获取连接状态"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     return ConnectionStatus(
         active_connections=0,
@@ -145,7 +148,7 @@ async def get_alerts(
     limit: int = Query(default=50, ge=1, le=200),
 ):
     """获取告警信息"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     # TODO: 从告警存储获取告警
     alerts = []
@@ -156,7 +159,7 @@ async def get_alerts(
 @router.post("/alerts/{alert_id}/resolve")
 async def resolve_alert(request: Request, alert_id: str):
     """解决告警"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     # TODO: 标记告警为已解决
 

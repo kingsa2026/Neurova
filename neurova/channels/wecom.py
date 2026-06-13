@@ -16,7 +16,6 @@ API 参考:
 
 import asyncio
 import hashlib
-import json
 import logging
 import time
 import xml.etree.ElementTree as ET
@@ -26,10 +25,10 @@ from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
     ChannelEventType,
-    ChannelMessage,
 )
 
 logger = logging.getLogger(__name__)
+
 
 class WeComAdapter(ChannelAdapter):
     """
@@ -68,7 +67,7 @@ class WeComAdapter(ChannelAdapter):
             else:
                 return await self._connect_webhook()
         except Exception as e:
-            logger.exception(f"WeCom connect error: {e}")
+            logger.exception("WeCom connect error: %s", e)
             return False
 
     async def _connect_stream(self) -> bool:
@@ -89,7 +88,7 @@ class WeComAdapter(ChannelAdapter):
             # 3. 通过 WebSocket 接收消息推送
             # 4. 通过 WebSocket 发送回复
 
-            import aiohttp
+            pass
 
             # 尝试获取 access_token
             if not self._access_token or time.time() > self._token_expires_at:
@@ -106,16 +105,13 @@ class WeComAdapter(ChannelAdapter):
                 return False
 
         except Exception as e:
-            logger.exception(f"WeCom Stream connect error: {e}")
+            logger.exception("WeCom Stream connect error: %s", e)
             return False
 
     async def _connect_webhook(self) -> bool:
         """Webhook 模式: HTTP 回调"""
         self._connected = True
-        logger.info(
-            f"WeCom Webhook mode configured. "
-            f"Callback URL: {self.config.webhook_url}"
-        )
+        logger.info("WeCom Webhook mode configured. " f"Callback URL: %s", self.config.webhook_url)
         return True
 
     def handle_callback(
@@ -183,32 +179,25 @@ class WeComAdapter(ChannelAdapter):
                 if loop.is_running():
                     # 如果事件循环正在运行，使用 call_soon_threadsafe
                     asyncio.run_coroutine_threadsafe(
-                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg),
-                        loop
+                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg), loop
                     )
                 else:
                     # 如果事件循环未运行，直接运行
-                    loop.run_until_complete(
-                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
-                    )
+                    loop.run_until_complete(self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg))
             except RuntimeError:
                 # 如果没有事件循环，创建新的
                 loop = asyncio.new_event_loop()
-                loop.run_until_complete(
-                    self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
-                )
+                loop.run_until_complete(self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg))
                 loop.close()
 
             # 被动回复（示例: 回复文本）
             return self._build_reply_xml(from_user, to_user_name, "收到您的消息，正在处理中...")
 
         except Exception as e:
-            logger.exception(f"WeCom callback error: {e}")
+            logger.exception("WeCom callback error: %s", e)
             return None
 
-    def _build_reply_xml(
-        self, to_user: str, from_user: str, content: str, msg_type: str = "text"
-    ) -> str:
+    def _build_reply_xml(self, to_user: str, from_user: str, content: str, msg_type: str = "text") -> str:
         """构造被动回复 XML"""
         timestamp = str(int(time.time()))
         xml_template = f"""<xml>
@@ -277,20 +266,18 @@ class WeComAdapter(ChannelAdapter):
                 }
 
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     result = await resp.json()
                     if result.get("errcode") == 0:
                         msg_id = result.get("msgid", "")
-                        logger.info(f"WeCom message sent: {msg_id}")
+                        logger.info("WeCom message sent: %s", msg_id)
                         return str(msg_id)
                     else:
-                        logger.error(f"WeCom send failed: {result}")
+                        logger.error("WeCom send failed: %s", result)
                         return None
 
         except Exception as e:
-            logger.exception(f"WeCom send error: {e}")
+            logger.exception("WeCom send error: %s", e)
             return None
 
     async def _refresh_access_token(self):
@@ -307,9 +294,7 @@ class WeComAdapter(ChannelAdapter):
         )
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 result = await resp.json()
                 if result.get("errcode") == 0:
                     self._access_token = result["access_token"]
@@ -317,7 +302,7 @@ class WeComAdapter(ChannelAdapter):
                     self._token_expires_at = time.time() + expire_in - 300
                     logger.info("WeCom access token refreshed")
                 else:
-                    logger.error(f"WeCom token refresh failed: {result}")
+                    logger.error("WeCom token refresh failed: %s", result)
 
     async def disconnect(self):
         """断开企业微信连接"""
@@ -328,16 +313,20 @@ class WeComAdapter(ChannelAdapter):
     async def health_check(self) -> Dict[str, Any]:
         """企业微信健康检查"""
         base = await super().health_check()
-        base.update({
-            "corpid": self._corpid[:8] + "***" if self._corpid else "",
-            "has_token": bool(self._access_token),
-            "stream_mode": self.config.use_stream,
-        })
+        base.update(
+            {
+                "corpid": self._corpid[:8] + "***" if self._corpid else "",
+                "has_token": bool(self._access_token),
+                "stream_mode": self.config.use_stream,
+            }
+        )
         return base
+
 
 # ============================================================
 # 群机器人 Webhook（轻量级，仅发送）
 # ============================================================
+
 
 class WeComGroupBot:
     """
@@ -364,9 +353,7 @@ class WeComGroupBot:
         }
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                self.webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
+            async with session.post(self.webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 result = await resp.json()
                 return result.get("errcode") == 0
 
@@ -380,11 +367,10 @@ class WeComGroupBot:
         }
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                self.webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
+            async with session.post(self.webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 result = await resp.json()
                 return result.get("errcode") == 0
+
 
 def create_wecom_adapter(
     corpid: str,
@@ -398,11 +384,13 @@ def create_wecom_adapter(
 ) -> WeComAdapter:
     """创建企业微信适配器的工厂函数"""
     extra_data = extra or {}
-    extra_data.update({
-        "corpid": corpid,
-        "agentid": agentid,
-        "encoding_aes_key": encoding_aes_key,
-    })
+    extra_data.update(
+        {
+            "corpid": corpid,
+            "agentid": agentid,
+            "encoding_aes_key": encoding_aes_key,
+        }
+    )
     config = ChannelConfig(
         channel_type="wecom",
         app_id=corpid,

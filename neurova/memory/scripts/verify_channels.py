@@ -9,7 +9,6 @@
 4. 检查UI图标映射是否正确
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -18,10 +17,11 @@ from pathlib import Path
 current_file = Path(__file__).resolve()
 # 从 scripts 向上找到 Neurova 根目录 (包含 README 或其他标识文件)
 project_root = current_file
-while project_root.name != 'Neurova' and project_root.parent != project_root:
+while project_root.name != "Neurova" and project_root.parent != project_root:
     project_root = project_root.parent
 
 sys.path.insert(0, str(project_root))
+
 
 def check_file_exists(file_path, description):
     """检查文件是否存在"""
@@ -31,6 +31,7 @@ def check_file_exists(file_path, description):
     else:
         print(f"❌ {description} 不存在: {file_path}")
         return False
+
 
 def check_channel_adapters():
     """检查渠道适配器文件"""
@@ -57,6 +58,7 @@ def check_channel_adapters():
 
     return all(results)
 
+
 def check_channel_manager():
     """检查渠道管理器"""
     print("\n=== 检查渠道管理器 ===")
@@ -66,10 +68,22 @@ def check_channel_manager():
         print("❌ 渠道管理器不存在")
         return False
 
-    content = manager_file.read_text(encoding='utf-8')
+    content = manager_file.read_text(encoding="utf-8")
 
     # 检查是否导入了所有适配器
-    adapters = ["feishu", "dingtalk", "wechat", "telegram", "qq", "qqbot", "discord", "sip", "xiaoyi", "mqtt", "websocket"]
+    adapters = [
+        "feishu",
+        "dingtalk",
+        "wechat",
+        "telegram",
+        "qq",
+        "qqbot",
+        "discord",
+        "sip",
+        "xiaoyi",
+        "mqtt",
+        "websocket",
+    ]
     results = []
 
     for adapter in adapters:
@@ -82,6 +96,7 @@ def check_channel_manager():
 
     return all(results)
 
+
 def check_api_capabilities():
     """检查API能力描述"""
     print("\n=== 检查API能力描述 ===")
@@ -91,9 +106,21 @@ def check_api_capabilities():
         print("❌ API文件不存在")
         return False
 
-    content = api_file.read_text(encoding='utf-8')
+    content = api_file.read_text(encoding="utf-8")
 
-    channels = ["feishu", "dingtalk", "wechat", "telegram", "qq", "qqbot", "discord", "sip", "xiaoyi", "mqtt", "websocket"]
+    channels = [
+        "feishu",
+        "dingtalk",
+        "wechat",
+        "telegram",
+        "qq",
+        "qqbot",
+        "discord",
+        "sip",
+        "xiaoyi",
+        "mqtt",
+        "websocket",
+    ]
     results = []
 
     for channel in channels:
@@ -106,6 +133,7 @@ def check_api_capabilities():
 
     return all(results)
 
+
 def check_ui_icons():
     """检查UI图标映射"""
     print("\n=== 检查UI图标映射 ===")
@@ -115,9 +143,21 @@ def check_ui_icons():
         print("❌ UI文件不存在")
         return False
 
-    content = ui_file.read_text(encoding='utf-8')
+    content = ui_file.read_text(encoding="utf-8")
 
-    channels = ["feishu", "dingtalk", "wechat", "telegram", "qq", "qqbot", "discord", "sip", "xiaoyi", "mqtt", "websocket"]
+    channels = [
+        "feishu",
+        "dingtalk",
+        "wechat",
+        "telegram",
+        "qq",
+        "qqbot",
+        "discord",
+        "sip",
+        "xiaoyi",
+        "mqtt",
+        "websocket",
+    ]
     results = []
 
     for channel in channels:
@@ -129,6 +169,7 @@ def check_ui_icons():
             results.append(False)
 
     return all(results)
+
 
 def main():
     print("=" * 60)
@@ -149,6 +190,7 @@ def main():
     else:
         print("❌ 部分渠道配置存在问题!")
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

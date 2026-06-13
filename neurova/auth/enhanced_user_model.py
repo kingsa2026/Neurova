@@ -24,7 +24,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -49,20 +48,38 @@ class GroupType(str, Enum):
 
 GROUP_PERMISSIONS: Dict[str, List[str]] = {
     GroupType.USER.value: [
-        "read", "write", "profile.edit", "content.create",
+        "read",
+        "write",
+        "profile.edit",
+        "content.create",
     ],
     GroupType.ADMIN.value: [
-        "read", "write", "delete", "admin",
-        "manage_users", "manage_projects", "manage_settings",
-        "content.create", "content.delete",
+        "read",
+        "write",
+        "delete",
+        "admin",
+        "manage_users",
+        "manage_projects",
+        "manage_settings",
+        "content.create",
+        "content.delete",
     ],
     GroupType.GUEST.value: ["read"],
     GroupType.PREMIUM.value: [
-        "read", "write", "premium", "content.create", "profile.edit",
+        "read",
+        "write",
+        "premium",
+        "content.create",
+        "profile.edit",
     ],
     GroupType.DEVELOPER.value: [
-        "read", "write", "delete", "developer",
-        "api.access", "content.create", "profile.edit",
+        "read",
+        "write",
+        "delete",
+        "developer",
+        "api.access",
+        "content.create",
+        "profile.edit",
     ],
 }
 
@@ -107,10 +124,7 @@ def _now_iso() -> str:
 
 
 def _now_plus_minutes(minutes: int) -> str:
-    return (
-        datetime.datetime.now(datetime.timezone.utc)
-        + datetime.timedelta(minutes=minutes)
-    ).isoformat()
+    return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=minutes)).isoformat()
 
 
 def _hash_password(password: str) -> str:
@@ -192,10 +206,18 @@ def _parse_iso(value: Optional[str]) -> Optional[datetime.datetime]:
 class EnhancedUserModel:
     """增强用户模型服务。"""
 
-    _PROFILE_FIELDS = frozenset({
-        "display_name", "bio", "avatar_url", "email",
-        "group_type", "status", "metadata", "password_hash",
-    })
+    _PROFILE_FIELDS = frozenset(
+        {
+            "display_name",
+            "bio",
+            "avatar_url",
+            "email",
+            "group_type",
+            "status",
+            "metadata",
+            "password_hash",
+        }
+    )
 
     def __init__(self, storage_dir: str) -> None:
         self._dir = Path(storage_dir)
@@ -423,9 +445,7 @@ class EnhancedUserModel:
 
     # -- auth --
 
-    def authenticate_user(
-        self, username: str, password: str
-    ) -> Optional[Dict[str, Any]]:
+    def authenticate_user(self, username: str, password: str) -> Optional[Dict[str, Any]]:
         if not username or password is None:
             return None
         with self._lock:
@@ -446,9 +466,7 @@ class EnhancedUserModel:
                 user["locked_until"] = None
                 if user.get("status") == "locked":
                     user["status"] = "active"
-            password_ok = _verify_password(
-                password, user.get("password_hash") or ""
-            )
+            password_ok = _verify_password(password, user.get("password_hash") or "")
             if not password_ok:
                 self._increment_failed_attempts(user)
                 return None

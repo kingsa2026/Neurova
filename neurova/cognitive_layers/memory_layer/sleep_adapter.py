@@ -10,10 +10,10 @@ CognitiveStorageEngine（使用 UnifiedMemoryNode）。
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 from .cognitive_storage_engine import CognitiveStorageEngine, UnifiedMemoryNode
-from .sleep import SleepConsolidation, MemoryRecord, MergeResult
+from .sleep import MemoryRecord, MergeResult, SleepConsolidation
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +50,7 @@ class SleepConsolidationAdapter:
             archive_threshold=archive_threshold,
             decay_rate=decay_rate,
         )
-        logger.info(
-            f"SleepConsolidationAdapter 初始化: "
-            f"archive_threshold={archive_threshold}"
-        )
+        logger.info("SleepConsolidationAdapter 初始化: " f"archive_threshold=%s", archive_threshold)
 
     def run_consolidation(
         self,
@@ -85,8 +82,7 @@ class SleepConsolidationAdapter:
         stats = self._apply_results(raw_nodes, consolidated, merge_results)
 
         logger.info(
-            f"睡眠整合完成: 处理 {stats['processed']} 条, "
-            f"合并 {stats['merged']} 条, 归档 {stats['archived']} 条"
+            f"睡眠整合完成: 处理 {stats['processed']} 条, " f"合并 {stats['merged']} 条, 归档 {stats['archived']} 条"
         )
         return stats
 
@@ -142,7 +138,7 @@ class SleepConsolidationAdapter:
         merge_results: List[MergeResult],
     ) -> Dict[str, Any]:
         """将整合结果写回引擎"""
-        original_ids = {n.id for n in original_nodes}
+        {n.id for n in original_nodes}
         consolidated_ids = {r.id for r in consolidated}
         merged_source_ids = set()
         for mr in merge_results:

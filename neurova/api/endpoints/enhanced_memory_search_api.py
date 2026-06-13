@@ -8,12 +8,8 @@ import datetime
 import logging
 import typing
 
-from fastapi import APIRouter
-from fastapi import HTTPException
-from fastapi import Query
-from fastapi import Request
-from pydantic import BaseModel
-from pydantic import Field
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -22,11 +18,11 @@ router = APIRouter()
 def _get_all_recall_engines(request: Request) -> typing.List:
     """从所有活跃 Agent 中获取 NeurovaRecallEngine 实例"""
     engines = []
-    agents = getattr(request.app.state, 'agents', {})
+    agents = getattr(request.app.state, "agents", {})
     for agent_id, agent in agents.items():
-        memory_agent = getattr(agent, 'memory_agent', None)
+        memory_agent = getattr(agent, "memory_agent", None)
         if memory_agent:
-            recall_engine = getattr(memory_agent, 'recall_engine', None)
+            recall_engine = getattr(memory_agent, "recall_engine", None)
             if recall_engine:
                 engines.append(recall_engine)
     return engines
@@ -41,9 +37,9 @@ class EnhancedSearchRequest(BaseModel):
 
 # NeRF 融合模式全局配置
 _nerf_config: typing.Dict[str, typing.Any] = {
-    "fusion_mode": "legacy",       # "legacy" | "nerf"
-    "density_scale": 1.0,          # 体渲染密度缩放因子
-    "channel_densities": {         # 各通道密度（置信度）
+    "fusion_mode": "legacy",  # "legacy" | "nerf"
+    "density_scale": 1.0,  # 体渲染密度缩放因子
+    "channel_densities": {  # 各通道密度（置信度）
         "temperature": 0.7,
         "text": 0.9,
         "category": 0.5,
@@ -68,9 +64,12 @@ async def enhanced_memory_search(body: EnhancedSearchRequest, request: Request):
     engines = _get_all_recall_engines(request)
     if not engines:
         return {
-            "code": 0, "message": "success",
+            "code": 0,
+            "message": "success",
             "data": {
-                "query": body.query, "results": [], "total": 0,
+                "query": body.query,
+                "results": [],
+                "total": 0,
                 "scoring": {"method": "multi-layer", "layers": ["semantic", "temporal", "activation", "relevance"]},
             },
         }
@@ -87,7 +86,7 @@ async def enhanced_memory_search(body: EnhancedSearchRequest, request: Request):
         # 转换为 API 响应格式
         results = []
         for rm in recalled_memories:
-            if hasattr(rm, 'to_dict'):
+            if hasattr(rm, "to_dict"):
                 result_dict = rm.to_dict()
             else:
                 result_dict = rm
@@ -99,7 +98,8 @@ async def enhanced_memory_search(body: EnhancedSearchRequest, request: Request):
             results.append(result_dict)
 
         return {
-            "code": 0, "message": "success",
+            "code": 0,
+            "message": "success",
             "data": {
                 "query": body.query,
                 "results": results,
@@ -112,9 +112,10 @@ async def enhanced_memory_search(body: EnhancedSearchRequest, request: Request):
             },
         }
     except Exception as e:
-        logger.error(f"增强记忆检索失败: {e}")
+        logger.error("增强记忆检索失败: %s", e)
         return {
-            "code": -1, "message": f"检索失败: {str(e)}",
+            "code": -1,
+            "message": f"检索失败: {str(e)}",
             "data": {"query": body.query, "results": [], "total": 0},
         }
 
@@ -123,10 +124,13 @@ async def enhanced_memory_search(body: EnhancedSearchRequest, request: Request):
 async def get_retrieval_stats():
     """获取检索系统状态"""
     return {
-        "code": 0, "message": "success",
+        "code": 0,
+        "message": "success",
         "data": {
-            "total_memories": 0, "indexed_count": 0,
-            "avg_activation": 0.0, "search_method": "enhanced_multi_layer",
+            "total_memories": 0,
+            "indexed_count": 0,
+            "avg_activation": 0.0,
+            "search_method": "enhanced_multi_layer",
             "last_decay_at": None,
         },
     }
@@ -136,7 +140,8 @@ async def get_retrieval_stats():
 async def get_memory_search_settings():
     """获取记忆搜索设置"""
     return {
-        "code": 0, "message": "success",
+        "code": 0,
+        "message": "success",
         "data": {
             "search_method": "hybrid",
             "top_k": 10,
@@ -171,7 +176,8 @@ async def get_nerf_settings(request: Request):
         # 使用第一个引擎的设置作为当前设置
         settings = engines[0].get_fusion_settings()
         return {
-            "code": 0, "message": "success",
+            "code": 0,
+            "message": "success",
             "data": {
                 "fusion_mode": settings["fusion_mode"],
                 "density_scale": settings["density_scale"],
@@ -187,7 +193,8 @@ async def get_nerf_settings(request: Request):
 
     # 没有活跃引擎时返回全局默认设置
     return {
-        "code": 0, "message": "success",
+        "code": 0,
+        "message": "success",
         "data": {
             "fusion_mode": _nerf_config["fusion_mode"],
             "density_scale": _nerf_config["density_scale"],
@@ -248,7 +255,7 @@ async def update_nerf_settings(body: dict, request: Request):
             )
             updated_count += 1
         except Exception as e:
-            logger.warning(f"更新 recall_engine 设置失败: {e}")
+            logger.warning("更新 recall_engine 设置失败: %s", e)
 
     logger.info(
         f"NeRF 设置已更新: fusion_mode={_nerf_config['fusion_mode']}, "
@@ -303,9 +310,9 @@ async def reset_nerf_settings(request: Request):
             )
             updated_count += 1
         except Exception as e:
-            logger.warning(f"重置 recall_engine 设置失败: {e}")
+            logger.warning("重置 recall_engine 设置失败: %s", e)
 
-    logger.info(f"NeRF 设置已重置为默认值, engines_reset={updated_count}/{len(engines)}")
+    logger.info("NeRF 设置已重置为默认值, engines_reset=%s/%s", updated_count, len(engines))
 
     return {
         "code": 0,
@@ -323,10 +330,31 @@ async def get_channel_weights(intent: str = Query(default="exploratory")):
     # 意图 → 通道权重映射
     intent_weights = {
         "factual": {"text": 0.40, "temperature": 0.20, "category": 0.20, "graph": 0.10, "emotion": 0.05, "voice": 0.05},
-        "temporal": {"temperature": 0.50, "text": 0.15, "category": 0.10, "graph": 0.10, "emotion": 0.10, "voice": 0.05},
+        "temporal": {
+            "temperature": 0.50,
+            "text": 0.15,
+            "category": 0.10,
+            "graph": 0.10,
+            "emotion": 0.10,
+            "voice": 0.05,
+        },
         "causal": {"graph": 0.50, "text": 0.15, "category": 0.10, "temperature": 0.10, "emotion": 0.10, "voice": 0.05},
-        "comparative": {"category": 0.35, "text": 0.25, "graph": 0.15, "temperature": 0.10, "emotion": 0.10, "voice": 0.05},
-        "exploratory": {"text": 0.25, "temperature": 0.20, "graph": 0.20, "category": 0.15, "emotion": 0.10, "voice": 0.10},
+        "comparative": {
+            "category": 0.35,
+            "text": 0.25,
+            "graph": 0.15,
+            "temperature": 0.10,
+            "emotion": 0.10,
+            "voice": 0.05,
+        },
+        "exploratory": {
+            "text": 0.25,
+            "temperature": 0.20,
+            "graph": 0.20,
+            "category": 0.15,
+            "emotion": 0.10,
+            "voice": 0.10,
+        },
     }
     weights = intent_weights.get(intent, intent_weights["exploratory"])
     return {"code": 0, "message": "success", "data": {"intent": intent, "weights": weights}}
@@ -347,9 +375,11 @@ async def analyze_query(body: dict):
     intent = "factual" if len(words) <= 3 else "contextual"
 
     return {
-        "code": 0, "message": "success",
+        "code": 0,
+        "message": "success",
         "data": {
-            "query": query, "intent": intent,
+            "query": query,
+            "intent": intent,
             "suggested_strategy": "semantic_search" if len(words) > 5 else "keyword_search",
             "confidence": 0.75,
         },
@@ -359,5 +389,7 @@ async def analyze_query(body: dict):
 @router.get("/activation/{memory_id}")
 async def get_memory_activation(memory_id: str):
     """获取特定记忆的激活状态"""
-    act = _activations.get(memory_id, {"memory_id": memory_id, "activation_level": 0.0, "last_accessed": None, "access_count": 0})
+    act = _activations.get(
+        memory_id, {"memory_id": memory_id, "activation_level": 0.0, "last_accessed": None, "access_count": 0}
+    )
     return {"code": 0, "message": "success", "data": act}

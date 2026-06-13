@@ -8,7 +8,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ MODEL_REGISTRY = {
 @dataclass
 class DownloadProgress:
     """下载进度"""
+
     model_name: str
     total_size: int
     downloaded_size: int
@@ -118,20 +119,18 @@ class ModelDownloader:
 
         # 检查是否已下载
         if not force and self.is_model_available(model_name):
-            self._logger.debug(f"模型已存在: {model_name} -> {model_dir}")
+            self._logger.debug("模型已存在: %s -> %s", model_name, model_dir)
             return model_dir
 
         # 下载模型
-        self._logger.info(
-            f"开始下载模型: {registry['description']} "
-            f"({registry['size_hint']}) -> {model_dir}"
-        )
+        self._logger.info("开始下载模型: %s " f"(%s) -> %s", registry['description'], registry['size_hint'], model_dir)
 
         try:
-            from huggingface_hub import snapshot_download
-            from huggingface_hub.utils import enable_progress_bars, disable_progress_bars
             import threading
             import time
+
+            from huggingface_hub import snapshot_download
+            from huggingface_hub.utils import disable_progress_bars
 
             model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -148,14 +147,16 @@ class ModelDownloader:
                         pct = min(100.0, current_size / total_size * 100.0)
                         speed = float(current_size)  # approximate
                         eta = 0.0
-                        self._progress_callback(DownloadProgress(
-                            model_name=model_name,
-                            total_size=int(total_size),
-                            downloaded_size=int(current_size),
-                            percentage=pct,
-                            speed=speed,
-                            eta=eta,
-                        ))
+                        self._progress_callback(
+                            DownloadProgress(
+                                model_name=model_name,
+                                total_size=int(total_size),
+                                downloaded_size=int(current_size),
+                                percentage=pct,
+                                speed=speed,
+                                eta=eta,
+                            )
+                        )
                 except Exception:
                     pass
 
@@ -181,14 +182,16 @@ class ModelDownloader:
                             pct = min(99.0, current_size / total * 100.0) if expected_size > 0 else 0.0
                             eta = (total - current_size) / speed if speed > 0 and expected_size > 0 else 0.0
                             try:
-                                self._progress_callback(DownloadProgress(
-                                    model_name=model_name,
-                                    total_size=int(total),
-                                    downloaded_size=int(current_size),
-                                    percentage=pct,
-                                    speed=speed,
-                                    eta=eta,
-                                ))
+                                self._progress_callback(
+                                    DownloadProgress(
+                                        model_name=model_name,
+                                        total_size=int(total),
+                                        downloaded_size=int(current_size),
+                                        percentage=pct,
+                                        speed=speed,
+                                        eta=eta,
+                                    )
+                                )
                             except Exception:
                                 pass
                     except Exception:
@@ -223,14 +226,16 @@ class ModelDownloader:
                 if self._progress_callback:
                     try:
                         final_size = _dir_size(model_dir)
-                        self._progress_callback(DownloadProgress(
-                            model_name=model_name,
-                            total_size=max(final_size, 1),
-                            downloaded_size=final_size,
-                            percentage=100.0,
-                            speed=0.0,
-                            eta=0.0,
-                        ))
+                        self._progress_callback(
+                            DownloadProgress(
+                                model_name=model_name,
+                                total_size=max(final_size, 1),
+                                downloaded_size=final_size,
+                                percentage=100.0,
+                                speed=0.0,
+                                eta=0.0,
+                            )
+                        )
                     except Exception:
                         pass
 
@@ -238,14 +243,14 @@ class ModelDownloader:
             if not self.is_model_available(model_name):
                 raise RuntimeError(f"模型下载不完整: 缺少必要文件 {registry['required_files']}")
 
-            self._logger.info(f"模型下载完成: {model_name} -> {model_dir}")
+            self._logger.info("模型下载完成: %s -> %s", model_name, model_dir)
             return model_dir
 
         except ImportError:
             self._logger.error("huggingface_hub 未安装，请运行: pip install huggingface_hub")
             raise
         except Exception as e:
-            self._logger.error(f"模型下载失败: {model_name} - {e}")
+            self._logger.error("模型下载失败: %s - %s", model_name, e)
             raise
 
     def list_models(self) -> list:
@@ -254,27 +259,30 @@ class ModelDownloader:
         for name, registry in MODEL_REGISTRY.items():
             model_dir = self.get_model_dir(name)
             available = self.is_model_available(name)
-            result.append({
-                "name": name,
-                "description": registry["description"],
-                "size_hint": registry["size_hint"],
-                "local_dir": str(model_dir),
-                "available": available,
-            })
+            result.append(
+                {
+                    "name": name,
+                    "description": registry["description"],
+                    "size_hint": registry["size_hint"],
+                    "local_dir": str(model_dir),
+                    "available": available,
+                }
+            )
         return result
 
     def delete_model(self, model_name: str) -> bool:
         """删除本地模型文件"""
         try:
             import shutil
+
             model_dir = self.get_model_dir(model_name)
             if model_dir.exists():
                 shutil.rmtree(model_dir)
-                self._logger.info(f"已删除模型: {model_name} -> {model_dir}")
+                self._logger.info("已删除模型: %s -> %s", model_name, model_dir)
                 return True
             return False
         except Exception as e:
-            self._logger.error(f"删除模型失败: {model_name} - {e}")
+            self._logger.error("删除模型失败: %s - %s", model_name, e)
             return False
 
 
@@ -301,14 +309,14 @@ def _parse_size_hint(size_hint: str) -> int:
         num_f = float(num) if num else 0.0
         unit = unit.strip()
         if unit in ("gb", "g"):
-            return int(num_f * 1024 ** 3)
+            return int(num_f * 1024**3)
         if unit in ("mb", "m"):
-            return int(num_f * 1024 ** 2)
+            return int(num_f * 1024**2)
         if unit in ("kb", "k"):
             return int(num_f * 1024)
         if unit in ("b", ""):
             return int(num_f)
-        return int(num_f * 1024 ** 2)  # 默认按 MB 处理
+        return int(num_f * 1024**2)  # 默认按 MB 处理
     except Exception:
         return 0
 
@@ -333,7 +341,7 @@ def _dir_size(path: Path) -> int:
 
 def get_model_downloader(base_dir: str = None) -> ModelDownloader:
     """获取全局 ModelDownloader 实例
-    
+
     Args:
         base_dir: 模型存储的基础目录。如果为 None，则自动使用项目根目录。
     """

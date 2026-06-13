@@ -54,16 +54,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
+import * as notifApi from '@/api/modules/notifications'
+import type { Notification } from '@/api/modules/notifications'
 
 const { t } = useI18n()
 
 const loading = ref(false)
 const markingAll = ref(false)
-const notifications = ref<any[]>([])
+const notifications = ref<Notification[]>([])
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -80,10 +81,10 @@ const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
 const fetchNotifications = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/notifications', { params: { page: page.value, page_size: pageSize.value } })
-    const data = res?.data ?? res ?? {}
-    notifications.value = data.items ?? data.notifications ?? (Array.isArray(data) ? data : [])
-    total.value = data.total ?? notifications.value.length
+    const res = await notifApi.getNotifications({ page: page.value, size: pageSize.value })
+    const data = res?.data
+    notifications.value = data?.items ?? (Array.isArray(data) ? data : [])
+    total.value = data?.total ?? notifications.value.length
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -93,7 +94,7 @@ const fetchNotifications = async () => {
 
 const markRead = async (id: string) => {
   try {
-    await request.put(`/notifications/${id}/read`)
+    await notifApi.markRead(id)
     const notif = notifications.value.find(n => n.id === id)
     if (notif) notif.read = true
   } catch {
@@ -104,7 +105,7 @@ const markRead = async (id: string) => {
 const markAllRead = async () => {
   markingAll.value = true
   try {
-    await request.put('/notifications/read-all')
+    await notifApi.markAllRead()
     notifications.value.forEach(n => { n.read = true })
     message.success(t('common.success'))
   } catch {
@@ -116,7 +117,7 @@ const markAllRead = async () => {
 
 const deleteNotif = async (id: string) => {
   try {
-    await request.delete(`/notifications/${id}`)
+    await notifApi.deleteNotification(id)
     notifications.value = notifications.value.filter(n => n.id !== id)
     total.value = Math.max(0, total.value - 1)
     message.success(t('common.success'))

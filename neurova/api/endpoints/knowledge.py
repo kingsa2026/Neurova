@@ -13,12 +13,10 @@ from __future__ import annotations
 
 import logging
 import time
-import typing
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -28,6 +26,7 @@ router = APIRouter()
 
 class KnowledgeItem(BaseModel):
     """知识条目"""
+
     knowledge_id: str
     title: str
     content: str
@@ -41,6 +40,7 @@ class KnowledgeItem(BaseModel):
 
 class KnowledgeCreate(BaseModel):
     """创建知识请求"""
+
     title: str = Field(..., description="标题")
     content: str = Field(..., description="内容")
     category: str = Field(default="general", description="分类")
@@ -51,6 +51,7 @@ class KnowledgeCreate(BaseModel):
 
 class KnowledgeUpdate(BaseModel):
     """更新知识请求"""
+
     title: Optional[str] = None
     content: Optional[str] = None
     category: Optional[str] = None
@@ -60,6 +61,7 @@ class KnowledgeUpdate(BaseModel):
 
 class KnowledgeSearchRequest(BaseModel):
     """搜索知识请求"""
+
     query: str = Field(..., description="搜索查询")
     category: Optional[str] = None
     tags: List[str] = []
@@ -74,6 +76,7 @@ def _get_request_id(request: Request) -> str:
 def _get_agent(agent_id: str = "default"):
     """获取 Agent 实例"""
     from neurova.api.endpoints import get_agent_instance
+
     return get_agent_instance(agent_id)
 
 
@@ -95,7 +98,7 @@ async def get_knowledge(
 ):
     """获取知识库"""
     memory_manager = _get_memory_manager(agent_id)
-    
+
     knowledge_items = []
     if memory_manager:
         try:
@@ -106,23 +109,25 @@ async def get_knowledge(
                     offset=offset,
                 )
         except Exception as e:
-            logger.warning(f"Failed to get knowledge: {e}")
-    
+            logger.warning("Failed to get knowledge: %s", e)
+
     # 如果没有数据，返回模拟数据
     if not knowledge_items:
         for i in range(min(limit, 5)):
-            knowledge_items.append(KnowledgeItem(
-                knowledge_id=str(uuid.uuid4()),
-                title=f"Knowledge Item {i+1}",
-                content=f"Content of knowledge item {i+1}",
-                category=category or "general",
-                tags=["tag1", "tag2"],
-                source="system",
-                confidence=0.8 - i * 0.1,
-                created_at=time.time() - (i * 86400),
-                updated_at=time.time() - (i * 3600),
-            ))
-    
+            knowledge_items.append(
+                KnowledgeItem(
+                    knowledge_id=str(uuid.uuid4()),
+                    title=f"Knowledge Item {i+1}",
+                    content=f"Content of knowledge item {i+1}",
+                    category=category or "general",
+                    tags=["tag1", "tag2"],
+                    source="system",
+                    confidence=0.8 - i * 0.1,
+                    created_at=time.time() - (i * 86400),
+                    updated_at=time.time() - (i * 3600),
+                )
+            )
+
     return knowledge_items
 
 
@@ -134,7 +139,7 @@ async def search_knowledge(
 ):
     """搜索知识"""
     memory_manager = _get_memory_manager(agent_id)
-    
+
     results = []
     if memory_manager:
         try:
@@ -146,23 +151,25 @@ async def search_knowledge(
                     limit=body.limit,
                 )
         except Exception as e:
-            logger.warning(f"Failed to search knowledge: {e}")
-    
+            logger.warning("Failed to search knowledge: %s", e)
+
     # 如果没有数据，返回模拟数据
     if not results:
         for i in range(min(body.limit, 3)):
-            results.append(KnowledgeItem(
-                knowledge_id=str(uuid.uuid4()),
-                title=f"Search result for '{body.query}' #{i+1}",
-                content=f"Content related to {body.query}",
-                category=body.category or "general",
-                tags=body.tags or ["search"],
-                source="search",
-                confidence=0.7 - i * 0.1,
-                created_at=time.time() - (i * 86400),
-                updated_at=time.time() - (i * 3600),
-            ))
-    
+            results.append(
+                KnowledgeItem(
+                    knowledge_id=str(uuid.uuid4()),
+                    title=f"Search result for '{body.query}' #{i+1}",
+                    content=f"Content related to {body.query}",
+                    category=body.category or "general",
+                    tags=body.tags or ["search"],
+                    source="search",
+                    confidence=0.7 - i * 0.1,
+                    created_at=time.time() - (i * 86400),
+                    updated_at=time.time() - (i * 3600),
+                )
+            )
+
     return results
 
 
@@ -173,13 +180,13 @@ async def create_knowledge(
     agent_id: str = Query(default="default", description="Agent ID"),
 ):
     """添加知识"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     memory_manager = _get_memory_manager(agent_id)
-    
+
     knowledge_id = str(uuid.uuid4())
     timestamp = time.time()
-    
+
     if memory_manager:
         try:
             if hasattr(memory_manager, "add_knowledge"):
@@ -193,8 +200,8 @@ async def create_knowledge(
                     confidence=body.confidence,
                 )
         except Exception as e:
-            logger.warning(f"Failed to add knowledge: {e}")
-    
+            logger.warning("Failed to add knowledge: %s", e)
+
     return KnowledgeItem(
         knowledge_id=knowledge_id,
         title=body.title,
@@ -216,7 +223,7 @@ async def get_knowledge_item(
 ):
     """获取单个知识详情"""
     memory_manager = _get_memory_manager(agent_id)
-    
+
     if memory_manager:
         try:
             if hasattr(memory_manager, "get_knowledge_item"):
@@ -224,8 +231,8 @@ async def get_knowledge_item(
                 if item:
                     return item
         except Exception as e:
-            logger.warning(f"Failed to get knowledge item: {e}")
-    
+            logger.warning("Failed to get knowledge item: %s", e)
+
     raise HTTPException(status_code=404, detail=f"Knowledge '{knowledge_id}' not found")
 
 
@@ -237,18 +244,18 @@ async def update_knowledge(
     agent_id: str = Query(default="default", description="Agent ID"),
 ):
     """更新知识"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     memory_manager = _get_memory_manager(agent_id)
-    
+
     if memory_manager:
         try:
             if hasattr(memory_manager, "update_knowledge"):
                 update_data = body.dict(exclude_unset=True)
                 memory_manager.update_knowledge(knowledge_id, update_data)
         except Exception as e:
-            logger.warning(f"Failed to update knowledge: {e}")
-    
+            logger.warning("Failed to update knowledge: %s", e)
+
     # 返回更新后的知识
     return await get_knowledge_item(request, knowledge_id, agent_id)
 
@@ -261,16 +268,16 @@ async def delete_knowledge(
 ):
     """删除知识"""
     request_id = _get_request_id(request)
-    
+
     memory_manager = _get_memory_manager(agent_id)
-    
+
     if memory_manager:
         try:
             if hasattr(memory_manager, "delete_knowledge"):
                 memory_manager.delete_knowledge(knowledge_id)
         except Exception as e:
-            logger.warning(f"Failed to delete knowledge: {e}")
-    
+            logger.warning("Failed to delete knowledge: %s", e)
+
     return {
         "code": 0,
         "message": f"Knowledge '{knowledge_id}' deleted",

@@ -18,13 +18,12 @@
   multiplier *= exp(-decay_rate × hours_since_last_use)
 """
 
-from dataclasses import dataclass, field
-import math
-import time
-import threading
-from typing import Any, Dict, List, Optional, Tuple
-
 import logging
+import math
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +31,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ToolWeightEntry:
     """工具权重条目"""
+
     tool_name: str
     base_weight: float = 1.0
     adaptive_multiplier: float = 1.0
@@ -159,10 +159,7 @@ class AdaptiveToolWeights:
 
             # 递减收益的成功激励
             bonus = self._success_bonus / (1 + entry.success_count * 0.1)
-            entry.adaptive_multiplier = min(
-                self._max_multiplier,
-                entry.adaptive_multiplier + bonus
-            )
+            entry.adaptive_multiplier = min(self._max_multiplier, entry.adaptive_multiplier + bonus)
 
             # 更新窗口
             entry.window.append((now, True))
@@ -181,10 +178,7 @@ class AdaptiveToolWeights:
             entry.last_failure = now
 
             # 失败惩罚
-            entry.adaptive_multiplier = max(
-                self._min_multiplier,
-                entry.adaptive_multiplier * self._failure_penalty
-            )
+            entry.adaptive_multiplier = max(self._min_multiplier, entry.adaptive_multiplier * self._failure_penalty)
 
             # 更新窗口
             entry.window.append((now, False))
@@ -197,15 +191,12 @@ class AdaptiveToolWeights:
 
         if hours_since_use > 0.1:  # 至少 6 分钟才衰减
             decay = math.exp(-self._decay_rate * hours_since_use)
-            entry.adaptive_multiplier = max(
-                self._min_multiplier,
-                entry.adaptive_multiplier * decay
-            )
+            entry.adaptive_multiplier = max(self._min_multiplier, entry.adaptive_multiplier * decay)
 
     def _trim_window(self, entry: ToolWeightEntry):
         """修剪窗口"""
         if len(entry.window) > self._window_size:
-            entry.window = entry.window[-self._window_size:]
+            entry.window = entry.window[-self._window_size :]
 
     def get_tool_entry(self, tool_name: str) -> Optional[ToolWeightEntry]:
         """获取工具条目（只读副本）"""
@@ -245,7 +236,7 @@ class AdaptiveToolWeights:
                     "failure_penalty": self._failure_penalty,
                     "decay_rate": self._decay_rate,
                     "window_size": self._window_size,
-                }
+                },
             }
 
     @classmethod

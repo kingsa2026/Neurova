@@ -10,11 +10,11 @@ Agent 只与 NeuHebbManager 交互，不直接接触内部子模块。
 from __future__ import annotations
 
 import logging
-from typing import Callable, List, Optional, Dict, Any
+from typing import Any, Callable, Dict, List, Optional
 
-from .neurova_hebb import NeurovaHebb, NeuHebbConfig, NeuHebbMem
-from .neuHebb_forge import NeuHebbForge
 from .neuHebb_curator import NeuHebbCurator
+from .neuHebb_forge import NeuHebbForge
+from .neurova_hebb import NeuHebbConfig, NeuHebbMem, NeurovaHebb
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,9 @@ class NeuHebbManager:
             stored = self.storage.store(document_id, hebbs)
             logger.info(
                 "Stored %d/%d NeurovaHebbs for document %s",
-                stored, len(hebbs), document_id,
+                stored,
+                len(hebbs),
+                document_id,
             )
 
         return hebbs
@@ -152,6 +154,7 @@ class NeuHebbManager:
 
         # 2. 生成唯一的 document_id（使用会话 ID + 时间戳）
         from datetime import datetime, timezone
+
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         document_id = f"conversation_{session_id}_{timestamp}"
 
@@ -175,7 +178,8 @@ class NeuHebbManager:
         if hebbs:
             logger.info(
                 "Generated %d NeurovaHebbs from conversation (session: %s)",
-                len(hebbs), session_id,
+                len(hebbs),
+                session_id,
             )
 
         return hebbs
@@ -202,7 +206,8 @@ class NeuHebbManager:
         if results:
             logger.info(
                 "Retrieved %d NeurovaHebbs for query: %.60s",
-                len(results), query,
+                len(results),
+                query,
             )
 
         return results
@@ -227,9 +232,7 @@ class NeuHebbManager:
         return {
             "total_documents": total_docs,
             "total_neurova_hebbs": total_hebbs,
-            "avg_verification_score": (
-                sum(all_scores) / len(all_scores) if all_scores else 0.0
-            ),
+            "avg_verification_score": (sum(all_scores) / len(all_scores) if all_scores else 0.0),
             "config": {
                 "enabled": self.config.enabled,
                 "top_k": self.config.top_k,

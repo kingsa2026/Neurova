@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import datetime
-import enum
 import json
 import logging
 import threading
-import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -401,12 +399,8 @@ class AgentConstitution(BaseModule):
             value_compliance = self._evaluate_value_compliance(action, context or {})
             violation_level = self._calculate_boundary_score(boundary_violations)
             overall = self._compute_overall_score(violation_level, value_compliance)
-            reasoning = self._generate_reasoning(
-                action, boundary_violations, value_compliance, violation_level
-            )
-            recommendations = self._generate_suggestions(
-                action, boundary_violations, violation_level
-            )
+            reasoning = self._generate_reasoning(action, boundary_violations, value_compliance, violation_level)
+            recommendations = self._generate_suggestions(action, boundary_violations, violation_level)
             evaluation = ActionEvaluation(
                 action_id=action_id,
                 action_description=action,
@@ -451,9 +445,7 @@ class AgentConstitution(BaseModule):
                 return False
         return True
 
-    def _evaluate_value_compliance(
-        self, action: str, context: Dict[str, Any]
-    ) -> Dict[str, float]:
+    def _evaluate_value_compliance(self, action: str, context: Dict[str, Any]) -> Dict[str, float]:
         action_lower = (action or "").lower()
         result: Dict[str, float] = {}
         with self._lock:
@@ -486,9 +478,7 @@ class AgentConstitution(BaseModule):
         max_rank = 0
         with self._lock:
             for name in violations:
-                boundary = next(
-                    (b for b in self._boundaries.values() if b.name == name), None
-                )
+                boundary = next((b for b in self._boundaries.values() if b.name == name), None)
                 if boundary is None:
                     continue
                 rank = _VIOLATION_RANK.get(boundary.violation_level.value, 0)
@@ -497,9 +487,7 @@ class AgentConstitution(BaseModule):
                     max_level = boundary.violation_level
         return max_level
 
-    def _compute_overall_score(
-        self, violation_level: ViolationLevel, value_compliance: Dict[str, float]
-    ) -> float:
+    def _compute_overall_score(self, violation_level: ViolationLevel, value_compliance: Dict[str, float]) -> float:
         violation_penalty = _VIOLATION_RANK.get(violation_level.value, 0) * 0.2
         if value_compliance:
             avg_value = sum(value_compliance.values()) / len(value_compliance)
@@ -616,7 +604,7 @@ class AgentConstitution(BaseModule):
             items = [e.to_dict() for e in self._history.values()]
             items.sort(key=lambda d: d.get("metadata", {}).get("evaluated_at", ""))
             if limit is not None:
-                items = items[-int(limit):]
+                items = items[-int(limit) :]
             return items
 
     def get_constitution_summary(self) -> Dict[str, Any]:

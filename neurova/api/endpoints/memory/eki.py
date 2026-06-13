@@ -2,30 +2,36 @@
 记忆接口 - 分类 & EKI 认知优化器
 """
 
-from typing import Optional, List, Dict, Any
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends
-from datetime import datetime
 from pydantic import BaseModel, Field
 
-from neurova.interfaces.api_standard import (
-    APIResponse,
-    APIError,
-    ErrorCodes,
-)
 from neurova.api.auth import get_current_user
+from neurova.interfaces.api_standard import (
+    APIError,
+    APIResponse,
+)
 
 from .base import (
-    router, logger, _get_request_id, get_memory_manager, _get_user_ids_from_token,
+    _get_request_id,
+    get_memory_manager,
+    logger,
+    router,
 )
+
 
 class ClassifyMemoryRequest(BaseModel):
     """分类记忆请求"""
+
     content: str = Field(..., min_length=1, max_length=50000, description="记忆内容")
     context: Optional[dict] = Field(default=None, description="分类上下文")
 
+
 class ClassifyMemoryResponse(BaseModel):
     """分类结果响应"""
+
     category: str
     category_confidence: float
     type: str
@@ -37,35 +43,47 @@ class ClassifyMemoryResponse(BaseModel):
     confidence: float
     reasoning: str
 
+
 class ProcessTaskRequest(BaseModel):
     """EKI任务处理请求"""
+
     task_embedding: List[float] = Field(..., description="任务嵌入向量")
     memory_context: List[str] = Field(default_factory=list, description="相关记忆ID列表")
     user_feedback: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="用户反馈 (0-1)")
 
+
 class RecommendReinforcementRequest(BaseModel):
     """强化推荐请求"""
+
     top_k: int = Field(default=10, ge=1, le=100, description="推荐数量")
+
 
 class PredictDecayRequest(BaseModel):
     """衰减预测请求"""
+
     memory_id: str = Field(..., description="记忆ID")
     horizon: int = Field(default=7, ge=1, le=30, description="预测天数")
 
+
 class BatchUpdateRequest(BaseModel):
     """批量更新请求"""
+
     batch_data: List[dict] = Field(..., description="批量数据 [{memory_id, observations, obs_type}]")
+
 
 class EKIConfigRequest(BaseModel):
     """EKI配置请求"""
+
     ensemble_size: Optional[int] = Field(default=None, ge=10, le=200, description="EKI集合大小")
     embed_dim: Optional[int] = Field(default=None, ge=2, le=32, description="嵌入维度")
     use_surrogate: Optional[bool] = Field(default=None, description="是否使用代理模型")
     auto_update: Optional[bool] = Field(default=None, description="是否自动更新")
 
+
 # ============================================================
 # 分类路由
 # ============================================================
+
 
 @router.post("/classify", summary="分类记忆内容")
 async def classify_memory_content(
@@ -102,8 +120,9 @@ async def classify_memory_content(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"分类失败: {e}")
+        logger.exception("分类失败: %s", e)
         raise APIError.internal(f"分类失败: {str(e)}")
+
 
 @router.post("/classify-and-remember", summary="分类并记忆")
 async def classify_and_remember(
@@ -148,12 +167,14 @@ async def classify_and_remember(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"分类并记忆失败: {e}")
+        logger.exception("分类并记忆失败: %s", e)
         raise APIError.internal(f"分类并记忆失败: {str(e)}")
+
 
 # ============================================================
 # EKI认知优化器路由
 # ============================================================
+
 
 @router.get("/eki/status", summary="获取EKI状态")
 async def get_eki_status(
@@ -188,8 +209,9 @@ async def get_eki_status(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取EKI状态失败: {e}")
+        logger.exception("获取EKI状态失败: %s", e)
         raise APIError.internal(f"获取EKI状态失败: {str(e)}")
+
 
 @router.post("/eki/process", summary="处理EKI任务")
 async def process_eki_task(
@@ -207,7 +229,7 @@ async def process_eki_task(
         result = manager.eki_process_task(
             task_embedding=request.task_embedding,
             memory_context=request.memory_context,
-            user_feedback=request.user_feedback
+            user_feedback=request.user_feedback,
         )
 
         return APIResponse.ok(
@@ -219,8 +241,9 @@ async def process_eki_task(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"EKI任务处理失败: {e}")
+        logger.exception("EKI任务处理失败: %s", e)
         raise APIError.internal(f"EKI任务处理失败: {str(e)}")
+
 
 @router.get("/eki/reinforce", summary="获取强化推荐")
 async def get_reinforcement_recommendations(
@@ -247,8 +270,9 @@ async def get_reinforcement_recommendations(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取强化推荐失败: {e}")
+        logger.exception("获取强化推荐失败: %s", e)
         raise APIError.internal(f"获取强化推荐失败: {str(e)}")
+
 
 @router.get("/eki/decay/{memory_id}", summary="预测记忆衰减")
 async def predict_memory_decay(
@@ -273,8 +297,9 @@ async def predict_memory_decay(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"预测记忆衰减失败: {e}")
+        logger.exception("预测记忆衰减失败: %s", e)
         raise APIError.internal(f"预测记忆衰减失败: {str(e)}")
+
 
 @router.get("/eki/strength/{memory_id}", summary="获取记忆强度")
 async def get_memory_strength(
@@ -298,8 +323,9 @@ async def get_memory_strength(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取记忆强度失败: {e}")
+        logger.exception("获取记忆强度失败: %s", e)
         raise APIError.internal(f"获取记忆强度失败: {str(e)}")
+
 
 @router.get("/eki/statistics", summary="获取EKI统计信息")
 async def get_eki_statistics(
@@ -322,8 +348,9 @@ async def get_eki_statistics(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取EKI统计信息失败: {e}")
+        logger.exception("获取EKI统计信息失败: %s", e)
         raise APIError.internal(f"获取EKI统计信息失败: {str(e)}")
+
 
 @router.post("/eki/batch-update", summary="批量更新认知状态")
 async def batch_update_cognitive_state(
@@ -352,8 +379,9 @@ async def batch_update_cognitive_state(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"批量更新认知状态失败: {e}")
+        logger.exception("批量更新认知状态失败: %s", e)
         raise APIError.internal(f"批量更新认知状态失败: {str(e)}")
+
 
 @router.put("/eki/config", summary="配置EKI优化器")
 async def configure_eki(
@@ -368,13 +396,13 @@ async def configure_eki(
         manager = get_memory_manager(agent_id, user)
         config = {}
         if request.ensemble_size is not None:
-            config['ensemble_size'] = request.ensemble_size
+            config["ensemble_size"] = request.ensemble_size
         if request.embed_dim is not None:
-            config['embed_dim'] = request.embed_dim
+            config["embed_dim"] = request.embed_dim
         if request.use_surrogate is not None:
-            config['use_surrogate'] = request.use_surrogate
+            config["use_surrogate"] = request.use_surrogate
         if request.auto_update is not None:
-            config['auto_update'] = request.auto_update
+            config["auto_update"] = request.auto_update
 
         manager.eki_configure(config)
 
@@ -387,8 +415,9 @@ async def configure_eki(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"配置EKI失败: {e}")
+        logger.exception("配置EKI失败: %s", e)
         raise APIError.internal(f"配置EKI失败: {str(e)}")
+
 
 @router.put("/eki/enable", summary="启用/禁用EKI优化器")
 async def set_eki_enabled(
@@ -413,5 +442,5 @@ async def set_eki_enabled(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"设置EKI状态失败: {e}")
+        logger.exception("设置EKI状态失败: %s", e)
         raise APIError.internal(f"设置EKI状态失败: {str(e)}")

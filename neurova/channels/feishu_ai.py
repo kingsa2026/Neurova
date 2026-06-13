@@ -7,7 +7,7 @@
 import logging
 import os
 import tempfile
-from typing import Any, Dict, Generator, Optional
+from typing import Generator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class AIMixin:
                 os.unlink(temp_path)
 
         except Exception as e:
-            logger.exception(f"Image generation error: {e}")
+            logger.exception("Image generation error: %s", e)
             return None
 
     async def generate_video(
@@ -138,7 +138,7 @@ class AIMixin:
                 os.unlink(temp_path)
 
         except Exception as e:
-            logger.exception(f"Video generation error: {e}")
+            logger.exception("Video generation error: %s", e)
             return None
 
     async def ai_chat(
@@ -183,7 +183,7 @@ class AIMixin:
                 return response.get("content", "")
 
         except Exception as e:
-            logger.exception(f"AI chat error: {e}")
+            logger.exception("AI chat error: %s", e)
             return None
 
     async def ai_chat_stream(
@@ -219,4 +219,4 @@ class AIMixin:
                 yield chunk
 
         except Exception as e:
-            logger.exception(f"AI chat stream error: {e}")
+            logger.exception("AI chat stream error: %s", e)

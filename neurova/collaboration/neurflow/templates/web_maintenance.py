@@ -9,26 +9,24 @@
 - 内容更新
 - 链接检查
 """
+
 import time
 import uuid
-from typing import Dict, List, Any
+from typing import List
 
-from ..models import (
-    WorkflowDefinition, WorkflowNode, WorkflowEdge, WorkflowVariable,
-    WorkflowStatus, NodeCategory
-)
+from ..models import WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus, WorkflowVariable
 
 
 def get_web_maintenance_template() -> WorkflowDefinition:
     """获取网站维护工作流模板
-    
+
     Returns:
         预定义的网站维护工作流定义
     """
     nodes = _create_nodes()
     edges = _create_edges()
     variables = _create_variables()
-    
+
     return WorkflowDefinition(
         id=f"template_web_maintenance_{uuid.uuid4().hex[:8]}",
         name="网站维护",
@@ -50,7 +48,7 @@ def get_web_maintenance_template() -> WorkflowDefinition:
             "estimated_time": "20-40 minutes",
             "required_skills": ["web", "seo", "content-management"],
             "description": "自动化网站维护流程",
-        }
+        },
     )
 
 
@@ -80,12 +78,11 @@ def _create_nodes() -> List[WorkflowNode]:
                         "max": 5,
                         "default": 3,
                         "description": "抓取深度",
-                    }
+                    },
                 }
             },
             label="开始",
         ),
-        
         WorkflowNode(
             id="scrape",
             type="builtin:web-scrape",
@@ -97,7 +94,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="内容抓取",
         ),
-        
         WorkflowNode(
             id="seo_analysis",
             type="builtin:seo-optimize",
@@ -109,7 +105,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="SEO 分析",
         ),
-        
         WorkflowNode(
             id="broken_links",
             type="builtin:broken-link-check",
@@ -120,7 +115,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="死链检测",
         ),
-        
         WorkflowNode(
             id="content_update",
             type="builtin:llm",
@@ -143,7 +137,6 @@ SEO 分析：{{seo_analysis.output}}
             },
             label="内容更新",
         ),
-        
         WorkflowNode(
             id="fix_links",
             type="builtin:llm",
@@ -166,7 +159,6 @@ SEO 分析：{{seo_analysis.output}}
             },
             label="链接修复",
         ),
-        
         WorkflowNode(
             id="generate_report",
             type="builtin:llm",
@@ -194,7 +186,6 @@ SEO 分析：{{seo_analysis.output}}
             },
             label="报告生成",
         ),
-        
         WorkflowNode(
             id="end",
             type="builtin:end",

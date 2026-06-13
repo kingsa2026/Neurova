@@ -19,13 +19,11 @@ NLToolSynthesizer v1.0.0 — 自然语言工具合成器 (Phase 3 P3-3)
        └─▶ SynthesizedTool → 导出格式
 """
 
-from dataclasses import dataclass, field
-import enum
 import logging
 import re
 import typing
 import uuid
-
+from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -33,20 +31,23 @@ logger = logging.getLogger(__name__)
 
 # ────── 数据模型 ──────
 
+
 class SynthesisStage(Enum):
     """合成阶段"""
-    PARSING = "parsing"          # 解析描述
+
+    PARSING = "parsing"  # 解析描述
     CLASSIFICATION = "classification"  # 分类推断
     SCHEMA_GENERATION = "schema_generation"  # Schema 生成
     SEQUENCE_SUGGESTION = "sequence_suggestion"  # 序列建议
     CONFIDENCE_ESTIMATION = "confidence_estimation"  # 置信度估算
-    COMPLETED = "completed"      # 完成
-    FAILED = "failed"            # 失败
+    COMPLETED = "completed"  # 完成
+    FAILED = "failed"  # 失败
 
 
 @dataclass
 class SynthesizedTool:
     """合成工具"""
+
     tool_id: str = ""
     name: str = ""
     description: str = ""
@@ -63,6 +64,7 @@ class SynthesizedTool:
             self.tool_id = str(uuid.uuid4())[:8]
         if not self.created_at:
             import datetime
+
             self.created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     def to_dict(self) -> typing.Dict[str, typing.Any]:
@@ -84,6 +86,7 @@ class SynthesizedTool:
 @dataclass
 class ToolSynthesisResult:
     """工具合成结果"""
+
     success: bool = False
     synthesized_tool: typing.Optional[SynthesizedTool] = None
     error_message: str = ""
@@ -122,6 +125,7 @@ CATEGORY_KEYWORDS = {
 
 # ────── 主类 ──────
 
+
 class NLToolSynthesizer:
     """
     自然语言工具合成器
@@ -129,9 +133,7 @@ class NLToolSynthesizer:
     解析自然语言描述，推断工具需求，生成结构化工具定义。
     """
 
-    def __init__(self, min_confidence: float = 0.3,
-                 max_sequence_length: int = 5,
-                 enable_pattern_mining: bool = True):
+    def __init__(self, min_confidence: float = 0.3, max_sequence_length: int = 5, enable_pattern_mining: bool = True):
         """
         初始化合成器
 
@@ -174,8 +176,9 @@ class NLToolSynthesizer:
             },
         }
 
-    def synthesize(self, description: str,
-                   context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> ToolSynthesisResult:
+    def synthesize(
+        self, description: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> ToolSynthesisResult:
         """
         合成工具
 
@@ -187,6 +190,7 @@ class NLToolSynthesizer:
             ToolSynthesisResult: 合成结果
         """
         import time
+
         start_time = time.time()
 
         result = ToolSynthesisResult()
@@ -195,7 +199,7 @@ class NLToolSynthesizer:
         try:
             # 阶段1: 解析描述
             tool.stage = SynthesisStage.PARSING
-            parsed_info = self.parse_description(description)
+            self.parse_description(description)
             result.stages_completed.append(SynthesisStage.PARSING)
 
             # 阶段2: 检测分类
@@ -238,7 +242,7 @@ class NLToolSynthesizer:
             result.synthesized_tool = tool
 
         except Exception as e:
-            logger.error(f"Synthesis failed: {e}")
+            logger.error("Synthesis failed: %s", e)
             tool.stage = SynthesisStage.FAILED
             result.success = False
             result.error_message = str(e)
@@ -246,8 +250,9 @@ class NLToolSynthesizer:
         result.processing_time = time.time() - start_time
         return result
 
-    def batch_synthesize(self, descriptions: typing.List[str],
-                        context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.List[ToolSynthesisResult]:
+    def batch_synthesize(
+        self, descriptions: typing.List[str], context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> typing.List[ToolSynthesisResult]:
         """
         批量合成工具
 
@@ -275,13 +280,13 @@ class NLToolSynthesizer:
             Dict: 解析结果
         """
         # 提取关键信息
-        words = re.findall(r'[\w\u4e00-\u9fff]+', description.lower())
+        words = re.findall(r"[\w\u4e00-\u9fff]+", description.lower())
 
         # 识别动词和名词
         verbs = []
         nouns = []
-        verb_patterns = ['搜索', '查找', '查询', '读取', '写入', '处理', '分析', '生成', '获取', '创建']
-        noun_patterns = ['文件', '数据', '图片', '文本', '网页', '数据库', '接口', '任务', '用户']
+        verb_patterns = ["搜索", "查找", "查询", "读取", "写入", "处理", "分析", "生成", "获取", "创建"]
+        noun_patterns = ["文件", "数据", "图片", "文本", "网页", "数据库", "接口", "任务", "用户"]
 
         for word in words:
             if word in verb_patterns:
@@ -345,52 +350,31 @@ class NLToolSynthesizer:
 
         # 根据分类生成基础 Schema
         if category == "search":
-            base_schema["properties"]["query"] = {
-                "type": "string",
-                "description": "搜索查询"
-            }
+            base_schema["properties"]["query"] = {"type": "string", "description": "搜索查询"}
             base_schema["required"].append("query")
 
         elif category == "file":
-            base_schema["properties"]["path"] = {
-                "type": "string",
-                "description": "文件路径"
-            }
+            base_schema["properties"]["path"] = {"type": "string", "description": "文件路径"}
             base_schema["required"].append("path")
 
         elif category == "data":
-            base_schema["properties"]["data"] = {
-                "type": "object",
-                "description": "输入数据"
-            }
+            base_schema["properties"]["data"] = {"type": "object", "description": "输入数据"}
             base_schema["required"].append("data")
 
         elif category == "web":
-            base_schema["properties"]["url"] = {
-                "type": "string",
-                "description": "URL 地址"
-            }
+            base_schema["properties"]["url"] = {"type": "string", "description": "URL 地址"}
             base_schema["required"].append("url")
 
         elif category == "api":
-            base_schema["properties"]["endpoint"] = {
-                "type": "string",
-                "description": "API 端点"
-            }
+            base_schema["properties"]["endpoint"] = {"type": "string", "description": "API 端点"}
             base_schema["required"].append("endpoint")
 
         # 从描述中提取额外参数
         if "用户" in description or "user" in description.lower():
-            base_schema["properties"]["user_id"] = {
-                "type": "string",
-                "description": "用户 ID"
-            }
+            base_schema["properties"]["user_id"] = {"type": "string", "description": "用户 ID"}
 
         if "时间" in description or "time" in description.lower():
-            base_schema["properties"]["timestamp"] = {
-                "type": "string",
-                "description": "时间戳"
-            }
+            base_schema["properties"]["timestamp"] = {"type": "string", "description": "时间戳"}
 
         return base_schema
 
@@ -434,10 +418,9 @@ class NLToolSynthesizer:
                     break
 
         # 限制序列长度
-        return sequence[:self._max_sequence_length]
+        return sequence[: self._max_sequence_length]
 
-    def estimate_confidence(self, description: str, category: str,
-                          tool_sequence: typing.List[str]) -> float:
+    def estimate_confidence(self, description: str, category: str, tool_sequence: typing.List[str]) -> float:
         """
         估算合成置信度
 
@@ -453,7 +436,7 @@ class NLToolSynthesizer:
         max_score = 100.0
 
         # 1. 描述长度得分 (0-20分)
-        word_count = len(re.findall(r'[\w\u4e00-\u9fff]+', description))
+        word_count = len(re.findall(r"[\w\u4e00-\u9fff]+", description))
         if word_count >= 5:
             score += 20
         elif word_count >= 3:
@@ -484,9 +467,9 @@ class NLToolSynthesizer:
         score += keyword_score
 
         # 5. 描述清晰度 (0-10分)
-        if any(word in description_lower for word in ['请', '帮我', '需要', 'please', 'help']):
+        if any(word in description_lower for word in ["请", "帮我", "需要", "please", "help"]):
             score += 5
-        if '?' in description or '？' in description:
+        if "?" in description or "？" in description:
             score += 5
 
         return min(1.0, score / max_score)
@@ -503,7 +486,7 @@ class NLToolSynthesizer:
             str: 工具名称
         """
         # 提取关键名词
-        words = re.findall(r'[\w\u4e00-\u9fff]+', description.lower())
+        words = re.findall(r"[\w\u4e00-\u9fff]+", description.lower())
         nouns = [w for w in words if len(w) > 1][:3]
 
         if nouns:
@@ -517,7 +500,7 @@ class NLToolSynthesizer:
 # ────── 单例管理 ──────
 
 _synthesizer_instance: typing.Optional[NLToolSynthesizer] = None
-_instance_lock = __import__('threading').Lock()
+_instance_lock = __import__("threading").Lock()
 
 
 def get_nl_synthesizer(**kwargs) -> NLToolSynthesizer:

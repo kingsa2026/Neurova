@@ -5,7 +5,7 @@
 提供 Agent 协作模板、工作流定义和管理功能。
 """
 
-from .models import TemplateType, AgentRole, TaskStep, WorkflowDefinition
+from .models import AgentRole, TaskStep, TemplateType, WorkflowDefinition
 from .template import CollaborationTemplate, TemplateManager, get_template_manager
 
 __all__ = [
@@ -14,7 +14,6 @@ __all__ = [
     "AgentRole",
     "TaskStep",
     "WorkflowDefinition",
-
     # 模板管理
     "CollaborationTemplate",
     "TemplateManager",

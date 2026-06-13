@@ -8,26 +8,22 @@ Neurova 自动化任务调度器核心模块
 """
 
 import asyncio
-import json
 import logging
-import threading
 import uuid
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Union
 from threading import Lock
-import copy
+from typing import Any, Callable, Dict, List, Optional, Set
 
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
+from apscheduler.executors.pool import ProcessPoolExecutor, ThreadPoolExecutor
+from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.date import DateTrigger
-from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, EVENT_JOB_MISSED
-from apscheduler.jobstores.memory import MemoryJobStore
-from apscheduler.executors.pool import ThreadPoolExecutor, ProcessPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -35,23 +31,29 @@ logger = logging.getLogger(__name__)
 # 枚举定义
 # ============================================================
 
+
 class TaskType(str, Enum):
     """任务类型"""
+
     AGENT = "agent"
     WORKFLOW = "workflow"
     SCRIPT = "script"
     WEBHOOK = "webhook"
 
+
 class TriggerType(str, Enum):
     """触发类型"""
+
     CRON = "cron"
     INTERVAL = "interval"
     MANUAL = "manual"
     CONDITION = "condition"
     EVENT = "event"
 
+
 class TaskStatus(str, Enum):
     """任务状态"""
+
     PENDING = "pending"
     RUNNING = "running"
     SUCCESS = "success"
@@ -59,20 +61,25 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
     TIMEOUT = "timeout"
 
+
 class TaskPriority(str, Enum):
     """任务优先级"""
+
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
     CRITICAL = "critical"
 
+
 # ============================================================
 # 数据模型
 # ============================================================
 
+
 @dataclass
 class ScheduleConfig:
     """调度配置"""
+
     type: TriggerType = TriggerType.CRON
     cron: Optional[str] = None
     interval_seconds: Optional[int] = None
@@ -101,9 +108,11 @@ class ScheduleConfig:
             end_date=datetime.fromisoformat(data["end_date"]) if data.get("end_date") else None,
         )
 
+
 @dataclass
 class TaskRequest:
     """任务请求配置"""
+
     type: TaskType = TaskType.AGENT
     agent_id: Optional[str] = None
     workflow_id: Optional[str] = None
@@ -141,9 +150,11 @@ class TaskRequest:
             max_retries=data.get("max_retries", 3),
         )
 
+
 @dataclass
 class TaskDependency:
     """任务依赖"""
+
     task_id: str
     type: str = "blocks"  # blocks, waits_for, runs_after
 
@@ -154,9 +165,11 @@ class TaskDependency:
     def from_dict(cls, data: Dict[str, str]) -> "TaskDependency":
         return cls(task_id=data["task_id"], type=data.get("type", "blocks"))
 
+
 @dataclass
 class RetryPolicy:
     """重试策略"""
+
     enabled: bool = False
     max_attempts: int = 3
     retry_delay_seconds: int = 60
@@ -169,9 +182,11 @@ class RetryPolicy:
     def from_dict(cls, data: Dict[str, Any]) -> "RetryPolicy":
         return cls(**data) if data else cls()
 
+
 @dataclass
 class NotificationConfig:
     """通知配置"""
+
     on_success: bool = False
     on_failure: bool = True
     channels: List[str] = field(default_factory=lambda: ["in_app"])
@@ -185,9 +200,11 @@ class NotificationConfig:
     def from_dict(cls, data: Dict[str, Any]) -> "NotificationConfig":
         return cls(**data) if data else cls()
 
+
 @dataclass
 class AutomationTask:
     """自动化任务"""
+
     id: str
     name: str
     description: Optional[str] = None
@@ -267,9 +284,11 @@ class AutomationTask:
             failure_count=data.get("failure_count", 0),
         )
 
+
 @dataclass
 class TaskExecution:
     """任务执行记录"""
+
     id: str
     task_id: str
     task_name: str = ""
@@ -316,9 +335,11 @@ class TaskExecution:
             metadata=data.get("metadata", {}),
         )
 
+
 # ============================================================
 # 任务执行器接口
 # ============================================================
+
 
 class TaskExecutor(ABC):
     """任务执行器抽象基类"""
@@ -326,12 +347,11 @@ class TaskExecutor(ABC):
     @abstractmethod
     async def execute(self, task: AutomationTask, execution: TaskExecution) -> Dict[str, Any]:
         """执行任务并返回结果"""
-        pass
 
     @abstractmethod
     async def validate(self, task: AutomationTask) -> tuple[bool, Optional[str]]:
         """验证任务配置是否有效"""
-        pass
+
 
 class AgentTaskExecutor(TaskExecutor):
     """Agent 任务执行器"""
@@ -345,10 +365,10 @@ class AgentTaskExecutor(TaskExecutor):
             from neurova.api.app import app_state
 
             agent_id = task.request.agent_id if task.request else None
-            if not agent_id and hasattr(app_state, 'default_agent'):
+            if not agent_id and hasattr(app_state, "default_agent"):
                 agent = app_state.default_agent
-                agent_id = getattr(agent.config, 'agent_id', None)
-            elif agent_id and hasattr(app_state, 'agents'):
+                agent_id = getattr(agent.config, "agent_id", None)
+            elif agent_id and hasattr(app_state, "agents"):
                 agent = app_state.agents.get(agent_id)
             else:
                 return {"success": False, "error": "Agent not found"}
@@ -370,7 +390,7 @@ class AgentTaskExecutor(TaskExecutor):
                 "agent_id": agent_id,
             }
         except Exception as e:
-            logger.exception(f"Agent task execution failed: {e}")
+            logger.exception("Agent task execution failed: %s", e)
             return {"success": False, "error": str(e)}
 
     async def validate(self, task: AutomationTask) -> tuple[bool, Optional[str]]:
@@ -378,6 +398,7 @@ class AgentTaskExecutor(TaskExecutor):
         if not task.request or not task.request.agent_id:
             return False, "Agent ID is required"
         return True, None
+
 
 class WorkflowTaskExecutor(TaskExecutor):
     """工作流任务执行器"""
@@ -394,12 +415,14 @@ class WorkflowTaskExecutor(TaskExecutor):
 
             # 获取工作流运行器
             from neurova.api.app import app_state
-            workflow_runner = getattr(app_state, 'workflow_runner', None)
+
+            workflow_runner = getattr(app_state, "workflow_runner", None)
 
             if not workflow_runner:
                 # 如果没有工作流运行器，尝试导入
                 try:
                     from neurova.workflow.runner import WorkflowRunner
+
                     workflow_runner = WorkflowRunner()
                 except ImportError:
                     return {"success": False, "error": "Workflow runner not available"}
@@ -414,7 +437,7 @@ class WorkflowTaskExecutor(TaskExecutor):
                 "workflow_id": workflow_id,
             }
         except Exception as e:
-            logger.exception(f"Workflow task execution failed: {e}")
+            logger.exception("Workflow task execution failed: %s", e)
             return {"success": False, "error": str(e)}
 
     async def validate(self, task: AutomationTask) -> tuple[bool, Optional[str]]:
@@ -422,6 +445,7 @@ class WorkflowTaskExecutor(TaskExecutor):
         if not task.request or not task.request.workflow_id:
             return False, "Workflow ID is required"
         return True, None
+
 
 class WebhookTaskExecutor(TaskExecutor):
     """Webhook 任务执行器"""
@@ -438,8 +462,12 @@ class WebhookTaskExecutor(TaskExecutor):
             input_data = task.request.input if task.request else {}
 
             async with aiohttp.ClientSession() as session:
-                async with session.post(webhook_url, json=input_data, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    result = await response.json() if response.content_type == 'application/json' else await response.text()
+                async with session.post(
+                    webhook_url, json=input_data, timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    result = (
+                        await response.json() if response.content_type == "application/json" else await response.text()
+                    )
 
                     return {
                         "success": response.status < 400,
@@ -447,16 +475,17 @@ class WebhookTaskExecutor(TaskExecutor):
                         "result": result,
                     }
         except Exception as e:
-            logger.exception(f"Webhook task execution failed: {e}")
+            logger.exception("Webhook task execution failed: %s", e)
             return {"success": False, "error": str(e)}
 
     async def validate(self, task: AutomationTask) -> tuple[bool, Optional[str]]:
         """验证 Webhook 任务"""
         if not task.request or not task.request.webhook_url:
             return False, "Webhook URL is required"
-        if not task.request.webhook_url.startswith(('http://', 'https://')):
+        if not task.request.webhook_url.startswith(("http://", "https://")):
             return False, "Invalid webhook URL"
         return True, None
+
 
 class ScriptTaskExecutor(TaskExecutor):
     """脚本任务执行器"""
@@ -493,7 +522,7 @@ class ScriptTaskExecutor(TaskExecutor):
                 "error": safe_locals.get("error"),
             }
         except Exception as e:
-            logger.exception(f"Script task execution failed: {e}")
+            logger.exception("Script task execution failed: %s", e)
             return {"success": False, "error": str(e)}
 
     async def validate(self, task: AutomationTask) -> tuple[bool, Optional[str]]:
@@ -502,9 +531,11 @@ class ScriptTaskExecutor(TaskExecutor):
             return False, "Script is required"
         return True, None
 
+
 # ============================================================
 # 任务调度器核心
 # ============================================================
+
 
 class TaskScheduler:
     """
@@ -528,7 +559,7 @@ class TaskScheduler:
         return cls._instance
 
     def __init__(self):
-        if hasattr(self, '_initialized'):
+        if hasattr(self, "_initialized"):
             return
 
         self._initialized = True
@@ -557,7 +588,7 @@ class TaskScheduler:
     def register_executor(self, task_type: TaskType, executor: TaskExecutor):
         """注册自定义执行器"""
         self._executors[task_type] = executor
-        logger.info(f"Registered executor for task type: {task_type.value}")
+        logger.info("Registered executor for task type: %s", task_type.value)
 
     # ============================================================
     # 任务管理
@@ -584,11 +615,11 @@ class TaskScheduler:
                 if task.enabled and self._apscheduler and task.schedule:
                     self._add_to_scheduler(task)
 
-                logger.info(f"Task added: {task.id} ({task.name})")
+                logger.info("Task added: %s (%s)", task.id, task.name)
                 self._emit_event("task_added", task)
                 return True
             except Exception as e:
-                logger.exception(f"Failed to add task: {e}")
+                logger.exception("Failed to add task: %s", e)
                 return False
 
     def update_task(self, task_id: str, updates: Dict[str, Any]) -> Optional[AutomationTask]:
@@ -616,11 +647,11 @@ class TaskScheduler:
                 if new_task.enabled and new_task.schedule:
                     self._add_to_scheduler(new_task)
 
-                logger.info(f"Task updated: {task_id}")
+                logger.info("Task updated: %s", task_id)
                 self._emit_event("task_updated", new_task)
                 return new_task
             except Exception as e:
-                logger.exception(f"Failed to update task: {e}")
+                logger.exception("Failed to update task: %s", e)
                 return None
 
     def delete_task(self, task_id: str) -> bool:
@@ -642,11 +673,11 @@ class TaskScheduler:
                 del self._tasks[task_id]
                 del self._executions[task_id]
 
-                logger.info(f"Task deleted: {task_id}")
+                logger.info("Task deleted: %s", task_id)
                 self._emit_event("task_deleted", {"task_id": task_id})
                 return True
             except Exception as e:
-                logger.exception(f"Failed to delete task: {e}")
+                logger.exception("Failed to delete task: %s", e)
                 return False
 
     def get_task(self, task_id: str) -> Optional[AutomationTask]:
@@ -702,24 +733,12 @@ class TaskScheduler:
             return
 
         try:
-            jobstores = {
-                'default': MemoryJobStore()
-            }
-            executors = {
-                'default': ThreadPoolExecutor(10),
-                'processpool': ProcessPoolExecutor(5)
-            }
-            job_defaults = {
-                'coalesce': True,
-                'max_instances': 3,
-                'misfire_grace_time': 60
-            }
+            jobstores = {"default": MemoryJobStore()}
+            executors = {"default": ThreadPoolExecutor(10), "processpool": ProcessPoolExecutor(5)}
+            job_defaults = {"coalesce": True, "max_instances": 3, "misfire_grace_time": 60}
 
             self._apscheduler = BackgroundScheduler(
-                jobstores=jobstores,
-                executors=executors,
-                job_defaults=job_defaults,
-                timezone="Asia/Shanghai"
+                jobstores=jobstores, executors=executors, job_defaults=job_defaults, timezone="Asia/Shanghai"
             )
 
             # 添加事件监听器
@@ -735,7 +754,7 @@ class TaskScheduler:
             logger.info("TaskScheduler started")
 
         except Exception as e:
-            logger.exception(f"Failed to start scheduler: {e}")
+            logger.exception("Failed to start scheduler: %s", e)
             raise
 
     def stop(self):
@@ -767,7 +786,7 @@ class TaskScheduler:
                         end_date=schedule.end_date,
                     )
                 else:
-                    logger.warning(f"Invalid cron expression: {schedule.cron}")
+                    logger.warning("Invalid cron expression: %s", schedule.cron)
                     return
             elif schedule.type == TriggerType.INTERVAL and schedule.interval_seconds:
                 # 间隔触发器
@@ -777,7 +796,7 @@ class TaskScheduler:
                     end_date=schedule.end_date,
                 )
             else:
-                logger.warning(f"Unsupported schedule type: {schedule.type}")
+                logger.warning("Unsupported schedule type: %s", schedule.type)
                 return
 
             self._apscheduler.add_job(
@@ -794,25 +813,27 @@ class TaskScheduler:
             if next_run_time:
                 task.next_run_at = next_run_time
 
-            logger.info(f"Task {task.id} added to scheduler, next run: {task.next_run_at}")
+            logger.info("Task %s added to scheduler, next run: %s", task.id, task.next_run_at)
 
         except Exception as e:
-            logger.exception(f"Failed to add task to scheduler: {e}")
+            logger.exception("Failed to add task to scheduler: %s", e)
 
     # ============================================================
     # 任务执行
     # ============================================================
 
-    async def execute_task(self, task_id: str, input_override: Optional[Dict[str, Any]] = None, triggered_by: str = "manual") -> Optional[TaskExecution]:
+    async def execute_task(
+        self, task_id: str, input_override: Optional[Dict[str, Any]] = None, triggered_by: str = "manual"
+    ) -> Optional[TaskExecution]:
         """执行任务"""
         task = self._tasks.get(task_id)
         if not task:
-            logger.error(f"Task not found: {task_id}")
+            logger.error("Task not found: %s", task_id)
             return None
 
         # 检查依赖
         if not self._check_dependencies(task_id):
-            logger.warning(f"Task {task_id} dependencies not satisfied")
+            logger.warning("Task %s dependencies not satisfied", task_id)
             return None
 
         # 创建执行记录
@@ -871,7 +892,7 @@ class TaskScheduler:
             execution.status = TaskStatus.FAILED
             execution.error = str(e)
             task.failure_count += 1
-            logger.exception(f"Task execution failed: {e}")
+            logger.exception("Task execution failed: %s", e)
 
         finally:
             execution.ended_at = datetime.now()
@@ -903,7 +924,7 @@ class TaskScheduler:
             finally:
                 loop.close()
         except Exception as e:
-            logger.exception(f"Task execution wrapper failed: {e}")
+            logger.exception("Task execution wrapper failed: %s", e)
 
     async def _handle_retry(self, task: AutomationTask, execution: TaskExecution):
         """处理任务重试"""
@@ -916,10 +937,10 @@ class TaskScheduler:
 
         delay = task.retry_policy.retry_delay_seconds
         if task.retry_policy.exponential_backoff:
-            delay *= (2 ** execution.metadata.get("_retry_count", 0))
+            delay *= 2 ** execution.metadata.get("_retry_count", 0)
 
         execution.metadata["_retry_count"] = execution.metadata.get("_retry_count", 0) + 1
-        logger.info(f"Scheduling retry for task {task.id} in {delay} seconds")
+        logger.info("Scheduling retry for task %s in %s seconds", task.id, delay)
 
         # 延迟重试
         await asyncio.sleep(delay)
@@ -990,16 +1011,16 @@ class TaskScheduler:
             try:
                 handler(event_type, data)
             except Exception as e:
-                logger.exception(f"Event handler error: {e}")
+                logger.exception("Event handler error: %s", e)
 
     def _on_job_executed(self, event):
         """任务执行完成回调"""
         if event.exception:
-            logger.error(f"Job {event.job_id} executed with exception: {event.exception}")
+            logger.error("Job %s executed with exception: %s", event.job_id, event.exception)
 
     def _on_job_error(self, event):
         """任务执行错误回调"""
-        logger.error(f"Job {event.job_id} error: {event.exception}")
+        logger.error("Job %s error: %s", event.job_id, event.exception)
 
     # ============================================================
     # 验证
@@ -1094,11 +1115,13 @@ class TaskScheduler:
             "running_tasks": running,
         }
 
+
 # ============================================================
 # 全局实例
 # ============================================================
 
 _scheduler_instance: Optional[TaskScheduler] = None
+
 
 def get_scheduler() -> TaskScheduler:
     """获取任务调度器单例"""
@@ -1106,6 +1129,7 @@ def get_scheduler() -> TaskScheduler:
     if _scheduler_instance is None:
         _scheduler_instance = TaskScheduler()
     return _scheduler_instance
+
 
 def init_scheduler() -> TaskScheduler:
     """初始化任务调度器"""

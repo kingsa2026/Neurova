@@ -7,13 +7,13 @@ NEU Token Manager - 神经元令牌管理器
 
 from __future__ import annotations
 
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
 import logging
-import hashlib
 import secrets
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
 
 class NEUTokenManager:
     """
@@ -57,10 +57,10 @@ class NEUTokenManager:
             "created_at": datetime.now().isoformat(),
             "expires_at": expires_at.isoformat(),
             "metadata": metadata or {},
-            "is_active": True
+            "is_active": True,
         }
 
-        logger.info(f"Generated token for user {user_id}")
+        logger.info("Generated token for user %s", user_id)
         return token
 
     def validate_token(self, token: str) -> Optional[Dict[str, Any]]:
@@ -102,7 +102,7 @@ class NEUTokenManager:
         """
         if token in self._tokens:
             self._tokens[token]["is_active"] = False
-            logger.info(f"Revoked token: {token[:8]}...")
+            logger.info("Revoked token: %s...", token[:8])
             return True
         return False
 
@@ -125,10 +125,10 @@ class NEUTokenManager:
             "created_at": datetime.now().isoformat(),
             "scopes": scopes or [],
             "is_active": True,
-            "last_used": None
+            "last_used": None,
         }
 
-        logger.info(f"Generated API key '{name}' for user {user_id}")
+        logger.info("Generated API key '%s' for user %s", name, user_id)
         return api_key
 
     def validate_api_key(self, api_key: str) -> Optional[Dict[str, Any]]:
@@ -166,7 +166,7 @@ class NEUTokenManager:
         """
         if api_key in self._api_keys:
             self._api_keys[api_key]["is_active"] = False
-            logger.info(f"Revoked API key: {api_key[:12]}...")
+            logger.info("Revoked API key: %s...", api_key[:12])
             return True
         return False
 
@@ -205,12 +205,14 @@ class NEUTokenManager:
             del self._tokens[token]
 
         if expired_tokens:
-            logger.info(f"Cleaned up {len(expired_tokens)} expired tokens")
+            logger.info("Cleaned up %s expired tokens", len(expired_tokens))
 
         return len(expired_tokens)
 
+
 # 全局单例
 _neu_token_manager: Optional[NEUTokenManager] = None
+
 
 def get_neu_token_manager() -> NEUTokenManager:
     """获取全局 NEU Token Manager 单例"""
@@ -218,6 +220,7 @@ def get_neu_token_manager() -> NEUTokenManager:
     if _neu_token_manager is None:
         _neu_token_manager = NEUTokenManager()
     return _neu_token_manager
+
 
 def reset_neu_token_manager() -> None:
     """重置全局 NEU Token Manager（用于测试）"""

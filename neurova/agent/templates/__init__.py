@@ -12,22 +12,22 @@ Agent 协作模板模块
 """
 
 from .collaboration_template import (
-    CollaborationTemplate,
-    TemplateType,
     AgentRole,
+    CollaborationTemplate,
     TaskStep,
-    WorkflowDefinition,
     TemplateManager,
+    TemplateType,
+    WorkflowDefinition,
     get_template_manager,
 )
+from .personality_templates import PersonalityTemplate
 from .preset_templates import (
-    PRESET_TEMPLATES,
     CODE_REVIEW_TEMPLATE,
-    PAIR_PROGRAMMING_TEMPLATE,
     DIAGNOSTIC_TEMPLATE,
     KNOWLEDGE_SHARING_TEMPLATE,
+    PAIR_PROGRAMMING_TEMPLATE,
+    PRESET_TEMPLATES,
 )
-from .personality_templates import PersonalityTemplate
 
 __all__ = [
     # 模板核心

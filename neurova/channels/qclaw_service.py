@@ -8,15 +8,15 @@ QClaw 服务类
 4. 消息签名验证
 """
 
+import hashlib
 import logging
 import time
-import json
-import hashlib
-from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
 try:
-    import re
+    pass
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # QClaw 网关地址（应配置化，不要硬编码）
 QCLAW_API_BASE = "https://jprx.m.qq.com"
 QCLAW_TOKEN_ENDPOINT = "/api/v1/4310"  # 根据实际QClaw API调整
+
 
 class QClawService:
     """
@@ -52,7 +53,7 @@ class QClawService:
         self.token_cache = {}  # 缓存 accessToken，按 appId 索引
         self.binding_model = QClawBindingModel()
 
-        logger.info(f"QClaw 服务已初始化，API地址: {self.api_base}")
+        logger.info("QClaw 服务已初始化，API地址: %s", self.api_base)
 
     def verify_credentials(self, app_id: str, app_secret: str) -> Dict[str, Any]:
         """
@@ -71,11 +72,7 @@ class QClawService:
         if not REQUESTS_AVAILABLE:
             # 模拟模式：假设凭证有效
             logger.warning("模拟模式：假设 QClaw 凭证有效")
-            return {
-                "valid": True,
-                "qclaw_user_id": f"mock_user_{app_id[:8]}",
-                "error": None
-            }
+            return {"valid": True, "qclaw_user_id": f"mock_user_{app_id[:8]}", "error": None}
 
         try:
             # 调用 QClaw 网关校验接口（根据实际API调整）
@@ -83,46 +80,29 @@ class QClawService:
             response = requests.post(
                 f"{self.api_base}{QCLAW_TOKEN_ENDPOINT}",
                 headers={"Content-Type": "application/json"},
-                json={
-                    "app_id": app_id,
-                    "app_secret": app_secret,
-                    "progress": "verify"  # 自定义进度标识，用于校验
-                },
-                timeout=10
+                json={"app_id": app_id, "app_secret": app_secret, "progress": "verify"},  # 自定义进度标识，用于校验
+                timeout=10,
             )
 
             if response.status_code == 200:
                 data = response.json()
                 # 根据实际返回格式解析
                 if data.get("common", {}).get("code") == 0:
-                    return {
-                        "valid": True,
-                        "qclaw_user_id": data.get("data", {}).get("qclaw_user_id"),
-                        "error": None
-                    }
+                    return {"valid": True, "qclaw_user_id": data.get("data", {}).get("qclaw_user_id"), "error": None}
                 else:
                     return {
                         "valid": False,
                         "qclaw_user_id": None,
-                        "error": data.get("common", {}).get("message", "凭证校验失败")
+                        "error": data.get("common", {}).get("message", "凭证校验失败"),
                     }
             else:
-                return {
-                    "valid": False,
-                    "qclaw_user_id": None,
-                    "error": f"HTTP {response.status_code}"
-                }
+                return {"valid": False, "qclaw_user_id": None, "error": f"HTTP {response.status_code}"}
 
         except Exception as e:
-            logger.error(f"QClaw 凭证校验失败: {e}")
-            return {
-                "valid": False,
-                "qclaw_user_id": None,
-                "error": str(e)
-            }
+            logger.error("QClaw 凭证校验失败: %s", e)
+            return {"valid": False, "qclaw_user_id": None, "error": str(e)}
 
-    def get_access_token(self, app_id: str, app_secret: str,
-                         force_refresh: bool = False) -> Optional[str]:
+    def get_access_token(self, app_id: str, app_secret: str, force_refresh: bool = False) -> Optional[str]:
         """
         获取 accessToken（带缓存）
 
@@ -138,16 +118,13 @@ class QClawService:
         if not force_refresh and app_id in self.token_cache:
             cached = self.token_cache[app_id]
             if datetime.now() < cached["expires_at"]:
-                logger.debug(f"使用缓存的 accessToken (app_id: {app_id[:4]}****)")
+                logger.debug("使用缓存的 accessToken (app_id: %s****)", app_id[:4])
                 return cached["token"]
 
         if not REQUESTS_AVAILABLE:
             # 模拟模式
             mock_token = f"mock_token_{app_id[:8]}_{int(time.time())}"
-            self.token_cache[app_id] = {
-                "token": mock_token,
-                "expires_at": datetime.now() + timedelta(hours=2)
-            }
+            self.token_cache[app_id] = {"token": mock_token, "expires_at": datetime.now() + timedelta(hours=2)}
             return mock_token
 
         try:
@@ -155,12 +132,8 @@ class QClawService:
             response = requests.post(
                 f"{self.api_base}{QCLAW_TOKEN_ENDPOINT}",
                 headers={"Content-Type": "application/json"},
-                json={
-                    "app_id": app_id,
-                    "app_secret": app_secret,
-                    "grant_type": "client_credentials"
-                },
-                timeout=10
+                json={"app_id": app_id, "app_secret": app_secret, "grant_type": "client_credentials"},
+                timeout=10,
             )
 
             if response.status_code == 200:
@@ -173,25 +146,25 @@ class QClawService:
                     # 缓存 token
                     self.token_cache[app_id] = {
                         "token": token,
-                        "expires_at": datetime.now() + timedelta(seconds=expires_in)
+                        "expires_at": datetime.now() + timedelta(seconds=expires_in),
                     }
 
-                    logger.info(f"获取 accessToken 成功 (app_id: {app_id[:4]}****)")
+                    logger.info("获取 accessToken 成功 (app_id: %s****)", app_id[:4])
                     return token
                 else:
-                    logger.error(f"获取 accessToken 失败: {data.get('common', {}).get('message')}")
+                    logger.error("获取 accessToken 失败: %s", data.get('common', {}).get('message', 'unknown'))
                     return None
             else:
-                logger.error(f"获取 accessToken HTTP 错误: {response.status_code}")
+                logger.error("获取 accessToken HTTP 错误: %s", response.status_code)
                 return None
 
         except Exception as e:
-            logger.error(f"获取 accessToken 异常: {e}")
+            logger.error("获取 accessToken 异常: %s", e)
             return None
 
-    def send_message(self, app_id: str, app_secret: str,
-                     chat_id: str, content: str,
-                     content_type: str = "text") -> Dict[str, Any]:
+    def send_message(
+        self, app_id: str, app_secret: str, chat_id: str, content: str, content_type: str = "text"
+    ) -> Dict[str, Any]:
         """
         发送消息到 QClaw
 
@@ -208,62 +181,36 @@ class QClawService:
         # 获取 accessToken
         access_token = self.get_access_token(app_id, app_secret)
         if not access_token:
-            return {
-                "success": False,
-                "error": "获取 accessToken 失败"
-            }
+            return {"success": False, "error": "获取 accessToken 失败"}
 
         if not REQUESTS_AVAILABLE:
             # 模拟模式
             logger.warning("模拟模式：模拟发送消息成功")
-            return {
-                "success": True,
-                "message_id": f"mock_msg_{int(time.time())}"
-            }
+            return {"success": True, "message_id": f"mock_msg_{int(time.time())}"}
 
         try:
             # 调用 QClaw 消息发送接口（根据实际API调整）
             response = requests.post(
                 f"{self.api_base}/api/v1/message/send",  # 假设接口地址
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {access_token}"
-                },
-                json={
-                    "chat_id": chat_id,
-                    "content": content,
-                    "content_type": content_type
-                },
-                timeout=10
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"},
+                json={"chat_id": chat_id, "content": content, "content_type": content_type},
+                timeout=10,
             )
 
             if response.status_code == 200:
                 data = response.json()
                 if data.get("common", {}).get("code") == 0:
-                    return {
-                        "success": True,
-                        "message_id": data.get("data", {}).get("message_id")
-                    }
+                    return {"success": True, "message_id": data.get("data", {}).get("message_id")}
                 else:
-                    return {
-                        "success": False,
-                        "error": data.get("common", {}).get("message", "发送失败")
-                    }
+                    return {"success": False, "error": data.get("common", {}).get("message", "发送失败")}
             else:
-                return {
-                    "success": False,
-                    "error": f"HTTP {response.status_code}"
-                }
+                return {"success": False, "error": f"HTTP {response.status_code}"}
 
         except Exception as e:
-            logger.error(f"发送消息到 QClaw 失败: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            logger.error("发送消息到 QClaw 失败: %s", e)
+            return {"success": False, "error": str(e)}
 
-    def verify_signature(self, signature: str, body: str,
-                         app_secret: str) -> bool:
+    def verify_signature(self, signature: str, body: str, app_secret: str) -> bool:
         """
         验证 QClaw 回调签名
 
@@ -276,11 +223,7 @@ class QClawService:
             签名是否有效
         """
         # 根据实际签名算法实现（这里使用HMAC-SHA256示例）
-        expected_signature = hmac.new(
-            app_secret.encode(),
-            body.encode(),
-            hashlib.sha256
-        ).hexdigest()
+        expected_signature = hmac.new(app_secret.encode(), body.encode(), hashlib.sha256).hexdigest()
 
         # 安全比较（防止时序攻击）
         return hmac.compare_digest(signature, expected_signature)
@@ -298,8 +241,7 @@ class QClawService:
         """
         return self.binding_model.get_binding_by_user(neuser_id, user_id)
 
-    def create_binding(self, neuser_id: str, user_id: str,
-                       app_id: str, app_secret: str) -> Dict[str, Any]:
+    def create_binding(self, neuser_id: str, user_id: str, app_id: str, app_secret: str) -> Dict[str, Any]:
         """
         创建 QClaw 绑定
 
@@ -315,10 +257,7 @@ class QClawService:
         # 1. 校验凭证
         verify_result = self.verify_credentials(app_id, app_secret)
         if not verify_result["valid"]:
-            return {
-                "success": False,
-                "error": verify_result["error"]
-            }
+            return {"success": False, "error": verify_result["error"]}
 
         # 2. 创建绑定
         try:
@@ -327,18 +266,12 @@ class QClawService:
                 user_id=user_id,
                 app_id=app_id,
                 app_secret=app_secret,
-                qclaw_user_id=verify_result["qclaw_user_id"]
+                qclaw_user_id=verify_result["qclaw_user_id"],
             )
 
-            return {
-                "success": True,
-                "binding": binding
-            }
+            return {"success": True, "binding": binding}
         except ValueError as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     def delete_binding(self, binding_id: int):
         """
@@ -362,8 +295,10 @@ class QClawService:
         """
         self.binding_model.update_last_used(binding_id)
 
+
 # 全局单例
 _qclaw_service_instance: Optional[QClawService] = None
+
 
 def get_qclaw_service() -> QClawService:
     """

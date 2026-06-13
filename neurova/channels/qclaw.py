@@ -5,28 +5,28 @@ QClaw 消息渠道适配器
 通过 QClaw 网关与 QClaw 管家通信。
 """
 
+import json
 import logging
 import time
-import json
-from typing import Optional, Dict, Any, List
 from datetime import datetime
+from typing import Any, Dict, Optional
 
 try:
-    import re
+    pass
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
     logging.warning("requests 库未安装，QClaw 适配器将使用模拟模式")
 
-from neurova.channels import (
-    ChannelAdapter, MessageChannel, UnifiedMessage, ContentType
-)
+from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
 from neurova.channels.qclaw_service import get_qclaw_service
 
 logger = logging.getLogger(__name__)
 
 # QClaw 网关地址（应配置化，不要硬编码）
 QCLAW_API_BASE = "https://jprx.m.qq.com"
+
 
 class QClawAdapter(ChannelAdapter):
     """
@@ -88,25 +88,21 @@ class QClawAdapter(ChannelAdapter):
         self.qclaw_service = get_qclaw_service()
 
         # 验证凭证
-        verify_result = self.qclaw_service.verify_credentials(
-            self.app_id, self.app_secret
-        )
+        verify_result = self.qclaw_service.verify_credentials(self.app_id, self.app_secret)
 
         if not verify_result["valid"]:
-            logger.error(f"QClaw 认证失败: {verify_result['error']}")
+            logger.error("QClaw 认证失败: %s", verify_result['error'])
             return False
 
         # 获取 access_token
-        access_token = self.qclaw_service.get_access_token(
-            self.app_id, self.app_secret
-        )
+        access_token = self.qclaw_service.get_access_token(self.app_id, self.app_secret)
 
         if not access_token:
             logger.error("QClaw 认证失败: 无法获取 access_token")
             return False
 
         self.access_token = access_token
-        logger.info(f"QClaw 认证成功 (app_id: {self.app_id[:4]}****)")
+        logger.info("QClaw 认证成功 (app_id: %s****)", self.app_id[:4])
         return True
 
     def send_message(self, message: UnifiedMessage) -> bool:
@@ -136,7 +132,7 @@ class QClawAdapter(ChannelAdapter):
                 app_secret=self.app_secret,
                 chat_id=chat_id,
                 content=message.content,
-                content_type="text"
+                content_type="text",
             )
         elif message.content_type == ContentType.IMAGE:
             # 发送图片
@@ -151,14 +147,14 @@ class QClawAdapter(ChannelAdapter):
             # 发送文件
             result = self._send_media_message(chat_id, message, "file")
         else:
-            logger.warning(f"不支持的消息类型: {message.content_type}")
+            logger.warning("不支持的消息类型: %s", message.content_type)
             return False
 
         if result["success"]:
-            logger.debug(f"消息发送成功: {result.get('message_id')}")
+            logger.debug("消息发送成功: %s", result.get('message_id'))
             return True
         else:
-            logger.error(f"消息发送失败: {result.get('error')}")
+            logger.error("消息发送失败: %s", result.get('error'))
             return False
 
     def receive_message(self) -> Optional[UnifiedMessage]:
@@ -223,10 +219,10 @@ class QClawAdapter(ChannelAdapter):
             metadata={
                 "raw_data": data,
                 "chat_id": chat_id,
-            }
+            },
         )
 
-        logger.debug(f"解析 QClaw 消息: {message_id}, 类型: {msg_type}")
+        logger.debug("解析 QClaw 消息: %s, 类型: %s", message_id, msg_type)
         return message
 
     def get_channel_config(self) -> Dict[str, Any]:
@@ -237,8 +233,7 @@ class QClawAdapter(ChannelAdapter):
             "binding_id": self.binding_id,
         }
 
-    def _send_media_message(self, chat_id: str, message: UnifiedMessage,
-                            media_type: str) -> Dict[str, Any]:
+    def _send_media_message(self, chat_id: str, message: UnifiedMessage, media_type: str) -> Dict[str, Any]:
         """
         发送媒体消息
 
@@ -251,10 +246,7 @@ class QClawAdapter(ChannelAdapter):
             发送结果字典
         """
         if not self.qclaw_service:
-            return {
-                "success": False,
-                "error": "QClaw 服务未初始化"
-            }
+            return {"success": False, "error": "QClaw 服务未初始化"}
 
         # 获取媒体文件 URL 或路径
         file_url = message.file_url
@@ -263,72 +255,41 @@ class QClawAdapter(ChannelAdapter):
             file_url = message.metadata.get("image_url", "")
 
         if not file_url:
-            return {
-                "success": False,
-                "error": "缺少媒体文件 URL"
-            }
+            return {"success": False, "error": "缺少媒体文件 URL"}
 
         # 调用 QClaw 服务发送媒体消息
         # 注意：这里需要根据 QClaw API 的实际实现调整
         if not REQUESTS_AVAILABLE:
             # 模拟模式
             logger.warning("模拟模式：模拟发送媒体消息成功")
-            return {
-                "success": True,
-                "message_id": f"mock_media_{int(time.time())}"
-            }
+            return {"success": True, "message_id": f"mock_media_{int(time.time())}"}
 
         try:
             # 获取 access_token
-            access_token = self.qclaw_service.get_access_token(
-                self.app_id, self.app_secret
-            )
+            access_token = self.qclaw_service.get_access_token(self.app_id, self.app_secret)
             if not access_token:
-                return {
-                    "success": False,
-                    "error": "无法获取 access_token"
-                }
+                return {"success": False, "error": "无法获取 access_token"}
 
             # 调用 QClaw 媒体消息发送接口（根据实际API调整）
             response = requests.post(
                 f"{QCLAW_API_BASE}/api/v1/message/send_media",
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {access_token}"
-                },
-                json={
-                    "chat_id": chat_id,
-                    "media_type": media_type,
-                    "file_url": file_url,
-                    "caption": message.content
-                },
-                timeout=10
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"},
+                json={"chat_id": chat_id, "media_type": media_type, "file_url": file_url, "caption": message.content},
+                timeout=10,
             )
 
             if response.status_code == 200:
                 data = response.json()
                 if data.get("common", {}).get("code") == 0:
-                    return {
-                        "success": True,
-                        "message_id": data.get("data", {}).get("message_id")
-                    }
+                    return {"success": True, "message_id": data.get("data", {}).get("message_id")}
                 else:
-                    return {
-                        "success": False,
-                        "error": data.get("common", {}).get("message", "发送失败")
-                    }
+                    return {"success": False, "error": data.get("common", {}).get("message", "发送失败")}
             else:
-                return {
-                    "success": False,
-                    "error": f"HTTP {response.status_code}"
-                }
+                return {"success": False, "error": f"HTTP {response.status_code}"}
 
         except Exception as e:
-            logger.error(f"发送媒体消息到 QClaw 失败: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            logger.error("发送媒体消息到 QClaw 失败: %s", e)
+            return {"success": False, "error": str(e)}
 
     def _create_error_message(self, error_msg: str) -> UnifiedMessage:
         """

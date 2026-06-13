@@ -10,7 +10,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -103,11 +102,7 @@ class MCPClientManager:
         with self._lock:
             if status is None:
                 return [dict(c) for c in self._clients.values()]
-            return [
-                dict(c)
-                for c in self._clients.values()
-                if c.get("status") == status
-            ]
+            return [dict(c) for c in self._clients.values() if c.get("status") == status]
 
     def unregister_client(self, client_id: str) -> bool:
         with self._lock:

@@ -9,26 +9,24 @@
 - 价格监控
 - 客户服务
 """
+
 import time
 import uuid
-from typing import Dict, List, Any
+from typing import List
 
-from ..models import (
-    WorkflowDefinition, WorkflowNode, WorkflowEdge, WorkflowVariable,
-    WorkflowStatus, NodeCategory
-)
+from ..models import WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus, WorkflowVariable
 
 
 def get_ecommerce_template() -> WorkflowDefinition:
     """获取电商运营工作流模板
-    
+
     Returns:
         预定义的电商运营工作流定义
     """
     nodes = _create_nodes()
     edges = _create_edges()
     variables = _create_variables()
-    
+
     return WorkflowDefinition(
         id=f"template_ecommerce_{uuid.uuid4().hex[:8]}",
         name="电商运营",
@@ -50,7 +48,7 @@ def get_ecommerce_template() -> WorkflowDefinition:
             "estimated_time": "15-30 minutes",
             "required_skills": ["ecommerce", "marketing", "customer-service"],
             "description": "自动化电商运营流程",
-        }
+        },
     )
 
 
@@ -79,12 +77,11 @@ def _create_nodes() -> List[WorkflowNode]:
                         "options": ["价格监控", "库存监控", "评价监控", "竞品监控"],
                         "default": "价格监控",
                         "description": "监控类型",
-                    }
+                    },
                 }
             },
             label="开始",
         ),
-        
         WorkflowNode(
             id="monitor",
             type="builtin:price-monitor",
@@ -95,7 +92,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="商品监控",
         ),
-        
         WorkflowNode(
             id="analyze",
             type="builtin:llm",
@@ -120,7 +116,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="价格分析",
         ),
-        
         WorkflowNode(
             id="ad_copy",
             type="builtin:ad-copy",
@@ -132,7 +127,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="广告文案",
         ),
-        
         WorkflowNode(
             id="review_respond",
             type="builtin:review-respond",
@@ -144,7 +138,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="评价回复",
         ),
-        
         WorkflowNode(
             id="merge",
             type="builtin:merge",
@@ -154,7 +147,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="结果合并",
         ),
-        
         WorkflowNode(
             id="end",
             type="builtin:end",

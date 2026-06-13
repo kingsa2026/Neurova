@@ -14,30 +14,32 @@ import asyncio
 import base64
 import json
 import logging
-import os
 import threading
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 # 可选依赖
 try:
-    import playwright.async_api
+    pass
+
     HAS_PLAYWRIGHT = True
 except ImportError:
     HAS_PLAYWRIGHT = False
 
 try:
     import scrapling.fetchers
+
     HAS_SCRAPLING = True
 except ImportError:
     HAS_SCRAPLING = False
 
 try:
     import websockets
+
     HAS_WEBSOCKETS = True
 except ImportError:
     HAS_WEBSOCKETS = False
@@ -46,6 +48,7 @@ except ImportError:
 @dataclass
 class BrowserResult:
     """浏览器操作结果"""
+
     success: bool
     data: Optional[Any] = None
     error: Optional[str] = None
@@ -68,7 +71,7 @@ class BrowserResult:
 
 class DialogHandler:
     """对话框处理器"""
-    
+
     def __init__(self, auto_accept: bool = True):
         self._auto_accept = auto_accept
         self._dialogs: List[Dict[str, Any]] = []
@@ -82,7 +85,7 @@ class DialogHandler:
             "timestamp": time.time(),
         }
         self._dialogs.append(dialog_info)
-        
+
         if self._auto_accept:
             await dialog.accept()
         else:
@@ -97,7 +100,7 @@ class DialogHandler:
 
 class BrowserSupervisor:
     """浏览器监控器（CDP WebSocket）"""
-    
+
     def __init__(self, ws_url: str):
         self._ws_url = ws_url
         self._ws = None
@@ -109,7 +112,7 @@ class BrowserSupervisor:
         if not HAS_WEBSOCKETS:
             logger.warning("websockets not available")
             return False
-        
+
         try:
             self._ws = await websockets.connect(self._ws_url)
             self._running = True
@@ -123,15 +126,15 @@ class BrowserSupervisor:
     async def send(self, method: str, params: Optional[Dict[str, Any]] = None) -> Any:
         if not self._ws:
             raise RuntimeError("Not connected")
-        
+
         msg_id = self._next_id()
         message = {"id": msg_id, "method": method, "params": params or {}}
-        
+
         future = asyncio.get_event_loop().create_future()
         self._pending_responses[msg_id] = future
-        
+
         await self._ws.send(json.dumps(message))
-        
+
         try:
             return await asyncio.wait_for(future, timeout=30.0)
         except asyncio.TimeoutError:
@@ -174,7 +177,7 @@ class BrowserSupervisor:
 
 class CamofoxAdapter:
     """Camofox 反检测浏览器适配器"""
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self._config = config or {}
         self._port = self._config.get("port", 9222)
@@ -188,7 +191,9 @@ class CamofoxAdapter:
                 await supervisor.send("Page.navigate", {"url": url})
                 await supervisor.disconnect()
                 return BrowserResult(success=True, url=url, duration_ms=(time.time() - start_time) * 1000)
-            return BrowserResult(success=False, error="Failed to connect to Camofox", duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=False, error="Failed to connect to Camofox", duration_ms=(time.time() - start_time) * 1000
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -199,8 +204,14 @@ class CamofoxAdapter:
             if await supervisor.connect():
                 result = await supervisor.send("Page.captureScreenshot", {"format": "png"})
                 await supervisor.disconnect()
-                return BrowserResult(success=True, screenshot=result.get("data") if result else None, duration_ms=(time.time() - start_time) * 1000)
-            return BrowserResult(success=False, error="Failed to connect", duration_ms=(time.time() - start_time) * 1000)
+                return BrowserResult(
+                    success=True,
+                    screenshot=result.get("data") if result else None,
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            return BrowserResult(
+                success=False, error="Failed to connect", duration_ms=(time.time() - start_time) * 1000
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -211,8 +222,14 @@ class CamofoxAdapter:
             if await supervisor.connect():
                 result = await supervisor.send("Runtime.evaluate", {"expression": "document.body.innerText"})
                 await supervisor.disconnect()
-                return BrowserResult(success=True, data=result.get("result", {}).get("value") if result else None, duration_ms=(time.time() - start_time) * 1000)
-            return BrowserResult(success=False, error="Failed to connect", duration_ms=(time.time() - start_time) * 1000)
+                return BrowserResult(
+                    success=True,
+                    data=result.get("result", {}).get("value") if result else None,
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            return BrowserResult(
+                success=False, error="Failed to connect", duration_ms=(time.time() - start_time) * 1000
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -222,7 +239,7 @@ class CamofoxAdapter:
 
 class ScraplingSpiderTool:
     """Scrapling 爬虫工具"""
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self._config = config or {}
         self._spiders: Dict[str, Any] = {}
@@ -230,7 +247,7 @@ class ScraplingSpiderTool:
     def create_spider(self, name: str, start_urls: List[str], **kwargs) -> str:
         if not HAS_SCRAPLING:
             raise RuntimeError("Scrapling not available")
-        
+
         spider_id = f"spider_{name}_{int(time.time())}"
         self._spiders[spider_id] = {"name": name, "start_urls": start_urls, "status": "created", **kwargs}
         return spider_id
@@ -239,10 +256,10 @@ class ScraplingSpiderTool:
         start_time = time.time()
         if spider_id not in self._spiders:
             return BrowserResult(success=False, error=f"Spider not found: {spider_id}")
-        
+
         spider = self._spiders[spider_id]
         spider["status"] = "running"
-        
+
         try:
             results = []
             for url in spider["start_urls"]:
@@ -251,7 +268,7 @@ class ScraplingSpiderTool:
                     results.append({"url": url, "text": page.text[:1000] if page.text else ""})
                 except Exception as e:
                     results.append({"url": url, "error": str(e)})
-            
+
             spider["status"] = "completed"
             return BrowserResult(success=True, data=results, duration_ms=(time.time() - start_time) * 1000)
         except Exception as e:
@@ -273,7 +290,7 @@ class ScraplingSpiderTool:
 
 class BrowserBackend(ABC):
     """浏览器后端基类"""
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self._config = config or {}
         self._initialized = False
@@ -321,7 +338,7 @@ class BrowserBackend(ABC):
 
 class PlaywrightBackend(BrowserBackend):
     """Playwright 浏览器后端"""
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
         self._browser = None
@@ -335,6 +352,7 @@ class PlaywrightBackend(BrowserBackend):
             return False
         try:
             from playwright.async_api import async_playwright
+
             self._playwright = await async_playwright().start()
             self._browser = await self._playwright.chromium.launch(headless=self._headless)
             self._context = await self._browser.new_context()
@@ -351,7 +369,9 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             await self._page.goto(url, wait_until="networkidle")
-            return BrowserResult(success=True, url=url, title=await self._page.title(), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=True, url=url, title=await self._page.title(), duration_ms=(time.time() - start_time) * 1000
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -361,7 +381,13 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             screenshot_bytes = await self._page.screenshot()
-            return BrowserResult(success=True, screenshot=base64.b64encode(screenshot_bytes).decode(), url=self._page.url, title=await self._page.title(), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=True,
+                screenshot=base64.b64encode(screenshot_bytes).decode(),
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -371,7 +397,12 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             await self._page.click(selector)
-            return BrowserResult(success=True, url=self._page.url, title=await self._page.title(), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=True,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -381,7 +412,12 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             await self._page.fill(selector, text)
-            return BrowserResult(success=True, url=self._page.url, title=await self._page.title(), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=True,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -391,7 +427,13 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             text = await self._page.evaluate("() => document.body.innerText")
-            return BrowserResult(success=True, data=text, url=self._page.url, title=await self._page.title(), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=True,
+                data=text,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -403,7 +445,13 @@ class PlaywrightBackend(BrowserBackend):
             links = await self._page.evaluate("""
                 () => Array.from(document.querySelectorAll('a[href]')).map(a => ({text: a.innerText, href: a.href}))
             """)
-            return BrowserResult(success=True, data=links, url=self._page.url, title=await self._page.title(), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=True,
+                data=links,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -413,7 +461,13 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             result = await self._page.evaluate(script)
-            return BrowserResult(success=True, data=result, url=self._page.url, title=await self._page.title(), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=True,
+                data=result,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -423,7 +477,13 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             content = await self._page.content()
-            return BrowserResult(success=True, data=content[:10000] + "..." if len(content) > 10000 else content, url=self._page.url, title=await self._page.title(), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=True,
+                data=content[:10000] + "..." if len(content) > 10000 else content,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -435,7 +495,7 @@ class PlaywrightBackend(BrowserBackend):
                 await self._context.close()
             if self._browser:
                 await self._browser.close()
-            if hasattr(self, '_playwright'):
+            if hasattr(self, "_playwright"):
                 await self._playwright.stop()
         except Exception as e:
             logger.error("Error closing Playwright: %s", str(e))
@@ -443,7 +503,7 @@ class PlaywrightBackend(BrowserBackend):
 
 class ScraplingBackend(BrowserBackend):
     """Scrapling 浏览器后端"""
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
         self._fetcher = None
@@ -467,7 +527,12 @@ class ScraplingBackend(BrowserBackend):
             if not self._fetcher:
                 raise RuntimeError("Not initialized")
             self._current_page = self._fetcher.get(url)
-            return BrowserResult(success=True, url=url, title=getattr(self._current_page, 'title', ''), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=True,
+                url=url,
+                title=getattr(self._current_page, "title", ""),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -485,7 +550,11 @@ class ScraplingBackend(BrowserBackend):
         try:
             if not self._current_page:
                 raise RuntimeError("No page loaded")
-            return BrowserResult(success=True, data=getattr(self._current_page, 'text', ''), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(
+                success=True,
+                data=getattr(self._current_page, "text", ""),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
@@ -494,7 +563,10 @@ class ScraplingBackend(BrowserBackend):
         try:
             if not self._current_page:
                 raise RuntimeError("No page loaded")
-            links = [{"text": getattr(link, 'text', ''), "href": getattr(link, 'url', '')} for link in getattr(self._current_page, 'links', [])]
+            links = [
+                {"text": getattr(link, "text", ""), "href": getattr(link, "url", "")}
+                for link in getattr(self._current_page, "links", [])
+            ]
             return BrowserResult(success=True, data=links, duration_ms=(time.time() - start_time) * 1000)
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
@@ -512,7 +584,7 @@ class ScraplingBackend(BrowserBackend):
 
 class BrowserManager:
     """浏览器管理器"""
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self._config = config or {}
         self._backends: Dict[str, BrowserBackend] = {}
@@ -546,19 +618,19 @@ class BrowserManager:
         """获取并初始化后端"""
         name = self._resolve_backend(backend_name)
         backend = self._backends[name]
-        
+
         if not backend._initialized:
             success = await backend.initialize()
             if not success:
                 raise RuntimeError(f"Failed to initialize backend: {name}")
-        
+
         self._active_backend = backend
         return backend
 
     async def execute(self, action: str, **kwargs) -> BrowserResult:
         """执行浏览器动作"""
         backend = await self._get_backend()
-        
+
         if action == "navigate":
             return await backend.navigate(kwargs.get("url", ""))
         elif action == "screenshot":
@@ -630,7 +702,7 @@ class BrowserManager:
                     results.append({"url": url, "text": text_result.data if text_result.success else ""})
                 else:
                     results.append({"url": url, "error": result.error})
-            
+
             return BrowserResult(success=True, data=results, duration_ms=(time.time() - start_time) * 1000)
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)

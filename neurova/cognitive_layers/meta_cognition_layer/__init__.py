@@ -19,57 +19,57 @@ _logger = logging.getLogger(__name__)
 try:
     from neurova.agent_core import Agent
 except ImportError as _e:
-    _logger.debug(f"Agent 未可用: {_e}")
+    _logger.debug("Agent 未可用: %s", _e)
     Agent = None
 
 try:
     from neurova.skills.models import Skill
 except ImportError as _e:
-    _logger.debug(f"Skill 未可用: {_e}")
+    _logger.debug("Skill 未可用: %s", _e)
     Skill = None
 
 # cognitive_layers imports
 try:
-    import neurova.cognitive_layers.meta_cognition_layer.autonomy_system
+    pass
 except ImportError as _e:
-    _logger.debug(f"autonomy_system 模块未可用: {_e}")
+    _logger.debug("autonomy_system 模块未可用: %s", _e)
 
 try:
-    import neurova.cognitive_layers.meta_cognition_layer.constitution
+    pass
 except ImportError as _e:
-    _logger.debug(f"constitution 模块未可用: {_e}")
+    _logger.debug("constitution 模块未可用: %s", _e)
 
 try:
-    import neurova.cognitive_layers.meta_cognition_layer.growth_log
+    pass
 except ImportError as _e:
-    _logger.debug(f"growth_log 模块未可用: {_e}")
+    _logger.debug("growth_log 模块未可用: %s", _e)
 
 try:
-    import neurova.cognitive_layers.meta_cognition_layer.meta_cognition
+    pass
 except ImportError as _e:
-    _logger.debug(f"meta_cognition 模块未可用: {_e}")
+    _logger.debug("meta_cognition 模块未可用: %s", _e)
 
 try:
-    import neurova.cognitive_layers.meta_cognition_layer.personality
+    pass
 except ImportError as _e:
-    _logger.debug(f"personality 模块未可用: {_e}")
+    _logger.debug("personality 模块未可用: %s", _e)
 
 try:
-    import neurova.cognitive_layers.meta_cognition_layer.question_queue
+    pass
 except ImportError as _e:
-    _logger.debug(f"question_queue 模块未可用: {_e}")
+    _logger.debug("question_queue 模块未可用: %s", _e)
 
 try:
-    import neurova.cognitive_layers.meta_cognition_layer.self_optimization
+    pass
 except ImportError as _e:
-    _logger.debug(f"self_optimization 模块未可用: {_e}")
+    _logger.debug("self_optimization 模块未可用: %s", _e)
 
 try:
-    import neurova.cognitive_layers.meta_cognition_layer.self_reflection
+    pass
 except ImportError as _e:
-    _logger.debug(f"self_reflection 模块未可用: {_e}")
+    _logger.debug("self_reflection 模块未可用: %s", _e)
 
 try:
-    import neurova.cognitive_layers.meta_cognition_layer.skills_manager
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills_manager 模块未可用: {_e}")
+    _logger.debug("skills_manager 模块未可用: %s", _e)

@@ -2,22 +2,28 @@
 记忆接口 - 基本 CRUD
 """
 
-from typing import Optional, Dict, Any
-
-from fastapi import Request, Query, Depends
 from datetime import datetime
+from typing import Any, Dict, Optional
 
+from fastapi import Depends, Query, Request
+
+from neurova.api.auth import get_current_user
 from neurova.interfaces.api_standard import (
-    APIResponse,
     APIError,
+    APIResponse,
     ErrorCodes,
 )
-from neurova.api.auth import get_current_user
 
 from .base import (
-    router, logger, _get_request_id, get_memory_manager,
-    AddMemoryRequest, memory_to_dict, _get_user_ids_from_token,
+    AddMemoryRequest,
+    _get_request_id,
+    _get_user_ids_from_token,
+    get_memory_manager,
+    logger,
+    memory_to_dict,
+    router,
 )
+
 
 @router.get("", summary="搜索记忆")
 async def search_memories(
@@ -50,8 +56,9 @@ async def search_memories(
             )
         raise
     except Exception as e:
-        logger.exception(f"记忆搜索失败: {e}")
+        logger.exception("记忆搜索失败: %s", e)
         raise APIError(ErrorCodes.MEMORY_SEARCH_FAILED, f"记忆搜索失败: {str(e)}") from e
+
 
 @router.post("", summary="添加记忆")
 async def add_memory(
@@ -90,8 +97,9 @@ async def add_memory(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"添加记忆失败: {e}")
+        logger.exception("添加记忆失败: %s", e)
         raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, f"添加记忆失败: {str(e)}") from e
+
 
 @router.get("/stats", summary="获取记忆统计")
 async def get_memory_stats(
@@ -105,8 +113,9 @@ async def get_memory_stats(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取记忆统计失败: {e}")
+        logger.exception("获取记忆统计失败: %s", e)
         raise APIError.internal(f"获取记忆统计失败: {str(e)}")
+
 
 @router.get("/{memory_id}", summary="获取记忆详情")
 async def get_memory(
@@ -129,6 +138,7 @@ async def get_memory(
             raise APIError.not_found(f"记忆不存在: {memory_id}")
 
         from neurova.cognitive_layers.memory_layer.models import Memory
+
         target = Memory.from_dict(memory_data)
 
         return APIResponse.ok(
@@ -140,8 +150,9 @@ async def get_memory(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取记忆失败: {e}")
+        logger.exception("获取记忆失败: %s", e)
         raise APIError(ErrorCodes.MEMORY_NOT_FOUND, f"获取记忆失败: {str(e)}")
+
 
 @router.delete("/{memory_id}", summary="删除记忆")
 async def delete_memory(
@@ -168,8 +179,9 @@ async def delete_memory(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"删除记忆失败: {e}")
+        logger.exception("删除记忆失败: %s", e)
         raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, f"删除记忆失败: {str(e)}")
+
 
 @router.get("/hot", summary="获取高温记忆")
 async def get_hot_memories(
@@ -196,8 +208,9 @@ async def get_hot_memories(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取高温记忆失败: {e}")
+        logger.exception("获取高温记忆失败: %s", e)
         raise APIError.internal(f"获取高温记忆失败: {str(e)}")
+
 
 @router.get("/crystallized", summary="获取固化记忆")
 async def get_crystallized_memories(
@@ -224,8 +237,9 @@ async def get_crystallized_memories(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取固化记忆失败: {e}")
+        logger.exception("获取固化记忆失败: %s", e)
         raise APIError.internal(f"获取固化记忆失败: {str(e)}")
+
 
 @router.post("/decay", summary="执行温度衰减")
 async def run_decay_cycle(
@@ -249,5 +263,5 @@ async def run_decay_cycle(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"温度衰减失败: {e}")
+        logger.exception("温度衰减失败: %s", e)
         raise APIError.internal(f"温度衰减失败: {str(e)}")

@@ -6,20 +6,14 @@ Supports Stable Diffusion Img2Img, DALL-E Variations, Wanx Style Transfer, Contr
 import base64
 import logging
 import time
-import typing
-from typing import Dict, Any, Optional
-
-import http
+from typing import Any, Dict
 
 try:
     import aiohttp
 except ImportError:
     aiohttp = None
 
-from neurova.llm.generators.base import (
-    BaseGenerator, GeneratorType, GenerationConfig, GenerationResult
-)
-
+from neurova.llm.generators.base import BaseGenerator, GenerationConfig, GenerationResult, GeneratorType
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +21,7 @@ logger = logging.getLogger(__name__)
 class ImageToImageGenerator(BaseGenerator):
     """
     图生图生成器
-    
+
     支持多种图生图服务商：
     - Stable Diffusion Img2Img
     - DALL-E Variations
@@ -35,7 +29,7 @@ class ImageToImageGenerator(BaseGenerator):
     - ControlNet
     - Midjourney Vary
     """
-    
+
     # 支持的服务商列表
     _SUPPORTED_PROVIDERS = {
         "stable-diffusion": {
@@ -69,17 +63,17 @@ class ImageToImageGenerator(BaseGenerator):
             "requires_image": True,
         },
     }
-    
+
     def __init__(
         self,
         generator_id: str = "image_to_image",
         api_key: str = "",
         base_url: str = "",
         provider: str = "generic",
-        **kwargs
+        **kwargs,
     ):
         """初始化图生图生成器
-        
+
         Args:
             generator_id: 生成器唯一标识符
             api_key: API 密钥
@@ -87,49 +81,45 @@ class ImageToImageGenerator(BaseGenerator):
             provider: 服务商类型
             **kwargs: 其他配置参数
         """
-        super().__init__(
-            generator_id=generator_id,
-            generator_type=GeneratorType.IMAGE_TO_IMAGE,
-            **kwargs
-        )
+        super().__init__(generator_id=generator_id, generator_type=GeneratorType.IMAGE_TO_IMAGE, **kwargs)
         self.api_key = api_key
         self.base_url = base_url
         self.provider = provider
         self._initialized = True
-        
-        self.logger.info(f"ImageToImageGenerator 初始化完成: provider={provider}")
-    
+
+        self.logger.info("ImageToImageGenerator 初始化完成: provider=%s", provider)
+
     def supports(self, config: GenerationConfig) -> bool:
         """检查是否支持指定的生成配置
-        
+
         Args:
             config: 生成配置
-            
+
         Returns:
             是否支持
         """
         # 检查是否为图生图类型
         if config.type != GeneratorType.IMAGE_TO_IMAGE:
             return False
-        
+
         # 检查服务商是否支持
         if config.extra_params.get("provider") in self._SUPPORTED_PROVIDERS:
             return True
-        
+
         # 默认支持
         return True
-    
+
     async def generate(self, config: GenerationConfig) -> GenerationResult:
         """执行图生图生成
-        
+
         Args:
             config: 生成配置
-            
+
         Returns:
             生成结果
         """
         start_time = time.time()
-        
+
         try:
             # 检查是否提供了输入图片
             input_image = config.extra_params.get("input_image")
@@ -138,10 +128,10 @@ class ImageToImageGenerator(BaseGenerator):
                     error="未提供输入图片",
                     duration=time.time() - start_time,
                 )
-            
+
             # 确定服务商
             provider = config.extra_params.get("provider", self.provider)
-            
+
             # 根据服务商选择生成方法
             if provider == "stable-diffusion":
                 result = await self._generate_sd_img2img(config)
@@ -155,41 +145,43 @@ class ImageToImageGenerator(BaseGenerator):
                 result = await self._generate_midjourney_vary(config)
             else:
                 result = await self._generate_generic(config)
-            
+
             duration = time.time() - start_time
-            
+
             # 更新结果
             result.duration = duration
-            result.metadata.update({
-                "provider": provider,
-                "generator_id": self.generator_id,
-            })
-            
+            result.metadata.update(
+                {
+                    "provider": provider,
+                    "generator_id": self.generator_id,
+                }
+            )
+
             return result
-            
+
         except Exception as e:
             duration = time.time() - start_time
-            self.logger.error(f"图生图生成失败: {e}")
+            self.logger.error("图生图生成失败: %s", e)
             return self._create_error_result(
                 error=str(e),
                 duration=duration,
             )
-    
+
     async def _generate_sd_img2img(self, config: GenerationConfig) -> GenerationResult:
         """Stable Diffusion Img2Img 生成
-        
+
         Args:
             config: 生成配置
-            
+
         Returns:
             生成结果
         """
         if not aiohttp:
             raise ImportError("aiohttp 未安装，无法调用 Stable Diffusion API")
-        
+
         if not self.api_key:
             raise ValueError("API 密钥未配置")
-        
+
         # 获取输入图片
         input_image = config.extra_params.get("input_image")
         if isinstance(input_image, bytes):
@@ -198,7 +190,7 @@ class ImageToImageGenerator(BaseGenerator):
             input_image_b64 = input_image
         else:
             raise ValueError("输入图片格式不支持")
-        
+
         # 构建请求数据
         request_data = {
             "text_prompts": [
@@ -211,32 +203,34 @@ class ImageToImageGenerator(BaseGenerator):
             "samples": 1,
             "steps": config.num_inference_steps,
         }
-        
+
         if config.negative_prompt:
-            request_data["text_prompts"].append({
-                "text": config.negative_prompt,
-                "weight": -1.0,
-            })
-        
+            request_data["text_prompts"].append(
+                {
+                    "text": config.negative_prompt,
+                    "weight": -1.0,
+                }
+            )
+
         if config.seed is not None:
             request_data["seed"] = config.seed
-        
+
         # 发送请求
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{self.base_url}/v1/generation/image-to-image",
                 json=request_data,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=120)
+                timeout=aiohttp.ClientTimeout(total=120),
             ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    
+
                     # 获取图片数据
                     artifacts = data.get("artifacts", [])
                     if artifacts:
@@ -251,7 +245,7 @@ class ImageToImageGenerator(BaseGenerator):
                                     "finish_reason": artifacts[0].get("finishReason"),
                                 },
                             )
-                    
+
                     return self._create_error_result(
                         error="未获取到图片数据",
                         metadata={"response": data},
@@ -262,22 +256,22 @@ class ImageToImageGenerator(BaseGenerator):
                         error=f"API 请求失败: HTTP {response.status}",
                         metadata={"response": error_text},
                     )
-    
+
     async def _generate_dalle_variations(self, config: GenerationConfig) -> GenerationResult:
         """DALL-E Variations 生成
-        
+
         Args:
             config: 生成配置
-            
+
         Returns:
             生成结果
         """
         if not aiohttp:
             raise ImportError("aiohttp 未安装，无法调用 DALL-E API")
-        
+
         if not self.api_key:
             raise ValueError("API 密钥未配置")
-        
+
         # 获取输入图片
         input_image = config.extra_params.get("input_image")
         if isinstance(input_image, bytes):
@@ -286,7 +280,7 @@ class ImageToImageGenerator(BaseGenerator):
             input_image_b64 = input_image
         else:
             raise ValueError("输入图片格式不支持")
-        
+
         # 构建请求数据
         request_data = {
             "model": config.extra_params.get("model", "dall-e-2"),
@@ -295,26 +289,26 @@ class ImageToImageGenerator(BaseGenerator):
             "size": f"{config.width}x{config.height}",
             "response_format": "b64_json",
         }
-        
+
         # 发送请求
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{self.base_url}/v1/images/variations",
                 json=request_data,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=60)
+                timeout=aiohttp.ClientTimeout(total=60),
             ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    
+
                     # 获取图片数据
                     image_data_b64 = data.get("data", [{}])[0].get("b64_json", "")
-                    
+
                     if image_data_b64:
                         image_data = base64.b64decode(image_data_b64)
                         return self._create_success_result(
@@ -324,7 +318,7 @@ class ImageToImageGenerator(BaseGenerator):
                                 "size": request_data["size"],
                             },
                         )
-                    
+
                     return self._create_error_result(
                         error="未获取到图片数据",
                         metadata={"response": data},
@@ -335,22 +329,22 @@ class ImageToImageGenerator(BaseGenerator):
                         error=f"API 请求失败: HTTP {response.status}",
                         metadata={"response": error_text},
                     )
-    
+
     async def _generate_wanx_style_transfer(self, config: GenerationConfig) -> GenerationResult:
         """通义万相风格迁移
-        
+
         Args:
             config: 生成配置
-            
+
         Returns:
             生成结果
         """
         if not aiohttp:
             raise ImportError("aiohttp 未安装，无法调用通义万相 API")
-        
+
         if not self.api_key:
             raise ValueError("API 密钥未配置")
-        
+
         # 获取输入图片
         input_image = config.extra_params.get("input_image")
         if isinstance(input_image, bytes):
@@ -359,7 +353,7 @@ class ImageToImageGenerator(BaseGenerator):
             input_image_b64 = input_image
         else:
             raise ValueError("输入图片格式不支持")
-        
+
         # 构建请求数据
         request_data = {
             "model": config.extra_params.get("model", "wanx-style-v1"),
@@ -372,26 +366,26 @@ class ImageToImageGenerator(BaseGenerator):
                 "seed": config.seed,
             },
         }
-        
+
         # 发送请求
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{self.base_url}/api/v1/services/aigc/image2image/image-synthesis",
                 json=request_data,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=60)
+                timeout=aiohttp.ClientTimeout(total=60),
             ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    
+
                     # 获取图片 URL
                     image_url = data.get("output", {}).get("results", [{}])[0].get("url", "")
-                    
+
                     if image_url:
                         # 下载图片
                         async with session.get(image_url) as img_response:
@@ -405,7 +399,7 @@ class ImageToImageGenerator(BaseGenerator):
                                         "image_url": image_url,
                                     },
                                 )
-                    
+
                     return self._create_error_result(
                         error="未获取到图片数据",
                         metadata={"response": data},
@@ -416,22 +410,22 @@ class ImageToImageGenerator(BaseGenerator):
                         error=f"API 请求失败: HTTP {response.status}",
                         metadata={"response": error_text},
                     )
-    
+
     async def _generate_controlnet(self, config: GenerationConfig) -> GenerationResult:
         """ControlNet 生成
-        
+
         Args:
             config: 生成配置
-            
+
         Returns:
             生成结果
         """
         if not aiohttp:
             raise ImportError("aiohttp 未安装，无法调用 ControlNet API")
-        
+
         if not self.api_key:
             raise ValueError("API 密钥未配置")
-        
+
         # 获取输入图片
         input_image = config.extra_params.get("input_image")
         if isinstance(input_image, bytes):
@@ -440,7 +434,7 @@ class ImageToImageGenerator(BaseGenerator):
             input_image_b64 = input_image
         else:
             raise ValueError("输入图片格式不支持")
-        
+
         # 构建请求数据
         request_data = {
             "prompt": config.prompt,
@@ -455,26 +449,26 @@ class ImageToImageGenerator(BaseGenerator):
             "guidance_scale": config.guidance_scale,
             "seed": config.seed,
         }
-        
+
         # 发送请求
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{self.base_url}/generate",
                 json=request_data,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=120)
+                timeout=aiohttp.ClientTimeout(total=120),
             ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    
+
                     # 尝试获取图片数据
                     image_data = None
-                    
+
                     # 尝试不同的响应格式
                     if "image" in data:
                         image_data = base64.b64decode(data["image"])
@@ -483,7 +477,7 @@ class ImageToImageGenerator(BaseGenerator):
                             image_data = base64.b64decode(data["output"])
                         elif isinstance(data["output"], dict) and "image" in data["output"]:
                             image_data = base64.b64decode(data["output"]["image"])
-                    
+
                     if image_data:
                         return self._create_success_result(
                             output_data=image_data,
@@ -493,7 +487,7 @@ class ImageToImageGenerator(BaseGenerator):
                                 "control_strength": request_data["control_strength"],
                             },
                         )
-                    
+
                     return self._create_error_result(
                         error="未获取到图片数据",
                         metadata={"response": data},
@@ -504,25 +498,25 @@ class ImageToImageGenerator(BaseGenerator):
                         error=f"API 请求失败: HTTP {response.status}",
                         metadata={"response": error_text},
                     )
-    
+
     async def _generate_midjourney_vary(self, config: GenerationConfig) -> GenerationResult:
         """Midjourney Vary 生成
-        
+
         Args:
             config: 生成配置
-            
+
         Returns:
             生成结果
         """
         # Midjourney 通常通过 Discord Bot 或第三方 API 调用
         # 这里提供一个通用的实现框架
-        
+
         if not aiohttp:
             raise ImportError("aiohttp 未安装，无法调用 Midjourney API")
-        
+
         if not self.api_key:
             raise ValueError("API 密钥未配置")
-        
+
         # 获取输入图片
         input_image = config.extra_params.get("input_image")
         if isinstance(input_image, bytes):
@@ -531,7 +525,7 @@ class ImageToImageGenerator(BaseGenerator):
             input_image_b64 = input_image
         else:
             raise ValueError("输入图片格式不支持")
-        
+
         # 构建请求数据（Midjourney API 格式）
         request_data = {
             "prompt": config.prompt,
@@ -539,26 +533,26 @@ class ImageToImageGenerator(BaseGenerator):
             "action": "vary",
             "strength": config.extra_params.get("strength", 0.7),
         }
-        
+
         # 发送请求
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{self.base_url}/v1/generations",
                 json=request_data,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=120)
+                timeout=aiohttp.ClientTimeout(total=120),
             ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    
+
                     # 尝试获取图片数据
                     image_data = None
-                    
+
                     # 尝试不同的响应格式
                     if "image" in data:
                         image_data = base64.b64decode(data["image"])
@@ -567,7 +561,7 @@ class ImageToImageGenerator(BaseGenerator):
                             image_data = base64.b64decode(data["output"])
                         elif isinstance(data["output"], dict) and "image" in data["output"]:
                             image_data = base64.b64decode(data["output"]["image"])
-                    
+
                     if image_data:
                         return self._create_success_result(
                             output_data=image_data,
@@ -576,7 +570,7 @@ class ImageToImageGenerator(BaseGenerator):
                                 "action": "vary",
                             },
                         )
-                    
+
                     return self._create_error_result(
                         error="未获取到图片数据",
                         metadata={"response": data},
@@ -587,22 +581,22 @@ class ImageToImageGenerator(BaseGenerator):
                         error=f"API 请求失败: HTTP {response.status}",
                         metadata={"response": error_text},
                     )
-    
+
     async def _generate_generic(self, config: GenerationConfig) -> GenerationResult:
         """通用 API 生成
-        
+
         Args:
             config: 生成配置
-            
+
         Returns:
             生成结果
         """
         if not aiohttp:
             raise ImportError("aiohttp 未安装，无法调用通用 API")
-        
+
         if not self.api_key:
             raise ValueError("API 密钥未配置")
-        
+
         # 获取输入图片
         input_image = config.extra_params.get("input_image")
         if isinstance(input_image, bytes):
@@ -611,7 +605,7 @@ class ImageToImageGenerator(BaseGenerator):
             input_image_b64 = input_image
         else:
             raise ValueError("输入图片格式不支持")
-        
+
         # 构建请求数据
         request_data = {
             "prompt": config.prompt,
@@ -624,26 +618,26 @@ class ImageToImageGenerator(BaseGenerator):
             "strength": config.extra_params.get("strength", 0.75),
             "seed": config.seed,
         }
-        
+
         # 发送请求
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{self.base_url}/generate",
                 json=request_data,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=120)
+                timeout=aiohttp.ClientTimeout(total=120),
             ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    
+
                     # 尝试获取图片数据
                     image_data = None
-                    
+
                     # 尝试不同的响应格式
                     if "image" in data:
                         image_data = base64.b64decode(data["image"])
@@ -652,7 +646,7 @@ class ImageToImageGenerator(BaseGenerator):
                             image_data = base64.b64decode(data["output"])
                         elif isinstance(data["output"], dict) and "image" in data["output"]:
                             image_data = base64.b64decode(data["output"]["image"])
-                    
+
                     if image_data:
                         return self._create_success_result(
                             output_data=image_data,
@@ -661,7 +655,7 @@ class ImageToImageGenerator(BaseGenerator):
                                 "strength": request_data["strength"],
                             },
                         )
-                    
+
                     return self._create_error_result(
                         error="未获取到图片数据",
                         metadata={"response": data},
@@ -672,10 +666,10 @@ class ImageToImageGenerator(BaseGenerator):
                         error=f"API 请求失败: HTTP {response.status}",
                         metadata={"response": error_text},
                     )
-    
+
     def get_supported_providers(self) -> Dict[str, Dict[str, Any]]:
         """获取支持的服务商列表
-        
+
         Returns:
             服务商信息字典
         """
@@ -684,26 +678,19 @@ class ImageToImageGenerator(BaseGenerator):
 
 # 工厂函数
 def create_image_to_image_generator(
-    api_key: str = "",
-    base_url: str = "",
-    provider: str = "generic",
-    **kwargs
+    api_key: str = "", base_url: str = "", provider: str = "generic", **kwargs
 ) -> ImageToImageGenerator:
     """创建图生图生成器实例
-    
+
     Args:
         api_key: API 密钥
         base_url: API 基础 URL
         provider: 服务商类型
         **kwargs: 其他配置参数
-        
+
     Returns:
         ImageToImageGenerator 实例
     """
     return ImageToImageGenerator(
-        generator_id="image_to_image",
-        api_key=api_key,
-        base_url=base_url,
-        provider=provider,
-        **kwargs
+        generator_id="image_to_image", api_key=api_key, base_url=base_url, provider=provider, **kwargs
     )

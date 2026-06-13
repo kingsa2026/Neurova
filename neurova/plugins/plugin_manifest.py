@@ -11,24 +11,22 @@ from __future__ import annotations
 - 清单校验与序列化
 """
 
-from dataclasses import dataclass
-import enum
 import json
-import re
 import typing
-
+from dataclasses import dataclass
 from enum import Enum
+
 
 class SemVersion:
     """
     语义化版本
-    
+
     遵循 SemVer 2.0.0 规范：主版本号.次版本号.修订号
     """
-    
+
     def __init__(self, version_str: str = "0.0.0"):
         """初始化版本
-        
+
         Args:
             version_str: 版本字符串，格式为 "主版本号.次版本号.修订号"
         """
@@ -37,50 +35,54 @@ class SemVersion:
         self.patch = 0
         self.prerelease = ""
         self.build = ""
-        
+
         self._parse(version_str)
-    
+
     def _parse(self, version_str: str) -> None:
         """解析版本字符串
-        
+
         Args:
             version_str: 版本字符串
         """
         # 移除前导 'v' 或 'V'
-        if version_str.startswith(('v', 'V')):
+        if version_str.startswith(("v", "V")):
             version_str = version_str[1:]
-        
+
         # 分离构建元数据
-        if '+' in version_str:
-            version_str, self.build = version_str.split('+', 1)
-        
+        if "+" in version_str:
+            version_str, self.build = version_str.split("+", 1)
+
         # 分离预发布版本
-        if '-' in version_str:
-            version_str, self.prerelease = version_str.split('-', 1)
-        
+        if "-" in version_str:
+            version_str, self.prerelease = version_str.split("-", 1)
+
         # 解析版本号
-        parts = version_str.split('.')
+        parts = version_str.split(".")
         if len(parts) >= 1:
             self.major = int(parts[0])
         if len(parts) >= 2:
             self.minor = int(parts[1])
         if len(parts) >= 3:
             self.patch = int(parts[2])
-    
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SemVersion):
             return NotImplemented
-        return (self.major, self.minor, self.patch, self.prerelease) == \
-               (other.major, other.minor, other.patch, other.prerelease)
-    
-    def __lt__(self, other: 'SemVersion') -> bool:
+        return (self.major, self.minor, self.patch, self.prerelease) == (
+            other.major,
+            other.minor,
+            other.patch,
+            other.prerelease,
+        )
+
+    def __lt__(self, other: "SemVersion") -> bool:
         if not isinstance(other, SemVersion):
             return NotImplemented
-        
+
         # 比较主版本号、次版本号、修订号
         if (self.major, self.minor, self.patch) != (other.major, other.minor, other.patch):
             return (self.major, self.minor, self.patch) < (other.major, other.minor, other.patch)
-        
+
         # 比较预发布版本
         if self.prerelease and not other.prerelease:
             return True
@@ -88,21 +90,21 @@ class SemVersion:
             return False
         if self.prerelease and other.prerelease:
             return self.prerelease < other.prerelease
-        
+
         return False
-    
-    def __le__(self, other: 'SemVersion') -> bool:
+
+    def __le__(self, other: "SemVersion") -> bool:
         return self == other or self < other
-    
-    def __gt__(self, other: 'SemVersion') -> bool:
+
+    def __gt__(self, other: "SemVersion") -> bool:
         return not self <= other
-    
-    def __ge__(self, other: 'SemVersion') -> bool:
+
+    def __ge__(self, other: "SemVersion") -> bool:
         return not self < other
-    
+
     def __repr__(self) -> str:
         return f"SemVersion('{self}')"
-    
+
     def __str__(self) -> str:
         version = f"{self.major}.{self.minor}.{self.patch}"
         if self.prerelease:
@@ -110,30 +112,31 @@ class SemVersion:
         if self.build:
             version += f"+{self.build}"
         return version
-    
+
     def to_tuple(self) -> typing.Tuple[int, int, int]:
         """转换为元组
-        
+
         Returns:
             (主版本号, 次版本号, 修订号)
         """
         return (self.major, self.minor, self.patch)
-    
-    def is_compatible_with(self, other: 'SemVersion') -> bool:
+
+    def is_compatible_with(self, other: "SemVersion") -> bool:
         """检查是否兼容
-        
+
         Args:
             other: 其他版本
-            
+
         Returns:
             是否兼容（主版本号相同）
         """
         return self.major == other.major
 
+
 class VersionConstraint:
     """
     版本约束
-    
+
     支持以下格式：
     - 精确版本: "1.0.0"
     - 比较运算符: ">=1.0.0", "<=2.0.0", ">1.0.0", "<2.0.0"
@@ -141,80 +144,82 @@ class VersionConstraint:
     - 近似版本: "~1.2.3" (允许 1.2.x)
     - 范围: ">=1.0.0,<=2.0.0"
     """
-    
+
     def __init__(self, constraint_str: str):
         """初始化版本约束
-        
+
         Args:
             constraint_str: 约束字符串
         """
         self.constraint_str = constraint_str
         self._parse(constraint_str)
-    
+
     def _parse(self, constraint_str: str) -> None:
         """解析约束字符串"""
         self.constraints = []
-        
+
         # 分割多个约束（逗号分隔）
-        parts = [p.strip() for p in constraint_str.split(',')]
-        
+        parts = [p.strip() for p in constraint_str.split(",")]
+
         for part in parts:
-            if part.startswith('^'):
+            if part.startswith("^"):
                 # 兼容版本: ^1.2.3 -> >=1.2.3,<2.0.0
                 version = SemVersion(part[1:])
-                self.constraints.append(('>=', version))
-                self.constraints.append(('<', SemVersion(f"{version.major + 1}.0.0")))
-            elif part.startswith('~'):
+                self.constraints.append((">=", version))
+                self.constraints.append(("<", SemVersion(f"{version.major + 1}.0.0")))
+            elif part.startswith("~"):
                 # 近似版本: ~1.2.3 -> >=1.2.3,<1.3.0
                 version = SemVersion(part[1:])
-                self.constraints.append(('>=', version))
-                self.constraints.append(('<', SemVersion(f"{version.major}.{version.minor + 1}.0")))
-            elif part.startswith('>='):
-                self.constraints.append(('>=', SemVersion(part[2:])))
-            elif part.startswith('<='):
-                self.constraints.append(('<=', SemVersion(part[2:])))
-            elif part.startswith('>'):
-                self.constraints.append(('>', SemVersion(part[1:])))
-            elif part.startswith('<'):
-                self.constraints.append(('<', SemVersion(part[1:])))
+                self.constraints.append((">=", version))
+                self.constraints.append(("<", SemVersion(f"{version.major}.{version.minor + 1}.0")))
+            elif part.startswith(">="):
+                self.constraints.append((">=", SemVersion(part[2:])))
+            elif part.startswith("<="):
+                self.constraints.append(("<=", SemVersion(part[2:])))
+            elif part.startswith(">"):
+                self.constraints.append((">", SemVersion(part[1:])))
+            elif part.startswith("<"):
+                self.constraints.append(("<", SemVersion(part[1:])))
             else:
                 # 精确版本
-                self.constraints.append(('==', SemVersion(part)))
-    
+                self.constraints.append(("==", SemVersion(part)))
+
     def satisfies(self, version: SemVersion) -> bool:
         """检查版本是否满足约束
-        
+
         Args:
             version: 要检查的版本
-            
+
         Returns:
             是否满足约束
         """
         for op, constraint_version in self.constraints:
-            if op == '==':
+            if op == "==":
                 if version != constraint_version:
                     return False
-            elif op == '>=':
+            elif op == ">=":
                 if version < constraint_version:
                     return False
-            elif op == '<=':
+            elif op == "<=":
                 if version > constraint_version:
                     return False
-            elif op == '>':
+            elif op == ">":
                 if version <= constraint_version:
                     return False
-            elif op == '<':
+            elif op == "<":
                 if version >= constraint_version:
                     return False
         return True
-    
+
     def __repr__(self) -> str:
         return f"VersionConstraint('{self.constraint_str}')"
+
 
 class PluginType(str, Enum):
     """
     插件类型枚举
     """
+
     CORE = "core"
     SKILL = "skill"
     CHANNEL = "channel"
@@ -223,10 +228,12 @@ class PluginType(str, Enum):
     FUNCTIONAL = "functional"
     EXTENSION = "extension"
 
+
 class PluginState(str, Enum):
     """
     插件状态枚举
     """
+
     INSTALLED = "installed"
     ENABLED = "enabled"
     DISABLED = "disabled"
@@ -234,10 +241,12 @@ class PluginState(str, Enum):
     ERROR = "error"
     UPDATING = "updating"
 
+
 class PluginPermission(str, Enum):
     """
     插件权限枚举
     """
+
     READ_EVENTS = "read:events"
     EMIT_EVENTS = "emit:events"
     HTTP_REQUEST = "http:request"
@@ -247,45 +256,47 @@ class PluginPermission(str, Enum):
     NETWORK_ACCESS = "network:access"
     ADMIN = "admin"
 
+
 @dataclass
 class PluginManifest:
     """
     插件清单数据结构
     """
+
     plugin_id: str
     name: str
     version: SemVersion
     description: str = ""
     author: str = ""
     plugin_type: PluginType = PluginType.FUNCTIONAL
-    
+
     # 依赖
     dependencies: typing.Dict[str, str] = None
     optional_dependencies: typing.Dict[str, str] = None
     neurova_min_version: str = ""
-    
+
     # 入口
     entry_point: str = ""
     module_class: str = ""
-    
+
     # 权限
     required_permissions: typing.List[PluginPermission] = None
-    
+
     # 配置
     config_schema: typing.Dict[str, typing.Any] = None
     default_config: typing.Dict[str, typing.Any] = None
-    
+
     # API 端点
     api_endpoints: typing.List[typing.Dict[str, str]] = None
-    
+
     # 前端资源
     frontend_resources: typing.List[str] = None
-    
+
     # 标签和元数据
     tags: typing.List[str] = None
     homepage: str = ""
     license: str = ""
-    
+
     def __post_init__(self):
         """初始化后处理"""
         if self.dependencies is None:
@@ -304,7 +315,7 @@ class PluginManifest:
             self.frontend_resources = []
         if self.tags is None:
             self.tags = []
-    
+
     def to_dict(self) -> typing.Dict[str, typing.Any]:
         """转换为字典"""
         return {
@@ -328,23 +339,23 @@ class PluginManifest:
             "homepage": self.homepage,
             "license": self.license,
         }
-    
+
     @classmethod
-    def from_dict(cls, data: typing.Dict[str, typing.Any]) -> 'PluginManifest':
+    def from_dict(cls, data: typing.Dict[str, typing.Any]) -> "PluginManifest":
         """从字典创建"""
         # 必填字段
         plugin_id = data.get("plugin_id", "")
         name = data.get("name", "")
         version_str = data.get("version", "0.0.0")
-        
+
         # 可选字段
         description = data.get("description", "")
         author = data.get("author", "")
         plugin_type_str = data.get("plugin_type", "functional")
-        
+
         # 枚举转换
         plugin_type = PluginType(plugin_type_str)
-        
+
         # 权限转换
         permissions = []
         for p in data.get("required_permissions", []):
@@ -352,7 +363,7 @@ class PluginManifest:
                 permissions.append(PluginPermission(p))
             else:
                 permissions.append(p)
-        
+
         return cls(
             plugin_id=plugin_id,
             name=name,
@@ -375,16 +386,17 @@ class PluginManifest:
             license=data.get("license", ""),
         )
 
+
 def parse_manifest(data: typing.Union[str, typing.Dict[str, typing.Any]]) -> PluginManifest:
     """
     解析插件清单
-    
+
     Args:
         data: JSON 字符串或字典
-        
+
     Returns:
         PluginManifest 实例
-        
+
     Raises:
         ValueError: 解析失败或缺少必填字段
     """
@@ -393,14 +405,14 @@ def parse_manifest(data: typing.Union[str, typing.Dict[str, typing.Any]]) -> Plu
             data = json.loads(data)
         except json.JSONDecodeError as e:
             raise ValueError(f"无效的 JSON 格式: {e}")
-    
+
     if not isinstance(data, dict):
         raise ValueError("数据必须是 JSON 字符串或字典")
-    
+
     # 检查必填字段
     required_fields = ["plugin_id", "name", "version"]
     missing_fields = [f for f in required_fields if f not in data]
     if missing_fields:
         raise ValueError(f"缺少必填字段: {', '.join(missing_fields)}")
-    
+
     return PluginManifest.from_dict(data)

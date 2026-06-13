@@ -90,10 +90,16 @@ async def create_user(body: UserCreate):
     uid = str(uuid.uuid4())
     now = time.time()
     user = {
-        "user_id": uid, "username": body.username, "password": body.password,
-        "display_name": body.display_name, "email": body.email,
-        "role": body.role, "group": body.group, "enabled": True,
-        "created_at": now, "updated_at": now,
+        "user_id": uid,
+        "username": body.username,
+        "password": body.password,
+        "display_name": body.display_name,
+        "email": body.email,
+        "role": body.role,
+        "group": body.group,
+        "enabled": True,
+        "created_at": now,
+        "updated_at": now,
     }
     _users_store[uid] = user
     return UserInfo(**{k: v for k, v in user.items() if k != "password"})
@@ -136,7 +142,12 @@ async def backup_user(user_id: str):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     backup_id = str(uuid.uuid4())
-    _backups_store[backup_id] = {"backup_id": backup_id, "user_id": user_id, "data": dict(user), "created_at": time.time()}
+    _backups_store[backup_id] = {
+        "backup_id": backup_id,
+        "user_id": user_id,
+        "data": dict(user),
+        "created_at": time.time(),
+    }
     return {"code": 0, "message": "Backup created", "data": {"backup_id": backup_id}}
 
 
@@ -145,7 +156,9 @@ async def get_quota_status(user_id: str):
     """获取用户配额状态"""
     if user_id not in _users_store:
         raise HTTPException(status_code=404, detail="User not found")
-    return UserQuotaStatus(user_id=user_id, storage_used=0, storage_limit=1073741824, api_calls_today=0, api_calls_limit=1000)
+    return UserQuotaStatus(
+        user_id=user_id, storage_used=0, storage_limit=1073741824, api_calls_today=0, api_calls_limit=1000
+    )
 
 
 @router.put("/{user_id}/password")

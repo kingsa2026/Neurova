@@ -11,16 +11,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from enum import Enum
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any, Protocol, Callable
-from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
 
 class RetrievalStatus(Enum):
     """检索状态"""
+
     SUCCESS = "success"
     FAILED = "failed"
     DEGRADED = "degraded"
@@ -29,6 +29,7 @@ class RetrievalStatus(Enum):
 
 class HealthStatus(Enum):
     """健康状态"""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
@@ -37,6 +38,7 @@ class HealthStatus(Enum):
 @dataclass
 class RetrievalMetrics:
     """检索指标"""
+
     total_attempts: int = 0
     successful_attempts: int = 0
     failed_attempts: int = 0
@@ -51,6 +53,7 @@ class RetrievalMetrics:
 @dataclass
 class CrystallizedExperience:
     """结晶经验数据结构"""
+
     id: str
     content: str
     method: str
@@ -63,6 +66,7 @@ class CrystallizedExperience:
 @dataclass
 class RetrievalResult:
     """检索结果"""
+
     status: RetrievalStatus
     experiences: List[CrystallizedExperience] = field(default_factory=list)
     source: str = ""
@@ -73,6 +77,7 @@ class RetrievalResult:
 
 class CrystallizerProtocol(Protocol):
     """结晶器协议"""
+
     def retrieve(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """检索结晶经验"""
         ...
@@ -172,7 +177,7 @@ class CrystallizedExperienceManager:
             cached_result = self._get_from_cache(query)
             if cached_result:
                 self._metrics.cached_attempts += 1
-                logger.debug(f"结晶经验缓存命中: query={query[:30]}...")
+                logger.debug("结晶经验缓存命中: query=%s...", query[:30])
                 return cached_result
 
         # 2. 尝试检索（带重试）
@@ -201,9 +206,7 @@ class CrystallizedExperienceManager:
 
             except Exception as e:
                 last_error = e
-                logger.warning(
-                    f"结晶经验检索失败 (attempt {attempt + 1}/{self._max_retries + 1}): {e}"
-                )
+                logger.warning("结晶经验检索失败 (attempt %s/%s): %s", attempt + 1, self._max_retries + 1, e)
 
                 # 重试延迟
                 if attempt < self._max_retries:
@@ -219,11 +222,11 @@ class CrystallizedExperienceManager:
             try:
                 callback(query, last_error)
             except Exception as cb_error:
-                logger.warning(f"失败回调执行错误: {cb_error}")
+                logger.warning("失败回调执行错误: %s", cb_error)
 
         # 降级到记忆检索
         if fallback_to_memory and self._memory_manager:
-            logger.info(f"结晶经验检索降级到记忆检索: query={query[:30]}...")
+            logger.info("结晶经验检索降级到记忆检索: query=%s...", query[:30])
             result = await self._fallback_to_memory(query, limit)
             latency_ms = (time.time() - start_time) * 1000
             result.latency_ms = latency_ms
@@ -232,9 +235,7 @@ class CrystallizedExperienceManager:
 
         # 完全失败
         latency_ms = (time.time() - start_time) * 1000
-        logger.error(
-            f"结晶经验检索完全失败: query={query[:30]}..., error={last_error}"
-        )
+        logger.error("结晶经验检索完全失败: query=%s..., error=%s", query[:30], last_error)
         return RetrievalResult(
             status=RetrievalStatus.FAILED,
             source="crystallized_experience_manager",
@@ -242,9 +243,7 @@ class CrystallizedExperienceManager:
             error=str(last_error),
         )
 
-    async def _retrieve_with_crystallizer(
-        self, query: str, limit: int
-    ) -> RetrievalResult:
+    async def _retrieve_with_crystallizer(self, query: str, limit: int) -> RetrievalResult:
         """
         使用结晶器检索
 
@@ -265,13 +264,13 @@ class CrystallizedExperienceManager:
         experiences = []
         for item in raw_results:
             experience = CrystallizedExperience(
-                id=item.get('id', ''),
-                content=item.get('content', ''),
-                method=item.get('method', ''),
-                confidence=item.get('confidence', 0.0),
-                score=item.get('score', 0.0),
-                source=item.get('source', 'crystallized'),
-                metadata=item.get('metadata'),
+                id=item.get("id", ""),
+                content=item.get("content", ""),
+                method=item.get("method", ""),
+                confidence=item.get("confidence", 0.0),
+                score=item.get("score", 0.0),
+                source=item.get("source", "crystallized"),
+                metadata=item.get("metadata"),
             )
             experiences.append(experience)
 
@@ -281,9 +280,7 @@ class CrystallizedExperienceManager:
             source="pattern_crystallizer",
         )
 
-    async def _fallback_to_memory(
-        self, query: str, limit: int
-    ) -> RetrievalResult:
+    async def _fallback_to_memory(self, query: str, limit: int) -> RetrievalResult:
         """
         降级到记忆检索
 
@@ -309,13 +306,13 @@ class CrystallizedExperienceManager:
             experiences = []
             for mem in memories:
                 experience = CrystallizedExperience(
-                    id=mem.get('id', ''),
-                    content=mem.get('content', ''),
+                    id=mem.get("id", ""),
+                    content=mem.get("content", ""),
                     method="memory_fallback",
-                    confidence=mem.get('importance', 0.5),
-                    score=mem.get('temperature', 50.0),
+                    confidence=mem.get("importance", 0.5),
+                    score=mem.get("temperature", 50.0),
                     source="memory_fallback",
-                    metadata={"original_source": mem.get('source', 'memory')},
+                    metadata={"original_source": mem.get("source", "memory")},
                 )
                 experiences.append(experience)
 
@@ -327,7 +324,7 @@ class CrystallizedExperienceManager:
             )
 
         except Exception as e:
-            logger.error(f"记忆检索降级失败: {e}")
+            logger.error("记忆检索降级失败: %s", e)
             return RetrievalResult(
                 status=RetrievalStatus.FAILED,
                 source="memory_fallback",
@@ -354,7 +351,7 @@ class CrystallizedExperienceManager:
             try:
                 self._crystallizer.observe(tool_name, context, success, result)
             except Exception as e:
-                logger.warning(f"观察工具使用失败: {e}")
+                logger.warning("观察工具使用失败: %s", e)
 
     def get_health(self) -> HealthStatus:
         """
@@ -394,9 +391,7 @@ class CrystallizedExperienceManager:
             统计字典
         """
         total = self._metrics.total_attempts
-        success_rate = (
-            self._metrics.successful_attempts / total if total > 0 else 0.0
-        )
+        success_rate = self._metrics.successful_attempts / total if total > 0 else 0.0
         return {
             "total_attempts": total,
             "successful_attempts": self._metrics.successful_attempts,

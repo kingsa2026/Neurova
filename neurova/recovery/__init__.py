@@ -12,11 +12,11 @@ _logger = logging.getLogger(__name__)
 try:
     from neurova.recovery.shutdown_guard import ShutdownGuard
 except ImportError as _e:
-    _logger.debug(f"ShutdownGuard 未可用: {_e}")
+    _logger.debug("ShutdownGuard 未可用: %s", _e)
     ShutdownGuard = None
 
 # recovery imports
 try:
-    import neurova.recovery.shutdown_guard
+    pass
 except ImportError as _e:
-    _logger.debug(f"recovery.shutdown_guard 模块未可用: {_e}")
+    _logger.debug("recovery.shutdown_guard 模块未可用: %s", _e)

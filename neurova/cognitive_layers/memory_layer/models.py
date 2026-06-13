@@ -9,21 +9,23 @@ from typing import Any, Dict, List, Optional
 
 from neurova.cognitive_layers.memory_layer.isolation import IsolationContext
 
-
 # ────── Enums ──────
+
 
 class MemoryType(Enum):
     """记忆类型"""
-    SEMANTIC = "semantic"       # 语义记忆（事实知识）
-    EPISODIC = "episodic"       # 情景记忆（事件经历）
-    PROCEDURAL = "procedural"   # 程序记忆（技能操作）
-    PATTERN = "pattern"         # 模式记忆（行为模式）
-    EMOTIONAL = "emotional"     # 情感记忆
-    WORKING = "working"         # 工作记忆
+
+    SEMANTIC = "semantic"  # 语义记忆（事实知识）
+    EPISODIC = "episodic"  # 情景记忆（事件经历）
+    PROCEDURAL = "procedural"  # 程序记忆（技能操作）
+    PATTERN = "pattern"  # 模式记忆（行为模式）
+    EMOTIONAL = "emotional"  # 情感记忆
+    WORKING = "working"  # 工作记忆
 
 
 class MemoryCategory(Enum):
     """记忆分类"""
+
     GENERAL = "general"
     CONVERSATION = "conversation"
     KNOWLEDGE = "knowledge"
@@ -35,23 +37,26 @@ class MemoryCategory(Enum):
 
 class LifecycleStage(Enum):
     """记忆生命周期阶段"""
-    ACTIVE = "active"           # 活跃
+
+    ACTIVE = "active"  # 活跃
     CONSOLIDATED = "consolidated"  # 已巩固
-    ARCHIVED = "archived"       # 已归档
-    FORGOTTEN = "forgotten"     # 已遗忘
+    ARCHIVED = "archived"  # 已归档
+    FORGOTTEN = "forgotten"  # 已遗忘
     CRYSTALLIZED = "crystallized"  # 已结晶（永久）
 
 
 class MemoryPerspective(Enum):
     """记忆视角"""
-    FIRST_PERSON = "first_person"    # 第一人称
+
+    FIRST_PERSON = "first_person"  # 第一人称
     SECOND_PERSON = "second_person"  # 第二人称
-    THIRD_PERSON = "third_person"    # 第三人称
-    SYSTEM = "system"                # 系统视角
+    THIRD_PERSON = "third_person"  # 第三人称
+    SYSTEM = "system"  # 系统视角
 
 
 class EmotionType(Enum):
     """情感类型"""
+
     NEUTRAL = "neutral"
     JOY = "joy"
     SADNESS = "sadness"
@@ -65,9 +70,11 @@ class EmotionType(Enum):
 
 # ────── Data Models ──────
 
+
 @dataclass
 class UserProfile:
     """用户档案"""
+
     user_id: str = ""
     name: str = ""
     preferences: Dict[str, Any] = field(default_factory=dict)
@@ -98,6 +105,7 @@ class UserProfile:
 @dataclass
 class Skill:
     """技能模型"""
+
     skill_id: str = ""
     name: str = ""
     description: str = ""
@@ -135,6 +143,7 @@ class Skill:
 @dataclass
 class SelfModel:
     """自我模型"""
+
     agent_id: str = ""
     name: str = ""
     personality_traits: List[str] = field(default_factory=list)
@@ -172,6 +181,7 @@ class SelfModel:
 @dataclass
 class Attachment:
     """附件"""
+
     id: str = ""
     filename: str = ""
     content_type: str = ""
@@ -195,6 +205,7 @@ class Attachment:
 @dataclass
 class MemoryRelation:
     """记忆关联"""
+
     id: str = ""
     source_memory_id: str = ""
     target_memory_id: str = ""
@@ -216,6 +227,7 @@ class MemoryRelation:
 @dataclass
 class MetaTrace:
     """推理轨迹元数据"""
+
     trace_id: str = ""
     memory_id: str = ""
     reasoning_steps: List[str] = field(default_factory=list)
@@ -237,6 +249,7 @@ class MetaTrace:
 @dataclass
 class Memory:
     """核心记忆模型"""
+
     id: str = ""
     content: str = ""
     memory_type: MemoryType = MemoryType.SEMANTIC
@@ -289,7 +302,7 @@ class Memory:
             "category": self.category.value,
             "lifecycle_stage": self.lifecycle_stage.value,
             "perspective": self.perspective.value,
-            "emotion": self.emotion.value if hasattr(self.emotion, 'value') else str(self.emotion),
+            "emotion": self.emotion.value if hasattr(self.emotion, "value") else str(self.emotion),
             "temperature": self.temperature,
             "importance": self.importance,
             "access_count": self.access_count,

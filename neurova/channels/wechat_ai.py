@@ -15,7 +15,7 @@
 import logging
 import os
 import tempfile
-from typing import Any, Dict, Generator, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ class AIMixin:
                 os.unlink(temp_path)
 
         except Exception as e:
-            logger.exception(f"Text-to-image generation error: {e}")
+            logger.exception("Text-to-image generation error: %s", e)
             return None
 
     async def generate_image_to_image(
@@ -152,7 +152,7 @@ class AIMixin:
                 os.unlink(temp_path)
 
         except Exception as e:
-            logger.exception(f"Image-to-image generation error: {e}")
+            logger.exception("Image-to-image generation error: %s", e)
             return None
 
     async def generate_text_to_video(
@@ -208,7 +208,7 @@ class AIMixin:
                 os.unlink(temp_path)
 
         except Exception as e:
-            logger.exception(f"Text-to-video generation error: {e}")
+            logger.exception("Text-to-video generation error: %s", e)
             return None
 
     async def generate_image_to_video(
@@ -271,7 +271,7 @@ class AIMixin:
                 os.unlink(temp_path)
 
         except Exception as e:
-            logger.exception(f"Image-to-video generation error: {e}")
+            logger.exception("Image-to-video generation error: %s", e)
             return None
 
     async def generate_keyframe_to_video(
@@ -339,7 +339,7 @@ class AIMixin:
                 os.unlink(temp_path)
 
         except Exception as e:
-            logger.exception(f"Keyframe-to-video generation error: {e}")
+            logger.exception("Keyframe-to-video generation error: %s", e)
             return None
 
     async def generate_video_to_video(
@@ -402,7 +402,7 @@ class AIMixin:
                 os.unlink(temp_path)
 
         except Exception as e:
-            logger.exception(f"Video-to-video generation error: {e}")
+            logger.exception("Video-to-video generation error: %s", e)
             return None
 
     def _download_url(self, url: str) -> Optional[bytes]:
@@ -417,11 +417,12 @@ class AIMixin:
         """
         try:
             import requests
+
             response = requests.get(url, timeout=30)
             response.raise_for_status()
             return response.content
         except Exception as e:
-            logger.exception(f"Download URL error: {e}")
+            logger.exception("Download URL error: %s", e)
             return None
 
     def _save_temp_file(self, data: bytes, suffix: str = ".tmp") -> Optional[str]:
@@ -440,7 +441,7 @@ class AIMixin:
                 f.write(data)
                 return f.name
         except Exception as e:
-            logger.exception(f"Save temp file error: {e}")
+            logger.exception("Save temp file error: %s", e)
             return None
 
     def _extract_prompt(self, text: str) -> str:
@@ -457,7 +458,7 @@ class AIMixin:
         prefixes = ["画", "生成", "创建", "制作", "画一个", "生成一个"]
         for prefix in prefixes:
             if text.startswith(prefix):
-                text = text[len(prefix):]
+                text = text[len(prefix) :]
                 break
 
         return text.strip()

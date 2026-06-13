@@ -3,12 +3,11 @@ LLM 预设配置 - 热插拔机制
 预设从 JSON 文件加载，支持运行时热重载，不再硬编码在代码中。
 """
 
-from dataclasses import dataclass, field
 import json
 import logging
-import os
-from pathlib import Path
 import threading
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -17,6 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ModelPreset:
     """模型预设配置"""
+
     name: str
     provider: str  # openai, anthropic, ollama, etc.
     model_id: str
@@ -92,14 +92,14 @@ class LLMPresetRegistry:
         """从目录加载所有预设文件"""
         presets_dir = Path(self._presets_dir)
         if not presets_dir.exists():
-            logger.info(f"Presets directory not found: {presets_dir}")
+            logger.info("Presets directory not found: %s", presets_dir)
             self._export_legacy()
             return
 
         for f in presets_dir.glob("*.json"):
             self._load_from_file(f)
 
-        logger.info(f"Loaded {len(self._presets)} model presets")
+        logger.info("Loaded %s model presets", len(self._presets))
 
     def _load_from_file(self, filepath: Path) -> None:
         """从单个 JSON 文件加载预设"""
@@ -120,7 +120,7 @@ class LLMPresetRegistry:
                     preset = ModelPreset.from_dict(data)
                     self._presets[preset.name] = preset
         except Exception as e:
-            logger.warning(f"Failed to load presets from {filepath}: {e}")
+            logger.warning("Failed to load presets from %s: %s", filepath, e)
 
     def _export_legacy(self) -> None:
         """导出内置默认预设到文件"""
@@ -185,9 +185,9 @@ class LLMPresetRegistry:
             data = [p.to_dict() for p in self._presets.values()]
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            logger.info(f"Saved {len(data)} presets to {save_path}")
+            logger.info("Saved %s presets to %s", len(data), save_path)
         except Exception as e:
-            logger.error(f"Failed to save presets: {e}")
+            logger.error("Failed to save presets: %s", e)
 
     def reload(self) -> None:
         """热重载预设"""
@@ -224,7 +224,8 @@ class LLMPresetRegistry:
         """搜索预设"""
         query_lower = query.lower()
         return [
-            p for p in self._presets.values()
+            p
+            for p in self._presets.values()
             if query_lower in p.name.lower()
             or query_lower in p.model_id.lower()
             or query_lower in p.description.lower()

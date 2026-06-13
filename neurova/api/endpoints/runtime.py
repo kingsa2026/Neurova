@@ -12,13 +12,10 @@ from __future__ import annotations
 
 import logging
 import time
-import typing
 import uuid
-from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Request
+from pydantic import BaseModel
 
 from neurova.api.endpoints import get_app_state
 
@@ -29,6 +26,7 @@ router = APIRouter()
 
 class RuntimeStatus(BaseModel):
     """运行时状态"""
+
     status: str = "running"
     uptime: float = 0
     start_time: float = 0
@@ -39,6 +37,7 @@ class RuntimeStatus(BaseModel):
 
 class ResourceUsage(BaseModel):
     """资源使用"""
+
     cpu_percent: float = 0
     memory_percent: float = 0
     memory_used_mb: float = 0
@@ -50,6 +49,7 @@ class ResourceUsage(BaseModel):
 
 class PerformanceMetrics(BaseModel):
     """性能指标"""
+
     requests_per_second: float = 0
     average_response_time: float = 0
     active_connections: int = 0
@@ -71,9 +71,9 @@ def _get_app_state():
 async def get_runtime_status(request: Request):
     """获取运行时状态"""
     app_state = _get_app_state()
-    
+
     import sys
-    
+
     status = RuntimeStatus(
         status="running",
         uptime=0,
@@ -82,7 +82,7 @@ async def get_runtime_status(request: Request):
         platform=sys.platform,
         agent_count=0,
     )
-    
+
     if app_state:
         if hasattr(app_state, "get_uptime"):
             status.uptime = app_state.get_uptime()
@@ -90,7 +90,7 @@ async def get_runtime_status(request: Request):
             status.start_time = app_state.start_time
         if hasattr(app_state, "agents"):
             status.agent_count = len(app_state.agents)
-    
+
     return status
 
 
@@ -98,19 +98,19 @@ async def get_runtime_status(request: Request):
 async def get_resource_usage(request: Request):
     """获取资源使用情况"""
     resources = ResourceUsage()
-    
+
     try:
         import psutil
-        
+
         # CPU
         resources.cpu_percent = psutil.cpu_percent(interval=0.1)
-        
+
         # 内存
         memory = psutil.virtual_memory()
         resources.memory_percent = memory.percent
         resources.memory_used_mb = memory.used / (1024 * 1024)
         resources.memory_total_mb = memory.total / (1024 * 1024)
-        
+
         # 磁盘
         disk = psutil.disk_usage("/")
         resources.disk_percent = disk.percent
@@ -119,8 +119,8 @@ async def get_resource_usage(request: Request):
     except ImportError:
         logger.warning("psutil not available")
     except Exception as e:
-        logger.warning(f"Failed to get resource usage: {e}")
-    
+        logger.warning("Failed to get resource usage: %s", e)
+
     return resources
 
 
@@ -141,11 +141,11 @@ async def get_performance_metrics(request: Request):
 async def trigger_garbage_collection(request: Request):
     """执行垃圾回收"""
     request_id = _get_request_id(request)
-    
+
     import gc
-    
+
     collected = gc.collect()
-    
+
     return {
         "code": 0,
         "message": "Garbage collection completed",

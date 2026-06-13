@@ -2,34 +2,44 @@
 记忆接口 - 元认知 (Meta-cognition)
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, Optional
 
-from fastapi import Request, Depends
+from fastapi import Depends, Request
 from pydantic import BaseModel, Field
 
-from neurova.interfaces.api_standard import (
-    APIResponse,
-    APIError,
-)
 from neurova.api.auth import get_current_user
+from neurova.interfaces.api_standard import (
+    APIError,
+    APIResponse,
+)
 
 from .base import (
-    router, logger, _get_request_id, get_memory_manager, _get_user_ids_from_token,
+    _get_request_id,
+    _get_user_ids_from_token,
+    get_memory_manager,
+    logger,
+    router,
 )
+
 
 class AutoGenerateSkillRequest(BaseModel):
     """自动生成技能请求"""
+
     description: str = Field(..., min_length=1, max_length=2000, description="技能描述")
     category: Optional[str] = Field(default=None, description="技能分类")
 
+
 class MatchSkillsRequest(BaseModel):
     """匹配技能请求"""
+
     query: str = Field(..., min_length=1, max_length=500, description="查询内容")
     top_k: int = Field(default=5, ge=1, le=20, description="返回数量")
+
 
 # ============================================================
 # 元认知核心操作
 # ============================================================
+
 
 @router.post("/meta/monitor", summary="执行元认知监控")
 async def meta_monitor(
@@ -50,8 +60,9 @@ async def meta_monitor(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"元认知监控失败: {e}")
+        logger.exception("元认知监控失败: %s", e)
         raise APIError.internal(f"元认知监控失败: {str(e)}")
+
 
 @router.post("/meta/reflect", summary="执行元认知反思")
 async def meta_reflect(
@@ -72,8 +83,9 @@ async def meta_reflect(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"元认知反思失败: {e}")
+        logger.exception("元认知反思失败: %s", e)
         raise APIError.internal(f"元认知反思失败: {str(e)}")
+
 
 @router.post("/meta/optimize", summary="执行元认知优化")
 async def meta_optimize(
@@ -98,8 +110,9 @@ async def meta_optimize(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"元认知优化失败: {e}")
+        logger.exception("元认知优化失败: %s", e)
         raise APIError.internal(f"元认知优化失败: {str(e)}")
+
 
 @router.post("/meta/evolve-skills", summary="执行技能进化")
 async def meta_evolve_skills(
@@ -124,12 +137,14 @@ async def meta_evolve_skills(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"技能进化失败: {e}")
+        logger.exception("技能进化失败: %s", e)
         raise APIError.internal(f"技能进化失败: {str(e)}")
+
 
 # ============================================================
 # 元认知报告
 # ============================================================
+
 
 @router.get("/meta/health", summary="获取元认知健康报告")
 async def meta_get_health(
@@ -154,8 +169,9 @@ async def meta_get_health(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取健康报告失败: {e}")
+        logger.exception("获取健康报告失败: %s", e)
         raise APIError.internal(f"获取健康报告失败: {str(e)}")
+
 
 @router.get("/meta/reflection", summary="获取元认知反思报告")
 async def meta_get_reflection(
@@ -180,12 +196,14 @@ async def meta_get_reflection(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取反思报告失败: {e}")
+        logger.exception("获取反思报告失败: %s", e)
         raise APIError.internal(f"获取反思报告失败: {str(e)}")
+
 
 # ============================================================
 # 元认知条件检查
 # ============================================================
+
 
 @router.get("/meta/should-monitor", summary="检查是否需要监控")
 async def meta_should_monitor(
@@ -208,8 +226,9 @@ async def meta_should_monitor(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"检查监控条件失败: {e}")
+        logger.exception("检查监控条件失败: %s", e)
         raise APIError.internal(f"检查监控条件失败: {str(e)}")
+
 
 @router.get("/meta/should-reflect", summary="检查是否需要反思")
 async def meta_should_reflect(
@@ -232,8 +251,9 @@ async def meta_should_reflect(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"检查反思条件失败: {e}")
+        logger.exception("检查反思条件失败: %s", e)
         raise APIError.internal(f"检查反思条件失败: {str(e)}")
+
 
 @router.get("/meta/should-optimize", summary="检查是否需要优化")
 async def meta_should_optimize(
@@ -256,8 +276,9 @@ async def meta_should_optimize(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"检查优化条件失败: {e}")
+        logger.exception("检查优化条件失败: %s", e)
         raise APIError.internal(f"检查优化条件失败: {str(e)}")
+
 
 @router.get("/meta/should-evolve", summary="检查是否需要技能进化")
 async def meta_should_evolve(
@@ -280,12 +301,14 @@ async def meta_should_evolve(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"检查进化条件失败: {e}")
+        logger.exception("检查进化条件失败: %s", e)
         raise APIError.internal(f"检查进化条件失败: {str(e)}")
+
 
 # ============================================================
 # 技能管理
 # ============================================================
+
 
 @router.get("/meta/skills", summary="获取所有技能")
 async def meta_get_all_skills(
@@ -314,8 +337,9 @@ async def meta_get_all_skills(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取技能列表失败: {e}")
+        logger.exception("获取技能列表失败: %s", e)
         raise APIError.internal(f"获取技能列表失败: {str(e)}")
+
 
 @router.get("/meta/skills/stats", summary="获取技能统计")
 async def meta_get_skill_stats(
@@ -339,8 +363,9 @@ async def meta_get_skill_stats(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取技能统计失败: {e}")
+        logger.exception("获取技能统计失败: %s", e)
         raise APIError.internal(f"获取技能统计失败: {str(e)}")
+
 
 @router.post("/meta/skills/generate", summary="自动生成技能")
 async def meta_generate_skill(
@@ -365,8 +390,9 @@ async def meta_generate_skill(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"生成技能失败: {e}")
+        logger.exception("生成技能失败: %s", e)
         raise APIError.internal(f"生成技能失败: {str(e)}")
+
 
 @router.post("/meta/skills/match", summary="匹配技能")
 async def meta_match_skills(
@@ -394,12 +420,14 @@ async def meta_match_skills(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"匹配技能失败: {e}")
+        logger.exception("匹配技能失败: %s", e)
         raise APIError.internal(f"匹配技能失败: {str(e)}")
+
 
 # ============================================================
 # Agent 级路由（兼容前端 /agents/{agent_id}/metacognition 路径）
 # ============================================================
+
 
 @router.get("/{agent_id}/metacognition", summary="获取 Agent 元认知记录")
 async def get_agent_metacognition(
@@ -411,6 +439,7 @@ async def get_agent_metacognition(
     """获取 Agent 的元认知记录（前端 MetacognitionPage.vue 调用）"""
     try:
         from neurova.agent_registry import AgentRegistry
+
         registry = AgentRegistry()
         agent = registry.get_agent(agent_id)
         if not agent:
@@ -422,7 +451,7 @@ async def get_agent_metacognition(
         manager = getattr(agent, "metacog_manager", None)
         records = getattr(manager, "records", []) if manager else []
         total = len(records)
-        items = records[offset:offset + limit]
+        items = records[offset : offset + limit]
 
         evals = len([r for r in records if getattr(r, "thought_type", "") == "evaluation"])
         opts = len([r for r in records if getattr(r, "thought_type", "") == "optimization"])
@@ -450,11 +479,12 @@ async def get_agent_metacognition(
             request_id=_get_request_id(req),
         )
     except Exception as e:
-        logger.exception(f"获取元认知记录失败: {e}")
+        logger.exception("获取元认知记录失败: %s", e)
         return APIResponse.ok(
             data={"items": [], "total": 0, "stats": {"total": 0, "evaluations": 0, "suggestions": 0}},
             request_id=_get_request_id(req),
         )
+
 
 @router.get("/{agent_id}/metacognition/stats", summary="获取 Agent 元认知统计")
 async def get_agent_metacognition_stats(
@@ -464,6 +494,7 @@ async def get_agent_metacognition_stats(
     """获取 Agent 元认知统计（前端 MetacognitionPage.vue 调用）"""
     try:
         from neurova.agent_registry import AgentRegistry
+
         registry = AgentRegistry()
         agent = registry.get_agent(agent_id)
         if not agent:
@@ -494,7 +525,7 @@ async def get_agent_metacognition_stats(
             request_id=_get_request_id(req),
         )
     except Exception as e:
-        logger.exception(f"获取元认知统计失败: {e}")
+        logger.exception("获取元认知统计失败: %s", e)
         return APIResponse.ok(
             data={"agent_id": agent_id, "total": 0, "by_type": {}},
             request_id=_get_request_id(req),

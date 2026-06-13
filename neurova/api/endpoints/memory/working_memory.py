@@ -2,47 +2,63 @@
 记忆接口 - 工作记忆 (Working Memory)
 """
 
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
-from fastapi import Depends, Request, Query
-from neurova.api.auth import get_current_user
+from fastapi import Depends, Query, Request
 from pydantic import BaseModel, Field
 
+from neurova.api.auth import get_current_user
 from neurova.interfaces.api_standard import (
-    APIResponse,
     APIError,
+    APIResponse,
 )
+
 from .base import (
-    router, logger, _get_request_id, get_memory_manager, _get_user_ids_from_token,
+    _get_request_id,
+    _get_user_ids_from_token,
+    get_memory_manager,
+    logger,
+    router,
 )
+
 
 class AddTurnRequest(BaseModel):
     """添加对话轮次请求"""
+
     role: str = Field(..., description="角色 (user/assistant/system)")
     content: str = Field(..., description="内容")
     metadata: Optional[dict] = Field(default=None, description="元数据")
 
+
 class CompressTurnRequest(BaseModel):
     """压缩请求"""
+
     content: str = Field(..., max_length=10000, description="待压缩内容")
+
 
 class CachePlanRequest(BaseModel):
     """缓存计划请求"""
+
     task_description: str = Field(..., description="任务描述")
     steps: list = Field(..., description="执行步骤列表")
     task_type: Optional[str] = Field(default=None, description="任务类型")
     context: Optional[dict] = Field(default=None, description="上下文")
 
+
 class RetrievePlanRequest(BaseModel):
     """检索计划请求"""
+
     task_description: str = Field(..., description="任务描述")
     task_type: Optional[str] = Field(default=None, description="任务类型")
     top_k: Optional[int] = Field(default=3, ge=1, le=10, description="返回数量")
 
+
 class RecordPlanResultRequest(BaseModel):
     """记录计划执行结果请求"""
+
     plan_id: str = Field(..., description="计划ID")
     success: bool = Field(..., description="是否成功")
+
 
 @router.post("/wm/turns", summary="添加对话轮次")
 async def add_wm_turn(
@@ -69,8 +85,9 @@ async def add_wm_turn(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"添加对话轮次失败: {e}")
+        logger.exception("添加对话轮次失败: %s", e)
         raise APIError.internal(f"添加对话轮次失败: {str(e)}")
+
 
 @router.get("/wm/context", summary="获取工作记忆上下文")
 async def get_wm_context(
@@ -98,8 +115,9 @@ async def get_wm_context(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取工作记忆上下文失败: {e}")
+        logger.exception("获取工作记忆上下文失败: %s", e)
         raise APIError.internal(f"获取工作记忆上下文失败: {str(e)}")
+
 
 @router.post("/wm/compress", summary="压缩单轮内容")
 async def compress_turn(
@@ -119,18 +137,16 @@ async def compress_turn(
         compressed = manager.wm_compress_turn(request.content)
 
         return APIResponse.ok(
-            data={
-                "original": request.content,
-                "compressed": compressed
-            },
+            data={"original": request.content, "compressed": compressed},
             message="压缩完成",
             request_id=_get_request_id(req),
         )
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"压缩失败: {e}")
+        logger.exception("压缩失败: %s", e)
         raise APIError.internal(f"压缩失败: {str(e)}")
+
 
 @router.post("/wm/plans", summary="缓存执行计划")
 async def cache_wm_plan(
@@ -147,12 +163,7 @@ async def cache_wm_plan(
         neuser_id, user_id = _get_user_ids_from_token(req)
 
         manager = get_memory_manager(agent_id, neuser_id, user_id)
-        plan_id = manager.wm_cache_plan(
-            request.task_description,
-            request.steps,
-            request.task_type,
-            request.context
-        )
+        plan_id = manager.wm_cache_plan(request.task_description, request.steps, request.task_type, request.context)
 
         return APIResponse.ok(
             data={"plan_id": plan_id},
@@ -162,8 +173,9 @@ async def cache_wm_plan(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"缓存计划失败: {e}")
+        logger.exception("缓存计划失败: %s", e)
         raise APIError.internal(f"缓存计划失败: {str(e)}")
+
 
 @router.post("/wm/plans/retrieve", summary="检索执行计划")
 async def retrieve_wm_plan(
@@ -180,25 +192,19 @@ async def retrieve_wm_plan(
         neuser_id, user_id = _get_user_ids_from_token(req)
 
         manager = get_memory_manager(agent_id, neuser_id, user_id)
-        plans = manager.wm_retrieve_plan(
-            request.task_description,
-            request.task_type,
-            request.top_k
-        )
+        plans = manager.wm_retrieve_plan(request.task_description, request.task_type, request.top_k)
 
         return APIResponse.ok(
-            data={
-                "count": len(plans),
-                "plans": plans
-            },
+            data={"count": len(plans), "plans": plans},
             message="检索完成",
             request_id=_get_request_id(req),
         )
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"检索计划失败: {e}")
+        logger.exception("检索计划失败: %s", e)
         raise APIError.internal(f"检索计划失败: {str(e)}")
+
 
 @router.post("/wm/plans/result", summary="记录计划执行结果")
 async def record_plan_result(
@@ -225,8 +231,9 @@ async def record_plan_result(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"记录结果失败: {e}")
+        logger.exception("记录结果失败: %s", e)
         raise APIError.internal(f"记录结果失败: {str(e)}")
+
 
 @router.get("/wm/stats", summary="获取工作记忆统计")
 async def get_wm_stats(
@@ -252,8 +259,9 @@ async def get_wm_stats(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取工作记忆统计失败: {e}")
+        logger.exception("获取工作记忆统计失败: %s", e)
         raise APIError.internal(f"获取工作记忆统计失败: {str(e)}")
+
 
 @router.delete("/wm", summary="清空工作记忆")
 async def clear_wm(
@@ -279,5 +287,5 @@ async def clear_wm(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"清空工作记忆失败: {e}")
+        logger.exception("清空工作记忆失败: %s", e)
         raise APIError.internal(f"清空工作记忆失败: {str(e)}")

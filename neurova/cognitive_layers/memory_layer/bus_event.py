@@ -13,23 +13,24 @@ CogArch 1.0.0 事件总线 — MemoryManager 的骨架替代
   - 模块不直接引用彼此，只 emit / subscribe 事件
 """
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 import asyncio
-import enum
 import inspect
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional, Set
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 # ────── ModuleHealth ──────
 
+
 @dataclass
 class ModuleHealth:
     """模块健康状态"""
+
     module_name: str
     status: str = "ok"  # ok, degraded, error
     message: str = ""
@@ -50,6 +51,7 @@ class ModuleHealth:
 
 
 # ────── MemoryEvent ──────
+
 
 class MemoryEvent:
     """模块间通信的事件载体"""
@@ -90,6 +92,7 @@ class MemoryEvent:
 
 # ────── MemoryModule ──────
 
+
 class MemoryModule(ABC):
     """所有记忆子模块的统一协议"""
 
@@ -118,6 +121,7 @@ class MemoryModule(ABC):
 
 
 # ────── EventBus ──────
+
 
 class EventBus:
     """事件路由引擎（同步 + async 双模）"""
@@ -153,7 +157,7 @@ class EventBus:
                     handler(event)
                 called += 1
             except Exception as e:
-                logger.error(f"EventBus handler error for {event.type}: {e}")
+                logger.error("EventBus handler error for %s: %s", event.type, e)
         return called
 
     async def aemit(self, event: MemoryEvent) -> int:
@@ -169,7 +173,7 @@ class EventBus:
                     handler(event)
                 called += 1
             except Exception as e:
-                logger.error(f"EventBus async handler error for {event.type}: {e}")
+                logger.error("EventBus async handler error for %s: %s", event.type, e)
         return called
 
     async def _run_async_handler(self, handler: Callable, event: MemoryEvent) -> None:
@@ -177,7 +181,7 @@ class EventBus:
         try:
             await handler(event)
         except Exception as e:
-            logger.error(f"EventBus _run_async_handler error: {e}")
+            logger.error("EventBus _run_async_handler error: %s", e)
 
     def registered_events(self) -> List[str]:
         """返回已注册事件类型的列表"""

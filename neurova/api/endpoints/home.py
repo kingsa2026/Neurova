@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import random
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, Query, Request
 
@@ -32,12 +32,12 @@ async def get_home_data(request: Request):
     try:
         # 尝试从实际模块获取数据
         app_state = _get_app_state(request)
-        
+
         # 获取 agent 数量
         agent_count = 0
         if app_state and hasattr(app_state, "agent"):
             agent_count = 1  # 当前 agent
-        
+
         # 获取记忆数量
         memory_count = 0
         if app_state and hasattr(app_state, "memory_manager"):
@@ -48,7 +48,7 @@ async def get_home_data(request: Request):
                     memory_count = stats.get("total_memories", 0)
             except Exception:
                 pass
-        
+
         return {
             "welcome_message": "欢迎使用 Neurova",
             "quick_stats": {
@@ -125,14 +125,14 @@ async def get_home_trends(request: Request, days: int = Query(default=7, ge=1, l
         for i in range(days - 1, -1, -1):
             d = now - timedelta(days=i)
             labels.append(d.strftime("%m-%d"))
-        
+
         # 生成示例趋势数据
         def _trend_data(base: int = 0) -> Dict[str, Any]:
             data = []
             for i in range(days):
                 data.append(base + random.randint(0, 5))
             return {"labels": labels, "data": data}
-        
+
         return {
             "agent_trend": _trend_data(1),
             "token_trend": _trend_data(100),
@@ -151,10 +151,11 @@ async def get_system_stats(request: Request):
     """获取系统统计"""
     try:
         import psutil
+
         cpu_percent = psutil.cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
         disk = psutil.disk_usage("/")
-        
+
         return {
             "cpu": {
                 "percent": cpu_percent,

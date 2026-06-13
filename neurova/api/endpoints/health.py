@@ -13,10 +13,9 @@ from __future__ import annotations
 """
 
 import logging
-import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -26,6 +25,7 @@ router = APIRouter()
 
 class HealthStatusResponse(BaseModel):
     """健康状态响应"""
+
     status: str
     timestamp: float
     uptime: float = 0
@@ -36,6 +36,7 @@ class HealthStatusResponse(BaseModel):
 
 class CheckResultResponse(BaseModel):
     """检查结果响应"""
+
     name: str
     status: str
     message: str = ""
@@ -45,6 +46,7 @@ class CheckResultResponse(BaseModel):
 
 class HealthReportResponse(BaseModel):
     """健康报告响应"""
+
     status: str
     checks: Dict[str, Any]
     total_checks: int
@@ -55,6 +57,7 @@ class HealthReportResponse(BaseModel):
 
 class RecoveryResponse(BaseModel):
     """恢复响应"""
+
     success: bool
     message: str
     actions_taken: List[str] = []
@@ -62,6 +65,7 @@ class RecoveryResponse(BaseModel):
 
 class RegisterCheckRequest(BaseModel):
     """注册检查请求"""
+
     name: str
     check_type: str = "custom"
     description: str = ""
@@ -72,6 +76,7 @@ class RegisterCheckRequest(BaseModel):
 def _get_health_checker():
     """获取健康检查器"""
     from neurova.api.endpoints import get_health_checker
+
     return get_health_checker()
 
 

@@ -11,8 +11,6 @@
 由 WeChatAdapter 通过多继承使用，所有属性都来自主类。
 """
 
-import hashlib
-import json
 import logging
 import time
 from typing import Any, Dict, Optional
@@ -61,11 +59,11 @@ class AuthMixin:
             elif auth_type == "ilink":
                 return await self._authenticate_ilink()
             else:
-                logger.error(f"Unknown auth type: {auth_type}")
+                logger.error("Unknown auth type: %s", auth_type)
                 return False
 
         except Exception as e:
-            logger.exception(f"Authentication error: {e}")
+            logger.exception("Authentication error: %s", e)
             return False
 
     async def _authenticate_wecom(self) -> bool:
@@ -91,7 +89,7 @@ class AuthMixin:
             data = response.json()
 
             if data.get("errcode") != 0:
-                logger.error(f"WeCom auth failed: {data}")
+                logger.error("WeCom auth failed: %s", data)
                 return False
 
             self._access_token = data["access_token"]
@@ -102,7 +100,7 @@ class AuthMixin:
             return True
 
         except Exception as e:
-            logger.exception(f"WeCom auth error: {e}")
+            logger.exception("WeCom auth error: %s", e)
             return False
 
     async def _refresh_wecom_token(self) -> bool:
@@ -139,7 +137,7 @@ class AuthMixin:
             data = response.json()
 
             if "errcode" in data:
-                logger.error(f"WeChat official auth failed: {data}")
+                logger.error("WeChat official auth failed: %s", data)
                 return False
 
             self._access_token = data["access_token"]
@@ -150,7 +148,7 @@ class AuthMixin:
             return True
 
         except Exception as e:
-            logger.exception(f"WeChat official auth error: {e}")
+            logger.exception("WeChat official auth error: %s", e)
             return False
 
     async def _refresh_official_token(self) -> bool:
@@ -184,7 +182,7 @@ class AuthMixin:
             return False
 
         except Exception as e:
-            logger.exception(f"iLink auth error: {e}")
+            logger.exception("iLink auth error: %s", e)
             return False
 
     async def _generate_qr_code(self) -> Optional[str]:
@@ -260,5 +258,5 @@ class AuthMixin:
             return response.json()
 
         except requests.exceptions.RequestException as e:
-            logger.exception(f"WeChat API request error: {e}")
+            logger.exception("WeChat API request error: %s", e)
             raise

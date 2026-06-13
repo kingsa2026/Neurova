@@ -9,12 +9,11 @@
 - 贝叶斯遗忘概率
 """
 
-import math
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
+
 
 class TemperatureEngine:
     """温度引擎
@@ -46,10 +45,12 @@ class TemperatureEngine:
     _CLASS_EMOTIONAL_PROTECTION_THRESHOLD = 0.5
     _CLASS_EMOTIONAL_PROTECTION_FACTOR = 0.6
 
-    def __init__(self,
-                 base_decay_rate: float = 0.1,
-                 emotional_protection_threshold: float = 0.5,
-                 emotional_protection_factor: float = 0.6):
+    def __init__(
+        self,
+        base_decay_rate: float = 0.1,
+        emotional_protection_threshold: float = 0.5,
+        emotional_protection_factor: float = 0.6,
+    ):
         """初始化温度引擎
 
         Args:
@@ -61,12 +62,10 @@ class TemperatureEngine:
         self.emotional_protection_threshold = emotional_protection_threshold
         self.emotional_protection_factor = emotional_protection_factor
 
-        logger.debug(f"TemperatureEngine 初始化: decay_rate={base_decay_rate}")
+        logger.debug("TemperatureEngine 初始化: decay_rate=%s", base_decay_rate)
 
     @classmethod
-    def on_access(cls, current_temp: float,
-                  importance: float = 0.5,
-                  recall_count: int = 0) -> float:
+    def on_access(cls, current_temp: float, importance: float = 0.5, recall_count: int = 0) -> float:
         """记忆被访问时更新温度
 
         Args:
@@ -90,11 +89,14 @@ class TemperatureEngine:
         return max(0.0, min(100.0, new_temp))
 
     @classmethod
-    def on_decay(cls, current_temp: float,
-                 days_idle: float,
-                 importance: float = 0.5,
-                 emotion_score: float = 0.0,
-                 recall_count: int = 0) -> float:
+    def on_decay(
+        cls,
+        current_temp: float,
+        days_idle: float,
+        importance: float = 0.5,
+        emotion_score: float = 0.0,
+        recall_count: int = 0,
+    ) -> float:
         """计算温度衰减
 
         Args:
@@ -112,9 +114,9 @@ class TemperatureEngine:
         curve_factor = cls._calculate_curve_factor(days_idle)
 
         # 2. 情感保护（减缓衰减，值越小保护越强）
-        emotion_protect = (cls._CLASS_EMOTIONAL_PROTECTION_FACTOR
-                          if emotion_score > cls._CLASS_EMOTIONAL_PROTECTION_THRESHOLD
-                          else 1.0)
+        emotion_protect = (
+            cls._CLASS_EMOTIONAL_PROTECTION_FACTOR if emotion_score > cls._CLASS_EMOTIONAL_PROTECTION_THRESHOLD else 1.0
+        )
 
         # 3. 饱和效应（高温时衰减更快，低温时衰减更慢）
         # 高温 → 1.0（最大衰减），低温 → 接近 0（最小衰减）
@@ -182,11 +184,9 @@ class TemperatureEngine:
             return cls.STAGE_DELETED
 
     @classmethod
-    def calculate_forgetting_probability(cls,
-                                         temperature: float,
-                                         days_idle: float,
-                                         importance: float = 0.5,
-                                         emotion_score: float = 0.0) -> float:
+    def calculate_forgetting_probability(
+        cls, temperature: float, days_idle: float, importance: float = 0.5, emotion_score: float = 0.0
+    ) -> float:
         """计算贝叶斯遗忘概率
 
         P(forget|evidence) = 1 - P(retain|evidence)
@@ -240,5 +240,5 @@ class TemperatureEngine:
                 "secondary": self.THRESHOLD_SECONDARY,
                 "archived": self.THRESHOLD_ARCHIVED,
                 "deleted": self.THRESHOLD_DELETED,
-            }
+            },
         }

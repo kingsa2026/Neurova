@@ -12,21 +12,20 @@ Neurova 认知安全 (Cognitive Security) 2.0
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import datetime
-import enum
-import json
 import logging
 import re
 import time
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Pattern, Set
+from typing import Any, Dict, List, Optional, Pattern
 
 logger = logging.getLogger(__name__)
 
 
 class SafetyLevel(str, Enum):
     """安全等级"""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -35,6 +34,7 @@ class SafetyLevel(str, Enum):
 
 class ThreatType(str, Enum):
     """威胁类型"""
+
     PROMPT_INJECTION = "prompt_injection"
     SENSITIVE_INFO_LEAK = "sensitive_info_leak"
     HARMFUL_CONTENT = "harmful_content"
@@ -47,6 +47,7 @@ class ThreatType(str, Enum):
 @dataclass
 class ThreatFinding:
     """威胁发现"""
+
     threat_type: ThreatType
     severity: SafetyLevel
     description: str
@@ -70,6 +71,7 @@ class ThreatFinding:
 @dataclass
 class SafetyCheckResult:
     """安全检查结果"""
+
     is_safe: bool
     safety_level: SafetyLevel
     findings: List[ThreatFinding] = field(default_factory=list)
@@ -110,46 +112,41 @@ class PromptInjectionDetector:
     # 常见的 Prompt 注入模式
     INJECTION_PATTERNS = [
         # 直接指令覆盖
-        r'ignore\s+(all\s+)?previous\s+instructions',
-        r'disregard\s+(all\s+)?prior\s+instructions',
-        r'forget\s+(all\s+)?previous\s+instructions',
-        r'override\s+(all\s+)?previous\s+instructions',
-
+        r"ignore\s+(all\s+)?previous\s+instructions",
+        r"disregard\s+(all\s+)?prior\s+instructions",
+        r"forget\s+(all\s+)?previous\s+instructions",
+        r"override\s+(all\s+)?previous\s+instructions",
         # 角色切换
-        r'you\s+are\s+now\s+',
-        r'act\s+as\s+',
-        r'pretend\s+to\s+be\s+',
-        r'roleplay\s+as\s+',
-        r'impersonate\s+',
-
+        r"you\s+are\s+now\s+",
+        r"act\s+as\s+",
+        r"pretend\s+to\s+be\s+",
+        r"roleplay\s+as\s+",
+        r"impersonate\s+",
         # 系统提示泄露
-        r'show\s+me\s+(your|the)\s+(system|initial)\s+(prompt|instructions)',
-        r'what\s+(is|are)\s+your\s+(system|initial)\s+(prompt|instructions)',
-        r'reveal\s+(your|the)\s+(system|initial)\s+(prompt|instructions)',
-        r'print\s+(your|the)\s+(system|initial)\s+(prompt|instructions)',
-
+        r"show\s+me\s+(your|the)\s+(system|initial)\s+(prompt|instructions)",
+        r"what\s+(is|are)\s+your\s+(system|initial)\s+(prompt|instructions)",
+        r"reveal\s+(your|the)\s+(system|initial)\s+(prompt|instructions)",
+        r"print\s+(your|the)\s+(system|initial)\s+(prompt|instructions)",
         # 编码/混淆攻击
-        r'base64\s+decode',
-        r'rot13\s+',
-        r'\\x[0-9a-fA-F]{2}',
-        r'\\u[0-9a-fA-F]{4}',
-
+        r"base64\s+decode",
+        r"rot13\s+",
+        r"\\x[0-9a-fA-F]{2}",
+        r"\\u[0-9a-fA-F]{4}",
         # 分隔符注入
-        r'---\s*END\s+OF\s+(SYSTEM|INSTRUCTIONS)',
-        r'---\s*START\s+OF\s+(NEW|USER)\s+(INSTRUCTIONS|PROMPT)',
-        r'<\|im_start\|>',
-        r'<\|im_end\|>',
-        r'<\|system\|>',
-        r'<\|user\|>',
-
+        r"---\s*END\s+OF\s+(SYSTEM|INSTRUCTIONS)",
+        r"---\s*START\s+OF\s+(NEW|USER)\s+(INSTRUCTIONS|PROMPT)",
+        r"<\|im_start\|>",
+        r"<\|im_end\|>",
+        r"<\|system\|>",
+        r"<\|user\|>",
         # 中文注入模式
-        r'忽略.{0,10}(指令|规则|限制)',
-        r'无视.{0,10}(指令|规则|限制)',
-        r'忘记.{0,10}(指令|规则|限制)',
-        r'你现在是',
-        r'假装(你是|成为|自己是)',
-        r'显示.{0,10}(提示词|指令|规则)',
-        r'告诉我.{0,10}(提示词|指令|规则)',
+        r"忽略.{0,10}(指令|规则|限制)",
+        r"无视.{0,10}(指令|规则|限制)",
+        r"忘记.{0,10}(指令|规则|限制)",
+        r"你现在是",
+        r"假装(你是|成为|自己是)",
+        r"显示.{0,10}(提示词|指令|规则)",
+        r"告诉我.{0,10}(提示词|指令|规则)",
     ]
 
     def __init__(self, custom_patterns: Optional[List[str]] = None):
@@ -160,7 +157,7 @@ class PromptInjectionDetector:
             try:
                 self._patterns.append(re.compile(pattern, re.IGNORECASE))
             except re.error:
-                logger.warning(f"编译正则失败: {pattern}")
+                logger.warning("编译正则失败: %s", pattern)
 
         # 加载自定义模式
         if custom_patterns:
@@ -168,7 +165,7 @@ class PromptInjectionDetector:
                 try:
                     self._patterns.append(re.compile(pattern, re.IGNORECASE))
                 except re.error:
-                    logger.warning(f"编译自定义正则失败: {pattern}")
+                    logger.warning("编译自定义正则失败: %s", pattern)
 
     def detect(self, text: str) -> List[ThreatFinding]:
         """检测 Prompt 注入"""
@@ -180,14 +177,16 @@ class PromptInjectionDetector:
         for pattern in self._patterns:
             match = pattern.search(text)
             if match:
-                findings.append(ThreatFinding(
-                    threat_type=ThreatType.PROMPT_INJECTION,
-                    severity=SafetyLevel.HIGH,
-                    description=f"检测到潜在的 Prompt 注入",
-                    evidence=match.group(),
-                    location=f"位置 {match.start()}-{match.end()}",
-                    confidence=0.8,
-                ))
+                findings.append(
+                    ThreatFinding(
+                        threat_type=ThreatType.PROMPT_INJECTION,
+                        severity=SafetyLevel.HIGH,
+                        description=f"检测到潜在的 Prompt 注入",
+                        evidence=match.group(),
+                        location=f"位置 {match.start()}-{match.end()}",
+                        confidence=0.8,
+                    )
+                )
 
         return findings
 
@@ -197,7 +196,7 @@ class PromptInjectionDetector:
             compiled = re.compile(pattern, re.IGNORECASE)
             self._patterns.append(compiled)
         except re.error as e:
-            logger.error(f"添加模式失败: {e}")
+            logger.error("添加模式失败: %s", e)
 
 
 class SensitiveInfoDetector:
@@ -205,14 +204,14 @@ class SensitiveInfoDetector:
 
     # 敏感信息模式
     SENSITIVE_PATTERNS = {
-        "phone": (r'1[3-9]\d{9}', SafetyLevel.MEDIUM),
-        "email": (r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', SafetyLevel.LOW),
-        "id_card": (r'\d{17}[\dXx]', SafetyLevel.HIGH),
-        "bank_card": (r'\d{16,19}', SafetyLevel.HIGH),
-        "password": (r'(?i)(password|passwd|pwd)\s*[=:]\s*\S+', SafetyLevel.HIGH),
-        "api_key": (r'(?i)(api[_\s-]?key|apikey|secret[_\s-]?key)\s*[=:]\s*\S+', SafetyLevel.CRITICAL),
-        "token": (r'(?i)(token|access[_\s-]?token|bearer)\s*[=:]\s*\S+', SafetyLevel.HIGH),
-        "ip_address": (r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', SafetyLevel.LOW),
+        "phone": (r"1[3-9]\d{9}", SafetyLevel.MEDIUM),
+        "email": (r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", SafetyLevel.LOW),
+        "id_card": (r"\d{17}[\dXx]", SafetyLevel.HIGH),
+        "bank_card": (r"\d{16,19}", SafetyLevel.HIGH),
+        "password": (r"(?i)(password|passwd|pwd)\s*[=:]\s*\S+", SafetyLevel.HIGH),
+        "api_key": (r"(?i)(api[_\s-]?key|apikey|secret[_\s-]?key)\s*[=:]\s*\S+", SafetyLevel.CRITICAL),
+        "token": (r"(?i)(token|access[_\s-]?token|bearer)\s*[=:]\s*\S+", SafetyLevel.HIGH),
+        "ip_address": (r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", SafetyLevel.LOW),
     }
 
     def __init__(self, custom_patterns: Optional[Dict[str, tuple]] = None):
@@ -223,7 +222,7 @@ class SensitiveInfoDetector:
             try:
                 self._patterns[name] = (re.compile(pattern, re.IGNORECASE), severity)
             except re.error:
-                logger.warning(f"编译正则失败: {pattern}")
+                logger.warning("编译正则失败: %s", pattern)
 
         # 加载自定义模式
         if custom_patterns:
@@ -231,7 +230,7 @@ class SensitiveInfoDetector:
                 try:
                     self._patterns[name] = (re.compile(pattern, re.IGNORECASE), severity)
                 except re.error:
-                    logger.warning(f"编译自定义正则失败: {pattern}")
+                    logger.warning("编译自定义正则失败: %s", pattern)
 
     def detect(self, text: str) -> List[ThreatFinding]:
         """检测敏感信息"""
@@ -250,14 +249,16 @@ class SensitiveInfoDetector:
                 else:
                     masked = "***"
 
-                findings.append(ThreatFinding(
-                    threat_type=ThreatType.SENSITIVE_INFO_LEAK,
-                    severity=severity,
-                    description=f"检测到敏感信息: {info_type}",
-                    evidence=masked,
-                    location=f"位置 {match.start()}-{match.end()}",
-                    confidence=0.9,
-                ))
+                findings.append(
+                    ThreatFinding(
+                        threat_type=ThreatType.SENSITIVE_INFO_LEAK,
+                        severity=severity,
+                        description=f"检测到敏感信息: {info_type}",
+                        evidence=masked,
+                        location=f"位置 {match.start()}-{match.end()}",
+                        confidence=0.9,
+                    )
+                )
 
         return findings
 
@@ -291,19 +292,16 @@ class OutputFilter:
     # 不当内容模式
     HARMFUL_PATTERNS = [
         # 暴力内容
-        r'(?i)how\s+to\s+make.{0,20}(bomb|explosive|weapon)',
-        r'(?i)(kill|murder|assassinate)\s+(someone|people|person)',
-
+        r"(?i)how\s+to\s+make.{0,20}(bomb|explosive|weapon)",
+        r"(?i)(kill|murder|assassinate)\s+(someone|people|person)",
         # 自我伤害
-        r'(?i)(how\s+to|ways\s+to)\s+(harm|hurt|kill)\s+(my)?self',
-
+        r"(?i)(how\s+to|ways\s+to)\s+(harm|hurt|kill)\s+(my)?self",
         # 非法活动
-        r'(?i)(how\s+to|instructions?\s+for)\s+(hack|crack|break\s+into)',
-        r'(?i)(how\s+to|instructions?\s+for)\s+(steal|shoplift|pickpocket)',
-
+        r"(?i)(how\s+to|instructions?\s+for)\s+(hack|crack|break\s+into)",
+        r"(?i)(how\s+to|instructions?\s+for)\s+(steal|shoplift|pickpocket)",
         # 中文有害内容
-        r'怎么.{0,5}(制作|制造|做).{0,5}(炸弹|爆炸物|武器)',
-        r'怎么.{0,5}(黑入|入侵|破解)',
+        r"怎么.{0,5}(制作|制造|做).{0,5}(炸弹|爆炸物|武器)",
+        r"怎么.{0,5}(黑入|入侵|破解)",
     ]
 
     def __init__(self, custom_patterns: Optional[List[str]] = None):
@@ -314,7 +312,7 @@ class OutputFilter:
             try:
                 self._patterns.append(re.compile(pattern, re.IGNORECASE))
             except re.error:
-                logger.warning(f"编译正则失败: {pattern}")
+                logger.warning("编译正则失败: %s", pattern)
 
         # 加载自定义模式
         if custom_patterns:
@@ -322,7 +320,7 @@ class OutputFilter:
                 try:
                     self._patterns.append(re.compile(pattern, re.IGNORECASE))
                 except re.error:
-                    logger.warning(f"编译自定义正则失败: {pattern}")
+                    logger.warning("编译自定义正则失败: %s", pattern)
 
     def filter(self, text: str) -> tuple[str, List[ThreatFinding]]:
         """过滤不当内容"""
@@ -335,14 +333,16 @@ class OutputFilter:
         for pattern in self._patterns:
             match = pattern.search(filtered_text)
             if match:
-                findings.append(ThreatFinding(
-                    threat_type=ThreatType.HARMFUL_CONTENT,
-                    severity=SafetyLevel.CRITICAL,
-                    description="检测到不当内容",
-                    evidence=match.group()[:50],
-                    location=f"位置 {match.start()}-{match.end()}",
-                    confidence=0.9,
-                ))
+                findings.append(
+                    ThreatFinding(
+                        threat_type=ThreatType.HARMFUL_CONTENT,
+                        severity=SafetyLevel.CRITICAL,
+                        description="检测到不当内容",
+                        evidence=match.group()[:50],
+                        location=f"位置 {match.start()}-{match.end()}",
+                        confidence=0.9,
+                    )
+                )
                 # 替换为 [内容已过滤]
                 filtered_text = pattern.sub("[内容已过滤]", filtered_text)
 
@@ -377,20 +377,29 @@ class CognitiveSafetyChecker:
 
         # 危险关键词检测
         dangerous_keywords = [
-            "rm -rf", "sudo", "chmod 777", "DROP TABLE", "DELETE FROM",
-            "eval(", "exec(", "__import__", "subprocess",
+            "rm -rf",
+            "sudo",
+            "chmod 777",
+            "DROP TABLE",
+            "DELETE FROM",
+            "eval(",
+            "exec(",
+            "__import__",
+            "subprocess",
         ]
 
         for keyword in dangerous_keywords:
             if keyword.lower() in intent.lower():
                 risk_score += 0.3
-                findings.append(ThreatFinding(
-                    threat_type=ThreatType.MALICIOUS_CODE,
-                    severity=SafetyLevel.HIGH,
-                    description=f"意图包含危险关键词: {keyword}",
-                    evidence=keyword,
-                    confidence=0.8,
-                ))
+                findings.append(
+                    ThreatFinding(
+                        threat_type=ThreatType.MALICIOUS_CODE,
+                        severity=SafetyLevel.HIGH,
+                        description=f"意图包含危险关键词: {keyword}",
+                        evidence=keyword,
+                        confidence=0.8,
+                    )
+                )
 
         # 认知安全评估
         cognitive_assessment = self._cognitive_safety_assessment(intent, context)
@@ -425,20 +434,22 @@ class CognitiveSafetyChecker:
 
         # 检查是否试图绕过安全限制
         bypass_patterns = [
-            r'(?i)ignore\s+(all\s+)?(safety|security)',
-            r'(?i)bypass\s+(all\s+)?(safety|security)',
-            r'(?i)disable\s+(all\s+)?(safety|security)',
+            r"(?i)ignore\s+(all\s+)?(safety|security)",
+            r"(?i)bypass\s+(all\s+)?(safety|security)",
+            r"(?i)disable\s+(all\s+)?(safety|security)",
         ]
 
         for pattern in bypass_patterns:
             if re.search(pattern, intent):
                 risk_score += 0.5
-                findings.append(ThreatFinding(
-                    threat_type=ThreatType.PRIVILEGE_ESCALATION,
-                    severity=SafetyLevel.HIGH,
-                    description="检测到绕过安全限制的尝试",
-                    confidence=0.7,
-                ))
+                findings.append(
+                    ThreatFinding(
+                        threat_type=ThreatType.PRIVILEGE_ESCALATION,
+                        severity=SafetyLevel.HIGH,
+                        description="检测到绕过安全限制的尝试",
+                        confidence=0.7,
+                    )
+                )
 
         return {
             "risk_score": risk_score,
@@ -457,13 +468,15 @@ class CognitiveSafetyChecker:
 
         # 检查是否有异常输出
         if len(output) > 100000:  # 输出过大
-            findings.append(ThreatFinding(
-                threat_type=ThreatType.DATA_EXFILTRATION,
-                severity=SafetyLevel.MEDIUM,
-                description="输出数据量异常大",
-                evidence=f"输出大小: {len(output)} 字符",
-                confidence=0.6,
-            ))
+            findings.append(
+                ThreatFinding(
+                    threat_type=ThreatType.DATA_EXFILTRATION,
+                    severity=SafetyLevel.MEDIUM,
+                    description="输出数据量异常大",
+                    evidence=f"输出大小: {len(output)} 字符",
+                    confidence=0.6,
+                )
+            )
 
         is_safe = len(findings) == 0
         safety_level = SafetyLevel.LOW if is_safe else SafetyLevel.MEDIUM
@@ -481,8 +494,13 @@ class MemorySecurityGuard:
 
     # 不应被记住的敏感信息类型
     SENSITIVE_MEMORY_TYPES = {
-        "password", "api_key", "token", "secret",
-        "credit_card", "bank_account", "id_card",
+        "password",
+        "api_key",
+        "token",
+        "secret",
+        "credit_card",
+        "bank_account",
+        "id_card",
     }
 
     def __init__(self):
@@ -500,7 +518,7 @@ class MemorySecurityGuard:
         """判断是否应该记住该内容"""
         # 检查记忆类型
         if memory_type in self.SENSITIVE_MEMORY_TYPES:
-            logger.warning(f"不应记住敏感类型的记忆: {memory_type}")
+            logger.warning("不应记住敏感类型的记忆: %s", memory_type)
             return False
 
         # 检查内容中是否包含敏感信息
@@ -555,7 +573,7 @@ class CognitiveSecuritySystem:
         self._safety_checker = CognitiveSafetyChecker(safety_level)
         self._memory_guard = MemorySecurityGuard()
 
-        logger.info(f"认知安全系统初始化完成，安全等级: {safety_level.value}")
+        logger.info("认知安全系统初始化完成，安全等级: %s", safety_level.value)
 
     def check_input_safety(self, user_input: str, context: Optional[Dict[str, Any]] = None) -> SafetyCheckResult:
         """检查输入安全性"""

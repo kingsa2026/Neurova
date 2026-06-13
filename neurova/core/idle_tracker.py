@@ -8,30 +8,31 @@
 - either: 温度或时间任一满足即可
 """
 
-import time
 import threading
-import typing
-from typing import Dict, Optional, Callable, Any, List
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
 
-from neurova.core.base_module import BaseModule, ModuleState
-from neurova.core.sleep_phase_config_manager import SleepPhaseConfigManager
 from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
+from neurova.core.base_module import BaseModule
+from neurova.core.sleep_phase_config_manager import SleepPhaseConfigManager
 
 
 @dataclass
 class SleepPhaseThresholds:
     """睡眠阶段阈值配置"""
+
     idle_warning: float = 300.0  # 5分钟
-    idle_drowsy: float = 600.0   # 10分钟
+    idle_drowsy: float = 600.0  # 10分钟
     idle_light_sleep: float = 1800.0  # 30分钟
-    idle_deep_sleep: float = 3600.0   # 60分钟
+    idle_deep_sleep: float = 3600.0  # 60分钟
 
 
 @dataclass
 class PhaseDuration:
     """阶段持续时间配置"""
+
     active: float = 0.0
     warning: float = 300.0
     drowsy: float = 600.0
@@ -42,6 +43,7 @@ class PhaseDuration:
 @dataclass
 class WakeCondition:
     """唤醒条件配置"""
+
     min_temperature: float = 0.3
     min_activity_count: int = 3
     activity_window: float = 60.0
@@ -58,29 +60,29 @@ class IdleTimeTracker(BaseModule):
     - either: 温度或时间任一满足即可
     """
 
-    MODULE_ID = 'idle_tracker'
-    MODULE_NAME = 'Idle Time Tracker'
-    MODULE_VERSION = '1.0.0'
+    MODULE_ID = "idle_tracker"
+    MODULE_NAME = "Idle Time Tracker"
+    MODULE_VERSION = "1.0.0"
 
     # 睡眠阶段顺序
-    PHASE_ORDER = ['active', 'light_sleep', 'deep_sleep', 'rem', 'hibernate']
+    PHASE_ORDER = ["active", "light_sleep", "deep_sleep", "rem", "hibernate"]
     PHASE_DISPLAY_NAMES = {
-        'active': '活跃',
-        'light_sleep': '浅睡眠',
-        'deep_sleep': '深睡眠',
-        'rem': 'REM睡眠',
-        'hibernate': '休眠',
+        "active": "活跃",
+        "light_sleep": "浅睡眠",
+        "deep_sleep": "深睡眠",
+        "rem": "REM睡眠",
+        "hibernate": "休眠",
     }
 
     def __init__(self, event_bus=None, state_manager=None, log_manager=None, error_handler=None):
         super().__init__(config={}, event_bus=event_bus)
         self._last_activity_time = time.time()
         self._current_idle_time = 0.0
-        self._current_phase = 'active'
+        self._current_phase = "active"
         self._phase_start_time = time.time()
         self._phase_config_manager: Optional[SleepPhaseConfigManager] = None
         self._sleep_consolidation: Optional[SleepConsolidation] = None
-        self._sleep_mode = 'temperature'
+        self._sleep_mode = "temperature"
         self._idle_thresholds = SleepPhaseThresholds()
         self._phase_durations = PhaseDuration()
         self._wake_conditions = WakeCondition()
@@ -96,17 +98,17 @@ class IdleTimeTracker(BaseModule):
         if self._phase_config_manager:
             self._phase_config_manager.on_initialize()
         if self._sleep_consolidation:
-            self._sleep_consolidation.set_state_value('initialized', True)
-        self._current_phase = 'active'
+            self._sleep_consolidation.set_state_value("initialized", True)
+        self._current_phase = "active"
 
     def on_start(self) -> None:
         self.log_info("Starting Idle Time Tracker")
         if self._phase_config_manager:
             self._phase_config_manager.on_start()
         if self._sleep_consolidation:
-            self._sleep_consolidation.set_state_value('started', True)
+            self._sleep_consolidation.set_state_value("started", True)
         self._start_monitoring()
-        self.set_state_value('running', True)
+        self.set_state_value("running", True)
 
     def on_stop(self) -> None:
         self.log_info("Stopping Idle Time Tracker")
@@ -114,8 +116,8 @@ class IdleTimeTracker(BaseModule):
         if self._phase_config_manager:
             self._phase_config_manager.on_stop()
         if self._sleep_consolidation:
-            self._sleep_consolidation.set_state_value('stopped', True)
-        self.set_state_value('running', False)
+            self._sleep_consolidation.set_state_value("stopped", True)
+        self.set_state_value("running", False)
 
     def _start_monitoring(self) -> None:
         """启动监控线程"""
@@ -123,11 +125,7 @@ class IdleTimeTracker(BaseModule):
             return
 
         self._monitor_running = True
-        self._monitor_thread = threading.Thread(
-            target=self._monitor_phase,
-            daemon=True,
-            name="idle-tracker-monitor"
-        )
+        self._monitor_thread = threading.Thread(target=self._monitor_phase, daemon=True, name="idle-tracker-monitor")
         self._monitor_thread.start()
         self.log_info(f"Started monitoring with interval {self._monitor_interval}s")
 
@@ -172,10 +170,11 @@ class IdleTimeTracker(BaseModule):
         # 简化实现：检查是否有存储的梦境报告统计
         try:
             from neurova.cognitive_layers.memory_layer.storage import MemoryStorage
+
             if isinstance(self._storage, MemoryStorage):
                 stats = self._storage.get_dream_report_stats()
                 if stats:
-                    avg_quality = stats.get('average_quality', 0)
+                    avg_quality = stats.get("average_quality", 0)
                     self.log_info(f"Average dream quality: {avg_quality:.2f}")
                     # 根据质量调整监控间隔
                     if avg_quality > 0.7:
@@ -186,8 +185,8 @@ class IdleTimeTracker(BaseModule):
             self.log_debug(f"Could not adjust parameters: {e}")
 
         return {
-            'monitor_interval': self._monitor_interval,
-            'current_phase': self._current_phase,
+            "monitor_interval": self._monitor_interval,
+            "current_phase": self._current_phase,
         }
 
     def _on_phase_changed(self, old_phase: str, new_phase: str, event_data: Optional[Dict] = None) -> None:
@@ -207,37 +206,38 @@ class IdleTimeTracker(BaseModule):
             if memories:
                 # 转换Dict为MemoryRecord
                 from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord
+
                 memory_records = [MemoryRecord.from_dict(m) for m in memories]
                 result = self._sleep_consolidation.run_sleep_cycle(memory_records)
                 self._last_consolidation_result = result
                 self.log_info(f"Consolidation completed: {len(memories)} memories processed")
-                
+
                 # 写回合并后的记忆
                 self._write_back_consolidated_memories(result)
 
                 # 通知回调
-                for callback in self._callbacks.get('consolidation', []):
+                for callback in self._callbacks.get("consolidation", []):
                     try:
                         callback(result)
                     except Exception as e:
                         self.log_error(f"Error in consolidation callback: {e}")
         except Exception as e:
             self.log_error(f"Error during consolidation: {e}")
-    
+
     def _write_back_consolidated_memories(self, result: Dict) -> None:
         """将合并后的记忆写回MemoryManager"""
         if not self._memory_manager:
             return
-            
+
         try:
             merged_memories = result.get("merged_memories", [])
             merge_results = result.get("merge_results", [])
-            
+
             # 1. 删除原始记忆（被合并的）
             source_ids = set()
             for merge_result in merge_results:
                 source_ids.update(merge_result.source_ids)
-            
+
             # 2. 更新或添加合并后的记忆
             for memory in merged_memories:
                 if memory.merged_from:
@@ -268,9 +268,9 @@ class IdleTimeTracker(BaseModule):
                             interaction_type="consolidation",
                         )
                         self.log_debug(f"Updated memory temperature: {memory.id}")
-            
+
             self.log_info(f"Write-back completed: {len(merged_memories)} memories updated")
-            
+
         except Exception as e:
             self.log_error(f"Error during write-back: {e}")
 
@@ -292,18 +292,18 @@ class IdleTimeTracker(BaseModule):
 
     def record_activity(self) -> None:
         """记录用户活动（重置空闲时间）"""
-        if self._current_phase != 'active':
+        if self._current_phase != "active":
             self.log_info(f"Activity recorded, resetting from phase: {self._current_phase}")
-            self._current_phase = 'active'
+            self._current_phase = "active"
             self._last_activity_time = time.time()
             self._current_idle_time = 0.0
             self._phase_start_time = time.time()
-            self._emit_phase_changed('active', 'active')
-            self.set_state_value('current_phase', 'active')
+            self._emit_phase_changed("active", "active")
+            self.set_state_value("current_phase", "active")
 
     def get_current_idle_time(self) -> int:
         """获取当前空闲时间（秒）"""
-        if self._current_phase == 'active':
+        if self._current_phase == "active":
             return int(time.time() - self._last_activity_time)
         else:
             return int(time.time() - self._phase_start_time)
@@ -321,10 +321,10 @@ class IdleTimeTracker(BaseModule):
         current_idle = self.get_current_idle_time()
 
         # 根据睡眠模式判断
-        if self._sleep_mode == 'temperature':
+        if self._sleep_mode == "temperature":
             threshold = self._get_temperature_threshold(target_phase)
             return current_temperature <= threshold
-        elif self._sleep_mode == 'time':
+        elif self._sleep_mode == "time":
             phase_index = self.PHASE_ORDER.index(target_phase) if target_phase in self.PHASE_ORDER else -1
             if phase_index > 0:
                 threshold_key = f"to_{target_phase}"
@@ -348,10 +348,10 @@ class IdleTimeTracker(BaseModule):
         """获取阶段的温度阈值"""
         # 简化实现：使用默认阈值
         thresholds = {
-            'light_sleep': 30.0,
-            'deep_sleep': 25.0,
-            'rem': 20.0,
-            'hibernate': 15.0,
+            "light_sleep": 30.0,
+            "deep_sleep": 25.0,
+            "rem": 20.0,
+            "hibernate": 15.0,
         }
         return thresholds.get(phase, 30.0)
 
@@ -362,19 +362,19 @@ class IdleTimeTracker(BaseModule):
         # 检查后续阶段
         for i in range(current_index + 1, len(self.PHASE_ORDER)):
             phase = self.PHASE_ORDER[i]
-            if phase == 'active':
+            if phase == "active":
                 continue
 
             current_idle = self.get_current_idle_time()
-            phase_index = self.PHASE_ORDER.index(phase)
+            self.PHASE_ORDER.index(phase)
             threshold_key = f"to_{phase}"
             threshold = getattr(self._idle_thresholds, threshold_key, 0)
 
-            if self._sleep_mode == 'temperature':
+            if self._sleep_mode == "temperature":
                 temp_threshold = self._get_temperature_threshold(phase)
                 if current_temperature <= temp_threshold:
                     return phase
-            elif self._sleep_mode == 'time':
+            elif self._sleep_mode == "time":
                 if current_idle >= threshold:
                     return phase
             else:  # either
@@ -396,27 +396,27 @@ class IdleTimeTracker(BaseModule):
         old_phase = self._current_phase
         self._current_phase = new_phase
         self._phase_start_time = time.time()
-        self.set_state_value('current_phase', new_phase)
+        self.set_state_value("current_phase", new_phase)
         self._emit_phase_changed(old_phase, new_phase)
         self.log_info(f"Transitioned to phase: {new_phase}")
 
     def _emit_phase_changed(self, old_phase: str, new_phase: str) -> None:
         """发送阶段变更事件"""
         event_data = {
-            'old_phase': old_phase,
-            'new_phase': new_phase,
-            'timestamp': datetime.now().isoformat(),
+            "old_phase": old_phase,
+            "new_phase": new_phase,
+            "timestamp": datetime.now().isoformat(),
         }
 
         # 调用回调
-        for callback in self._callbacks.get('phase_changed', []):
+        for callback in self._callbacks.get("phase_changed", []):
             try:
                 callback(old_phase, new_phase, event_data)
             except Exception as e:
                 self.log_error(f"Error in phase change callback: {e}")
 
         # 发送事件
-        self.emit_event('phase.changed', event_data)
+        self.emit_event("phase.changed", event_data)
 
     def enter_manual_phase(self, target_phase: str, duration: int = 0) -> bool:
         """手动进入指定阶段"""
@@ -425,7 +425,7 @@ class IdleTimeTracker(BaseModule):
             return False
 
         # 如果是活跃阶段，重置活动
-        if target_phase == 'active':
+        if target_phase == "active":
             self.record_activity()
             return True
 
@@ -445,11 +445,14 @@ class IdleTimeTracker(BaseModule):
             timer.daemon = True
             timer.start()
 
-            self.emit_event('phase.manual_entered', {
-                'phase': target_phase,
-                'duration': actual_duration,
-                'end_time': datetime.now().isoformat(),
-            })
+            self.emit_event(
+                "phase.manual_entered",
+                {
+                    "phase": target_phase,
+                    "duration": actual_duration,
+                    "end_time": datetime.now().isoformat(),
+                },
+            )
 
         return True
 
@@ -465,18 +468,18 @@ class IdleTimeTracker(BaseModule):
         next_phase = self.get_next_phase(current_temperature)
 
         return {
-            'current_idle_time': current_idle,
-            'current_phase': self._current_phase,
-            'current_phase_display': self.get_phase_display_name(self._current_phase),
-            'next_phase': next_phase,
-            'next_phase_display': self.get_phase_display_name(next_phase) if next_phase else None,
-            'time_until_next': self._calculate_time_until_next(next_phase),
-            'phase_start_time': self._phase_start_time,
-            'last_activity_time': self._last_activity_time,
-            'sleep_mode': self._sleep_mode,
-            'thresholds': self._idle_thresholds.__dict__,
-            'phase_durations': self._phase_durations.__dict__,
-            'wake_conditions': self._wake_conditions.__dict__,
+            "current_idle_time": current_idle,
+            "current_phase": self._current_phase,
+            "current_phase_display": self.get_phase_display_name(self._current_phase),
+            "next_phase": next_phase,
+            "next_phase_display": self.get_phase_display_name(next_phase) if next_phase else None,
+            "time_until_next": self._calculate_time_until_next(next_phase),
+            "phase_start_time": self._phase_start_time,
+            "last_activity_time": self._last_activity_time,
+            "sleep_mode": self._sleep_mode,
+            "thresholds": self._idle_thresholds.__dict__,
+            "phase_durations": self._phase_durations.__dict__,
+            "wake_conditions": self._wake_conditions.__dict__,
         }
 
     def _calculate_time_until_next(self, next_phase: Optional[str]) -> Optional[int]:
@@ -505,7 +508,7 @@ class IdleTimeTracker(BaseModule):
         """更新配置"""
         if sleep_mode:
             self._sleep_mode = sleep_mode
-            self.set_state_value('sleep_mode', sleep_mode)
+            self.set_state_value("sleep_mode", sleep_mode)
 
         if idle_thresholds:
             for key, value in idle_thresholds.items():
@@ -527,23 +530,24 @@ class IdleTimeTracker(BaseModule):
     def get_config(self) -> Dict[str, Any]:
         """获取当前配置"""
         return {
-            'sleep_mode': self._sleep_mode,
-            'idle_thresholds': self._idle_thresholds.__dict__,
-            'phase_durations': self._phase_durations.__dict__,
-            'wake_conditions': self._wake_conditions.__dict__,
+            "sleep_mode": self._sleep_mode,
+            "idle_thresholds": self._idle_thresholds.__dict__,
+            "phase_durations": self._phase_durations.__dict__,
+            "wake_conditions": self._wake_conditions.__dict__,
         }
 
     def reset(self) -> None:
         """重置追踪器"""
         self.record_activity()
-        self._current_phase = 'active'
+        self._current_phase = "active"
         self._phase_start_time = time.time()
-        self.set_state_value('current_phase', 'active')
+        self.set_state_value("current_phase", "active")
         self.log_info("Tracker reset to active state")
 
+
 __all__ = [
-    'SleepPhaseThresholds',
-    'PhaseDuration',
-    'WakeCondition',
-    'IdleTimeTracker',
+    "SleepPhaseThresholds",
+    "PhaseDuration",
+    "WakeCondition",
+    "IdleTimeTracker",
 ]

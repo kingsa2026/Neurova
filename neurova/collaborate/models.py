@@ -5,45 +5,49 @@
 定义协作模板、角色、任务步骤和工作流的数据结构。
 """
 
-import time
-import uuid
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
 
 class TemplateType(str, Enum):
     """协作模板类型"""
-    CODE_REVIEW = "code_review"           # 代码评审
+
+    CODE_REVIEW = "code_review"  # 代码评审
     PAIR_PROGRAMMING = "pair_programming"  # 结对编程
-    DIAGNOSTIC = "diagnostic"              # 问题诊断
+    DIAGNOSTIC = "diagnostic"  # 问题诊断
     KNOWLEDGE_SHARING = "knowledge_sharing"  # 知识共享
-    CUSTOM = "custom"                      # 自定义模板
+    CUSTOM = "custom"  # 自定义模板
+
 
 class AgentRole(str, Enum):
     """Agent 角色"""
-    COORDINATOR = "coordinator"           # 协调者
-    REVIEWER = "reviewer"                 # 评审者
-    AUTHOR = "author"                     # 作者/执行者
-    TEACHER = "teacher"                   # 教师
-    LEARNER = "learner"                   # 学习者
-    DIAGNOSTIC = "diagnostic"             # 诊断者
-    SOLVER = "solver"                     # 解决者
-    OBSERVER = "observer"                 # 观察者
-    PARTICIPANT = "participant"           # 参与者
+
+    COORDINATOR = "coordinator"  # 协调者
+    REVIEWER = "reviewer"  # 评审者
+    AUTHOR = "author"  # 作者/执行者
+    TEACHER = "teacher"  # 教师
+    LEARNER = "learner"  # 学习者
+    DIAGNOSTIC = "diagnostic"  # 诊断者
+    SOLVER = "solver"  # 解决者
+    OBSERVER = "observer"  # 观察者
+    PARTICIPANT = "participant"  # 参与者
+
 
 @dataclass
 class TaskStep:
     """协作任务步骤"""
-    step_id: str = ""                                    # 步骤ID
-    name: str = ""                                       # 步骤名称
-    description: str = ""                                # 步骤描述
-    assigned_role: AgentRole = AgentRole.PARTICIPANT     # 负责角色
+
+    step_id: str = ""  # 步骤ID
+    name: str = ""  # 步骤名称
+    description: str = ""  # 步骤描述
+    assigned_role: AgentRole = AgentRole.PARTICIPANT  # 负责角色
     required_capabilities: List[str] = field(default_factory=list)  # 所需能力
     input_requirements: Dict[str, Any] = field(default_factory=dict)  # 输入要求
     output_produces: List[str] = field(default_factory=list)  # 输出产物
-    depends_on: List[str] = field(default_factory=list)   # 依赖步骤
-    timeout_seconds: int = 300                            # 超时时间
-    optional: bool = False                               # 是否可选
+    depends_on: List[str] = field(default_factory=list)  # 依赖步骤
+    timeout_seconds: int = 300  # 超时时间
+    optional: bool = False  # 是否可选
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -51,7 +55,9 @@ class TaskStep:
             "step_id": self.step_id,
             "name": self.name,
             "description": self.description,
-            "assigned_role": self.assigned_role.value if isinstance(self.assigned_role, AgentRole) else self.assigned_role,
+            "assigned_role": (
+                self.assigned_role.value if isinstance(self.assigned_role, AgentRole) else self.assigned_role
+            ),
             "required_capabilities": self.required_capabilities,
             "input_requirements": self.input_requirements,
             "output_produces": self.output_produces,
@@ -60,16 +66,18 @@ class TaskStep:
             "optional": self.optional,
         }
 
+
 @dataclass
 class WorkflowDefinition:
     """工作流定义"""
-    workflow_id: str = ""                              # 工作流ID
-    name: str = ""                                      # 工作流名称
-    description: str = ""                               # 工作流描述
-    steps: List[TaskStep] = field(default_factory=list) # 任务步骤
-    parallel_allowed: bool = False                      # 是否允许并行
-    max_concurrent_steps: int = 2                       # 最大并行步骤数
-    rollback_on_failure: bool = True                    # 失败时是否回滚
+
+    workflow_id: str = ""  # 工作流ID
+    name: str = ""  # 工作流名称
+    description: str = ""  # 工作流描述
+    steps: List[TaskStep] = field(default_factory=list)  # 任务步骤
+    parallel_allowed: bool = False  # 是否允许并行
+    max_concurrent_steps: int = 2  # 最大并行步骤数
+    rollback_on_failure: bool = True  # 失败时是否回滚
 
     def get_step(self, step_id: str) -> Optional[TaskStep]:
         """获取指定步骤"""

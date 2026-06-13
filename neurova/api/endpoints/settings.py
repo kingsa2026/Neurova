@@ -14,14 +14,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 import uuid
 from pathlib import Path as FilePath
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Body, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -55,12 +53,14 @@ _DEFAULT_CORS_ORIGINS = [
 
 class SettingsResponse(BaseModel):
     """设置响应"""
+
     settings: Dict[str, Any]
     updated_at: Optional[str] = None
 
 
 class UpdateSettingsRequest(BaseModel):
     """更新设置请求"""
+
     settings: Dict[str, Any] = Field(..., description="设置键值对")
 
 
@@ -72,7 +72,7 @@ def _get_request_id(request: Request) -> str:
 @router.get("", response_model=SettingsResponse)
 async def get_settings(request: Request):
     """获取全局设置"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     # TODO: 从数据库或文件加载设置
     settings = dict(_default_settings)
@@ -86,7 +86,7 @@ async def get_settings(request: Request):
 @router.put("", response_model=SettingsResponse)
 async def update_settings(request: Request, body: UpdateSettingsRequest):
     """更新全局设置"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     # TODO: 保存设置到数据库或文件
     _default_settings.update(body.settings)
@@ -100,7 +100,7 @@ async def update_settings(request: Request, body: UpdateSettingsRequest):
 @router.get("/{key}")
 async def get_setting(request: Request, key: str = Path(...)):
     """获取特定设置"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     if key not in _default_settings:
         raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
@@ -117,7 +117,7 @@ async def get_setting(request: Request, key: str = Path(...)):
 @router.put("/{key}")
 async def update_setting(request: Request, key: str = Path(...), value: Any = Body(...)):
     """更新特定设置"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     _default_settings[key] = value
 
@@ -136,6 +136,7 @@ async def update_setting(request: Request, key: str = Path(...), value: Any = Bo
 
 class CorsConfigResponse(BaseModel):
     """CORS 配置响应"""
+
     origins: List[str]
     allow_credentials: bool = True
     allow_methods: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
@@ -145,6 +146,7 @@ class CorsConfigResponse(BaseModel):
 
 class UpdateCorsConfigRequest(BaseModel):
     """更新 CORS 配置请求"""
+
     origins: List[str] = Field(..., description="允许的来源列表")
     allow_credentials: Optional[bool] = Field(None, description="是否允许凭证")
     allow_methods: Optional[List[str]] = Field(None, description="允许的 HTTP 方法")
@@ -158,7 +160,7 @@ def _load_cors_config() -> Dict[str, Any]:
             with open(_CORS_CONFIG_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.warning(f"Failed to load CORS config: {e}")
+            logger.warning("Failed to load CORS config: %s", e)
     return {
         "origins": _DEFAULT_CORS_ORIGINS,
         "allow_credentials": True,
@@ -175,14 +177,14 @@ def _save_cors_config(config: Dict[str, Any]) -> bool:
             json.dump(config, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
-        logger.error(f"Failed to save CORS config: {e}")
+        logger.error("Failed to save CORS config: %s", e)
         return False
 
 
 @router.get("/cors", response_model=CorsConfigResponse)
 async def get_cors_config(request: Request):
     """获取 CORS 配置"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
     config = _load_cors_config()
 
     return CorsConfigResponse(
@@ -197,7 +199,7 @@ async def get_cors_config(request: Request):
 @router.put("/cors", response_model=CorsConfigResponse)
 async def update_cors_config(request: Request, body: UpdateCorsConfigRequest):
     """更新 CORS 配置（管理员）"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     # 验证 origins 格式
     validated_origins = []
@@ -208,8 +210,7 @@ async def update_cors_config(request: Request, body: UpdateCorsConfigRequest):
         # 验证 URL 格式
         if not origin.startswith("http://") and not origin.startswith("https://"):
             raise HTTPException(
-                status_code=400,
-                detail=f"Invalid origin format: {origin}. Must start with http:// or https://"
+                status_code=400, detail=f"Invalid origin format: {origin}. Must start with http:// or https://"
             )
         validated_origins.append(origin)
 
@@ -229,7 +230,7 @@ async def update_cors_config(request: Request, body: UpdateCorsConfigRequest):
     if not _save_cors_config(config):
         raise HTTPException(status_code=500, detail="Failed to save CORS config")
 
-    logger.info(f"CORS config updated by user, origins: {validated_origins}")
+    logger.info("CORS config updated by user, origins: %s", validated_origins)
 
     return CorsConfigResponse(
         origins=config["origins"],

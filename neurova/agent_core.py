@@ -9,32 +9,29 @@ D1 任务重构版本：
 """
 
 import logging
-import json
-import time
-from typing import List, Dict, Optional, Any
-from datetime import datetime, UTC
-from pathlib import Path
-
 import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 # 添加项目根目录到 sys.path (用于导入 agent.loops)
 project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from neurova.mem_core import MemCore
 from neurova.context import ContextOrchestrator
-from neurova.llm_client import LLMClient, LLMConfig
-from neurova.router import MessageRouter, Message, MessageType, RouteResult
-from neurova.skills.registry import SkillRegistry
 from neurova.core.idle_tracker import IdleTimeTracker
 from neurova.core.sleep_config_manager import SleepConfigManager
+from neurova.llm_client import LLMConfig
+from neurova.mem_core import MemCore
+from neurova.router import MessageRouter, RouteResult
 from neurova.skills.agent_skill_manager import AgentSkillManager  # will be migrated to evolution
+from neurova.skills.registry import SkillRegistry
 
 # Neurova-Evocate: Neurova Hebb 记忆系统
 try:
     from neurova.cognitive_layers.memory_layer.neuHebb_manager import NeuHebbManager
     from neurova.cognitive_layers.memory_layer.neurova_hebb import NeuHebbConfig
+
     NEUHEBB_AVAILABLE = True
 except ImportError:
     NEUHEBB_AVAILABLE = False
@@ -42,6 +39,7 @@ except ImportError:
 # 温度引擎
 try:
     from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
+
     TEMPERATURE_ENGINE_AVAILABLE = True
 except ImportError:
     TEMPERATURE_ENGINE_AVAILABLE = False
@@ -50,44 +48,42 @@ except ImportError:
 # 认知图谱存储架构 — 一步到位替换
 try:
     from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
-    from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
     from neurova.cognitive_layers.memory_layer.pattern_crystallizer import PatternCrystallizer
     from neurova.cognitive_layers.memory_layer.reasoning_trace_manager import ReasoningTraceManager
+    from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
+
     COGNITIVE_GRAPH_AVAILABLE = True
 except ImportError:
     COGNITIVE_GRAPH_AVAILABLE = False
     logging.warning("Cognitive Graph modules not available")
 
-# P0: Phase 2+3 模块接线 — 序列挖掘 / 基因编程 / 生命周期 / NL合成 / DAG编排 / 工具市场
-from neurova.evolution import (
-    PatternMiner,
-    ToolGeneticEngine,
-    ToolLifecycleManager,
-    NLToolSynthesizer,
-)
-from neurova.tool_layers import (
-    ToolOrchestrator,
-    ToolMarketplace,
-    MarketplaceTool,
-)
-
-# P1: 提取的深度模块
-from neurova.tool_executor import ToolExecutor
-from neurova.post_chat_pipeline import PostChatPipeline
-
 # P5: 对话管线（从 chat() 提取）
-from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
+from neurova.agent.chat_pipeline import ChatContext, ChatPipeline
 
 # LoopManager 深度模块
 from neurova.agent.loop_manager import LoopManager
 
 # P3: 内置工具注册器（替代 _init_file_operation_wrappers 的 15 个闭包）
-from neurova.builtin_tools import BuiltinToolRegistry, get_builtin_tool_params
+from neurova.builtin_tools import BuiltinToolRegistry
+
+# P0: Phase 2+3 模块接线 — 序列挖掘 / 基因编程 / 生命周期 / NL合成 / DAG编排 / 工具市场
+from neurova.evolution import (
+    NLToolSynthesizer,
+    ToolLifecycleManager,
+)
+from neurova.post_chat_pipeline import PostChatPipeline
+
+# P1: 提取的深度模块
+from neurova.tool_executor import ToolExecutor
+from neurova.tool_layers import (
+    ToolMarketplace,
+    ToolOrchestrator,
+)
 
 # Agent Loop 导入
 try:
-    from neurova.agent.loops.registry import find_agent_loop
-    from neurova.agent.loops.base import BaseAgentLoop
+    pass
+
     AGENT_LOOP_AVAILABLE = True
 except ImportError:
     AGENT_LOOP_AVAILABLE = False
@@ -101,9 +97,10 @@ def debug_log(msg: str) -> None:
     logger.debug(msg)
 
 
-from neurova.session_manager import get_session_manager
 from neurova.core.trace_recorder import get_trajectory_recorder
-from neurova.core.trace_models import TrajectoryEventType
+from neurova.session_manager import get_session_manager
+from neurova.agent_loop_detection import calculate_similarity, detect_content_loop, has_repeated_patterns
+from neurova.agent_shutdown import shutdown_agent
 
 __all__ = ["AgentConfig", "Agent"]
 
@@ -111,46 +108,45 @@ __all__ = ["AgentConfig", "Agent"]
 # Agent LLM 客户端：指定模型/路由 → 委托 MultiModelLLMClient
 # ═══════════════════════════════════════════════════════════════
 
+
 class AgentLLMClient:
     """Agent 的 LLM 路由客户端
     不持有 API Key，通过 LLM 路由层（MultiModelLLMClient）传递上下文。
     指定模型 ID 或 'auto' 让路由器自动选择。
     """
-    def __init__(self, model: str = 'auto', provider_id: str = ''):
+
+    def __init__(self, model: str = "auto", provider_id: str = ""):
         self.model = model
         self.provider_id = provider_id
         # config 用于 OpenAILoop 兼容（hasattr 检查 temperature/max_tokens 等）
-        self.config = type('Config', (), {
-            'temperature': 0.7, 'max_tokens': 8192,
-            'top_p': 0.9, 'frequency_penalty': 0.0,
-            'model': model
-        })()
+        self.config = type(
+            "Config",
+            (),
+            {"temperature": 0.7, "max_tokens": 8192, "top_p": 0.9, "frequency_penalty": 0.0, "model": model},
+        )()
 
     def _get_client(self):
         from neurova.llm.multi_model_client import get_multi_model_client
+
         return get_multi_model_client()
 
     def chat(self, messages, **kwargs):
         return self._get_client().chat(
-            messages,
-            model=self.model if self.model != 'auto' else None,
-            provider_id=self.provider_id or None,
-            **kwargs
+            messages, model=self.model if self.model != "auto" else None, provider_id=self.provider_id or None, **kwargs
         )
 
     def chat_stream(self, messages, **kwargs):
         return self._get_client().chat_stream(
-            messages,
-            model=self.model if self.model != 'auto' else None,
-            provider_id=self.provider_id or None,
-            **kwargs
+            messages, model=self.model if self.model != "auto" else None, provider_id=self.provider_id or None, **kwargs
         )
 
     def get_stats(self):
         return self._get_client().get_stats()
 
+
 class AgentConfig:
     """Agent 配置"""
+
     def __init__(
         self,
         name: str = "忆灵",
@@ -170,28 +166,23 @@ class AgentConfig:
         enable_cognitive_capabilities: bool = True,  # 认知能力
         enable_evolution: bool = True,  # 进化能力
         enable_experience_summary: bool = True,  # 经验总结
-
         # 个性和宪法配置
         personality: str = "",  # 个性设定
         constitution: str = "",  # 行为准则（宪法）
         behavior_rules: List[str] = None,  # 动态行为规则列表
-
         # TTS 配置
         enable_tts: bool = False,  # 是否启用 TTS
         tts_engine: str = "mock",  # TTS 引擎类型 (edge/moss_nano/mock)
         tts_voice: str = "mock",  # 音色名称
         tts_auto_download: bool = True,  # 是否自动下载模型
-        
         # ASR 配置
         enable_asr: bool = False,  # 是否启用 ASR
         asr_engine: str = "mock",  # ASR 引擎类型 (funasr/whisper/mock)
         asr_voice: str = "zh",  # 语言
         asr_auto_download: bool = True,  # 是否自动下载模型
-        
         # 活水上下文池配置
         enable_context_pool: bool = True,  # 是否启用活水上下文池
         enable_auto_tagging: bool = False,  # 是否启用自动标签生成
-
         # 所有权配置
         owner_user_id: Optional[str] = None,  # 创建者用户 ID
     ):
@@ -248,13 +239,13 @@ class AgentConfig:
         self.tts_engine = tts_engine
         self.tts_voice = tts_voice
         self.tts_auto_download = tts_auto_download
-        
+
         # ASR 配置
         self.enable_asr = enable_asr
         self.asr_engine = asr_engine
         self.asr_voice = asr_voice
         self.asr_auto_download = asr_auto_download
-        
+
         # 活水上下文池配置
         self.enable_context_pool = enable_context_pool
         self.enable_auto_tagging = enable_auto_tagging
@@ -275,6 +266,7 @@ class AgentConfig:
 
 class _NullSystem:
     """空系统占位符 — 当闭环系统不可用时用作 fallback"""
+
     def get_feedback(self):
         return {}
 
@@ -325,9 +317,7 @@ class SubSystemContainer:
         a.storage = None
         a.temperature_engine = TemperatureEngine() if TEMPERATURE_ENGINE_AVAILABLE else None
         a.memory_agent = MemCore(a)
-        a.context_orchestrator = ContextOrchestrator(
-            a, use_pool=c.enable_context_pool, auto_tag=c.enable_auto_tagging
-        )
+        a.context_orchestrator = ContextOrchestrator(a, use_pool=c.enable_context_pool, auto_tag=c.enable_auto_tagging)
 
         a.cognitive_engine = None
         a.unified_retriever = None
@@ -339,13 +329,13 @@ class SubSystemContainer:
             try:
                 a.memory_agent.init_moe_router()
             except Exception as e:
-                logger.warning(f"MoE 路由器初始化失败: {e}")
+                logger.warning("MoE 路由器初始化失败: %s", e)
 
             if COGNITIVE_GRAPH_AVAILABLE:
                 try:
                     a._init_cognitive_graph()
                 except Exception as e:
-                    logger.warning(f"认知图谱初始化失败: {e}")
+                    logger.warning("认知图谱初始化失败: %s", e)
 
         # ToolMemory（闭环学习）
         a.tool_memory = None
@@ -353,6 +343,7 @@ class SubSystemContainer:
             try:
                 from neurova.cognitive_layers.memory_layer.muscle_memory import MuscleMemory
                 from neurova.cognitive_layers.memory_layer.tool_memory_integration import ToolMemoryIntegration
+
                 muscle_memory = MuscleMemory(
                     agent_id=c.agent_id,
                     storage_dir=str(c.workspace_path / "memory" / "muscle_memory"),
@@ -364,7 +355,7 @@ class SubSystemContainer:
                     temperature_threshold=30.0,
                 )
             except Exception as e:
-                logger.warning(f"ToolMemory 初始化失败: {e}")
+                logger.warning("ToolMemory 初始化失败: %s", e)
 
     def init_context(self):
         """初始化上下文系统"""
@@ -373,8 +364,8 @@ class SubSystemContainer:
 
         a.context_orchestrator.init_context_system()
         a.llm_client = AgentLLMClient(
-            model=c.llm_config.model if hasattr(c, 'llm_config') and c.llm_config else 'auto',
-            provider_id=getattr(c, 'llm_provider', '') or '',
+            model=c.llm_config.model if hasattr(c, "llm_config") and c.llm_config else "auto",
+            provider_id=getattr(c, "llm_provider", "") or "",
         )
 
     def init_conversation(self):
@@ -404,34 +395,39 @@ class SubSystemContainer:
         a.tts_manager = None
         if c.enable_tts:
             try:
-                from neurova.tts.manager import TTSManager, TTSConfig
+                from neurova.tts.manager import TTSConfig, TTSManager
+
                 tts_config = TTSConfig(
-                    engine=c.tts_engine, voice=c.tts_voice,
+                    engine=c.tts_engine,
+                    voice=c.tts_voice,
                     auto_download=c.tts_auto_download,
                     model_path=str(c.workspace_path / "models" / "tts" / "moss-nano"),
                     tokenizer_path=str(c.workspace_path / "models" / "tts" / "moss-tokenizer"),
                 )
                 a.tts_manager = TTSManager(tts_config)
             except Exception as e:
-                logger.warning(f"TTS管理器初始化失败: {e}")
+                logger.warning("TTS管理器初始化失败: %s", e)
 
         a.asr_manager = None
         if c.enable_asr:
             try:
-                from neurova.asr.manager import ASRManager, ASRConfig
+                from neurova.asr.manager import ASRConfig, ASRManager
+
                 asr_config = ASRConfig(
-                    engine=c.asr_engine, voice=c.asr_voice,
+                    engine=c.asr_engine,
+                    voice=c.asr_voice,
                     model_path=str(c.workspace_path / "models" / "asr"),
                     auto_download=c.asr_auto_download,
                 )
                 a.asr_manager = ASRManager(asr_config)
             except Exception as e:
-                logger.warning(f"ASR管理器初始化失败: {e}")
+                logger.warning("ASR管理器初始化失败: %s", e)
 
         a.voice_pipeline = None
         if c.enable_tts or c.enable_asr:
             try:
                 from neurova.voice_pipeline import get_voice_pipeline
+
                 a.voice_pipeline = get_voice_pipeline()
             except Exception:
                 pass
@@ -440,6 +436,7 @@ class SubSystemContainer:
         if (c.enable_tts or c.enable_asr) and a.memory_manager:
             try:
                 from neurova.voice_memory_bridge import VoiceMemoryBridge, VoiceMemoryConfig
+
                 voice_config = VoiceMemoryConfig(
                     enable_asr_memory=c.enable_asr,
                     enable_tts_stats=c.enable_tts,
@@ -453,20 +450,21 @@ class SubSystemContainer:
                     evolution_orchestrator=a.evolution,
                 )
             except Exception as e:
-                logger.warning(f"语音记忆桥接器初始化失败: {e}")
+                logger.warning("语音记忆桥接器初始化失败: %s", e)
 
     def init_security(self):
         """初始化安全模块"""
         a = self.agent
         a.approval_manager = None
         try:
-            from neurova.security.approval_manager import ApprovalManager, ApprovalLevel
+            from neurova.security.approval_manager import ApprovalLevel, ApprovalManager
+
             a.approval_manager = ApprovalManager(
                 workspace_path=str(a.config.workspace_path),
                 approval_level=ApprovalLevel.SMART,
             )
         except Exception as e:
-            logger.warning(f"审批管理器初始化失败: {e}")
+            logger.warning("审批管理器初始化失败: %s", e)
 
     def init_cognition(self):
         """初始化认知能力"""
@@ -477,11 +475,12 @@ class SubSystemContainer:
         if c.enable_cognitive_capabilities and a.memory_manager:
             try:
                 from neurova.cognitive_layers.growth_layer.analyzer import GrowthAnalyzer
+
                 a.growth_analyzer = GrowthAnalyzer(
                     storage_path=str(c.workspace_path / "memory" / "growth"),
                 )
             except Exception as e:
-                logger.warning(f"认知能力初始化失败: {e}")
+                logger.warning("认知能力初始化失败: %s", e)
 
         a.neuHebb_manager = None
         if NEUHEBB_AVAILABLE and c.enable_memory:
@@ -492,7 +491,7 @@ class SubSystemContainer:
                 )
                 a.neuHebb_manager = NeuHebbManager(config=hebb_config)
             except Exception as e:
-                logger.warning(f"Neurova-Evocate 初始化失败: {e}")
+                logger.warning("Neurova-Evocate 初始化失败: %s", e)
 
     def init_evolution(self):
         """初始化进化引擎"""
@@ -503,12 +502,13 @@ class SubSystemContainer:
         if c.enable_evolution or c.enable_experience_summary:
             try:
                 from neurova.evolution import EvolutionOrchestrator
+
                 a.evolution = EvolutionOrchestrator()
                 if a._skill_registry:
                     skill_names = [s.name for s in a._skill_registry.list_skills()]
                     a.evolution.register_tools(skill_names)
             except Exception as e:
-                logger.warning(f"统一进化引擎初始化失败: {e}")
+                logger.warning("统一进化引擎初始化失败: %s", e)
 
         a.evolution_engine = a.evolution  # 向后兼容别名
         a.pattern_miner = None
@@ -521,7 +521,7 @@ class SubSystemContainer:
         try:
             a.tool_lifecycle = ToolLifecycleManager()
         except Exception as e:
-            logger.warning(f"ToolLifecycleManager 初始化失败: {e}")
+            logger.warning("ToolLifecycleManager 初始化失败: %s", e)
 
         if a.tool_memory and a.evolution:
             a.tool_memory.tool_weights = a.evolution.tool_weights
@@ -532,7 +532,7 @@ class SubSystemContainer:
             try:
                 a.tool_synthesizer = NLToolSynthesizer(pattern_miner=a.pattern_miner)
             except Exception as e:
-                logger.warning(f"NLToolSynthesizer 初始化失败: {e}")
+                logger.warning("NLToolSynthesizer 初始化失败: %s", e)
 
     def init_tools(self):
         """初始化工具系统"""
@@ -541,29 +541,32 @@ class SubSystemContainer:
         a._builtin_tools = None
         try:
             from neurova.computer_use import get_computer_use_manager
+
             computer_use = get_computer_use_manager()
             a._builtin_tools = BuiltinToolRegistry(a, computer_use)
         except Exception as e:
-            logger.warning(f"BuiltinToolRegistry 初始化失败: {e}")
+            logger.warning("BuiltinToolRegistry 初始化失败: %s", e)
 
         a.tool_router = None
         try:
             from neurova.tool_layers import ToolRouter
+
             a.tool_router = ToolRouter()
             a.tool_router.set_skill_manager(a.skill_registry)
             if a._builtin_tools:
                 a.tool_router.register_builtin_batch(a._builtin_tools.get_all_tools())
         except Exception as e:
-            logger.warning(f"ToolRouter 初始化失败: {e}")
+            logger.warning("ToolRouter 初始化失败: %s", e)
 
         a.model_adapter = None
         try:
             from neurova.cognitive_layers.model_adapter import ModelAdapterRegistry
-            model_name = a.config.llm_config.model if a.config.llm_config else ''
-            model_name = model_name or 'deepseek-v4-flash'
+
+            model_name = a.config.llm_config.model if a.config.llm_config else ""
+            model_name = model_name or "deepseek-v4-flash"
             a.model_adapter = ModelAdapterRegistry.get_adapter(model_name)
         except Exception as e:
-            logger.warning(f"模型适配器初始化失败: {e}")
+            logger.warning("模型适配器初始化失败: %s", e)
 
         a.tool_orchestrator = None
         try:
@@ -579,25 +582,26 @@ class SubSystemContainer:
                         return {"success": False, "error": result.error}
                 if a.tool_router:
                     router_result = await a.tool_router.execute(
-                        tool_name=tool_name, params=params,
+                        tool_name=tool_name,
+                        params=params,
                         agent_id=a.config.agent_id,
-                        user_id=getattr(a.config, 'user_id', 'default'),
+                        user_id=getattr(a.config, "user_id", "default"),
                     )
                     if router_result and router_result.success:
                         return {"success": True, "data": router_result.result}
-                    error = getattr(router_result, 'error', None) if router_result else "no result"
+                    error = getattr(router_result, "error", None) if router_result else "no result"
                     return {"success": False, "error": str(error) if error else "unknown error"}
                 return {"success": False, "error": f"工具 '{tool_name}' 未找到"}
 
             a.tool_orchestrator.set_executor(_orchestrator_executor)
         except Exception as e:
-            logger.warning(f"ToolOrchestrator 初始化失败: {e}")
+            logger.warning("ToolOrchestrator 初始化失败: %s", e)
 
         a.tool_marketplace = None
         try:
             a.tool_marketplace = ToolMarketplace()
         except Exception as e:
-            logger.warning(f"ToolMarketplace 初始化失败: {e}")
+            logger.warning("ToolMarketplace 初始化失败: %s", e)
 
         a.tool_executor = ToolExecutor(a)
 
@@ -609,6 +613,7 @@ class SubSystemContainer:
         a.neurflow_executor = None
         try:
             from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
+
             a.neurflow_executor = get_workflow_executor()
         except ImportError:
             pass
@@ -630,13 +635,14 @@ class SubSystemContainer:
         if c.llm_provider:
             try:
                 from neurova.llm.provider_manager import get_provider_manager
+
                 pm = get_provider_manager()
                 provider = pm.get_provider(c.llm_provider)
                 if provider and provider.api_key:
                     c.llm_config.api_key = provider.api_key
                     c.llm_config.base_url = provider.base_url
             except Exception as e:
-                logger.warning(f"从 llm_provider 加载配置失败: {e}")
+                logger.warning("从 llm_provider 加载配置失败: %s", e)
 
 
 class Agent:
@@ -661,7 +667,7 @@ class Agent:
 
         self.config = config or AgentConfig(**kwargs)
 
-        logger.debug(f"Agent.__init__() 开始: {self.config.name} (ID: {self.config.agent_id})")
+        logger.debug("Agent.__init__() 开始: %s (ID: %s)", self.config.name, self.config.agent_id)
 
         # 加载身份和性格
         self._load_identity()
@@ -670,7 +676,7 @@ class Agent:
         self._subsystems = SubSystemContainer(self)
         self._subsystems.init_all()
 
-        logger.info(f"Agent {self.config.name} 初始化完成")
+        logger.info("Agent %s 初始化完成", self.config.name)
 
     def rebuild_loop(self, model_name: str) -> bool:
         """
@@ -719,13 +725,13 @@ class Agent:
             str: Agent 回复文本
         """
         metadata = metadata or {}
-        logger.info(f"处理多模态消息: media_type={media_type}, model={model}")
+        logger.info("处理多模态消息: media_type=%s, model=%s", media_type, model)
 
         # 1. 将 media_type 映射为 LLM RequestType，使用 LLMRouter 选择模型
         try:
+            from neurova.llm.llm_router import RequestType as LLMRequestType
             from neurova.llm.llm_router import (
                 select_model_for_request,
-                RequestType as LLMRequestType,
             )
 
             media_to_request_type = {
@@ -741,23 +747,20 @@ class Agent:
                 selection = select_model_for_request(request_type)
                 if selection:
                     model = selection.model
-                    logger.info(
-                        f"LLMRouter 为 {media_type} 选择模型: "
-                        f"{selection.provider_name}/{selection.model}"
-                    )
+                    logger.info("LLMRouter 为 %s 选择模型: " f"%s/%s", media_type, selection.provider_name, selection.model)
 
             # 如果指定了模型且与当前不同，热切换
-            if model and model != getattr(self.config.llm_config, 'model', None):
-                logger.info(f"多模态路由：热切换模型到 {model}")
+            if model and model != getattr(self.config.llm_config, "model", None):
+                logger.info("多模态路由：热切换模型到 %s", model)
                 self.rebuild_loop(model)
 
         except Exception as e:
-            logger.warning(f"多模态模型选择失败，使用当前模型: {e}")
+            logger.warning("多模态模型选择失败，使用当前模型: %s", e)
 
         # 2. 构建多模态上下文描述
-        media_url = metadata.get("media_url", "")
+        metadata.get("media_url", "")
         filename = metadata.get("filename", "")
-        mime_type = metadata.get("mime_type", "")
+        metadata.get("mime_type", "")
         audio_bytes = metadata.get("audio_bytes")  # 语音消息可能包含音频数据
 
         media_descriptions = {
@@ -767,7 +770,7 @@ class Agent:
             "document": f"[用户发送了一个文档{': ' + filename if filename else ''}]",
         }
         media_desc = media_descriptions.get(media_type, f"[用户发送了媒体文件: {media_type}]")
-        
+
         # 语音消息：通过统一语音管线处理（ASR→情感→上下文→记忆）
         voice_context = None
         if media_type == "voice" and audio_bytes:
@@ -779,12 +782,11 @@ class Agent:
                         audio_data=audio_bytes,
                         user_id=user_id,
                         agent_id=agent_id,
-                        **{k: v for k, v in (metadata or {}).items()
-                           if k not in ("audio_bytes",)},
+                        **{k: v for k, v in (metadata or {}).items() if k not in ("audio_bytes",)},
                     )
                     if pipeline_result.text:
                         transcribed_text = pipeline_result.text
-                        logger.info(f"ASR 转写结果: {transcribed_text[:100]}...")
+                        logger.info("ASR 转写结果: %s...", transcribed_text[:100])
                         media_desc = f"[语音识别结果: {transcribed_text}]"
                         # 构建语音上下文供后续 metadata 注入
                         voice_context = {
@@ -801,16 +803,16 @@ class Agent:
                             },
                         }
                     elif pipeline_result.error:
-                        logger.warning(f"语音管线 ASR 失败: {pipeline_result.error}")
+                        logger.warning("语音管线 ASR 失败: %s", pipeline_result.error)
                 except Exception as e:
-                    logger.warning(f"统一语音管线处理失败: {e}")
+                    logger.warning("统一语音管线处理失败: %s", e)
             elif self.asr_manager:
                 # 降级：直接调用 ASR 引擎（无管线集成）
                 try:
                     asr_result = await self.asr_manager.transcribe(audio_bytes)
                     if asr_result and "text" in asr_result:
                         transcribed_text = asr_result["text"]
-                        logger.info(f"ASR 转写结果（降级模式）: {transcribed_text[:100]}...")
+                        logger.info("ASR 转写结果（降级模式）: %s...", transcribed_text[:100])
                         media_desc = f"[语音识别结果: {transcribed_text}]"
                         voice_context = {
                             "text": transcribed_text,
@@ -820,14 +822,14 @@ class Agent:
                             "duration_ms": asr_result.get("duration_ms", 0),
                         }
                 except Exception as e:
-                    logger.warning(f"ASR 转写失败（降级模式）: {e}")
+                    logger.warning("ASR 转写失败（降级模式）: %s", e)
 
         # 3. 将媒体描述注入用户输入，调用 chat()
         enriched_input = f"{media_desc}\n{content}" if content else media_desc
 
         # 附加原始 metadata（含 attachment_ids 供附件管理器使用）
         chat_metadata = dict(metadata)
-        
+
         # 如果有语音上下文，添加到 metadata
         if voice_context:
             chat_metadata["voice_context"] = voice_context
@@ -851,7 +853,7 @@ class Agent:
     def router(self, value: MessageRouter):
         """设置 Router 实例"""
         self._router = value
-        logger.info(f"Agent {self.config.name} 已绑定 Router")
+        logger.info("Agent %s 已绑定 Router", self.config.name)
 
     @property
     def skill_registry(self) -> Optional[SkillRegistry]:
@@ -862,7 +864,7 @@ class Agent:
     def skill_registry(self, value: SkillRegistry):
         """设置 Skill 注册中心"""
         self._skill_registry = value
-        logger.info(f"Agent {self.config.name} 已绑定 SkillRegistry")
+        logger.info("Agent %s 已绑定 SkillRegistry", self.config.name)
 
     def _load_identity(self):
         """加载 Agent 身份和性格"""
@@ -872,7 +874,7 @@ class Agent:
         soul_path = workspace / "soul.md"
         if soul_path.exists():
             self.soul = soul_path.read_text(encoding="utf-8")
-            logger.info(f"已加载身份文件: {soul_path}")
+            logger.info("已加载身份文件: %s", soul_path)
         else:
             self.soul = f"你是 {self.config.name}，一个友好的 AI 助手。"
             logger.warning(f"未找到身份文件，使用默认身份")
@@ -881,7 +883,7 @@ class Agent:
         personality_path = workspace / "personality.md"
         if personality_path.exists():
             self.personality = personality_path.read_text(encoding="utf-8")
-            logger.info(f"已加载性格文件: {personality_path}")
+            logger.info("已加载性格文件: %s", personality_path)
         else:
             self.personality = ""
 
@@ -897,39 +899,42 @@ class Agent:
         # Phase 10: 初始化睡眠整理引擎（不启动，仅在 shutdown 时触发）
         try:
             from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
+
             self.sleep_consolidation = SleepConsolidation(
                 memory_manager=self.memory_manager,
                 storage=self.storage,
             )
             # 连接 IdleTimeTracker 和 SleepConsolidation
-            if hasattr(self, 'idle_tracker') and self.idle_tracker:
+            if hasattr(self, "idle_tracker") and self.idle_tracker:
                 self.idle_tracker.set_sleep_consolidation(self.sleep_consolidation)
                 self.idle_tracker.set_memory_manager(self.memory_manager)
-            logger.info(f"Agent {self.config.name}: SleepConsolidation（睡眠整理）已初始化")
+            logger.info("Agent %s: SleepConsolidation（睡眠整理）已初始化", self.config.name)
         except Exception as e:
-            logger.warning(f"SleepConsolidation 初始化失败: {e}")
+            logger.warning("SleepConsolidation 初始化失败: %s", e)
             self.sleep_consolidation = None
 
-        logger.info(f"记忆系统模块初始化成功: agent_id={self.config.agent_id}, neuser_id={neuser_id}, user_id={user_id}")
+        logger.info(
+            f"记忆系统模块初始化成功: agent_id={self.config.agent_id}, neuser_id={neuser_id}, user_id={user_id}"
+        )
 
     def _init_cognitive_graph(self):
         """初始化认知图谱存储架构"""
         # 创建数据目录
         data_dir = Path(f"data/{self.config.agent_id}")
         data_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # 1. 初始化 CognitiveStorageEngine
         self.cognitive_engine = CognitiveStorageEngine(
             agent_id=self.config.agent_id,
             data_dir=str(data_dir),
         )
-        logger.info(f"CognitiveStorageEngine 初始化完成: {data_dir}")
-        
+        logger.info("CognitiveStorageEngine 初始化完成: %s", data_dir)
+
         # 2. 初始化 UnifiedRetriever（包装旧检索器）
-        moe_router = getattr(self.memory_agent, 'moe_router', None)
-        recall_engine = getattr(self.memory_agent, 'recall_engine', None)
-        hebb_manager = getattr(self.memory_agent, 'hebb_manager', None)
-        
+        moe_router = getattr(self.memory_agent, "moe_router", None)
+        recall_engine = getattr(self.memory_agent, "recall_engine", None)
+        hebb_manager = getattr(self.memory_agent, "hebb_manager", None)
+
         self.unified_retriever = UnifiedRetriever(
             engine=self.cognitive_engine,
             moe_router=moe_router,
@@ -937,33 +942,35 @@ class Agent:
             hebb_manager=hebb_manager,
         )
         logger.info("UnifiedRetriever 初始化完成")
-        
+
         # 3. 初始化 PatternCrystallizer
-        evolution = getattr(self, 'evolution', None)
+        evolution = getattr(self, "evolution", None)
         self.crystallizer = PatternCrystallizer(
             engine=self.cognitive_engine,
             evolution_orchestrator=evolution,
         )
         logger.info("PatternCrystallizer 初始化完成")
-        
+
         # 将 crystallizer 注入到 EvolutionOrchestrator
-        if evolution and hasattr(evolution, 'crystallizer'):
+        if evolution and hasattr(evolution, "crystallizer"):
             evolution.crystallizer = self.crystallizer
             logger.info("PatternCrystallizer 已注入到 EvolutionOrchestrator")
-        
+
         # 4. 初始化 RSI（递归自我改进）编排器
         self.rsi_orchestrator = None
         try:
             from neurova.evolution.rsi.orchestrator import RSIOrchestrator
-            
+
             # 获取四大闭环系统
-            sleep_system = getattr(self, 'sleep_consolidation', None)
-            emotion_system = getattr(self.memory_manager, '_emotion_module', None) if self.memory_manager else None
-            experience_system = getattr(evolution, 'experience_feedback', None) if evolution else None
-            tool_memory_system = getattr(self, 'tool_memory', None)
-            
+            sleep_system = getattr(self, "sleep_consolidation", None)
+            emotion_system = getattr(self.memory_manager, "_emotion_module", None) if self.memory_manager else None
+            experience_system = getattr(evolution, "experience_feedback", None) if evolution else None
+            tool_memory_system = getattr(self, "tool_memory", None)
+
             # 只有当至少一个闭环系统可用时才初始化 RSI
-            available_systems = [s for s in [sleep_system, emotion_system, experience_system, tool_memory_system] if s is not None]
+            available_systems = [
+                s for s in [sleep_system, emotion_system, experience_system, tool_memory_system] if s is not None
+            ]
             if available_systems:
                 self.rsi_orchestrator = RSIOrchestrator(
                     sleep_system=sleep_system or _NullSystem(),
@@ -971,12 +978,12 @@ class Agent:
                     experience_system=experience_system or _NullSystem(),
                     tool_memory_system=tool_memory_system or _NullSystem(),
                 )
-                logger.info(f"Agent {self.config.name}: RSI 编排器已初始化 ({len(available_systems)}/4 闭环系统可用)")
+                logger.info("Agent %s: RSI 编排器已初始化 (%s/4 闭环系统可用)", self.config.name, len(available_systems))
             else:
-                logger.info(f"Agent {self.config.name}: RSI 未初始化（无可用闭环系统）")
+                logger.info("Agent %s: RSI 未初始化（无可用闭环系统）", self.config.name)
         except Exception as e:
-            logger.warning(f"Agent {self.config.name}: RSI 初始化失败: {e}")
-        
+            logger.warning("Agent %s: RSI 初始化失败: %s", self.config.name, e)
+
         # 5. 初始化 ReasoningTraceManager
         self.trace_manager = ReasoningTraceManager(
             engine=self.cognitive_engine,
@@ -996,9 +1003,7 @@ class Agent:
 
         # 先初始化 SkillRegistry
         if not self._skill_registry:
-            self._skill_registry = create_default_skills(
-                memory_manager=self.memory_manager
-            )
+            self._skill_registry = create_default_skills(memory_manager=self.memory_manager)
 
         # 注册 ToolMemory 回调：Skill 成功执行后记录到 ToolMemory
         if self.tool_memory and self._skill_registry:
@@ -1006,7 +1011,7 @@ class Agent:
                 SkillEvent.POST_EXECUTE,
                 self._on_skill_post_execute,
             )
-            logger.info(f"Agent {self.config.name}: ToolMemory 回调已注册（Skill成功执行时记录）")
+            logger.info("Agent %s: ToolMemory 回调已注册（Skill成功执行时记录）", self.config.name)
 
         # 创建 Router 并注入所有依赖
         self._router = create_default_router(
@@ -1022,7 +1027,7 @@ class Agent:
                 skill_registry=self._skill_registry,
                 auto_acquire=True,
             )
-            logger.info(f"Agent {self.config.name} 的 SkillManager 已初始化")
+            logger.info("Agent %s 的 SkillManager 已初始化", self.config.name)
 
         # 初始化技能自动构建器 (AutoSkillBuilder from evolution)
         # 替换旧的 SkillPacker，统一在 evolution 模块中
@@ -1034,12 +1039,12 @@ class Agent:
                     min_occurrences=3,
                     min_success_rate=0.7,
                 )
-                logger.info(f"Agent {self.config.name}: AutoSkillBuilder 已初始化")
+                logger.info("Agent %s: AutoSkillBuilder 已初始化", self.config.name)
 
             except ImportError as e:
-                logger.warning(f"AutoSkillBuilder 初始化失败: {e}")
+                logger.warning("AutoSkillBuilder 初始化失败: %s", e)
 
-        logger.info(f"Agent {self.config.name} 的 Router 已初始化")
+        logger.info("Agent %s 的 Router 已初始化", self.config.name)
         return self._router
 
     def _on_skill_post_execute(self, skill, result, **kwargs):
@@ -1065,9 +1070,9 @@ class Agent:
                 tool_source="skill_system",
                 execution_time=result.execution_time,
             )
-            logger.info(f"ToolMemory 记录成功技能执行: {skill.name}")
+            logger.info("ToolMemory 记录成功技能执行: %s", skill.name)
         except Exception as e:
-            logger.warning(f"ToolMemory 记录失败: {e}")
+            logger.warning("ToolMemory 记录失败: %s", e)
 
     async def process_message(self, content: str, sender: str = "user") -> RouteResult:
         """
@@ -1099,12 +1104,12 @@ class Agent:
         message.metadata["router"] = self._router
         message.metadata["skill_registry"] = self._skill_registry
 
-        logger.info(f"Agent {self.config.name} 收到消息: {content[:50]}...")
+        logger.info("Agent %s 收到消息: %s...", self.config.name, content[:50])
 
         # 通过 Router 路由（现在是异步的）
         result = await self._router.route(message)
 
-        logger.info(f"消息路由完成: {result.message_type.value}, success={result.success}")
+        logger.info("消息路由完成: %s, success=%s", result.message_type.value, result.success)
 
         return result
 
@@ -1138,7 +1143,7 @@ class Agent:
             "audio_data": b"音频数据（如果有）",
         }
         """
-        logger.info(f"收到用户输入: {user_input[:50]}...")
+        logger.info("收到用户输入: %s...", user_input[:50])
         ctx = ChatContext(
             user_input=user_input,
             stream=stream,
@@ -1162,21 +1167,22 @@ class Agent:
         """
         # 1. 重置肌肉记忆的连续成功计数（触发自动降级）
         try:
-            muscle = getattr(self.tool_memory, 'muscle_memory', None) if self.tool_memory else None
-            if muscle and hasattr(muscle, 'items'):
+            muscle = getattr(self.tool_memory, "muscle_memory", None) if self.tool_memory else None
+            if muscle and hasattr(muscle, "items"):
                 for key, item in muscle.items.items():
-                    if hasattr(item, 'tool_name') and item.tool_name == tool_name:
+                    if hasattr(item, "tool_name") and item.tool_name == tool_name:
                         item.consecutive_success = 0
-                        logger.info(f"📉 肌肉记忆降级: {tool_name} consecutive_success 重置为 0")
+                        logger.info("📉 肌肉记忆降级: %s consecutive_success 重置为 0", tool_name)
                         break
         except Exception as e:
-            logger.debug(f"肌肉记忆降级记录跳过: {e}")
+            logger.debug("肌肉记忆降级记录跳过: %s", e)
 
         # 2. 写入反思日志
         try:
-            glog = getattr(self, 'growth_log_manager', None)
+            glog = getattr(self, "growth_log_manager", None)
             if glog:
                 from neurova.cognitive_layers.meta_cognition_layer.growth_log import ReflectionType
+
                 entry = await glog.generate_log(
                     type=ReflectionType.ERROR,
                     title=f"工具失败: {tool_name}",
@@ -1195,11 +1201,18 @@ class Agent:
                     action_items=["降低自动执行置信度"],
                     confidence=0.7,
                 )
-                logger.info(f"📝 已记录工具失败教训: {tool_name} (反思ID: {entry.id})")
+                logger.info("📝 已记录工具失败教训: %s (反思ID: %s)", tool_name, entry.id)
         except Exception as e:
-            logger.debug(f"反思日志记录跳过: {e}")
+            logger.debug("反思日志记录跳过: %s", e)
 
-    def _save_to_session(self, user_input: str, reply: str, session_id: str = None, metadata: Optional[Dict[str, Any]] = None, assistant_metadata: Optional[Dict[str, Any]] = None) -> str:
+    def _save_to_session(
+        self,
+        user_input: str,
+        reply: str,
+        session_id: str = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        assistant_metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """保存对话到session文件（委托给 MemCore）"""
         return self.memory_agent.save_to_session(user_input, reply, session_id, metadata, assistant_metadata)
 
@@ -1209,14 +1222,14 @@ class Agent:
             if not self.memory_manager:
                 logger.debug("memory_manager 未初始化，跳过温度更新")
                 return
-            
+
             # 使用 MemoryManager.run_decay_cycle() 批量衰减所有记忆温度
             # 衰减参数：hours=1.0 表示每小时衰减一次，rate=1.0 使用默认衰减率
             count = self.memory_manager.run_decay_cycle(hours=1.0, rate=1.0)
             if count > 0:
-                logger.debug(f"记忆温度已更新: {count} 条记忆")
+                logger.debug("记忆温度已更新: %s 条记忆", count)
         except Exception as e:
-            logger.warning(f"记忆温度更新失败: {e}")
+            logger.warning("记忆温度更新失败: %s", e)
 
     def get_llm_stats(self) -> Dict[str, Any]:
         """获取 LLM 统计信息"""
@@ -1239,100 +1252,16 @@ class Agent:
         }
 
     def _detect_content_loop(self, contents: List[str], threshold: float = 0.8) -> bool:
-        """
-        检测内容循环
-
-        通过比较最近 N 次内容的相似度，判断是否陷入循环。
-        使用简单的字符级相似度计算，避免复杂的 NLP 处理。
-
-        Args:
-            contents: 最近的内容列表
-            threshold: 相似度阈值，超过此值认为是循环
-
-        Returns:
-            True 表示检测到循环，False 表示未检测到
-        """
-        if len(contents) < 2:
-            return False
-
-        # 计算相邻内容的相似度
-        similarities = []
-        for i in range(1, len(contents)):
-            prev = contents[i-1]
-            curr = contents[i]
-
-            # 简单的字符级相似度计算
-            # 使用最长公共子序列的简化版本
-            similarity = self._calculate_similarity(prev, curr)
-            similarities.append(similarity)
-
-        # 如果所有相邻内容的相似度都超过阈值，认为是循环
-        if similarities and all(s > threshold for s in similarities):
-            return True
-
-        # 检查是否有重复的句子或段落
-        if self._has_repeated_patterns(contents):
-            return True
-
-        return False
+        """检测内容循环（委托给 agent_loop_detection 模块）"""
+        return detect_content_loop(contents, threshold)
 
     def _calculate_similarity(self, text1: str, text2: str) -> float:
-        """
-        计算两个文本的相似度
-
-        使用简化的字符级相似度计算，基于共同字符的比例。
-        """
-        if not text1 or not text2:
-            return 0.0
-
-        # 转换为小写并去除标点符号
-        import re
-        clean1 = re.sub(r'[^\w\s]', '', text1.lower())
-        clean2 = re.sub(r'[^\w\s]', '', text2.lower())
-
-        # 计算共同字符数
-        set1 = set(clean1)
-        set2 = set(clean2)
-
-        if not set1 or not set2:
-            return 0.0
-
-        intersection = len(set1.intersection(set2))
-        union = len(set1.union(set2))
-
-        return intersection / union if union > 0 else 0.0
+        """计算两个文本的相似度（委托给 agent_loop_detection 模块）"""
+        return calculate_similarity(text1, text2)
 
     def _has_repeated_patterns(self, contents: List[str]) -> bool:
-        """
-        检测是否有重复的句子或段落模式
-
-        将内容分割成句子，检查是否有重复的句子序列。
-        """
-        import re
-
-        # 将每个内容分割成句子
-        all_sentences = []
-        for content in contents:
-            # 简单的句子分割（按句号、问号、感叹号）
-            sentences = re.split(r'[。！？.!?]', content)
-            sentences = [s.strip() for s in sentences if s.strip()]
-            all_sentences.extend(sentences)
-
-        # 检查是否有重复的句子
-        if len(all_sentences) > 3:
-            # 检查最后几个句子是否与前面的句子重复
-            recent_sentences = all_sentences[-3:]
-            earlier_sentences = all_sentences[:-3]
-
-            for recent in recent_sentences:
-                if len(recent) > 20:  # 只检查长度足够的句子
-                    for earlier in earlier_sentences:
-                        # 计算句子相似度
-                        similarity = self._calculate_similarity(recent, earlier)
-                        if similarity > 0.9:  # 句子相似度阈值更高
-                            return True
-
-        return False
+        """检测是否有重复的句子或段落模式（委托给 agent_loop_detection 模块）"""
+        return has_repeated_patterns(contents)
 
     def _collect_tool_messages(self) -> List[Dict[str, Any]]:
         """
@@ -1345,7 +1274,7 @@ class Agent:
             - params/result: 参数/结果
             - timestamp: 时间戳
         """
-        if hasattr(self, '_tool_messages_list') and self._tool_messages_list:
+        if hasattr(self, "_tool_messages_list") and self._tool_messages_list:
             return list(self._tool_messages_list)
         return []
 
@@ -1359,17 +1288,18 @@ class Agent:
         ⚠️ DEPRECATED: 此方法已废弃，请直接使用 tool_executor.execute_text_tool_calls()。
         """
         import warnings
+
         warnings.warn(
             "Agent._execute_text_tool_calls() is deprecated, use ToolExecutor directly",
             DeprecationWarning,
-            stacklevel=2
+            stacklevel=2,
         )
         if not reply or not isinstance(reply, str):
             return reply
         try:
             return await self.tool_executor.execute_text_tool_calls(reply, user_input)
         except Exception as e:
-            logger.debug(f"文本工具调用解析跳过: {e}")
+            logger.debug("文本工具调用解析跳过: %s", e)
         return reply
 
     def _set_reasoning(self, reasoning: str):
@@ -1377,64 +1307,8 @@ class Agent:
         self._current_reasoning = reasoning
 
     async def shutdown(self) -> None:
-        """Agent 关闭时的清理操作
-
-        触发睡眠整理、刷新缓冲等。
-        """
-        logger.info(f"Agent {self.config.name} 正在关闭...")
-
-        # Phase 10: 触发睡眠整理
-        sleep_consolidation = getattr(self, 'sleep_consolidation', None)
-        if sleep_consolidation and self.memory_manager:
-            try:
-                # 获取所有记忆进行整理
-                all_memories = self.memory_manager.recall(query="", limit=1000)
-                if all_memories:
-                    # 转换Dict为MemoryRecord
-                    from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord
-                    memory_records = [MemoryRecord.from_dict(m) for m in all_memories]
-                    result = sleep_consolidation.run_sleep_cycle(memories=memory_records)
-                    logger.info(f"💤 睡眠整理完成: {result}")
-            except Exception as e:
-                logger.warning(f"睡眠整理失败: {e}")
-
-        # P1: 关闭语音记忆桥接器（刷新缓冲区、清理引用）
-        voice_memory_bridge = getattr(self, 'voice_memory_bridge', None)
-        if voice_memory_bridge:
-            try:
-                voice_memory_bridge.shutdown()
-                logger.debug("语音记忆桥接器已关闭")
-            except Exception as e:
-                logger.warning(f"语音记忆桥接器关闭失败: {e}")
-
-        # P1: 关闭 TTS 管理器（释放模型资源）
-        tts_manager = getattr(self, 'tts_manager', None)
-        if tts_manager and hasattr(tts_manager, 'shutdown'):
-            try:
-                await tts_manager.shutdown()
-                logger.debug("TTS 管理器已关闭")
-            except Exception as e:
-                logger.warning(f"TTS 管理器关闭失败: {e}")
-
-        # P1: 关闭 ASR 管理器（释放模型资源）
-        asr_manager = getattr(self, 'asr_manager', None)
-        if asr_manager and hasattr(asr_manager, 'shutdown'):
-            try:
-                await asr_manager.shutdown()
-                logger.debug("ASR 管理器已关闭")
-            except Exception as e:
-                logger.warning(f"ASR 管理器关闭失败: {e}")
-
-        # 刷新对话历史缓冲（如果使用 ConversationBuffer）
-        conversation_buffer = getattr(self, '_conversation_buffer', None)
-        if conversation_buffer:
-            try:
-                await conversation_buffer.flush()
-                logger.debug("对话缓冲已刷新")
-            except Exception as e:
-                logger.warning(f"对话缓冲刷新失败: {e}")
-
-        logger.info(f"Agent {self.config.name} 关闭完成")
+        """Agent 关闭时的清理操作（委托给 agent_shutdown 模块）"""
+        await shutdown_agent(self)
 
     def __repr__(self):
         return f"Agent(name='{self.config.name}', id='{self.config.agent_id}')"

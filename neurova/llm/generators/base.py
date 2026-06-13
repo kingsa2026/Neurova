@@ -3,23 +3,16 @@
 定义统一的生成器接口和数据结构
 """
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-import enum
 import logging
-import typing
-
-from abc import ABC
-from enum import Enum
-from abc import abstractmethod
-
-from enum import Enum
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-import time
+from enum import Enum
+from typing import Any, Dict, Optional
+
 
 class GeneratorType(str, Enum):
     """生成器类型"""
+
     TEXT_TO_IMAGE = "text_to_image"
     IMAGE_TO_IMAGE = "image_to_image"
     TEXT_TO_VIDEO = "text_to_video"
@@ -31,9 +24,11 @@ class GeneratorType(str, Enum):
     TEXT_GENERATION = "text_generation"
     CODE_GENERATION = "code_generation"
 
+
 @dataclass
 class GenerationConfig:
     """生成配置"""
+
     type: GeneratorType = GeneratorType.TEXT_GENERATION
     prompt: str = ""
     negative_prompt: str = ""
@@ -48,9 +43,11 @@ class GenerationConfig:
     seed: Optional[int] = None
     extra_params: Dict[str, Any] = field(default_factory=dict)
 
+
 @dataclass
 class GenerationResult:
     """生成结果"""
+
     success: bool = False
     output_path: str = ""
     output_data: Optional[bytes] = None
@@ -59,17 +56,18 @@ class GenerationResult:
     duration: float = 0.0
     seed_used: Optional[int] = None
 
+
 class BaseGenerator(ABC):
     """
     生成器抽象基类
-    
+
     定义统一的生成器接口，用于与不同的生成服务进行交互。
     所有具体的生成器实现都必须继承此类。
     """
-    
+
     def __init__(self, generator_id: str, generator_type: GeneratorType, **kwargs):
         """初始化生成器
-        
+
         Args:
             generator_id: 生成器唯一标识符
             generator_type: 生成器类型
@@ -80,40 +78,38 @@ class BaseGenerator(ABC):
         self.logger = logging.getLogger(f"{__name__}.{generator_id}")
         self._config = kwargs
         self._initialized = False
-    
+
     def configure(self, **kwargs) -> None:
         """配置生成器
-        
+
         Args:
             **kwargs: 配置参数
         """
         self._config.update(kwargs)
         self._initialized = True
-    
+
     @abstractmethod
     def supports(self, config: GenerationConfig) -> bool:
         """检查是否支持指定的生成配置
-        
+
         Args:
             config: 生成配置
-            
+
         Returns:
             是否支持
         """
-        pass
-    
+
     @abstractmethod
     async def generate(self, config: GenerationConfig) -> GenerationResult:
         """执行生成
-        
+
         Args:
             config: 生成配置
-            
+
         Returns:
             生成结果
         """
-        pass
-    
+
     def _create_success_result(
         self,
         output_path: str = "",
@@ -123,14 +119,14 @@ class BaseGenerator(ABC):
         seed_used: Optional[int] = None,
     ) -> GenerationResult:
         """创建成功结果
-        
+
         Args:
             output_path: 输出路径
             output_data: 输出数据
             metadata: 元数据
             duration: 耗时
             seed_used: 使用的种子
-            
+
         Returns:
             生成结果
         """
@@ -142,7 +138,7 @@ class BaseGenerator(ABC):
             duration=duration,
             seed_used=seed_used,
         )
-    
+
     def _create_error_result(
         self,
         error: str,
@@ -150,12 +146,12 @@ class BaseGenerator(ABC):
         duration: float = 0.0,
     ) -> GenerationResult:
         """创建错误结果
-        
+
         Args:
             error: 错误信息
             metadata: 元数据
             duration: 耗时
-            
+
         Returns:
             生成结果
         """

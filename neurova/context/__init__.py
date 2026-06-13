@@ -22,9 +22,9 @@
     )
 """
 
-from .models import ContextPriority, TokenBudget, ContextEntry, ContextBuildResult
-from .injector import UnifiedContextInjector, create_unified_context_injector
 from .builder import ContextBuilder
+from .injector import UnifiedContextInjector, create_unified_context_injector
+from .models import ContextBuildResult, ContextEntry, ContextPriority, TokenBudget
 from .orchestrator import ContextOrchestrator
 
 __all__ = [
@@ -33,12 +33,10 @@ __all__ = [
     "TokenBudget",
     "ContextEntry",
     "ContextBuildResult",
-
     # 核心组件
     "UnifiedContextInjector",
     "ContextBuilder",
     "ContextOrchestrator",
-
     # 工厂函数
     "create_unified_context_injector",
 ]

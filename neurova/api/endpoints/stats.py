@@ -13,10 +13,9 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from neurova.api.endpoints import get_app_state
@@ -28,6 +27,7 @@ router = APIRouter()
 
 class SystemStats(BaseModel):
     """系统统计"""
+
     uptime: float = 0
     agents_count: int = 0
     total_conversations: int = 0
@@ -40,6 +40,7 @@ class SystemStats(BaseModel):
 
 class AgentStats(BaseModel):
     """Agent 统计"""
+
     agent_id: str
     name: str
     conversations: int = 0
@@ -51,6 +52,7 @@ class AgentStats(BaseModel):
 
 class UsageStats(BaseModel):
     """使用统计"""
+
     daily_requests: Dict[str, int] = {}
     total_requests: int = 0
     avg_response_time: float = 0
@@ -70,7 +72,7 @@ def _get_app_state():
 @router.get("", response_model=SystemStats)
 async def get_system_stats(request: Request):
     """获取系统统计"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     state = _get_app_state()
     stats = SystemStats()
@@ -85,6 +87,7 @@ async def get_system_stats(request: Request):
     # 获取系统资源使用情况
     try:
         import psutil
+
         stats.cpu_usage = psutil.cpu_percent()
         stats.memory_usage = psutil.virtual_memory().percent
     except ImportError:
@@ -98,10 +101,11 @@ async def get_system_info(request: Request):
     """获取系统信息（前端 Dashboard 用）"""
     try:
         import psutil
+
         cpu_percent = psutil.cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
         disk = psutil.disk_usage("/")
-        
+
         return {
             "cpu": {
                 "percent": cpu_percent,
@@ -133,13 +137,10 @@ async def get_system_info(request: Request):
         return {"error": str(e)}
 
 
-
-
-
 @router.get("/agents", response_model=List[AgentStats])
 async def get_agents_stats(request: Request):
     """获取 Agent 统计"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     state = _get_app_state()
     agents_stats = []
@@ -171,7 +172,7 @@ async def get_agents_stats(request: Request):
 @router.get("/usage", response_model=UsageStats)
 async def get_usage_stats(request: Request):
     """获取使用统计"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     # TODO: 从数据库或缓存加载使用统计
     return UsageStats(
@@ -185,7 +186,7 @@ async def get_usage_stats(request: Request):
 @router.get("/performance")
 async def get_performance_stats(request: Request):
     """获取性能统计"""
-    request_id = _get_request_id(request)
+    _get_request_id(request)
 
     stats = {
         "cpu_usage": 0,
@@ -197,6 +198,7 @@ async def get_performance_stats(request: Request):
 
     try:
         import psutil
+
         stats["cpu_usage"] = psutil.cpu_percent()
         stats["memory_usage"] = psutil.virtual_memory().percent
         stats["disk_usage"] = psutil.disk_usage("/").percent

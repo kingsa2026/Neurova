@@ -4,7 +4,6 @@
 支持 Twilio 语音通话，含 TTS/STT
 """
 
-import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -16,6 +15,7 @@ from neurova.channels.base import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 class VoiceAdapter(ChannelAdapter):
     """
@@ -54,7 +54,7 @@ class VoiceAdapter(ChannelAdapter):
             logger.error("twilio not installed. Run: pip install twilio")
             return False
         except Exception as e:
-            logger.exception(f"Voice connect error: {e}")
+            logger.exception("Voice connect error: %s", e)
             return False
 
     async def disconnect(self):
@@ -97,7 +97,7 @@ class VoiceAdapter(ChannelAdapter):
                     "content": content,
                     "status": "initiated",
                 }
-                logger.info(f"Voice call initiated: {call_id}")
+                logger.info("Voice call initiated: %s", call_id)
                 return call_id
 
             elif message_type == "sms":
@@ -107,15 +107,15 @@ class VoiceAdapter(ChannelAdapter):
                     from_=self.config.extra.get("from_number", ""),
                     body=content,
                 )
-                logger.info(f"SMS sent: {message.sid}")
+                logger.info("SMS sent: %s", message.sid)
                 return message.sid
 
             else:
-                logger.warning(f"Unsupported message type: {message_type}")
+                logger.warning("Unsupported message type: %s", message_type)
                 return None
 
         except Exception as e:
-            logger.exception(f"Voice send_message error: {e}")
+            logger.exception("Voice send_message error: %s", e)
             return None
 
     async def handle_webhook(self, data: Dict[str, Any]) -> str:
@@ -143,11 +143,7 @@ class VoiceAdapter(ChannelAdapter):
             raw_event=data,
         )
 
-        event_type = (
-            ChannelEventType.MESSAGE_RECEIVED
-            if call_status == "completed"
-            else ChannelEventType.BOT_ERROR
-        )
+        event_type = ChannelEventType.MESSAGE_RECEIVED if call_status == "completed" else ChannelEventType.BOT_ERROR
         await self._emit_event(event_type, message)
 
         # 返回 TwiML 响应
@@ -158,20 +154,22 @@ class VoiceAdapter(ChannelAdapter):
     def get_call_status(self, call_id: str) -> Optional[Dict[str, Any]]:
         """获取通话状态"""
         return self._active_calls.get(call_id)
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """
         健康检查
-        
+
         返回:
             Dict: 包含 connected, channel_type, last_error, active_calls 等
         """
         base_health = await super().health_check()
-        base_health.update({
-            "active_calls_count": len(self._active_calls),
-            "has_client": self._client is not None,
-            "from_number": self.config.extra.get("from_number", ""),
-        })
+        base_health.update(
+            {
+                "active_calls_count": len(self._active_calls),
+                "has_client": self._client is not None,
+                "from_number": self.config.extra.get("from_number", ""),
+            }
+        )
         return base_health
 
 

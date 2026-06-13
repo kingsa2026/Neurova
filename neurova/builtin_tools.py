@@ -168,7 +168,11 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "properties": {
                 "text": {"type": "string", "description": "要合成的文本"},
                 "voice": {"type": "string", "description": "音色名称（如 zh-CN-XiaoxiaoNeural）", "default": "default"},
-                "engine": {"type": "string", "description": "TTS 引擎（如 edge-tts, moss-nano, auto）", "default": "auto"},
+                "engine": {
+                    "type": "string",
+                    "description": "TTS 引擎（如 edge-tts, moss-nano, auto）",
+                    "default": "auto",
+                },
             },
             "required": ["text"],
         },
@@ -192,6 +196,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
 
 _BUILTIN_EXEC_MAP: Dict[str, Callable] = {}
 
+
 def get_builtin_tool_params(tool_name: str) -> Optional[Dict]:
     """
     获取内置工具的参数 schema
@@ -204,6 +209,7 @@ def get_builtin_tool_params(tool_name: str) -> Optional[Dict]:
     """
     return _BUILTIN_SCHEMAS.get(tool_name)
 
+
 def register_builtin_exec(tool_name: str, exec_func: Callable):
     """
     注册内置工具的执行函数
@@ -214,9 +220,11 @@ def register_builtin_exec(tool_name: str, exec_func: Callable):
     """
     _BUILTIN_EXEC_MAP[tool_name] = exec_func
 
+
 @dataclass
 class BuiltinTool:
     """内置工具数据结构"""
+
     name: str
     description: str
     parameters: Dict[str, Any]
@@ -232,6 +240,7 @@ class BuiltinTool:
                 "parameters": self.parameters,
             },
         }
+
 
 class BuiltinToolRegistry:
     """内置工具注册器"""

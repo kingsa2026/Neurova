@@ -9,20 +9,23 @@ ConflictDetector V2 — 基于向量的冲突检测
 
 import logging
 import re
-from typing import Dict, List, Tuple, Optional, Any, Set
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ConflictGroup:
     """冲突记忆组"""
+
     group_id: int
     options: List[Dict[str, Any]] = field(default_factory=list)
     conflict_type: str = "contradiction"  # "contradiction" | "evolution" | "version"
     entity_overlap: float = 0.0
     semantic_similarity: float = 0.0
+
 
 class ConflictDetector:
     """
@@ -44,11 +47,9 @@ class ConflictDetector:
         self.sim_threshold = sim_threshold
         self.entity_threshold = entity_threshold
 
-    def detect(self, results: List[Dict[str, Any]]) -> Tuple[
-        List[ConflictGroup],      # 冲突组
-        List[Dict[str, Any]],     # 独立记忆
-        List[List[Dict[str, Any]]]  # 演进链
-    ]:
+    def detect(
+        self, results: List[Dict[str, Any]]
+    ) -> Tuple[List[ConflictGroup], List[Dict[str, Any]], List[List[Dict[str, Any]]]]:  # 冲突组  # 独立记忆  # 演进链
         """
         检测结果中的冲突 — 杏仁核的威胁检测功能
 
@@ -76,7 +77,7 @@ class ConflictDetector:
             if mem_a_id in processed:
                 continue
 
-            for j, mem_b in enumerate(results[i+1:], i+1):
+            for j, mem_b in enumerate(results[i + 1 :], i + 1):
                 mem_b_id = mem_b.get("id", "")
                 if mem_b_id in processed:
                     continue
@@ -92,9 +93,7 @@ class ConflictDetector:
                 # 判断类型
                 if self._is_contradictory(mem_a, mem_b):
                     # 矛盾
-                    group = self._find_or_create_group(
-                        conflict_groups, mem_a, mem_b, group_id_counter
-                    )
+                    group = self._find_or_create_group(conflict_groups, mem_a, mem_b, group_id_counter)
                     if group.group_id == group_id_counter:
                         group_id_counter += 1
                     group.options.append(mem_b)
@@ -103,19 +102,14 @@ class ConflictDetector:
                     processed.add(mem_b_id)
                 elif self._is_evolution(mem_a, mem_b):
                     # 演进
-                    chain = self._find_or_create_chain(
-                        evolution_chains, mem_a, mem_b
-                    )
+                    chain = self._find_or_create_chain(evolution_chains, mem_a, mem_b)
                     chain.append(mem_b)
                     processed.add(mem_b_id)
 
         # 未参与冲突/演进的记忆
         conflicted_ids = {m.get("id") for g in conflict_groups for m in g.options}
         evolved_ids = {m.get("id") for chain in evolution_chains for m in chain}
-        independent = [
-            m for m in results
-            if m.get("id") not in conflicted_ids | evolved_ids
-        ]
+        independent = [m for m in results if m.get("id") not in conflicted_ids | evolved_ids]
 
         return conflict_groups, independent, evolution_chains
 
@@ -128,10 +122,10 @@ class ConflictDetector:
             return 0.0
 
         # 中英文混合分词：中文按字，英文按词
-        words_a = set(re.findall(r'[\u4e00-\u9fff]', content_a))
-        words_a.update(re.findall(r'\b[a-z]+\b', content_a))
-        words_b = set(re.findall(r'[\u4e00-\u9fff]', content_b))
-        words_b.update(re.findall(r'\b[a-z]+\b', content_b))
+        words_a = set(re.findall(r"[\u4e00-\u9fff]", content_a))
+        words_a.update(re.findall(r"\b[a-z]+\b", content_a))
+        words_b = set(re.findall(r"[\u4e00-\u9fff]", content_b))
+        words_b.update(re.findall(r"\b[a-z]+\b", content_b))
 
         if not words_a or not words_b:
             return 0.0
@@ -159,15 +153,15 @@ class ConflictDetector:
         entities = set()
 
         # 中文词组
-        chinese_words = re.findall(r'[\u4e00-\u9fff]{2,}', text)
+        chinese_words = re.findall(r"[\u4e00-\u9fff]{2,}", text)
         entities.update(chinese_words)
 
         # 英文单词
-        english_words = re.findall(r'\b[A-Za-z]+\b', text)
+        english_words = re.findall(r"\b[A-Za-z]+\b", text)
         entities.update(word.lower() for word in english_words if len(word) > 2)
 
         # 专有名词（大写开头）
-        proper_nouns = re.findall(r'\b[A-Z][a-z]+\b', text)
+        proper_nouns = re.findall(r"\b[A-Z][a-z]+\b", text)
         entities.update(proper_nouns)
 
         return entities
@@ -207,9 +201,9 @@ class ConflictDetector:
 
         # 模式: "X 是 Y" 或 "X 为 Y" — Y 可以是中文或英文
         patterns = [
-            r'([\u4e00-\u9fff]+)\s*(?:是|为)\s*([\u4e00-\u9fff\w]+)',
-            r'([\u4e00-\u9fff]+)\s*(?:使用|采用|用)\s*([\u4e00-\u9fff\w]+)',
-            r'([\u4e00-\u9fff]+)\s*(?:升级到|更新到|改为)\s*([\u4e00-\u9fff\w]+)',
+            r"([\u4e00-\u9fff]+)\s*(?:是|为)\s*([\u4e00-\u9fff\w]+)",
+            r"([\u4e00-\u9fff]+)\s*(?:使用|采用|用)\s*([\u4e00-\u9fff\w]+)",
+            r"([\u4e00-\u9fff]+)\s*(?:升级到|更新到|改为)\s*([\u4e00-\u9fff\w]+)",
         ]
 
         for pattern in patterns:
@@ -238,9 +232,9 @@ class ConflictDetector:
 
         return None
 
-    def _find_or_create_group(self, groups: List[ConflictGroup],
-                              mem_a: Dict, mem_b: Dict,
-                              next_id: int) -> ConflictGroup:
+    def _find_or_create_group(
+        self, groups: List[ConflictGroup], mem_a: Dict, mem_b: Dict, next_id: int
+    ) -> ConflictGroup:
         """查找或创建冲突组"""
         # 检查是否已有包含 mem_a 的组
         for group in groups:
@@ -257,8 +251,7 @@ class ConflictDetector:
         groups.append(group)
         return group
 
-    def _find_or_create_chain(self, chains: List[List[Dict]],
-                              mem_a: Dict, mem_b: Dict) -> List[Dict]:
+    def _find_or_create_chain(self, chains: List[List[Dict]], mem_a: Dict, mem_b: Dict) -> List[Dict]:
         """查找或创建演进链"""
         # 检查是否已有包含 mem_a 的链
         for chain in chains:

@@ -6,37 +6,38 @@ NeuHebbMem 负责 Neurova Hebb 的持久化存储和检索。
 
 模块深度: 小接口（store/retrieve/get_metadata），深实现（JSON持久化、索引管理、生命周期追踪）。
 """
+
 from __future__ import annotations
 
 import json
-import uuid
 import logging
-from dataclasses import dataclass, field, asdict
+import uuid
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 # ── 数据模型 ──────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class NeurovaHebb:
     """Neurova Hebb 单元 —— 一条结构化的 LLM 推理记忆。"""
+
     id: str = field(default_factory=lambda: f"hebb_{uuid.uuid4().hex[:12]}")
-    content: str = ""                              # 总结后的知识内容
-    embedding: Optional[List[float]] = None        # 向量嵌入
-    question: str = ""                             # 原始预查询
-    answer: str = ""                               # 原始答案
-    source: str = "pre_query"                      # 来源类型
-    document_id: str = ""                          # 关联文档 ID
-    created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
-    verification_score: float = 0.0                # 验证得分 [0, 1]
-    usage_count: int = 0                           # 被检索使用次数
-    last_used: Optional[str] = None                # 最后使用时间
+    content: str = ""  # 总结后的知识内容
+    embedding: Optional[List[float]] = None  # 向量嵌入
+    question: str = ""  # 原始预查询
+    answer: str = ""  # 原始答案
+    source: str = "pre_query"  # 来源类型
+    document_id: str = ""  # 关联文档 ID
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    verification_score: float = 0.0  # 验证得分 [0, 1]
+    usage_count: int = 0  # 被检索使用次数
+    last_used: Optional[str] = None  # 最后使用时间
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def touch(self) -> None:
@@ -55,6 +56,7 @@ class NeurovaHebb:
 @dataclass
 class NeuHebbConfig:
     """Neurova Hebb 系统配置。"""
+
     enabled: bool = True
     chunk_num: int = 8
     recall_coe: int = 5
@@ -75,6 +77,7 @@ class NeuHebbConfig:
 
 
 # ── 存储模块 ──────────────────────────────────────────────────────────────────
+
 
 class NeuHebbMem:
     """
@@ -114,7 +117,8 @@ class NeuHebbMem:
             if len(doc["neurova_hebbs"]) >= limit:
                 logger.warning(
                     "Document %s reached Neurova Hebb limit (%d), truncating",
-                    document_id, limit,
+                    document_id,
+                    limit,
                 )
                 break
             doc["neurova_hebbs"].append(hebb.to_dict())
@@ -173,8 +177,7 @@ class NeuHebbMem:
         id_set = set(neurova_hebb_ids)
         before = len(self._data[document_id]["neurova_hebbs"])
         self._data[document_id]["neurova_hebbs"] = [
-            r for r in self._data[document_id]["neurova_hebbs"]
-            if r["id"] not in id_set
+            r for r in self._data[document_id]["neurova_hebbs"] if r["id"] not in id_set
         ]
         after = len(self._data[document_id]["neurova_hebbs"])
         self._data[document_id]["metadata"]["total_neurova_hebbs"] = after

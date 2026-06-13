@@ -15,111 +15,129 @@ _mem_layer_logger = _mem_layer_log.getLogger(__name__)
 
 # 尝试导入存在的模块（失败时记录 warning 而非静默忽略）
 try:
-    from .moe_router import MoEMemoryRouter, VectorGatingNetwork, ExpertDrilldownRetriever
+    from .moe_router import ExpertDrilldownRetriever, MoEMemoryRouter, VectorGatingNetwork
 except ImportError as _e:
-    _mem_layer_logger.debug(f"moe_router 未可用: {_e}")
+    _mem_layer_logger.debug("moe_router 未可用: %s", _e)
 
 try:
     from .unified_vector_store import UnifiedVectorStore
 except ImportError as _e:
-    _mem_layer_logger.debug(f"unified_vector_store 未可用: {_e}")
+    _mem_layer_logger.debug("unified_vector_store 未可用: %s", _e)
 
 try:
-    from .schema import MemoryCategory, MemoryType, LifecycleStage
+    from .schema import LifecycleStage, MemoryCategory, MemoryType
 except ImportError as _e:
-    _mem_layer_logger.debug(f"schema 未可用: {_e}")
+    _mem_layer_logger.debug("schema 未可用: %s", _e)
 
 try:
     from .conflict_detector_v2 import ConflictDetector
 except ImportError as _e:
-    _mem_layer_logger.debug(f"conflict_detector_v2 未可用: {_e}")
+    _mem_layer_logger.debug("conflict_detector_v2 未可用: %s", _e)
 
 try:
-    from .temperature import TemperatureEngine
+    pass
 except ImportError as _e:
-    _mem_layer_logger.debug(f"temperature 未可用: {_e}")
+    _mem_layer_logger.debug("temperature 未可用: %s", _e)
 
 try:
-    from .conversation_buffer import ConversationBuffer, ConversationMemoryBuffer, MemoryWriteQueue
+    pass
 except ImportError as _e:
-    _mem_layer_logger.debug(f"conversation_buffer 未可用: {_e}")
+    _mem_layer_logger.debug("conversation_buffer 未可用: %s", _e)
 
 try:
-    from .sleep import SleepConsolidation, MemoryRecord, MergeResult
+    pass
 except ImportError as _e:
-    _mem_layer_logger.debug(f"sleep 未可用: {_e}")
+    _mem_layer_logger.debug("sleep 未可用: %s", _e)
 
 try:
-    from .graph_traversal import GraphTraversal, MemoryRelation, TraversalPath, TraversalResult
+    pass
 except ImportError as _e:
-    _mem_layer_logger.debug(f"graph_traversal 未可用: {_e}")
+    _mem_layer_logger.debug("graph_traversal 未可用: %s", _e)
 
 # 认知图谱存储架构 — 一步到位替换
 try:
-    from .cognitive_storage_engine import CognitiveStorageEngine, UnifiedMemoryNode, MemoryType as CognitiveMemoryType, StorageLayer
+    from .cognitive_storage_engine import (
+        CognitiveStorageEngine,
+    )
+    from .cognitive_storage_engine import MemoryType as CognitiveMemoryType
+    from .cognitive_storage_engine import (
+        StorageLayer,
+        UnifiedMemoryNode,
+    )
 except ImportError as _e:
-    _mem_layer_logger.debug(f"cognitive_storage_engine 未可用: {_e}")
+    _mem_layer_logger.debug("cognitive_storage_engine 未可用: %s", _e)
 
 try:
     from .unified_retriever import UnifiedRetriever
 except ImportError as _e:
-    _mem_layer_logger.debug(f"unified_retriever 未可用: {_e}")
+    _mem_layer_logger.debug("unified_retriever 未可用: %s", _e)
 
 try:
     from .pattern_crystallizer import PatternCrystallizer
 except ImportError as _e:
-    _mem_layer_logger.debug(f"pattern_crystallizer 未可用: {_e}")
+    _mem_layer_logger.debug("pattern_crystallizer 未可用: %s", _e)
 
 try:
-    from .reasoning_trace_manager import ReasoningTraceManager, ReasoningStep, ReasoningTrace
+    from .reasoning_trace_manager import ReasoningStep, ReasoningTrace, ReasoningTraceManager
 except ImportError as _e:
-    _mem_layer_logger.debug(f"reasoning_trace_manager 未可用: {_e}")
+    _mem_layer_logger.debug("reasoning_trace_manager 未可用: %s", _e)
 
 try:
-    from .sleep_adapter import SleepConsolidationAdapter
+    pass
 except ImportError as _e:
-    _mem_layer_logger.debug(f"sleep_adapter 未可用: {_e}")
+    _mem_layer_logger.debug("sleep_adapter 未可用: %s", _e)
 
 try:
     from .causal_reasoning import CausalReasoningEngine, get_causal_reasoning_engine
 except ImportError as _e:
-    _mem_layer_logger.debug(f"causal_reasoning 未可用: {_e}")
+    _mem_layer_logger.debug("causal_reasoning 未可用: %s", _e)
 
 try:
     from .question_decomposer import QuestionDecomposer, QuestionType, get_question_decomposer
 except ImportError as _e:
-    _mem_layer_logger.debug(f"question_decomposer 未可用: {_e}")
+    _mem_layer_logger.debug("question_decomposer 未可用: %s", _e)
 
 try:
-    from .neurova_recall import QueryIntent, QueryIntentDetector, IntentAwareRecallStrategy
+    from .neurova_recall import IntentAwareRecallStrategy, QueryIntent, QueryIntentDetector
 except ImportError as _e:
-    _mem_layer_logger.debug(f"neurova_recall intent classes 未可用: {_e}")
+    _mem_layer_logger.debug("neurova_recall intent classes 未可用: %s", _e)
 
 # NeRF 记忆系统升级模块
 try:
     from .positional_encoding import (
-        PositionalEncodingConfig, PositionalEncoder, TemporalPositionalEncoder,
-        EmotionPositionalEncoder, ImportancePositionalEncoder,
-        create_temporal_encoder, create_emotion_encoder, create_importance_encoder
+        EmotionPositionalEncoder,
+        ImportancePositionalEncoder,
+        PositionalEncoder,
+        PositionalEncodingConfig,
+        TemporalPositionalEncoder,
+        create_emotion_encoder,
+        create_importance_encoder,
+        create_temporal_encoder,
     )
 except ImportError as _e:
-    _mem_layer_logger.debug(f"positional_encoding 未可用: {_e}")
+    _mem_layer_logger.debug("positional_encoding 未可用: %s", _e)
 
 try:
     from .memory_field import (
-        MemoryFieldConfig, MemoryFieldNetwork, MemoryFieldTrainer,
-        get_memory_field, reset_memory_field
+        MemoryFieldConfig,
+        MemoryFieldNetwork,
+        MemoryFieldTrainer,
+        get_memory_field,
+        reset_memory_field,
     )
 except ImportError as _e:
-    _mem_layer_logger.debug(f"memory_field 未可用 (需要 torch): {_e}")
+    _mem_layer_logger.debug("memory_field 未可用 (需要 torch): %s", _e)
 
 try:
     from .volume_renderer import (
-        ChannelSample, RenderedMemory, VolumeRenderer,
-        create_volume_renderer, get_volume_renderer
+        ChannelSample,
+        RenderedMemory,
+        VolumeRenderer,
+        create_volume_renderer,
+        get_volume_renderer,
     )
 except ImportError as _e:
-    _mem_layer_logger.debug(f"volume_renderer 未可用: {_e}")
+    _mem_layer_logger.debug("volume_renderer 未可用: %s", _e)
 
 # 版本信息
 __version__ = "0.3.0"  # NeRF 升级版本

@@ -4,12 +4,12 @@ Schema Module — 数据库 Schema 定义与迁移
 管理 SQLite 数据库的 DDL 创建和旧版本迁移逻辑。
 """
 
-import sqlite3
 import logging
+import sqlite3
 import threading
-from typing import Optional
 
 logger = logging.getLogger(__name__)
+
 
 def init_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
     """初始化数据库 schema
@@ -115,7 +115,9 @@ def init_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
         try:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dream_reports_neuser_id ON dream_reports(neuser_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dream_reports_user_id ON dream_reports(user_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dream_reports_neuser_user ON dream_reports(neuser_id, user_id)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_dream_reports_neuser_user ON dream_reports(neuser_id, user_id)"
+            )
         except sqlite3.OperationalError:
             pass
 
@@ -129,7 +131,9 @@ def init_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_crystallized ON memories(is_crystallized)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at)")
         # MoE 路由器复合索引（加速 _layer0_exact_index 查询）— 像髓鞘化的神经通路
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_moe_composite ON memories(category, lifecycle_stage, is_crystallized)")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_moe_composite ON memories(category, lifecycle_stage, is_crystallized)"
+        )
 
         # ── memory_relations 表 ──
         cursor.execute("""
@@ -202,6 +206,7 @@ def init_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
         conn.commit()
         logger.info("Database schema initialized")
 
+
 def migrate_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
     """数据库迁移：为现有表添加新字段（如果不存在）
 
@@ -260,11 +265,13 @@ def migrate_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_neuser_user ON memories(neuser_id, user_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_dream_reports_neuser_id ON dream_reports(neuser_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_dream_reports_user_id ON dream_reports(user_id)")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_dream_reports_neuser_user ON dream_reports(neuser_id, user_id)")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_dream_reports_neuser_user ON dream_reports(neuser_id, user_id)"
+                )
                 conn.commit()
                 logger.info("Database migration completed successfully")
             except sqlite3.OperationalError:
                 pass
 
     except Exception as e:
-        logger.error(f"Database migration failed: {e}")
+        logger.error("Database migration failed: %s", e)

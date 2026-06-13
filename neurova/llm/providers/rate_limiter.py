@@ -9,8 +9,8 @@ import logging
 import random
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class ExponentialBackoff:
         with self._lock:
             if attempt < 0:
                 attempt = 0
-            base = self.initial_delay * (self.multiplier ** attempt)
+            base = self.initial_delay * (self.multiplier**attempt)
             delay = min(base, self.max_delay)
             if self.jitter > 0:
                 spread = delay * self.jitter
@@ -332,13 +332,27 @@ def with_retry_and_circuit_breaker(
     failure_threshold: Optional[int] = None,
     recovery_timeout: Optional[float] = None,
 ) -> Any:
-    if func is not None and callable(func) and not any(
-        v is not None
-        for v in (retry_config, circuit_breaker, max_attempts, initial_delay, max_delay, failure_threshold, recovery_timeout)
+    if (
+        func is not None
+        and callable(func)
+        and not any(
+            v is not None
+            for v in (
+                retry_config,
+                circuit_breaker,
+                max_attempts,
+                initial_delay,
+                max_delay,
+                failure_threshold,
+                recovery_timeout,
+            )
+        )
     ):
+
         @functools.wraps(func)
         def _wrapped(*args: Any, **kwargs: Any) -> Any:
             return func(*args, **kwargs)
+
         return _wrapped
 
     rc = retry_config or RetryConfig(
@@ -361,6 +375,7 @@ def with_retry_and_circuit_breaker(
 
     def _decorator(target: Callable[..., Any]) -> Callable[..., Any]:
         if asyncio.iscoroutinefunction(target):
+
             @functools.wraps(target)
             async def _async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 if not cb.can_execute():
@@ -375,6 +390,7 @@ def with_retry_and_circuit_breaker(
                 else:
                     cb.record_success()
                     return result
+
             return _async_wrapper
 
         @functools.wraps(target)
@@ -391,6 +407,7 @@ def with_retry_and_circuit_breaker(
             else:
                 cb.record_success()
                 return result
+
         return _sync_wrapper
 
     if func is not None and callable(func):

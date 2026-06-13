@@ -12,33 +12,31 @@ from __future__ import annotations
 - 主动提问时读取 question_queue
 """
 
-from dataclasses import dataclass, field
-import datetime
-import enum
 import json
 import logging
 import threading
 import time
-import typing
 import uuid
-from typing import Any, Dict, List, Optional
-
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class QuestionStatus(Enum):
     """问题状态枚举"""
-    PENDING = "pending"       # 待处理（已生成，等待提问）
-    ASKED = "asked"           # 已提问
-    ANSWERED = "answered"     # 已回答
-    ARCHIVED = "archived"     # 已归档
-    COOLDOWN = "cooldown"     # 冷却中
+
+    PENDING = "pending"  # 待处理（已生成，等待提问）
+    ASKED = "asked"  # 已提问
+    ANSWERED = "answered"  # 已回答
+    ARCHIVED = "archived"  # 已归档
+    COOLDOWN = "cooldown"  # 冷却中
 
 
 class QuestionPriority(Enum):
     """问题优先级枚举"""
+
     HIGH = "high"
     NORMAL = "normal"
     LOW = "low"
@@ -47,6 +45,7 @@ class QuestionPriority(Enum):
 @dataclass
 class QuestionEntry:
     """问题条目数据模型"""
+
     id: str
     content: str
     status: QuestionStatus = QuestionStatus.PENDING
@@ -125,16 +124,12 @@ class QuestionQueueManager:
         self._questions: Dict[str, QuestionEntry] = {}
 
         # 状态索引
-        self._status_index: Dict[QuestionStatus, List[str]] = {
-            status: [] for status in QuestionStatus
-        }
+        self._status_index: Dict[QuestionStatus, List[str]] = {status: [] for status in QuestionStatus}
 
     def on_initialize(self) -> None:
         """初始化回调：从记忆系统加载问题"""
         self._load_questions_from_memory()
-        logger.info(
-            f"QuestionQueueManager initialized with {len(self._questions)} questions"
-        )
+        logger.info("QuestionQueueManager initialized with %s questions", len(self._questions))
 
     def on_start(self) -> None:
         """启动回调"""
@@ -183,7 +178,7 @@ class QuestionQueueManager:
             self._save_single_question(entry)
             self._on_question_generate(entry)
 
-            logger.info(f"Generated question: {question_id[:8]}... ({priority.value})")
+            logger.info("Generated question: %s... (%s)", question_id[:8], priority.value)
             return entry
 
     def get_pending_questions(self) -> List[QuestionEntry]:
@@ -260,7 +255,7 @@ class QuestionQueueManager:
             self._status_index[QuestionStatus.ASKED].append(question_id)
 
             self._on_question_ask(entry)
-            logger.info(f"Question {question_id[:8]}... marked as asked")
+            logger.info("Question %s... marked as asked", question_id[:8])
             return True
 
     def archive_question(self, question_id: str) -> bool:
@@ -286,7 +281,7 @@ class QuestionQueueManager:
             self._status_index[QuestionStatus.ARCHIVED].append(question_id)
 
             self._on_question_archive(entry)
-            logger.info(f"Question {question_id[:8]}... archived")
+            logger.info("Question %s... archived", question_id[:8])
             return True
 
     def update_question(self, question_id: str, **kwargs: Any) -> bool:
@@ -347,17 +342,9 @@ class QuestionQueueManager:
         with self._lock:
             return {
                 "total": len(self._questions),
-                "by_status": {
-                    status.value: len(self._status_index.get(status, []))
-                    for status in QuestionStatus
-                },
+                "by_status": {status.value: len(self._status_index.get(status, [])) for status in QuestionStatus},
                 "by_priority": {
-                    p.value: sum(
-                        1
-                        for q in self._questions.values()
-                        if q.priority == p
-                    )
-                    for p in QuestionPriority
+                    p.value: sum(1 for q in self._questions.values() if q.priority == p) for p in QuestionPriority
                 },
             }
 
@@ -384,7 +371,7 @@ class QuestionQueueManager:
                     except (json.JSONDecodeError, KeyError, TypeError):
                         continue
         except Exception as e:
-            logger.warning(f"Failed to load questions from memory: {e}")
+            logger.warning("Failed to load questions from memory: %s", e)
 
     def _save_questions_to_memory(self) -> None:
         """将所有问题保存到记忆系统"""
@@ -395,7 +382,7 @@ class QuestionQueueManager:
             for entry in self._questions.values():
                 self._save_single_question(entry)
         except Exception as e:
-            logger.warning(f"Failed to save questions to memory: {e}")
+            logger.warning("Failed to save questions to memory: %s", e)
 
     def _save_single_question(self, entry: QuestionEntry) -> None:
         """保存单个问题到记忆"""
@@ -410,7 +397,7 @@ class QuestionQueueManager:
                 metadata={"type": "question_queue", "question_id": entry.id},
             )
         except Exception as e:
-            logger.debug(f"Failed to save question {entry.id[:8]}...: {e}")
+            logger.debug("Failed to save question %s...: %s", entry.id[:8], e)
 
     def _archive_oldest_pending(self) -> None:
         """归档最旧的待处理问题（带锁）"""
@@ -437,7 +424,7 @@ class QuestionQueueManager:
             entry.status = QuestionStatus.ARCHIVED
             pending_ids.remove(oldest_id)
             self._status_index[QuestionStatus.ARCHIVED].append(oldest_id)
-            logger.info(f"Auto-archived oldest question: {oldest_id[:8]}...")
+            logger.info("Auto-archived oldest question: %s...", oldest_id[:8])
 
     def get_questions_by_status_unlocked(self, status: QuestionStatus) -> List[QuestionEntry]:
         """按状态获取问题（无锁版本）"""
@@ -460,12 +447,12 @@ class QuestionQueueManager:
 
     def _on_question_generate(self, entry: QuestionEntry) -> None:
         """问题生成事件回调"""
-        logger.debug(f"Question generated: {entry.id[:8]}... - {entry.content[:50]}...")
+        logger.debug("Question generated: %s... - %s...", entry.id[:8], entry.content[:50])
 
     def _on_question_ask(self, entry: QuestionEntry) -> None:
         """问题提问事件回调"""
-        logger.debug(f"Question asked: {entry.id[:8]}...")
+        logger.debug("Question asked: %s...", entry.id[:8])
 
     def _on_question_archive(self, entry: QuestionEntry) -> None:
         """问题归档事件回调"""
-        logger.debug(f"Question archived: {entry.id[:8]}...")
+        logger.debug("Question archived: %s...", entry.id[:8])

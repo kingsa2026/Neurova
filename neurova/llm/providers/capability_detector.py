@@ -4,11 +4,10 @@
 探测 LLM 模型的能力（流式输出、函数调用、多模态等）
 """
 
-from dataclasses import dataclass, field
 import logging
 import threading
 import time
-import typing
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 class ModelCapability(Enum):
     """模型能力枚举"""
+
     STREAMING = "streaming"
     FUNCTION_CALLING = "function_calling"
     VISION = "vision"
@@ -30,6 +30,7 @@ class ModelCapability(Enum):
 @dataclass
 class CapabilityResult:
     """能力检测结果"""
+
     model_name: str
     provider: str
     capabilities: Dict[ModelCapability, bool] = field(default_factory=dict)
@@ -65,11 +66,11 @@ class CapabilityResult:
 
 class CapabilityDetector:
     """模型能力探测器"""
-    
+
     def __init__(self, timeout: float = 30.0):
         """
         初始化探测器
-        
+
         Args:
             timeout: 探测超时时间（秒）
         """
@@ -95,23 +96,23 @@ class CapabilityDetector:
     ) -> CapabilityResult:
         """
         探测模型能力
-        
+
         Args:
             model_name: 模型名称
             provider: 提供商名称
             llm_client: LLM 客户端实例
             capabilities_to_probe: 要探测的能力列表，None 表示全部探测
-            
+
         Returns:
             CapabilityResult 探测结果
         """
         start_time = time.time()
-        
+
         if capabilities_to_probe is None:
             capabilities_to_probe = list(ModelCapability)
-        
+
         capabilities = {}
-        
+
         for cap in capabilities_to_probe:
             try:
                 if cap == ModelCapability.STREAMING:
@@ -132,31 +133,32 @@ class CapabilityDetector:
                     supported = await self._probe_multi_turn(llm_client, model_name)
                 else:
                     supported = False
-                
+
                 capabilities[cap] = supported
                 logger.debug("Probed %s for %s: %s", cap.value, model_name, supported)
-                
+
             except Exception as e:
                 logger.warning("Failed to probe %s for %s: %s", cap.value, model_name, str(e))
                 capabilities[cap] = False
-        
+
         elapsed_ms = (time.time() - start_time) * 1000
-        
+
         result = CapabilityResult(
             model_name=model_name,
             provider=provider,
             capabilities=capabilities,
             response_time_ms=elapsed_ms,
         )
-        
+
         logger.info(
             "Probe complete for %s/%s: %d/%d capabilities supported in %.1fms",
-            provider, model_name,
+            provider,
+            model_name,
             len(result.get_supported_capabilities()),
             len(capabilities_to_probe),
             elapsed_ms,
         )
-        
+
         return result
 
     async def _probe_streaming(self, llm_client: Any, model_name: str) -> bool:
@@ -180,21 +182,23 @@ class CapabilityDetector:
     async def _probe_function_calling(self, llm_client: Any, model_name: str) -> bool:
         """探测函数调用能力"""
         try:
-            tools = [{
-                "type": "function",
-                "function": {
-                    "name": "get_weather",
-                    "description": "Get the current weather in a location",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "location": {"type": "string", "description": "The city name"},
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get the current weather in a location",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "location": {"type": "string", "description": "The city name"},
+                            },
+                            "required": ["location"],
                         },
-                        "required": ["location"],
                     },
-                },
-            }]
-            
+                }
+            ]
+
             response = await llm_client.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "user", "content": self._probe_prompts[ModelCapability.FUNCTION_CALLING]}],
@@ -202,10 +206,10 @@ class CapabilityDetector:
                 tool_choice="auto",
                 max_tokens=100,
             )
-            
+
             if response.choices and response.choices[0].message:
                 message = response.choices[0].message
-                return hasattr(message, 'tool_calls') and message.tool_calls is not None
+                return hasattr(message, "tool_calls") and message.tool_calls is not None
             return False
         except Exception as e:
             logger.debug("Function calling probe failed: %s", str(e))
@@ -216,19 +220,21 @@ class CapabilityDetector:
         try:
             # 使用一个简单的 base64 图片进行测试
             test_image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-            
+
             response = await llm_client.chat.completions.create(
                 model=model_name,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": self._probe_prompts[ModelCapability.VISION]},
-                        {"type": "image_url", "image_url": {"url": test_image}},
-                    ],
-                }],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": self._probe_prompts[ModelCapability.VISION]},
+                            {"type": "image_url", "image_url": {"url": test_image}},
+                        ],
+                    }
+                ],
                 max_tokens=50,
             )
-            
+
             return response.choices and response.choices[0].message and response.choices[0].message.content
         except Exception as e:
             logger.debug("Vision probe failed: %s", str(e))
@@ -243,11 +249,12 @@ class CapabilityDetector:
                 response_format={"type": "json_object"},
                 max_tokens=50,
             )
-            
+
             if response.choices and response.choices[0].message:
                 content = response.choices[0].message.content
                 if content:
                     import json
+
                     try:
                         json.loads(content)
                         return True
@@ -264,26 +271,28 @@ class CapabilityDetector:
             response = await llm_client.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "user", "content": self._probe_prompts[ModelCapability.CODE_INTERPRETER]}],
-                tools=[{
-                    "type": "function",
-                    "function": {
-                        "name": "execute_code",
-                        "description": "Execute Python code",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "code": {"type": "string"},
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "execute_code",
+                            "description": "Execute Python code",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "code": {"type": "string"},
+                                },
+                                "required": ["code"],
                             },
-                            "required": ["code"],
                         },
-                    },
-                }],
+                    }
+                ],
                 max_tokens=100,
             )
-            
+
             if response.choices and response.choices[0].message:
                 message = response.choices[0].message
-                return hasattr(message, 'tool_calls') and message.tool_calls is not None
+                return hasattr(message, "tool_calls") and message.tool_calls is not None
             return False
         except Exception as e:
             logger.debug("Code interpreter probe failed: %s", str(e))
@@ -292,21 +301,23 @@ class CapabilityDetector:
     async def _probe_parallel_function_calling(self, llm_client: Any, model_name: str) -> bool:
         """探测并行函数调用能力"""
         try:
-            tools = [{
-                "type": "function",
-                "function": {
-                    "name": "get_weather",
-                    "description": "Get the current weather in a location",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "location": {"type": "string"},
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get the current weather in a location",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "location": {"type": "string"},
+                            },
+                            "required": ["location"],
                         },
-                        "required": ["location"],
                     },
-                },
-            }]
-            
+                }
+            ]
+
             response = await llm_client.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "user", "content": self._probe_prompts[ModelCapability.PARALLEL_FUNCTION_CALLING]}],
@@ -314,10 +325,10 @@ class CapabilityDetector:
                 tool_choice="auto",
                 max_tokens=200,
             )
-            
+
             if response.choices and response.choices[0].message:
                 message = response.choices[0].message
-                if hasattr(message, 'tool_calls') and message.tool_calls:
+                if hasattr(message, "tool_calls") and message.tool_calls:
                     return len(message.tool_calls) > 1
             return False
         except Exception as e:
@@ -335,7 +346,7 @@ class CapabilityDetector:
                 ],
                 max_tokens=50,
             )
-            
+
             if response.choices and response.choices[0].message:
                 content = response.choices[0].message.content or ""
                 return "SYSTEM_TEST_OK" in content
@@ -352,13 +363,13 @@ class CapabilityDetector:
                 {"role": "assistant", "content": "Hello Alice! Nice to meet you."},
                 {"role": "user", "content": "What is my name?"},
             ]
-            
+
             response = await llm_client.chat.completions.create(
                 model=model_name,
                 messages=messages,
                 max_tokens=50,
             )
-            
+
             if response.choices and response.choices[0].message:
                 content = response.choices[0].message.content or ""
                 return "Alice" in content
@@ -374,9 +385,9 @@ class CapabilityDetector:
             "family": "unknown",
             "size": "unknown",
         }
-        
+
         name_lower = model_name.lower()
-        
+
         # 推断模型家族
         if "gpt" in name_lower:
             info["family"] = "gpt"
@@ -392,7 +403,7 @@ class CapabilityDetector:
             info["family"] = "llama"
         elif "mistral" in name_lower:
             info["family"] = "mistral"
-        
+
         # 推断模型大小
         if "mini" in name_lower or "small" in name_lower:
             info["size"] = "small"
@@ -400,17 +411,17 @@ class CapabilityDetector:
             info["size"] = "large"
         elif "turbo" in name_lower or "fast" in name_lower:
             info["size"] = "fast"
-        
+
         return info
 
 
 class CapabilityCache:
     """能力缓存管理器"""
-    
+
     def __init__(self, ttl: float = 3600.0, max_size: int = 1000):
         """
         初始化缓存
-        
+
         Args:
             ttl: 缓存过期时间（秒）
             max_size: 最大缓存条目数
@@ -424,46 +435,46 @@ class CapabilityCache:
     def get(self, model_name: str, provider: str) -> Optional[CapabilityResult]:
         """
         获取缓存的能力结果
-        
+
         Args:
             model_name: 模型名称
             provider: 提供商名称
-            
+
         Returns:
             CapabilityResult 或 None（如果未命中或过期）
         """
         key = f"{provider}:{model_name}"
-        
+
         with self._lock:
             result = self._cache.get(key)
             if result is None:
                 return None
-            
+
             # 检查是否过期
             if time.time() - result.probed_at > self._ttl:
                 del self._cache[key]
                 logger.debug("Cache expired for %s", key)
                 return None
-            
+
             logger.debug("Cache hit for %s", key)
             return result
 
     def set(self, result: CapabilityResult) -> None:
         """
         缓存能力结果
-        
+
         Args:
             result: 能力检测结果
         """
         key = f"{result.provider}:{result.model_name}"
-        
+
         with self._lock:
             # 如果缓存已满，删除最旧的条目
             if len(self._cache) >= self._max_size:
                 oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k].probed_at)
                 del self._cache[oldest_key]
                 logger.debug("Cache evicted oldest entry: %s", oldest_key)
-            
+
             self._cache[key] = result
             logger.debug("Cached result for %s", key)
 
@@ -479,7 +490,7 @@ class CapabilityCache:
             now = time.time()
             valid_count = sum(1 for r in self._cache.values() if now - r.probed_at <= self._ttl)
             expired_count = len(self._cache) - valid_count
-            
+
             return {
                 "total_entries": len(self._cache),
                 "valid_entries": valid_count,
@@ -539,32 +550,32 @@ async def detect_capabilities(
 ) -> CapabilityResult:
     """
     探测模型能力（便捷函数）
-    
+
     Args:
         model_name: 模型名称
         provider: 提供商名称
         llm_client: LLM 客户端实例
         use_cache: 是否使用缓存
         timeout: 探测超时时间（秒）
-        
+
     Returns:
         CapabilityResult 探测结果
     """
     cache = get_capability_cache() if use_cache else None
-    
+
     # 尝试从缓存获取
     if cache:
         cached = cache.get(model_name, provider)
         if cached is not None:
             logger.debug("Using cached capabilities for %s/%s", provider, model_name)
             return cached
-    
+
     # 执行探测
     detector = get_capability_detector(timeout=timeout)
     result = await detector.probe(model_name, provider, llm_client)
-    
+
     # 缓存结果
     if cache:
         cache.set(result)
-    
+
     return result

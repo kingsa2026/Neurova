@@ -10,24 +10,15 @@ FastAPI 中间件集合
 - 认证中间件
 """
 
-import json
 import logging
-import re
 import time
-import typing
 import uuid
 
-from starlette.types import ASGIApp
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from fastapi import Request, Response
-import fastapi
-import fastapi.middleware.cors
-import fastapi.responses
-import starlette.middleware.base
-import starlette.types
+from starlette.types import ASGIApp
 
 logger = logging.getLogger(__name__)
 
@@ -127,9 +118,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             self._requests[client_ip] = []
 
         # 移除超过1分钟的记录
-        self._requests[client_ip] = [
-            t for t in self._requests[client_ip] if now - t < 60
-        ]
+        self._requests[client_ip] = [t for t in self._requests[client_ip] if now - t < 60]
 
         if len(self._requests[client_ip]) >= self.requests_per_minute:
             return JSONResponse(
@@ -156,14 +145,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 def _load_cors_origins_from_config() -> list:
     """
     从配置文件加载 CORS origins
-    
+
     优先级:
     1. 环境变量 NEUROVA_CORS_ORIGINS
     2. 配置文件 config/cors.json
     3. 默认值
     """
-    import os as _os
     import json as _json
+    import os as _os
     from pathlib import Path
 
     # 1. 检查环境变量
@@ -180,7 +169,7 @@ def _load_cors_origins_from_config() -> list:
                 if "origins" in config and config["origins"]:
                     return config["origins"]
         except Exception as e:
-            logger.warning(f"Failed to load CORS config from file: {e}")
+            logger.warning("Failed to load CORS config from file: %s", e)
 
     # 3. 默认值（包含前端 dev server 端口 8100）
     return [

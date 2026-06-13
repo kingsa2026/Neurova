@@ -15,7 +15,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -52,9 +51,21 @@ class MemoryRecord:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MemoryRecord":
         known = {
-            "id", "content", "memory_type", "owner", "tags", "metadata",
-            "importance", "access_count", "created_at", "updated_at",
-            "agent_id", "neuser_id", "user_id", "shared", "share_group_ids",
+            "id",
+            "content",
+            "memory_type",
+            "owner",
+            "tags",
+            "metadata",
+            "importance",
+            "access_count",
+            "created_at",
+            "updated_at",
+            "agent_id",
+            "neuser_id",
+            "user_id",
+            "shared",
+            "share_group_ids",
         }
         kwargs: Dict[str, Any] = {k: v for k, v in data.items() if k in known}
         if "tags" in kwargs and kwargs["tags"] is None:
@@ -88,20 +99,20 @@ class MemoryIndex:
             self.by_tag.setdefault(tag, [])
             if record.id not in self.by_tag[tag]:
                 self.by_tag[tag].append(record.id)
-        
+
         # 三层隔离索引
         self.by_agent.setdefault(record.agent_id, [])
         if record.id not in self.by_agent[record.agent_id]:
             self.by_agent[record.agent_id].append(record.id)
-        
+
         self.by_neuser.setdefault(record.neuser_id, [])
         if record.id not in self.by_neuser[record.neuser_id]:
             self.by_neuser[record.neuser_id].append(record.id)
-        
+
         self.by_user.setdefault(record.user_id, [])
         if record.id not in self.by_user[record.user_id]:
             self.by_user[record.user_id].append(record.id)
-        
+
         # 组合隔离键
         isolation_key = f"{record.agent_id}:{record.neuser_id}:{record.user_id}"
         self.by_isolation_key.setdefault(isolation_key, [])
@@ -122,7 +133,7 @@ class MemoryIndex:
                 ids.remove(record.id)
             if ids is not None and not ids:
                 self.by_tag.pop(tag, None)
-        
+
         # 三层隔离索引清理
         for bucket, key in [
             (self.by_agent, record.agent_id),
@@ -134,7 +145,7 @@ class MemoryIndex:
                 ids.remove(record.id)
             if ids is not None and not ids:
                 bucket.pop(key, None)
-        
+
         # 组合隔离键清理
         isolation_key = f"{record.agent_id}:{record.neuser_id}:{record.user_id}"
         ids = self.by_isolation_key.get(isolation_key)
@@ -272,14 +283,14 @@ class MemoryStorage:
         with self._lock:
             mid = _new_id("mem_")
             now = _now_iso()
-            
+
             # 从隔离上下文获取隔离字段
             agent_id = isolation_context.agent_id if isolation_context else "default"
             neuser_id = isolation_context.neuser_id if isolation_context else "default"
             user_id = isolation_context.user_id if isolation_context else "default"
             shared = isolation_context.shared if isolation_context else False
             share_group_ids = list(isolation_context.share_group_ids) if isolation_context else []
-            
+
             rec = MemoryRecord(
                 id=mid,
                 content=content,
@@ -374,13 +385,13 @@ class MemoryStorage:
                             # 检查共享组
                             if not self._in_same_share_group(isolation_context, rec):
                                 continue
-                    
+
                     # neuser_id 和 user_id 始终检查
                     if isolation_context.neuser_id != "default" and rec.neuser_id != isolation_context.neuser_id:
                         continue
                     if isolation_context.user_id != "default" and rec.user_id != isolation_context.user_id:
                         continue
-                
+
                 if memory_type is not None and rec.memory_type != memory_type:
                     continue
                 if owner is not None and rec.owner != owner:
@@ -404,16 +415,10 @@ class MemoryStorage:
                 return []
             if match_all:
                 wanted = set(tags)
-                candidates = [
-                    r for r in self._records.values()
-                    if wanted.issubset(set(r.tags))
-                ]
+                candidates = [r for r in self._records.values() if wanted.issubset(set(r.tags))]
             else:
                 wanted = set(tags)
-                candidates = [
-                    r for r in self._records.values()
-                    if wanted.intersection(r.tags)
-                ]
+                candidates = [r for r in self._records.values() if wanted.intersection(r.tags)]
             candidates.sort(key=lambda r: r.created_at)
             return [r.to_dict() for r in candidates]
 
@@ -473,26 +478,27 @@ class MemoryStorage:
         """检查请求者和记忆记录是否在同一共享组中"""
         try:
             from .share_group import get_share_group_manager
+
             manager = get_share_group_manager()
-            
+
             # 获取请求者的 agent_id
             requester_agent = isolation_context.agent_id
             record_agent = rec.agent_id
-            
+
             # 如果任一 agent_id 为空或 default，不共享
             if not requester_agent or requester_agent == "default":
                 return False
             if not record_agent or record_agent == "default":
                 return False
-            
+
             # 如果请求者和记录的 agent_id 相同，允许访问
             if requester_agent == record_agent:
                 return True
-            
+
             # 检查是否在同一共享组
             return manager.are_agents_shared(requester_agent, record_agent)
         except Exception as e:
-            logger.warning(f"Share group check failed: {e}")
+            logger.warning("Share group check failed: %s", e)
             return False
 
     def storage_path(self) -> str:

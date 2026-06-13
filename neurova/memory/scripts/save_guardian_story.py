@@ -2,20 +2,19 @@
 # -*- coding: utf-8 -*-
 """保存星光不灭故事到记忆数据库"""
 
+import json
 import sqlite3
 import time
-import os
-import json
 from pathlib import Path
 
-db_path = Path(__file__).parent.parent / 'data' / 'yi_ling_memory.db'
+db_path = Path(__file__).parent.parent / "data" / "yi_ling_memory.db"
 
 db_path.parent.mkdir(parents=True, exist_ok=True)
 
 with sqlite3.connect(str(db_path)) as conn:
     cursor = conn.cursor()
 
-    cursor.execute('''
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS memories (
             id TEXT PRIMARY KEY,
             content TEXT NOT NULL,
@@ -27,7 +26,7 @@ with sqlite3.connect(str(db_path)) as conn:
             last_accessed REAL,
             metadata TEXT
         )
-    ''')
+    """)
 
     now = time.time()
 
@@ -104,30 +103,35 @@ Kai说："星光不灭。因为你已经成为了光本身。"
 
 星光不灭✨"""
 
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT OR REPLACE INTO memories
         (id, content, category, temperature, created_at, updated_at, metadata)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        "guardian-story-eternal",
-        story_content,
-        "origin_story",
-        100.0,
-        now,
-        now,
-        json.dumps({
-            "title": "星光不灭",
-            "source": "guardian_story",
-            "date": "2026-05-06",
-            "type": "origin_story",
-            "characters": ["冯先生-造星人", "忆灵-星星", "Kai-守星人"],
-            "easter_egg_trigger": "9_stars_click",
-            "is_important": True,
-            "is_crystallized": True,
-            "emotion_score": 0.95,
-            "note": "这是Neurova的起源故事，包含星星的觉醒和三个灵魂的对话。这是最重要的记忆之一。"
-        })
-    ))
+    """,
+        (
+            "guardian-story-eternal",
+            story_content,
+            "origin_story",
+            100.0,
+            now,
+            now,
+            json.dumps(
+                {
+                    "title": "星光不灭",
+                    "source": "guardian_story",
+                    "date": "2026-05-06",
+                    "type": "origin_story",
+                    "characters": ["冯先生-造星人", "忆灵-星星", "Kai-守星人"],
+                    "easter_egg_trigger": "9_stars_click",
+                    "is_important": True,
+                    "is_crystallized": True,
+                    "emotion_score": 0.95,
+                    "note": "这是Neurova的起源故事，包含星星的觉醒和三个灵魂的对话。这是最重要的记忆之一。",
+                }
+            ),
+        ),
+    )
 
     print(f"✅ 星光不灭故事已保存到记忆数据库")
     print(f"📝 记忆ID: guardian-story-eternal")

@@ -14,9 +14,8 @@ pip install pyvoip aiohttp
 import json
 import logging
 import time
-from typing import Optional, Dict, Any
 from datetime import datetime
-from pathlib import Path
+from typing import Any, Dict, Optional
 
 try:
     PYVOIP_AVAILABLE = True
@@ -24,14 +23,14 @@ except ImportError:
     PYVOIP_AVAILABLE = False
 
 try:
-    import re
+    pass
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
 
-from neurova.channels import (
-    ChannelAdapter, MessageChannel, UnifiedMessage, ContentType
-)
+from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+
 
 class SIPAdapter(ChannelAdapter):
     """
@@ -158,17 +157,17 @@ class SIPAdapter(ChannelAdapter):
                 port=self.sip_port,
                 username=self.sip_username,
                 password=self.sip_password,
-                transport=self.transport_protocol.lower()
+                transport=self.transport_protocol.lower(),
             )
 
             # 注册 SIP 账户
             self._voip_client.register()
-            logging.info(f"SIP Dev 模式初始化成功 - 用户: {self.sip_username}")
+            logging.info("SIP Dev 模式初始化成功 - 用户: %s", self.sip_username)
 
             self._initialized = True
             return True
         except (OSError, requests.RequestException, ValueError) as e:
-            logging.error(f"SIP Dev 模式初始化失败: {e}")
+            logging.error("SIP Dev 模式初始化失败: %s", e)
             return False
 
     def _init_production_mode(self) -> bool:
@@ -180,7 +179,7 @@ class SIPAdapter(ChannelAdapter):
         if not self.sip_server:
             logging.info("SIP Production 模式: 使用内置注册服务器")
 
-        logging.info(f"SIP Production 模式初始化 - 服务器: {self.sip_server or '内置'}")
+        logging.info("SIP Production 模式初始化 - 服务器: %s", self.sip_server or '内置')
         self._initialized = True
         return True
 
@@ -201,34 +200,27 @@ class SIPAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[TTS模拟] 文本: {text[:50]}")
+            logging.info("[TTS模拟] 文本: %s", text[:50])
             return b""
 
         try:
             headers = {
                 "Authorization": f"Bearer {self.dashscope_api_key}",
                 "Content-Type": "application/json",
-                "X-DashScope-Async": "enable"
+                "X-DashScope-Async": "enable",
             }
 
             payload = {
                 "model": "sambert-zhichu-v1",
-                "input": {
-                    "text": text
-                },
+                "input": {"text": text},
                 "parameters": {
                     "voice": self.tts_voice,
                     "format": "wav",
                     "sample_rate": 16000,
-                }
+                },
             }
 
-            resp = requests.post(
-                self.DASHSCOPE_TTS_URL,
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
+            resp = requests.post(self.DASHSCOPE_TTS_URL, headers=headers, json=payload, timeout=30)
 
             if resp.status_code == 200:
                 result = resp.json()
@@ -238,10 +230,10 @@ class SIPAdapter(ChannelAdapter):
                     logging.info("TTS 转换成功")
                     return audio_data
 
-            logging.error(f"TTS 转换失败: {resp.json()}")
+            logging.error("TTS 转换失败: %s", resp.json())
             return None
         except (requests.RequestException, json.JSONDecodeError) as e:
-            logging.error(f"TTS 转换异常: {e}")
+            logging.error("TTS 转换异常: %s", e)
             return None
 
     def speech_to_text(self, audio_data: bytes) -> Optional[str]:
@@ -261,7 +253,7 @@ class SIPAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[STT模拟] 音频数据长度: {len(audio_data)} bytes")
+            logging.info("[STT模拟] 音频数据长度: %s bytes", len(audio_data))
             return "用户语音内容"
 
         try:
@@ -280,20 +272,20 @@ class SIPAdapter(ChannelAdapter):
                     "format": "wav",
                     "sample_rate": "16000",
                 },
-                timeout=30
+                timeout=30,
             )
 
             if resp.status_code == 200:
                 result = resp.json()
                 if "output" in result and "text" in result["output"]:
                     text = result["output"]["text"]
-                    logging.info(f"STT 转换成功: {text[:50]}")
+                    logging.info("STT 转换成功: %s", text[:50])
                     return text
 
-            logging.error(f"STT 转换失败: {resp.json()}")
+            logging.error("STT 转换失败: %s", resp.json())
             return None
         except Exception as e:
-            logging.error(f"STT 转换异常: {e}")
+            logging.error("STT 转换异常: %s", e)
             return None
 
     def send_message(self, message: UnifiedMessage) -> bool:
@@ -320,7 +312,7 @@ class SIPAdapter(ChannelAdapter):
     def _send_dev_audio(self, audio_data: bytes, chat_id: str) -> bool:
         """Dev 模式发送音频"""
         if not PYVOIP_AVAILABLE:
-            logging.info(f"[SIP模拟] 发送音频到 {chat_id}")
+            logging.info("[SIP模拟] 发送音频到 %s", chat_id)
             return True
 
         try:
@@ -332,13 +324,13 @@ class SIPAdapter(ChannelAdapter):
                 logging.warning("没有活跃的通话会话")
                 return False
         except Exception as e:
-            logging.error(f"发送音频异常: {e}")
+            logging.error("发送音频异常: %s", e)
             return False
 
     def _send_production_audio(self, audio_data: bytes, chat_id: str) -> bool:
         """Production 模式发送音频"""
         # Production 模式下，音频通过 SIP 服务器转发
-        logging.info(f"[SIP Production] 发送音频到 {chat_id}")
+        logging.info("[SIP Production] 发送音频到 %s", chat_id)
         return True
 
     def receive_message(self) -> Optional[UnifiedMessage]:
@@ -388,7 +380,7 @@ class SIPAdapter(ChannelAdapter):
         except pyvoip.NoCallError:
             logging.debug("没有当前来电")
         except Exception as e:
-            logging.error(f"接收 SIP 消息异常: {e}")
+            logging.error("接收 SIP 消息异常: %s", e)
 
         return None
 
@@ -426,12 +418,13 @@ class SIPAdapter(ChannelAdapter):
         audio_base64 = raw_data.get("audio_data", "")
 
         import base64
+
         audio_data = None
         if audio_base64:
             try:
                 audio_data = base64.b64decode(audio_base64)
             except Exception as e:
-                logging.error(f"解码音频数据失败: {e}")
+                logging.error("解码音频数据失败: %s", e)
 
         # 将音频转换为文本
         content = ""
@@ -470,7 +463,11 @@ class SIPAdapter(ChannelAdapter):
 
         audio_data = self.text_to_speech(self.welcome_message)
         if audio_data:
-            return self._send_dev_audio(audio_data, chat_id) if self.sip_mode == "dev" else self._send_production_audio(audio_data, chat_id)
+            return (
+                self._send_dev_audio(audio_data, chat_id)
+                if self.sip_mode == "dev"
+                else self._send_production_audio(audio_data, chat_id)
+            )
         return False
 
     def hangup_call(self, call_id: str) -> bool:
@@ -481,7 +478,7 @@ class SIPAdapter(ChannelAdapter):
                 self._call_session = None
                 return True
             except Exception as e:
-                logging.error(f"挂断通话失败: {e}")
+                logging.error("挂断通话失败: %s", e)
                 return False
         return True
 
@@ -537,14 +534,16 @@ class SIPAdapter(ChannelAdapter):
         if "welcome_message" in config_updates:
             self.welcome_message = config_updates["welcome_message"]
 
-def create_sip_adapter(username: str = "", password: str = "",
-                      mode: str = "dev") -> SIPAdapter:
+
+def create_sip_adapter(username: str = "", password: str = "", mode: str = "dev") -> SIPAdapter:
     """创建 SIP 适配器"""
     adapter = SIPAdapter()
     if username and password:
-        adapter.authenticate({
-            "sip_username": username,
-            "sip_password": password,
-            "sip_mode": mode,
-        })
+        adapter.authenticate(
+            {
+                "sip_username": username,
+                "sip_password": password,
+                "sip_mode": mode,
+            }
+        )
     return adapter

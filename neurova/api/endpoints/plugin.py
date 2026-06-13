@@ -7,17 +7,15 @@ import logging
 import typing
 import uuid
 
-from fastapi import APIRouter
-from fastapi import HTTPException
-from fastapi import Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from pydantic import Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 # ── Models ─────────────────────────────────────────────
+
 
 class DiscoverPluginsRequest(BaseModel):
     directory: typing.Optional[str] = None
@@ -43,9 +41,39 @@ def _init_sample_plugins():
     if _PLUGINS:
         return
     samples = [
-        {"id": "builtin-tools", "name": "Builtin Tools", "version": "1.0.0", "description": "Core builtin tool set", "author": "Neurova", "status": "enabled", "loaded": True, "type": "system", "config": {}},
-        {"id": "web-scraper", "name": "Web Scraper", "version": "0.9.0", "description": "Web scraping plugin", "author": "Community", "status": "disabled", "loaded": False, "type": "custom", "config": {"max_depth": 3}},
-        {"id": "data-viz", "name": "Data Visualization", "version": "1.2.0", "description": "Charts and graphs generation", "author": "Neurova", "status": "enabled", "loaded": True, "type": "extension", "config": {"theme": "default"}},
+        {
+            "id": "builtin-tools",
+            "name": "Builtin Tools",
+            "version": "1.0.0",
+            "description": "Core builtin tool set",
+            "author": "Neurova",
+            "status": "enabled",
+            "loaded": True,
+            "type": "system",
+            "config": {},
+        },
+        {
+            "id": "web-scraper",
+            "name": "Web Scraper",
+            "version": "0.9.0",
+            "description": "Web scraping plugin",
+            "author": "Community",
+            "status": "disabled",
+            "loaded": False,
+            "type": "custom",
+            "config": {"max_depth": 3},
+        },
+        {
+            "id": "data-viz",
+            "name": "Data Visualization",
+            "version": "1.2.0",
+            "description": "Charts and graphs generation",
+            "author": "Neurova",
+            "status": "enabled",
+            "loaded": True,
+            "type": "extension",
+            "config": {"theme": "default"},
+        },
     ]
     now = datetime.datetime.utcnow().isoformat()
     for p in samples:
@@ -63,8 +91,15 @@ def _get_request_id(request) -> str:
 
 # ── Endpoints ──────────────────────────────────────────
 
+
 @router.get("/")
-async def list_plugins(request, status: typing.Optional[str] = None, plugin_type: typing.Optional[str] = None, page: int = 1, size: int = 20):
+async def list_plugins(
+    request,
+    status: typing.Optional[str] = None,
+    plugin_type: typing.Optional[str] = None,
+    page: int = 1,
+    size: int = 20,
+):
     """获取插件列表"""
     results = list(_PLUGINS.values())
     if status:
@@ -84,13 +119,21 @@ async def get_plugin_status():
     total = len(_PLUGINS)
     enabled = sum(1 for p in _PLUGINS.values() if p.get("status") == "enabled")
     loaded = sum(1 for p in _PLUGINS.values() if p.get("loaded"))
-    return {"code": 0, "message": "success", "data": {"total": total, "enabled": enabled, "loaded": loaded, "disabled": total - enabled}}
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"total": total, "enabled": enabled, "loaded": loaded, "disabled": total - enabled},
+    }
 
 
 @router.get("/market")
 async def list_market_plugins(page: int = 1, size: int = 20):
     """[预留] 获取插件市场应用列表"""
-    return {"code": 0, "message": "Plugin marketplace coming soon", "data": {"items": _MARKET_PLUGINS, "total": 0, "page": page, "size": size}}
+    return {
+        "code": 0,
+        "message": "Plugin marketplace coming soon",
+        "data": {"items": _MARKET_PLUGINS, "total": 0, "page": page, "size": size},
+    }
 
 
 @router.post("/market/submit")
@@ -118,6 +161,7 @@ async def get_plugin(plugin_id: str):
 async def discover_plugins(body: DiscoverPluginsRequest):
     """扫描目录发现插件"""
     from pathlib import Path
+
     directory = body.directory or "plugins"
     p = Path(directory)
     discovered = []
@@ -126,12 +170,24 @@ async def discover_plugins(body: DiscoverPluginsRequest):
         for manifest in p.rglob("manifest.json") if body.recursive else p.glob("manifest.json"):
             try:
                 import json
+
                 data = json.loads(manifest.read_text(encoding="utf-8"))
-                discovered.append({"name": data.get("name", manifest.parent.name), "path": str(manifest.parent), "version": data.get("version", "unknown"), "description": data.get("description", "")})
+                discovered.append(
+                    {
+                        "name": data.get("name", manifest.parent.name),
+                        "path": str(manifest.parent),
+                        "version": data.get("version", "unknown"),
+                        "description": data.get("description", ""),
+                    }
+                )
             except Exception:
                 continue
 
-    return {"code": 0, "message": f"Discovered {len(discovered)} plugins", "data": {"plugins": discovered, "directory": directory}}
+    return {
+        "code": 0,
+        "message": f"Discovered {len(discovered)} plugins",
+        "data": {"plugins": discovered, "directory": directory},
+    }
 
 
 @router.post("/{plugin_id}/install")
@@ -147,9 +203,18 @@ async def install_plugin(plugin_id: str, body: InstallPluginRequest):
 
     now = datetime.datetime.utcnow().isoformat()
     plugin = {
-        "id": plugin_id, "name": plugin_id, "version": "0.1.0", "description": f"Plugin from {body.source}",
-        "author": "Unknown", "status": "disabled", "loaded": False, "type": "custom",
-        "config": body.config or {}, "source": body.source, "created_at": now, "updated_at": now,
+        "id": plugin_id,
+        "name": plugin_id,
+        "version": "0.1.0",
+        "description": f"Plugin from {body.source}",
+        "author": "Unknown",
+        "status": "disabled",
+        "loaded": False,
+        "type": "custom",
+        "config": body.config or {},
+        "source": body.source,
+        "created_at": now,
+        "updated_at": now,
     }
     _PLUGINS[plugin_id] = plugin
     logger.info("Plugin installed: %s", plugin_id)
@@ -232,4 +297,8 @@ async def get_plugin_modules(plugin_id: str):
     plugin = _PLUGINS.get(plugin_id)
     if not plugin:
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
-    return {"code": 0, "message": "success", "data": {"plugin_id": plugin_id, "modules": [], "loaded": plugin.get("loaded", False)}}
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"plugin_id": plugin_id, "modules": [], "loaded": plugin.get("loaded", False)},
+    }

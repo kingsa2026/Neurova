@@ -15,19 +15,18 @@ pip install paho-mqtt
 import json
 import logging
 import time
-import ssl
-from typing import Optional, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, Optional
 
 try:
     import paho.mqtt.client as mqtt
+
     MQTT_AVAILABLE = True
 except ImportError:
     MQTT_AVAILABLE = False
 
-from neurova.channels import (
-    ChannelAdapter, MessageChannel, UnifiedMessage, ContentType
-)
+from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+
 
 class MQTTAdapter(ChannelAdapter):
     """
@@ -138,9 +137,7 @@ class MQTTAdapter(ChannelAdapter):
         try:
             # 创建 MQTT 客户端
             self._client = mqtt.Client(
-                client_id=self._client_id,
-                clean_session=self.clean_session,
-                transport=self.transport
+                client_id=self._client_id, clean_session=self.clean_session, transport=self.transport
             )
 
             # 设置回调
@@ -157,20 +154,21 @@ class MQTTAdapter(ChannelAdapter):
             # BUG-41: TLS配置初始化 - 验证证书路径有效性
             if self.tls_enabled:
                 import os
+
                 tls_kwargs = {}
                 if self.tls_ca_certs:
                     if not os.path.exists(self.tls_ca_certs):
-                        logging.warning(f"TLS CA 证书文件不存在: {self.tls_ca_certs}，跳过TLS")
+                        logging.warning("TLS CA 证书文件不存在: %s，跳过TLS", self.tls_ca_certs)
                     else:
                         tls_kwargs["ca_certs"] = self.tls_ca_certs
                 if self.tls_certfile:
                     if not os.path.exists(self.tls_certfile):
-                        logging.warning(f"TLS 证书文件不存在: {self.tls_certfile}，跳过TLS")
+                        logging.warning("TLS 证书文件不存在: %s，跳过TLS", self.tls_certfile)
                     else:
                         tls_kwargs["certfile"] = self.tls_certfile
                 if self.tls_keyfile:
                     if not os.path.exists(self.tls_keyfile):
-                        logging.warning(f"TLS 私钥文件不存在: {self.tls_keyfile}，跳过TLS")
+                        logging.warning("TLS 私钥文件不存在: %s，跳过TLS", self.tls_keyfile)
                     else:
                         tls_kwargs["keyfile"] = self.tls_keyfile
 
@@ -192,55 +190,55 @@ class MQTTAdapter(ChannelAdapter):
                 self.disconnect()
                 return False
 
-            logging.info(f"MQTT 连接初始化成功 - 服务器: {self.host}:{self.port}")
+            logging.info("MQTT 连接初始化成功 - 服务器: %s:%s", self.host, self.port)
             self._initialized = True
             return True
 
         except Exception as e:
-            logging.error(f"MQTT 连接初始化失败: {e}")
+            logging.error("MQTT 连接初始化失败: %s", e)
             return False
 
     def _on_connect(self, client, userdata, flags, rc):
         """连接成功回调"""
         if rc == 0:
             self._connected = True
-            logging.info(f"MQTT 连接成功 - Client ID: {self._client_id}")
+            logging.info("MQTT 连接成功 - Client ID: %s", self._client_id)
 
             # 订阅主题
             if self.subscribe_topic:
                 result, mid = client.subscribe(self.subscribe_topic, qos=self.qos)
                 if result == mqtt.MQTT_ERR_SUCCESS:
-                    logging.info(f"MQTT 订阅成功: {self.subscribe_topic}")
+                    logging.info("MQTT 订阅成功: %s", self.subscribe_topic)
                 else:
-                    logging.error(f"MQTT 订阅失败: {self.subscribe_topic}")
+                    logging.error("MQTT 订阅失败: %s", self.subscribe_topic)
         else:
-            logging.error(f"MQTT 连接失败，返回码: {rc}")
+            logging.error("MQTT 连接失败，返回码: %s", rc)
 
     def _on_disconnect(self, client, userdata, rc):
         """断开连接回调"""
         self._connected = False
-        logging.info(f"MQTT 连接断开，返回码: {rc}")
+        logging.info("MQTT 连接断开，返回码: %s", rc)
 
     def _on_message(self, client, userdata, msg):
         """收到消息回调"""
         try:
             payload = msg.payload.decode("utf-8", errors="replace")
-            logging.debug(f"MQTT 收到消息 [{msg.topic}]: {payload[:100]}")
+            logging.debug("MQTT 收到消息 [%s]: %s", msg.topic, payload[:100])
 
             # 解析消息
             unified_msg = self._parse_mqtt_message(msg, payload)
             if unified_msg:
                 self._message_queue.append(unified_msg)
         except Exception as e:
-            logging.error(f"MQTT 消息处理异常: {e}")
+            logging.error("MQTT 消息处理异常: %s", e)
 
     def _on_subscribe(self, client, userdata, mid, granted_qos):
         """订阅成功回调"""
-        logging.info(f"MQTT 订阅确认，QoS: {granted_qos}")
+        logging.info("MQTT 订阅确认，QoS: %s", granted_qos)
 
     def _on_publish(self, client, userdata, mid):
         """发布成功回调"""
-        logging.debug(f"MQTT 消息发布确认，Message ID: {mid}")
+        logging.debug("MQTT 消息发布确认，Message ID: %s", mid)
 
     def _parse_mqtt_message(self, msg, payload: str) -> Optional[UnifiedMessage]:
         """解析 MQTT 消息"""
@@ -302,7 +300,7 @@ class MQTTAdapter(ChannelAdapter):
             return False
 
         if not MQTT_AVAILABLE or not self._client:
-            logging.info(f"[MQTT模拟] 发布到 {self.publish_topic}: {message.content[:50]}")
+            logging.info("[MQTT模拟] 发布到 %s: %s", self.publish_topic, message.content[:50])
             return True
 
         try:
@@ -325,21 +323,18 @@ class MQTTAdapter(ChannelAdapter):
 
             # 发布消息
             result, mid = self._client.publish(
-                topic,
-                payload=json.dumps(payload, ensure_ascii=False),
-                qos=self.qos,
-                retain=False
+                topic, payload=json.dumps(payload, ensure_ascii=False), qos=self.qos, retain=False
             )
 
             if result == mqtt.MQTT_ERR_SUCCESS:
-                logging.debug(f"MQTT 消息发布成功 [{topic}]")
+                logging.debug("MQTT 消息发布成功 [%s]", topic)
                 return True
             else:
-                logging.error(f"MQTT 消息发布失败: {result}")
+                logging.error("MQTT 消息发布失败: %s", result)
                 return False
 
         except Exception as e:
-            logging.error(f"MQTT 消息发送异常: {e}")
+            logging.error("MQTT 消息发送异常: %s", e)
             return False
 
     def receive_message(self) -> Optional[UnifiedMessage]:
@@ -425,15 +420,19 @@ class MQTTAdapter(ChannelAdapter):
             self._client.disconnect()
             logging.info("MQTT 连接已断开")
 
-def create_mqtt_adapter(host: str = "127.0.0.1", port: int = 1883,
-                       username: str = "", password: str = "") -> MQTTAdapter:
+
+def create_mqtt_adapter(
+    host: str = "127.0.0.1", port: int = 1883, username: str = "", password: str = ""
+) -> MQTTAdapter:
     """创建 MQTT 适配器"""
     adapter = MQTTAdapter()
     if host:
-        adapter.authenticate({
-            "host": host,
-            "port": str(port),
-            "username": username,
-            "password": password,
-        })
+        adapter.authenticate(
+            {
+                "host": host,
+                "port": str(port),
+                "username": username,
+                "password": password,
+            }
+        )
     return adapter

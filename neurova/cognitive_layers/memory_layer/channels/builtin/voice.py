@@ -3,7 +3,8 @@ VoiceChannel — 语音通道（语音转写记忆检索）
 
 检索语音转写记忆（用户通过语音说过的内容）。
 """
-from typing import Any, Dict, List, Optional
+
+from typing import List
 
 from ..base import BaseChannel, ChannelMetadata, ChannelResult
 
@@ -20,13 +21,7 @@ class VoiceChannel(BaseChannel):
             capabilities=["voice", "asr", "transcription"],
         )
 
-    async def retrieve(
-        self,
-        query: str,
-        limit: int = 10,
-        weight: float = 1.0,
-        **kwargs
-    ) -> List[ChannelResult]:
+    async def retrieve(self, query: str, limit: int = 10, weight: float = 1.0, **kwargs) -> List[ChannelResult]:
         memory_manager = kwargs.get("memory_manager")
         if not memory_manager:
             return []
@@ -48,22 +43,24 @@ class VoiceChannel(BaseChannel):
 
                         score = (confidence * 0.7 + 0.3) * weight
 
-                        voice_memories.append(ChannelResult(
-                            memory_id=mem.get("id", ""),
-                            content=content,
-                            score=score,
-                            channel="voice",
-                            metadata={
-                                "confidence": confidence,
-                                "engine": record_data.get("engine", "unknown"),
-                                "language": record_data.get("language", "unknown"),
-                                "emotion": record_data.get("emotion_label"),
-                            },
-                        ))
+                        voice_memories.append(
+                            ChannelResult(
+                                memory_id=mem.get("id", ""),
+                                content=content,
+                                score=score,
+                                channel="voice",
+                                metadata={
+                                    "confidence": confidence,
+                                    "engine": record_data.get("engine", "unknown"),
+                                    "language": record_data.get("language", "unknown"),
+                                    "emotion": record_data.get("emotion_label"),
+                                },
+                            )
+                        )
 
             voice_memories.sort(key=lambda m: m.score, reverse=True)
             return voice_memories[:limit]
 
         except Exception as e:
-            self._logger.debug(f"语音通道检索失败: {e}")
+            self._logger.debug("语音通道检索失败: %s", e)
             return []

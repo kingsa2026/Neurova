@@ -78,9 +78,9 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import * as webhookApi from '@/api/modules/webhooks'
 
 const { t } = useI18n()
 
@@ -148,8 +148,18 @@ function openEdit(wh: Webhook) {
 async function fetchWebhooks() {
   loading.value = true
   try {
-    const res = await request.get('/webhooks') as unknown as Webhook[]
-    webhooks.value = res ?? []
+    const res = await webhookApi.getWebhooks()
+    const data = res?.data
+    const items = data?.items ?? (Array.isArray(data) ? data : [])
+    webhooks.value = items.map((w: any) => ({
+      id: w.id,
+      url: w.url || w.name,
+      events: w.events ?? [],
+      enabled: w.enabled,
+      secret: w.secret,
+      description: w.description,
+      lastDelivery: w.last_triggered,
+    }))
   } catch { webhooks.value = [] } finally { loading.value = false }
 }
 
@@ -157,10 +167,11 @@ async function handleSave() {
   if (!form.url) return
   saving.value = true
   try {
+    const payload = { name: form.url, url: form.url, events: form.events, secret: form.secret || undefined }
     if (editingId.value) {
-      await request.put(`/webhooks/${editingId.value}`, { ...form })
+      await webhookApi.updateWebhook(editingId.value, payload)
     } else {
-      await request.post('/webhooks', { ...form })
+      await webhookApi.createWebhook(payload)
     }
     showModal.value = false
     resetForm()
@@ -171,21 +182,29 @@ async function handleSave() {
 async function handleTest(id: string) {
   testingId.value = id
   try {
-    await request.post(`/webhooks/${id}/test`)
+    await webhookApi.testWebhook(id)
   } catch { /* handled */ } finally { testingId.value = null }
 }
 
 async function handleDelete(id: string) {
   try {
-    await request.delete(`/webhooks/${id}`)
+    await webhookApi.deleteWebhook(id)
     await fetchWebhooks()
   } catch { /* handled */ }
 }
 
 async function handleViewLogs(wh: Webhook) {
   try {
-    const res = await request.get(`/webhooks/${wh.id}/deliveries`) as unknown as DeliveryLog[]
-    deliveryLogs.value = res ?? []
+    const res = await webhookApi.getWebhookDeliveries(wh.id)
+    const data = res?.data
+    const items = data?.items ?? (Array.isArray(data) ? data : [])
+    deliveryLogs.value = items.map((d: any) => ({
+      id: d.id,
+      event: d.event,
+      statusCode: d.status_code ?? 0,
+      timestamp: d.created_at,
+      duration: d.duration_ms ? `${d.duration_ms}ms` : undefined,
+    }))
   } catch { deliveryLogs.value = [] }
   showLogs.value = true
 }

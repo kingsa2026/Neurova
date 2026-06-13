@@ -6,13 +6,11 @@ Neurova CogArch 1.0.0 的核心组件之一
 """
 
 import asyncio
-from dataclasses import dataclass, field
 import datetime
-import enum
 import logging
 import typing
 import uuid
-
+from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -20,25 +18,29 @@ logger = logging.getLogger(__name__)
 
 # ────── 数据模型 ──────
 
+
 class TaskComplexity(Enum):
     """任务复杂度"""
-    SIMPLE = "simple"          # 简单任务
-    COMPOUND = "compound"      # 复合任务
-    PARALLEL = "parallel"      # 并行任务
-    DAG = "dag"                # 有向无环图任务
+
+    SIMPLE = "simple"  # 简单任务
+    COMPOUND = "compound"  # 复合任务
+    PARALLEL = "parallel"  # 并行任务
+    DAG = "dag"  # 有向无环图任务
 
 
 class RetryPolicy(Enum):
     """重试策略"""
-    NONE = "none"              # 不重试
-    LINEAR = "linear"          # 线性重试
+
+    NONE = "none"  # 不重试
+    LINEAR = "linear"  # 线性重试
     EXPONENTIAL = "exponential"  # 指数退避
-    FIXED = "fixed"            # 固定间隔
+    FIXED = "fixed"  # 固定间隔
 
 
 @dataclass
 class TaskNode:
     """任务节点"""
+
     task_id: str = ""
     name: str = ""
     description: str = ""
@@ -75,6 +77,7 @@ class TaskNode:
 @dataclass
 class Plan:
     """执行计划"""
+
     plan_id: str = ""
     name: str = ""
     description: str = ""
@@ -103,6 +106,7 @@ class Plan:
 @dataclass
 class PlanResult:
     """计划执行结果"""
+
     plan_id: str = ""
     success: bool = False
     task_results: typing.Dict[str, typing.Any] = field(default_factory=dict)
@@ -125,6 +129,7 @@ class PlanResult:
 @dataclass
 class ExecutionFeedback:
     """执行反馈"""
+
     task_id: str = ""
     success: bool = False
     output: typing.Optional[typing.Dict[str, typing.Any]] = None
@@ -147,6 +152,7 @@ class ExecutionFeedback:
 
 
 # ────── 主类 ──────
+
 
 class PlanOrchestrator:
     """
@@ -199,10 +205,12 @@ class PlanOrchestrator:
         # 存储计划
         self._plans[plan.plan_id] = plan
 
-        logger.info(f"Created plan {plan.plan_id} for intent: {intent[:50]}...")
+        logger.info("Created plan %s for intent: %s...", plan.plan_id, intent[:50])
         return plan
 
-    async def execute_plan(self, plan_id: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> PlanResult:
+    async def execute_plan(
+        self, plan_id: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> PlanResult:
         """
         执行计划
 
@@ -215,11 +223,7 @@ class PlanOrchestrator:
         """
         plan = self._plans.get(plan_id)
         if not plan:
-            return PlanResult(
-                plan_id=plan_id,
-                success=False,
-                error=f"Plan not found: {plan_id}"
-            )
+            return PlanResult(plan_id=plan_id, success=False, error=f"Plan not found: {plan_id}")
 
         start_time = time.time()
 
@@ -240,16 +244,13 @@ class PlanOrchestrator:
                 success=all_success,
                 task_results=results,
                 total_duration_ms=duration_ms,
-                error=None if all_success else "Some tasks failed"
+                error=None if all_success else "Some tasks failed",
             )
 
         except Exception as e:
-            logger.error(f"Plan execution failed: {e}")
+            logger.error("Plan execution failed: %s", e)
             return PlanResult(
-                plan_id=plan_id,
-                success=False,
-                total_duration_ms=(time.time() - start_time) * 1000,
-                error=str(e)
+                plan_id=plan_id, success=False, total_duration_ms=(time.time() - start_time) * 1000, error=str(e)
             )
 
     def adjust_plan(self, plan_id: str, feedback: ExecutionFeedback) -> typing.Optional[Plan]:
@@ -277,12 +278,14 @@ class PlanOrchestrator:
                         task.retry_policy = RetryPolicy.LINEAR
                         task.max_retries = 3
 
-                    logger.info(f"Adjusted task {task.task_id} retry policy")
+                    logger.info("Adjusted task %s retry policy", task.task_id)
                     break
 
         return plan
 
-    def _analyze_complexity(self, intent: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> TaskComplexity:
+    def _analyze_complexity(
+        self, intent: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> TaskComplexity:
         """
         分析复杂度
 
@@ -442,7 +445,9 @@ class PlanOrchestrator:
         task_map = {task.task_id: task for task in tasks}
         return [task_map[task_id] for task_id in result if task_id in task_map]
 
-    async def _execute_sequential(self, plan: Plan, context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.Dict[str, typing.Any]:
+    async def _execute_sequential(
+        self, plan: Plan, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> typing.Dict[str, typing.Any]:
         """
         顺序执行
 
@@ -464,12 +469,14 @@ class PlanOrchestrator:
 
             # 如果任务失败，停止执行
             if not result.get("success", False):
-                logger.warning(f"Task {task.task_id} failed, stopping sequential execution")
+                logger.warning("Task %s failed, stopping sequential execution", task.task_id)
                 break
 
         return results
 
-    async def _execute_parallel(self, plan: Plan, context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.Dict[str, typing.Any]:
+    async def _execute_parallel(
+        self, plan: Plan, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> typing.Dict[str, typing.Any]:
         """
         并行执行
 
@@ -487,19 +494,13 @@ class PlanOrchestrator:
 
         for level_tasks in levels:
             # 并行执行同一层级的任务
-            tasks_coroutines = [
-                self._execute_single_task(task, context)
-                for task in level_tasks
-            ]
+            tasks_coroutines = [self._execute_single_task(task, context) for task in level_tasks]
 
             level_results = await asyncio.gather(*tasks_coroutines, return_exceptions=True)
 
             for task, result in zip(level_tasks, level_results):
                 if isinstance(result, Exception):
-                    results[task.task_id] = {
-                        "success": False,
-                        "error": str(result)
-                    }
+                    results[task.task_id] = {"success": False, "error": str(result)}
                 else:
                     results[task.task_id] = result
 
@@ -543,7 +544,9 @@ class PlanOrchestrator:
 
         return levels
 
-    async def _execute_single_task(self, task: TaskNode, context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.Dict[str, typing.Any]:
+    async def _execute_single_task(
+        self, task: TaskNode, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> typing.Dict[str, typing.Any]:
         """
         执行单个任务
 
@@ -571,7 +574,7 @@ class PlanOrchestrator:
 
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
-            logger.error(f"Task {task.task_id} failed: {e}")
+            logger.error("Task %s failed: %s", task.task_id, e)
 
             return {
                 "success": False,
@@ -580,7 +583,9 @@ class PlanOrchestrator:
                 "duration_ms": duration_ms,
             }
 
-    async def _simulate_task_execution(self, task: TaskNode, context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.Dict[str, typing.Any]:
+    async def _simulate_task_execution(
+        self, task: TaskNode, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> typing.Dict[str, typing.Any]:
         """
         模拟任务执行
 
@@ -626,7 +631,7 @@ class PlanOrchestrator:
 # ────── 单例管理 ──────
 
 _orchestrator_instance: typing.Optional[PlanOrchestrator] = None
-_instance_lock = __import__('threading').Lock()
+_instance_lock = __import__("threading").Lock()
 
 
 def get_plan_orchestrator(**kwargs) -> PlanOrchestrator:

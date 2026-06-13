@@ -11,22 +11,23 @@ MultiAgentManager - 多 Agent 管理器（大脑/办公室 + 共用小脑/脑干
 """
 
 import asyncio
-from dataclasses import dataclass, field
-import json
 import logging
-from pathlib import Path
+import threading
 import time
 import typing
-import threading
+from dataclasses import dataclass, field
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
 # ────── 数据模型 ──────
 
+
 @dataclass
 class NeurovaAgent:
     """Neurova Agent"""
+
     agent_id: str = ""
     name: str = ""
     description: str = ""
@@ -60,6 +61,7 @@ class NeurovaAgent:
 
 # ────── 主类 ──────
 
+
 class MultiAgentManager:
     """
     多 Agent 管理器
@@ -92,9 +94,12 @@ class MultiAgentManager:
 
         logger.info("MultiAgentManager initialized")
 
-    def initialize_shared_components(self, plan_orchestrator: typing.Any = None,
-                                   execution_engine: typing.Any = None,
-                                   infrastructure: typing.Any = None) -> None:
+    def initialize_shared_components(
+        self,
+        plan_orchestrator: typing.Any = None,
+        execution_engine: typing.Any = None,
+        infrastructure: typing.Any = None,
+    ) -> None:
         """
         初始化共享组件
 
@@ -126,11 +131,11 @@ class MultiAgentManager:
                 try:
                     path_obj.mkdir(parents=True, exist_ok=True)
                 except Exception as e:
-                    logger.error(f"Failed to create workspace directory: {e}")
+                    logger.error("Failed to create workspace directory: %s", e)
                     return False
 
             self._base_workspace_dir = path_obj
-            logger.info(f"Base workspace directory set to: {path_obj}")
+            logger.info("Base workspace directory set to: %s", path_obj)
             return True
 
     def get_workspace_dir(self, agent_id: str) -> typing.Optional[Path]:
@@ -186,12 +191,13 @@ class MultiAgentManager:
             )
 
             self._agents[agent_id] = agent
-            logger.info(f"Created agent: {agent_id}")
+            logger.info("Created agent: %s", agent_id)
 
             return agent
 
-    async def execute_with_shared_cerebellum(self, agent_id: str, task: str,
-                                           context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.Dict[str, typing.Any]:
+    async def execute_with_shared_cerebellum(
+        self, agent_id: str, task: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> typing.Dict[str, typing.Any]:
         """
         使用共享小脑执行任务
 
@@ -205,10 +211,7 @@ class MultiAgentManager:
         """
         agent = self.get_agent(agent_id)
         if not agent:
-            return {
-                "success": False,
-                "error": f"Agent not found: {agent_id}"
-            }
+            return {"success": False, "error": f"Agent not found: {agent_id}"}
 
         try:
             # 执行认知处理
@@ -231,14 +234,12 @@ class MultiAgentManager:
             return result
 
         except Exception as e:
-            logger.error(f"Execution failed for agent {agent_id}: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            logger.error("Execution failed for agent %s: %s", agent_id, e)
+            return {"success": False, "error": str(e)}
 
-    async def _cognitive_processing(self, agent: NeurovaAgent, task: str,
-                                  context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> typing.Dict[str, typing.Any]:
+    async def _cognitive_processing(
+        self, agent: NeurovaAgent, task: str, context: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> typing.Dict[str, typing.Any]:
         """
         认知处理
 
@@ -257,9 +258,13 @@ class MultiAgentManager:
             "processing_time": time.time(),
         }
 
-    async def _consolidate_memory(self, agent: NeurovaAgent, task: str,
-                                result: typing.Dict[str, typing.Any],
-                                context: typing.Optional[typing.Dict[str, typing.Any]] = None) -> None:
+    async def _consolidate_memory(
+        self,
+        agent: NeurovaAgent,
+        task: str,
+        result: typing.Dict[str, typing.Any],
+        context: typing.Optional[typing.Dict[str, typing.Any]] = None,
+    ) -> None:
         """
         巩固记忆
 
@@ -272,7 +277,7 @@ class MultiAgentManager:
         # 更新 Agent 活跃时间
         agent.last_active = time.time()
 
-        logger.debug(f"Memory consolidated for agent {agent.agent_id}")
+        logger.debug("Memory consolidated for agent %s", agent.agent_id)
 
     async def start_agent(self, agent_id: str, config: typing.Optional[typing.Dict[str, typing.Any]] = None) -> bool:
         """
@@ -291,7 +296,7 @@ class MultiAgentManager:
                 return False
 
             if agent.is_running:
-                logger.warning(f"Agent {agent_id} is already running")
+                logger.warning("Agent %s is already running", agent_id)
                 return True
 
             try:
@@ -304,11 +309,11 @@ class MultiAgentManager:
                 agent.is_running = True
                 agent.last_active = time.time()
 
-                logger.info(f"Agent {agent_id} started")
+                logger.info("Agent %s started", agent_id)
                 return True
 
             except Exception as e:
-                logger.error(f"Failed to start agent {agent_id}: {e}")
+                logger.error("Failed to start agent %s: %s", agent_id, e)
                 return False
 
     async def reload_agent(self, agent_id: str, config: typing.Optional[typing.Dict[str, typing.Any]] = None) -> bool:
@@ -348,11 +353,11 @@ class MultiAgentManager:
 
             try:
                 agent.is_running = False
-                logger.info(f"Agent {agent_id} stopped")
+                logger.info("Agent %s stopped", agent_id)
                 return True
 
             except Exception as e:
-                logger.error(f"Failed to stop agent {agent_id}: {e}")
+                logger.error("Failed to stop agent %s: %s", agent_id, e)
                 return False
 
     async def stop_all(self) -> typing.Dict[str, bool]:

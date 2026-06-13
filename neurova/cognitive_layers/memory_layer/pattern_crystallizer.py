@@ -7,11 +7,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from typing import Any, Dict, List
 
-from .cognitive_storage_engine import CognitiveStorageEngine, UnifiedMemoryNode, MemoryType
+from .cognitive_storage_engine import CognitiveStorageEngine, MemoryType, UnifiedMemoryNode
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +41,7 @@ class PatternCrystallizer:
         self.engine = engine
         self.evolution = evolution_orchestrator
         self._buffer: Dict[str, List[Dict[str, Any]]] = {}
-        
+
         logger.info("PatternCrystallizer 初始化完成")
 
     def observe(
@@ -62,19 +61,21 @@ class PatternCrystallizer:
             result: 工具结果（可选）
         """
         key = self._extract_pattern_key(context)
-        
+
         if key not in self._buffer:
             self._buffer[key] = []
-        
-        self._buffer[key].append({
-            'tool': tool_name,
-            'success': success,
-            'context': context[:200],
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-        })
-        
-        logger.debug(f"观察到工具使用: {tool_name}, 模式键: {key}")
-        
+
+        self._buffer[key].append(
+            {
+                "tool": tool_name,
+                "success": success,
+                "context": context[:200],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        logger.debug("观察到工具使用: %s, 模式键: %s", tool_name, key)
+
         # 当同一模式观察3次时尝试结晶
         if len(self._buffer[key]) >= 3:
             self._try_crystallize(key)
@@ -89,53 +90,55 @@ class PatternCrystallizer:
         entries = self._buffer.get(key, [])
         if not entries:
             return
-        
+
         # 计算成功率
-        success_count = sum(1 for e in entries if e['success'])
+        success_count = sum(1 for e in entries if e["success"])
         rate = success_count / len(entries)
-        
+
         # 成功率低于60%不结晶
         if rate < 0.6:
-            logger.debug(f"模式 '{key}' 成功率 {rate:.0%} < 60%，不结晶")
+            logger.debug("模式 '%s' 成功率 %.0f%% < 60%%，不结晶", key, rate * 100)
             del self._buffer[key]
             return
-        
+
         # 找出最常用的工具
         tool_counts: Dict[str, int] = {}
         for e in entries:
-            tool_counts[e['tool']] = tool_counts.get(e['tool'], 0) + 1
+            tool_counts[e["tool"]] = tool_counts.get(e["tool"], 0) + 1
         primary_tool = max(tool_counts.items(), key=lambda x: x[1])[0]
-        
+
         # 创建结晶记忆节点
         node = UnifiedMemoryNode(
-            content=f"模式: '{key}' 类任务用 {primary_tool} 成功率 {rate:.0%}",
+            content=f"模式: '{key}' 类任务用 {primary_tool} 成功率 {rate * 100:.0f}%%",
             memory_type=MemoryType.PATTERN,
             category="crystallized",
             temperature=rate * 100.0,  # 成功率即温度（0-100）
             metadata={
-                'pattern_key': key,
-                'primary_tool': primary_tool,
-                'success_rate': rate,
-                'sample_count': len(entries),
+                "pattern_key": key,
+                "primary_tool": primary_tool,
+                "success_rate": rate,
+                "sample_count": len(entries),
             },
         )
-        
+
         # 存储
         self.engine.store(node)
-        logger.info(f"结晶成功: '{key}' → {primary_tool} (成功率 {rate:.0%})")
-        
+        logger.info("结晶成功: '%s' → %s (成功率 %.0f%%)", key, primary_tool, rate * 100)
+
         # 通知 EvolutionOrchestrator
         if self.evolution:
             try:
-                self.evolution.on_experience_recorded(
+                from neurova.evolution.evolution_facade import EvolutionFacade
+                facade = EvolutionFacade(self.evolution)
+                facade.record_experience(
                     node.content,
                     key,
                     [primary_tool],
                     True,
                 )
             except Exception as e:
-                logger.warning(f"通知 EvolutionOrchestrator 失败: {e}")
-        
+                logger.warning("通知 EvolutionOrchestrator 失败: %s", e)
+
         # 清空缓冲区
         del self._buffer[key]
 
@@ -153,17 +156,20 @@ class PatternCrystallizer:
         nodes = self.engine.retrieve(
             query,
             limit=limit,
-            filters={'memory_type': 'pattern'},
+            filters={"memory_type": "pattern"},
         )
-        
-        return [{
-            'id': n.id,
-            'content': n.content,
-            'method': n.metadata.get('primary_tool', ''),
-            'confidence': n.metadata.get('success_rate', 0),
-            'score': n.temperature,
-            'source': 'crystallized',
-        } for n in nodes]
+
+        return [
+            {
+                "id": n.id,
+                "content": n.content,
+                "method": n.metadata.get("primary_tool", ""),
+                "confidence": n.metadata.get("success_rate", 0),
+                "score": n.temperature,
+                "source": "crystallized",
+            }
+            for n in nodes
+        ]
 
     def _extract_pattern_key(self, context: str) -> str:
         """

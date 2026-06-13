@@ -10,10 +10,10 @@
     # 创建共享组
     manager = ShareGroupManager(storage_path="share_groups.json")
     group = manager.create_group(name="项目组A", agent_ids=["agent_1", "agent_2"])
-    
+
     # 查询 Agent 所属的共享组
     groups = manager.get_groups_for_agent("agent_1")
-    
+
     # 查询共享组中的所有 Agent
     agents = manager.get_agents_in_group(group.group_id)
 """
@@ -24,7 +24,7 @@ import json
 import logging
 import threading
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ShareGroup:
     """共享组数据模型"""
+
     group_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     name: str = ""
     description: str = ""
@@ -73,7 +74,7 @@ class ShareGroupManager:
         if self._storage_path:
             self._load_from_file()
 
-        logger.info(f"ShareGroupManager 初始化: {len(self._groups)} 个共享组")
+        logger.info("ShareGroupManager 初始化: %s 个共享组", len(self._groups))
 
     def _load_from_file(self) -> None:
         """从文件加载共享组"""
@@ -81,7 +82,7 @@ class ShareGroupManager:
             return
 
         try:
-            with open(self._storage_path, 'r', encoding='utf-8') as f:
+            with open(self._storage_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             for group_data in data.get("groups", []):
@@ -93,9 +94,9 @@ class ShareGroupManager:
                         self._agent_index[agent_id] = set()
                     self._agent_index[agent_id].add(group.group_id)
 
-            logger.info(f"从文件加载 {len(self._groups)} 个共享组")
+            logger.info("从文件加载 %s 个共享组", len(self._groups))
         except Exception as e:
-            logger.error(f"加载共享组文件失败: {e}")
+            logger.error("加载共享组文件失败: %s", e)
 
     def _save_to_file(self) -> None:
         """保存共享组到文件"""
@@ -108,10 +109,10 @@ class ShareGroupManager:
                 "groups": [g.to_dict() for g in self._groups.values()],
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            with open(self._storage_path, 'w', encoding='utf-8') as f:
+            with open(self._storage_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.error(f"保存共享组文件失败: {e}")
+            logger.error("保存共享组文件失败: %s", e)
 
     def create_group(
         self,
@@ -147,7 +148,7 @@ class ShareGroupManager:
                 self._agent_index[agent_id].add(group.group_id)
 
             self._save_to_file()
-            logger.info(f"创建共享组: {group.group_id} ({name}), agents={group.agent_ids}")
+            logger.info("创建共享组: %s (%s), agents=%s", group.group_id, name, group.agent_ids)
             return group
 
     def get_group(self, group_id: str) -> Optional[ShareGroup]:
@@ -199,7 +200,7 @@ class ShareGroupManager:
                         del self._agent_index[agent_id]
 
             self._save_to_file()
-            logger.info(f"删除共享组: {group_id}")
+            logger.info("删除共享组: %s", group_id)
             return True
 
     def add_agent_to_group(self, group_id: str, agent_id: str) -> bool:
@@ -219,7 +220,7 @@ class ShareGroupManager:
                 self._agent_index[agent_id].add(group_id)
 
                 self._save_to_file()
-                logger.info(f"Agent {agent_id} 加入共享组 {group_id}")
+                logger.info("Agent %s 加入共享组 %s", agent_id, group_id)
 
             return True
 
@@ -241,7 +242,7 @@ class ShareGroupManager:
                         del self._agent_index[agent_id]
 
                 self._save_to_file()
-                logger.info(f"Agent {agent_id} 退出共享组 {group_id}")
+                logger.info("Agent %s 退出共享组 %s", agent_id, group_id)
 
             return True
 

@@ -16,8 +16,6 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 from neurova.channels.base import (
     ChannelAdapter,
-    ChannelConfig,
-    ChannelEventCallback,
     ChannelEventType,
     ChannelMessage,
 )
@@ -34,16 +32,19 @@ def _get_session_sync_manager():
     if _session_sync_manager is None:
         try:
             from neurova.sync.session_sync_manager import get_session_sync_manager
+
             _session_sync_manager = get_session_sync_manager()
         except Exception as e:
-            logger.debug(f"SessionSyncManager not available: {e}")
+            logger.debug("SessionSyncManager not available: %s", e)
     return _session_sync_manager
+
 
 # ============================================================
 # 消息处理器类型
 # ============================================================
 
 MessageHandler = Callable[[ChannelMessage], Coroutine[Any, Any, str]]
+
 
 class ChannelManager:
     """
@@ -85,16 +86,16 @@ class ChannelManager:
         """注册渠道适配器"""
         channel_type = adapter.channel_type
         if channel_type in self._adapters:
-            logger.warning(f"Replacing existing adapter for {channel_type}")
+            logger.warning("Replacing existing adapter for %s", channel_type)
         adapter.set_event_callback(self._on_channel_event)
         self._adapters[channel_type] = adapter
-        logger.info(f"Registered adapter: {channel_type}")
+        logger.info("Registered adapter: %s", channel_type)
 
     def unregister_adapter(self, channel_type: str) -> bool:
         """注销渠道适配器"""
         if channel_type in self._adapters:
             del self._adapters[channel_type]
-            logger.info(f"Unregistered adapter: {channel_type}")
+            logger.info("Unregistered adapter: %s", channel_type)
             return True
         return False
 
@@ -119,40 +120,40 @@ class ChannelManager:
 
     def set_message_handler(self, handler: MessageHandler):
         """设置消息处理函数 - 收到消息后调用此函数
-        
+
         注意: 此方法会覆盖之前的处理器。如果需要多个处理器，请使用 add_message_handler。
         """
         self._message_handler = handler
-        
+
     def add_message_handler(self, handler: MessageHandler, priority: int = 0) -> int:
         """添加消息处理函数（支持多个处理器）
-        
+
         Args:
             handler: 消息处理函数
             priority: 优先级（数字越小优先级越高）
-            
+
         Returns:
             处理器ID（用于后续移除）
         """
-        if not hasattr(self, '_message_handlers'):
+        if not hasattr(self, "_message_handlers"):
             self._message_handlers: List[tuple] = []
-            
+
         handler_id = len(self._message_handlers)
         self._message_handlers.append((priority, handler_id, handler))
         # 按优先级排序
         self._message_handlers.sort(key=lambda x: x[0])
-        logger.info(f"Added message handler with priority {priority}, id={handler_id}")
+        logger.info("Added message handler with priority %s, id=%s", priority, handler_id)
         return handler_id
-        
+
     def remove_message_handler(self, handler_id: int) -> bool:
         """移除消息处理函数"""
-        if not hasattr(self, '_message_handlers'):
+        if not hasattr(self, "_message_handlers"):
             return False
-            
+
         for i, (priority, hid, handler) in enumerate(self._message_handlers):
             if hid == handler_id:
                 del self._message_handlers[i]
-                logger.info(f"Removed message handler id={handler_id}")
+                logger.info("Removed message handler id=%s", handler_id)
                 return True
         return False
 
@@ -167,24 +168,22 @@ class ChannelManager:
         """通过指定渠道发送消息"""
         adapter = self._adapters.get(channel_type)
         if not adapter:
-            logger.error(f"No adapter for channel: {channel_type}")
+            logger.error("No adapter for channel: %s", channel_type)
             return None
         if not adapter.is_connected:
-            logger.warning(f"Adapter {channel_type} not connected, attempting connect")
+            logger.warning("Adapter %s not connected, attempting connect", channel_type)
             if not await adapter.connect():
-                logger.error(f"Failed to connect adapter: {channel_type}")
+                logger.error("Failed to connect adapter: %s", channel_type)
                 return None
-        
+
         result = await adapter.send_message(chat_id, content, message_type, **kwargs)
-        
+
         # 广播回复到 SessionSyncManager
         await self._sync_reply_to_session(chat_id, content, channel_type)
-        
+
         return result
 
-    async def _sync_reply_to_session(
-        self, chat_id: str, content: str, channel_type: str
-    ):
+    async def _sync_reply_to_session(self, chat_id: str, content: str, channel_type: str):
         """同步回复消息到 SessionSyncManager"""
         sync_manager = _get_session_sync_manager()
         if not sync_manager:
@@ -206,18 +205,14 @@ class ChannelManager:
                 payload={
                     "content": content,
                     "reply_to": chat_id,
-                }
+                },
             )
 
             # 广播到其他渠道
-            await sync_manager.broadcast_event(
-                session.session_id,
-                event,
-                exclude_channel=channel_type
-            )
+            await sync_manager.broadcast_event(session.session_id, event, exclude_channel=channel_type)
 
         except Exception as e:
-            logger.debug(f"SessionSyncManager reply sync failed: {e}")
+            logger.debug("SessionSyncManager reply sync failed: %s", e)
 
     async def broadcast_message(
         self,
@@ -233,25 +228,20 @@ class ChannelManager:
                     msg_id = await adapter.send_message("", content, message_type, **kwargs)
                     results[channel_type] = msg_id
                 except Exception as e:
-                    logger.exception(f"Broadcast to {channel_type} failed: {e}")
+                    logger.exception("Broadcast to %s failed: %s", channel_type, e)
                     results[channel_type] = None
         return results
 
-    async def _on_channel_event(
-        self, event_type: ChannelEventType, message: ChannelMessage
-    ):
+    async def _on_channel_event(self, event_type: ChannelEventType, message: ChannelMessage):
         """处理渠道事件"""
-        logger.info(
-            f"Channel event: {event_type.value} from {message.channel_type} "
-            f"sender={message.sender_name}"
-        )
+        logger.info("Channel event: %s from %s " f"sender=%s", event_type.value, message.channel_type, message.sender_name)
 
         # 广播到 SessionSyncManager
         await self._sync_to_session_sync(event_type, message)
 
         if event_type == ChannelEventType.MESSAGE_RECEIVED:
             # 优先使用多处理器链
-            if hasattr(self, '_message_handlers') and self._message_handlers:
+            if hasattr(self, "_message_handlers") and self._message_handlers:
                 for priority, handler_id, handler in self._message_handlers:
                     try:
                         reply = await handler(message)
@@ -263,7 +253,7 @@ class ChannelManager:
                             )
                             break  # 第一个返回回复的处理器获胜
                     except Exception as e:
-                        logger.exception(f"Message handler {handler_id} error: {e}")
+                        logger.exception("Message handler %s error: %s", handler_id, e)
             # 回退到单处理器模式
             elif self._message_handler:
                 try:
@@ -275,7 +265,7 @@ class ChannelManager:
                             reply,
                         )
                 except Exception as e:
-                    logger.exception(f"Message handler error: {e}")
+                    logger.exception("Message handler error: %s", e)
                     # 尝试发送错误提示
                     try:
                         await self.send_message(
@@ -286,9 +276,7 @@ class ChannelManager:
                     except Exception:
                         pass
 
-    async def _sync_to_session_sync(
-        self, event_type: ChannelEventType, message: ChannelMessage
-    ):
+    async def _sync_to_session_sync(self, event_type: ChannelEventType, message: ChannelMessage):
         """同步事件到 SessionSyncManager"""
         sync_manager = _get_session_sync_manager()
         if not sync_manager:
@@ -312,13 +300,13 @@ class ChannelManager:
             session = sync_manager.get_session_by_external_id(message.chat_id)
             if not session:
                 # 尝试从元数据获取 user_id
-                user_id = getattr(message, 'sender_id', None) or "anonymous"
+                user_id = getattr(message, "sender_id", None) or "anonymous"
                 agent_id = "default"
                 session = sync_manager.create_session(
                     user_id=user_id,
                     agent_id=agent_id,
                     external_id=message.chat_id,
-                    metadata={"channel_type": message.channel_type}
+                    metadata={"channel_type": message.channel_type},
                 )
 
             # 创建事件
@@ -329,20 +317,16 @@ class ChannelManager:
                 payload={
                     "content": message.content,
                     "sender_name": message.sender_name,
-                    "sender_id": getattr(message, 'sender_id', None),
+                    "sender_id": getattr(message, "sender_id", None),
                     "metadata": message.metadata,
-                }
+                },
             )
 
             # 广播到其他渠道
-            await sync_manager.broadcast_event(
-                session.session_id,
-                event,
-                exclude_channel=message.channel_type
-            )
+            await sync_manager.broadcast_event(session.session_id, event, exclude_channel=message.channel_type)
 
         except Exception as e:
-            logger.debug(f"SessionSyncManager sync failed: {e}")
+            logger.debug("SessionSyncManager sync failed: %s", e)
 
     # ============================================================
     # 生命周期
@@ -364,9 +348,9 @@ class ChannelManager:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
-                    logger.error(f"Connect error: {result}")
+                    logger.error("Connect error: %s", result)
 
-        logger.info(f"ChannelManager started with {len(self._adapters)} adapters")
+        logger.info("ChannelManager started with %s adapters", len(self._adapters))
 
     async def stop(self):
         """停止所有适配器"""
@@ -383,11 +367,11 @@ class ChannelManager:
         try:
             success = await adapter.connect()
             if success:
-                logger.info(f"Adapter {adapter.channel_type} connected")
+                logger.info("Adapter %s connected", adapter.channel_type)
             else:
-                logger.warning(f"Adapter {adapter.channel_type} failed to connect")
+                logger.warning("Adapter %s failed to connect", adapter.channel_type)
         except Exception as e:
-            logger.exception(f"Adapter {adapter.channel_type} connect error: {e}")
+            logger.exception("Adapter %s connect error: %s", adapter.channel_type, e)
 
     # ============================================================
     # 健康检查
@@ -411,9 +395,11 @@ class ChannelManager:
             "adapters": statuses,
         }
 
+
 # ============================================================
 # 全局单例
 # ============================================================
+
 
 def get_channel_manager() -> ChannelManager:
     """获取渠道管理器单例"""

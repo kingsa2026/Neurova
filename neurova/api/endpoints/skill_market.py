@@ -15,7 +15,7 @@ import tempfile
 import zipfile
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, UploadFile
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -69,23 +69,39 @@ async def search_skills(body: SearchSkillRequest):
     # 模拟搜索结果
     results = [
         MarketplaceSkill(
-            skill_id="skill_weather", name="Weather Skill", description="Get weather information",
-            author="neurova", version="1.0.0", downloads=1500, rating=4.5, market="neurova-hub",
+            skill_id="skill_weather",
+            name="Weather Skill",
+            description="Get weather information",
+            author="neurova",
+            version="1.0.0",
+            downloads=1500,
+            rating=4.5,
+            market="neurova-hub",
         ),
         MarketplaceSkill(
-            skill_id="skill_translate", name="Translation Skill", description="Translate text",
-            author="community", version="2.1.0", downloads=3200, rating=4.8, market="neurova-hub",
+            skill_id="skill_translate",
+            name="Translation Skill",
+            description="Translate text",
+            author="community",
+            version="2.1.0",
+            downloads=3200,
+            rating=4.8,
+            market="neurova-hub",
         ),
     ]
     if body.query:
-        results = [r for r in results if body.query.lower() in r.name.lower() or body.query.lower() in r.description.lower()]
-    return {"code": 0, "data": {"skills": [r.model_dump() for r in results[:body.limit]]}}
+        results = [
+            r for r in results if body.query.lower() in r.name.lower() or body.query.lower() in r.description.lower()
+        ]
+    return {"code": 0, "data": {"skills": [r.model_dump() for r in results[: body.limit]]}}
 
 
 @router.post("/install")
 async def install_skill_from_market(body: InstallSkillRequest):
     """从市场安装技能"""
-    _installed_skills.append({"skill_id": body.url.split("/")[-1], "source_url": body.url, "version": body.version or "latest"})
+    _installed_skills.append(
+        {"skill_id": body.url.split("/")[-1], "source_url": body.url, "version": body.version or "latest"}
+    )
     return {"code": 0, "message": "Skill installed", "data": {"url": body.url}}
 
 

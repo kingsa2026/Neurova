@@ -1,0 +1,6 @@
+
+> neurui@2.0.0 lint
+> eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix
+
+'eslint' 不是内部或外部命令，也不是可运行的程序
+或批处理文件。

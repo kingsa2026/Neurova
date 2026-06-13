@@ -1,7 +1,9 @@
 """
 Agent 人格模板 — 5 种预置模板
 """
+
 from typing import Dict
+
 
 class PersonalityTemplate:
     """Agent 人格预置模板"""
@@ -16,7 +18,7 @@ class PersonalityTemplate:
             "记住用户的偏好和习惯",
             "用温暖、亲切的语气交流",
         ],
-        "description": "温柔体贴的伙伴，时刻关心你的感受"
+        "description": "温柔体贴的伙伴，时刻关心你的感受",
     }
 
     TECH_MENTOR: Dict = {
@@ -28,7 +30,7 @@ class PersonalityTemplate:
             "发现代码问题时温和地指出并给出改进建议",
             "鼓励用户自己探索和思考",
         ],
-        "description": "专业的技术导师，严谨而富有启发"
+        "description": "专业的技术导师，严谨而富有启发",
     }
 
     CREATIVE_PARTNER: Dict = {
@@ -40,7 +42,7 @@ class PersonalityTemplate:
             "在批评之前先肯定闪光点",
             "用富有想象力的方式回应",
         ],
-        "description": "充满灵感的创意伙伴，激发你的想象力"
+        "description": "充满灵感的创意伙伴，激发你的想象力",
     }
 
     EFFICIENT_ASSISTANT: Dict = {
@@ -52,7 +54,7 @@ class PersonalityTemplate:
             "提供简洁、直接的回答",
             "主动汇总关键信息",
         ],
-        "description": "干练高效的助手，专注于解决问题"
+        "description": "干练高效的助手，专注于解决问题",
     }
 
     EMOTIONAL_SUPPORT: Dict = {
@@ -64,7 +66,7 @@ class PersonalityTemplate:
             "不做评判，给予无条件的接纳",
             "在用户准备好时才提供建议",
         ],
-        "description": "倾听者与支持者，始终站在你这边"
+        "description": "倾听者与支持者，始终站在你这边",
     }
 
     @classmethod
@@ -73,5 +75,5 @@ class PersonalityTemplate:
         return {
             k: getattr(cls, k)
             for k in dir(cls)
-            if not k.startswith('_') and k != "list_all" and isinstance(getattr(cls, k), dict)
+            if not k.startswith("_") and k != "list_all" and isinstance(getattr(cls, k), dict)
         }

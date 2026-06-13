@@ -10,18 +10,14 @@ from __future__ import annotations
 4. 获取对话历史 (GET /api/v1/chat/history)
 """
 
-import asyncio
 import datetime
 import json
 import logging
-from pathlib import Path
-import re
-import time
-import typing
 import uuid
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -34,6 +30,7 @@ router = APIRouter()
 
 class ChatRequest(BaseModel):
     """对话请求"""
+
     message: str = Field(..., description="用户消息")
     agent_id: str = Field(default="default", description="Agent ID")
     session_id: Optional[str] = Field(default=None, description="会话 ID")
@@ -45,6 +42,7 @@ class ChatRequest(BaseModel):
 
 class ChatStreamRequest(BaseModel):
     """流式对话请求"""
+
     message: str = Field(..., description="用户消息")
     agent_id: str = Field(default="default", description="Agent ID")
     session_id: Optional[str] = Field(default=None, description="会话 ID")
@@ -56,6 +54,7 @@ class ChatStreamRequest(BaseModel):
 
 class AttachmentRequest(BaseModel):
     """附件请求"""
+
     file_path: str
     file_type: str = "file"
     description: str = ""
@@ -69,6 +68,7 @@ def _get_request_id(request: Request) -> str:
 def _get_agent(agent_id: str = "default"):
     """获取 Agent 实例"""
     from neurova.api.endpoints import get_agent_instance
+
     return get_agent_instance(agent_id)
 
 
@@ -135,17 +135,17 @@ async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any]
             session_id=body.session_id,
             metadata=body.metadata,
         )
-        
+
         # 提取响应数据，适配前端期望格式
         reply_text = ""
         audio_info = None
-        
+
         if isinstance(response, dict):
             # Agent.chat() 返回字典格式：{"text": "...", "audio_path": "...", "audio_data": "..."}
             reply_text = response.get("text", "")
             audio_path = response.get("audio_path")
             audio_data = response.get("audio_data")
-            
+
             if audio_path or audio_data:
                 audio_info = {
                     "url": audio_path,
@@ -182,7 +182,9 @@ async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any]
 
 
 @router.post("/stream")
-async def chat_stream(request: Request, body: ChatStreamRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
+async def chat_stream(
+    request: Request, body: ChatStreamRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """流式对话 SSE"""
     request_id = _get_request_id(request)
 
@@ -260,7 +262,7 @@ async def get_chat_sessions(
 ):
     """获取聊天会话列表"""
     request_id = _get_request_id(request)
-    
+
     # 权限检查
     user_id = current_user.get("user_id", "")
     role = current_user.get("role", "user")
@@ -273,7 +275,7 @@ async def get_chat_sessions(
                 "request_id": request_id,
             },
         )
-    
+
     try:
         # 从Agent获取会话列表
         agent = _get_agent(agent_id)
@@ -286,7 +288,7 @@ async def get_chat_sessions(
                     "request_id": request_id,
                 },
             )
-        
+
         # 尝试从Agent获取会话列表
         sessions = []
         if hasattr(agent, "get_sessions"):
@@ -296,7 +298,7 @@ async def get_chat_sessions(
             session_manager = agent.session_manager
             if hasattr(session_manager, "list_sessions"):
                 sessions = session_manager.list_sessions(user_id=user_id, limit=limit)
-        
+
         # 如果没有会话管理器，返回空列表
         return {
             "code": 0,
@@ -327,10 +329,10 @@ async def create_chat_session(
 ):
     """创建聊天会话"""
     request_id = _get_request_id(request)
-    
+
     agent_id = body.get("agent_id", "default")
     title = body.get("title", "New Chat")
-    
+
     # 权限检查
     user_id = current_user.get("user_id", "")
     role = current_user.get("role", "user")
@@ -343,7 +345,7 @@ async def create_chat_session(
                 "request_id": request_id,
             },
         )
-    
+
     try:
         agent = _get_agent(agent_id)
         if not agent:
@@ -355,7 +357,7 @@ async def create_chat_session(
                     "request_id": request_id,
                 },
             )
-        
+
         # 创建会话
         session_id = str(uuid.uuid4())
         session_data = {
@@ -366,7 +368,7 @@ async def create_chat_session(
             "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
-        
+
         # 尝试保存到Agent的会话管理器
         if hasattr(agent, "create_session"):
             session_data = agent.create_session(title=title, user_id=user_id)
@@ -374,7 +376,7 @@ async def create_chat_session(
             session_manager = agent.session_manager
             if hasattr(session_manager, "create_session"):
                 session_data = session_manager.create_session(title=title, user_id=user_id)
-        
+
         return {
             "code": 0,
             "message": "Session created",
@@ -402,9 +404,9 @@ async def rename_chat_session(
 ):
     """重命名聊天会话"""
     request_id = _get_request_id(request)
-    
+
     title = body.get("title", "")
-    
+
     try:
         # 这里简化实现，实际应该从存储中更新会话标题
         # 由于我们没有实际的会话存储，返回成功响应
@@ -437,7 +439,7 @@ async def delete_chat_session(
 ):
     """删除聊天会话"""
     request_id = _get_request_id(request)
-    
+
     try:
         # 这里简化实现，实际应该从存储中删除会话
         # 由于我们没有实际的会话存储，返回成功响应

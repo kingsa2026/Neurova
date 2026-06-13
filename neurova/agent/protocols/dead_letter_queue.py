@@ -12,29 +12,30 @@ Agent 死信队列模块
 import json
 import logging
 import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, field, asdict
-from enum import Enum
-from pathlib import Path
 from collections import defaultdict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
-from .message_protocol import AgentMessage, DeadLetterReason, DeadLetterMessage
+from .message_protocol import AgentMessage, DeadLetterMessage, DeadLetterReason
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class DLQConfig:
     """死信队列配置"""
-    max_retries: int = 3                 # 最大重试次数
-    retry_delay_base: float = 1.0        # 基础重试延迟（秒）
-    retry_delay_max: float = 60.0       # 最大重试延迟（秒）
-    retry_backoff: float = 2.0          # 退避指数
-    cleanup_interval: int = 3600         # 清理间隔（秒）
-    max_age_hours: int = 24              # 最大保留时间（小时）
-    storage_path: str = "data/dlq"       # 存储路径
-    enable_auto_retry: bool = True       # 是否自动重试
-    enable_alert: bool = True            # 是否启用告警
+
+    max_retries: int = 3  # 最大重试次数
+    retry_delay_base: float = 1.0  # 基础重试延迟（秒）
+    retry_delay_max: float = 60.0  # 最大重试延迟（秒）
+    retry_backoff: float = 2.0  # 退避指数
+    cleanup_interval: int = 3600  # 清理间隔（秒）
+    max_age_hours: int = 24  # 最大保留时间（小时）
+    storage_path: str = "data/dlq"  # 存储路径
+    enable_auto_retry: bool = True  # 是否自动重试
+    enable_alert: bool = True  # 是否启用告警
+
 
 class DeadLetterQueue:
     """死信队列处理器"""
@@ -66,11 +67,11 @@ class DeadLetterQueue:
         # 加载已有的死信
         self._load_from_disk()
 
-        logger.info(f"死信队列初始化完成: max_retries={self.config.max_retries}, "
-                   f"storage={self._storage_path}")
+        logger.info("死信队列初始化完成: max_retries=%s, " f"storage=%s", self.config.max_retries, self._storage_path)
 
-    def add(self, message: AgentMessage, reason: DeadLetterReason,
-            error_details: str, handler_id: str = None) -> DeadLetterMessage:
+    def add(
+        self, message: AgentMessage, reason: DeadLetterReason, error_details: str, handler_id: str = None
+    ) -> DeadLetterMessage:
         """
         添加死信到队列
 
@@ -99,8 +100,7 @@ class DeadLetterQueue:
         # 计算下次重试时间
         retry_count = self._retry_count.get(message.message_id, 0)
         delay = min(
-            self.config.retry_delay_base * (self.config.retry_backoff ** retry_count),
-            self.config.retry_delay_max
+            self.config.retry_delay_base * (self.config.retry_backoff**retry_count), self.config.retry_delay_max
         )
         self._retry_schedule[message.message_id] = time.time() + delay
 
@@ -108,8 +108,7 @@ class DeadLetterQueue:
         self._save_to_disk(dlq_msg)
 
         logger.warning(
-            f"死信已添加: message_id={message.message_id}, "
-            f"reason={reason.value}, retry_count={retry_count}"
+            f"死信已添加: message_id={message.message_id}, " f"reason={reason.value}, retry_count={retry_count}"
         )
 
         # 调用死信处理器
@@ -141,7 +140,7 @@ class DeadLetterQueue:
         """标记死信已处理"""
         self._stats["total_processed"] += 1
         self._remove_from_queue(message_id)
-        logger.info(f"死信已处理: message_id={message_id}")
+        logger.info("死信已处理: message_id=%s", message_id)
 
     def discard(self, message_id: str, reason: str = None) -> bool:
         """
@@ -162,7 +161,7 @@ class DeadLetterQueue:
                 # 删除磁盘文件
                 self._delete_from_disk(message_id)
 
-                logger.info(f"死信已丢弃: message_id={message_id}, reason={reason}")
+                logger.info("死信已丢弃: message_id=%s, reason=%s", message_id, reason)
                 return True
         return False
 
@@ -184,7 +183,7 @@ class DeadLetterQueue:
         current_retry = self._retry_count.get(msg_id, 0)
 
         if current_retry >= self.config.max_retries:
-            logger.warning(f"超过最大重试次数: message_id={msg_id}")
+            logger.warning("超过最大重试次数: message_id=%s", msg_id)
             return None
 
         # 创建重试消息
@@ -198,12 +197,11 @@ class DeadLetterQueue:
 
         # 计算下次重试时间
         delay = min(
-            self.config.retry_delay_base * (self.config.retry_backoff ** current_retry),
-            self.config.retry_delay_max
+            self.config.retry_delay_base * (self.config.retry_backoff**current_retry), self.config.retry_delay_max
         )
         self._retry_schedule[msg_id] = time.time() + delay
 
-        logger.info(f"准备重试死信: message_id={msg_id}, retry_count={current_retry + 1}")
+        logger.info("准备重试死信: message_id=%s, retry_count=%s", msg_id, current_retry + 1)
         return retry_msg
 
     def get_by_reason(self, reason: DeadLetterReason) -> List[DeadLetterMessage]:
@@ -248,14 +246,14 @@ class DeadLetterQueue:
                 cleaned += 1
 
         if cleaned > 0:
-            logger.info(f"已清理 {cleaned} 条过期死信")
+            logger.info("已清理 %s 条过期死信", cleaned)
 
         return cleaned
 
     def register_handler(self, handler: Callable[[DeadLetterMessage], None]) -> None:
         """注册死信处理器"""
         self._handlers.append(handler)
-        logger.info(f"已注册死信处理器: {handler.__name__}")
+        logger.info("已注册死信处理器: %s", handler.__name__)
 
     def _notify_handlers(self, dlq_msg: DeadLetterMessage) -> None:
         """通知死信处理器"""
@@ -263,7 +261,7 @@ class DeadLetterQueue:
             try:
                 handler(dlq_msg)
             except Exception as e:
-                logger.error(f"死信处理器执行失败: {handler.__name__}, error={e}")
+                logger.error("死信处理器执行失败: %s, error=%s", handler.__name__, e)
 
     def _is_processed(self, dlq: DeadLetterMessage) -> bool:
         """检查死信是否已处理"""
@@ -298,7 +296,7 @@ class DeadLetterQueue:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(dlq_msg.to_dict(), f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.error(f"保存死信到磁盘失败: {e}")
+            logger.error("保存死信到磁盘失败: %s", e)
 
     def _delete_from_disk(self, message_id: str) -> None:
         """从磁盘删除"""
@@ -307,7 +305,7 @@ class DeadLetterQueue:
             if file_path.exists():
                 file_path.unlink()
         except Exception as e:
-            logger.error(f"从磁盘删除死信失败: {e}")
+            logger.error("从磁盘删除死信失败: %s", e)
 
     def _load_from_disk(self) -> None:
         """从磁盘加载"""
@@ -331,16 +329,18 @@ class DeadLetterQueue:
                     self._queue.append(dlq_msg)
 
                 except Exception as e:
-                    logger.error(f"加载死信文件失败: {file_path}, error={e}")
+                    logger.error("加载死信文件失败: %s, error=%s", file_path, e)
 
             if self._queue:
-                logger.info(f"已从磁盘加载 {len(self._queue)} 条死信")
+                logger.info("已从磁盘加载 %s 条死信", len(self._queue))
 
         except Exception as e:
-            logger.error(f"加载死信目录失败: {e}")
+            logger.error("加载死信目录失败: %s", e)
+
 
 # 全局死信队列实例
 _global_dlq: Optional[DeadLetterQueue] = None
+
 
 def get_dead_letter_queue() -> DeadLetterQueue:
     """获取全局死信队列"""

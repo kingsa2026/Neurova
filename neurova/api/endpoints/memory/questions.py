@@ -2,29 +2,35 @@
 记忆接口 - 问题队列 (Question Queue)
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from fastapi import Query, Depends
+from fastapi import Depends, Query
 from pydantic import BaseModel, Field
 
-from neurova.interfaces.api_standard import (
-    APIResponse,
-    APIError,
-    ErrorCodes,
-)
 from neurova.api.auth import get_current_user
+from neurova.interfaces.api_standard import (
+    APIError,
+    APIResponse,
+)
 
 from .base import (
-    router, logger, _get_request_id, get_memory_manager,
+    _get_request_id,
+    get_memory_manager,
+    logger,
+    router,
 )
+
 
 class MarkQuestionAskedRequest(BaseModel):
     """标记问题已问请求"""
+
     question: str = Field(..., min_length=1, max_length=1000, description="问题内容")
     answer: str = Field(..., description="回答内容")
 
+
 class QuestionItem(BaseModel):
     """问题条目"""
+
     id: str
     question_type: Optional[str] = None
     question: str
@@ -37,11 +43,16 @@ class QuestionItem(BaseModel):
     updated_at: str
     tags: List[str]
 
+
 def question_entry_to_dict(entry) -> dict:
     """将 QuestionQueueEntry 转换为字典"""
     return {
         "id": entry.id,
-        "question_type": entry.question_type.value if hasattr(entry.question_type, "value") else str(entry.question_type) if entry.question_type else None,
+        "question_type": (
+            entry.question_type.value
+            if hasattr(entry.question_type, "value")
+            else str(entry.question_type) if entry.question_type else None
+        ),
         "question": entry.question,
         "context": entry.context,
         "priority": entry.priority,
@@ -52,6 +63,7 @@ def question_entry_to_dict(entry) -> dict:
         "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
         "tags": list(entry.tags) if entry.tags else [],
     }
+
 
 @router.get("/questions/pending", summary="获取待问问题")
 async def get_pending_questions(
@@ -78,8 +90,9 @@ async def get_pending_questions(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取待问问题失败: {e}")
+        logger.exception("获取待问问题失败: %s", e)
         raise APIError.internal(f"获取待问问题失败: {str(e)}")
+
 
 @router.post("/questions/ask", summary="标记问题已问")
 async def mark_question_asked(
@@ -106,8 +119,9 @@ async def mark_question_asked(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"标记问题失败: {e}")
+        logger.exception("标记问题失败: %s", e)
         raise APIError.internal(f"标记问题失败: {str(e)}")
+
 
 @router.get("/questions/stats", summary="获取问题队列统计")
 async def get_question_queue_stats(
@@ -130,5 +144,5 @@ async def get_question_queue_stats(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取问题队列统计失败: {e}")
+        logger.exception("获取问题队列统计失败: %s", e)
         raise APIError.internal(f"获取问题队列统计失败: {str(e)}")

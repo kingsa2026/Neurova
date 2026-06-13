@@ -13,15 +13,15 @@ _logger = logging.getLogger(__name__)
 
 try:
     from .llm_router import (
-        RequestType,
+        LLMRouter,
         ModelCapability,
         ModelSelectionResult,
-        LLMRouter,
-        select_model_for_request,
+        RequestType,
         detect_request_type,
+        select_model_for_request,
     )
 except ImportError as _e:
-    _logger.debug(f"llm_router 模块未可用: {_e}")
+    _logger.debug("llm_router 模块未可用: %s", _e)
     RequestType = None
     ModelCapability = None
     ModelSelectionResult = None

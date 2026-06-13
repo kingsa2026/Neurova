@@ -3,14 +3,15 @@ ChannelMoERouter — 通道路由层
 
 使用向量门控网络动态选择激活哪些通道，复用现有 VectorGatingNetwork。
 """
+
 import asyncio
 import logging
 from typing import Dict, List, Optional
 
-from .base import BaseChannel, ChannelResult
-from .registry import ChannelRegistry
 from ..moe_router import VectorGatingNetwork
 from ..unified_vector_store import UnifiedVectorStore
+from .base import BaseChannel, ChannelResult
+from .registry import ChannelRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,7 @@ class ChannelMoERouter:
             activation_threshold=activation_threshold,
         )
 
-        logger.info(
-            f"ChannelMoERouter 初始化完成，top_k={top_k}, threshold={activation_threshold}"
-        )
+        logger.info("ChannelMoERouter 初始化完成，top_k=%s, threshold=%s", top_k, activation_threshold)
 
     async def retrieve(
         self,
@@ -71,15 +70,10 @@ class ChannelMoERouter:
 
         if not activated_channels and self.fallback_to_all:
             logger.debug("MoE 未激活任何通道，回退到全通道模式")
-            activated_channels = {
-                ch.metadata.name: 1.0
-                for ch in self.registry.get_active()
-            }
+            activated_channels = {ch.metadata.name: 1.0 for ch in self.registry.get_active()}
 
         # Step 3: 并行执行激活的通道
-        results = await self._execute_channels(
-            query, limit, activated_channels, memory_manager=memory_manager
-        )
+        results = await self._execute_channels(query, limit, activated_channels, memory_manager=memory_manager)
 
         return results
 
@@ -97,13 +91,9 @@ class ChannelMoERouter:
         activated = await self.gating.route(query_vec)
 
         valid_names = {ch.metadata.name for ch in self.registry.get_active()}
-        valid_activated = {
-            name: score
-            for name, score in activated.items()
-            if name in valid_names
-        }
+        valid_activated = {name: score for name, score in activated.items() if name in valid_names}
 
-        logger.debug(f"MoE 激活通道: {valid_activated}")
+        logger.debug("MoE 激活通道: %s", valid_activated)
         return valid_activated
 
     async def _ensure_centroids(self) -> None:
@@ -116,7 +106,7 @@ class ChannelMoERouter:
                 description = channel.metadata.description
                 centroid = self.vector_store.encode(description)
                 self.vector_store.register_centroid(name, centroid)
-                logger.debug(f"初始化通道 {name} 质心")
+                logger.debug("初始化通道 %s 质心", name)
 
     async def _execute_channels(
         self,
@@ -134,7 +124,10 @@ class ChannelMoERouter:
             if channel:
                 tasks.append(
                     self._execute_single_channel(
-                        channel, query, limit, ch_weight,
+                        channel,
+                        query,
+                        limit,
+                        ch_weight,
                         memory_manager=memory_manager,
                     )
                 )
@@ -156,7 +149,7 @@ class ChannelMoERouter:
                 channel_results = await task
                 results.extend(channel_results)
             except Exception as e:
-                logger.warning(f"通道执行失败: {e}")
+                logger.warning("通道执行失败: %s", e)
 
         for task in pending:
             task.cancel()
@@ -181,5 +174,5 @@ class ChannelMoERouter:
                 memory_manager=memory_manager,
             )
         except Exception as e:
-            logger.error(f"通道 {channel.metadata.name} 执行失败: {e}")
+            logger.error("通道 %s 执行失败: %s", channel.metadata.name, e)
             return []

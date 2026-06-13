@@ -7,18 +7,15 @@ import logging
 import typing
 import uuid
 
-from fastapi import APIRouter
-from fastapi import HTTPException
-from fastapi import Query
-from fastapi import Request
-from pydantic import BaseModel
-from pydantic import Field
+from fastapi import APIRouter, Query, Request
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 # ── Models ─────────────────────────────────────────────
+
 
 class MetacognitionRecordCreate(BaseModel):
     thought: str
@@ -35,6 +32,7 @@ _RECORDS: typing.Dict[str, typing.List[dict]] = {}  # agent_id -> [records]
 
 
 # ── Endpoints ──────────────────────────────────────────
+
 
 @router.get("/{agent_id}/metacognition")
 async def get_metacognition_records(
@@ -86,7 +84,11 @@ async def get_metacognition_stats(agent_id: str, request: Request):
     """获取元认知统计信息"""
     records = _RECORDS.get(agent_id, [])
     if not records:
-        return {"code": 0, "message": "success", "data": {"total_records": 0, "avg_confidence": 0, "categories": {}, "recent_count": 0}}
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {"total_records": 0, "avg_confidence": 0, "categories": {}, "recent_count": 0},
+        }
 
     total = len(records)
     avg_conf = sum(r.get("confidence", 0) for r in records) / total
@@ -101,7 +103,8 @@ async def get_metacognition_stats(agent_id: str, request: Request):
     recent = sum(1 for r in records if r.get("created_at", "") >= cutoff)
 
     return {
-        "code": 0, "message": "success",
+        "code": 0,
+        "message": "success",
         "data": {
             "total_records": total,
             "avg_confidence": round(avg_conf, 3),

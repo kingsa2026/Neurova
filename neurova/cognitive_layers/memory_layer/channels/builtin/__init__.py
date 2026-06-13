@@ -1,9 +1,10 @@
 """内置通道插件"""
+
+from .category import CategoryChannel
+from .emotion import EmotionChannel
+from .graph import GraphChannel
 from .temperature import TemperatureChannel
 from .text import TextChannel
-from .category import CategoryChannel
-from .graph import GraphChannel
-from .emotion import EmotionChannel
 from .voice import VoiceChannel
 
 BUILTIN_CHANNELS = [
@@ -16,7 +17,11 @@ BUILTIN_CHANNELS = [
 ]
 
 __all__ = [
-    "TemperatureChannel", "TextChannel", "CategoryChannel",
-    "GraphChannel", "EmotionChannel", "VoiceChannel",
+    "TemperatureChannel",
+    "TextChannel",
+    "CategoryChannel",
+    "GraphChannel",
+    "EmotionChannel",
+    "VoiceChannel",
     "BUILTIN_CHANNELS",
 ]

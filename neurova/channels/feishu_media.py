@@ -4,9 +4,8 @@
 提供媒体文件上传、下载和处理功能。
 """
 
-import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +45,9 @@ class MediaMixin:
         """
         try:
             import os
+
             if not os.path.exists(image_path):
-                logger.error(f"Image file not found: {image_path}")
+                logger.error("Image file not found: %s", image_path)
                 return None
 
             # 确定 MIME 类型
@@ -71,14 +71,14 @@ class MediaMixin:
 
             if response.get("code") == 0:
                 image_key = response.get("data", {}).get("image_key")
-                logger.info(f"Image uploaded: {image_key}")
+                logger.info("Image uploaded: %s", image_key)
                 return image_key
             else:
-                logger.error(f"Image upload failed: {response}")
+                logger.error("Image upload failed: %s", response)
                 return None
 
         except Exception as e:
-            logger.exception(f"Image upload error: {e}")
+            logger.exception("Image upload error: %s", e)
             return None
 
     async def upload_file(
@@ -97,15 +97,15 @@ class MediaMixin:
             str: file_key
         """
         try:
-            import os
             import mimetypes
+            import os
 
             if not os.path.exists(file_path):
-                logger.error(f"File not found: {file_path}")
+                logger.error("File not found: %s", file_path)
                 return None
 
             # 确定文件类型
-            suffix = os.path.splitext(file_path)[1].lower()
+            os.path.splitext(file_path)[1].lower()
             mime_type, _ = mimetypes.guess_type(file_path)
             if not mime_type:
                 mime_type = "application/octet-stream"
@@ -126,14 +126,14 @@ class MediaMixin:
 
             if response.get("code") == 0:
                 file_key = response.get("data", {}).get("file_key")
-                logger.info(f"File uploaded: {file_key}")
+                logger.info("File uploaded: %s", file_key)
                 return file_key
             else:
-                logger.error(f"File upload failed: {response}")
+                logger.error("File upload failed: %s", response)
                 return None
 
         except Exception as e:
-            logger.exception(f"File upload error: {e}")
+            logger.exception("File upload error: %s", e)
             return None
 
     async def download_media(
@@ -162,17 +162,18 @@ class MediaMixin:
             if response.get("code") == 0:
                 # 保存文件
                 import os
+
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 with open(save_path, "wb") as f:
                     f.write(response.get("data", b""))
-                logger.info(f"Media downloaded to {save_path}")
+                logger.info("Media downloaded to %s", save_path)
                 return True
             else:
-                logger.error(f"Media download failed: {response}")
+                logger.error("Media download failed: %s", response)
                 return False
 
         except Exception as e:
-            logger.exception(f"Media download error: {e}")
+            logger.exception("Media download error: %s", e)
             return False
 
     def get_media_type(self, file_path: str) -> str:
@@ -186,6 +187,7 @@ class MediaMixin:
             str: 媒体类型 (image, audio, video, file)
         """
         import os
+
         suffix = os.path.splitext(file_path)[1].lower()
 
         for media_type, info in MEDIA_TYPE_MAP.items():

@@ -16,10 +16,9 @@ import json
 import logging
 import threading
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 
 logger = logging.getLogger(__name__)
 
@@ -141,9 +140,7 @@ class ModelRouteConfig:
             route_id=data.get("route_id") or _new_id("route_"),
             user_id=data.get("user_id"),
             level=RouteLevel.from_value(data.get("level", RouteLevel.SYSTEM)),
-            request_type=RequestType.from_value(
-                data.get("request_type", RequestType.GENERAL)
-            ),
+            request_type=RequestType.from_value(data.get("request_type", RequestType.GENERAL)),
             model_id=data.get("model_id", "") or "",
             provider_id=data.get("provider_id", "") or "",
             priority=int(data.get("priority", 0) or 0),
@@ -317,8 +314,7 @@ class ModelRouteConfigStorage:
     def delete_user_routes(self, user_id: str) -> int:
         with self._lock:
             targets = [
-                rid for rid, cfg in self._routes.items()
-                if cfg.level == RouteLevel.USER and cfg.user_id == user_id
+                rid for rid, cfg in self._routes.items() if cfg.level == RouteLevel.USER and cfg.user_id == user_id
             ]
             for rid in targets:
                 self._routes.pop(rid, None)

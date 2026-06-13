@@ -11,12 +11,9 @@
 """
 
 import hashlib
-import json
 import logging
-import re
-import time
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +68,7 @@ class MessageMixin:
         elif auth_type == "ilink":
             return await self._send_ilink_message(chat_id, content, message_type, **kwargs)
         else:
-            logger.error(f"Unknown auth type for send_message: {auth_type}")
+            logger.error("Unknown auth type for send_message: %s", auth_type)
             return None
 
     async def _send_wecom_message(
@@ -106,7 +103,7 @@ class MessageMixin:
                     "news": content,  # 应该是文章列表
                 }
             else:
-                logger.error(f"Unsupported message type: {message_type}")
+                logger.error("Unsupported message type: %s", message_type)
                 return None
 
             # 发送消息
@@ -117,14 +114,14 @@ class MessageMixin:
             )
 
             if response.get("errcode") == 0:
-                logger.info(f"WeCom message sent to {chat_id}")
+                logger.info("WeCom message sent to %s", chat_id)
                 return response.get("msgid")
             else:
-                logger.error(f"WeCom message send failed: {response}")
+                logger.error("WeCom message send failed: %s", response)
                 return None
 
         except Exception as e:
-            logger.exception(f"WeCom message send error: {e}")
+            logger.exception("WeCom message send error: %s", e)
             return None
 
     async def _send_official_message(
@@ -156,7 +153,7 @@ class MessageMixin:
                     "news": {"articles": content},  # 文章列表
                 }
             else:
-                logger.error(f"Unsupported message type: {message_type}")
+                logger.error("Unsupported message type: %s", message_type)
                 return None
 
             # 发送消息
@@ -167,14 +164,14 @@ class MessageMixin:
             )
 
             if response.get("errcode") == 0:
-                logger.info(f"Official message sent to {chat_id}")
+                logger.info("Official message sent to %s", chat_id)
                 return response.get("msgid")
             else:
-                logger.error(f"Official message send failed: {response}")
+                logger.error("Official message send failed: %s", response)
                 return None
 
         except Exception as e:
-            logger.exception(f"Official message send error: {e}")
+            logger.exception("Official message send error: %s", e)
             return None
 
     async def _send_ilink_message(
@@ -211,14 +208,14 @@ class MessageMixin:
             )
 
             if response.get("errcode") == 0:
-                logger.info(f"KF message sent to {chat_id}")
+                logger.info("KF message sent to %s", chat_id)
                 return response.get("msgid")
             else:
-                logger.error(f"KF message send failed: {response}")
+                logger.error("KF message send failed: %s", response)
                 return None
 
         except Exception as e:
-            logger.exception(f"KF message send error: {e}")
+            logger.exception("KF message send error: %s", e)
             return None
 
     def receive_message(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -240,7 +237,7 @@ class MessageMixin:
         elif auth_type == "ilink":
             return self._parse_ilink_message(data)
         else:
-            logger.error(f"Unknown auth type for receive_message: {auth_type}")
+            logger.error("Unknown auth type for receive_message: %s", auth_type)
             return None
 
     def _parse_wecom_message(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -283,7 +280,7 @@ class MessageMixin:
             return message
 
         except Exception as e:
-            logger.exception(f"WeCom message parse error: {e}")
+            logger.exception("WeCom message parse error: %s", e)
             return None
 
     def _parse_official_message(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -302,7 +299,7 @@ class MessageMixin:
                 "raw_data": data,
             }
         except Exception as e:
-            logger.exception(f"iLink message parse error: {e}")
+            logger.exception("iLink message parse error: %s", e)
             return None
 
     def _parse_xml_message(self, xml_content: str) -> Optional[Dict[str, Any]]:
@@ -319,7 +316,7 @@ class MessageMixin:
             return message
 
         except Exception as e:
-            logger.exception(f"XML message parse error: {e}")
+            logger.exception("XML message parse error: %s", e)
             return None
 
     def parse_raw_message(self, raw_data: Any) -> Optional[Dict[str, Any]]:
@@ -337,7 +334,7 @@ class MessageMixin:
         elif isinstance(raw_data, dict):
             return raw_data
         else:
-            logger.error(f"Unsupported raw data type: {type(raw_data)}")
+            logger.error("Unsupported raw data type: %s", type(raw_data))
             return None
 
     def should_process_message(self, message: Dict[str, Any]) -> bool:
@@ -362,7 +359,7 @@ class MessageMixin:
         # 过滤非文本消息（可配置）
         msg_type = message.get("message_type", "")
         if msg_type not in [MSG_TYPE_TEXT, MSG_TYPE_EVENT, MSG_TYPE_LOCATION]:
-            logger.debug(f"Skipping message type: {msg_type}")
+            logger.debug("Skipping message type: %s", msg_type)
             return False
 
         return True
@@ -406,5 +403,5 @@ class MessageMixin:
                 return None
 
         except Exception as e:
-            logger.exception(f"Signature verification error: {e}")
+            logger.exception("Signature verification error: %s", e)
             return None

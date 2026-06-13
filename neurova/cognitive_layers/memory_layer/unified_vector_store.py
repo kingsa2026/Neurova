@@ -15,19 +15,21 @@ UnifiedVectorStore — 三合一向量索引
 
 import logging
 import math
-from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
 
 def vector_norm(a: List[float]) -> float:
     """计算向量范数"""
     return math.sqrt(sum(x * x for x in a))
 
+
 def vector_dot(a: List[float], b: List[float]) -> float:
     """计算向量点积"""
     return sum(x * y for x, y in zip(a, b))
+
 
 def vector_normalize(a: List[float]) -> List[float]:
     """归一化向量"""
@@ -35,6 +37,7 @@ def vector_normalize(a: List[float]) -> List[float]:
     if norm == 0:
         return a
     return [x / norm for x in a]
+
 
 class UnifiedVectorStore:
     """三合一向量索引"""
@@ -49,9 +52,9 @@ class UnifiedVectorStore:
         self.backend = self._select_backend(backend)
         self.index = None
         self.centroids: Dict[str, List[float]] = {}  # expert_id → vector
-        self.memory_vectors: List[List[float]] = []   # 记忆向量列表
-        self.memory_ids: List[str] = []              # 与 memory_vectors 对应的记忆 ID
-        self.memory_metadata: List[Dict] = []        # 记忆元数据
+        self.memory_vectors: List[List[float]] = []  # 记忆向量列表
+        self.memory_ids: List[str] = []  # 与 memory_vectors 对应的记忆 ID
+        self.memory_metadata: List[Dict] = []  # 记忆元数据
         self._centroid_last_access: Dict[str, float] = {}  # 质心最后访问时间
 
         # TF-IDF 相关
@@ -67,7 +70,7 @@ class UnifiedVectorStore:
         # 初始化编码器
         self._encoder = self._create_encoder()
 
-        logger.info(f"UnifiedVectorStore 初始化完成，后端: {self.backend}")
+        logger.info("UnifiedVectorStore 初始化完成，后端: %s", self.backend)
 
     async def initialize_encoder(self) -> bool:
         """
@@ -80,7 +83,7 @@ class UnifiedVectorStore:
             try:
                 return await self._encoder.initialize()
             except Exception as e:
-                logger.warning(f"ONNX 编码器异步初始化失败: {e}")
+                logger.warning("ONNX 编码器异步初始化失败: %s", e)
                 return False
         return True
 
@@ -90,22 +93,24 @@ class UnifiedVectorStore:
             return backend
 
         try:
-            import faiss
-            from sentence_transformers import SentenceTransformer
+            pass
+
             return "faiss"
         except ImportError:
             pass
 
         try:
-            from fastembed import TextEmbedding
+            pass
+
             return "fastembed"
         except ImportError:
             pass
 
         # Tier 1: ONNX Embedding (默认推荐)
         try:
-            import onnxruntime
-            from neurova.embedding.onnx_embedding import ONNXEmbeddingEngine
+            pass
+
+
             return "onnx"
         except ImportError:
             pass
@@ -117,26 +122,29 @@ class UnifiedVectorStore:
         if self.backend == "faiss":
             try:
                 from sentence_transformers import SentenceTransformer
+
                 return SentenceTransformer("BAAI/bge-small-zh-v1.5")
             except Exception as e:
-                logger.warning(f"FAISS 编码器创建失败: {e}，降级到 TF-IDF")
+                logger.warning("FAISS 编码器创建失败: %s，降级到 TF-IDF", e)
                 return None
 
         elif self.backend == "fastembed":
             try:
                 from fastembed import TextEmbedding
+
                 return TextEmbedding("BAAI/bge-small-zh-v1.5")
             except Exception as e:
-                logger.warning(f"fastembed 编码器创建失败: {e}，降级到 TF-IDF")
+                logger.warning("fastembed 编码器创建失败: %s，降级到 TF-IDF", e)
                 return None
 
         elif self.backend == "onnx":
             try:
                 from neurova.embedding.onnx_embedding import ONNXEmbeddingEngine
+
                 engine = ONNXEmbeddingEngine(auto_download=True)
                 return engine
             except Exception as e:
-                logger.warning(f"ONNX 编码器创建失败: {e}，降级到 TF-IDF")
+                logger.warning("ONNX 编码器创建失败: %s，降级到 TF-IDF", e)
                 return None
 
         return None  # TF-IDF 不需要预训练编码器
@@ -159,11 +167,12 @@ class UnifiedVectorStore:
                 # 懒初始化 ONNX 引擎
                 if not self._encoder.is_initialized:
                     import asyncio
+
                     try:
                         loop = asyncio.get_running_loop()
                     except RuntimeError:
                         loop = None
-                    
+
                     if loop and loop.is_running():
                         # 已有运行的事件循环，无法同步初始化
                         logger.warning("ONNX 编码器未初始化，降级到 TF-IDF")
@@ -173,7 +182,7 @@ class UnifiedVectorStore:
                         if not self._encoder.is_initialized:
                             logger.warning("ONNX 编码器初始化失败，降级到 TF-IDF")
                             return self._tfidf_encode(text)
-                
+
                 return self._encoder.encode(text)
             else:
                 vec = list(self._encoder.embed([text]))[0]
@@ -232,15 +241,17 @@ class UnifiedVectorStore:
     def _tokenize(self, text: str) -> List[str]:
         """简单分词"""
         import re
+
         # 英文单词
-        english_words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
+        english_words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
         # 中文字符
-        chinese_chars = re.findall(r'[\u4e00-\u9fff]', text)
+        chinese_chars = re.findall(r"[\u4e00-\u9fff]", text)
         return english_words + chinese_chars
 
     def _update_idf(self, documents: List[str]):
         """更新 IDF 值"""
         import math
+
         n_docs = len(documents)
         if n_docs == 0:
             return
@@ -289,7 +300,7 @@ class UnifiedVectorStore:
             self.centroids[expert_id] = centroid
             self._centroid_last_access[expert_id] = datetime.now().timestamp()
 
-        logger.info(f"初始化 {len(experts)} 个质心")
+        logger.info("初始化 %s 个质心", len(experts))
 
     def _expert_to_text(self, expert_def: Dict[str, Any]) -> str:
         """将 Expert 定义转为可编码的文本"""
@@ -332,7 +343,7 @@ class UnifiedVectorStore:
             self.memory_ids.append(mem.get("id", ""))
             self.memory_metadata.append(mem)
 
-        logger.info(f"索引 {len(memories)} 条记忆")
+        logger.info("索引 %s 条记忆", len(memories))
 
     def get_expert_centroids(self) -> Dict[str, List[float]]:
         """获取所有 Expert 质心"""
@@ -362,8 +373,7 @@ class UnifiedVectorStore:
         """获取所有质心及其 ID"""
         return [(k, v) for k, v in self.centroids.items()]
 
-    def search(self, query: str, limit: int = 10,
-               filter_dict: Optional[Dict] = None) -> List[Dict[str, Any]]:
+    def search(self, query: str, limit: int = 10, filter_dict: Optional[Dict] = None) -> List[Dict[str, Any]]:
         """
         搜索记忆
 
@@ -411,8 +421,7 @@ class UnifiedVectorStore:
 
         return results
 
-    def search_in_expert(self, query: str, expert_def: Dict,
-                         limit: int = 10) -> List[Dict[str, Any]]:
+    def search_in_expert(self, query: str, expert_def: Dict, limit: int = 10) -> List[Dict[str, Any]]:
         """
         在特定 Expert 内搜索
 
@@ -428,9 +437,7 @@ class UnifiedVectorStore:
 
     # ── Neurova Hebb 向量索引 ──
 
-    def add_neurova_hebb(self, neurova_hebb_id: str,
-                         embedding: List[float],
-                         metadata: Dict[str, Any]) -> None:
+    def add_neurova_hebb(self, neurova_hebb_id: str, embedding: List[float], metadata: Dict[str, Any]) -> None:
         """
         添加 Neurova Hebb 到向量索引。
 
@@ -446,8 +453,7 @@ class UnifiedVectorStore:
         self._neurova_hebb_ids.append(neurova_hebb_id)
         self._neurova_hebb_metadata.append(metadata)
 
-    def search_neurova_hebbs(self, query_embedding: List[float],
-                             top_k: int = 5) -> List[Tuple[str, float]]:
+    def search_neurova_hebbs(self, query_embedding: List[float], top_k: int = 5) -> List[Tuple[str, float]]:
         """
         搜索最相似的 Neurova Hebb。
 
@@ -517,6 +523,7 @@ class UnifiedVectorStore:
                 return False
 
         return True
+
 
 def cosine_similarity(a: List[float], b: List[float]) -> float:
     """计算余弦相似度"""

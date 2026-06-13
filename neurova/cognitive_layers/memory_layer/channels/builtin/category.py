@@ -3,7 +3,8 @@ CategoryChannel — 分类通道（同类别记忆）
 
 检索与查询推断类别相同的记忆。
 """
-from typing import Any, Dict, List, Optional
+
+from typing import List
 
 from ..base import BaseChannel, ChannelMetadata, ChannelResult
 
@@ -20,13 +21,7 @@ class CategoryChannel(BaseChannel):
             capabilities=["category", "classification"],
         )
 
-    async def retrieve(
-        self,
-        query: str,
-        limit: int = 10,
-        weight: float = 1.0,
-        **kwargs
-    ) -> List[ChannelResult]:
+    async def retrieve(self, query: str, limit: int = 10, weight: float = 1.0, **kwargs) -> List[ChannelResult]:
         memory_manager = kwargs.get("memory_manager")
         if not memory_manager:
             return []
@@ -41,17 +36,19 @@ class CategoryChannel(BaseChannel):
                 # 类别匹配得分
                 score = 0.5 * weight if category != "general" else 0.2 * weight
 
-                scored.append(ChannelResult(
-                    memory_id=mem.get("id", ""),
-                    content=content,
-                    score=score,
-                    channel="category",
-                    metadata={"category": category},
-                ))
+                scored.append(
+                    ChannelResult(
+                        memory_id=mem.get("id", ""),
+                        content=content,
+                        score=score,
+                        channel="category",
+                        metadata={"category": category},
+                    )
+                )
 
             scored.sort(key=lambda m: m.score, reverse=True)
             return scored[:limit]
 
         except Exception as e:
-            self._logger.debug(f"分类通道检索失败: {e}")
+            self._logger.debug("分类通道检索失败: %s", e)
             return []

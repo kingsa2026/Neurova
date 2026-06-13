@@ -16,15 +16,12 @@ from __future__ import annotations
 4. 模块是否需要优化
 """
 
-import asyncio
-from dataclasses import dataclass, field
 import datetime
-import enum
 import logging
 import threading
 import time
 import typing
-
+from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -32,27 +29,31 @@ logger = logging.getLogger(__name__)
 
 # ────── 数据模型 ──────
 
+
 class LoopStatus(Enum):
     """闭环状态"""
-    NOT_STARTED = "not_started"    # 未开始
-    IN_PROGRESS = "in_progress"    # 进行中
-    COMPLETED = "completed"        # 已完成
-    FAILED = "failed"              # 失败
-    INEFFECTIVE = "ineffective"    # 无效
+
+    NOT_STARTED = "not_started"  # 未开始
+    IN_PROGRESS = "in_progress"  # 进行中
+    COMPLETED = "completed"  # 已完成
+    FAILED = "failed"  # 失败
+    INEFFECTIVE = "ineffective"  # 无效
 
 
 class EffectivenessLevel(Enum):
     """有效性级别"""
-    HIGH = "high"          # 高效
-    MEDIUM = "medium"      # 中等
-    LOW = "low"            # 低效
+
+    HIGH = "high"  # 高效
+    MEDIUM = "medium"  # 中等
+    LOW = "low"  # 低效
     INEFFECTIVE = "ineffective"  # 无效
-    UNKNOWN = "unknown"    # 未知
+    UNKNOWN = "unknown"  # 未知
 
 
 @dataclass
 class ModuleAccessRecord:
     """模块访问记录"""
+
     module_id: str = ""
     access_type: str = "read"  # read/write
     timestamp: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
@@ -71,6 +72,7 @@ class ModuleAccessRecord:
 @dataclass
 class ModuleLoopChecklist:
     """模块闭环检查清单"""
+
     module_id: str = ""
     initialized: bool = False
     started: bool = False
@@ -97,6 +99,7 @@ class ModuleLoopChecklist:
 @dataclass
 class EffectivenessReport:
     """有效性报告"""
+
     module_id: str = ""
     effectiveness_level: EffectivenessLevel = EffectivenessLevel.UNKNOWN
     write_count: int = 0
@@ -121,6 +124,7 @@ class EffectivenessReport:
 
 
 # ────── 主类 ──────
+
 
 class ModuleEffectivenessTracker:
     """
@@ -164,6 +168,7 @@ class ModuleEffectivenessTracker:
 
     def _start_periodic_check(self):
         """启动定时检查"""
+
         def check_loop():
             while self._running:
                 try:
@@ -171,7 +176,7 @@ class ModuleEffectivenessTracker:
                     if self._running:
                         self._periodic_check()
                 except Exception as e:
-                    logger.error(f"Periodic check error: {e}")
+                    logger.error("Periodic check error: %s", e)
 
         self._check_thread = threading.Thread(target=check_loop, daemon=True)
         self._check_thread.start()
@@ -181,21 +186,21 @@ class ModuleEffectivenessTracker:
         with self._lock:
             checklist = self._ensure_checklist(module_id)
             checklist.initialized = True
-            logger.debug(f"Module {module_id} initialized")
+            logger.debug("Module %s initialized", module_id)
 
     def on_start(self, module_id: str) -> None:
         """模块启动回调"""
         with self._lock:
             checklist = self._ensure_checklist(module_id)
             checklist.started = True
-            logger.debug(f"Module {module_id} started")
+            logger.debug("Module %s started", module_id)
 
     def on_stop(self, module_id: str) -> None:
         """模块停止回调"""
         with self._lock:
             checklist = self._ensure_checklist(module_id)
             checklist.started = False
-            logger.debug(f"Module {module_id} stopped")
+            logger.debug("Module %s stopped", module_id)
 
     def _initialize_all_modules(self) -> None:
         """初始化所有模块"""
@@ -225,8 +230,9 @@ class ModuleEffectivenessTracker:
         """检查请求回调"""
         self._check_module(module_id)
 
-    def record_access(self, module_id: str, access_type: str,
-                     details: typing.Optional[typing.Dict[str, typing.Any]] = None) -> None:
+    def record_access(
+        self, module_id: str, access_type: str, details: typing.Optional[typing.Dict[str, typing.Any]] = None
+    ) -> None:
         """
         记录访问
 
@@ -352,8 +358,7 @@ class ModuleEffectivenessTracker:
             recommendations=recommendations,
         )
 
-    def _generate_recommendations(self, module_id: str, level: EffectivenessLevel,
-                                ratio: float) -> typing.List[str]:
+    def _generate_recommendations(self, module_id: str, level: EffectivenessLevel, ratio: float) -> typing.List[str]:
         """生成建议"""
         recommendations = []
 
@@ -463,7 +468,7 @@ class ModuleEffectivenessTracker:
         with self._lock:
             self._modules[module_id] = module
             self._ensure_checklist(module_id)
-            logger.debug(f"Registered module: {module_id}")
+            logger.debug("Registered module: %s", module_id)
 
     def unregister_module(self, module_id: str) -> None:
         """
@@ -488,7 +493,7 @@ class ModuleEffectivenessTracker:
             if module_id in self._read_counts:
                 del self._read_counts[module_id]
 
-            logger.debug(f"Unregistered module: {module_id}")
+            logger.debug("Unregistered module: %s", module_id)
 
     def reset_stats(self, module_id: typing.Optional[str] = None) -> None:
         """
@@ -509,7 +514,7 @@ class ModuleEffectivenessTracker:
                 self._access_records.clear()
                 self._checklists.clear()
 
-            logger.debug(f"Reset stats for: {module_id or 'all modules'}")
+            logger.debug("Reset stats for: %s", module_id or 'all modules')
 
     def shutdown(self) -> None:
         """关闭追踪器"""

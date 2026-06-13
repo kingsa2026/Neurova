@@ -9,12 +9,10 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from neurova.cognitive_layers.memory_layer.share_group import (
-    ShareGroup,
-    ShareGroupManager,
     get_share_group_manager,
 )
 
@@ -25,8 +23,10 @@ router = APIRouter(prefix="/memory-share-groups", tags=["memory-share-groups"])
 
 # ── 请求/响应模型 ──────────────────────────────────────────────────────────────
 
+
 class ShareGroupCreate(BaseModel):
     """创建共享组请求"""
+
     name: str = Field(..., description="共享组名称", min_length=1, max_length=100)
     description: str = Field("", description="共享组描述", max_length=500)
     agent_ids: List[str] = Field(default_factory=list, description="初始 Agent ID 列表")
@@ -35,6 +35,7 @@ class ShareGroupCreate(BaseModel):
 
 class ShareGroupUpdate(BaseModel):
     """更新共享组请求"""
+
     name: Optional[str] = Field(None, description="共享组名称", min_length=1, max_length=100)
     description: Optional[str] = Field(None, description="共享组描述", max_length=500)
     metadata: Optional[dict] = Field(None, description="额外元数据")
@@ -42,6 +43,7 @@ class ShareGroupUpdate(BaseModel):
 
 class ShareGroupResponse(BaseModel):
     """共享组响应"""
+
     group_id: str
     name: str
     description: str
@@ -53,15 +55,18 @@ class ShareGroupResponse(BaseModel):
 
 class AddAgentRequest(BaseModel):
     """添加 Agent 到共享组请求"""
+
     agent_id: str = Field(..., description="Agent ID", min_length=1)
 
 
 class RemoveAgentRequest(BaseModel):
     """从共享组移除 Agent 请求"""
+
     agent_id: str = Field(..., description="Agent ID", min_length=1)
 
 
 # ── API 端点 ──────────────────────────────────────────────────────────────────
+
 
 @router.get("", response_model=List[ShareGroupResponse])
 async def list_share_groups():
@@ -75,22 +80,22 @@ async def list_share_groups():
 async def create_share_group(request: ShareGroupCreate):
     """创建共享组"""
     manager = get_share_group_manager()
-    
+
     # 验证 agent_ids 不为空
     if not request.agent_ids:
         raise HTTPException(status_code=400, detail="agent_ids 不能为空")
-    
+
     # 去重
     unique_agent_ids = list(set(request.agent_ids))
-    
+
     group = manager.create_group(
         name=request.name,
         agent_ids=unique_agent_ids,
         description=request.description,
         metadata=request.metadata,
     )
-    
-    logger.info(f"Created share group: {group.group_id} ({request.name})")
+
+    logger.info("Created share group: %s (%s)", group.group_id, request.name)
     return group.to_dict()
 
 

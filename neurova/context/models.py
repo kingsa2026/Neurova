@@ -15,16 +15,20 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List
 
+
 class ContextPriority(Enum):
     """上下文优先级"""
-    CRITICAL = 100   # 系统提示、固化记忆
-    HIGH = 80        # 高温记忆、反思日志
-    NORMAL = 50      # 普通记忆
-    LOW = 20         # 低温记忆、归档内容
+
+    CRITICAL = 100  # 系统提示、固化记忆
+    HIGH = 80  # 高温记忆、反思日志
+    NORMAL = 50  # 普通记忆
+    LOW = 20  # 低温记忆、归档内容
+
 
 @dataclass
 class TokenBudget:
     """Token 预算配置 - 增强版"""
+
     max_total: int = 16000
     system_prompt: int = 1500
     reflection_log: int = 1000
@@ -41,9 +45,11 @@ class TokenBudget:
     def english_ratio(self) -> float:
         return 0.25
 
+
 @dataclass
 class ContextEntry:
     """上下文条目"""
+
     id: str
     content: str
     priority: ContextPriority
@@ -55,19 +61,21 @@ class ContextEntry:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            'id': self.id,
-            'content': self.content,
-            'priority': self.priority.value,
-            'category': self.category,
-            'temperature': self.temperature,
-            'is_crystallized': self.is_crystallized,
-            'metadata': self.metadata,
-            'created_at': self.created_at,
+            "id": self.id,
+            "content": self.content,
+            "priority": self.priority.value,
+            "category": self.category,
+            "temperature": self.temperature,
+            "is_crystallized": self.is_crystallized,
+            "metadata": self.metadata,
+            "created_at": self.created_at,
         }
+
 
 @dataclass
 class ContextBuildResult:
     """上下文构建结果"""
+
     context: List[Dict[str, str]]
     total_tokens: int
     compression_ratio: float

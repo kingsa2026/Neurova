@@ -14,12 +14,10 @@ from __future__ import annotations
 
 import logging
 import time
-import typing
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -29,6 +27,7 @@ router = APIRouter()
 
 class ChannelInfo(BaseModel):
     """渠道信息"""
+
     channel_id: str
     name: str
     channel_type: str = "feishu"
@@ -41,6 +40,7 @@ class ChannelInfo(BaseModel):
 
 class ChannelCreate(BaseModel):
     """创建渠道请求"""
+
     name: str = Field(..., description="渠道名称")
     channel_type: str = Field(default="feishu", description="渠道类型")
     enabled: bool = Field(default=True, description="是否启用")
@@ -49,6 +49,7 @@ class ChannelCreate(BaseModel):
 
 class ChannelUpdate(BaseModel):
     """更新渠道请求"""
+
     name: Optional[str] = None
     enabled: Optional[bool] = None
     config: Optional[Dict[str, Any]] = None
@@ -63,9 +64,10 @@ def _get_channel_manager():
     """获取渠道管理器单例"""
     try:
         from neurova.channels.manager import ChannelManager
+
         return ChannelManager.get_instance()
     except Exception as e:
-        logger.warning(f"ChannelManager not available: {e}")
+        logger.warning("ChannelManager not available: %s", e)
         return None
 
 
@@ -78,7 +80,7 @@ async def get_channels(
 ):
     """获取渠道列表"""
     channel_manager = _get_channel_manager()
-    
+
     channels = []
     if channel_manager:
         try:
@@ -89,8 +91,8 @@ async def get_channels(
                     limit=limit,
                 )
         except Exception as e:
-            logger.warning(f"Failed to get channels: {e}")
-    
+            logger.warning("Failed to get channels: %s", e)
+
     return channels
 
 
@@ -100,13 +102,13 @@ async def create_channel(
     body: ChannelCreate,
 ):
     """创建渠道"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     channel_manager = _get_channel_manager()
-    
+
     channel_id = str(uuid.uuid4())
     timestamp = time.time()
-    
+
     if channel_manager:
         try:
             if hasattr(channel_manager, "create_channel"):
@@ -118,8 +120,8 @@ async def create_channel(
                     config=body.config,
                 )
         except Exception as e:
-            logger.warning(f"Failed to create channel: {e}")
-    
+            logger.warning("Failed to create channel: %s", e)
+
     return ChannelInfo(
         channel_id=channel_id,
         name=body.name,
@@ -139,7 +141,7 @@ async def get_channel(
 ):
     """获取渠道详情"""
     channel_manager = _get_channel_manager()
-    
+
     if channel_manager:
         try:
             if hasattr(channel_manager, "get_channel"):
@@ -147,8 +149,8 @@ async def get_channel(
                 if channel:
                     return channel
         except Exception as e:
-            logger.warning(f"Failed to get channel: {e}")
-    
+            logger.warning("Failed to get channel: %s", e)
+
     raise HTTPException(status_code=404, detail=f"Channel '{channel_id}' not found")
 
 
@@ -159,18 +161,18 @@ async def update_channel(
     body: ChannelUpdate = ChannelUpdate(),
 ):
     """更新渠道"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     channel_manager = _get_channel_manager()
-    
+
     if channel_manager:
         try:
             if hasattr(channel_manager, "update_channel"):
                 update_data = body.dict(exclude_unset=True)
                 channel_manager.update_channel(channel_id, update_data)
         except Exception as e:
-            logger.warning(f"Failed to update channel: {e}")
-    
+            logger.warning("Failed to update channel: %s", e)
+
     return await get_channel(request, channel_id)
 
 
@@ -181,16 +183,16 @@ async def delete_channel(
 ):
     """删除渠道"""
     request_id = _get_request_id(request)
-    
+
     channel_manager = _get_channel_manager()
-    
+
     if channel_manager:
         try:
             if hasattr(channel_manager, "delete_channel"):
                 channel_manager.delete_channel(channel_id)
         except Exception as e:
-            logger.warning(f"Failed to delete channel: {e}")
-    
+            logger.warning("Failed to delete channel: %s", e)
+
     return {
         "code": 0,
         "message": f"Channel '{channel_id}' deleted",
@@ -206,9 +208,9 @@ async def test_channel_connection(
 ):
     """测试渠道连接"""
     request_id = _get_request_id(request)
-    
+
     channel_manager = _get_channel_manager()
-    
+
     if channel_manager:
         try:
             if hasattr(channel_manager, "test_connection"):
@@ -220,8 +222,8 @@ async def test_channel_connection(
                     "request_id": request_id,
                 }
         except Exception as e:
-            logger.warning(f"Failed to test channel connection: {e}")
-    
+            logger.warning("Failed to test channel connection: %s", e)
+
     return {
         "code": 0,
         "message": "Connection test not available",

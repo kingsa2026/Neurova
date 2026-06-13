@@ -17,16 +17,18 @@ LLM Router - 多模态自适应路由器
 - 语音识别
 """
 
-import re
 import logging
-from enum import Enum
+import re
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
 class RequestType(Enum):
     """请求类型枚举"""
+
     CHAT = "chat"  # 文本聊天
     IMAGE_UNDERSTANDING = "image_understanding"  # 图像理解
     AUDIO_UNDERSTANDING = "audio_understanding"  # 音频理解
@@ -38,8 +40,10 @@ class RequestType(Enum):
     TEXT_TO_SPEECH = "text_to_speech"  # 语音合成 (TTS)
     SPEECH_TO_TEXT = "speech_to_text"  # 语音识别 (STT)
 
+
 class ModelCapability(Enum):
     """模型能力枚举"""
+
     TEXT = "text"  # 文本处理
     VISION = "vision"  # 视觉理解
     AUDIO = "audio"  # 音频处理
@@ -51,9 +55,11 @@ class ModelCapability(Enum):
     MULTIMODAL = "multimodal"  # 多模态
     TOOL_USE = "tool_use"  # 工具使用
 
+
 @dataclass
 class ModelSelectionResult:
     """模型选择结果"""
+
     provider_id: str
     provider_name: str
     model: str
@@ -62,6 +68,7 @@ class ModelSelectionResult:
     health_status: str = "unknown"
     response_time: float = 0.0
     weight: float = 1.0
+
 
 class LLMRouter:
     """
@@ -75,9 +82,9 @@ class LLMRouter:
     - 响应时间优化
     """
 
-    _instance: Optional['LLMRouter'] = None
+    _instance: Optional["LLMRouter"] = None
 
-    def __new__(cls) -> 'LLMRouter':
+    def __new__(cls) -> "LLMRouter":
         """单例模式"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -93,12 +100,7 @@ class LLMRouter:
         self._initialized = True
         logger.info("LLMRouter initialized")
 
-    def register_provider(
-        self,
-        provider_id: str,
-        provider_name: str,
-        models: List[Dict[str, Any]]
-    ):
+    def register_provider(self, provider_id: str, provider_name: str, models: List[Dict[str, Any]]):
         """
         注册提供商
 
@@ -113,11 +115,8 @@ class LLMRouter:
                 - response_time: 响应时间
                 - weight: 权重
         """
-        self._providers[provider_id] = {
-            "name": provider_name,
-            "models": models
-        }
-        logger.info(f"Provider registered: {provider_id} ({provider_name}) with {len(models)} models")
+        self._providers[provider_id] = {"name": provider_name, "models": models}
+        logger.info("Provider registered: %s (%s) with %s models", provider_id, provider_name, len(models))
 
     def unregister_provider(self, provider_id: str):
         """
@@ -128,7 +127,7 @@ class LLMRouter:
         """
         if provider_id in self._providers:
             del self._providers[provider_id]
-            logger.info(f"Provider unregistered: {provider_id}")
+            logger.info("Provider unregistered: %s", provider_id)
 
     def list_providers(self) -> List[Dict[str, Any]]:
         """
@@ -139,18 +138,16 @@ class LLMRouter:
         """
         result = []
         for provider_id, provider_data in self._providers.items():
-            result.append({
-                "provider_id": provider_id,
-                "provider_name": provider_data["name"],
-                "models": provider_data["models"]
-            })
+            result.append(
+                {"provider_id": provider_id, "provider_name": provider_data["name"], "models": provider_data["models"]}
+            )
         return result
 
     def select_model(
         self,
         request_type: RequestType,
         required_capabilities: Optional[List[ModelCapability]] = None,
-        exclude_providers: Optional[List[str]] = None
+        exclude_providers: Optional[List[str]] = None,
     ) -> Optional[ModelSelectionResult]:
         """
         根据请求类型选择最佳模型
@@ -178,9 +175,7 @@ class LLMRouter:
                     continue
 
                 # 检查能力匹配
-                model_capabilities = [
-                    ModelCapability(cap) for cap in model_data.get("capabilities", [])
-                ]
+                model_capabilities = [ModelCapability(cap) for cap in model_data.get("capabilities", [])]
 
                 # 检查是否满足必需能力
                 if required_capabilities:
@@ -200,33 +195,24 @@ class LLMRouter:
                     priority=model_data.get("priority", 0),
                     health_status=model_data.get("health_status", "healthy"),
                     response_time=model_data.get("response_time", 0.0),
-                    weight=model_data.get("weight", 1.0)
+                    weight=model_data.get("weight", 1.0),
                 )
 
                 candidates.append(candidate)
 
         if not candidates:
-            logger.warning(f"No model found for request type: {request_type.value}")
+            logger.warning("No model found for request type: %s", request_type.value)
             return None
 
         # 按优先级和响应时间排序
-        candidates.sort(
-            key=lambda x: (-x.priority, x.response_time, -x.weight)
-        )
+        candidates.sort(key=lambda x: (-x.priority, x.response_time, -x.weight))
 
         selected = candidates[0]
-        logger.info(
-            f"Model selected: {selected.provider_name}/{selected.model} "
-            f"for {request_type.value}"
-        )
+        logger.info("Model selected: %s/%s " f"for %s", selected.provider_name, selected.model, request_type.value)
 
         return selected
 
-    def _matches_request_type(
-        self,
-        request_type: RequestType,
-        capabilities: List[ModelCapability]
-    ) -> bool:
+    def _matches_request_type(self, request_type: RequestType, capabilities: List[ModelCapability]) -> bool:
         """
         检查模型能力是否匹配请求类型
 
@@ -256,10 +242,10 @@ class LLMRouter:
         # 检查是否满足所有必需能力
         return all(cap in capabilities for cap in required)
 
+
 # 便捷函数
 def select_model_for_request(
-    request_type: RequestType,
-    required_capabilities: Optional[List[ModelCapability]] = None
+    request_type: RequestType, required_capabilities: Optional[List[ModelCapability]] = None
 ) -> Optional[ModelSelectionResult]:
     """
     为请求类型选择最佳模型的便捷函数
@@ -273,6 +259,7 @@ def select_model_for_request(
     """
     router = LLMRouter()
     return router.select_model(request_type, required_capabilities)
+
 
 def detect_request_type(content: str) -> RequestType:
     """
@@ -300,11 +287,11 @@ def detect_request_type(content: str) -> RequestType:
 
     # 检测生成请求（需在通用关键词之前）
     # 文生图：生成/画/创建/绘制 + 图片/图像/图画/照片
-    if re.search(r'(生成|画|创建|绘制|制作|搞|弄|来).{0,10}(图片|图像|图画|照片)', content_lower):
+    if re.search(r"(生成|画|创建|绘制|制作|搞|弄|来).{0,10}(图片|图像|图画|照片)", content_lower):
         return RequestType.TEXT_TO_IMAGE
 
     # 文生视频：制作/生成/创建 + 视频/影片/录像
-    if re.search(r'(制作|生成|创建|制作|搞|弄|来).{0,10}(视频|影片|录像)', content_lower):
+    if re.search(r"(制作|生成|创建|制作|搞|弄|来).{0,10}(视频|影片|录像)", content_lower):
         return RequestType.TEXT_TO_VIDEO
 
     # 语音合成：用语音读出/朗读/语音播放/读出来/念出来
@@ -323,6 +310,7 @@ def detect_request_type(content: str) -> RequestType:
 
     # 默认为文本聊天
     return RequestType.CHAT
+
 
 # 请求类型到能力的映射
 REQUEST_TYPE_CAPABILITIES: Dict[RequestType, List[ModelCapability]] = {

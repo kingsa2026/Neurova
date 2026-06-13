@@ -15,12 +15,10 @@ from __future__ import annotations
 
 import logging
 import time
-import typing
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -29,7 +27,7 @@ router = APIRouter()
 
 # 导入用户组服务
 try:
-    from neurova.auth.user_group_model import get_user_group_manager, UserGroupManager, UserGroup
+    from neurova.auth.user_group_model import UserGroup, UserGroupManager, get_user_group_manager
 except ImportError:
     logger.warning("User group service not available")
     get_user_group_manager = None
@@ -39,6 +37,7 @@ except ImportError:
 
 class GroupInfo(BaseModel):
     """群组信息"""
+
     group_id: str
     name: str
     description: str = ""
@@ -50,6 +49,7 @@ class GroupInfo(BaseModel):
 
 class GroupCreate(BaseModel):
     """创建群组请求"""
+
     name: str = Field(..., description="群组名称")
     description: str = Field(default="", description="群组描述")
     members: List[str] = Field(default_factory=list, description="初始成员")
@@ -57,6 +57,7 @@ class GroupCreate(BaseModel):
 
 class GroupUpdate(BaseModel):
     """更新群组请求"""
+
     name: Optional[str] = None
     description: Optional[str] = None
 
@@ -75,27 +76,29 @@ async def get_groups(
     """获取群组列表"""
     if get_user_group_manager is None:
         raise HTTPException(status_code=503, detail="User group service not available")
-    
+
     try:
         manager = get_user_group_manager()
         groups = manager.list_groups(limit=limit, offset=offset)
-        
+
         # 转换为API响应格式
         result = []
         for group in groups:
-            result.append(GroupInfo(
-                group_id=group.group_id,
-                name=group.name,
-                description=group.description,
-                owner_id="",  # UserGroup没有owner_id，使用空字符串
-                members=[],   # UserGroup没有members列表，使用空列表
-                created_at=group.created_at or 0,
-                updated_at=group.updated_at or 0,
-            ))
-        
+            result.append(
+                GroupInfo(
+                    group_id=group.group_id,
+                    name=group.name,
+                    description=group.description,
+                    owner_id="",  # UserGroup没有owner_id，使用空字符串
+                    members=[],  # UserGroup没有members列表，使用空列表
+                    created_at=group.created_at or 0,
+                    updated_at=group.updated_at or 0,
+                )
+            )
+
         return result
     except Exception as e:
-        logger.exception(f"Error getting groups: {e}")
+        logger.exception("Error getting groups: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to get groups: {str(e)}")
 
 
@@ -105,30 +108,28 @@ async def create_group(
     body: GroupCreate,
 ):
     """创建群组"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     if get_user_group_manager is None:
         raise HTTPException(status_code=503, detail="User group service not available")
-    
+
     try:
         manager = get_user_group_manager()
-        
+
         # 创建用户组
         group = manager.create_group(
-            name=body.name,
-            description=body.description,
-            group_type="custom"  # 默认为自定义类型
+            name=body.name, description=body.description, group_type="custom"  # 默认为自定义类型
         )
-        
+
         if group is None:
             raise HTTPException(status_code=500, detail="Failed to create group")
-        
+
         # 添加成员
         for member_id in body.members:
             manager.add_user_to_group(member_id, group.group_id)
-        
+
         timestamp = time.time()
-        
+
         return GroupInfo(
             group_id=group.group_id,
             name=group.name,
@@ -141,7 +142,7 @@ async def create_group(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error creating group: {e}")
+        logger.exception("Error creating group: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to create group: {str(e)}")
 
 
@@ -153,17 +154,17 @@ async def get_group(
     """获取群组详情"""
     if get_user_group_manager is None:
         raise HTTPException(status_code=503, detail="User group service not available")
-    
+
     try:
         manager = get_user_group_manager()
         group = manager.get_group(group_id)
-        
+
         if group is None:
             raise HTTPException(status_code=404, detail=f"Group '{group_id}' not found")
-        
+
         # 获取组成员
         members = manager.get_group_members(group_id)
-        
+
         return GroupInfo(
             group_id=group.group_id,
             name=group.name,
@@ -176,7 +177,7 @@ async def get_group(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error getting group {group_id}: {e}")
+        logger.exception("Error getting group %s: %s", group_id, e)
         raise HTTPException(status_code=500, detail=f"Failed to get group: {str(e)}")
 
 
@@ -187,30 +188,30 @@ async def update_group(
     body: GroupUpdate = GroupUpdate(),
 ):
     """更新群组"""
-    request_id = _get_request_id(request)
-    
+    _get_request_id(request)
+
     if get_user_group_manager is None:
         raise HTTPException(status_code=503, detail="User group service not available")
-    
+
     try:
         manager = get_user_group_manager()
         group = manager.get_group(group_id)
-        
+
         if group is None:
             raise HTTPException(status_code=404, detail=f"Group '{group_id}' not found")
-        
+
         # 更新组信息
         if body.name is not None:
             group.name = body.name
         if body.description is not None:
             group.description = body.description
-        
+
         # 保存更新
         manager.update_group(group)
-        
+
         # 获取组成员
         members = manager.get_group_members(group_id)
-        
+
         return GroupInfo(
             group_id=group.group_id,
             name=group.name,
@@ -223,7 +224,7 @@ async def update_group(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error updating group {group_id}: {e}")
+        logger.exception("Error updating group %s: %s", group_id, e)
         raise HTTPException(status_code=500, detail=f"Failed to update group: {str(e)}")
 
 
@@ -234,17 +235,17 @@ async def delete_group(
 ):
     """删除群组"""
     request_id = _get_request_id(request)
-    
+
     if get_user_group_manager is None:
         raise HTTPException(status_code=503, detail="User group service not available")
-    
+
     try:
         manager = get_user_group_manager()
         success = manager.delete_group(group_id)
-        
+
         if not success:
             raise HTTPException(status_code=404, detail=f"Group '{group_id}' not found")
-        
+
         return {
             "code": 0,
             "message": f"Group '{group_id}' deleted",
@@ -254,7 +255,7 @@ async def delete_group(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error deleting group {group_id}: {e}")
+        logger.exception("Error deleting group %s: %s", group_id, e)
         raise HTTPException(status_code=500, detail=f"Failed to delete group: {str(e)}")
 
 
@@ -266,24 +267,24 @@ async def add_group_member(
 ):
     """添加群组成员"""
     request_id = _get_request_id(request)
-    
+
     if get_user_group_manager is None:
         raise HTTPException(status_code=503, detail="User group service not available")
-    
+
     try:
         manager = get_user_group_manager()
-        
+
         # 检查组是否存在
         group = manager.get_group(group_id)
         if group is None:
             raise HTTPException(status_code=404, detail=f"Group '{group_id}' not found")
-        
+
         # 添加成员
         success = manager.add_user_to_group(user_id, group_id)
-        
+
         if not success:
             raise HTTPException(status_code=400, detail=f"Failed to add user '{user_id}' to group '{group_id}'")
-        
+
         return {
             "code": 0,
             "message": f"User '{user_id}' added to group '{group_id}'",
@@ -293,7 +294,7 @@ async def add_group_member(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error adding member to group {group_id}: {e}")
+        logger.exception("Error adding member to group %s: %s", group_id, e)
         raise HTTPException(status_code=500, detail=f"Failed to add member: {str(e)}")
 
 
@@ -305,24 +306,24 @@ async def remove_group_member(
 ):
     """移除群组成员"""
     request_id = _get_request_id(request)
-    
+
     if get_user_group_manager is None:
         raise HTTPException(status_code=503, detail="User group service not available")
-    
+
     try:
         manager = get_user_group_manager()
-        
+
         # 检查组是否存在
         group = manager.get_group(group_id)
         if group is None:
             raise HTTPException(status_code=404, detail=f"Group '{group_id}' not found")
-        
+
         # 移除成员
         success = manager.remove_user_from_group(user_id, group_id)
-        
+
         if not success:
             raise HTTPException(status_code=400, detail=f"Failed to remove user '{user_id}' from group '{group_id}'")
-        
+
         return {
             "code": 0,
             "message": f"User '{user_id}' removed from group '{group_id}'",
@@ -332,5 +333,5 @@ async def remove_group_member(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error removing member from group {group_id}: {e}")
+        logger.exception("Error removing member from group %s: %s", group_id, e)
         raise HTTPException(status_code=500, detail=f"Failed to remove member: {str(e)}")

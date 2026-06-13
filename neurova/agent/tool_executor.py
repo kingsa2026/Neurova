@@ -13,13 +13,14 @@ ToolExecutor — 统一工具执行器
 - 可独立测试：不依赖 Agent 类的完整初始化
 """
 
-import re
 import json
 import logging
+import re
 from datetime import datetime
-from typing import List, Dict, Optional, Any
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
 
 class ToolExecutor:
     """统一工具执行器
@@ -35,30 +36,30 @@ class ToolExecutor:
     # ---- 属性代理（方便内部访问） ----
     @property
     def _skill_registry(self):
-        return getattr(self._agent, '_skill_registry', None)
+        return getattr(self._agent, "_skill_registry", None)
 
     @property
     def tool_router(self):
-        return getattr(self._agent, 'tool_router', None)
+        return getattr(self._agent, "tool_router", None)
 
     @property
     def tool_memory(self):
-        return getattr(self._agent, 'tool_memory', None)
+        return getattr(self._agent, "tool_memory", None)
 
     @property
     def tool_lifecycle(self):
-        return getattr(self._agent, 'tool_lifecycle', None)
+        return getattr(self._agent, "tool_lifecycle", None)
 
     @property
     def skill_packer(self):
-        return getattr(self._agent, 'skill_packer', None)
+        return getattr(self._agent, "skill_packer", None)
 
     @property
     def config(self):
-        return getattr(self._agent, 'config', None)
+        return getattr(self._agent, "config", None)
 
     def _ensure_messages_list(self):
-        if not hasattr(self._agent, '_tool_messages_list'):
+        if not hasattr(self._agent, "_tool_messages_list"):
             self._agent._tool_messages_list = []
         return self._agent._tool_messages_list
 
@@ -77,10 +78,7 @@ class ToolExecutor:
         4. function_name(arg1, arg2) — 自然函数调用格式
         """
         tool_calls = self._parse_tool_calls_multi_strategy(reply)
-        logger.info(
-            f"[TOOL_PARSE] 检查回复中是否有工具调用: {len(tool_calls)} 个匹配, "
-            f"回复前100字: {reply[:100]}"
-        )
+        logger.info("[TOOL_PARSE] 检查回复中是否有工具调用: %s 个匹配, " f"回复前100字: %s", len(tool_calls), reply[:100])
         if not tool_calls:
             return reply
 
@@ -88,15 +86,17 @@ class ToolExecutor:
         for tc in tool_calls:
             tool_name = tc["name"]
             params = tc.get("params", {})
-            logger.info(f"🔧 解析到文本工具调用: {tool_name}({params})")
+            logger.info("🔧 解析到文本工具调用: %s(%s)", tool_name, params)
 
             # 记录工具调用
-            self._ensure_messages_list().append({
-                "type": "tool_call",
-                "tool_name": tool_name,
-                "params": params,
-                "timestamp": datetime.now().isoformat(),
-            })
+            self._ensure_messages_list().append(
+                {
+                    "type": "tool_call",
+                    "tool_name": tool_name,
+                    "params": params,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
             # 执行工具
             try:
@@ -110,7 +110,7 @@ class ToolExecutor:
                             result_str = json.dumps(result.data, ensure_ascii=False)
                             max_len = 8000
                             offset = int(params.get("offset", 0))
-                            chunk = result_str[offset:offset + max_len]
+                            chunk = result_str[offset : offset + max_len]
                             total = len(result_str)
                             suffix = ""
                             if total > offset + max_len:
@@ -119,11 +119,15 @@ class ToolExecutor:
                                     f"使用 offset={offset + max_len} 继续获取后续内容)"
                                 )
                             results.append(f"\n\n**{tool_name} 结果**: {chunk}{suffix}")
-                            self._ensure_messages_list().append({
-                                "type": "tool_result", "tool_name": tool_name,
-                                "result": chunk + suffix,
-                                "success": True, "timestamp": datetime.now().isoformat(),
-                            })
+                            self._ensure_messages_list().append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_name": tool_name,
+                                    "result": chunk + suffix,
+                                    "success": True,
+                                    "timestamp": datetime.now().isoformat(),
+                                }
+                            )
                             # P0: 使用集中化钩子（记忆+生命周期+技能打包三合一）
                             self.on_tool_executed(
                                 tool_name=tool_name,
@@ -138,25 +142,31 @@ class ToolExecutor:
 
                 # 2. ToolRouter fallback
                 if self.tool_router:
-                    user_id = getattr(self.config, 'user_id', 'default') if self.config else 'default'
+                    user_id = getattr(self.config, "user_id", "default") if self.config else "default"
                     router_result = await self.tool_router.execute(
-                        tool_name=tool_name, params=params,
-                        agent_id=self.config.agent_id if self.config else 'default',
+                        tool_name=tool_name,
+                        params=params,
+                        agent_id=self.config.agent_id if self.config else "default",
                         user_id=user_id,
                     )
                     if router_result and router_result.success:
                         result_str = str(router_result.result)
                         results.append(f"\n\n**{tool_name} 结果**: {result_str[:8000]}")
-                        self._ensure_messages_list().append({
-                            "type": "tool_result", "tool_name": tool_name,
-                            "result": result_str[:8000],
-                            "success": True, "timestamp": datetime.now().isoformat(),
-                        })
+                        self._ensure_messages_list().append(
+                            {
+                                "type": "tool_result",
+                                "tool_name": tool_name,
+                                "result": result_str[:8000],
+                                "success": True,
+                                "timestamp": datetime.now().isoformat(),
+                            }
+                        )
                         continue
 
                 # 构建失败信息
                 err_msg = (
-                    f"执行失败: {skill_exec_error}" if skill_exec_error
+                    f"执行失败: {skill_exec_error}"
+                    if skill_exec_error
                     else "工具注册但执行未找到处理器，请检查参数是否正确"
                 )
                 params_info = self._get_tool_params_info(tool_name)
@@ -166,7 +176,7 @@ class ToolExecutor:
                     err_msg += f"。可用参数: {', '.join(hints)}"
                 results.append(f"\n\n**{tool_name} 结果**: {err_msg}")
             except Exception as e:
-                logger.warning(f"文本工具调用执行失败: {tool_name}, {e}")
+                logger.warning("文本工具调用执行失败: %s, %s", tool_name, e)
                 results.append(f"\n\n**{tool_name} 结果**: 执行出错: {e}")
 
         # 移除原文中的工具调用标记，追加结果
@@ -196,15 +206,17 @@ class ToolExecutor:
             logger.warning("ToolMemory 结果缺少 tool_name")
             return None
 
-        logger.info(f"🚀 自动执行工具: {tool_name} (来源: {tool_source})")
+        logger.info("🚀 自动执行工具: %s (来源: %s)", tool_name, tool_source)
 
-        self._ensure_messages_list().append({
-            "type": "tool_call",
-            "tool_name": tool_name,
-            "tool_source": tool_source,
-            "params": tool_params,
-            "timestamp": datetime.now().isoformat(),
-        })
+        self._ensure_messages_list().append(
+            {
+                "type": "tool_call",
+                "tool_name": tool_name,
+                "tool_source": tool_source,
+                "params": tool_params,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
         try:
             if tool_source == "skill_system" and self._skill_registry:
@@ -222,18 +234,20 @@ class ToolExecutor:
                 tool_source=tool_source or "unknown",
             )
 
-            self._ensure_messages_list().append({
-                "type": "tool_result",
-                "tool_name": tool_name,
-                "result": str(result)[:8000] if result else "执行失败",
-                "success": result is not None,
-                "timestamp": datetime.now().isoformat(),
-            })
+            self._ensure_messages_list().append(
+                {
+                    "type": "tool_result",
+                    "tool_name": tool_name,
+                    "result": str(result)[:8000] if result else "执行失败",
+                    "success": result is not None,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
             return result
 
         except Exception as e:
-            logger.error(f"工具自动执行失败: {tool_name}, 错误: {e}")
+            logger.error("工具自动执行失败: %s, 错误: %s", tool_name, e)
             self.on_tool_executed(
                 tool_name=tool_name,
                 params=tool_params,
@@ -263,15 +277,17 @@ class ToolExecutor:
         if not tool_name:
             return {"status": "failure", "error": "ToolMemory 结果缺少 tool_name", "tool_name": ""}
 
-        logger.info(f"🚀 自动执行工具（异步）: {tool_name} (来源: {tool_source})")
+        logger.info("🚀 自动执行工具（异步）: %s (来源: %s)", tool_name, tool_source)
 
-        self._ensure_messages_list().append({
-            "type": "tool_call",
-            "tool_name": tool_name,
-            "tool_source": tool_source,
-            "params": tool_params,
-            "timestamp": datetime.now().isoformat(),
-        })
+        self._ensure_messages_list().append(
+            {
+                "type": "tool_call",
+                "tool_name": tool_name,
+                "tool_source": tool_source,
+                "params": tool_params,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
         try:
             if tool_source == "skill_system" and self._skill_registry:
@@ -290,13 +306,15 @@ class ToolExecutor:
                 tool_source=tool_source or "unknown",
             )
 
-            self._ensure_messages_list().append({
-                "type": "tool_result",
-                "tool_name": tool_name,
-                "result": str(result)[:8000] if result else "执行失败",
-                "success": success,
-                "timestamp": datetime.now().isoformat(),
-            })
+            self._ensure_messages_list().append(
+                {
+                    "type": "tool_result",
+                    "tool_name": tool_name,
+                    "result": str(result)[:8000] if result else "执行失败",
+                    "success": success,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
             if success:
                 return {"status": "success", "result": result, "tool_name": tool_name}
@@ -304,7 +322,7 @@ class ToolExecutor:
                 return {"status": "failure", "error": "工具返回空结果", "tool_name": tool_name}
 
         except Exception as e:
-            logger.error(f"工具自动执行失败: {tool_name}, 错误: {e}")
+            logger.error("工具自动执行失败: %s, 错误: %s", tool_name, e)
             self.on_tool_executed(
                 tool_name=tool_name,
                 params=tool_params,
@@ -333,19 +351,19 @@ class ToolExecutor:
         try:
             skill = self._skill_registry.get_skill(skill_name)
             if not skill:
-                logger.warning(f"技能未找到: {skill_name}")
+                logger.warning("技能未找到: %s", skill_name)
                 return None
 
-            if hasattr(skill, 'execute') and callable(skill.execute):
+            if hasattr(skill, "execute") and callable(skill.execute):
                 result = skill.execute(**skill_params)
-                logger.info(f"✅ 技能执行成功: {skill_name}")
+                logger.info("✅ 技能执行成功: %s", skill_name)
                 return {"result": result, "skill_name": skill_name}
             else:
-                logger.warning(f"技能没有 execute 方法: {skill_name}")
+                logger.warning("技能没有 execute 方法: %s", skill_name)
                 return None
 
         except Exception as e:
-            logger.error(f"技能执行异常: {skill_name}, 错误: {e}")
+            logger.error("技能执行异常: %s, 错误: %s", skill_name, e)
             return None
 
     def execute_cli_tool(
@@ -355,32 +373,34 @@ class ToolExecutor:
         user_input: str,
     ) -> Optional[Dict[str, Any]]:
         """执行 CLI/MCP 工具（同步版本，向后兼容）"""
-        logger.info(f"CLI工具执行（模拟）: {tool_name}, 参数: {tool_params}")
+        logger.info("CLI工具执行（模拟）: %s, 参数: %s", tool_name, tool_params)
 
         if self.tool_router:
             import asyncio
+
             try:
-                loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
                 # 已有 event loop 在运行，用 nest_asyncio 或直接创建新 loop
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    result = pool.submit(
-                        asyncio.run,
-                        self.tool_router.execute(
-                            tool_name=tool_name,
-                            params=tool_params,
-                            agent_id=self.config.agent_id if self.config else 'default',
-                            user_id=getattr(self.config, 'user_id', 'default') if self.config else 'default',
-                        )
-                    ).result()
+                from neurova.core.thread_pool import get_thread_pool
+
+                pool = get_thread_pool()
+                result = pool.submit(
+                    asyncio.run,
+                    self.tool_router.execute(
+                        tool_name=tool_name,
+                        params=tool_params,
+                        agent_id=self.config.agent_id if self.config else "default",
+                        user_id=getattr(self.config, "user_id", "default") if self.config else "default",
+                    ),
+                ).result()
             except RuntimeError:
                 # 没有运行中的 event loop
                 result = _asyncio.run(
                     self.tool_router.execute(
                         tool_name=tool_name,
                         params=tool_params,
-                        agent_id=self.config.agent_id if self.config else 'default',
-                        user_id=getattr(self.config, 'user_id', 'default') if self.config else 'default',
+                        agent_id=self.config.agent_id if self.config else "default",
+                        user_id=getattr(self.config, "user_id", "default") if self.config else "default",
                     )
                 )
             if result.success:
@@ -397,19 +417,24 @@ class ToolExecutor:
         user_input: str,
     ) -> Optional[Dict[str, Any]]:
         """执行 CLI/MCP 工具（异步版本，支持超时控制）"""
-        logger.info(f"CLI工具执行（异步）: {tool_name}, 参数: {tool_params}")
+        logger.info("CLI工具执行（异步）: %s, 参数: %s", tool_name, tool_params)
 
         if self.tool_router:
             result = await self.tool_router.execute(
                 tool_name=tool_name,
                 params=tool_params,
-                agent_id=self.config.agent_id if self.config else 'default',
-                user_id=getattr(self.config, 'user_id', 'default') if self.config else 'default',
+                agent_id=self.config.agent_id if self.config else "default",
+                user_id=getattr(self.config, "user_id", "default") if self.config else "default",
             )
             if result.success:
                 return {"result": result.result, "tool_name": tool_name, "status": "success"}
             else:
-                return {"result": f"执行失败: {tool_name}", "tool_name": tool_name, "status": "failure", "error": str(result.error) if hasattr(result, 'error') else "未知错误"}
+                return {
+                    "result": f"执行失败: {tool_name}",
+                    "tool_name": tool_name,
+                    "status": "failure",
+                    "error": str(result.error) if hasattr(result, "error") else "未知错误",
+                }
 
         return {"result": f"模拟执行: {tool_name}", "tool_name": tool_name, "status": "simulated"}
 
@@ -439,14 +464,14 @@ class ToolExecutor:
                     execution_time=execution_time,
                 )
             except Exception as e:
-                logger.warning(f"记录工具使用失败: {e}")
+                logger.warning("记录工具使用失败: %s", e)
 
         # 2. 工具生命周期记录 (P0: ToolLifecycleManager)
         if self.tool_lifecycle:
             try:
                 self.tool_lifecycle.touch(tool_name)
             except Exception as e:
-                logger.warning(f"工具生命周期记录失败: {e}")
+                logger.warning("工具生命周期记录失败: %s", e)
 
         # 3. 技能打包器观察 (AutoSkillBuilder)
         if self.skill_packer:
@@ -457,20 +482,22 @@ class ToolExecutor:
                     success=success,
                 )
             except Exception as e:
-                logger.warning(f"技能打包器记录失败: {e}")
+                logger.warning("技能打包器记录失败: %s", e)
 
         # 4. 进化系统反馈（权重更新 + 生命周期评估）
         evolution = getattr(self._agent, "evolution", None)
         if evolution:
             try:
-                evolution.on_after_tool_execution(
+                from neurova.evolution.evolution_facade import EvolutionFacade
+                facade = EvolutionFacade(evolution)
+                facade.on_after_tool_execution(
                     tool_name=tool_name,
                     success=success,
                     context=user_input[:100],
                     latency=execution_time,
                 )
             except Exception as e:
-                logger.warning(f"进化系统反馈失败: {e}")
+                logger.warning("进化系统反馈失败: %s", e)
 
     # ================================================================
     # 多策略文本工具调用解析
@@ -492,7 +519,7 @@ class ToolExecutor:
         seen_names = set()
 
         # Strategy 1: [TOOL_CALL:name(params)]
-        pattern1 = r'\[TOOL_CALL:([\w:.\-]+)\((.+?)\)\]'
+        pattern1 = r"\[TOOL_CALL:([\w:.\-]+)\((.+?)\)\]"
         for m in re.finditer(pattern1, text):
             name, params_str = m.group(1), m.group(2)
             if name not in seen_names:
@@ -503,7 +530,7 @@ class ToolExecutor:
             return results
 
         # Strategy 2: ```json ... ``` blocks with {"function": ...}
-        json_blocks = re.findall(r'```(?:json)?\s*(.*?)\s*```', text, re.DOTALL)
+        json_blocks = re.findall(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
         for block in json_blocks:
             try:
                 data = json.loads(block)
@@ -542,7 +569,7 @@ class ToolExecutor:
             return results
 
         # Strategy 3: ``` ... TOOL_CALL:name(params) ... ``` (code blocks)
-        code_blocks = re.findall(r'```\s*(.*?)\s*```', text, re.DOTALL)
+        code_blocks = re.findall(r"```\s*(.*?)\s*```", text, re.DOTALL)
         for block in code_blocks:
             for m in re.finditer(pattern1, block):
                 name, params_str = m.group(1), m.group(2)
@@ -557,7 +584,7 @@ class ToolExecutor:
         # Only match known tool names to avoid false positives
         known_tools = self._get_known_tool_names()
         if known_tools:
-            pattern4 = r'(?:^|\s)(' + '|'.join(re.escape(t) for t in known_tools) + r')\(([^)]*)\)'
+            pattern4 = r"(?:^|\s)(" + "|".join(re.escape(t) for t in known_tools) + r")\(([^)]*)\)"
             for m in re.finditer(pattern4, text):
                 name, params_str = m.group(1), m.group(2)
                 if name not in seen_names:
@@ -569,10 +596,10 @@ class ToolExecutor:
     def _strip_tool_calls_from_text(self, text: str) -> str:
         """从文本中移除所有已识别的工具调用标记"""
         # Remove [TOOL_CALL:...] patterns
-        text = re.sub(r'\[TOOL_CALL:[\w:.\-]+\([^)]*\)\]', '', text)
+        text = re.sub(r"\[TOOL_CALL:[\w:.\-]+\([^)]*\)\]", "", text)
         # Remove ```json ... ``` blocks that contained tool calls
-        text = re.sub(r'```(?:json)?\s*\{[^`]*"function"[^`]*\}\s*```', '', text, flags=re.DOTALL)
-        text = re.sub(r'```(?:json)?\s*\[[^`]*"function"[^`]*\]\s*```', '', text, flags=re.DOTALL)
+        text = re.sub(r'```(?:json)?\s*\{[^`]*"function"[^`]*\}\s*```', "", text, flags=re.DOTALL)
+        text = re.sub(r'```(?:json)?\s*\[[^`]*"function"[^`]*\]\s*```', "", text, flags=re.DOTALL)
         return text.strip()
 
     def _get_known_tool_names(self) -> List[str]:
@@ -587,9 +614,18 @@ class ToolExecutor:
                 pass
         # Built-in tools
         builtin = [
-            "memory_search", "file_read", "file_write", "file_create",
-            "file_delete", "file_edit", "computer_screenshot", "computer_click",
-            "computer_type", "computer_scroll", "computer_shell", "emotion_analyze",
+            "memory_search",
+            "file_read",
+            "file_write",
+            "file_create",
+            "file_delete",
+            "file_edit",
+            "computer_screenshot",
+            "computer_click",
+            "computer_type",
+            "computer_scroll",
+            "computer_shell",
+            "emotion_analyze",
         ]
         names.update(builtin)
         return sorted(names)
@@ -606,22 +642,22 @@ class ToolExecutor:
         if not params_str:
             return params
 
-        if params_str.startswith('{'):
+        if params_str.startswith("{"):
             try:
                 return json.loads(params_str)
             except json.JSONDecodeError:
-                logger.warning(f"JSON参数解析失败: {params_str}")
+                logger.warning("JSON参数解析失败: %s", params_str)
                 return params
 
         # key=value 格式
-        for pair in params_str.split(','):
+        for pair in params_str.split(","):
             pair = pair.strip()
-            if '=' in pair:
-                k, v = pair.split('=', 1)
+            if "=" in pair:
+                k, v = pair.split("=", 1)
                 k, v = k.strip(), v.strip().strip('"').strip("'")
-                if v.lower() == 'true':
+                if v.lower() == "true":
                     params[k] = True
-                elif v.lower() == 'false':
+                elif v.lower() == "false":
                     params[k] = False
                 else:
                     try:
@@ -638,7 +674,7 @@ class ToolExecutor:
         # 1. SkillRegistry
         if self._skill_registry:
             sk = self._skill_registry.get_skill(tool_name)
-            if sk and hasattr(sk, '_get_parameters'):
+            if sk and hasattr(sk, "_get_parameters"):
                 return sk._get_parameters()
 
         # 2. 内置工具参数

@@ -12,19 +12,19 @@
 """
 
 import logging
-import time
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime, UTC
-import json
-from pathlib import Path
 import threading
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ToolWeight:
     """工具权重数据"""
+
     tool_name: str
     success_count: int = 0
     failure_count: int = 0
@@ -32,6 +32,7 @@ class ToolWeight:
     last_used: Optional[datetime] = None
     adaptive_multiplier: float = 1.0
     lifecycle_state: str = "active"  # active, degraded, archived, frozen
+
 
 class ToolLifecycleManager:
     """工具生命周期管理器 — 记录工具使用状态"""
@@ -47,7 +48,7 @@ class ToolLifecycleManager:
         with self._lock:
             self._usage_counts[tool_name] = self._usage_counts.get(tool_name, 0) + 1
             self._last_used[tool_name] = datetime.now(UTC)
-            logger.debug(f"Tool touched: {tool_name} (count: {self._usage_counts[tool_name]})")
+            logger.debug("Tool touched: %s (count: %s)", tool_name, self._usage_counts[tool_name])
 
     def get_usage_count(self, tool_name: str) -> int:
         """获取工具使用次数"""
@@ -60,10 +61,10 @@ class ToolLifecycleManager:
     def evaluate(self, tool_name: str = None) -> Dict[str, Any]:
         """
         评估工具生命周期状态
-        
+
         Args:
             tool_name: 工具名称，如果为 None 则评估所有工具
-            
+
         Returns:
             评估结果字典
         """
@@ -90,6 +91,7 @@ class ToolLifecycleManager:
                         "status": "active" if count > 0 else "unused",
                     }
                 return results
+
 
 class AdaptiveToolWeights:
     """自适应权重管理器 — 根据工具表现调整权重"""
@@ -130,7 +132,9 @@ class AdaptiveToolWeights:
 
             weight.total_latency += latency
             weight.last_used = datetime.now(UTC)
-            logger.debug(f"Weight updated for {tool_name}: success={success}, multiplier={weight.adaptive_multiplier:.3f}")
+            logger.debug(
+                f"Weight updated for {tool_name}: success={success}, multiplier={weight.adaptive_multiplier:.3f}"
+            )
 
     def get_effective_weight(self, tool_name: str) -> float:
         """获取工具的有效权重（考虑自适应乘数）"""
@@ -150,15 +154,18 @@ class AdaptiveToolWeights:
 
     def get_ranked_tools(self, tool_names: List[str]) -> List[str]:
         """按权重对工具进行排序"""
+
         def sort_key(tool_name: str) -> float:
             return self.get_effective_weight(tool_name)
 
         return sorted(tool_names, key=sort_key, reverse=True)
 
-# 从真实实现导入，替代占位符
-from neurova.evolution.pattern_miner import PatternMiner, FrequentPattern
-from neurova.evolution.genetic_engine import ToolGeneticEngine, ToolGenotype
+
 from neurova.evolution.experience_feedback import ExperienceFeedback
+from neurova.evolution.genetic_engine import ToolGeneticEngine
+
+# 从真实实现导入，替代占位符
+from neurova.evolution.pattern_miner import PatternMiner
 
 
 class NLToolSynthesizer:
@@ -167,12 +174,13 @@ class NLToolSynthesizer:
     def __init__(self, pattern_miner: Optional[PatternMiner] = None):
         self.pattern_miner = pattern_miner
         logger.info("NLToolSynthesizer initialized")
-    
+
     def synthesize_from_patterns(self, top_n: int = 5) -> List[Dict[str, Any]]:
         """从频繁模式合成工具模板列表。"""
         if not self.pattern_miner:
             return []
         return self.pattern_miner.to_skill_template_list(top_n=top_n)
+
 
 class EvolutionOrchestrator:
     """进化编排器 — 协调工具进化、权重更新和经验反哺"""
@@ -192,7 +200,7 @@ class EvolutionOrchestrator:
 
         # 工具注册表
         self._registered_tools: List[str] = []
-        
+
         # 生命周期评估时间追踪
         self._last_lifecycle_eval: float = time.time()
         self._lifecycle_eval_interval: float = 3600.0  # 1 小时
@@ -203,9 +211,9 @@ class EvolutionOrchestrator:
         """注册工具列表（同时注册到权重和生命周期管理器）"""
         self._registered_tools = tool_names.copy()
         for name in tool_names:
-            if hasattr(self.tool_lifecycle, 'register_tool'):
+            if hasattr(self.tool_lifecycle, "register_tool"):
                 self.tool_lifecycle.register_tool(name)
-        logger.info(f"Registered {len(tool_names)} tools")
+        logger.info("Registered %s tools", len(tool_names))
 
     def on_before_tool_selection(
         self,
@@ -225,24 +233,24 @@ class EvolutionOrchestrator:
             包含排序后工具列表的字典
         """
         tool_list = tools or available_tools or []
-        
+
         filtered: List[str] = []
         ranking: List[str] = []
-        
+
         for tool in tool_list:
             state = None
-            if hasattr(self.tool_lifecycle, 'get_state'):
+            if hasattr(self.tool_lifecycle, "get_state"):
                 state = self.tool_lifecycle.get_state(tool)
-            
+
             # 从 ToolLifecycleState 枚举或字符串比较
-            state_value = state.value if hasattr(state, 'value') else str(state) if state else "active"
-            
+            state_value = state.value if hasattr(state, "value") else str(state) if state else "active"
+
             if state_value in ("archived", "frozen"):
                 filtered.append(tool)
                 continue
-            
+
             ranking.append(tool)
-        
+
         # 按权重排序
         ranked_tools = self.tool_weights.get_ranked_tools(ranking)
 
@@ -251,10 +259,10 @@ class EvolutionOrchestrator:
         for tool in ranked_tools:
             w = self.tool_weights.get_effective_weight(tool)
             state = None
-            if hasattr(self.tool_lifecycle, 'get_state'):
+            if hasattr(self.tool_lifecycle, "get_state"):
                 state = self.tool_lifecycle.get_state(tool)
-            state_value = state.value if hasattr(state, 'value') else str(state) if state else "active"
-            
+            state_value = state.value if hasattr(state, "value") else str(state) if state else "active"
+
             if state_value == "degraded":
                 w *= 0.7
             weights[tool] = w
@@ -290,7 +298,7 @@ class EvolutionOrchestrator:
         # 可能触发生命周期评估
         self._maybe_evaluate_lifecycle()
 
-        logger.debug(f"Tool execution recorded: {tool_name}, success={success}")
+        logger.debug("Tool execution recorded: %s, success=%s", tool_name, success)
 
     def on_experience_recorded(self, text: str, task: str, tools: List[str], success: bool) -> Dict[str, Any]:
         """
@@ -331,9 +339,9 @@ class EvolutionOrchestrator:
                         success=success,
                     )
                 except Exception as e:
-                    logger.warning(f"经验结晶观察失败: {e}")
+                    logger.warning("经验结晶观察失败: %s", e)
 
-        logger.info(f"Experience recorded: task='{task}', tools={tools}, success={success}")
+        logger.info("Experience recorded: task='%s', tools=%s, success=%s", task, tools, success)
 
         return {
             "insights_count": result.get("insights_created", 0),
@@ -349,15 +357,15 @@ class EvolutionOrchestrator:
         now = time.time()
         if now - self._last_lifecycle_eval < self._lifecycle_eval_interval:
             return
-        
+
         self._last_lifecycle_eval = now
-        
-        if hasattr(self.tool_lifecycle, 'evaluate'):
+
+        if hasattr(self.tool_lifecycle, "evaluate"):
             self.tool_lifecycle.evaluate()
-        
-        if hasattr(self.tool_lifecycle, 'apply_decay'):
+
+        if hasattr(self.tool_lifecycle, "apply_decay"):
             self.tool_lifecycle.apply_decay()
-        
+
         logger.debug("Lifecycle evaluation triggered")
 
     def get_statistics(self) -> Dict[str, Any]:
@@ -367,27 +375,27 @@ class EvolutionOrchestrator:
             "registered_tools": len(self._registered_tools),
             "tools_with_weights": len(self.tool_weights._weights),
         }
-        
+
         # 生命周期统计
-        if hasattr(self.tool_lifecycle, 'get_lifecycle_report'):
+        if hasattr(self.tool_lifecycle, "get_lifecycle_report"):
             stats["lifecycle"] = self.tool_lifecycle.get_lifecycle_report()
-        
+
         # 每个工具的详细统计
         tool_stats = {}
         for tool_name in self._registered_tools:
             tool_info = {
                 "weight": self.tool_weights.get_effective_weight(tool_name),
             }
-            
+
             # 生命周期状态
-            if hasattr(self.tool_lifecycle, 'get_state'):
+            if hasattr(self.tool_lifecycle, "get_state"):
                 state = self.tool_lifecycle.get_state(tool_name)
-                tool_info["lifecycle_state"] = state.value if hasattr(state, 'value') else str(state) or "active"
-            
+                tool_info["lifecycle_state"] = state.value if hasattr(state, "value") else str(state) or "active"
+
             tool_stats[tool_name] = tool_info
-        
+
         stats["tools"] = tool_stats
-        
+
         return stats
 
 
@@ -399,7 +407,7 @@ _orchestrator_lock = threading.Lock()
 def get_evolution_orchestrator() -> EvolutionOrchestrator:
     """
     获取 EvolutionOrchestrator 单例
-    
+
     Returns:
         EvolutionOrchestrator 实例
     """

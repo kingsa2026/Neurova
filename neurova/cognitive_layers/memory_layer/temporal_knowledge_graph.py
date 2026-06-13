@@ -10,15 +10,15 @@
 5. 高效检索优化
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from enum import Enum
 import hashlib
 import json
 import logging
 import re
 import sqlite3
 import threading
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -26,8 +26,10 @@ logger = logging.getLogger(__name__)
 
 # ────── Enums ──────
 
+
 class FactStatus(Enum):
     """事实状态"""
+
     ACTIVE = "active"
     EXPIRED = "expired"
     CONFLICTED = "conflicted"
@@ -36,6 +38,7 @@ class FactStatus(Enum):
 
 class RelationType(Enum):
     """关系类型"""
+
     IS_A = "is_a"
     HAS_A = "has_a"
     PART_OF = "part_of"
@@ -49,9 +52,11 @@ class RelationType(Enum):
 
 # ────── Data Models ──────
 
+
 @dataclass
 class TemporalFact:
     """时序事实"""
+
     id: str = ""
     subject: str = ""
     predicate: str = ""
@@ -150,6 +155,7 @@ class TemporalFact:
 @dataclass
 class FactConflict:
     """事实冲突"""
+
     fact1_id: str
     fact2_id: str
     conflict_type: str
@@ -161,6 +167,7 @@ class FactConflict:
 
 
 # ────── 主类 ──────
+
 
 class TemporalKnowledgeGraph:
     """时序知识图谱引擎，管理带时间窗口的事实"""
@@ -214,7 +221,7 @@ class TemporalKnowledgeGraph:
         self._conn: Optional[sqlite3.Connection] = None
         self._initialize_db()
         self._load_facts_into_cache()
-        logger.info(f"TemporalKnowledgeGraph initialized with db_path={db_path}")
+        logger.info("TemporalKnowledgeGraph initialized with db_path=%s", db_path)
 
     def _initialize_db(self):
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
@@ -256,9 +263,13 @@ class TemporalKnowledgeGraph:
                 return datetime.now(timezone.utc)
 
         return TemporalFact(
-            id=row["id"], subject=row["subject"], predicate=row["predicate"],
-            object=row["object"], relation_type=RelationType(row["relation_type"]),
-            confidence=row["confidence"], status=FactStatus(row["status"]),
+            id=row["id"],
+            subject=row["subject"],
+            predicate=row["predicate"],
+            object=row["object"],
+            relation_type=RelationType(row["relation_type"]),
+            confidence=row["confidence"],
+            status=FactStatus(row["status"]),
             valid_from=_parse_dt(row["valid_from"]) or datetime.now(timezone.utc),
             valid_until=_parse_dt(row["valid_until"]),
             created_at=_parse_dt(row["created_at"]) or datetime.now(timezone.utc),
@@ -278,13 +289,24 @@ class TemporalKnowledgeGraph:
              valid_from,valid_until,created_at,updated_at,
              source_memory_id,source_text,extraction_method,metadata,tags)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (fact.id, fact.subject, fact.predicate, fact.object,
-             fact.relation_type.value, fact.confidence, fact.status.value,
-             fact.valid_from.isoformat(),
-             fact.valid_until.isoformat() if fact.valid_until else None,
-             fact.created_at.isoformat(), fact.updated_at.isoformat(),
-             fact.source_memory_id, fact.source_text, fact.extraction_method,
-             json.dumps(fact.metadata), json.dumps(fact.tags)),
+            (
+                fact.id,
+                fact.subject,
+                fact.predicate,
+                fact.object,
+                fact.relation_type.value,
+                fact.confidence,
+                fact.status.value,
+                fact.valid_from.isoformat(),
+                fact.valid_until.isoformat() if fact.valid_until else None,
+                fact.created_at.isoformat(),
+                fact.updated_at.isoformat(),
+                fact.source_memory_id,
+                fact.source_text,
+                fact.extraction_method,
+                json.dumps(fact.metadata),
+                json.dumps(fact.tags),
+            ),
         )
         conn.commit()
 
@@ -296,13 +318,23 @@ class TemporalKnowledgeGraph:
             status=?,valid_from=?,valid_until=?,updated_at=?,
             source_memory_id=?,source_text=?,extraction_method=?,metadata=?,tags=?
             WHERE id=?""",
-            (fact.subject, fact.predicate, fact.object,
-             fact.relation_type.value, fact.confidence, fact.status.value,
-             fact.valid_from.isoformat(),
-             fact.valid_until.isoformat() if fact.valid_until else None,
-             fact.updated_at.isoformat(),
-             fact.source_memory_id, fact.source_text, fact.extraction_method,
-             json.dumps(fact.metadata), json.dumps(fact.tags), fact.id),
+            (
+                fact.subject,
+                fact.predicate,
+                fact.object,
+                fact.relation_type.value,
+                fact.confidence,
+                fact.status.value,
+                fact.valid_from.isoformat(),
+                fact.valid_until.isoformat() if fact.valid_until else None,
+                fact.updated_at.isoformat(),
+                fact.source_memory_id,
+                fact.source_text,
+                fact.extraction_method,
+                json.dumps(fact.metadata),
+                json.dumps(fact.tags),
+                fact.id,
+            ),
         )
         conn.commit()
 
@@ -314,7 +346,7 @@ class TemporalKnowledgeGraph:
             if old_fact.valid_until is None or old_fact.valid_until > new_fact.valid_from:
                 old_fact.supersede(new_fact.id)
                 self._update_fact_in_db(old_fact)
-                logger.info(f"Superseded fact {old_fact.id} with {new_fact.id}")
+                logger.info("Superseded fact %s with %s", old_fact.id, new_fact.id)
 
     def add_fact(self, fact: TemporalFact, check_conflicts: bool = True) -> Tuple[bool, List[FactConflict]]:
         with self._lock:
@@ -322,7 +354,7 @@ class TemporalKnowledgeGraph:
             if check_conflicts:
                 conflicts = self.detect_conflicts(fact)
                 if any(c.severity > 0.7 for c in conflicts):
-                    logger.warning(f"High severity conflicts detected for {fact.id}")
+                    logger.warning("High severity conflicts detected for %s", fact.id)
                     return False, conflicts
             existing = self._facts_cache.get(fact.id)
             if existing:
@@ -338,9 +370,14 @@ class TemporalKnowledgeGraph:
                 self._expire_older_facts(fact)
             return True, conflicts
 
-    def query_current(self, subject: Optional[str] = None, predicate: Optional[str] = None,
-                     object_: Optional[str] = None, relation_type: Optional[RelationType] = None,
-                     time_point: Optional[datetime] = None) -> List[TemporalFact]:
+    def query_current(
+        self,
+        subject: Optional[str] = None,
+        predicate: Optional[str] = None,
+        object_: Optional[str] = None,
+        relation_type: Optional[RelationType] = None,
+        time_point: Optional[datetime] = None,
+    ) -> List[TemporalFact]:
         if time_point is None:
             time_point = datetime.now(timezone.utc)
         with self._lock:
@@ -360,15 +397,18 @@ class TemporalKnowledgeGraph:
             results.sort(key=lambda x: x.confidence, reverse=True)
             return results
 
-    def query_at_time(self, time_point: datetime, subject: Optional[str] = None,
-                     predicate: Optional[str] = None) -> List[TemporalFact]:
+    def query_at_time(
+        self, time_point: datetime, subject: Optional[str] = None, predicate: Optional[str] = None
+    ) -> List[TemporalFact]:
         return self.query_current(subject=subject, predicate=predicate, time_point=time_point)
 
-    def get_fact_history(self, subject: str, predicate: Optional[str] = None,
-                        limit: int = 100) -> List[TemporalFact]:
+    def get_fact_history(self, subject: str, predicate: Optional[str] = None, limit: int = 100) -> List[TemporalFact]:
         with self._lock:
-            results = [f for f in self._facts_cache.values()
-                       if f.subject == subject and (predicate is None or f.predicate == predicate)]
+            results = [
+                f
+                for f in self._facts_cache.values()
+                if f.subject == subject and (predicate is None or f.predicate == predicate)
+            ]
             results.sort(key=lambda x: x.valid_from, reverse=True)
             return results[:limit]
 
@@ -379,16 +419,27 @@ class TemporalKnowledgeGraph:
                 if existing.id == new_fact.id:
                     continue
                 if self._is_contradiction(existing, new_fact):
-                    conflicts.append(FactConflict(
-                        existing.id, new_fact.id, "contradiction",
-                        f"矛盾事实: {existing.object} vs {new_fact.object}", 0.8))
+                    conflicts.append(
+                        FactConflict(
+                            existing.id,
+                            new_fact.id,
+                            "contradiction",
+                            f"矛盾事实: {existing.object} vs {new_fact.object}",
+                            0.8,
+                        )
+                    )
                 if self._is_relation_mutually_exclusive(existing, new_fact):
-                    conflicts.append(FactConflict(
-                        existing.id, new_fact.id, "mutual_exclusion",
-                        f"互斥关系: {existing.predicate} vs {new_fact.predicate}", 0.6))
+                    conflicts.append(
+                        FactConflict(
+                            existing.id,
+                            new_fact.id,
+                            "mutual_exclusion",
+                            f"互斥关系: {existing.predicate} vs {new_fact.predicate}",
+                            0.6,
+                        )
+                    )
                 if self._has_temporal_overlap(existing, new_fact):
-                    conflicts.append(FactConflict(
-                        existing.id, new_fact.id, "temporal_overlap", "时间范围重叠", 0.4))
+                    conflicts.append(FactConflict(existing.id, new_fact.id, "temporal_overlap", "时间范围重叠", 0.4))
             for c in conflicts:
                 self._store_conflict(c)
         return conflicts
@@ -399,8 +450,7 @@ class TemporalKnowledgeGraph:
         return False
 
     def _is_relation_mutually_exclusive(self, f1: TemporalFact, f2: TemporalFact) -> bool:
-        pairs = {(RelationType.IS_A, RelationType.PART_OF),
-                 (RelationType.CAUSES, RelationType.RELATED_TO)}
+        pairs = {(RelationType.IS_A, RelationType.PART_OF), (RelationType.CAUSES, RelationType.RELATED_TO)}
         pair = (f1.relation_type, f2.relation_type)
         return pair in pairs or (pair[1], pair[0]) in pairs
 
@@ -415,17 +465,23 @@ class TemporalKnowledgeGraph:
             """INSERT INTO fact_conflicts
             (fact1_id,fact2_id,conflict_type,description,severity,detected_at,resolved,resolution)
             VALUES (?,?,?,?,?,?,?,?)""",
-            (conflict.fact1_id, conflict.fact2_id, conflict.conflict_type,
-             conflict.description, conflict.severity, conflict.detected_at.isoformat(),
-             conflict.resolved, conflict.resolution),
+            (
+                conflict.fact1_id,
+                conflict.fact2_id,
+                conflict.conflict_type,
+                conflict.description,
+                conflict.severity,
+                conflict.detected_at.isoformat(),
+                conflict.resolved,
+                conflict.resolution,
+            ),
         )
         conn.commit()
 
     def get_fact_by_id(self, fact_id: str) -> Optional[TemporalFact]:
         return self._facts_cache.get(fact_id)
 
-    def get_all_facts(self, status_filter: Optional[FactStatus] = None,
-                     limit: int = 1000) -> List[TemporalFact]:
+    def get_all_facts(self, status_filter: Optional[FactStatus] = None, limit: int = 1000) -> List[TemporalFact]:
         with self._lock:
             facts = list(self._facts_cache.values())
             if status_filter:
@@ -447,8 +503,7 @@ class TemporalKnowledgeGraph:
                 "total_facts": len(self._facts_cache),
                 "by_status": status_counts,
                 "by_relation_type": relation_counts,
-                "conflicts": {"total": total_conflicts, "resolved": resolved,
-                              "unresolved": total_conflicts - resolved},
+                "conflicts": {"total": total_conflicts, "resolved": resolved, "unresolved": total_conflicts - resolved},
             }
 
     def clear_cache(self):
@@ -471,32 +526,112 @@ class TemporalKnowledgeGraph:
 
 # ────── 桥梁类 ──────
 
+
 class TemporalKGMemoryBridge:
     """时序知识图谱与记忆系统的桥梁"""
 
     _EXTRACTION_RULES = [
-        {"name": "is_a", "pattern": r"(.+?)是一种(.+)", "predicate": "is_a",
-         "relation_type": RelationType.IS_A},
-        {"name": "works_at", "pattern": r"(.+?)在(.+?)工作", "predicate": "works_at",
-         "relation_type": RelationType.RELATED_TO},
-        {"name": "lives_in", "pattern": r"(.+?)住在(.+)", "predicate": "lives_in",
-         "relation_type": RelationType.LOCATED_IN},
-        {"name": "born_in", "pattern": r"(.+?)出生于(.+)", "predicate": "born_in",
-         "relation_type": RelationType.OCCURRED_AT},
-        {"name": "created_by", "pattern": r"(.+?)由(.+?)创建", "predicate": "created_by",
-         "relation_type": RelationType.HAS_A},
-        {"name": "occurred_at", "pattern": r"(.+?)发生在(.+)", "predicate": "occurred_at",
-         "relation_type": RelationType.OCCURRED_AT},
+        {"name": "is_a", "pattern": r"(.+?)是一种(.+)", "predicate": "is_a", "relation_type": RelationType.IS_A},
+        {
+            "name": "works_at",
+            "pattern": r"(.+?)在(.+?)工作",
+            "predicate": "works_at",
+            "relation_type": RelationType.RELATED_TO,
+        },
+        {
+            "name": "lives_in",
+            "pattern": r"(.+?)住在(.+)",
+            "predicate": "lives_in",
+            "relation_type": RelationType.LOCATED_IN,
+        },
+        {
+            "name": "born_in",
+            "pattern": r"(.+?)出生于(.+)",
+            "predicate": "born_in",
+            "relation_type": RelationType.OCCURRED_AT,
+        },
+        {
+            "name": "created_by",
+            "pattern": r"(.+?)由(.+?)创建",
+            "predicate": "created_by",
+            "relation_type": RelationType.HAS_A,
+        },
+        {
+            "name": "occurred_at",
+            "pattern": r"(.+?)发生在(.+)",
+            "predicate": "occurred_at",
+            "relation_type": RelationType.OCCURRED_AT,
+        },
     ]
 
-    _STOP_WORDS = frozenset({
-        "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一",
-        "也", "很", "到", "说", "要", "去", "你", "会", "着", "没有", "看", "好",
-        "the", "a", "an", "is", "are", "was", "were", "be", "have", "has", "had",
-        "do", "does", "did", "will", "would", "could", "should", "may", "can",
-        "what", "which", "who", "this", "that", "i", "me", "my", "we", "our",
-        "you", "your", "he", "him", "she", "her", "it", "its", "they", "them",
-    })
+    _STOP_WORDS = frozenset(
+        {
+            "的",
+            "了",
+            "在",
+            "是",
+            "我",
+            "有",
+            "和",
+            "就",
+            "不",
+            "人",
+            "都",
+            "一",
+            "也",
+            "很",
+            "到",
+            "说",
+            "要",
+            "去",
+            "你",
+            "会",
+            "着",
+            "没有",
+            "看",
+            "好",
+            "the",
+            "a",
+            "an",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "can",
+            "what",
+            "which",
+            "who",
+            "this",
+            "that",
+            "i",
+            "me",
+            "my",
+            "we",
+            "our",
+            "you",
+            "your",
+            "he",
+            "him",
+            "she",
+            "her",
+            "it",
+            "its",
+            "they",
+            "them",
+        }
+    )
 
     def __init__(self, tkg: TemporalKnowledgeGraph):
         self._tkg = tkg
@@ -505,8 +640,9 @@ class TemporalKGMemoryBridge:
     def _initialize_extraction_rules(self) -> List[Dict[str, Any]]:
         return list(self._EXTRACTION_RULES)
 
-    def extract_facts_from_memory(self, memory_id: str, content: str,
-                                 timestamp: Optional[datetime] = None) -> List[TemporalFact]:
+    def extract_facts_from_memory(
+        self, memory_id: str, content: str, timestamp: Optional[datetime] = None
+    ) -> List[TemporalFact]:
         if timestamp is None:
             timestamp = datetime.now(timezone.utc)
         facts: List[TemporalFact] = []
@@ -514,25 +650,41 @@ class TemporalKGMemoryBridge:
             try:
                 matches = re.findall(rule["pattern"], content)
                 for match in matches:
-                    subj, obj = (match if isinstance(match, tuple) else (match, ""))
+                    subj, obj = match if isinstance(match, tuple) else (match, "")
                     subj, obj = subj.strip(), obj.strip()
                     if subj and obj:
-                        facts.append(TemporalFact(
-                            subject=subj, predicate=rule["predicate"], object=obj,
-                            relation_type=rule["relation_type"], confidence=0.8,
-                            valid_from=timestamp, source_memory_id=memory_id,
-                            source_text=content, extraction_method="pattern_matching",
-                            tags=["extracted", "auto"]))
+                        facts.append(
+                            TemporalFact(
+                                subject=subj,
+                                predicate=rule["predicate"],
+                                object=obj,
+                                relation_type=rule["relation_type"],
+                                confidence=0.8,
+                                valid_from=timestamp,
+                                source_memory_id=memory_id,
+                                source_text=content,
+                                extraction_method="pattern_matching",
+                                tags=["extracted", "auto"],
+                            )
+                        )
             except Exception as e:
-                logger.error(f"Error applying rule {rule['name']}: {e}")
+                logger.error("Error applying rule %s: %s", rule['name'], e)
         nouns = self._extract_noun_phrases(content)
         for i in range(len(nouns) - 1):
-            facts.append(TemporalFact(
-                subject=nouns[i], predicate="related_to", object=nouns[i + 1],
-                relation_type=RelationType.RELATED_TO, confidence=0.5,
-                valid_from=timestamp, source_memory_id=memory_id,
-                source_text=content, extraction_method="noun_phrase",
-                tags=["extracted", "auto", "noun_phrase"]))
+            facts.append(
+                TemporalFact(
+                    subject=nouns[i],
+                    predicate="related_to",
+                    object=nouns[i + 1],
+                    relation_type=RelationType.RELATED_TO,
+                    confidence=0.5,
+                    valid_from=timestamp,
+                    source_memory_id=memory_id,
+                    source_text=content,
+                    extraction_method="noun_phrase",
+                    tags=["extracted", "auto", "noun_phrase"],
+                )
+            )
         return facts
 
     def _extract_noun_phrases(self, text: str) -> List[str]:
@@ -550,8 +702,9 @@ class TemporalKGMemoryBridge:
             phrases.append(" ".join(current))
         return phrases[:5]
 
-    def sync_memory_to_tkg(self, memory_id: str, content: str,
-                          timestamp: Optional[datetime] = None) -> List[TemporalFact]:
+    def sync_memory_to_tkg(
+        self, memory_id: str, content: str, timestamp: Optional[datetime] = None
+    ) -> List[TemporalFact]:
         facts = self.extract_facts_from_memory(memory_id, content, timestamp)
         added = []
         for fact in facts:
@@ -559,12 +712,13 @@ class TemporalKGMemoryBridge:
             if success:
                 added.append(fact)
                 if conflicts:
-                    logger.warning(f"Conflicts for fact {fact.id}: {len(conflicts)}")
-        logger.info(f"Synced {len(added)} facts from memory {memory_id}")
+                    logger.warning("Conflicts for fact %s: %s", fact.id, len(conflicts))
+        logger.info("Synced %s facts from memory %s", len(added), memory_id)
         return added
 
-    def query_tkg_for_context(self, query: str, max_facts: int = 10,
-                             time_window_days: int = 30) -> List[Dict[str, Any]]:
+    def query_tkg_for_context(
+        self, query: str, max_facts: int = 10, time_window_days: int = 30
+    ) -> List[Dict[str, Any]]:
         now = datetime.now(timezone.utc)
         window_start = now - timedelta(days=time_window_days)
         keywords = self._extract_keywords(query)
@@ -577,13 +731,18 @@ class TemporalKGMemoryBridge:
                     unique.append(fact)
         unique.sort(key=lambda x: x.confidence, reverse=True)
         return [
-            {"id": f.id, "subject": f.subject, "predicate": f.predicate,
-             "object": f.object, "confidence": f.confidence,
-             "valid_from": f.valid_from.isoformat(), "source": f.source_memory_id}
+            {
+                "id": f.id,
+                "subject": f.subject,
+                "predicate": f.predicate,
+                "object": f.object,
+                "confidence": f.confidence,
+                "valid_from": f.valid_from.isoformat(),
+                "source": f.source_memory_id,
+            }
             for f in unique[:max_facts]
         ]
 
     def _extract_keywords(self, text: str) -> List[str]:
         text = re.sub(r"[^\w\s]", " ", text)
-        return [w for w in text.split()
-                if w.lower() not in self._STOP_WORDS and len(w) > 1][:10]
+        return [w for w in text.split() if w.lower() not in self._STOP_WORDS and len(w) > 1][:10]

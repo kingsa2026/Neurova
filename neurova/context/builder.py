@@ -8,12 +8,13 @@ from __future__ import annotations
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from .models import TokenBudget
 from .injector import UnifiedContextInjector
+from .models import TokenBudget
 
 logger = logging.getLogger(__name__)
+
 
 class ContextBuilder:
     """
@@ -25,11 +26,7 @@ class ContextBuilder:
 
     MAX_CONTEXT_TOKENS = 16000  # 与 UnifiedContextInjector 保持一致
 
-    def __init__(
-        self,
-        config: Dict = None,
-        unified_injector: Optional[UnifiedContextInjector] = None
-    ):
+    def __init__(self, config: Dict = None, unified_injector: Optional[UnifiedContextInjector] = None):
         self.config = config or {}
         self._unified_injector = unified_injector
 
@@ -62,9 +59,7 @@ class ContextBuilder:
             return result.context
 
         # 降级模式：直接使用 injector 的静态方法
-        return self._fallback_build_context(
-            system_prompt, memories, conversation_history, user_input, agent_emotion
-        )
+        return self._fallback_build_context(system_prompt, memories, conversation_history, user_input, agent_emotion)
 
     def build_from_pool(
         self,
@@ -107,7 +102,7 @@ class ContextBuilder:
         budget = token_budget or TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)
 
         # 按优先级降序排序
-        sorted_pool = sorted(candidate_pool, key=lambda x: getattr(x, 'priority', 50), reverse=True)
+        sorted_pool = sorted(candidate_pool, key=lambda x: getattr(x, "priority", 50), reverse=True)
 
         # 分离 system 内容和 history
         system_parts: list[str] = []
@@ -133,15 +128,15 @@ class ContextBuilder:
         if not system_content:
             system_content = "You are a helpful assistant."
 
-        context = [{'role': 'system', 'content': system_content}]
+        context = [{"role": "system", "content": system_content}]
         # 对话历史
         if conversation_history:
             context.extend(conversation_history)
         else:
             for i, content in enumerate(history_items):
                 role = "user" if i % 2 == 0 else "assistant"
-                context.append({'role': role, 'content': content})
-        context.append({'role': 'user', 'content': user_input})
+                context.append({"role": role, "content": content})
+        context.append({"role": "user", "content": user_input})
 
         return context
 
@@ -156,21 +151,25 @@ class ContextBuilder:
     def _extract_memory_dicts_from_pool(self, pool: list) -> List[Dict]:
         """从候选池中提取记忆条目，还原为 dict 格式"""
         from neurova.context_pool import ContextSource
+
         memories = []
         for item in pool:
             if item.source == ContextSource.MEMORY:
-                memories.append({
-                    "content": item.content,
-                    "temperature": item.metadata.get("temperature", 50),
-                    "is_crystallized": item.metadata.get("is_crystallized", False),
-                    "is_important": item.metadata.get("is_important", False),
-                    "category": item.metadata.get("category", ""),
-                })
+                memories.append(
+                    {
+                        "content": item.content,
+                        "temperature": item.metadata.get("temperature", 50),
+                        "is_crystallized": item.metadata.get("is_crystallized", False),
+                        "is_important": item.metadata.get("is_important", False),
+                        "category": item.metadata.get("category", ""),
+                    }
+                )
         return memories
 
     def _extract_emotion_from_pool(self, pool: list) -> Optional[Dict]:
         """从候选池中提取情感状态"""
         from neurova.context_pool import ContextSource
+
         for item in pool:
             if item.source == ContextSource.EMOTION:
                 return {
@@ -182,22 +181,26 @@ class ContextBuilder:
     def _extract_experience_dicts_from_pool(self, pool: list) -> List[Dict]:
         """从候选池中提取经验条目，还原为 dict 格式"""
         from neurova.context_pool import ContextSource
+
         experiences = []
         for item in pool:
             if item.source == ContextSource.EXPERIENCE:
-                experiences.append({
-                    "context": item.content[:100],  # 使用内容作为上下文摘要
-                    "result": item.metadata.get("result", ""),
-                    "success": item.metadata.get("success", True),
-                    "lesson": item.metadata.get("lesson", ""),
-                    "confidence": item.metadata.get("confidence", 1.0),
-                })
+                experiences.append(
+                    {
+                        "context": item.content[:100],  # 使用内容作为上下文摘要
+                        "result": item.metadata.get("result", ""),
+                        "success": item.metadata.get("success", True),
+                        "lesson": item.metadata.get("lesson", ""),
+                        "confidence": item.metadata.get("confidence", 1.0),
+                    }
+                )
         return experiences
 
     @staticmethod
     def _source_to_section_name(source) -> str:
         """将 ContextSource 映射为 section 标题"""
         from neurova.context_pool import ContextSource
+
         mapping = {
             ContextSource.SYSTEM_INSTRUCTION: "系统指令",
             ContextSource.DEVELOPER_INSTRUCTION: "行为规则",
@@ -227,8 +230,7 @@ class ContextBuilder:
         """
         # 创建临时 injector
         temp_injector = UnifiedContextInjector(
-            memory_manager=None,  # 无记忆管理器
-            token_budget=TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)
+            memory_manager=None, token_budget=TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)  # 无记忆管理器
         )
 
         result = temp_injector.build_context(
@@ -256,31 +258,28 @@ class ContextBuilder:
             # 使用 injector 的压缩逻辑
             try:
                 # 计算总 tokens
-                total_tokens = sum(
-                    self._unified_injector._count_tokens(msg.get('content', ''))
-                    for msg in context
-                )
+                total_tokens = sum(self._unified_injector._count_tokens(msg.get("content", "")) for msg in context)
 
                 if total_tokens <= self.MAX_CONTEXT_TOKENS:
                     return context
 
                 # 需要压缩：提取系统消息和历史
-                system_msg = context[0] if context else {'role': 'system', 'content': ''}
-                user_msg = context[-1] if len(context) > 1 else {'role': 'user', 'content': ''}
+                system_msg = context[0] if context else {"role": "system", "content": ""}
+                user_msg = context[-1] if len(context) > 1 else {"role": "user", "content": ""}
                 history = context[1:-1] if len(context) > 2 else []
 
                 # 使用 injector 的压缩方法
                 system_content, compressed_history, _ = self._unified_injector._compress_context(
-                    system_content=system_msg.get('content', ''),
+                    system_content=system_msg.get("content", ""),
                     history=history,
-                    user_tokens=self._unified_injector._count_tokens(user_msg.get('content', ''))
+                    user_tokens=self._unified_injector._count_tokens(user_msg.get("content", "")),
                 )
 
                 # 重建上下文
-                compressed_system_msg = {'role': 'system', 'content': system_content}
+                compressed_system_msg = {"role": "system", "content": system_content}
                 return [compressed_system_msg] + compressed_history + [user_msg]
             except Exception as e:
-                logger.warning(f"UnifiedContextInjector 压缩失败，使用降级模式: {e}")
+                logger.warning("UnifiedContextInjector 压缩失败，使用降级模式: %s", e)
                 return self._fallback_compress(context)
 
         # 降级模式：使用简单的压缩逻辑
@@ -294,15 +293,11 @@ class ContextBuilder:
         """
         # 创建临时 injector
         temp_injector = UnifiedContextInjector(
-            memory_manager=None,
-            token_budget=TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)
+            memory_manager=None, token_budget=TokenBudget(max_total=self.MAX_CONTEXT_TOKENS)
         )
 
         # 计算总 tokens
-        total_tokens = sum(
-            temp_injector._count_tokens(msg.get('content', ''))
-            for msg in context
-        )
+        total_tokens = sum(temp_injector._count_tokens(msg.get("content", "")) for msg in context)
 
         if total_tokens <= self.MAX_CONTEXT_TOKENS:
             return context
@@ -358,18 +353,18 @@ class ContextBuilder:
         options = options or {}
 
         # 提取会话信息
-        conversation_history = session.get('conversation_history', [])
-        user_id = session.get('user_id')
-        agent_id = session.get('agent_id')
-        metadata = session.get('metadata', {})
+        conversation_history = session.get("conversation_history", [])
+        user_id = session.get("user_id")
+        session.get("agent_id")
+        metadata = session.get("metadata", {})
 
         # 提取选项
-        include_reflection_log = options.get('include_reflection_log', True)
-        include_question_queue = options.get('include_question_queue', False)
-        max_tokens = options.get('max_tokens')
-        tool_memory_result = options.get('tool_memory_result')
-        experience_items = options.get('experience_items')
-        system_prompt = options.get('system_prompt', self._get_default_system_prompt())
+        include_reflection_log = options.get("include_reflection_log", True)
+        include_question_queue = options.get("include_question_queue", False)
+        max_tokens = options.get("max_tokens")
+        tool_memory_result = options.get("tool_memory_result")
+        experience_items = options.get("experience_items")
+        system_prompt = options.get("system_prompt", self._get_default_system_prompt())
 
         # 自动检索记忆
         memories = self._auto_retrieve_memories(user_input, user_id)
@@ -397,9 +392,7 @@ class ContextBuilder:
             return result.context
 
         # 降级模式
-        return self._fallback_build_context(
-            system_prompt, memories, conversation_history, user_input, agent_emotion
-        )
+        return self._fallback_build_context(system_prompt, memories, conversation_history, user_input, agent_emotion)
 
     def _get_default_system_prompt(self) -> str:
         """获取默认系统提示"""
@@ -420,7 +413,7 @@ class ContextBuilder:
             )
             return memories or []
         except Exception as e:
-            logger.warning(f"自动记忆检索失败: {e}")
+            logger.warning("自动记忆检索失败: %s", e)
             return []
 
     def _analyze_emotion(self, user_input: str, metadata: Dict) -> Optional[Dict]:
@@ -428,10 +421,10 @@ class ContextBuilder:
         # 简单的情感分析逻辑
         # 实际实现可以使用更复杂的情感分析模型
         emotion_keywords = {
-            'joy': ['开心', '高兴', '快乐', '喜欢', '好'],
-            'sadness': ['难过', '伤心', '失望', '不好'],
-            'anger': ['生气', '愤怒', '讨厌', '烦'],
-            'neutral': ['你好', '请问', '怎么', '什么'],
+            "joy": ["开心", "高兴", "快乐", "喜欢", "好"],
+            "sadness": ["难过", "伤心", "失望", "不好"],
+            "anger": ["生气", "愤怒", "讨厌", "烦"],
+            "neutral": ["你好", "请问", "怎么", "什么"],
         }
 
         user_input_lower = user_input.lower()
@@ -450,7 +443,7 @@ class ContextBuilder:
             return memories
 
         # 提取工具记忆
-        tool_memories = tool_memory_result.get('memories', [])
+        tool_memories = tool_memory_result.get("memories", [])
         if not tool_memories:
             return memories
 
@@ -458,7 +451,7 @@ class ContextBuilder:
         merged = memories.copy()
         for tool_mem in tool_memories:
             # 检查是否已存在
-            if not any(m.get('content') == tool_mem.get('content') for m in merged):
+            if not any(m.get("content") == tool_mem.get("content") for m in merged):
                 merged.append(tool_mem)
 
         return merged

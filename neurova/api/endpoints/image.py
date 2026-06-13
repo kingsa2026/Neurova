@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from neurova.image_pipeline import get_image_pipeline_manager, BuildStatus
+from neurova.image_pipeline import get_image_pipeline_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,8 +30,10 @@ router = APIRouter()
 # Pydantic Models
 # ---------------------------------------------------------------------------
 
+
 class BuildRequest(BaseModel):
     """构建请求"""
+
     template_name: str = Field(..., description="模板名称")
     tag: str = Field(..., description="镜像标签")
     build_args: Dict[str, str] = Field(default_factory=dict, description="构建参数")
@@ -41,6 +43,7 @@ class BuildRequest(BaseModel):
 
 class ImageTemplate(BaseModel):
     """镜像模板"""
+
     name: str
     description: str = ""
     base_image: str = ""
@@ -53,6 +56,7 @@ class ImageTemplate(BaseModel):
 
 class BuildRecord(BaseModel):
     """构建记录"""
+
     build_id: str
     template_name: str
     tag: str
@@ -99,15 +103,18 @@ _builds_store: Dict[str, Dict[str, Any]] = {}
 # Helper Functions
 # ---------------------------------------------------------------------------
 
+
 def _generate_build_id() -> str:
     """生成构建 ID"""
     import uuid
+
     return f"build-{uuid.uuid4().hex[:12]}"
 
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 
 @router.get("/templates")
 async def list_templates():
@@ -139,12 +146,12 @@ async def build_image(body: BuildRequest):
     """构建自定义镜像"""
     # 获取 ImagePipelineManager
     manager = get_image_pipeline_manager()
-    
+
     # 检查模板是否存在
     template = manager.get_template(body.template_name)
     if not template:
         raise HTTPException(status_code=404, detail=f"Template '{body.template_name}' not found")
-    
+
     # 构建镜像
     result = manager.build_image(
         template_id=body.template_name,
@@ -152,12 +159,12 @@ async def build_image(body: BuildRequest):
         build_args=body.build_args,
         platform=body.platform,
     )
-    
+
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error", "Build failed"))
-    
+
     build_data = result["build"]
-    
+
     return {
         "code": 0,
         "message": f"Build started for template '{body.template_name}' with tag '{body.tag}'",
@@ -179,15 +186,15 @@ async def list_builds(
 ):
     """查看构建历史"""
     builds = list(_builds_store.values())
-    
+
     if template_name:
         builds = [b for b in builds if b.get("template_name") == template_name]
     if status:
         builds = [b for b in builds if b.get("status") == status]
-    
+
     # 按开始时间降序排序
     builds.sort(key=lambda x: x.get("started_at", 0), reverse=True)
-    
+
     return {
         "code": 0,
         "data": {
@@ -203,7 +210,7 @@ async def get_build(build_id: str):
     build = _builds_store.get(build_id)
     if not build:
         raise HTTPException(status_code=404, detail=f"Build '{build_id}' not found")
-    
+
     return {
         "code": 0,
         "data": build,

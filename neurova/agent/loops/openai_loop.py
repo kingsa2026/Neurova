@@ -3,15 +3,16 @@ OpenAI Loop - OpenAI 兼容模型适配循环
 
 支持: GPT-4, GPT-3.5-turbo, GPT-4V, 以及所有 OpenAI 兼容 API
 """
-import json
+
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from neurova.agent.loops.base import BaseAgentLoop
 from neurova.agent.loops.registry import register_loop
 from neurova.llm_client import LLMResponse
 
 logger = logging.getLogger(__name__)
+
 
 class OpenAILoop(BaseAgentLoop):
     """
@@ -21,18 +22,14 @@ class OpenAILoop(BaseAgentLoop):
     支持工具调用 (tool_calls) 和流式输出。
     """
 
-    def __init__(self, agent: 'Agent'):
+    def __init__(self, agent: "Agent"):
         super().__init__(agent)
         self._tool_rounds = 0  # 递归深度计数
         self._tools_supported = True  # 初始假设支持，400 后设为 False
-        logger.info(f"OpenAILoop initialized for agent: {agent.config.name}")
+        logger.info("OpenAILoop initialized for agent: %s", agent.config.name)
 
     async def predict_step(
-        self,
-        messages: List[Dict],
-        tools: Optional[List[Dict]] = None,
-        stream: bool = False,
-        **kwargs
+        self, messages: List[Dict], tools: Optional[List[Dict]] = None, stream: bool = False, **kwargs
     ) -> Any:
         """
         执行一步预测
@@ -80,8 +77,8 @@ class OpenAILoop(BaseAgentLoop):
                 return await self._predict_normal(request_params)
         except Exception as e:
             err_str = str(e)
-            if tools and ('400' in err_str or 'Invalid' in err_str or 'Missing' in err_str):
-                logger.warning(f"工具调用不被 API 支持，已禁用后续 tools 注入: {e}")
+            if tools and ("400" in err_str or "Invalid" in err_str or "Missing" in err_str):
+                logger.warning("工具调用不被 API 支持，已禁用后续 tools 注入: %s", e)
                 self._tools_supported = False
                 request_params.pop("tools", None)
                 request_params.pop("tool_choice", None)
@@ -98,18 +95,18 @@ class OpenAILoop(BaseAgentLoop):
         # 记录思考过程（用于前端展示）
         if response.reasoning_content:
             # 将思考过程存储到 agent 上，供 chat() 方法读取
-            if hasattr(self.agent, '_current_reasoning'):
+            if hasattr(self.agent, "_current_reasoning"):
                 self.agent._current_reasoning = response.reasoning_content
-            logger.info(f"🧠 捕获思考过程: {len(response.reasoning_content)} 字符")
+            logger.info("🧠 捕获思考过程: %s 字符", len(response.reasoning_content))
 
         # 处理 tool_calls
         if response.tool_calls:
             self._tool_rounds += 1
             if self._tool_rounds > 10:
-                logger.warning(f"工具调用轮次超过上限 ({self._tool_rounds})，停止递归")
+                logger.warning("工具调用轮次超过上限 (%s)，停止递归", self._tool_rounds)
                 return response
 
-            logger.info(f"LLM returned {len(response.tool_calls)} tool calls (round {self._tool_rounds})")
+            logger.info("LLM returned %s tool calls (round %s)", len(response.tool_calls), self._tool_rounds)
 
             # 执行工具
             tool_messages = await self.handle_tool_calls(response.tool_calls, request_params["messages"])
@@ -146,7 +143,9 @@ class OpenAILoop(BaseAgentLoop):
             elif ev_type == "tool_calls":
                 pending_tool_calls = event.get("data", [])
                 self._tool_rounds += 1
-                logger.info(f"🔧 流式捕获 {len(pending_tool_calls)} 个 tool_calls: {[tc['function']['name'] for tc in pending_tool_calls]}")
+                logger.info(
+                    f"🔧 流式捕获 {len(pending_tool_calls)} 个 tool_calls: {[tc['function']['name'] for tc in pending_tool_calls]}"
+                )
                 for tc in pending_tool_calls:
                     yield {"type": "tool_call", "data": tc}
             elif ev_type == "done":
@@ -154,35 +153,37 @@ class OpenAILoop(BaseAgentLoop):
                 full_reply = "".join(reply_parts)
 
                 # 保存思考过程到 agent
-                if reasoning_parts and hasattr(self.agent, '_current_reasoning'):
+                if reasoning_parts and hasattr(self.agent, "_current_reasoning"):
                     self.agent._current_reasoning = "".join(reasoning_parts)
-                    logger.info(f"🧠 捕获流式思考过程: {len(self.agent._current_reasoning)} 字符")
+                    logger.info("🧠 捕获流式思考过程: %s 字符", len(self.agent._current_reasoning))
 
                 # 如果有待处理的 tool_calls，执行它们
                 if pending_tool_calls:
                     # 先 yield 文本部分（如果有）
                     if full_reply.strip():
-                        logger.info(f"📝 工具调用前已有文本: {len(full_reply)} 字符")
+                        logger.info("📝 工具调用前已有文本: %s 字符", len(full_reply))
 
                     # 执行工具
-                    tool_messages = await self.handle_tool_calls(
-                        pending_tool_calls, request_params["messages"]
-                    )
+                    tool_messages = await self.handle_tool_calls(pending_tool_calls, request_params["messages"])
                     for tm in tool_messages:
                         yield {"type": "tool_result", "data": tm}
 
                     if self._tool_rounds <= 10:
                         # 将工具结果加入消息，递归调用（非流式）
                         request_params["messages"].extend(tool_messages)
-                        logger.info(f"🔄 工具执行完成，递归继续对话 (round {self._tool_rounds})")
+                        logger.info("🔄 工具执行完成，递归继续对话 (round %s)", self._tool_rounds)
                         continuation = await self._predict_normal(request_params)
                         if continuation and continuation.content:
                             yield {"type": "content", "data": continuation.content}
                             full_reply = continuation.content  # 使用续写结果作为最终回复
-                        if continuation and hasattr(continuation, 'reasoning_content') and continuation.reasoning_content:
+                        if (
+                            continuation
+                            and hasattr(continuation, "reasoning_content")
+                            and continuation.reasoning_content
+                        ):
                             yield {"type": "reasoning", "data": continuation.reasoning_content}
                     else:
-                        logger.warning(f"工具调用轮次超过上限 ({self._tool_rounds})，停止递归")
+                        logger.warning("工具调用轮次超过上限 (%s)，停止递归", self._tool_rounds)
 
                 yield {"type": "done", "reply": full_reply, "finish_reason": finish_reason}
 
@@ -192,8 +193,9 @@ class OpenAILoop(BaseAgentLoop):
         """
         处理工具调用 (重写基类方法，添加更多日志)
         """
-        logger.info(f"Handling {len(tool_calls)} tool calls")
+        logger.info("Handling %s tool calls", len(tool_calls))
         return await super().handle_tool_calls(tool_calls, messages)
+
 
 # 注册到全局注册表
 try:
@@ -204,11 +206,11 @@ try:
         r"zhipu/.*|zai-org/.*|moonshot/.*|yi-.*|internlm-.*|baichuan-.*|"
         r"mistral-.*|llama-.*|mixtral-.*|gemini-.*|text-.*|chatglm-.*|"
         r"minimax-.*|Meta-.*|THUDM/.*|Qwen/.*|Pro/.*|SiliconFlow.*",
-        priority=10
+        priority=10,
     )
     class RegisteredOpenAILoop(OpenAILoop):
         """注册到全局注册表的 OpenAI Loop (通用兼容)"""
-        pass
+
 
     logger.info("OpenAILoop registered to global registry")
 except ImportError:

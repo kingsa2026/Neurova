@@ -15,15 +15,15 @@ API 文档: https://core.telegram.org/bots/api
 
 import json
 import logging
-import time
-import tempfile
 import os
 import re
-from typing import Optional, Dict, Any, List, Callable
+import tempfile
 from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
 
 try:
     import requests  # type: ignore[import-not-found]
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
@@ -31,14 +31,14 @@ except ImportError:
 
 try:
     import httpx  # type: ignore[import-not-found]
+
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
     logging.warning("httpx 库未安装，部分AI生成功能可能不可用")
 
-from neurova.channels import (
-    ChannelAdapter, MessageChannel, UnifiedMessage, ContentType
-)
+from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+
 
 class TelegramAdapter(ChannelAdapter):
     """
@@ -114,7 +114,7 @@ class TelegramAdapter(ChannelAdapter):
         handler: 处理函数 (message: UnifiedMessage) -> str
         """
         self._command_handlers[command.lower()] = handler
-        logging.info(f"注册 Telegram 命令处理器: /{command}")
+        logging.info("注册 Telegram 命令处理器: /%s", command)
 
     def _handle_start(self, message: UnifiedMessage) -> str:
         """处理 /start 命令"""
@@ -198,7 +198,7 @@ class TelegramAdapter(ChannelAdapter):
         else:
             self._proxies = proxies
 
-        logging.info(f"Telegram 代理已设置: {self.http_proxy}")
+        logging.info("Telegram 代理已设置: %s", self.http_proxy)
 
     def _api_request(self, method: str, path: str, **kwargs) -> Dict[str, Any]:
         """
@@ -225,13 +225,13 @@ class TelegramAdapter(ChannelAdapter):
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.Timeout:
-            logging.error(f"Telegram API 请求超时: {url}")
+            logging.error("Telegram API 请求超时: %s", url)
             return {"ok": False, "description": "请求超时"}
         except requests.exceptions.HTTPError as e:
-            logging.error(f"Telegram API HTTP 错误: {e}")
+            logging.error("Telegram API HTTP 错误: %s", e)
             return {"ok": False, "description": f"HTTP 错误: {e.response.status_code}"}
         except Exception as e:
-            logging.error(f"Telegram API 请求异常: {e}")
+            logging.error("Telegram API 请求异常: %s", e)
             return {"ok": False, "description": str(e)}
 
     def _verify_token(self) -> bool:
@@ -248,13 +248,13 @@ class TelegramAdapter(ChannelAdapter):
                 bot_info = data.get("result", {})
                 self._bot_info = bot_info
                 self._bot_username = bot_info.get("username", "")
-                logging.info(f"Telegram 认证成功: @{self._bot_username}")
+                logging.info("Telegram 认证成功: @%s", self._bot_username)
                 return True
             else:
-                logging.error(f"Telegram 认证失败: {data}")
+                logging.error("Telegram 认证失败: %s", data)
                 return False
         except Exception as e:
-            logging.error(f"Telegram 认证异常: {e}")
+            logging.error("Telegram 认证异常: %s", e)
             return False
 
     def _ensure_initialized(self) -> bool:
@@ -281,7 +281,7 @@ class TelegramAdapter(ChannelAdapter):
             return False
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[Telegram模拟] 发送消息到 {message.chat_id}: {message.content[:50]}")
+            logging.info("[Telegram模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
             return True
 
         try:
@@ -307,7 +307,7 @@ class TelegramAdapter(ChannelAdapter):
             else:
                 return self._send_text_message(message.chat_id, message.content)
         except Exception as e:
-            logging.error(f"Telegram 消息发送异常: {e}")
+            logging.error("Telegram 消息发送异常: %s", e)
             return False
 
     def _send_text_message(self, chat_id: str, text: str, parse_mode: str = "Markdown") -> bool:
@@ -325,7 +325,7 @@ class TelegramAdapter(ChannelAdapter):
         if data.get("ok"):
             return True
         else:
-            logging.error(f"Telegram 文本消息发送失败: {data}")
+            logging.error("Telegram 文本消息发送失败: %s", data)
             return False
 
     def _send_photo(self, chat_id: str, photo: str, caption: str = "") -> bool:
@@ -415,7 +415,7 @@ class TelegramAdapter(ChannelAdapter):
             )
             return data.get("ok", False)
         except (ValueError, IndexError):
-            logging.error(f"位置数据解析失败: {location_data}")
+            logging.error("位置数据解析失败: %s", location_data)
             return False
 
     def _send_chat_action(self, chat_id: str, action: str) -> bool:
@@ -473,7 +473,7 @@ class TelegramAdapter(ChannelAdapter):
 
             return None
         except Exception as e:
-            logging.error(f"Telegram 接收消息异常: {e}")
+            logging.error("Telegram 接收消息异常: %s", e)
             return None
 
     def parse_raw_message(self, raw_data: Any) -> Optional[UnifiedMessage]:
@@ -490,7 +490,7 @@ class TelegramAdapter(ChannelAdapter):
             try:
                 raw_data = json.loads(raw_data)
             except json.JSONDecodeError:
-                logging.error(f"Telegram JSON 解析失败: {raw_data}")
+                logging.error("Telegram JSON 解析失败: %s", raw_data)
                 return None
 
         # 提取消息
@@ -572,7 +572,7 @@ class TelegramAdapter(ChannelAdapter):
                 response = handler(temp_message)
                 self._send_text_message(str(chat.get("id", "")), response)
             except Exception as e:
-                logging.error(f"命令处理异常 /{command}: {e}")
+                logging.error("命令处理异常 /%s: %s", command, e)
 
         return UnifiedMessage(
             message_id=str(msg.get("message_id", "")),
@@ -602,7 +602,7 @@ class TelegramAdapter(ChannelAdapter):
             if entity.get("type") == "mention":
                 start = entity.get("offset", 0)
                 length = entity.get("length", 0)
-                mentioned_name = text[start:start+length]
+                mentioned_name = text[start : start + length]
                 bot_names = [
                     f"@{self.bot_prefix}",
                     f"@{self.bot_prefix.lower()}",
@@ -691,10 +691,10 @@ class TelegramAdapter(ChannelAdapter):
         )
 
         if data.get("ok"):
-            logging.info(f"Telegram Webhook 已设置: {webhook_url}")
+            logging.info("Telegram Webhook 已设置: %s", webhook_url)
             return True
         else:
-            logging.error(f"Telegram Webhook 设置失败: {data}")
+            logging.error("Telegram Webhook 设置失败: %s", data)
             return False
 
     def delete_webhook(self, drop_pending_updates: bool = False) -> bool:
@@ -717,7 +717,7 @@ class TelegramAdapter(ChannelAdapter):
             logging.info("Telegram Webhook 已删除")
             return True
         else:
-            logging.error(f"Telegram Webhook 删除失败: {data}")
+            logging.error("Telegram Webhook 删除失败: %s", data)
             return False
 
     def get_webhook_info(self) -> Optional[Dict]:
@@ -965,7 +965,7 @@ class TelegramAdapter(ChannelAdapter):
             成功返回图片二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("text_to_image", kwargs.get("model"))
@@ -989,14 +989,16 @@ class TelegramAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"图片生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"图片生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"AI图片生成异常: {e}")
+            logger.exception("AI图片生成异常: %s", e)
             return None
 
     async def generate_image_to_image(self, image_url: str, prompt: str, **kwargs) -> Optional[bytes]:
@@ -1011,7 +1013,7 @@ class TelegramAdapter(ChannelAdapter):
             成功返回图片二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("image_to_image", kwargs.get("model"))
@@ -1021,7 +1023,7 @@ class TelegramAdapter(ChannelAdapter):
 
             image_data = await self._download_url(image_url)
             if not image_data:
-                logger.error(f"下载参考图片失败: {image_url}")
+                logger.error("下载参考图片失败: %s", image_url)
                 return None
 
             config = GenerationConfig(
@@ -1043,14 +1045,16 @@ class TelegramAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"图生图生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"图生图生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"图生图生成异常: {e}")
+            logger.exception("图生图生成异常: %s", e)
             return None
 
     async def generate_text_to_video(self, prompt: str, **kwargs) -> Optional[bytes]:
@@ -1064,7 +1068,7 @@ class TelegramAdapter(ChannelAdapter):
             成功返回视频二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("text_to_video", kwargs.get("model"))
@@ -1089,14 +1093,16 @@ class TelegramAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"AI视频生成异常: {e}")
+            logger.exception("AI视频生成异常: %s", e)
             return None
 
     async def generate_image_to_video(self, image_url: str, prompt: str, **kwargs) -> Optional[bytes]:
@@ -1111,7 +1117,7 @@ class TelegramAdapter(ChannelAdapter):
             成功返回视频二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("image_to_video", kwargs.get("model"))
@@ -1121,7 +1127,7 @@ class TelegramAdapter(ChannelAdapter):
 
             image_data = await self._download_url(image_url)
             if not image_data:
-                logger.error(f"下载参考图片失败: {image_url}")
+                logger.error("下载参考图片失败: %s", image_url)
                 return None
 
             config = GenerationConfig(
@@ -1142,14 +1148,16 @@ class TelegramAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"图生视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"图生视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"图生视频生成异常: {e}")
+            logger.exception("图生视频生成异常: %s", e)
             return None
 
     async def generate_keyframe_to_video(self, start_url: str, end_url: str, **kwargs) -> Optional[bytes]:
@@ -1164,7 +1172,7 @@ class TelegramAdapter(ChannelAdapter):
             成功返回视频二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("keyframe_to_video", kwargs.get("model"))
@@ -1197,14 +1205,16 @@ class TelegramAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"首尾帧生成视频失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"首尾帧生成视频失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"首尾帧生成视频异常: {e}")
+            logger.exception("首尾帧生成视频异常: %s", e)
             return None
 
     async def generate_video_to_video(self, video_url: str, prompt: str, **kwargs) -> Optional[bytes]:
@@ -1219,7 +1229,7 @@ class TelegramAdapter(ChannelAdapter):
             成功返回视频二进制数据，失败返回 None
         """
         try:
-            from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+            from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
             manager = get_generator_manager()
             generator = manager.get_generator("video_to_video", kwargs.get("model"))
@@ -1229,7 +1239,7 @@ class TelegramAdapter(ChannelAdapter):
 
             video_data = await self._download_url(video_url)
             if not video_data:
-                logger.error(f"下载参考视频失败: {video_url}")
+                logger.error("下载参考视频失败: %s", video_url)
                 return None
 
             config = GenerationConfig(
@@ -1253,14 +1263,16 @@ class TelegramAdapter(ChannelAdapter):
             if result.success and result.urls:
                 return await self._download_url(result.urls[0])
             else:
-                logger.error(f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                logger.error(
+                    f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                )
                 return None
 
         except ImportError:
             logger.error("GeneratorManager 模块不可用")
             return None
         except Exception as e:
-            logger.exception(f"视频生成异常: {e}")
+            logger.exception("视频生成异常: %s", e)
             return None
 
     async def _download_url(self, url: str, timeout: int = 60) -> Optional[bytes]:
@@ -1280,10 +1292,10 @@ class TelegramAdapter(ChannelAdapter):
                     if response.status_code == 200:
                         return response.content
                     else:
-                        logging.error(f"下载失败 HTTP {response.status_code}: {url}")
+                        logging.error("下载失败 HTTP %s: %s", response.status_code, url)
                         return None
             except Exception as e:
-                logging.error(f"httpx下载异常: {e}")
+                logging.error("httpx下载异常: %s", e)
                 return None
         elif REQUESTS_AVAILABLE:
             try:
@@ -1291,10 +1303,10 @@ class TelegramAdapter(ChannelAdapter):
                 if response.status_code == 200:
                     return response.content
                 else:
-                    logging.error(f"下载失败 HTTP {response.status_code}: {url}")
+                    logging.error("下载失败 HTTP %s: %s", response.status_code, url)
                     return None
             except Exception as e:
-                logging.error(f"requests下载异常: {e}")
+                logging.error("requests下载异常: %s", e)
                 return None
         else:
             logging.error("无可用的HTTP客户端")
@@ -1314,10 +1326,10 @@ class TelegramAdapter(ChannelAdapter):
             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{extension}") as f:
                 f.write(data)
                 temp_path = f.name
-            logging.info(f"临时文件已保存: {temp_path}")
+            logging.info("临时文件已保存: %s", temp_path)
             return temp_path
         except Exception as e:
-            logging.error(f"保存临时文件失败: {e}")
+            logging.error("保存临时文件失败: %s", e)
             return None
 
     def _extract_prompt(self, content: str) -> str:
@@ -1389,7 +1401,9 @@ class TelegramAdapter(ChannelAdapter):
                     self._send_text_message(message.chat_id, "图片生成失败")
                     return False
 
-        elif has_image and ("图生图" in content or "以图生图" in content or "生成相似图片" in content or "生成新图片" in content):
+        elif has_image and (
+            "图生图" in content or "以图生图" in content or "生成相似图片" in content or "生成新图片" in content
+        ):
             prompt = self._extract_prompt(message.content) or ""
             if image_url:
                 self._send_text_message(message.chat_id, "正在生成图片，请稍候...")
@@ -1404,7 +1418,9 @@ class TelegramAdapter(ChannelAdapter):
                 self._send_text_message(message.chat_id, "图片生成失败")
                 return False
 
-        elif has_image and ("图生视频" in content or "图片转视频" in content or "让图片动起来" in content or "图片生成视频" in content):
+        elif has_image and (
+            "图生视频" in content or "图片转视频" in content or "让图片动起来" in content or "图片生成视频" in content
+        ):
             prompt = self._extract_prompt(message.content) or ""
             if image_url:
                 self._send_text_message(message.chat_id, "正在生成视频，请稍候...")
@@ -1419,7 +1435,9 @@ class TelegramAdapter(ChannelAdapter):
                 self._send_text_message(message.chat_id, "视频生成失败")
                 return False
 
-        elif ("首尾帧" in content or "首帧到尾帧" in content or "首尾帧生成视频" in content) and message.metadata.get("images_count", 0) >= 2:
+        elif ("首尾帧" in content or "首帧到尾帧" in content or "首尾帧生成视频" in content) and message.metadata.get(
+            "images_count", 0
+        ) >= 2:
             start_url = message.metadata.get("first_image_url", "")
             end_url = message.metadata.get("last_image_url", "")
             if start_url and end_url:
@@ -1435,7 +1453,9 @@ class TelegramAdapter(ChannelAdapter):
                 self._send_text_message(message.chat_id, "视频生成失败")
                 return False
 
-        elif has_video and ("视频生成" in content or "视频风格" in content or "修改视频" in content or "视频转视频" in content):
+        elif has_video and (
+            "视频生成" in content or "视频风格" in content or "修改视频" in content or "视频转视频" in content
+        ):
             prompt = self._extract_prompt(message.content) or ""
             if video_url:
                 self._send_text_message(message.chat_id, "正在生成视频，请稍候...")
@@ -1467,9 +1487,11 @@ class TelegramAdapter(ChannelAdapter):
 
         return False
 
+
 # ============================================================
 # 工厂函数
 # ============================================================
+
 
 def create_telegram_adapter(bot_token: str = "", **kwargs) -> TelegramAdapter:
     """

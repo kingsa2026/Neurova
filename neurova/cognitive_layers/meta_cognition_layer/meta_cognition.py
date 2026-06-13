@@ -12,27 +12,21 @@ Neurova 2.0 改进：
 ...
 """
 
-from dataclasses import dataclass
 import datetime
-import logging
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from neurova.skills.models import ExperienceRecord
-
 # cognitive_layers imports
-import neurova.cognitive_layers.meta_cognition_layer.root_cause_analyzer
-import neurova.cognitive_layers.meta_cognition_layer.tool_history
 
 # skills imports
-import neurova.skills.auto_skill_improver
-import neurova.skills.experience_knowledge_base
-import neurova.skills.models
+
 
 @dataclass
 class HealthMetrics:
     """健康指标"""
+
     timestamp: datetime.datetime
     cpu_usage: float = 0.0
     memory_usage: float = 0.0
@@ -78,6 +72,7 @@ class HealthMetrics:
 @dataclass
 class ReflectionReport:
     """反思报告"""
+
     report_id: str
     timestamp: datetime.datetime
     trigger: str
@@ -129,6 +124,7 @@ class ReflectionReport:
 @dataclass
 class OptimizationReport:
     """优化报告"""
+
     report_id: str
     timestamp: datetime.datetime
     target: str
@@ -182,6 +178,7 @@ class OptimizationReport:
 @dataclass
 class SkillEvolutionReport:
     """技能进化报告"""
+
     report_id: str
     timestamp: datetime.datetime
     skill_id: str
@@ -231,6 +228,7 @@ class SkillEvolutionReport:
             reason=data.get("reason", ""),
             metadata=data.get("metadata", {}),
         )
+
 
 class MetaCognition:
     """Agent元认知模块：自我监控、自我反思、自我优化、技能进化"""
@@ -284,7 +282,7 @@ class MetaCognition:
                 self._check_health_alerts(metrics)
                 return metrics
             except Exception as e:
-                logger.error(f"monitor failed: {e}")
+                logger.error("monitor failed: %s", e)
                 return HealthMetrics(timestamp=datetime.datetime.now(datetime.timezone.utc), metadata={"error": str(e)})
 
     def reflect(self, trigger: str = "periodic") -> ReflectionReport:
@@ -316,9 +314,13 @@ class MetaCognition:
                 insights.extend(gen_insights)
                 confidence = self._calculate_reflection_score(observations, insights, actions)
                 report = ReflectionReport(
-                    report_id=report_id, timestamp=datetime.datetime.now(datetime.timezone.utc),
-                    trigger=trigger, observations=observations, insights=insights,
-                    action_items=actions, confidence=confidence,
+                    report_id=report_id,
+                    timestamp=datetime.datetime.now(datetime.timezone.utc),
+                    trigger=trigger,
+                    observations=observations,
+                    insights=insights,
+                    action_items=actions,
+                    confidence=confidence,
                     impact_score=len(insights) * 0.1 + len(actions) * 0.05,
                 )
                 self._reflection_reports.append(report)
@@ -328,10 +330,12 @@ class MetaCognition:
                 self._last_reflect_time = time.time()
                 return report
             except Exception as e:
-                logger.error(f"reflect failed: {e}")
+                logger.error("reflect failed: %s", e)
                 return ReflectionReport(
-                    report_id=f"ref_err_{int(time.time())}", timestamp=datetime.datetime.now(datetime.timezone.utc),
-                    trigger=trigger, observations=[f"reflection error: {e}"],
+                    report_id=f"ref_err_{int(time.time())}",
+                    timestamp=datetime.datetime.now(datetime.timezone.utc),
+                    trigger=trigger,
+                    observations=[f"reflection error: {e}"],
                 )
 
     def set_tool_history(self, tool_history: Any) -> None:
@@ -355,16 +359,16 @@ class MetaCognition:
                     sr = s.get("success_rate", 0.0)
                     tc = s.get("total_calls", 0)
                     if tc >= 10 and sr < 0.7:
-                        observations.append(f"tool {name} low success rate: {sr:.1%}")
+                        observations.append(f"tool {name} low success rate: {sr * 100:.1f}%%")
                         actions.append(f"investigate tool {name}")
                     elif tc >= 10 and sr > 0.95:
-                        insights.append(f"tool {name} excellent: {sr:.1%}")
+                        insights.append(f"tool {name} excellent: {sr * 100:.1f}%%")
             degraded = self._tool_history.get_degraded_tools()
             if degraded:
                 observations.append(f"{len(degraded)} degraded tools")
             return {"observations": observations, "insights": insights, "action_items": actions}
         except Exception as e:
-            logger.error(f"_analyze_tool_usage failed: {e}")
+            logger.error("_analyze_tool_usage failed: %s", e)
             return None
 
     def _detect_tool_anomalies(self) -> List[Dict[str, Any]]:
@@ -374,7 +378,7 @@ class MetaCognition:
             anomalies = self._tool_history.detect_anomalies()
             return [a.to_dict() if hasattr(a, "to_dict") else a for a in anomalies]
         except Exception as e:
-            logger.error(f"_detect_tool_anomalies failed: {e}")
+            logger.error("_detect_tool_anomalies failed: %s", e)
             return []
 
     def _evaluate_tool_selection_quality(self) -> Optional[float]:
@@ -393,9 +397,15 @@ class MetaCognition:
             return False
         try:
             content = f"tool insight: {insight.get('description', '')}"
-            meta = {"type": "tool_insight", "tool_name": insight.get("tool_name", ""), "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+            meta = {
+                "type": "tool_insight",
+                "tool_name": insight.get("tool_name", ""),
+                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
             if hasattr(self._memory_manager, "remember"):
-                self._memory_manager.remember(content=content, memory_type="tool_insight", importance=0.6, metadata=meta)
+                self._memory_manager.remember(
+                    content=content, memory_type="tool_insight", importance=0.6, metadata=meta
+                )
                 return True
             return False
         except Exception:
@@ -404,6 +414,7 @@ class MetaCognition:
     def _collect_health_metrics(self, agent_state: Optional[Dict[str, Any]] = None) -> HealthMetrics:
         try:
             import psutil
+
             cpu_usage = psutil.cpu_percent(interval=0.1)
             memory_usage = psutil.virtual_memory().percent
         except ImportError:
@@ -411,7 +422,8 @@ class MetaCognition:
         state = agent_state or {}
         return HealthMetrics(
             timestamp=datetime.datetime.now(datetime.timezone.utc),
-            cpu_usage=cpu_usage, memory_usage=memory_usage,
+            cpu_usage=cpu_usage,
+            memory_usage=memory_usage,
             response_time_ms=state.get("response_time_ms", 0.0),
             success_rate=state.get("success_rate", 1.0),
             error_count=state.get("error_count", 0),
@@ -435,21 +447,28 @@ class MetaCognition:
         anomalies = []
         if self._health_metrics:
             latest = self._health_metrics[-1]
-            if latest.cpu_usage > 90: anomalies.append(f"high CPU: {latest.cpu_usage:.1f}%")
-            if latest.memory_usage > 90: anomalies.append(f"high memory: {latest.memory_usage:.1f}%")
-            if latest.response_time_ms > 10000: anomalies.append(f"slow response: {latest.response_time_ms:.0f}ms")
-            if latest.success_rate < 0.8: anomalies.append(f"low success rate: {latest.success_rate:.1%}")
+            if latest.cpu_usage > 90:
+                anomalies.append(f"high CPU: {latest.cpu_usage:.1f}%")
+            if latest.memory_usage > 90:
+                anomalies.append(f"high memory: {latest.memory_usage:.1f}%")
+            if latest.response_time_ms > 10000:
+                anomalies.append(f"slow response: {latest.response_time_ms:.0f}ms")
+            if latest.success_rate < 0.8:
+                anomalies.append(f"low success rate: {latest.success_rate * 100:.1f}%%")
         return anomalies
 
     def _generate_insights(self) -> List[str]:
         insights = []
         if len(self._reflection_reports) >= 3:
             avg = sum(r.confidence for r in self._reflection_reports[-3:]) / 3
-            if avg > 0.8: insights.append("high reflection quality")
-            elif avg < 0.5: insights.append("reflection quality needs improvement")
+            if avg > 0.8:
+                insights.append("high reflection quality")
+            elif avg < 0.5:
+                insights.append("reflection quality needs improvement")
         if self._optimization_reports:
             last = self._optimization_reports[-1]
-            if last.improvement_percentage > 10: insights.append("recent optimization effective")
+            if last.improvement_percentage > 10:
+                insights.append("recent optimization effective")
         return insights
 
     def _optimize_temperature(self) -> Optional[Dict[str, Any]]:
@@ -458,9 +477,19 @@ class MetaCognition:
         latest = self._health_metrics[-1]
         current_temp = 0.7
         if latest.success_rate < 0.8:
-            return {"parameter": "temperature", "old": current_temp, "new": max(current_temp - 0.1, 0.1), "reason": "low success rate"}
+            return {
+                "parameter": "temperature",
+                "old": current_temp,
+                "new": max(current_temp - 0.1, 0.1),
+                "reason": "low success rate",
+            }
         elif latest.success_rate > 0.95 and latest.response_time_ms < 5000:
-            return {"parameter": "temperature", "old": current_temp, "new": min(current_temp + 0.1, 1.0), "reason": "good performance"}
+            return {
+                "parameter": "temperature",
+                "old": current_temp,
+                "new": min(current_temp + 0.1, 1.0),
+                "reason": "good performance",
+            }
         return None
 
     def _prune_memories(self) -> Optional[Dict[str, Any]]:
@@ -495,7 +524,9 @@ class MetaCognition:
                 improvements = []
                 for skill in skills[:3]:
                     if hasattr(skill, "performance_metrics"):
-                        imp = self._auto_skill_improver.analyze_skill_performance(skill.skill_id, skill.performance_metrics)
+                        imp = self._auto_skill_improver.analyze_skill_performance(
+                            skill.skill_id, skill.performance_metrics
+                        )
                         improvements.extend(imp)
                 if improvements:
                     return {"action": "optimize_skills", "count": len(improvements)}
@@ -523,12 +554,23 @@ class MetaCognition:
                 if stats:
                     sr = stats.get("success_rate", 0.0)
                     tc = stats.get("total_calls", 0)
-                    if tc == 0: status, msg = "unknown", "no records"
-                    elif sr >= 0.9: status, msg = "healthy", "running well"
-                    elif sr >= 0.7: status, msg = "warning", "low success rate"
-                    elif sr >= 0.5: status, msg = "degraded", "performance decline"
-                    else: status, msg = "unhealthy", "serious issues"
-                    return {"tool_name": tool_name, "status": status, "success_rate": sr, "total_calls": tc, "message": msg}
+                    if tc == 0:
+                        status, msg = "unknown", "no records"
+                    elif sr >= 0.9:
+                        status, msg = "healthy", "running well"
+                    elif sr >= 0.7:
+                        status, msg = "warning", "low success rate"
+                    elif sr >= 0.5:
+                        status, msg = "degraded", "performance decline"
+                    else:
+                        status, msg = "unhealthy", "serious issues"
+                    return {
+                        "tool_name": tool_name,
+                        "status": status,
+                        "success_rate": sr,
+                        "total_calls": tc,
+                        "message": msg,
+                    }
             return {"status": "unknown", "message": "no stats available"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
@@ -543,7 +585,14 @@ class MetaCognition:
                     obs_count[o] = obs_count.get(o, 0) + 1
             for obs, cnt in obs_count.items():
                 if cnt >= 3:
-                    patterns.append({"type": "observation_pattern", "description": obs, "frequency": cnt, "confidence": min(cnt / len(recent), 1.0)})
+                    patterns.append(
+                        {
+                            "type": "observation_pattern",
+                            "description": obs,
+                            "frequency": cnt,
+                            "confidence": min(cnt / len(recent), 1.0),
+                        }
+                    )
         if self._tool_history:
             try:
                 for t1, t2, conf in self._tool_history.find_tool_pairs()[:3]:
@@ -559,7 +608,11 @@ class MetaCognition:
         if not frequent:
             return None
         p = frequent[0]
-        return {"action": "auto_generate", "description": f"auto skill: {p['description']}", "confidence": p.get("confidence", 0.5)}
+        return {
+            "action": "auto_generate",
+            "description": f"auto skill: {p['description']}",
+            "confidence": p.get("confidence", 0.5),
+        }
 
     def _optimize_existing_skills(self, skill_id: str) -> Optional[Dict[str, Any]]:
         if not self._auto_skill_improver or not self._skills_manager:
@@ -570,7 +623,11 @@ class MetaCognition:
                 if skill and hasattr(skill, "performance_metrics"):
                     imp = self._auto_skill_improver.analyze_skill_performance(skill_id, skill.performance_metrics)
                     if imp:
-                        return {"action": "optimize_skill", "skill_id": skill_id, "improvements": [i.description for i in imp]}
+                        return {
+                            "action": "optimize_skill",
+                            "skill_id": skill_id,
+                            "improvements": [i.description for i in imp],
+                        }
             return None
         except Exception:
             return None
@@ -583,22 +640,31 @@ class MetaCognition:
             if hasattr(self._skills_manager, "get_all_skills"):
                 for skill in self._skills_manager.get_all_skills():
                     if hasattr(skill, "success_rate") and skill.success_rate < 0.3:
-                        pruned.append({"action": "prune_skill", "skill_id": skill.skill_id, "success_rate": skill.success_rate})
+                        pruned.append(
+                            {"action": "prune_skill", "skill_id": skill.skill_id, "success_rate": skill.success_rate}
+                        )
         except Exception:
             pass
         return pruned
 
     def _calculate_reflection_score(self, observations: List[str], insights: List[str], actions: List[str]) -> float:
         score = 0.0
-        if observations: score += min(len(observations) * 0.1, 0.3)
-        if insights: score += min(len(insights) * 0.15, 0.4)
-        if actions: score += min(len(actions) * 0.1, 0.3)
+        if observations:
+            score += min(len(observations) * 0.1, 0.3)
+        if insights:
+            score += min(len(insights) * 0.15, 0.4)
+        if actions:
+            score += min(len(actions) * 0.1, 0.3)
         return min(score, 1.0)
 
-    def _calculate_optimization_score(self, optimizations: List[Dict[str, Any]], improvements: List[Dict[str, Any]]) -> float:
+    def _calculate_optimization_score(
+        self, optimizations: List[Dict[str, Any]], improvements: List[Dict[str, Any]]
+    ) -> float:
         score = 0.0
-        if optimizations: score += min(len(optimizations) * 0.2, 0.5)
-        if improvements: score += min(len(improvements) * 0.15, 0.5)
+        if optimizations:
+            score += min(len(optimizations) * 0.2, 0.5)
+        if improvements:
+            score += min(len(improvements) * 0.15, 0.5)
         return min(score, 1.0)
 
     def _check_health_alerts(self, metrics: HealthMetrics) -> None:

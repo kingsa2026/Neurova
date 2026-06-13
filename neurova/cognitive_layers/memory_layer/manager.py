@@ -22,15 +22,18 @@ import logging
 import os
 import sqlite3
 import threading
-import time
-import uuid
 from typing import Any, Dict, List, Optional
 
 from neurova.cognitive_layers.memory_layer.bus_event import (
-    EventBus, MemoryEvent, MemoryModule, ModuleHealth,
+    EventBus,
+    MemoryEvent,
 )
 from neurova.cognitive_layers.memory_layer.models import (
-    Memory, MemoryCategory, MemoryType, LifecycleStage, EmotionType,
+    EmotionType,
+    LifecycleStage,
+    Memory,
+    MemoryCategory,
+    MemoryType,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,8 +46,7 @@ _manager_lock = threading.Lock()
 class MemoryManager:
     """记忆管理器 Facade — 通过 EventBus 路由到各子模块"""
 
-    def __init__(self, db_path: str = "neurova_memory.db", agent_id: str = "default",
-                 user_id: str = "default"):
+    def __init__(self, db_path: str = "neurova_memory.db", agent_id: str = "default", user_id: str = "default"):
         self._db_path = db_path
         self._agent_id = agent_id
         self._user_id = user_id
@@ -68,9 +70,10 @@ class MemoryManager:
         self._forgetting_recovery = None
         self._emotion_conduction = None
         self._write_queue = None
-        
+
         # 情感模块（立即初始化）
         from neurova.cognitive_layers.memory_layer.modules.emotion_module import EmotionModule
+
         self._emotion_module = EmotionModule(db_path=db_path)
         self._emotion_module.init()
 
@@ -85,7 +88,9 @@ class MemoryManager:
             "remember_count": 0,
         }
 
-        logger.info(f"MemoryManager initialized: agent_id={agent_id}, user_id={user_id}, memories_loaded={len(self._memories)}")
+        logger.info(
+            f"MemoryManager initialized: agent_id={agent_id}, user_id={user_id}, memories_loaded={len(self._memories)}"
+        )
 
     def _init_persistence_db(self):
         """初始化 SQLite 持久化数据库"""
@@ -121,25 +126,25 @@ class MemoryManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_type ON memories(memory_type)")
             conn.commit()
             conn.close()
-            logger.debug(f"Persistence DB initialized: {self._persist_db_path}")
+            logger.debug("Persistence DB initialized: %s", self._persist_db_path)
         except Exception as e:
-            logger.warning(f"Persistence DB init failed: {e}")
+            logger.warning("Persistence DB init failed: %s", e)
             self._persist_db_path = None
 
     def _load_from_db(self):
         """从 SQLite 加载记忆到内存"""
-        if not getattr(self, '_persist_db_path', None):
+        if not getattr(self, "_persist_db_path", None):
             return
         try:
             conn = sqlite3.connect(self._persist_db_path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT * FROM memories WHERE agent_id = ? ORDER BY created_at DESC",
-                (self._agent_id,)
+                "SELECT * FROM memories WHERE agent_id = ? ORDER BY created_at DESC", (self._agent_id,)
             ).fetchall()
             conn.close()
 
-            from datetime import datetime, timezone
+            from datetime import datetime
+
             for row in rows:
                 try:
                     mem = Memory(
@@ -159,20 +164,24 @@ class MemoryManager:
                         shared=bool(row["shared"]),
                         created_at=datetime.fromisoformat(row["created_at"]),
                         updated_at=datetime.fromisoformat(row["updated_at"]),
-                        last_accessed_at=datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None,
+                        last_accessed_at=(
+                            datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None
+                        ),
                     )
                     self._memories[mem.id] = mem
-                    self._counter = max(self._counter, int(mem.id.replace("mem_", "")) if mem.id.startswith("mem_") else 0)
+                    self._counter = max(
+                        self._counter, int(mem.id.replace("mem_", "")) if mem.id.startswith("mem_") else 0
+                    )
                 except Exception as e:
-                    logger.debug(f"Skip invalid memory row {row['id']}: {e}")
+                    logger.debug("Skip invalid memory row %s: %s", row['id'], e)
 
-            logger.info(f"Loaded {len(self._memories)} memories from persistence DB")
+            logger.info("Loaded %s memories from persistence DB", len(self._memories))
         except Exception as e:
-            logger.warning(f"Failed to load memories from DB: {e}")
+            logger.warning("Failed to load memories from DB: %s", e)
 
     def _persist_memory(self, mem: Memory):
         """将单条记忆写入 SQLite 持久化"""
-        if not getattr(self, '_persist_db_path', None):
+        if not getattr(self, "_persist_db_path", None):
             return
         try:
             conn = sqlite3.connect(self._persist_db_path)
@@ -183,23 +192,34 @@ class MemoryManager:
                     shared, created_at, updated_at, last_accessed_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    mem.id, mem.content, mem.memory_type.value, mem.category.value,
-                    mem.lifecycle_stage.value, mem.perspective.value, mem.emotion.value,
-                    mem.temperature, mem.importance, mem.access_count,
+                    mem.id,
+                    mem.content,
+                    mem.memory_type.value,
+                    mem.category.value,
+                    mem.lifecycle_stage.value,
+                    mem.perspective.value,
+                    mem.emotion.value,
+                    mem.temperature,
+                    mem.importance,
+                    mem.access_count,
                     json.dumps(mem.metadata, ensure_ascii=False),
-                    mem.agent_id, mem.neuser_id, mem.user_id, int(mem.shared),
-                    mem.created_at.isoformat(), mem.updated_at.isoformat(),
+                    mem.agent_id,
+                    mem.neuser_id,
+                    mem.user_id,
+                    int(mem.shared),
+                    mem.created_at.isoformat(),
+                    mem.updated_at.isoformat(),
                     mem.last_accessed_at.isoformat() if mem.last_accessed_at else None,
-                )
+                ),
             )
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.debug(f"Persist memory failed: {e}")
+            logger.debug("Persist memory failed: %s", e)
 
     def _delete_persisted_memory(self, memory_id: str):
         """从 SQLite 删除持久化记忆"""
-        if not getattr(self, '_persist_db_path', None):
+        if not getattr(self, "_persist_db_path", None):
             return
         try:
             conn = sqlite3.connect(self._persist_db_path)
@@ -207,7 +227,7 @@ class MemoryManager:
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.debug(f"Delete persisted memory failed: {e}")
+            logger.debug("Delete persisted memory failed: %s", e)
 
     # ────── Properties ──────
 
@@ -234,11 +254,17 @@ class MemoryManager:
 
     # ────── Core Memory Operations ──────
 
-    def remember(self, content: str, category: str = "general",
-                 memory_type: str = "semantic", temperature: float = 100.0,
-                 importance: float = 50.0, metadata: Optional[Dict[str, Any]] = None,
-                 emotion: Optional[str] = None,
-                 **kwargs) -> str:
+    def remember(
+        self,
+        content: str,
+        category: str = "general",
+        memory_type: str = "semantic",
+        temperature: float = 100.0,
+        importance: float = 50.0,
+        metadata: Optional[Dict[str, Any]] = None,
+        emotion: Optional[str] = None,
+        **kwargs,
+    ) -> str:
         """存储一条记忆"""
         with self._lock:
             self._counter += 1
@@ -257,7 +283,7 @@ class MemoryManager:
                 try:
                     parsed_memory_type = MemoryType(memory_type)
                 except (ValueError, KeyError):
-                    logger.warning(f"Invalid memory_type '{memory_type}', falling back to SEMANTIC")
+                    logger.warning("Invalid memory_type '%s', falling back to SEMANTIC", memory_type)
                     parsed_memory_type = MemoryType.SEMANTIC
             else:
                 parsed_memory_type = memory_type
@@ -267,7 +293,7 @@ class MemoryManager:
                 try:
                     parsed_category = MemoryCategory(category)
                 except (ValueError, KeyError):
-                    logger.warning(f"Invalid category '{category}', falling back to GENERAL")
+                    logger.warning("Invalid category '%s', falling back to GENERAL", category)
                     parsed_category = MemoryCategory.GENERAL
             else:
                 parsed_category = category
@@ -302,16 +328,18 @@ class MemoryManager:
                     pass
 
             # 发射事件
-            self._bus.emit(MemoryEvent(
-                type=MemoryEvent.MEMORY_CREATED,
-                source="memory_manager",
-                payload={"memory_id": mem_id, "content": content, "category": category},
-            ))
+            self._bus.emit(
+                MemoryEvent(
+                    type=MemoryEvent.MEMORY_CREATED,
+                    source="memory_manager",
+                    payload={"memory_id": mem_id, "content": content, "category": category},
+                )
+            )
             return mem_id
 
-    def recall(self, query: str = "", category: Optional[str] = None,
-               limit: int = 10, min_temperature: float = 0.0,
-               **kwargs) -> List[Dict[str, Any]]:
+    def recall(
+        self, query: str = "", category: Optional[str] = None, limit: int = 10, min_temperature: float = 0.0, **kwargs
+    ) -> List[Dict[str, Any]]:
         """检索记忆"""
         with self._lock:
             self._stats["recall_count"] += 1
@@ -336,11 +364,13 @@ class MemoryManager:
             # 发射事件
             for m in results[:limit]:
                 m.touch()
-                self._bus.emit(MemoryEvent(
-                    type=MemoryEvent.MEMORY_ACCESSED,
-                    source="memory_manager",
-                    payload={"memory_id": m.id, "temperature": m.temperature},
-                ))
+                self._bus.emit(
+                    MemoryEvent(
+                        type=MemoryEvent.MEMORY_ACCESSED,
+                        source="memory_manager",
+                        payload={"memory_id": m.id, "temperature": m.temperature},
+                    )
+                )
 
             return [m.to_dict() for m in results[:limit]]
 
@@ -349,11 +379,13 @@ class MemoryManager:
         mem = self._memories.get(memory_id)
         if mem:
             mem.touch()
-            self._bus.emit(MemoryEvent(
-                type=MemoryEvent.MEMORY_ACCESSED,
-                source="memory_manager",
-                payload={"memory_id": mem.id},
-            ))
+            self._bus.emit(
+                MemoryEvent(
+                    type=MemoryEvent.MEMORY_ACCESSED,
+                    source="memory_manager",
+                    payload={"memory_id": mem.id},
+                )
+            )
             return mem.to_dict()
         return None
 
@@ -369,7 +401,9 @@ class MemoryManager:
         if "importance" in kwargs:
             mem.importance = kwargs["importance"]
         if "category" in kwargs:
-            mem.category = MemoryCategory(kwargs["category"]) if isinstance(kwargs["category"], str) else kwargs["category"]
+            mem.category = (
+                MemoryCategory(kwargs["category"]) if isinstance(kwargs["category"], str) else kwargs["category"]
+            )
         if "lifecycle_stage" in kwargs:
             stage_val = kwargs["lifecycle_stage"]
             if isinstance(stage_val, str):
@@ -378,11 +412,13 @@ class MemoryManager:
                 mem.lifecycle_stage = stage_val
         mem.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
         self._persist_memory(mem)  # 更新持久化
-        self._bus.emit(MemoryEvent(
-            type=MemoryEvent.MEMORY_UPDATED,
-            source="memory_manager",
-            payload={"memory_id": memory_id},
-        ))
+        self._bus.emit(
+            MemoryEvent(
+                type=MemoryEvent.MEMORY_UPDATED,
+                source="memory_manager",
+                payload={"memory_id": memory_id},
+            )
+        )
         return True
 
     def forget(self, memory_id: str, soft: bool = True) -> bool:
@@ -396,11 +432,13 @@ class MemoryManager:
             del self._memories[memory_id]
             self._delete_persisted_memory(memory_id)  # 删除持久化
         self._stats["total_memories"] = len(self._memories)
-        self._bus.emit(MemoryEvent(
-            type=MemoryEvent.MEMORY_DELETED,
-            source="memory_manager",
-            payload={"memory_id": memory_id, "soft": soft},
-        ))
+        self._bus.emit(
+            MemoryEvent(
+                type=MemoryEvent.MEMORY_DELETED,
+                source="memory_manager",
+                payload={"memory_id": memory_id, "soft": soft},
+            )
+        )
         return True
 
     def search_memories(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
@@ -412,7 +450,7 @@ class MemoryManager:
         with self._lock:
             mems = list(self._memories.values())
             mems.sort(key=lambda m: m.created_at, reverse=True)
-            return [m.to_dict() for m in mems[offset:offset + limit]]
+            return [m.to_dict() for m in mems[offset : offset + limit]]
 
     def get_all_memories(self) -> List[Dict[str, Any]]:
         """获取所有记忆（用于睡眠整合）"""
@@ -531,8 +569,9 @@ class MemoryManager:
         return count
 
     def get_crystallized(self, limit: int = 10) -> List[Dict[str, Any]]:
-        return [m.to_dict() for m in self._memories.values()
-                if m.lifecycle_stage == LifecycleStage.CRYSTALLIZED][:limit]
+        return [m.to_dict() for m in self._memories.values() if m.lifecycle_stage == LifecycleStage.CRYSTALLIZED][
+            :limit
+        ]
 
     def get_hot_memories(self, limit: int = 10, min_temperature: float = 80.0) -> List[Dict[str, Any]]:
         return self.recall(limit=limit, min_temperature=min_temperature)
@@ -725,19 +764,20 @@ class MemoryManager:
         """获取带有特定情感的记忆"""
         if not self._emotion_module:
             return []
-        
+
         from neurova.cognitive_layers.memory_layer.modules.emotion_module import EmotionType
+
         try:
             emotion_type = EmotionType(emotion)
         except ValueError:
             return []
-        
+
         memory_ids = self._emotion_module.get_emotional_memories(
             emotion_type=emotion_type,
             min_intensity=0.3,
             limit=limit,
         )
-        
+
         # 将 memory_id 转为完整的记忆字典
         results = []
         for mid in memory_ids:
@@ -749,7 +789,7 @@ class MemoryManager:
                 if emotion_state:
                     mem_dict["emotion_state"] = emotion_state.to_dict()
                 results.append(mem_dict)
-        
+
         return results
 
     def remember_with_trace(self, content: str, trace: Dict[str, Any], **kwargs) -> str:
@@ -839,12 +879,10 @@ class MemoryManager:
         return self.recover_from_archive(memory_id)
 
     def get_archived_memories(self, limit: int = 10) -> List[Dict[str, Any]]:
-        return [m.to_dict() for m in self._memories.values()
-                if m.lifecycle_stage == LifecycleStage.ARCHIVED][:limit]
+        return [m.to_dict() for m in self._memories.values() if m.lifecycle_stage == LifecycleStage.ARCHIVED][:limit]
 
     def get_deleted_memories(self, limit: int = 10) -> List[Dict[str, Any]]:
-        return [m.to_dict() for m in self._memories.values()
-                if m.lifecycle_stage == LifecycleStage.FORGOTTEN][:limit]
+        return [m.to_dict() for m in self._memories.values() if m.lifecycle_stage == LifecycleStage.FORGOTTEN][:limit]
 
     def get_recovery_history(self) -> List[Dict[str, Any]]:
         return []
@@ -868,14 +906,15 @@ class MemoryManager:
     def close(self) -> None:
         """优雅关闭"""
         self._started = False
-        logger.info(f"MemoryManager closed: agent_id={self._agent_id}")
+        logger.info("MemoryManager closed: agent_id=%s", self._agent_id)
 
     def __repr__(self) -> str:
         return f"MemoryManager(agent_id={self._agent_id!r}, memories={len(self._memories)})"
 
 
-def get_memory_manager(agent_id: str = "default", user_id: str = "default",
-                       db_path: str = "neurova_memory.db") -> MemoryManager:
+def get_memory_manager(
+    agent_id: str = "default", user_id: str = "default", db_path: str = "neurova_memory.db"
+) -> MemoryManager:
     """获取/创建默认 MemoryManager 单例"""
     global _default_manager
     with _manager_lock:

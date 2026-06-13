@@ -10,20 +10,20 @@ Neurova 数据脱敏模块
 4. 脱敏策略管理
 """
 
-from dataclasses import dataclass, field
-import enum
 import hashlib
 import logging
 import re
 import threading
+from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Any, List, Optional, Pattern, Callable, Union
+from typing import Any, Callable, Dict, List, Optional, Pattern
 
 logger = logging.getLogger(__name__)
 
 
 class MaskingStrategy(str, Enum):
     """脱敏策略"""
+
     FULL_MASK = "full"
     PARTIAL_MASK = "partial"
     KEEP_PREFIX = "keep_prefix"
@@ -35,6 +35,7 @@ class MaskingStrategy(str, Enum):
 @dataclass
 class MaskingRule:
     """脱敏规则"""
+
     name: str
     field_name: str
     strategy: MaskingStrategy
@@ -55,6 +56,7 @@ class MaskingRule:
 @dataclass
 class SensitiveField:
     """敏感字段定义"""
+
     field_name: str
     field_type: str
     example: str = ""
@@ -73,10 +75,10 @@ PREDEFINED_SENSITIVE_FIELDS = [
 
 
 # 手机号、邮箱、身份证、IP 的正则（用于文本中的日志脱敏）
-_PHONE_RE = re.compile(r'\b(1[3-9]\d{9})\b')
-_EMAIL_RE = re.compile(r'\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b')
-_ID_CARD_RE = re.compile(r'\b(\d{17}[\dXx])\b')
-_IP_RE = re.compile(r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b')
+_PHONE_RE = re.compile(r"\b(1[3-9]\d{9})\b")
+_EMAIL_RE = re.compile(r"\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b")
+_ID_CARD_RE = re.compile(r"\b(\d{17}[\dXx])\b")
+_IP_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
 
 
 class DataMasking:
@@ -227,8 +229,7 @@ class DataMasking:
             return [self._mask_dict_recursive(item, exclude) for item in data]
         return data
 
-    def mask_log_message(self, message: Optional[str],
-                         extra_patterns: List[tuple] = None) -> Optional[str]:
+    def mask_log_message(self, message: Optional[str], extra_patterns: List[tuple] = None) -> Optional[str]:
         """对日志消息中的敏感信息进行脱敏"""
         if message is None:
             return None
@@ -252,8 +253,9 @@ class DataMasking:
 
         return result
 
-    def mask_export_data(self, data: List[Dict], columns: List[str],
-                         masking_config: Optional[Dict[str, str]] = None) -> List[Dict]:
+    def mask_export_data(
+        self, data: List[Dict], columns: List[str], masking_config: Optional[Dict[str, str]] = None
+    ) -> List[Dict]:
         """对导出数据进行脱敏"""
         if not data:
             return []

@@ -9,21 +9,25 @@ D1 任务重构版本：
 - 集成 LLMRouter 实现智能模型选择
 """
 
-import asyncio
 import json
-import logging
-import re
-from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, field
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Dict, Optional
 
 # LLM Router 导入（条件导入）
 try:
-    from neurova.llm.llm_router import LLMRouter, RequestType, get_llm_router, select_model_for_request, detect_request_type
+    from neurova.llm.llm_router import (
+        RequestType,
+        detect_request_type,
+        get_llm_router,
+        select_model_for_request,
+    )
+
     LLM_ROUTER_AVAILABLE = True
 except ImportError:
     LLM_ROUTER_AVAILABLE = False
+
     # 定义占位符
     class RequestType(Enum):
         CHAT = "chat"
@@ -46,8 +50,10 @@ except ImportError:
     def detect_request_type(content):
         return RequestType.CHAT
 
+
 class MessageType(Enum):
     """消息类型"""
+
     CHAT = "chat"
     COMMAND = "command"
     SKILL_REQUEST = "skill_request"
@@ -55,9 +61,11 @@ class MessageType(Enum):
     SYSTEM = "system"
     UNKNOWN = "unknown"
 
+
 @dataclass
 class Message:
     """消息数据结构"""
+
     content: str
     message_type: MessageType = MessageType.UNKNOWN
     sender_id: str = ""
@@ -80,14 +88,17 @@ class Message:
         else:
             return MessageType.CHAT
 
+
 @dataclass
 class RouteResult:
     """路由结果"""
+
     success: bool = True
     response: str = ""
     handler: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     execution_time: float = 0.0
+
 
 class MessageRouter:
     """消息路由器"""
@@ -280,7 +291,7 @@ class MessageRouter:
             # 检查是否是语音消息（通过 metadata 中的 media_type）
             metadata = message.metadata or {}
             media_type = metadata.get("media_type")
-            
+
             if media_type == "voice":
                 # 语音消息：调用 process_multimodal 处理
                 response = await self._agent.process_multimodal(
@@ -291,7 +302,7 @@ class MessageRouter:
             else:
                 # 普通文本消息：使用 Agent 处理聊天
                 response = await self._agent.chat(message.content, message.metadata)
-            
+
             return RouteResult(
                 success=True,
                 response=response,
@@ -317,9 +328,11 @@ class MessageRouter:
             "by_type": {},
         }
 
+
 # ═══════════════════════════════════════════════════════════════
 # 默认命令处理器
 # ═══════════════════════════════════════════════════════════════
+
 
 async def _help_command(message: Message, groups: str) -> RouteResult:
     """帮助命令"""
@@ -338,6 +351,7 @@ async def _help_command(message: Message, groups: str) -> RouteResult:
         handler="help",
     )
 
+
 async def _stats_command(message: Message, groups: str) -> RouteResult:
     """统计命令"""
     router = message.metadata.get("router")
@@ -355,6 +369,7 @@ async def _stats_command(message: Message, groups: str) -> RouteResult:
             handler="stats",
         )
 
+
 async def _clear_command(message: Message, groups: str) -> RouteResult:
     """清空命令"""
     agent = message.metadata.get("agent")
@@ -371,6 +386,7 @@ async def _clear_command(message: Message, groups: str) -> RouteResult:
             response="清空功能开发中...",
             handler="clear",
         )
+
 
 async def _skills_command(message: Message, groups: str) -> RouteResult:
     """列出可用 Skill"""
@@ -399,6 +415,7 @@ async def _skills_command(message: Message, groups: str) -> RouteResult:
             response="Skill 系统未初始化",
             handler="skills",
         )
+
 
 async def _memory_command(message: Message, groups: str) -> RouteResult:
     """记忆相关命令"""
@@ -431,6 +448,7 @@ async def _memory_command(message: Message, groups: str) -> RouteResult:
             response="请使用 /memory search <关键词> 或 /memory stats",
             handler="memory",
         )
+
 
 def create_default_router(
     agent=None,

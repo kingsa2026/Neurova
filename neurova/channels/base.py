@@ -12,13 +12,12 @@ from __future__ import annotations
 - ChannelManager 负责生命周期和路由
 """
 
-import asyncio
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Callable, Coroutine, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +25,10 @@ logger = logging.getLogger(__name__)
 # 数据模型
 # ============================================================
 
+
 class ChannelEventType(str, Enum):
     """渠道事件类型"""
+
     MESSAGE_RECEIVED = "message_received"
     MESSAGE_SENT = "message_sent"
     BOT_CONNECTED = "bot_connected"
@@ -36,8 +37,10 @@ class ChannelEventType(str, Enum):
     USER_SUBSCRIBED = "user_subscribed"
     USER_UNSUBSCRIBED = "user_unsubscribed"
 
+
 class MessageChannel(str, Enum):
     """消息渠道枚举"""
+
     WECHAT = "wechat"
     FEISHU = "feishu"
     DINGTALK = "dingtalk"
@@ -55,9 +58,11 @@ class MessageChannel(str, Enum):
     MOBILE = "mobile"
     XIAOYI = "xiaoyi"
 
+
 @dataclass
 class ChannelConfig:
     """渠道配置"""
+
     channel_type: str  # feishu / dingtalk / wecom
     enabled: bool = True
     app_id: str = ""
@@ -84,20 +89,23 @@ class ChannelConfig:
             "extra": self.extra,
         }
 
+
 @dataclass
 class ChannelMessage:
     """渠道消息 - 跨平台统一消息格式"""
-    channel_type: str              # feishu / dingtalk / wecom
-    message_id: str                # 平台消息 ID
-    sender_id: str                 # 发送者 ID
-    sender_name: str               # 发送者名称
-    content: str                   # 消息文本内容
-    message_type: str = "text"     # text / image / file / ...
-    chat_id: str = ""              # 会话 ID（群聊/私聊）
-    chat_type: str = "p2p"         # p2p / group
+
+    channel_type: str  # feishu / dingtalk / wecom
+    message_id: str  # 平台消息 ID
+    sender_id: str  # 发送者 ID
+    sender_name: str  # 发送者名称
+    content: str  # 消息文本内容
+    message_type: str = "text"  # text / image / file / ...
+    chat_id: str = ""  # 会话 ID（群聊/私聊）
+    chat_type: str = "p2p"  # p2p / group
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     raw_event: Dict[str, Any] = field(default_factory=dict)  # 原始事件
-    metadata: Dict[str, Any] = field(default_factory=dict)   # 附加元数据
+    metadata: Dict[str, Any] = field(default_factory=dict)  # 附加元数据
+
 
 # 事件回调类型
 ChannelEventCallback = Callable[[ChannelEventType, ChannelMessage], Coroutine[Any, Any, None]]
@@ -105,6 +113,7 @@ ChannelEventCallback = Callable[[ChannelEventType, ChannelMessage], Coroutine[An
 # ============================================================
 # 适配器基类
 # ============================================================
+
 
 class ChannelAdapter(ABC):
     """
@@ -194,7 +203,7 @@ class ChannelAdapter(ABC):
             try:
                 await self._event_callback(event_type, message)
             except Exception as e:
-                logger.exception(f"Event callback error for {self.channel_type}: {e}")
+                logger.exception("Event callback error for %s: %s", self.channel_type, e)
 
     def _make_message(
         self,

@@ -5,42 +5,39 @@ Meta-cognition Layer Models - 元认知层数据模型
 """
 
 from dataclasses import dataclass
-import datetime
-import enum
-import typing
-import uuid
-
 from enum import Enum
-from neurova.mem_core import Memory
 
 # cognitive_layers imports
-import neurova.cognitive_layers.memory_layer.models
+
 
 class SkillCategory(str, Enum):
     """技能分类"""
-    COGNITIVE = "cognitive"       # 认知技能
-    MEMORY = "memory"             # 记忆技能
-    REASONING = "reasoning"       # 推理技能
-    LEARNING = "learning"         # 学习技能
+
+    COGNITIVE = "cognitive"  # 认知技能
+    MEMORY = "memory"  # 记忆技能
+    REASONING = "reasoning"  # 推理技能
+    LEARNING = "learning"  # 学习技能
     COMMUNICATION = "communication"  # 沟通技能
-    EXECUTION = "execution"       # 执行技能
-    MONITORING = "monitoring"     # 监控技能
-    INTEGRATION = "integration"   # 集成技能
+    EXECUTION = "execution"  # 执行技能
+    MONITORING = "monitoring"  # 监控技能
+    INTEGRATION = "integration"  # 集成技能
 
 
 class SkillStatus(str, Enum):
     """技能状态"""
-    INACTIVE = "inactive"         # 未激活
-    ACTIVE = "active"             # 激活
-    LEARNING = "learning"         # 学习中
-    MASTERED = "mastered"         # 已掌握
-    DEPRECATED = "deprecated"     # 已废弃
-    BROKEN = "broken"             # 已损坏
+
+    INACTIVE = "inactive"  # 未激活
+    ACTIVE = "active"  # 激活
+    LEARNING = "learning"  # 学习中
+    MASTERED = "mastered"  # 已掌握
+    DEPRECATED = "deprecated"  # 已废弃
+    BROKEN = "broken"  # 已损坏
 
 
 @dataclass
 class Skill:
     """技能"""
+
     skill_id: str
     name: str
     description: str
@@ -114,6 +111,7 @@ class Skill:
 @dataclass
 class SkillExecutionRecord:
     """技能执行记录"""
+
     record_id: str
     skill_id: str
     task_id: str
@@ -172,11 +170,12 @@ class SkillExecutionRecord:
 
 class MemoryCategory(str, Enum):
     """记忆分类"""
-    EPISODIC = "episodic"         # 情景记忆
-    SEMANTIC = "semantic"         # 语义记忆
-    PROCEDURAL = "procedural"     # 程序记忆
-    SHORT_TERM = "short_term"     # 短期记忆
-    LONG_TERM = "long_term"       # 长期记忆
-    WORKING = "working"           # 工作记忆
-    EMOTIONAL = "emotional"       # 情感记忆
-    SENSORY = "sensory"           # 感官记忆
+
+    EPISODIC = "episodic"  # 情景记忆
+    SEMANTIC = "semantic"  # 语义记忆
+    PROCEDURAL = "procedural"  # 程序记忆
+    SHORT_TERM = "short_term"  # 短期记忆
+    LONG_TERM = "long_term"  # 长期记忆
+    WORKING = "working"  # 工作记忆
+    EMOTIONAL = "emotional"  # 情感记忆
+    SENSORY = "sensory"  # 感官记忆

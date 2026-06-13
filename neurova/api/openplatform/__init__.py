@@ -9,10 +9,6 @@ Neurova API 开放平台模块
 5. 用量统计 - API调用统计和配额管理
 """
 
-from asyncio import Event
 
 # api imports
-import neurova.api.openplatform.events
-import neurova.api.openplatform.models
 
-pass

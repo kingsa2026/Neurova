@@ -15,15 +15,13 @@ Neurova 模块化启动系统
 3. 生命周期管理 - 支持初始化、启动、停止、清理
 """
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import enum
 import logging
-from pathlib import Path
 import threading
 import time
-import typing
+from abc import ABC
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Type
 
 logger = logging.getLogger(__name__)
@@ -31,18 +29,20 @@ logger = logging.getLogger(__name__)
 
 class ModuleState(enum.Enum):
     """模块状态"""
-    CREATED = "created"         # 已创建
-    INITIALIZED = "initialized" # 已初始化
-    STARTING = "starting"       # 启动中
-    RUNNING = "running"         # 运行中
-    STOPPING = "stopping"       # 停止中
-    STOPPED = "stopped"         # 已停止
-    ERROR = "error"             # 错误
+
+    CREATED = "created"  # 已创建
+    INITIALIZED = "initialized"  # 已初始化
+    STARTING = "starting"  # 启动中
+    RUNNING = "running"  # 运行中
+    STOPPING = "stopping"  # 停止中
+    STOPPED = "stopped"  # 已停止
+    ERROR = "error"  # 错误
 
 
 @dataclass
 class ModuleInfo:
     """模块信息"""
+
     name: str
     module_class: Type["Module"]
     dependencies: List[str] = field(default_factory=list)
@@ -58,6 +58,7 @@ class ModuleInfo:
 @dataclass
 class StartupResult:
     """启动结果"""
+
     success: bool
     modules_started: List[str] = field(default_factory=list)
     modules_failed: List[str] = field(default_factory=list)
@@ -151,15 +152,12 @@ class Module(ABC):
 
     def _on_init(self) -> None:
         """初始化钩子 - 子类重写"""
-        pass
 
     def _on_start(self) -> None:
         """启动钩子 - 子类重写"""
-        pass
 
     def _on_stop(self) -> None:
         """停止钩子 - 子类重写"""
-        pass
 
 
 class DependencyResolver:
@@ -253,7 +251,7 @@ class ModuleRegistry:
         """创建模块实例"""
         info = self._resolver.get_module_info(name)
         if not info:
-            logger.warning(f"Module '{name}' not registered")
+            logger.warning("Module '%s' not registered", name)
             return None
         try:
             instance = info.module_class(config=config)
@@ -264,7 +262,7 @@ class ModuleRegistry:
         except Exception as e:
             info.state = ModuleState.ERROR
             info.error = str(e)
-            logger.error(f"Failed to create instance of '{name}': {e}")
+            logger.error("Failed to create instance of '%s': %s", name, e)
             return None
 
     def get_instance(self, name: str) -> Optional[Module]:
@@ -331,4 +329,4 @@ class ModuleRegistry:
                 try:
                     instance.stop()
                 except Exception as e:
-                    logger.error(f"Error stopping module '{name}': {e}")
+                    logger.error("Error stopping module '%s': %s", name, e)

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -28,14 +28,17 @@ router = APIRouter()
 # Pydantic Models
 # ---------------------------------------------------------------------------
 
+
 class SetChannelsRequest(BaseModel):
     """设置共享渠道列表请求"""
+
     channels: List[str] = Field(..., description="参与上下文共享的渠道列表")
     shared_context: bool = Field(default=True, description="是否启用上下文共享")
 
 
 class TestSharingRequest(BaseModel):
     """测试共享配置请求"""
+
     channel: str = Field(..., description="要测试的渠道类型")
 
 
@@ -57,15 +60,30 @@ _channel_sharing_status: Dict[str, Dict[str, Any]] = {}
 
 # Available channels from MessageChannel enum
 _AVAILABLE_CHANNELS = [
-    "wechat", "feishu", "dingtalk", "wecom", "webhook", "api",
-    "telegram", "websocket", "sip", "qqbot", "qq", "qclaw",
-    "mqtt", "discord", "mobile", "xiaoyi", "web"
+    "wechat",
+    "feishu",
+    "dingtalk",
+    "wecom",
+    "webhook",
+    "api",
+    "telegram",
+    "websocket",
+    "sip",
+    "qqbot",
+    "qq",
+    "qclaw",
+    "mqtt",
+    "discord",
+    "mobile",
+    "xiaoyi",
+    "web",
 ]
 
 
 # ---------------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------------
+
 
 def _get_channel_label(channel_type: str) -> str:
     """获取渠道显示名称"""
@@ -130,6 +148,7 @@ def _get_sharing_manager():
     """获取渠道共享管理器（如果可用）"""
     try:
         from neurova.channels import get_channel_manager
+
         return get_channel_manager()
     except Exception:
         return None
@@ -138,6 +157,7 @@ def _get_sharing_manager():
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 
 @router.get("")
 async def get_channel_sharing_config():
@@ -190,13 +210,13 @@ async def set_shared_channels(body: SetChannelsRequest):
     if invalid_channels:
         raise HTTPException(
             status_code=400,
-            detail=f"无效的渠道类型: {', '.join(invalid_channels)}。可用渠道: {', '.join(_AVAILABLE_CHANNELS)}"
+            detail=f"无效的渠道类型: {', '.join(invalid_channels)}。可用渠道: {', '.join(_AVAILABLE_CHANNELS)}",
         )
-    
+
     _sharing_config["shared_channels"] = body.channels
     _sharing_config["enabled"] = body.shared_context
     _sharing_config["updated_at"] = time.time()
-    
+
     return {
         "code": 0,
         "message": f"已设置 {len(body.channels)} 个共享渠道",
@@ -213,13 +233,15 @@ async def get_available_channels():
     """获取所有可用的渠道列表，用于前端下拉选择"""
     channels_info = []
     for channel_type in _AVAILABLE_CHANNELS:
-        channels_info.append({
-            "type": channel_type,
-            "label": _get_channel_label(channel_type),
-            "description": _get_channel_description(channel_type),
-            "is_shared": channel_type in _sharing_config.get("shared_channels", []),
-        })
-    
+        channels_info.append(
+            {
+                "type": channel_type,
+                "label": _get_channel_label(channel_type),
+                "description": _get_channel_description(channel_type),
+                "is_shared": channel_type in _sharing_config.get("shared_channels", []),
+            }
+        )
+
     return {
         "code": 0,
         "data": {
@@ -236,19 +258,18 @@ async def test_sharing_config(body: TestSharingRequest):
     channel = body.channel
     if channel not in _AVAILABLE_CHANNELS:
         raise HTTPException(
-            status_code=400,
-            detail=f"无效的渠道类型: {channel}。可用渠道: {', '.join(_AVAILABLE_CHANNELS)}"
+            status_code=400, detail=f"无效的渠道类型: {channel}。可用渠道: {', '.join(_AVAILABLE_CHANNELS)}"
         )
-    
+
     shared_channels = _sharing_config.get("shared_channels", [])
     is_shared = channel in shared_channels
     is_enabled = _sharing_config.get("enabled", False)
-    
+
     # 获取共享关系
     shared_with = []
     if is_shared and is_enabled:
         shared_with = [ch for ch in shared_channels if ch != channel]
-    
+
     # 获取渠道状态
     manager = _get_sharing_manager()
     channel_status = "unknown"
@@ -259,7 +280,7 @@ async def test_sharing_config(body: TestSharingRequest):
                 channel_status = "connected" if adapter.is_connected else "disconnected"
         except Exception:
             channel_status = "unavailable"
-    
+
     return {
         "code": 0,
         "data": {
@@ -281,12 +302,12 @@ async def get_sharing_status():
     """获取渠道上下文共享状态的简要摘要，用于前端仪表盘显示"""
     shared_channels = _sharing_config.get("shared_channels", [])
     is_enabled = _sharing_config.get("enabled", False)
-    
+
     # 计算共享统计
     total_channels = len(_AVAILABLE_CHANNELS)
     shared_count = len(shared_channels)
     unshared_count = total_channels - shared_count
-    
+
     # 获取管理器状态
     manager = _get_sharing_manager()
     connected_channels = 0
@@ -296,7 +317,7 @@ async def get_sharing_status():
             connected_channels = sum(1 for info in adapters_status.values() if info.get("connected", False))
         except Exception:
             pass
-    
+
     return {
         "code": 0,
         "data": {

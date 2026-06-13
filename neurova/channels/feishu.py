@@ -18,17 +18,16 @@ API 参考:
 import asyncio
 import json
 import logging
-import time
 from typing import Any, Dict, Optional
 
 from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
     ChannelEventType,
-    ChannelMessage,
 )
 
 logger = logging.getLogger(__name__)
+
 
 class FeishuAdapter(ChannelAdapter):
     """
@@ -56,7 +55,7 @@ class FeishuAdapter(ChannelAdapter):
             else:
                 return await self._connect_webhook()
         except Exception as e:
-            logger.exception(f"Feishu connect error: {e}")
+            logger.exception("Feishu connect error: %s", e)
             return False
 
     async def _connect_stream(self) -> bool:
@@ -71,9 +70,7 @@ class FeishuAdapter(ChannelAdapter):
             )
 
             # 注册消息接收事件
-            self._event_handler.register_p2_im_message_receive_v1(
-                self._handle_message_event
-            )
+            self._event_handler.register_p2_im_message_receive_v1(self._handle_message_event)
 
             # 创建长连接客户端
             self._ws_client = lark.ws.Client(
@@ -85,6 +82,7 @@ class FeishuAdapter(ChannelAdapter):
 
             # 启动长连接（非阻塞）
             import threading
+
             self._ws_thread = threading.Thread(
                 target=self._ws_client.start,
                 daemon=True,
@@ -99,16 +97,13 @@ class FeishuAdapter(ChannelAdapter):
             logger.error("lark-oapi not installed. Run: pip install lark-oapi")
             return False
         except Exception as e:
-            logger.exception(f"Feishu Stream connect error: {e}")
+            logger.exception("Feishu Stream connect error: %s", e)
             return False
 
     async def _connect_webhook(self) -> bool:
         """Webhook 模式: 需要公网 URL，在 FastAPI 中注册路由"""
         self._connected = True
-        logger.info(
-            f"Feishu Webhook mode configured. "
-            f"Register webhook at: {self.config.webhook_url}"
-        )
+        logger.info("Feishu Webhook mode configured. " f"Register webhook at: %s", self.config.webhook_url)
         return True
 
     def _handle_message_event(self, ctx, event):
@@ -142,7 +137,10 @@ class FeishuAdapter(ChannelAdapter):
                 chat_id=msg.chat_id or "",
                 chat_type=msg.chat_type or "p2p",
                 message_type=msg.message_type or "text",
-                raw_event={"header": ctx.__dict__ if hasattr(ctx, '__dict__') else {}, "event": event.__dict__ if hasattr(event, '__dict__') else {}},
+                raw_event={
+                    "header": ctx.__dict__ if hasattr(ctx, "__dict__") else {},
+                    "event": event.__dict__ if hasattr(event, "__dict__") else {},
+                },
             )
 
             # 触发事件（同步回调转异步）
@@ -152,24 +150,19 @@ class FeishuAdapter(ChannelAdapter):
                 if loop.is_running():
                     # 如果事件循环正在运行，使用 call_soon_threadsafe
                     asyncio.run_coroutine_threadsafe(
-                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg),
-                        loop
+                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg), loop
                     )
                 else:
                     # 如果事件循环未运行，直接运行
-                    loop.run_until_complete(
-                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
-                    )
+                    loop.run_until_complete(self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg))
             except RuntimeError:
                 # 如果没有事件循环，创建新的
                 loop = asyncio.new_event_loop()
-                loop.run_until_complete(
-                    self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
-                )
+                loop.run_until_complete(self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg))
                 loop.close()
 
         except Exception as e:
-            logger.exception(f"Feishu message handler error: {e}")
+            logger.exception("Feishu message handler error: %s", e)
 
     async def send_message(
         self,
@@ -187,10 +180,9 @@ class FeishuAdapter(ChannelAdapter):
             )
 
             if not self._client:
-                self._client = lark.Client.builder() \
-                    .app_id(self.config.app_id) \
-                    .app_secret(self.config.app_secret) \
-                    .build()
+                self._client = (
+                    lark.Client.builder().app_id(self.config.app_id).app_secret(self.config.app_secret).build()
+                )
 
             # 构造消息内容
             if message_type == "text":
@@ -200,34 +192,31 @@ class FeishuAdapter(ChannelAdapter):
                 msg_content = content
                 receive_id_type = kwargs.get("receive_id_type", "chat_id")
 
-            body = CreateMessageRequestBody.builder() \
-                .receive_id(chat_id) \
-                .msg_type(message_type) \
-                .content(msg_content) \
+            body = (
+                CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .msg_type(message_type)
+                .content(msg_content)
                 .build()
+            )
 
-            request = CreateMessageRequest.builder() \
-                .receive_id_type(receive_id_type) \
-                .request_body(body) \
-                .build()
+            request = CreateMessageRequest.builder().receive_id_type(receive_id_type).request_body(body).build()
 
             response = self._client.im.v1.message.create(request)
 
             if response.success():
                 msg_id = response.data.message_id if response.data else None
-                logger.info(f"Feishu message sent: {msg_id}")
+                logger.info("Feishu message sent: %s", msg_id)
                 return msg_id
             else:
-                logger.error(
-                    f"Feishu send failed: code={response.code}, msg={response.msg}"
-                )
+                logger.error("Feishu send failed: code=%s, msg=%s", response.code, response.msg)
                 return None
 
         except ImportError:
             logger.error("lark-oapi not installed")
             return None
         except Exception as e:
-            logger.exception(f"Feishu send error: {e}")
+            logger.exception("Feishu send error: %s", e)
             return None
 
     async def disconnect(self):
@@ -238,7 +227,7 @@ class FeishuAdapter(ChannelAdapter):
                 # 线程是 daemon 的，主线程退出时自动终止
                 pass
             except Exception as e:
-                logger.warning(f"Feishu disconnect warning: {e}")
+                logger.warning("Feishu disconnect warning: %s", e)
 
         self._connected = False
         self._ws_client = None
@@ -248,10 +237,12 @@ class FeishuAdapter(ChannelAdapter):
     async def health_check(self) -> Dict[str, Any]:
         """飞书健康检查"""
         base = await super().health_check()
-        base.update({
-            "app_id": self.config.app_id[:8] + "***" if self.config.app_id else "",
-            "stream_mode": self.config.use_stream,
-        })
+        base.update(
+            {
+                "app_id": self.config.app_id[:8] + "***" if self.config.app_id else "",
+                "stream_mode": self.config.use_stream,
+            }
+        )
         return base
 
     # ============================================================
@@ -266,6 +257,7 @@ class FeishuAdapter(ChannelAdapter):
         飞书在配置 Webhook 时会发送 challenge 请求进行验证。
         """
         return {"challenge": challenge}
+
 
 def create_feishu_adapter(
     app_id: str,

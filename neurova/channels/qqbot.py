@@ -15,29 +15,30 @@ API 文档: https://12.onebot.dev/
 
 import json
 import logging
-import re
-import time
-import tempfile
 import os
-from typing import Optional, Dict, Any
+import re
+import tempfile
+import time
 from datetime import datetime
+from typing import Any, Dict, Optional
 
 try:
     import re
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
 
 try:
-    import http
+    pass
+
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
     logging.warning("httpx 库未安装，部分AI生成功能可能不可用")
 
-from neurova.channels import (
-    ChannelAdapter, MessageChannel, UnifiedMessage, ContentType
-)
+from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+
 
 class QQBotAdapter(ChannelAdapter):
     """
@@ -70,7 +71,7 @@ class QQBotAdapter(ChannelAdapter):
 
         # 消息策略
         self.private_chat_strategy = "open"  # open/closed/whitelist
-        self.group_chat_strategy = "open"    # open/closed/whitelist
+        self.group_chat_strategy = "open"  # open/closed/whitelist
         self.require_mention = False
         self.whitelist_users = []
         self.message_merge = False
@@ -142,16 +143,9 @@ class QQBotAdapter(ChannelAdapter):
 
         try:
             # 测试获取机器人信息
-            headers = {
-                "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json"
-            }
+            headers = {"Authorization": f"Bearer {self.access_token}", "Content-Type": "application/json"}
 
-            resp = requests.post(
-                f"{self.http_api_url}/get_login_info",
-                headers=headers,
-                timeout=10
-            )
+            resp = requests.post(f"{self.http_api_url}/get_login_info", headers=headers, timeout=10)
 
             if resp.status_code == 200:
                 data = resp.json()
@@ -159,17 +153,17 @@ class QQBotAdapter(ChannelAdapter):
                     user_info = data.get("data", {})
                     nickname = user_info.get("nickname", "Unknown")
                     user_id = user_info.get("user_id", "Unknown")
-                    logging.info(f"QQ Bot认证成功 - 用户: {nickname}({user_id})")
+                    logging.info("QQ Bot认证成功 - 用户: %s(%s)", nickname, user_id)
                     self._initialized = True
                     return True
                 else:
-                    logging.error(f"QQ Bot认证失败: {data}")
+                    logging.error("QQ Bot认证失败: %s", data)
                     return False
             else:
-                logging.error(f"QQ Bot连接失败: HTTP {resp.status_code}")
+                logging.error("QQ Bot连接失败: HTTP %s", resp.status_code)
                 return False
         except Exception as e:
-            logging.error(f"QQ Bot连接异常: {e}")
+            logging.error("QQ Bot连接异常: %s", e)
             return False
 
     def _ensure_authenticated(self) -> bool:
@@ -194,10 +188,7 @@ class QQBotAdapter(ChannelAdapter):
             return {"retcode": 1, "data": {}, "message": "requests 库未安装"}
 
         url = f"{self.http_api_url}{endpoint}"
-        headers = {
-            "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json"
-        }
+        headers = {"Authorization": f"Bearer {self.access_token}", "Content-Type": "application/json"}
         kwargs.setdefault("timeout", 30)
 
         try:
@@ -205,13 +196,13 @@ class QQBotAdapter(ChannelAdapter):
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.Timeout:
-            logging.error(f"QQ Bot API 请求超时: {url}")
+            logging.error("QQ Bot API 请求超时: %s", url)
             return {"retcode": 1, "data": {}, "message": "请求超时"}
         except requests.exceptions.HTTPError as e:
-            logging.error(f"QQ Bot API HTTP 错误: {e}")
+            logging.error("QQ Bot API HTTP 错误: %s", e)
             return {"retcode": 1, "data": {}, "message": f"HTTP 错误: {e.response.status_code}"}
         except Exception as e:
-            logging.error(f"QQ Bot API 请求异常: {e}")
+            logging.error("QQ Bot API 请求异常: %s", e)
             return {"retcode": 1, "data": {}, "message": str(e)}
 
     def send_message(self, message: UnifiedMessage) -> bool:
@@ -230,7 +221,7 @@ class QQBotAdapter(ChannelAdapter):
             return False
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[QQ Bot模拟] 发送消息到 {message.chat_id}: {message.content[:50]}")
+            logging.info("[QQ Bot模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
             return True
 
         try:
@@ -246,18 +237,10 @@ class QQBotAdapter(ChannelAdapter):
 
             # 构建API请求
             if is_group:
-                payload = {
-                    "group_id": message.chat_id,
-                    "message": message_content,
-                    "auto_escape": False
-                }
+                payload = {"group_id": message.chat_id, "message": message_content, "auto_escape": False}
                 api_endpoint = "/send_group_msg"
             else:
-                payload = {
-                    "user_id": message.chat_id,
-                    "message": message_content,
-                    "auto_escape": False
-                }
+                payload = {"user_id": message.chat_id, "message": message_content, "auto_escape": False}
                 api_endpoint = "/send_private_msg"
 
             # 发送请求
@@ -266,10 +249,10 @@ class QQBotAdapter(ChannelAdapter):
             if data.get("retcode") == 0:
                 return True
             else:
-                logging.error(f"QQ Bot消息发送失败: {data}")
+                logging.error("QQ Bot消息发送失败: %s", data)
                 return False
         except Exception as e:
-            logging.error(f"QQ Bot消息发送异常: {e}")
+            logging.error("QQ Bot消息发送异常: %s", e)
             return False
 
     def _build_cq_message(self, message: UnifiedMessage) -> str:
@@ -389,7 +372,7 @@ class QQBotAdapter(ChannelAdapter):
                 return None
             elif self.private_chat_strategy == "whitelist":
                 if user_id not in self.whitelist_users:
-                    logging.debug(f"用户 {user_id} 不在白名单中")
+                    logging.debug("用户 %s 不在白名单中", user_id)
                     return None
         elif message_type == "group":
             if self.group_chat_strategy == "closed":
@@ -397,7 +380,7 @@ class QQBotAdapter(ChannelAdapter):
                 return None
             elif self.group_chat_strategy == "whitelist":
                 if user_id not in self.whitelist_users:
-                    logging.debug(f"用户 {user_id} 不在白名单中")
+                    logging.debug("用户 %s 不在白名单中", user_id)
                     return None
 
         return UnifiedMessage(
@@ -439,7 +422,7 @@ class QQBotAdapter(ChannelAdapter):
         (content_type, file_url) 元组
         """
         # CQ码正则表达式
-        cq_pattern = r'\[CQ:([^,\]]+)(?:,([^\]]+))?\]'
+        cq_pattern = r"\[CQ:([^,\]]+)(?:,([^\]]+))?\]"
         matches = re.findall(cq_pattern, message)
 
         content_type = ContentType.TEXT
@@ -463,23 +446,23 @@ class QQBotAdapter(ChannelAdapter):
             if cq_type == "image":
                 content_type = ContentType.IMAGE
                 file_url = file_param
-                logging.debug(f"解析到图片消息: {file_url}")
+                logging.debug("解析到图片消息: %s", file_url)
             elif cq_type == "record":
                 content_type = ContentType.VOICE
                 file_url = file_param
-                logging.debug(f"解析到录音消息: {file_url}")
+                logging.debug("解析到录音消息: %s", file_url)
             elif cq_type == "voice":
                 content_type = ContentType.VOICE
                 file_url = file_param
-                logging.debug(f"解析到语音消息: {file_url}")
+                logging.debug("解析到语音消息: %s", file_url)
             elif cq_type == "video":
                 content_type = ContentType.VIDEO
                 file_url = file_param
-                logging.debug(f"解析到视频消息: {file_url}")
+                logging.debug("解析到视频消息: %s", file_url)
             elif cq_type == "file":
                 content_type = ContentType.FILE
                 file_url = file_param
-                logging.debug(f"解析到文件消息: {file_url}")
+                logging.debug("解析到文件消息: %s", file_url)
 
         return content_type, file_url
 
@@ -498,7 +481,7 @@ class QQBotAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[QQ Bot模拟] 上传文件: {file_path}")
+            logging.info("[QQ Bot模拟] 上传文件: %s", file_path)
             return f"模拟_file_id_{file_path}"
 
         try:
@@ -511,26 +494,26 @@ class QQBotAdapter(ChannelAdapter):
                     headers={"Authorization": f"Bearer {self.access_token}"},
                     files=files,
                     data=data,
-                    timeout=60
+                    timeout=60,
                 )
 
                 if resp.status_code == 200:
                     result = resp.json()
                     if result.get("retcode") == 0:
                         file_id = result.get("data", {}).get("file_id")
-                        logging.info(f"文件上传成功: {file_path} -> {file_id}")
+                        logging.info("文件上传成功: %s -> %s", file_path, file_id)
                         return file_id
                     else:
-                        logging.error(f"文件上传失败: {result}")
+                        logging.error("文件上传失败: %s", result)
                         return None
                 else:
-                    logging.error(f"文件上传失败: HTTP {resp.status_code}")
+                    logging.error("文件上传失败: HTTP %s", resp.status_code)
                     return None
         except FileNotFoundError:
-            logging.error(f"文件不存在: {file_path}")
+            logging.error("文件不存在: %s", file_path)
             return None
         except Exception as e:
-            logging.error(f"文件上传异常: {e}")
+            logging.error("文件上传异常: %s", e)
             return None
 
     def send_image(self, chat_id: str, file_path: str = "", file_id: str = "", url: str = "") -> bool:
@@ -569,17 +552,13 @@ class QQBotAdapter(ChannelAdapter):
             return False
 
         if is_group:
-            data = self._api_request("POST", "/send_group_msg", json={
-                "group_id": chat_id,
-                "message": cq_message,
-                "auto_escape": False
-            })
+            data = self._api_request(
+                "POST", "/send_group_msg", json={"group_id": chat_id, "message": cq_message, "auto_escape": False}
+            )
         else:
-            data = self._api_request("POST", "/send_private_msg", json={
-                "user_id": chat_id,
-                "message": cq_message,
-                "auto_escape": False
-            })
+            data = self._api_request(
+                "POST", "/send_private_msg", json={"user_id": chat_id, "message": cq_message, "auto_escape": False}
+            )
 
         return data.get("retcode") == 0
 
@@ -619,17 +598,13 @@ class QQBotAdapter(ChannelAdapter):
             return False
 
         if is_group:
-            data = self._api_request("POST", "/send_group_msg", json={
-                "group_id": chat_id,
-                "message": cq_message,
-                "auto_escape": False
-            })
+            data = self._api_request(
+                "POST", "/send_group_msg", json={"group_id": chat_id, "message": cq_message, "auto_escape": False}
+            )
         else:
-            data = self._api_request("POST", "/send_private_msg", json={
-                "user_id": chat_id,
-                "message": cq_message,
-                "auto_escape": False
-            })
+            data = self._api_request(
+                "POST", "/send_private_msg", json={"user_id": chat_id, "message": cq_message, "auto_escape": False}
+            )
 
         return data.get("retcode") == 0
 
@@ -669,17 +644,13 @@ class QQBotAdapter(ChannelAdapter):
             return False
 
         if is_group:
-            data = self._api_request("POST", "/send_group_msg", json={
-                "group_id": chat_id,
-                "message": cq_message,
-                "auto_escape": False
-            })
+            data = self._api_request(
+                "POST", "/send_group_msg", json={"group_id": chat_id, "message": cq_message, "auto_escape": False}
+            )
         else:
-            data = self._api_request("POST", "/send_private_msg", json={
-                "user_id": chat_id,
-                "message": cq_message,
-                "auto_escape": False
-            })
+            data = self._api_request(
+                "POST", "/send_private_msg", json={"user_id": chat_id, "message": cq_message, "auto_escape": False}
+            )
 
         return data.get("retcode") == 0
 
@@ -726,17 +697,13 @@ class QQBotAdapter(ChannelAdapter):
             return False
 
         if is_group:
-            data = self._api_request("POST", "/send_group_msg", json={
-                "group_id": chat_id,
-                "message": cq_message,
-                "auto_escape": False
-            })
+            data = self._api_request(
+                "POST", "/send_group_msg", json={"group_id": chat_id, "message": cq_message, "auto_escape": False}
+            )
         else:
-            data = self._api_request("POST", "/send_private_msg", json={
-                "user_id": chat_id,
-                "message": cq_message,
-                "auto_escape": False
-            })
+            data = self._api_request(
+                "POST", "/send_private_msg", json={"user_id": chat_id, "message": cq_message, "auto_escape": False}
+            )
 
         return data.get("retcode") == 0
 
@@ -792,19 +759,24 @@ class QQBotAdapter(ChannelAdapter):
 
         return True
 
+
 def create_qqbot_adapter(access_token: str = "", http_url: str = "http://127.0.0.1:3000") -> QQBotAdapter:
     """创建QQ Bot适配器"""
     adapter = QQBotAdapter()
     if access_token:
-        adapter.authenticate({
-            "access_token": access_token,
-            "http_api_url": http_url,
-        })
+        adapter.authenticate(
+            {
+                "access_token": access_token,
+                "http_api_url": http_url,
+            }
+        )
     return adapter
+
 
 # ============================================================
 # QQBotAdapter AI 生成能力
 # ============================================================
+
 
 async def generate_text_to_image(self, prompt: str, **kwargs) -> Optional[bytes]:
     """生成AI图片
@@ -817,7 +789,7 @@ async def generate_text_to_image(self, prompt: str, **kwargs) -> Optional[bytes]
         成功返回图片二进制数据，失败返回 None
     """
     try:
-        from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+        from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
         manager = get_generator_manager()
         generator = manager.get_generator("text_to_image", kwargs.get("model"))
@@ -841,15 +813,18 @@ async def generate_text_to_image(self, prompt: str, **kwargs) -> Optional[bytes]
         if result.success and result.urls:
             return await self._download_url(result.urls[0])
         else:
-            logger.error(f"图片生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+            logger.error(
+                f"图片生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+            )
             return None
 
     except ImportError:
         logger.error("GeneratorManager 模块不可用")
         return None
     except Exception as e:
-        logger.exception(f"AI图片生成异常: {e}")
+        logger.exception("AI图片生成异常: %s", e)
         return None
+
 
 async def generate_image_to_image(self, image_url: str, prompt: str, **kwargs) -> Optional[bytes]:
     """图生图 - 基于参考图片生成新图片
@@ -863,7 +838,7 @@ async def generate_image_to_image(self, image_url: str, prompt: str, **kwargs) -
         成功返回图片二进制数据，失败返回 None
     """
     try:
-        from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+        from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
         manager = get_generator_manager()
         generator = manager.get_generator("image_to_image", kwargs.get("model"))
@@ -873,7 +848,7 @@ async def generate_image_to_image(self, image_url: str, prompt: str, **kwargs) -
 
         image_data = await self._download_url(image_url)
         if not image_data:
-            logger.error(f"下载参考图片失败: {image_url}")
+            logger.error("下载参考图片失败: %s", image_url)
             return None
 
         config = GenerationConfig(
@@ -895,15 +870,18 @@ async def generate_image_to_image(self, image_url: str, prompt: str, **kwargs) -
         if result.success and result.urls:
             return await self._download_url(result.urls[0])
         else:
-            logger.error(f"图生图生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+            logger.error(
+                f"图生图生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+            )
             return None
 
     except ImportError:
         logger.error("GeneratorManager 模块不可用")
         return None
     except Exception as e:
-        logger.exception(f"图生图生成异常: {e}")
+        logger.exception("图生图生成异常: %s", e)
         return None
+
 
 async def generate_text_to_video(self, prompt: str, **kwargs) -> Optional[bytes]:
     """生成AI视频
@@ -916,7 +894,7 @@ async def generate_text_to_video(self, prompt: str, **kwargs) -> Optional[bytes]
         成功返回视频二进制数据，失败返回 None
     """
     try:
-        from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+        from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
         manager = get_generator_manager()
         generator = manager.get_generator("text_to_video", kwargs.get("model"))
@@ -941,15 +919,18 @@ async def generate_text_to_video(self, prompt: str, **kwargs) -> Optional[bytes]
         if result.success and result.urls:
             return await self._download_url(result.urls[0])
         else:
-            logger.error(f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+            logger.error(
+                f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+            )
             return None
 
     except ImportError:
         logger.error("GeneratorManager 模块不可用")
         return None
     except Exception as e:
-        logger.exception(f"AI视频生成异常: {e}")
+        logger.exception("AI视频生成异常: %s", e)
         return None
+
 
 async def generate_image_to_video(self, image_url: str, prompt: str, **kwargs) -> Optional[bytes]:
     """图生视频 - 基于图片生成视频
@@ -963,7 +944,7 @@ async def generate_image_to_video(self, image_url: str, prompt: str, **kwargs) -
         成功返回视频二进制数据，失败返回 None
     """
     try:
-        from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+        from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
         manager = get_generator_manager()
         generator = manager.get_generator("image_to_video", kwargs.get("model"))
@@ -973,7 +954,7 @@ async def generate_image_to_video(self, image_url: str, prompt: str, **kwargs) -
 
         image_data = await self._download_url(image_url)
         if not image_data:
-            logger.error(f"下载参考图片失败: {image_url}")
+            logger.error("下载参考图片失败: %s", image_url)
             return None
 
         config = GenerationConfig(
@@ -994,15 +975,18 @@ async def generate_image_to_video(self, image_url: str, prompt: str, **kwargs) -
         if result.success and result.urls:
             return await self._download_url(result.urls[0])
         else:
-            logger.error(f"图生视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+            logger.error(
+                f"图生视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+            )
             return None
 
     except ImportError:
         logger.error("GeneratorManager 模块不可用")
         return None
     except Exception as e:
-        logger.exception(f"图生视频生成异常: {e}")
+        logger.exception("图生视频生成异常: %s", e)
         return None
+
 
 async def generate_keyframe_to_video(self, start_url: str, end_url: str, **kwargs) -> Optional[bytes]:
     """首尾帧生视频 - 基于起始和结束帧生成视频
@@ -1016,7 +1000,7 @@ async def generate_keyframe_to_video(self, start_url: str, end_url: str, **kwarg
         成功返回视频二进制数据，失败返回 None
     """
     try:
-        from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+        from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
         manager = get_generator_manager()
         generator = manager.get_generator("keyframe_to_video", kwargs.get("model"))
@@ -1049,15 +1033,18 @@ async def generate_keyframe_to_video(self, start_url: str, end_url: str, **kwarg
         if result.success and result.urls:
             return await self._download_url(result.urls[0])
         else:
-            logger.error(f"首尾帧生成视频失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+            logger.error(
+                f"首尾帧生成视频失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+            )
             return None
 
     except ImportError:
         logger.error("GeneratorManager 模块不可用")
         return None
     except Exception as e:
-        logger.exception(f"首尾帧生成视频异常: {e}")
+        logger.exception("首尾帧生成视频异常: %s", e)
         return None
+
 
 async def generate_video_to_video(self, video_url: str, prompt: str, **kwargs) -> Optional[bytes]:
     """视频生视频 - 基于参考视频生成新视频
@@ -1071,7 +1058,7 @@ async def generate_video_to_video(self, video_url: str, prompt: str, **kwargs) -
         成功返回视频二进制数据，失败返回 None
     """
     try:
-        from neurova.llm.generators import get_generator_manager, GenerationConfig, GeneratorType
+        from neurova.llm.generators import GenerationConfig, GeneratorType, get_generator_manager
 
         manager = get_generator_manager()
         generator = manager.get_generator("video_to_video", kwargs.get("model"))
@@ -1081,7 +1068,7 @@ async def generate_video_to_video(self, video_url: str, prompt: str, **kwargs) -
 
         video_data = await self._download_url(video_url)
         if not video_data:
-            logger.error(f"下载参考视频失败: {video_url}")
+            logger.error("下载参考视频失败: %s", video_url)
             return None
 
         config = GenerationConfig(
@@ -1105,15 +1092,18 @@ async def generate_video_to_video(self, video_url: str, prompt: str, **kwargs) -
         if result.success and result.urls:
             return await self._download_url(result.urls[0])
         else:
-            logger.error(f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+            logger.error(
+                f"视频生成失败: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+            )
             return None
 
     except ImportError:
         logger.error("GeneratorManager 模块不可用")
         return None
     except Exception as e:
-        logger.exception(f"视频生成异常: {e}")
+        logger.exception("视频生成异常: %s", e)
         return None
+
 
 async def _download_url(self, url: str, timeout: int = 60) -> Optional[bytes]:
     """下载URL内容
@@ -1132,10 +1122,10 @@ async def _download_url(self, url: str, timeout: int = 60) -> Optional[bytes]:
                 if response.status_code == 200:
                     return response.content
                 else:
-                    logging.error(f"下载失败 HTTP {response.status_code}: {url}")
+                    logging.error("下载失败 HTTP %s: %s", response.status_code, url)
                     return None
         except Exception as e:
-            logging.error(f"httpx下载异常: {e}")
+            logging.error("httpx下载异常: %s", e)
             return None
     elif REQUESTS_AVAILABLE:
         try:
@@ -1143,14 +1133,15 @@ async def _download_url(self, url: str, timeout: int = 60) -> Optional[bytes]:
             if response.status_code == 200:
                 return response.content
             else:
-                logging.error(f"下载失败 HTTP {response.status_code}: {url}")
+                logging.error("下载失败 HTTP %s: %s", response.status_code, url)
                 return None
         except Exception as e:
-            logging.error(f"requests下载异常: {e}")
+            logging.error("requests下载异常: %s", e)
             return None
     else:
         logging.error("无可用的HTTP客户端")
         return None
+
 
 async def _save_temp_file(self, data: bytes, extension: str) -> Optional[str]:
     """保存临时文件
@@ -1166,11 +1157,12 @@ async def _save_temp_file(self, data: bytes, extension: str) -> Optional[str]:
         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{extension}") as f:
             f.write(data)
             temp_path = f.name
-        logging.info(f"临时文件已保存: {temp_path}")
+        logging.info("临时文件已保存: %s", temp_path)
         return temp_path
     except Exception as e:
-        logging.error(f"保存临时文件失败: {e}")
+        logging.error("保存临时文件失败: %s", e)
         return None
+
 
 def _extract_prompt(self, content: str) -> str:
     """从消息内容中提取AI生成提示词
@@ -1191,6 +1183,7 @@ def _extract_prompt(self, content: str) -> str:
         if match:
             return match.group(1).strip()
     return content
+
 
 async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
     """处理AI生成请求
@@ -1241,7 +1234,9 @@ async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
                 _send_typing(self, message, "图片生成失败")
                 return False
 
-    elif has_image and ("图生图" in content or "以图生图" in content or "生成相似图片" in content or "生成新图片" in content):
+    elif has_image and (
+        "图生图" in content or "以图生图" in content or "生成相似图片" in content or "生成新图片" in content
+    ):
         prompt = _extract_prompt(self, message.content) or ""
         if image_url:
             _send_typing(self, message, "正在生成图片，请稍候...")
@@ -1256,7 +1251,9 @@ async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
             _send_typing(self, message, "图片生成失败")
             return False
 
-    elif has_image and ("图生视频" in content or "图片转视频" in content or "让图片动起来" in content or "图片生成视频" in content):
+    elif has_image and (
+        "图生视频" in content or "图片转视频" in content or "让图片动起来" in content or "图片生成视频" in content
+    ):
         prompt = _extract_prompt(self, message.content) or ""
         if image_url:
             _send_typing(self, message, "正在生成视频，请稍候...")
@@ -1271,7 +1268,9 @@ async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
             _send_typing(self, message, "视频生成失败")
             return False
 
-    elif ("首尾帧" in content or "首帧到尾帧" in content or "首尾帧生成视频" in content) and message.metadata.get("images_count", 0) >= 2:
+    elif ("首尾帧" in content or "首帧到尾帧" in content or "首尾帧生成视频" in content) and message.metadata.get(
+        "images_count", 0
+    ) >= 2:
         start_url = message.metadata.get("first_image_url", "")
         end_url = message.metadata.get("last_image_url", "")
         if start_url and end_url:
@@ -1287,7 +1286,9 @@ async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
             _send_typing(self, message, "视频生成失败")
             return False
 
-    elif has_video and ("视频生成" in content or "视频风格" in content or "修改视频" in content or "视频转视频" in content):
+    elif has_video and (
+        "视频生成" in content or "视频风格" in content or "修改视频" in content or "视频转视频" in content
+    ):
         prompt = _extract_prompt(self, message.content) or ""
         if video_url:
             _send_typing(self, message, "正在生成视频，请稍候...")
@@ -1319,18 +1320,22 @@ async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
 
     return False
 
+
 def _send_typing(self, message: UnifiedMessage, content: str):
     """发送临时消息提示"""
-    self.send_message(UnifiedMessage(
-        message_id="temp",
-        channel=MessageChannel.QQBOT,
-        chat_id=message.chat_id,
-        user_id=message.user_id,
-        agent_id="",
-        content=content,
-        content_type=ContentType.TEXT,
-        timestamp=datetime.now(),
-    ))
+    self.send_message(
+        UnifiedMessage(
+            message_id="temp",
+            channel=MessageChannel.QQBOT,
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            agent_id="",
+            content=content,
+            content_type=ContentType.TEXT,
+            timestamp=datetime.now(),
+        )
+    )
+
 
 QQBotAdapter.generate_text_to_image = generate_text_to_image
 QQBotAdapter.generate_image_to_image = generate_image_to_image

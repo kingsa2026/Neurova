@@ -6,8 +6,6 @@ Neurova 认证模块:
 """
 
 import logging
-import os
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +47,14 @@ except ImportError:
 
 # auth imports
 try:
-    import neurova.auth.enhanced_user_model
-    import neurova.auth.password_hasher
-    import neurova.auth.user_group_model
-    import neurova.auth.user_model
+    pass
 except ImportError as e:
-    logger.debug(f"部分 auth 子模块导入失败: {e}")
+    logger.debug("部分 auth 子模块导入失败: %s", e)
 
 __all__ = [
-    "EnhancedUserModel", "Permission", "ResourceQuotaManager",
-    "User", "UserGroupManager",
+    "EnhancedUserModel",
+    "Permission",
+    "ResourceQuotaManager",
+    "User",
+    "UserGroupManager",
 ]

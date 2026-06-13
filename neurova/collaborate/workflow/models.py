@@ -7,44 +7,50 @@
 
 import time
 import uuid
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
 
 class FlowPhase(str, Enum):
     """工作流执行阶段"""
-    IDLE = "idle"                      # 空闲
+
+    IDLE = "idle"  # 空闲
     INITIALIZATION = "initialization"  # 初始化
-    PLANNING = "planning"              # 规划
-    EXECUTION = "execution"            # 执行
-    CONVERSATION = "conversation"      # 对话
-    REVIEW = "review"                  # 评审
-    COMPLETION = "completion"          # 完成
-    FAILED = "failed"                  # 失败
-    CANCELLED = "cancelled"            # 取消
+    PLANNING = "planning"  # 规划
+    EXECUTION = "execution"  # 执行
+    CONVERSATION = "conversation"  # 对话
+    REVIEW = "review"  # 评审
+    COMPLETION = "completion"  # 完成
+    FAILED = "failed"  # 失败
+    CANCELLED = "cancelled"  # 取消
+
 
 class FlowEvent(str, Enum):
     """工作流事件类型"""
-    PHASE_CHANGED = "phase_changed"              # 阶段变更
-    STEP_STARTED = "step_started"                # 步骤开始
-    STEP_COMPLETED = "step_completed"            # 步骤完成
-    STEP_FAILED = "step_failed"                  # 步骤失败
-    TASK_ASSIGNED = "task_assigned"              # 任务分配
-    TASK_REASSIGNED = "task_reassigned"          # 任务重新分配
-    APPROVAL_REQUESTED = "approval_requested"    # 请求批准
-    APPROVAL_GRANTED = "approval_granted"        # 批准
-    APPROVAL_REJECTED = "approval_rejected"      # 拒绝
-    WORKFLOW_COMPLETED = "workflow_completed"    # 工作流完成
-    WORKFLOW_FAILED = "workflow_failed"          # 工作流失败
-    WORKFLOW_CANCELLED = "workflow_cancelled"    # 工作流取消
+
+    PHASE_CHANGED = "phase_changed"  # 阶段变更
+    STEP_STARTED = "step_started"  # 步骤开始
+    STEP_COMPLETED = "step_completed"  # 步骤完成
+    STEP_FAILED = "step_failed"  # 步骤失败
+    TASK_ASSIGNED = "task_assigned"  # 任务分配
+    TASK_REASSIGNED = "task_reassigned"  # 任务重新分配
+    APPROVAL_REQUESTED = "approval_requested"  # 请求批准
+    APPROVAL_GRANTED = "approval_granted"  # 批准
+    APPROVAL_REJECTED = "approval_rejected"  # 拒绝
+    WORKFLOW_COMPLETED = "workflow_completed"  # 工作流完成
+    WORKFLOW_FAILED = "workflow_failed"  # 工作流失败
+    WORKFLOW_CANCELLED = "workflow_cancelled"  # 工作流取消
+
 
 @dataclass
 class FlowContext:
     """工作流执行上下文"""
+
     flow_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    template_id: str = ""                                    # 关联的模板ID
-    current_phase: FlowPhase = FlowPhase.INITIALIZATION      # 当前阶段
-    current_step_id: Optional[str] = None                   # 当前步骤ID
+    template_id: str = ""  # 关联的模板ID
+    current_phase: FlowPhase = FlowPhase.INITIALIZATION  # 当前阶段
+    current_step_id: Optional[str] = None  # 当前步骤ID
 
     # 执行状态
     started_at: float = field(default_factory=time.time)
@@ -54,16 +60,16 @@ class FlowContext:
 
     # 参与者
     participants: Dict[str, str] = field(default_factory=dict)  # agent_id -> role
-    active_agents: List[str] = field(default_factory=list)      # 当前活跃的agent
+    active_agents: List[str] = field(default_factory=list)  # 当前活跃的agent
 
     # 步骤状态
-    completed_steps: List[str] = field(default_factory=list)    # 已完成的步骤ID
-    failed_steps: List[str] = field(default_factory=list)       # 失败的步骤ID
-    skipped_steps: List[str] = field(default_factory=list)      # 跳过的步骤ID
+    completed_steps: List[str] = field(default_factory=list)  # 已完成的步骤ID
+    failed_steps: List[str] = field(default_factory=list)  # 失败的步骤ID
+    skipped_steps: List[str] = field(default_factory=list)  # 跳过的步骤ID
 
     # 数据存储
     step_outputs: Dict[str, Any] = field(default_factory=dict)  # step_id -> output
-    shared_data: Dict[str, Any] = field(default_factory=dict)   # 共享数据
+    shared_data: Dict[str, Any] = field(default_factory=dict)  # 共享数据
 
     # 事件历史
     event_history: List[Dict[str, Any]] = field(default_factory=list)
@@ -90,10 +96,13 @@ class FlowContext:
         old_phase = self.current_phase
         self.current_phase = phase
         self.updated_at = time.time()
-        self.add_event(FlowEvent.PHASE_CHANGED, {
-            "old_phase": old_phase.value if isinstance(old_phase, FlowPhase) else old_phase,
-            "new_phase": phase.value if isinstance(phase, FlowPhase) else phase,
-        })
+        self.add_event(
+            FlowEvent.PHASE_CHANGED,
+            {
+                "old_phase": old_phase.value if isinstance(old_phase, FlowPhase) else old_phase,
+                "new_phase": phase.value if isinstance(phase, FlowPhase) else phase,
+            },
+        )
 
     def complete_step(self, step_id: str, output: Any = None) -> None:
         """标记步骤完成"""
@@ -166,7 +175,9 @@ class FlowContext:
         return {
             "flow_id": self.flow_id,
             "template_id": self.template_id,
-            "current_phase": self.current_phase.value if isinstance(self.current_phase, FlowPhase) else self.current_phase,
+            "current_phase": (
+                self.current_phase.value if isinstance(self.current_phase, FlowPhase) else self.current_phase
+            ),
             "current_step_id": self.current_step_id,
             "started_at": self.started_at,
             "updated_at": self.updated_at,
@@ -183,31 +194,33 @@ class FlowContext:
             "error_message": self.error_message,
         }
 
+
 @dataclass
 class ScheduledTask:
     """计划任务"""
+
     task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    name: str = ""                                          # 任务名称
-    description: str = ""                                   # 任务描述
+    name: str = ""  # 任务名称
+    description: str = ""  # 任务描述
 
     # 调度配置
-    scheduled_at: Optional[float] = None                   # 计划执行时间
-    interval_seconds: Optional[int] = None                 # 重复间隔（秒）
-    cron_expression: Optional[str] = None                  # Cron 表达式
+    scheduled_at: Optional[float] = None  # 计划执行时间
+    interval_seconds: Optional[int] = None  # 重复间隔（秒）
+    cron_expression: Optional[str] = None  # Cron 表达式
 
     # 执行配置
-    agent_id: str = ""                                      # 执行的 Agent ID
-    action: str = ""                                        # 执行的动作
+    agent_id: str = ""  # 执行的 Agent ID
+    action: str = ""  # 执行的动作
     parameters: Dict[str, Any] = field(default_factory=dict)  # 动作参数
 
     # 状态
-    status: str = "pending"                                 # pending, running, completed, failed, cancelled
+    status: str = "pending"  # pending, running, completed, failed, cancelled
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     last_run_at: Optional[float] = None
     next_run_at: Optional[float] = None
     run_count: int = 0
-    max_runs: Optional[int] = None                         # 最大执行次数
+    max_runs: Optional[int] = None  # 最大执行次数
 
     # 结果
     last_result: Optional[Any] = None

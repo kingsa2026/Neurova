@@ -10,7 +10,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -199,9 +198,7 @@ class EvolutionHub:
         with self._lock:
             return [dict(r) for r in self._learning.values()]
 
-    def on_knowledge_gap_detected(
-        self, topic: str, priority: str = GapPriority.MEDIUM.value
-    ) -> Dict[str, Any]:
+    def on_knowledge_gap_detected(self, topic: str, priority: str = GapPriority.MEDIUM.value) -> Dict[str, Any]:
         with self._lock:
             existing = self._find_gap_by_topic(topic)
             if existing is not None:
@@ -249,10 +246,7 @@ class EvolutionHub:
         with self._lock:
             analyzed = self.analyze_knowledge_gaps()
             total = len(self._learning)
-            completed = sum(
-                1 for r in self._learning.values()
-                if r.get("status") == LearningStatus.COMPLETED.value
-            )
+            completed = sum(1 for r in self._learning.values() if r.get("status") == LearningStatus.COMPLETED.value)
             return {
                 "status": "idle_cycle_completed",
                 "gaps_analyzed": len(analyzed),
@@ -267,12 +261,9 @@ class EvolutionHub:
             total_gaps = len(self._gaps)
             total_records = len(self._learning)
             completed_records = sum(
-                1 for r in self._learning.values()
-                if r.get("status") == LearningStatus.COMPLETED.value
+                1 for r in self._learning.values() if r.get("status") == LearningStatus.COMPLETED.value
             )
-            completion_rate = (
-                (completed_records / total_records) if total_records else 0.0
-            )
+            completion_rate = (completed_records / total_records) if total_records else 0.0
             return {
                 "total_gaps": total_gaps,
                 "total_records": total_records,
@@ -280,9 +271,7 @@ class EvolutionHub:
                 "completion_rate": completion_rate,
             }
 
-    def _extract_insights(
-        self, topic: str, source: str, depth: int
-    ) -> List[str]:
+    def _extract_insights(self, topic: str, source: str, depth: int) -> List[str]:
         insights: List[str] = [
             f"Concept '{topic}' indexed from {source}.",
             f"Pattern recognized: {topic} (depth={depth}).",

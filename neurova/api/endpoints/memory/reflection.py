@@ -2,21 +2,24 @@
 记忆接口 - 反思日志 (Reflection Log)
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Request, Depends
+from fastapi import Depends, Request
 from pydantic import BaseModel, Field
 
-from neurova.interfaces.api_standard import (
-    APIResponse,
-    APIError,
-    ErrorCodes,
-)
 from neurova.api.auth import get_current_user
+from neurova.interfaces.api_standard import (
+    APIError,
+    APIResponse,
+)
 
 from .base import (
-    router, logger, _get_request_id, get_memory_manager,
+    _get_request_id,
+    get_memory_manager,
+    logger,
+    router,
 )
+
 
 class ReflectionLogRequest(BaseModel):
     """反思日志生成请求"""
@@ -33,11 +36,13 @@ class ReflectionLogRequest(BaseModel):
     emotion_score: float = Field(default=0.0, ge=-1.0, le=1.0, description="情感分数")
     tags: Optional[List[str]] = Field(default=None, description="标签")
 
+
 class ValidateReflectionRequest(BaseModel):
     """验证反思应用请求"""
 
     validation_result: str = Field(..., description="验证结果 (success/failed)")
     feedback: Optional[str] = Field(default=None, description="反馈")
+
 
 class ReflectionLogItem(BaseModel):
     """反思日志条目"""
@@ -63,11 +68,14 @@ class ReflectionLogItem(BaseModel):
     updated_at: str
     tags: List[str]
 
+
 def reflection_log_entry_to_dict(entry) -> dict:
     """将 ReflectionLogEntry 转换为字典"""
     return {
         "id": entry.id,
-        "reflection_type": entry.reflection_type.value if hasattr(entry.reflection_type, "value") else str(entry.reflection_type),
+        "reflection_type": (
+            entry.reflection_type.value if hasattr(entry.reflection_type, "value") else str(entry.reflection_type)
+        ),
         "status": entry.status.value if hasattr(entry.status, "value") else str(entry.status),
         "situation": entry.situation,
         "thought": entry.thought,
@@ -87,6 +95,7 @@ def reflection_log_entry_to_dict(entry) -> dict:
         "created_at": entry.created_at.isoformat() if entry.created_at else None,
         "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
     }
+
 
 @router.get("/reflection/logs", summary="获取反思日志")
 async def get_reflection_logs(
@@ -125,8 +134,9 @@ async def get_reflection_logs(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取反思日志失败: {e}")
+        logger.exception("获取反思日志失败: %s", e)
         raise APIError.internal(f"获取反思日志失败: {str(e)}")
+
 
 @router.post("/reflection/generate", summary="生成反思日志")
 async def generate_reflection(
@@ -163,8 +173,9 @@ async def generate_reflection(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"生成反思日志失败: {e}")
+        logger.exception("生成反思日志失败: %s", e)
         raise APIError.internal(f"生成反思日志失败: {str(e)}")
+
 
 @router.put("/reflection/{log_id}/validate", summary="验证反思应用结果")
 async def validate_reflection(
@@ -194,8 +205,9 @@ async def validate_reflection(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"验证反思日志失败: {e}")
+        logger.exception("验证反思日志失败: %s", e)
         raise APIError.internal(f"验证反思日志失败: {str(e)}")
+
 
 @router.get("/reflection/stats", summary="获取反思日志统计")
 async def get_reflection_stats(
@@ -218,12 +230,14 @@ async def get_reflection_stats(
     except APIError:
         raise
     except Exception as e:
-        logger.exception(f"获取反思统计失败: {e}")
+        logger.exception("获取反思统计失败: %s", e)
         raise APIError.internal(f"获取反思统计失败: {str(e)}")
+
 
 # ============================================================
 # Agent 级路由（兼容前端 /agents/{agent_id}/reflection 路径）
 # ============================================================
+
 
 @router.get("/{agent_id}/reflection", summary="获取 Agent 反思记录")
 async def get_agent_reflection(
@@ -236,6 +250,7 @@ async def get_agent_reflection(
     """获取 Agent 的反思记录（前端 ReflectionPage.vue 调用）"""
     try:
         from neurova.agent_registry import AgentRegistry
+
         registry = AgentRegistry()
         agent = registry.get_agent(agent_id)
         if not agent:
@@ -247,7 +262,7 @@ async def get_agent_reflection(
         manager = getattr(agent, "reflection_manager", None)
         records = getattr(manager, "records", []) if manager else []
         total = len(records)
-        items = records[offset:offset + limit]
+        items = records[offset : offset + limit]
 
         # 统计
         by_category = {}
@@ -290,11 +305,12 @@ async def get_agent_reflection(
             request_id=_get_request_id(req),
         )
     except Exception as e:
-        logger.exception(f"获取反思记录失败: {e}")
+        logger.exception("获取反思记录失败: %s", e)
         return APIResponse.ok(
             data={"items": [], "total": 0, "stats": {"total": 0, "suggestions": 0, "status": "低"}},
             request_id=_get_request_id(req),
         )
+
 
 @router.get("/{agent_id}/reflection/stats", summary="获取 Agent 反思统计")
 async def get_agent_reflection_stats(
@@ -304,6 +320,7 @@ async def get_agent_reflection_stats(
     """获取 Agent 反思统计（前端 ReflectionPage.vue 调用）"""
     try:
         from neurova.agent_registry import AgentRegistry
+
         registry = AgentRegistry()
         agent = registry.get_agent(agent_id)
         if not agent:
@@ -342,7 +359,7 @@ async def get_agent_reflection_stats(
             request_id=_get_request_id(req),
         )
     except Exception as e:
-        logger.exception(f"获取反思统计失败: {e}")
+        logger.exception("获取反思统计失败: %s", e)
         return APIResponse.ok(
             data={"agent_id": agent_id, "total": 0, "by_category": {}},
             request_id=_get_request_id(req),

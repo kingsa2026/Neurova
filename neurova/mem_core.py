@@ -23,13 +23,13 @@ MemCore — 神经感知记忆核心模块
 - 封装认知层：Agent 只需导入 MemCore，无需直接导入认知层模块
 """
 
-import logging
 import asyncio
-from dataclasses import dataclass, field
-from datetime import datetime, UTC
-from pathlib import Path
-from typing import List, Dict, Optional, Any
+import logging
 import time
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -37,17 +37,18 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Memory:
     """记忆数据模型
-    
+
     具有类型安全和数据验证的记忆数据类。
     支持向后兼容的 **kwargs 构造方式。
     """
+
     id: str = ""
     content: str = ""
     importance: float = 0.5
     temperature: float = 1.0
     last_accessed: float = field(default_factory=time.time)
     metadata: Optional[Dict[str, Any]] = None
-    
+
     def __post_init__(self):
         """后初始化处理，支持向后兼容的 **kwargs 构造方式"""
         # 类型转换和验证
@@ -56,29 +57,29 @@ class Memory:
                 self.importance = float(self.importance)
             except (ValueError, TypeError):
                 raise TypeError(f"importance 必须是数字，当前值: {self.importance}")
-        
+
         if not isinstance(self.temperature, (int, float)):
             try:
                 self.temperature = float(self.temperature)
             except (ValueError, TypeError):
                 raise TypeError(f"temperature 必须是数字，当前值: {self.temperature}")
-        
+
         # 验证重要性范围
         if not (0.0 <= self.importance <= 1.0):
             raise ValueError(f"importance 必须在 [0.0, 1.0] 范围内，当前值: {self.importance}")
-        
+
         # 验证温度非负
         if self.temperature < 0.0:
             raise ValueError(f"temperature 必须非负，当前值: {self.temperature}")
-        
+
         # 如果没有提供 id，自动生成
         if not self.id:
             self.id = f"memory_{int(time.time() * 1000)}"
-        
+
         # 确保 metadata 是字典
         if self.metadata is None:
             self.metadata = {}
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -89,9 +90,9 @@ class Memory:
             "last_accessed": self.last_accessed,
             "metadata": self.metadata or {},
         }
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Memory':
+    def from_dict(cls, data: Dict[str, Any]) -> "Memory":
         """从字典创建 Memory 实例"""
         return cls(
             id=data.get("id", ""),
@@ -106,10 +107,11 @@ class Memory:
 @dataclass
 class Conversation:
     """对话数据模型
-    
+
     具有类型安全和数据验证的对话数据类。
     支持向后兼容的 **kwargs 构造方式。
     """
+
     id: str = ""
     session_id: str = ""
     user_id: str = ""
@@ -118,21 +120,21 @@ class Conversation:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     metadata: Optional[Dict[str, Any]] = None
-    
+
     def __post_init__(self):
         """后初始化处理，支持向后兼容的 **kwargs 构造方式"""
         # 如果没有提供 id，自动生成
         if not self.id:
             self.id = f"conversation_{int(time.time() * 1000)}"
-        
+
         # 确保 messages 是列表
         if self.messages is None:
             self.messages = []
-        
+
         # 确保 metadata 是字典
         if self.metadata is None:
             self.metadata = {}
-    
+
     def add_message(self, role: str, content: str, metadata: Optional[Dict[str, Any]] = None):
         """添加消息"""
         message = {
@@ -143,7 +145,7 @@ class Conversation:
         }
         self.messages.append(message)
         self.updated_at = time.time()
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -156,9 +158,9 @@ class Conversation:
             "updated_at": self.updated_at,
             "metadata": self.metadata or {},
         }
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Conversation':
+    def from_dict(cls, data: Dict[str, Any]) -> "Conversation":
         """从字典创建 Conversation 实例"""
         return cls(
             id=data.get("id", ""),
@@ -196,7 +198,7 @@ class MemCore:
 
     @property
     def memory_manager(self):
-        return getattr(self._agent, 'memory_manager', None)
+        return getattr(self._agent, "memory_manager", None)
 
     @memory_manager.setter
     def memory_manager(self, value):
@@ -204,7 +206,7 @@ class MemCore:
 
     @property
     def storage(self):
-        return getattr(self._agent, 'storage', None)
+        return getattr(self._agent, "storage", None)
 
     @storage.setter
     def storage(self, value):
@@ -212,7 +214,7 @@ class MemCore:
 
     @property
     def temperature_engine(self):
-        return getattr(self._agent, 'temperature_engine', None)
+        return getattr(self._agent, "temperature_engine", None)
 
     @temperature_engine.setter
     def temperature_engine(self, value):
@@ -220,7 +222,7 @@ class MemCore:
 
     @property
     def recall_engine(self):
-        return getattr(self._agent, 'recall_engine', None)
+        return getattr(self._agent, "recall_engine", None)
 
     @recall_engine.setter
     def recall_engine(self, value):
@@ -228,7 +230,7 @@ class MemCore:
 
     @property
     def working_memory(self):
-        return getattr(self._agent, 'working_memory', None)
+        return getattr(self._agent, "working_memory", None)
 
     @working_memory.setter
     def working_memory(self, value):
@@ -236,7 +238,7 @@ class MemCore:
 
     @property
     def conversation_buffer(self):
-        return getattr(self._agent, 'conversation_buffer', None)
+        return getattr(self._agent, "conversation_buffer", None)
 
     @conversation_buffer.setter
     def conversation_buffer(self, value):
@@ -244,7 +246,7 @@ class MemCore:
 
     @property
     def buffer_module(self):
-        return getattr(self._agent, 'buffer_module', None)
+        return getattr(self._agent, "buffer_module", None)
 
     @buffer_module.setter
     def buffer_module(self, value):
@@ -252,7 +254,7 @@ class MemCore:
 
     @property
     def conversation_history(self):
-        return getattr(self._agent, 'conversation_history', [])
+        return getattr(self._agent, "conversation_history", [])
 
     @conversation_history.setter
     def conversation_history(self, value):
@@ -260,15 +262,15 @@ class MemCore:
 
     @property
     def evolution(self):
-        return getattr(self._agent, 'evolution', None)
+        return getattr(self._agent, "evolution", None)
 
     @property
     def session_manager(self):
-        return getattr(self._agent, 'session_manager', None)
+        return getattr(self._agent, "session_manager", None)
 
     @property
     def growth_log_manager(self):
-        return getattr(self._agent, 'growth_log_manager', None)
+        return getattr(self._agent, "growth_log_manager", None)
 
     @growth_log_manager.setter
     def growth_log_manager(self, value):
@@ -276,7 +278,7 @@ class MemCore:
 
     @property
     def question_queue_manager(self):
-        return getattr(self._agent, 'question_queue_manager', None)
+        return getattr(self._agent, "question_queue_manager", None)
 
     @question_queue_manager.setter
     def question_queue_manager(self, value):
@@ -284,7 +286,7 @@ class MemCore:
 
     @property
     def tool_memory(self):
-        return getattr(self._agent, 'tool_memory', None)
+        return getattr(self._agent, "tool_memory", None)
 
     @tool_memory.setter
     def tool_memory(self, value):
@@ -292,7 +294,7 @@ class MemCore:
 
     @property
     def muscle_memory(self):
-        return getattr(self._agent, 'muscle_memory', None)
+        return getattr(self._agent, "muscle_memory", None)
 
     @muscle_memory.setter
     def muscle_memory(self, value):
@@ -300,7 +302,7 @@ class MemCore:
 
     @property
     def attachment_manager(self):
-        return getattr(self._agent, 'attachment_manager', None)
+        return getattr(self._agent, "attachment_manager", None)
 
     @attachment_manager.setter
     def attachment_manager(self, value):
@@ -308,7 +310,7 @@ class MemCore:
 
     @property
     def moe_router(self):
-        return getattr(self._agent, '_moe_router', None)
+        return getattr(self._agent, "_moe_router", None)
 
     # ══════════════════════════════════════════════════════════════
     # 初始化
@@ -321,11 +323,11 @@ class MemCore:
             neuser_id: Neurova系统用户ID（三级隔离第2级）
             user_id: 对话用户ID（三级隔离第3级）
         """
+        from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationMemoryBuffer, MemoryWriteQueue
         from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+        from neurova.cognitive_layers.memory_layer.modules.buffer_module import BufferModule
         from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
         from neurova.cognitive_layers.memory_layer.working_memory import WorkingMemoryAugmenter
-        from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationMemoryBuffer, MemoryWriteQueue
-        from neurova.cognitive_layers.memory_layer.modules.buffer_module import BufferModule
         from neurova.cognitive_layers.meta_cognition_layer.growth_log import GrowthLogManager
         from neurova.cognitive_layers.meta_cognition_layer.question_queue import QuestionQueueManager
 
@@ -342,12 +344,13 @@ class MemCore:
                 agent_id=self.config.agent_id,
                 user_id=user_id,
             )
-            self.storage = getattr(self.memory_manager, 'storage', None)
+            self.storage = getattr(self.memory_manager, "storage", None)
             self.temperature_engine = TemperatureEngine()
 
             # Neurova 统一记忆检索引擎（多维融合 + 意图钻取）
             if self.storage:
                 from neurova.cognitive_layers.memory_layer.neurova_recall import NeurovaRecallEngine
+
                 self.recall_engine = NeurovaRecallEngine(
                     storage=self.storage,
                     temperature_engine=self.temperature_engine,
@@ -364,25 +367,26 @@ class MemCore:
                         "max_seeds": 10,
                         "max_total": 20,
                         "relevance_threshold": 0.15,
-                    }
+                    },
                 )
-                logger.info(f"Agent {self.config.name}: NeurovaRecallEngine（多维融合+钻取）已启用")
+                logger.info("Agent %s: NeurovaRecallEngine（多维融合+钻取）已启用", self.config.name)
 
             # 初始化附件管理器（Agent隔离 + 用户隔离）
             from neurova.cognitive_layers.memory_layer.attachment_manager import AttachmentManager
+
             self._agent.attachment_manager = AttachmentManager.from_agent_config(
                 agent_id=self.config.agent_id,
                 agent_workspace_path=str(self.config.workspace_path),
                 db_path=db_path,
             )
-            logger.info(f"AttachmentManager 初始化成功: {self.config.attachment_dir}")
+            logger.info("AttachmentManager 初始化成功: %s", self.config.attachment_dir)
 
             # 初始化反思日志管理器
             self._agent.growth_log_manager = GrowthLogManager(
                 memory_manager=self.memory_manager,
                 max_logs=1000,
             )
-            logger.info(f"Agent {self.config.name}: GrowthLogManager（反思日志）已启用")
+            logger.info("Agent %s: GrowthLogManager（反思日志）已启用", self.config.name)
 
             # 初始化问题队列管理器
             self._agent.question_queue_manager = QuestionQueueManager(
@@ -390,7 +394,7 @@ class MemCore:
                 default_cooldown=300.0,
                 max_questions=100,
             )
-            logger.info(f"Agent {self.config.name}: QuestionQueueManager（问题队列）已启用")
+            logger.info("Agent %s: QuestionQueueManager（问题队列）已启用", self.config.name)
 
             # 初始化工作记忆
             self.working_memory = WorkingMemoryAugmenter(
@@ -399,56 +403,59 @@ class MemCore:
                     "memory_manager": self.memory_manager,
                 }
             )
-            logger.info(f"Agent {self.config.name}: WorkingMemoryAugmenter（工作记忆）已启用")
+            logger.info("Agent %s: WorkingMemoryAugmenter（工作记忆）已启用", self.config.name)
 
             # 初始化对话缓冲区
             self.conversation_buffer = ConversationMemoryBuffer(
                 turn_limit=1000,  # 增大默认轮次限制
             )
-            logger.info(f"Agent {self.config.name}: ConversationMemoryBuffer（对话缓冲区）已启用")
+            logger.info("Agent %s: ConversationMemoryBuffer（对话缓冲区）已启用", self.config.name)
 
             # 初始化缓冲模块
             self.buffer_module = BufferModule()
             # 将对话缓冲区和写入队列注入到缓冲模块
             self.buffer_module._buffer = self.conversation_buffer
             from neurova.cognitive_layers.memory_layer.conversation_buffer import MemoryWriteQueue
+
             # 始终创建 MemoryWriteQueue，传递 memory_manager 作为降级后端
             self.buffer_module._write_queue = MemoryWriteQueue(
                 storage=self.storage,
                 agent_id=self.config.agent_id,
                 memory_manager=self.memory_manager,
             )
-            logger.info(f"Agent {self.config.name}: BufferModule（缓冲模块）已启用")
+            logger.info("Agent %s: BufferModule（缓冲模块）已启用", self.config.name)
 
             # 初始化肌肉记忆
             from neurova.cognitive_layers.memory_layer.muscle_memory import MuscleMemory
+
             self._agent.muscle_memory = MuscleMemory(
                 agent_id=self.config.agent_id,
             )
-            logger.info(f"Agent {self.config.name}: MuscleMemory（肌肉记忆）已启用")
+            logger.info("Agent %s: MuscleMemory（肌肉记忆）已启用", self.config.name)
 
             # 初始化工具记忆集成
             from neurova.cognitive_layers.memory_layer.tool_memory_integration import ToolMemoryIntegration
+
             self._agent.tool_memory = ToolMemoryIntegration(
                 memory_layer=self.memory_manager,
             )
-            logger.info(f"Agent {self.config.name}: ToolMemoryIntegration（工具记忆）已启用")
+            logger.info("Agent %s: ToolMemoryIntegration（工具记忆）已启用", self.config.name)
 
-            logger.info(f"记忆系统模块初始化成功: agent_id={self.config.agent_id}, neuser_id={neuser_id}, user_id={user_id}")
+            logger.info(
+                f"记忆系统模块初始化成功: agent_id={self.config.agent_id}, neuser_id={neuser_id}, user_id={user_id}"
+            )
 
         except Exception as e:
             import traceback
-            logger.error(
-                f"记忆系统模块初始化失败: {e}\n"
-                f"完整调用栈:\n{traceback.format_exc()}"
-            )
+
+            logger.error("记忆系统模块初始化失败: %s\n" f"完整调用栈:\n%s", e, traceback.format_exc())
             raise  # 记忆模块是 Agent 核心依赖，无法降级
 
     def init_moe_router(self):
         """初始化 MoE 路由器"""
         try:
-            from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
             from neurova.cognitive_layers.memory_layer.moe_router import MoEMemoryRouter
+            from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
 
             vector_store = UnifiedVectorStore()
 
@@ -458,21 +465,23 @@ class MemCore:
                     if memories:
                         memory_items = []
                         for mem in memories:
-                            memory_items.append({
-                                'id': mem.get('id', ''),
-                                'content': mem.get('content', ''),
-                                'metadata': {
-                                    'category': mem.get('category', 'unknown'),
-                                    'lifecycle': mem.get('lifecycle', 'active'),
-                                    'is_crystallized': mem.get('is_crystallized', False),
+                            memory_items.append(
+                                {
+                                    "id": mem.get("id", ""),
+                                    "content": mem.get("content", ""),
+                                    "metadata": {
+                                        "category": mem.get("category", "unknown"),
+                                        "lifecycle": mem.get("lifecycle", "active"),
+                                        "is_crystallized": mem.get("is_crystallized", False),
+                                    },
                                 }
-                            })
+                            )
                         vector_store.index_memories(memory_items)
-                        logger.info(f"MoE: 已索引 {len(memory_items)} 条记忆到向量存储")
+                        logger.info("MoE: 已索引 %s 条记忆到向量存储", len(memory_items))
                     else:
                         logger.info("MoE: 数据库中没有记忆，跳过索引")
                 except Exception as e:
-                    logger.warning(f"MoE: 加载记忆失败: {e}")
+                    logger.warning("MoE: 加载记忆失败: %s", e)
 
             experts = {
                 "conversation_episodic": {
@@ -509,7 +518,7 @@ class MemCore:
             logger.info("MoE 路由器初始化成功")
 
         except Exception as e:
-            logger.error(f"MoE 路由器初始化失败: {e}")
+            logger.error("MoE 路由器初始化失败: %s", e)
 
     # ══════════════════════════════════════════════════════════════
     # 记忆检索
@@ -536,7 +545,7 @@ class MemCore:
             )
             return memories or []
         except Exception as e:
-            logger.warning(f"记忆检索失败: {e}")
+            logger.warning("记忆检索失败: %s", e)
             return []
 
     def get_memories(self, limit: int = 100, offset: int = 0) -> List[Dict]:
@@ -555,7 +564,7 @@ class MemCore:
         try:
             return self.memory_manager.get_memories(limit=limit, offset=offset)
         except Exception as e:
-            logger.warning(f"获取记忆列表失败: {e}")
+            logger.warning("获取记忆列表失败: %s", e)
             return []
 
     def moe_retrieve(self, query: str, limit: int = 10) -> List[Dict]:
@@ -572,12 +581,12 @@ class MemCore:
             try:
                 results = asyncio.run(moe.retrieve(query, limit=limit))
                 if results:
-                    logger.debug(f"MoE 检索成功: {len(results)} 条结果")
+                    logger.debug("MoE 检索成功: %s 条结果", len(results))
                     return results
                 else:
                     logger.debug("MoE 检索无结果，降级到普通检索")
             except Exception as e:
-                logger.warning(f"MoE 检索失败: {e}，降级到普通检索")
+                logger.warning("MoE 检索失败: %s，降级到普通检索", e)
 
         return self.retrieve_memories(query, limit=limit)
 
@@ -596,21 +605,23 @@ class MemCore:
             if memories:
                 memory_items = []
                 for mem in memories:
-                    memory_items.append({
-                        'id': mem.get('id', ''),
-                        'content': mem.get('content', ''),
-                        'metadata': {
-                            'category': mem.get('category', 'unknown'),
-                            'lifecycle': mem.get('lifecycle', 'active'),
-                            'is_crystallized': mem.get('is_crystallized', False),
+                    memory_items.append(
+                        {
+                            "id": mem.get("id", ""),
+                            "content": mem.get("content", ""),
+                            "metadata": {
+                                "category": mem.get("category", "unknown"),
+                                "lifecycle": mem.get("lifecycle", "active"),
+                                "is_crystallized": mem.get("is_crystallized", False),
+                            },
                         }
-                    })
+                    )
                 moe.vector_store.index_memories(memory_items)
                 # 重新初始化质心
                 moe.vector_store.initialize_centroids(moe.experts)
-                logger.info(f"MoE 向量索引已刷新: {len(memory_items)} 条记忆")
+                logger.info("MoE 向量索引已刷新: %s 条记忆", len(memory_items))
         except Exception as e:
-            logger.warning(f"MoE 向量索引刷新失败: {e}")
+            logger.warning("MoE 向量索引刷新失败: %s", e)
 
     def flush_before_retrieve(self):
         """检索前刷新缓冲区（断裂2修复）
@@ -625,14 +636,14 @@ class MemCore:
                 logger.debug("对话缓冲区已 flush")
 
             # 刷新写入队列
-            if self.buffer_module and hasattr(self.buffer_module, '_write_queue'):
+            if self.buffer_module and hasattr(self.buffer_module, "_write_queue"):
                 queue = self.buffer_module._write_queue
-                if queue and hasattr(queue, 'flush_to_storage'):
+                if queue and hasattr(queue, "flush_to_storage"):
                     result = queue.flush_to_storage()
-                    if result.get('written', 0) > 0:
-                        logger.debug(f"写入队列已 flush: {result['written']} 条")
+                    if result.get("written", 0) > 0:
+                        logger.debug("写入队列已 flush: %s 条", result['written'])
         except Exception as e:
-            logger.warning(f"检索前 flush 失败: {e}")
+            logger.warning("检索前 flush 失败: %s", e)
 
     # ══════════════════════════════════════════════════════════════
     # 对话记忆保存
@@ -674,9 +685,9 @@ class MemCore:
                 if self.conversation_buffer.is_full():
                     self.conversation_buffer.flush_to_long_term_memory()
 
-            logger.debug(f"对话记忆已保存: user_input={user_input[:50]}...")
+            logger.debug("对话记忆已保存: user_input=%s...", user_input[:50])
         except Exception as e:
-            logger.warning(f"对话记忆保存失败: {e}")
+            logger.warning("对话记忆保存失败: %s", e)
 
     # ══════════════════════════════════════════════════════════════
     # 对话历史更新
@@ -691,25 +702,29 @@ class MemCore:
         """
         try:
             # 添加到对话历史
-            self.conversation_history.append({
-                'role': 'user',
-                'content': user_input,
-                'timestamp': datetime.now(UTC).isoformat(),
-            })
-            self.conversation_history.append({
-                'role': 'assistant',
-                'content': agent_response,
-                'timestamp': datetime.now(UTC).isoformat(),
-            })
+            self.conversation_history.append(
+                {
+                    "role": "user",
+                    "content": user_input,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
+            self.conversation_history.append(
+                {
+                    "role": "assistant",
+                    "content": agent_response,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
 
             # 限制历史长度
             max_history = 100
             if len(self.conversation_history) > max_history:
                 self.conversation_history = self.conversation_history[-max_history:]
 
-            logger.debug(f"对话历史已更新: 长度={len(self.conversation_history)}")
+            logger.debug("对话历史已更新: 长度=%s", len(self.conversation_history))
         except Exception as e:
-            logger.warning(f"对话历史更新失败: {e}")
+            logger.warning("对话历史更新失败: %s", e)
 
     # ══════════════════════════════════════════════════════════════
     # Session 文件保存（B5 闭环修复：GAP-3）
@@ -748,9 +763,10 @@ class MemCore:
         # 自动生成 session_id
         if not session_id:
             from uuid import uuid4
+
             session_id = f"auto-{uuid4().hex[:12]}"
 
-        agent_id = getattr(self.config, 'agent_id', 'unknown') if self.config else 'unknown'
+        agent_id = getattr(self.config, "agent_id", "unknown") if self.config else "unknown"
 
         return sm.add_message(
             agent_id=agent_id,
@@ -780,9 +796,9 @@ class MemCore:
                 memory_id=memory_id,
                 interaction_type=interaction_type,
             )
-            logger.debug(f"记忆温度已更新: memory_id={memory_id}, type={interaction_type}")
+            logger.debug("记忆温度已更新: memory_id=%s, type=%s", memory_id, interaction_type)
         except Exception as e:
-            logger.warning(f"记忆温度更新失败: {e}")
+            logger.warning("记忆温度更新失败: %s", e)
 
     # ══════════════════════════════════════════════════════════════
     # 记忆统计
@@ -795,15 +811,15 @@ class MemCore:
             统计信息字典
         """
         stats = {
-            'memory_manager_available': self.memory_manager is not None,
-            'storage_available': self.storage is not None,
-            'temperature_engine_available': self.temperature_engine is not None,
-            'recall_engine_available': self.recall_engine is not None,
-            'working_memory_available': self.working_memory is not None,
-            'conversation_buffer_available': self.conversation_buffer is not None,
-            'buffer_module_available': self.buffer_module is not None,
-            'conversation_history_length': len(self.conversation_history),
-            'moe_router_available': self.moe_router is not None,
+            "memory_manager_available": self.memory_manager is not None,
+            "storage_available": self.storage is not None,
+            "temperature_engine_available": self.temperature_engine is not None,
+            "recall_engine_available": self.recall_engine is not None,
+            "working_memory_available": self.working_memory is not None,
+            "conversation_buffer_available": self.conversation_buffer is not None,
+            "buffer_module_available": self.buffer_module is not None,
+            "conversation_history_length": len(self.conversation_history),
+            "moe_router_available": self.moe_router is not None,
         }
 
         # 添加记忆管理器统计
@@ -812,7 +828,6 @@ class MemCore:
                 memory_stats = self.memory_manager.get_stats()
                 stats.update(memory_stats)
             except Exception as e:
-                logger.warning(f"获取记忆管理器统计失败: {e}")
+                logger.warning("获取记忆管理器统计失败: %s", e)
 
         return stats
-

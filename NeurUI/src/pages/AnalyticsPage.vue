@@ -96,10 +96,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import { message } from 'ant-design-vue'
+import * as analyticsApi from '@/api/modules/analytics'
 
 const { t } = useI18n()
 
@@ -128,19 +128,43 @@ const errorColumns = computed(() => [
 const fetchAll = async () => {
   loading.value = true
   try {
-    const params = { range: timeRange.value }
+    const params = { period: timeRange.value }
     if (activeTab.value === 'usage') {
-      const res: any = await request.get('/analytics/usage', { params })
-      usageData.value = res?.data ?? res ?? {}
+      const res = await analyticsApi.getUsageAnalytics(params)
+      const d = res?.data ?? {} as any
+      usageData.value = {
+        conversations: d.total_requests ?? 0,
+        tokens: d.total_tokens ?? 0,
+        api_calls: d.total_requests ?? 0,
+        agents: d.by_agent?.length ?? 0,
+        timeline: (d.daily_trend ?? []).map((p: any) => ({ label: p.date, value: p.requests })),
+        max_value: Math.max(...(d.daily_trend ?? []).map((p: any) => p.requests), 1),
+      }
     } else if (activeTab.value === 'performance') {
-      const res: any = await request.get('/analytics/performance', { params })
-      perfData.value = res?.data ?? res ?? {}
+      const res = await analyticsApi.getPerformanceAnalytics(params)
+      const d = res?.data ?? {} as any
+      perfData.value = {
+        avg_response_ms: Math.round(d.avg_latency_ms ?? 0),
+        p95_ms: Math.round(d.p95_latency_ms ?? 0),
+        throughput: d.throughput_rps ?? 0,
+        error_rate: Math.round((d.error_rate ?? 0) * 100),
+        endpoints: (d.by_endpoint ?? []).map((e: any) => ({ path: e.endpoint, avg_ms: e.avg_ms, count: e.count })),
+      }
     } else if (activeTab.value === 'behavior') {
-      const res: any = await request.get('/analytics/behavior', { params })
-      behaviorData.value = res?.data ?? res ?? {}
+      const res = await analyticsApi.getBehaviorAnalytics(params)
+      const d = res?.data ?? {} as any
+      behaviorData.value = {
+        popular_features: (d.top_tools ?? []).map((t: any) => ({ name: t.name, count: t.usage_count })),
+        user_paths: (d.conversation_patterns ?? []).map((p: any) => ({ path: p.pattern, count: p.count })),
+      }
     } else if (activeTab.value === 'errors') {
-      const res: any = await request.get('/analytics/errors', { params })
-      errorData.value = res?.data ?? res ?? {}
+      const res = await analyticsApi.getErrorAnalytics(params)
+      const d = res?.data ?? {} as any
+      errorData.value = {
+        total: d.total_errors ?? 0,
+        rate: Math.round(((d.total_errors ?? 0) / 100) * 100),
+        top_errors: (d.by_type ?? []).map((e: any) => ({ code: e.type, message: e.type, count: e.count })),
+      }
     }
   } catch {
     message.error(t('common.error'))

@@ -14,31 +14,31 @@ GitHub Push Skill - Neurova GitHub 推送技能
 """
 
 import asyncio
-import subprocess
+import importlib.util
 import logging
-from typing import Dict, List, Optional, Any, Union
-from pathlib import Path
-import time
 
 # 动态导入 Skill 类，避免包和模块冲突
 import sys
-import importlib.util
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 # 直接导入模块文件
-skill_system_module_path = Path(__file__).parent.parent.parent.parent / 'skill_system.py'
+skill_system_module_path = Path(__file__).parent.parent.parent.parent / "skill_system.py"
 if skill_system_module_path.exists():
     # 动态加载模块
-    spec = importlib.util.spec_from_file_location('neurova.skill_system_module', skill_system_module_path)
+    spec = importlib.util.spec_from_file_location("neurova.skill_system_module", skill_system_module_path)
     skill_system_module = importlib.util.module_from_spec(spec)
-    sys.modules['neurova.skill_system_module'] = skill_system_module
+    sys.modules["neurova.skill_system_module"] = skill_system_module
     spec.loader.exec_module(skill_system_module)
-    
+
     Skill = skill_system_module.Skill
     SkillResult = skill_system_module.SkillResult
     SkillStatus = skill_system_module.SkillStatus
 else:
     # 如果模块文件不存在，从包导入
-    from neurova.skill_system import Skill, SkillResult, SkillStatus
+    from neurova.skill_system import Skill, SkillResult
+
 
 class GitHubPushSkill(Skill):
     """GitHub 推送技能"""
@@ -93,7 +93,7 @@ class GitHubPushSkill(Skill):
             return result
 
         except Exception as e:
-            self.logger.error(f"GitHub 推送操作失败: {e}")
+            self.logger.error("GitHub 推送操作失败: %s", e)
             return SkillResult(
                 success=False,
                 error=str(e),
@@ -103,35 +103,32 @@ class GitHubPushSkill(Skill):
     async def _run_git_command(self, command: List[str], check_output: bool = True) -> Dict[str, Any]:
         """执行 Git 命令"""
         try:
-            self.logger.info(f"执行 Git 命令: {' '.join(command)}")
+            self.logger.info("执行 Git 命令: %s", ' '.join(command))
 
             # 使用 asyncio.create_subprocess_exec 在异步环境中执行
             process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.repo_path)
+                *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=str(self.repo_path)
             )
 
             stdout, stderr = await process.communicate()
 
             result = {
-                "command": ' '.join(command),
+                "command": " ".join(command),
                 "returncode": process.returncode,
-                "stdout": stdout.decode('utf-8', errors='ignore').strip(),
-                "stderr": stderr.decode('utf-8', errors='ignore').strip(),
+                "stdout": stdout.decode("utf-8", errors="ignore").strip(),
+                "stderr": stderr.decode("utf-8", errors="ignore").strip(),
                 "success": process.returncode == 0,
             }
 
             if check_output and not result["success"]:
-                self.logger.warning(f"Git 命令执行失败: {result['stderr']}")
+                self.logger.warning("Git 命令执行失败: %s", result['stderr'])
 
             return result
 
         except Exception as e:
-            self.logger.error(f"执行 Git 命令异常: {e}")
+            self.logger.error("执行 Git 命令异常: %s", e)
             return {
-                "command": ' '.join(command),
+                "command": " ".join(command),
                 "returncode": -1,
                 "stdout": "",
                 "stderr": str(e),
@@ -144,17 +141,14 @@ class GitHubPushSkill(Skill):
 
         if result["success"]:
             # 解析状态输出
-            lines = result["stdout"].split('\n') if result["stdout"] else []
+            lines = result["stdout"].split("\n") if result["stdout"] else []
             files = []
             for line in lines:
                 if line.strip():
                     # 状态码在前两个字符，文件名在第三个字符后
                     status_code = line[:2].strip()
                     file_path = line[3:].strip() if len(line) > 3 else ""
-                    files.append({
-                        "status": status_code,
-                        "file": file_path
-                    })
+                    files.append({"status": status_code, "file": file_path})
 
             return SkillResult(
                 success=True,
@@ -162,7 +156,7 @@ class GitHubPushSkill(Skill):
                     "files": files,
                     "total_files": len(files),
                     "clean": len(files) == 0,
-                    "raw_output": result["stdout"]
+                    "raw_output": result["stdout"],
                 },
                 execution_time=0.0,
             )
@@ -187,7 +181,7 @@ class GitHubPushSkill(Skill):
         if result["success"]:
             # 检查暂存区状态
             status_result = await self._run_git_command(["git", "diff", "--cached", "--name-only"])
-            staged_files = status_result["stdout"].split('\n') if status_result["stdout"] else []
+            staged_files = status_result["stdout"].split("\n") if status_result["stdout"] else []
             staged_files = [f for f in staged_files if f.strip()]
 
             return SkillResult(
@@ -195,7 +189,7 @@ class GitHubPushSkill(Skill):
                 data={
                     "staged_files": staged_files,
                     "staged_count": len(staged_files),
-                    "message": f"成功添加 {len(staged_files)} 个文件到暂存区"
+                    "message": f"成功添加 {len(staged_files)} 个文件到暂存区",
                 },
                 execution_time=0.0,
             )
@@ -210,7 +204,7 @@ class GitHubPushSkill(Skill):
         """提交更改"""
         # 检查是否有暂存的更改
         status_result = await self._run_git_command(["git", "diff", "--cached", "--name-only"])
-        staged_files = status_result["stdout"].split('\n') if status_result["stdout"] else []
+        staged_files = status_result["stdout"].split("\n") if status_result["stdout"] else []
         staged_files = [f for f in staged_files if f.strip()]
 
         if not staged_files:
@@ -235,7 +229,7 @@ class GitHubPushSkill(Skill):
                     "message": message,
                     "files_committed": len(staged_files),
                     "files": staged_files,
-                    "output": result["stdout"]
+                    "output": result["stdout"],
                 },
                 execution_time=0.0,
             )
@@ -281,7 +275,7 @@ class GitHubPushSkill(Skill):
                     "pushed_to": "main" if push_to_main and current_branch != "main" else current_branch,
                     "branch": current_branch,
                     "output": result["stdout"],
-                    "message": f"成功推送到远程仓库"
+                    "message": f"成功推送到远程仓库",
                 },
                 execution_time=0.0,
             )
@@ -292,7 +286,9 @@ class GitHubPushSkill(Skill):
                 execution_time=0.0,
             )
 
-    async def _full_push_workflow(self, message: str, push_to_main: bool = True, branch: Optional[str] = None) -> SkillResult:
+    async def _full_push_workflow(
+        self, message: str, push_to_main: bool = True, branch: Optional[str] = None
+    ) -> SkillResult:
         """完整推送工作流：状态 → 添加 → 提交 → 推送"""
         workflow_steps = []
         total_start_time = time.time()
@@ -301,12 +297,14 @@ class GitHubPushSkill(Skill):
             # 步骤1: 获取状态
             self.logger.info("步骤1: 获取 Git 状态")
             status_result = await self._get_status()
-            workflow_steps.append({
-                "step": "status",
-                "success": status_result.success,
-                "data": status_result.data if status_result.success else None,
-                "error": status_result.error if not status_result.success else None,
-            })
+            workflow_steps.append(
+                {
+                    "step": "status",
+                    "success": status_result.success,
+                    "data": status_result.data if status_result.success else None,
+                    "error": status_result.error if not status_result.success else None,
+                }
+            )
 
             if not status_result.success:
                 return SkillResult(
@@ -320,10 +318,7 @@ class GitHubPushSkill(Skill):
             if status_result.data.get("clean", True):
                 return SkillResult(
                     success=True,
-                    data={
-                        "message": "工作区干净，无需推送",
-                        "workflow_steps": workflow_steps
-                    },
+                    data={"message": "工作区干净，无需推送", "workflow_steps": workflow_steps},
                     metadata={"workflow_steps": workflow_steps},
                     execution_time=time.time() - total_start_time,
                 )
@@ -331,12 +326,14 @@ class GitHubPushSkill(Skill):
             # 步骤2: 添加文件
             self.logger.info("步骤2: 添加文件到暂存区")
             add_result = await self._add_files()
-            workflow_steps.append({
-                "step": "add",
-                "success": add_result.success,
-                "data": add_result.data if add_result.success else None,
-                "error": add_result.error if not add_result.success else None,
-            })
+            workflow_steps.append(
+                {
+                    "step": "add",
+                    "success": add_result.success,
+                    "data": add_result.data if add_result.success else None,
+                    "error": add_result.error if not add_result.success else None,
+                }
+            )
 
             if not add_result.success:
                 return SkillResult(
@@ -349,12 +346,14 @@ class GitHubPushSkill(Skill):
             # 步骤3: 提交更改
             self.logger.info("步骤3: 提交更改")
             commit_result = await self._commit_changes(message)
-            workflow_steps.append({
-                "step": "commit",
-                "success": commit_result.success,
-                "data": commit_result.data if commit_result.success else None,
-                "error": commit_result.error if not commit_result.success else None,
-            })
+            workflow_steps.append(
+                {
+                    "step": "commit",
+                    "success": commit_result.success,
+                    "data": commit_result.data if commit_result.success else None,
+                    "error": commit_result.error if not commit_result.success else None,
+                }
+            )
 
             if not commit_result.success:
                 return SkillResult(
@@ -367,12 +366,14 @@ class GitHubPushSkill(Skill):
             # 步骤4: 推送更改
             self.logger.info("步骤4: 推送到远程仓库")
             push_result = await self._push_changes(push_to_main, branch)
-            workflow_steps.append({
-                "step": "push",
-                "success": push_result.success,
-                "data": push_result.data if push_result.success else None,
-                "error": push_result.error if not push_result.success else None,
-            })
+            workflow_steps.append(
+                {
+                    "step": "push",
+                    "success": push_result.success,
+                    "data": push_result.data if push_result.success else None,
+                    "error": push_result.error if not push_result.success else None,
+                }
+            )
 
             if not push_result.success:
                 return SkillResult(
@@ -397,7 +398,7 @@ class GitHubPushSkill(Skill):
             )
 
         except Exception as e:
-            self.logger.error(f"完整推送工作流异常: {e}")
+            self.logger.error("完整推送工作流异常: %s", e)
             return SkillResult(
                 success=False,
                 error=f"工作流异常: {str(e)}",
@@ -415,13 +416,13 @@ class GitHubPushSkill(Skill):
                 "type": "string",
                 "description": "操作类型：status, add, commit, push, full_push",
                 "required": False,
-                "default": "full_push"
+                "default": "full_push",
             },
             "message": {
                 "type": "string",
                 "description": "提交信息（commit 操作需要）",
                 "required": False,
-                "default": "Update from Neurova GitHub Push Skill"
+                "default": "Update from Neurova GitHub Push Skill",
             },
             "files": {
                 "type": "array",
@@ -432,7 +433,7 @@ class GitHubPushSkill(Skill):
                 "type": "boolean",
                 "description": "是否直接推送到 main 分支",
                 "required": False,
-                "default": True
+                "default": True,
             },
             "branch": {
                 "type": "string",
@@ -443,7 +444,7 @@ class GitHubPushSkill(Skill):
                 "type": "string",
                 "description": "仓库路径（默认为当前目录）",
                 "required": False,
-            }
+            },
         }
         info.required_params = []
         return info
@@ -455,27 +456,22 @@ def create_github_push_skill() -> GitHubPushSkill:
 
 
 # 便捷函数：一键推送
-async def push_to_github(message: str = "Update from Neurova", 
-                        push_to_main: bool = True,
-                        repo_path: str = ".") -> SkillResult:
+async def push_to_github(
+    message: str = "Update from Neurova", push_to_main: bool = True, repo_path: str = "."
+) -> SkillResult:
     """
     便捷函数：一键推送到 GitHub
-    
+
     Args:
         message: 提交信息
         push_to_main: 是否推送到 main 分支
         repo_path: 仓库路径
-        
+
     Returns:
         SkillResult: 执行结果
     """
     skill = create_github_push_skill()
-    params = {
-        "action": "full_push",
-        "message": message,
-        "push_to_main": push_to_main,
-        "repo_path": repo_path
-    }
+    params = {"action": "full_push", "message": message, "push_to_main": push_to_main, "repo_path": repo_path}
     return await skill.execute(params)
 
 

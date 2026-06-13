@@ -17,7 +17,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -30,28 +29,74 @@ def _now_iso() -> str:
 
 
 VISION_EXTS = {
-    "png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "tiff", "tif", "heic", "heif",
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "bmp",
+    "webp",
+    "svg",
+    "tiff",
+    "tif",
+    "heic",
+    "heif",
 }
 AUDIO_EXTS = {"mp3", "wav", "ogg", "flac", "m4a", "aac", "wma", "opus", "oga"}
 VIDEO_EXTS = {"mp4", "avi", "mov", "mkv", "webm", "flv", "wmv", "m4v", "mpeg", "mpg"}
 
 VISION_MODEL_KEYWORDS = (
-    "vision", "gpt-4v", "gpt-4-v", "image", "multimodal", "llava",
-    "qwen-vl", "qwen2-vl", "gemini", "claude-3", "claude-3.5",
-    "pixtral", "internvl", "cogvlm", "yi-vl", "vl-", "-vl",
+    "vision",
+    "gpt-4v",
+    "gpt-4-v",
+    "image",
+    "multimodal",
+    "llava",
+    "qwen-vl",
+    "qwen2-vl",
+    "gemini",
+    "claude-3",
+    "claude-3.5",
+    "pixtral",
+    "internvl",
+    "cogvlm",
+    "yi-vl",
+    "vl-",
+    "-vl",
 )
 AUDIO_MODEL_KEYWORDS = (
-    "whisper", "audio", "asr", "tts", "speech", "voice",
-    "bark", "musicgen", "audiogen",
+    "whisper",
+    "audio",
+    "asr",
+    "tts",
+    "speech",
+    "voice",
+    "bark",
+    "musicgen",
+    "audiogen",
 )
 VIDEO_MODEL_KEYWORDS = ("video", "sora", "moviegen")
 
 
 MEDIA_ERROR_KEYWORDS = (
-    "image", "vision", "multimodal", "media", "picture", "photo",
-    "audio", "speech", "voice", "video", "attachment", "unsupported",
-    "not supported", "cannot process", "invalid content type",
-    "binary", "base64", "mime", "data uri",
+    "image",
+    "vision",
+    "multimodal",
+    "media",
+    "picture",
+    "photo",
+    "audio",
+    "speech",
+    "voice",
+    "video",
+    "attachment",
+    "unsupported",
+    "not supported",
+    "cannot process",
+    "invalid content type",
+    "binary",
+    "base64",
+    "mime",
+    "data uri",
 )
 
 
@@ -211,9 +256,7 @@ class MultimodalProber:
         mime_type: Optional[str] = None,
         model_id: Optional[str] = None,
     ) -> bool:
-        rec = self.detect_capabilities(
-            filename=filename, mime_type=mime_type, model_id=model_id
-        )
+        rec = self.detect_capabilities(filename=filename, mime_type=mime_type, model_id=model_id)
         return "vision" in rec.capabilities
 
     def is_audio(
@@ -222,9 +265,7 @@ class MultimodalProber:
         mime_type: Optional[str] = None,
         model_id: Optional[str] = None,
     ) -> bool:
-        rec = self.detect_capabilities(
-            filename=filename, mime_type=mime_type, model_id=model_id
-        )
+        rec = self.detect_capabilities(filename=filename, mime_type=mime_type, model_id=model_id)
         return "audio" in rec.capabilities
 
     def is_video(
@@ -233,9 +274,7 @@ class MultimodalProber:
         mime_type: Optional[str] = None,
         model_id: Optional[str] = None,
     ) -> bool:
-        rec = self.detect_capabilities(
-            filename=filename, mime_type=mime_type, model_id=model_id
-        )
+        rec = self.detect_capabilities(filename=filename, mime_type=mime_type, model_id=model_id)
         return "video" in rec.capabilities
 
     def get_record(self, record_id: str) -> Optional[ProbeRecord]:
@@ -295,11 +334,30 @@ def reset_multimodal_prober() -> None:
 
 
 _MEDIA_KEYWORDS = (
-    "image", "images", "vision", "multimodal", "photo", "picture",
-    "audio", "speech", "voice", "sound", "music",
-    "video", "movie", "clip",
-    "media", "attachment", "input_image", "input_audio", "input_video",
-    "image_url", "image_input", "content", "blob", "base64",
+    "image",
+    "images",
+    "vision",
+    "multimodal",
+    "photo",
+    "picture",
+    "audio",
+    "speech",
+    "voice",
+    "sound",
+    "music",
+    "video",
+    "movie",
+    "clip",
+    "media",
+    "attachment",
+    "input_image",
+    "input_audio",
+    "input_video",
+    "image_url",
+    "image_input",
+    "content",
+    "blob",
+    "base64",
 )
 
 
@@ -311,7 +369,9 @@ def _is_media_keyword_error(message: Any) -> bool:
         return False
     if "no image" in text or "no audio" in text or "no video" in text:
         return True
-    if "does not support" in text and any(k in text for k in ("image", "audio", "video", "vision", "media", "multimodal")):
+    if "does not support" in text and any(
+        k in text for k in ("image", "audio", "video", "vision", "media", "multimodal")
+    ):
         return True
     if "unsupported" in text and any(k in text for k in ("image", "audio", "video", "vision", "media", "multimodal")):
         return True
@@ -325,12 +385,26 @@ def evaluate_image_probe_answer(answer: Any) -> Dict[str, Any]:
     if not text:
         return {"supports_vision": False, "confidence": 0.0, "reason": "empty"}
     negative_markers = (
-        "cannot", "can't", "unable", "no image", "not support",
-        "do not see", "no visual", "no picture", "as a text model",
+        "cannot",
+        "can't",
+        "unable",
+        "no image",
+        "not support",
+        "do not see",
+        "no visual",
+        "no picture",
+        "as a text model",
     )
     positive_markers = (
-        "i see", "i can see", "the image", "this image", "shows",
-        "depicts", "in the picture", "in the image", "describes",
+        "i see",
+        "i can see",
+        "the image",
+        "this image",
+        "shows",
+        "depicts",
+        "in the picture",
+        "in the image",
+        "describes",
     )
     if any(m in text for m in negative_markers):
         return {"supports_vision": False, "confidence": 0.85, "reason": "negative_marker"}

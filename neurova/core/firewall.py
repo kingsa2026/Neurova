@@ -10,16 +10,14 @@ L2: 文件访问保护
 外部请求排除: LLM 服务、模型推理服务（信任域内部流量）
 """
 
-from dataclasses import dataclass, field
-import functools
 import json
 import logging
-import os
-from pathlib import Path
 import re
 import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -27,24 +25,42 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GlobalRuleSet:
     """全局规则集（admin 默认）"""
+
     rate_limit_per_minute: int = 60
     rate_limit_per_hour: int = 1000
     allowed_ips: List[str] = field(default_factory=list)
     blocked_ips: List[str] = field(default_factory=list)
     max_input_length: int = 10000
     max_file_size_mb: int = 50
-    blocked_paths: List[str] = field(default_factory=lambda: [
-        "/etc/passwd", "/etc/shadow", "/root", "/home",
-        "C:\\Windows", "C:\\Users",
-    ])
-    sensitive_output_patterns: List[str] = field(default_factory=lambda: [
-        r"api[_-]?key", r"password", r"secret", r"token",
-        r"Bearer\s+\S+", r"sk-\w+",
-    ])
-    llm_trust_domains: List[str] = field(default_factory=lambda: [
-        "api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com",
-        "localhost", "127.0.0.1",
-    ])
+    blocked_paths: List[str] = field(
+        default_factory=lambda: [
+            "/etc/passwd",
+            "/etc/shadow",
+            "/root",
+            "/home",
+            "C:\\Windows",
+            "C:\\Users",
+        ]
+    )
+    sensitive_output_patterns: List[str] = field(
+        default_factory=lambda: [
+            r"api[_-]?key",
+            r"password",
+            r"secret",
+            r"token",
+            r"Bearer\s+\S+",
+            r"sk-\w+",
+        ]
+    )
+    llm_trust_domains: List[str] = field(
+        default_factory=lambda: [
+            "api.openai.com",
+            "api.anthropic.com",
+            "generativelanguage.googleapis.com",
+            "localhost",
+            "127.0.0.1",
+        ]
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -63,6 +79,7 @@ class GlobalRuleSet:
 @dataclass
 class UserRuleSet:
     """用户级规则集（只能加严不能放松）"""
+
     user_id: str = ""
     rate_limit_per_minute: Optional[int] = None
     rate_limit_per_hour: Optional[int] = None
@@ -104,10 +121,7 @@ class AgentFirewall:
         self._rate_counters: Dict[Tuple[str, str], int] = {}
 
         # 编译敏感输出正则
-        self._sensitive_patterns = [
-            re.compile(p, re.IGNORECASE)
-            for p in self._global_rules.sensitive_output_patterns
-        ]
+        self._sensitive_patterns = [re.compile(p, re.IGNORECASE) for p in self._global_rules.sensitive_output_patterns]
 
         # 加载配置
         self._load()
@@ -129,7 +143,7 @@ class AgentFirewall:
                     for uid, udata in data["users"].items():
                         self._user_rules[uid] = UserRuleSet(user_id=uid, **udata)
         except Exception as e:
-            logger.warning(f"Failed to load firewall config: {e}")
+            logger.warning("Failed to load firewall config: %s", e)
 
     def _save_global(self) -> None:
         """保存全局规则"""
@@ -144,7 +158,7 @@ class AgentFirewall:
             with open(self._config_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.error(f"Failed to save firewall config: {e}")
+            logger.error("Failed to save firewall config: %s", e)
 
     def _save_user(self, user_id: str) -> None:
         """保存用户规则"""
@@ -198,13 +212,9 @@ class AgentFirewall:
                     user_rules.rate_limit_per_hour,
                 )
             # IP 黑名单合并
-            effective["blocked_ips"] = list(set(
-                effective["blocked_ips"] + user_rules.blocked_ips
-            ))
+            effective["blocked_ips"] = list(set(effective["blocked_ips"] + user_rules.blocked_ips))
             # 路径黑名单合并
-            effective["blocked_paths"] = list(set(
-                effective["blocked_paths"] + user_rules.extra_blocked_paths
-            ))
+            effective["blocked_paths"] = list(set(effective["blocked_paths"] + user_rules.extra_blocked_paths))
             effective["agent_isolation"] = user_rules.agent_isolation
 
         return effective
@@ -251,10 +261,7 @@ class AgentFirewall:
         """清理过期的速率计数器"""
         cutoff_min = f"min_{int(now // 60) - 2}"
         cutoff_hour = f"hour_{int(now // 3600) - 2}"
-        to_delete = [
-            key for key in self._rate_counters
-            if key[1] < cutoff_min or key[1] < cutoff_hour
-        ]
+        to_delete = [key for key in self._rate_counters if key[1] < cutoff_min or key[1] < cutoff_hour]
         for key in to_delete:
             del self._rate_counters[key]
 
@@ -273,10 +280,7 @@ class AgentFirewall:
 
     def is_llm_internal(self, domain: str) -> bool:
         """检查是否为 LLM 内部信任域"""
-        return any(
-            trust in domain
-            for trust in self._global_rules.llm_trust_domains
-        )
+        return any(trust in domain for trust in self._global_rules.llm_trust_domains)
 
     def validate_input(self, text: str, user_id: str = "") -> Tuple[bool, str]:
         """
@@ -325,9 +329,7 @@ class AgentFirewall:
 
         return True, ""
 
-    def check_agent_access(
-        self, source_agent: str, target_agent: str, user_id: str
-    ) -> Tuple[bool, str]:
+    def check_agent_access(self, source_agent: str, target_agent: str, user_id: str) -> Tuple[bool, str]:
         """
         检查 Agent 间访问权限（L1）
 
@@ -339,9 +341,7 @@ class AgentFirewall:
                 return False, "Agent isolation enabled: cross-agent access denied"
         return True, ""
 
-    def check_cross_agent(
-        self, agent_id: str, resource: str, user_id: str
-    ) -> Tuple[bool, str]:
+    def check_cross_agent(self, agent_id: str, resource: str, user_id: str) -> Tuple[bool, str]:
         """检查跨 Agent 资源访问"""
         return self.check_agent_access(agent_id, resource, user_id)
 

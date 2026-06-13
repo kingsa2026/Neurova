@@ -4,23 +4,23 @@ QQ频道消息渠道适配器
 API 文档: https://bot.q.qq.com/wiki/
 """
 
+import hashlib
 import json
 import logging
-import time
 import threading
-from typing import Optional, Dict, Any
-import hashlib
+import time
 from datetime import datetime
+from typing import Any, Dict, Optional
 
 try:
-    import re
+    pass
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
 
-from neurova.channels import (
-    ChannelAdapter, MessageChannel, UnifiedMessage, ContentType
-)
+from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+
 
 class QQAdapter(ChannelAdapter):
     """
@@ -58,7 +58,7 @@ class QQAdapter(ChannelAdapter):
 
         # 消息策略
         self.private_chat_strategy = "open"  # open/closed/whitelist
-        self.group_chat_strategy = "open"    # open/closed/whitelist
+        self.group_chat_strategy = "open"  # open/closed/whitelist
         self.require_mention = False
         self.whitelist_users = []
         self.message_merge = False
@@ -143,7 +143,7 @@ class QQAdapter(ChannelAdapter):
             url = f"{self.API_BASE}/gateway/bot"
             headers = {
                 "Authorization": f"Bot {self.app_id}.{self.token}",
-                "User-Agent": f"Bot/{self.app_id} Neurova-QQ-Adapter/1.0"
+                "User-Agent": f"Bot/{self.app_id} Neurova-QQ-Adapter/1.0",
             }
 
             resp = requests.get(url, headers=headers, timeout=10)
@@ -154,16 +154,16 @@ class QQAdapter(ChannelAdapter):
                 logging.info("QQ频道认证成功")
                 return True
             else:
-                logging.error(f"QQ频道认证失败: {data}")
+                logging.error("QQ频道认证失败: %s", data)
                 return False
         except requests.exceptions.Timeout as e:
-            logging.error(f"QQ频道认证超时: {e}")
+            logging.error("QQ频道认证超时: %s", e)
             return False
         except requests.exceptions.RequestException as e:
-            logging.error(f"QQ频道认证请求异常: {e}")
+            logging.error("QQ频道认证请求异常: %s", e)
             return False
         except Exception as e:
-            logging.error(f"QQ频道认证异常: {e}")
+            logging.error("QQ频道认证异常: %s", e)
             return False
 
     def _ensure_token(self) -> bool:
@@ -178,29 +178,20 @@ class QQAdapter(ChannelAdapter):
             return False
 
         if not REQUESTS_AVAILABLE:
-            logging.info(f"[QQ模拟] 发送消息到 {message.chat_id}: {message.content[:50]}")
+            logging.info("[QQ模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
             return True
 
         try:
             # 根据消息类型构建API请求
             url = f"{self.API_BASE}/channels/{message.chat_id}/messages"
 
-            headers = {
-                "Authorization": f"Bot {self.app_id}.{self.token}",
-                "Content-Type": "application/json"
-            }
+            headers = {"Authorization": f"Bot {self.app_id}.{self.token}", "Content-Type": "application/json"}
 
-            payload = {
-                "content": message.content,
-                "msg_id": message.message_id  # 回复时可携带原消息ID
-            }
+            payload = {"content": message.content, "msg_id": message.message_id}  # 回复时可携带原消息ID
 
             # 如果启用消息合并，添加合并标识
             if self.message_merge:
-                payload["embed"] = {
-                    "title": "系统消息",
-                    "description": "此消息为合并发送"
-                }
+                payload["embed"] = {"title": "系统消息", "description": "此消息为合并发送"}
 
             resp = requests.post(url, headers=headers, json=payload, timeout=10)
 
@@ -208,10 +199,10 @@ class QQAdapter(ChannelAdapter):
                 return True
             else:
                 data = resp.json()
-                logging.error(f"QQ频道消息发送失败: {data}")
+                logging.error("QQ频道消息发送失败: %s", data)
                 return False
         except Exception as e:
-            logging.error(f"QQ频道消息发送异常: {e}")
+            logging.error("QQ频道消息发送异常: %s", e)
             return False
 
     def receive_message(self) -> Optional[UnifiedMessage]:
@@ -266,7 +257,7 @@ class QQAdapter(ChannelAdapter):
         timestamp = None
         if timestamp_str:
             try:
-                timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
             except ValueError:
                 timestamp = datetime.now()
 
@@ -297,7 +288,7 @@ class QQAdapter(ChannelAdapter):
             return None
         elif self.group_chat_strategy == "whitelist":
             if user_id not in self.whitelist_users:
-                logging.debug(f"用户 {user_id} 不在白名单中")
+                logging.debug("用户 %s 不在白名单中", user_id)
                 return None
 
         return UnifiedMessage(
@@ -337,9 +328,7 @@ class QQAdapter(ChannelAdapter):
         # 构造签名字符串: timestamp + body
         sign_str = timestamp + body
         expected_sign = hmac.new(
-            self.secret.encode('utf-8'),
-            sign_str.encode('utf-8'),
-            digestmod=hashlib.sha256
+            self.secret.encode("utf-8"), sign_str.encode("utf-8"), digestmod=hashlib.sha256
         ).hexdigest()
 
         return hmac.compare_digest(expected_sign, sign)
@@ -400,14 +389,16 @@ class QQAdapter(ChannelAdapter):
 
         return True
 
-def create_qq_adapter(app_id: str = "", token: str = "",
-                     secret: str = "") -> QQAdapter:
+
+def create_qq_adapter(app_id: str = "", token: str = "", secret: str = "") -> QQAdapter:
     """创建QQ频道适配器"""
     adapter = QQAdapter()
     if app_id and token and secret:
-        adapter.authenticate({
-            "app_id": app_id,
-            "token": token,
-            "secret": secret,
-        })
+        adapter.authenticate(
+            {
+                "app_id": app_id,
+                "token": token,
+                "secret": secret,
+            }
+        )
     return adapter

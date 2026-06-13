@@ -3,6 +3,7 @@ WeightAdjuster — 通道权重动态调整
 
 基于用户反馈动态调整通道权重，保持权重归一化。
 """
+
 import logging
 from typing import Dict
 
@@ -51,10 +52,7 @@ class WeightAdjuster:
         self._weights[channel] += delta
 
         # 边界限制
-        self._weights[channel] = max(
-            self.min_weight,
-            min(self.max_weight, self._weights[channel])
-        )
+        self._weights[channel] = max(self.min_weight, min(self.max_weight, self._weights[channel]))
 
     def _normalize(self, weights: Dict[str, float]) -> Dict[str, float]:
         """归一化权重使总和为 1.0"""

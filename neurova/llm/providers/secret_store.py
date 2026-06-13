@@ -1,6 +1,7 @@
 """
 Secret store with simple XOR obfuscation and JSON persistence.
 """
+
 import base64
 import datetime
 import hashlib
@@ -11,7 +12,6 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ def decrypt_api_key(encrypted: Any, master_key: str = "") -> str:
             return ""
     if not encrypted.startswith(_PREFIX):
         return encrypted
-    payload = encrypted[len(_PREFIX):]
+    payload = encrypted[len(_PREFIX) :]
     try:
         raw = _try_decode_b64(payload)
     except Exception:
@@ -143,9 +143,7 @@ class SecretStore:
         self._secrets: Dict[str, str] = {}
         self._meta: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.RLock()
-        self._storage_path: Optional[Path] = (
-            Path(storage_path) if storage_path else None
-        )
+        self._storage_path: Optional[Path] = Path(storage_path) if storage_path else None
         self._load()
 
     @property

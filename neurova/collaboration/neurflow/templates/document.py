@@ -9,26 +9,24 @@
 - 报告生成
 - 内容提取
 """
+
 import time
 import uuid
-from typing import Dict, List, Any
+from typing import List
 
-from ..models import (
-    WorkflowDefinition, WorkflowNode, WorkflowEdge, WorkflowVariable,
-    WorkflowStatus, NodeCategory
-)
+from ..models import WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus, WorkflowVariable
 
 
 def get_document_template() -> WorkflowDefinition:
     """获取文档处理工作流模板
-    
+
     Returns:
         预定义的文档处理工作流定义
     """
     nodes = _create_nodes()
     edges = _create_edges()
     variables = _create_variables()
-    
+
     return WorkflowDefinition(
         id=f"template_document_{uuid.uuid4().hex[:8]}",
         name="文档处理",
@@ -50,7 +48,7 @@ def get_document_template() -> WorkflowDefinition:
             "estimated_time": "10-20 minutes",
             "required_skills": ["document", "formatting"],
             "description": "自动化文档处理流程",
-        }
+        },
     )
 
 
@@ -80,12 +78,11 @@ def _create_nodes() -> List[WorkflowNode]:
                         "options": ["摘要", "关键词提取", "结构分析", "情感分析", "翻译"],
                         "default": "摘要",
                         "description": "分析类型",
-                    }
+                    },
                 }
             },
             label="开始",
         ),
-        
         WorkflowNode(
             id="read_doc",
             type="builtin:doc-read",
@@ -96,7 +93,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="读取文档",
         ),
-        
         WorkflowNode(
             id="analyze",
             type="builtin:llm",
@@ -120,7 +116,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="内容分析",
         ),
-        
         WorkflowNode(
             id="format",
             type="builtin:llm",
@@ -144,7 +139,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="文档格式化",
         ),
-        
         WorkflowNode(
             id="save",
             type="builtin:doc-write",
@@ -156,7 +150,6 @@ def _create_nodes() -> List[WorkflowNode]:
             },
             label="保存文档",
         ),
-        
         WorkflowNode(
             id="end",
             type="builtin:end",

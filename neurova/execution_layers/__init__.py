@@ -10,21 +10,22 @@ Execution Runtime + Transport Abstraction v1.0.0
   - CloudFunctionExecutor  - gRPCTransport
 """
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 import logging
 import os
 import subprocess
 import threading
 import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class RuntimeType(Enum):
     """运行时类型"""
+
     LOCAL = "local"
     DOCKER = "docker"
     CLOUD_FUNCTION = "cloud_function"
@@ -33,6 +34,7 @@ class RuntimeType(Enum):
 
 class TransportType(Enum):
     """传输类型"""
+
     HTTP = "http"
     WEBSOCKET = "websocket"
     GRPC = "grpc"
@@ -42,6 +44,7 @@ class TransportType(Enum):
 @dataclass
 class RuntimeInfo:
     """运行时信息"""
+
     runtime_id: str
     runtime_type: RuntimeType
     name: str
@@ -80,6 +83,7 @@ class RuntimeInfo:
 @dataclass
 class ExecutionResult:
     """执行结果"""
+
     success: bool
     exit_code: Optional[int] = None
     stdout: Optional[str] = None
@@ -102,7 +106,7 @@ class ExecutionResult:
 
 class ExecutionRuntime(ABC):
     """执行运行时抽象基类"""
-    
+
     def __init__(self, runtime_id: str, config: Optional[Dict[str, Any]] = None):
         self._runtime_id = runtime_id
         self._config = config or {}
@@ -120,12 +124,10 @@ class ExecutionRuntime(ABC):
     @abstractmethod
     async def start(self) -> bool:
         """启动运行时"""
-        pass
 
     @abstractmethod
     async def stop(self) -> bool:
         """停止运行时"""
-        pass
 
     @abstractmethod
     async def exec(
@@ -137,17 +139,15 @@ class ExecutionRuntime(ABC):
         timeout: Optional[float] = None,
     ) -> ExecutionResult:
         """执行命令"""
-        pass
 
     @abstractmethod
     def get_info(self) -> RuntimeInfo:
         """获取运行时信息"""
-        pass
 
 
 class ExecutionTransport(ABC):
     """执行传输抽象基类"""
-    
+
     def __init__(self, transport_type: TransportType, config: Optional[Dict[str, Any]] = None):
         self._transport_type = transport_type
         self._config = config or {}
@@ -165,27 +165,23 @@ class ExecutionTransport(ABC):
     @abstractmethod
     async def connect(self) -> bool:
         """建立连接"""
-        pass
 
     @abstractmethod
     async def disconnect(self) -> bool:
         """断开连接"""
-        pass
 
     @abstractmethod
     async def send(self, data: Any) -> Any:
         """发送数据"""
-        pass
 
     @abstractmethod
     async def receive(self) -> Any:
         """接收数据"""
-        pass
 
 
 class LocalExecutor(ExecutionRuntime):
     """本地执行器"""
-    
+
     def __init__(self, runtime_id: str = "local", config: Optional[Dict[str, Any]] = None):
         super().__init__(runtime_id, config)
         self._process: Optional[subprocess.Popen] = None
@@ -215,11 +211,11 @@ class LocalExecutor(ExecutionRuntime):
     ) -> ExecutionResult:
         """执行本地命令"""
         start_time = time.time()
-        
+
         try:
             cmd = [command] + (args or [])
             merged_env = {**os.environ, **(env or {})}
-            
+
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -227,7 +223,7 @@ class LocalExecutor(ExecutionRuntime):
                 env=merged_env,
                 cwd=cwd,
             )
-            
+
             try:
                 stdout, stderr = process.communicate(timeout=timeout)
                 exit_code = process.returncode
@@ -235,9 +231,9 @@ class LocalExecutor(ExecutionRuntime):
                 process.kill()
                 stdout, stderr = process.communicate()
                 exit_code = -1
-            
+
             duration_ms = (time.time() - start_time) * 1000
-            
+
             return ExecutionResult(
                 success=exit_code == 0,
                 exit_code=exit_code,
@@ -245,7 +241,7 @@ class LocalExecutor(ExecutionRuntime):
                 stderr=stderr.decode("utf-8", errors="replace") if stderr else None,
                 duration_ms=duration_ms,
             )
-            
+
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
             return ExecutionResult(
@@ -267,7 +263,7 @@ class LocalExecutor(ExecutionRuntime):
 
 class DockerExecutor(ExecutionRuntime):
     """Docker 执行器"""
-    
+
     def __init__(
         self,
         runtime_id: str = "docker",
@@ -290,11 +286,11 @@ class DockerExecutor(ExecutionRuntime):
             if result.returncode != 0:
                 logger.error("Docker not available")
                 return False
-            
+
             self._started = True
             logger.info("Docker executor started with image: %s", self._image)
             return True
-            
+
         except Exception as e:
             logger.error("Failed to start Docker executor: %s", str(e))
             return False
@@ -311,7 +307,7 @@ class DockerExecutor(ExecutionRuntime):
                 self._container_id = None
             except Exception as e:
                 logger.error("Failed to stop container: %s", str(e))
-        
+
         self._started = False
         logger.info("Docker executor stopped")
         return True
@@ -326,31 +322,31 @@ class DockerExecutor(ExecutionRuntime):
     ) -> ExecutionResult:
         """在 Docker 容器中执行命令"""
         start_time = time.time()
-        
+
         try:
             cmd = ["docker", "run", "--rm"]
-            
+
             # 添加环境变量
             if env:
                 for key, value in env.items():
                     cmd.extend(["-e", f"{key}={value}"])
-            
+
             # 添加工作目录
             if cwd:
                 cmd.extend(["-w", cwd])
-            
+
             # 镜像和命令
             cmd.append(self._image)
             cmd.append(command)
             if args:
                 cmd.extend(args)
-            
+
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
-            
+
             try:
                 stdout, stderr = process.communicate(timeout=timeout)
                 exit_code = process.returncode
@@ -358,9 +354,9 @@ class DockerExecutor(ExecutionRuntime):
                 process.kill()
                 stdout, stderr = process.communicate()
                 exit_code = -1
-            
+
             duration_ms = (time.time() - start_time) * 1000
-            
+
             return ExecutionResult(
                 success=exit_code == 0,
                 exit_code=exit_code,
@@ -368,7 +364,7 @@ class DockerExecutor(ExecutionRuntime):
                 stderr=stderr.decode("utf-8", errors="replace") if stderr else None,
                 duration_ms=duration_ms,
             )
-            
+
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
             return ExecutionResult(
@@ -390,7 +386,7 @@ class DockerExecutor(ExecutionRuntime):
 
 class HTTPTransport(ExecutionTransport):
     """HTTP 传输层"""
-    
+
     def __init__(self, base_url: str, config: Optional[Dict[str, Any]] = None):
         super().__init__(TransportType.HTTP, config)
         self._base_url = base_url.rstrip("/")
@@ -411,10 +407,10 @@ class HTTPTransport(ExecutionTransport):
         """发送 HTTP 请求"""
         if not self._connected:
             raise RuntimeError("Not connected")
-        
+
         try:
             import httpx
-            
+
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"{self._base_url}/execute",
@@ -422,7 +418,7 @@ class HTTPTransport(ExecutionTransport):
                     timeout=self._config.get("timeout", 30),
                 )
                 return response.json()
-                
+
         except ImportError:
             logger.warning("httpx not available, using fallback")
             return {"error": "httpx not installed"}
@@ -437,7 +433,7 @@ class HTTPTransport(ExecutionTransport):
 
 class WebSocketTransport(ExecutionTransport):
     """WebSocket 传输层"""
-    
+
     def __init__(self, ws_url: str, config: Optional[Dict[str, Any]] = None):
         super().__init__(TransportType.WEBSOCKET, config)
         self._ws_url = ws_url
@@ -447,6 +443,7 @@ class WebSocketTransport(ExecutionTransport):
         """建立 WebSocket 连接"""
         try:
             import websockets
+
             self._ws = await websockets.connect(self._ws_url)
             self._connected = True
             logger.info("WebSocket transport connected to %s", self._ws_url)
@@ -471,10 +468,11 @@ class WebSocketTransport(ExecutionTransport):
         """发送 WebSocket 消息"""
         if not self._ws:
             raise RuntimeError("Not connected")
-        
+
         import json
+
         await self._ws.send(json.dumps(data))
-        
+
         # 等待响应
         response = await self._ws.recv()
         return json.loads(response)
@@ -483,15 +481,16 @@ class WebSocketTransport(ExecutionTransport):
         """接收 WebSocket 消息"""
         if not self._ws:
             raise RuntimeError("Not connected")
-        
+
         import json
+
         message = await self._ws.recv()
         return json.loads(message)
 
 
 class RuntimeFactory:
     """运行时工厂"""
-    
+
     @staticmethod
     def create(runtime_type: RuntimeType, **kwargs) -> ExecutionRuntime:
         """创建运行时实例"""
@@ -510,7 +509,7 @@ class RuntimeFactory:
 
 class TransportFactory:
     """传输层工厂"""
-    
+
     @staticmethod
     def create(transport_type: TransportType, endpoint: str, **kwargs) -> ExecutionTransport:
         """创建传输层实例"""
@@ -535,35 +534,36 @@ async def execute_skill(
 ) -> ExecutionResult:
     """
     统一技能执行接口（运行时+传输层双抽象）
-    
+
     Args:
         skill_name: 技能名称
         args: 技能参数
         runtime: 执行运行时（可选，默认本地）
         transport: 传输层（可选）
-        
+
     Returns:
         ExecutionResult 执行结果
     """
     start_time = time.time()
-    
+
     try:
         # 使用默认本地运行时
         if runtime is None:
             runtime = LocalExecutor()
             await runtime.start()
-        
+
         # 构建执行命令
         command = "python"
         script_args = ["-m", f"neurova.skills.{skill_name}"]
-        
+
         # 将参数转为环境变量
         import json
+
         env = {
             "NEUROVA_SKILL_NAME": skill_name,
             "NEUROVA_SKILL_ARGS": json.dumps(args),
         }
-        
+
         # 执行
         result = await runtime.exec(
             command=command,
@@ -571,12 +571,12 @@ async def execute_skill(
             env=env,
             timeout=args.get("timeout", 60),
         )
-        
+
         duration_ms = (time.time() - start_time) * 1000
         result.duration_ms = duration_ms
-        
+
         return result
-        
+
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         return ExecutionResult(
@@ -588,7 +588,7 @@ async def execute_skill(
 
 class RuntimeManager:
     """运行时管理器"""
-    
+
     def __init__(self):
         self._runtimes: Dict[str, ExecutionRuntime] = {}
         self._lock = threading.RLock()
@@ -599,7 +599,7 @@ class RuntimeManager:
         with self._lock:
             runtime_id = f"{runtime_type.value}_{int(time.time())}"
             runtime = RuntimeFactory.create(runtime_type, runtime_id=runtime_id, **kwargs)
-            
+
             success = await runtime.start()
             if success:
                 self._runtimes[runtime_id] = runtime
@@ -614,12 +614,12 @@ class RuntimeManager:
             runtime = self._runtimes.get(runtime_id)
             if not runtime:
                 return False
-            
+
             success = await runtime.stop()
             if success:
                 del self._runtimes[runtime_id]
                 logger.info("Runtime stopped: %s", runtime_id)
-            
+
             return success
 
     def list_active(self) -> List[Dict[str, Any]]:

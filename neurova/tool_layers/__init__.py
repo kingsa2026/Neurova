@@ -19,98 +19,109 @@
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Callable
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 # 导入核心模块
 try:
     from neurova.tool_layers.schemas import (
-        ToolSource,
-        ToolParameter,
-        ToolSchema,
         MCPConnection,
         ToolExecutionResult,
+        ToolParameter,
+        ToolSchema,
+        ToolSource,
         ToolType,
     )
 except ImportError as e:
-    logger.warning(f"Failed to import schemas: {e}")
+    logger.warning("Failed to import schemas: %s", e)
 
 try:
     from neurova.tool_layers.tool_router import ToolRouter
 except ImportError as e:
-    logger.warning(f"Failed to import tool_router: {e}")
+    logger.warning("Failed to import tool_router: %s", e)
 
 try:
     from neurova.tool_layers.unified_registry import UnifiedToolRegistry
 except ImportError as e:
-    logger.warning(f"Failed to import unified_registry: {e}")
+    logger.warning("Failed to import unified_registry: %s", e)
 
 try:
     from neurova.tool_layers.mcp_client import MCPToolClient, ToolNotFoundError
 except ImportError as e:
-    logger.warning(f"Failed to import mcp_client: {e}")
+    logger.warning("Failed to import mcp_client: %s", e)
 
 try:
     from neurova.tool_layers.capability_graph import ToolCapabilityGraph, ToolCapabilityNode
 except ImportError as e:
-    logger.warning(f"Failed to import capability_graph: {e}")
+    logger.warning("Failed to import capability_graph: %s", e)
 
 try:
-    from neurova.tool_layers.tool_orchestrator import ToolOrchestrator, ExecutionStatus, StepResult, OrchestrationResult
+    from neurova.tool_layers.tool_orchestrator import ExecutionStatus, OrchestrationResult, StepResult, ToolOrchestrator
 except ImportError as e:
-    logger.warning(f"Failed to import tool_orchestrator: {e}")
+    logger.warning("Failed to import tool_orchestrator: %s", e)
 
 try:
-    from neurova.tool_layers.tool_marketplace import ToolMarketplace, MarketplaceTool, BayesianRating, ToolReview, ToolFork
+    from neurova.tool_layers.tool_marketplace import (
+        BayesianRating,
+        MarketplaceTool,
+        ToolFork,
+        ToolMarketplace,
+        ToolReview,
+    )
 except ImportError as e:
-    logger.warning(f"Failed to import tool_marketplace: {e}")
+    logger.warning("Failed to import tool_marketplace: %s", e)
 
 try:
-    from neurova.tool_layers.tool_cache import ToolCache, CacheEntry
+    from neurova.tool_layers.tool_cache import CacheEntry, ToolCache
 except ImportError as e:
-    logger.warning(f"Failed to import tool_cache: {e}")
+    logger.warning("Failed to import tool_cache: %s", e)
 
 try:
-    from neurova.tool_layers.tool_logger import ToolExecutionLogger, ToolExecutionEntry
+    from neurova.tool_layers.tool_logger import ToolExecutionEntry, ToolExecutionLogger
 except ImportError as e:
-    logger.warning(f"Failed to import tool_logger: {e}")
+    logger.warning("Failed to import tool_logger: %s", e)
 
 try:
     from neurova.tool_layers.cli_tool import CLIToolExecutor
 except ImportError as e:
-    logger.warning(f"Failed to import cli_tool: {e}")
+    logger.warning("Failed to import cli_tool: %s", e)
 
 try:
     from neurova.tool_layers.browser_capability import BrowserBackendCapability
 except ImportError as e:
-    logger.warning(f"Failed to import browser_capability: {e}")
+    logger.warning("Failed to import browser_capability: %s", e)
 
 try:
     from neurova.tool_layers.openai_schema import (
-        OpenAIFunctionSchema,
         AnthropicToolSchema,
         GoogleToolSchema,
-        ToolSchemaConverter,
+        OpenAIFunctionSchema,
         ToolCallParser,
+        ToolSchemaConverter,
     )
 except ImportError as e:
-    logger.warning(f"Failed to import openai_schema: {e}")
+    logger.warning("Failed to import openai_schema: %s", e)
 
 
 # 向后兼容的简单实现（仅在真实类导入失败时定义，避免覆盖）
 if "MarketplaceTool" not in dir() or MarketplaceTool is None:  # type: ignore[possibly-undefined]
+
     class MarketplaceTool:
         """市场工具（向后兼容）"""
+
         def __init__(self, name: str = "", description: str = "", version: str = "1.0.0", **kwargs):
             self.name = name
             self.description = description
             self.version = version
             self.metadata = kwargs
 
+
 if "ToolOrchestrator" not in dir() or ToolOrchestrator is None:  # type: ignore[possibly-undefined]
+
     class ToolOrchestrator:
         """DAG 工具编排器（向后兼容）"""
+
         def __init__(self):
             self._tools: Dict[str, Any] = {}
             self._dag: Dict[str, List[str]] = {}
@@ -127,11 +138,14 @@ if "ToolOrchestrator" not in dir() or ToolOrchestrator is None:  # type: ignore[
             return list(self._tools.keys())
 
         async def execute(self, task: str, context: Optional[Dict] = None) -> Dict[str, Any]:
-            return {'success': True, 'result': f"Executed: {task}"}
+            return {"success": True, "result": f"Executed: {task}"}
+
 
 if "ToolMarketplace" not in dir() or ToolMarketplace is None:  # type: ignore[possibly-undefined]
+
     class ToolMarketplace:
         """工具市场（向后兼容）"""
+
         def __init__(self):
             self._tools: Dict[str, MarketplaceTool] = {}
 
@@ -150,40 +164,38 @@ if "ToolMarketplace" not in dir() or ToolMarketplace is None:  # type: ignore[po
 
 __all__ = [
     # 核心数据模型
-    'ToolSource',
-    'ToolParameter',
-    'ToolSchema',
-    'MCPConnection',
-    'ToolExecutionResult',
-    'ToolType',
-    
+    "ToolSource",
+    "ToolParameter",
+    "ToolSchema",
+    "MCPConnection",
+    "ToolExecutionResult",
+    "ToolType",
     # 核心类
-    'ToolRouter',
-    'UnifiedToolRegistry',
-    'MCPToolClient',
-    'ToolNotFoundError',
-    'ToolCapabilityGraph',
-    'ToolCapabilityNode',
-    'ToolOrchestrator',
-    'ExecutionStatus',
-    'StepResult',
-    'OrchestrationResult',
-    'ToolMarketplace',
-    'MarketplaceTool',
-    'BayesianRating',
-    'ToolReview',
-    'ToolFork',
-    'ToolCache',
-    'CacheEntry',
-    'ToolExecutionLogger',
-    'ToolExecutionEntry',
-    'CLIToolExecutor',
-    'BrowserBackendCapability',
-    
+    "ToolRouter",
+    "UnifiedToolRegistry",
+    "MCPToolClient",
+    "ToolNotFoundError",
+    "ToolCapabilityGraph",
+    "ToolCapabilityNode",
+    "ToolOrchestrator",
+    "ExecutionStatus",
+    "StepResult",
+    "OrchestrationResult",
+    "ToolMarketplace",
+    "MarketplaceTool",
+    "BayesianRating",
+    "ToolReview",
+    "ToolFork",
+    "ToolCache",
+    "CacheEntry",
+    "ToolExecutionLogger",
+    "ToolExecutionEntry",
+    "CLIToolExecutor",
+    "BrowserBackendCapability",
     # OpenAI Schema 兼容层
-    'OpenAIFunctionSchema',
-    'AnthropicToolSchema',
-    'GoogleToolSchema',
-    'ToolSchemaConverter',
-    'ToolCallParser',
+    "OpenAIFunctionSchema",
+    "AnthropicToolSchema",
+    "GoogleToolSchema",
+    "ToolSchemaConverter",
+    "ToolCallParser",
 ]

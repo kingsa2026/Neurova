@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CacheEntry:
     """缓存条目"""
+
     key: str
     value: Any
     created_at: float = field(default_factory=time.time)
@@ -39,6 +40,7 @@ class CacheEntry:
 @dataclass
 class CacheStats:
     """缓存统计信息"""
+
     hits: int = 0
     misses: int = 0
     evictions: int = 0
@@ -111,7 +113,7 @@ class MemoryCache:
         self._cleanup_timer: Optional[threading.Timer] = None
         self._start_cleanup_timer()
 
-        logger.info(f"MemoryCache initialized: capacity={capacity}, default_ttl={default_ttl}s")
+        logger.info("MemoryCache initialized: capacity=%s, default_ttl=%ss", capacity, default_ttl)
 
     def _start_cleanup_timer(self):
         """启动清理定时器"""
@@ -126,16 +128,13 @@ class MemoryCache:
     def _cleanup_expired(self):
         """清理过期条目"""
         with self._lock:
-            expired_keys = [
-                key for key, entry in self._cache.items()
-                if entry.is_expired()
-            ]
+            expired_keys = [key for key, entry in self._cache.items() if entry.is_expired()]
             for key in expired_keys:
                 del self._cache[key]
                 self._stats.evictions += 1
 
             if expired_keys:
-                logger.debug(f"Cleaned up {len(expired_keys)} expired cache entries")
+                logger.debug("Cleaned up %s expired cache entries", len(expired_keys))
 
             # 重新启动定时器
             self._start_cleanup_timer()
@@ -206,7 +205,7 @@ class MemoryCache:
                 # 淘汰最久未使用的（头部）
                 evicted_key, _ = self._cache.popitem(last=False)
                 self._stats.evictions += 1
-                logger.debug(f"Evicted cache entry: {evicted_key}")
+                logger.debug("Evicted cache entry: %s", evicted_key)
 
             # 创建新条目
             entry_ttl = ttl if ttl is not None else self._default_ttl
@@ -283,11 +282,7 @@ class MemoryCache:
     def items(self) -> List[Tuple[str, Any]]:
         """获取所有键值对"""
         with self._lock:
-            return [
-                (key, entry.value)
-                for key, entry in self._cache.items()
-                if not entry.is_expired()
-            ]
+            return [(key, entry.value) for key, entry in self._cache.items() if not entry.is_expired()]
 
     def get_or_set(
         self,
@@ -435,7 +430,7 @@ class MemoryCache:
 
     def __repr__(self) -> str:
         """字符串表示"""
-        return f"MemoryCache(capacity={self._capacity}, size={len(self._cache)}, hit_rate={self._stats.hit_rate:.2%})"
+        return f"MemoryCache(capacity={self._capacity}, size={len(self._cache)}, hit_rate={self._stats.hit_rate * 100:.2f}%%)"
 
 
 # ============================================================
@@ -483,6 +478,7 @@ def reset_global_cache():
 # 缓存装饰器
 # ============================================================
 
+
 def cached(
     ttl: Optional[float] = None,
     key_prefix: str = "",
@@ -499,6 +495,7 @@ def cached(
         def get_user(user_id: str):
             return fetch_user_from_db(user_id)
     """
+
     def decorator(func):
         def wrapper(*args, **kwargs):
             cache = get_global_cache()

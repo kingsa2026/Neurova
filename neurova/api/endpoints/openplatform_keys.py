@@ -9,11 +9,8 @@ import secrets
 import typing
 import uuid
 
-from fastapi import APIRouter
-from fastapi import HTTPException
-from fastapi import Request
-from pydantic import BaseModel
-from pydantic import Field
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -24,6 +21,7 @@ class CreateApiKeyRequest(BaseModel):
     scopes: typing.List[str] = Field(default_factory=list)
     expires_in_days: int = Field(default=90, ge=1, le=365)
     description: str = ""
+
 
 class UpdateApiKeyRequest(BaseModel):
     name: typing.Optional[str] = None
@@ -44,8 +42,10 @@ _AVAILABLE_SCOPES = [
 def _get_uid(request) -> str:
     return getattr(request.state, "user_id", "anonymous")
 
+
 def _hash_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
+
 
 def _gen_key() -> tuple:
     key = f"nrv_{secrets.token_urlsafe(32)}"
@@ -58,7 +58,11 @@ async def list_api_keys(request: Request, page: int = 1, size: int = 20):
     keys = [k for k in _KEYS_STORE.values() if k.get("user_id") == uid and not k.get("revoked")]
     keys.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     start = (page - 1) * size
-    return {"code": 0, "message": "success", "data": {"items": keys[start:start+size], "total": len(keys), "page": page, "size": size}}
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"items": keys[start : start + size], "total": len(keys), "page": page, "size": size},
+    }
 
 
 @router.post("/")
@@ -68,11 +72,19 @@ async def create_api_key(body: CreateApiKeyRequest, request: Request):
     full, h, prefix = _gen_key()
     now = datetime.datetime.utcnow()
     data = {
-        "id": kid, "name": body.name, "description": body.description, "key_prefix": prefix,
-        "key_hash": h, "scopes": body.scopes, "enabled": True, "revoked": False,
-        "user_id": uid, "created_at": now.isoformat(),
+        "id": kid,
+        "name": body.name,
+        "description": body.description,
+        "key_prefix": prefix,
+        "key_hash": h,
+        "scopes": body.scopes,
+        "enabled": True,
+        "revoked": False,
+        "user_id": uid,
+        "created_at": now.isoformat(),
         "expires_at": (now + datetime.timedelta(days=body.expires_in_days)).isoformat(),
-        "last_used_at": None, "usage_count": 0,
+        "last_used_at": None,
+        "usage_count": 0,
     }
     _KEYS_STORE[kid] = data
     return {"code": 0, "message": "Key created", "data": {**data, "key": full}}
@@ -93,9 +105,12 @@ async def update_api_key(key_id: str, body: UpdateApiKeyRequest, request: Reques
     k = _KEYS_STORE.get(key_id)
     if not k or k.get("user_id") != uid:
         raise HTTPException(status_code=404, detail="Key not found")
-    if body.name is not None: k["name"] = body.name
-    if body.scopes is not None: k["scopes"] = body.scopes
-    if body.enabled is not None: k["enabled"] = body.enabled
+    if body.name is not None:
+        k["name"] = body.name
+    if body.scopes is not None:
+        k["scopes"] = body.scopes
+    if body.enabled is not None:
+        k["enabled"] = body.enabled
     k["updated_at"] = datetime.datetime.utcnow().isoformat()
     return {"code": 0, "message": "Key updated", "data": k}
 
@@ -128,7 +143,11 @@ async def get_key_usage(key_id: str, request: Request):
     k = _KEYS_STORE.get(key_id)
     if not k or k.get("user_id") != uid:
         raise HTTPException(status_code=404, detail="Key not found")
-    return {"code": 0, "message": "success", "data": {"key_id": key_id, "usage_count": k.get("usage_count", 0), "last_used_at": k.get("last_used_at")}}
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"key_id": key_id, "usage_count": k.get("usage_count", 0), "last_used_at": k.get("last_used_at")},
+    }
 
 
 @router.get("/scopes")

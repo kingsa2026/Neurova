@@ -8,12 +8,10 @@ import datetime
 import json
 import logging
 import threading
-import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +206,9 @@ class CapabilityCache:
             except Exception as exc:
                 logger.warning(
                     "Preheat probe failed for %s/%s: %s",
-                    provider_id, model_id, exc,
+                    provider_id,
+                    model_id,
+                    exc,
                 )
                 continue
             if not isinstance(caps, dict):

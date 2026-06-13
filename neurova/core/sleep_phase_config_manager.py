@@ -4,8 +4,10 @@
 为 IdleTimeTracker 提供睡眠阶段配置。
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from neurova.core.sleep_config_manager import SleepConfigManager
+
 
 class SleepPhaseConfigManager:
     """睡眠阶段配置管理器
@@ -50,4 +52,5 @@ class SleepPhaseConfigManager:
         """更新配置"""
         return self._config_manager.update_config(updates)
 
-__all__ = ['SleepPhaseConfigManager']
+
+__all__ = ["SleepPhaseConfigManager"]

@@ -4,7 +4,6 @@
 提供统一的 API 请求方法、Token 管理和认证功能。
 """
 
-import json
 import logging
 import threading
 import time
@@ -62,7 +61,7 @@ class AuthMixin:
                 data = response.json()
 
                 if data.get("code") != 0:
-                    logger.error(f"Failed to get tenant_access_token: {data}")
+                    logger.error("Failed to get tenant_access_token: %s", data)
                     raise ValueError(f"Feishu auth error: {data.get('msg')}")
 
                 self._tenant_access_token = data["tenant_access_token"]
@@ -73,7 +72,7 @@ class AuthMixin:
                 return self._tenant_access_token
 
             except Exception as e:
-                logger.exception(f"Error getting tenant_access_token: {e}")
+                logger.exception("Error getting tenant_access_token: %s", e)
                 raise
 
     def _feishu_request(
@@ -118,7 +117,7 @@ class AuthMixin:
             return response.json()
 
         except requests.exceptions.RequestException as e:
-            logger.exception(f"Feishu API request error: {e}")
+            logger.exception("Feishu API request error: %s", e)
             raise
 
     def _feishu_get(

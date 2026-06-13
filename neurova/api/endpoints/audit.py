@@ -10,13 +10,10 @@ from __future__ import annotations
 """
 
 import logging
-import time
-import typing
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -25,7 +22,13 @@ router = APIRouter()
 
 # 尝试导入审计日志管理器
 try:
-    from neurova.security.audit_logger import get_audit_logger, AuditLogger, AuditEventType, AuditSeverity, AuditLogEntry
+    from neurova.security.audit_logger import (
+        AuditEventType,
+        AuditLogEntry,
+        AuditLogger,
+        AuditSeverity,
+        get_audit_logger,
+    )
 except ImportError:
     logger.warning("Audit logger service not available")
     get_audit_logger = None
@@ -37,6 +40,7 @@ except ImportError:
 
 class AuditLog(BaseModel):
     """审计日志"""
+
     log_id: str
     timestamp: float
     user_id: Optional[str] = None
@@ -50,6 +54,7 @@ class AuditLog(BaseModel):
 
 class AuditSearchRequest(BaseModel):
     """审计日志搜索请求"""
+
     query: Optional[str] = None
     user_id: Optional[str] = None
     action: Optional[str] = None
@@ -61,6 +66,7 @@ class AuditSearchRequest(BaseModel):
 
 class AuditStats(BaseModel):
     """审计统计"""
+
     total_logs: int = 0
     unique_users: int = 0
     unique_actions: int = 0
@@ -102,26 +108,25 @@ async def get_audit_logs(
         if get_audit_logger is None:
             logger.warning("Audit logger service not available")
             return []
-        
+
         # 获取审计日志管理器
-        logger_instance = get_audit_logger()
-        
+        get_audit_logger()
+
         # 获取审计日志
         # 注意：这里简化实现，实际应该根据筛选条件查询
         # AuditLogger可能有更复杂的查询方法
         logs = []
-        
+
         # 这里可以添加实际的查询逻辑
         # 例如：logger_instance.get_logs(user_id=user_id, action=action, ...)
-        
+
         # 返回空列表（实际实现需要扩展AuditLogger）
         return logs
-        
+
     except Exception as e:
-        logger.exception(f"Failed to get audit logs: {e}")
+        logger.exception("Failed to get audit logs: %s", e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get audit logs: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get audit logs: {str(e)}"
         )
 
 
@@ -135,25 +140,24 @@ async def search_audit_logs(
         if get_audit_logger is None:
             logger.warning("Audit logger service not available")
             return []
-        
+
         # 获取审计日志管理器
-        logger_instance = get_audit_logger()
-        
+        get_audit_logger()
+
         # 搜索审计日志
         # 注意：这里简化实现，实际应该根据搜索条件查询
         logs = []
-        
+
         # 这里可以添加实际的搜索逻辑
         # 例如：logger_instance.search_logs(query=body.query, user_id=body.user_id, ...)
-        
+
         # 返回空列表（实际实现需要扩展AuditLogger）
         return logs
-        
+
     except Exception as e:
-        logger.exception(f"Failed to search audit logs: {e}")
+        logger.exception("Failed to search audit logs: %s", e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to search audit logs: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to search audit logs: {str(e)}"
         )
 
 
@@ -168,14 +172,14 @@ async def get_audit_stats(
         if get_audit_logger is None:
             logger.warning("Audit logger service not available")
             return AuditStats()
-        
+
         # 获取审计日志管理器
-        logger_instance = get_audit_logger()
-        
+        get_audit_logger()
+
         # 获取审计统计
         # 注意：这里简化实现，实际应该计算统计信息
         # AuditLogger可能有统计方法
-        
+
         # 返回默认统计（实际实现需要扩展AuditLogger）
         return AuditStats(
             total_logs=0,
@@ -184,10 +188,9 @@ async def get_audit_stats(
             action_counts={},
             resource_type_counts={},
         )
-        
+
     except Exception as e:
-        logger.exception(f"Failed to get audit stats: {e}")
+        logger.exception("Failed to get audit stats: %s", e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get audit stats: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get audit stats: {str(e)}"
         )

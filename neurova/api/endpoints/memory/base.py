@@ -7,18 +7,15 @@ from __future__ import annotations
 """
 
 import logging
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Request, Query, Depends
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from neurova.interfaces.api_standard import (
-    APIResponse,
     APIError,
     ErrorCodes,
 )
-from neurova.api.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +25,10 @@ router = APIRouter(prefix="/memories", tags=["记忆管理"])
 # 辅助函数
 # ============================================================
 
+
 def _get_request_id(req: Optional[Request]) -> Optional[str]:
     return getattr(req.state, "request_id", None) if req else None
+
 
 def _get_user_ids_from_token(req: Optional[Request]) -> tuple:
     """从请求的 Token 中提取 neuser_id 和 user_id
@@ -46,6 +45,7 @@ def _get_user_ids_from_token(req: Optional[Request]) -> tuple:
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:]
                 from neurova.api.auth import verify_access_token
+
                 payload = verify_access_token(token)
                 if payload:
                     neuser_id = payload.get("neuser_id", "default")
@@ -55,9 +55,11 @@ def _get_user_ids_from_token(req: Optional[Request]) -> tuple:
 
     return neuser_id, user_id
 
+
 # ============================================================
 # 请求/响应模型
 # ============================================================
+
 
 class AddMemoryRequest(BaseModel):
     """添加记忆请求"""
@@ -72,6 +74,7 @@ class AddMemoryRequest(BaseModel):
     auto_classify: bool = Field(default=True, description="是否自动分类推断 (默认开启)")
     classification_context: Optional[dict] = Field(default=None, description="分类上下文")
     auto_analyze_emotion: bool = Field(default=True, description="是否自动分析情绪 (默认开启)")
+
 
 class MemoryItem(BaseModel):
     """记忆项"""
@@ -88,6 +91,7 @@ class MemoryItem(BaseModel):
     access_count: int
     created_at: str
     last_accessed_at: Optional[str] = None
+
 
 def memory_to_dict(memory) -> dict:
     """将 Memory 对象转换为字典（安全序列化，容忍损坏数据）"""
@@ -112,6 +116,7 @@ def memory_to_dict(memory) -> dict:
             "content": str(getattr(memory, "content", "(数据损坏)")),
             "category": "unknown",
         }
+
 
 def get_memory_manager(agent_id: Optional[str] = None, user: Optional[Dict[str, Any]] = None):
     """

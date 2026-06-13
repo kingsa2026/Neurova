@@ -3,27 +3,29 @@
 将对话内容按agent和session_id隔离，直接即时写入文件，无内存缓存
 """
 
-import os
 import json
 import logging
 import uuid
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
 from threading import Lock
-from dataclasses import dataclass, field, asdict
+from typing import Any, Dict, List, Optional
 
 try:
     import fcntl  # type: ignore[import-not-found]  # Unix only
+
     HAS_FCNTL = True
 except ImportError:
     HAS_FCNTL = False
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class SessionMessage:
     """会话消息"""
+
     role: str
     content: str
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
@@ -31,17 +33,19 @@ class SessionMessage:
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
-            'role': self.role,
-            'content': self.content,
-            'timestamp': self.timestamp,
+            "role": self.role,
+            "content": self.content,
+            "timestamp": self.timestamp,
         }
         if self.metadata:
-            d['metadata'] = self.metadata
+            d["metadata"] = self.metadata
         return d
+
 
 @dataclass
 class SessionRecord:
     """会话记录"""
+
     agent_id: str
     session_id: str
     session_date: str
@@ -52,8 +56,9 @@ class SessionRecord:
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
-        data['messages'] = [msg.to_dict() if isinstance(msg, SessionMessage) else msg for msg in self.messages]
+        data["messages"] = [msg.to_dict() if isinstance(msg, SessionMessage) else msg for msg in self.messages]
         return data
+
 
 class SessionManager:
     """会话管理器 - 直接即时写入文件，无内存缓存"""
@@ -69,7 +74,7 @@ class SessionManager:
         return cls._instance
 
     def __init__(self):
-        if not hasattr(self, '_initialized'):
+        if not hasattr(self, "_initialized"):
             self._initialized = True
             self._sessions_dir = Path("sessions")
             self._sessions_dir.mkdir(exist_ok=True)
@@ -102,10 +107,10 @@ class SessionManager:
             return None
 
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.error(f"读取session文件失败: {e}")
+            logger.error("读取session文件失败: %s", e)
             return None
 
     def _write_session_file(self, file_path: Path, data: Dict[str, Any]) -> bool:
@@ -113,7 +118,7 @@ class SessionManager:
         try:
             file_lock = self._get_file_lock(file_path)
             with file_lock:
-                with open(file_path, 'w', encoding='utf-8') as f:
+                with open(file_path, "w", encoding="utf-8") as f:
                     if HAS_FCNTL:
                         try:
                             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
@@ -125,10 +130,18 @@ class SessionManager:
                         json.dump(data, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            logger.error(f"写入session文件失败: {e}")
+            logger.error("写入session文件失败: %s", e)
             return False
 
-    def add_message(self, agent_id: str, session_id: str, user_content: str, assistant_content: str, metadata: Dict[str, Any] = None, date: str = None) -> str:
+    def add_message(
+        self,
+        agent_id: str,
+        session_id: str,
+        user_content: str,
+        assistant_content: str,
+        metadata: Dict[str, Any] = None,
+        date: str = None,
+    ) -> str:
         """添加一条对话（user + assistant 两条消息）到session"""
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
@@ -140,40 +153,40 @@ class SessionManager:
 
         now = datetime.now().isoformat()
         user_msg = {
-            'role': 'user',
-            'content': user_content,
-            'timestamp': now,
+            "role": "user",
+            "content": user_content,
+            "timestamp": now,
         }
         assistant_msg = {
-            'role': 'assistant',
-            'content': assistant_content,
-            'timestamp': now,
+            "role": "assistant",
+            "content": assistant_content,
+            "timestamp": now,
         }
         if metadata:
-            user_msg['metadata'] = metadata
-            assistant_msg['metadata'] = metadata
+            user_msg["metadata"] = metadata
+            assistant_msg["metadata"] = metadata
 
         new_messages = [user_msg, assistant_msg]
 
         if session_data is None:
             # 创建新的session记录
             session_data = {
-                'agent_id': agent_id,
-                'session_id': session_id,
-                'session_date': date,
-                'messages': new_messages,
-                'created_at': now,
-                'updated_at': now,
-                'total_messages': len(new_messages),
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "session_date": date,
+                "messages": new_messages,
+                "created_at": now,
+                "updated_at": now,
+                "total_messages": len(new_messages),
             }
         else:
             # 更新现有session记录
-            if 'messages' not in session_data:
-                session_data['messages'] = []
+            if "messages" not in session_data:
+                session_data["messages"] = []
 
-            session_data['messages'].extend(new_messages)
-            session_data['updated_at'] = now
-            session_data['total_messages'] = len(session_data['messages'])
+            session_data["messages"].extend(new_messages)
+            session_data["updated_at"] = now
+            session_data["total_messages"] = len(session_data["messages"])
 
         # 写入文件
         self._write_session_file(file_path, session_data)
@@ -197,25 +210,27 @@ class SessionManager:
 
         # 转换为SessionRecord对象
         messages = []
-        for msg_data in session_data.get('messages', []):
+        for msg_data in session_data.get("messages", []):
             if isinstance(msg_data, dict):
-                messages.append(SessionMessage(
-                    role=msg_data.get('role', ''),
-                    content=msg_data.get('content', ''),
-                    timestamp=msg_data.get('timestamp', ''),
-                    metadata=msg_data.get('metadata'),
-                ))
+                messages.append(
+                    SessionMessage(
+                        role=msg_data.get("role", ""),
+                        content=msg_data.get("content", ""),
+                        timestamp=msg_data.get("timestamp", ""),
+                        metadata=msg_data.get("metadata"),
+                    )
+                )
             else:
                 messages.append(msg_data)
 
         return SessionRecord(
-            agent_id=session_data.get('agent_id', agent_id),
-            session_id=session_data.get('session_id', session_id),
-            session_date=session_data.get('session_date', date),
+            agent_id=session_data.get("agent_id", agent_id),
+            session_id=session_data.get("session_id", session_id),
+            session_date=session_data.get("session_date", date),
             messages=messages,
-            created_at=session_data.get('created_at', ''),
-            updated_at=session_data.get('updated_at', ''),
-            total_messages=session_data.get('total_messages', 0),
+            created_at=session_data.get("created_at", ""),
+            updated_at=session_data.get("updated_at", ""),
+            total_messages=session_data.get("total_messages", 0),
         )
 
     def get_sessions_by_agent(self, agent_id: str) -> List[Dict[str, Any]]:
@@ -262,8 +277,8 @@ class SessionManager:
 
         results = []
         for session in sessions:
-            for message in session.get('messages', []):
-                if keyword.lower() in message.get('content', '').lower():
+            for message in session.get("messages", []):
+                if keyword.lower() in message.get("content", "").lower():
                     results.append(message)
 
         return results
@@ -284,13 +299,13 @@ class SessionManager:
                     file_lock = self._get_file_lock(file_path)
                     with file_lock:
                         file_path.unlink()
-                        logger.info(f"Session已删除: {file_path}")
+                        logger.info("Session已删除: %s", file_path)
                         return True
                 except Exception as e:
-                    logger.error(f"删除session文件失败: {e}")
+                    logger.error("删除session文件失败: %s", e)
                     return False
             else:
-                logger.warning(f"未找到 session_id={session_id} 的文件（date={date}）")
+                logger.warning("未找到 session_id=%s 的文件（date=%s）", session_id, date)
                 return False
         else:
             # 删除所有日期的文件
@@ -301,16 +316,16 @@ class SessionManager:
                     with file_lock:
                         file_path.unlink()
                         deleted_count += 1
-                        logger.info(f"Session已删除: {file_path}")
+                        logger.info("Session已删除: %s", file_path)
                 except Exception as e:
-                    logger.error(f"删除session文件失败: {e}")
+                    logger.error("删除session文件失败: %s", e)
                     continue
 
             if deleted_count > 0:
-                logger.info(f"共删除 {deleted_count} 个文件（session_id={session_id}）")
+                logger.info("共删除 %s 个文件（session_id=%s）", deleted_count, session_id)
                 return True
             else:
-                logger.warning(f"未找到 session_id={session_id} 的任何文件（agent_id={agent_id}）")
+                logger.warning("未找到 session_id=%s 的任何文件（agent_id=%s）", session_id, agent_id)
                 return False
 
     def get_session_stats(self, agent_id: str, session_id: str) -> Dict[str, Any]:
@@ -319,12 +334,12 @@ class SessionManager:
 
         if not sessions:
             return {
-                'agent_id': agent_id,
-                'session_id': session_id,
-                'total_files': 0,
-                'total_messages': 0,
-                'total_size_bytes': 0,
-                'dates': [],
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "total_files": 0,
+                "total_messages": 0,
+                "total_size_bytes": 0,
+                "dates": [],
             }
 
         total_messages = 0
@@ -332,59 +347,62 @@ class SessionManager:
         dates = []
 
         for session in sessions:
-            total_messages += session.get('total_messages', 0)
+            total_messages += session.get("total_messages", 0)
             # 计算文件大小
-            file_path = self._get_session_file(agent_id, session_id, session.get('session_date'))
+            file_path = self._get_session_file(agent_id, session_id, session.get("session_date"))
             if file_path.exists():
                 total_size_bytes += file_path.stat().st_size
-            dates.append(session.get('session_date'))
+            dates.append(session.get("session_date"))
 
         return {
-            'agent_id': agent_id,
-            'session_id': session_id,
-            'total_files': len(sessions),
-            'total_messages': total_messages,
-            'total_size_bytes': total_size_bytes,
-            'dates': sorted(dates),
+            "agent_id": agent_id,
+            "session_id": session_id,
+            "total_files": len(sessions),
+            "total_messages": total_messages,
+            "total_size_bytes": total_size_bytes,
+            "dates": sorted(dates),
         }
 
     def get_recent_context(self, agent_id: str, session_id: str, max_messages: int = 20) -> List[Dict[str, str]]:
         """
         获取最近的对话上下文
-        
+
         Args:
             agent_id: Agent ID
             session_id: 会话 ID
             max_messages: 最大消息数
-            
+
         Returns:
             消息列表，格式为 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
         """
         # 获取所有日期的 session 数据
         sessions = self._get_session_data_list(agent_id, session_id)
-        
+
         if not sessions:
             return []
-        
+
         # 按日期排序，获取最新的
-        sessions.sort(key=lambda x: x.get('session_date', ''), reverse=True)
-        
+        sessions.sort(key=lambda x: x.get("session_date", ""), reverse=True)
+
         # 收集所有消息
         all_messages = []
         for session in sessions:
-            messages = session.get('messages', [])
+            messages = session.get("messages", [])
             for msg in messages:
                 if isinstance(msg, dict):
-                    role = msg.get('role', '')
-                    content = msg.get('content', '')
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
                     if role and content:
-                        all_messages.append({
-                            "role": role,
-                            "content": content,
-                        })
-        
+                        all_messages.append(
+                            {
+                                "role": role,
+                                "content": content,
+                            }
+                        )
+
         # 返回最近的 max_messages 条消息
         return all_messages[-max_messages:] if len(all_messages) > max_messages else all_messages
+
 
 def get_session_manager() -> SessionManager:
     """获取SessionManager单例"""

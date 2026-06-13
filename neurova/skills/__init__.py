@@ -18,22 +18,50 @@ _logger = logging.getLogger(__name__)
 
 try:
     from neurova.skills.models import (
-        Skill, SkillMetadata, SkillSource, SkillInfo, SkillVersion,
-        SkillDependency, SkillParameter, SkillOutput, SkillRequirement,
-        SkillConflict, SkillRecommendation, SkillExecutionResult,
-        SkillSearchResult, SkillInstallResult, SkillMarketResult,
-        SkillUpdateResult, SkillUninstallResult, SkillEnableResult,
-        SkillDisableResult, SkillVerifyResult, SkillPublishResult,
-        SkillDependencyResult, SkillConflictResult, SkillRecommendationResult,
-        SkillExecutionLog, SkillMarketplaceStats, SkillSearchStats,
-        SkillInstallStats, SkillUpdateStats, SkillUninstallStats,
-        SkillEnableStats, SkillDisableStats, SkillVerifyStats,
-        SkillPublishStats, SkillDependencyStats, SkillConflictStats,
-        SkillRecommendationStats, SkillExecutionStats,
-        SkillRecord, SkillManifest, PluginEntryPoints,
+        PluginEntryPoints,
+        Skill,
+        SkillConflict,
+        SkillConflictResult,
+        SkillConflictStats,
+        SkillDependency,
+        SkillDependencyResult,
+        SkillDependencyStats,
+        SkillDisableResult,
+        SkillDisableStats,
+        SkillEnableResult,
+        SkillEnableStats,
+        SkillExecutionLog,
+        SkillExecutionResult,
+        SkillExecutionStats,
+        SkillInfo,
+        SkillInstallResult,
+        SkillInstallStats,
+        SkillManifest,
+        SkillMarketplaceStats,
+        SkillMarketResult,
+        SkillMetadata,
+        SkillOutput,
+        SkillParameter,
+        SkillPublishResult,
+        SkillPublishStats,
+        SkillRecommendation,
+        SkillRecommendationResult,
+        SkillRecommendationStats,
+        SkillRecord,
+        SkillRequirement,
+        SkillSearchResult,
+        SkillSearchStats,
+        SkillSource,
+        SkillUninstallResult,
+        SkillUninstallStats,
+        SkillUpdateResult,
+        SkillUpdateStats,
+        SkillVerifyResult,
+        SkillVerifyStats,
+        SkillVersion,
     )
 except ImportError as _e:
-    _logger.debug(f"skills.models 模块未可用: {_e}")
+    _logger.debug("skills.models 模块未可用: %s", _e)
     # 提供最小化占位符
     Skill = None
     SkillMetadata = None
@@ -79,87 +107,87 @@ except ImportError as _e:
 
 # skills imports
 try:
-    import neurova.skills.auto_skill_improver
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.auto_skill_improver 模块未可用: {_e}")
+    _logger.debug("skills.auto_skill_improver 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.evolution_engine
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.evolution_engine 模块未可用: {_e}")
+    _logger.debug("skills.evolution_engine 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.hub_client
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.hub_client 模块未可用: {_e}")
+    _logger.debug("skills.hub_client 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.manifest
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.manifest 模块未可用: {_e}")
+    _logger.debug("skills.manifest 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.market_searcher
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.market_searcher 模块未可用: {_e}")
+    _logger.debug("skills.market_searcher 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.models
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.models 模块未可用: {_e}")
+    _logger.debug("skills.models 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.pool_service
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.pool_service 模块未可用: {_e}")
+    _logger.debug("skills.pool_service 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.registry
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.registry 模块未可用: {_e}")
+    _logger.debug("skills.registry 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.security_scanner
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.security_scanner 模块未可用: {_e}")
+    _logger.debug("skills.security_scanner 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.skill_need_analyzer
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.skill_need_analyzer 模块未可用: {_e}")
+    _logger.debug("skills.skill_need_analyzer 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.skill_packager
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.skill_packager 模块未可用: {_e}")
+    _logger.debug("skills.skill_packager 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.skill_service
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.skill_service 模块未可用: {_e}")
+    _logger.debug("skills.skill_service 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.task_decomposer
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.task_decomposer 模块未可用: {_e}")
+    _logger.debug("skills.task_decomposer 模块未可用: %s", _e)
 
 # Meta-skill 集成模块
 try:
-    import neurova.skills.skill_generator
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.skill_generator 模块未可用: {_e}")
+    _logger.debug("skills.skill_generator 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.project_to_skill
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.project_to_skill 模块未可用: {_e}")
+    _logger.debug("skills.project_to_skill 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.skill_chain_executor
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.skill_chain_executor 模块未可用: {_e}")
+    _logger.debug("skills.skill_chain_executor 模块未可用: %s", _e)
 
 try:
-    import neurova.skills.prompt_optimizer
+    pass
 except ImportError as _e:
-    _logger.debug(f"skills.prompt_optimizer 模块未可用: {_e}")
+    _logger.debug("skills.prompt_optimizer 模块未可用: %s", _e)

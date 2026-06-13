@@ -15,31 +15,32 @@ Shared Plan Orchestrator - 共用任务编排器（小脑）
 
 import asyncio
 import datetime
-import enum
 import logging
 import threading
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class NodeType(Enum):
     """任务节点类型"""
-    ACTION = "action"           # 执行动作
-    CONDITION = "condition"     # 条件判断
-    PARALLEL = "parallel"       # 并行执行
-    SEQUENTIAL = "sequential"   # 顺序执行
-    LOOP = "loop"               # 循环
-    SUBPLAN = "subplan"         # 子计划
-    LLM_CALL = "llm_call"       # LLM 调用
-    TOOL_CALL = "tool_call"     # 工具调用
+
+    ACTION = "action"  # 执行动作
+    CONDITION = "condition"  # 条件判断
+    PARALLEL = "parallel"  # 并行执行
+    SEQUENTIAL = "sequential"  # 顺序执行
+    LOOP = "loop"  # 循环
+    SUBPLAN = "subplan"  # 子计划
+    LLM_CALL = "llm_call"  # LLM 调用
+    TOOL_CALL = "tool_call"  # 工具调用
 
 
 class PlanStatus(Enum):
     """计划状态"""
+
     DRAFT = "draft"
     READY = "ready"
     RUNNING = "running"
@@ -52,6 +53,7 @@ class PlanStatus(Enum):
 @dataclass
 class TaskNode:
     """任务节点"""
+
     node_id: str
     name: str
     node_type: NodeType
@@ -105,6 +107,7 @@ class TaskNode:
 @dataclass
 class TaskPlan:
     """任务计划"""
+
     plan_id: str
     name: str
     description: str = ""
@@ -188,6 +191,7 @@ class TaskPlan:
 
 class SharedPlanOrchestrator:
     """共用任务编排器（单例）"""
+
     _instance: Optional[SharedPlanOrchestrator] = None
     _lock = threading.Lock()
 
@@ -289,18 +293,20 @@ class SharedPlanOrchestrator:
         plan.status = PlanStatus.READY
         plan.updated_at = datetime.datetime.now(datetime.timezone.utc)
         self.plans[plan_id] = plan
-        logger.info(f"生成计划: {plan.name} (复杂度: {complexity}, 节点数: {len(plan.nodes)})")
+        logger.info("生成计划: %s (复杂度: %s, 节点数: %s)", plan.name, complexity, len(plan.nodes))
         return plan
 
     def _generate_simple_plan_nodes(self, intent_result: Dict[str, Any]) -> List[TaskNode]:
         """生成简单计划节点"""
-        return [TaskNode(
-            node_id=str(uuid.uuid4()),
-            name="execute",
-            node_type=NodeType.ACTION,
-            description="执行简单任务",
-            parameters={"intent": intent_result.get("intents", ["general"])[0]},
-        )]
+        return [
+            TaskNode(
+                node_id=str(uuid.uuid4()),
+                name="execute",
+                node_type=NodeType.ACTION,
+                description="执行简单任务",
+                parameters={"intent": intent_result.get("intents", ["general"])[0]},
+            )
+        ]
 
     def _generate_medium_plan_nodes(self, intent_result: Dict[str, Any]) -> List[TaskNode]:
         """生成中等复杂度计划节点"""

@@ -25,10 +25,10 @@ from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
     ChannelEventType,
-    ChannelMessage,
 )
 
 logger = logging.getLogger(__name__)
+
 
 class DingTalkAdapter(ChannelAdapter):
     """
@@ -64,7 +64,7 @@ class DingTalkAdapter(ChannelAdapter):
             else:
                 return await self._connect_webhook()
         except Exception as e:
-            logger.exception(f"DingTalk connect error: {e}")
+            logger.exception("DingTalk connect error: %s", e)
             return False
 
     async def _connect_stream(self) -> bool:
@@ -88,6 +88,7 @@ class DingTalkAdapter(ChannelAdapter):
 
             # 启动连接（非阻塞）
             import threading
+
             self._ws_thread = threading.Thread(
                 target=self._stream_client.start,
                 daemon=True,
@@ -99,12 +100,10 @@ class DingTalkAdapter(ChannelAdapter):
             return True
 
         except ImportError:
-            logger.error(
-                "dingtalk-stream not installed. Run: pip install dingtalk-stream"
-            )
+            logger.error("dingtalk-stream not installed. Run: pip install dingtalk-stream")
             return False
         except Exception as e:
-            logger.exception(f"DingTalk Stream connect error: {e}")
+            logger.exception("DingTalk Stream connect error: %s", e)
             return False
 
     async def _connect_webhook(self) -> bool:
@@ -176,24 +175,19 @@ class DingTalkAdapter(ChannelAdapter):
                 if loop.is_running():
                     # 如果事件循环正在运行，使用 call_soon_threadsafe
                     asyncio.run_coroutine_threadsafe(
-                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg),
-                        loop
+                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg), loop
                     )
                 else:
                     # 如果事件循环未运行，直接运行
-                    loop.run_until_complete(
-                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
-                    )
+                    loop.run_until_complete(self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg))
             except RuntimeError:
                 # 如果没有事件循环，创建新的
                 loop = asyncio.new_event_loop()
-                loop.run_until_complete(
-                    self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
-                )
+                loop.run_until_complete(self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg))
                 loop.close()
 
         except Exception as e:
-            logger.exception(f"DingTalk message handler error: {e}")
+            logger.exception("DingTalk message handler error: %s", e)
 
     async def send_message(
         self,
@@ -207,9 +201,7 @@ class DingTalkAdapter(ChannelAdapter):
             # 优先使用 session_webhook 回复（Stream 模式）
             session_webhook = kwargs.get("session_webhook", "")
             if session_webhook:
-                return await self._send_via_session_webhook(
-                    session_webhook, content, message_type
-                )
+                return await self._send_via_session_webhook(session_webhook, content, message_type)
 
             # 使用 Access Token API
             if not self._access_token or time.time() > self._token_expires_at:
@@ -222,12 +214,10 @@ class DingTalkAdapter(ChannelAdapter):
             return await self._send_via_api(chat_id, content, message_type)
 
         except Exception as e:
-            logger.exception(f"DingTalk send error: {e}")
+            logger.exception("DingTalk send error: %s", e)
             return None
 
-    async def _send_via_session_webhook(
-        self, webhook_url: str, content: str, message_type: str
-    ) -> Optional[str]:
+    async def _send_via_session_webhook(self, webhook_url: str, content: str, message_type: str) -> Optional[str]:
         """通过 session webhook 发送回复"""
         import aiohttp
 
@@ -243,20 +233,16 @@ class DingTalkAdapter(ChannelAdapter):
             payload["text"] = {"content": content}
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
+            async with session.post(webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 result = await resp.json()
                 if resp.status == 200 and result.get("errcode") == 0:
                     logger.info("DingTalk session webhook message sent")
                     return result.get("messageId", "sent")
                 else:
-                    logger.error(f"DingTalk session webhook failed: {result}")
+                    logger.error("DingTalk session webhook failed: %s", result)
                     return None
 
-    async def _send_via_api(
-        self, chat_id: str, content: str, message_type: str
-    ) -> Optional[str]:
+    async def _send_via_api(self, chat_id: str, content: str, message_type: str) -> Optional[str]:
         """通过 DingTalk OpenAPI 发送消息"""
         import aiohttp
 
@@ -283,7 +269,7 @@ class DingTalkAdapter(ChannelAdapter):
                     logger.info("DingTalk API message sent")
                     return result.get("processQueryKey", "sent")
                 else:
-                    logger.error(f"DingTalk API failed: {result}")
+                    logger.error("DingTalk API failed: %s", result)
                     return None
 
     async def _refresh_access_token(self):
@@ -294,9 +280,7 @@ class DingTalkAdapter(ChannelAdapter):
         payload = {"appKey": self.config.app_id, "appSecret": self.config.app_secret}
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 result = await resp.json()
                 if resp.status == 200 and "accessToken" in result:
                     self._access_token = result["accessToken"]
@@ -304,7 +288,7 @@ class DingTalkAdapter(ChannelAdapter):
                     self._token_expires_at = time.time() + expire_in - 300  # 提前5分钟刷新
                     logger.info("DingTalk access token refreshed")
                 else:
-                    logger.error(f"DingTalk token refresh failed: {result}")
+                    logger.error("DingTalk token refresh failed: %s", result)
 
     async def disconnect(self):
         """断开钉钉连接"""
@@ -312,7 +296,7 @@ class DingTalkAdapter(ChannelAdapter):
             try:
                 pass  # daemon 线程自动退出
             except Exception as e:
-                logger.warning(f"DingTalk disconnect warning: {e}")
+                logger.warning("DingTalk disconnect warning: %s", e)
 
         self._connected = False
         self._stream_client = None
@@ -322,16 +306,20 @@ class DingTalkAdapter(ChannelAdapter):
     async def health_check(self) -> Dict[str, Any]:
         """钉钉健康检查"""
         base = await super().health_check()
-        base.update({
-            "app_id": self.config.app_id[:8] + "***" if self.config.app_id else "",
-            "stream_mode": self.config.use_stream,
-            "has_token": bool(self._access_token),
-        })
+        base.update(
+            {
+                "app_id": self.config.app_id[:8] + "***" if self.config.app_id else "",
+                "stream_mode": self.config.use_stream,
+                "has_token": bool(self._access_token),
+            }
+        )
         return base
+
 
 # ============================================================
 # 群机器人 Webhook 适配器（轻量级，仅发送）
 # ============================================================
+
 
 class DingTalkWebhookBot:
     """
@@ -347,10 +335,11 @@ class DingTalkWebhookBot:
 
     async def send_text(self, text: str, at_all: bool = False, at_mobiles: list = None) -> bool:
         """发送文本消息"""
-        import aiohttp
-        import hashlib
         import base64
+        import hashlib
         import urllib.parse
+
+        import aiohttp
 
         payload = {
             "msgtype": "text",
@@ -371,9 +360,7 @@ class DingTalkWebhookBot:
             url += f"&timestamp={timestamp}&sign={sign}"
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 result = await resp.json()
                 return result.get("errcode") == 0
 
@@ -388,11 +375,10 @@ class DingTalkWebhookBot:
         }
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                self.webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
+            async with session.post(self.webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 result = await resp.json()
                 return result.get("errcode") == 0
+
 
 def create_dingtalk_adapter(
     app_id: str,
