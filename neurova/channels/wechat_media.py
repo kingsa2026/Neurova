@@ -1,340 +1,421 @@
 """
-微信媒体与用户 Mixin
+微信媒体上传/下载 Mixin
 
-包含:
-1. 用户管理 (get_user_info, _get_wecom_user_info, _get_official_user_info)
-2. 媒体上传与下载 (upload_media, _upload_wecom_media, _upload_official_media, _upload_ilink_media,
-   download_media, _download_wecom_media, _download_official_media, _download_ilink_media)
-
-由 WeChatAdapter 通过多继承使用，所有属性都来自主类。
+处理企业微信、iLink、微信公众号三种模式的媒体文件操作。
 """
+from __future__ import annotations
 
+import json
 import logging
-import os
-from typing import Any, Dict, Optional
+import tempfile
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
-import requests
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
+try:
+    import httpx
+    HTTPX_AVAILABLE = True
+except ImportError:
+    HTTPX_AVAILABLE = False
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger(__name__)
 
-# 媒体类型映射
-MEDIA_TYPE_MAP = {
-    "image": {"type": "image", "suffix": [".jpg", ".jpeg", ".png", ".gif"]},
-    "voice": {"type": "voice", "suffix": [".amr", ".mp3"]},
-    "video": {"type": "video", "suffix": [".mp4"]},
-    "file": {"type": "file", "suffix": []},
-}
 
+class WeChatMediaMixin:
+    """微信媒体 Mixin — 上传 / 下载 / 临时文件"""
 
-class MediaMixin:
-    """
-    微信媒体与用户 Mixin
+    def __init__(self, adapter: Any) -> None:
+        self.adapter = adapter
 
-    提供:
-    - 用户信息获取
-    - 媒体文件上传
-    - 媒体文件下载
-    """
+    # ============================================================
+    # 媒体上传
+    # ============================================================
 
-    async def get_user_info(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """
-        获取用户信息
-
-        参数:
-            user_id: 用户 ID (openid 或 userid)
-
-        返回:
-            Dict: 用户信息
-        """
-        auth_type = self.config.extra.get("auth_type", "wecom")
-
-        if auth_type == "wecom":
-            return await self._get_wecom_user_info(user_id)
-        elif auth_type == "official":
-            return await self._get_official_user_info(user_id)
-        else:
-            logger.error("Unknown auth type for get_user_info: %s", auth_type)
-            return None
-
-    async def _get_wecom_user_info(self, userid: str) -> Optional[Dict[str, Any]]:
-        """获取企业微信用户信息"""
-        try:
-            response = await self._api_request(
-                "GET",
-                f"/user/get",
-                params={"userid": userid},
-            )
-
-            if response.get("errcode") == 0:
-                return {
-                    "userid": response.get("userid"),
-                    "name": response.get("name"),
-                    "department": response.get("department"),
-                    "position": response.get("position"),
-                    "mobile": response.get("mobile"),
-                    "email": response.get("email"),
-                    "avatar": response.get("avatar"),
-                    "status": response.get("status"),
-                }
-            else:
-                logger.error("Get WeCom user info failed: %s", response)
-                return None
-
-        except Exception as e:
-            logger.exception("Get WeCom user info error: %s", e)
-            return None
-
-    async def _get_official_user_info(self, openid: str) -> Optional[Dict[str, Any]]:
-        """获取公众号用户信息"""
-        try:
-            response = await self._api_request(
-                "GET",
-                "/user/info",
-                params={"openid": openid, "lang": "zh_CN"},
-            )
-
-            if "errcode" not in response:
-                return {
-                    "openid": response.get("openid"),
-                    "nickname": response.get("nickname"),
-                    "sex": response.get("sex"),
-                    "province": response.get("province"),
-                    "city": response.get("city"),
-                    "country": response.get("country"),
-                    "headimgurl": response.get("headimgurl"),
-                    "subscribe_time": response.get("subscribe_time"),
-                    "unionid": response.get("unionid"),
-                }
-            else:
-                logger.error("Get official user info failed: %s", response)
-                return None
-
-        except Exception as e:
-            logger.exception("Get official user info error: %s", e)
-            return None
-
-    async def upload_media(
-        self,
-        file_path: str,
-        media_type: str = "image",
+    def upload_media(
+        self, file_path: str, media_type: str = "image", title: str = "", description: str = ""
     ) -> Optional[str]:
         """
-        上传媒体文件
+        上传媒体文件到微信服务器
 
         参数:
-            file_path: 文件路径
-            media_type: 媒体类型 (image, voice, video, file)
+        file_path: 媒体文件路径
+        media_type: 媒体类型 (image/voice/video/file)
+        title: 视频标题 (仅视频类型需要)
+        description: 视频描述 (仅视频类型需要)
 
         返回:
-            str: media_id
+        成功返回 media_id，失败返回 None
         """
-        auth_type = self.config.extra.get("auth_type", "wecom")
-
-        if auth_type == "wecom":
-            return await self._upload_wecom_media(file_path, media_type)
-        elif auth_type == "official":
-            return await self._upload_official_media(file_path, media_type)
-        elif auth_type == "ilink":
-            return await self._upload_ilink_media(file_path, media_type)
+        if self.adapter.mode == "official":
+            return self._upload_official_media(file_path, media_type)
+        elif self.adapter.mode == "ilink":
+            return self._upload_ilink_media(file_path, media_type)
         else:
-            logger.error("Unknown auth type for upload_media: %s", auth_type)
+            return self._upload_wecom_media(file_path, media_type, title, description)
+
+    def _upload_wecom_media(
+        self, file_path: str, media_type: str, title: str = "", description: str = ""
+    ) -> Optional[str]:
+        """上传媒体文件到企业微信"""
+        if not self.adapter._ensure_wecom_token():
+            logger.error("企业微信 Token 获取失败")
             return None
 
-    async def _upload_wecom_media(
-        self,
-        file_path: str,
-        media_type: str,
-    ) -> Optional[str]:
-        """企业微信媒体上传"""
+        if not REQUESTS_AVAILABLE:
+            logger.info("[企微模拟] 上传媒体: %s, 类型: %s", file_path, media_type)
+            return f"mock_media_id_{int(time.time())}"
+
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists():
+            logger.error("媒体文件不存在: %s", file_path)
+            return None
+
         try:
-            if not os.path.exists(file_path):
-                logger.error("File not found: %s", file_path)
-                return None
+            a = self.adapter
+            url = f"{a.WECOM_API_BASE}/cgi-bin/media/upload"
+            params = {
+                "access_token": a.access_token,
+                "type": media_type,
+            }
 
-            # 获取 access_token
-            token = await self._ensure_wecom_token()
+            with open(file_path_obj, "rb") as f:
+                files = {"media": (file_path_obj.name, f)}
 
-            # 上传文件
-            url = f"{WECOM_API_BASE}/media/upload"
-            params = {"access_token": token, "type": media_type}
+                if media_type == "video":
+                    data = {
+                        "description": json.dumps(
+                            {
+                                "title": title or file_path_obj.stem,
+                                "introduction": description or "",
+                            }
+                        )
+                    }
+                    resp = requests.post(url, params=params, files=files, data=data, timeout=30)
+                else:
+                    resp = requests.post(url, params=params, files=files, timeout=30)
 
-            with open(file_path, "rb") as f:
-                files = {"media": (os.path.basename(file_path), f)}
-                response = requests.post(url, params=params, files=files, timeout=30)
+            result = resp.json()
 
-            response.raise_for_status()
-            data = response.json()
-
-            if data.get("errcode") == 0:
-                media_id = data.get("media_id")
-                logger.info("Media uploaded: %s", media_id)
+            if result.get("errcode") == 0:
+                media_id = result.get("media_id")
+                logger.info("企业微信媒体上传成功: %s", media_id)
                 return media_id
             else:
-                logger.error("Media upload failed: %s", data)
+                logger.error("企业微信媒体上传失败: %s", result)
                 return None
-
+        except requests.exceptions.Timeout:
+            logger.error("媒体上传超时: %s", file_path)
+            return None
+        except requests.exceptions.HTTPError as e:
+            logger.error("媒体上传 HTTP 错误: %s", e)
+            return None
+        except IOError as e:
+            logger.error("读取媒体文件失败: %s", e)
+            return None
         except Exception as e:
-            logger.exception("WeCom media upload error: %s", e)
+            logger.error("媒体上传异常: %s", e)
             return None
 
-    async def _upload_official_media(
-        self,
-        file_path: str,
-        media_type: str,
-    ) -> Optional[str]:
-        """公众号媒体上传"""
+    def _upload_official_media(self, file_path: str, media_type: str) -> Optional[str]:
+        """上传媒体文件到微信公众号"""
+        if not self.adapter._ensure_official_token():
+            logger.error("微信公众号 Token 获取失败")
+            return None
+
+        if not REQUESTS_AVAILABLE:
+            logger.info("[公众号模拟] 上传媒体: %s, 类型: %s", file_path, media_type)
+            return f"mock_official_media_id_{int(time.time())}"
+
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists():
+            logger.error("媒体文件不存在: %s", file_path)
+            return None
+
         try:
-            if not os.path.exists(file_path):
-                logger.error("File not found: %s", file_path)
-                return None
+            a = self.adapter
+            url = f"{a.WECHAT_OA_API_BASE}/cgi-bin/media/upload"
+            params = {
+                "access_token": a.official_access_token,
+                "type": media_type,
+            }
 
-            # 获取 access_token
-            token = await self._ensure_official_token()
+            with open(file_path_obj, "rb") as f:
+                files = {"media": (file_path_obj.name, f)}
+                resp = requests.post(url, params=params, files=files, timeout=30)
 
-            # 上传文件
-            url = f"{WECHAT_API_BASE}/media/upload"
-            params = {"access_token": token, "type": media_type}
+            result = resp.json()
 
-            with open(file_path, "rb") as f:
-                files = {"media": (os.path.basename(file_path), f)}
-                response = requests.post(url, params=params, files=files, timeout=30)
-
-            response.raise_for_status()
-            data = response.json()
-
-            if "errcode" not in data:
-                media_id = data.get("media_id")
-                logger.info("Media uploaded: %s", media_id)
+            if result.get("errcode") == 0:
+                media_id = result.get("media_id")
+                logger.info("微信公众号媒体上传成功: %s", media_id)
                 return media_id
             else:
-                logger.error("Media upload failed: %s", data)
+                logger.error("微信公众号媒体上传失败: %s", result)
                 return None
-
         except Exception as e:
-            logger.exception("Official media upload error: %s", e)
+            logger.error("微信公众号媒体上传异常: %s", e)
             return None
 
-    async def _upload_ilink_media(
-        self,
-        file_path: str,
-        media_type: str,
-    ) -> Optional[str]:
-        """iLink 媒体上传"""
-        # iLink 媒体上传实现
-        logger.warning("iLink media upload not implemented")
-        return None
+    def _upload_ilink_media(self, file_path: str, media_type: str) -> Optional[str]:
+        """上传媒体文件到 iLink"""
+        a = self.adapter
+        if not a._ilink_initialized:
+            logger.error("iLink 未初始化")
+            return None
 
-    async def download_media(
-        self,
-        media_id: str,
-        save_path: str,
-    ) -> bool:
+        if not REQUESTS_AVAILABLE:
+            logger.info("[iLink 模拟] 上传媒体: %s, 类型: %s", file_path, media_type)
+            return f"mock_ilink_media_id_{int(time.time())}"
+
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists():
+            logger.error("媒体文件不存在: %s", file_path)
+            return None
+
+        try:
+            url = f"{a.ILINK_API_BASE}/media/upload"
+            headers = {"Authorization": f"Bearer {a.ilink_bot_token}"}
+
+            with open(file_path_obj, "rb") as f:
+                files = {"file": (file_path_obj.name, f)}
+                data = {"type": media_type}
+                resp = requests.post(url, headers=headers, data=data, files=files, timeout=30)
+
+            result = resp.json()
+
+            if result.get("success"):
+                media_id = result.get("media_id")
+                logger.info("iLink 媒体上传成功: %s", media_id)
+                return media_id
+            else:
+                logger.error("iLink 媒体上传失败: %s", result)
+                return None
+        except Exception as e:
+            logger.error("iLink 媒体上传异常: %s", e)
+            return None
+
+    # ============================================================
+    # 媒体下载
+    # ============================================================
+
+    def download_media(self, media_id: str, save_path: str = "") -> Optional[bytes]:
         """
-        下载媒体文件
+        从微信服务器下载媒体文件
 
         参数:
-            media_id: 媒体 ID
-            save_path: 保存路径
+        media_id: 媒体文件 ID
+        save_path: 保存路径 (为空则返回二进制数据)
 
         返回:
-            bool: 是否成功
+        成功返回二进制数据 (或保存后返回数据)，失败返回 None
         """
-        auth_type = self.config.extra.get("auth_type", "wecom")
-
-        if auth_type == "wecom":
-            return await self._download_wecom_media(media_id, save_path)
-        elif auth_type == "official":
-            return await self._download_official_media(media_id, save_path)
-        elif auth_type == "ilink":
-            return await self._download_ilink_media(media_id, save_path)
+        if self.adapter.mode == "official":
+            return self._download_official_media(media_id, save_path)
+        elif self.adapter.mode == "ilink":
+            return self._download_ilink_media(media_id, save_path)
         else:
-            logger.error("Unknown auth type for download_media: %s", auth_type)
-            return False
+            return self._download_wecom_media(media_id, save_path)
 
-    async def _download_wecom_media(
-        self,
-        media_id: str,
-        save_path: str,
-    ) -> bool:
-        """企业微信媒体下载"""
+    def _download_wecom_media(self, media_id: str, save_path: str = "") -> Optional[bytes]:
+        """从企业微信下载媒体文件"""
+        if not self.adapter._ensure_wecom_token():
+            logger.error("企业微信 Token 获取失败")
+            return None
+
+        if not REQUESTS_AVAILABLE:
+            logger.info("[企微模拟] 下载媒体: %s", media_id)
+            return b"mock_media_data"
+
         try:
-            # 获取 access_token
-            token = await self._ensure_wecom_token()
+            a = self.adapter
+            url = f"{a.WECOM_API_BASE}/cgi-bin/media/get"
+            params = {
+                "access_token": a.access_token,
+                "media_id": media_id,
+            }
 
-            # 下载文件
-            url = f"{WECOM_API_BASE}/media/get"
-            params = {"access_token": token, "media_id": media_id}
+            resp = requests.get(url, params=params, timeout=30, stream=True)
 
-            response = requests.get(url, params=params, timeout=30, stream=True)
-            response.raise_for_status()
+            content_type = resp.headers.get("Content-Type", "")
 
-            # 保存文件
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            with open(save_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+            if "application/json" in content_type:
+                result = resp.json()
+                logger.error("企业微信媒体下载失败: %s", result)
+                return None
 
-            logger.info("Media downloaded to %s", save_path)
-            return True
+            media_data = resp.content
 
+            if save_path:
+                save_path_obj = Path(save_path)
+                save_path_obj.parent.mkdir(parents=True, exist_ok=True)
+                with open(save_path_obj, "wb") as f:
+                    f.write(media_data)
+                logger.info("企业微信媒体已保存: %s", save_path)
+
+            return media_data
+        except requests.exceptions.Timeout:
+            logger.error("媒体下载超时: %s", media_id)
+            return None
+        except requests.exceptions.HTTPError as e:
+            logger.error("媒体下载 HTTP 错误: %s", e)
+            return None
+        except IOError as e:
+            logger.error("保存媒体文件失败: %s", e)
+            return None
         except Exception as e:
-            logger.exception("WeCom media download error: %s", e)
-            return False
+            logger.error("媒体下载异常: %s", e)
+            return None
 
-    async def _download_official_media(
-        self,
-        media_id: str,
-        save_path: str,
-    ) -> bool:
-        """公众号媒体下载"""
+    def _download_official_media(self, media_id: str, save_path: str = "") -> Optional[bytes]:
+        """从微信公众号下载媒体文件"""
+        if not self.adapter._ensure_official_token():
+            logger.error("微信公众号 Token 获取失败")
+            return None
+
+        if not REQUESTS_AVAILABLE:
+            logger.info("[公众号模拟] 下载媒体: %s", media_id)
+            return b"mock_official_media_data"
+
         try:
-            # 获取 access_token
-            token = await self._ensure_official_token()
+            a = self.adapter
+            url = f"{a.WECHAT_OA_API_BASE}/cgi-bin/media/get"
+            params = {
+                "access_token": a.official_access_token,
+                "media_id": media_id,
+            }
 
-            # 下载文件
-            url = f"{WECHAT_API_BASE}/media/get"
-            params = {"access_token": token, "media_id": media_id}
+            resp = requests.get(url, params=params, timeout=30, stream=True)
 
-            response = requests.get(url, params=params, timeout=30, stream=True)
-            response.raise_for_status()
+            content_type = resp.headers.get("Content-Type", "")
 
-            # 保存文件
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            with open(save_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+            if "application/json" in content_type:
+                result = resp.json()
+                logger.error("微信公众号媒体下载失败: %s", result)
+                return None
 
-            logger.info("Media downloaded to %s", save_path)
-            return True
+            media_data = resp.content
 
+            if save_path:
+                save_path_obj = Path(save_path)
+                save_path_obj.parent.mkdir(parents=True, exist_ok=True)
+                with open(save_path_obj, "wb") as f:
+                    f.write(media_data)
+                logger.info("微信公众号媒体已保存: %s", save_path)
+
+            return media_data
         except Exception as e:
-            logger.exception("Official media download error: %s", e)
-            return False
+            logger.error("微信公众号媒体下载异常: %s", e)
+            return None
 
-    async def _download_ilink_media(
-        self,
-        media_id: str,
-        save_path: str,
-    ) -> bool:
-        """iLink 媒体下载"""
-        # iLink 媒体下载实现
-        logger.warning("iLink media download not implemented")
-        return False
+    def _download_ilink_media(self, media_id: str, save_path: str = "") -> Optional[bytes]:
+        """从 iLink 下载媒体文件"""
+        a = self.adapter
+        if not a._ilink_initialized:
+            logger.error("iLink 未初始化")
+            return None
 
-    def get_media_type(self, file_path: str) -> str:
-        """
-        根据文件扩展名判断媒体类型
+        if not REQUESTS_AVAILABLE:
+            logger.info("[iLink 模拟] 下载媒体: %s", media_id)
+            return b"mock_ilink_media_data"
+
+        try:
+            url = f"{a.ILINK_API_BASE}/media/get"
+            headers = {"Authorization": f"Bearer {a.ilink_bot_token}"}
+            params = {"media_id": media_id}
+
+            resp = requests.get(url, headers=headers, params=params, timeout=30, stream=True)
+            result = resp.json()
+
+            if not result.get("success"):
+                logger.error("iLink 媒体下载失败: %s", result)
+                return None
+
+            media_url = result.get("url")
+            if not media_url:
+                logger.error("iLink 媒体 URL 为空")
+                return None
+
+            media_resp = requests.get(media_url, timeout=30, stream=True)
+            media_data = media_resp.content
+
+            if save_path:
+                save_path_obj = Path(save_path)
+                save_path_obj.parent.mkdir(parents=True, exist_ok=True)
+                with open(save_path_obj, "wb") as f:
+                    f.write(media_data)
+                logger.info("iLink 媒体已保存: %s", save_path)
+
+            return media_data
+        except Exception as e:
+            logger.error("iLink 媒体下载异常: %s", e)
+            return None
+
+    # ============================================================
+    # 辅助方法
+    # ============================================================
+
+    async def _download_url(self, url: str, timeout: int = 60) -> Optional[bytes]:
+        """下载URL内容
 
         参数:
-            file_path: 文件路径
+            url: 目标URL
+            timeout: 超时时间（秒）
 
         返回:
-            str: 媒体类型 (image, voice, video, file)
+            成功返回二进制数据，失败返回 None
         """
-        suffix = os.path.splitext(file_path)[1].lower()
+        if HTTPX_AVAILABLE:
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.get(url)
+                    if response.status_code == 200:
+                        return response.content
+                    else:
+                        logger.error("下载失败 HTTP %s: %s", response.status_code, url)
+                        return None
+            except Exception as e:
+                logger.error("httpx下载异常: %s", e)
+                return None
+        elif REQUESTS_AVAILABLE:
+            try:
+                response = requests.get(url, timeout=timeout)
+                if response.status_code == 200:
+                    return response.content
+                else:
+                    logger.error("下载失败 HTTP %s: %s", response.status_code, url)
+                    return None
+            except Exception as e:
+                logger.error("requests下载异常: %s", e)
+                return None
+        else:
+            logger.error("无可用的HTTP客户端")
+            return None
 
-        for media_type, info in MEDIA_TYPE_MAP.items():
-            if suffix in info["suffix"]:
-                return media_type
+    async def _save_temp_file(self, data: bytes, extension: str) -> Optional[str]:
+        """保存临时文件
 
-        return "file"
+        参数:
+            data: 文件数据
+            extension: 文件扩展名
+
+        返回:
+            成功返回文件路径，失败返回 None
+        """
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{extension}") as f:
+                f.write(data)
+                temp_path = f.name
+            logger.info("临时文件已保存: %s", temp_path)
+            return temp_path
+        except Exception as e:
+            logger.error("保存临时文件失败: %s", e)
+            return None
