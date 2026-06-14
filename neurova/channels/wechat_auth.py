@@ -1,262 +1,377 @@
 """
 微信认证 Mixin
 
-包含:
-1. 主认证入口 (authenticate)
-2. 企业微信认证 (_authenticate_wecom, _refresh_wecom_token, _ensure_wecom_token)
-3. iLink 协议认证 (_authenticate_ilink, _generate_qr_code, _wait_for_scan, _verify_ilink_token, _save_ilink_token)
-4. 微信公众号认证 (_authenticate_official, _refresh_official_token, _ensure_official_token)
-5. 统一 API 请求方法 (_api_request)
-
-由 WeChatAdapter 通过多继承使用，所有属性都来自主类。
+处理企业微信、iLink、微信公众号三种模式的认证逻辑。
 """
+from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
-import requests
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger(__name__)
 
-# 微信 API 基础 URL
-WECHAT_API_BASE = "https://api.weixin.qq.com/cgi-bin"
-WECOM_API_BASE = "https://qyapi.weixin.qq.com/cgi-bin"
 
+class WeChatAuthMixin:
+    """微信认证 Mixin — 企业微信 / iLink / 公众号"""
 
-class AuthMixin:
-    """
-    微信认证 Mixin
+    def __init__(self, adapter: Any) -> None:
+        self.adapter = adapter
 
-    提供:
-    - 企业微信认证
-    - 微信公众号认证
-    - iLink 协议认证
-    - 统一 API 请求
-    """
+    # ============================================================
+    # 企业微信认证
+    # ============================================================
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._access_token: Optional[str] = None
-        self._token_expires_at: float = 0.0
+    def _authenticate_wecom(self, config: Dict[str, str]) -> bool:
+        """认证企业微信"""
+        a = self.adapter
+        a.corpid = config.get("corpid", "")
+        a.corpsecret = config.get("corpsecret", "")
+        a.agentid = config.get("agentid", "")
+        a.kf_mode = config.get("kf_mode", "false").lower() == "true"
+        a.open_kfid = config.get("open_kfid", "")
+        a.callback_token = config.get("token", "")
+        a.encoding_aes_key = config.get("encoding_aes_key", "")
 
-    async def authenticate(self) -> bool:
-        """
-        主认证入口
-
-        根据配置选择认证方式:
-        - 企业微信: corpid + corpsecret
-        - 公众号: appid + secret
-        - iLink: 扫码认证
-        """
-        try:
-            auth_type = self.config.extra.get("auth_type", "wecom")
-
-            if auth_type == "wecom":
-                return await self._authenticate_wecom()
-            elif auth_type == "official":
-                return await self._authenticate_official()
-            elif auth_type == "ilink":
-                return await self._authenticate_ilink()
-            else:
-                logger.error("Unknown auth type: %s", auth_type)
-                return False
-
-        except Exception as e:
-            logger.exception("Authentication error: %s", e)
+        if not a.corpid or not a.corpsecret:
+            logger.error("企业微信认证失败: corpid 和 corpsecret 不能为空")
             return False
 
-    async def _authenticate_wecom(self) -> bool:
-        """企业微信认证"""
-        try:
-            corpid = self.config.app_id
-            corpsecret = self.config.app_secret
-
-            if not corpid or not corpsecret:
-                logger.error("WeChat credentials not configured")
-                return False
-
-            # 获取 access_token
-            response = requests.get(
-                f"{WECOM_API_BASE}/gettoken",
-                params={
-                    "corpid": corpid,
-                    "corpsecret": corpsecret,
-                },
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            if data.get("errcode") != 0:
-                logger.error("WeCom auth failed: %s", data)
-                return False
-
-            self._access_token = data["access_token"]
-            expires_in = data.get("expires_in", 7200)
-            self._token_expires_at = time.time() + expires_in - 300  # 提前5分钟刷新
-
-            logger.info("WeCom authentication successful")
-            return True
-
-        except Exception as e:
-            logger.exception("WeCom auth error: %s", e)
+        if a.kf_mode and not a.open_kfid:
+            logger.error("微信客服模式需要提供 open_kfid")
             return False
 
-    async def _refresh_wecom_token(self) -> bool:
+        return self._refresh_wecom_token()
+
+    def _refresh_wecom_token(self) -> bool:
         """刷新企业微信 access_token"""
-        return await self._authenticate_wecom()
-
-    async def _ensure_wecom_token(self) -> str:
-        """确保企业微信 token 有效"""
-        if not self._access_token or time.time() >= self._token_expires_at:
-            await self._refresh_wecom_token()
-        return self._access_token or ""
-
-    async def _authenticate_official(self) -> bool:
-        """微信公众号认证"""
-        try:
-            appid = self.config.app_id
-            secret = self.config.app_secret
-
-            if not appid or not secret:
-                logger.error("WeChat official credentials not configured")
-                return False
-
-            # 获取 access_token
-            response = requests.get(
-                f"{WECHAT_API_BASE}/token",
-                params={
-                    "grant_type": "client_credential",
-                    "appid": appid,
-                    "secret": secret,
-                },
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            if "errcode" in data:
-                logger.error("WeChat official auth failed: %s", data)
-                return False
-
-            self._access_token = data["access_token"]
-            expires_in = data.get("expires_in", 7200)
-            self._token_expires_at = time.time() + expires_in - 300
-
-            logger.info("WeChat official authentication successful")
+        a = self.adapter
+        if not REQUESTS_AVAILABLE:
+            a._wecom_initialized = True
             return True
 
-        except Exception as e:
-            logger.exception("WeChat official auth error: %s", e)
-            return False
-
-    async def _refresh_official_token(self) -> bool:
-        """刷新公众号 access_token"""
-        return await self._authenticate_official()
-
-    async def _ensure_official_token(self) -> str:
-        """确保公众号 token 有效"""
-        if not self._access_token or time.time() >= self._token_expires_at:
-            await self._refresh_official_token()
-        return self._access_token or ""
-
-    async def _authenticate_ilink(self) -> bool:
-        """iLink 协议认证 (扫码)"""
         try:
-            # 生成二维码
-            qr_code_url = await self._generate_qr_code()
-            if not qr_code_url:
-                return False
+            url = f"{a.WECOM_API_BASE}/cgi-bin/gettoken"
+            params = {
+                "corpid": a.corpid,
+                "corpsecret": a.corpsecret,
+            }
+            resp = requests.get(url, params=params, timeout=10)
+            data = resp.json()
 
-            # 等待扫码
-            token = await self._wait_for_scan(qr_code_url)
-            if not token:
-                return False
-
-            # 验证 token
-            if await self._verify_ilink_token(token):
-                await self._save_ilink_token(token)
+            if data.get("errcode") == 0:
+                a.access_token = data["access_token"]
+                a.token_expire_time = int(time.time()) + data.get("expires_in", 7200) - 60
+                a._wecom_initialized = True
+                logger.info("企业微信认证成功")
                 return True
-
+            else:
+                logger.error("企业微信认证失败: %s", data)
+                return False
+        except (requests.RequestException, json.JSONDecodeError) as e:
+            logger.error("企业微信认证异常: %s", e)
             return False
 
-        except Exception as e:
-            logger.exception("iLink auth error: %s", e)
-            return False
+    def _ensure_wecom_token(self) -> bool:
+        """确保企业微信 token 有效"""
+        a = self.adapter
+        if not a._wecom_initialized:
+            return self._refresh_wecom_token()
+        if int(time.time()) >= a.token_expire_time:
+            return self._refresh_wecom_token()
+        return True
 
-    async def _generate_qr_code(self) -> Optional[str]:
-        """生成 iLink 扫码二维码 URL"""
-        # 实际实现需要调用 iLink API
-        logger.warning("iLink QR code generation not implemented")
-        return None
+    # ============================================================
+    # iLink 协议认证
+    # ============================================================
 
-    async def _wait_for_scan(self, qr_code_url: str) -> Optional[str]:
-        """等待用户扫码"""
-        # 实际实现需要轮询扫码状态
-        logger.warning("iLink scan waiting not implemented")
-        return None
-
-    async def _verify_ilink_token(self, token: str) -> bool:
-        """验证 iLink token"""
-        # 实际实现需要调用 iLink API 验证
-        logger.warning("iLink token verification not implemented")
-        return False
-
-    async def _save_ilink_token(self, token: str):
-        """保存 iLink token"""
-        self._access_token = token
-        # 设置较长的过期时间
-        self._token_expires_at = time.time() + 86400 * 30  # 30天
-
-    async def _api_request(
-        self,
-        method: str,
-        path: str,
-        data: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        timeout: int = 30,
-    ) -> Dict[str, Any]:
+    def _authenticate_ilink(self, config: Dict[str, str]) -> bool:
         """
-        统一 API 请求方法
+        认证 iLink 协议
 
-        参数:
-            method: HTTP 方法
-            path: API 路径
-            data: 请求体
-            params: 查询参数
-            timeout: 超时时间
+        流程:
+        1. 如果提供了 bot_token，直接使用
+        2. 如果没有 token，生成二维码URL，等待扫码
+        3. 扫码成功后，token 保存到本地文件
+        """
+        a = self.adapter
+        a.ilink_bot_token = config.get("bot_token", "")
+        a.ilink_token_file = config.get("token_file", "~/.Neurova/weixin_bot_token")
+        a.ilink_media_dir = config.get("media_directory", "")
+        a.ilink_message_merge = config.get("message_merge", "false").lower() == "true"
+        a.ilink_private_strategy = config.get("private_strategy", "open")
+        a.ilink_group_strategy = config.get("group_strategy", "open")
+        a.ilink_require_mention = config.get("require_mention", "false").lower() == "true"
+
+        whitelist = config.get("whitelist_users", "")
+        a.ilink_whitelist_users = [u.strip() for u in whitelist.split(",") if u.strip()] if whitelist else []
+
+        # 扩展 token_file 路径
+        if a.ilink_token_file.startswith("~"):
+            a.ilink_token_file = str(Path(a.ilink_token_file).expanduser())
+
+        # 如果已有 token，直接验证
+        if a.ilink_bot_token:
+            return self._verify_ilink_token()
+
+        # 尝试从文件加载 token
+        token_path = Path(a.ilink_token_file)
+        if token_path.exists():
+            try:
+                with open(token_path, "r") as f:
+                    a.ilink_bot_token = f.read().strip()
+                if a.ilink_bot_token:
+                    logger.info("从文件加载 iLink Token: %s", a.ilink_token_file)
+                    return self._verify_ilink_token()
+            except (OSError, IOError) as e:
+                logger.warning("加载 Token 文件失败: %s", e)
+
+        # 首次启动，需要扫码登录
+        logger.info("iLink 协议首次启动，需要扫码登录")
+        return self._generate_qr_code()
+
+    def _generate_qr_code(self) -> bool:
+        """
+        生成登录二维码
 
         返回:
-            Dict: API 响应
+        如果请求成功返回 True (需要用户扫码)
         """
-        # 确保 token 有效
-        auth_type = self.config.extra.get("auth_type", "wecom")
-        if auth_type == "wecom":
-            token = await self._ensure_wecom_token()
-            base_url = WECOM_API_BASE
-        else:
-            token = await self._ensure_official_token()
-            base_url = WECHAT_API_BASE
-
-        # 添加 access_token 到参数
-        if params is None:
-            params = {}
-        params["access_token"] = token
-
-        url = f"{base_url}{path}"
+        a = self.adapter
+        if not REQUESTS_AVAILABLE:
+            logger.info("[iLink 模拟] 生成二维码链接: https://ilink.wechat.bot/qr/xxxxx")
+            a._ilink_initialized = True
+            return True
 
         try:
-            response = requests.request(
-                method=method,
-                url=url,
-                json=data,
-                params=params,
-                timeout=timeout,
-            )
-            response.raise_for_status()
-            return response.json()
+            url = f"{a.ILINK_API_BASE}/auth/qrcode"
+            resp = requests.post(url, timeout=10)
+            data = resp.json()
 
-        except requests.exceptions.RequestException as e:
-            logger.exception("WeChat API request error: %s", e)
-            raise
+            if data.get("success"):
+                qr_url = data.get("qr_code_url", "")
+                qr_id = data.get("qr_id", "")
+                logger.info("iLink 登录二维码: %s", qr_url)
+                logger.info("请扫码登录，QR ID: %s", qr_id)
+
+                # 轮询等待扫码
+                return self._wait_for_scan(qr_id)
+            else:
+                logger.error("生成二维码失败: %s", data)
+                return False
+        except (requests.RequestException, json.JSONDecodeError) as e:
+            logger.error("生成二维码异常: %s", e)
+            return False
+
+    def _wait_for_scan(self, qr_id: str, timeout: int = 300) -> bool:
+        """
+        等待用户扫码登录
+
+        参数:
+        qr_id: 二维码ID
+        timeout: 超时时间 (秒)
+        """
+        a = self.adapter
+        if not REQUESTS_AVAILABLE:
+            a._ilink_initialized = True
+            return True
+
+        start_time = time.time()
+        poll_interval = 3
+
+        while time.time() - start_time < timeout:
+            try:
+                url = f"{a.ILINK_API_BASE}/auth/status"
+                resp = requests.get(url, params={"qr_id": qr_id}, timeout=10)
+                data = resp.json()
+
+                status = data.get("status", "")
+                if status == "scanned":
+                    logger.info("二维码已扫描，等待确认...")
+                elif status == "confirmed":
+                    a.ilink_bot_token = data.get("bot_token", "")
+                    self._save_ilink_token()
+                    a._ilink_initialized = True
+                    logger.info("iLink 登录成功!")
+                    return True
+                elif status == "expired":
+                    logger.error("二维码已过期，请重新生成")
+                    return False
+
+                time.sleep(poll_interval)
+            except (requests.RequestException, json.JSONDecodeError) as e:
+                logger.error("轮询扫码状态异常: %s", e)
+                time.sleep(poll_interval)
+
+        logger.error("扫码登录超时")
+        return False
+
+    def _verify_ilink_token(self) -> bool:
+        """验证 iLink Token 是否有效"""
+        a = self.adapter
+        if not REQUESTS_AVAILABLE:
+            a._ilink_initialized = True
+            return True
+
+        try:
+            url = f"{a.ILINK_API_BASE}/auth/verify"
+            headers = {"Authorization": f"Bearer {a.ilink_bot_token}"}
+            resp = requests.get(url, headers=headers, timeout=10)
+            data = resp.json()
+
+            if data.get("valid", False):
+                a._ilink_initialized = True
+                logger.info("iLink Token 验证成功")
+                return True
+            else:
+                logger.error("iLink Token 无效，需要重新登录")
+                a.ilink_bot_token = ""
+                return False
+        except (requests.RequestException, json.JSONDecodeError) as e:
+            logger.error("验证 Token 异常: %s", e)
+            return False
+
+    def _save_ilink_token(self):
+        """保存 iLink Token 到本地文件"""
+        a = self.adapter
+        if not a.ilink_token_file:
+            return
+
+        try:
+            token_path = Path(a.ilink_token_file)
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(token_path, "w") as f:
+                f.write(a.ilink_bot_token)
+            logger.info("iLink Token 已保存到: %s", a.ilink_token_file)
+        except (OSError, IOError) as e:
+            logger.error("保存 Token 失败: %s", e)
+
+    # ============================================================
+    # 微信公众号认证
+    # ============================================================
+
+    def _authenticate_official(self, config: Dict[str, str]) -> bool:
+        """认证微信公众号"""
+        a = self.adapter
+        a.official_appid = config.get("appid", "")
+        a.official_secret = config.get("secret", "")
+        a.official_token = config.get("token", "")
+        a.official_encoding_aes_key = config.get("encoding_aes_key", "")
+
+        if not a.official_appid or not a.official_secret:
+            logger.error("微信公众号认证失败: appid 和 secret 不能为空")
+            return False
+
+        return self._refresh_official_token()
+
+    def _refresh_official_token(self) -> bool:
+        """刷新微信公众号 access_token"""
+        a = self.adapter
+        if not REQUESTS_AVAILABLE:
+            a._official_initialized = True
+            return True
+
+        try:
+            url = f"{a.WECHAT_OA_API_BASE}/cgi-bin/token"
+            params = {
+                "grant_type": "client_credential",
+                "appid": a.official_appid,
+                "secret": a.official_secret,
+            }
+            resp = requests.get(url, params=params, timeout=10)
+            data = resp.json()
+
+            if "access_token" in data:
+                a.official_access_token = data["access_token"]
+                a.official_token_expire_time = int(time.time()) + data.get("expires_in", 7200) - 60
+                a._official_initialized = True
+                logger.info("微信公众号认证成功")
+                return True
+            else:
+                logger.error("微信公众号认证失败: %s", data)
+                return False
+        except Exception as e:
+            logger.error("微信公众号认证异常: %s", e)
+            return False
+
+    def _ensure_official_token(self) -> bool:
+        """确保微信公众号 token 有效"""
+        a = self.adapter
+        if not a._official_initialized:
+            return self._refresh_official_token()
+        if int(time.time()) >= a.official_token_expire_time:
+            return self._refresh_official_token()
+        return True
+
+    # ============================================================
+    # 签名验证 (企业微信/公众号回调)
+    # ============================================================
+
+    def verify_signature(self, msg_signature: str, timestamp: str, nonce: str, echostr: str = "") -> Optional[str]:
+        """
+        验证企业微信/公众号回调签名
+
+        返回 echostr 表示验证通过
+        """
+        a = self.adapter
+        if not a.callback_token and not a.official_token:
+            return None
+
+        token = a.callback_token or a.official_token
+        params = sorted([token, timestamp, nonce])
+        sign_str = "".join(params)
+        signature = hashlib.sha1(sign_str.encode("utf-8")).hexdigest()
+
+        if signature == msg_signature:
+            return echostr
+        return None
+
+    # ============================================================
+    # 统一 API 请求方法
+    # ============================================================
+
+    def _api_request(self, base_url: str, method: str, path: str, params: Dict = None, **kwargs) -> Dict[str, Any]:
+        """
+        统一的 API 请求方法
+
+        参数:
+        base_url: API 基础 URL
+        method: HTTP 方法
+        path: API 路径
+        params: URL 参数
+        **kwargs: requests 的其他参数
+
+        返回:
+        API 响应数据
+        """
+        if not REQUESTS_AVAILABLE:
+            return {"errcode": -1, "errmsg": "requests 库未安装"}
+
+        url = f"{base_url}{path}"
+        kwargs.setdefault("timeout", 10)
+
+        try:
+            resp = requests.request(method, url, params=params, **kwargs)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.exceptions.Timeout:
+            logger.error("微信 API 请求超时: %s", url)
+            return {"errcode": -1, "errmsg": "请求超时"}
+        except requests.exceptions.HTTPError as e:
+            logger.error("微信 API HTTP 错误: %s", e)
+            return {"errcode": -1, "errmsg": f"HTTP 错误: {e.response.status_code}"}
+        except Exception as e:
+            logger.error("微信 API 请求异常: %s", e)
+            return {"errcode": -1, "errmsg": str(e)}

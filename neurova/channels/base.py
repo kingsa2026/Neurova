@@ -205,6 +205,28 @@ class ChannelAdapter(ABC):
             except Exception as e:
                 logger.exception("Event callback error for %s: %s", self.channel_type, e)
 
+    def get_channel_config(self) -> Dict[str, Any]:
+        """获取渠道配置"""
+        return {
+            "channel_type": self.channel_type,
+            "enabled": self.config.enabled,
+            "app_id": self.config.app_id,
+            "app_secret": "***" if self.config.app_secret else "",
+            "webhook_url": self.config.webhook_url,
+            "use_stream": self.config.use_stream,
+            "extra": self.config.extra,
+        }
+
+    def update_config(self, updates: Dict[str, Any]):
+        """更新渠道配置"""
+        for key, value in updates.items():
+            if hasattr(self.config, key):
+                setattr(self.config, key, value)
+            elif key in self.config.extra:
+                self.config.extra[key] = value
+            else:
+                self.config.extra[key] = value
+
     def _make_message(
         self,
         message_id: str,

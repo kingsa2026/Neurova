@@ -30,11 +30,13 @@ class ContentType(Enum):
     TEXT = "text"
     IMAGE = "image"
     AUDIO = "audio"
+    VOICE = "voice"
     VIDEO = "video"
     FILE = "file"
     LOCATION = "location"
     CARD = "card"
     MIXED = "mixed"
+    SYSTEM = "system"
 
 
 @dataclass
@@ -46,10 +48,15 @@ class UnifiedMessage:
     content_type: ContentType
     content: str
     user_id: str
+    chat_id: Optional[str] = None
     session_id: Optional[str] = None
     agent_id: Optional[str] = None
     timestamp: Optional[float] = None
     reply_to: Optional[str] = None
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    card_data: Optional[Dict[str, Any]] = None
+    raw_message: Optional[Any] = None
     attachments: Optional[List[Dict[str, Any]]] = None
     metadata: Optional[Dict[str, Any]] = None
 

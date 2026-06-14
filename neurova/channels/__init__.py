@@ -32,6 +32,13 @@ except ImportError as _e:
     MessageChannel = None
 
 try:
+    from neurova.channels.models import ContentType, UnifiedMessage
+except ImportError as _e:
+    _logger.debug("channels.models 未可用: %s", _e)
+    ContentType = None
+    UnifiedMessage = None
+
+try:
     from neurova.channels.manager import ChannelManager, get_channel_manager
 except ImportError as _e:
     _logger.debug("channels.manager 未可用: %s", _e)
@@ -53,6 +60,13 @@ except ImportError as _e:
     create_voice_adapter = None
 
 try:
+    from neurova.channels.telegram_adapter import TelegramAdapter, create_telegram_adapter
+except ImportError as _e:
+    _logger.debug("channels.telegram_adapter 未可用: %s", _e)
+    TelegramAdapter = None
+    create_telegram_adapter = None
+
+try:
     from neurova.session_manager import SessionManager, SessionMessage, SessionRecord, get_session_manager
 except ImportError as _e:
     _logger.debug("session_manager 未可用: %s", _e)
@@ -67,12 +81,16 @@ __all__ = [
     "ChannelMessage",
     "ChannelEventType",
     "MessageChannel",
+    "ContentType",
+    "UnifiedMessage",
     "ChannelManager",
     "get_channel_manager",
     "XiaoYiAdapter",
     "create_xiaoyi_adapter",
     "VoiceAdapter",
     "create_voice_adapter",
+    "TelegramAdapter",
+    "create_telegram_adapter",
     "SessionManager",
     "SessionMessage",
     "SessionRecord",
