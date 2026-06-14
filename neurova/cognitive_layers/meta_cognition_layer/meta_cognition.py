@@ -13,10 +13,13 @@ Neurova 2.0 改进：
 """
 
 import datetime
+import logging
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # cognitive_layers imports
 
