@@ -335,7 +335,7 @@ class ToolRootCauseAnalyzer:
                 hypotheses = self._generate_hypotheses(tool_name, error_message, error_type, parameters)
 
                 # 检测系统性模式
-                pattern_hypotheses = self._detect_systemic_patterns(tool_name, error_message)
+                pattern_hypotheses = self._detect_systemic_patterns(tool_name, error_message, parameters)
                 hypotheses.extend(pattern_hypotheses)
 
                 # 选择主要假设
@@ -540,6 +540,7 @@ class ToolRootCauseAnalyzer:
         self,
         tool_name: str,
         error_message: str,
+        parameters: Optional[Dict[str, Any]] = None,
     ) -> List[RootCauseHypothesis]:
         """检测系统性模式
 
