@@ -38,7 +38,7 @@
 
     <!-- Create/Edit modal -->
     <a-modal v-model:open="showModal" :title="editingId ? t('common.edit') : t('common.create')" @ok="handleSave" :confirm-loading="saving" width="560px">
-      <a-form layout="vertical">
+      <a-form layout="vertical" :rules="{ url: [{ required: true, message: t('common.required') }], events: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('system.url')">
           <a-input v-model:value="form.url" placeholder="https://example.com/webhook" />
         </a-form-item>
@@ -78,6 +78,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import * as webhookApi from '@/api/modules/webhooks'
@@ -160,11 +161,10 @@ async function fetchWebhooks() {
       description: w.description,
       lastDelivery: w.last_triggered,
     }))
-  } catch { webhooks.value = [] } finally { loading.value = false }
+  } catch { message.error(t('common.error')) } finally { loading.value = false }
 }
 
 async function handleSave() {
-  if (!form.url) return
   saving.value = true
   try {
     const payload = { name: form.url, url: form.url, events: form.events, secret: form.secret || undefined }
@@ -176,21 +176,21 @@ async function handleSave() {
     showModal.value = false
     resetForm()
     await fetchWebhooks()
-  } catch { /* handled */ } finally { saving.value = false }
+  } catch { message.error(t('common.error')) } finally { saving.value = false }
 }
 
 async function handleTest(id: string) {
   testingId.value = id
   try {
     await webhookApi.testWebhook(id)
-  } catch { /* handled */ } finally { testingId.value = null }
+  } catch { message.error(t('common.error')) } finally { testingId.value = null }
 }
 
 async function handleDelete(id: string) {
   try {
     await webhookApi.deleteWebhook(id)
     await fetchWebhooks()
-  } catch { /* handled */ }
+  } catch { message.error(t('common.error')) }
 }
 
 async function handleViewLogs(wh: Webhook) {
@@ -205,7 +205,7 @@ async function handleViewLogs(wh: Webhook) {
       timestamp: d.created_at,
       duration: d.duration_ms ? `${d.duration_ms}ms` : undefined,
     }))
-  } catch { deliveryLogs.value = [] }
+  } catch { message.error(t('common.error')) }
   showLogs.value = true
 }
 

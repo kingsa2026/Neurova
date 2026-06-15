@@ -37,11 +37,12 @@
     </GlassPanel>
 
     <!-- Knowledge Table -->
-    <GlassPanel>
+    <GlassPanel v-if="knowledgeItems.length > 0 || loading">
       <a-table
         :columns="columns"
         :data-source="knowledgeItems"
         :loading="loading"
+        :locale="{ emptyText: '' }"
         :pagination="pagination"
         row-key="id"
         @change="onTableChange"
@@ -72,6 +73,9 @@
         </template>
       </a-table>
     </GlassPanel>
+    <GlassPanel v-else>
+      <a-empty :description="t('common.noData')" />
+    </GlassPanel>
 
     <!-- Create / Edit Modal -->
     <a-modal
@@ -82,7 +86,7 @@
       @ok="saveItem"
       @cancel="modalVisible = false"
     >
-      <a-form layout="vertical">
+      <a-form layout="vertical" :rules="{ title: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('knowledge.itemTitle')">
           <a-input v-model:value="form.title" :placeholder="t('knowledge.titlePlaceholder')" />
         </a-form-item>
@@ -127,9 +131,17 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
 import type { UploadFile } from 'ant-design-vue'
+import {
+  getKnowledgeNodes,
+  searchKnowledge,
+  createKnowledgeNode,
+  updateKnowledgeNode,
+  deleteKnowledgeNode,
+} from '@/api/modules/knowledge'
 import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import { useAgentPage } from '@/composables/useAgentPage'
 
 interface KnowledgeItem {
   id: string
@@ -142,6 +154,13 @@ interface KnowledgeItem {
 }
 
 const { t } = useI18n()
+
+const { agentId } = useAgentPage({
+  onAgentChange: () => {
+    currentPage.value = 1
+    fetchKnowledge()
+  },
+})
 
 const knowledgeItems = ref<KnowledgeItem[]>([])
 const loading = ref(false)
@@ -209,13 +228,14 @@ async function fetchKnowledge() {
   loading.value = true
   try {
     const params: Record<string, any> = {
+      agent_id: agentId.value,
       page: currentPage.value,
       page_size: pageSize.value,
     }
     if (searchQuery.value) params.q = searchQuery.value
     if (activeCategory.value) params.category = activeCategory.value
 
-    const res: any = await request.get('/knowledge', { params })
+    const res: any = await getKnowledgeNodes(params)
     const data = res?.data ?? res
     knowledgeItems.value = Array.isArray(data) ? data : data?.items ?? []
     totalItems.value = data?.total ?? knowledgeItems.value.length
@@ -235,8 +255,8 @@ async function fetchKnowledge() {
 async function semanticSearchFn() {
   loading.value = true
   try {
-    const res: any = await request.post('/knowledge/search', {
-      query: searchQuery.value,
+    const res: any = await searchKnowledge(searchQuery.value, {
+      agent_id: agentId.value,
       page: currentPage.value,
       page_size: pageSize.value,
     })
@@ -268,17 +288,13 @@ function editItem(item: KnowledgeItem) {
 }
 
 async function saveItem() {
-  if (!form.value.title.trim()) {
-    message.warning(t('knowledge.titleRequired'))
-    return
-  }
   saving.value = true
   try {
     if (editingItem.value) {
-      await request.put(`/knowledge/${editingItem.value.id}`, form.value)
+      await updateKnowledgeNode(editingItem.value.id, form.value, { agent_id: agentId.value })
       message.success(t('knowledge.updateSuccess'))
     } else {
-      await request.post('/knowledge', form.value)
+      await createKnowledgeNode({ ...form.value, agent_id: agentId.value })
       message.success(t('knowledge.createSuccess'))
     }
     modalVisible.value = false
@@ -298,7 +314,7 @@ function confirmDelete(item: KnowledgeItem) {
     cancelText: t('common.cancel'),
     onOk: async () => {
       try {
-        await request.delete(`/knowledge/${item.id}`)
+        await deleteKnowledgeNode(item.id, { agent_id: agentId.value })
         knowledgeItems.value = knowledgeItems.value.filter((k) => k.id !== item.id)
         message.success(t('knowledge.deleteSuccess'))
       } catch {
@@ -333,6 +349,7 @@ async function handleImport() {
     formData.append('file', file)
     await request.post('/knowledge/import', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      params: { agent_id: agentId.value },
     })
     message.success(t('knowledge.importSuccess'))
     importVisible.value = false

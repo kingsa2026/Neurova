@@ -20,6 +20,7 @@ except ImportError:
     logging.warning("requests 库未安装，QClaw 适配器将使用模拟模式")
 
 from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels.base import ChannelConfig
 from neurova.channels.qclaw_service import get_qclaw_service
 
 logger = logging.getLogger(__name__)
@@ -41,11 +42,13 @@ class QClawAdapter(ChannelAdapter):
         """返回渠道类型"""
         return MessageChannel.QCLAW
 
-    def __init__(self):
+    def __init__(self, config: ChannelConfig):
         """初始化 QClaw 适配器"""
+        super().__init__(config)
+        
         # 认证相关
-        self.app_id = ""
-        self.app_secret = ""
+        self.app_id = config.app_id
+        self.app_secret = config.app_secret
         self.access_token = ""
         self.token_expire_time = 0
 
@@ -63,22 +66,21 @@ class QClawAdapter(ChannelAdapter):
 
         logger.info("QClaw 适配器已初始化")
 
-    def authenticate(self, config: Dict[str, Any]) -> bool:
+    def authenticate(self, config: Optional[Dict[str, Any]] = None) -> bool:
         """
         认证 QClaw 渠道
 
         参数:
-            config: 配置字典，包含:
-                - app_id: QClaw 应用ID
-                - app_secret: QClaw 应用密钥
+            config: 可选的配置字典，包含:
                 - binding_id: 绑定记录ID（用于多用户隔离）
+                如果未提供，使用构造函数中的配置
 
         返回:
             认证成功返回 True
         """
-        self.app_id = config.get("app_id", "")
-        self.app_secret = config.get("app_secret", "")
-        self.binding_id = config.get("binding_id")
+        # 如果提供了额外配置，更新绑定ID
+        if config:
+            self.binding_id = config.get("binding_id", self.binding_id)
 
         if not self.app_id or not self.app_secret:
             logger.error("QClaw 认证失败: 缺少 app_id 或 app_secret")
@@ -105,9 +107,72 @@ class QClawAdapter(ChannelAdapter):
         logger.info("QClaw 认证成功 (app_id: %s****)", self.app_id[:4])
         return True
 
-    def send_message(self, message: UnifiedMessage) -> bool:
+    async def connect(self) -> bool:
         """
-        发送消息到 QClaw
+        建立与 QClaw 的连接
+
+        QClaw 使用 Webhook 模式，无需主动建立连接。
+        认证信息通过 authenticate() 方法设置。
+
+        返回:
+            bool: 连接是否成功（认证成功即为连接成功）
+        """
+        if not self.app_id or not self.app_secret:
+            logger.warning("QClaw connect: 未配置 app_id/app_secret")
+            return False
+        # QClaw 使用 Webhook 模式，连接即认证
+        result = self.authenticate()
+        if result:
+            self._connected = True
+        return result
+
+    async def disconnect(self):
+        """断开连接并清理资源"""
+        self._connected = False
+        self.access_token = ""
+        self.qclaw_service = None
+        logger.info("QClaw 适配器已断开连接")
+
+    async def send_message(
+        self,
+        chat_id: str,
+        content: str,
+        message_type: str = "text",
+        **kwargs,
+    ) -> Optional[str]:
+        """
+        发送消息到 QClaw（异步接口）
+
+        参数:
+            chat_id: 会话 ID
+            content: 消息内容
+            message_type: 消息类型 (text, image, file)
+            **kwargs: 额外参数
+
+        返回:
+            str: 消息ID，失败返回 None
+        """
+        if not self.qclaw_service:
+            logger.error("QClaw 服务未初始化")
+            return None
+
+        result = self.qclaw_service.send_message(
+            app_id=self.app_id,
+            app_secret=self.app_secret,
+            chat_id=chat_id,
+            content=content,
+            content_type=message_type,
+        )
+
+        if result["success"]:
+            return result.get("message_id")
+        else:
+            logger.error("消息发送失败: %s", result.get("error"))
+            return None
+
+    def send_message_sync(self, message: UnifiedMessage) -> bool:
+        """
+        发送消息到 QClaw（同步接口，兼容旧代码）
 
         参数:
             message: 统一消息对象
@@ -311,3 +376,24 @@ class QClawAdapter(ChannelAdapter):
             content_type=ContentType.SYSTEM,
             timestamp=datetime.now(),
         )
+
+
+def create_qclaw_adapter(
+    app_id: str,
+    app_secret: str,
+    use_stream: bool = True,
+    extra: Optional[Dict[str, Any]] = None,
+) -> QClawAdapter:
+    """创建 QClaw 适配器的工厂函数"""
+    config = ChannelConfig(
+        channel_type="qclaw",
+        app_id=app_id,
+        app_secret=app_secret,
+        use_stream=use_stream,
+        extra=extra or {},
+    )
+    adapter = QClawAdapter(config)
+    # 自动认证
+    if app_id and app_secret:
+        adapter.authenticate()
+    return adapter

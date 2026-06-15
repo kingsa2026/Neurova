@@ -327,6 +327,10 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
     app.include_router(acp_router, prefix="/api/acp", tags=["ACP"])
     app.include_router(evolution_router, prefix="/api/evolution", tags=["Evolution"])
     app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
+    
+    # 注册 NEURON 系统路由
+    from neurova.api.endpoints.neuron import router as neuron_router
+    app.include_router(neuron_router, prefix="/api/neuron", tags=["NEURON"])
 
     # 注册所有端点路由
     register_endpoint_routers(app)

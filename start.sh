@@ -19,14 +19,14 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 查找 Python 3.12+
+# 查找 Python 3.10+
 PYTHON_CMD=""
-for cmd in python3.12 python3 python; do
+for cmd in python3.10 python3 python; do
     if command -v "$cmd" &>/dev/null; then
         version=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
         major=$("$cmd" -c "import sys; print(sys.version_info.major)" 2>/dev/null)
         minor=$("$cmd" -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
-        if [ "$major" -ge 3 ] && [ "$minor" -ge 12 ] 2>/dev/null; then
+        if [ "$major" -ge 3 ] && [ "$minor" -ge 10 ] 2>/dev/null; then
             PYTHON_CMD="$cmd"
             break
         fi
@@ -36,15 +36,15 @@ done
 # 如果没找到合适的 Python，尝试使用 venv 中的
 if [ -z "$PYTHON_CMD" ] && [ -x ".venv/bin/python" ]; then
     version=$(".venv/bin/python" -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
-    if [ "$version" -ge 12 ] 2>/dev/null; then
+    if [ "$version" -ge 10 ] 2>/dev/null; then
         PYTHON_CMD=".venv/bin/python"
     fi
 fi
 
 if [ -z "$PYTHON_CMD" ]; then
     echo ""
-    echo "  ✗ 未找到 Python 3.12 或更高版本"
-    echo "  请安装 Python 3.12+ 后重试"
+    echo "  ✗ 未找到 Python 3.10 或更高版本"
+    echo "  请安装 Python 3.10+ 后重试"
     echo "  下载地址: https://www.python.org/downloads/"
     echo ""
     exit 1

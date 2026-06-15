@@ -6,7 +6,7 @@
       <!-- General -->
       <a-tab-pane key="general" :tab="t('settings.general')">
         <GlassCard :title="t('settings.generalSettings')">
-          <a-form layout="vertical" :model="general">
+          <a-form layout="vertical" :model="general" :rules="{ app_name: [{ required: true, message: t('common.required') }], language: [{ required: true, message: t('common.required') }] }">
             <a-form-item :label="t('settings.appName')">
               <a-input v-model:value="general.app_name" />
             </a-form-item>
@@ -30,7 +30,7 @@
       <!-- LLM -->
       <a-tab-pane key="llm" :tab="t('settings.llm')">
         <GlassCard :title="t('settings.llmSettings')">
-          <a-form layout="vertical" :model="llm">
+          <a-form layout="vertical" :model="llm" :rules="{ default_provider: [{ required: true, message: t('common.required') }], default_model: [{ required: true, message: t('common.required') }] }">
             <a-form-item :label="t('model.providers')">
               <a-select v-model:value="llm.default_provider" style="width: 100%">
                 <a-select-option v-for="p in providerOptions" :key="p" :value="p">{{ p }}</a-select-option>
@@ -55,7 +55,7 @@
       <!-- Security -->
       <a-tab-pane key="security" :tab="t('settings.security')">
         <GlassCard :title="t('settings.securitySettings')">
-          <a-form layout="vertical" :model="security">
+          <a-form layout="vertical" :model="security" :rules="{ jwt_secret: [{ required: true, message: t('common.required') }] }">
             <a-form-item :label="t('settings.jwtSecret')">
               <a-input-password v-model:value="security.jwt_secret" />
             </a-form-item>
@@ -78,7 +78,7 @@
       <!-- Storage -->
       <a-tab-pane key="storage" :tab="t('settings.storage')">
         <GlassCard :title="t('settings.storageSettings')">
-          <a-form layout="vertical" :model="storage">
+          <a-form layout="vertical" :model="storage" :rules="{ media_path: [{ required: true, message: t('common.required') }] }">
             <a-form-item :label="t('settings.mediaStoragePath')">
               <a-input v-model:value="storage.media_path" />
             </a-form-item>
@@ -101,7 +101,7 @@
       <!-- Advanced -->
       <a-tab-pane key="advanced" :tab="t('settings.advanced')">
         <GlassCard :title="t('settings.advancedSettings')">
-          <a-form layout="vertical" :model="advanced">
+          <a-form layout="vertical" :model="advanced" :rules="{ log_level: [{ required: true, message: t('common.required') }] }">
             <a-form-item :label="t('settings.debugMode')">
               <a-switch v-model:checked="advanced.debug_mode" />
             </a-form-item>
@@ -134,7 +134,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { getSettings, updateSettings, clearCache as clearCacheApi } from '@/api/modules/settings'
 import { useAppStore } from '@/stores/app'
 import { supportedLocales } from '@/i18n'
 import GlassCard from '@/components/GlassCard.vue'
@@ -164,14 +164,14 @@ const onThemeToggle = () => {
 
 const fetchSettings = async () => {
   try {
-    const res: any = await request.get('/settings')
-    const data = res?.data ?? res ?? {}
-    if (data.general) general.value = { ...general.value, ...data.general }
-    if (data.llm) llm.value = { ...llm.value, ...data.llm }
-    if (data.security) security.value = { ...security.value, ...data.security }
-    if (data.storage) storage.value = { ...storage.value, ...data.storage }
-    if (data.advanced) advanced.value = { ...advanced.value, ...data.advanced }
-    if (data.providers) providerOptions.value = data.providers
+    const res = await getSettings()
+    const data = res?.data
+    if (data?.general) general.value = { ...general.value, ...data.general }
+    if (data?.llm) llm.value = { ...llm.value, ...data.llm }
+    if (data?.security) security.value = { ...security.value, ...data.security }
+    if (data?.storage) storage.value = { ...storage.value, ...data.storage }
+    if (data?.advanced) advanced.value = { ...advanced.value, ...data.advanced }
+    if (data?.providers) providerOptions.value = data.providers
   } catch {
     message.error(t('common.error'))
   }
@@ -181,7 +181,7 @@ const saveSection = async (section: string) => {
   saving.value = true
   try {
     const sectionMap: Record<string, any> = { general: general.value, llm: llm.value, security: security.value, storage: storage.value, advanced: advanced.value }
-    await request.put('/settings', { section, data: sectionMap[section] })
+    await updateSettings(section, sectionMap[section])
 
     if (section === 'general' && general.value.language !== locale.value) {
       locale.value = general.value.language
@@ -199,7 +199,7 @@ const saveSection = async (section: string) => {
 const clearCache = async () => {
   clearingCache.value = true
   try {
-    await request.post('/settings/clear-cache')
+    await clearCacheApi()
     message.success(t('common.success'))
   } catch {
     message.error(t('common.error'))

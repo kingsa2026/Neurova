@@ -3,7 +3,7 @@
     <div class="page-header">
       <h2 class="page-title">{{ t('system.users') }}</h2>
       <div class="header-actions">
-        <GlassButton variant="ghost" size="sm" @click="backupUsers">{{ t('common.export') }}</GlassButton>
+        <GlassButton variant="ghost" size="sm" @click="doBackupUsers">{{ t('common.export') }}</GlassButton>
         <GlassButton variant="primary" size="sm" @click="showCreate = true">{{ t('common.create') }}</GlassButton>
       </div>
     </div>
@@ -45,7 +45,7 @@
             <div class="action-btns">
               <GlassButton variant="ghost" size="sm" @click="editUser(record)">{{ t('common.edit') }}</GlassButton>
               <GlassButton variant="ghost" size="sm" @click="changePassword(record)">{{ t('user.changePassword') }}</GlassButton>
-              <GlassButton variant="danger" size="sm" @click="deleteUser(record.id)">{{ t('common.delete') }}</GlassButton>
+              <GlassButton variant="danger" size="sm" @click="doDeleteUser(record.id)">{{ t('common.delete') }}</GlassButton>
             </div>
           </template>
         </template>
@@ -94,7 +94,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { enhancedUsersApi } from '@/api/modules'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
@@ -103,14 +103,14 @@ const { t } = useI18n()
 
 const loading = ref(false)
 const saving = ref(false)
-const users = ref<any[]>([])
+const users = ref<enhancedUsersApi.User[]>([])
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const searchQuery = ref('')
 const showCreate = ref(false)
 const showPasswordModal = ref(false)
-const editingUser = ref<any>(null)
+const editingUser = ref<enhancedUsersApi.User | null>(null)
 const selectedUserId = ref<string>('')
 const newPassword = ref('')
 const confirmPassword = ref('')
@@ -129,12 +129,11 @@ const columns = computed(() => [
 const fetchUsers = async () => {
   loading.value = true
   try {
-    const params: any = { page: page.value, page_size: pageSize.value }
+    const params: enhancedUsersApi.UserListParams = { page: page.value, page_size: pageSize.value }
     if (searchQuery.value) params.search = searchQuery.value
-    const res: any = await request.get('/enhanced-users', { params })
-    const data = res?.data ?? res ?? {}
-    users.value = data.items ?? data.users ?? (Array.isArray(data) ? data : [])
-    total.value = data.total ?? users.value.length
+    const res = await enhancedUsersApi.listUsers(params)
+    users.value = res?.items ?? res?.users ?? (Array.isArray(res) ? res : [])
+    total.value = res?.total ?? users.value.length
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -146,9 +145,9 @@ const saveUser = async () => {
   saving.value = true
   try {
     if (editingUser.value) {
-      await request.put(`/enhanced-users/${editingUser.value.id}`, { email: userForm.value.email, role: userForm.value.role, active: userForm.value.active })
+      await enhancedUsersApi.updateUser(editingUser.value.id, { email: userForm.value.email, role: userForm.value.role, active: userForm.value.active })
     } else {
-      await request.post('/enhanced-users', userForm.value)
+      await enhancedUsersApi.createUser(userForm.value)
     }
     message.success(t('common.success'))
     showCreate.value = false
@@ -162,13 +161,13 @@ const saveUser = async () => {
   }
 }
 
-const editUser = (user: any) => {
+const editUser = (user: enhancedUsersApi.User) => {
   editingUser.value = user
-  userForm.value = { username: user.username, email: user.email, password: '', role: user.role, active: user.active }
+  userForm.value = { username: user.username, email: user.email ?? '', password: '', role: user.role ?? 'user', active: user.active ?? true }
   showCreate.value = true
 }
 
-const changePassword = (user: any) => {
+const changePassword = (user: enhancedUsersApi.User) => {
   selectedUserId.value = user.id
   newPassword.value = ''
   confirmPassword.value = ''
@@ -182,7 +181,7 @@ const savePassword = async () => {
   }
   saving.value = true
   try {
-    await request.put(`/enhanced-users/${selectedUserId.value}/password`, { password: newPassword.value })
+    await enhancedUsersApi.updatePassword(selectedUserId.value, { password: newPassword.value })
     message.success(t('common.success'))
     showPasswordModal.value = false
   } catch {
@@ -192,13 +191,13 @@ const savePassword = async () => {
   }
 }
 
-const deleteUser = (id: string) => {
+const doDeleteUser = (id: string) => {
   Modal.confirm({
     title: t('common.confirm'),
     content: t('agent.deleteConfirm'),
     onOk: async () => {
       try {
-        await request.delete(`/enhanced-users/${id}`)
+        await enhancedUsersApi.deleteUser(id)
         message.success(t('common.success'))
         await fetchUsers()
       } catch {
@@ -208,9 +207,9 @@ const deleteUser = (id: string) => {
   })
 }
 
-const backupUsers = async () => {
+const doBackupUsers = async () => {
   try {
-    const res: any = await request.get('/enhanced-users/backup', { responseType: 'blob' })
+    const res = await enhancedUsersApi.backupUsers()
     const blob = new Blob([res], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

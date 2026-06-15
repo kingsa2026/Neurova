@@ -9,30 +9,50 @@
         <span v-if="!appStore.sidebarCollapsed" class="nr-brand-text">Neurova</span>
       </template>
 
+      <!-- Agent Switcher -->
+      <AgentSwitcher
+        :collapsed="appStore.sidebarCollapsed"
+      />
+
       <!-- Home -->
       <GlassNavItem to="/dashboard" :label="t('nav.dashboard')" :collapsed="appStore.sidebarCollapsed">
         <template #icon><DashboardOutlined /></template>
       </GlassNavItem>
-
-      <!-- Agent Section -->
-      <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.agents') }}</div>
+      <GlassNavItem to="/chat" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><MessageOutlined /></template>
+      </GlassNavItem>
       <GlassNavItem to="/agents" :label="t('nav.agents')" :collapsed="appStore.sidebarCollapsed" active-path="/agents">
         <template #icon><RobotOutlined /></template>
       </GlassNavItem>
+      <GlassNavItem to="/channels" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><GlobalOutlined /></template>
+      </GlassNavItem>
 
-      <!-- Agent-scoped menu (only show when agent selected) -->
+      <!-- ==================== Agent-scoped (when agent selected) ==================== -->
       <template v-if="agentStore.currentAgent">
+        <!-- Agent: Core -->
+        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.agentCore') }}</div>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/chat`" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><MessageOutlined /></template>
         </GlassNavItem>
-
-        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.memory') }}</div>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/memory`" :label="t('nav.memory')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><DatabaseOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/memory/settings" :label="t('nav.memorySettings')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><ControlOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/memory/search-settings" :label="t('nav.searchSettings')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><ExperimentOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/experience-knowledge`" :label="t('nav.experience')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><BulbOutlined /></template>
         </GlassNavItem>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/knowledge-graph`" :label="t('nav.knowledgeGraph')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><ShareAltOutlined /></template>
         </GlassNavItem>
+
+        <!-- Agent: Cognition -->
+        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.agentCognition') }}</div>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/metacognition`" :label="t('nav.metacognition')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><ExperimentOutlined /></template>
         </GlassNavItem>
@@ -45,108 +65,55 @@
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/emotion`" :label="t('nav.emotion')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><HeartOutlined /></template>
         </GlassNavItem>
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/personality`" :label="t('nav.personality')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><SmileOutlined /></template>
+        </GlassNavItem>
 
-        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.skills') }}</div>
+        <!-- Agent: Capabilities -->
+        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.agentCapabilities') }}</div>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/skills`" :label="t('nav.skills')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><ThunderboltOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/rules`" :label="t('nav.rules')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><SafetyOutlined /></template>
         </GlassNavItem>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/files`" :label="t('nav.files')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><FileOutlined /></template>
         </GlassNavItem>
-
-        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.channels') }}</div>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/channel`" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><ApiOutlined /></template>
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/media`" :label="t('nav.media')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><PlayCircleOutlined /></template>
         </GlassNavItem>
+
+        <!-- Agent: Runtime -->
+        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.agentRuntime') }}</div>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/scheduler`" :label="t('nav.scheduler')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><ClockCircleOutlined /></template>
         </GlassNavItem>
-
-        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('system.settings') }}</div>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/sleep/status`" :label="t('nav.sleep')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><CoffeeOutlined /></template>
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/channel`" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><ApiOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/channel-sharing`" :label="t('nav.channelSharing')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><LinkOutlined /></template>
         </GlassNavItem>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/firewall`" :label="t('nav.firewall')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><SafetyOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/trace`" :label="t('nav.trace')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><CodeOutlined /></template>
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/sleep/status`" :label="t('nav.sleep')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><CoffeeOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/sleep/settings`" :label="t('nav.sleepsettings')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><CoffeeOutlined /></template>
         </GlassNavItem>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/computer`" :label="t('nav.computer')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><DesktopOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/media`" :label="t('nav.media')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><PlayCircleOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/personality`" :label="t('nav.personality')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><SmileOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/rules`" :label="t('nav.rules')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><SafetyOutlined /></template>
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/trace`" :label="t('nav.trace')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><CodeOutlined /></template>
         </GlassNavItem>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/trajectory`" :label="t('nav.trajectory')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><FileTextOutlined /></template>
         </GlassNavItem>
       </template>
-
-      <!-- Global Navigation -->
-      <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.knowledge') }}</div>
-      <GlassNavItem to="/knowledge" :label="t('nav.knowledge')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><BookOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/skill-pool" :label="t('nav.skillPool')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><AppstoreOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/workflows" :label="t('nav.workflows')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><NodeIndexOutlined /></template>
-      </GlassNavItem>
-
-      <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.system') }}</div>
-      <GlassNavItem to="/models" :label="t('nav.models')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><CloudServerOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/tool-layers" :label="t('nav.toolLayers')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><ToolOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/analytics" :label="t('nav.analytics')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><BarChartOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/monitor" :label="t('nav.monitor')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><MonitorOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/settings" :label="t('nav.settings')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><SettingOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/stats" :label="t('nav.stats')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><PieChartOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/logs" :label="t('nav.logs')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><FileTextOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/health" :label="t('nav.health')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><HeartOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/audit" :label="t('nav.audit')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><HistoryOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/benchmark" :label="t('nav.benchmark')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><DashboardOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/sandbox" :label="t('nav.sandbox')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><CodeOutlined /></template>
-      </GlassNavItem>
-
-      <!-- User Management Section -->
-      <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.users') }}</div>
-      <GlassNavItem to="/groups" :label="t('nav.groups')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><TeamOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/enhanced-users" :label="t('nav.enhancedusers')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><UserOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/notifications" :label="t('nav.notifications')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><BellOutlined /></template>
-      </GlassNavItem>
 
       <!-- Footer -->
       <template #footer>
@@ -178,6 +145,8 @@
             </a-breadcrumb-item>
           </a-breadcrumb>
         </div>
+        <!-- Global navigation moved to top bar -->
+        <TopNavMenu />
         <div class="nr-header-right">
           <!-- Theme toggle -->
           <button class="nr-header-action" @click="appStore.toggleTheme" :title="appStore.isDark ? t('theme.light') : t('theme.dark')">
@@ -232,6 +201,7 @@ import StarBackground from '@/components/StarBackground.vue'
 import GlassNav from '@/components/GlassNav.vue'
 import GlassNavItem from '@/components/GlassNavItem.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import AgentSwitcher from '@/components/AgentSwitcher.vue'
 import {
   DashboardOutlined, RobotOutlined, MessageOutlined, DatabaseOutlined,
   ShareAltOutlined, ExperimentOutlined, BulbOutlined, RiseOutlined,
@@ -243,6 +213,8 @@ import {
   BgColorsOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   CoffeeOutlined, PieChartOutlined, FileTextOutlined, HistoryOutlined,
   TeamOutlined, UserOutlined, PlayCircleOutlined, SmileOutlined,
+  RocketOutlined, BranchesOutlined, ControlOutlined, LinkOutlined,
+  ProjectOutlined, AlertOutlined, ShopOutlined,
 } from '@ant-design/icons-vue'
 
 const router = useRouter()

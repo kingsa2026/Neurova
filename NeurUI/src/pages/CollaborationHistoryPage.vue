@@ -57,7 +57,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { listHistory } from '@/api/modules/collaboration'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 
@@ -91,7 +91,7 @@ const filteredSessions = computed(() =>
 async function fetchHistory() {
   loading.value = true
   try {
-    const res = await request.get('/collaboration/history') as unknown as Session[]
+    const res = await listHistory() as unknown as Session[]
     sessions.value = res ?? []
   } catch {
     sessions.value = []

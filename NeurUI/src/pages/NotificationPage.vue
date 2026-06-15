@@ -33,9 +33,11 @@
                 <GlassButton v-if="!notif.read" variant="ghost" size="sm" @click="markRead(notif.id)">
                   Mark Read
                 </GlassButton>
-                <GlassButton variant="ghost" size="sm" @click="deleteNotif(notif.id)">
-                  {{ t('common.delete') }}
-                </GlassButton>
+                <a-popconfirm :title="t('common.confirm') + '?'" @confirm="deleteNotif(notif.id)">
+                  <GlassButton variant="ghost" size="sm">
+                    {{ t('common.delete') }}
+                  </GlassButton>
+                </a-popconfirm>
               </div>
             </div>
           </div>

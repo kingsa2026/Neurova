@@ -18,8 +18,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# E-1: 正确检查 numpy 是否可用
 try:
-    pass
+    import numpy as np
 
     HAS_NUMPY = True
 except ImportError:
@@ -98,6 +99,11 @@ class EKICognitiveOptimizer:
             ensemble_size: 集合大小（粒子数）
             learning_rate: 学习率
         """
+        # E-2: 校验 ensemble_size
+        if not isinstance(ensemble_size, int) or ensemble_size <= 0:
+            raise ValueError(f"ensemble_size must be a positive integer, got {ensemble_size}")
+        if not isinstance(learning_rate, (int, float)) or learning_rate <= 0:
+            raise ValueError(f"learning_rate must be a positive number, got {learning_rate}")
         self._ensemble_size = ensemble_size
         self._learning_rate = learning_rate
         self._lock = threading.RLock()
@@ -306,6 +312,28 @@ class EKICognitiveOptimizer:
                 # 更新参数
                 particle["importance_weight"] += self._learning_rate * kalman_gain * innovation
                 particle["importance_weight"] = max(0.01, min(1.0, particle["importance_weight"]))
+
+            # E-4: 粒子多样性监测 — 防止 ensemble collapse
+            self._check_and_restore_diversity()
+
+    def _check_and_restore_diversity(self):
+        """E-4: 检查粒子多样性,方差过低时加抖动防止 ensemble collapse"""
+        if len(self._ensemble) < 2:
+            return
+
+        weights = [p["importance_weight"] for p in self._ensemble]
+        mean_w = sum(weights) / len(weights)
+        variance = sum((w - mean_w) ** 2 for w in weights) / len(weights)
+
+        # 多样性阈值: 方差低于 0.001 视为塌缩
+        if variance < 0.001:
+            logger.warning("EKI ensemble collapse detected (variance=%.6f), adding jitter", variance)
+            import random
+
+            for i, particle in enumerate(self._ensemble):
+                jitter = random.uniform(-0.05, 0.05)
+                particle["importance_weight"] = max(0.01, min(1.0, mean_w + jitter))
+                particle["novelty_bonus"] = max(0.01, min(0.5, particle["novelty_bonus"] + jitter * 0.5))
 
     def recommend_reinforcement(self, score: float, information_gain: float) -> ReinforcementAction:
         """

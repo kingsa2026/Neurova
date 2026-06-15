@@ -44,10 +44,12 @@
       <a-tab-pane key="rules" :tab="t('system.rules')">
         <a-spin :spinning="loading">
           <a-table
+            v-if="rules.length > 0"
             :columns="ruleColumns"
             :data-source="rules"
             row-key="id"
             :pagination="{ pageSize: 20 }"
+            :locale="{ emptyText: '' }"
             size="small"
           >
             <template #bodyCell="{ column, record }">
@@ -71,13 +73,14 @@
               </template>
             </template>
           </a-table>
+          <a-empty v-else :description="t('common.noData')" />
         </a-spin>
       </a-tab-pane>
 
       <!-- Blocked requests log -->
       <a-tab-pane key="blocked" :tab="t('firewall.blockedRequests')">
         <a-spin :spinning="loadingBlocked">
-          <a-table :columns="blockedColumns" :data-source="blockedLogs" row-key="id" :pagination="{ pageSize: 20 }" size="small">
+          <a-table v-if="blockedLogs.length > 0" :columns="blockedColumns" :data-source="blockedLogs" row-key="id" :pagination="{ pageSize: 20 }" :locale="{ emptyText: '' }" size="small">
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'timestamp'">
                 <span class="mono">{{ formatTime(record.timestamp) }}</span>
@@ -90,13 +93,14 @@
               </template>
             </template>
           </a-table>
+          <a-empty v-else :description="t('common.noData')" />
         </a-spin>
       </a-tab-pane>
     </a-tabs>
 
     <!-- Create/Edit rule modal -->
     <a-modal v-model:open="showForm" :title="editingRule ? t('common.edit') : t('common.create')" @ok="saveRule" :confirm-loading="saving">
-      <a-form layout="vertical" :model="ruleForm">
+      <a-form layout="vertical" :model="ruleForm" :rules="{ name: [{ required: true, message: t('common.required') }], pattern: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="ruleForm.name" />
         </a-form-item>

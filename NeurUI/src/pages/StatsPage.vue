@@ -2,7 +2,7 @@
   <div class="stats-page">
     <div class="page-header">
       <h2 class="page-title">{{ t('system.stats') }}</h2>
-      <GlassButton variant="secondary" size="sm" :loading="exporting" @click="exportStats">{{ t('common.export') }}</GlassButton>
+      <GlassButton variant="secondary" size="sm" :loading="exporting" @click="doExportStats">{{ t('common.export') }}</GlassButton>
     </div>
 
     <!-- Overview stat cards -->
@@ -56,7 +56,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { statsApi } from '@/api/modules'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -67,10 +67,10 @@ const { t } = useI18n()
 const loading = ref(false)
 const exporting = ref(false)
 const overview = ref<Record<string, any>>({})
-const agentStats = ref<any[]>([])
-const trends = ref<any[]>([])
+const agentStats = ref<statsApi.AgentStats[]>([])
+const trends = ref<statsApi.TrendPoint[]>([])
 
-const maxTrend = computed(() => Math.max(...trends.value.map((p: any) => p.value || 0), 1))
+const maxTrend = computed(() => Math.max(...trends.value.map((p) => p.value || 0), 1))
 
 const agentColumns = computed(() => [
   { title: t('common.name'), key: 'name', dataIndex: 'name' },
@@ -84,16 +84,15 @@ const agentColumns = computed(() => [
 const fetchStats = async () => {
   loading.value = true
   try {
-    const [overviewRes, agentsRes]: any[] = await Promise.all([
-      request.get('/stats'),
-      request.get('/stats/agents'),
+    const [overviewRes, agentsRes] = await Promise.all([
+      statsApi.getSystemStats(),
+      statsApi.getAgentStats(),
     ])
-    const ov = overviewRes?.data ?? overviewRes ?? {}
+    const ov = overviewRes ?? {}
     overview.value = ov.overview ?? ov
     trends.value = ov.trends ?? ov.timeline ?? []
 
-    const ag = agentsRes?.data ?? agentsRes ?? []
-    agentStats.value = Array.isArray(ag) ? ag : ag.agents ?? []
+    agentStats.value = Array.isArray(agentsRes) ? agentsRes : []
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -101,10 +100,10 @@ const fetchStats = async () => {
   }
 }
 
-const exportStats = async () => {
+const doExportStats = async () => {
   exporting.value = true
   try {
-    const res: any = await request.get('/stats/export', { responseType: 'blob' })
+    const res = await statsApi.exportStats()
     const blob = new Blob([res], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

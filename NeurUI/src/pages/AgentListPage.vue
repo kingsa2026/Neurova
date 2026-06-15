@@ -37,7 +37,7 @@
       <!-- Card view -->
       <div v-else-if="viewMode === 'card'" class="card-grid">
         <GlassCard
-          v-for="agent in filteredAgents"
+          v-for="agent in pagedFilteredAgents"
           :key="agent.id"
           :title="agent.name"
           :subtitle="agent.description || ''"
@@ -77,6 +77,7 @@
             </div>
           </template>
         </GlassCard>
+        <a-pagination v-if="filteredAgents.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="filteredAgents.length" size="small" style="margin-top: 16px; text-align: center" />
       </div>
 
       <!-- Table view -->
@@ -137,6 +138,8 @@ const agentStore = useAgentStore()
 
 const searchQuery = ref('')
 const viewMode = ref<'card' | 'table'>('card')
+const currentPage = ref(1)
+const pageSize = ref(12)
 
 const viewOptions = computed(() => [
   { label: t('common.viewCard'), value: 'card' },
@@ -161,6 +164,10 @@ const filteredAgents = computed(() => {
       a.model?.toLowerCase().includes(q),
   )
 })
+
+const pagedFilteredAgents = computed(() =>
+  filteredAgents.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
+)
 
 const statusColor = (status: string) => {
   const map: Record<string, string> = {

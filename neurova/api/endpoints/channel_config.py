@@ -24,9 +24,18 @@ from pydantic import BaseModel, Field
 
 from neurova.channels.base import ChannelConfig
 from neurova.channels.dingtalk import create_dingtalk_adapter
+from neurova.channels.discord import create_discord_adapter
 from neurova.channels.feishu import create_feishu_adapter
 from neurova.channels.manager import get_channel_manager
+from neurova.channels.mqtt import create_mqtt_adapter
+from neurova.channels.qq import create_qq_adapter
+from neurova.channels.qqbot import create_qqbot_adapter
+from neurova.channels.qclaw import create_qclaw_adapter
+from neurova.channels.sip import create_sip_adapter
+from neurova.channels.telegram import create_telegram_adapter
+from neurova.channels.wechat import create_wechat_adapter
 from neurova.channels.wecom import create_wecom_adapter
+from neurova.channels.xiaoyi import create_xiaoyi_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +184,8 @@ async def create_or_update_config(request: ChannelConfigRequest):
 
     adapter = _create_adapter(request.channel_type, channel_config)
     manager = get_channel_manager()
-    manager.register_adapter(adapter)
+    if adapter is not None:
+        manager.register_adapter(adapter)
 
     return {
         "success": True,
@@ -222,6 +232,12 @@ async def test_connection(channel_type: str, request: ChannelConfigRequest):
 
     adapter = _create_adapter(channel_type, channel_config)
 
+    if adapter is None:
+        return ChannelTestResult(
+            success=False,
+            message=f"Channel type '{channel_type}' does not have a registered adapter factory yet. Config saved successfully.",
+        )
+
     try:
         success = await adapter.connect()
         if success:
@@ -247,6 +263,9 @@ async def test_connection(channel_type: str, request: ChannelConfigRequest):
 
 def _create_adapter(channel_type: str, config: ChannelConfig):
     """根据类型创建适配器"""
+    extra = config.extra or {}
+
+    # --- Gen 1: formal ChannelConfig-based adapters ---
     if channel_type == "feishu":
         return create_feishu_adapter(
             app_id=config.app_id,
@@ -255,25 +274,123 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
             encrypt_key=config.encrypt_key,
             verification_token=config.verification_token,
             webhook_url=config.webhook_url,
-            extra=config.extra,
+            extra=extra,
         )
     elif channel_type == "dingtalk":
         return create_dingtalk_adapter(
             app_id=config.app_id,
             app_secret=config.app_secret,
             use_stream=config.use_stream,
-            extra=config.extra,
+            extra=extra,
         )
     elif channel_type == "wecom":
         return create_wecom_adapter(
             corpid=config.app_id,
             app_secret=config.app_secret,
-            agentid=config.extra.get("agentid", ""),
+            agentid=extra.get("agentid", ""),
             use_stream=config.use_stream,
             callback_token=config.webhook_token,
             encoding_aes_key=config.encrypt_key,
             webhook_url=config.webhook_url,
-            extra=config.extra,
+            extra=extra,
         )
+
+    # --- Gen 2: config-dict-based adapters ---
+    elif channel_type == "xiaoyi":
+        try:
+            return create_xiaoyi_adapter(
+                access_key=extra.get("access_key", ""),
+                secret_key=extra.get("secret_key", ""),
+                agent_id=extra.get("agent_id", ""),
+            )
+        except Exception as e:
+            logger.warning("Failed to create xiaoyi adapter: %s", e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+    elif channel_type == "discord":
+        try:
+            return create_discord_adapter(bot_token=extra.get("bot_token", ""))
+        except Exception as e:
+            logger.warning("Failed to create discord adapter: %s", e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+    elif channel_type == "telegram":
+        try:
+            return create_telegram_adapter(bot_token=extra.get("bot_token", ""))
+        except Exception as e:
+            logger.warning("Failed to create telegram adapter: %s", e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+    elif channel_type == "qq":
+        try:
+            return create_qq_adapter(
+                app_id=config.app_id or extra.get("app_id", ""),
+                token=extra.get("token", ""),
+                secret=config.app_secret or extra.get("client_secret", ""),
+            )
+        except Exception as e:
+            logger.warning("Failed to create qq adapter: %s", e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+    elif channel_type == "qqbot":
+        try:
+            return create_qqbot_adapter(
+                access_token=extra.get("access_token", ""),
+                http_url=extra.get("http_api_url", "http://127.0.0.1:3000"),
+            )
+        except Exception as e:
+            logger.warning("Failed to create qqbot adapter: %s", e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+    elif channel_type == "wechat":
+        try:
+            return create_wechat_adapter(
+                corpid=config.app_id,
+                corpsecret=config.app_secret,
+                agentid=extra.get("agentid", ""),
+                mode=extra.get("mode", "ilink"),
+                **extra,
+            )
+        except Exception as e:
+            logger.warning("Failed to create wechat adapter: %s", e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+    elif channel_type == "sip":
+        try:
+            return create_sip_adapter(
+                username=extra.get("sip_username", ""),
+                password=extra.get("sip_password", ""),
+                mode=extra.get("sip_mode", "dev"),
+            )
+        except Exception as e:
+            logger.warning("Failed to create sip adapter: %s", e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+    elif channel_type == "mqtt":
+        try:
+            return create_mqtt_adapter(
+                host=extra.get("host", "127.0.0.1"),
+                port=extra.get("port", 1883),
+                username=extra.get("username", ""),
+                password=extra.get("password", ""),
+            )
+        except Exception as e:
+            logger.warning("Failed to create mqtt adapter: %s", e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+    elif channel_type == "qclaw":
+        try:
+            return create_qclaw_adapter(
+                app_id=config.app_id,
+                app_secret=config.app_secret,
+            )
+        except Exception as e:
+            logger.warning("Failed to create qclaw adapter: %s", e)
+            raise HTTPException(status_code=400, detail=str(e))
+
     else:
-        raise HTTPException(status_code=400, detail=f"Unsupported channel type: {channel_type}")
+        # For channel types without a dedicated factory (yuanbao, matrix, mattermost, etc.),
+        # persist the config but skip adapter creation — the adapter can be registered
+        # manually or via a future factory implementation.
+        logger.warning("No adapter factory for channel type '%s', config saved only", channel_type)
+        return None

@@ -10,7 +10,7 @@
       <a-empty v-if="!loading && rules.length === 0" :description="t('common.noData')" />
       <div v-else class="rule-list">
         <GlassCard
-          v-for="rule in rules"
+          v-for="rule in pagedRules"
           :key="rule.id"
           :title="rule.name"
           variant="default"
@@ -33,11 +33,12 @@
           </div>
         </GlassCard>
       </div>
+      <a-pagination v-if="rules.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="rules.length" size="small" style="margin-top: 16px; text-align: center" />
     </a-spin>
 
     <!-- Create/Edit modal -->
     <a-modal v-model:open="showModal" :title="editingId ? t('common.edit') : t('common.create')" @ok="handleSave" :confirm-loading="saving" width="560px">
-      <a-form layout="vertical">
+      <a-form layout="vertical" :rules="{ name: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="form.name" :placeholder="t('common.name')" />
         </a-form-item>
@@ -86,32 +87,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import {
+  listRules, createRule, updateRule, deleteRule, toggleRule, testRule, getRuleLogs,
+  type Rule, type ExecutionLog,
+} from '@/api/modules/rules'
 
 const { t } = useI18n()
-
-interface Rule {
-  id: string
-  name: string
-  condition: string
-  action: string
-  active: boolean
-  executionCount?: number
-  priority?: string
-  description?: string
-}
-
-interface ExecutionLog {
-  id: string
-  ruleId: string
-  timestamp: string
-  success: boolean
-  detail?: string
-}
 
 const rules = ref<Rule[]>([])
 const loading = ref(false)
@@ -121,6 +107,8 @@ const saving = ref(false)
 const editingId = ref<string | null>(null)
 const testingId = ref<string | null>(null)
 const executionLogs = ref<ExecutionLog[]>([])
+const currentPage = ref(1)
+const pageSize = ref(12)
 
 const logColumns = [
   { title: t('common.createdAt'), dataIndex: 'timestamp', key: 'timestamp' },
@@ -129,6 +117,10 @@ const logColumns = [
 ]
 
 const form = reactive({ name: '', condition: '', action: '', priority: 'medium', description: '' })
+
+const pagedRules = computed(() =>
+  rules.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
+)
 
 function resetForm() {
   form.name = ''
@@ -153,52 +145,51 @@ function openEdit(rule: Rule) {
 async function fetchRules() {
   loading.value = true
   try {
-    const res = await request.get('/rules') as unknown as Rule[]
+    const res = await listRules()
     rules.value = res ?? []
-  } catch { rules.value = [] } finally { loading.value = false }
+  } catch { message.error(t('common.error')) } finally { loading.value = false }
 }
 
 async function handleSave() {
-  if (!form.name) return
   saving.value = true
   try {
     if (editingId.value) {
-      await request.put(`/rules/${editingId.value}`, { ...form })
+      await updateRule(editingId.value, { ...form })
     } else {
-      await request.post('/rules', { ...form })
+      await createRule({ ...form })
     }
     showModal.value = false
     resetForm()
     await fetchRules()
-  } catch { /* handled */ } finally { saving.value = false }
+  } catch { message.error(t('common.error')) } finally { saving.value = false }
 }
 
 async function handleToggle(id: string) {
   try {
-    await request.put(`/rules/${id}/toggle`)
+    await toggleRule(id)
     await fetchRules()
-  } catch { /* handled */ }
+  } catch { message.error(t('common.error')) }
 }
 
 async function handleTest(id: string) {
   testingId.value = id
   try {
-    await request.post(`/rules/${id}/test`)
-  } catch { /* handled */ } finally { testingId.value = null }
+    await testRule(id)
+  } catch { message.error(t('common.error')) } finally { testingId.value = null }
 }
 
 async function handleDelete(id: string) {
   try {
-    await request.delete(`/rules/${id}`)
+    await deleteRule(id)
     await fetchRules()
-  } catch { /* handled */ }
+  } catch { message.error(t('common.error')) }
 }
 
 async function handleViewLogs(rule: Rule) {
   try {
-    const res = await request.get(`/rules/${rule.id}/logs`) as unknown as ExecutionLog[]
+    const res = await getRuleLogs(rule.id)
     executionLogs.value = res ?? []
-  } catch { executionLogs.value = [] }
+  } catch { message.error(t('common.error')) }
   showLogs.value = true
 }
 

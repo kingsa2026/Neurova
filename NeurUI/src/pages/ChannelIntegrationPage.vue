@@ -31,6 +31,7 @@
     </div>
 
     <!-- Channel Grid -->
+    <a-spin :spinning="loadingConfigs">
     <div v-if="filteredChannels.length > 0" class="nr-ci-grid">
       <GlassCard
         v-for="ch in filteredChannels"
@@ -75,6 +76,7 @@
       </GlassCard>
     </div>
     <a-empty v-else :description="t('channel.noChannels')" />
+    </a-spin>
 
     <!-- Toast notification -->
     <Teleport to="body">
@@ -196,7 +198,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { message } from 'ant-design-vue'
+import { listChannelConfigs, createChannelConfig, testChannelConfig } from '@/api/modules/channel-configs'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
@@ -382,6 +385,7 @@ const showConfigModal = ref(false)
 const currentChannel = ref<ChannelItem | null>(null)
 const configForm = reactive<Record<string, any>>({})
 const saving = ref(false)
+const loadingConfigs = ref(false)
 const testingChannel = ref<string | null>(null)
 const toastMessage = ref('')
 
@@ -417,8 +421,9 @@ function toggleChannel(ch: ChannelItem) {
 }
 
 async function loadConfigs() {
+  loadingConfigs.value = true
   try {
-    const data: any = await request.get('/channel-configs')
+    const data: any = await listChannelConfigs()
     if (Array.isArray(data)) {
       data.forEach((cfg: any) => {
         const ch = channels.value.find((c) => c.backendType === cfg.channel_type)
@@ -429,7 +434,9 @@ async function loadConfigs() {
       })
     }
   } catch (e) {
-    console.warn('Failed to load channel configs:', e)
+    message.error(t('common.error'))
+  } finally {
+    loadingConfigs.value = false
   }
 }
 
@@ -459,7 +466,7 @@ async function saveConfig() {
       extra,
     }
 
-    await request.post('/channel-configs', payload)
+    await createChannelConfig(payload as any)
 
     ch.enabled = payload.enabled
     showToast(t('channel.configSaved'))
@@ -487,7 +494,7 @@ async function testChannel(ch: ChannelItem) {
       verification_token: '',
       extra: {},
     }
-    const result: any = await request.post(`/channel-configs/${ch.backendType}/test`, payload)
+    const result: any = await testChannelConfig(ch.backendType, payload as any)
     showToast(result?.success ? t('channel.testSuccess') : t('channel.testFailed'))
   } catch (e: any) {
     showToast(t('channel.testFailed'))

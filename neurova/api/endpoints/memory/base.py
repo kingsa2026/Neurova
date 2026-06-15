@@ -19,7 +19,7 @@ from neurova.interfaces.api_standard import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/memories", tags=["记忆管理"])
+router = APIRouter(tags=["记忆管理"])
 
 # ============================================================
 # 辅助函数

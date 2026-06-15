@@ -222,6 +222,28 @@ class PostChatPipeline:
         # 降级到agent_ref
         return getattr(self._agent, name, None)
 
+    async def _safe_step(self, step_name: str, coro, default=None):
+        """P-1: 安全执行单个步骤,异常只记录不传播"""
+        try:
+            return await coro
+        except Exception as e:
+            logger.error("Step '%s' failed: %s", step_name, e, exc_info=True)
+            self._step_results.append(
+                StepResult(step_name=step_name, status=StepStatus.FAILED, message=str(e))
+            )
+            return default
+
+    def _safe_step_sync(self, step_name: str, func, default=None):
+        """P-1: 安全执行同步步骤,异常只记录不传播"""
+        try:
+            return func()
+        except Exception as e:
+            logger.error("Step '%s' failed: %s", step_name, e, exc_info=True)
+            self._step_results.append(
+                StepResult(step_name=step_name, status=StepStatus.FAILED, message=str(e))
+            )
+            return default
+
     async def process(
         self,
         user_input: str,
@@ -246,47 +268,66 @@ class PostChatPipeline:
         # 清空步骤结果
         self._step_results.clear()
 
+        # P-1: 每个步骤用 _safe_step 包裹,异常只记录不传播
         # 步骤 6: 保存到 session 文件
-        actual_session_id = await self._step_save_session(user_input, reply, session_id, save_memory, metadata)
+        actual_session_id = await self._safe_step(
+            "save_session",
+            self._step_save_session(user_input, reply, session_id, save_memory, metadata),
+            default=session_id or "",
+        )
 
         # 步骤 6.5: 保存对话记忆到数据库
-        await self._step_save_memory(user_input, reply, actual_session_id)
+        await self._safe_step("save_memory", self._step_save_memory(user_input, reply, actual_session_id))
 
         # 步骤 6.6: 更新记忆温度（批量衰减）
-        self._step_update_memory_temperature()
+        self._safe_step_sync("update_memory_temperature", self._step_update_memory_temperature)
 
         # 步骤 7: TTS 语音生成
-        audio_path, audio_data = await self._step_generate_tts(reply, actual_session_id, enable_tts)
+        tts_result = await self._safe_step(
+            "generate_tts",
+            self._step_generate_tts(reply, actual_session_id, enable_tts),
+            default=(None, None),
+        )
+        audio_path, audio_data = tts_result if tts_result else (None, None)
 
         # 步骤 8: 认知能力分析
-        cognitive_score = await self._step_cognitive_analysis(user_input)
+        cognitive_score = await self._safe_step(
+            "cognitive_analysis", self._step_cognitive_analysis(user_input), default=0.0
+        )
 
         # 步骤 8.5: 反思日志生成
-        await self._step_reflection(user_input, reply)
+        await self._safe_step("reflection", self._step_reflection(user_input, reply))
 
         # 步骤 9: 经验记录
-        await self._step_record_experience(user_input, reply, save_memory)
+        await self._safe_step("record_experience", self._step_record_experience(user_input, reply, save_memory))
 
-        # 步骤 9.05: 记录工作流执行经验（Agent-Neurflow 集成）
-        await self._step_record_workflow_experience(user_input, reply, actual_session_id)
+        # 步骤 9.05: 记录工作流执行经验
+        await self._safe_step(
+            "record_workflow_experience",
+            self._step_record_workflow_experience(user_input, reply, actual_session_id),
+        )
 
-        # 步骤 9.1: Evocate 生成（从对话中提取结构化推理记忆）
-        await self._step_evocate_generation(user_input, reply, actual_session_id)
+        # 步骤 9.1: Evocate 生成
+        await self._safe_step(
+            "evocate_generation", self._step_evocate_generation(user_input, reply, actual_session_id)
+        )
 
         # 步骤 9.5-9.8: P0 后处理
-        await self._step_p0_post_processing(save_memory)
+        await self._safe_step("p0_post_processing", self._step_p0_post_processing(save_memory))
 
         # 步骤 9.9: 记忆冲突检测
-        await self._step_conflict_detection(user_input, reply)
+        await self._safe_step("conflict_detection", self._step_conflict_detection(user_input, reply))
 
         # 步骤 9.95: 记忆版本快照
-        await self._step_version_snapshot(user_input)
+        await self._safe_step("version_snapshot", self._step_version_snapshot(user_input))
 
         # 步骤 10: 主动提问决策
-        proactive_question = await self._step_proactive_question(user_input, reply)
+        proactive_question = await self._safe_step(
+            "proactive_question", self._step_proactive_question(user_input, reply), default=None
+        )
 
-        # 步骤 11: RSI 迭代（递归自我改进）
-        rsi_result = await self._step_rsi_iteration()
+        # 步骤 11: RSI 迭代
+        rsi_result = await self._safe_step("rsi_iteration", self._step_rsi_iteration(), default=None)
 
         # 记录步骤统计
         executed = sum(1 for r in self._step_results if r.status == StepStatus.EXECUTED)
@@ -373,9 +414,10 @@ class PostChatPipeline:
             return result_session_id
 
         try:
+            _tool_msgs = self._agt._collect_tool_messages()
             assistant_meta = {
                 "reasoning_content": getattr(self._agt, "_current_reasoning", None),
-                "tool_calls": self._agt._collect_tool_messages() if self._agt._collect_tool_messages() else None,
+                "tool_calls": _tool_msgs or None,
             }
             # 过滤 None 值
             assistant_meta = {k: v for k, v in assistant_meta.items() if v is not None}
@@ -435,6 +477,10 @@ class PostChatPipeline:
             return
 
         try:
+            # P-7: 初始化变量,避免仅 conversation_buffer 时 NameError
+            user_memory_id = None
+            agent_memory_id = None
+
             # 使用对话缓冲区
             if conversation_buffer:
                 conversation_buffer.add_user_message(user_input, session_id=session_id or "default")
@@ -599,7 +645,7 @@ class PostChatPipeline:
             return None, None
 
     async def _step_cognitive_analysis(self, user_input: str) -> float:
-        """认知能力分析"""
+        """P-6: 认知能力分析 — 实际计算分数而非硬编码"""
         step_name = "cognitive_analysis"
         start_time = time.time()
 
@@ -609,32 +655,50 @@ class PostChatPipeline:
                 StepResult(
                     step_name=step_name,
                     status=StepStatus.SKIPPED,
-                    message="growth_analyzer not available, using default score 0.75",
+                    message="growth_analyzer not available",
                     duration_ms=(time.time() - start_time) * 1000,
-                    data={"score": 0.75},
+                    data={"score": None},
                 )
             )
-            return 0.75
+            return 0.5  # 中性默认值
 
         try:
-            w = user_input.replace("？", "").replace("?", "")
-            if len(w) > 0:
-                concepts = w.split()
+            w = user_input.replace("？", "").replace("?", "").replace("！", "").replace("!", "").strip()
+            if not w:
+                return 0.5
+
+            # P-6: 中文分词改进 — 按标点和空格切分,再按字符类型聚合
+            import re
+            # 按标点/空格切分
+            raw_parts = re.split(r'[,，。.!！?？;；\s]+', w)
+            concepts = [p.strip() for p in raw_parts if len(p.strip()) > 1]
+
+            if not concepts:
+                # 对纯中文无标点的输入,按固定窗口切分
+                concepts = [w[i:i+4] for i in range(0, len(w), 4) if len(w[i:i+4]) > 1]
+
+            if concepts:
                 growth_analyzer.record_learning(
                     concepts=concepts,
                     context="conversation",
                 )
-                logger.info("🧠 认知能力分析完成")
-                self._step_results.append(
-                    StepResult(
-                        step_name=step_name,
-                        status=StepStatus.EXECUTED,
-                        message="Cognitive analysis completed",
-                        duration_ms=(time.time() - start_time) * 1000,
-                        data={"score": 0.75, "concepts": concepts},
-                    )
+
+            # 实际计算分数: 基于输入长度和概念数量
+            length_score = min(1.0, len(w) / 200.0)  # 长度因子
+            concept_score = min(1.0, len(concepts) / 10.0)  # 概念丰富度
+            score = 0.3 + 0.4 * length_score + 0.3 * concept_score  # 0.3-1.0 范围
+
+            logger.info("🧠 认知能力分析完成: score=%.2f, concepts=%d", score, len(concepts))
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.EXECUTED,
+                    message="Cognitive analysis completed",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={"score": round(score, 3), "concepts": concepts[:5]},
                 )
-                return 0.75
+            )
+            return score
         except Exception as e:
             logger.warning("认知能力分析失败: %s", e)
             self._step_results.append(
@@ -646,7 +710,7 @@ class PostChatPipeline:
                 )
             )
 
-        return 0.75
+        return 0.5
 
     # ============================================================
     # 反思相关常量和方法
@@ -859,11 +923,13 @@ class PostChatPipeline:
             if hasattr(evolution, "on_experience_recorded"):
                 from neurova.evolution.evolution_facade import EvolutionFacade
                 facade = EvolutionFacade(evolution)
+                # P-5: success 基于工具实际成败,而非"是否调用了工具"
+                tool_success = any(tm.get("success", True) for tm in tool_messages) if tool_messages else True
                 facade.record_experience(
                     text=f"用户: {user_input}\n助手: {reply}",
                     task=user_input,
                     tools=tools_used,
-                    success=len(tool_messages) > 0,
+                    success=tool_success,
                 )
                 logger.info("📚 对话经验已记录 (工具: %s)", tools_used)
                 self._step_results.append(
@@ -1000,7 +1066,8 @@ class PostChatPipeline:
                 if decay:
                     for tool_name, factor in decay.items():
                         if tool_name in evolution._tool_weights:
-                            evolution._tool_weights[tool_name] *= factor
+                            # P-4: ToolWeight 是 dataclass,不能直接 *= ;操作 adaptive_multiplier
+                            evolution._tool_weights[tool_name].adaptive_multiplier *= factor
                     logger.debug("📉 工具权重衰减: %s 个工具", len(decay))
 
             self._step_results.append(
@@ -1721,7 +1788,7 @@ class PostChatPipeline:
             logger.info("从对话提取到 %d 个规则", len(rules))
             
             # 2. 关联经验记忆（这个对话用到了什么工具？）
-            tools_used = self._collect_tool_messages()
+            tools_used = self._agt._collect_tool_messages()
             tool_names = list(set(tm.get("tool_name", "unknown") for tm in tools_used))
             
             # 3. 更新经验记忆融合器

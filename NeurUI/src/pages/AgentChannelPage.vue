@@ -10,7 +10,7 @@
       <a-empty v-if="!loading && channels.length === 0" :description="t('common.noData')" />
       <div v-else class="channel-grid">
         <GlassCard
-          v-for="ch in channels"
+          v-for="ch in pagedChannels"
           :key="ch.id"
           :title="ch.name"
           variant="default"
@@ -31,11 +31,12 @@
           </div>
         </GlassCard>
       </div>
+      <a-pagination v-if="channels.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="channels.length" size="small" style="margin-top: 16px; text-align: center" />
     </a-spin>
 
     <!-- Create/Edit modal -->
     <a-modal v-model:open="showModal" :title="editingId ? t('common.edit') : t('channel.create')" @ok="handleSave" :confirm-loading="saving" width="560px">
-      <a-form layout="vertical">
+      <a-form layout="vertical" :rules="{ name: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="form.name" :placeholder="t('common.name')" />
         </a-form-item>
@@ -65,24 +66,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import {
+  listChannels, createChannel, updateChannel, deleteChannel, testChannel, toggleChannel,
+  type Channel,
+} from '@/api/modules/channels'
 
 const { t } = useI18n()
-
-interface Channel {
-  id: string
-  name: string
-  type: string
-  enabled: boolean
-  lastMessage?: string
-  description?: string
-  token?: string
-  webhookUrl?: string
-}
 
 const channels = ref<Channel[]>([])
 const loading = ref(false)
@@ -90,8 +84,14 @@ const showModal = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
 const testingId = ref<string | null>(null)
+const currentPage = ref(1)
+const pageSize = ref(12)
 
 const form = reactive({ name: '', type: '', token: '', webhookUrl: '', description: '' })
+
+const pagedChannels = computed(() =>
+  channels.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
+)
 
 function resetForm() {
   form.name = ''
@@ -116,45 +116,44 @@ function openEdit(ch: Channel) {
 async function fetchChannels() {
   loading.value = true
   try {
-    const res = await request.get('/channels') as unknown as Channel[]
+    const res = await listChannels()
     channels.value = res ?? []
-  } catch { channels.value = [] } finally { loading.value = false }
+  } catch { message.error(t('common.error')) } finally { loading.value = false }
 }
 
 async function handleSave() {
-  if (!form.name) return
   saving.value = true
   try {
     if (editingId.value) {
-      await request.put(`/channels/${editingId.value}`, { ...form })
+      await updateChannel(editingId.value, { ...form })
     } else {
-      await request.post('/channels', { ...form })
+      await createChannel({ ...form })
     }
     showModal.value = false
     resetForm()
     await fetchChannels()
-  } catch { /* handled */ } finally { saving.value = false }
+  } catch { message.error(t('common.error')) } finally { saving.value = false }
 }
 
 async function handleTest(id: string) {
   testingId.value = id
   try {
-    await request.post(`/channels/${id}/test`)
-  } catch { /* handled */ } finally { testingId.value = null }
+    await testChannel(id)
+  } catch { message.error(t('common.error')) } finally { testingId.value = null }
 }
 
 async function handleToggle(id: string, enabled: boolean) {
   try {
-    await request.put(`/channels/${id}`, { enabled })
+    await toggleChannel(id, enabled)
     await fetchChannels()
-  } catch { /* handled */ }
+  } catch { message.error(t('common.error')) }
 }
 
 async function handleDelete(id: string) {
   try {
-    await request.delete(`/channels/${id}`)
+    await deleteChannel(id)
     await fetchChannels()
-  } catch { /* handled */ }
+  } catch { message.error(t('common.error')) }
 }
 
 onMounted(fetchChannels)

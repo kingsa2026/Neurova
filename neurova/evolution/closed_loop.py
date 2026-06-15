@@ -52,11 +52,28 @@ class ToolLifecycleManager:
 
     def get_usage_count(self, tool_name: str) -> int:
         """获取工具使用次数"""
-        return self._usage_counts.get(tool_name, 0)
+        with self._lock:
+            return self._usage_counts.get(tool_name, 0)
 
     def get_last_used(self, tool_name: str) -> Optional[datetime]:
         """获取工具最后使用时间"""
-        return self._last_used.get(tool_name)
+        with self._lock:
+            return self._last_used.get(tool_name)
+
+    def get_state(self, tool_name: str) -> str:
+        """CL-3: 获取工具生命周期状态(供 EvolutionOrchestrator 使用)"""
+        with self._lock:
+            count = self._usage_counts.get(tool_name, 0)
+            if count == 0:
+                return "unused"
+            last_used = self._last_used.get(tool_name)
+            if last_used:
+                days_idle = (datetime.now(UTC) - last_used).total_seconds() / 86400
+                if days_idle > 30:
+                    return "archived"
+                elif days_idle > 7:
+                    return "degraded"
+            return "active"
 
     def evaluate(self, tool_name: str = None) -> Dict[str, Any]:
         """
@@ -82,7 +99,7 @@ class ToolLifecycleManager:
             else:
                 # 评估所有工具
                 results = {}
-                for name in set(list(self._usage_counts.keys()) + list(self._last_used.keys())):
+                for name in set(self._usage_counts) | set(self._last_used):
                     count = self._usage_counts.get(name, 0)
                     last_used = self._last_used.get(name)
                     results[name] = {
@@ -98,7 +115,7 @@ class AdaptiveToolWeights:
 
     def __init__(self):
         self._weights: Dict[str, ToolWeight] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # CL-1: RLock 支持读路径间的可重入调用
         logger.info("AdaptiveToolWeights initialized")
 
     def register_tool(self, tool_name: str, base_weight: float = 1.0) -> None:
@@ -112,7 +129,8 @@ class AdaptiveToolWeights:
 
     def get_weight(self, tool_name: str) -> Optional[ToolWeight]:
         """获取工具权重"""
-        return self._weights.get(tool_name)
+        with self._lock:
+            return self._weights.get(tool_name)
 
     def update_weight(self, tool_name: str, success: bool, latency: float = 0.0) -> None:
         """更新工具权重"""

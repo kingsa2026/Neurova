@@ -25,7 +25,7 @@
           <template #footer>
             <div class="sb-actions">
               <GlassButton variant="ghost" size="sm" @click="selectSandbox(sb)">{{ t('common.open') }}</GlassButton>
-              <GlassButton variant="ghost" size="sm" @click="commitSandbox(sb.id)">{{ t('sandbox.commit') }}</GlassButton>
+              <GlassButton variant="ghost" size="sm" @click="doCommitSandbox(sb.id)">{{ t('sandbox.commit') }}</GlassButton>
               <GlassButton variant="danger" size="sm" @click="destroySandbox(sb.id)">{{ t('sandbox.destroy') }}</GlassButton>
             </div>
           </template>
@@ -73,7 +73,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { sandboxApi } from '@/api/modules'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
@@ -83,22 +83,22 @@ const { t } = useI18n()
 const loading = ref(false)
 const starting = ref(false)
 const executing = ref(false)
-const sandboxes = ref<any[]>([])
-const selectedSandbox = ref<any>(null)
+const sandboxes = ref<sandboxApi.Sandbox[]>([])
+const selectedSandbox = ref<sandboxApi.Sandbox | null>(null)
 const showStart = ref(false)
 const stepCommand = ref('')
 const stepLanguage = ref('python')
 const execOutput = ref('')
 
-const newSandbox = ref({ name: '', image: 'python:3.11-slim', timeout: 300 })
+const newSandbox = ref<sandboxApi.CreateSandboxPayload>({ name: '', image: 'python:3.11-slim', timeout: 300 })
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
+const formatTime = (ts?: string) => ts ? new Date(ts).toLocaleString() : ''
 
 const fetchSandboxes = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/sandbox')
-    sandboxes.value = res?.data ?? res ?? []
+    const res = await sandboxApi.listSandboxes()
+    sandboxes.value = res ?? []
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -114,7 +114,7 @@ const startSandbox = () => {
 const confirmStart = async () => {
   starting.value = true
   try {
-    await request.post('/sandbox/start', newSandbox.value)
+    await sandboxApi.createSandbox(newSandbox.value)
     message.success(t('common.success'))
     showStart.value = false
     await fetchSandboxes()
@@ -125,12 +125,12 @@ const confirmStart = async () => {
   }
 }
 
-const selectSandbox = async (sb: any) => {
+const selectSandbox = async (sb: sandboxApi.Sandbox) => {
   selectedSandbox.value = sb
   execOutput.value = ''
   try {
-    const res: any = await request.get(`/sandbox/${sb.id}`)
-    selectedSandbox.value = res?.data ?? res ?? sb
+    const res = await sandboxApi.getSandbox(sb.id)
+    selectedSandbox.value = res ?? sb
   } catch {
     // keep existing data
   }
@@ -140,12 +140,11 @@ const executeStep = async () => {
   if (!selectedSandbox.value || !stepCommand.value) return
   executing.value = true
   try {
-    const res: any = await request.post(`/sandbox/${selectedSandbox.value.id}/execute`, {
+    const res = await sandboxApi.executeInSandbox(selectedSandbox.value.id, {
       command: stepCommand.value,
       language: stepLanguage.value,
     })
-    const data = res?.data ?? res ?? {}
-    execOutput.value = data.output ?? data.result ?? JSON.stringify(data, null, 2)
+    execOutput.value = res.output ?? res.result ?? JSON.stringify(res, null, 2)
   } catch (e: any) {
     execOutput.value = e.message || t('common.error')
   } finally {
@@ -153,9 +152,9 @@ const executeStep = async () => {
   }
 }
 
-const commitSandbox = async (id: string) => {
+const doCommitSandbox = async (id: string) => {
   try {
-    await request.post(`/sandbox/${id}/commit`)
+    await sandboxApi.commitSandbox(id)
     message.success(t('common.success'))
     await fetchSandboxes()
   } catch {
@@ -169,7 +168,7 @@ const destroySandbox = (id: string) => {
     content: t('agent.deleteConfirm'),
     onOk: async () => {
       try {
-        await request.delete(`/sandbox/${id}`)
+        await sandboxApi.deleteSandbox(id)
         message.success(t('common.success'))
         if (selectedSandbox.value?.id === id) selectedSandbox.value = null
         await fetchSandboxes()

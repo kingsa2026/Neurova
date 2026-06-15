@@ -42,14 +42,20 @@ class CreateToolSchemaRequest(BaseModel):
 
 
 class ConvertSchemaRequest(BaseModel):
-    schema: Dict[str, Any] = Field(..., description="源 Schema")
+    tool_schema: Dict[str, Any] = Field(..., alias="schema", description="源 Schema")
     source_format: str = Field(default="neurova", description="源格式")
     target_format: str = Field(default="openai", description="目标格式")
 
+    class Config:
+        populate_by_name = True
+
 
 class ValidateSchemaRequest(BaseModel):
-    schema: Dict[str, Any] = Field(..., description="待验证的 Schema")
+    tool_schema: Dict[str, Any] = Field(..., alias="schema", description="待验证的 Schema")
     format: str = Field(default="openai", description="格式")
+
+    class Config:
+        populate_by_name = True
 
 
 class ParseToolCallRequest(BaseModel):
@@ -80,7 +86,7 @@ async def create_tool_schema(body: CreateToolSchemaRequest):
 @router.post("/convert")
 async def convert_schema_format(body: ConvertSchemaRequest):
     """转换 Schema 格式"""
-    src = body.schema
+    src = body.tool_schema
     name = src.get("name") or src.get("function", {}).get("name", "")
     desc = src.get("description") or src.get("function", {}).get("description", "")
     params = src.get("parameters") or src.get("input_schema") or src.get("function", {}).get("parameters", {})
@@ -96,7 +102,7 @@ async def convert_schema_format(body: ConvertSchemaRequest):
 @router.post("/validate")
 async def validate_schema(body: ValidateSchemaRequest):
     """验证 Schema"""
-    schema = body.schema
+    schema = body.tool_schema
     errors = []
     if body.format == "openai":
         fn = schema.get("function", schema)

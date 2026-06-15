@@ -144,7 +144,7 @@ _CREATE_FTS_TRIGGER_SQL = [
     """,
     """
     CREATE TRIGGER IF NOT EXISTS cse_ad AFTER DELETE ON memories BEGIN
-        INSERT INTO memories_fts(rowid, content) VALUES (old.rowid, '');
+        DELETE FROM memories_fts WHERE rowid = old.rowid;
     END
     """,
 ]
@@ -204,36 +204,42 @@ class CognitiveStorageEngine:
         return conn
 
     def _recover_wal(self):
-        """从 WAL 文件恢复未 flush 的数据"""
+        """S-1: 从 WAL 文件恢复未 flush 的数据(整体在锁内保护)"""
         if not self._wal_path.exists():
             return
         recovered = 0
         try:
-            with open(self._wal_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                        node = UnifiedMemoryNode.from_dict(data)
-                        # Only recover nodes not already in L1
-                        existing = self._db.execute("SELECT id FROM memories WHERE id = ?", (node.id,)).fetchone()
-                        if existing is None:
-                            self._l0_buffer.append(node)
-                            if node.embedding:
-                                self._vector_index[node.id] = node.embedding
-                            recovered += 1
-                    except (json.JSONDecodeError, Exception) as e:
-                        logger.warning("WAL recovery: skip bad entry: %s", e)
-            # Rewrite WAL with only recovered entries
-            if recovered > 0:
-                with open(self._wal_path, "w", encoding="utf-8") as f:
-                    for node in self._l0_buffer:
-                        f.write(json.dumps(node.to_dict(), ensure_ascii=False) + "\n")
-                logger.info("WAL recovery: restored %s nodes", recovered)
+            # S-1: 整个恢复过程在 db_lock 内,防止与并发 store 操作竞态
+            with self._db_lock, self._wal_lock:
+                with open(self._wal_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            data = json.loads(line)
+                            node = UnifiedMemoryNode.from_dict(data)
+                            # Only recover nodes not already in L1
+                            existing = self._db.execute(
+                                "SELECT id FROM memories WHERE id = ?", (node.id,)
+                            ).fetchone()
+                            if existing is None:
+                                self._l0_buffer.append(node)
+                                if node.embedding:
+                                    self._vector_index[node.id] = node.embedding
+                                recovered += 1
+                        except (json.JSONDecodeError, Exception) as e:
+                            logger.warning("WAL recovery: skip bad entry: %s", e)
+                # Rewrite WAL with only recovered entries
+                if recovered > 0:
+                    with open(self._wal_path, "w", encoding="utf-8") as f:
+                        for node in self._l0_buffer:
+                            f.write(json.dumps(node.to_dict(), ensure_ascii=False) + "\n")
+                    logger.info("WAL recovery: restored %s nodes", recovered)
         except Exception as e:
             logger.error("WAL recovery failed: %s", e)
+
+    _WAL_MAX_SIZE_BYTES = 10 * 1024 * 1024  # S-2: WAL 最大 10MB
 
     def _wal_append(self, node: UnifiedMemoryNode):
         """追加到 WAL 文件"""
@@ -243,6 +249,15 @@ class CognitiveStorageEngine:
                     f.write(json.dumps(node.to_dict(), ensure_ascii=False) + "\n")
             except Exception as e:
                 logger.error("WAL append failed: %s", e)
+
+            # S-2: WAL 文件大小监控,超限时强制 flush + rotate
+            try:
+                wal_size = self._wal_path.stat().st_size if self._wal_path.exists() else 0
+                if wal_size > self._WAL_MAX_SIZE_BYTES:
+                    logger.warning("WAL file size %.1f MB exceeds limit, forcing flush", wal_size / 1024 / 1024)
+                    self._flush_l0_to_l1()
+            except Exception as e:
+                logger.warning("WAL size check failed: %s", e)
 
     def _flush_l0_to_l1(self):
         """将 L0 缓冲区 flush 到 L1 SQLite"""
@@ -353,9 +368,16 @@ class CognitiveStorageEngine:
                     continue
                 results.append(node)
 
+        # S-4: 去重(按 id), 保留温度更高的那份
+        seen: Dict[str, UnifiedMemoryNode] = {}
+        for node in results:
+            if node.id not in seen or node.temperature > seen[node.id].temperature:
+                seen[node.id] = node
+        deduped = list(seen.values())
+
         # 3. 排序（温度优先）
-        results.sort(key=lambda n: n.temperature, reverse=True)
-        return results[:limit]
+        deduped.sort(key=lambda n: n.temperature, reverse=True)
+        return deduped[:limit]
 
     def _row_to_node(self, row: tuple) -> UnifiedMemoryNode:
         """SQLite 行转 UnifiedMemoryNode"""
@@ -380,6 +402,13 @@ class CognitiveStorageEngine:
         for node in self._l0_buffer:
             if node.id == node_id:
                 node.temperature = max(0.0, min(100.0, node.temperature + delta))
+                # S-4: L0 命中时也同步更新 L1,避免 flush 前 retrieve 拿到旧值
+                with self._db_lock:
+                    self._db.execute(
+                        "UPDATE memories SET temperature = MAX(0, MIN(100, temperature + ?)) WHERE id = ?",
+                        (delta, node_id),
+                    )
+                    self._db.commit()
                 return
         # 再查 L1
         with self._db_lock:

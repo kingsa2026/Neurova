@@ -1,6 +1,7 @@
 <template>
   <div
     class="nr-chat-page"
+    :class="{ 'nr-chat-page--main': isMainLayout }"
     @dragenter.prevent="onDragEnter"
     @dragover.prevent="onDragOver"
     @dragleave.prevent="onDragLeave"
@@ -17,7 +18,7 @@
     </transition>
 
     <!-- Left Sidebar: Sessions -->
-    <aside class="nr-chat-sidebar" :class="{ collapsed: sidebarCollapsed }">
+    <aside v-if="!isMainLayout" class="nr-chat-sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="nr-sidebar-header">
         <GlassButton variant="primary" size="md" style="flex: 1" @click="createSession">
           + {{ t('chat.newChat') }}
@@ -67,9 +68,16 @@
       <!-- Message List -->
       <div class="nr-chat-messages" ref="messagesRef">
         <div v-if="messages.length === 0" class="nr-chat-empty">
-          <div class="nr-chat-empty-icon">🤖</div>
-          <h3>{{ currentAgent?.name || t('agent.title') }}</h3>
-          <p>{{ t('chat.placeholder') }}</p>
+          <div v-if="isMainLayout && !agentId" class="nr-chat-empty">
+            <div class="nr-chat-empty-icon">💬</div>
+            <h3>{{ t('nav.chat') }}</h3>
+            <p>{{ t('chat.selectAgentFirst') }}</p>
+          </div>
+          <div v-else class="nr-chat-empty">
+            <div class="nr-chat-empty-icon">🤖</div>
+            <h3>{{ currentAgent?.name || t('agent.title') }}</h3>
+            <p>{{ t('chat.placeholder') }}</p>
+          </div>
         </div>
 
         <div
@@ -270,6 +278,51 @@
       </div>
     </main>
 
+    <!-- Right Panel: Conversation History (main layout mode) -->
+    <aside v-if="isMainLayout && agentId" class="nr-chat-history-panel">
+      <div class="nr-history-header">
+        <span class="nr-history-title">{{ t('chat.history') }}</span>
+        <GlassButton variant="ghost" size="sm" @click="createSession">
+          + {{ t('chat.newChat') }}
+        </GlassButton>
+      </div>
+      <div class="nr-history-search">
+        <GlassInput
+          v-model:model-value="searchQuery"
+          :placeholder="t('common.search')"
+          @update:model-value="searchQuery = $event"
+        />
+      </div>
+      <div class="nr-session-list">
+        <div
+          v-for="session in filteredSessions"
+          :key="session.id"
+          class="nr-session-item"
+          :class="{ active: session.id === currentSessionId }"
+          @click="switchSession(session.id)"
+        >
+          <span class="nr-session-icon">💬</span>
+          <span class="nr-session-name">{{ session.title }}</span>
+          <a-dropdown :trigger="['click']" @click.stop>
+            <span class="nr-session-menu-btn" @click.stop>⋯</span>
+            <template #overlay>
+              <a-menu>
+                <a-menu-item @click="renameSession(session.id)">
+                  {{ t('chat.rename') }}
+                </a-menu-item>
+                <a-menu-item danger @click="deleteSession(session.id)">
+                  {{ t('chat.deleteSession') }}
+                </a-menu-item>
+              </a-menu>
+            </template>
+          </a-dropdown>
+        </div>
+        <div v-if="filteredSessions.length === 0" class="nr-session-empty">
+          {{ t('chat.noSessions') }}
+        </div>
+      </div>
+    </aside>
+
     <!-- Image Lightbox -->
     <transition name="fade-scale">
       <div v-if="lightbox.open" class="nr-lightbox" @click="lightbox.open = false">
@@ -309,6 +362,12 @@ import GlassInput from '@/components/GlassInput.vue'
 const { t } = useI18n()
 const appStore = useAppStore()
 const { agentId, currentAgent } = useAgentPage()
+
+const props = defineProps<{
+  layoutMode?: 'chat' | 'main'
+}>()
+
+const isMainLayout = computed(() => props.layoutMode === 'main')
 
 // ---------------------------------------------------------------------------
 // Types
@@ -496,6 +555,7 @@ async function sendMessage() {
   const text = inputText.value.trim()
   if (!text && pendingFiles.length === 0) return
   if (isStreaming.value) return
+  if (!agentId.value) return
 
   // Stop any active ASR recording
   if (isRecording.value) stopRecording()
@@ -2074,5 +2134,39 @@ onBeforeUnmount(() => {
 .fade-slide-leave-to {
   opacity: 0;
   transform: translateY(6px);
+}
+
+/* Main layout mode: fill parent container instead of viewport */
+.nr-chat-page--main {
+  height: calc(100vh - var(--nr-header-h) - 48px);
+  border-radius: 12px;
+}
+
+/* Right-side conversation history panel (main layout mode) */
+.nr-chat-history-panel {
+  width: 280px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.nr-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.nr-history-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+}
+
+.nr-history-search {
+  padding: 0 16px 12px;
 }
 </style>

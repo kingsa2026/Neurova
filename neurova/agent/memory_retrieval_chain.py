@@ -15,7 +15,10 @@ MemoryRetrievalChain 深度模块 - 记忆检索责任链
 """
 
 import asyncio
+import hashlib
 import logging
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -79,6 +82,7 @@ class RetrievalContext:
     strategy: RetrievalStrategy = RetrievalStrategy.CHAIN
     min_quality: float = 0.3  # 最低质量要求
     metadata: Optional[Dict[str, Any]] = None
+    timeout: float = 15.0  # C-2: 单次检索超时(秒)
 
 
 @runtime_checkable
@@ -136,14 +140,18 @@ class MemoryRetrievalChain:
     def __init__(self):
         """初始化 MemoryRetrievalChain"""
         self._retrievers: List[Retriever] = []
-        self._cache: Dict[str, RetrievalResult] = {}
+        self._cache: OrderedDict[str, RetrievalResult] = OrderedDict()  # C-3: LRU 缓存
+        self._cache_max_size: int = 200
         self._statistics: Dict[str, Any] = {
             "total_retrievals": 0,
             "successful_retrievals": 0,
             "failed_retrievals": 0,
             "cache_hits": 0,
             "average_quality": 0.0,
+            "_quality_sum": 0.0,  # C-4: 用单独计数做分母
+            "_success_quality_count": 0,
         }
+        self._stats_lock = threading.Lock()  # C-4: 统计更新加锁
 
         logger.debug("MemoryRetrievalChain initialized")
 
@@ -203,7 +211,8 @@ class MemoryRetrievalChain:
         返回:
             RetrievalResult 实例
         """
-        self._statistics["total_retrievals"] += 1
+        with self._stats_lock:
+            self._statistics["total_retrievals"] += 1
 
         logger.info("Starting retrieval: query='%s...', strategy=%s", context.query[:50], context.strategy.value)
 
@@ -230,9 +239,19 @@ class MemoryRetrievalChain:
             # 更新缓存
             self._update_cache(context.query, result)
 
-            # 更新统计
-            self._statistics["successful_retrievals"] += 1
-            self._update_average_quality(result.quality)
+            # C-1: 根据 result.source 判定成功/失败
+            is_exhausted = result.source.endswith(("_exhausted", "_failed", "_all_failed")) or result.source == "no_retrievers"
+
+            with self._stats_lock:
+                if is_exhausted:
+                    self._statistics["failed_retrievals"] += 1
+                else:
+                    self._statistics["successful_retrievals"] += 1
+                    self._statistics["_quality_sum"] += result.quality
+                    self._statistics["_success_quality_count"] += 1
+                    # C-4: 用成功计数做分母
+                    count = self._statistics["_success_quality_count"]
+                    self._statistics["average_quality"] = self._statistics["_quality_sum"] / count if count > 0 else 0.0
 
             logger.info(
                 f"Retrieval completed: source={result.source}, quality={result.quality_level.value}, memories={len(result.memories)}"
@@ -242,12 +261,14 @@ class MemoryRetrievalChain:
 
         except Exception as e:
             logger.error("Retrieval failed: %s", e)
-            self._statistics["failed_retrievals"] += 1
+            with self._stats_lock:
+                self._statistics["failed_retrievals"] += 1
 
             # 尝试缓存降级
             cache_result = await self._retrieve_from_cache(context)
             if cache_result:
-                self._statistics["cache_hits"] += 1
+                with self._stats_lock:
+                    self._statistics["cache_hits"] += 1
                 return cache_result
 
             # 返回空结果
@@ -290,7 +311,14 @@ class MemoryRetrievalChain:
                 logger.debug("Trying retriever: %s", retriever.name)
                 start_time = asyncio.get_event_loop().time()
 
-                result = await retriever.retrieve(context)
+                # C-2: 添加超时控制
+                try:
+                    result = await asyncio.wait_for(
+                        retriever.retrieve(context), timeout=context.timeout
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Retriever %s timed out after %.1fs", retriever.name, context.timeout)
+                    continue
 
                 elapsed = asyncio.get_event_loop().time() - start_time
                 result.retrieval_time = elapsed
@@ -466,42 +494,34 @@ class MemoryRetrievalChain:
             return None
 
     async def _retrieve_from_cache(self, context: RetrievalContext) -> Optional[RetrievalResult]:
-        """从缓存检索"""
+        """从缓存检索(LRU: 命中时移到末尾)"""
         cache_key = self._get_cache_key(context.query)
-        cached = self._cache.get(cache_key)
-
-        if cached:
+        if cache_key in self._cache:
+            # C-3: LRU — 命中时移到末尾
+            self._cache.move_to_end(cache_key)
+            cached = self._cache[cache_key]
             logger.debug("Cache hit for query: %s...", context.query[:50])
             return cached
 
         return None
 
     def _update_cache(self, query: str, result: RetrievalResult) -> None:
-        """更新缓存"""
+        """更新缓存(LRU: 超限时淘汰最旧条目)"""
         if result.memories and result.quality > 0.5:  # 只缓存高质量结果
             cache_key = self._get_cache_key(query)
             self._cache[cache_key] = result
+            # C-3: 新条目移到末尾
+            self._cache.move_to_end(cache_key)
 
-            # 限制缓存大小（最多1000条）
-            if len(self._cache) > 1000:
-                # 移除最早缓存的10%
-                keys_to_remove = list(self._cache.keys())[:100]
-                for key in keys_to_remove:
-                    del self._cache[key]
+            # 限制缓存大小
+            while len(self._cache) > self._cache_max_size:
+                # C-3: LRU — 淘汰最旧(第一个)条目
+                self._cache.popitem(last=False)
 
     def _get_cache_key(self, query: str) -> str:
-        """生成缓存键"""
-        # 简化实现：使用查询的前100个字符作为缓存键
-        return query[:100].strip().lower()
-
-    def _update_average_quality(self, quality: float) -> None:
-        """更新平均质量"""
-        total = self._statistics["total_retrievals"]
-        current_avg = self._statistics["average_quality"]
-
-        # 增量平均公式
-        new_avg = current_avg + (quality - current_avg) / total
-        self._statistics["average_quality"] = new_avg
+        """C-3: 生成缓存键(用 hash 避免长查询截断冲突)"""
+        normalized = query.strip().lower()
+        return hashlib.md5(normalized.encode("utf-8")).hexdigest()
 
     def __repr__(self) -> str:
         """字符串表示"""

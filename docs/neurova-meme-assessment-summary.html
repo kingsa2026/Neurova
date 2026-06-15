@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neurova MEME 评估报告</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        header { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 30px; border-radius: 10px; margin-bottom: 24px; text-align: center; }
+        header h1 { font-size: 2em; margin-bottom: 8px; }
+        header .sub { opacity: 0.9; }
+        .meta { display: flex; justify-content: center; gap: 20px; margin-top: 16px; flex-wrap: wrap; }
+        .meta span { background: rgba(255,255,255,0.2); padding: 5px 14px; border-radius: 16px; font-size: 0.85em; }
+        .card { background: white; border-radius: 8px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 4px solid #667eea; }
+        .card h2 { color: #2c3e50; margin-bottom: 16px; font-size: 1.4em; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+        .card h3 { color: #34495e; margin: 16px 0 8px; font-size: 1.1em; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 16px 0; }
+        .stat { background: linear-gradient(135deg, #f5f7fa, #c3cfe2); padding: 16px; border-radius: 8px; text-align: center; }
+        .stat b { font-size: 2em; color: #667eea; display: block; }
+        .stat small { color: #666; }
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+        th { background: #667eea; color: white; padding: 10px 12px; text-align: left; font-size: 0.9em; }
+        td { padding: 8px 12px; border-bottom: 1px solid #eee; font-size: 0.9em; }
+        tr:nth-child(even) { background: #f8f9fa; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: 500; }
+        .ok { background: #d4edda; color: #155724; }
+        .warn { background: #fff3cd; color: #856404; }
+        .err { background: #f8d7da; color: #721c24; }
+        .issue { background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 14px; margin: 10px 0; }
+        .issue b { color: #dc3545; }
+        pre { background: #f4f4f4; border: 1px solid #ddd; border-radius: 4px; padding: 12px; font-size: 0.82em; overflow-x: auto; margin: 10px 0; line-height: 1.4; }
+        .p0 { border-left: 4px solid #dc3545; background: #fff5f5; }
+        .p1 { border-left: 4px solid #ffc107; background: #fffbf0; }
+        .p2 { border-left: 4px solid #17a2b8; background: #f0f9ff; }
+        .p3 { border-left: 4px solid #6c757d; }
+        .pri { padding: 10px 14px; margin: 8px 0; border-radius: 6px; }
+        .pri b { display: block; margin-bottom: 3px; }
+        .pri small { color: #666; }
+        .alert { padding: 10px 14px; border-radius: 5px; margin: 12px 0; border-left: 4px solid; font-size: 0.9em; }
+        .alert-warn { background: #fff3cd; border-color: #ffc107; color: #856404; }
+        .alert-info { background: #d1ecf1; border-color: #17a2b8; color: #0c5460; }
+        .alert-ok { background: #d4edda; border-color: #28a745; color: #155724; }
+        .arch { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 6px; padding: 14px; font-family: 'Courier New', monospace; font-size: 0.82em; line-height: 1.5; overflow-x: auto; white-space: pre; margin: 12px 0; }
+        footer { text-align: center; padding: 20px 0; color: #999; font-size: 0.85em; margin-top: 20px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>Neurova 记忆系统 MEME 评估报告</h1>
+        <div class="sub">基于 MEME 基准测试的代码级深度评估</div>
+        <div class="meta">
+            <span>2026-06-13</span>
+            <span>arXiv:2605.12477v1</span>
+            <span>代码级分析</span>
+        </div>
+    </header>
+
+    <div class="card">
+        <h2>1. 评估概览</h2>
+        <div class="grid">
+            <div class="stat"><b>3-8%</b><small>Cascade 预估</small></div>
+            <div class="stat"><b>2-5%</b><small>Absence 预估</small></div>
+            <div class="stat"><b>6</b><small>关键差距</small></div>
+            <div class="stat"><b>7</b><small>改进优先级</small></div>
+        </div>
+        <div class="alert alert-info">核心发现: Neurova 已实现 CascadeEngine、AbsenceReasoner、TemporalReasoner 等核心组件，但检索使用子字符串匹配、多个检索通道为空列表、深度钻取为存根。</div>
+    </div>
+
+    <div class="card">
+        <h2>2. 论文核心发现</h2>
+        <table>
+            <tr><th>任务</th><th>论文平均</th><th>Neurova 预估</th><th>关键限制</th></tr>
+            <tr><td><b>Cascade</b></td><td>3%</td><td>3-8%</td><td>依赖图稀疏，需手动添加边</td></tr>
+            <tr><td><b>Absence</b></td><td>1%</td><td>2-5%</td><td>依赖外部触发，无主动探测</td></tr>
+            <tr><td><b>Temporal</b></td><td>较高</td><td>20-30%</td><td>依赖正则提取，语义理解弱</td></tr>
+            <tr><td><b>Multi-hop</b></td><td>较低</td><td>1-3%</td><td>子字符串匹配，无语义理解</td></tr>
+            <tr><td><b>单实体更新</b></td><td>较高</td><td>60-70%</td><td>基础 CRUD 完整</td></tr>
+        </table>
+        <div class="alert alert-warn">核心结论: 所有系统在依赖推理任务中表现极差，简单优化无法解决，需要新架构。</div>
+    </div>
+
+    <div class="card">
+        <h2>3. 已实现组件</h2>
+        <table>
+            <tr><th>组件</th><th>文件</th><th>测试</th><th>状态</th></tr>
+            <tr><td>CascadeEngine</td><td>cascade_engine.py</td><td>5 tests</td><td><span class="badge ok">已实现</span></td></tr>
+            <tr><td>AbsenceReasoner</td><td>absence_reasoner.py</td><td>4 tests</td><td><span class="badge ok">已实现</span></td></tr>
+            <tr><td>TemporalReasoner</td><td>temporal_reasoner.py</td><td>29 tests</td><td><span class="badge ok">已实现</span></td></tr>
+            <tr><td>DependencyGraph</td><td>dependency_graph.py</td><td>15 tests</td><td><span class="badge ok">已实现</span></td></tr>
+            <tr><td>MOEDependencyExtractor</td><td>moe_dependency_extractor.py</td><td>3 tests</td><td><span class="badge ok">已实现</span></td></tr>
+            <tr><td>ConversationRuleExtractor</td><td>conversation_rule_extractor.py</td><td>10 tests</td><td><span class="badge ok">已实现</span></td></tr>
+            <tr><td>SemanticEdgeFilter</td><td>semantic_edge_filter.py</td><td>7 tests</td><td><span class="badge ok">已实现</span></td></tr>
+            <tr><td>CoreferenceResolver</td><td>coreference_resolver.py</td><td>8 tests</td><td><span class="badge ok">已实现</span></td></tr>
+            <tr><td>UnifiedReasoningEngine</td><td>unified_reasoning_engine.py</td><td>6 tests</td><td><span class="badge ok">已实现</span></td></tr>
+        </table>
+        <div class="alert alert-ok">总计 87 个测试全部通过，0 个 linter 错误。</div>
+    </div>
+
+    <div class="card">
+        <h2>4. 代码级关键问题</h2>
+
+        <div class="issue">
+            <b>P0 - 检索使用子字符串匹配</b>
+            <p>文件: manager.py:389 | 无法处理同义词和语义相似查询，严重限制 Multi-hop 推理</p>
+<pre>def recall(self, query: str, limit: int = 10, **kwargs):
+    query_lower = query.lower()
+    for m in self._memories.values():
+        if query_lower in m.content.lower():  # 子字符串匹配
+            scored.append((m, m.importance))</pre>
+        </div>
+
+        <div class="issue">
+            <b>P0 - 检索通道为空列表</b>
+            <p>文件: neurova_recall.py:894 | 5 通道融合检索实际只有 3 个通道工作</p>
+<pre>def _channel_temperature(self, query, memories, limit, context):
+    return []  # 未实现
+def _channel_text(self, query, memories, limit, context):
+    return []  # 未实现
+def _channel_category(self, query, memories, limit, context):
+    return []  # 未实现</pre>
+        </div>
+
+        <div class="issue">
+            <b>P1 - 深度钻取为存根</b>
+            <p>文件: neurova_recall.py:1332 | 无深度推理能力</p>
+<pre>def _drill_explore(self, query, memories, limit, context):
+    return memories[:limit]  # 简化存根</pre>
+        </div>
+
+        <div class="issue">
+            <b>P2 - 冲突检测使用字符重叠率</b>
+            <p>文件: conflict.py:45 | 无法检测语义矛盾（"天气好" vs "天气差"）</p>
+<pre>def _calculate_similarity(self, text1, text2):
+    chars1, chars2 = set(text1), set(text2)
+    return len(chars1 & chars2) / len(chars1 | chars2)</pre>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>5. 改进优先级</h2>
+        <div class="pri p0"><b>P0: 修复检索能力</b><small>MemoryManager.recall() 从子字符串匹配升级为语义搜索</small></div>
+        <div class="pri p0"><b>P0: 完成检索通道</b><small>实现 NeurovaRecallEngine 5 通道融合检索</small></div>
+        <div class="pri p1"><b>P1: 实现深度钻取</b><small>将 Phase 2 钻取方法从存根升级为完整实现</small></div>
+        <div class="pri p1"><b>P1: 语义冲突检测</b><small>ConflictDetector 从字符重叠率升级为语义相似度</small></div>
+        <div class="pri p2"><b>P2: 集成到对话流程</b><small>ConversationRuleExtractor + UnifiedReasoningEngine 集成到 PostChatPipeline</small></div>
+        <div class="pri p3"><b>P3: 经验记忆融合</b><small>工具使用经验与知识图谱关联</small></div>
+        <div class="pri p3"><b>P3: 删除后状态维护</b><small>实现专门的 Deletion 处理组件</small></div>
+    </div>
+
+    <div class="card">
+        <h2>6. 架构概览</h2>
+        <div class="arch">┌─ 17 维分类体系 ───────────────────────────────────┐
+│  MemoryType(6) + MemoryCategory(7) +              │
+│  LifecycleStage(5) + EmotionType(9)               │
+└────────────────────────────────────────────────────┘
+┌─ 温度引擎（贝叶斯遗忘曲线）────────────────────────┐
+│  0°C(DELETED) ← 50°C(SECONDARY) ← 100°C(ACTIVE)   │
+│  情感保护: emotion_score > 0.5 → 衰减×0.6          │
+└────────────────────────────────────────────────────┘
+┌─ 5 通道融合检索 ──────────────────────────────────┐
+│  Temperature(25%) + Text(30%) + Category(15%)      │
+│  + Graph(20%) + Emotion(10%)                       │
+└────────────────────────────────────────────────────┘
+┌─ 时序推理 ────────────────────────────────────────┐
+│  25条组合规则 + BFS传递(深度10) + 三层矛盾检测    │
+└────────────────────────────────────────────────────┘</div>
+    </div>
+
+    <div class="card">
+        <h2>7. 结论</h2>
+        <h3>优势</h3>
+        <ul style="padding-left:20px;margin:8px 0">
+            <li>核心组件完整实现: CascadeEngine, AbsenceReasoner, TemporalReasoner, DependencyGraph</li>
+            <li>高级组件已补充: ConversationRuleExtractor, SemanticEdgeFilter, CoreferenceResolver, UnifiedReasoningEngine</li>
+            <li>测试覆盖: 87 个测试全部通过</li>
+            <li>TemporalReasoner 25 条组合规则 + BFS 传递推理完整</li>
+        </ul>
+        <h3>关键差距</h3>
+        <ul style="padding-left:20px;margin:8px 0">
+            <li>MemoryManager.recall() 使用子字符串匹配，无语义搜索能力</li>
+            <li>NeurovaRecallEngine 5 通道中 3 个返回空列表</li>
+            <li>Phase 2 钻取方法为简化存根</li>
+            <li>ConflictDetector 使用字符重叠率</li>
+        </ul>
+        <div class="alert alert-info">注意: 预估基于实际代码实现，未计入 LLM 增强。集成 LLM 语义搜索后性能可能显著提升。</div>
+    </div>
+
+    <footer>
+        Neurova MEME Assessment | 2026-06-13 | 基于 arXiv:2605.12477v1 | Python 3.12
+    </footer>
+</div>
+</body>
+</html>

@@ -2,7 +2,7 @@
 # 生产模式：后端服务静态文件
 
 # 多阶段构建
-FROM python:3.12-slim as builder
+FROM python:3.10-slim as builder
 
 # 设置工作目录
 WORKDIR /app
@@ -20,7 +20,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # 生产阶段
-FROM python:3.12-slim as production
+FROM python:3.10-slim as production
 
 # 设置工作目录
 WORKDIR /app

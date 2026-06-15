@@ -59,6 +59,16 @@ class CreateAgentRequest(BaseModel):
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
 
 
+class UpdateAgentRequest(BaseModel):
+    """更新 Agent 请求"""
+
+    name: Optional[str] = Field(default=None, description="Agent 名称")
+    description: Optional[str] = Field(default=None, description="Agent 描述")
+    model: Optional[str] = Field(default=None, description="LLM 模型")
+    provider: Optional[str] = Field(default=None, description="LLM 提供商")
+    config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
+
+
 class UpdateConstitutionRequest(BaseModel):
     """更新宪法请求"""
 
@@ -244,6 +254,40 @@ async def create_agent(
     except Exception as e:
         logger.error(f"Create agent error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create agent: {str(e)}")
+
+
+@router.put("/{agent_id}", response_model=AgentInfo)
+async def update_agent(
+    request: Request,
+    agent_id: str = FastAPIPath(...),
+    body: UpdateAgentRequest = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """更新 Agent"""
+    _get_request_id(request)
+
+    agent = get_agent_from_state(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    # 更新 Agent 属性
+    if body.name is not None and hasattr(agent, "config") and hasattr(agent.config, "name"):
+        agent.config.name = body.name
+    if body.description is not None and hasattr(agent, "config"):
+        if hasattr(agent.config, "description"):
+            agent.config.description = body.description
+    if body.model is not None and hasattr(agent, "config") and hasattr(agent.config, "llm_config"):
+        agent.config.llm_config.model = body.model
+
+    # 触发 rebuild_loop 如果模型变更
+    if body.model is not None and hasattr(agent, "rebuild_loop"):
+        try:
+            agent.rebuild_loop(model_name=body.model)
+        except Exception as e:
+            logger.warning(f"rebuild_loop failed after model update: {e}")
+
+    info = agent_to_info(agent)
+    return AgentInfo(**info)
 
 
 @router.delete("/{agent_id}")

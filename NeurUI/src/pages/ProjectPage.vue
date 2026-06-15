@@ -17,7 +17,7 @@
       <a-empty v-if="!loading && projects.length === 0" :description="t('common.noData')" />
       <div v-else class="project-grid">
         <GlassCard
-          v-for="proj in projects"
+          v-for="proj in pagedProjects"
           :key="proj.id"
           :title="proj.name"
           :subtitle="proj.description"
@@ -41,6 +41,7 @@
           </div>
         </GlassCard>
       </div>
+      <a-pagination v-if="projects.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="projects.length" size="small" style="margin-top: 16px; text-align: center" />
     </a-spin>
 
     <!-- Detail modal -->
@@ -61,7 +62,7 @@
 
     <!-- Create/Edit modal -->
     <a-modal v-model:open="showModal" :title="editingId ? t('common.edit') : t('common.create')" @ok="handleSave" :confirm-loading="saving">
-      <a-form layout="vertical">
+      <a-form layout="vertical" :rules="{ name: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="form.name" :placeholder="t('common.name')" />
         </a-form-item>
@@ -83,7 +84,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { message } from 'ant-design-vue'
+import { listProjects, createProject, updateProject, deleteProject as deleteProjectApi } from '@/api/modules/projects'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 
@@ -106,6 +108,8 @@ const showDetail = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
 const detailProject = ref<Project | null>(null)
+const currentPage = ref(1)
+const pageSize = ref(12)
 
 const form = reactive({ name: '', description: '', status: 'active' })
 
@@ -114,6 +118,10 @@ const stats = computed(() => [
   { label: t('common.active'), value: projects.value.filter((p) => p.status === 'active').length },
   { label: t('common.archived'), value: projects.value.filter((p) => p.status === 'archived').length },
 ])
+
+const pagedProjects = computed(() =>
+  projects.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
+)
 
 function resetForm() {
   form.name = ''
@@ -134,31 +142,30 @@ function openEdit(p: Project) {
 async function fetchProjects() {
   loading.value = true
   try {
-    const res = await request.get('/projects') as unknown as Project[]
+    const res = await listProjects()
     projects.value = res ?? []
-  } catch { projects.value = [] } finally { loading.value = false }
+  } catch { message.error(t('common.error')) } finally { loading.value = false }
 }
 
 async function handleSave() {
-  if (!form.name) return
   saving.value = true
   try {
     if (editingId.value) {
-      await request.put(`/projects/${editingId.value}`, { ...form })
+      await updateProject(editingId.value, { ...form })
     } else {
-      await request.post('/projects', { ...form })
+      await createProject({ ...form })
     }
     showModal.value = false
     resetForm()
     await fetchProjects()
-  } catch { /* handled */ } finally { saving.value = false }
+  } catch { message.error(t('common.error')) } finally { saving.value = false }
 }
 
 async function handleDelete(id: string) {
   try {
-    await request.delete(`/projects/${id}`)
+    await deleteProjectApi(id)
     await fetchProjects()
-  } catch { /* handled */ }
+  } catch { message.error(t('common.error')) }
 }
 
 function handleViewDetail(p: Project) {

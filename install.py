@@ -5,7 +5,7 @@ Neurova 一键安装脚本 / One-Click Install / 一键インストール / Од
 
 自动完成以下步骤：
 1. 选择语言 (中文/English/日本語/Русский)
-2. 检查 Python 版本 (>= 3.12)
+2. 检查 Python 版本 (>= 3.10)
 3. 创建虚拟环境 (.venv)
 4. 安装 Python 依赖
 5. 安装前端依赖 (npm)

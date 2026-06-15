@@ -61,50 +61,52 @@ const BASE = '/sleep'
 
 /** Get sleep status for an agent. */
 export function getSleepStatus(agentId: string) {
-  return api.get<ApiResponse<SleepStatus>>(`${BASE}/status`, { params: { agent_id: agentId } })
+  return api.get<ApiResponse<SleepStatus>>(`${BASE}/${agentId}/status`)
 }
 
 /** Get sleep settings. */
 export function getSleepSettings(agentId: string) {
-  return api.get<ApiResponse<SleepSettings>>(`${BASE}/settings`, { params: { agent_id: agentId } })
+  return api.get<ApiResponse<SleepSettings>>(`${BASE}/${agentId}/settings`)
 }
 
 /** Update sleep settings. */
 export function updateSleepSettings(agentId: string, data: Partial<SleepSettings>) {
-  return api.put<ApiResponse<SleepSettings>>(`${BASE}/settings`, { agent_id: agentId, ...data })
+  return api.put<ApiResponse<SleepSettings>>(`${BASE}/${agentId}/settings`, data)
 }
 
 /** Put agent to sleep. */
-export function putToSleep(agentId: string) {
-  return api.post<ApiResponse<null>>(`${BASE}/sleep`, { agent_id: agentId })
+export function putToSleep(agentId: string, durationMinutes?: number) {
+  return api.post<ApiResponse<null>>(`${BASE}/${agentId}/sleep`, undefined, {
+    params: durationMinutes != null ? { duration_minutes: durationMinutes } : undefined,
+  })
 }
 
 /** Wake agent up. */
 export function wakeUp(agentId: string) {
-  return api.post<ApiResponse<null>>(`${BASE}/wake`, { agent_id: agentId })
+  return api.post<ApiResponse<null>>(`${BASE}/${agentId}/wake`)
 }
 
 /** Get dreams list. */
-export function getDreams(agentId: string, params?: { page?: number; size?: number; type?: string }) {
-  return api.get<ApiResponse<{ items: Dream[]; total: number }>>(`${BASE}/dreams`, { params: { ...params, agent_id: agentId } })
+export function getDreams(agentId: string, params?: { limit?: number; offset?: number; type?: string }) {
+  return api.get<ApiResponse<{ items: Dream[]; total: number }>>(`${BASE}/${agentId}/dreams`, { params })
 }
 
 /** Get sleep insights. */
-export function getSleepInsights(agentId: string, params?: { page?: number; size?: number }) {
-  return api.get<ApiResponse<{ items: SleepInsight[]; total: number }>>(`${BASE}/insights`, { params: { ...params, agent_id: agentId } })
+export function getSleepInsights(agentId: string, params?: { limit?: number; offset?: number }) {
+  return api.get<ApiResponse<{ items: SleepInsight[]; total: number }>>(`${BASE}/${agentId}/insights`, { params })
 }
 
 /** Apply a sleep insight. */
-export function applyInsight(insightId: string) {
-  return api.post<ApiResponse<null>>(`${BASE}/insights/${insightId}/apply`)
+export function applyInsight(agentId: string, insightId: string) {
+  return api.post<ApiResponse<null>>(`${BASE}/${agentId}/insights/${insightId}/apply`)
 }
 
 /** Get merge conflicts from sleep consolidation. */
-export function getMergeConflicts(agentId: string, params?: { resolved?: boolean }) {
-  return api.get<ApiResponse<MergeConflict[]>>(`${BASE}/conflicts`, { params: { ...params, agent_id: agentId } })
+export function getMergeConflicts(agentId: string, params?: { limit?: number; offset?: number; resolved?: boolean }) {
+  return api.get<ApiResponse<MergeConflict[]>>(`${BASE}/${agentId}/conflicts`, { params })
 }
 
 /** Resolve a merge conflict. */
-export function resolveConflict(conflictId: string, resolution: string) {
-  return api.post<ApiResponse<null>>(`${BASE}/conflicts/${conflictId}/resolve`, { resolution })
+export function resolveConflict(agentId: string, conflictId: string, resolution: string) {
+  return api.post<ApiResponse<null>>(`${BASE}/${agentId}/conflicts/${conflictId}/resolve`, { resolution })
 }

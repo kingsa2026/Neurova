@@ -17,6 +17,7 @@
     </div>
 
     <!-- Stat Cards Grid -->
+    <a-spin :spinning="dashboardLoading">
     <div class="nr-dashboard-stats">
       <GlassStatCard
         :label="t('dashboard.totalAgents')"
@@ -51,6 +52,7 @@
         emoji="⚡"
       />
     </div>
+    </a-spin>
 
     <!-- Main Content Grid -->
     <div class="nr-dashboard-grid">
@@ -126,7 +128,8 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAgentStore } from '@/stores/agents'
-import { request } from '@/api'
+import { getHomeData, getHomeTrends } from '@/api/modules/home'
+import { statsApi } from '@/api/modules'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 
@@ -156,10 +159,10 @@ const stats = reactive({
   conversationTrend: 0,
   tokenTrend: 0,
   callTrend: 0,
-  agentSpark: [3, 5, 4, 7, 6, 8, 9] as number[],
-  conversationSpark: [12, 18, 15, 22, 28, 25, 32] as number[],
-  tokenSpark: [45, 52, 48, 61, 58, 72, 68] as number[],
-  callSpark: [120, 145, 132, 168, 155, 190, 178] as number[],
+  agentSpark: [] as number[],
+  conversationSpark: [] as number[],
+  tokenSpark: [] as number[],
+  callSpark: [] as number[],
 })
 
 /** System health indicators. */
@@ -181,6 +184,9 @@ const activities = ref<Array<{
 /** Chart bar data for 7-day usage. */
 const chartBars = ref<Array<{ label: string; height: number; value: number }>>([])
 
+/** Loading state. */
+const dashboardLoading = ref(false)
+
 /** Format large token counts for display. */
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
@@ -201,58 +207,81 @@ function navigateToChat() {
 /** Fetch dashboard data from the API. */
 async function fetchDashboardData() {
   try {
-    const res: any = await request.get('/home/data')
-    const data = res?.data ?? res
+    const [homeRes, trendsRes] = await Promise.allSettled([
+      getHomeData(),
+      getHomeTrends(7),
+    ])
 
-    if (data) {
-      stats.totalAgents = data.total_agents ?? data.totalAgents ?? agentStore.agents.length
-      stats.totalConversations = data.total_conversations ?? data.totalConversations ?? 0
-      stats.totalTokens = data.total_tokens ?? data.totalTokens ?? 0
-      stats.totalCalls = data.total_calls ?? data.totalCalls ?? 0
+    // --- Home data ---
+    if (homeRes.status === 'fulfilled') {
+      const raw: any = homeRes.value
+      const data = raw?.data ?? raw
+      if (data) {
+        const s = data.stats ?? {}
+        const t = data.trends ?? {}
 
-      stats.agentTrend = data.agent_trend ?? data.agentTrend ?? 12
-      stats.conversationTrend = data.conversation_trend ?? data.conversationTrend ?? 8
-      stats.tokenTrend = data.token_trend ?? data.tokenTrend ?? -3
-      stats.callTrend = data.call_trend ?? data.callTrend ?? 15
+        stats.totalAgents = s.agent_count ?? agentStore.agents.length
+        stats.totalConversations = s.conversation_count ?? 0
+        stats.totalTokens = s.token_consumption ?? 0
+        stats.totalCalls = s.llm_call_count ?? 0
 
-      if (data.agent_spark) stats.agentSpark = data.agent_spark
-      if (data.conversation_spark) stats.conversationSpark = data.conversation_spark
-      if (data.token_spark) stats.tokenSpark = data.token_spark
-      if (data.call_spark) stats.callSpark = data.call_spark
+        stats.agentTrend = t.agent_trend ?? 0
+        stats.conversationTrend = t.conversation_trend ?? 0
+        stats.tokenTrend = t.token_trend ?? 0
+        stats.callTrend = t.plugin_trend ?? 0
 
-      if (data.recent_activities && Array.isArray(data.recent_activities)) {
-        activities.value = data.recent_activities.slice(0, 5).map((a: any) => ({
-          icon: a.icon || '📌',
-          text: a.text || a.message || 'Activity',
-          time: formatTimeAgo(a.created_at || a.timestamp),
-          color: a.color || 'rgba(99,102,241,0.15)',
-        }))
+        if (data.recent_activities && Array.isArray(data.recent_activities)) {
+          activities.value = data.recent_activities.slice(0, 5).map((a: any) => ({
+            icon: a.icon || '📌',
+            text: a.text || a.message || a.title || 'Activity',
+            time: formatTimeAgo(a.created_at || a.timestamp),
+            color: a.color || 'rgba(99,102,241,0.15)',
+          }))
+        }
       }
+    }
 
-      if (data.usage_7d && Array.isArray(data.usage_7d)) {
-        buildChartBars(data.usage_7d)
+    // --- Trends (sparklines + chart) ---
+    if (trendsRes.status === 'fulfilled') {
+      const raw: any = trendsRes.value
+      const data = raw?.data ?? raw
+      if (data) {
+        const agentT = data.agent_trend?.data
+        const convT = data.conversation_trend?.data
+        const tokenT = data.token_trend?.data
+        const llmT = data.llm_trend?.data
+        const labels = data.agent_trend?.labels ?? []
+
+        if (agentT) stats.agentSpark = agentT
+        if (convT) stats.conversationSpark = convT
+        if (tokenT) stats.tokenSpark = tokenT
+        if (llmT) stats.callSpark = llmT
+
+        if (tokenT && labels.length) {
+          buildChartBars(labels.map((l: string, i: number) => ({ day: l, value: tokenT[i] ?? 0 })))
+        }
       }
     }
   } catch {
-    // Fallback to demo data if API fails
-    populateDemoData()
+    // API unreachable — show zeros instead of demo data
+    stats.totalAgents = agentStore.agents.length
   }
 }
 
 /** Fetch system health status. */
 async function fetchSystemHealth() {
   try {
-    const res: any = await request.get('/stats/system')
-    const data = res?.data ?? res
+    const data = await statsApi.getSystemInfo()
 
     if (data) {
-      systemHealth.api = data.api_status !== 'down'
-      systemHealth.db = data.db_status !== 'down'
-      systemHealth.redis = data.redis_status !== 'down'
-      systemHealth.queue = data.queue_status !== 'down'
+      // Backend returns { status, cpu, memory, disk } — all present means healthy
+      systemHealth.api = data.status === 'running'
+      systemHealth.db = true // DB check is internal; assume healthy if API responds
+      systemHealth.redis = (data.memory?.percent ?? 0) < 90
+      systemHealth.queue = true
     }
   } catch {
-    // Keep defaults (all healthy) on error
+    systemHealth.api = false
   }
 }
 
@@ -282,37 +311,15 @@ function formatTimeAgo(timestamp: string | number): string {
   return date.toLocaleDateString()
 }
 
-/** Populate demo data when the API is unavailable. */
-function populateDemoData() {
-  stats.totalAgents = agentStore.agents.length || 8
-  stats.totalConversations = 156
-  stats.totalTokens = 2_340_000
-  stats.totalCalls = 12_450
-  stats.agentTrend = 12
-  stats.conversationTrend = 8
-  stats.tokenTrend = -3
-  stats.callTrend = 15
-
-  activities.value = [
-    { icon: '🤖', text: t('dashboard.demoAgentCreated'), time: t('dashboard.demoTimeAgo2h'), color: 'rgba(99,102,241,0.15)' },
-    { icon: '💬', text: t('dashboard.demoConversationStarted'), time: t('dashboard.demoTimeAgo3h'), color: 'rgba(34,211,238,0.15)' },
-    { icon: '🧩', text: t('dashboard.demoSkillInstalled'), time: t('dashboard.demoTimeAgo5h'), color: 'rgba(167,139,250,0.15)' },
-    { icon: '📊', text: t('dashboard.demoTokenMilestone'), time: t('dashboard.demoTimeAgo1d'), color: 'rgba(16,185,129,0.15)' },
-    { icon: '⚙️', text: t('dashboard.demoModelSwitched'), time: t('dashboard.demoTimeAgo2d'), color: 'rgba(245,158,11,0.15)' },
-  ]
-
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const values = [320, 450, 380, 520, 480, 290, 410]
-  buildChartBars(days.map((day, i) => ({ day, value: values[i] })))
-}
-
 onMounted(async () => {
+  dashboardLoading.value = true
   // Load agents in parallel with dashboard data
   await Promise.allSettled([
     agentStore.loadAgents(),
     fetchDashboardData(),
     fetchSystemHealth(),
   ])
+  dashboardLoading.value = false
 })
 </script>
 

@@ -25,7 +25,7 @@
         <a-spin :spinning="publicLoading">
           <div v-if="filteredPublic.length" class="skills-grid">
             <GlassCard
-              v-for="skill in filteredPublic"
+              v-for="skill in pagedPublic"
               :key="skill.id"
               :title="skill.name"
               :subtitle="skill.description"
@@ -47,6 +47,7 @@
               </div>
             </GlassCard>
           </div>
+          <a-pagination v-if="filteredPublic.length > pageSize" v-model:current="publicPage" :pageSize="pageSize" :total="filteredPublic.length" size="small" style="margin-top: 16px; text-align: center" />
           <a-empty v-else :description="t('skillPool.noPublic')" />
         </a-spin>
       </a-tab-pane>
@@ -64,7 +65,7 @@
         <a-spin :spinning="privateLoading">
           <div v-if="filteredPrivate.length" class="skills-grid">
             <GlassCard
-              v-for="skill in filteredPrivate"
+              v-for="skill in pagedPrivate"
               :key="skill.id"
               :title="skill.name"
               :subtitle="skill.description"
@@ -93,6 +94,7 @@
               </div>
             </GlassCard>
           </div>
+          <a-pagination v-if="filteredPrivate.length > pageSize" v-model:current="privatePage" :pageSize="pageSize" :total="filteredPrivate.length" size="small" style="margin-top: 16px; text-align: center" />
           <a-empty v-else :description="t('skillPool.noPrivate')" />
         </a-spin>
       </a-tab-pane>
@@ -106,7 +108,7 @@
       @ok="saveSkill"
       @cancel="modalVisible = false"
     >
-      <a-form layout="vertical">
+      <a-form layout="vertical" :rules="{ name: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('skillPool.skillName')">
           <a-input v-model:value="form.name" :placeholder="t('skillPool.namePlaceholder')" />
         </a-form-item>
@@ -155,6 +157,9 @@ const publicLoading = ref(false)
 const privateLoading = ref(false)
 const publicSearch = ref('')
 const privateSearch = ref('')
+const publicPage = ref(1)
+const privatePage = ref(1)
+const pageSize = ref(12)
 
 // Modal state
 const modalVisible = ref(false)
@@ -177,6 +182,14 @@ const filteredPrivate = computed(() => {
     (s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
   )
 })
+
+const pagedPublic = computed(() =>
+  filteredPublic.value.slice((publicPage.value - 1) * pageSize.value, publicPage.value * pageSize.value),
+)
+
+const pagedPrivate = computed(() =>
+  filteredPrivate.value.slice((privatePage.value - 1) * pageSize.value, privatePage.value * pageSize.value),
+)
 
 function openCreateModal() {
   editingSkill.value = null
@@ -222,10 +235,6 @@ async function fetchPrivate() {
 }
 
 async function saveSkill() {
-  if (!form.value.name.trim()) {
-    message.warning(t('skillPool.nameRequired'))
-    return
-  }
   saving.value = true
   try {
     if (editingSkill.value) {

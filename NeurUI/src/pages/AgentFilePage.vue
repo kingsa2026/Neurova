@@ -33,11 +33,12 @@
     </GlassPanel>
 
     <!-- File Table -->
-    <GlassPanel>
+    <GlassPanel v-if="filteredFiles.length > 0 || loading">
       <a-table
         :columns="columns"
         :data-source="filteredFiles"
         :loading="loading"
+        :locale="{ emptyText: '' }"
         :pagination="{ pageSize: 15 }"
         row-key="id"
       >
@@ -87,6 +88,9 @@
         </template>
       </a-table>
     </GlassPanel>
+    <GlassPanel v-else>
+      <a-empty :description="t('common.noData')" />
+    </GlassPanel>
 
     <!-- Preview Modal -->
     <a-modal
@@ -117,7 +121,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
-import { request } from '@/api'
+import { listFiles, uploadFile, getFileContent, updateFile, deleteFile } from '@/api/modules/files'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
@@ -200,9 +204,9 @@ function isPdf(f: FileItem) { return f.type?.includes('pdf') || f.name?.endsWith
 async function fetchFiles() {
   loading.value = true
   try {
-    const res: any = await request.get(`/files?agent_id=${props.agentId}`)
-    const data = res?.data ?? res
-    files.value = (Array.isArray(data) ? data : data?.items ?? data?.files ?? []).map((f: any) => ({
+    const res = await listFiles({ agent_id: props.agentId })
+    const data = res?.data
+    files.value = ((Array.isArray(data) ? data : (data as any)?.items ?? (data as any)?.files ?? []) as any[]).map((f: any) => ({
       ...f,
       _renaming: false,
       _renameValue: '',
@@ -232,9 +236,7 @@ async function uploadFile(file: File) {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('agent_id', props.agentId)
-    await request.post('/files/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
+    await uploadFile(formData)
     message.success(t('file.uploadSuccess'))
     fetchFiles()
   } catch {
@@ -251,7 +253,7 @@ async function previewFile(file: FileItem) {
     previewUrl.value = `/api/v1/files/${file.id}/download`
   } else if (isText(file)) {
     try {
-      const res: any = await request.get(`/files/${file.id}/download`, { responseType: 'text' })
+      const res = await getFileContent(file.id)
       previewContent.value = typeof res === 'string' ? res : JSON.stringify(res, null, 2)
     } catch {
       previewContent.value = t('file.previewError')
@@ -282,7 +284,7 @@ async function confirmRename(file: FileItem) {
     return
   }
   try {
-    await request.put(`/files/${file.id}`, { name: file._renameValue })
+    await updateFile(file.id, { name: file._renameValue })
     file.name = file._renameValue
     file._renaming = false
     message.success(t('file.renameSuccess'))
@@ -299,7 +301,7 @@ function confirmDelete(file: FileItem) {
     cancelText: t('common.cancel'),
     onOk: async () => {
       try {
-        await request.delete(`/files/${file.id}`)
+        await deleteFile(file.id)
         files.value = files.value.filter((f) => f.id !== file.id)
         message.success(t('file.deleteSuccess'))
       } catch {

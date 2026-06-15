@@ -165,9 +165,13 @@ class VolumeRenderer:
         samples = []
         for channel, memories in channel_results.items():
             for mem in memories:
+                # V-3: 跳过无 memory_id 的项,避免空串作为分组键
+                mid = mem.get("memory_id", mem.get("id", ""))
+                if not mid:
+                    continue
                 samples.append(
                     ChannelSample(
-                        memory_id=mem.get("memory_id", mem.get("id", "")),
+                        memory_id=mid,
                         content=mem.get("content", ""),
                         raw_score=mem.get("score", 0.0),
                         channel=channel,
@@ -206,8 +210,9 @@ class VolumeRenderer:
         channel_scores = {}
 
         for sample in samples:
-            # 透射率：T = exp(-累积密度)
-            transmission = math.exp(-cumulative_density * self.density_scale)
+            # V-1: 透射率：T = exp(-累积密度), clamp 防止溢出
+            exponent = -min(cumulative_density * self.density_scale, 50.0)
+            transmission = math.exp(exponent)
 
             # 意图权重
             intent_weight = intent_weights.get(sample.channel, 0.5)
@@ -238,15 +243,18 @@ class VolumeRenderer:
         if len(rendered) < 2:
             return rendered
 
+        # V-2: 使用固定通道序列对齐向量维度,确保余弦相似度计算正确
+        all_channels = list(self.DEFAULT_CHANNEL_DENSITY.keys())
+
         # 计算结果间的注意力（基于 channel_scores 的余弦相似度）
         for i, mem_i in enumerate(rendered):
             attention_boost = 0.0
-            scores_i = list(mem_i.channel_scores.values())
+            scores_i = [mem_i.channel_scores.get(ch, 0.0) for ch in all_channels]
 
             for j, mem_j in enumerate(rendered):
                 if i == j:
                     continue
-                scores_j = list(mem_j.channel_scores.values())
+                scores_j = [mem_j.channel_scores.get(ch, 0.0) for ch in all_channels]
 
                 # 纯 Python 余弦相似度
                 dot = sum(a * b for a, b in zip(scores_i, scores_j))

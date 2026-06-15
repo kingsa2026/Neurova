@@ -16,7 +16,7 @@
                 <a-textarea v-model:value="textPrompt" :rows="6" :placeholder="t('aigc.textPromptPlaceholder')" />
               </a-form-item>
               <a-form-item :label="t('aigc.model')">
-                <a-select v-model:value="textModel" :options="textModels" :placeholder="t('aigc.selectModel')" />
+                <a-select v-model:value="textModel" :options="textModels" :placeholder="t('aigc.selectModel')" show-search />
               </a-form-item>
               <GlassButton variant="primary" :loading="textGenerating" @click="generateText">
                 {{ t('aigc.generate') }}
@@ -39,7 +39,7 @@
                 <a-textarea v-model:value="imagePrompt" :rows="4" :placeholder="t('aigc.imagePromptPlaceholder')" />
               </a-form-item>
               <a-form-item :label="t('aigc.template')">
-                <a-select v-model:value="imageTemplate" :options="imageTemplates" :placeholder="t('aigc.selectTemplate')" />
+                <a-select v-model:value="imageTemplate" :options="imageTemplateOptions" :placeholder="t('aigc.selectTemplate')" show-search />
               </a-form-item>
               <GlassButton variant="primary" :loading="imageGenerating" @click="generateImage">
                 {{ t('aigc.generate') }}
@@ -120,10 +120,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
+import { getAdapters } from '@/api/modules/model-adapter'
+import { getTemplates as getImageTemplates } from '@/api/modules/image'
+import { generateText as apiGenerateText, generateImage as apiGenerateImage } from '@/api/modules/generation'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -132,16 +135,47 @@ const { t } = useI18n()
 
 const activeTab = ref<'text' | 'image' | 'audio' | 'video'>('text')
 
+// --- Dynamic options from backend ---
+const textModels = ref<{ label: string; value: string }[]>([])
+const imageTemplateOptions = ref<{ label: string; value: string }[]>([])
+
+onMounted(async () => {
+  try {
+    const [adaptersRes, templatesRes] = await Promise.allSettled([getAdapters(), getImageTemplates()])
+    if (adaptersRes.status === 'fulfilled') {
+      const adapters = adaptersRes.value?.data?.adapters ?? []
+      const models: { label: string; value: string }[] = []
+      for (const a of adapters) {
+        for (const m of a.models ?? []) {
+          models.push({ label: `${a.name} / ${m}`, value: m })
+        }
+      }
+      textModels.value = models.length ? models : [
+        { label: 'GPT-4', value: 'gpt-4' },
+        { label: 'GPT-3.5', value: 'gpt-3.5-turbo' },
+        { label: 'Claude 3', value: 'claude-3' },
+      ]
+    }
+    if (templatesRes.status === 'fulfilled') {
+      const templates = templatesRes.value?.data?.templates ?? []
+      imageTemplateOptions.value = templates.map((t: any) => ({ label: t.name ?? t.description ?? t.base_image, value: t.name }))
+    }
+  } catch { /* use defaults */ }
+  if (!imageTemplateOptions.value.length) {
+    imageTemplateOptions.value = [
+      { label: t('aigc.default'), value: 'default' },
+      { label: t('aigc.photorealistic'), value: 'photorealistic' },
+      { label: t('aigc.anime'), value: 'anime' },
+      { label: t('aigc.oilPainting'), value: 'oil-painting' },
+    ]
+  }
+})
+
 // --- Text ---
 const textPrompt = ref('')
 const textModel = ref('gpt-4')
 const textGenerating = ref(false)
 const textResult = ref('')
-const textModels = [
-  { label: 'GPT-4', value: 'gpt-4' },
-  { label: 'GPT-3.5', value: 'gpt-3.5-turbo' },
-  { label: 'Claude 3', value: 'claude-3' },
-]
 
 const renderedText = computed(() => {
   // Basic markdown: bold, italic, code blocks, line breaks
@@ -158,7 +192,7 @@ async function generateText() {
   textGenerating.value = true
   textResult.value = ''
   try {
-    const res: any = await request.post('/generation/text', {
+    const res: any = await apiGenerateText({
       prompt: textPrompt.value,
       model: textModel.value,
     })
@@ -179,20 +213,13 @@ const imageResults = ref<{ url: string; prompt: string }[]>([])
 const imagePreviewVisible = ref(false)
 const imagePreviewUrl = ref('')
 
-const imageTemplates = [
-  { label: t('aigc.default'), value: 'default' },
-  { label: t('aigc.photorealistic'), value: 'photorealistic' },
-  { label: t('aigc.anime'), value: 'anime' },
-  { label: t('aigc.oilPainting'), value: 'oil-painting' },
-]
-
 async function generateImage() {
   if (!imagePrompt.value.trim()) return
   imageGenerating.value = true
   try {
-    const res: any = await request.post('/generation/image', {
+    const res: any = await apiGenerateImage({
       prompt: imagePrompt.value,
-      template: imageTemplate.value,
+      style: imageTemplate.value,
     })
     const data = res?.data ?? res
     const urls: string[] = data?.urls ?? data?.images ?? (data?.url ? [data.url] : [])
