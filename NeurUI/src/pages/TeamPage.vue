@@ -9,7 +9,7 @@
       <a-empty v-if="!loading && teams.length === 0" :description="t('common.noData')" />
       <div v-else class="team-grid">
         <GlassCard
-          v-for="team in teams"
+          v-for="team in pagedTeams"
           :key="team.id"
           :title="team.name"
           :subtitle="team.description"
@@ -32,11 +32,12 @@
           </div>
         </GlassCard>
       </div>
+      <a-pagination v-if="teams.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="teams.length" size="small" style="margin-top: 16px; text-align: center" />
     </a-spin>
 
     <!-- Create/Edit team modal -->
     <a-modal v-model:open="showTeamModal" :title="editingId ? t('common.edit') : t('common.create')" @ok="handleSave" :confirm-loading="saving">
-      <a-form layout="vertical">
+      <a-form layout="vertical" :rules="{ name: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="teamForm.name" :placeholder="t('common.name')" />
         </a-form-item>
@@ -61,9 +62,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { message } from 'ant-design-vue'
+import { listTeams, createTeam, updateTeam, deleteTeam as deleteTeamApi, addTeamMembers } from '@/api/modules/teams'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 
@@ -86,8 +88,14 @@ const editingId = ref<string | null>(null)
 const activeTeamId = ref<string | null>(null)
 const newMembers = ref<string[]>([])
 const memberPrompt = ref('')
+const currentPage = ref(1)
+const pageSize = ref(12)
 
 const teamForm = reactive({ name: '', description: '' })
+
+const pagedTeams = computed(() =>
+  teams.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
+)
 
 function resetTeamForm() {
   teamForm.name = ''
@@ -113,44 +121,43 @@ function openAddMember(team: Team) {
 async function fetchTeams() {
   loading.value = true
   try {
-    const res = await request.get('/teams') as unknown as Team[]
+    const res = await listTeams()
     teams.value = res ?? []
-  } catch { teams.value = [] } finally { loading.value = false }
+  } catch { message.error(t('common.error')) } finally { loading.value = false }
 }
 
 async function handleSave() {
-  if (!teamForm.name) return
   saving.value = true
   try {
     if (editingId.value) {
-      await request.put(`/teams/${editingId.value}`, { ...teamForm })
+      await updateTeam(editingId.value, { ...teamForm })
     } else {
-      await request.post('/teams', { ...teamForm })
+      await createTeam({ ...teamForm })
     }
     showTeamModal.value = false
     resetTeamForm()
     await fetchTeams()
-  } catch { /* handled */ } finally { saving.value = false }
+  } catch { message.error(t('common.error')) } finally { saving.value = false }
 }
 
 async function handleDelete(id: string) {
   try {
-    await request.delete(`/teams/${id}`)
+    await deleteTeamApi(id)
     await fetchTeams()
-  } catch { /* handled */ }
+  } catch { message.error(t('common.error')) }
 }
 
 async function handleAddMember() {
   if (!activeTeamId.value || newMembers.value.length === 0) return
   addingMember.value = true
   try {
-    await request.post(`/teams/${activeTeamId.value}/members`, {
+    await addTeamMembers(activeTeamId.value, {
       members: newMembers.value,
       prompt: memberPrompt.value,
     })
     showMemberModal.value = false
     await fetchTeams()
-  } catch { /* handled */ } finally { addingMember.value = false }
+  } catch { message.error(t('common.error')) } finally { addingMember.value = false }
 }
 
 onMounted(fetchTeams)

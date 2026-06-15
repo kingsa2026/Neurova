@@ -261,7 +261,11 @@ import * as metacognitionApi from '@/api/modules/metacognition'
 import type { MetacognitionEntry, MetacognitionStats, MetacognitionCreatePayload } from '@/api/modules/metacognition'
 
 const { t } = useI18n()
-const { agentId, currentAgent } = useAgentPage()
+const { agentId, currentAgent } = useAgentPage({
+  onAgentChange: () => {
+    refreshAll()
+  },
+})
 
 // --- Legacy state (kept for backward compatibility with existing metrics/dimensions/history) ---
 const loading = ref(false)

@@ -4,7 +4,9 @@
       <h2 class="page-title">{{ t('system.logs') }}</h2>
       <div class="header-actions">
         <a-switch v-model:checked="autoRefresh" :checked-children="t('common.refresh')" :un-checked-children="t('common.off')" @change="toggleAutoRefresh" />
-        <GlassButton variant="danger" size="sm" :loading="clearing" @click="clearLogs">{{ t('common.delete') }}</GlassButton>
+        <a-popconfirm :title="t('common.confirm') + '?'" @confirm="clearLogs">
+          <GlassButton variant="danger" size="sm" :loading="clearing">{{ t('common.delete') }}</GlassButton>
+        </a-popconfirm>
       </div>
     </div>
 
@@ -24,11 +26,12 @@
     </GlassCard>
 
     <!-- Log table -->
-    <GlassCard style="margin-top: 16px">
+    <GlassCard v-if="logs.length > 0 || loading" style="margin-top: 16px">
       <a-table
         :columns="columns"
         :data-source="logs"
         :loading="loading"
+        :locale="{ emptyText: '' }"
         row-key="id"
         :pagination="{ current: page, pageSize: pageSize, total: total, showSizeChanger: true, onChange: onPageChange }"
         :scroll="{ y: 500 }"
@@ -50,13 +53,16 @@
         </template>
       </a-table>
     </GlassCard>
+    <GlassCard v-else style="margin-top: 16px">
+      <a-empty :description="t('common.noData')" />
+    </GlassCard>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { listLogs, clearLogs as clearLogsApi } from '@/api/modules/system-logs'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
@@ -105,10 +111,10 @@ const fetchLogs = async () => {
       params.start = filters.value.dateRange[0].toISOString()
       params.end = filters.value.dateRange[1].toISOString()
     }
-    const res: any = await request.get('/logs', { params })
-    const data = res?.data ?? res ?? {}
-    logs.value = data.items ?? data.logs ?? (Array.isArray(data) ? data : [])
-    total.value = data.total ?? logs.value.length
+    const res = await listLogs(params)
+    const data = res?.data
+    logs.value = (data as any)?.items ?? (Array.isArray(data) ? data : [])
+    total.value = (data as any)?.total ?? logs.value.length
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -119,7 +125,7 @@ const fetchLogs = async () => {
 const clearLogs = async () => {
   clearing.value = true
   try {
-    await request.post('/logs/clear')
+    await clearLogsApi()
     message.success(t('common.success'))
     await fetchLogs()
   } catch {

@@ -36,7 +36,7 @@ export interface KnowledgeCreatePayload {
 const BASE = '/knowledge'
 
 /** List knowledge nodes, optionally filtered by agent. */
-export function getKnowledgeNodes(params?: PageParams & { agent_id?: string; category?: string; search?: string }) {
+export function getKnowledgeNodes(params?: PageParams & { agent_id?: string; category?: string; search?: string; q?: string }) {
   return api.get<ApiResponse<PaginatedData<KnowledgeNode>>>(BASE, { params })
 }
 
@@ -51,16 +51,16 @@ export function createKnowledgeNode(data: KnowledgeCreatePayload) {
 }
 
 /** Update a knowledge node. */
-export function updateKnowledgeNode(id: string, data: Partial<KnowledgeCreatePayload>) {
-  return api.put<ApiResponse<KnowledgeNode>>(`${BASE}/${id}`, data)
+export function updateKnowledgeNode(id: string, data: Partial<KnowledgeCreatePayload>, params?: { agent_id?: string }) {
+  return api.put<ApiResponse<KnowledgeNode>>(`${BASE}/${id}`, data, { params })
 }
 
 /** Delete a knowledge node. */
-export function deleteKnowledgeNode(id: string) {
-  return api.delete<ApiResponse<null>>(`${BASE}/${id}`)
+export function deleteKnowledgeNode(id: string, params?: { agent_id?: string }) {
+  return api.delete<ApiResponse<null>>(`${BASE}/${id}`, { params })
 }
 
 /** Search knowledge nodes with semantic similarity. */
-export function searchKnowledge(query: string, params?: { agent_id?: string; limit?: number; category?: string }) {
+export function searchKnowledge(query: string, params?: { agent_id?: string; limit?: number; category?: string; page?: number; page_size?: number }) {
   return api.post<ApiResponse<KnowledgeNode[]>>(`${BASE}/search`, { query, ...params })
 }

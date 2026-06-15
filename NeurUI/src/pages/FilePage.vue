@@ -27,11 +27,12 @@
     </GlassCard>
 
     <!-- File list -->
-    <GlassCard style="margin-top: 16px">
+    <GlassCard v-if="files.length > 0 || loading" style="margin-top: 16px">
       <a-table
         :columns="columns"
         :data-source="files"
         :loading="loading"
+        :locale="{ emptyText: '' }"
         row-key="id"
         :pagination="{ current: page, pageSize: pageSize, total, showSizeChanger: true, onChange: onPageChange }"
         size="small"
@@ -60,6 +61,9 @@
         </template>
       </a-table>
     </GlassCard>
+    <GlassCard v-else style="margin-top: 16px">
+      <a-empty :description="t('common.noData')" />
+    </GlassCard>
 
     <!-- Preview modal -->
     <a-modal v-model:open="showPreview" :title="previewFile?.name" :footer="null" width="640px">
@@ -87,7 +91,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { listFiles, uploadFile, getFileContent, getFileVersions, deleteFile } from '@/api/modules/files'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
@@ -143,11 +147,10 @@ const getFileIcon = (name: string) => {
 const fetchFiles = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/files', { params: { page: page.value, page_size: pageSize.value } })
-    const data = res?.data ?? res ?? {}
-    files.value = data.items ?? data.files ?? (Array.isArray(data) ? data : [])
-    total.value = data.total ?? files.value.length
-    storageInfo.value = data.storage ?? storageInfo.value
+    const res = await listFiles({ page: page.value, page_size: pageSize.value })
+    const data = res?.data
+    files.value = data?.items ?? (Array.isArray(data) ? data : [])
+    total.value = data?.total ?? files.value.length
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -159,7 +162,7 @@ const handleUpload = async (file: File) => {
   try {
     const formData = new FormData()
     formData.append('file', file)
-    await request.post('/files/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+    await uploadFile(formData)
     message.success(t('common.success'))
     await fetchFiles()
   } catch {
@@ -174,7 +177,7 @@ const previewFileFn = async (record: any) => {
     previewContent.value = ''
   } else {
     try {
-      const res: any = await request.get(`/files/${record.id}/content`)
+      const res = await getFileContent(record.id)
       previewContent.value = typeof res === 'string' ? res : JSON.stringify(res, null, 2)
     } catch {
       previewContent.value = t('common.error')
@@ -193,8 +196,8 @@ const downloadFile = (record: any) => {
 const showHistory = async (record: any) => {
   currentVersion.value = record.version ?? 1
   try {
-    const res: any = await request.get(`/files/${record.id}/versions`)
-    versions.value = res?.data ?? res ?? []
+      const res = await getFileVersions(record.id)
+      versions.value = res?.data ?? []
   } catch {
     versions.value = []
   }
@@ -207,7 +210,7 @@ const deleteFile = (id: string) => {
     content: t('agent.deleteConfirm'),
     onOk: async () => {
       try {
-        await request.delete(`/files/${id}`)
+        await deleteFile(id)
         message.success(t('common.success'))
         await fetchFiles()
       } catch {

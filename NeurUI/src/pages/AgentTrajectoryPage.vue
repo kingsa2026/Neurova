@@ -72,7 +72,7 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { request } from '@/api'
+import { listTraces, getTraceDetail, exportTrace as exportTraceApi } from '@/api/modules/trace'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
@@ -102,7 +102,7 @@ const eventColor = (type: string) => {
 const fetchTraces = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/trace', { params: { agent_id: agentId } })
+    const res: any = await listTraces(agentId)
     const data = res?.data ?? res ?? {}
     traces.value = data.items ?? data.traces ?? (Array.isArray(data) ? data : [])
   } catch {
@@ -116,7 +116,7 @@ const selectTrace = async (trace: any) => {
   selectedTrace.value = trace
   detailLoading.value = true
   try {
-    const res: any = await request.get(`/trace/${trace.id}`)
+    const res: any = await getTraceDetail(trace.id)
     const data = res?.data ?? res ?? {}
     selectedTrace.value = { ...trace, ...data }
     traceEvents.value = data.events ?? data.steps ?? []
@@ -130,7 +130,7 @@ const selectTrace = async (trace: any) => {
 const exportTrace = async () => {
   if (!selectedTrace.value) return
   try {
-    const res: any = await request.get(`/trace/${selectedTrace.value.id}/export`, { responseType: 'blob' })
+    const res: any = await exportTraceApi(selectedTrace.value.id)
     const blob = new Blob([res], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

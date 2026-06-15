@@ -35,7 +35,7 @@ except ImportError as _e:
     _mem_layer_logger.debug("conflict_detector_v2 未可用: %s", _e)
 
 try:
-    pass
+    from .temperature import TemperatureEngine
 except ImportError as _e:
     _mem_layer_logger.debug("temperature 未可用: %s", _e)
 

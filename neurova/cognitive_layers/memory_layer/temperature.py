@@ -10,9 +10,25 @@
 """
 
 import logging
+import math
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_temp(value: float, name: str = "temperature") -> float:
+    """校验温度/分数输入: 非 NaN、非负"""
+    if not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be numeric, got {type(value).__name__}")
+    if math.isnan(value) or math.isinf(value):
+        raise ValueError(f"{name} must be finite, got {value}")
+    return float(value)
+
+
+def _validate_score(value: float, name: str = "score") -> float:
+    """校验 0-1 范围的分数输入"""
+    _validate_temp(value, name)
+    return max(0.0, min(1.0, float(value)))
 
 
 class TemperatureEngine:
@@ -40,10 +56,13 @@ class TemperatureEngine:
     THRESHOLD_ARCHIVED = 20.0
     THRESHOLD_DELETED = 5.0
 
-    # 类级别默认值（供 classmethod 使用）
+    # 类级别默认值（供 classmethod 兼容包装器使用）
     _CLASS_DECAY_RATE = 0.1
     _CLASS_EMOTIONAL_PROTECTION_THRESHOLD = 0.5
     _CLASS_EMOTIONAL_PROTECTION_FACTOR = 0.6
+
+    # 默认实例（供类方法调用时使用，避免重复创建）
+    _default_instance: "TemperatureEngine" = None
 
     def __init__(
         self,
@@ -64,80 +83,284 @@ class TemperatureEngine:
 
         logger.debug("TemperatureEngine 初始化: decay_rate=%s", base_decay_rate)
 
-    @classmethod
-    def on_access(cls, current_temp: float, importance: float = 0.5, recall_count: int = 0) -> float:
+    def on_access(
+        self,
+        current_temp: float,
+        importance: float = 0.5,
+        recall_count: int = 0,
+        access_count: int = 0,
+        emotion_score: float = 0.0,
+        relation_count: int = 0,
+    ) -> float:
+        return self._on_access_impl(current_temp, importance, recall_count, access_count, emotion_score, relation_count)
+
+    def _on_access_impl(
+        self,
+        current_temp: float,
+        importance: float,
+        recall_count: int,
+        access_count: int,
+        emotion_score: float,
+        relation_count: int,
+    ) -> float:
         """记忆被访问时更新温度
 
         Args:
             current_temp: 当前温度
             importance: 重要性分数 (0.0 - 1.0)
             recall_count: 回忆次数
+            access_count: 访问次数(用于连击倍率)
+            emotion_score: 情感分数 (0.0 - 1.0)
+            relation_count: 关联记忆数
 
         Returns:
             float: 更新后的温度
         """
-        # 访问升温
-        access_boost = 10.0 * importance
+        # T-1: 输入校验
+        current_temp = _validate_temp(current_temp, "current_temp")
+        importance = _validate_score(importance, "importance")
+        recall_count = max(0, int(recall_count))
+        access_count = max(0, int(access_count))
+        emotion_score = _validate_score(emotion_score, "emotion_score")
+        relation_count = max(0, int(relation_count))
+
+        # 访问升温 — 饱和效应: 高温时升温幅度减缓
+        base_boost = 10.0 * importance * (self.base_decay_rate / 0.1)
+        # 温度越高,升温空间越小 (90度时只有一半升温幅度)
+        saturation = max(0.1, 1.0 - (current_temp / 100.0) * 0.8)
+        access_boost = base_boost * saturation
 
         # 回忆次数加成
         recall_boost = min(recall_count * 2.0, 20.0)
 
+        # 连击倍率: access_count%10 影响 multiplier (1.0 ~ 2.0)
+        combo_multiplier = 1.0 + (access_count % 10) * 0.1
+
+        # 情感加成
+        emotion_bonus = emotion_score * 5.0
+
+        # 关联加成 (上限 3.0)
+        relation_bonus = min(relation_count * 0.5, 3.0)
+
         # 计算新温度
-        new_temp = current_temp + access_boost + recall_boost
+        new_temp = current_temp + (access_boost + recall_boost) * combo_multiplier + emotion_bonus + relation_bonus
 
         # 限制在有效范围内
         return max(0.0, min(100.0, new_temp))
 
-    @classmethod
     def on_decay(
-        cls,
+        self,
         current_temp: float,
-        days_idle: float,
+        last_accessed: str = None,
+        days_idle: float = 0.0,
         importance: float = 0.5,
         emotion_score: float = 0.0,
         recall_count: int = 0,
-    ) -> float:
+        relation_count: int = 0,
+        is_important: bool = False,
+        is_crystallized: bool = False,
+        combo_multiplier: float = 1.0,
+    ) -> dict:
+        return self._on_decay_impl(
+            current_temp, last_accessed, days_idle, importance, emotion_score,
+            recall_count, relation_count, is_important, is_crystallized, combo_multiplier,
+        )
+
+    def _on_decay_impl(
+        self,
+        current_temp: float,
+        last_accessed: str,
+        days_idle: float,
+        importance: float,
+        emotion_score: float,
+        recall_count: int,
+        relation_count: int,
+        is_important: bool,
+        is_crystallized: bool,
+        combo_multiplier: float,
+    ) -> dict:
         """计算温度衰减
 
         Args:
             current_temp: 当前温度
-            days_idle: 空闲天数
+            last_accessed: 最后访问时间(ISO格式字符串)
+            days_idle: 空闲天数(当 last_accessed 未提供时使用)
             importance: 重要性分数 (0.0 - 1.0)
             emotion_score: 情感分数 (0.0 - 1.0)
             recall_count: 回忆次数
+            relation_count: 关联记忆数
+            is_important: 是否重要记忆
+            is_crystallized: 是否固化记忆
+            combo_multiplier: 连击倍率
 
         Returns:
-            float: 衰减后的温度
+            dict: {'new_temp', 'lifecycle_stage', 'days_idle', 'decay_amount'}
         """
-        # 1. 基础衰减率（贝叶斯遗忘曲线）
-        # curve_factor 越大衰减越快：1天=0.4, 7天=0.2, 30天=0.1, >30天=0.05
-        curve_factor = cls._calculate_curve_factor(days_idle)
+        # T-1: 输入校验
+        current_temp = _validate_temp(current_temp, "current_temp")
+        importance = _validate_score(importance, "importance")
+        emotion_score = _validate_score(emotion_score, "emotion_score")
+        recall_count = max(0, int(recall_count))
+        relation_count = max(0, int(relation_count))
 
-        # 2. 情感保护（减缓衰减，值越小保护越强）
+        # 计算空闲天数
+        if last_accessed:
+            try:
+                from datetime import datetime as _dt
+                if isinstance(last_accessed, str):
+                    last_dt = _dt.fromisoformat(last_accessed)
+                else:
+                    last_dt = last_accessed
+                days_idle = max(0.0, (_dt.now() - last_dt).total_seconds() / 86400.0)
+            except (ValueError, TypeError):
+                days_idle = max(0.0, days_idle)
+        else:
+            days_idle = max(0.0, _validate_temp(days_idle, "days_idle"))
+
+        # 固化记忆不衰减
+        if is_crystallized:
+            return {
+                'new_temp': current_temp,
+                'lifecycle_stage': self._determine_stage(current_temp, days_idle, is_important),
+                'days_idle': days_idle,
+                'decay_amount': 0.0,
+            }
+
+        # 高温记忆(>=80)不衰减(视为固化)
+        if current_temp >= 80.0:
+            return {
+                'new_temp': current_temp,
+                'lifecycle_stage': self._determine_stage(current_temp, days_idle, is_important),
+                'days_idle': days_idle,
+                'decay_amount': 0.0,
+            }
+
+        # 今天访问过的记忆不衰减
+        if days_idle < 1.0:
+            return {
+                'new_temp': current_temp,
+                'lifecycle_stage': self._determine_stage(current_temp, days_idle, is_important),
+                'days_idle': days_idle,
+                'decay_amount': 0.0,
+            }
+
+        # 1. 基础衰减率（贝叶斯遗忘曲线: 短期衰减快、长期衰减慢）
+        curve_factor = self._calculate_curve_factor(days_idle)
+
+        # 2. 情感保护（减缓衰减）— 使用实例配置
         emotion_protect = (
-            cls._CLASS_EMOTIONAL_PROTECTION_FACTOR if emotion_score > cls._CLASS_EMOTIONAL_PROTECTION_THRESHOLD else 1.0
+            self.emotional_protection_factor if emotion_score > self.emotional_protection_threshold else 1.0
         )
 
-        # 3. 饱和效应（高温时衰减更快，低温时衰减更慢）
-        # 高温 → 1.0（最大衰减），低温 → 接近 0（最小衰减）
+        # 3. 饱和效应（高温时衰减更快）
         saturation_factor = min(1.0, (current_temp / 100.0) ** 2)
 
-        # 4. 重要性加权（重要记忆衰减更少，值越小保护越强）
+        # 4. 重要性加权
         importance_weight = 1.0 - 0.5 * importance
 
-        # 5. 回忆次数保护
-        recall_protection = min(1.0 + recall_count * 0.05, 1.5)
+        # 5. 关联保护（关联越多 → 保护越强 → 衰减因子越小）
+        # 用除法: 关联越多,衰减率被压得越低
+        relation_protection = 1.0 / (1.0 + relation_count * 0.1)
 
-        # 6. 计算衰减率（所有因子乘积，确保 ≤ 1.0）
-        decay_rate = min(1.0, curve_factor * emotion_protect * saturation_factor * importance_weight)
+        # 6. 重要记忆保护
+        important_protection = 0.5 if is_important else 1.0
 
-        # 7. 应用衰减
+        # 计算衰减率 (基础衰减率 * 各因子)
+        decay_rate = min(
+            0.95,
+            curve_factor * emotion_protect * saturation_factor * importance_weight
+            * relation_protection * important_protection
+            * (self.base_decay_rate / 0.1),
+        )
+
+        # 应用衰减
         new_temp = current_temp * (1.0 - decay_rate)
 
-        # 最后应用回忆保护（防止过度衰减）
-        new_temp = max(new_temp, current_temp * recall_protection * 0.1)
+        # 限制在有效范围内
+        new_temp = max(0.0, min(100.0, new_temp))
+        decay_amount = current_temp - new_temp
 
-        return max(0.0, min(100.0, new_temp))
+        # lifecycle_stage 基于原始温度(衰减前)判断
+        return {
+            'new_temp': new_temp,
+            'lifecycle_stage': self._determine_stage(current_temp, days_idle, is_important),
+            'days_idle': days_idle,
+            'decay_amount': decay_amount,
+        }
+
+    @staticmethod
+    def _determine_stage(temperature: float, days_idle: float = 0.0, is_important: bool = False) -> str:
+        """根据温度确定生命周期阶段
+
+        Args:
+            temperature: 当前温度
+            days_idle: 空闲天数
+            is_important: 是否重要记忆(重要记忆最低 secondary)
+        """
+        if temperature >= 60.0:
+            stage = 'active'
+        elif temperature >= 40.0:
+            stage = 'secondary'
+        elif temperature >= 20.0:
+            stage = 'secondary' if days_idle < 30 else 'archived'
+        elif days_idle >= 60:
+            stage = 'deleted'
+        elif days_idle >= 30:
+            stage = 'archived'
+        else:
+            stage = 'secondary' if temperature >= 10.0 else 'archived'
+
+        # 重要记忆最低 secondary
+        if is_important and stage == 'deleted':
+            stage = 'secondary'
+        if is_important and stage == 'archived':
+            stage = 'secondary'
+
+        return stage
+
+    @staticmethod
+    def should_upgrade_to_important(temperature: float, access_count: int = 0, emotion_score: float = 0.0, relation_count: int = 0) -> bool:
+        """判断是否应升级为重要记忆"""
+        if temperature >= 80.0:
+            return True
+        if access_count >= 10:
+            return True
+        if emotion_score >= 0.7:
+            return True
+        if relation_count >= 5:
+            return True
+        return False
+
+    @staticmethod
+    def should_crystallize(
+        temperature: float,
+        is_important: bool = False,
+        emotion_score: float = 0.0,
+        user_locked: bool = False,
+        content: str = "",
+        agent_marked_important: bool = False,
+        metadata: dict = None,
+    ) -> bool:
+        """判断是否应固化"""
+        meta = metadata or {}
+
+        # 从 metadata 读取标志
+        if meta.get("user_locked") or user_locked:
+            return True
+        if meta.get("agent_marked_important") or agent_marked_important:
+            return True
+        if is_important and temperature >= 80.0 and emotion_score >= 0.5:
+            return True
+
+        # 从 metadata.content 或 content 参数检查关键词
+        check_content = meta.get("content", "") or content
+        if check_content:
+            special_keywords = ["生日", "密码", "地址", "电话", "纪念日"]
+            if any(kw in check_content for kw in special_keywords):
+                return True
+            if "纪念日" in check_content or "anniversary" in check_content.lower():
+                return True
+        return False
 
     @classmethod
     def _calculate_curve_factor(cls, days_idle: float) -> float:
@@ -155,14 +378,16 @@ class TemperatureEngine:
         Returns:
             float: 曲线因子 (0.0 - 1.0)
         """
+        # Ebbinghaus 遗忘曲线: 短期衰减快、长期衰减慢
+        # 1天=2.0, 7天=1.0, 30天=0.5, >30天=0.2
         if days_idle <= 1:
-            return 0.05
+            return 2.0
         elif days_idle <= 7:
-            return 0.1
+            return 1.0
         elif days_idle <= 30:
-            return 0.2
+            return 0.5
         else:
-            return 0.4
+            return 0.2
 
     @classmethod
     def get_lifecycle_stage(cls, temperature: float) -> str:
@@ -187,6 +412,11 @@ class TemperatureEngine:
     def calculate_forgetting_probability(
         cls, temperature: float, days_idle: float, importance: float = 0.5, emotion_score: float = 0.0
     ) -> float:
+        # T-1: 输入校验
+        temperature = _validate_temp(temperature, "temperature")
+        days_idle = max(0.0, _validate_temp(days_idle, "days_idle"))
+        importance = _validate_score(importance, "importance")
+        emotion_score = _validate_score(emotion_score, "emotion_score")
         """计算贝叶斯遗忘概率
 
         P(forget|evidence) = 1 - P(retain|evidence)
@@ -242,3 +472,49 @@ class TemperatureEngine:
                 "deleted": self.THRESHOLD_DELETED,
             },
         }
+
+    # ── 向后兼容: 类方法调用方式 ──
+    # 旧代码: TemperatureEngine.on_access(50.0) 仍然可用
+    # 新代码: engine = TemperatureEngine(base_decay_rate=0.2); engine.on_access(50.0)
+
+    @classmethod
+    def _get_default(cls) -> "TemperatureEngine":
+        """获取或创建默认实例"""
+        if cls._default_instance is None:
+            cls._default_instance = cls()
+        return cls._default_instance
+
+    @classmethod
+    def on_access(
+        cls,
+        current_temp: float,
+        importance: float = 0.5,
+        recall_count: int = 0,
+        access_count: int = 0,
+        emotion_score: float = 0.0,
+        relation_count: int = 0,
+    ) -> float:
+        """向后兼容: 类方法调用 → 委托给默认实例的 impl"""
+        return cls._get_default()._on_access_impl(
+            current_temp, importance, recall_count, access_count, emotion_score, relation_count
+        )
+
+    @classmethod
+    def on_decay(
+        cls,
+        current_temp: float,
+        last_accessed: str = None,
+        days_idle: float = 0.0,
+        importance: float = 0.5,
+        emotion_score: float = 0.0,
+        recall_count: int = 0,
+        relation_count: int = 0,
+        is_important: bool = False,
+        is_crystallized: bool = False,
+        combo_multiplier: float = 1.0,
+    ) -> dict:
+        """向后兼容: 类方法调用 → 委托给默认实例的 impl"""
+        return cls._get_default()._on_decay_impl(
+            current_temp, last_accessed, days_idle, importance, emotion_score,
+            recall_count, relation_count, is_important, is_crystallized, combo_multiplier,
+        )

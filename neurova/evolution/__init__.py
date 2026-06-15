@@ -31,6 +31,21 @@ except ImportError as _e:
     get_evolution_orchestrator = None
     reset_evolution_orchestrator = None
 
+# 事件驱动闭环
+try:
+    from .event_driven import (
+        EvolutionEventBridge,
+        EvolutionEvent,
+        get_evolution_event_bridge,
+        reset_evolution_event_bridge,
+    )
+except ImportError as _e:
+    _logger.debug("event_driven 模块未可用: %s", _e)
+    EvolutionEventBridge = None
+    EvolutionEvent = None
+    get_evolution_event_bridge = None
+    reset_evolution_event_bridge = None
+
 # RSI模块（递归自我进化）
 try:
     from .rsi import (
@@ -54,6 +69,11 @@ __all__ = [
     "NLToolSynthesizer",
     "get_evolution_orchestrator",
     "reset_evolution_orchestrator",
+    # 事件驱动闭环
+    "EvolutionEventBridge",
+    "EvolutionEvent",
+    "get_evolution_event_bridge",
+    "reset_evolution_event_bridge",
     # RSI模块
     "RecursiveRatchetPruner",
     "EnhancedRatchetPruner",

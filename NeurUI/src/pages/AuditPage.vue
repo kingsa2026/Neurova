@@ -29,11 +29,12 @@
     </div>
 
     <!-- Audit table -->
-    <GlassCard style="margin-top: 16px">
+    <GlassCard v-if="records.length > 0 || loading" style="margin-top: 16px">
       <a-table
         :columns="columns"
         :data-source="records"
         :loading="loading"
+        :locale="{ emptyText: '' }"
         row-key="id"
         :pagination="{ current: page, pageSize: pageSize, total, showSizeChanger: true, onChange: onPageChange }"
         size="small"
@@ -60,13 +61,16 @@
         </template>
       </a-table>
     </GlassCard>
+    <GlassCard v-else style="margin-top: 16px">
+      <a-empty :description="t('common.noData')" />
+    </GlassCard>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { listAuditRecords, exportAudit as exportAuditApi } from '@/api/modules/audit'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -114,11 +118,11 @@ const fetchAudit = async () => {
       params.end = filters.value.dateRange[1].toISOString()
     }
 
-    const res: any = await request.get('/audit', { params })
-    const data = res?.data ?? res ?? {}
-    records.value = data.items ?? data.records ?? (Array.isArray(data) ? data : [])
-    total.value = data.total ?? records.value.length
-    stats.value = data.stats ?? { total: total.value, today: 0, warnings: 0 }
+    const res = await listAuditRecords(params)
+    const data = res?.data
+    records.value = data?.items ?? (Array.isArray(data) ? data : [])
+    total.value = data?.total ?? records.value.length
+    stats.value = data?.stats ?? { total: total.value, today: 0, warnings: 0 }
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -129,7 +133,7 @@ const fetchAudit = async () => {
 const exportAudit = async () => {
   exporting.value = true
   try {
-    const res: any = await request.get('/audit/export', { responseType: 'blob' })
+    const res: any = await exportAuditApi()
     const blob = new Blob([res], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

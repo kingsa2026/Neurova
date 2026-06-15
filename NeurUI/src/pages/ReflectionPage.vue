@@ -196,7 +196,11 @@ import * as growthApi from '@/api/modules/growth'
 import type { GrowthReflection } from '@/api/modules/growth'
 
 const { t } = useI18n()
-const { agentId, currentAgent } = useAgentPage()
+const { agentId, currentAgent } = useAgentPage({
+  onAgentChange: () => {
+    fetchReflections()
+  },
+})
 
 const loading = ref(false)
 const creating = ref(false)

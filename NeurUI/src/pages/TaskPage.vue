@@ -71,7 +71,7 @@
 
     <!-- Create task modal -->
     <a-modal v-model:open="showCreateModal" :title="t('common.create')" @ok="handleCreate" :confirm-loading="creating">
-      <a-form layout="vertical">
+      <a-form layout="vertical" :rules="{ title: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="createForm.title" :placeholder="t('common.name')" />
         </a-form-item>
@@ -99,36 +99,22 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { message } from 'ant-design-vue'
+import { tasksApi } from '@/api/modules'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 
 const { t } = useI18n()
 
-interface Task {
-  id: string
-  title: string
-  description: string
-  status: string
-  priority?: string
-  assignee?: string
-  dueDate?: string
-}
-
-interface Board {
-  id: string
-  name: string
-}
-
-const boards = ref<Board[]>([])
-const tasks = ref<Task[]>([])
+const boards = ref<tasksApi.Board[]>([])
+const tasks = ref<tasksApi.Task[]>([])
 const loading = ref(false)
 const activeBoard = ref<string | undefined>(undefined)
 const showCreateModal = ref(false)
 const showDetail = ref(false)
 const creating = ref(false)
-const selectedTask = ref<Task | null>(null)
+const selectedTask = ref<tasksApi.Task | null>(null)
 
 const createForm = reactive({ title: '', description: '', priority: 'medium', assignee: '', dueDate: '' })
 
@@ -156,46 +142,46 @@ function openCreate() {
   showCreateModal.value = true
 }
 
-function handleViewTask(task: Task) {
+function handleViewTask(task: tasksApi.Task) {
   selectedTask.value = task
   showDetail.value = true
 }
 
 async function fetchBoards() {
   try {
-    const res = await request.get('/tasks/boards') as unknown as Board[]
+    const res = await tasksApi.listBoards()
     boards.value = res ?? []
     if (boards.value.length > 0 && !activeBoard.value) {
       activeBoard.value = boards.value[0].id
       await fetchTasks()
     }
-  } catch { boards.value = [] }
+  } catch { message.error(t('common.error')) }
 }
 
 async function fetchTasks() {
   if (!activeBoard.value) return
   loading.value = true
   try {
-    const res = await request.get(`/tasks/boards/${activeBoard.value}/tasks`) as unknown as Task[]
+    const res = await tasksApi.listBoardTasks(activeBoard.value)
     tasks.value = res ?? []
-  } catch { tasks.value = [] } finally { loading.value = false }
+  } catch { message.error(t('common.error')) } finally { loading.value = false }
 }
 
 async function handleCreate() {
-  if (!createForm.title || !activeBoard.value) return
+  if (!activeBoard.value) return
   creating.value = true
   try {
-    await request.post(`/tasks/boards/${activeBoard.value}/tasks`, { ...createForm, status: 'todo' })
+    await tasksApi.createTask(activeBoard.value, { ...createForm, status: 'todo' })
     showCreateModal.value = false
     await fetchTasks()
-  } catch { /* handled */ } finally { creating.value = false }
+  } catch { message.error(t('common.error')) } finally { creating.value = false }
 }
 
 async function handleMove(taskId: string, targetStatus: string) {
   try {
-    await request.put(`/tasks/tasks/${taskId}/move`, { status: targetStatus })
+    await tasksApi.moveTask(taskId, { status: targetStatus })
     await fetchTasks()
-  } catch { /* handled */ }
+  } catch { message.error(t('common.error')) }
 }
 
 onMounted(fetchBoards)

@@ -139,6 +139,8 @@ async def get_retrieval_stats():
 @router.get("/settings")
 async def get_memory_search_settings():
     """获取记忆搜索设置"""
+    from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
+    cfg = _get()
     return {
         "code": 0,
         "message": "success",
@@ -148,9 +150,9 @@ async def get_memory_search_settings():
             "score_threshold": 0.5,
             "decay": {
                 "enabled": True,
-                "rate": 0.1,
-                "half_life_days": 30,
-                "min_score": 0.1,
+                "rate": cfg.get("temperature.decay_rate"),
+                "half_life_days": cfg.get("auto_context.compression_threshold_days"),
+                "min_score": cfg.get("threshold.default"),
             },
         },
     }
@@ -159,8 +161,19 @@ async def get_memory_search_settings():
 @router.put("/settings")
 async def update_memory_search_settings(body: dict):
     """更新记忆搜索设置"""
-    # 这里应该保存设置，现在只是返回成功
-    return {"code": 0, "message": "Settings updated"}
+    from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
+    cfg = _get()
+    updates = {}
+    if "decay" in body:
+        decay = body["decay"]
+        if "rate" in decay:
+            updates["temperature.decay_rate"] = decay["rate"]
+        if "half_life_days" in decay:
+            updates["auto_context.compression_threshold_days"] = decay["half_life_days"]
+        if "min_score" in decay:
+            updates["threshold.default"] = decay["min_score"]
+    updated = cfg.update_and_save(updates)
+    return {"code": 0, "message": f"Updated {len(updated)} setting(s)", "data": {"updated": updated}}
 
 
 @router.get("/nerf-settings")

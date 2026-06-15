@@ -18,7 +18,7 @@
       <a-empty v-if="!loading && tasks.length === 0" :description="t('common.noData')" />
       <div v-else class="task-list">
         <GlassCard
-          v-for="task in tasks"
+          v-for="task in pagedTasks"
           :key="task.id"
           :title="task.name"
           variant="default"
@@ -40,11 +40,12 @@
           </div>
         </GlassCard>
       </div>
+      <a-pagination v-if="tasks.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="tasks.length" size="small" style="margin-top: 16px; text-align: center" />
     </a-spin>
 
     <!-- Create/Edit modal -->
     <a-modal v-model:open="showModal" :title="editingId ? t('common.edit') : t('common.create')" @ok="handleSave" :confirm-loading="saving" width="520px">
-      <a-form layout="vertical">
+      <a-form layout="vertical" :rules="{ name: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="form.name" :placeholder="t('common.name')" />
         </a-form-item>
@@ -77,8 +78,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { message } from 'ant-design-vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -108,6 +110,8 @@ const saving = ref(false)
 const editingId = ref<string | null>(null)
 const runningId = ref<string | null>(null)
 const schedulerRunning = ref(true)
+const currentPage = ref(1)
+const pageSize = ref(12)
 
 const form = reactive({
   name: '',
@@ -117,6 +121,10 @@ const form = reactive({
   action: '',
   description: '',
 })
+
+const pagedTasks = computed(() =>
+  tasks.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
+)
 
 function resetForm() {
   form.name = ''
@@ -157,11 +165,10 @@ async function fetchTasks() {
       description: t.description,
       cron: t.cron_expr,
     }))
-  } catch { tasks.value = [] } finally { loading.value = false }
+  } catch { message.error(t('common.error')) } finally { loading.value = false }
 }
 
 async function handleSave() {
-  if (!form.name) return
   saving.value = true
   try {
     const cronExpr = form.scheduleType === 'cron' ? form.cron : `*/${form.interval || 5} * * * *`
@@ -184,14 +191,14 @@ async function handleSave() {
     showModal.value = false
     resetForm()
     await fetchTasks()
-  } catch { /* handled */ } finally { saving.value = false }
+  } catch { message.error(t('common.error')) } finally { saving.value = false }
 }
 
 async function handleToggle(id: string, enabled: boolean) {
   try {
     await schedulerApi.updateScheduledTask(id, { enabled })
     await fetchTasks()
-  } catch { /* handled */ }
+  } catch { message.error(t('common.error')) }
 }
 
 async function handleRunNow(_id: string) {
@@ -204,7 +211,7 @@ async function handleDelete(id: string) {
   try {
     await schedulerApi.deleteScheduledTask(id)
     await fetchTasks()
-  } catch { /* handled */ }
+  } catch { message.error(t('common.error')) }
 }
 
 onMounted(fetchTasks)

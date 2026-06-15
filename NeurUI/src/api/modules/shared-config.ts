@@ -59,32 +59,32 @@ const BASE = '/shared-config'
 
 /** List all LLM providers. */
 export function getProviders() {
-  return api.get<ApiResponse<LLMProvider[]>>(`${BASE}/providers`)
+  return api.get<ApiResponse<LLMProvider[]>>(`${BASE}/llm-providers`)
 }
 
 /** Get a single provider. */
 export function getProvider(id: string) {
-  return api.get<ApiResponse<LLMProvider>>(`${BASE}/providers/${id}`)
+  return api.get<ApiResponse<LLMProvider>>(`${BASE}/llm-providers/${id}`)
 }
 
 /** Create a new LLM provider. */
 export function createProvider(data: ProviderCreatePayload) {
-  return api.post<ApiResponse<LLMProvider>>(`${BASE}/providers`, data)
+  return api.post<ApiResponse<LLMProvider>>(`${BASE}/llm-providers`, data)
 }
 
 /** Update a provider. */
 export function updateProvider(id: string, data: Partial<ProviderCreatePayload>) {
-  return api.put<ApiResponse<LLMProvider>>(`${BASE}/providers/${id}`, data)
+  return api.put<ApiResponse<LLMProvider>>(`${BASE}/llm-providers/${id}`, data)
 }
 
 /** Delete a provider. */
 export function deleteProvider(id: string) {
-  return api.delete<ApiResponse<null>>(`${BASE}/providers/${id}`)
+  return api.delete<ApiResponse<null>>(`${BASE}/llm-providers/${id}`)
 }
 
 /** Test a provider connection. */
 export function testProvider(id: string) {
-  return api.post<ApiResponse<{ success: boolean; latency_ms: number; error?: string }>>(`${BASE}/providers/${id}/test`)
+  return api.post<ApiResponse<{ success: boolean; latency_ms: number; error?: string }>>(`${BASE}/llm-providers/${id}/test`)
 }
 
 // ---------------------------------------------------------------------------

@@ -98,7 +98,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { request } from '@/api'
+import { listTraces, getTraceStats, getTraceDetail } from '@/api/modules/trace'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -140,8 +140,8 @@ const fetchTraces = async () => {
   loading.value = true
   try {
     const [traceRes, statsRes]: any[] = await Promise.all([
-      request.get('/trace', { params: { agent_id: agentId } }),
-      request.get('/trace/stats', { params: { agent_id: agentId } }),
+      listTraces(agentId),
+      getTraceStats(agentId),
     ])
     const td = traceRes?.data ?? traceRes ?? {}
     traces.value = td.items ?? td.traces ?? (Array.isArray(td) ? td : [])
@@ -158,7 +158,7 @@ const onExpand = async (expanded: boolean, record: any) => {
     expandedKeys.value = [record.id]
     if (!record.expanded && !record.tool_calls) {
       try {
-        const res: any = await request.get(`/trace/${record.id}`)
+        const res: any = await getTraceDetail(record.id)
         const data = res?.data ?? res ?? {}
         record.expanded = data
         record.tool_calls = data.tool_calls ?? []

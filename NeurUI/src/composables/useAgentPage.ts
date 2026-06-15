@@ -18,7 +18,7 @@ import type { Agent } from '@/types/agent'
  * </script>
  * ```
  */
-export function useAgentPage() {
+export function useAgentPage(options?: { onAgentChange?: (newAgentId: string) => void }) {
   const route = useRoute()
   const agentStore = useAgentStore()
 
@@ -43,12 +43,33 @@ export function useAgentPage() {
     (newId) => {
       if (newId && typeof newId === 'string') {
         agentId.value = newId
+        agentStore.setCurrentAgent(newId)
       }
     },
   )
 
-  // On mount, register the agentId as the current agent in the store
-  onMounted(() => {
+  // Keep agentId in sync when store changes (e.g. AgentSwitcher selection)
+  watch(
+    () => agentStore.currentAgentId,
+    (newId) => {
+      if (newId && newId !== agentId.value) {
+        agentId.value = newId
+      }
+    },
+  )
+
+  // Fire onAgentChange callback whenever agentId changes (from any source)
+  watch(agentId, (newId) => {
+    if (newId && options?.onAgentChange) {
+      options.onAgentChange(newId)
+    }
+  })
+
+  // On mount, ensure agents are loaded and register the agentId as current
+  onMounted(async () => {
+    if (agentStore.agents.length === 0) {
+      await agentStore.loadAgents()
+    }
     if (agentId.value) {
       agentStore.setCurrentAgent(agentId.value)
     }

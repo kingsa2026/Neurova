@@ -1,11 +1,7 @@
 <template>
   <div :data-theme="appStore.theme" class="nr-app">
     <div class="star-bg" v-if="appStore.isDark" />
-    <router-view v-slot="{ Component, route }">
-      <transition name="fade-slide" mode="out-in">
-        <component :is="Component" :key="route.path" />
-      </transition>
-    </router-view>
+    <router-view />
   </div>
 </template>
 

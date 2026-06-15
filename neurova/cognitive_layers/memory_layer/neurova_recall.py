@@ -519,7 +519,7 @@ class NeurovaRecallEngine:
         timeout_seconds: float = 10.0,
         intent_detector: Optional[QueryIntentDetector] = None,
         intent_strategy: Optional[IntentAwareRecallStrategy] = None,
-        use_plugins: bool = False,
+        use_plugins: bool = True,
         registry: Any = None,
         fusion_mode: str = "legacy",
         density_scale: float = 1.0,
@@ -552,8 +552,14 @@ class NeurovaRecallEngine:
         self._registry = registry
         if use_plugins and self._registry is None:
             from .channels.registry import get_channel_registry
+            from .channels.builtin import BUILTIN_CHANNELS
 
             self._registry = get_channel_registry()
+            # 自动注册内置通道（如果尚未注册）
+            if not self._registry.get_all():
+                for channel_cls in BUILTIN_CHANNELS:
+                    channel = channel_cls()
+                    self._registry.register(channel)
 
         # 体渲染器（nerf 模式）
         self._volume_renderer = None

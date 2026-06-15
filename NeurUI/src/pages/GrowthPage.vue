@@ -316,7 +316,15 @@ import * as growthApi from '@/api/modules/growth'
 import type { MotivationState, PersonalityProfile, ConstitutionRule, GrowthReflection, GrowthQuestion, ProactiveAction } from '@/api/modules/growth'
 
 const { t } = useI18n()
-const { agentId, currentAgent } = useAgentPage()
+const { agentId, currentAgent } = useAgentPage({
+  onAgentChange: () => {
+    fetchOverview()
+    fetchReflections()
+    fetchQuestions()
+    fetchActions()
+    fetchConstitution()
+  },
+})
 
 const activeTab = ref('overview')
 

@@ -286,7 +286,11 @@ import * as experienceApi from '@/api/modules/experience'
 import type { ExperienceRecord, ExperienceStats } from '@/api/modules/experience'
 
 const { t } = useI18n()
-const { agentId, currentAgent } = useAgentPage()
+const { agentId, currentAgent } = useAgentPage({
+  onAgentChange: () => {
+    fetchAll()
+  },
+})
 
 const loading = ref(false)
 const loadingStats = ref(false)

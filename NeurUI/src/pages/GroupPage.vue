@@ -8,7 +8,7 @@
     <!-- Group list -->
     <a-spin :spinning="loading">
       <div class="groups-grid">
-        <GlassCard v-for="group in groups" :key="group.id" :title="group.name" variant="default">
+        <GlassCard v-for="group in pagedGroups" :key="group.id" :title="group.name" variant="default">
           <template #header>
             <div class="group-header">
               <span class="group-name">{{ group.name }}</span>
@@ -25,12 +25,13 @@
           </template>
         </GlassCard>
       </div>
+      <a-pagination v-if="groups.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="groups.length" size="small" style="margin-top: 16px; text-align: center" />
       <a-empty v-if="!groups.length && !loading" :description="t('common.noData')" />
     </a-spin>
 
     <!-- Create/Edit group modal -->
     <a-modal v-model:open="showForm" :title="editingGroup ? t('common.edit') : t('common.create')" @ok="saveGroup" :confirm-loading="saving">
-      <a-form layout="vertical" :model="groupForm">
+      <a-form layout="vertical" :model="groupForm" :rules="{ name: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="groupForm.name" />
         </a-form-item>
@@ -52,7 +53,9 @@
             <div class="member-item">
               <span>{{ item.username }}</span>
               <a-tag>{{ item.role || 'member' }}</a-tag>
-              <GlassButton variant="ghost" size="sm" @click="removeMember(item.id)">{{ t('common.delete') }}</GlassButton>
+              <a-popconfirm :title="t('common.confirm') + '?'" @confirm="removeMember(item.id)">
+                <GlassButton variant="ghost" size="sm">{{ t('common.delete') }}</GlassButton>
+              </a-popconfirm>
             </div>
           </a-list-item>
         </template>
@@ -63,9 +66,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { listGroups, updateGroup, createGroup, deleteGroup as deleteGroupApi, listGroupMembers, addGroupMember, removeGroupMember } from '@/api/modules/groups'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
@@ -81,14 +84,20 @@ const showMembers = ref(false)
 const editingGroup = ref<any>(null)
 const selectedGroupId = ref<string>('')
 const newMemberName = ref('')
+const currentPage = ref(1)
+const pageSize = ref(12)
 
 const groupForm = ref({ name: '', description: '' })
+
+const pagedGroups = computed(() =>
+  groups.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
+)
 
 const fetchGroups = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/groups')
-    groups.value = res?.data ?? res ?? []
+    const res = await listGroups()
+    groups.value = res ?? []
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -112,9 +121,9 @@ const saveGroup = async () => {
   saving.value = true
   try {
     if (editingGroup.value) {
-      await request.put(`/groups/${editingGroup.value.id}`, groupForm.value)
+      await updateGroup(editingGroup.value.id, groupForm.value)
     } else {
-      await request.post('/groups', groupForm.value)
+      await createGroup(groupForm.value)
     }
     message.success(t('common.success'))
     showForm.value = false
@@ -132,7 +141,7 @@ const deleteGroup = (id: string) => {
     content: t('agent.deleteConfirm'),
     onOk: async () => {
       try {
-        await request.delete(`/groups/${id}`)
+        await deleteGroupApi(id)
         message.success(t('common.success'))
         await fetchGroups()
       } catch {
@@ -146,8 +155,8 @@ const viewMembers = async (group: any) => {
   selectedGroupId.value = group.id
   showMembers.value = true
   try {
-    const res: any = await request.get(`/groups/${group.id}/members`)
-    members.value = res?.data ?? res ?? []
+    const res = await listGroupMembers(group.id)
+    members.value = res ?? []
   } catch {
     members.value = []
   }
@@ -156,7 +165,7 @@ const viewMembers = async (group: any) => {
 const addMember = async () => {
   if (!newMemberName.value) return
   try {
-    await request.post(`/groups/${selectedGroupId.value}/members`, { username: newMemberName.value })
+    await addGroupMember(selectedGroupId.value, { username: newMemberName.value })
     message.success(t('common.success'))
     newMemberName.value = ''
     await viewMembers({ id: selectedGroupId.value })
@@ -168,7 +177,7 @@ const addMember = async () => {
 
 const removeMember = async (memberId: string) => {
   try {
-    await request.delete(`/groups/${selectedGroupId.value}/members/${memberId}`)
+    await removeGroupMember(selectedGroupId.value, memberId)
     message.success(t('common.success'))
     await viewMembers({ id: selectedGroupId.value })
     await fetchGroups()

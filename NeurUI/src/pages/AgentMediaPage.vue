@@ -34,7 +34,7 @@
       <template v-if="viewMode === 'grid'">
         <div v-if="filteredMedia.length" class="media-grid">
           <GlassCard
-            v-for="item in filteredMedia"
+            v-for="item in pagedMedia"
             :key="item.id"
             variant="default"
             class="media-card"
@@ -59,6 +59,7 @@
             </div>
           </GlassCard>
         </div>
+        <a-pagination v-if="filteredMedia.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="filteredMedia.length" size="small" style="margin-top: 16px; text-align: center" />
         <a-empty v-else :description="t('media.noMedia')" />
       </template>
 
@@ -170,6 +171,8 @@ const searchQuery = ref('')
 const typeFilter = ref('')
 const viewMode = ref<'grid' | 'list'>('grid')
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const currentPage = ref(1)
+const pageSize = ref(12)
 
 // Detail modal
 const detailVisible = ref(false)
@@ -191,6 +194,10 @@ const filteredMedia = computed(() => {
   }
   return list
 })
+
+const pagedMedia = computed(() =>
+  filteredMedia.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
+)
 
 const columns = computed(() => [
   { title: t('media.colName'), key: 'name', dataIndex: 'name' },

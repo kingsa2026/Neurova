@@ -57,7 +57,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { listTemplates, createTemplate, updateTemplate, deleteTemplate } from '@/api/modules/collaboration'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 
@@ -104,7 +104,7 @@ function openEdit(tpl: Template) {
 async function fetchTemplates() {
   loading.value = true
   try {
-    const res = await request.get('/collaboration/templates') as unknown as Template[]
+    const res = await listTemplates() as unknown as Template[]
     templates.value = res ?? []
   } catch {
     templates.value = []
@@ -118,9 +118,9 @@ async function handleSave() {
   saving.value = true
   try {
     if (editingId.value) {
-      await request.put(`/collaboration/templates/${editingId.value}`, { ...form })
+      await updateTemplate(editingId.value, { ...form })
     } else {
-      await request.post('/collaboration/templates', { ...form })
+      await createTemplate({ ...form })
     }
     showModal.value = false
     resetForm()
@@ -132,7 +132,7 @@ async function handleSave() {
 
 async function handleDelete(id: string) {
   try {
-    await request.delete(`/collaboration/templates/${id}`)
+    await deleteTemplate(id)
     await fetchTemplates()
   } catch { /* handled */ }
 }

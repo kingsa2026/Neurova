@@ -66,6 +66,9 @@ def get_agent_instance(agent_id: str = "default"):
     """获取 Agent 实例"""
     if _app_state:
         agents = _app_state.get("agents", {})
+        # 如果 agent_id 为空，使用默认 agent
+        if not agent_id:
+            agent_id = "default"
         return agents.get(agent_id)
     return None
 
@@ -208,7 +211,7 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.marketplace", "/v1/marketplace", "Marketplace API"),
         ("neurova.api.endpoints.channel", "/v1/channels", "Channel API"),
         ("neurova.api.endpoints.channels", "/v1/channel-adapters", "Channel Adapters API"),
-        ("neurova.api.endpoints.channel_config", "/v1/channel-configs", "Channel Config API"),
+        ("neurova.api.endpoints.channel_config", "/v1", "Channel Config API"),
         ("neurova.api.endpoints.notifications", "/v1/notifications", "Notifications API"),
         ("neurova.api.endpoints.audit", "/v1/audit", "Audit API"),
         ("neurova.api.endpoints.firewall", "/v1/firewall", "Firewall API"),
@@ -261,10 +264,12 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.memory_enhancement", "/v1/memory-enhancement", "Memory Enhancement API"),
         ("neurova.api.endpoints.channel_sharing", "/v1/channel-sharing", "Channel Sharing API"),
         ("neurova.api.endpoints.audio", "/v1/audio", "Audio API"),
-        ("neurova.api.endpoints.memory_share_groups", "/v1/memory-share-groups", "Memory Share Groups API"),
+        ("neurova.api.endpoints.memory_share_groups", "/v1", "Memory Share Groups API"),
         ("neurova.api.endpoints.session_sync", "/v1/sync", "Session Sync API"),
         ("neurova.api.endpoints.neurflow_api", "/v1/neurflow", "Neurflow Workflow API"),
         ("neurova.api.endpoints.negative_screen_settings", "/v1/negative-screen", "Negative Screen Settings API"),
+        ("neurova.api.endpoints.memory_settings_api", "/v1/memory-settings", "Memory Settings API"),
+        ("neurova.api.endpoints.neuron", "", "NEURON System API"),
     ]
 
     registered = 0

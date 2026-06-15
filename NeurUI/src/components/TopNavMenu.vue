@@ -1,0 +1,284 @@
+<template>
+  <nav class="nr-topnav" :aria-label="t('nav.globalNav')">
+    <!-- 快捷入口 -->
+    <router-link
+      v-for="quick in quickItems"
+      :key="quick.to"
+      :to="quick.to"
+      class="nr-topnav-quick"
+      :class="{ 'is-active': isActiveRoute(quick.to) }"
+    >
+      <component :is="quick.icon" />
+      <span class="nr-topnav-quick-label">{{ t(quick.labelKey) }}</span>
+    </router-link>
+
+    <!-- 分类下拉 -->
+    <a-dropdown
+      v-for="cat in categories"
+      :key="cat.key"
+      :trigger="['hover']"
+      placement="bottomLeft"
+    >
+      <div class="nr-topnav-cat" :class="{ 'is-active': isCategoryActive(cat) }">
+        <component :is="cat.icon" />
+        <span class="nr-topnav-cat-label">{{ t(cat.labelKey) }}</span>
+        <DownOutlined class="nr-topnav-cat-arrow" />
+      </div>
+      <template #overlay>
+        <div class="nr-glass-dropdown">
+          <router-link
+            v-for="item in cat.items"
+            :key="item.to"
+            :to="item.to"
+            class="nr-glass-dropdown-item"
+            :class="{ 'is-active': isActiveRoute(item.to) }"
+          >
+            <component :is="item.icon" />
+            <span>{{ t(item.labelKey) }}</span>
+          </router-link>
+        </div>
+      </template>
+    </a-dropdown>
+  </nav>
+</template>
+
+<script setup lang="ts">
+import { type Component } from 'vue'
+import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import {
+  DashboardOutlined, MessageOutlined, RobotOutlined, GlobalOutlined,
+  DownOutlined,
+  BookOutlined, AppstoreOutlined, ShopOutlined, RocketOutlined,
+  NodeIndexOutlined, FileOutlined,
+  CloudServerOutlined, ToolOutlined, CodeOutlined,
+  BarChartOutlined, MonitorOutlined, HeartOutlined, PieChartOutlined,
+  FileTextOutlined,
+  TeamOutlined, ProjectOutlined, ClockCircleOutlined,
+  BranchesOutlined, ApiOutlined, HistoryOutlined,
+  SettingOutlined, UserOutlined, BellOutlined, AlertOutlined,
+} from '@ant-design/icons-vue'
+
+const route = useRoute()
+const { t } = useI18n()
+
+// ── 快捷入口 ──
+const quickItems: { to: string; labelKey: string; icon: Component }[] = [
+  { to: '/dashboard', labelKey: 'nav.dashboard', icon: DashboardOutlined },
+  { to: '/chat', labelKey: 'nav.chat', icon: MessageOutlined },
+  { to: '/agents', labelKey: 'nav.agents', icon: RobotOutlined },
+  { to: '/channels', labelKey: 'nav.channels', icon: GlobalOutlined },
+]
+
+// ── 6 个全局分类 ──
+interface NavItem { to: string; labelKey: string; icon: Component }
+interface NavCategory {
+  key: string
+  labelKey: string
+  icon: Component
+  items: NavItem[]
+}
+
+const categories: NavCategory[] = [
+  {
+    key: 'knowledge',
+    labelKey: 'nav.knowledge',
+    icon: BookOutlined,
+    items: [
+      { to: '/knowledge', labelKey: 'nav.knowledge', icon: BookOutlined },
+      { to: '/skill-pool', labelKey: 'nav.skillPool', icon: AppstoreOutlined },
+      { to: '/marketplace/skills', labelKey: 'nav.skillMarket', icon: ShopOutlined },
+      { to: '/aigc', labelKey: 'nav.aigc', icon: RocketOutlined },
+      { to: '/workflows', labelKey: 'nav.workflows', icon: NodeIndexOutlined },
+    ],
+  },
+  {
+    key: 'neuron',
+    labelKey: 'nav.neuron',
+    icon: RocketOutlined,
+    items: [
+      { to: '/neuron', labelKey: 'nav.neuron', icon: RocketOutlined },
+      { to: '/files', labelKey: 'nav.files', icon: FileOutlined },
+    ],
+  },
+  {
+    key: 'development',
+    labelKey: 'nav.development',
+    icon: CloudServerOutlined,
+    items: [
+      { to: '/models', labelKey: 'nav.models', icon: CloudServerOutlined },
+      { to: '/tool-layers', labelKey: 'nav.toolLayers', icon: ToolOutlined },
+      { to: '/sandbox', labelKey: 'nav.sandbox', icon: CodeOutlined },
+    ],
+  },
+  {
+    key: 'operations',
+    labelKey: 'nav.operations',
+    icon: MonitorOutlined,
+    items: [
+      { to: '/analytics', labelKey: 'nav.analytics', icon: BarChartOutlined },
+      { to: '/monitor', labelKey: 'nav.monitor', icon: MonitorOutlined },
+      { to: '/health', labelKey: 'nav.health', icon: HeartOutlined },
+      { to: '/stats', labelKey: 'nav.stats', icon: PieChartOutlined },
+      { to: '/logs', labelKey: 'nav.logs', icon: FileTextOutlined },
+    ],
+  },
+  {
+    key: 'collaboration',
+    labelKey: 'nav.collaboration',
+    icon: TeamOutlined,
+    items: [
+      { to: '/collaboration', labelKey: 'nav.collaboration', icon: TeamOutlined },
+      { to: '/collaboration/templates', labelKey: 'nav.collaborationtemplates', icon: NodeIndexOutlined },
+      { to: '/collaboration/initiate', labelKey: 'nav.collaborationinitiate', icon: BranchesOutlined },
+      { to: '/collaboration/history', labelKey: 'nav.collaborationhistory', icon: HistoryOutlined },
+      { to: '/projects', labelKey: 'nav.projects', icon: ProjectOutlined },
+      { to: '/teams', labelKey: 'nav.teams', icon: TeamOutlined },
+      { to: '/tasks', labelKey: 'nav.tasks', icon: ClockCircleOutlined },
+      { to: '/webhooks', labelKey: 'nav.webhooks', icon: BranchesOutlined },
+      { to: '/session-sync', labelKey: 'nav.sessionsync', icon: ApiOutlined },
+    ],
+  },
+  {
+    key: 'admin',
+    labelKey: 'nav.admin',
+    icon: SettingOutlined,
+    items: [
+      { to: '/settings', labelKey: 'nav.settings', icon: SettingOutlined },
+      { to: '/groups', labelKey: 'nav.groups', icon: TeamOutlined },
+      { to: '/enhanced-users', labelKey: 'nav.enhancedusers', icon: UserOutlined },
+      { to: '/notifications', labelKey: 'nav.notifications', icon: BellOutlined },
+      { to: '/firewall', labelKey: 'nav.firewall', icon: AlertOutlined },
+      { to: '/audit', labelKey: 'nav.audit', icon: HistoryOutlined },
+      { to: '/benchmark', labelKey: 'nav.benchmark', icon: DashboardOutlined },
+      { to: '/marketplace', labelKey: 'nav.marketplace', icon: ShopOutlined },
+    ],
+  },
+]
+
+// ── 路由状态判定 ──
+function isActiveRoute(to: string): boolean {
+  return route.path === to || route.path.startsWith(to + '/')
+}
+
+function isCategoryActive(cat: NavCategory): boolean {
+  return cat.items.some(item => isActiveRoute(item.to))
+}
+</script>
+
+<style scoped>
+.nr-topnav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  justify-content: center;
+}
+
+/* ── 快捷入口 ── */
+.nr-topnav-quick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  color: var(--nr-text-secondary);
+  font-size: 13px;
+  font-weight: 450;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.nr-topnav-quick:hover {
+  color: var(--nr-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+.nr-topnav-quick.is-active {
+  color: var(--nr-primary-light);
+  background: rgba(99, 102, 241, 0.12);
+  font-weight: 550;
+}
+.nr-topnav-quick-label {
+  display: inline;
+}
+
+/* ── 分类下拉触发器 ── */
+.nr-topnav-cat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  color: var(--nr-text-secondary);
+  font-size: 13px;
+  font-weight: 450;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+.nr-topnav-cat:hover,
+.nr-topnav-cat.is-active {
+  color: var(--nr-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+.nr-topnav-cat.is-active {
+  color: var(--nr-primary-light);
+  background: rgba(99, 102, 241, 0.12);
+}
+.nr-topnav-cat-arrow {
+  font-size: 10px;
+  opacity: 0.6;
+  transition: transform 0.2s ease;
+}
+
+/* ── 液态玻璃弹出层 ── */
+.nr-glass-dropdown {
+  background: rgba(10, 14, 26, 0.85);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 14px;
+  padding: 6px;
+  min-width: 180px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── 弹出层菜单项 ── */
+.nr-glass-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  color: var(--nr-text-secondary);
+  font-size: 13px;
+  font-weight: 450;
+  text-decoration: none;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+.nr-glass-dropdown-item:hover {
+  color: var(--nr-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+.nr-glass-dropdown-item.is-active {
+  color: var(--nr-primary-light);
+  background: rgba(99, 102, 241, 0.1);
+  font-weight: 550;
+}
+
+/* ── 响应式: 小屏隐藏快捷入口文字和分类标签 ── */
+@media (max-width: 1024px) {
+  .nr-topnav-quick-label,
+  .nr-topnav-cat-label {
+    display: none;
+  }
+  .nr-topnav-cat-arrow {
+    display: none;
+  }
+}
+</style>

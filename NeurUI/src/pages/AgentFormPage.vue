@@ -11,7 +11,7 @@
     </div>
 
     <a-spin :spinning="pageLoading">
-      <a-form :model="formState" layout="vertical" class="agent-form">
+      <a-form :model="formState" layout="vertical" class="agent-form" :rules="{ name: [{ required: true, message: t('common.required') }] }">
         <!-- Basic info -->
         <GlassCard :title="t('common.info')" style="margin-bottom: 20px">
           <a-row :gutter="16">
@@ -185,11 +185,6 @@ const loadAgent = async () => {
 }
 
 const handleSave = async () => {
-  if (!formState.value.name.trim()) {
-    message.warning(t('validation.required'))
-    return
-  }
-
   saving.value = true
   try {
     const payload = {

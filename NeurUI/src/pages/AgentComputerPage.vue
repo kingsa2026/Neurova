@@ -90,7 +90,17 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { request } from '@/api'
+import {
+  screenshot,
+  click,
+  type as computerType,
+  scroll,
+  navigate,
+  extractPage,
+  smartClick,
+  visualParse,
+  shell,
+} from '@/api/modules/computer'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
@@ -115,7 +125,7 @@ const shellOutput = ref('')
 const takeScreenshot = async () => {
   screenshotLoading.value = true
   try {
-    const res: any = await request.post('/computer/screenshot', { agent_id: agentId })
+    const res: any = await screenshot(agentId)
     const data = res?.data ?? res ?? {}
     screenshotUrl.value = data.url || data.image || (data.base64 ? `data:image/png;base64,${data.base64}` : '')
   } catch {
@@ -137,7 +147,7 @@ const onScreenshotClick = (e: MouseEvent) => {
 
 const doClick = async () => {
   try {
-    await request.post('/computer/click', { agent_id: agentId, x: clickX.value, y: clickY.value })
+    await click(agentId, clickX.value, clickY.value)
     message.success(t('common.success'))
     await takeScreenshot()
   } catch { message.error(t('common.error')) }
@@ -146,7 +156,7 @@ const doClick = async () => {
 const doType = async () => {
   if (!typeText.value) return
   try {
-    await request.post('/computer/type', { agent_id: agentId, text: typeText.value })
+    await computerType(agentId, typeText.value)
     message.success(t('common.success'))
     typeText.value = ''
   } catch { message.error(t('common.error')) }
@@ -154,7 +164,7 @@ const doType = async () => {
 
 const doScroll = async () => {
   try {
-    await request.post('/computer/scroll', { agent_id: agentId, direction: scrollDir.value, amount: scrollAmount.value })
+    await scroll(agentId, scrollDir.value, scrollAmount.value)
     message.success(t('common.success'))
     await takeScreenshot()
   } catch { message.error(t('common.error')) }
@@ -163,7 +173,7 @@ const doScroll = async () => {
 const browserNavigate = async () => {
   if (!browserUrl.value) return
   try {
-    await request.post('/computer/browser/navigate', { agent_id: agentId, url: browserUrl.value })
+    await navigate(agentId, browserUrl.value)
     message.success(t('common.success'))
     await takeScreenshot()
   } catch { message.error(t('common.error')) }
@@ -177,14 +187,14 @@ const browserType = async () => { await doType() }
 
 const browserExtract = async () => {
   try {
-    const res: any = await request.post('/computer/browser/extract', { agent_id: agentId })
+    const res: any = await extractPage(agentId)
     message.info(JSON.stringify(res?.data ?? res))
   } catch { message.error(t('common.error')) }
 }
 
 const smartClick = async () => {
   try {
-    await request.post('/computer/smart-click', { agent_id: agentId, x: clickX.value, y: clickY.value })
+    await smartClick(agentId, clickX.value, clickY.value)
     message.success(t('common.success'))
     await takeScreenshot()
   } catch { message.error(t('common.error')) }
@@ -192,7 +202,7 @@ const smartClick = async () => {
 
 const visualParse = async () => {
   try {
-    const res: any = await request.post('/computer/visual-parse', { agent_id: agentId })
+    const res: any = await visualParse(agentId)
     message.info(JSON.stringify(res?.data ?? res))
   } catch { message.error(t('common.error')) }
 }
@@ -201,7 +211,7 @@ const executeShell = async () => {
   if (!shellCommand.value) return
   shellLoading.value = true
   try {
-    const res: any = await request.post('/computer/shell', { agent_id: agentId, command: shellCommand.value })
+    const res: any = await shell(agentId, shellCommand.value)
     const data = res?.data ?? res ?? {}
     shellOutput.value = data.output ?? data.result ?? JSON.stringify(data, null, 2)
     shellCommand.value = ''

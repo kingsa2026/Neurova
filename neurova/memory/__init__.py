@@ -11,26 +11,41 @@ import sys
 
 logger = logging.getLogger(__name__)
 
-# 从 neurova.cognitive_layers.memory_layer 重新导出主要类（全部用 try/except 保护 + 回退值）
+# 从 neurova.cognitive_layers.memory_layer 重新导出主要类（每个单独 try/except,避免一个失败全部 None）
 try:
-    from neurova.cognitive_layers.memory_layer import (
-        ConflictDetector,
-        ConversationMemoryBuffer,
-        GraphTraversal,
-        MoEMemoryRouter,
-        SleepConsolidation,
-        TemperatureEngine,
-        UnifiedVectorStore,
-    )
-except ImportError as e:
-    logger.debug("部分 cognitive_layers.memory_layer 导入失败: %s", e)
-    MoEMemoryRouter = None
-    UnifiedVectorStore = None
+    from neurova.cognitive_layers.memory_layer import ConflictDetector
+except ImportError:
     ConflictDetector = None
-    TemperatureEngine = None
+
+try:
+    from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationBuffer as ConversationMemoryBuffer
+except ImportError:
     ConversationMemoryBuffer = None
-    SleepConsolidation = None
+
+try:
+    from neurova.cognitive_layers.memory_layer import GraphTraversal
+except ImportError:
     GraphTraversal = None
+
+try:
+    from neurova.cognitive_layers.memory_layer import MoEMemoryRouter
+except ImportError:
+    MoEMemoryRouter = None
+
+try:
+    from neurova.cognitive_layers.memory_layer import SleepConsolidation
+except ImportError:
+    SleepConsolidation = None
+
+try:
+    from neurova.cognitive_layers.memory_layer import TemperatureEngine
+except ImportError:
+    TemperatureEngine = None
+
+try:
+    from neurova.cognitive_layers.memory_layer import UnifiedVectorStore
+except ImportError:
+    UnifiedVectorStore = None
 
 # 可能不存在的类，用占位
 try:

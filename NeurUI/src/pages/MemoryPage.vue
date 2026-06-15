@@ -16,9 +16,36 @@
         </div>
       </div>
       <div class="header-actions">
+        <a-tooltip :title="t('memory.decay')">
+          <GlassButton variant="ghost" size="sm" :loading="decaying" @click="handleTriggerDecay">
+            {{ t('memory.decay') }}
+          </GlassButton>
+        </a-tooltip>
         <GlassButton variant="secondary" size="sm" :loading="loading" @click="fetchMemories">
           {{ t('common.refresh') }}
         </GlassButton>
+        <a-dropdown>
+          <GlassButton variant="secondary" size="sm">
+            ⋯
+          </GlassButton>
+          <template #overlay>
+            <a-menu>
+              <a-menu-item @click="handleExport">
+                {{ t('memory.exportMem') }}
+              </a-menu-item>
+              <a-menu-item @click="showImportModal = true">
+                {{ t('memory.importMem') }}
+              </a-menu-item>
+              <a-menu-divider />
+              <a-menu-item @click="$router.push('/memory/settings')">
+                {{ t('memorySettings.title') }}
+              </a-menu-item>
+              <a-menu-item @click="$router.push('/memory/search-settings')">
+                {{ t('memorySearch.title') }}
+              </a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
         <GlassButton variant="primary" @click="showCreateModal = true">
           {{ t('memory.create') }}
         </GlassButton>
@@ -67,6 +94,12 @@
         </a-tab-pane>
         <a-tab-pane key="semantic">
           <template #tab><span>Semantic</span></template>
+        </a-tab-pane>
+        <a-tab-pane key="hot">
+          <template #tab><span>🔥 Hot</span></template>
+        </a-tab-pane>
+        <a-tab-pane key="crystallized">
+          <template #tab><span>💎 Crystallized</span></template>
         </a-tab-pane>
       </a-tabs>
 
@@ -121,11 +154,12 @@
     </GlassCard>
 
     <!-- Memory table -->
-    <GlassCard>
+    <GlassCard v-if="memories.length > 0 || loading">
       <a-table
         :columns="tableColumns"
         :data-source="memories"
         :loading="loading"
+        :locale="{ emptyText: '' }"
         :pagination="{
           current: page,
           pageSize: size,
@@ -163,9 +197,19 @@
               <GlassButton size="sm" variant="ghost" @click="viewMemory(record)">
                 {{ t('common.open') }}
               </GlassButton>
+              <a-tooltip :title="t('memory.strengthen')">
+                <GlassButton size="sm" variant="ghost" @click="handleStrengthen(record.id)">
+                  ↑
+                </GlassButton>
+              </a-tooltip>
+              <a-tooltip :title="t('memory.forget')">
+                <GlassButton size="sm" variant="ghost" @click="handleForget(record.id)">
+                  ↓
+                </GlassButton>
+              </a-tooltip>
               <a-popconfirm
                 :title="t('memory.forget') + '?'"
-                @confirm="deleteMemory(record.id)"
+                @confirm="confirmDeleteMemory(record.id)"
                 :ok-text="t('common.yes')"
                 :cancel-text="t('common.no')"
               >
@@ -178,6 +222,9 @@
         </template>
       </a-table>
     </GlassCard>
+    <GlassCard v-else>
+      <a-empty :description="t('common.noData')" />
+    </GlassCard>
 
     <!-- Create memory modal -->
     <a-modal
@@ -186,7 +233,7 @@
       :confirm-loading="creating"
       @ok="createMemory"
     >
-      <a-form layout="vertical" :model="createForm">
+      <a-form layout="vertical" :model="createForm" :rules="{ content: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('common.description')" required>
           <a-textarea v-model:value="createForm.content" :rows="4" />
         </a-form-item>
@@ -265,6 +312,30 @@
         </div>
       </template>
     </a-modal>
+
+    <!-- Import memories modal -->
+    <a-modal
+      v-model:open="showImportModal"
+      :title="t('memory.importMem')"
+      :confirm-loading="importing"
+      @ok="handleImport"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="JSON Data">
+          <a-textarea v-model:value="importJson" :rows="8" placeholder='[{"content": "...", "type": "long_term"}]' />
+        </a-form-item>
+        <a-form-item label="Merge Mode">
+          <a-radio-group v-model:value="importMergeMode">
+            <a-radio-button value="skip">Skip</a-radio-button>
+            <a-radio-button value="overwrite">Overwrite</a-radio-button>
+            <a-radio-button value="merge">Merge</a-radio-button>
+          </a-radio-group>
+        </a-form-item>
+        <a-upload :before-upload="onImportFile" :show-upload-list="false" accept=".json">
+          <GlassButton variant="ghost" size="sm">{{ t('memory.importMem') }} (File)</GlassButton>
+        </a-upload>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -280,7 +351,12 @@ import * as memoryApi from '@/api/modules/memory'
 import type { MemoryEntry, MemorySearchResult, MemoryStats } from '@/api/modules/memory'
 
 const { t } = useI18n()
-const { agentId, currentAgent } = useAgentPage()
+const { agentId, currentAgent } = useAgentPage({
+  onAgentChange: () => {
+    fetchMemories()
+    fetchStats()
+  },
+})
 const agentStore = useAgentStore()
 
 // Expose the agent_id portion of the three-level isolation key
@@ -291,6 +367,8 @@ const loadingStats = ref(false)
 const creating = ref(false)
 const updating = ref(false)
 const editing = ref(false)
+const decaying = ref(false)
+const importing = ref(false)
 
 const memories = ref<MemoryEntry[]>([])
 const total = ref(0)
@@ -303,7 +381,10 @@ const semanticSearch = ref(false)
 
 const showCreateModal = ref(false)
 const showDetailModal = ref(false)
+const showImportModal = ref(false)
 const selectedMemory = ref<any>(null)
+const importJson = ref('')
+const importMergeMode = ref<'skip' | 'overwrite' | 'merge'>('skip')
 
 // Stats from API
 const memoryStats = ref<MemoryStats | null>(null)
@@ -363,7 +444,7 @@ const tableColumns = computed(() => [
   { title: t('common.type'), key: 'type', width: 120 },
   { title: t('memory.importance'), key: 'importance', width: 120 },
   { title: t('common.createdAt'), dataIndex: 'created_at', width: 180 },
-  { title: t('common.actions'), key: 'actions', width: 180 },
+  { title: t('common.actions'), key: 'actions', width: 240 },
 ])
 
 const truncate = (text: string, len: number) =>
@@ -379,7 +460,13 @@ const importanceColor = (val: number) => {
 
 const onTabChange = () => {
   page.value = 1
-  fetchMemories()
+  if (activeTab.value === 'hot') {
+    fetchHotMemories()
+  } else if (activeTab.value === 'crystallized') {
+    fetchCrystallizedMemories()
+  } else {
+    fetchMemories()
+  }
 }
 
 const onTableChange = (pagination: any) => {
@@ -455,10 +542,6 @@ const fetchMemories = async () => {
 }
 
 const createMemory = async () => {
-  if (!createForm.value.content.trim()) {
-    message.warning(t('validation.required'))
-    return
-  }
   creating.value = true
   try {
     await memoryApi.createMemory({
@@ -518,6 +601,128 @@ const deleteMemory = async (id: string) => {
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   }
+}
+
+// Renamed from deleteMemory for the popconfirm handler
+const confirmDeleteMemory = deleteMemory
+
+// --- New memory enhancement handlers ---
+
+const fetchHotMemories = async () => {
+  loading.value = true
+  try {
+    const res = await memoryApi.getHotMemories(agentId.value, size.value)
+    const data = res.data
+    memories.value = Array.isArray(data) ? data : []
+    total.value = memories.value.length
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  } finally {
+    loading.value = false
+  }
+}
+
+const fetchCrystallizedMemories = async () => {
+  loading.value = true
+  try {
+    const res = await memoryApi.getCrystallizedMemories(agentId.value, size.value)
+    const data = res.data
+    memories.value = Array.isArray(data) ? data : []
+    total.value = memories.value.length
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleTriggerDecay = async () => {
+  decaying.value = true
+  try {
+    const res = await memoryApi.triggerDecay(agentId.value)
+    const decayed = (res as any)?.data?.decayed ?? 0
+    message.success(`${t('memory.decay')}: ${decayed} memories decayed`)
+    await fetchMemories()
+    await fetchStats()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  } finally {
+    decaying.value = false
+  }
+}
+
+const handleStrengthen = async (id: string) => {
+  try {
+    await memoryApi.strengthenMemory(id, 0.2, 'Manual strengthen from UI')
+    message.success(t('memory.strengthen') + ' ✓')
+    await fetchMemories()
+    await fetchStats()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  }
+}
+
+const handleForget = async (id: string) => {
+  try {
+    await memoryApi.forgetMemory(id, 'Manual forget from UI')
+    message.success(t('memory.forget') + ' ✓')
+    await fetchMemories()
+    await fetchStats()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  }
+}
+
+const handleExport = async () => {
+  try {
+    const res = await memoryApi.exportMemories({ format: 'json' })
+    const data = (res as any)?.data ?? res
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `memories-${Date.now()}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    message.success(t('memorySettings.exportSuccess'))
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  }
+}
+
+const handleImport = async () => {
+  if (!importJson.value.trim()) {
+    message.warning(t('validation.required'))
+    return
+  }
+  importing.value = true
+  try {
+    const memories = JSON.parse(importJson.value)
+    if (!Array.isArray(memories)) {
+      message.error('JSON must be an array of memory objects')
+      return
+    }
+    const res = await memoryApi.importMemories(memories, importMergeMode.value)
+    const imported = (res as any)?.data?.imported ?? 0
+    message.success(`${t('memory.importMem')}: ${imported} imported`)
+    showImportModal.value = false
+    importJson.value = ''
+    await fetchMemories()
+    await fetchStats()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  } finally {
+    importing.value = false
+  }
+}
+
+const onImportFile = (file: File) => {
+  const reader = new FileReader()
+  reader.onload = () => {
+    importJson.value = reader.result as string
+  }
+  reader.readAsText(file)
+  return false
 }
 
 onMounted(() => {

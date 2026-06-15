@@ -104,8 +104,23 @@ class RecursiveRatchetPruner:
                 - 第3轮细筛: 5个候选 → 保留1个最优
             max_complexity: 最大复杂度阈值（用于粗筛）
         """
+        # R-1: 校验 rounds
+        if not isinstance(rounds, int) or rounds <= 0:
+            raise ValueError(f"rounds must be a positive integer, got {rounds}")
+
         self.rounds = rounds
         self.candidates_per_round = candidates_per_round or [100, 20, 5]
+
+        # R-1: 校验 candidates_per_round 长度,不足时补齐(用最后一个值)
+        if len(self.candidates_per_round) < self.rounds:
+            last_val = self.candidates_per_round[-1] if self.candidates_per_round else 1
+            while len(self.candidates_per_round) < self.rounds:
+                self.candidates_per_round.append(last_val)
+            logger.warning(
+                "candidates_per_round length < rounds, padded to %s",
+                self.candidates_per_round,
+            )
+
         self.max_complexity = max_complexity or self.MAX_COMPLEXITY
 
         # 每轮筛选的评估精度
@@ -153,6 +168,7 @@ class RecursiveRatchetPruner:
 
         current_candidates = candidates.copy()
         self.prune_history = []  # 重置历史
+        self.best_candidates_cache.clear()  # R-3: 清理跨次调用的缓存
 
         logger.info("Starting recursive pruning with %s candidates", len(candidates))
 
@@ -167,6 +183,9 @@ class RecursiveRatchetPruner:
                 len(current_candidates),
             )
 
+            # R-4: 在筛选前记录 input_count
+            input_count_before = len(current_candidates)
+
             # 执行本轮筛选
             start_time = datetime.now()
 
@@ -180,12 +199,20 @@ class RecursiveRatchetPruner:
                 # 第3轮：细筛（完整验证）
                 current_candidates = self._fine_prune(current_candidates, keep_count, validation_fn)
 
+            # R-3: 将被淘汰的候选写入 failed_candidates_history(最多保留 100 条)
+            if len(current_candidates) < input_count_before:
+                survived_ids = {c.id for c in current_candidates}
+                eliminated = [c for c in candidates if c.id not in survived_ids and c.id not in {f.id for f in self.failed_candidates_history}]
+                self.failed_candidates_history.extend(eliminated[-50:])  # 最多追加 50 条
+                if len(self.failed_candidates_history) > 100:
+                    self.failed_candidates_history = self.failed_candidates_history[-100:]
+
             # 记录本轮结果
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
             round_result = PruneRoundResult(
                 round_num=round_num,
                 precision=self.round_precision.get(round_num, "unknown"),
-                input_count=len(current_candidates) if round_num == 0 else len(current_candidates),
+                input_count=input_count_before,
                 output_count=len(current_candidates),
                 execution_time_ms=execution_time,
                 best_candidate=current_candidates[0] if current_candidates else None,
@@ -205,8 +232,19 @@ class RecursiveRatchetPruner:
         result = current_candidates[0] if current_candidates else None
 
         if result:
+            # R-2: 根据实际经过的阶段选择正确的 score 字段
+            if self.prune_history:
+                last_precision = self.prune_history[-1].precision
+                if last_precision == self.PRECISION_FINE:
+                    score_display = result.validation_score
+                elif last_precision == self.PRECISION_MEDIUM:
+                    score_display = result.quick_evaluation_score
+                else:
+                    score_display = result.heuristic_score
+            else:
+                score_display = result.heuristic_score
             logger.info(
-                f"Recursive pruning completed. Best candidate: {result.id} " f"(score: {result.validation_score:.3f})"
+                f"Recursive pruning completed. Best candidate: {result.id} " f"(score: {score_display:.3f})"
             )
 
         return result
@@ -246,10 +284,15 @@ class RecursiveRatchetPruner:
         if heuristic_fn:
             for c in filtered:
                 c.heuristic_score = heuristic_fn(c)
+        else:
+            # R-1: 无 heuristic_fn 时,用 complexity 作为默认评分(低复杂度优先)
+            for c in filtered:
+                if c.heuristic_score == 0.0:
+                    c.heuristic_score = max(0.0, 1.0 - c.complexity / self.max_complexity)
 
-        # 基于启发式评分排序
+        # 基于启发式评分排序(同分时按 complexity 升序做 tiebreaker)
         scored = [(c, c.heuristic_score) for c in filtered]
-        scored.sort(key=lambda x: x[1], reverse=True)
+        scored.sort(key=lambda x: (x[1], -x[0].complexity), reverse=True)
 
         result = [c for c, _ in scored[:keep_count]]
 

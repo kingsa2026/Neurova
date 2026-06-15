@@ -9,7 +9,7 @@ import type { Agent, AgentConfig } from '@/types/agent'
 function mapAgentResponse(raw: Record<string, any>): Agent {
   const config = raw.config || {}
   return {
-    id: raw.id,
+    id: raw.id ?? raw.agent_id,
     name: raw.name,
     description: raw.description ?? '',
     model: raw.model ?? config.model ?? '',

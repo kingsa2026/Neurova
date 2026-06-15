@@ -90,149 +90,27 @@ async def list_providers(request: Request):
 
     if provider_manager:
         try:
-            if hasattr(provider_manager, "get_all_providers"):
-                all_providers = provider_manager.get_all_providers()
+            # 使用 list_providers() 方法（ProviderManager 的真实 API）
+            list_method = getattr(provider_manager, "list_providers", None) or \
+                          getattr(provider_manager, "get_all_providers", None)
+            if list_method:
+                all_providers = list_method()
                 for provider in all_providers:
                     providers.append(
                         ProviderInfo(
-                            provider_id=getattr(provider, "provider_id", "unknown"),
+                            provider_id=getattr(provider, "id", "unknown"),
                             name=getattr(provider, "name", "Unknown"),
-                            provider_type=getattr(provider, "provider_type", ""),
+                            provider_type=getattr(provider, "provider", ""),
                             base_url=getattr(provider, "base_url", ""),
-                            is_active=getattr(provider, "is_active", False),
-                            status=getattr(provider, "status", "unknown"),
-                            models_count=getattr(provider, "models_count", 0),
+                            is_active=getattr(provider, "enabled", False),
+                            status=getattr(provider, "health_status", "unknown"),
+                            models_count=len(getattr(provider, "models", [])),
                         )
                     )
         except Exception as e:
             logger.warning("List providers error: %s", e)
 
     return providers
-
-
-@router.get("/{provider_id}", response_model=ProviderInfo)
-async def get_provider(request: Request, provider_id: str = Path(...)):
-    """获取服务商详情"""
-    _get_request_id(request)
-
-    provider_manager = _get_provider_manager()
-    if not provider_manager:
-        raise HTTPException(status_code=503, detail="Provider manager not available")
-
-    try:
-        if hasattr(provider_manager, "get_provider"):
-            provider = provider_manager.get_provider(provider_id)
-            if provider:
-                return ProviderInfo(
-                    provider_id=getattr(provider, "provider_id", provider_id),
-                    name=getattr(provider, "name", "Unknown"),
-                    provider_type=getattr(provider, "provider_type", ""),
-                    base_url=getattr(provider, "base_url", ""),
-                    is_active=getattr(provider, "is_active", False),
-                    status=getattr(provider, "status", "unknown"),
-                    models_count=getattr(provider, "models_count", 0),
-                )
-    except Exception as e:
-        logger.warning("Get provider error: %s", e)
-
-    raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
-
-
-@router.post("", response_model=ProviderInfo)
-async def create_provider(request: Request, body: CreateProviderRequest):
-    """添加服务商"""
-    _get_request_id(request)
-
-    provider_manager = _get_provider_manager()
-    if not provider_manager:
-        raise HTTPException(status_code=503, detail="Provider manager not available")
-
-    try:
-        provider_id = str(uuid.uuid4())[:8]
-
-        if hasattr(provider_manager, "add_provider"):
-            provider = provider_manager.add_provider(
-                provider_id=provider_id,
-                name=body.name,
-                provider_type=body.provider_type,
-                base_url=body.base_url,
-                api_key=body.api_key,
-                config=body.config,
-            )
-
-            return ProviderInfo(
-                provider_id=provider_id,
-                name=body.name,
-                provider_type=body.provider_type,
-                base_url=body.base_url or "",
-                is_active=True,
-                status="created",
-            )
-    except Exception as e:
-        logger.error(f"Create provider error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to create provider: {str(e)}")
-
-    raise HTTPException(status_code=500, detail="Failed to create provider")
-
-
-@router.put("/{provider_id}", response_model=ProviderInfo)
-async def update_provider(
-    request: Request,
-    provider_id: str = Path(...),
-    body: UpdateProviderRequest = Body(...),
-):
-    """更新服务商"""
-    _get_request_id(request)
-
-    provider_manager = _get_provider_manager()
-    if not provider_manager:
-        raise HTTPException(status_code=503, detail="Provider manager not available")
-
-    try:
-        if hasattr(provider_manager, "update_provider"):
-            provider = provider_manager.update_provider(
-                provider_id=provider_id,
-                name=body.name,
-                base_url=body.base_url,
-                api_key=body.api_key,
-                config=body.config,
-            )
-
-            if provider:
-                return ProviderInfo(
-                    provider_id=getattr(provider, "provider_id", provider_id),
-                    name=getattr(provider, "name", "Unknown"),
-                    provider_type=getattr(provider, "provider_type", ""),
-                    base_url=getattr(provider, "base_url", ""),
-                    is_active=getattr(provider, "is_active", False),
-                    status="updated",
-                )
-    except Exception as e:
-        logger.error(f"Update provider error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to update provider: {str(e)}")
-
-    raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
-
-
-@router.delete("/{provider_id}")
-async def delete_provider(request: Request, provider_id: str = Path(...)):
-    """删除服务商"""
-    _get_request_id(request)
-
-    provider_manager = _get_provider_manager()
-    if not provider_manager:
-        raise HTTPException(status_code=503, detail="Provider manager not available")
-
-    try:
-        if hasattr(provider_manager, "remove_provider"):
-            success = provider_manager.remove_provider(provider_id)
-            if success:
-                return {"code": 0, "message": f"Provider '{provider_id}' deleted"}
-    except Exception as e:
-        logger.error(f"Delete provider error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to delete provider: {str(e)}")
-
-    raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
 
 
 @router.post("/activate-model")
@@ -280,6 +158,142 @@ async def get_active_model(request: Request):
         logger.warning("Get active model error: %s", e)
 
     return {"code": 0, "data": {"model": None, "provider": None}}
+
+
+@router.get("/{provider_id}", response_model=ProviderInfo)
+async def get_provider(request: Request, provider_id: str = Path(...)):
+    """获取服务商详情"""
+    _get_request_id(request)
+
+    provider_manager = _get_provider_manager()
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+
+    try:
+        if hasattr(provider_manager, "get_provider"):
+            provider = provider_manager.get_provider(provider_id)
+            if provider:
+                return ProviderInfo(
+                    provider_id=getattr(provider, "id", provider_id),
+                    name=getattr(provider, "name", "Unknown"),
+                    provider_type=getattr(provider, "provider", ""),
+                    base_url=getattr(provider, "base_url", ""),
+                    is_active=getattr(provider, "enabled", False),
+                    status=getattr(provider, "health_status", "unknown"),
+                    models_count=len(getattr(provider, "models", [])),
+                )
+    except Exception as e:
+        logger.warning("Get provider error: %s", e)
+
+    raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
+
+
+@router.post("", response_model=ProviderInfo)
+async def create_provider(request: Request, body: CreateProviderRequest):
+    """添加服务商"""
+    _get_request_id(request)
+
+    provider_manager = _get_provider_manager()
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+
+    try:
+        if hasattr(provider_manager, "add_provider"):
+            logger.info(f"Creating provider: name={body.name}, provider_type={body.provider_type}, base_url={body.base_url}")
+            provider = provider_manager.add_provider(
+                name=body.name,
+                provider=body.provider_type,
+                base_url=body.base_url or "",
+                api_key=body.api_key,
+            )
+            logger.info(f"Provider created successfully: {provider.id}")
+
+            return ProviderInfo(
+                provider_id=getattr(provider, "id", ""),
+                name=getattr(provider, "name", body.name),
+                provider_type=getattr(provider, "provider", body.provider_type),
+                base_url=getattr(provider, "base_url", ""),
+                is_active=getattr(provider, "enabled", True),
+                status="created",
+            )
+        else:
+            logger.error("Provider manager does not have add_provider method")
+            raise HTTPException(status_code=500, detail="Provider manager not properly initialized")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Create provider error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create provider: {str(e)}")
+
+    raise HTTPException(status_code=500, detail="Failed to create provider")
+
+
+@router.put("/{provider_id}", response_model=ProviderInfo)
+async def update_provider(
+    request: Request,
+    provider_id: str = Path(...),
+    body: UpdateProviderRequest = Body(...),
+):
+    """更新服务商"""
+    _get_request_id(request)
+
+    provider_manager = _get_provider_manager()
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+
+    try:
+        if hasattr(provider_manager, "update_provider"):
+            success = provider_manager.update_provider(
+                provider_id=provider_id,
+                base_url=body.base_url,
+                api_key=body.api_key,
+            )
+
+            if success:
+                # 读取更新后的配置（使用公共 API 而非私有属性）
+                provider = None
+                if hasattr(provider_manager, "get_provider"):
+                    provider = provider_manager.get_provider(provider_id)
+                if provider:
+                    return ProviderInfo(
+                        provider_id=getattr(provider, "id", provider_id),
+                        name=getattr(provider, "name", "Unknown"),
+                        provider_type=getattr(provider, "provider", ""),
+                        base_url=getattr(provider, "base_url", ""),
+                        is_active=getattr(provider, "enabled", False),
+                        status="updated",
+                    )
+                return ProviderInfo(
+                    provider_id=provider_id,
+                    name="Unknown",
+                    status="updated",
+                )
+    except Exception as e:
+        logger.error(f"Update provider error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update provider: {str(e)}")
+
+    raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
+
+
+@router.delete("/{provider_id}")
+async def delete_provider(request: Request, provider_id: str = Path(...)):
+    """删除服务商"""
+    _get_request_id(request)
+
+    provider_manager = _get_provider_manager()
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+
+    try:
+        if hasattr(provider_manager, "remove_provider"):
+            success = provider_manager.remove_provider(provider_id)
+            if success:
+                return {"code": 0, "message": f"Provider '{provider_id}' deleted"}
+    except Exception as e:
+        logger.error(f"Delete provider error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete provider: {str(e)}")
+
+    raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
 
 
 @router.get("/{provider_id}/models/discover")
