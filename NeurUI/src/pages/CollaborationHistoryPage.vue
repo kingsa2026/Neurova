@@ -91,8 +91,9 @@ const filteredSessions = computed(() =>
 async function fetchHistory() {
   loading.value = true
   try {
-    const res = await listHistory() as unknown as Session[]
-    sessions.value = res ?? []
+    const res: any = await listHistory()
+    const raw = res?.data ?? res ?? []
+    sessions.value = Array.isArray(raw) ? raw : (raw?.data ?? [])
   } catch {
     sessions.value = []
   } finally {

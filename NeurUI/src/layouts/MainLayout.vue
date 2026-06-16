@@ -14,17 +14,18 @@
         :collapsed="appStore.sidebarCollapsed"
       />
 
-      <!-- Home -->
+      <!-- Quick access -->
       <GlassNavItem to="/dashboard" :label="t('nav.dashboard')" :collapsed="appStore.sidebarCollapsed">
         <template #icon><DashboardOutlined /></template>
-      </GlassNavItem>
-      <GlassNavItem to="/chat" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><MessageOutlined /></template>
       </GlassNavItem>
       <GlassNavItem to="/agents" :label="t('nav.agents')" :collapsed="appStore.sidebarCollapsed" active-path="/agents">
         <template #icon><RobotOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/channels" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
+      <!-- 全局对话/渠道: 仅无 Agent 选中时显示(选中 Agent 后由 Agent 隔离菜单替代) -->
+      <GlassNavItem v-if="!agentStore.currentAgent" to="/chat" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><MessageOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem v-if="!agentStore.currentAgent" to="/channels" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
         <template #icon><GlobalOutlined /></template>
       </GlassNavItem>
 
@@ -94,9 +95,6 @@
         </GlassNavItem>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/channel-sharing`" :label="t('nav.channelSharing')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><LinkOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/firewall`" :label="t('nav.firewall')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><SafetyOutlined /></template>
         </GlassNavItem>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/sleep/status`" :label="t('nav.sleep')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><CoffeeOutlined /></template>
@@ -202,19 +200,17 @@ import GlassNav from '@/components/GlassNav.vue'
 import GlassNavItem from '@/components/GlassNavItem.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import AgentSwitcher from '@/components/AgentSwitcher.vue'
+import TopNavMenu from '@/components/TopNavMenu.vue'
 import {
   DashboardOutlined, RobotOutlined, MessageOutlined, DatabaseOutlined,
   ShareAltOutlined, ExperimentOutlined, BulbOutlined, RiseOutlined,
   HeartOutlined, ThunderboltOutlined, FileOutlined, ApiOutlined,
   ClockCircleOutlined, SafetyOutlined, CodeOutlined,
-  DesktopOutlined, BookOutlined, AppstoreOutlined, NodeIndexOutlined,
-  CloudServerOutlined, ToolOutlined, BarChartOutlined, MonitorOutlined,
+  DesktopOutlined, PlusOutlined, ControlOutlined, LinkOutlined,
   SettingOutlined, BellOutlined, GlobalOutlined, SkinOutlined,
   BgColorsOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-  CoffeeOutlined, PieChartOutlined, FileTextOutlined, HistoryOutlined,
-  TeamOutlined, UserOutlined, PlayCircleOutlined, SmileOutlined,
-  RocketOutlined, BranchesOutlined, ControlOutlined, LinkOutlined,
-  ProjectOutlined, AlertOutlined, ShopOutlined,
+  CoffeeOutlined, FileTextOutlined, HistoryOutlined,
+  UserOutlined, PlayCircleOutlined, SmileOutlined,
 } from '@ant-design/icons-vue'
 
 const router = useRouter()

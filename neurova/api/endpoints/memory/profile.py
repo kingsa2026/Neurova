@@ -7,10 +7,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, Request
 from pydantic import BaseModel, Field
 
-from neurova.api.auth import get_current_user
+from neurova.api.auth import get_current_user_or_default
 from neurova.interfaces.api_standard import (
     APIError,
     APIResponse,
+    success_response,
 )
 
 from .base import (
@@ -46,7 +47,7 @@ class UpdateUserProfileRequest(BaseModel):
 async def get_self_model(
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取Agent的自我模型（持久身份、价值观、能力等）
@@ -57,7 +58,7 @@ async def get_self_model(
 
         manager = get_memory_manager(agent_id, neuser_id, user_id)
         self_model = manager.get_self_model()
-        return APIResponse.ok(
+        return success_response(
             data=self_model,
             message="获取成功",
             request_id=_get_request_id(req),
@@ -74,7 +75,7 @@ async def update_self_model(
     request: UpdateSelfModelRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     更新Agent的自我模型
@@ -99,7 +100,7 @@ async def update_self_model(
             updates["preferred_style"] = request.preferred_style
 
         manager.update_self_model(updates)
-        return APIResponse.ok(
+        return success_response(
             data={"updated": list(updates.keys())},
             message="自我模型已更新",
             request_id=_get_request_id(req),
@@ -116,7 +117,7 @@ async def get_user_profile(
     user_id: str,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取特定用户的画像
@@ -127,7 +128,7 @@ async def get_user_profile(
 
         manager = get_memory_manager(agent_id, neuser_id, token_user_id)
         profile = manager.get_user_profile(user_id)
-        return APIResponse.ok(
+        return success_response(
             data=profile or {"message": "用户画像不存在"},
             message="获取成功",
             request_id=_get_request_id(req),
@@ -145,7 +146,7 @@ async def update_user_profile(
     request: UpdateUserProfileRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     更新特定用户的画像
@@ -166,7 +167,7 @@ async def update_user_profile(
             updates["knowledge_level"] = request.knowledge_level
 
         manager.update_user_profile(user_id, updates)
-        return APIResponse.ok(
+        return success_response(
             data={"user_id": user_id, "updated": list(updates.keys())},
             message="用户画像已更新",
             request_id=_get_request_id(req),

@@ -136,6 +136,7 @@ export default {
     development: 'Development',
     operations: 'Operations',
     admin: 'Admin',
+    globalNav: 'वैश्विक नेविगेशन',
     agentchat: 'एजेंट चैट',
     agentcreate: 'एजेंट बनाएं',
     agentedit: 'एजेंट संपादित करें',

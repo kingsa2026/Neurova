@@ -8,10 +8,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends
 from pydantic import BaseModel, Field
 
-from neurova.api.auth import get_current_user
+from neurova.api.auth import get_current_user_or_default
 from neurova.interfaces.api_standard import (
     APIError,
     APIResponse,
+    success_response,
 )
 
 from .base import (
@@ -89,7 +90,7 @@ class EKIConfigRequest(BaseModel):
 async def classify_memory_content(
     request: ClassifyMemoryRequest,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     对记忆内容进行分类推断
@@ -100,7 +101,7 @@ async def classify_memory_content(
         manager = get_memory_manager(agent_id, user)
         result = manager.classify_memory(request.content, request.context)
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "category": result["category"][0],
                 "category_confidence": result["category"][1],
@@ -128,7 +129,7 @@ async def classify_memory_content(
 async def classify_and_remember(
     request: ClassifyMemoryRequest,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     自动分类并创建记忆 (一站式操作)
@@ -143,7 +144,7 @@ async def classify_and_remember(
 
         result = manager.classify_memory(request.content, request.context)
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "memory_id": memory_id,
                 "classification": {
@@ -179,7 +180,7 @@ async def classify_and_remember(
 @router.get("/eki/status", summary="获取EKI状态")
 async def get_eki_status(
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取EKI认知优化器状态
@@ -189,7 +190,7 @@ async def get_eki_status(
         enabled = manager.eki_get_enabled()
 
         if not enabled:
-            return APIResponse.ok(
+            return success_response(
                 data={"enabled": False, "message": "EKI优化器已禁用"},
                 message="获取成功",
                 request_id=_get_request_id(None),
@@ -197,7 +198,7 @@ async def get_eki_status(
 
         stats = manager.eki_get_statistics()
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "enabled": True,
                 "statistics": stats,
@@ -217,7 +218,7 @@ async def get_eki_status(
 async def process_eki_task(
     request: ProcessTaskRequest,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     EKI任务处理 - 评估任务价值并更新认知状态
@@ -232,7 +233,7 @@ async def process_eki_task(
             user_feedback=request.user_feedback,
         )
 
-        return APIResponse.ok(
+        return success_response(
             data=result,
             message="任务处理完成",
             request_id=_get_request_id(None),
@@ -249,7 +250,7 @@ async def process_eki_task(
 async def get_reinforcement_recommendations(
     top_k: int = 10,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取EKI推荐需要强化的记忆
@@ -258,7 +259,7 @@ async def get_reinforcement_recommendations(
         manager = get_memory_manager(agent_id, user)
         recommendations = manager.eki_get_reinforcement_recommendations(top_k=top_k)
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "count": len(recommendations),
                 "recommendations": recommendations,
@@ -279,7 +280,7 @@ async def predict_memory_decay(
     memory_id: str,
     horizon: int = 7,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     预测指定记忆的温度衰减趋势
@@ -288,7 +289,7 @@ async def predict_memory_decay(
         manager = get_memory_manager(agent_id, user)
         prediction = manager.eki_predict_decay(memory_id=memory_id, horizon=horizon)
 
-        return APIResponse.ok(
+        return success_response(
             data=prediction,
             message="预测成功",
             request_id=_get_request_id(None),
@@ -305,7 +306,7 @@ async def predict_memory_decay(
 async def get_memory_strength(
     memory_id: str,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取指定记忆的认知强度
@@ -314,7 +315,7 @@ async def get_memory_strength(
         manager = get_memory_manager(agent_id, user)
         strength = manager.eki_get_memory_strength(memory_id=memory_id)
 
-        return APIResponse.ok(
+        return success_response(
             data={"memory_id": memory_id, "strength": strength},
             message="获取成功",
             request_id=_get_request_id(None),
@@ -330,7 +331,7 @@ async def get_memory_strength(
 @router.get("/eki/statistics", summary="获取EKI统计信息")
 async def get_eki_statistics(
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取EKI认知优化器详细统计信息
@@ -339,7 +340,7 @@ async def get_eki_statistics(
         manager = get_memory_manager(agent_id, user)
         stats = manager.eki_get_statistics()
 
-        return APIResponse.ok(
+        return success_response(
             data=stats,
             message="获取成功",
             request_id=_get_request_id(None),
@@ -356,7 +357,7 @@ async def get_eki_statistics(
 async def batch_update_cognitive_state(
     request: BatchUpdateRequest,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     批量更新认知状态
@@ -367,7 +368,7 @@ async def batch_update_cognitive_state(
         manager = get_memory_manager(agent_id, user)
         results = manager.eki_batch_update(batch_data=request.batch_data)
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "updated_count": len(results),
                 "results": results,
@@ -387,7 +388,7 @@ async def batch_update_cognitive_state(
 async def configure_eki(
     request: EKIConfigRequest,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     配置EKI认知优化器参数
@@ -406,7 +407,7 @@ async def configure_eki(
 
         manager.eki_configure(config)
 
-        return APIResponse.ok(
+        return success_response(
             data=config,
             message="EKI配置已更新",
             request_id=_get_request_id(None),
@@ -423,7 +424,7 @@ async def configure_eki(
 async def set_eki_enabled(
     enabled: bool = True,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     启用或禁用EKI认知优化器
@@ -433,7 +434,7 @@ async def set_eki_enabled(
         manager.eki_set_enabled(enabled)
 
         status = "已启用" if enabled else "已禁用"
-        return APIResponse.ok(
+        return success_response(
             data={"enabled": enabled},
             message=f"EKI优化器{status}",
             request_id=_get_request_id(None),

@@ -66,12 +66,12 @@ const BASE = '/growth'
 
 /** Get growth reflections for an agent. */
 export function getReflections(agentId: string, params?: { page?: number; size?: number }) {
-  return api.get<ApiResponse<{ items: GrowthReflection[]; total: number }>>(`${BASE}/reflections`, { params: { ...params, agent_id: agentId } })
+  return api.get<ApiResponse<{ items: GrowthReflection[]; total: number }>>(`${BASE}/reflection`, { params: { ...params, agent_id: agentId } })
 }
 
 /** Create a reflection. */
 export function createReflection(agentId: string, content: string, category?: string) {
-  return api.post<ApiResponse<GrowthReflection>>(`${BASE}/reflections`, { agent_id: agentId, content, category })
+  return api.post<ApiResponse<GrowthReflection>>(`${BASE}/reflection`, { agent_id: agentId, content, category })
 }
 
 /** Get growth questions. */

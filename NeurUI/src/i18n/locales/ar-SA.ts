@@ -136,6 +136,7 @@ export default {
     development: 'Development',
     operations: 'Operations',
     admin: 'Admin',
+    globalNav: 'التنقل العام',
     agentchat: 'محادثة الوكيل',
     agentcreate: 'إنشاء وكيل',
     agentedit: 'تعديل الوكيل',

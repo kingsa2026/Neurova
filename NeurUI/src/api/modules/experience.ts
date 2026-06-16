@@ -42,9 +42,9 @@ export interface ExperienceStats {
 
 const BASE = '/experience'
 
-/** List experience records for an agent. */
+/** List experience records for an agent (uses /ranking endpoint). */
 export function getExperiences(agentId: string, params?: PageParams & { task_type?: string }) {
-  return api.get<ApiResponse<PaginatedData<ExperienceRecord>>>(BASE, { params: { ...params, agent_id: agentId } })
+  return api.get<ApiResponse<PaginatedData<ExperienceRecord>>>(`${BASE}/ranking`, { params: { ...params, agent_id: agentId } })
 }
 
 /** Get a single experience record. */
@@ -54,7 +54,7 @@ export function getExperience(id: string) {
 
 /** Create a new experience record. */
 export function createExperience(data: ExperienceCreatePayload) {
-  return api.post<ApiResponse<ExperienceRecord>>(BASE, data)
+  return api.post<ApiResponse<ExperienceRecord>>(`${BASE}/records`, data)
 }
 
 /** Delete an experience record. */
@@ -68,13 +68,13 @@ export function searchSimilar(agentId: string, query: string, limit = 5) {
 }
 
 /** Evaluate an experience (e.g. rate quality). */
-export function evaluateExperience(id: string, rating: number, feedback?: string) {
-  return api.post<ApiResponse<null>>(`${BASE}/${id}/evaluate`, { rating, feedback })
+export function evaluateExperience(skillName: string, rating: number, feedback?: string) {
+  return api.get<ApiResponse<null>>(`${BASE}/evaluate/${skillName}`)
 }
 
-/** Get experience recommendations for a task. */
+/** Get experience recommendations for a task (uses /ranking as fallback). */
 export function getRecommendations(agentId: string, taskType: string, limit = 5) {
-  return api.get<ApiResponse<ExperienceRecord[]>>(`${BASE}/recommendations`, { params: { agent_id: agentId, task_type: taskType, limit } })
+  return api.get<ApiResponse<PaginatedData<ExperienceRecord>>>(`${BASE}/ranking`, { params: { agent_id: agentId, task_type: taskType, limit } })
 }
 
 /** Get experience statistics for an agent. */

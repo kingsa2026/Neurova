@@ -7,10 +7,11 @@ from typing import Any, Dict, Optional
 from fastapi import Depends, Request
 from pydantic import BaseModel, Field
 
-from neurova.api.auth import get_current_user
+from neurova.api.auth import get_current_user_or_default
 from neurova.interfaces.api_standard import (
     APIError,
     APIResponse,
+    success_response,
 )
 
 from .base import (
@@ -49,7 +50,7 @@ async def add_temporal_fact(
     request: AddTemporalFactRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     添加时序事实到知识图谱
@@ -70,7 +71,7 @@ async def add_temporal_fact(
             metadata=request.metadata,
         )
 
-        return APIResponse.ok(
+        return success_response(
             data={"fact_id": fact_id},
             message="时序事实已添加",
             request_id=_get_request_id(req),
@@ -88,7 +89,7 @@ async def query_temporal_facts(
     request: QueryTemporalRequest,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     查询时序知识图谱中的事实
@@ -107,7 +108,7 @@ async def query_temporal_facts(
             limit=request.limit,
         )
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "count": len(facts),
                 "facts": facts,
@@ -129,7 +130,7 @@ async def get_temporal_history(
     relation: str,
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取指定实体关系的事实演变历史
@@ -143,7 +144,7 @@ async def get_temporal_history(
             relation=relation,
         )
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "entity": entity,
                 "relation": relation,
@@ -165,7 +166,7 @@ async def get_temporal_history(
 async def get_tkg_stats(
     agent_id: Optional[str] = None,
     req: Request = None,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取时序知识图谱统计信息
@@ -176,7 +177,7 @@ async def get_tkg_stats(
         manager = get_memory_manager(agent_id, neuser_id, user_id)
         stats = manager.tkg_get_stats()
 
-        return APIResponse.ok(
+        return success_response(
             data=stats,
             message="获取成功",
             request_id=_get_request_id(req),

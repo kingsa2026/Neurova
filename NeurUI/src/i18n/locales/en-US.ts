@@ -167,6 +167,7 @@ export default {
     acp: 'ACP',
     runtimeConfig: 'Runtime Config',
     agentStats: 'Agent Stats',
+    globalNav: 'Global Navigation',
     agentchat: 'Agent Chat',
     agenttrajectory: 'Trajectory',
     aigc: 'AIGC',
@@ -1321,7 +1322,7 @@ export default {
     underDevelopment: 'is currently under development and will be available in a future release.',
   },
   stats: {
-    title: 'Statistics',
+    title: 'Statistics & Analysis',
     usageTrends: 'Usage Trends',
   },
   session: {

@@ -136,6 +136,7 @@ export default {
     development: 'Development',
     operations: 'Operations',
     admin: 'Admin',
+    globalNav: 'Глобальная навигация',
     agentchat: 'Чат агента',
     agentcreate: 'Создать агент',
     agentedit: 'Редактировать агент',

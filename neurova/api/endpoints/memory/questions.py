@@ -7,10 +7,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, Query
 from pydantic import BaseModel, Field
 
-from neurova.api.auth import get_current_user
+from neurova.api.auth import get_current_user_or_default
 from neurova.interfaces.api_standard import (
     APIError,
     APIResponse,
+    success_response,
 )
 
 from .base import (
@@ -69,7 +70,7 @@ def question_entry_to_dict(entry) -> dict:
 async def get_pending_questions(
     limit: int = Query(default=10, ge=1, le=50, description="返回条数"),
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取待问问题列表
@@ -78,7 +79,7 @@ async def get_pending_questions(
         manager = get_memory_manager(agent_id, user)
         questions = manager.get_pending_questions(limit=limit)
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "count": len(questions),
                 "questions": [question_entry_to_dict(q) for q in questions],
@@ -98,7 +99,7 @@ async def get_pending_questions(
 async def mark_question_asked(
     request: MarkQuestionAskedRequest,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     标记一个问题为已问状态
@@ -110,7 +111,7 @@ async def mark_question_asked(
             answer=request.answer,
         )
 
-        return APIResponse.ok(
+        return success_response(
             data=question_entry_to_dict(entry),
             message="标记成功",
             request_id=_get_request_id(None),
@@ -126,7 +127,7 @@ async def mark_question_asked(
 @router.get("/questions/stats", summary="获取问题队列统计")
 async def get_question_queue_stats(
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取问题队列统计信息
@@ -135,7 +136,7 @@ async def get_question_queue_stats(
         manager = get_memory_manager(agent_id, user)
         stats = manager.get_question_stats()
 
-        return APIResponse.ok(
+        return success_response(
             data=stats,
             message="获取成功",
             request_id=_get_request_id(None),

@@ -224,7 +224,7 @@ const channelLabel = (ch: string) => t(`memorySearch.${channelLabelMap[ch] || ch
 const fetchSettings = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/memory-search/settings')
+    const res: any = await request.get('/enhanced-memory-search/settings')
     const data = res?.data ?? res ?? {}
     if (data.search) searchConfig.value = { ...searchConfig.value, ...data.search }
     if (data.decay) decay.value = { ...decay.value, ...data.decay }
@@ -270,7 +270,7 @@ const onChannelDensityChange = (ch: string, val: number) => {
 const saveSettings = async () => {
   saving.value = true
   try {
-    await request.put('/memory-search/settings', {
+    await request.put('/enhanced-memory-search/settings', {
       search: searchConfig.value,
       decay: decay.value,
       enhancement: enhancement.value,

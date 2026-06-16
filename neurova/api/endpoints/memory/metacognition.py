@@ -7,10 +7,11 @@ from typing import Any, Dict, Optional
 from fastapi import Depends, Request
 from pydantic import BaseModel, Field
 
-from neurova.api.auth import get_current_user
+from neurova.api.auth import get_current_user_or_default
 from neurova.interfaces.api_standard import (
     APIError,
     APIResponse,
+    success_response,
 )
 
 from .base import (
@@ -44,7 +45,7 @@ class MatchSkillsRequest(BaseModel):
 @router.post("/meta/monitor", summary="执行元认知监控")
 async def meta_monitor(
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     执行元认知系统监控
@@ -52,7 +53,7 @@ async def meta_monitor(
     try:
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_monitor()
-        return APIResponse.ok(
+        return success_response(
             data=result,
             message="监控完成",
             request_id=_get_request_id(None),
@@ -67,7 +68,7 @@ async def meta_monitor(
 @router.post("/meta/reflect", summary="执行元认知反思")
 async def meta_reflect(
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     执行元认知系统反思
@@ -75,7 +76,7 @@ async def meta_reflect(
     try:
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_reflect()
-        return APIResponse.ok(
+        return success_response(
             data=result,
             message="反思完成",
             request_id=_get_request_id(None),
@@ -102,7 +103,7 @@ async def meta_optimize(
         user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_optimize()
-        return APIResponse.ok(
+        return success_response(
             data=result,
             message="优化完成",
             request_id=_get_request_id(req),
@@ -129,7 +130,7 @@ async def meta_evolve_skills(
         user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_evolve_skills()
-        return APIResponse.ok(
+        return success_response(
             data=result,
             message="技能进化完成",
             request_id=_get_request_id(req),
@@ -161,7 +162,7 @@ async def meta_get_health(
         user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_get_health_report()
-        return APIResponse.ok(
+        return success_response(
             data=result,
             message="获取成功",
             request_id=_get_request_id(req),
@@ -188,7 +189,7 @@ async def meta_get_reflection(
         user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_get_reflection_report()
-        return APIResponse.ok(
+        return success_response(
             data=result,
             message="获取成功",
             request_id=_get_request_id(req),
@@ -218,7 +219,7 @@ async def meta_should_monitor(
         user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_should_monitor()
-        return APIResponse.ok(
+        return success_response(
             data={"should_monitor": result},
             message="检查完成",
             request_id=_get_request_id(req),
@@ -243,7 +244,7 @@ async def meta_should_reflect(
         user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_should_reflect()
-        return APIResponse.ok(
+        return success_response(
             data={"should_reflect": result},
             message="检查完成",
             request_id=_get_request_id(req),
@@ -268,7 +269,7 @@ async def meta_should_optimize(
         user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_should_optimize()
-        return APIResponse.ok(
+        return success_response(
             data={"should_optimize": result},
             message="检查完成",
             request_id=_get_request_id(req),
@@ -293,7 +294,7 @@ async def meta_should_evolve(
         user = {"neuser_id": neuser_id, "user_id": user_id}
         manager = get_memory_manager(agent_id, user)
         result = manager.meta_should_evolve_skills()
-        return APIResponse.ok(
+        return success_response(
             data={"should_evolve": result},
             message="检查完成",
             request_id=_get_request_id(req),
@@ -326,7 +327,7 @@ async def meta_get_all_skills(
         manager = get_memory_manager(agent_id, user)
         skills = manager.meta_get_all_skills(category=category, status=status)
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "count": len(skills),
                 "skills": skills,
@@ -355,7 +356,7 @@ async def meta_get_skill_stats(
         manager = get_memory_manager(agent_id, user)
         stats = manager.meta_get_skill_stats()
 
-        return APIResponse.ok(
+        return success_response(
             data=stats,
             message="获取成功",
             request_id=_get_request_id(req),
@@ -382,7 +383,7 @@ async def meta_generate_skill(
         manager = get_memory_manager(agent_id, user)
         skill = manager.meta_generate_skill(request.description, category=request.category)
 
-        return APIResponse.ok(
+        return success_response(
             data=skill,
             message="技能生成成功",
             request_id=_get_request_id(req),
@@ -409,7 +410,7 @@ async def meta_match_skills(
         manager = get_memory_manager(agent_id, user)
         matched = manager.meta_match_skills(request.query, top_k=request.top_k)
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "count": len(matched),
                 "matched_skills": matched,
@@ -443,7 +444,7 @@ async def get_agent_metacognition(
         registry = AgentRegistry()
         agent = registry.get_agent(agent_id)
         if not agent:
-            return APIResponse.ok(
+            return success_response(
                 data={"items": [], "total": 0, "stats": {"total": 0, "evaluations": 0, "suggestions": 0}},
                 request_id=_get_request_id(req),
             )
@@ -456,7 +457,7 @@ async def get_agent_metacognition(
         evals = len([r for r in records if getattr(r, "thought_type", "") == "evaluation"])
         opts = len([r for r in records if getattr(r, "thought_type", "") == "optimization"])
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "agent_id": agent_id,
                 "total": total,
@@ -480,7 +481,7 @@ async def get_agent_metacognition(
         )
     except Exception as e:
         logger.exception("获取元认知记录失败: %s", e)
-        return APIResponse.ok(
+        return success_response(
             data={"items": [], "total": 0, "stats": {"total": 0, "evaluations": 0, "suggestions": 0}},
             request_id=_get_request_id(req),
         )
@@ -498,7 +499,7 @@ async def get_agent_metacognition_stats(
         registry = AgentRegistry()
         agent = registry.get_agent(agent_id)
         if not agent:
-            return APIResponse.ok(
+            return success_response(
                 data={"agent_id": agent_id, "total": 0, "by_type": {}},
                 request_id=_get_request_id(req),
             )
@@ -513,7 +514,7 @@ async def get_agent_metacognition_stats(
         evals = by_type.get("evaluation", 0)
         opts = by_type.get("optimization", 0)
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "agent_id": agent_id,
                 "total": len(records),
@@ -526,7 +527,7 @@ async def get_agent_metacognition_stats(
         )
     except Exception as e:
         logger.exception("获取元认知统计失败: %s", e)
-        return APIResponse.ok(
+        return success_response(
             data={"agent_id": agent_id, "total": 0, "by_type": {}},
             request_id=_get_request_id(req),
         )

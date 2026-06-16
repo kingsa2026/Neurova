@@ -145,6 +145,7 @@ export default {
     acp: 'ACP',
     runtimeConfig: 'Runtime Config',
     agentStats: 'Agent Stats',
+    globalNav: 'グローバルナビゲーション',
     agentchat: 'エージェントチャット',
     agentcreate: 'エージェント作成',
     agentedit: 'エージェント編集',

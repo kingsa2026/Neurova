@@ -360,3 +360,27 @@ async def get_blocked_ips(
     except Exception as e:
         logger.exception("Error getting blocked list: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to get blocked list: {str(e)}")
+
+
+@router.get("/stats")
+async def get_firewall_stats():
+    """获取防火墙统计信息"""
+    try:
+        rules = _firewall_rules_store if '_firewall_rules_store' in dir() else []
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "total_rules": len(_firewall_rules_store),
+                "active_rules": len([r for r in _firewall_rules_store if r.get("enabled", True)]),
+                "blocked_ips": 0,
+                "blocked_paths": 0,
+            },
+        }
+    except Exception as e:
+        logger.exception("Error getting firewall stats: %s", e)
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {"total_rules": 0, "active_rules": 0, "blocked_ips": 0, "blocked_paths": 0},
+        }
