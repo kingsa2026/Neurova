@@ -7,10 +7,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, Request
 from pydantic import BaseModel, Field
 
-from neurova.api.auth import get_current_user
+from neurova.api.auth import get_current_user_or_default
 from neurova.interfaces.api_standard import (
     APIError,
     APIResponse,
+    success_response,
 )
 
 from .base import (
@@ -104,7 +105,7 @@ async def get_reflection_logs(
     limit: int = 20,
     offset: int = 0,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取反思日志列表，支持按类型和状态筛选
@@ -121,7 +122,7 @@ async def get_reflection_logs(
 
         logs = [reflection_log_entry_to_dict(entry) for entry in result.get("logs", [])]
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "count": len(logs),
                 "total": result.get("total", 0),
@@ -142,7 +143,7 @@ async def get_reflection_logs(
 async def generate_reflection(
     request: ReflectionLogRequest,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     生成新的反思日志
@@ -164,7 +165,7 @@ async def generate_reflection(
             tags=request.tags,
         )
 
-        return APIResponse.ok(
+        return success_response(
             data={"log_id": log_id},
             message="反思日志生成成功",
             request_id=_get_request_id(None),
@@ -182,7 +183,7 @@ async def validate_reflection(
     log_id: str,
     request: ValidateReflectionRequest,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     验证反思日志的应用结果
@@ -196,7 +197,7 @@ async def validate_reflection(
             feedback=request.feedback,
         )
 
-        return APIResponse.ok(
+        return success_response(
             data=reflection_log_entry_to_dict(entry),
             message="验证成功",
             request_id=_get_request_id(None),
@@ -212,7 +213,7 @@ async def validate_reflection(
 @router.get("/reflection/stats", summary="获取反思日志统计")
 async def get_reflection_stats(
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取反思日志统计信息
@@ -221,7 +222,7 @@ async def get_reflection_stats(
         manager = get_memory_manager(agent_id, user)
         stats = manager.get_reflection_stats()
 
-        return APIResponse.ok(
+        return success_response(
             data=stats,
             message="获取成功",
             request_id=_get_request_id(None),
@@ -254,7 +255,7 @@ async def get_agent_reflection(
         registry = AgentRegistry()
         agent = registry.get_agent(agent_id)
         if not agent:
-            return APIResponse.ok(
+            return success_response(
                 data={"items": [], "total": 0, "stats": {"total": 0, "suggestions": 0, "status": "低"}},
                 request_id=_get_request_id(req),
             )
@@ -279,7 +280,7 @@ async def get_agent_reflection(
         elif total > 20:
             status = "中"
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "agent_id": agent_id,
                 "total": total,
@@ -306,7 +307,7 @@ async def get_agent_reflection(
         )
     except Exception as e:
         logger.exception("获取反思记录失败: %s", e)
-        return APIResponse.ok(
+        return success_response(
             data={"items": [], "total": 0, "stats": {"total": 0, "suggestions": 0, "status": "低"}},
             request_id=_get_request_id(req),
         )
@@ -324,7 +325,7 @@ async def get_agent_reflection_stats(
         registry = AgentRegistry()
         agent = registry.get_agent(agent_id)
         if not agent:
-            return APIResponse.ok(
+            return success_response(
                 data={"agent_id": agent_id, "total": 0, "by_category": {}},
                 request_id=_get_request_id(req),
             )
@@ -347,7 +348,7 @@ async def get_agent_reflection_stats(
         elif total > 20:
             status = "中"
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "agent_id": agent_id,
                 "total": total,
@@ -360,7 +361,7 @@ async def get_agent_reflection_stats(
         )
     except Exception as e:
         logger.exception("获取反思统计失败: %s", e)
-        return APIResponse.ok(
+        return success_response(
             data={"agent_id": agent_id, "total": 0, "by_category": {}},
             request_id=_get_request_id(req),
         )

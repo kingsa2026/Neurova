@@ -47,7 +47,7 @@ import { type Component } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  DashboardOutlined, MessageOutlined, RobotOutlined, GlobalOutlined,
+  DashboardOutlined, RobotOutlined,
   DownOutlined,
   BookOutlined, AppstoreOutlined, ShopOutlined, RocketOutlined,
   NodeIndexOutlined, FileOutlined,
@@ -62,12 +62,10 @@ import {
 const route = useRoute()
 const { t } = useI18n()
 
-// ── 快捷入口 ──
+// ── 快捷入口(仅全局管理级) ──
 const quickItems: { to: string; labelKey: string; icon: Component }[] = [
   { to: '/dashboard', labelKey: 'nav.dashboard', icon: DashboardOutlined },
-  { to: '/chat', labelKey: 'nav.chat', icon: MessageOutlined },
   { to: '/agents', labelKey: 'nav.agents', icon: RobotOutlined },
-  { to: '/channels', labelKey: 'nav.channels', icon: GlobalOutlined },
 ]
 
 // ── 6 个全局分类 ──
@@ -116,10 +114,9 @@ const categories: NavCategory[] = [
     labelKey: 'nav.operations',
     icon: MonitorOutlined,
     items: [
-      { to: '/analytics', labelKey: 'nav.analytics', icon: BarChartOutlined },
+      { to: '/stats', labelKey: 'nav.stats', icon: BarChartOutlined },
       { to: '/monitor', labelKey: 'nav.monitor', icon: MonitorOutlined },
       { to: '/health', labelKey: 'nav.health', icon: HeartOutlined },
-      { to: '/stats', labelKey: 'nav.stats', icon: PieChartOutlined },
       { to: '/logs', labelKey: 'nav.logs', icon: FileTextOutlined },
     ],
   },

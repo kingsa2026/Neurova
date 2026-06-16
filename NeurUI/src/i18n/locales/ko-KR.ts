@@ -145,6 +145,7 @@ export default {
     acp: 'ACP',
     runtimeConfig: 'Runtime Config',
     agentStats: 'Agent Stats',
+    globalNav: '글로벌 탐색',
     agentchat: '에이전트 채팅',
     agentcreate: '에이전트 생성',
     agentedit: '에이전트 편집',

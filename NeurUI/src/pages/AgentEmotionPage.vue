@@ -185,7 +185,7 @@ const traitColor = (val: number) => {
 const fetchEmotion = async () => {
   loading.value = true
   try {
-    const res: any = await request.get(`/memory/emotion?agent_id=${agentId.value}`)
+    const res: any = await request.get(`/memory/emotion/summary?agent_id=${agentId.value}`)
     const data = res?.data ?? res ?? {}
     currentEmotion.value = data.current ?? data.state ?? {}
     categories.value = data.categories ?? data.emotions ?? Object.entries(currentEmotion.value.scores ?? {}).map(([name, value]) => ({ name, value }))

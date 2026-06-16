@@ -30,6 +30,11 @@ def _get_request_id(req: Optional[Request]) -> Optional[str]:
     return getattr(req.state, "request_id", None) if req else None
 
 
+def resolve_user(user: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """将可选用户解析为有效用户(未认证时返回默认用户)"""
+    return user or {"user_id": "default", "username": "default", "role": "user"}
+
+
 def _get_user_ids_from_token(req: Optional[Request]) -> tuple:
     """从请求的 Token 中提取 neuser_id 和 user_id
 
@@ -126,26 +131,35 @@ def get_memory_manager(agent_id: Optional[str] = None, user: Optional[Dict[str, 
     agent_id: Agent ID（可选）
     user: 用户信息字典（包含neuser_id和user_id），如果为None则使用默认值
     """
-    from neurova.api.app import app_state
+    from neurova.api.app import get_app_state
+
+    _state = get_app_state()
+    if not _state:
+        raise APIError(ErrorCodes.AGENT_NOT_INITIALIZED, "应用状态未初始化") from None
 
     if agent_id:
-        agent = app_state.agents.get(agent_id)
+        agent = _state.agents.get(agent_id)
         if not agent:
             raise APIError.not_found(f"Agent 不存在: {agent_id}") from None
     else:
-        agent = app_state.default_agent
+        agent = _state.get_agent()
         if not agent:
             raise APIError(ErrorCodes.AGENT_NOT_INITIALIZED, "默认 Agent 未初始化") from None
 
     if not agent.memory_manager:
         raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, "记忆系统未启用") from None
 
-    # 设置多用户隔离参数
+    # 设置多用户隔离参数(安全设置，跳过只读属性)
     if user:
-        agent.memory_manager.neuser_id = user.get("neuser_id", "default")
-        agent.memory_manager.user_id = user.get("user_id", "default")
-    else:
-        agent.memory_manager.neuser_id = "default"
-        agent.memory_manager.user_id = "default"
+        if hasattr(agent.memory_manager, 'neuser_id'):
+            try:
+                agent.memory_manager.neuser_id = user.get("neuser_id", "default")
+            except (AttributeError, AttributeError):
+                pass
+        if hasattr(agent.memory_manager, 'user_id'):
+            try:
+                agent.memory_manager.user_id = user.get("user_id", "default")
+            except (AttributeError, AttributeError):
+                pass
 
     return agent.memory_manager

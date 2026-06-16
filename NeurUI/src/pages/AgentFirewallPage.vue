@@ -521,8 +521,10 @@ const fetchL2Rules = async () => {
 const fetchAllRules = async () => {
   // Fetch once and distribute across layers
   try {
-    const res: any = await request.get(`/agents/${agentId}/firewall/rules`)
-    const all: any[] = res?.data ?? res ?? []
+    const res: any = await request.get(`/firewall/rules`)
+    // API may return {code,data:[...]} or direct array
+    const raw = res?.data ?? res ?? []
+    const all: any[] = Array.isArray(raw) ? raw : (raw?.data ?? [])
     if (Array.isArray(all)) {
       l0Rules.value = all.filter((r) => (r.layer === 'L0' || !r.layer) && (r.category === 'ip' || r.category === 'gateway' || !r.category || r.category === 'input' || r.category === 'output'))
       l1Rules.value = all.filter((r) => r.layer === 'L1' || r.source === 'global' || r.source === 'user')
@@ -540,8 +542,14 @@ const fetchAllRules = async () => {
 const fetchBlocked = async () => {
   loadingBlocked.value = true
   try {
-    const res: any = await request.get(`/agents/${agentId}/firewall/blocked`)
-    blockedLogs.value = res?.data ?? res ?? []
+    const res: any = await request.get(`/firewall/blocked`)
+    // API returns {code,data:{blocked_ips:[],blocked_paths:[]}}
+    const raw = res?.data ?? res ?? {}
+    const data = raw?.data ?? raw ?? {}
+    // Flatten blocked_ips and blocked_paths into a single array
+    const ips = (data.blocked_ips ?? []).map((ip: string) => ({ type: 'ip', value: ip, blocked_at: '-' }))
+    const paths = (data.blocked_paths ?? []).map((p: string) => ({ type: 'path', value: p, blocked_at: '-' }))
+    blockedLogs.value = [...ips, ...paths]
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -552,7 +560,7 @@ const fetchBlocked = async () => {
 const fetchStats = async () => {
   loadingStats.value = true
   try {
-    const res: any = await request.get(`/agents/${agentId}/firewall/stats`)
+    const res: any = await request.get(`/firewall/stats`)
     stats.value = res?.data ?? res ?? {}
   } catch {
     // silently ignore stats errors

@@ -7,11 +7,12 @@ from typing import Any, Dict, Optional
 
 from fastapi import Depends, Query, Request
 
-from neurova.api.auth import get_current_user
+from neurova.api.auth import get_current_user_or_default
 from neurova.interfaces.api_standard import (
     APIError,
     APIResponse,
     ErrorCodes,
+    success_response,
 )
 
 from .base import (
@@ -31,14 +32,14 @@ async def search_memories(
     category: Optional[str] = Query(default=None, description="按分类过滤"),
     limit: int = Query(default=10, ge=1, le=100, description="返回条数"),
     agent_id: Optional[str] = Query(default=None, description="Agent ID"),
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """搜索记忆 - query 为空时返回全部"""
     try:
         manager = get_memory_manager(agent_id, user)
         memories = manager.recall(query=query, category=category, limit=limit)
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "count": len(memories),
                 "memories": [memory_to_dict(m) for m in memories],
@@ -49,7 +50,7 @@ async def search_memories(
 
     except APIError as e:
         if e.code == ErrorCodes.AGENT_NOT_INITIALIZED:
-            return APIResponse.ok(
+            return success_response(
                 data={"count": 0, "memories": []},
                 message="记忆系统未初始化，请先创建 Agent",
                 request_id=_get_request_id(None),
@@ -64,7 +65,7 @@ async def search_memories(
 async def add_memory(
     request: AddMemoryRequest,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     添加新记忆 (支持自动分类)
@@ -85,7 +86,7 @@ async def add_memory(
             classification_context=request.classification_context,
         )
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "memory_id": memory_id,
                 "timestamp": datetime.now().isoformat(),
@@ -104,12 +105,12 @@ async def add_memory(
 @router.get("/stats", summary="获取记忆统计")
 async def get_memory_stats(
     agent_id: Optional[str] = Query(default=None, description="Agent ID"),
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     try:
         manager = get_memory_manager(agent_id, user)
         stats = manager.get_stats()
-        return APIResponse.ok(data=stats, message="获取成功", request_id=_get_request_id(None))
+        return success_response(data=stats, message="获取成功", request_id=_get_request_id(None))
     except APIError:
         raise
     except Exception as e:
@@ -141,7 +142,7 @@ async def get_memory(
 
         target = Memory.from_dict(memory_data)
 
-        return APIResponse.ok(
+        return success_response(
             data=memory_to_dict(target),
             message="获取成功",
             request_id=_get_request_id(req),
@@ -158,7 +159,7 @@ async def get_memory(
 async def delete_memory(
     memory_id: str,
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     删除指定记忆 (遗忘)
@@ -170,7 +171,7 @@ async def delete_memory(
         if not success:
             raise APIError.not_found(f"记忆不存在: {memory_id}")
 
-        return APIResponse.ok(
+        return success_response(
             data={"memory_id": memory_id},
             message="记忆已删除",
             request_id=_get_request_id(None),
@@ -187,7 +188,7 @@ async def delete_memory(
 async def get_hot_memories(
     limit: int = Query(default=10, ge=1, le=50, description="返回条数"),
     agent_id: Optional[str] = Query(default=None, description="Agent ID"),
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取高温记忆 (temperature >= 50)
@@ -196,7 +197,7 @@ async def get_hot_memories(
         manager = get_memory_manager(agent_id, user)
         memories = manager.get_hot_memories(limit=limit)
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "count": len(memories),
                 "memories": [memory_to_dict(m) for m in memories],
@@ -216,7 +217,7 @@ async def get_hot_memories(
 async def get_crystallized_memories(
     limit: int = Query(default=20, ge=1, le=50, description="返回条数"),
     agent_id: Optional[str] = Query(default=None, description="Agent ID"),
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     获取固化记忆 (永不遗忘的重要记忆)
@@ -225,7 +226,7 @@ async def get_crystallized_memories(
         manager = get_memory_manager(agent_id, user)
         memories = manager.get_crystallized(limit=limit)
 
-        return APIResponse.ok(
+        return success_response(
             data={
                 "count": len(memories),
                 "memories": [memory_to_dict(m) for m in memories],
@@ -244,7 +245,7 @@ async def get_crystallized_memories(
 @router.post("/decay", summary="执行温度衰减")
 async def run_decay_cycle(
     agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """
     手动执行一轮温度衰减
@@ -254,7 +255,7 @@ async def run_decay_cycle(
         manager = get_memory_manager(agent_id, user)
         updated_count = manager.run_decay_cycle()
 
-        return APIResponse.ok(
+        return success_response(
             data={"updated_count": updated_count},
             message=f"已更新 {updated_count} 条记忆温度",
             request_id=_get_request_id(None),

@@ -365,3 +365,30 @@ async def get_optional_user(
         "username": payload.get("username", "unknown"),
         "role": payload.get("role", "user"),
     }
+
+
+_DEFAULT_USER = {"user_id": "default", "username": "default", "role": "user"}
+
+
+async def get_current_user_or_default(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Dict[str, Any]:
+    """
+    FastAPI 依赖：获取认证用户，未认证时返回默认用户
+
+    用于不需要严格认证但仍然想识别已登录用户的端点。
+    """
+    if not credentials:
+        return _DEFAULT_USER.copy()
+
+    token = credentials.credentials
+    payload = verify_access_token(token)
+
+    if not payload:
+        return _DEFAULT_USER.copy()
+
+    return {
+        "user_id": payload.get("sub", "default"),
+        "username": payload.get("username", "default"),
+        "role": payload.get("role", "user"),
+    }

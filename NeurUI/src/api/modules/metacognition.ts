@@ -40,15 +40,15 @@ const BASE = '/metacognition'
 
 /** List metacognition entries. */
 export function getMetacognitionEntries(agentId: string, params?: { page?: number; size?: number; type?: string }) {
-  return api.get<ApiResponse<{ items: MetacognitionEntry[]; total: number }>>(BASE, { params: { ...params, agent_id: agentId } })
+  return api.get<ApiResponse<{ items: MetacognitionEntry[]; total: number }>>(`${BASE}/${agentId}/metacognition`, { params })
 }
 
 /** Create a metacognition entry. */
 export function createMetacognition(data: MetacognitionCreatePayload) {
-  return api.post<ApiResponse<MetacognitionEntry>>(BASE, data)
+  return api.post<ApiResponse<MetacognitionEntry>>(`${BASE}/${data.agent_id}/metacognition`, data)
 }
 
 /** Get metacognition statistics. */
 export function getMetacognitionStats(agentId: string) {
-  return api.get<ApiResponse<MetacognitionStats>>(`${BASE}/stats`, { params: { agent_id: agentId } })
+  return api.get<ApiResponse<MetacognitionStats>>(`${BASE}/${agentId}/metacognition/stats`)
 }

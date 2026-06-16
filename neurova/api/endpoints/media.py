@@ -220,6 +220,36 @@ async def save_media(
     }
 
 
+@router.get("/list")
+async def list_media(
+    agent_id: str = Query(default="default", description="Agent ID"),
+    media_type: Optional[str] = Query(default=None, description="媒体类型筛选"),
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0),
+):
+    """列出媒体文件"""
+    media_list = [m for m in _media_store.values() if m.get("agent_id") == agent_id]
+
+    if media_type:
+        media_list = [m for m in media_list if m.get("media_type") == media_type]
+
+    # 按创建时间降序排序
+    media_list.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+
+    total = len(media_list)
+    paginated = media_list[offset : offset + limit]
+
+    return {
+        "code": 0,
+        "data": {
+            "media": paginated,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+        },
+    }
+
+
 @router.get("/{media_id}")
 async def get_media(media_id: str):
     """获取媒体文件内容"""
@@ -260,36 +290,6 @@ async def get_media_metadata(media_id: str):
             "size": media.get("size"),
             "created_at": media.get("created_at"),
             "metadata": media.get("metadata", {}),
-        },
-    }
-
-
-@router.get("/list")
-async def list_media(
-    agent_id: str = Query(default="default", description="Agent ID"),
-    media_type: Optional[str] = Query(default=None, description="媒体类型筛选"),
-    limit: int = Query(default=50, le=200),
-    offset: int = Query(default=0),
-):
-    """列出媒体文件"""
-    media_list = [m for m in _media_store.values() if m.get("agent_id") == agent_id]
-
-    if media_type:
-        media_list = [m for m in media_list if m.get("media_type") == media_type]
-
-    # 按创建时间降序排序
-    media_list.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-
-    total = len(media_list)
-    paginated = media_list[offset : offset + limit]
-
-    return {
-        "code": 0,
-        "data": {
-            "media": paginated,
-            "total": total,
-            "offset": offset,
-            "limit": limit,
         },
     }
 

@@ -307,11 +307,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/SandboxPage.vue'),
       },
       {
-        path: 'analytics',
-        name: 'Analytics',
-        component: () => import('@/pages/AnalyticsPage.vue'),
-      },
-      {
         path: 'stats',
         name: 'Stats',
         component: () => import('@/pages/StatsPage.vue'),

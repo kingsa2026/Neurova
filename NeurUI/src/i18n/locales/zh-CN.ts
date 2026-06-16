@@ -146,6 +146,7 @@ export default {
     acp: 'ACP',
     runtimeConfig: '运行配置',
     agentStats: '智能体统计',
+    globalNav: '全局导航',
     agentchat: '智能体对话',
     agentcreate: '创建智能体',
     agentedit: '编辑智能体',
@@ -1362,7 +1363,7 @@ export default {
     underDevelopment: '正在开发中，将在未来版本中可用。',
   },
   stats: {
-    title: '统计',
+    title: '统计分析',
     usageTrends: '使用趋势',
   },
   session: {
