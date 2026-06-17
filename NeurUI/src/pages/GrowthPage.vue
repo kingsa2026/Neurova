@@ -700,11 +700,11 @@ onMounted(() => {
 }
 
 .factor-impact.positive {
-  color: #10b981;
+  color: var(--nr-success);
 }
 
 .factor-impact.negative {
-  color: #ef4444;
+  color: var(--nr-error);
 }
 
 .meta-timestamp {

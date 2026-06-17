@@ -292,8 +292,8 @@ onMounted(fetchAll)
   font-family: var(--nr-font-mono);
   font-weight: 600;
 }
-.factor-value.positive { color: #10b981; }
-.factor-value.negative { color: #ef4444; }
+.factor-value.positive { color: var(--nr-success); }
+.factor-value.negative { color: var(--nr-error); }
 
 /* Personality traits chart */
 .personality-section { display: flex; flex-direction: column; gap: 16px; }

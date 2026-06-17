@@ -198,7 +198,7 @@ async function toggleInstall(skill: MarketSkill) {
   skill._installing = true
   try {
     if (skill.installed) {
-      await request.post('/skills-market/uninstall', { skill_id: skill.id })
+      await request.delete(`/marketplace/skills/${skill.id}/install`)
       skill.installed = false
       skill.install_count = Math.max(0, (skill.install_count ?? 1) - 1)
       message.success(t('market.uninstallSuccess'))

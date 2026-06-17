@@ -65,6 +65,43 @@
 
     <!-- Main Chat Area -->
     <main class="nr-chat-main">
+      <!-- Page Header (when inside MainLayout) -->
+      <div v-if="isMainLayout" class="nr-chat-page-header">
+        <div class="nr-chat-header-left">
+          <a-dropdown :trigger="['click']" placement="bottomLeft">
+            <button class="nr-chat-session-select">
+              <span class="nr-chat-session-select-icon">💬</span>
+              <span class="nr-chat-session-select-name">{{ currentSessionTitle || t('chat.noSessions') }}</span>
+              <span class="nr-chat-session-select-arrow">▾</span>
+            </button>
+            <template #overlay>
+              <div class="nr-glass-dropdown">
+                <div class="nr-glass-dropdown-item" style="font-weight:600; color: var(--nr-text-primary);" @click="createSession">
+                  + {{ t('chat.newChat') }}
+                </div>
+                <div class="nr-glass-dropdown-divider" />
+                <div
+                  v-for="s in filteredSessions"
+                  :key="s.id"
+                  class="nr-glass-dropdown-item"
+                  :class="{ 'is-active': s.id === currentSessionId }"
+                  @click="switchSession(s.id)"
+                >
+                  <span>{{ s.title }}</span>
+                </div>
+                <div v-if="filteredSessions.length === 0" class="nr-glass-dropdown-item" style="opacity:0.5">
+                  {{ t('common.noData') }}
+                </div>
+              </div>
+            </template>
+          </a-dropdown>
+        </div>
+        <div class="nr-chat-header-actions">
+          <button class="nr-chat-toggle-btn" @click="historyPanelOpen = !historyPanelOpen" :title="t('chat.history')">
+            {{ historyPanelOpen ? '›' : '‹' }}
+          </button>
+        </div>
+      </div>
       <!-- Message List -->
       <div class="nr-chat-messages" ref="messagesRef">
         <div v-if="messages.length === 0" class="nr-chat-empty">
@@ -279,12 +316,9 @@
     </main>
 
     <!-- Right Panel: Conversation History (main layout mode) -->
-    <aside v-if="isMainLayout && agentId" class="nr-chat-history-panel">
+    <aside v-if="isMainLayout && agentId && historyPanelOpen" class="nr-chat-history-panel">
       <div class="nr-history-header">
-        <span class="nr-history-title">{{ t('chat.history') }}</span>
-        <GlassButton variant="ghost" size="sm" @click="createSession">
-          + {{ t('chat.newChat') }}
-        </GlassButton>
+        <GlassButton variant="primary" size="sm" @click="createSession">+ {{ t('chat.newChat') }}</GlassButton>
       </div>
       <div class="nr-history-search">
         <GlassInput
@@ -419,6 +453,7 @@ const searchQuery = ref('')
 const isStreaming = ref(false)
 const pendingFiles = ref<PendingFile[]>([])
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
+const historyPanelOpen = ref(true)
 
 // Drag & Drop
 const isDragOver = ref(false)
@@ -449,6 +484,8 @@ let abortController: AbortController | null = null
 // ---------------------------------------------------------------------------
 // Computed
 // ---------------------------------------------------------------------------
+const currentSessionTitle = computed(() => sessions.value.find(s => s.id === currentSessionId.value)?.title ?? '')
+
 const filteredSessions = computed(() => {
   if (!searchQuery.value) return sessions.value
   const q = searchQuery.value.toLowerCase()
@@ -1364,6 +1401,47 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
+.nr-chat-page-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 24px; border-bottom: 1px solid var(--nr-glass-border);
+  background: var(--nr-glass-bg); flex-shrink: 0;
+}
+.nr-chat-header-left { display: flex; align-items: center; gap: 12px; }
+.nr-chat-header-left .page-title { margin: 0; font-family: var(--nr-font-display); font-size: 20px; font-weight: 700; color: var(--nr-text-primary); }
+.nr-chat-header-actions { display: flex; gap: 8px; }
+.nr-chat-toggle-btn {
+  width: 32px; height: 32px; border: 1px solid var(--nr-glass-border); border-radius: 8px;
+  background: var(--nr-glass-bg); color: var(--nr-text-secondary); font-size: 18px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s ease;
+}
+.nr-chat-toggle-btn:hover { border-color: var(--nr-glass-border-hover); color: var(--nr-text-primary); background: var(--nr-glass-bg-hover); }
+.nr-chat-session-select {
+  display: flex; align-items: center; gap: 8px; padding: 6px 14px;
+  border-radius: 10px; border: 1px solid var(--nr-glass-border);
+  background: var(--nr-glass-bg); color: var(--nr-text-primary);
+  font-size: 14px; font-weight: 500; cursor: pointer;
+  transition: all 0.2s ease;
+}
+.nr-chat-session-select:hover { border-color: var(--nr-glass-border-hover); background: var(--nr-glass-bg-hover); }
+.nr-chat-session-select-icon { font-size: 16px; }
+.nr-chat-session-select-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nr-chat-session-select-arrow { font-size: 10px; opacity: 0.5; }
+.nr-glass-dropdown {
+  background: var(--nr-bg-surface); backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid var(--nr-glass-border); border-radius: 14px;
+  padding: 6px; min-width: 220px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.nr-glass-dropdown-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border-radius: 10px; color: var(--nr-text-secondary);
+  font-size: 13px; cursor: pointer; transition: all 0.18s ease; white-space: nowrap;
+}
+.nr-glass-dropdown-item:hover { color: var(--nr-text-primary); background: var(--nr-glass-bg-hover); }
+.nr-glass-dropdown-item.is-active { color: var(--nr-primary-light); background: rgba(99, 102, 241, 0.1); font-weight: 550; }
+.nr-glass-dropdown-divider { height: 1px; background: var(--nr-glass-border); margin: 4px 8px; }
+
 .nr-session-empty {
   text-align: center;
   color: var(--nr-text-muted);
@@ -1662,7 +1740,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   border: none;
   background: var(--nr-primary);
-  color: #fff;
+  color: var(--nr-text-primary);
   font-size: 14px;
   cursor: pointer;
   display: flex;
@@ -1837,7 +1915,7 @@ onBeforeUnmount(() => {
 }
 
 .nr-pending-file-remove:hover {
-  color: #ef4444;
+  color: var(--nr-error);
 }
 
 /* ASR Recording Bar */
@@ -1867,7 +1945,7 @@ onBeforeUnmount(() => {
 
 .nr-recording-label {
   font-size: 13px;
-  color: #f87171;
+  color: var(--nr-error);
   font-weight: 500;
 }
 
@@ -1904,7 +1982,7 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   padding: 2px 10px;
   font-size: 12px;
-  color: #f87171;
+  color: var(--nr-error);
   cursor: pointer;
   transition: background 0.2s;
 }
@@ -2013,7 +2091,7 @@ onBeforeUnmount(() => {
   padding: 1px 5px;
   font-family: var(--nr-font-mono);
   font-size: 0.9em;
-  color: #e879f9;
+  color: var(--nr-accent-secondary);
 }
 
 /* Rich Content: Inline Images */
@@ -2100,9 +2178,9 @@ onBeforeUnmount(() => {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(0, 0, 0, 0.4);
-  color: #fff;
+  border: 1px solid var(--nr-glass-border);
+  background: var(--nr-bg-overlay);
+  color: var(--nr-text-primary);
   font-size: 18px;
   cursor: pointer;
   display: flex;

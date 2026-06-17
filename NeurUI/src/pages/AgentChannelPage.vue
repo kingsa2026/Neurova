@@ -12,14 +12,19 @@
         <GlassCard
           v-for="ch in pagedChannels"
           :key="ch.id"
-          :title="ch.name"
           variant="default"
           padding="18px 22px"
         >
+          <div class="ch-header">
+            <img v-if="ch.iconSrc" :src="ch.iconSrc" class="ch-icon" :alt="ch.name" />
+            <span v-else class="ch-icon" :style="{ background: ch.color || '#6366f1' }">🔌</span>
+            <div>
+              <div class="ch-name">{{ ch.name }}</div>
+              <a-tag color="blue">{{ ch.type }}</a-tag>
+            </div>
+          </div>
           <div class="ch-meta">
-            <a-tag color="blue">{{ ch.type }}</a-tag>
             <a-badge :status="ch.enabled ? 'processing' : 'default'" :text="ch.enabled ? t('common.active') : t('common.inactive')" />
-            <span v-if="ch.lastMessage" class="meta-text">{{ ch.lastMessage }}</span>
           </div>
           <div class="ch-actions">
             <GlassButton variant="secondary" size="sm" :loading="testingId === ch.id" @click="handleTest(ch.id)">{{ t('channel.test') }}</GlassButton>
@@ -113,12 +118,48 @@ function openEdit(ch: Channel) {
   showModal.value = true
 }
 
+// Built-in channel types for this agent
+const builtInChannels = ref<{ id: string; name: string; type: string; enabled: boolean; iconSrc: string; color: string }[]>([
+  { id: 'xiaoyi', name: '小艺', type: 'xiaoyi', enabled: true, iconSrc: 'https://gw.alicdn.com/imgextra/i1/O1CN01EPS9Z81OKhIEcwpCd_!!6000000001687-2-tps-476-476.png', color: '#ec4899' },
+  { id: 'dingtalk', name: '钉钉', type: 'dingtalk', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01w5mzV01tFtE37wkJI_!!6000000005873-2-tps-48-48.png', color: '#2563eb' },
+  { id: 'feishu', name: '飞书', type: 'feishu', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN01wCpTM41LOPeyP7wKc_!!6000000001289-2-tps-48-48.png', color: '#7c3aed' },
+  { id: 'discord', name: 'Discord', type: 'discord', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01OsQiMO1ZYrJXp3TmX_!!6000000003207-2-tps-42-48.png', color: '#5865f2' },
+  { id: 'telegram', name: 'Telegram', type: 'telegram', enabled: true, iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN013VVoKf1jsgcNn40KA_!!6000000004604-2-tps-48-48.png', color: '#0088cc' },
+  { id: 'qq', name: 'QQ', type: 'qq', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i3/O1CN01ApVkC91JeKBkQfgj9_!!6000000001053-2-tps-41-48.png', color: '#e62117' },
+  { id: 'wechat', name: '微信', type: 'wechat', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01ikAjLG1jhh721iEUc_!!6000000004580-2-tps-48-48.png', color: '#07c160' },
+  { id: 'wecom', name: '企业微信', type: 'wecom', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01oWpOyx1TPnmnrzxlq_!!6000000002375-2-tps-48-48.png', color: '#3370ff' },
+  { id: 'yuanbao', name: '元宝', type: 'yuanbao', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN0164yBmJ1a2AftSglge_!!6000000003271-2-tps-225-225.png', color: '#f59e0b' },
+  { id: 'matrix', name: 'Matrix', type: 'matrix', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i3/O1CN01YfEzZu1DWdqgAdqtu_!!6000000000224-2-tps-48-48.png', color: '#0dbd8b' },
+  { id: 'sip', name: 'SIP', type: 'sip', enabled: false, iconSrc: 'https://gw.alicdn.com/imgextra/i1/O1CN016SJ9AO1SpA6L3j0KH_!!6000000002295-2-tps-400-400.png', color: '#64748b' },
+  { id: 'mattermost', name: 'Mattermost', type: 'mattermost', enabled: false, iconSrc: 'https://gw.alicdn.com/imgextra/i2/O1CN01A2bvSh1eVig4fDBEF_!!6000000003877-2-tps-400-400.png', color: '#0058cc' },
+  { id: 'mqtt', name: 'MQTT', type: 'mqtt', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN014ALZcD1iBnv2GeYdE_!!6000000004375-2-tps-64-64.png', color: '#667f80' },
+  { id: 'twilio', name: 'Twilio', type: 'voice', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01nwY8ZK1eY0etBKDWb_!!6000000003882-2-tps-48-48.png', color: '#f22f46' },
+  { id: 'onebot', name: 'OneBot', type: 'qqbot', enabled: false, iconSrc: 'https://gw.alicdn.com/imgextra/i3/O1CN01xqM0EN1oKrRiAFX3K_!!6000000005207-2-tps-400-400.png', color: '#10b981' },
+  { id: 'imessage', name: 'iMessage', type: 'imessage', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN01QtLiI31uAgL02USNH_!!6000000005997-2-tps-48-48.png', color: '#34aadc' },
+])
+
 async function fetchChannels() {
   loading.value = true
   try {
-    const res = await listChannels()
-    channels.value = res ?? []
-  } catch { message.error(t('common.error')) } finally { loading.value = false }
+    const res: any = await listChannels()
+    const data = res?.data ?? res ?? []
+    const list = Array.isArray(data) ? data : (data?.data ?? [])
+    if (list.length > 0) {
+      // Merge API channels with built-in
+      for (const apiCh of list) {
+        const built = builtInChannels.value.find(b => b.id === apiCh.id || b.type === apiCh.type)
+        if (built) {
+          built.enabled = apiCh.enabled ?? built.enabled
+        } else {
+          builtInChannels.value.push({ id: apiCh.id, name: apiCh.name, type: apiCh.type, enabled: apiCh.enabled ?? true, icon: '🔌', color: '#6366f1' })
+        }
+      }
+    }
+    channels.value = builtInChannels.value
+  } catch {
+    // Still show built-in channels even if API fails
+    channels.value = builtInChannels.value
+  } finally { loading.value = false }
 }
 
 async function handleSave() {
@@ -163,7 +204,10 @@ onMounted(fetchChannels)
 .agent-channel-page { display: flex; flex-direction: column; gap: 24px; padding: 24px; }
 .page-header { display: flex; justify-content: space-between; align-items: center; }
 .page-header h2 { color: var(--nr-text-primary); font-family: var(--nr-font-display); font-weight: 700; margin: 0; }
-.channel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+.channel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.ch-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.ch-icon { width: 40px; height: 40px; border-radius: 10px; object-fit: cover; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+.ch-name { font-size: 15px; font-weight: 600; color: var(--nr-text-primary); }
 .ch-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .meta-text { font-size: 12px; color: var(--nr-text-tertiary); }
 .ch-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

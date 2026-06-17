@@ -4,8 +4,7 @@
     <div class="nr-glass-nav-content">
       <div class="nr-glass-nav-brand" @click="$emit('brand-click')">
         <slot name="brand">
-          <span class="nr-glass-nav-logo">N</span>
-          <span v-if="!collapsed" class="nr-glass-nav-title">Neurova</span>
+          <img src="/img/NEUROVA-LOGO350white.png" alt="Neurova" class="nr-glass-nav-logo-img" :class="{ 'is-collapsed': collapsed }" />
         </slot>
       </div>
       <div class="nr-glass-nav-items">
@@ -50,16 +49,13 @@ defineEmits<{ 'brand-click': [] }>()
   transition: background 0.2s;
 }
 .nr-glass-nav-brand:hover { background: rgba(255,255,255,0.04); }
-.nr-glass-nav-logo {
-  width: 32px; height: 32px; border-radius: 8px; display: flex;
-  align-items: center; justify-content: center; flex-shrink: 0;
-  background: var(--nr-gradient-primary); color: white;
-  font-family: var(--nr-font-display); font-weight: 800; font-size: 16px;
+.nr-glass-nav-logo-img {
+  height: 32px; width: auto; max-width: 140px;
+  object-fit: contain; flex-shrink: 0;
+  transition: all 0.3s ease;
 }
-.nr-glass-nav-title {
-  font-family: var(--nr-font-display); font-weight: 700; font-size: 17px;
-  color: var(--nr-text-primary); letter-spacing: -0.02em;
-  white-space: nowrap;
+.nr-glass-nav-logo-img.is-collapsed {
+  height: 28px; max-width: 28px; object-fit: contain;
 }
 .nr-glass-nav-items { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .nr-glass-nav-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--nr-glass-border); }

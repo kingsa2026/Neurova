@@ -482,7 +482,7 @@ const editRule = (rule: any) => {
 const fetchL0Rules = async () => {
   loadingL0.value = true
   try {
-    const res: any = await request.get(`/agents/${agentId}/firewall/rules`, { params: { layer: 'L0' } })
+    const res: any = await request.get(`/firewall/rules`, { params: { layer: 'L0' } })
     const all = res?.data ?? res ?? []
     l0Rules.value = Array.isArray(all) ? all.filter((r: any) => r.layer === 'L0' || !r.layer) : []
   } catch {
@@ -495,7 +495,7 @@ const fetchL0Rules = async () => {
 const fetchL1Rules = async () => {
   loadingL1.value = true
   try {
-    const res: any = await request.get(`/agents/${agentId}/firewall/rules`, { params: { layer: 'L1' } })
+    const res: any = await request.get(`/firewall/rules`, { params: { layer: 'L1' } })
     const all = res?.data ?? res ?? []
     l1Rules.value = Array.isArray(all) ? all.filter((r: any) => r.layer === 'L1' || r.source === 'global' || r.source === 'user') : []
   } catch {
@@ -508,7 +508,7 @@ const fetchL1Rules = async () => {
 const fetchL2Rules = async () => {
   loadingL2.value = true
   try {
-    const res: any = await request.get(`/agents/${agentId}/firewall/rules`, { params: { layer: 'L2' } })
+    const res: any = await request.get(`/firewall/rules`, { params: { layer: 'L2' } })
     const all = res?.data ?? res ?? []
     l2Rules.value = Array.isArray(all) ? all.filter((r: any) => r.layer === 'L2') : []
   } catch {
@@ -581,7 +581,7 @@ const saveRule = async () => {
     if (editingRule.value) {
       await request.put(`/agents/${agentId}/firewall/rules/${editingRule.value.id}`, ruleForm.value)
     } else {
-      await request.post(`/agents/${agentId}/firewall/rules`, ruleForm.value)
+      await request.post(`/firewall/rules`, ruleForm.value)
     }
     message.success(t('common.success'))
     showForm.value = false
@@ -637,16 +637,16 @@ onMounted(() => {
 .stat-item { display: flex; flex-direction: column; gap: 4px; }
 .stat-label { font-size: 12px; color: var(--nr-text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; }
 .stat-value { font-family: var(--nr-font-display); font-size: 28px; font-weight: 700; color: var(--nr-text-primary); }
-.stat-danger { color: #ef4444; }
-.stat-warning { color: #f59e0b; }
+.stat-danger { color: var(--nr-error); }
+.stat-warning { color: var(--nr-warning); }
 
 /* Layer overview banner */
 .layer-overview { margin-bottom: 4px; }
 .layer-flow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.layer-badge { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 6px; font-weight: 700; font-size: 13px; color: #fff; }
-.layer-l0 { background: #3b82f6; }
-.layer-l1 { background: #10b981; }
-.layer-l2 { background: #f59e0b; }
+.layer-badge { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 6px; font-weight: 700; font-size: 13px; color: var(--nr-text-primary); }
+.layer-l0 { background: var(--nr-info); }
+.layer-l1 { background: var(--nr-success); }
+.layer-l2 { background: var(--nr-warning); }
 .layer-arrow { color: var(--nr-text-tertiary); font-size: 16px; }
 .layer-desc { font-size: 12px; color: var(--nr-text-secondary); margin-left: 8px; }
 

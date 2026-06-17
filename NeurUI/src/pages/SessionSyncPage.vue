@@ -177,9 +177,9 @@ onUnmounted(() => {
 .page-header h2 { color: var(--nr-text-primary); font-family: var(--nr-font-display); font-weight: 700; margin: 0; }
 .header-actions { display: flex; gap: 12px; align-items: center; }
 .ws-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--nr-text-tertiary); }
-.ws-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; transition: background 0.3s; }
-.ws-indicator.connected .ws-dot { background: #10b981; }
-.ws-indicator.connected .ws-label { color: #10b981; }
+.ws-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--nr-error); transition: background 0.3s; }
+.ws-indicator.connected .ws-dot { background: var(--nr-success); }
+.ws-indicator.connected .ws-label { color: var(--nr-success); }
 .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 .stat-value { font-family: var(--nr-font-display); font-size: 24px; font-weight: 700; color: var(--nr-text-primary); }
 .section-title { color: var(--nr-text-primary); font-family: var(--nr-font-display); font-weight: 600; margin: 0 0 16px; font-size: 16px; }

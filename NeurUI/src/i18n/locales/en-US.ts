@@ -1370,4 +1370,6 @@ export default {
     voiceNova: 'Nova',
     voiceShimmer: 'Shimmer',
   },
+  media: { title: "Media", all: "All" },
+  sleep: { enabled: "Enable Auto Sleep" },
 }
