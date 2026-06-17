@@ -292,10 +292,10 @@ onMounted(() => {
 .cascade-title { font-size: 14px; font-weight: 600; color: var(--nr-text-primary); }
 .cascade-flow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .cascade-layer { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 100px; }
-.cascade-badge { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; font-weight: 700; font-size: 14px; color: #fff; }
-.cascade-l0 { background: #3b82f6; }
-.cascade-l1 { background: #10b981; }
-.cascade-l2 { background: #f59e0b; }
+.cascade-badge { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; font-weight: 700; font-size: 14px; color: var(--nr-text-primary); }
+.cascade-l0 { background: var(--nr-info); }
+.cascade-l1 { background: var(--nr-success); }
+.cascade-l2 { background: var(--nr-warning); }
 .cascade-label { font-size: 12px; font-weight: 600; color: var(--nr-text-primary); }
 .cascade-desc { font-size: 11px; color: var(--nr-text-tertiary); text-align: center; }
 .cascade-arrow { font-size: 18px; color: var(--nr-text-tertiary); margin-top: -16px; }

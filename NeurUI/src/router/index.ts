@@ -263,11 +263,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/CollaborationTemplatePage.vue'),
       },
       {
-        path: 'collaboration/initiate',
-        name: 'CollaborationInitiate',
-        component: () => import('@/pages/CollaborationInitiatePage.vue'),
-      },
-      {
         path: 'collaboration/history',
         name: 'CollaborationHistory',
         component: () => import('@/pages/CollaborationHistoryPage.vue'),
@@ -375,20 +370,11 @@ const routes: RouteRecordRaw[] = [
   },
 
   // ---------------------------------------------------------------------------
-  // Chat route with its own layout (independent sidebar + agent switcher)
+  // Legacy chat route → redirect to unified MainLayout chat
   // ---------------------------------------------------------------------------
   {
-    path: '/',
-    component: () => import('@/layouts/ChatLayout.vue'),
-    meta: { requiresAuth: true },
-    children: [
-      {
-        path: 'agent/:agentId/chat',
-        name: 'AgentChat',
-        component: () => import('@/pages/ChatPage.vue'),
-        props: true,
-      },
-    ],
+    path: '/agent/:agentId/chat',
+    redirect: '/chat',
   },
 
   // ---------------------------------------------------------------------------

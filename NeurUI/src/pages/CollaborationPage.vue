@@ -2,7 +2,7 @@
   <div class="collab-page">
     <div class="page-header">
       <h2>{{ t('collab.title') }}</h2>
-      <GlassButton variant="primary" size="sm" @click="$router.push('/collaboration/initiate')">{{ t('collab.initiate') }}</GlassButton>
+      <GlassButton variant="primary" size="sm" @click="showInitiate = true">{{ t('collab.initiate') }}</GlassButton>
     </div>
 
     <!-- Stats -->
@@ -58,18 +58,121 @@
         <p><strong>{{ t('common.createdAt') }}:</strong> {{ selectedSession.createdAt }}</p>
       </div>
     </a-modal>
+
+    <!-- Initiate collaboration drawer -->
+    <a-drawer v-model:open="showInitiate" :title="t('collab.initiate')" placement="right" width="520" :body-style="{ padding: '20px 24px' }">
+      <a-steps :current="initStep" size="small" style="margin-bottom: 24px">
+        <a-step :title="t('collab.templates')" />
+        <a-step :title="t('collab.members')" />
+        <a-step :title="t('agent.config')" />
+        <a-step :title="t('common.confirm')" />
+      </a-steps>
+
+      <!-- Step 1: Select template -->
+      <div v-if="initStep === 0">
+        <a-spin :spinning="loadingTemplates">
+          <a-empty v-if="!loadingTemplates && templates.length === 0" :description="t('common.noData')" />
+          <div v-else class="tpl-list">
+            <div
+              v-for="tpl in templates"
+              :key="tpl.id"
+              class="tpl-option"
+              :class="{ selected: initForm.templateId === tpl.id }"
+              @click="initForm.templateId = tpl.id"
+            >
+              <strong>{{ tpl.name }}</strong>
+              <span class="tpl-desc">{{ tpl.description }}</span>
+              <a-tag color="blue">{{ tpl.type }}</a-tag>
+            </div>
+          </div>
+        </a-spin>
+      </div>
+
+      <!-- Step 2: Configure participants -->
+      <div v-if="initStep === 1">
+        <a-form layout="vertical">
+          <a-form-item :label="t('collab.members')">
+            <a-select v-model:value="initForm.participants" mode="tags" :placeholder="t('collab.members')" style="width: 100%" />
+          </a-form-item>
+        </a-form>
+      </div>
+
+      <!-- Step 3: Parameters -->
+      <div v-if="initStep === 2">
+        <a-form layout="vertical">
+          <a-form-item :label="t('common.name')">
+            <a-input v-model:value="initForm.name" :placeholder="t('common.name')" />
+          </a-form-item>
+          <a-form-item :label="t('common.description')">
+            <a-input v-model:value="initForm.description" type="textarea" :rows="3" :placeholder="t('common.description')" />
+          </a-form-item>
+        </a-form>
+      </div>
+
+      <!-- Step 4: Review -->
+      <div v-if="initStep === 3">
+        <p><strong>{{ t('common.name') }}:</strong> {{ initForm.name }}</p>
+        <p><strong>{{ t('common.description') }}:</strong> {{ initForm.description }}</p>
+        <p><strong>{{ t('collab.templates') }}:</strong> {{ selectedTemplateName }}</p>
+        <p><strong>{{ t('collab.members') }}:</strong> {{ initForm.participants.join(', ') }}</p>
+      </div>
+
+      <template #footer>
+        <div style="display: flex; gap: 8px; justify-content: flex-end">
+          <GlassButton v-if="initStep > 0" variant="secondary" size="sm" @click="initStep--">{{ t('common.prev') }}</GlassButton>
+          <GlassButton v-if="initStep < 3" variant="primary" size="sm" @click="initStep++">{{ t('common.next') }}</GlassButton>
+          <GlassButton v-if="initStep === 3" variant="primary" size="sm" :loading="starting" @click="handleStart">{{ t('common.submit') }}</GlassButton>
+        </div>
+      </template>
+    </a-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import { message } from 'ant-design-vue'
 
 const { t } = useI18n()
+
+// ── Initiate drawer state ──
+const showInitiate = ref(false)
+const initStep = ref(0)
+const starting = ref(false)
+const loadingTemplates = ref(false)
+const templates = ref<{ id: string; name: string; description: string; type: string }[]>([])
+const initForm = reactive({ templateId: '', participants: [] as string[], name: '', description: '' })
+const selectedTemplateName = computed(() => templates.value.find((t) => t.id === initForm.templateId)?.name ?? '-')
+
+async function fetchTemplates() {
+  loadingTemplates.value = true
+  try {
+    const res: any = await request.get('/collaboration/templates')
+    const raw = res?.data ?? res ?? []
+    templates.value = Array.isArray(raw) ? raw : (raw?.data ?? [])
+  } catch { templates.value = [] }
+  finally { loadingTemplates.value = false }
+}
+
+async function handleStart() {
+  starting.value = true
+  try {
+    await request.post('/collaboration/start', { templateId: initForm.templateId, participants: initForm.participants, name: initForm.name, description: initForm.description })
+    message.success(t('common.success'))
+    showInitiate.value = false
+    initStep.value = 0
+    initForm.templateId = ''
+    initForm.participants = []
+    initForm.name = ''
+    initForm.description = ''
+    fetchSessions()
+  } catch { message.error(t('common.error')) }
+  finally { starting.value = false }
+}
 
 interface Session {
   id: string
@@ -115,7 +218,7 @@ function handleViewSession(record: Session) {
   showDetail.value = true
 }
 
-onMounted(fetchSessions)
+onMounted(() => { fetchSessions(); fetchTemplates() })
 </script>
 
 <style scoped>
@@ -128,4 +231,9 @@ onMounted(fetchSessions)
 .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .session-detail { display: flex; flex-direction: column; gap: 10px; }
 .session-detail p { color: var(--nr-text-secondary); font-size: 14px; margin: 0; }
+.tpl-list { display: flex; flex-direction: column; gap: 8px; }
+.tpl-option { padding: 12px 16px; border: 1px solid var(--nr-glass-border); border-radius: 10px; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 4px; }
+.tpl-option:hover { border-color: var(--nr-primary-light); background: rgba(99,102,241,0.05); }
+.tpl-option.selected { border-color: var(--nr-primary); background: rgba(99,102,241,0.1); }
+.tpl-desc { font-size: 13px; color: var(--nr-text-tertiary); }
 </style>

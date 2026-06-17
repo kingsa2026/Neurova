@@ -139,7 +139,7 @@
                 </div>
 
                 <div class="param-changed" v-if="isChanged(param.key)">
-                  <a-tag color="orange">Modified</a-tag>
+                  <a-tag color="orange">{{ t('memorySettings.modified') }}</a-tag>
                 </div>
               </div>
             </div>

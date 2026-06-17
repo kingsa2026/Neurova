@@ -5,8 +5,7 @@
     <!-- Sidebar -->
     <GlassNav :collapsed="appStore.sidebarCollapsed" @brand-click="router.push('/dashboard')">
       <template #brand>
-        <span class="nr-logo">N</span>
-        <span v-if="!appStore.sidebarCollapsed" class="nr-brand-text">Neurova</span>
+        <img src="/img/NEUROVA-LOGO350white.png" alt="Neurova" class="nr-logo-img" />
       </template>
 
       <!-- Agent Switcher -->
@@ -15,16 +14,14 @@
       />
 
       <!-- Quick access -->
-      <GlassNavItem to="/dashboard" :label="t('nav.dashboard')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><DashboardOutlined /></template>
-      </GlassNavItem>
       <GlassNavItem to="/agents" :label="t('nav.agents')" :collapsed="appStore.sidebarCollapsed" active-path="/agents">
         <template #icon><RobotOutlined /></template>
       </GlassNavItem>
-      <!-- 全局对话/渠道: 仅无 Agent 选中时显示(选中 Agent 后由 Agent 隔离菜单替代) -->
+      <!-- 全局对话: 仅无 Agent 选中时显示 -->
       <GlassNavItem v-if="!agentStore.currentAgent" to="/chat" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed">
         <template #icon><MessageOutlined /></template>
       </GlassNavItem>
+      <!-- 渠道: 仅无 Agent 选中时显示全局版 -->
       <GlassNavItem v-if="!agentStore.currentAgent" to="/channels" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
         <template #icon><GlobalOutlined /></template>
       </GlassNavItem>
@@ -33,7 +30,7 @@
       <template v-if="agentStore.currentAgent">
         <!-- Agent: Core -->
         <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.agentCore') }}</div>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/chat`" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/chat" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><MessageOutlined /></template>
         </GlassNavItem>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/memory`" :label="t('nav.memory')" :collapsed="appStore.sidebarCollapsed">
@@ -321,11 +318,5 @@ const breadcrumbs = computed(() => {
 .nr-nav-user-name { font-size: 13px; font-weight: 500; color: var(--nr-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nr-nav-user-role { font-size: 11px; color: var(--nr-text-muted); text-transform: capitalize; }
 
-.nr-brand-text { font-family: var(--nr-font-display); font-weight: 700; font-size: 17px; color: var(--nr-text-primary); letter-spacing: -0.02em; white-space: nowrap; }
-.nr-logo {
-  width: 32px; height: 32px; border-radius: 8px; display: flex;
-  align-items: center; justify-content: center; flex-shrink: 0;
-  background: var(--nr-gradient-primary); color: white;
-  font-family: var(--nr-font-display); font-weight: 800; font-size: 16px;
-}
+.nr-logo-img { height: 32px; width: auto; max-width: 160px; object-fit: contain; }
 </style>

@@ -64,7 +64,6 @@ const { t } = useI18n()
 
 // ── 快捷入口(仅全局管理级) ──
 const quickItems: { to: string; labelKey: string; icon: Component }[] = [
-  { to: '/dashboard', labelKey: 'nav.dashboard', icon: DashboardOutlined },
   { to: '/agents', labelKey: 'nav.agents', icon: RobotOutlined },
 ]
 
@@ -127,7 +126,6 @@ const categories: NavCategory[] = [
     items: [
       { to: '/collaboration', labelKey: 'nav.collaboration', icon: TeamOutlined },
       { to: '/collaboration/templates', labelKey: 'nav.collaborationtemplates', icon: NodeIndexOutlined },
-      { to: '/collaboration/initiate', labelKey: 'nav.collaborationinitiate', icon: BranchesOutlined },
       { to: '/collaboration/history', labelKey: 'nav.collaborationhistory', icon: HistoryOutlined },
       { to: '/projects', labelKey: 'nav.projects', icon: ProjectOutlined },
       { to: '/teams', labelKey: 'nav.teams', icon: TeamOutlined },

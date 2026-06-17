@@ -116,6 +116,12 @@ export const useAgentStore = defineStore('agents', () => {
       const data = res?.data ?? res
       const list = Array.isArray(data) ? data : data?.items ?? data?.agents ?? []
       agents.value = list.map(mapAgentResponse)
+
+      // Auto-select default agent if none selected
+      if (!currentAgentId.value && agents.value.length > 0) {
+        const defaultAgent = agents.value.find(a => a.id === 'default' || a.name === 'neurova') ?? agents.value[0]
+        setCurrentAgent(defaultAgent.id)
+      }
     } catch (err: any) {
       error.value = err?.response?.data?.message || err?.message || 'Failed to load agents.'
       console.error('[AgentStore] loadAgents error:', err)

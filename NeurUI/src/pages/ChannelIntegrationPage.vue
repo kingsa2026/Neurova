@@ -231,22 +231,22 @@ interface ChannelItem {
 }
 
 // ─── Common config fields (all channels) ───
-const commonFields: FieldSchema[] = [
+const commonFields = computed<FieldSchema[]>(() => [
   { key: 'bot_prefix', label: 'Bot Prefix', type: 'text', placeholder: '@bot', defaultValue: '@bot' },
-  { key: 'show_tool_messages', label: '显示工具消息', type: 'toggle', defaultValue: false },
-  { key: 'show_thinking', label: '显示思考过程', type: 'toggle', defaultValue: false },
-  { key: 'stream_mode', label: '流式输出', type: 'toggle', defaultValue: true },
-  { key: 'private_chat_strategy', label: '私聊访问控制', type: 'select', defaultValue: 'open', options: [
-    { value: 'open', label: '开放' }, { value: 'closed', label: '关闭' }, { value: 'whitelist', label: '白名单' },
+  { key: 'show_tool_messages', label: t('nav.showToolMessages'), type: 'toggle', defaultValue: false },
+  { key: 'show_thinking', label: t('nav.showThinking'), type: 'toggle', defaultValue: false },
+  { key: 'stream_mode', label: t('nav.streamMode'), type: 'toggle', defaultValue: true },
+  { key: 'private_chat_strategy', label: t('nav.privateChatStrategy'), type: 'select', defaultValue: 'open', options: [
+    { value: 'open', label: t('nav.open') }, { value: 'closed', label: t('nav.closed') }, { value: 'whitelist', label: t('nav.whitelist') },
   ]},
-  { key: 'group_chat_strategy', label: '群聊访问控制', type: 'select', defaultValue: 'open', options: [
-    { value: 'open', label: '开放' }, { value: 'closed', label: '关闭' }, { value: 'whitelist', label: '白名单' },
+  { key: 'group_chat_strategy', label: t('nav.groupChatStrategy'), type: 'select', defaultValue: 'open', options: [
+    { value: 'open', label: t('nav.open') }, { value: 'closed', label: t('nav.closed') }, { value: 'whitelist', label: t('nav.whitelist') },
   ]},
-  { key: 'require_mention', label: '需要 @提及', type: 'toggle', defaultValue: false },
-]
+  { key: 'require_mention', label: t('nav.requireMention'), type: 'toggle', defaultValue: false },
+])
 
 // ─── Channel-specific fields ───
-const channelFieldsMap: Record<string, FieldSchema[]> = {
+const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => ({
   xiaoyi: [
     { key: 'access_key', label: 'Access Key', type: 'text', required: true },
     { key: 'secret_key', label: 'Secret Key', type: 'password', required: true },
@@ -254,27 +254,27 @@ const channelFieldsMap: Record<string, FieldSchema[]> = {
     { key: 'ws_url', label: 'WebSocket URL', type: 'text', placeholder: 'wss://hag.cloud.huawei.com/openclaw/v1/ws/link' },
   ],
   dingtalk: [
-    { key: 'app_id', label: 'Client ID', type: 'text', required: true, placeholder: '钉钉应用 AppKey' },
-    { key: 'app_secret', label: 'Client Secret', type: 'password', required: true, placeholder: '钉钉应用 AppSecret' },
-    { key: 'use_stream', label: 'Stream 模式', type: 'toggle', defaultValue: true },
-    { key: 'reply_at_sender', label: '回复时@发送者', type: 'toggle', defaultValue: false },
+    { key: 'app_id', label: 'Client ID', type: 'text', required: true, placeholder: t('nav.dingtalkAppKey') },
+    { key: 'app_secret', label: 'Client Secret', type: 'password', required: true, placeholder: t('nav.dingtalkAppSecret') },
+    { key: 'use_stream', label: t('nav.streamMode'), type: 'toggle', defaultValue: true },
+    { key: 'reply_at_sender', label: t('nav.replyAtSender'), type: 'toggle', defaultValue: false },
   ],
   feishu: [
     { key: 'app_id', label: 'App ID', type: 'text', required: true },
     { key: 'app_secret', label: 'App Secret', type: 'password', required: true },
     { key: 'encrypt_key', label: 'Encrypt Key', type: 'password' },
     { key: 'verification_token', label: 'Verification Token', type: 'password' },
-    { key: 'region', label: '地区', type: 'select', defaultValue: 'feishu', options: [
-      { value: 'feishu', label: '飞书（国内）' }, { value: 'lark', label: 'Lark（国际）' },
+    { key: 'region', label: t('nav.region'), type: 'select', defaultValue: 'feishu', options: [
+      { value: 'feishu', label: t('nav.feishuChina') }, { value: 'lark', label: t('nav.larkInternational') },
     ]},
-    { key: 'media_directory', label: '媒体文件目录', type: 'text', placeholder: './media' },
-    { key: 'group_share_session', label: '群聊共享上下文', type: 'toggle', defaultValue: false },
+    { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
+    { key: 'group_share_session', label: t('nav.groupShareSession'), type: 'toggle', defaultValue: false },
   ],
   discord: [
     { key: 'bot_token', label: 'Bot Token', type: 'password', required: true },
     { key: 'http_proxy', label: 'HTTP Proxy', type: 'text', placeholder: 'http://127.0.0.1:7890' },
     { key: 'http_proxy_auth', label: 'HTTP Proxy Auth', type: 'text', placeholder: 'user:pass' },
-    { key: 'receive_bot_messages', label: '接收机器人消息', type: 'toggle', defaultValue: false },
+    { key: 'receive_bot_messages', label: t('nav.receiveBotMessages'), type: 'toggle', defaultValue: false },
   ],
   telegram: [
     { key: 'bot_token', label: 'Bot Token', type: 'password', required: true, placeholder: '123456:ABC-DEF...' },
@@ -285,34 +285,34 @@ const channelFieldsMap: Record<string, FieldSchema[]> = {
   qq: [
     { key: 'app_id', label: 'App ID', type: 'text', required: true },
     { key: 'client_secret', label: 'Client Secret', type: 'password', required: true },
-    { key: 'instant_confirm', label: '即时确认消息', type: 'toggle', defaultValue: false },
+    { key: 'instant_confirm', label: t('nav.instantConfirm'), type: 'toggle', defaultValue: false },
   ],
   wechat: [
     { key: 'bot_token', label: 'Bot Token', type: 'password', required: true },
-    { key: 'token_file', label: 'Token 文件路径', type: 'text', placeholder: './token.json' },
-    { key: 'media_directory', label: '媒体文件目录', type: 'text', placeholder: './media' },
-    { key: 'message_merge', label: '消息合并', type: 'toggle', defaultValue: false },
+    { key: 'token_file', label: t('nav.tokenFile'), type: 'text', placeholder: './token.json' },
+    { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
+    { key: 'message_merge', label: t('nav.messageMerge'), type: 'toggle', defaultValue: false },
   ],
   wecom: [
     { key: 'app_id', label: 'Bot ID (CorpID)', type: 'text', required: true },
     { key: 'app_secret', label: 'Secret', type: 'password', required: true },
-    { key: 'media_directory', label: '媒体文件目录', type: 'text', placeholder: './media' },
-    { key: 'welcome_message', label: '欢迎消息', type: 'text', placeholder: '你好！我是 Neurova' },
-    { key: 'group_share_session', label: '群聊共享上下文', type: 'toggle', defaultValue: false },
+    { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
+    { key: 'welcome_message', label: t('nav.welcomeMessage'), type: 'text', placeholder: 'Hello! I am Neurova' },
+    { key: 'group_share_session', label: t('nav.groupShareSession'), type: 'toggle', defaultValue: false },
   ],
   yuanbao: [
     { key: 'app_id', label: 'App ID', type: 'text', required: true },
     { key: 'app_secret', label: 'App Secret', type: 'password', required: true },
     { key: 'api_domain', label: 'API Domain', type: 'text', placeholder: 'https://api.yuanbao.com' },
-    { key: 'media_directory', label: '媒体文件目录', type: 'text', placeholder: './media' },
+    { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
   ],
   matrix: [
     { key: 'homeserver_url', label: 'Homeserver URL', type: 'text', required: true, placeholder: 'https://matrix.org' },
     { key: 'user_id', label: 'User ID', type: 'text', required: true, placeholder: '@bot:matrix.org' },
     { key: 'access_token', label: 'Access Token', type: 'password', required: true },
     { key: 'device_name', label: 'Device Name', type: 'text', placeholder: 'Neurova' },
-    { key: 'disable_dm', label: '禁用私聊', type: 'toggle', defaultValue: false },
-    { key: 'disable_group', label: '禁用群聊', type: 'toggle', defaultValue: false },
+    { key: 'disable_dm', label: t('nav.disableDm'), type: 'toggle', defaultValue: false },
+    { key: 'disable_group', label: t('nav.disableGroup'), type: 'toggle', defaultValue: false },
   ],
   sip: [
     { key: 'sip_mode', label: 'SIP Mode', type: 'select', defaultValue: 'dev', options: [
@@ -353,13 +353,13 @@ const channelFieldsMap: Record<string, FieldSchema[]> = {
     { key: 'access_token', label: 'Access Token', type: 'password', required: true },
     { key: 'http_api_url', label: 'HTTP API URL', type: 'text', defaultValue: 'http://127.0.0.1:3000' },
     { key: 'ws_api_url', label: 'WS API URL', type: 'text', defaultValue: 'ws://127.0.0.1:3001' },
-    { key: 'media_directory', label: '媒体文件目录', type: 'text', placeholder: './media' },
+    { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
   ],
-}
+}))
 
 // ─── Channel definitions ───
 const channels = ref<ChannelItem[]>([
-  { name: '控制台', icon: '🖥', type: 'builtin', enabled: true, color: '#6366f1', channelKey: 'console', backendType: 'api', connected: false },
+  { name: 'Console', icon: '🖥', type: 'builtin', enabled: true, color: '#6366f1', channelKey: 'console', backendType: 'api', connected: false },
   { name: '小艺', icon: '', iconSrc: 'https://gw.alicdn.com/imgextra/i1/O1CN01EPS9Z81OKhIEcwpCd_!!6000000001687-2-tps-476-476.png', type: 'builtin', enabled: true, color: '#ec4899', channelKey: 'xiaoyi', backendType: 'xiaoyi', connected: false },
   { name: '钉钉', icon: '', iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01w5mzV01tFtE37wkJI_!!6000000005873-2-tps-48-48.png', type: 'builtin', enabled: false, color: '#2563eb', channelKey: 'dingtalk', backendType: 'dingtalk', connected: false },
   { name: '飞书', icon: '', iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN01wCpTM41LOPeyP7wKc_!!6000000001289-2-tps-48-48.png', type: 'builtin', enabled: true, color: '#7c3aed', channelKey: 'feishu', backendType: 'feishu', connected: false },
@@ -402,7 +402,7 @@ function openConfigModal(ch: ChannelItem) {
     group_chat_strategy: 'open',
     require_mention: false,
   }
-  const specificFields = channelFieldsMap[ch.channelKey] || []
+  const specificFields = channelFieldsMap.value[ch.channelKey] || []
   specificFields.forEach((f) => {
     if (f.defaultValue !== undefined) defaults[f.key] = f.defaultValue
   })
@@ -511,7 +511,7 @@ function showToast(msg: string) {
 // ─── Computed ───
 const currentChannelFields = computed(() => {
   if (!currentChannel.value) return []
-  return channelFieldsMap[currentChannel.value.channelKey] || []
+  return channelFieldsMap.value[currentChannel.value.channelKey] || []
 })
 
 const filteredChannels = computed(() => {
@@ -532,7 +532,7 @@ const tabs = computed(() => [
   { key: 'custom' as const, label: t('channel.customChannel') },
 ])
 
-onMounted(() => { loadConfigs() })
+onMounted(() => { search.value = ''; loadConfigs() })
 </script>
 
 <style scoped>
@@ -689,7 +689,7 @@ onMounted(() => { loadConfigs() })
 
 .nr-ci-type-badge.custom {
   background: rgba(245, 158, 11, 0.12);
-  color: #f59e0b;
+  color: var(--nr-warning);
 }
 
 .nr-ci-conn-badge {
@@ -701,7 +701,7 @@ onMounted(() => { loadConfigs() })
 
 .nr-ci-conn-badge.connected {
   background: rgba(34, 197, 94, 0.12);
-  color: #22c55e;
+  color: var(--nr-success);
 }
 
 .nr-ci-status {
@@ -908,7 +908,7 @@ onMounted(() => { loadConfigs() })
 }
 
 .nr-ci-required {
-  color: #ef4444;
+  color: var(--nr-error);
   margin-left: 2px;
 }
 
@@ -951,7 +951,7 @@ onMounted(() => { loadConfigs() })
 }
 
 .nr-ci-select option {
-  background: #1a1a24;
+  background: var(--nr-bg-surface);
   color: var(--nr-text-primary);
 }
 

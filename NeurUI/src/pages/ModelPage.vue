@@ -45,6 +45,7 @@
             v-model="providerSearch"
             :placeholder="t('model.searchProviders')"
             class="nr-search-input"
+            autocomplete="off"
           />
         </div>
         <div class="nr-toolbar-right">
@@ -526,12 +527,23 @@ const filteredModels = computed(() => {
 async function fetchProviders() {
   loading.value = true
   try {
-    const apiProviders: any[] = await listProviders() as any
+    const res: any = await listProviders()
+    // Interceptor already unwraps response.data
+    // Backend may return: raw array [...], {data:[...]}, {providers:[...]}, or {code:0, data:[...]}
+    let apiProviders: any[] = []
+    if (Array.isArray(res)) {
+      apiProviders = res
+    } else if (res?.data && Array.isArray(res.data)) {
+      apiProviders = res.data
+    } else if (res?.providers && Array.isArray(res.providers)) {
+      apiProviders = res.providers
+    }
     console.log('[ModelPage] fetchProviders API response:', apiProviders.length, 'providers from backend')
     providers.value = mergeProviders(apiProviders)
     console.log('[ModelPage] fetchProviders merged:', providers.value.length, 'providers')
   } catch (err) {
-    console.warn('[ModelPage] fetchProviders failed:', err)
+    console.warn('[ModelPage] fetchProviders failed, showing built-in only:', err)
+    // Always show built-in providers even if API fails (SPA navigation race condition)
     providers.value = buildDefaultProviders()
   } finally {
     loading.value = false
@@ -541,8 +553,10 @@ async function fetchProviders() {
 async function fetchModels() {
   loadingModels.value = true
   try {
-    const list: any = await listModels() as any
-    allModels.value = (Array.isArray(list) ? list : list.models ?? []).map((m: any) => mapModel(m))
+    const res: any = await listModels()
+    const raw = res?.data ?? res ?? []
+    const list = Array.isArray(raw) ? raw : (raw?.data ?? raw?.models ?? [])
+    allModels.value = list.map((m: any) => mapModel(m))
     // Rebuild providers array with new object references to ensure Vue reactivity
     providers.value = providers.value.map((p) => {
       const models = allModels.value.filter((m) => m.provider_id === p.id || m.provider === p.name)
@@ -558,7 +572,8 @@ async function fetchModels() {
 
 async function fetchActiveModel() {
   try {
-    const data: any = await getActiveModel() as any
+    const res: any = await getActiveModel()
+    const data = res?.data ?? res ?? {}
     activeModelInfo.model_id = data.model_id || data.model || ''
     activeModelInfo.name = data.name || data.model_id || data.model || ''
     activeModelInfo.provider = data.provider_name || data.provider || ''
@@ -945,6 +960,7 @@ async function addNewModel() {
 // Lifecycle
 // ---------------------------------------------------------------------------
 onMounted(async () => {
+  providerSearch.value = ''
   console.log('[ModelPage] onMounted start')
   await fetchProviders()
   console.log('[ModelPage] after fetchProviders:', providers.value.length, 'providers')
@@ -1000,7 +1016,7 @@ watch(() => defaultConfig.provider_id, () => {
   padding: 0 4px;
   border-radius: 3px;
   background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
+  color: var(--nr-success);
   text-transform: uppercase;
 }
 
@@ -1337,7 +1353,7 @@ watch(() => defaultConfig.provider_id, () => {
   font-weight: 500;
   color: var(--nr-text-primary);
 }
-.req { color: #ef4444; }
+.req { color: var(--nr-error); }
 .nr-hint {
   font-size: 11px;
   color: var(--nr-text-muted);
@@ -1420,7 +1436,7 @@ watch(() => defaultConfig.provider_id, () => {
   border: none;
   border-radius: 6px;
   background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
+  color: var(--nr-error);
   cursor: pointer;
   font-size: 16px;
   display: flex;
@@ -1530,7 +1546,7 @@ watch(() => defaultConfig.provider_id, () => {
   padding: 1px 6px;
   border-radius: 4px;
   background: rgba(34, 197, 94, 0.12);
-  color: #22c55e;
+  color: var(--nr-success);
 }
 .nr-mgmt-id {
   font-size: 11px;
@@ -1549,7 +1565,7 @@ watch(() => defaultConfig.provider_id, () => {
   padding: 1px 6px;
   border-radius: 3px;
   background: rgba(139, 92, 246, 0.1);
-  color: #a78bfa;
+  color: var(--nr-accent-secondary);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }

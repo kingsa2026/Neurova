@@ -480,13 +480,13 @@ onUnmounted(() => {
   transition: all 0.3s ease;
 }
 .phase-step.active .phase-dot {
-  background: #6366f1;
-  border-color: #6366f1;
+  background: var(--nr-primary);
+  border-color: var(--nr-primary);
   box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
 }
 .phase-step.completed .phase-dot {
-  background: #10b981;
-  border-color: #10b981;
+  background: var(--nr-success);
+  border-color: var(--nr-success);
 }
 .phase-name {
   font-size: 11px;
@@ -495,11 +495,11 @@ onUnmounted(() => {
   letter-spacing: 0.04em;
 }
 .phase-step.active .phase-name {
-  color: #6366f1;
+  color: var(--nr-primary);
   font-weight: 600;
 }
 .phase-step.completed .phase-name {
-  color: #10b981;
+  color: var(--nr-success);
 }
 .phase-line {
   position: absolute;

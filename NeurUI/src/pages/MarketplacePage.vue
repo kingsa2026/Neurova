@@ -135,7 +135,7 @@ const fetchMarketplace = async () => {
 const installItem = async (item: any) => {
   installingId.value = item.id
   try {
-    await request.post('/marketplace/install', { id: item.id, type: item.type })
+    await request.post(`/marketplace/skills/${item.id}/install`)
     message.success(t('common.success'))
     item.installed = true
   } catch {
@@ -147,7 +147,7 @@ const installItem = async (item: any) => {
 
 const uninstallItem = async (id: string) => {
   try {
-    await request.post('/marketplace/uninstall', { id })
+    await request.delete(`/marketplace/skills/${id}/install`)
     message.success(t('common.success'))
     installedItems.value = installedItems.value.filter(i => i.id !== id)
   } catch {
