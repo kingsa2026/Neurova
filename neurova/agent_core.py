@@ -562,7 +562,7 @@ class SubSystemContainer:
             from neurova.computer_use import get_computer_use_manager
 
             computer_use = get_computer_use_manager()
-            a._builtin_tools = BuiltinToolRegistry(a, computer_use)
+            a._builtin_tools = BuiltinToolRegistry()
             logger.info("Agent %s: BuiltinToolRegistry 初始化成功", a.config.name)
         except Exception as e:
             logger.warning("BuiltinToolRegistry 初始化失败: %s", e)
@@ -584,7 +584,8 @@ class SubSystemContainer:
             a.tool_router = ToolRouter()
             a.tool_router.set_skill_manager(a.skill_registry)
             if a._builtin_tools:
-                a.tool_router.register_builtin_batch(a._builtin_tools.get_all_tools())
+                tools_dict = {t.name: t for t in a._builtin_tools.list_tools()}
+                a.tool_router.register_builtin_batch(tools_dict)
         except Exception as e:
             logger.warning("ToolRouter 初始化失败: %s", e)
 
