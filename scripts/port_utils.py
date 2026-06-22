@@ -50,12 +50,13 @@ def get_process_by_port(port: int) -> Optional[int]:
             result = subprocess.run(
                 ['netstat', '-ano'],
                 capture_output=True,
-                text=True,
                 timeout=5,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
+            # netstat 在中文 Windows 上输出 GBK，用 bytes 处理避免编码错误
+            stdout = result.stdout.decode('gbk', errors='replace') if isinstance(result.stdout, bytes) else result.stdout
             if result.returncode == 0:
-                for line in result.stdout.split('\n'):
+                for line in stdout.split('\n'):
                     if f':{port}' in line and 'LISTENING' in line:
                         parts = line.split()
                         if parts and parts[-1].isdigit():
@@ -94,12 +95,13 @@ def get_processes_by_port(port: int) -> List[int]:
             result = subprocess.run(
                 ['netstat', '-ano'],
                 capture_output=True,
-                text=True,
                 timeout=5,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
+            # netstat 在中文 Windows 上输出 GBK，用 bytes 处理避免编码错误
+            stdout = result.stdout.decode('gbk', errors='replace') if isinstance(result.stdout, bytes) else result.stdout
             if result.returncode == 0:
-                for line in result.stdout.split('\n'):
+                for line in stdout.split('\n'):
                     if f':{port}' in line and 'LISTENING' in line:
                         parts = line.split()
                         if parts and parts[-1].isdigit():

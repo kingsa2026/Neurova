@@ -351,6 +351,13 @@ class UnifiedContextInjector(BaseModule):
         context.extend(history)
         context.append({"role": "user", "content": user_input})
 
+        logger.info(
+            "[LLM_TRACE] Final context: %d msgs (system=1, history=%d, user=1), total_tokens=%d",
+            len(context),
+            len(history),
+            total_tokens,
+        )
+
         result = ContextBuildResult(
             context=context,
             total_tokens=total_tokens,

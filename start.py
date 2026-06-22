@@ -22,6 +22,8 @@ Neurova 统一启动脚本
     python start.py --prod       # 生产模式（仅后端，服务静态文件）
     python start.py --cli        # 启动后端 + CLI 聊天
     python start.py --chat       # 启动前后端 + 自动打开浏览器
+    python start.py --restart     # 交互式重启前后端
+    python start.py --restart --backend  # 仅重启后端
     python start.py --check      # 仅检查服务状态
     python start.py --skip-install  # 跳过自动环境检查
 
@@ -48,7 +50,7 @@ from scripts.config import (
     get_venv_python, get_backend_script, is_venv_available,
     is_frontend_available,
 )
-from scripts.port_utils import check_port, kill_port, wait_for_port
+from scripts.port_utils import check_port, kill_port, wait_for_port, get_processes_by_port, wait_for_port_free
 from scripts.health_check import (
     health_check, wait_for_server, check_all_services, print_services_status,
 )
@@ -66,14 +68,14 @@ def _get_backend_python() -> list:
     return [sys.executable]
 
 
-def start_backend(port: int = BACKEND_PORT, log_file: str = None) -> subprocess.Popen:
+def start_backend(port: int = BACKEND_PORT, log_file: str = "server.log") -> subprocess.Popen:
     """
     启动后端服务器
-    
+
     Args:
         port: 后端端口
-        log_file: 日志文件路径，None 表示不重定向
-        
+        log_file: 日志文件路径，默认写入 logs/server.log
+
     Returns:
         subprocess.Popen: 服务器进程
     """
@@ -86,13 +88,10 @@ def start_backend(port: int = BACKEND_PORT, log_file: str = None) -> subprocess.
     env = os.environ.copy()
     env["NEUROVA_PORT"] = str(port)
 
-    stdout_target = None
-    stderr_target = None
-    if log_file:
-        log_dir = ROOT_DIR / "logs"
-        log_dir.mkdir(exist_ok=True)
-        stdout_target = open(log_dir / log_file, "w", encoding="utf-8")
-        stderr_target = subprocess.STDOUT
+    log_dir = ROOT_DIR / "logs"
+    log_dir.mkdir(exist_ok=True)
+    stdout_target = open(log_dir / log_file, "w", encoding="utf-8")
+    stderr_target = subprocess.STDOUT
 
     cmd = _get_backend_python() + [str(get_backend_script())]
     
@@ -208,6 +207,157 @@ def start_prod() -> tuple:
         print(f"  {c('✓', Colors.GREEN)} 前端文件已复制到 {static_dir}")
 
     return start_backend(BACKEND_PORT, log_file="server.log")
+
+
+# ═══════════════════════════════════════════════════════════════
+# 重启服务
+# ═══════════════════════════════════════════════════════════════
+
+def _show_service_status():
+    """显示当前服务运行状态"""
+    services = check_all_services()
+
+    backend = services["backend"]
+    frontend = services["frontend"]
+
+    if backend["occupied"]:
+        pids = get_processes_by_port(backend["port"])
+        pid_str = f", PID: {pids[0]}" if pids else ""
+        print(f"  {c('后端', Colors.BOLD)} (端口 {backend['port']}): "
+              f"{c('运行中', Colors.GREEN)}{pid_str}")
+    else:
+        print(f"  {c('后端', Colors.BOLD)} (端口 {backend['port']}): "
+              f"{c('未启动', Colors.RED)}")
+
+    if frontend["occupied"]:
+        pids = get_processes_by_port(frontend["port"])
+        pid_str = f", PID: {pids[0]}" if pids else ""
+        print(f"  {c('前端', Colors.BOLD)} (端口 {frontend['port']}): "
+              f"{c('运行中', Colors.GREEN)}{pid_str}")
+    else:
+        print(f"  {c('前端', Colors.BOLD)} (端口 {frontend['port']}): "
+              f"{c('未启动', Colors.RED)}")
+
+
+def restart_services(
+    restart_backend: bool = True,
+    restart_frontend: bool = True,
+    backend_port: int = BACKEND_PORT,
+    frontend_port: int = FRONTEND_PORT,
+    auto_yes: bool = False,
+) -> int:
+    """
+    交互式重启服务
+
+    Args:
+        restart_backend: 是否重启后端
+        restart_frontend: 是否重启前端
+        backend_port: 后端端口
+        frontend_port: 前端端口
+
+    Returns:
+        int: 退出码
+    """
+    services = check_all_services()
+
+    # 确定需要停止的服务
+    need_stop_backend = restart_backend and services["backend"]["occupied"]
+    need_stop_frontend = restart_frontend and services["frontend"]["occupied"]
+
+    # 如果没有需要停止的服务，直接启动
+    if not need_stop_backend and not need_stop_frontend:
+        print(f"  {c('▸', Colors.CYAN)} 没有运行中的服务，直接启动...\n")
+        if restart_backend:
+            check_python_deps()
+            proc, log_fh = start_backend(backend_port, log_file="server.log")
+            if not wait_for_server(port=backend_port):
+                if proc.poll() is not None:
+                    print(f"  {c('✗', Colors.RED)} 后端进程已退出 (退出码: {proc.returncode})")
+                else:
+                    print(f"  {c('✗', Colors.RED)} 后端启动超时")
+                print(f"  请检查日志: logs/server.log")
+                return 1
+        if restart_frontend:
+            check_node_deps()
+            proc = start_frontend(frontend_port)
+            if proc:
+                processes.append(("Frontend", proc, None))
+        print(f"\n  {c('✓', Colors.GREEN)} 服务已启动")
+        return 0
+
+    # 显示当前状态
+    print(f"\n  {c('当前服务状态:', Colors.SKY_BLUE_BRIGHT)}")
+    _show_service_status()
+    print()
+
+    # 确认操作
+    targets = []
+    if need_stop_backend:
+        targets.append("后端")
+    if need_stop_frontend:
+        targets.append("前端")
+    target_str = " + ".join(targets)
+    confirm = "y"
+    if not auto_yes:
+        confirm = input(f"  是否重启 {c(target_str, Colors.BOLD)}? (Y/n): ").strip().lower()
+    if confirm and confirm != "y":
+        print(f"\n  {c('已取消', Colors.YELLOW)}")
+        return 0
+
+    print()
+
+    # 停止服务
+    if need_stop_backend:
+        print(f"  {c('▸', Colors.CYAN)} {c('停止后端', Colors.BOLD)} ...")
+        kill_port(backend_port)
+        wait_for_port_free(backend_port, timeout=10)
+        print()
+
+    if need_stop_frontend:
+        print(f"  {c('▸', Colors.CYAN)} {c('停止前端', Colors.BOLD)} ...")
+        kill_port(frontend_port)
+        # 同时终止 node 进程（Vite dev server）
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "node.exe"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        wait_for_port_free(frontend_port, timeout=10)
+        print()
+
+    # 启动服务
+    if restart_backend:
+        print(f"  {c('▸', Colors.CYAN)} {c('启动后端', Colors.BOLD)} (端口 {backend_port}) ...")
+        check_python_deps()
+        proc, log_fh = start_backend(backend_port, log_file="server.log")
+        # 等待后端就绪，同时检测进程是否存活
+        if not wait_for_server(port=backend_port):
+            # 进程可能已崩溃，检查是否还活着
+            if proc.poll() is not None:
+                print(f"  {c('✗', Colors.RED)} 后端进程已退出 (退出码: {proc.returncode})")
+                print(f"  请检查日志: logs/server.log")
+            else:
+                print(f"  {c('✗', Colors.RED)} 后端启动超时，请检查日志: logs/server.log")
+            return 1
+        print(f"  {c('✓', Colors.GREEN)} 后端已就绪\n")
+
+    if restart_frontend:
+        print(f"  {c('▸', Colors.CYAN)} {c('启动前端', Colors.BOLD)} (端口 {frontend_port}) ...")
+        check_node_deps()
+        proc = start_frontend(frontend_port, open_browser=True)
+        if proc:
+            time.sleep(3)  # 给 Vite 一点时间
+            print(f"  {c('✓', Colors.GREEN)} 前端已就绪\n")
+
+    print(f"  {c('═' * 50, Colors.DIM)}")
+    print(f"  {c('重启完成!', Colors.GREEN)}")
+    print(f"  后端: http://localhost:{backend_port}")
+    print(f"  前端: http://localhost:{frontend_port}")
+    print(f"  文档: http://localhost:{backend_port}/docs")
+    print(f"  {c('═' * 50, Colors.DIM)}\n")
+
+    return 0
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -393,6 +543,8 @@ def main():
   python start.py --cli        # 启动后端 + CLI 聊天
   python start.py --chat       # 启动前后端 + 自动打开浏览器
   python start.py --check      # 检查服务状态
+  python start.py --restart    # 交互式重启前后端
+  python start.py --restart --backend  # 仅重启后端
         """,
     )
     parser.add_argument("--backend", action="store_true", help="仅启动后端")
@@ -401,6 +553,8 @@ def main():
     parser.add_argument("--cli", action="store_true", help="启动后端 + CLI 聊天")
     parser.add_argument("--chat", action="store_true", help="启动前后端 + 自动打开浏览器聊天")
     parser.add_argument("--check", action="store_true", help="检查服务状态并退出")
+    parser.add_argument("--restart", action="store_true", help="交互式重启服务")
+    parser.add_argument("--yes", "-y", action="store_true", help="跳过确认提示（用于脚本/批处理调用）")
     parser.add_argument("--backend-port", type=int, default=BACKEND_PORT, help="后端端口")
     parser.add_argument("--frontend-port", type=int, default=FRONTEND_PORT, help="前端端口")
     parser.add_argument("--skip-install", action="store_true", help="跳过自动安装检查")
@@ -425,6 +579,21 @@ def main():
     if args.check:
         print_status()
         return 0
+
+    # 重启服务
+    if args.restart:
+        restart_backend = not args.frontend or args.backend
+        restart_frontend = not args.backend or args.frontend
+        if not args.backend and not args.frontend:
+            restart_backend = True
+            restart_frontend = True
+        return restart_services(
+            restart_backend=restart_backend,
+            restart_frontend=restart_frontend,
+            backend_port=args.backend_port,
+            frontend_port=args.frontend_port,
+            auto_yes=args.yes,
+        )
 
     processes = []  # [(name, process, log_handle)]
 

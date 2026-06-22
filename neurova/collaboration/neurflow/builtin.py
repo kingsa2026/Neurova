@@ -699,6 +699,7 @@ async def exec_llm(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
             temperature=temperature,
             max_tokens=max_tokens,
             system_prompt=system_prompt,
+            metadata={"history": []},
         )
 
         return {
@@ -771,6 +772,7 @@ async def exec_agent(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, A
             task,
             temperature=temperature,
             max_tokens=max_tokens,
+            metadata={"history": []},
         )
 
         # 提取响应内容

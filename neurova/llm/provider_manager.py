@@ -10,6 +10,7 @@ LLM 服务商配置管理器
 import json
 import logging
 import os
+import random
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -225,7 +226,7 @@ class LLMProviderManager(Module):
         self._config_path = self._get_default_config_path()
         self._providers: Dict[str, ProviderConfig] = {}
         self._default_provider_id: Optional[str] = None
-        self._config_lock = threading.Lock()
+        self._config_lock = threading.RLock()
 
         # 加载配置
         self._load_config()
@@ -256,7 +257,7 @@ class LLMProviderManager(Module):
                 data = json.load(f)
 
             for provider_data in data.get("providers", []):
-                provider = ProviderConfig.from_dict(provider_data)
+                provider = ProviderConfig.from_dict(provider_data, decrypt=True)
                 self._providers[provider.id] = provider
 
             self._default_provider_id = data.get("default_provider_id")
@@ -730,6 +731,20 @@ class LLMProviderManager(Module):
             "model": provider.default_model,
             "base_url": provider.base_url,
         }
+
+    def get_all_models(self) -> List[PydanticModelInfo]:
+        """获取所有服务商的模型列表（聚合）"""
+        all_models: List[PydanticModelInfo] = []
+        for provider in self.list_providers():
+            for model_id in provider.models:
+                all_models.append(
+                    PydanticModelInfo(
+                        id=model_id,
+                        name=model_id,
+                        owned_by=provider.id,
+                    )
+                )
+        return all_models
 
     def fetch_provider_models(self, provider_id: str) -> List[PydanticModelInfo]:
         """获取服务商模型列表"""

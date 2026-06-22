@@ -141,6 +141,51 @@ def _register_default_health_checks(health_checker) -> None:
     )
 
 
+def _load_saved_agents(app_state: AppState, default_workspace: str) -> None:
+    """从 workspace 目录加载已持久化的 agent 配置"""
+    import json as _json
+
+    workspaces_dir = os.path.dirname(default_workspace)  # agent_workspaces/
+    loaded = 0
+    for agent_id in os.listdir(workspaces_dir):
+        if agent_id in ("default", "test") or not os.path.isdir(os.path.join(workspaces_dir, agent_id)):
+            continue
+        config_path = os.path.join(workspaces_dir, agent_id, "agent_config.json")
+        if not os.path.exists(config_path):
+            continue
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = _json.load(f)
+            name = cfg.get("name", "")
+            if not name:
+                continue
+
+            from neurova.agent_core import Agent, AgentConfig
+
+            workspace = os.path.join(workspaces_dir, agent_id)
+            model = cfg.get("model", "gpt-4")
+            provider = cfg.get("provider", "")
+
+            agent_config = AgentConfig(
+                name=name,
+                agent_id=agent_id,
+                workspace_path=workspace,
+                llm_model=model or "gpt-4",
+                llm_provider=provider,
+            )
+            # description 不是 AgentConfig 参数，存到 config 中
+            agent_config.description = cfg.get("description", "")
+            agent = Agent(config=agent_config)
+            app_state.add_agent(agent_id, agent)
+            loaded += 1
+            logger.info("Loaded saved agent: %s (%s/%s)", name, provider, model)
+        except Exception as e:
+            logger.warning("Failed to load agent from %s: %s", config_path, e)
+
+    if loaded:
+        logger.info("Loaded %d saved agents from workspaces", loaded)
+
+
 def _initialize_components(app_state: AppState) -> None:
     """
     初始化核心组件
@@ -207,7 +252,7 @@ def _initialize_components(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("NEUTokenManager init failed: %s", e)
 
-    # 初始化默认 Agent
+    # 初始化默认 Agent — 使用 provider_manager 的默认服务商和模型
     try:
         from neurova.agent_core import Agent, AgentConfig
 
@@ -215,15 +260,41 @@ def _initialize_components(app_state: AppState) -> None:
             os.path.dirname(os.path.abspath(__file__)), "..", "..", "agent_workspaces", "default"
         )
         os.makedirs(default_workspace, exist_ok=True)
+
+        # 从 provider_manager 获取默认 provider/model
+        _default_llm_provider = ""
+        _default_llm_model = "gpt-4"
+        try:
+            pm = get_provider_manager()
+            # 优先用默认服务商（需要有 API Key）
+            dp = pm.get_default_provider()
+            if dp and dp.api_key:
+                _default_llm_provider = dp.id
+                _default_llm_model = dp.default_model or (dp.models[0] if dp.models else "gpt-4")
+            else:
+                # 默认服务商没有 Key，找第一个有 Key 的
+                for p in pm.list_providers():
+                    if p.api_key and p.enabled:
+                        _default_llm_provider = p.id
+                        _default_llm_model = p.default_model or (p.models[0] if p.models else "gpt-4")
+                        break
+        except Exception:
+            pass
+
         config = AgentConfig(
             name="Neurova",
             agent_id="default",
             enable_memory=True,
             workspace_path=default_workspace,
+            llm_model=_default_llm_model,
+            llm_provider=_default_llm_provider,
         )
         agent = Agent(config=config)
         app_state.add_agent("default", agent)
         logger.info("Default Agent initialized")
+
+        # 加载已持久化的 agent（从 workspace 中的 agent_config.json）
+        _load_saved_agents(app_state, default_workspace)
     except Exception as e:
         logger.warning("Default Agent init failed: %s", e)
 

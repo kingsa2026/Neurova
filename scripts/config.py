@@ -12,7 +12,7 @@ ROOT_DIR = Path(__file__).parent.parent.resolve()
 
 # 目录配置
 VENV_DIR = ROOT_DIR / ".venv"
-FRONTEND_DIR = ROOT_DIR / "neuUI"
+FRONTEND_DIR = ROOT_DIR / "NeurUI"
 MODELS_DIR = ROOT_DIR / "models"
 LOGS_DIR = ROOT_DIR / "logs"
 
@@ -24,7 +24,7 @@ BACKEND_PORT = 9527
 FRONTEND_PORT = 8100
 
 # 健康检查配置
-HEALTH_CHECK_TIMEOUT = 60  # 秒
+HEALTH_CHECK_TIMEOUT = 90  # 秒（需 > sentence_transformers 模型加载超时 30s + 其他启动时间）
 HEALTH_CHECK_INTERVAL = 2  # 秒
 
 # 日志配置

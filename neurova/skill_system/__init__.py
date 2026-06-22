@@ -87,9 +87,33 @@ def __getattr__(name: str) -> Any:
             EXPERIMENTAL = "experimental"
 
         return SkillStatus
+    elif name == "create_default_skills":
+        # 使用 importlib 从被遮蔽的模块加载，避免递归
+        import importlib.util as _iu
+        import os as _os
+        import sys as _sys
+        _cache_key = "neurova.skill_system_module_standalone"
+        if _cache_key in _sys.modules:
+            return _sys.modules[_cache_key].create_default_skills
+        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
+        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
+        _mod = _iu.module_from_spec(_spec)
+        _sys.modules[_cache_key] = _mod
+        try:
+            _spec.loader.exec_module(_mod)
+        except Exception:
+            _sys.modules.pop(_cache_key, None)
+            raise
+        return _mod.create_default_skills
     else:
         raise AttributeError(f"module 'neurova.skill_system' has no attribute '{name}'")
 
+
+# 导入 create_default_skills（向后兼容）
+try:
+    from neurova.skill_system import create_default_skills
+except ImportError as e:
+    logger.warning("Failed to import create_default_skills: %s", e)
 
 # 导入核心类（向后兼容）
 try:
@@ -141,4 +165,5 @@ __all__ = [
     "SkillResult",
     "SkillInfo",
     "_get_skill_module",
+    "create_default_skills",
 ]

@@ -88,10 +88,19 @@ class ContextBuilder:
             emotion = self._extract_emotion_from_pool(candidate_pool)
             experience = self._extract_experience_dicts_from_pool(candidate_pool)
 
+            # 优先从 pool 中提取 CONVERSATION 条目（来自调用方的会话历史）
+            # pool 中的条目比 conversation_history 参数更准确
+            pool_conversation = [
+                {"role": item.metadata.get("role", "user"), "content": item.content}
+                for item in candidate_pool
+                if item.source == ContextSource.CONVERSATION
+            ]
+            effective_history = pool_conversation if pool_conversation else (conversation_history or [])
+
             result = self._unified_injector.build_context(
                 system_prompt=system_prompt,
                 memories=memories,
-                conversation_history=conversation_history or [],
+                conversation_history=effective_history,
                 user_input=user_input,
                 agent_emotion=emotion,
                 experience=experience,

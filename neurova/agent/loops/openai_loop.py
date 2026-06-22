@@ -90,7 +90,7 @@ class OpenAILoop(BaseAgentLoop):
 
     async def _predict_normal(self, request_params: Dict) -> LLMResponse:
         """普通预测 (非流式)"""
-        response = self.llm_client.chat(**request_params)
+        response = await self.llm_client.chat(**request_params)
 
         # 记录思考过程（用于前端展示）
         if response.reasoning_content:
@@ -125,7 +125,9 @@ class OpenAILoop(BaseAgentLoop):
         reasoning_parts = []
         pending_tool_calls = None
 
-        async for event in self.llm_client.chat_stream(request_params["messages"]):
+        # 传递 temperature/max_tokens 等参数到流式调用
+        stream_kwargs = {k: v for k, v in request_params.items() if k not in ("messages", "stream")}
+        async for event in self.llm_client.chat_stream(request_params["messages"], **stream_kwargs):
             if not isinstance(event, dict):
                 reply_parts.append(str(event))
                 yield {"type": "content", "data": str(event)}

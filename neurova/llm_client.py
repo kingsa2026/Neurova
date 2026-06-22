@@ -159,11 +159,15 @@ class LLMClient:
 
         try:
             # 构建请求参数
+            from neurova.llm.model_limits import clamp_max_tokens
             params = {
                 "model": self.config.model,
                 "messages": messages,
                 "temperature": kwargs.get("temperature", self.config.temperature),
-                "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+                "max_tokens": clamp_max_tokens(
+                    kwargs.get("max_tokens", self.config.max_tokens),
+                    self.config.model,
+                ),
                 "top_p": kwargs.get("top_p", self.config.top_p),
                 "frequency_penalty": kwargs.get("frequency_penalty", self.config.frequency_penalty),
                 "presence_penalty": kwargs.get("presence_penalty", self.config.presence_penalty),
@@ -229,15 +233,15 @@ class LLMClient:
 
             self.logger.error("LLM 调用失败: %s", e)
 
-            # 根据异常类型重新抛出
-            if isinstance(e, APIConnectionError):
-                raise APIConnectionError(f"连接失败: {e}")
-            elif isinstance(e, RateLimitError):
-                raise RateLimitError(f"请求频率过高: {e}")
-            elif isinstance(e, AuthenticationError):
-                raise AuthenticationError(f"认证失败: {e}")
-            elif isinstance(e, APIError):
-                raise APIError(f"API 错误: {e}")
+            # 包装异常为 RuntimeError，保留原始异常链
+            if isinstance(e, (APIConnectionError,)):
+                raise RuntimeError(f"连接失败: {e}") from e
+            elif isinstance(e, (RateLimitError,)):
+                raise RuntimeError(f"请求频率过高: {e}") from e
+            elif isinstance(e, (AuthenticationError,)):
+                raise RuntimeError(f"认证失败: {e}") from e
+            elif isinstance(e, (APIError,)):
+                raise RuntimeError(f"API 错误: {e}") from e
             else:
                 raise
 
@@ -260,11 +264,15 @@ class LLMClient:
 
         try:
             # 构建请求参数
+            from neurova.llm.model_limits import clamp_max_tokens
             params = {
                 "model": self.config.model,
                 "messages": messages,
                 "temperature": kwargs.get("temperature", self.config.temperature),
-                "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+                "max_tokens": clamp_max_tokens(
+                    kwargs.get("max_tokens", self.config.max_tokens),
+                    self.config.model,
+                ),
                 "top_p": kwargs.get("top_p", self.config.top_p),
                 "frequency_penalty": kwargs.get("frequency_penalty", self.config.frequency_penalty),
                 "presence_penalty": kwargs.get("presence_penalty", self.config.presence_penalty),
@@ -338,15 +346,15 @@ class LLMClient:
 
             self.logger.error("LLM 流式调用失败: %s", e)
 
-            # 根据异常类型重新抛出
-            if isinstance(e, APIConnectionError):
-                raise APIConnectionError(f"连接失败: {e}")
-            elif isinstance(e, RateLimitError):
-                raise RateLimitError(f"请求频率过高: {e}")
-            elif isinstance(e, AuthenticationError):
-                raise AuthenticationError(f"认证失败: {e}")
-            elif isinstance(e, APIError):
-                raise APIError(f"API 错误: {e}")
+            # 包装异常为 RuntimeError，保留原始异常链
+            if isinstance(e, (APIConnectionError,)):
+                raise RuntimeError(f"连接失败: {e}") from e
+            elif isinstance(e, (RateLimitError,)):
+                raise RuntimeError(f"请求频率过高: {e}") from e
+            elif isinstance(e, (AuthenticationError,)):
+                raise RuntimeError(f"认证失败: {e}") from e
+            elif isinstance(e, (APIError,)):
+                raise RuntimeError(f"API 错误: {e}") from e
             else:
                 raise
 
@@ -371,11 +379,15 @@ class LLMClient:
 
         try:
             # 构建请求参数
+            from neurova.llm.model_limits import clamp_max_tokens
             params = {
                 "model": self.config.model,
                 "messages": messages,
                 "temperature": kwargs.get("temperature", self.config.temperature),
-                "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+                "max_tokens": clamp_max_tokens(
+                    kwargs.get("max_tokens", self.config.max_tokens),
+                    self.config.model,
+                ),
                 "top_p": kwargs.get("top_p", self.config.top_p),
                 "frequency_penalty": kwargs.get("frequency_penalty", self.config.frequency_penalty),
                 "presence_penalty": kwargs.get("presence_penalty", self.config.presence_penalty),
@@ -386,8 +398,8 @@ class LLMClient:
             if "tools" in kwargs:
                 params["tools"] = kwargs["tools"]
 
-            # 调用异步流式 API
-            stream = await self.async_client.chat.completions.create(**params)
+            # 调用流式 API
+            stream = self.client.chat.completions.create(**params)
 
             # 处理流式响应
             async for chunk in stream:
@@ -449,15 +461,15 @@ class LLMClient:
 
             self.logger.error("异步 LLM 流式调用失败: %s", e)
 
-            # 根据异常类型重新抛出
-            if isinstance(e, APIConnectionError):
-                raise APIConnectionError(f"连接失败: {e}")
-            elif isinstance(e, RateLimitError):
-                raise RateLimitError(f"请求频率过高: {e}")
-            elif isinstance(e, AuthenticationError):
-                raise AuthenticationError(f"认证失败: {e}")
-            elif isinstance(e, APIError):
-                raise APIError(f"API 错误: {e}")
+            # 包装异常为 RuntimeError，保留原始异常链
+            if isinstance(e, (APIConnectionError,)):
+                raise RuntimeError(f"连接失败: {e}") from e
+            elif isinstance(e, (RateLimitError,)):
+                raise RuntimeError(f"请求频率过高: {e}") from e
+            elif isinstance(e, (AuthenticationError,)):
+                raise RuntimeError(f"认证失败: {e}") from e
+            elif isinstance(e, (APIError,)):
+                raise RuntimeError(f"API 错误: {e}") from e
             else:
                 raise
 

@@ -55,6 +55,7 @@ class ChatContext:
     context: List[Dict] = field(default_factory=list)
     trace_id: Optional[str] = None
     reply: Optional[str] = None
+    caller_provided_history: bool = False
 
     # 结果
     result: Optional[Dict] = None
@@ -316,7 +317,14 @@ class ChatPipeline:
         self._agent._turn_count += 1
 
         # 会话历史恢复
-        if ctx.session_id:
+        # 当调用方通过 metadata.history 提供了对话历史时，跳过 session_manager 恢复
+        # 因为调用方的历史是权威来源，session_manager 可能包含过期/重复数据
+        caller_provided_history = (
+            ctx.metadata
+            and isinstance(ctx.metadata, dict)
+            and "history" in ctx.metadata
+        )
+        if ctx.session_id and not caller_provided_history:
             await self._restore_session_history(ctx)
 
         # 轨迹记录启动
@@ -549,10 +557,23 @@ class ChatPipeline:
         await self._retrieve_crystallized_patterns(ctx)
 
         # 上下文构建（委托给 ContextOrchestrator）
-        # 从 metadata 中提取语音上下文
+        # 从 metadata 中提取语音上下文和调用方对话历史
         voice_context = None
+        caller_history = None
         if ctx.metadata and isinstance(ctx.metadata, dict):
             voice_context = ctx.metadata.get("voice_context")
+            caller_history = ctx.metadata.get("history")
+
+        # 优先使用调用方传入的完整对话历史（包含 user+assistant）
+        if caller_history is not None:
+            ctx.session_context = caller_history
+            ctx.caller_provided_history = True
+
+        logger.info(
+            "[CHAT_TRACE] session_context msgs=%d, user_input=%s",
+            len(ctx.session_context) if ctx.session_context else 0,
+            ctx.user_input[:50],
+        )
 
         ctx.context = await self.context_orchestrator.build_context(
             user_input=ctx.user_input,
@@ -784,6 +805,7 @@ class ChatPipeline:
         continue_round = 0
         recent_contents = []
         tool_call_rounds = 0
+        ctx_snapshot = list(ctx.context)
 
         while (
             response
@@ -801,8 +823,8 @@ class ChatPipeline:
             else:
                 full_hint = hint
 
-            ctx.context.append({"role": "assistant", "content": response.content})
-            ctx.context.append({"role": "user", "content": full_hint})
+            ctx_snapshot.append({"role": "assistant", "content": response.content})
+            ctx_snapshot.append({"role": "user", "content": full_hint})
 
             _tools = tools_for_llm if continue_round == 1 else None
 
@@ -813,7 +835,7 @@ class ChatPipeline:
 
             logger.info("截断续写第 %s 轮 (tools=%s, 已输出 %s 字符)", continue_round, 'on' if _tools else 'off', len(reply))
 
-            response = await self.loop.predict_step(messages=ctx.context, tools=_tools, stream=False)
+            response = await self.loop.predict_step(messages=ctx_snapshot, tools=_tools, stream=False)
             new_content = getattr(response, "content", "") if response else ""
 
             # 护栏 A: 续写过短
@@ -927,8 +949,8 @@ class ChatPipeline:
 
     async def _step_post_processing(self, ctx: ChatContext):
         """对话历史更新、轨迹记录、PostChatPipeline"""
-        # 更新对话历史
-        self.memory_agent.update_history(ctx.user_input, ctx.reply)
+        if not ctx.caller_provided_history:
+            self.memory_agent.update_history(ctx.user_input, ctx.reply)
 
         # 记录 LLM 调用事件
         if self._trajectory_recorder and ctx.trace_id:

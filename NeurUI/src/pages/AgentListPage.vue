@@ -40,7 +40,7 @@
           v-for="agent in pagedFilteredAgents"
           :key="agent.id"
           :title="agent.name"
-          :subtitle="agent.description || ''"
+          :subtitle="'ID: ' + agent.id"
         >
           <div class="agent-meta">
             <div class="meta-row">

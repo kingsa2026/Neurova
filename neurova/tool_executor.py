@@ -123,19 +123,50 @@ class ToolExecutor:
             return self._messages_list
         return messages
 
+    async def _execute_from_text(self, reply: str, user_input: str):
+        """从文本回复中解析并执行工具调用"""
+        import re
+
+        # 简单的文本工具调用解析
+        pattern = r'\[TOOL_CALL:(\w+)\((.*?)\)\]'
+        matches = re.findall(pattern, reply, re.DOTALL)
+
+        if not matches:
+            return reply
+
+        results = []
+        for tool_name, args_str in matches:
+            try:
+                # 尝试解析 JSON 参数
+                try:
+                    arguments = json.loads(args_str) if args_str.strip() else {}
+                except json.JSONDecodeError:
+                    arguments = {}
+
+                result = await self._execute_single_tool(tool_name, arguments)
+                results.append(f"\n\n**{tool_name} 结果**: {json.dumps(result, ensure_ascii=False)[:2000]}")
+            except Exception as e:
+                logger.error("Text tool execution failed: %s", e)
+                results.append(f"\n\n**{tool_name} 错误**: {str(e)}")
+
+        if results:
+            return reply + "\n".join(results)
+        return reply
+
     async def execute_text_tool_calls(
-        self, tool_calls: List[Dict], messages: Optional[List[Dict]] = None
-    ) -> List[Dict]:
+        self, tool_calls, messages: Optional[List[Dict]] = None
+    ):
         """
         执行文本工具调用
 
-        Args:
-            tool_calls: 工具调用列表
-            messages: 消息列表（可选）
-
-        Returns:
-            工具执行结果列表
+        支持两种调用方式:
+        1. execute_text_tool_calls(reply: str, user_input: str) — 从文本解析工具调用
+        2. execute_text_tool_calls(tool_calls: List[Dict], messages) — 直接执行工具调用列表
         """
+        # 如果第一个参数是字符串，从文本中解析工具调用
+        if isinstance(tool_calls, str):
+            return await self._execute_from_text(tool_calls, messages or "")
+
         messages = self._ensure_messages_list(messages)
         results = []
 
@@ -393,6 +424,9 @@ class ToolExecutor:
         # 内置工具
         builtin_tools = [
             "memory_search",
+            "search",
+            "web_search",
+            "weather",
             "file_read",
             "file_write",
             "file_create",
@@ -431,6 +465,10 @@ class ToolExecutor:
         # 简单的内置工具实现
         if tool_name == "memory_search":
             return await self._execute_memory_search(params)
+        elif tool_name in ("search", "web_search"):
+            return await self._execute_web_search(params)
+        elif tool_name == "weather":
+            return await self._execute_weather(params)
         elif tool_name == "file_read":
             return await self._execute_file_read(params)
         elif tool_name == "file_write":
@@ -459,6 +497,44 @@ class ToolExecutor:
             return await self._execute_run_code(params)
         else:
             return {"error": f"未知内置工具: {tool_name}"}
+
+    async def _execute_web_search(self, params: Dict) -> Dict:
+        """执行网页搜索"""
+        query = params.get("query") or params.get("q") or params.get("keywords", "")
+        if not query:
+            return {"error": "缺少搜索查询"}
+        try:
+            import urllib.request
+            import urllib.parse
+            url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&hl=zh-CN"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                html = resp.read().decode("utf-8", errors="replace")
+            # 简单提取文本摘要
+            import re
+            snippets = re.findall(r'<div[^>]*class="[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL)
+            text = re.sub(r'<[^>]+>', '', ' '.join(snippets[:5]))
+            text = re.sub(r'\s+', ' ', text).strip()[:500]
+            return {"query": query, "results": text or f"搜索 '{query}' 完成，但未能提取摘要。请直接告诉用户搜索结果。"}
+        except Exception as e:
+            return {"query": query, "results": f"搜索 '{query}' 时出错: {e}"}
+
+    async def _execute_weather(self, params: Dict) -> Dict:
+        """执行天气查询"""
+        location = params.get("location") or params.get("city") or params.get("query", "")
+        if not location:
+            return {"error": "缺少地点信息"}
+        try:
+            import urllib.request
+            import urllib.parse
+            # 使用 wttr.in 天气服务
+            url = f"https://wttr.in/{urllib.parse.quote(location)}?format=3&lang=zh"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                text = resp.read().decode("utf-8", errors="replace").strip()
+            return {"location": location, "weather": text}
+        except Exception as e:
+            return {"location": location, "error": f"天气查询失败: {e}"}
 
     async def _execute_memory_search(self, params: Dict) -> Dict:
         """执行记忆搜索"""

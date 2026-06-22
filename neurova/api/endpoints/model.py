@@ -15,7 +15,7 @@ import logging
 import uuid
 from typing import List
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -80,14 +80,15 @@ async def list_models(request: Request):
             if hasattr(provider_manager, "get_all_models"):
                 all_models = provider_manager.get_all_models()
                 for model in all_models:
+                    # PydanticModelInfo uses 'owned_by' for provider_id
                     models.append(
                         ModelInfo(
-                            model_id=getattr(model, "model_id", "unknown"),
+                            model_id=getattr(model, "id", "unknown"),
                             name=getattr(model, "name", "Unknown"),
-                            provider=getattr(model, "provider", ""),
+                            provider=getattr(model, "owned_by", ""),
                             capabilities=getattr(model, "capabilities", []),
                             is_active=getattr(model, "is_active", False),
-                            status=getattr(model, "status", "unknown"),
+                            status=getattr(model, "status", "available"),
                         )
                     )
         except Exception as e:
@@ -108,6 +109,43 @@ async def list_models(request: Request):
 
     return models
 
+
+@router.delete("/{model_id}")
+async def delete_model(request: Request, model_id: str = Path(...)):
+    """删除模型（从所属服务商的模型列表中移除）"""
+    _get_request_id(request)
+
+    provider_manager = _get_provider_manager()
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+
+    try:
+        # 找到包含该 model 的 provider
+        target_provider = None
+        if hasattr(provider_manager, "list_providers"):
+            for provider in provider_manager.list_providers():
+                if model_id in getattr(provider, "models", []):
+                    target_provider = provider
+                    break
+
+        if not target_provider:
+            raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found in any provider")
+
+        # 从 models 列表中移除
+        models = list(target_provider.models)
+        models.remove(model_id)
+
+        # 持久化
+        if hasattr(provider_manager, "update_provider"):
+            provider_manager.update_provider(target_provider.id, models=models)
+            logger.info("Deleted model '%s' from provider '%s'", model_id, target_provider.name)
+
+        return {"code": 0, "message": f"Model '{model_id}' deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete model error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete model: {str(e)}")
 
 @router.get("/active", response_model=ModelInfo)
 async def get_active_model(request: Request, agent_id: str = Query(default="default")):

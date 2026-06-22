@@ -36,7 +36,7 @@ class TTSBase(ABC):
         ...
 
     @abstractmethod
-    async def synthesize(self, text: str) -> bytes:
+    async def synthesize(self, text: str, **kwargs) -> bytes:
         """
         合成语音
 

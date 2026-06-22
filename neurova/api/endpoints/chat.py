@@ -129,11 +129,14 @@ async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any]
         )
 
     try:
+        # 确保 metadata 包含 history 键，防止 fallback 到全局 conversation_history
+        call_metadata = body.metadata if "history" in body.metadata else {"history": []}
+
         # 调用 Agent 的 chat 方法
         response = await agent.chat(
             user_input=body.message,
             session_id=body.session_id,
-            metadata=body.metadata,
+            metadata=call_metadata,
         )
 
         # 提取响应数据，适配前端期望格式
@@ -218,12 +221,15 @@ async def chat_stream(
             # 发送开始事件
             yield f"event: start\ndata: {json.dumps({'request_id': request_id})}\n\n"
 
+            # 确保 metadata 包含 history 键，防止 fallback 到全局 conversation_history
+            call_metadata = body.metadata if "history" in body.metadata else {"history": []}
+
             # 调用 Agent 的流式 chat 方法
             if hasattr(agent, "chat_stream"):
                 async for chunk in agent.chat_stream(
                     user_input=body.message,
                     session_id=body.session_id,
-                    metadata=body.metadata,
+                    metadata=call_metadata,
                 ):
                     yield f"event: message\ndata: {json.dumps({'content': chunk})}\n\n"
             else:
@@ -231,7 +237,7 @@ async def chat_stream(
                 response = await agent.chat(
                     user_input=body.message,
                     session_id=body.session_id,
-                    metadata=body.metadata,
+                    metadata=call_metadata,
                 )
                 yield f"event: message\ndata: {json.dumps({'content': response})}\n\n"
 

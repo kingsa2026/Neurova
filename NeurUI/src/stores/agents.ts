@@ -135,6 +135,7 @@ export const useAgentStore = defineStore('agents', () => {
    */
   async function createAgent(payload: {
     name: string
+    agent_id?: string
     description?: string
     model?: string
     provider?: string
@@ -148,6 +149,9 @@ export const useAgentStore = defineStore('agents', () => {
         description: payload.description,
         model: payload.model,
         provider: payload.provider,
+      }
+      if (payload.agent_id) {
+        body.agent_id = payload.agent_id
       }
       if (payload.config) {
         body.config = mapConfigToApi(payload.config)
