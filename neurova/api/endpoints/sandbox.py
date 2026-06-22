@@ -117,7 +117,7 @@ async def execute_step(sandbox_id: str, body: StepRequest):
             prompt = f"[Sandbox: {sandbox['topic']}]\nStep {sandbox['current_step'] + 1}\nInput: {body.input}"
             if body.context:
                 prompt += f"\nContext: {body.context}"
-            result = await agent.chat(prompt)
+            result = await agent.chat(prompt, metadata={"history": []})
             thought = result if isinstance(result, str) else str(result)
     except Exception:
         pass

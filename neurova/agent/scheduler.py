@@ -382,7 +382,7 @@ class AgentTaskExecutor(TaskExecutor):
                 return {"success": False, "error": "No message provided"}
 
             # 执行 Agent
-            result = agent.chat(message, stream=False)
+            result = agent.chat(message, stream=False, metadata={"history": []})
 
             return {
                 "success": True,

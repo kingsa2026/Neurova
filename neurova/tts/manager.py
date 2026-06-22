@@ -21,16 +21,21 @@ try:
 except ImportError:
     MOSSNanTTS = None
 
+try:
+    from neurova.tts.sapi5_tts import SAPI5TTS
+except ImportError:
+    SAPI5TTS = None
+
 logger = logging.getLogger(__name__)
 
 # Fallback 引擎优先级
-FALLBACK_CHAIN = ["moss-nano", "edge-tts", "mock"]
+FALLBACK_CHAIN = ["moss-nano", "edge-tts", "sapi5", "mock"]
 
 
 class TTSConfig(BaseModel):
     """TTS 配置"""
 
-    engine: Literal["edge-tts", "moss-nano", "mock", "auto"] = "auto"
+    engine: Literal["edge-tts", "moss-nano", "sapi5", "mock", "auto"] = "auto"
     voice: str = "zh-CN-XiaoxiaoNeural"
     rate: str = "+0%"
     volume: str = "+0%"
@@ -118,6 +123,15 @@ class TTSManager:
             elif engine_name == "edge-tts":
                 engine = EdgeTTS(
                     voice=self._config.voice,
+                    rate=self._config.rate,
+                    volume=self._config.volume,
+                )
+            elif engine_name == "sapi5":
+                if SAPI5TTS is None:
+                    logger.warning("SAPI5TTS 不可用（缺少 comtypes）")
+                    return False
+                engine = SAPI5TTS(
+                    voice_name=self._config.voice,
                     rate=self._config.rate,
                     volume=self._config.volume,
                 )

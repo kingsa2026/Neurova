@@ -47,7 +47,8 @@ class ContextInput:
         """初始化后处理"""
         # 自动生成哈希
         if self.hash is None:
-            self.hash = hashlib.md5(self.content.encode()).hexdigest()
+            raw = f"{self.source.value}:{self.content}"
+            self.hash = hashlib.md5(raw.encode()).hexdigest()
 
         # 自动设置时间
         now = datetime.now()

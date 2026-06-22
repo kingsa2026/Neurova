@@ -20,7 +20,6 @@ _app_state: Optional[Dict[str, Any]] = None
 
 
 def set_app_state(state: Dict[str, Any]) -> None:
-    """设置全局应用状态（由 app.py 调用）"""
     global _app_state
     _app_state = state
 

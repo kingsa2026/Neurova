@@ -13,7 +13,7 @@ import typing
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -69,6 +69,34 @@ _manager = ConnectionManager()
 _CONSOLE_UPLOAD_DIR = Path(os.getenv("NEUROVA_CONSOLE_UPLOADS", "uploads/console"))
 _CONSOLE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _CHAT_SESSIONS: typing.Dict[str, dict] = {}
+_SESSIONS_FILE = Path("data/console_sessions.json")
+_SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _load_sessions_from_disk():
+    """从磁盘加载会话"""
+    if _SESSIONS_FILE.exists():
+        try:
+            with open(_SESSIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                _CHAT_SESSIONS.update(data)
+                logger.info("Loaded %d sessions from disk", len(data))
+        except Exception as e:
+            logger.warning("Failed to load sessions: %s", e)
+
+
+def _save_sessions_to_disk():
+    """将会话持久化到磁盘"""
+    try:
+        with open(_SESSIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(_CHAT_SESSIONS, f, ensure_ascii=False, indent=2, default=str)
+    except Exception as e:
+        logger.warning("Failed to save sessions: %s", e)
+
+
+# 启动时加载
+_load_sessions_from_disk()
 
 
 def _safe_filename(filename: str) -> str:
@@ -94,6 +122,7 @@ def _get_user_id(request) -> str:
 class ChatRequest(BaseModel):
     message: str
     session_id: typing.Optional[str] = None
+    agent_id: typing.Optional[str] = None
     stream: bool = True
     model: typing.Optional[str] = None
 
@@ -113,32 +142,62 @@ async def post_console_chat(body: ChatRequest, request: Request):
     session_id = body.session_id or str(uuid.uuid4())
     session = _CHAT_SESSIONS.setdefault(
         session_id,
-        {"id": session_id, "user_id": user_id, "messages": [], "created_at": datetime.datetime.utcnow().isoformat()},
+        {"id": session_id, "user_id": user_id, "agent_id": getattr(body, "agent_id", "") or "", "messages": [], "created_at": datetime.datetime.utcnow().isoformat()},
     )
 
-    session["messages"].append(
+    # 只保留最近一轮对话（避免旧消息泄漏到新请求）
+    session["messages"] = [
         {"role": "user", "content": body.message, "timestamp": datetime.datetime.utcnow().isoformat()}
-    )
+    ]
+
+    # 不传递历史给 agent，每次请求独立
+    history_for_agent = []
 
     # Try to get agent for real response
+    reply = ""
+    reasoning = None
+    tool_messages = []
     try:
-        agent = get_agent_instance()
+        agent = get_agent_instance(agent_id=body.agent_id or "default")
         if agent:
-            response = await agent.chat(body.message)
-            reply = response if isinstance(response, str) else str(response)
+            response = await agent.chat(body.message, session_id=session_id, metadata={"history": history_for_agent})
+            if isinstance(response, dict):
+                reply = response.get("text", str(response))
+                reasoning = response.get("reasoning")
+                tool_messages = response.get("tool_messages", []) or []
+            else:
+                reply = str(response)
         else:
             reply = f"Echo: {body.message}"
     except Exception as e:
-        logger.warning("Console chat fallback: %s", e)
-        reply = f"Echo: {body.message}"
+        logger.warning("Console chat error: %s", e, exc_info=True)
+        reply = f"Error: {str(e)}"
 
     session["messages"].append(
         {"role": "assistant", "content": reply, "timestamp": datetime.datetime.utcnow().isoformat()}
     )
+    _save_sessions_to_disk()
 
     if body.stream:
 
         async def event_stream():
+            # 1. 发送思考过程
+            if reasoning:
+                yield f"data: {json.dumps({'type': 'reasoning', 'content': reasoning})}\n\n"
+
+            # 2. 发送工具调用/结果
+            for tm in tool_messages:
+                if isinstance(tm, dict):
+                    tm_type = tm.get("type", "")
+                    if tm_type == "tool_call":
+                        yield f"data: {json.dumps({'type': 'tool_call', 'name': tm.get('tool_name', ''), 'arguments': json.dumps(tm.get('params', {}), ensure_ascii=False)})}\n\n"
+                    elif tm_type == "tool_result":
+                        result_text = tm.get("result", "")
+                        if isinstance(result_text, dict):
+                            result_text = json.dumps(result_text, ensure_ascii=False)
+                        yield f"data: {json.dumps({'type': 'tool_result', 'result': str(result_text)[:500]})}\n\n"
+
+            # 3. 发送回复内容（逐词）
             words = reply.split(" ")
             for i, word in enumerate(words):
                 chunk = word + (" " if i < len(words) - 1 else "")
@@ -174,19 +233,25 @@ async def post_console_chat_new(request: Request):
     _CHAT_SESSIONS[session_id] = {
         "id": session_id,
         "user_id": user_id,
+        "agent_id": "",
         "messages": [],
         "created_at": datetime.datetime.utcnow().isoformat(),
     }
+    _save_sessions_to_disk()
     return {"code": 0, "message": "Session created", "data": {"session_id": session_id}}
 
 
 @router.get("/chat/sessions")
-async def get_chat_sessions(request: Request):
-    """列出所有会话"""
+async def get_chat_sessions(request: Request, agent_id: str = Query(default="")):
+    """列出所有会话（按 agent_id 过滤）"""
     user_id = _get_user_id(request)
     sessions = [s for s in _CHAT_SESSIONS.values() if s.get("user_id") == user_id]
+    if agent_id:
+        sessions = [s for s in sessions if s.get("agent_id") == agent_id]
     sessions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-    return {"code": 0, "message": "success", "data": {"sessions": sessions, "total": len(sessions)}}
+    # 只返回摘要信息，不返回完整消息列表
+    summaries = [{"id": s["id"], "title": s.get("title", "新对话"), "agent_id": s.get("agent_id", ""), "created_at": s.get("created_at", "")} for s in sessions]
+    return {"code": 0, "message": "success", "data": {"sessions": summaries, "total": len(summaries)}}
 
 
 # ── File endpoints ─────────────────────────────────────
@@ -333,9 +398,14 @@ async def websocket_console(websocket: WebSocket, client_id: str):
                 await websocket.send_json({"type": "pong", "timestamp": time.time()})
             elif msg_type == "chat":
                 message = data.get("message", "")
+                ws_session_id = data.get("session_id") or str(uuid.uuid4())
                 try:
                     agent = get_agent_instance()
-                    reply = await agent.chat(message) if agent else f"Echo: {message}"
+                    reply = await agent.chat(
+                        message,
+                        session_id=ws_session_id,
+                        metadata={"history": []},
+                    ) if agent else f"Echo: {message}"
                 except Exception:
                     reply = f"Echo: {message}"
                 await websocket.send_json({"type": "chat_reply", "content": reply})

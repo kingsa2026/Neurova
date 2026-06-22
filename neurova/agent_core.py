@@ -115,30 +115,43 @@ class AgentLLMClient:
     指定模型 ID 或 'auto' 让路由器自动选择。
     """
 
-    def __init__(self, model: str = "auto", provider_id: str = ""):
+    def __init__(self, model: str = "auto", provider_id: str = "", llm_config=None):
         self.model = model
         self.provider_id = provider_id
-        # config 用于 OpenAILoop 兼容（hasattr 检查 temperature/max_tokens 等）
-        self.config = type(
-            "Config",
-            (),
-            {"temperature": 0.7, "max_tokens": 8192, "top_p": 0.9, "frequency_penalty": 0.0, "model": model},
-        )()
+        # 使用真实的 LLMConfig，而非硬编码值
+        # OpenAILoop 通过 hasattr 检查 temperature/max_tokens 等
+        if llm_config is not None:
+            self.config = llm_config
+        else:
+            # 向后兼容：没有传入 llm_config 时使用默认值
+            from neurova.llm_client import LLMConfig
+            self.config = LLMConfig(model=model)
 
     def _get_client(self):
         from neurova.llm.multi_model_client import get_multi_model_client
 
         return get_multi_model_client()
 
-    def chat(self, messages, **kwargs):
-        return self._get_client().chat(
+    async def chat(self, messages, **kwargs):
+        result = await self._get_client().chat(
             messages, model=self.model if self.model != "auto" else None, provider_id=self.provider_id or None, **kwargs
         )
+        # MultiModelLLMClient.chat() 返回 dict {"success": bool, "response": LLMResponse, ...}
+        # OpenAILoop 等调用方期望直接得到 LLMResponse 对象，需要解包
+        if isinstance(result, dict):
+            if result.get("success"):
+                return result.get("response", result)
+            else:
+                # 失败时返回一个包含错误信息的简单对象
+                from neurova.llm_client import LLMResponse
+                return LLMResponse(content=f"[LLM Error] {result.get('error', 'Unknown error')}")
+        return result
 
-    def chat_stream(self, messages, **kwargs):
-        return self._get_client().chat_stream(
+    async def chat_stream(self, messages, **kwargs):
+        async for chunk in self._get_client().chat_stream(
             messages, model=self.model if self.model != "auto" else None, provider_id=self.provider_id or None, **kwargs
-        )
+        ):
+            yield chunk
 
     def get_stats(self):
         return self._get_client().get_stats()
@@ -157,7 +170,7 @@ class AgentConfig:
         llm_base_url: str = "https://api.openai.com/v1",
         llm_model: str = "gpt-4",
         llm_temperature: float = 0.7,
-        max_tokens: int = 8192,
+        max_tokens: int = 0,  # 0 = 自动适配（查 model_limits 注册表）
         enable_memory: bool = True,
         enable_streaming: bool = False,
         enable_active_skill_acquisition: bool = False,  # 主动技能获取
@@ -214,6 +227,11 @@ class AgentConfig:
 
         # LLM 服务商 ID（用于路由到指定服务商）
         self.llm_provider = llm_provider
+
+        # max_tokens=0 表示自动适配
+        if not max_tokens:
+            from neurova.llm.model_limits import get_model_max_tokens
+            max_tokens = get_model_max_tokens(llm_model)
 
         self.llm_config = LLMConfig(
             api_key=llm_api_key,
@@ -366,6 +384,7 @@ class SubSystemContainer:
         a.llm_client = AgentLLMClient(
             model=c.llm_config.model if hasattr(c, "llm_config") and c.llm_config else "auto",
             provider_id=getattr(c, "llm_provider", "") or "",
+            llm_config=c.llm_config if hasattr(c, "llm_config") else None,
         )
 
     def init_conversation(self):
@@ -544,8 +563,19 @@ class SubSystemContainer:
 
             computer_use = get_computer_use_manager()
             a._builtin_tools = BuiltinToolRegistry(a, computer_use)
+            logger.info("Agent %s: BuiltinToolRegistry 初始化成功", a.config.name)
         except Exception as e:
             logger.warning("BuiltinToolRegistry 初始化失败: %s", e)
+
+        # [BUGFIX] 提前初始化 SkillRegistry，避免 ToolRouter 获得 None
+        if a._skill_registry is None:
+            try:
+                from neurova.skill_system import create_default_skills
+                a._skill_registry = create_default_skills(memory_manager=a.memory_manager)
+                logger.info("Agent %s: SkillRegistry 在 init_tools 中提前初始化", a.config.name)
+            except Exception as _e:
+                logger.warning("init_tools 中提前初始化 SkillRegistry 失败: %s", _e)
+                a._skill_registry = None  # 显式设置为 None 以便后续检测
 
         a.tool_router = None
         try:
@@ -628,7 +658,7 @@ class SubSystemContainer:
         a.loop = a.loop_manager.get_loop()
 
     def _load_api_keys(self):
-        """从服务商加载 API Key"""
+        """从服务商加载 API Key（Agent 配置优先，仅填充空值）"""
         c = self.config
         if c.llm_config is None:
             c.llm_config = LLMConfig()
@@ -638,9 +668,15 @@ class SubSystemContainer:
 
                 pm = get_provider_manager()
                 provider = pm.get_provider(c.llm_provider)
-                if provider and provider.api_key:
-                    c.llm_config.api_key = provider.api_key
-                    c.llm_config.base_url = provider.base_url
+                if provider:
+                    # 优先级: Agent > Provider > System
+                    # 仅在 agent 未显式设置时才从 provider 填充
+                    if not c.llm_config.api_key and provider.api_key:
+                        c.llm_config.api_key = provider.api_key
+                        logger.debug("从 provider '%s' 填充 api_key", c.llm_provider)
+                    if c.llm_config.base_url == "https://api.openai.com/v1" and provider.base_url:
+                        c.llm_config.base_url = provider.base_url
+                        logger.debug("从 provider '%s' 填充 base_url", c.llm_provider)
             except Exception as e:
                 logger.warning("从 llm_provider 加载配置失败: %s", e)
 
@@ -1001,9 +1037,12 @@ class Agent:
         """
         from neurova.router import create_default_router
 
-        # 先初始化 SkillRegistry
+        # 先初始化 SkillRegistry（只在尚未初始化时创建，避免 init_tools 已创建的被覆盖）
         if not self._skill_registry:
             self._skill_registry = create_default_skills(memory_manager=self.memory_manager)
+            logger.info("Agent %s: SkillRegistry 在 _init_router 中初始化", self.config.name)
+        else:
+            logger.info("Agent %s: SkillRegistry 已存在，跳过重复初始化", self.config.name)
 
         # 注册 ToolMemory 回调：Skill 成功执行后记录到 ToolMemory
         if self.tool_memory and self._skill_registry:

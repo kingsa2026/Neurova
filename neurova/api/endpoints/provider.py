@@ -242,12 +242,29 @@ async def update_provider(
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
     try:
+        # 处理 config 中的特殊指令
+        config = body.config or {}
+        add_model_id = config.get("add_model")
+
         if hasattr(provider_manager, "update_provider"):
-            success = provider_manager.update_provider(
-                provider_id=provider_id,
-                base_url=body.base_url,
-                api_key=body.api_key,
-            )
+            # 构建更新参数
+            update_kwargs: dict = {"provider_id": provider_id}
+            if body.base_url is not None:
+                update_kwargs["base_url"] = body.base_url
+            if body.api_key is not None:
+                update_kwargs["api_key"] = body.api_key
+
+            # 如果有 add_model 指令，先获取当前 models 再合并
+            if add_model_id:
+                provider = provider_manager.get_provider(provider_id) if hasattr(provider_manager, "get_provider") else None
+                if provider:
+                    models = list(getattr(provider, "models", []))
+                    if add_model_id not in models:
+                        models.append(add_model_id)
+                        update_kwargs["models"] = models
+                        logger.info(f"Added model '{add_model_id}' to provider '{provider_id}'")
+
+            success = provider_manager.update_provider(**update_kwargs)
 
             if success:
                 # 读取更新后的配置（使用公共 API 而非私有属性）

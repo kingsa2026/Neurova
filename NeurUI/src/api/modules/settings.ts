@@ -58,7 +58,7 @@ export function getSettings() {
 
 /** Update a settings section. */
 export function updateSettings(section: string, data: Record<string, unknown>) {
-  return api.put<ApiResponse<null>>(BASE, { section, data })
+  return api.put<ApiResponse<null>>(BASE, { settings: { [section]: data } })
 }
 
 /** Clear application cache. */

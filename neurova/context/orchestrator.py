@@ -161,8 +161,10 @@ class ContextOrchestrator:
 
         from neurova.context_pool import ContextInput, ContextSource
 
-        # Phase 2: 构建系统提示
+        # 构建工具描述
         tools_desc = await self.get_tools_description()
+        
+        # Phase 2: 构建系统提示
         system_instructions = [self.soul]
         if self.personality:
             system_instructions.append(self.personality)
@@ -202,13 +204,20 @@ class ContextOrchestrator:
                 logger.debug("反思日志获取跳过: %s", e)
 
         # Phase 3: 构建 ContextInput → ContextCollector → 候选池
-        # 合并 conversation_history + session_context（B3修复）
-        conversation_context = list(
-            {"role": m["role"], "content": m["content"]} for m in (self.conversation_history or [])
+        # session_context 包含完整的 user+assistant 历史（优先使用）
+        # conversation_history 只有 user 消息且不更新（仅作 fallback）
+        if session_context is not None:
+            conversation_context = list(session_context)
+        else:
+            conversation_context = list(
+                {"role": m["role"], "content": m["content"]} for m in (self.conversation_history or [])
+            )
+
+        logger.info(
+            "[CTX_TRACE] conversation_context=%d msgs, session_context_provided=%s",
+            len(conversation_context),
+            bool(session_context),
         )
-        if session_context:
-            # session_context 添加到历史末尾（更新近的对话）
-            conversation_context.extend(session_context)
 
         # 构建工具记忆上下文（包含执行状态）
         tool_memory_context = dict(tool_memory_result) if tool_memory_result else {}
@@ -216,8 +225,8 @@ class ContextOrchestrator:
             tool_memory_context["auto_execute_result"] = auto_execute_result
         tool_memory_context["tool_decision"] = tool_decision
 
-        # 如果启用 ContextPool，将上下文添加到 ContextPool
         if self.use_pool and self.context_pool:
+            self.context_pool.clear()
             # 添加系统指令
             for instruction in system_instructions:
                 self.context_pool.add_context(
@@ -235,10 +244,15 @@ class ContextOrchestrator:
                 ContextInput(source=ContextSource.USER_INPUT, content=user_input, priority=90)
             )
 
-            # 添加对话历史
+            # 添加对话历史（保留 role 信息）
             for msg in conversation_context:
                 self.context_pool.add_context(
-                    ContextInput(source=ContextSource.CONVERSATION, content=msg["content"], priority=60)
+                    ContextInput(
+                        source=ContextSource.CONVERSATION,
+                        content=msg["content"],
+                        priority=60,
+                        metadata={"role": msg.get("role", "user")},
+                    )
                 )
 
             # 添加记忆
@@ -313,7 +327,8 @@ class ContextOrchestrator:
                 elif ctx.source == ContextSource.USER_INPUT:
                     context.append({"role": "user", "content": ctx.content})
                 elif ctx.source == ContextSource.CONVERSATION:
-                    context.append({"role": "user", "content": ctx.content})
+                    role = ctx.metadata.get("role", "user") if ctx.metadata else "user"
+                    context.append({"role": role, "content": ctx.content})
                 elif ctx.source == ContextSource.MEMORY:
                     context.append({"role": "system", "content": f"[记忆] {ctx.content}"})
                 elif ctx.source == ContextSource.EXPERIENCE:
@@ -346,9 +361,16 @@ class ContextOrchestrator:
         # 添加用户输入
         candidate_pool.append(ContextInput(source=ContextSource.USER_INPUT, content=user_input, priority=90))
 
-        # 添加对话历史
+        # 添加对话历史（保留 role 信息）
         for msg in conversation_context:
-            candidate_pool.append(ContextInput(source=ContextSource.CONVERSATION, content=msg["content"], priority=60))
+            candidate_pool.append(
+                ContextInput(
+                    source=ContextSource.CONVERSATION,
+                    content=msg["content"],
+                    priority=60,
+                    metadata={"role": msg.get("role", "user")},
+                )
+            )
 
         # 添加记忆
         for memory in relevant_memories or []:
@@ -451,7 +473,7 @@ class ContextOrchestrator:
         context = self.context_builder.build_from_pool(
             candidate_pool,
             token_budget=TokenBudget(max_total=16000),
-            conversation_history=self.conversation_history,
+            conversation_history=None,
             user_input=user_input,
         )
 

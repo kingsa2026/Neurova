@@ -108,6 +108,23 @@ class ContextPool:
         if self.auto_tag and hasattr(self, "_auto_tagger"):
             context = self._auto_tagger.auto_tag(context)
 
+        # [FIX] 添加时去重：已存在相同 hash 的条目则跳过
+        if context.hash:
+            existing = [c for c in self._collector._contexts if c.hash == context.hash]
+            if existing:
+                # 若新条目优先级更高则替换，否则跳过
+                existing_entry = existing[0]
+                if context.priority > existing_entry.priority:
+                    idx = self._collector._contexts.index(existing_entry)
+                    self._collector._contexts[idx] = context
+                    self._cache_version += 1
+                    logger.debug("ContextPool 替换条目: hash=%s, priority=%s→%s",
+                                 context.hash[:8], existing_entry.priority, context.priority)
+                else:
+                    logger.debug("ContextPool 跳过重复: hash=%s, source=%s",
+                                 context.hash[:8], context.source.value if context.source else "?")
+                return
+
         if hasattr(self, "max_size") and self.max_size > 0:
             current_size = len(self._collector._contexts)
             if current_size >= self.max_size:
@@ -116,42 +133,34 @@ class ContextPool:
         self._collector.add_context(context)
         self._cache_version += 1
 
+    def _filter_ttl(self, items: List) -> List:
+        """按 TTL 过滤条目（提取公共方法供 get_contexts 和 draw 复用）"""
+        if not hasattr(self, "ttl_seconds") or self.ttl_seconds <= 0:
+            return items
+        now = datetime.now()
+        valid = []
+        for item in items:
+            if item.created_at:
+                age = (now - item.created_at).total_seconds()
+                if age <= self.ttl_seconds:
+                    valid.append(item)
+            else:
+                valid.append(item)
+        return valid
+
     def get_contexts(self) -> List:
         contexts = self._collector.collect()
-
-        if hasattr(self, "ttl_seconds") and self.ttl_seconds > 0:
-            now = datetime.now()
-            valid_contexts = []
-            for ctx in contexts:
-                if ctx.created_at:
-                    age = (now - ctx.created_at).total_seconds()
-                    if age <= self.ttl_seconds:
-                        valid_contexts.append(ctx)
-                else:
-                    valid_contexts.append(ctx)
-            return valid_contexts
-
-        return contexts
+        return self._filter_ttl(contexts)
 
     def cleanup_expired(self) -> int:
+        """清理过期条目，返回移除数量"""
         if not hasattr(self, "ttl_seconds") or self.ttl_seconds <= 0:
             return 0
 
-        now = datetime.now()
         original_count = len(self._collector._contexts)
+        self._collector._contexts = self._filter_ttl(self._collector._contexts)
 
-        valid_contexts = []
-        for ctx in self._collector._contexts:
-            if ctx.created_at:
-                age = (now - ctx.created_at).total_seconds()
-                if age <= self.ttl_seconds:
-                    valid_contexts.append(ctx)
-            else:
-                valid_contexts.append(ctx)
-
-        self._collector._contexts = valid_contexts
-
-        removed_count = original_count - len(valid_contexts)
+        removed_count = original_count - len(self._collector._contexts)
         if removed_count > 0:
             self._cache_version += 1
 
@@ -230,8 +239,15 @@ class ContextPool:
         for ctx in other_contexts:
             self._collector.add_context(ctx)
 
+    def clear(self):
+        self._collector._contexts.clear()
+        self._cache.clear()
+        self._cache_version += 1
+
     def draw(self, need: str = None) -> List:
         all_drops = self._collector.collect()
+        # [FIX] draw() 也应用 TTL 过期过滤（之前绕过 get_contexts() 的 TTL 检查）
+        all_drops = self._filter_ttl(all_drops)
         deduped = self._deduplicator.dedup(all_drops, stage="output")
         return self._drawer.draw(deduped, need=need)
 

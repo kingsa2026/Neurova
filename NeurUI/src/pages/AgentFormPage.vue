@@ -21,8 +21,29 @@
               </a-form-item>
             </a-col>
             <a-col :span="12">
+              <a-form-item label="Agent ID" :extra="isEditing ? t('agent.idReadonly') : t('agent.idHint')">
+                <a-input
+                  v-model:value="formState.agent_id"
+                  :placeholder="isEditing ? agentId : t('agent.idPlaceholder')"
+                  :disabled="isEditing"
+                  :readonly="isEditing"
+                />
+              </a-form-item>
+            </a-col>
+          </a-row>
+          <a-row :gutter="16">
+            <a-col :span="12">
               <a-form-item :label="t('agent.provider')">
-                <a-input v-model:value="formState.provider" :placeholder="t('agent.provider')" />
+                <a-select
+                  v-model:value="formState.provider"
+                  :placeholder="t('agent.selectProvider')"
+                  :options="providerOptions"
+                  :loading="loadingProviders"
+                  show-search
+                  :filter-option="(input: string, option: any) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())"
+                  @change="onProviderChange"
+                  allow-clear
+                />
               </a-form-item>
             </a-col>
           </a-row>
@@ -34,7 +55,15 @@
           <a-row :gutter="16">
             <a-col :span="12">
               <a-form-item :label="t('agent.model')">
-                <a-input v-model:value="formState.model" :placeholder="t('agent.model')" />
+                <a-select
+                  v-model:value="formState.model"
+                  :placeholder="t('agent.selectModel')"
+                  :options="currentModelOptions"
+                  :disabled="!formState.provider"
+                  show-search
+                  :filter-option="(input: string, option: any) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())"
+                  allow-clear
+                />
               </a-form-item>
             </a-col>
           </a-row>
@@ -128,6 +157,8 @@ import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentStore } from '@/stores/agents'
+import { listProviders } from '@/api/modules/providers'
+import { listModels } from '@/api/modules/models'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -139,7 +170,66 @@ const isEditing = computed(() => !!agentId.value)
 const pageLoading = ref(false)
 const saving = ref(false)
 
+// Provider / Model dropdown state
+const providerOptions = ref<{ value: string; label: string }[]>([])
+const allModelOptions = ref<{ value: string; label: string; provider_id: string }[]>([])
+const loadingProviders = ref(false)
+
+const currentModelOptions = computed(() => {
+  if (!formState.value.provider) return []
+  return allModelOptions.value.filter((m) => m.provider_id === formState.value.provider)
+})
+
+const onProviderChange = (providerId: string | undefined) => {
+  // Clear model if it doesn't belong to the new provider
+  if (providerId && formState.value.model) {
+    const valid = allModelOptions.value.some(
+      (m) => m.value === formState.value.model && m.provider_id === providerId,
+    )
+    if (!valid) formState.value.model = ''
+  }
+}
+
+const fetchProvidersAndModels = async () => {
+  loadingProviders.value = true
+  try {
+    const [providersRes, modelsRes] = await Promise.all([listProviders(), listModels()])
+
+    // Normalize providers response
+    const rawProviders = Array.isArray(providersRes)
+      ? providersRes
+      : (providersRes as any)?.data ?? (providersRes as any)?.providers ?? []
+
+    // Filter to enabled providers with models
+    const enabled = rawProviders.filter(
+      (p: any) => p.is_active !== false && (p.models_count ?? 0) > 0,
+    )
+    providerOptions.value = enabled.map((p: any) => ({
+      value: p.provider_id || p.id,
+      label: p.name || p.provider_id || p.id,
+    }))
+
+    // Normalize models response
+    const rawModels = Array.isArray(modelsRes)
+      ? modelsRes
+      : (modelsRes as any)?.data ?? (modelsRes as any)?.models ?? []
+
+    allModelOptions.value = rawModels
+      .filter((m: any) => m.provider && m.provider !== 'system')
+      .map((m: any) => ({
+        value: m.model_id || m.id,
+        label: m.name || m.model_id || m.id,
+        provider_id: m.provider,
+      }))
+  } catch (err: any) {
+    console.warn('[AgentFormPage] fetchProvidersAndModels failed:', err)
+  } finally {
+    loadingProviders.value = false
+  }
+}
+
 const formState = ref({
+  agent_id: '',
   name: '',
   description: '',
   model: '',
@@ -162,6 +252,7 @@ const loadAgent = async () => {
     const agent = agentStore.agents.find((a) => a.id === agentId.value)
     if (agent) {
       formState.value = {
+        agent_id: agent.id,
         name: agent.name,
         description: agent.description || '',
         model: agent.model || '',
@@ -187,7 +278,7 @@ const loadAgent = async () => {
 const handleSave = async () => {
   saving.value = true
   try {
-    const payload = {
+    const payload: any = {
       name: formState.value.name,
       description: formState.value.description,
       model: formState.value.model,
@@ -201,6 +292,10 @@ const handleSave = async () => {
         ttsSpeed: formState.value.ttsSpeed,
         ttsPitch: formState.value.ttsPitch,
       },
+    }
+    // 新建时传入 agent_id
+    if (!isEditing.value && formState.value.agent_id.trim()) {
+      payload.agent_id = formState.value.agent_id.trim()
     }
 
     if (isEditing.value && agentId.value) {
@@ -228,9 +323,9 @@ const handleSave = async () => {
 }
 
 onMounted(async () => {
-  if (agentStore.agents.length === 0) {
-    await agentStore.loadAgents()
-  }
+  // Fetch provider/model options first (parallel with agents)
+  const agentsPromise = agentStore.agents.length === 0 ? agentStore.loadAgents() : Promise.resolve()
+  await Promise.all([fetchProvidersAndModels(), agentsPromise])
   if (isEditing.value) {
     await loadAgent()
   }

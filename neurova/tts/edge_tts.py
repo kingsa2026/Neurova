@@ -50,7 +50,7 @@ class EdgeTTS(TTSBase):
             self._logger.error("EdgeTTS 初始化失败: %s", e)
             return False
 
-    async def synthesize(self, text: str) -> bytes:
+    async def synthesize(self, text: str, **kwargs) -> bytes:
         """
         合成语音
 

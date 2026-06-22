@@ -136,17 +136,22 @@
               </div>
             </div>
 
-            <!-- Tool Call Block -->
+            <!-- Tool Call Block (collapsible) -->
             <div v-if="msg.toolCall" class="nr-msg-tool-call">
-              <div class="nr-tool-header">
+              <div class="nr-tool-header" @click="msg.toolOpen = !msg.toolOpen">
                 <span class="nr-tool-icon">🔧</span>
                 <span class="nr-tool-name">{{ msg.toolCall.name }}</span>
-                <a-tag color="processing">{{ t('chat.toolCalling') }}</a-tag>
+                <a-tag :color="msg.toolResult ? 'success' : 'processing'">
+                  {{ msg.toolResult ? t('chat.toolDone') : t('chat.toolCalling') }}
+                </a-tag>
+                <span class="nr-tool-toggle">{{ msg.toolOpen ? '▾' : '▸' }}</span>
               </div>
-              <pre class="nr-tool-args">{{ formatJSON(msg.toolCall.arguments) }}</pre>
-              <div v-if="msg.toolResult" class="nr-tool-result">
-                <div class="nr-tool-result-header">{{ t('chat.toolResult') }}</div>
-                <pre class="nr-tool-result-content">{{ msg.toolResult }}</pre>
+              <div v-show="msg.toolOpen">
+                <pre class="nr-tool-args">{{ formatJSON(msg.toolCall.arguments) }}</pre>
+                <div v-if="msg.toolResult" class="nr-tool-result">
+                  <div class="nr-tool-result-header">{{ t('chat.toolResult') }}</div>
+                  <pre class="nr-tool-result-content">{{ msg.toolResult }}</pre>
+                </div>
               </div>
             </div>
 
@@ -412,6 +417,7 @@ interface ChatMessage {
   reasoning?: string
   reasoningOpen?: boolean
   toolCall?: { name: string; arguments: string }
+  toolOpen?: boolean
   toolResult?: string
   attachments?: Array<{ name: string; type?: string; preview?: string; size?: number }>
   audioUrl?: string
@@ -497,10 +503,12 @@ const filteredSessions = computed(() => {
 // ---------------------------------------------------------------------------
 async function loadSessions() {
   try {
-    const res: any = await api.get(`/chat/sessions?agent_id=${agentId.value}`)
+    const agentParam = agentId.value ? `?agent_id=${agentId.value}` : ''
+    const res: any = await api.get(`/console/chat/sessions${agentParam}`)
     const data = res?.data ?? res
-    sessions.value = (Array.isArray(data) ? data : data?.items ?? data?.sessions ?? []).map(
-      (s: any) => ({ id: s.id, title: s.title || s.name || 'Untitled', updatedAt: s.updated_at }),
+    const sessionList = data?.sessions ?? data ?? []
+    sessions.value = sessionList.map(
+      (s: any) => ({ id: s.session_id || s.id, title: s.title || s.name || '新对话', updatedAt: s.created_at || s.updated_at }),
     )
     if (sessions.value.length > 0 && !currentSessionId.value) {
       switchSession(sessions.value[0].id)
@@ -511,25 +519,17 @@ async function loadSessions() {
 }
 
 async function createSession() {
-  try {
-    const res: any = await api.post('/chat/sessions', {
-      agent_id: agentId.value,
-      title: `${t('chat.newChat')} - ${new Date().toLocaleString()}`,
-    })
-    const data = res?.data ?? res
-    const newSession: Session = { id: data.id, title: data.title || t('chat.newChat') }
-    sessions.value.unshift(newSession)
-    switchSession(newSession.id)
-  } catch (err) {
-    console.error('[Chat] Failed to create session:', err)
-  }
+  const newId = crypto.randomUUID()
+  const newSession: Session = { id: newId, title: `${t('chat.newChat')} - ${new Date().toLocaleString()}` }
+  sessions.value.unshift(newSession)
+  switchSession(newId)
 }
 
 async function switchSession(sessionId: string) {
   currentSessionId.value = sessionId
   messages.value = []
   try {
-    const res: any = await api.get(`/chat/history?session_id=${sessionId}`)
+    const res: any = await api.get(`/console/chat/history?session_id=${sessionId}`)
     const data = res?.data ?? res
     const history = Array.isArray(data) ? data : data?.messages ?? data?.items ?? []
     messages.value = history.map((m: any) => ({
@@ -573,7 +573,7 @@ async function confirmRename() {
 
 async function deleteSession(sessionId: string) {
   try {
-    await api.delete(`/chat/sessions/${sessionId}`)
+    // console session 在内存中，客户端侧删除
     sessions.value = sessions.value.filter((s) => s.id !== sessionId)
     if (currentSessionId.value === sessionId) {
       currentSessionId.value = null
@@ -615,7 +615,8 @@ async function sendMessage() {
     role: 'assistant',
     content: '',
     reasoning: '',
-    reasoningOpen: true,
+    reasoningOpen: false,
+    toolOpen: false,
     streaming: true,
   }
   messages.value.push(assistantMsg)
@@ -731,6 +732,7 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'message':
     case 'content':
     case 'delta':
+    case 'chunk':
       msg.content += event.content || event.text || event.delta || ''
       break
 
@@ -1246,6 +1248,15 @@ watch(
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
+// 切换 agent 时重新加载 sessions
+watch(agentId, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    messages.value = []
+    currentSessionId.value = null
+    loadSessions()
+  }
+})
+
 onMounted(() => {
   loadSessions()
   initASR()
@@ -1608,7 +1619,18 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.nr-tool-header:hover {
+  opacity: 0.8;
+}
+
+.nr-tool-toggle {
+  margin-left: auto;
+  font-size: 14px;
+  color: var(--nr-text-muted);
 }
 
 .nr-tool-icon {

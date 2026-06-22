@@ -35,6 +35,31 @@ router = APIRouter()
 from neurova.api.endpoints import get_app_state
 
 
+def _save_agent_config(agent) -> None:
+    """将 agent 配置持久化到 workspace"""
+    if not hasattr(agent, "config"):
+        return
+    cfg = agent.config
+    workspace = getattr(cfg, "workspace_path", "")
+    if not workspace:
+        return
+
+    import json as _json
+    config_data = {
+        "name": getattr(cfg, "name", ""),
+        "description": getattr(cfg, "description", "") or "",
+        "model": getattr(cfg.llm_config, "model", "") if hasattr(cfg, "llm_config") else "",
+        "provider": getattr(cfg, "llm_provider", ""),
+        "personality": getattr(cfg, "personality", ""),
+        "constitution": getattr(cfg, "constitution", ""),
+    }
+    config_path = os.path.join(workspace, "agent_config.json")
+    os.makedirs(workspace, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as f:
+        _json.dump(config_data, f, ensure_ascii=False, indent=2)
+    logger.debug("Saved agent config to %s", config_path)
+
+
 class AgentInfo(BaseModel):
     """Agent 信息"""
 
@@ -42,6 +67,7 @@ class AgentInfo(BaseModel):
     name: str
     description: str = ""
     model: str = ""
+    provider: str = ""
     status: str = "unknown"
     created_at: Optional[str] = None
     last_active: Optional[str] = None
@@ -52,9 +78,11 @@ class AgentInfo(BaseModel):
 class CreateAgentRequest(BaseModel):
     """创建 Agent 请求"""
 
+    agent_id: Optional[str] = Field(default=None, description="Agent ID（可选，不填则自动生成）")
     name: str = Field(..., description="Agent 名称")
     description: str = Field(default="", description="Agent 描述")
     model: Optional[str] = Field(default=None, description="LLM 模型")
+    provider: Optional[str] = Field(default=None, description="LLM 提供商")
     enable_memory: bool = Field(default=True, description="启用记忆")
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
 
@@ -131,16 +159,18 @@ def agent_to_info(agent) -> Dict[str, Any]:
         "name": name,
         "description": description,
         "model": "",
+        "provider": "",
         "status": "running",
         "memory_enabled": enable_memory,
         "tools_count": 0,
     }
 
-    # 获取模型信息
+    # 获取模型和提供商信息
     if hasattr(agent, "config"):
         config = agent.config
         if hasattr(config, "llm_config"):
             info["model"] = getattr(config.llm_config, "model", "")
+        info["provider"] = getattr(config, "llm_provider", "") or ""
 
     # 获取工具数量
     if hasattr(agent, "tool_executor"):
@@ -185,6 +215,7 @@ async def list_agents(request: Request):
                         name=agent_cfg.get("name", "Unknown"),
                         description=agent_cfg.get("description", ""),
                         model=agent_cfg.get("model", ""),
+                        provider=agent_cfg.get("provider", ""),
                         status="config_only",
                     )
                 )
@@ -209,6 +240,7 @@ async def get_agent(request: Request, agent_id: str = FastAPIPath(...)):
                         name=agent_cfg.get("name", "Unknown"),
                         description=agent_cfg.get("description", ""),
                         model=agent_cfg.get("model", ""),
+                        provider=agent_cfg.get("provider", ""),
                         status="config_only",
                     )
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
@@ -227,7 +259,17 @@ async def create_agent(
     try:
         from neurova.agent_core import Agent, AgentConfig
 
-        agent_id = str(uuid.uuid4())[:8]
+        # 支持用户指定 agent_id，否则自动生成
+        agent_id = body.agent_id.strip() if body.agent_id else str(uuid.uuid4())[:8]
+        # 校验 agent_id 格式（只允许字母、数字、下划线、连字符）
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]+$', agent_id):
+            raise HTTPException(status_code=400, detail=f"Invalid agent_id: '{agent_id}'. Only letters, numbers, hyphens, and underscores are allowed.")
+        # 检查是否已存在
+        existing = get_agent_from_state(agent_id)
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Agent '{agent_id}' already exists.")
+
         workspace_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "agent_workspaces", agent_id
         )
@@ -238,6 +280,8 @@ async def create_agent(
             enable_memory=body.enable_memory,
             workspace_path=workspace_path,
             owner_user_id=current_user.get("user_id"),
+            llm_model=body.model or "gpt-4",
+            llm_provider=body.provider or body.config.get("provider", "") if body.config else "",
         )
 
         agent = Agent(config=config)
@@ -247,6 +291,12 @@ async def create_agent(
         if state:
             agents = state.get("agents", {})
             agents[agent_id] = agent
+
+        # 持久化配置
+        try:
+            _save_agent_config(agent)
+        except Exception as e:
+            logger.warning("Failed to persist new agent config: %s", e)
 
         info = agent_to_info(agent)
         return AgentInfo(**info)
@@ -278,6 +328,23 @@ async def update_agent(
             agent.config.description = body.description
     if body.model is not None and hasattr(agent, "config") and hasattr(agent.config, "llm_config"):
         agent.config.llm_config.model = body.model
+    if body.provider is not None and hasattr(agent, "config"):
+        agent.config.llm_provider = body.provider
+
+    # 更新运行时的 AgentLLMClient（provider/model 变更后必须重建）
+    if (body.model is not None or body.provider is not None) and hasattr(agent, "llm_client"):
+        try:
+            from neurova.agent_core import AgentLLMClient
+            new_model = body.model or getattr(agent.config.llm_config, "model", "auto") if hasattr(agent.config, "llm_config") else "auto"
+            new_provider = body.provider or getattr(agent.config, "llm_provider", "") or ""
+            agent.llm_client = AgentLLMClient(
+                model=new_model,
+                provider_id=new_provider,
+                llm_config=agent.config.llm_config if hasattr(agent.config, "llm_config") else None,
+            )
+            logger.info("Rebuilt AgentLLMClient: model=%s, provider=%s", new_model, new_provider)
+        except Exception as e:
+            logger.warning("Failed to rebuild AgentLLMClient: %s", e)
 
     # 触发 rebuild_loop 如果模型变更
     if body.model is not None and hasattr(agent, "rebuild_loop"):
@@ -285,6 +352,12 @@ async def update_agent(
             agent.rebuild_loop(model_name=body.model)
         except Exception as e:
             logger.warning(f"rebuild_loop failed after model update: {e}")
+
+    # 持久化 agent 配置到 workspace
+    try:
+        _save_agent_config(agent)
+    except Exception as e:
+        logger.warning("Failed to persist agent config: %s", e)
 
     info = agent_to_info(agent)
     return AgentInfo(**info)
@@ -313,6 +386,21 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...)):
 
     # 移除
     del agents[agent_id]
+
+    # 清理 workspace 目录（防止重启后被重新加载）
+    try:
+        workspaces_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "agent_workspaces")
+        agent_workspace = os.path.join(workspaces_dir, agent_id)
+        config_file = os.path.join(agent_workspace, "agent_config.json")
+        if os.path.exists(config_file):
+            os.remove(config_file)
+            logger.info("Removed agent_config.json for %s", agent_id)
+        # 如果目录为空则删除
+        if os.path.exists(agent_workspace) and not os.listdir(agent_workspace):
+            os.rmdir(agent_workspace)
+            logger.info("Removed empty workspace for %s", agent_id)
+    except Exception as e:
+        logger.warning("Failed to clean workspace for %s: %s", agent_id, e)
 
     return {"code": 0, "message": f"Agent '{agent_id}' deleted"}
 
@@ -426,7 +514,7 @@ async def make_decision(
         if body.constraints:
             prompt += f"\n\n约束条件: {', '.join(body.constraints)}"
 
-        response = await agent.chat(user_input=prompt)
+        response = await agent.chat(user_input=prompt, metadata={"history": []})
 
         return {
             "code": 0,

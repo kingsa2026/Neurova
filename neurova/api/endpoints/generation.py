@@ -86,6 +86,7 @@ async def generate_text(request: Request, body: TextGenerationRequest):
         response = await agent.chat(
             user_input=body.prompt,
             metadata={
+                "history": [],
                 "generation_type": "text",
                 "max_tokens": body.max_tokens,
                 "temperature": body.temperature,

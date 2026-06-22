@@ -75,6 +75,16 @@ class BaseAgentLoop(ABC):
             _tc_id = tool_call["id"]
 
             try:
+                # [TOOLBUG] 诊断日志：检查 SkillRegistry 和 ToolRouter 的初始化状态
+                _sr = self.agent.skill_registry
+                _tr = getattr(self.agent, "tool_router", None)
+                logger.info(
+                    "[TOOLBUG] skill_registry=%s (type=%s), tool_router=%s (type=%s), tool_name=%s",
+                    _sr is not None, type(_sr).__name__ if _sr else "None",
+                    _tr is not None, type(_tr).__name__ if _tr else "None",
+                    _tc_function_name,
+                )
+
                 # 记录工具调用消息（用于前端展示）
                 self.agent._tool_messages_list.append(
                     {

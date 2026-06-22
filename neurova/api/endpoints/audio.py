@@ -141,9 +141,18 @@ async def synthesize_speech(request: Request, body: SynthesizeRequest):
             if not result.audio_data:
                 raise HTTPException(status_code=500, detail="合成失败")
 
+            # Detect audio format from magic bytes
+            audio_bytes = result.audio_data
+            if audio_bytes[:4] == b"RIFF":
+                media_type = "audio/wav"
+            elif audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3") or audio_bytes[:3] == b"ID3":
+                media_type = "audio/mpeg"
+            else:
+                media_type = "audio/wav"
+
             return Response(
-                content=result.audio_data,
-                media_type="audio/wav",
+                content=audio_bytes,
+                media_type=media_type,
                 headers={
                     "X-Request-ID": request_id,
                     "X-TTS-Engine": voice_engine.get_info().get("engine_class", "unknown"),
@@ -182,9 +191,19 @@ async def synthesize_speech(request: Request, body: SynthesizeRequest):
         if not audio_bytes:
             raise HTTPException(status_code=500, detail="合成失败")
 
+        # Detect audio format from magic bytes
+        if audio_bytes[:4] == b"RIFF":
+            media_type = "audio/wav"
+        elif audio_bytes[:2] == b"\xff\xfb" or audio_bytes[:2] == b"\xff\xf3" or audio_bytes[:3] == b"ID3":
+            media_type = "audio/mpeg"
+        else:
+            media_type = "audio/wav"
+
+        logger.info("TTS format: %s, first bytes: %s", media_type, audio_bytes[:4].hex())
+
         return Response(
             content=audio_bytes,
-            media_type="audio/wav",
+            media_type=media_type,
             headers={
                 "X-Request-ID": request_id,
                 "X-TTS-Engine": tts.get_engine_name() or "unknown",

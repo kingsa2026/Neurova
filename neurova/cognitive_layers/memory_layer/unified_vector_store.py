@@ -16,6 +16,7 @@ UnifiedVectorStore — 三合一向量索引
 import logging
 import math
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -123,7 +124,24 @@ class UnifiedVectorStore:
             try:
                 from sentence_transformers import SentenceTransformer
 
-                return SentenceTransformer("BAAI/bge-small-zh-v1.5")
+                model_name = "BAAI/bge-small-zh-v1.5"
+
+                # 先检查本地缓存，避免网络不通时阻塞启动
+                # HuggingFace 缓存路径: ~/.cache/huggingface/hub/models--{org}--{model}/
+                cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+                cache_model_dir = cache_dir / f"models--{model_name.replace('/', '--')}"
+                if not cache_model_dir.exists():
+                    logger.warning(
+                        "FAISS 编码器模型未缓存: %s，跳过加载，降级到 TF-IDF。"
+                        "如需使用 FAISS，请先离线下载模型或配置代理后运行一次。",
+                        model_name,
+                    )
+                    return None
+
+                logger.info("正在加载 FAISS 编码器模型: %s (本地缓存)", model_name)
+                encoder = SentenceTransformer(model_name, cache_folder=str(cache_dir))
+                logger.info("FAISS 编码器模型加载成功: %s", model_name)
+                return encoder
             except Exception as e:
                 logger.warning("FAISS 编码器创建失败: %s，降级到 TF-IDF", e)
                 return None

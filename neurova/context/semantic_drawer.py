@@ -70,17 +70,34 @@ class SemanticMatchDrawer:
         if not drops:
             return []
 
-        scored_drops = []
-        for drop in drops:
-            score = self._calculate_score(drop, need)
-            scored_drops.append((score, drop))
+        conv_items = [(i, d) for i, d in enumerate(drops) if d.source == ContextSource.CONVERSATION]
+        non_conv_items = [d for d in drops if d.source != ContextSource.CONVERSATION]
 
-        scored_drops.sort(key=lambda x: -x[0])
+        scored_non_conv = []
+        for drop in non_conv_items:
+            score = self._calculate_score(drop, need)
+            scored_non_conv.append((score, drop))
+        scored_non_conv.sort(key=lambda x: -x[0])
+
+        result_by_pos = {}
+        for idx, (orig_pos, item) in enumerate(conv_items):
+            result_by_pos[orig_pos] = item
+
+        non_conv_idx = 0
+        for pos in range(len(drops)):
+            if pos in result_by_pos:
+                continue
+            if non_conv_idx < len(scored_non_conv):
+                _, item = scored_non_conv[non_conv_idx]
+                result_by_pos[pos] = item
+                non_conv_idx += 1
 
         result = []
         total_tokens = 0
-
-        for score, drop in scored_drops:
+        for pos in range(len(drops)):
+            if pos not in result_by_pos:
+                continue
+            drop = result_by_pos[pos]
             drop_tokens = drop.tokens if drop.tokens > 0 else self._estimate_tokens(drop.content)
 
             if total_tokens + drop_tokens <= self.max_tokens:

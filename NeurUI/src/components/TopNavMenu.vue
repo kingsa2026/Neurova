@@ -168,6 +168,14 @@ function isCategoryActive(cat: NavCategory): boolean {
   gap: 2px;
   flex: 1;
   justify-content: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.nr-topnav::-webkit-scrollbar {
+  display: none;
 }
 
 /* ── 快捷入口 ── */

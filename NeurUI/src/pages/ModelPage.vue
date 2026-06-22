@@ -72,7 +72,7 @@
             padding="0"
           >
             <div class="nr-pv-card" :class="'st-' + p.status">
-              <!-- Card header -->
+              <!-- Icon + Name + Badge -->
               <div class="nr-pv-head">
                 <div class="nr-pv-icon" :style="{ background: p.color }">
                   <img v-if="p.iconSrc" :src="p.iconSrc" :alt="p.name" class="nr-pv-icon-img" />
@@ -80,11 +80,16 @@
                 </div>
                 <div class="nr-pv-title">
                   <span class="nr-pv-name">{{ p.name }}</span>
-                  <span class="nr-pv-badge" :class="p.category">
+                  <a-tag :color="p.category === 'local' ? 'purple' : p.category === 'free' ? 'green' : 'blue'" size="small">
                     {{ p.category === 'local' ? t('model.local') : p.category === 'free' ? t('model.free') : p.type === 'builtin' ? t('model.builtin') : t('model.custom') }}
-                  </span>
+                  </a-tag>
                 </div>
-                <span class="nr-pv-dot" :class="p.status" :title="p.statusLabel" />
+              </div>
+
+              <!-- Status -->
+              <div class="nr-pv-status">
+                <span class="nr-pv-dot" :class="p.status" />
+                <span :class="'nr-pv-status-text st-' + p.status">{{ p.statusLabel }}</span>
               </div>
 
               <!-- Details -->
@@ -95,28 +100,17 @@
                 </div>
                 <div class="nr-pv-row">
                   <span class="nr-pv-label">API Key</span>
-                  <!-- Configured: show masked with eye toggle + save -->
                   <template v-if="p.api_key_configured">
-                    <span class="nr-pv-val mono">
-                      {{ revealKey[p.id] ? (p.api_key || '') : maskApiKey(p.api_key) }}
-                    </span>
+                    <span class="nr-pv-val mono">{{ revealKey[p.id] ? (p.api_key || '') : maskApiKey(p.api_key) }}</span>
                     <button class="nr-icon-btn" @click="revealKey[p.id] = !revealKey[p.id]" :title="revealKey[p.id] ? 'Hide' : 'Show'">
                       {{ revealKey[p.id] ? '🙈' : '👁' }}
                     </button>
                     <button class="nr-icon-btn nr-save-sm" @click="saveProviderKey(p)" :title="t('model.save')">✓</button>
                   </template>
-                  <!-- Not configured: inline input + save -->
                   <template v-else-if="p.status === 'not_configured' || p.status === 'not_ready'">
                     <div class="nr-inline-key">
-                      <input
-                        v-model="inlineApiKeys[p.id]"
-                        :type="revealKey[p.id] ? 'text' : 'password'"
-                        class="nr-inline-key-input"
-                        placeholder="sk-..."
-                      />
-                      <button class="nr-icon-btn tiny" @click="revealKey[p.id] = !revealKey[p.id]">
-                        {{ revealKey[p.id] ? '🙈' : '👁' }}
-                      </button>
+                      <input v-model="inlineApiKeys[p.id]" :type="revealKey[p.id] ? 'text' : 'password'" class="nr-inline-key-input" placeholder="sk-..." />
+                      <button class="nr-icon-btn tiny" @click="revealKey[p.id] = !revealKey[p.id]">{{ revealKey[p.id] ? '🙈' : '👁' }}</button>
                       <button class="nr-inline-key-save" @click="saveInlineKey(p)">{{ t('model.save') }}</button>
                     </div>
                   </template>
@@ -124,21 +118,15 @@
                 </div>
                 <div class="nr-pv-row">
                   <span class="nr-pv-label">{{ t('model.models') }}</span>
-                  <span class="nr-pv-val">
-                    {{ p.model_count > 0 ? t('model.modelCount', { n: p.model_count }) : t('model.noModels') }}
-                  </span>
+                  <span class="nr-pv-val">{{ p.model_count > 0 ? t('model.modelCount', { n: p.model_count }) : t('model.noModels') }}</span>
                 </div>
               </div>
 
               <!-- Actions -->
               <div class="nr-pv-actions">
-                <button class="nr-action-btn" @click="openModelManagement(p)">{{ t('model.models') }}</button>
+                <button class="nr-action-btn primary" @click="openModelManagement(p)">{{ t('model.models') }}</button>
                 <button class="nr-action-btn" @click="openConfigure(p)">{{ t('model.settings') }}</button>
-                <a-popconfirm
-                  v-if="p.type !== 'builtin'"
-                  :title="t('common.confirm') + '?'"
-                  @confirm="deleteProvider(p)"
-                >
+                <a-popconfirm v-if="p.type !== 'builtin'" :title="t('common.confirm') + '?'" @confirm="deleteProvider(p)">
                   <button class="nr-action-btn danger">{{ t('model.delete') }}</button>
                 </a-popconfirm>
               </div>
@@ -165,7 +153,7 @@
           <div class="nr-modal-body">
             <div class="nr-field">
               <label>{{ t('model.displayName') }} <span class="req">*</span></label>
-              <input v-model="addForm.name" class="nr-input" placeholder="OpenAI, Google Gemini, My Provider" />
+              <input v-model="addForm.name" class="nr-input" placeholder="OpenAI, Google Gemini, My Provider" autocomplete="off" />
             </div>
             <div class="nr-field">
               <label>{{ t('model.providerType') }} <span class="req">*</span></label>
@@ -283,7 +271,11 @@
             <!-- Search bar -->
             <div class="nr-mm-search">
               <svg class="nr-mm-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-              <input v-model="modelSearch" :placeholder="t('model.searchModels')" class="nr-mm-search-input" />
+              <input v-model="modelSearch" :placeholder="t('model.searchModels')" class="nr-mm-search-input" autocomplete="off" @keydown="onModelSearchKeydown" />
+              <button v-if="modelSearch" class="nr-mm-search-clear" @click="clearModelSearch" title="Clear">&times;</button>
+              <GlassButton variant="ghost" size="sm" @click="applyModelSearch">
+                {{ t('common.search') }}
+              </GlassButton>
               <GlassButton variant="ghost" size="sm" :loading="discoveringId === modelTarget.id" @click="discoverModels(modelTarget!.id)">
                 {{ t('model.discover') }}
               </GlassButton>
@@ -330,11 +322,11 @@
                 <div class="nr-mm-add-fields">
                   <div class="nr-mm-add-field">
                     <label>Model ID <span class="req">*</span></label>
-                    <input v-model="newModelId" class="nr-input" placeholder="例如 gpt-4o, gemini-2.0-flash" />
+                    <input v-model="newModelId" class="nr-input" placeholder="例如 gpt-4o, gemini-2.0-flash" autocomplete="off" />
                   </div>
                   <div class="nr-mm-add-field">
                     <label>{{ t('common.name') }}</label>
-                    <input v-model="newModelName" class="nr-input" placeholder="例如 GPT-4o, Gemini 2.0 Flash" />
+                    <input v-model="newModelName" class="nr-input" placeholder="例如 GPT-4o, Gemini 2.0 Flash" autocomplete="off" />
                   </div>
                 </div>
                 <div class="nr-mm-add-buttons">
@@ -406,7 +398,6 @@ type SeedProvider = {
 
 const BUILTIN_PROVIDERS: SeedProvider[] = [
   // ── Local ──
-  { id: 'qwenpaw-local', name: 'QwenPaw Local', icon: '🐱', color: '#f59e0b', type: 'builtin', category: 'local', base_url: '', protocol: 'openai', enabled: true },
   { id: 'ollama', name: 'Ollama', icon: '🦙', color: '#000000', type: 'builtin', category: 'local', base_url: 'http://192.168.2.2:11434', protocol: 'openai', enabled: true },
   { id: 'lm-studio', name: 'LM Studio', icon: 'LM', color: '#7c3aed', type: 'builtin', category: 'local', base_url: 'http://localhost:1234/v1', protocol: 'openai', enabled: true },
   // ── Free ──
@@ -463,6 +454,7 @@ const providers = ref<Provider[]>([])
 const allModels = ref<ModelItem[]>([])
 const providerSearch = ref('')
 const modelSearch = ref('')
+const modelSearchApplied = ref('')
 const inlineApiKeys = reactive<Record<string, string>>({})
 const revealKey = reactive<Record<string, boolean>>({})
 
@@ -513,13 +505,27 @@ const filteredProviders = computed(() => {
 
 const filteredModels = computed(() => {
   if (!modelTarget.value) return []
-  let list = modelTarget.value.models
-  if (modelSearch.value) {
-    const q = modelSearch.value.toLowerCase()
+  // 直接从 allModels 过滤，避免依赖 providers.value 中嵌套的 models 数组引用
+  let list = allModels.value.filter((m) => m.provider_id === modelTarget.value!.id || m.provider_id === modelTarget.value!.name)
+  if (modelSearchApplied.value) {
+    const q = modelSearchApplied.value.toLowerCase()
     list = list.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))
   }
   return list
 })
+
+function applyModelSearch() {
+  modelSearchApplied.value = modelSearch.value
+}
+
+function onModelSearchKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') applyModelSearch()
+}
+
+function clearModelSearch() {
+  modelSearch.value = ''
+  modelSearchApplied.value = ''
+}
 
 // ---------------------------------------------------------------------------
 // Data fetching
@@ -559,7 +565,7 @@ async function fetchModels() {
     allModels.value = list.map((m: any) => mapModel(m))
     // Rebuild providers array with new object references to ensure Vue reactivity
     providers.value = providers.value.map((p) => {
-      const models = allModels.value.filter((m) => m.provider_id === p.id || m.provider === p.name)
+      const models = allModels.value.filter((m) => m.provider_id === p.id || m.provider_id === p.name)
       return { ...p, models, model_count: models.length }
     })
   } catch {
@@ -726,6 +732,7 @@ async function saveInlineKey(p: Provider) {
   const key = inlineApiKeys[p.id]
   if (!key) return
   try {
+    await ensureProvider(p)
     await updateProvider(p.id, { api_key: key })
     p.api_key = key
     p.api_key_configured = true
@@ -735,10 +742,43 @@ async function saveInlineKey(p: Provider) {
   }
 }
 
+/** Ensure provider exists in backend — try PUT, if 404 then POST create */
+async function ensureProvider(p: { id: string; name: string; base_url: string; protocol?: string }) {
+  try {
+    await updateProvider(p.id, {})
+  } catch (err: any) {
+    if (err?.response?.status === 404) {
+      // Provider not found — try to create it
+      let created: any = null
+      try {
+        created = await apiCreateProvider({
+          name: p.name,
+          provider_type: p.protocol || 'openai',
+          base_url: p.base_url || undefined,
+        })
+      } catch (createErr: any) {
+        console.warn('[ensureProvider] createProvider failed:', createErr?.response?.status, createErr?.message)
+      }
+      if (created?.provider_id) {
+        // Backend created with a different ID — update caller reference
+        if (created.provider_id !== p.id) {
+          p.id = created.provider_id
+        }
+      } else {
+        // Both PUT and POST failed — provider cannot be resolved
+        throw new Error(`Provider "${p.name}" not found and could not be created`)
+      }
+    } else {
+      throw err
+    }
+  }
+}
+
 async function saveProviderKey(p: Provider) {
   // Re-save the existing key (e.g., after toggling visibility or updating)
   if (!p.api_key) return
   try {
+    await ensureProvider(p)
     await updateProvider(p.id, { api_key: p.api_key })
     message.success(t('common.success'))
   } catch {
@@ -876,7 +916,7 @@ async function saveConfiguration() {
     let genParams: Record<string, unknown> = {}
     try { genParams = JSON.parse(configForm.genParamsJson) } catch { /* keep empty */ }
 
-    await updateProvider(configureTarget.value.id, {
+    const configPayload = {
       base_url: configForm.base_url,
       api_key: configForm.api_key || undefined,
       config: {
@@ -884,7 +924,9 @@ async function saveConfiguration() {
         auth_method: configForm.auth_method,
         ...(Object.keys(headers).length ? { headers } : {}),
       },
-    })
+    }
+    await ensureProvider(configureTarget.value)
+    await updateProvider(configureTarget.value.id, configPayload)
     configureTarget.value.base_url = configForm.base_url
     configureTarget.value.api_key = configForm.api_key
     configureTarget.value.api_key_configured = !!configForm.api_key
@@ -903,6 +945,7 @@ async function saveConfiguration() {
 function openModelManagement(p: Provider) {
   modelTarget.value = p
   modelSearch.value = ''
+  modelSearchApplied.value = ''
   newModelId.value = ''
   newModelName.value = ''
   addModelExpanded.value = false
@@ -914,8 +957,11 @@ async function deleteModel(m: ModelItem) {
     await apiDeleteModel(m.id)
     message.success(t('common.success'))
     if (modelTarget.value) {
-      modelTarget.value.models = modelTarget.value.models.filter((mm) => mm.id !== m.id)
-      modelTarget.value.model_count = modelTarget.value.models.length
+      const live = providers.value.find((p) => p.id === modelTarget.value!.id)
+      if (live) {
+        live.models = live.models.filter((mm) => mm.id !== m.id)
+        live.model_count = live.models.length
+      }
     }
     allModels.value = allModels.value.filter((mm) => mm.id !== m.id)
   } catch {
@@ -925,10 +971,19 @@ async function deleteModel(m: ModelItem) {
 
 async function addNewModel() {
   if (!newModelId.value.trim() || !modelTarget.value) return
+  const modelId = newModelId.value.trim()
+  // 前端去重：检查该服务商下是否已存在相同 model ID
+  const exists = allModels.value.some(
+    (m) => m.id === modelId && (m.provider_id === modelTarget.value!.id || m.provider_id === modelTarget.value!.name),
+  )
+  if (exists) {
+    message.warning(t('model.modelAlreadyExists', { name: modelId }))
+    return
+  }
   addingModel.value = true
   try {
-    const modelId = newModelId.value.trim()
     const modelName = newModelName.value.trim() || modelId
+    await ensureProvider(modelTarget.value)
     await updateProvider(modelTarget.value.id, {
       config: { add_model: modelId, add_model_name: modelName },
     })
@@ -946,6 +1001,11 @@ async function addNewModel() {
     modelTarget.value.models.unshift(newModel)
     modelTarget.value.model_count++
     allModels.value.unshift(newModel)
+    const live = providers.value.find((p) => p.id === modelTarget.value!.id)
+    if (live) {
+      live.models.unshift(newModel)
+      live.model_count++
+    }
     newModelId.value = ''
     newModelName.value = ''
     addModelExpanded.value = false
@@ -1068,37 +1128,41 @@ watch(() => defaultConfig.provider_id, () => {
 /* ======================== Grid ======================== */
 .nr-providers-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+/* Override GlassPanel overflow:hidden → clip to keep border-radius while not clipping content */
+.nr-providers-grid :deep(.nr-glass-panel) {
+  overflow: clip !important;
 }
 
 /* ======================== Provider Card ======================== */
 .nr-pv-card {
   display: flex;
   flex-direction: column;
-  border-left: 3px solid transparent;
   transition: border-color 0.2s;
 }
-.nr-pv-card.st-available { border-left-color: #22c55e; }
-.nr-pv-card.st-unavailable { border-left-color: #ef4444; }
-.nr-pv-card.st-not_ready { border-left-color: #f59e0b; }
-.nr-pv-card.st-not_configured { border-left-color: #6b7280; }
+.nr-pv-card.st-available { border-left: 3px solid var(--nr-success); }
+.nr-pv-card.st-unavailable { border-left: 3px solid var(--nr-error); }
+.nr-pv-card.st-not_ready { border-left: 3px solid var(--nr-warning); }
+.nr-pv-card.st-not_configured { border-left: 3px solid var(--nr-text-tertiary); }
 
 .nr-pv-head {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 18px 10px;
+  margin: 5px 0 10px;
+  padding-left: 20px;
 }
 .nr-pv-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 9px;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
-  font-size: 16px;
+  font-size: 20px;
   font-weight: 700;
   flex-shrink: 0;
   overflow: hidden;
@@ -1108,18 +1172,29 @@ watch(() => defaultConfig.provider_id, () => {
   height: 24px;
   object-fit: contain;
 }
+.nr-pv-status {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 10px; padding: 0 2px 0 30px;
+}
+.nr-pv-status-text { font-size: 13px; }
+.nr-pv-status-text.st-available { color: var(--nr-success); }
+.nr-pv-status-text.st-unavailable { color: var(--nr-error); }
+.nr-pv-status-text.st-not_ready { color: var(--nr-warning); }
+.nr-pv-status-text.st-not_configured { color: var(--nr-text-tertiary); }
+
 .nr-pv-title {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 8px;
 }
 .nr-pv-name {
   font-size: 14px;
   font-weight: 600;
   color: var(--nr-text-primary);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1132,9 +1207,9 @@ watch(() => defaultConfig.provider_id, () => {
   width: fit-content;
   letter-spacing: 0.02em;
 }
-.nr-pv-badge.local { background: rgba(139, 92, 246, 0.12); color: #a78bfa; }
-.nr-pv-badge.free { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
-.nr-pv-badge.paid { background: rgba(99, 102, 241, 0.1); color: var(--nr-primary-light, #818cf8); }
+.nr-pv-badge.local { background: rgba(139, 92, 246, 0.12); color: var(--nr-accent-secondary); }
+.nr-pv-badge.free { background: rgba(34, 197, 94, 0.1); color: var(--nr-success); }
+.nr-pv-badge.paid { background: rgba(99, 102, 241, 0.1); color: var(--nr-primary-light); }
 
 .nr-pv-dot {
   width: 9px;
@@ -1142,22 +1217,24 @@ watch(() => defaultConfig.provider_id, () => {
   border-radius: 50%;
   flex-shrink: 0;
 }
-.nr-pv-dot.available { background: #22c55e; }
-.nr-pv-dot.unavailable { background: #ef4444; }
-.nr-pv-dot.not_ready { background: #f59e0b; }
-.nr-pv-dot.not_configured { background: #6b7280; }
+.nr-pv-dot.available { background: var(--nr-success); }
+.nr-pv-dot.unavailable { background: var(--nr-error); }
+.nr-pv-dot.not_ready { background: var(--nr-warning); }
+.nr-pv-dot.not_configured { background: var(--nr-text-tertiary); }
 
 /* Card body */
 .nr-pv-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 4px 18px 12px;
+  padding: 4px 18px 12px 30px;
 }
 .nr-pv-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 .nr-pv-label {
   font-size: 11px;
@@ -1166,7 +1243,7 @@ watch(() => defaultConfig.provider_id, () => {
   flex-shrink: 0;
 }
 .nr-pv-val {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--nr-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1183,7 +1260,7 @@ watch(() => defaultConfig.provider_id, () => {
   height: 26px;
   border: none;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--nr-glass-bg);
   cursor: pointer;
   font-size: 12px;
   display: flex;
@@ -1234,22 +1311,25 @@ watch(() => defaultConfig.provider_id, () => {
 /* Card actions */
 .nr-pv-actions {
   display: flex;
-  gap: 6px;
-  padding: 10px 18px 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  gap: 8px;
+  padding: 12px 18px 12px 30px;
+  border-top: 1px solid var(--nr-glass-border);
 }
 .nr-action-btn {
-  padding: 4px 12px;
-  border: none;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 14px;
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 8px;
+  background: var(--nr-glass-bg);
   color: var(--nr-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s;
 }
-.nr-action-btn:hover { background: rgba(255, 255, 255, 0.08); color: var(--nr-text-primary); }
-.nr-action-btn.danger { color: #ef4444; }
+.nr-action-btn:hover { background: var(--nr-glass-bg-hover); color: var(--nr-text-primary); border-color: var(--nr-glass-border-hover); }
+.nr-action-btn.primary { background: var(--nr-primary); color: white; border-color: var(--nr-primary); }
+.nr-action-btn.primary:hover { opacity: 0.9; }
+.nr-action-btn.danger { color: var(--nr-error); border-color: var(--nr-error); }
 .nr-action-btn.danger:hover { background: rgba(239, 68, 68, 0.12); }
 
 /* Loading state */
@@ -1658,6 +1738,12 @@ watch(() => defaultConfig.provider_id, () => {
   outline: none;
 }
 .nr-mm-search-input::placeholder { color: var(--nr-text-muted); }
+.nr-mm-search-clear {
+  background: none; border: none; cursor: pointer;
+  color: var(--nr-text-muted); font-size: 18px; line-height: 1;
+  padding: 0 2px; transition: color 0.2s;
+}
+.nr-mm-search-clear:hover { color: var(--nr-text-primary); }
 
 .nr-mm-list {
   display: flex;

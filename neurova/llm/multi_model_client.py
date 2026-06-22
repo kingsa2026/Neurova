@@ -119,10 +119,13 @@ class MultiModelLLMClient:
                 logger.warning("No API key for provider %s", provider.id)
                 return None
 
+            from neurova.llm.model_limits import get_model_max_tokens
+
             config = LLMConfig(
                 api_key=provider.api_key,
                 base_url=provider.base_url,
                 model=model,
+                max_tokens=get_model_max_tokens(model),
             )
             client = LLMClient(config)
             model_client = ModelClient(client=client, provider=provider, model=model)
@@ -260,9 +263,23 @@ class MultiModelLLMClient:
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         provider_id: Optional[str] = None,
+        **kwargs,
     ) -> Dict[str, Any]:
         """发送聊天请求"""
+        # [METRICS] 结构化日志：记录 LLM 调用的消息结构和模型信息
         client = self._get_client_for_request(model, provider_id)
+
+        _role_counts: Dict[str, int] = {}
+        for m in messages:
+            _r = m.get("role", "unknown")
+            _role_counts[_r] = _role_counts.get(_r, 0) + 1
+        _sys_count = _role_counts.get("system", 0)
+        _total_msgs = len(messages)
+        _model_name = model or (client.model if client else "unknown")
+        logger.info(
+            "[LLM-REQ] model=%s, messages=%s, system=%s, roles=%s",
+            _model_name, _total_msgs, _sys_count, _role_counts,
+        )
         if not client:
             logger.warning("No client available for chat")
             return {
@@ -272,7 +289,7 @@ class MultiModelLLMClient:
 
         try:
             start_time = time.time()
-            result = await asyncio.to_thread(client.client.chat, messages)
+            result = await asyncio.to_thread(client.client.chat, messages, **kwargs)
             duration = time.time() - start_time
 
             client.increment_request(success=True)
@@ -297,6 +314,7 @@ class MultiModelLLMClient:
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         provider_id: Optional[str] = None,
+        **kwargs,
     ):
         """发送流式聊天请求"""
         client = self._get_client_for_request(model, provider_id)
@@ -307,7 +325,7 @@ class MultiModelLLMClient:
 
         try:
             start_time = time.time()
-            async for chunk in client.client.chat_stream(messages):
+            async for chunk in client.client.chat_stream(messages, **kwargs):
                 yield chunk
             time.time() - start_time
             client.increment_request(success=True)
@@ -320,13 +338,41 @@ class MultiModelLLMClient:
         model: Optional[str] = None,
         provider_id: Optional[str] = None,
     ) -> Optional[ModelClient]:
-        """为请求获取客户端"""
+        """为请求获取客户端（支持懒加载非默认服务商）"""
         if provider_id and model:
-            return self.get_client(provider_id, model)
+            client = self.get_client(provider_id, model)
+            if client:
+                return client
+            # 懒加载：尝试为指定的 provider/model 创建客户端
+            return self._try_lazy_init(provider_id, model)
         elif model:
-            return self.get_client(model=model)
+            client = self.get_client(model=model)
+            if client:
+                return client
+            # 按模型名查找所有服务商
+            for provider in self._provider_manager.list_providers():
+                if model in provider.models:
+                    return self._try_lazy_init(provider.id, model)
+            return None
         else:
             return self.get_current_client()
+
+    def _try_lazy_init(self, provider_id: str, model: str) -> Optional[ModelClient]:
+        """尝试懒加载客户端 — 为非默认服务商动态创建"""
+        provider = self._provider_manager.get_provider(provider_id)
+        if not provider:
+            logger.warning("Provider %s not found for lazy init", provider_id)
+            return None
+        if not provider.enabled:
+            logger.warning("Provider %s is disabled", provider_id)
+            return None
+        if not provider.api_key:
+            logger.warning("Provider %s has no API key, cannot create client", provider_id)
+            return None
+        client = self._create_model_client(provider, model)
+        if client:
+            logger.info("Lazily initialized client for %s/%s", provider_id, model)
+        return client
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""

@@ -167,7 +167,7 @@ class AnthropicLoop(BaseAgentLoop):
         调用 Anthropic API 进行预测
         """
         # 使用 llm_client 调用 (假设它支持 Anthropic)
-        response = self.llm_client.chat(**request_params)
+        response = await self.llm_client.chat(**request_params)
         return response
 
     async def handle_tool_calls(self, tool_calls: List, messages: List[Dict]) -> List[Dict]:
