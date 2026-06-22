@@ -549,24 +549,26 @@ class ContextOrchestrator:
         # 1. ToolRouter 聚合所有工具（含 MCP）
         if self.tool_router:
             try:
-                all_tools = await self.tool_router.get_all_tools(
+                all_tools = self.tool_router.get_all_tools(
                     agent_id=self.config.agent_id,
                     user_id=user_id,
                 )
-                logger.info("[TOOLS] ToolRouter 返回 %s 个工具: %s", len(all_tools), [t.name for t in all_tools])
-                for t in all_tools:
+                tool_list = list(all_tools.values()) if isinstance(all_tools, dict) else list(all_tools)
+                logger.info("[TOOLS] ToolRouter 返回 %s 个工具: %s", len(tool_list), [getattr(t, "name", str(t)) for t in tool_list])
+                for t in tool_list:
                     if hasattr(t, "to_openai_format"):
                         tools.append(t.to_openai_format())
                     else:
-                        # 为内置工具生成参数 schema
-                        builtin_params = get_builtin_tool_params(t.name)
+                        tool_name = getattr(t, "name", str(t))
+                        tool_desc = getattr(t, "description", f"工具: {tool_name}")
+                        builtin_params = get_builtin_tool_params(tool_name)
                         tools.append(
                             {
                                 "type": "function",
                                 "function": {
-                                    "name": t.name,
-                                    "description": t.description
-                                    or builtin_params.get("description", f"工具: {t.name}"),
+                                    "name": tool_name,
+                                    "description": tool_desc
+                                    or builtin_params.get("description", f"工具: {tool_name}"),
                                     "parameters": builtin_params.get(
                                         "parameters", {"type": "object", "properties": {}, "required": []}
                                     ),
