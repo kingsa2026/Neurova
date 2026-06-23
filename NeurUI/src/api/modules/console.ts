@@ -40,6 +40,11 @@ export function getConsoleSessions(params?: { agent_id?: string; limit?: number 
   return api.get<ApiResponse<ConsoleSession[]>>(`${BASE}/sessions`, { params })
 }
 
+/** Delete a console session. */
+export function deleteConsoleSession(sessionId: string) {
+  return api.delete<ApiResponse<null>>(`${BASE}/chat/sessions/${sessionId}`)
+}
+
 /** Send a chat message via REST (non-streaming). Returns the assistant response. */
 export function sendConsoleMessage(agentId: string, message: string, sessionId?: string) {
   return api.post<ApiResponse<{ response: string; session_id: string; tool_calls?: any[] }>>(`${BASE}/chat`, {

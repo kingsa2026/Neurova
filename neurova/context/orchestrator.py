@@ -522,6 +522,10 @@ class ContextOrchestrator:
             if not tools:
                 return ""
             lines = ["\n\n## 可用工具\n你可以调用以下工具来完成任务。调用格式：\n`[TOOL_CALL:工具名(参数=值, ...)]`\n"]
+            lines.append("⚠️ **工具使用原则**：\n"
+                         "- `memory_search` 和 `voice_memory_search` 仅用于检索本Agent自身存储的历史记忆，不能搜索互联网\n"
+                         "- 需要实时信息（天气、新闻、股价等）时，请直接回复告知用户你无法获取，不要尝试用记忆搜索工具\n"
+                         "- `computer_shell` 可执行本地命令，但注意安全性和权限\n")
             for t in tools:
                 fn = t["function"]
                 params_desc = ""

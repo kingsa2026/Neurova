@@ -173,9 +173,12 @@ async def post_console_chat(body: ChatRequest, request: Request):
         logger.warning("Console chat error: %s", e, exc_info=True)
         reply = f"Error: {str(e)}"
 
-    session["messages"].append(
-        {"role": "assistant", "content": reply, "timestamp": datetime.datetime.utcnow().isoformat()}
-    )
+    assistant_msg = {"role": "assistant", "content": reply, "timestamp": datetime.datetime.utcnow().isoformat()}
+    if reasoning:
+        assistant_msg["reasoning"] = reasoning
+    if tool_messages:
+        assistant_msg["tool_messages"] = tool_messages
+    session["messages"].append(assistant_msg)
     _save_sessions_to_disk()
 
     if body.stream:
@@ -252,6 +255,20 @@ async def get_chat_sessions(request: Request, agent_id: str = Query(default=""))
     # 只返回摘要信息，不返回完整消息列表
     summaries = [{"id": s["id"], "title": s.get("title", "新对话"), "agent_id": s.get("agent_id", ""), "created_at": s.get("created_at", "")} for s in sessions]
     return {"code": 0, "message": "success", "data": {"sessions": summaries, "total": len(summaries)}}
+
+
+@router.delete("/chat/sessions/{session_id}")
+async def delete_chat_session(session_id: str, request: Request):
+    """删除指定会话"""
+    user_id = _get_user_id(request)
+    session = _CHAT_SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    del _CHAT_SESSIONS[session_id]
+    _save_sessions_to_disk()
+    return {"code": 0, "message": "Session deleted"}
 
 
 # ── File endpoints ─────────────────────────────────────
