@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 
 _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "memory_search": {
-        "description": "搜索记忆库中的相关记忆",
+        "description": "【内部记忆检索】仅搜索本Agent自身存储的历史对话和记忆条目。不能搜索互联网、不能查天气、不能查新闻、不能获取任何外部实时信息。仅用于回忆用户之前说过的话或Agent之前记录的内容。",
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "搜索关键词"},
+                "query": {"type": "string", "description": "搜索关键词（在自身记忆库中匹配）"},
                 "category": {"type": "string", "description": "记忆类别过滤"},
                 "limit": {"type": "integer", "description": "返回数量上限", "default": 5},
             },
@@ -178,11 +178,11 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "voice_memory_search": {
-        "description": "搜索语音转写记忆（用户通过语音说过的内容）",
+        "description": "【内部语音记忆检索】仅搜索用户之前通过语音说过的内容（语音转写后的记录）。不能搜索互联网、不能查天气、不能获取外部信息。仅用于回忆用户语音对话历史。",
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "搜索关键词"},
+                "query": {"type": "string", "description": "搜索关键词（在语音记忆中匹配）"},
                 "limit": {"type": "integer", "description": "返回数量上限", "default": 5},
             },
             "required": ["query"],

@@ -230,7 +230,7 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.tool_schema", "/v1/tools", "Tool Schema API"),
         ("neurova.api.endpoints.tool_layers", "/v1/tool-layers", "Tool Layers API"),
         ("neurova.api.endpoints.skill_pool_api", "/v1/skill-pool", "Skill Pool API"),
-        ("neurova.api.endpoints.skill_market", "/v1/skills-market", "Skill Market API"),
+        ("neurova.api.endpoints.skill_market", "/v1/skill-market", "Skill Market API"),
         ("neurova.api.endpoints.skills_market", "/v1/skills-market", "Skills Market API"),
         ("neurova.api.endpoints.skill_version_api", "/v1/skill-versions", "Skill Version API"),
         ("neurova.api.endpoints.benchmark", "/v1/benchmark", "Benchmark API"),

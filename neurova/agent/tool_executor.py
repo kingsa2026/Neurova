@@ -105,7 +105,7 @@ class ToolExecutor:
                 if self._skill_registry:
                     skill = self._skill_registry.get_skill(tool_name)
                     if skill:
-                        result = self._skill_registry.execute_skill(tool_name, **params)
+                        result = self._skill_registry.execute_skill(tool_name, params)
                         if result.success:
                             result_str = json.dumps(result.data, ensure_ascii=False)
                             max_len = 8000

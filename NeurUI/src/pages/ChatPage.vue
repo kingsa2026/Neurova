@@ -136,8 +136,28 @@
               </div>
             </div>
 
-            <!-- Tool Call Block (collapsible) -->
-            <div v-if="msg.toolCall" class="nr-msg-tool-call">
+            <!-- Tool Call Block (collapsible, supports multi-round) -->
+            <template v-if="msg.toolCalls && msg.toolCalls.length > 0">
+              <div v-for="(tc, tcIdx) in msg.toolCalls" :key="tcIdx" class="nr-msg-tool-call">
+                <div class="nr-tool-header" @click="msg.toolOpen = !msg.toolOpen">
+                  <span class="nr-tool-icon">🔧</span>
+                  <span class="nr-tool-name">{{ tc.name }}</span>
+                  <a-tag :color="tc.result ? 'success' : 'processing'">
+                    {{ tc.result ? t('chat.toolDone') : t('chat.toolCalling') }}
+                  </a-tag>
+                  <span class="nr-tool-toggle">{{ msg.toolOpen ? '▾' : '▸' }}</span>
+                </div>
+                <div v-show="msg.toolOpen">
+                  <pre class="nr-tool-args">{{ formatJSON(tc.arguments) }}</pre>
+                  <div v-if="tc.result" class="nr-tool-result">
+                    <div class="nr-tool-result-header">{{ t('chat.toolResult') }}</div>
+                    <pre class="nr-tool-result-content">{{ tc.result }}</pre>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <!-- Legacy single tool call (backward compat) -->
+            <div v-else-if="msg.toolCall" class="nr-msg-tool-call">
               <div class="nr-tool-header" @click="msg.toolOpen = !msg.toolOpen">
                 <span class="nr-tool-icon">🔧</span>
                 <span class="nr-tool-name">{{ msg.toolCall.name }}</span>
@@ -394,6 +414,7 @@ import { useI18n } from 'vue-i18n'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
+import { deleteConsoleSession } from '@/api/modules/console'
 import { secureStorage } from '@/utils/security'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
@@ -416,9 +437,10 @@ interface ChatMessage {
   content: string
   reasoning?: string
   reasoningOpen?: boolean
-  toolCall?: { name: string; arguments: string }
+  toolCalls?: Array<{ name: string; arguments: string; result?: string }>
   toolOpen?: boolean
-  toolResult?: string
+  toolCall?: { name: string; arguments: string }  // legacy single, kept for compat
+  toolResult?: string  // legacy single, kept for compat
   attachments?: Array<{ name: string; type?: string; preview?: string; size?: number }>
   audioUrl?: string
   audioPlaying?: boolean
@@ -532,19 +554,39 @@ async function switchSession(sessionId: string) {
     const res: any = await api.get(`/console/chat/history?session_id=${sessionId}`)
     const data = res?.data ?? res
     const history = Array.isArray(data) ? data : data?.messages ?? data?.items ?? []
-    messages.value = history.map((m: any) => ({
-      role: m.role === 'user' ? 'user' : 'assistant',
-      content: m.content || '',
-      reasoning: m.reasoning || m.reasoning_content || undefined,
-      reasoningOpen: false,
-      toolCall: m.tool_call
-        ? {
-            name: m.tool_call.name || m.tool_call.function?.name || '',
-            arguments: m.tool_call.arguments || m.tool_call.function?.arguments || '',
+    messages.value = history.map((m: any) => {
+      // Build toolCalls array from tool_messages
+      const toolCalls: Array<{ name: string; arguments: string; result?: string }> = []
+      const toolMessages = m.tool_messages || []
+      for (const tm of toolMessages) {
+        if (tm.type === 'tool_call') {
+          toolCalls.push({
+            name: tm.tool_name || tm.name || '',
+            arguments: typeof tm.params === 'string' ? tm.params : JSON.stringify(tm.params || tm.arguments || {}, null, 2),
+          })
+        } else if (tm.type === 'tool_result') {
+          const resultText = typeof tm.result === 'string' ? tm.result : JSON.stringify(tm.result || '', null, 2)
+          if (toolCalls.length > 0) {
+            toolCalls[toolCalls.length - 1].result = resultText
           }
-        : undefined,
-      toolResult: m.tool_result || undefined,
-    }))
+        }
+      }
+      // legacy single fallback
+      const toolCall = toolCalls.length > 0 ? toolCalls[0] : (m.tool_call ? {
+        name: m.tool_call.name || m.tool_call.function?.name || '',
+        arguments: m.tool_call.arguments || m.tool_call.function?.arguments || '',
+      } : undefined)
+      const toolResult = toolCalls.length > 0 ? toolCalls[0].result : (m.tool_result || undefined)
+      return {
+        role: m.role === 'user' ? 'user' : 'assistant',
+        content: m.content || '',
+        reasoning: m.reasoning || m.reasoning_content || undefined,
+        reasoningOpen: false,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        toolCall,
+        toolResult,
+      }
+    })
     scrollToBottom()
   } catch (err) {
     console.error('[Chat] Failed to load history:', err)
@@ -573,7 +615,7 @@ async function confirmRename() {
 
 async function deleteSession(sessionId: string) {
   try {
-    // console session 在内存中，客户端侧删除
+    await deleteConsoleSession(sessionId)
     sessions.value = sessions.value.filter((s) => s.id !== sessionId)
     if (currentSessionId.value === sessionId) {
       currentSessionId.value = null
@@ -616,6 +658,7 @@ async function sendMessage() {
     content: '',
     reasoning: '',
     reasoningOpen: false,
+    toolCalls: [],
     toolOpen: false,
     streaming: true,
   }
@@ -718,15 +761,22 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       break
 
     case 'tool_call':
-      msg.toolCall = {
+      if (!msg.toolCalls) msg.toolCalls = []
+      msg.toolCalls.push({
         name: event.name || event.tool_name || 'unknown',
         arguments: event.arguments || event.input || '',
-      }
+      })
+      // legacy compat
+      msg.toolCall = msg.toolCalls[msg.toolCalls.length - 1]
       break
 
     case 'tool_result':
-      msg.toolResult =
-        typeof event.result === 'string' ? event.result : JSON.stringify(event.result, null, 2)
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        const last = msg.toolCalls[msg.toolCalls.length - 1]
+        last.result = typeof event.result === 'string' ? event.result : JSON.stringify(event.result, null, 2)
+      }
+      // legacy compat
+      msg.toolResult = typeof event.result === 'string' ? event.result : JSON.stringify(event.result, null, 2)
       break
 
     case 'message':

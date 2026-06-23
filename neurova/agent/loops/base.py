@@ -100,7 +100,7 @@ class BaseAgentLoop(ABC):
 
                 # 1. 尝试 SkillRegistry
                 if self.agent.skill_registry:
-                    skill_result = await self.agent.skill_registry.execute_skill(_tc_function_name, **_tc_arguments)
+                    skill_result = await self.agent.skill_registry.execute_skill(_tc_function_name, _tc_arguments)
                     # SkillRegistry 找不到该 skill 时返回 None；找到但执行失败返回 success=False
                     if skill_result is not None and getattr(skill_result, "success", False):
                         from types import SimpleNamespace

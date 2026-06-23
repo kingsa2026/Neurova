@@ -607,7 +607,7 @@ class SubSystemContainer:
                 if a._skill_registry:
                     skill = a._skill_registry.get_skill(tool_name)
                     if skill:
-                        result = a._skill_registry.execute_skill(tool_name, **params)
+                        result = a._skill_registry.execute_skill(tool_name, params)
                         if result.success:
                             return {"success": True, "data": result.data}
                         return {"success": False, "error": result.error}
