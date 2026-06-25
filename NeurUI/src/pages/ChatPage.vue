@@ -1852,7 +1852,6 @@ onBeforeUnmount(() => {
 }
 
 .nr-audio-play-btn:hover {
-  transform: scale(1.08);
   background: var(--nr-primary-light);
 }
 

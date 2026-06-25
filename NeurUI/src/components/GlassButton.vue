@@ -80,7 +80,7 @@ const shineStyle = computed<CSSProperties>(() => ({
   transition: opacity 0.3s;
 }
 .nr-glass-btn--primary { color: white; box-shadow: 0 4px 20px rgba(99,102,241,0.3), inset 0 1px 0 rgba(255,255,255,0.15); }
-.nr-glass-btn--primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(99,102,241,0.4), inset 0 1px 0 rgba(255,255,255,0.2); }
+.nr-glass-btn--primary:hover { box-shadow: 0 8px 30px rgba(99,102,241,0.4), inset 0 1px 0 rgba(255,255,255,0.2); }
 
 .nr-glass-btn--secondary .nr-glass-btn-bg {
   position: absolute; inset: 0;
@@ -90,7 +90,7 @@ const shineStyle = computed<CSSProperties>(() => ({
 }
 .nr-glass-btn--secondary { color: #e0eaff; box-shadow: 0 2px 12px rgba(30, 64, 120, 0.25), inset 0 1px 0 rgba(255,255,255,0.08); }
 .nr-glass-btn--secondary:hover .nr-glass-btn-bg { background: linear-gradient(135deg, #1e3d6b 0%, #2563a0 50%, #1f5080 100%); border-color: rgba(59, 130, 246, 0.4); }
-.nr-glass-btn--secondary:hover { transform: translateY(-1px); color: #fff; box-shadow: 0 4px 20px rgba(30, 64, 120, 0.4), inset 0 1px 0 rgba(255,255,255,0.12); }
+.nr-glass-btn--secondary:hover { color: #fff; box-shadow: 0 4px 20px rgba(30, 64, 120, 0.4), inset 0 1px 0 rgba(255,255,255,0.12); }
 
 .nr-glass-btn--ghost .nr-glass-btn-bg {
   position: absolute; inset: 0;
@@ -107,7 +107,7 @@ const shineStyle = computed<CSSProperties>(() => ({
   border-radius: inherit; transition: opacity 0.3s;
 }
 .nr-glass-btn--danger { color: white; box-shadow: 0 4px 20px rgba(239,68,68,0.3); }
-.nr-glass-btn--danger:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(239,68,68,0.4); }
+.nr-glass-btn--danger:hover { box-shadow: 0 8px 30px rgba(239,68,68,0.4); }
 
 .nr-glass-btn-shine { position: absolute; inset: 0; z-index: 1; pointer-events: none; transition: background 0.2s; }
 .nr-glass-btn-content { position: relative; z-index: 2; display: flex; align-items: center; gap: inherit; }

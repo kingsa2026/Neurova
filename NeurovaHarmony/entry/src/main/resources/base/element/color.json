@@ -1,0 +1,9 @@
+{
+  "color": [
+    { "name": "start_window_background", "value": "#FFFFFF" },
+    { "name": "app_primary", "value": "#1976D2" },
+    { "name": "app_secondary", "value": "#4CAF50" },
+    { "name": "glass_background", "value": "#CCFFFFFF" },
+    { "name": "glass_border", "value": "#33FFFFFF" }
+  ]
+}
