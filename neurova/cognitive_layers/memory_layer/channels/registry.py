@@ -4,13 +4,13 @@ ChannelRegistry — 通道注册表
 管理所有检索通道的生命周期：注册/注销/查询/枚举，线程安全。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 from typing import Dict, List, Optional
 
 from .base import BaseChannel, ChannelMetadata, ChannelState
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ChannelRegistry:

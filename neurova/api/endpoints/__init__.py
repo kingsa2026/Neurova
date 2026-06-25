@@ -1,13 +1,13 @@
 # neurova.api.endpoints 包
 # 从各端点模块统一导出
 
-import logging
+from neurova.core.logger import get_logger
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 创建顶层 router
 router = APIRouter()

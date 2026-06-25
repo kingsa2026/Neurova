@@ -4,13 +4,13 @@ API 依赖注入模块
 提供 FastAPI 依赖注入函数，用于统一管理跨端点的公共依赖。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # HTTP Bearer scheme
 security = HTTPBearer(auto_error=False)

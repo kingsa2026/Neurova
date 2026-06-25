@@ -2,7 +2,7 @@
 技能市场适配器 - 支持多个技能市场平台的技能导入
 """
 
-import logging
+from neurova.core.logger import get_logger
 import os
 import re
 import tempfile
@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

@@ -7,7 +7,7 @@ from __future__ import annotations
 """
 
 import hashlib
-import logging
+from neurova.core.logger import get_logger
 import math
 import re
 from datetime import datetime
@@ -15,7 +15,7 @@ from typing import List, Optional
 
 from neurova.context.pool_models import ContextInput, ContextSource
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SemanticMatchDrawer:

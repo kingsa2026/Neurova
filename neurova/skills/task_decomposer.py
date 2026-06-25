@@ -8,12 +8,12 @@ Agent 能够分析用户请求，拆解为子任务，并识别所需的技能�
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

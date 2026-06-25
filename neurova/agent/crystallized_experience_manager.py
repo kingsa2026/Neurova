@@ -9,13 +9,13 @@ CrystallizedExperienceManager — 结晶经验检索管理器
 from __future__ import annotations
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RetrievalStatus(Enum):

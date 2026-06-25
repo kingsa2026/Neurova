@@ -5,7 +5,7 @@
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -17,7 +17,7 @@ from neurova.core.trace_models import (
     TrajectorySpan,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TrajectoryRecorder:

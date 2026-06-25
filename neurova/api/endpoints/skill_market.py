@@ -9,7 +9,7 @@
 - GET    /v1/skill-market/installed          已安装列表
 """
 
-import logging
+from neurova.core.logger import get_logger
 import os
 import tempfile
 import zipfile
@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, UploadFile
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

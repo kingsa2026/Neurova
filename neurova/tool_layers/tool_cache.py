@@ -16,7 +16,7 @@ Phase 2 P2-2: 减少重复工具调用的延迟和资源消耗。
 
 import hashlib
 import json
-import logging
+from neurova.core.logger import get_logger
 import time
 import typing
 from collections import OrderedDict
@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 # tool_layers imports
 from neurova.tool_layers.capability_graph import ToolCapabilityGraph
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

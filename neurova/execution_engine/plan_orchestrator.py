@@ -6,14 +6,14 @@ Neurova CogArch 1.0.0 的核心执行组件
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class StepStatus(str, Enum):

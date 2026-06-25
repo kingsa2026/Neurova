@@ -11,7 +11,7 @@ from __future__ import annotations
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 from neurova.channels.base import (
@@ -20,7 +20,7 @@ from neurova.channels.base import (
     ChannelMessage,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 延迟导入 SessionSyncManager 避免循环导入
 _session_sync_manager = None

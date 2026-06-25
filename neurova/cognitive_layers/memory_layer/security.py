@@ -5,7 +5,7 @@
 import base64
 import datetime
 import hashlib
-import logging
+from neurova.core.logger import get_logger
 import os
 import re
 import threading
@@ -23,7 +23,7 @@ try:
 except ImportError:
     HAS_CRYPTOGRAPHY = False
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── Enums ──────

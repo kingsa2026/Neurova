@@ -8,14 +8,14 @@ D1 任务重构版本：
 - 保持 SkillRegistry 向后兼容
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SkillStatus(Enum):
@@ -113,7 +113,7 @@ class Skill:
             try:
                 handler(event)
             except Exception as e:
-                logging.getLogger(__name__).error(f"事件处理失败: {e}")
+                get_logger(__name__).error(f"事件处理失败: {e}")
 
 
 class MemorySkill(Skill):
@@ -429,7 +429,7 @@ class SkillRegistry:
             try:
                 handler(event)
             except Exception as e:
-                logging.getLogger(__name__).error(f"事件处理失败: {e}")
+                get_logger(__name__).error(f"事件处理失败: {e}")
 
     def _emit_event(self, event_type: str, skill_name: str, data: Any = None):
         """触发事件"""
@@ -438,7 +438,7 @@ class SkillRegistry:
             try:
                 handler(event)
             except Exception as e:
-                logging.getLogger(__name__).error(f"事件处理失败: {e}")
+                get_logger(__name__).error(f"事件处理失败: {e}")
 
 
 def create_default_skills(memory_manager=None) -> SkillRegistry:

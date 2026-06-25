@@ -4,14 +4,14 @@ OpenAI Loop - OpenAI 兼容模型适配循环
 支持: GPT-4, GPT-3.5-turbo, GPT-4V, 以及所有 OpenAI 兼容 API
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
 from neurova.agent.loops.base import BaseAgentLoop
 from neurova.agent.loops.registry import register_loop
 from neurova.llm_client import LLMResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class OpenAILoop(BaseAgentLoop):

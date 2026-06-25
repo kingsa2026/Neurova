@@ -15,7 +15,7 @@ EventBusEnhanced — 增强版事件总线深度模块
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from collections import deque
@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from .event_bus import Event, EventBus, EventPriority, Subscription
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

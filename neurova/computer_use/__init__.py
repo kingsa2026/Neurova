@@ -13,11 +13,11 @@ Computer Use 能力 v2.1.0 - 浏览器自动化增强版（集成 browser-skill�
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import os
 import typing
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 try:
     import subprocess

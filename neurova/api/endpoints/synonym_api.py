@@ -4,14 +4,14 @@
 提供同义词库的CRUD操作、配置管理和语义搜索增强功能。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

@@ -13,13 +13,13 @@
                     存储到任务-工具关联表
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 工具名模式：下划线分隔的英文单词
 _TOOL_NAME_PATTERN = re.compile(r"\b([a-z][a-z0-9]*_[a-z][a-z0-9_]*)\b")

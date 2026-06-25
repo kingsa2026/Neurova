@@ -3,7 +3,7 @@ Neurflow API — 工作流管理端点
 提供工作流 CRUD、执行、节点注册、DAG 验证等 RESTful 接口
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from typing import Any, Dict, Optional
 
@@ -22,7 +22,7 @@ from neurova.collaboration.neurflow.models import (
 from neurova.collaboration.neurflow.node_registry import get_node_registry
 from neurova.collaboration.neurflow.storage import NeurflowStorage
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -623,7 +623,7 @@ async def create_agent(data: Dict[str, Any] = Body(...)):
 
         import logging
 
-        logger = logging.getLogger(__name__)
+        logger = get_logger(__name__)
         logger.error("DEBUG: name=%s, role=%s, manager=%s", name, role, manager)
 
         agent = manager.create_agent(name=name, role=role, config=data.get("config", {}), flow_id=data.get("flow_id"))

@@ -5,7 +5,8 @@ Web Console API - 控制台后端 API
 import asyncio
 import datetime
 import json
-import logging
+from neurova.core import config
+from neurova.core.logger import get_logger
 import os
 import re
 import time
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 
 from neurova.api.endpoints import get_agent_instance
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 
@@ -66,7 +67,7 @@ class ConnectionManager:
 
 
 _manager = ConnectionManager()
-_CONSOLE_UPLOAD_DIR = Path(os.getenv("NEUROVA_CONSOLE_UPLOADS", "uploads/console"))
+_CONSOLE_UPLOAD_DIR = Path(config.get("NEUROVA_CONSOLE_UPLOADS", "uploads/console"))
 _CONSOLE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _CHAT_SESSIONS: typing.Dict[str, dict] = {}
 _SESSIONS_FILE = Path("data/console_sessions.json")
@@ -338,7 +339,7 @@ async def delete_console_upload(filename: str):
 @router.get("/debug/logs")
 async def get_backend_debug_logs(lines: int = 100):
     """查看后端日志"""
-    log_path = os.getenv("NEUROVA_LOG_FILE", "logs/neurova.log")
+    log_path = config.get("NEUROVA_LOG_FILE", "logs/neurova.log")
     if os.path.exists(log_path):
         content = _tail_text_file(log_path, lines)
     else:

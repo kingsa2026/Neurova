@@ -17,14 +17,14 @@
 
 import hashlib
 import hmac
-import logging
+from neurova.core.logger import get_logger
 import secrets
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 配对码有效期（秒）
 PAIRING_CODE_TTL = 300  # 5 分钟

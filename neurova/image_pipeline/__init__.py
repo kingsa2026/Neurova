@@ -10,7 +10,7 @@ Image 定义管道 v1.0.0 (技能/环境预配)
 4. 查看构建历史
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 import uuid
@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from .docker_builder import get_docker_builder
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BuildStatus(Enum):

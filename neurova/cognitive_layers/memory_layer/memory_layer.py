@@ -5,12 +5,12 @@ AgentMemoryLayer - Agent独立的记忆层
 线程安全，支持多Agent并发访问。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AgentMemoryLayer:

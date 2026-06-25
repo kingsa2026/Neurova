@@ -12,7 +12,7 @@ Neurova 启动管理器
 6. 健康检查
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from dataclasses import dataclass
@@ -25,7 +25,7 @@ from neurova.core.module_system import (
     StartupResult,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

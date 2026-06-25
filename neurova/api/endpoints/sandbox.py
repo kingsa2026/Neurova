@@ -160,9 +160,8 @@ async def commit_sandbox(sandbox_id: str, body: SandboxCommitRequest):
                 if hasattr(agent.memory_manager, "remember"):
                     await agent.memory_manager.remember(memory_content, tags=body.tags + ["sandbox", "conclusion"])
         except Exception as e:
-            import logging
-
-            logging.getLogger(__name__).warning("Failed to save sandbox to memory: %s", e)
+            from neurova.core.logger import get_logger
+            get_logger(__name__).warning("Failed to save sandbox to memory: %s", e)
 
     return {
         "code": 0,

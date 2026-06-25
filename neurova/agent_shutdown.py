@@ -3,10 +3,10 @@
 从 agent_core.py 提取的关闭逻辑，负责清理资源和触发睡眠整理。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def shutdown_agent(agent) -> None:

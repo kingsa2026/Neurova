@@ -9,10 +9,10 @@ Browser Backend Capability v1.0.0 — 浏览器后端能力描述
 隔离层级: 与 ComputerUseManager 协作，注入到 LLM system prompt
 """
 
-import logging
+from neurova.core.logger import get_logger
 import typing
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BrowserBackendCapability:

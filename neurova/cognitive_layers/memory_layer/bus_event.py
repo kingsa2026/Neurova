@@ -15,13 +15,13 @@ CogArch 1.0.0 事件总线 — MemoryManager 的骨架替代
 
 import asyncio
 import inspect
-import logging
+from neurova.core.logger import get_logger
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── ModuleHealth ──────

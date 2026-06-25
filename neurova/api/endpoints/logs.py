@@ -10,14 +10,14 @@ from __future__ import annotations
 4. 清空日志 (DELETE /api/v1/logs)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

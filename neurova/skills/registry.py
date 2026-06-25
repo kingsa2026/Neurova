@@ -13,7 +13,7 @@ Skill Registry - 中央注册表
 
 import asyncio
 import inspect
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 import typing
@@ -75,7 +75,7 @@ class SkillRegistry:
         self._event_callbacks: typing.Dict[str, typing.List[typing.Callable]] = {}
         self._runtime_helpers: typing.Dict[str, typing.Any] = {}
         self._initialized = True
-        self._logger = logging.getLogger(__name__)
+        self._logger = get_logger(__name__)
 
     @property
     def skills(self) -> typing.Dict[str, typing.Tuple[Skill, Path]]:

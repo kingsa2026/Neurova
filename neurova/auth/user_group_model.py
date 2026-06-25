@@ -9,7 +9,7 @@ Neurova 用户组和资源配额模型
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import secrets
 import time
 from dataclasses import asdict, dataclass
@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 # core imports
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class Permission(Enum):

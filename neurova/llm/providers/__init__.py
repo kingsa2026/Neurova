@@ -4,9 +4,8 @@ Provider 系统
 统一的 LLM Provider 接口和实现
 """
 
-import logging
-
-_logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+_logger = get_logger(__name__)
 
 try:
     from neurova.llm.providers.anthropic_provider import AnthropicProvider

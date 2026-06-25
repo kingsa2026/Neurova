@@ -10,7 +10,7 @@ Audio API - 音频端点
 """
 
 import base64
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import Optional
@@ -19,7 +19,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

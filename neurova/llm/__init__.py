@@ -7,9 +7,8 @@ LLM 模块
 - Generators: 文本生成器
 """
 
-import logging
-
-_logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+_logger = get_logger(__name__)
 
 try:
     from .llm_router import (

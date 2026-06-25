@@ -12,7 +12,7 @@ Neurova API 开放平台事件系统
 
 import asyncio
 import json
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import asdict, dataclass
 from enum import Enum
@@ -29,7 +29,7 @@ from neurova.api.openplatform.models import (
     generate_event_id,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class EventTypes(Enum):

@@ -13,9 +13,17 @@
             @search="fetchSkills"
           />
         </div>
-        <GlassButton variant="secondary" size="sm" @click="fetchSkills">
-          {{ t('common.refresh') }}
-        </GlassButton>
+        <div class="header-actions">
+          <GlassButton variant="secondary" size="sm" @click="fetchSkills">
+            {{ t('common.refresh') }}
+          </GlassButton>
+          <GlassButton variant="primary" size="sm" @click="showUrlModal = true">
+            {{ t('market.installFromUrl') }}
+          </GlassButton>
+          <GlassButton variant="secondary" size="sm" @click="triggerZipUpload">
+            {{ t('market.importZip') }}
+          </GlassButton>
+        </div>
       </div>
     </GlassPanel>
 
@@ -100,6 +108,34 @@
         </a-spin>
       </div>
     </div>
+
+    <!-- URL Install Modal -->
+    <a-modal
+      v-model:open="showUrlModal"
+      :title="t('market.urlInputTitle')"
+      :ok-text="t('market.install')"
+      :confirm-loading="urlInstalling"
+      @ok="handleUrlInstall"
+    >
+      <div style="margin-bottom: 8px; color: var(--nr-text-secondary); font-size: 13px;">
+        {{ t('market.urlInputDesc') }}
+      </div>
+      <a-input
+        v-model:value="installUrl"
+        :placeholder="t('market.urlInputPlaceholder')"
+        allow-clear
+        @press-enter="handleUrlInstall"
+      />
+    </a-modal>
+
+    <!-- Hidden ZIP file input -->
+    <input
+      ref="zipFileInput"
+      type="file"
+      accept=".zip"
+      style="display: none"
+      @change="handleZipFileChange"
+    />
   </div>
 </template>
 
@@ -108,6 +144,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
+import { installSkillFromUrl, installSkillFromZip } from '@/api/modules/skill-pool'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -166,6 +203,57 @@ const sectionTitle = computed(() => {
 
 function selectCategory(id: string) {
   activeCategory.value = activeCategory.value === id ? '' : id
+}
+
+// --- ZIP import ---
+const zipFileInput = ref<HTMLInputElement | null>(null)
+
+function triggerZipUpload() {
+  zipFileInput.value?.click()
+}
+
+async function handleZipFileChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  input.value = '' // reset so same file can be re-selected
+
+  if (!file.name.endsWith('.zip')) {
+    message.error('Please select a .zip file')
+    return
+  }
+
+  message.loading({ content: t('market.uploading'), key: 'zip-upload', duration: 0 })
+  try {
+    await installSkillFromZip(file)
+    message.success({ content: t('market.installSuccess'), key: 'zip-upload' })
+    fetchSkills()
+  } catch {
+    message.error({ content: t('market.installFailed'), key: 'zip-upload' })
+  }
+}
+
+// --- Remote URL install ---
+const showUrlModal = ref(false)
+const installUrl = ref('')
+const urlInstalling = ref(false)
+
+async function handleUrlInstall() {
+  const url = installUrl.value.trim()
+  if (!url) return
+
+  urlInstalling.value = true
+  try {
+    await installSkillFromUrl(url)
+    message.success(t('market.installSuccess'))
+    showUrlModal.value = false
+    installUrl.value = ''
+    fetchSkills()
+  } catch {
+    message.error(t('market.installFailed'))
+  } finally {
+    urlInstalling.value = false
+  }
 }
 
 async function fetchCategories() {
@@ -239,6 +327,12 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .page-title {

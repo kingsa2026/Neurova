@@ -7,11 +7,11 @@
 3. 自动优化技能配置
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

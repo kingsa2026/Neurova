@@ -12,12 +12,12 @@ Phase 2 P2-1: 从工具执行日志中发现高频工具序列模式。
 ...
 """
 
-import logging
+from neurova.core.logger import get_logger
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

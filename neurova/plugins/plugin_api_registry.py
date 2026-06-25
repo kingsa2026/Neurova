@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

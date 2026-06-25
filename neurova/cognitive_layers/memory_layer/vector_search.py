@@ -5,7 +5,7 @@
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import math
 import os
 import pickle
@@ -14,7 +14,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

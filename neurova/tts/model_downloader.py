@@ -5,12 +5,14 @@ Model Downloader - 模型自动下载器
 """
 
 import logging
+
+from neurova.core.logger import get_logger
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 模型仓库映射
 MODEL_REGISTRY = {

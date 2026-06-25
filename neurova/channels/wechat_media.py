@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import tempfile
 import time
 from pathlib import Path
@@ -27,7 +27,7 @@ except ImportError:
 if TYPE_CHECKING:
     pass
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WeChatMediaMixin:

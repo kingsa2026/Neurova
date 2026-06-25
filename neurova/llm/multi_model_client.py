@@ -9,7 +9,7 @@
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -22,7 +22,7 @@ from neurova.llm.provider_manager import (
 )
 from neurova.llm_client import LLMClient, LLMConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ModelClient:

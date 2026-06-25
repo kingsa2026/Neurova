@@ -11,13 +11,13 @@
 
 import datetime
 import enum
-import logging
+from neurova.core.logger import get_logger
 import typing
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

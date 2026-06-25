@@ -12,7 +12,7 @@ ToolOrchestrator v1.0.0 — DAG 工具编排器 (Phase 3 P3-1b)
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import time
 import typing
 from dataclasses import dataclass, field
@@ -21,7 +21,7 @@ from enum import Enum
 # tool_layers imports
 from neurova.tool_layers.capability_graph import ToolCapabilityGraph
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ExecutionStatus(str, Enum):

@@ -9,14 +9,14 @@ NeuHebbForge — Neurova Hebb 生成器
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import math
 import re
 from typing import Callable, List, Optional
 
 from .neurova_hebb import NeuHebbConfig, NeurovaHebb
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 无效答案特征词（小写匹配）
 _INVALID_INDICATORS = [

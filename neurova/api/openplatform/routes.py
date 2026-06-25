@@ -3,7 +3,7 @@ from __future__ import annotations
 """Neurova API 开放平台路由 - 应用管理、Webhook管理、API密钥管理、文档"""
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import secrets
 import time
 from pathlib import Path
@@ -33,7 +33,7 @@ from neurova.api.openplatform.models import (
     hash_api_key,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter(prefix="/openplatform", tags=["开放平台"])
 
 

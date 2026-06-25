@@ -4,11 +4,11 @@ RSI 集成管理器
 协调 RSI 与四大闭环系统的交互
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

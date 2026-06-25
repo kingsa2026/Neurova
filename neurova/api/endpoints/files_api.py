@@ -15,18 +15,20 @@
 - GET    /v1/files/storage/info  获取存储使用情况
 """
 
-import logging
+from neurova.core.logger import get_logger
 import mimetypes
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
+from neurova.api.auth import get_current_user
+
+logger = get_logger(__name__)
 router = APIRouter()
 
 STORAGE_ROOT = Path("storage/users")
@@ -80,27 +82,40 @@ def _determine_file_type(filename: str) -> str:
 @router.post("/upload", response_model=FileInfo)
 async def upload_file(
     file: UploadFile = File(...),
-    user_id: str = Query(default="default"),
     agent_id: str = Query(default="default"),
     session_id: str = Query(default="default"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """上传文件"""
     file_id = str(uuid.uuid4())
     now = time.time()
+    user_id = current_user["user_id"]
+
+    # 净化文件名：只取 basename，防止路径遍历（../../etc/passwd 等）
+    raw_filename = file.filename or "unknown"
+    safe_filename = Path(raw_filename).name
+    if not safe_filename or safe_filename in (".", ".."):
+        safe_filename = "unknown"
 
     # 确定存储路径
-    file_type = _determine_file_type(file.filename or "unknown")
+    file_type = _determine_file_type(safe_filename)
     storage_dir = STORAGE_ROOT / user_id / "agents" / agent_id / "sessions" / session_id / file_type
     storage_dir.mkdir(parents=True, exist_ok=True)
 
-    file_path = storage_dir / f"{file_id}_{file.filename}"
+    file_path = storage_dir / f"{file_id}_{safe_filename}"
+    # 二次验证：最终路径必须在 storage_dir 内（防御性编程）
+    try:
+        file_path.resolve().relative_to(storage_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
     content = await file.read()
     file_path.write_bytes(content)
 
-    mime, _ = mimetypes.guess_type(file.filename or "")
+    mime, _ = mimetypes.guess_type(safe_filename)
     info = {
         "file_id": file_id,
-        "filename": file.filename,
+        "filename": safe_filename,
         "file_type": file_type,
         "mime_type": mime or "application/octet-stream",
         "size": len(content),
@@ -118,10 +133,11 @@ async def upload_file(
 
 @router.get("", response_model=List[FileInfo])
 async def list_files(
-    user_id: str = Query(default="default"),
     file_type: Optional[str] = Query(default=None),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """列出文件"""
+    user_id = current_user["user_id"]
     files = [f for f in _files_store.values() if f.get("user_id") == user_id]
     if file_type:
         files = [f for f in files if f.get("file_type") == file_type]
@@ -129,8 +145,9 @@ async def list_files(
 
 
 @router.get("/storage/info", response_model=StorageInfo)
-async def get_storage_info(user_id: str = Query(default="default")):
+async def get_storage_info(current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取存储使用情况"""
+    user_id = current_user["user_id"]
     files = [f for f in _files_store.values() if f.get("user_id") == user_id]
     by_type: Dict[str, int] = {}
     for f in files:
@@ -145,7 +162,10 @@ async def get_storage_info(user_id: str = Query(default="default")):
 
 
 @router.get("/{file_id}", response_model=FileInfo)
-async def get_file_info(file_id: str):
+async def get_file_info(
+    file_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取文件信息"""
     info = _files_store.get(file_id)
     if not info:
@@ -154,7 +174,10 @@ async def get_file_info(file_id: str):
 
 
 @router.get("/{file_id}/preview")
-async def preview_file(file_id: str):
+async def preview_file(
+    file_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """预览文件"""
     info = _files_store.get(file_id)
     if not info:
@@ -166,7 +189,10 @@ async def preview_file(file_id: str):
 
 
 @router.get("/{file_id}/download")
-async def download_file(file_id: str):
+async def download_file(
+    file_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """下载文件"""
     info = _files_store.get(file_id)
     if not info:
@@ -182,7 +208,11 @@ async def download_file(file_id: str):
 
 
 @router.put("/{file_id}", response_model=FileInfo)
-async def update_file(file_id: str, body: FileUpdateRequest):
+async def update_file(
+    file_id: str,
+    body: FileUpdateRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """更新文件信息"""
     info = _files_store.get(file_id)
     if not info:
@@ -196,7 +226,10 @@ async def update_file(file_id: str, body: FileUpdateRequest):
 
 
 @router.delete("/{file_id}")
-async def delete_file(file_id: str):
+async def delete_file(
+    file_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """删除文件"""
     info = _files_store.pop(file_id, None)
     if not info:
@@ -209,7 +242,10 @@ async def delete_file(file_id: str):
 
 
 @router.get("/{file_id}/versions")
-async def get_file_versions(file_id: str):
+async def get_file_versions(
+    file_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取版本历史"""
     info = _files_store.get(file_id)
     if not info:
@@ -221,7 +257,10 @@ async def get_file_versions(file_id: str):
 
 
 @router.post("/{file_id}/approve")
-async def approve_file(file_id: str):
+async def approve_file(
+    file_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """批准文件"""
     info = _files_store.get(file_id)
     if not info:
@@ -232,7 +271,10 @@ async def approve_file(file_id: str):
 
 
 @router.post("/{file_id}/reject")
-async def reject_file(file_id: str):
+async def reject_file(
+    file_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """拒绝文件"""
     info = _files_store.get(file_id)
     if not info:

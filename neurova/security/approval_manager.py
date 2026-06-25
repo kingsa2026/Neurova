@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import re
 import threading
 import uuid
@@ -21,7 +21,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ApprovalStatus(str, Enum):

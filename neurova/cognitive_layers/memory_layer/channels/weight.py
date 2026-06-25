@@ -4,10 +4,10 @@ WeightAdjuster — 通道权重动态调整
 基于用户反馈动态调整通道权重，保持权重归一化。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Dict
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WeightAdjuster:

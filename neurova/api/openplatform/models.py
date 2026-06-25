@@ -12,14 +12,14 @@ Neurova API 开放平台数据模型
 
 import hashlib
 import json
-import logging
+from neurova.core.logger import get_logger
 import secrets
 import time
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AppType(Enum):

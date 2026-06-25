@@ -8,7 +8,7 @@ Neurova 自动化任务调度器核心模块
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
@@ -25,7 +25,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ============================================================
 # 枚举定义

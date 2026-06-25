@@ -11,14 +11,14 @@ Neurova 数据脱敏模块
 """
 
 import hashlib
-import logging
+from neurova.core.logger import get_logger
 import re
 import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Pattern
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class MaskingStrategy(str, Enum):

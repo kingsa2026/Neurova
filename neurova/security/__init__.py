@@ -11,9 +11,11 @@ Neurova 安全体系 2.0
 """
 
 import logging
+
+from neurova.core.logger import get_logger
 from typing import TYPE_CHECKING
 
-_logger = logging.getLogger(__name__)
+_logger = get_logger(__name__)
 
 try:
     from neurova.security.api_keys import APIKey

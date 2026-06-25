@@ -15,8 +15,8 @@ Neurova Skill系统2.0架构。
 
 import io
 import json
-import logging
-import os
+from neurova.core import config
+from neurova.core.logger import get_logger
 import re
 import tarfile
 import time
@@ -29,7 +29,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SkillSource(str, Enum):
@@ -102,7 +102,7 @@ class RemoteSkill:
 # 缓存和配置函数
 def _github_cache_ttl() -> int:
     """获取GitHub缓存TTL（秒）"""
-    return int(os.environ.get("GITHUB_CACHE_TTL", "3600"))
+    return config.get_int("GITHUB_CACHE_TTL", 3600)
 
 
 def _github_cache_get(key: str) -> Optional[Any]:
@@ -124,22 +124,22 @@ def _github_cache_set(key: str, value: Any, ttl: int = None) -> None:
 
 def _http_timeout() -> float:
     """获取HTTP超时时间"""
-    return float(os.environ.get("HTTP_TIMEOUT", "30"))
+    return float(config.get("HTTP_TIMEOUT", "30"))
 
 
 def _http_retries() -> int:
     """获取HTTP重试次数"""
-    return int(os.environ.get("HTTP_RETRIES", "3"))
+    return config.get_int("HTTP_RETRIES", 3)
 
 
 def _http_backoff_base() -> float:
     """获取退避基数"""
-    return float(os.environ.get("HTTP_BACKOFF_BASE", "1"))
+    return float(config.get("HTTP_BACKOFF_BASE", "1"))
 
 
 def _http_backoff_cap() -> float:
     """获取退避上限"""
-    return float(os.environ.get("HTTP_BACKOFF_CAP", "60"))
+    return float(config.get("HTTP_BACKOFF_CAP", "60"))
 
 
 def _compute_backoff_seconds(attempt: int) -> float:
@@ -373,7 +373,7 @@ class SkillHubClient:
 
             # 添加 GitHub Token（如果有）
             headers = {}
-            github_token = os.environ.get("GITHUB_TOKEN")
+            github_token = config.get("GITHUB_TOKEN")
             if github_token:
                 headers["Authorization"] = f"token {github_token}"
 
@@ -661,7 +661,7 @@ class SkillHubClient:
             # 获取最新 release
             url = f"https://api.github.com/repos/{skill.author}/{skill.name}/releases/latest"
             headers = {}
-            github_token = os.environ.get("GITHUB_TOKEN")
+            github_token = config.get("GITHUB_TOKEN")
             if github_token:
                 headers["Authorization"] = f"token {github_token}"
 
@@ -763,7 +763,7 @@ class SkillHubClient:
             url = f"{api_url}{endpoint}?q={quote(topic_query)}&sort=stars&order=desc&per_page={limit}"
 
             headers = {}
-            github_token = os.environ.get("GITHUB_TOKEN")
+            github_token = config.get("GITHUB_TOKEN")
             if github_token:
                 headers["Authorization"] = f"token {github_token}"
 

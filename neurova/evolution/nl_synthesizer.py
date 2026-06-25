@@ -19,14 +19,14 @@ NLToolSynthesizer v1.0.0 — 自然语言工具合成器 (Phase 3 P3-3)
        └─▶ SynthesizedTool → 导出格式
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 import typing
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── 数据模型 ──────

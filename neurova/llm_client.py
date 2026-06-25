@@ -5,7 +5,7 @@ LLM Client - 语言模型客户端
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
@@ -86,7 +86,7 @@ class LLMClient:
             preset: 预设配置（可选）
         """
         self.config = config
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
 
         # 应用预设配置
         if preset:

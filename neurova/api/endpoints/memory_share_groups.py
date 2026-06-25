@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -16,7 +16,7 @@ from neurova.cognitive_layers.memory_layer.share_group import (
     get_share_group_manager,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/memory-share-groups", tags=["memory-share-groups"])
 

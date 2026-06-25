@@ -4,13 +4,13 @@ RSI 仪表盘
 为 RSI 提供实时监控界面
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, List
 
 from .convergence_analyzer import ConvergenceAnalyzer
 from .metrics import RSIMetrics
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RSIDashboard:

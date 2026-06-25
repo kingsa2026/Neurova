@@ -5,12 +5,12 @@
 所有缓存功能应使用此模块，避免重复实现。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Optional
 
 from neurova.memory.core.cache import CacheEntry, CacheStats, MemoryCache
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 全局缓存实例
 _global_cache: Optional[MemoryCache] = None

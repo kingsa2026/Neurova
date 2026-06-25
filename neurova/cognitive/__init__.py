@@ -5,9 +5,8 @@ Cognitive Module - 认知模块
 包括认知状态管理、注意力管理、记忆管理和认知编排器。
 """
 
-import logging
-
-_logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+_logger = get_logger(__name__)
 
 try:
     from neurova.mem_core import Memory

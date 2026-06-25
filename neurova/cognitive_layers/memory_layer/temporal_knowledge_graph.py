@@ -12,7 +12,7 @@
 
 import hashlib
 import json
-import logging
+from neurova.core.logger import get_logger
 import re
 import sqlite3
 import threading
@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── Enums ──────

@@ -6,11 +6,13 @@ VoiceEngine — 统一语音引擎接口
 """
 
 import logging
+
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class VoiceEngineType(Enum):

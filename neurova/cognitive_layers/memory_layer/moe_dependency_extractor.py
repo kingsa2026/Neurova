@@ -4,14 +4,14 @@
 利用 Neurova 已有的 MOE 向量门控网络进行语义路由。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── Entity Extractor ──────

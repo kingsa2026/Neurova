@@ -7,7 +7,7 @@ Skill Need Analyzer - 技能需求分析器
 实现 Neurova CogArch 1.0.0 的 Agent 主动学习能力。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -15,7 +15,7 @@ from neurova.skills.market_searcher import SearchResult, SkillMarketSearcher
 from neurova.skills.models import Skill
 from neurova.skills.task_decomposer import TaskDecomposer
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

@@ -7,7 +7,7 @@ ASR Manager - ASR引擎管理器
 3. mock: MockASR（测试用）
 """
 
-import logging
+from neurova.core.logger import get_logger
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from neurova.asr.base import ASRBase
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 项目根目录（neurova/asr/manager.py -> neurova/asr/ -> neurova/ -> ROOT）
 _ROOT_DIR = Path(__file__).parent.parent.parent.resolve()

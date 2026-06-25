@@ -11,11 +11,11 @@
 """
 
 import hashlib
-import logging
+from neurova.core.logger import get_logger
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 消息类型常量
 MSG_TYPE_TEXT = "text"

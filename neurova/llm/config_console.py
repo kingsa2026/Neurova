@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 _DEFAULT_CONFIG_PATH = "./data/llm_config.json"

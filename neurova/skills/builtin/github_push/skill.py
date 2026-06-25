@@ -15,8 +15,7 @@ GitHub Push Skill - Neurova GitHub 推送技能
 
 import asyncio
 import importlib.util
-import logging
-
+from neurova.core.logger import get_logger
 # 动态导入 Skill 类，避免包和模块冲突
 import sys
 import time
@@ -45,7 +44,7 @@ class GitHubPushSkill(Skill):
 
     def __init__(self):
         super().__init__("github_push", "GitHub 推送技能 - 封装完整的 Git 操作流程")
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
         self.repo_path = Path(".")  # 默认当前目录
 
     async def execute(self, params: Dict[str, Any], context: Optional[Dict] = None) -> SkillResult:

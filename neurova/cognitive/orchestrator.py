@@ -7,14 +7,14 @@ Cognition Orchestrator - 认知编排器
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import pathlib
 import threading
 import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _new_id(prefix: str) -> str:

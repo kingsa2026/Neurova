@@ -10,7 +10,7 @@ Tool History Tracker v1.0.0 — 工具执行历史追踪器
 隔离层级: 每个 MetaCognition 实例持有一个独立的 ToolHistoryTracker
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.tool_layers.tool_logger import ToolExecutionEntry
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AnomalyType(str, Enum):

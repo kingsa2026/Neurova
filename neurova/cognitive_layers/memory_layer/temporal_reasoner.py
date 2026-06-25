@@ -9,7 +9,7 @@
 5. 时序排序（按时间排序实体）
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TemporalRelation(Enum):

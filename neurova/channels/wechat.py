@@ -18,7 +18,7 @@ API 文档:
 """
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
 from neurova.channels.base import ChannelAdapter, MessageChannel
@@ -31,7 +31,7 @@ from neurova.channels.wechat_media import WeChatMediaMixin
 from neurova.channels.wechat_ai_generation import WeChatAIGenerationMixin
 from neurova.channels.wechat_ai_handler import WeChatAIHandlerMixin
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WeChatAdapter(

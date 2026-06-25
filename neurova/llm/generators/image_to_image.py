@@ -4,7 +4,7 @@ Supports Stable Diffusion Img2Img, DALL-E Variations, Wanx Style Transfer, Contr
 """
 
 import base64
-import logging
+from neurova.core.logger import get_logger
 import time
 from typing import Any, Dict
 
@@ -15,7 +15,7 @@ except ImportError:
 
 from neurova.llm.generators.base import BaseGenerator, GenerationConfig, GenerationResult, GeneratorType
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ImageToImageGenerator(BaseGenerator):

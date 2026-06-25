@@ -4,11 +4,11 @@
 检测三层缺失: 实体缺失、关系缺失、上下文依赖缺失。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

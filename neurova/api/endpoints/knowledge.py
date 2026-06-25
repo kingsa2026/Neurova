@@ -11,7 +11,7 @@ from __future__ import annotations
 5. 删除知识 (DELETE /api/v1/knowledge/{id})
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import List, Optional
@@ -19,7 +19,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

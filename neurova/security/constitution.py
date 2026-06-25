@@ -7,13 +7,13 @@ Neurova 宪法制度 (Constitutional System)
 3. 与执行流程集成
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RuleType(Enum):

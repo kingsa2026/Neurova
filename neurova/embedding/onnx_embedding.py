@@ -8,7 +8,7 @@ ONNX Embedding Engine - ONNX Runtime 向量嵌入引擎
 - 支持批量编码和单条编码
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from pathlib import Path
@@ -16,7 +16,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _normalize(vec: np.ndarray) -> np.ndarray:

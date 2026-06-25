@@ -12,9 +12,8 @@ Skills System 1.0.0 - 技能系统
 ...
 """
 
-import logging
-
-_logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+_logger = get_logger(__name__)
 
 try:
     from neurova.skills.models import (

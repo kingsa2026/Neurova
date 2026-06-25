@@ -9,14 +9,14 @@ ResultProcessor — 结果处理器
 5. 分层注入
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from neurova.cognitive_layers.memory_layer.conflict_detector_v2 import ConflictDetector, ConflictGroup
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

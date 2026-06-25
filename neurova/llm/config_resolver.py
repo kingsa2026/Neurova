@@ -8,11 +8,11 @@ Agent 配置: AgentConfig.llm_config 中显式设置的值（非空、非默认�
 系统默认配置: LLMConfig dataclass 的硬编码默认值
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 系统默认值（与 LLMConfig dataclass 一致，max_tokens 使用安全回退值）
 _SYSTEM_DEFAULTS = {

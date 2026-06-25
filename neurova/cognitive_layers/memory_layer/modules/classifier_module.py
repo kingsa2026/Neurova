@@ -6,12 +6,12 @@ ClassifierModule — 记忆分类模块
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import re
 import threading
 from typing import Any, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ClassifierModule:

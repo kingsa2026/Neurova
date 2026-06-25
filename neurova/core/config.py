@@ -12,7 +12,7 @@ from __future__ import annotations
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import os
 import threading
 import time
@@ -21,7 +21,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ConfigLevel(Enum):
@@ -437,3 +437,86 @@ def reset_config_manager() -> None:
     global _config_manager
     with _manager_lock:
         _config_manager = None
+
+
+# ---------------------------------------------------------------------------
+# 模块级便捷函数 — 统一环境变量读取入口
+# ---------------------------------------------------------------------------
+# 所有模块应通过这些函数读取环境变量，而非直接调用 os.environ.get / os.getenv，
+# 以便未来接入集中配置管理（ConfigManager）时只需修改此处。
+
+
+def get(key: str, default: Optional[str] = None) -> Optional[str]:
+    """读取环境变量字符串值
+
+    Args:
+        key: 环境变量名
+        default: 未设置时的默认值
+
+    Returns:
+        环境变量值，未设置时返回 default
+    """
+    return os.environ.get(key, default)
+
+
+def get_int(key: str, default: int = 0) -> int:
+    """读取环境变量并转为整数
+
+    非数字值时返回 default，不抛异常。
+
+    Args:
+        key: 环境变量名
+        default: 未设置或非法时的默认值
+
+    Returns:
+        整数值
+    """
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def get_bool(key: str, default: bool = False) -> bool:
+    """读取环境变量并转为布尔值
+
+    真值: 'true', '1', 'yes', 'on'（大小写不敏感）
+    其他值均为 False。
+
+    Args:
+        key: 环境变量名
+        default: 未设置时的默认值
+
+    Returns:
+        布尔值
+    """
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    return val.lower() in ("true", "1", "yes", "on")
+
+
+def get_list(
+    key: str,
+    default: Optional[List[str]] = None,
+    sep: str = ",",
+) -> List[str]:
+    """读取环境变量并拆分为列表
+
+    自动去除每项首尾空白并过滤空项。
+
+    Args:
+        key: 环境变量名
+        default: 未设置时的默认值（None 视为空列表）
+        sep: 分隔符，默认逗号
+
+    Returns:
+        字符串列表
+    """
+    val = os.environ.get(key)
+    if val is None:
+        return default if default is not None else []
+    return [item.strip() for item in val.split(sep) if item.strip()]

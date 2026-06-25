@@ -13,7 +13,7 @@ from __future__ import annotations
 
 # core imports
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 import traceback
@@ -226,7 +226,7 @@ class ErrorHandler:
             "recovery_attempts": 0,
             "recovery_successes": 0,
         }
-        self._logger = logging.getLogger(__name__)
+        self._logger = get_logger(__name__)
         self._lock = threading.Lock()
 
     def handle(

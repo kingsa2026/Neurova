@@ -9,7 +9,7 @@ RSI 编排器
 - 管理回滚和部署
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
 from .convergence_analyzer import create_convergence_analyzer
@@ -18,7 +18,7 @@ from .integration_manager import create_rsi_integration_manager
 from .metrics import create_rsi_metrics
 from .rollback_manager import create_rollback_manager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RSIOrchestrator:

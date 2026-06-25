@@ -4,10 +4,10 @@ RSI 部署控制器
 RSI 风险较高，必须采用渐进式部署，从被动观察到完全自动化
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RSIDeploymentController:

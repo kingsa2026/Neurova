@@ -11,13 +11,13 @@ from __future__ import annotations
 - 模型切换时的上下文适配
 """
 
-import logging
+from neurova.core.logger import get_logger
 from datetime import datetime
 from typing import Any, Dict, List
 
 from neurova.context.token_estimator import EstimationStrategy, TokenEstimator
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ContextPool:

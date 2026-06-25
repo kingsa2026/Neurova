@@ -6,7 +6,7 @@ Skill 安全扫描系统
 """
 
 import ast
-import logging
+from neurova.core.logger import get_logger
 import os
 import subprocess
 import sys
@@ -17,7 +17,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SecurityLevel(str, Enum):

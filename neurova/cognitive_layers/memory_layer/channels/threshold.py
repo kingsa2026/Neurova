@@ -4,10 +4,10 @@ ThresholdConfig — 通道激活阈值配置
 支持 per-channel 阈值和默认阈值，可从 dict 加载。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Dict
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ThresholdConfig:

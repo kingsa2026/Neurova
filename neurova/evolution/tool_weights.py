@@ -18,14 +18,14 @@
   multiplier *= exp(-decay_rate × hours_since_last_use)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import math
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

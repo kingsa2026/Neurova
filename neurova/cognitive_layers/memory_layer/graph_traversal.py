@@ -9,12 +9,12 @@
 - 循环检测
 """
 
-import logging
+from neurova.core.logger import get_logger
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

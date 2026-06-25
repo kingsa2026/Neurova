@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 import uuid
@@ -22,7 +22,7 @@ from .negative_screen import (
     PushResult,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

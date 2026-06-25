@@ -6,12 +6,12 @@ from __future__ import annotations
 负责收集、排序和预算控制上下文输入。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import List
 
 from neurova.context.pool_models import ContextInput
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ContextCollector:

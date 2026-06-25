@@ -13,14 +13,14 @@ Benchmark 基准测试框架 API 端点 v1.0.0
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import typing
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

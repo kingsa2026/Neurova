@@ -8,7 +8,7 @@ UnifiedResultProcessor — 统一结果处理管道
 4. 冲突检测（语义矛盾）
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -16,7 +16,7 @@ from .base import ChannelResult
 from .conflict import ConflictDetector
 from .temporal import TemporalDecay
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

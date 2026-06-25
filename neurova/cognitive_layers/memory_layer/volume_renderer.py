@@ -16,13 +16,13 @@
 - 支持通道间交互和协同
 """
 
-import logging
+from neurova.core.logger import get_logger
 import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── 数据模型 ──────

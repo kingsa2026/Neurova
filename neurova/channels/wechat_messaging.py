@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-import logging
+from neurova.core.logger import get_logger
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 try:
@@ -21,7 +21,7 @@ from neurova.channels.models import ContentType, UnifiedMessage
 if TYPE_CHECKING:
     pass
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WeChatMessagingMixin:

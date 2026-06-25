@@ -13,7 +13,7 @@ from __future__ import annotations
 7. 获取冲突解决历史 (GET /api/v1/sleep/{agent_id}/conflicts)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import List, Optional
@@ -21,7 +21,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

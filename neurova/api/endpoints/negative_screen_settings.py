@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from typing import Optional
 
@@ -25,7 +25,7 @@ from neurova.notifications.negative_screen import (
     create_negative_screen_pusher,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

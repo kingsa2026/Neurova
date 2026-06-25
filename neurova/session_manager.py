@@ -4,7 +4,7 @@
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -19,7 +19,7 @@ try:
 except ImportError:
     HAS_FCNTL = False
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

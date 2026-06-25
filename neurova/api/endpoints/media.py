@@ -17,7 +17,7 @@ Media Storage API - 媒体存储管理接口
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import os
 import time
 import uuid
@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

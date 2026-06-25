@@ -4,9 +4,8 @@ Neurflow — Neurova 协作系统的工作流模块
 三面镜子架构：工作流是 Neurova 全部能力的可视化投射层
 """
 
-import logging
-
-_logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+_logger = get_logger(__name__)
 
 # 安全导入：任一子模块失败不阻塞整个包
 try:

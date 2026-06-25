@@ -6,14 +6,14 @@
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import sqlite3
 from typing import Optional
 from contextlib import contextmanager
 
 from neurova.core.connection_pool import get_connection_pool, get_db_connection, close_all_pools
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 默认数据库路径
 DEFAULT_DB_PATH = "neurova_memory.db"

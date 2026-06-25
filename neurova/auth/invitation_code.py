@@ -11,7 +11,7 @@ Neurova 邀请码模型
 - 邀请码类型（一次性/多次使用）
 """
 
-import logging
+from neurova.core.logger import get_logger
 import os
 import secrets
 import sqlite3
@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class InvitationCodeType(Enum):

@@ -15,13 +15,13 @@ Neurflow 内置节点定义模块 — 垂直切片 9
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Callable, Dict, List
 
 from .agent_manager import get_agent_manager
 from .models import NodeDefinition
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ==================== 内置节点定义 ====================

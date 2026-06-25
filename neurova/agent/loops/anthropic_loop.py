@@ -6,13 +6,13 @@ Anthropic Loop - Anthropic 模型适配循环
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
 from neurova.agent.loops.base import BaseAgentLoop
 from neurova.llm_client import LLMResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AnthropicLoop(BaseAgentLoop):

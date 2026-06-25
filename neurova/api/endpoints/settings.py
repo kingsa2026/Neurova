@@ -13,7 +13,7 @@ from __future__ import annotations
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from pathlib import Path as FilePath
@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

@@ -11,7 +11,7 @@ Webhook 管理 API
 - GET    /v1/webhooks/{webhook_id}/deliveries   投递记录
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

@@ -5,7 +5,7 @@ ChannelMoERouter — 通道路由层
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 from typing import Dict, List, Optional
 
 from ..moe_router import VectorGatingNetwork
@@ -13,7 +13,7 @@ from ..unified_vector_store import UnifiedVectorStore
 from .base import BaseChannel, ChannelResult
 from .registry import ChannelRegistry
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ChannelMoERouter:

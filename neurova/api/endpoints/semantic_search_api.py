@@ -4,14 +4,14 @@ Semantic Search API - 语义搜索API端点
 支持：hybrid, bm25, vector, compare, analyze
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 import typing
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

@@ -6,7 +6,7 @@
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import mimetypes
 import re
 import typing
@@ -18,7 +18,7 @@ STORAGE_ROOT = Path("storage")
 DATA_DIR = Path("data")
 FILES_DB = DATA_DIR / "files.json"
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def sanitize_name(name: str) -> str:

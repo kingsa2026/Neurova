@@ -12,7 +12,7 @@ Neurova 验证码模型
 """
 
 import hashlib
-import logging
+from neurova.core.logger import get_logger
 import os
 import secrets
 import sqlite3
@@ -21,7 +21,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class VerificationType(Enum):

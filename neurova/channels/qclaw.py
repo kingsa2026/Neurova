@@ -6,24 +6,24 @@ QClaw 消息渠道适配器
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+logger = get_logger(__name__)
+
 try:
-    pass
+    import requests
 
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
-    logging.warning("requests 库未安装，QClaw 适配器将使用模拟模式")
+    logger.warning("requests 库未安装，QClaw 适配器将使用模拟模式")
 
 from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
 from neurova.channels.base import ChannelConfig
 from neurova.channels.qclaw_service import get_qclaw_service
-
-logger = logging.getLogger(__name__)
 
 # QClaw 网关地址（应配置化，不要硬编码）
 QCLAW_API_BASE = "https://jprx.m.qq.com"

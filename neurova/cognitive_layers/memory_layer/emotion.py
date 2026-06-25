@@ -5,12 +5,12 @@ Emotion Analyzer v1.0.0 - 基于情感中枢引擎
 支持四层17种情感分类体系。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 import threading
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 四层17种情感分类体系
 _EMOTION_HIERARCHY = {

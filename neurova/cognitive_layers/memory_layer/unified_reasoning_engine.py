@@ -4,11 +4,11 @@
 整合对话规则 + 经验记忆 + 模式挖掘，提供统一推理接口。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

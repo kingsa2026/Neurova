@@ -8,13 +8,13 @@ Phase 2 P2-3: 管理工具从活跃到归档的完整生命周期。
   （可通过 revive 回退到 ACTIVE）
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ToolLifecycleState(Enum):

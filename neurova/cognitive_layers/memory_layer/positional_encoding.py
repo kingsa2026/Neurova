@@ -14,13 +14,13 @@ NeRF 位置编码模块
 纯 Python 实现，不依赖 numpy/torch。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── 基础编码器 ──────

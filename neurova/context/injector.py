@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from neurova.core.logger import get_logger
 import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -96,7 +97,7 @@ from .models import ContextBuildResult, ContextEntry, TokenBudget
 if TYPE_CHECKING:
     from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class UnifiedContextInjector(BaseModule):

@@ -5,7 +5,7 @@ Agent 能力矩阵模块
 提供 Agent 能力的可视化和分析功能。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -19,7 +19,7 @@ from ..protocols.capability_discovery import (
     get_capability_discovery,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AgentStatus(str, Enum):

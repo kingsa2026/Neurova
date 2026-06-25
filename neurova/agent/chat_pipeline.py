@@ -16,7 +16,7 @@ ChatPipeline — 对话流程管线
 - 可独立测试：不依赖 Agent 类的完整初始化
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -30,7 +30,7 @@ from neurova.agent.retriever_adapters import (
 )
 from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

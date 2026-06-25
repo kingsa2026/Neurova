@@ -4,14 +4,14 @@
 提供统一的 API 请求方法、Token 管理和认证功能。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from typing import Any, Dict, Optional
 
 import requests
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 飞书 API 基础 URL
 FEISHU_API_BASE = "https://open.feishu.cn/open-apis"

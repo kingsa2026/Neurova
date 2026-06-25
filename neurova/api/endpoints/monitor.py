@@ -10,7 +10,7 @@ from __future__ import annotations
 4. 获取告警信息 (GET /api/v1/monitor/alerts)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import List, Optional
@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from neurova.api.endpoints import get_app_state
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

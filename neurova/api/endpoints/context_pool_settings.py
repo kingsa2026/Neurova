@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from neurova.api.auth import get_current_user
 from neurova.context_pool import ContextPool
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

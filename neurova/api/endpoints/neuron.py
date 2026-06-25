@@ -4,14 +4,14 @@ NEURON 系统 API 端点
 提供依赖图谱、级联推理、缺失推理等 API 接口。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/neuron", tags=["neuron"])
 

@@ -10,7 +10,7 @@ Agent 增强接口 - Agent Enhancement Endpoint
 4. 重启 Agent (POST /api/v1/agents/{id}/restart)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

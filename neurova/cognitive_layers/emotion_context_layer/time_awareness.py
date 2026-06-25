@@ -12,14 +12,14 @@
 from __future__ import annotations
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import math
 import threading
 import time
 from collections import Counter, defaultdict
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TimeAwareness:

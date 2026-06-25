@@ -4,11 +4,11 @@ Schema Module — 数据库 Schema 定义与迁移
 管理 SQLite 数据库的 DDL 创建和旧版本迁移逻辑。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import sqlite3
 import threading
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def init_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:

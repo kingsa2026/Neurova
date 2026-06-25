@@ -10,7 +10,7 @@ Neurova 协作模块隔离管理器
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import shutil
 import threading
 import time
@@ -19,7 +19,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ProjectStatus(str, Enum):

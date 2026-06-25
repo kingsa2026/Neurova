@@ -7,13 +7,13 @@ Neurova CogArch 1.0.0 的核心组件之一
 
 import asyncio
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import typing
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── 数据模型 ──────

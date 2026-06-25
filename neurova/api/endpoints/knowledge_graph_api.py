@@ -2,12 +2,12 @@
 知识图谱接口 - Knowledge Graph API Endpoint
 """
 
-import logging
+from neurova.core.logger import get_logger
 import typing
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

@@ -13,7 +13,7 @@ Muscle Memory - 真正的肌肉记忆系统（条件反射级）
 
 import hashlib
 import json
-import logging
+from neurova.core.logger import get_logger
 import re
 import threading
 import time
@@ -22,7 +22,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class MemoryLevel(Enum):

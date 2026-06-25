@@ -4,7 +4,7 @@
 支持 Twilio 语音通话，含 TTS/STT
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
 from neurova.channels.base import (
@@ -14,7 +14,7 @@ from neurova.channels.base import (
     ChannelMessage,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class VoiceAdapter(ChannelAdapter):

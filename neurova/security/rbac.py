@@ -11,7 +11,7 @@ Neurova 权限管理增强模块 (RBAC)
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import sqlite3
 import threading
 from dataclasses import dataclass, field
@@ -19,7 +19,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class Permission(str, Enum):

@@ -16,7 +16,7 @@ BM25 是信息检索领域的经典排序算法，综合考虑了词频(TF)、�
   - b = 长度归一化参数（通常 0.75）
 """
 
-import logging
+from neurova.core.logger import get_logger
 import math
 import re
 import threading
@@ -24,7 +24,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

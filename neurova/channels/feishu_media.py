@@ -4,10 +4,10 @@
 提供媒体文件上传、下载和处理功能。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 媒体类型映射
 MEDIA_TYPE_MAP = {

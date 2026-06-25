@@ -9,13 +9,13 @@
 - 情感分析集成
 """
 
-import logging
+from neurova.core.logger import get_logger
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

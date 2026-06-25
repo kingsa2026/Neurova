@@ -6,12 +6,12 @@ from __future__ import annotations
 负责将上下文转换为不同模型的格式（OpenAI、Anthropic 等）。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict
 
 from neurova.context.pool_models import ContextInput, ContextSource
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ContextConverter:

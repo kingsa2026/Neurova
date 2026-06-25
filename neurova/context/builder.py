@@ -7,13 +7,13 @@ from __future__ import annotations
 当 UnifiedContextInjector 可用时，ContextBuilder 成为纯代理。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Dict, List, Optional
 
 from .injector import UnifiedContextInjector
 from .models import TokenBudget
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ContextBuilder:

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import os
 import re
 from typing import Any, Optional
 
 from neurova.channels import ContentType, UnifiedMessage
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TelegramAIGenerationMixin:

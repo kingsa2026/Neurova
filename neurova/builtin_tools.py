@@ -8,11 +8,11 @@ BuiltinTools — 内置工具注册器
 - context/orchestrator.py → get_builtin_tool_params
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ═══════════════════════════════════════════════════════════════
 # 内置工具参数 Schema（单一事实源）

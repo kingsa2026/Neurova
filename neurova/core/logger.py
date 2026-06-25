@@ -14,6 +14,7 @@ from __future__ import annotations
 import collections
 import json
 import logging
+import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -30,9 +31,14 @@ class LogLevel(Enum):
     CRITICAL = "CRITICAL"
 
 
+# 统一日志器单例缓存（显式缓存，避免依赖 logging 内部实现）
+_logger_cache: Dict[str, logging.Logger] = {}
+_logger_lock = threading.Lock()
+
+
 def get_logger(name: str = "neurova", level: int = logging.DEBUG) -> logging.Logger:
     """
-    获取指定模块的记录器
+    获取指定模块的记录器（带单例缓存，线程安全）
 
     参数:
         name: 记录器名称（通常是模块的 __name__）
@@ -41,16 +47,20 @@ def get_logger(name: str = "neurova", level: int = logging.DEBUG) -> logging.Log
     返回:
         配置好的 logging.Logger 实例
     """
-    logger = logging.getLogger(name)
-    if not logger.handlers:
-        logger.setLevel(level)
-        # 控制台 handler
-        handler = logging.StreamHandler()
-        handler.setLevel(level)
-        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-    return logger
+    with _logger_lock:
+        if name in _logger_cache:
+            return _logger_cache[name]
+        logger = logging.getLogger(name)
+        if not logger.handlers:
+            logger.setLevel(level)
+            # 控制台 handler
+            handler = logging.StreamHandler()
+            handler.setLevel(level)
+            formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+        _logger_cache[name] = logger
+        return logger
 
 
 def _sanitize_context(context: Dict[str, Any]) -> Dict[str, Any]:
@@ -123,7 +133,7 @@ class LogManager:
             "by_level": {level.value: 0 for level in LogLevel},
             "by_module": defaultdict(int),
         }
-        self._logger = logging.getLogger(__name__)
+        self._logger = get_logger(__name__)
 
     def set_level(self, module: str, level: LogLevel) -> None:
         """设置模块日志级别

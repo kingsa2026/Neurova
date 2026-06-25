@@ -4,14 +4,14 @@
 探测 LLM 模型的能力（流式输出、函数调用、多模态等）
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ModelCapability(Enum):

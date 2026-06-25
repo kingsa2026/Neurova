@@ -11,14 +11,14 @@
 基于关键词规则和上下文分析进行智能分类
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 from .models import EmotionType, MemoryType
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── Enums ──────

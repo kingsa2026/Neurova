@@ -3,11 +3,10 @@ Memory Timeline API - 记忆时间线API
 """
 
 import datetime
-import logging
-
+from neurova.core.logger import get_logger
 from fastapi import APIRouter, Query
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

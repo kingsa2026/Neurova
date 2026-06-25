@@ -1,5 +1,8 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import { secureStorage } from '@/utils/security'
+import bus from '@/bus'
+import logger from '@/utils/logger'
+import config from '@/config'
 
 const TOKEN_KEY = 'auth_token'
 
@@ -25,8 +28,8 @@ function generateRequestId(): string {
  * Create the shared axios instance.
  */
 export const request: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
-  timeout: 300000,
+  baseURL: config.apiBaseUrl,
+  timeout: config.apiTimeout,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -59,7 +62,7 @@ request.interceptors.request.use(
     const url = config.baseURL
       ? `${config.baseURL}${config.url || ''}`
       : config.url || ''
-    console.log(`[API] -> ${method} ${url}  [${requestId}]`)
+    logger.info(`[API] -> ${method} ${url}  [${requestId}]`)
 
     return config
   },
@@ -77,7 +80,7 @@ request.interceptors.response.use(
     const requestId = (response.config as any).__requestId || 'unknown'
     const method = (response.config.method || 'GET').toUpperCase()
     const url = response.config.url || ''
-    console.log(`[API] <- ${method} ${url}  ${response.status}  [${requestId}]`)
+    logger.info(`[API] <- ${method} ${url}  ${response.status}  [${requestId}]`)
     return response.data
   },
   (error) => {
@@ -92,23 +95,20 @@ request.interceptors.response.use(
         window.location.href = '/login'
       }
       // Don't treat expired/missing token as a real error — it's expected on page load
-      console.warn(`[API] 401 Auth required [${requestId}] → redirecting to login`)
+      logger.warn(`[API] 401 Auth required [${requestId}] → redirecting to login`)
     } else if (status === 429) {
       const retryAfter = error.response?.headers?.['retry-after']
       const msg = retryAfter
         ? `Rate limit exceeded. Retry after ${retryAfter}s.`
         : 'Rate limit exceeded. Please slow down.'
-      console.warn(`[API] 429 Rate Limited [${requestId}]: ${msg}`)
-      // Surface a lightweight notification via a custom DOM event so any
-      // page can listen without importing a specific UI library.
-      window.dispatchEvent(
-        new CustomEvent('api:rate-limited', { detail: { requestId, retryAfter, message: msg } }),
-      )
+      logger.warn(`[API] 429 Rate Limited [${requestId}]: ${msg}`)
+      // 通过统一事件总线通知（替代 window.dispatchEvent）
+      bus.emit('api:rate-limited', { requestId, retryAfter, message: msg })
     }
 
     // Only log non-auth errors (auth errors are handled above)
     if (status !== 401) {
-      console.error(`[API] !! ${error.config?.method?.toUpperCase()} ${error.config?.url}  ${status || 'network'}  [${requestId}]`)
+      logger.error(`[API] !! ${error.config?.method?.toUpperCase()} ${error.config?.url}  ${status || 'network'}  [${requestId}]`)
     }
     return Promise.reject(error)
   },

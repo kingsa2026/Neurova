@@ -12,13 +12,13 @@ from __future__ import annotations
 - GET /v1/health/report - 获取详细健康报告
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

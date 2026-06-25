@@ -11,7 +11,7 @@ Benchmark 基准测试框架 v1.0.0 - 真实测试数据版本
 5. 查看某 Agent 的评测历史
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 import uuid
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BenchmarkStatus(Enum):

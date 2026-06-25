@@ -5,13 +5,13 @@ Agent Loop 基类 - 定义标准接口
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BaseAgentLoop(ABC):

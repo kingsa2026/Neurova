@@ -7,13 +7,13 @@
 - 检索策略规划
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class QuestionType(Enum):

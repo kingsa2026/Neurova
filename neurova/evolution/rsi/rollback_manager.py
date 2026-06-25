@@ -4,12 +4,12 @@ RSI 回滚管理器
 RSI 风险较高，必须具备自动回滚机制
 """
 
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RSIRollbackManager:

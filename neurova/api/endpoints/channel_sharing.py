@@ -13,14 +13,14 @@
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

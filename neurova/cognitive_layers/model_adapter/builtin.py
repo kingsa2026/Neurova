@@ -5,7 +5,7 @@
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 
@@ -16,7 +16,7 @@ from neurova.cognitive_layers.model_adapter.registry import (
     get_model_adapter_registry,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class DeepSeekAdapter(BaseModelAdapter):

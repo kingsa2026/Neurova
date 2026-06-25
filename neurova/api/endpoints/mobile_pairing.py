@@ -16,8 +16,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import logging
-import os
+from neurova.core import config
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import Any, Dict, Optional, Set
@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
 
@@ -103,7 +103,7 @@ _user_devices: Dict[str, Set[str]] = {}  # user_id -> set of pairing_ids
 _ws_connections: Dict[str, WebSocket] = {}  # user_id -> WebSocket
 
 # HMAC 密钥（用于生成 WS Token）
-_WS_SECRET = os.environ.get("NEUROVA_WS_SECRET", "neurova-ws-secret-key-2026")
+_WS_SECRET = config.get("NEUROVA_WS_SECRET", "neurova-ws-secret-key-2026")
 
 
 # ---------------------------------------------------------------------------

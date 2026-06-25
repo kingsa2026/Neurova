@@ -13,7 +13,7 @@ MCP Client、Tool Router 管理接口:
 - GET    /v1/tool-layers/tools/public               公共工具库
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from neurova.execution_engine.tool_engine import ToolEngine, ToolStatus
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 # 全局 ToolEngine 实例

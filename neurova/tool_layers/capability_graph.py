@@ -9,12 +9,12 @@ Tool Capability Graph v1.0.0 — 工具能力关系图
 隔离层级: 与 ToolRouter 平级，通过能力图适配器集成
 """
 
-import logging
+from neurova.core.logger import get_logger
 import typing
 from collections import deque
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

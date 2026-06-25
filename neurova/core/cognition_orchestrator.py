@@ -16,7 +16,7 @@
 import copy
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 import typing
@@ -25,7 +25,7 @@ from enum import Enum
 from pathlib import Path
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── 数据模型 ──────

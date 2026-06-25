@@ -11,13 +11,13 @@ Phase 2 P2-4: 使用进化算法自动发现和优化工具组合。
   - Validation: 沙箱验证 → 新工具 N 次验证后通过率 > 阈值才注册
 """
 
-import logging
+from neurova.core.logger import get_logger
 import math
 import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

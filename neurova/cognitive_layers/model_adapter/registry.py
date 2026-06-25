@@ -5,7 +5,7 @@ ModelAdapterRegistry — 模型适配器注册表
 所有用户/Agent 共享同一套适配器池（无状态路由）。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 import typing
 
@@ -14,7 +14,7 @@ from pydantic import BaseModel
 # llm_client imports
 from neurova.llm_client import LLMClient, LLMConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ModelAdapter(BaseModel):

@@ -12,7 +12,7 @@ Enhanced Memory Retrieval System - 增强版记忆检索系统
 from __future__ import annotations
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import math
 import threading
 import time
@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ActivationType(str, Enum):

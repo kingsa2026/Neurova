@@ -13,7 +13,7 @@ from __future__ import annotations
 7. 移除成员 (DELETE /api/v1/groups/{id}/members/{user_id})
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import List, Optional
@@ -21,7 +21,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

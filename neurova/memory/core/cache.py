@@ -4,14 +4,14 @@
 提供基于 LRU 策略的内存缓存，支持 TTL 过期、线程安全、容量限制。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

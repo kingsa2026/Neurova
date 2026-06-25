@@ -3,13 +3,13 @@ Shared Config API - 共享配置管理接口
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import typing
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

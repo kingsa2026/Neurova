@@ -8,13 +8,13 @@
 - 压缩和归档
 """
 
-import logging
+from neurova.core.logger import get_logger
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:

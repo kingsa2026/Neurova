@@ -10,14 +10,14 @@
 设计模式: Pipeline + Strategy
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

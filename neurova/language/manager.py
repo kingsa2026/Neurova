@@ -10,7 +10,7 @@ Neurova Language 管理器
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from pathlib import Path
@@ -25,7 +25,7 @@ from neurova.language.models import (
     UserLanguagePreference,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LanguageManager:

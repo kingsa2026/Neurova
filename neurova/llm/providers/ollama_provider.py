@@ -6,7 +6,7 @@ Ollama Provider
 支持本地 Ollama 服务
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import typing
 
@@ -29,7 +29,7 @@ except ImportError:
     langchain_community = None
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class OllamaProvider(BaseProvider):

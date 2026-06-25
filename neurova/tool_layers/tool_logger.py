@@ -9,13 +9,13 @@ Tool Execution Logger v1.0.0 — 结构化工具执行日志
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import time
 import typing
 from dataclasses import dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

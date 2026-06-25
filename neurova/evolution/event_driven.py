@@ -11,7 +11,7 @@
   experience.recorded → EvolutionEventBridge → EvolutionOrchestrator → evolution.cycle.completed
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 from neurova.core.event_bus import Event, EventBus, Subscription
 from neurova.core.event_bus_enhanced import EventBusEnhanced
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
