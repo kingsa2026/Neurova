@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict
 
 from neurova.channels import ChannelAdapter, MessageChannel
@@ -14,7 +14,7 @@ from neurova.channels.telegram_chat_management import TelegramChatManagementMixi
 from neurova.channels.telegram_message_management import TelegramMessageManagementMixin
 from neurova.channels.telegram_ai_generation import TelegramAIGenerationMixin
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 try:
     import requests  # type: ignore[import-not-found]

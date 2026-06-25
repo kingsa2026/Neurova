@@ -9,12 +9,12 @@
 
 import hashlib
 import json
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

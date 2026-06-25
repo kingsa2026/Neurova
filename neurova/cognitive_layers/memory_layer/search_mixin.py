@@ -5,13 +5,13 @@
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SearchMixin:

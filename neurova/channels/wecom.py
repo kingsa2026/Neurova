@@ -16,7 +16,7 @@ API 参考:
 
 import asyncio
 import hashlib
-import logging
+from neurova.core.logger import get_logger
 import time
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, Optional
@@ -27,7 +27,7 @@ from neurova.channels.base import (
     ChannelEventType,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WeComAdapter(ChannelAdapter):

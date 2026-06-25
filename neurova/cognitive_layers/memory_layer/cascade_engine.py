@@ -7,13 +7,13 @@
 对应 MEEM 基准测试中的 Cascade (Cas) 任务。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CascadeDirection(Enum):

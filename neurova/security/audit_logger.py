@@ -18,7 +18,7 @@ Neurova 安全审计日志模块
 import csv
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import sqlite3
 import threading
 import time
@@ -27,7 +27,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AuditEventType(str, Enum):

@@ -3,7 +3,7 @@ Neurflow 执行引擎 — 垂直切片 6
 工作流执行、节点调度、变量传递、事件通知
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -21,7 +21,7 @@ from .models import (
 from .node_registry import get_node_registry
 from .variable_resolver import ResolutionContext, get_variable_resolver
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ExecutionStatus(Enum):

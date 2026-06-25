@@ -10,12 +10,12 @@ Neurflow 适配器模块 — 自动发现适配器
 - 遵循 TDD 原则，所有转换逻辑可独立测试
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict
 
 from .models import NodeDefinition
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ==================== 参数类型映射 ====================

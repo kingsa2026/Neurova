@@ -15,7 +15,7 @@ from __future__ import annotations
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 from pathlib import Path
 from typing import Any, Dict
 
@@ -37,7 +37,7 @@ from neurova.channels.wechat import create_wechat_adapter
 from neurova.channels.wecom import create_wecom_adapter
 from neurova.channels.xiaoyi import create_xiaoyi_adapter
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/channel-configs", tags=["渠道配置"])
 

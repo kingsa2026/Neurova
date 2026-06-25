@@ -6,13 +6,13 @@ from __future__ import annotations
 从内容和来源自动生成标签。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 from typing import List, Set
 
 from neurova.context.pool_models import ContextInput, ContextSource
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AutoTagger:

@@ -8,8 +8,9 @@ API 文档: https://developer.huawei.com/consumer/cn/
 
 import asyncio
 import hashlib
+import hmac
 import json
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -19,7 +20,7 @@ import websockets
 
 from .base import ChannelAdapter, ChannelConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class XiaoYiAdapter(ChannelAdapter):

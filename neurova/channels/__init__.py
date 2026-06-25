@@ -11,9 +11,8 @@ Neurova 渠道集成模块
     manager.start()
 """
 
-import logging
-
-_logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+_logger = get_logger(__name__)
 
 try:
     from neurova.channels.base import (

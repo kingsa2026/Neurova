@@ -88,3 +88,21 @@ export function shareSkill(skillId: string) {
 export function pushSkill(skillId: string) {
   return api.post<ApiResponse<null>>(`${BASE}/${skillId}/push`)
 }
+
+// ---------------------------------------------------------------------------
+// Skill Market (ZIP / Remote Install)
+// ---------------------------------------------------------------------------
+
+/** Install a skill from a remote URL. */
+export function installSkillFromUrl(url: string, version?: string) {
+  return api.post<ApiResponse<{ url: string }>>('/skill-market/install', { url, version })
+}
+
+/** Install a skill from a ZIP file upload. */
+export function installSkillFromZip(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post<ApiResponse<{ message: string }>>('/skill-market/install/zip', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}

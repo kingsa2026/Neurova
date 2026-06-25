@@ -16,7 +16,7 @@ import datetime
 import hashlib
 import hmac
 import json
-import logging
+from neurova.core.logger import get_logger
 import secrets
 import threading
 import uuid
@@ -24,7 +24,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 DEFAULT_GROUP_TYPE = "user"

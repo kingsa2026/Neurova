@@ -10,13 +10,13 @@ GraphChannel — 图通道（关系图谱）
 基于KnowledgeGraphManager实现。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 from typing import Dict, List, Optional, Set
 
 from ..base import BaseChannel, ChannelMetadata, ChannelResult
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class GraphChannel(BaseChannel):

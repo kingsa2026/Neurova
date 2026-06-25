@@ -10,13 +10,13 @@ GET    /settings/export       导出当前配置 JSON
 PUT    /settings/import       导入配置 JSON
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

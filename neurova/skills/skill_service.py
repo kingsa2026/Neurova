@@ -11,7 +11,7 @@ Agent 技能服务 (SkillService)
 import datetime
 import importlib.util
 import json
-import logging
+from neurova.core.logger import get_logger
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -40,7 +40,7 @@ class SkillService:
         self.skills_dir = Path(skills_dir) if skills_dir else Path(f"data/agents/{agent_id}/skills")
         self.manifest_path = self.skills_dir / "manifest.json"
         self._skills: Dict[str, Dict[str, Any]] = {}
-        self._logger = logging.getLogger(__name__)
+        self._logger = get_logger(__name__)
 
         # 确保目录存在
         self.skills_dir.mkdir(parents=True, exist_ok=True)

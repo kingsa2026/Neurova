@@ -5,9 +5,8 @@
 包含递归自我进化（RSI）核心机制。
 """
 
-import logging
-
-_logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+_logger = get_logger(__name__)
 
 try:
     from .closed_loop import (

@@ -5,13 +5,13 @@ Agent Loop 注册机制
 Agent 根据模型名称自动选择合适的 Loop。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 from typing import Dict, List, Optional, Type
 
 from neurova.agent.loops.base import BaseAgentLoop
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 全局 Loop 注册表
 LOOP_REGISTRY: List[Dict] = []

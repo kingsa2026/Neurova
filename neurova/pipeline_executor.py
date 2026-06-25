@@ -5,11 +5,11 @@ PipelineExecutor — 简化的对话后处理管线
 遵循深度模块原则：小接口，深实现。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

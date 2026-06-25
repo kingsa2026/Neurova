@@ -4,12 +4,12 @@
 将工具使用经验与知识图谱关联，形成完整的"知识→行为→结果"推理链。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

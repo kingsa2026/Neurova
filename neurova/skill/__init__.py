@@ -6,9 +6,8 @@ Skill模块兼容性层
 """
 
 import importlib
-import logging
-
-logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+logger = get_logger(__name__)
 
 # ---- 安全的懒导入（避免硬依赖导致整个命名空间崩溃） ----
 

@@ -5,7 +5,7 @@
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -15,7 +15,7 @@ import httpx
 
 from neurova.knowledge.config import get_knowledge_config
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ContentType(str, Enum):

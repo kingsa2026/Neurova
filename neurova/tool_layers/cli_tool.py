@@ -9,14 +9,14 @@ CLI Tool Executor v1.0.0 — 独立的命令行工具模块
 隔离层级: 与 ToolRouter/ToolEngine 平级，通过统一 Schema 注册
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 import shlex
 import subprocess
 import time
 import typing
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CLIToolExecutor:

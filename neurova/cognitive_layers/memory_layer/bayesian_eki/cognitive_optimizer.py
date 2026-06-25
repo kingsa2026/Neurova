@@ -9,14 +9,14 @@ EKI认知优化器 - 核心编排器
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import math
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # E-1: 正确检查 numpy 是否可用
 try:
@@ -265,7 +265,7 @@ class EKICognitiveOptimizer:
         return value, score, confidence
 
     def _compute_information_gain(self, content: str, context: Optional[Dict[str, Any]] = None) -> float:
-        """计算信息增益"""
+        """计算信息增益（⚠️ 简化实现：非真正信息增益，基于词汇丰富度）"""
         # 简化实现：基于内容的新颖性和复杂度
         words = content.split()
         unique_words = len(set(words))
@@ -400,12 +400,16 @@ class EKICognitiveOptimizer:
             self._total_reinforcements += len(updates)
 
     def _flush_updates(self):
-        """刷新所有待处理的更新"""
-        # 当前实现实时更新，此方法用于未来扩展
+        """刷新所有待处理的更新
+
+        Raises:
+            NotImplementedError: 当前实现实时更新，此方法未实现
+        """
+        raise NotImplementedError("flush_updates not implemented - real-time updates used")
 
     def train_surrogate(self, training_data: List[Tuple[str, float]]):
         """
-        训练代理模型
+        训练代理模型（⚠️ 简化实现：非高斯过程代理模型）
 
         参数:
             training_data: List of (content, target_score)

@@ -7,7 +7,7 @@ Neurova 认证系统 (Auth System) 2.0
 
 import hashlib
 import json
-import logging
+from neurova.core.logger import get_logger
 import secrets
 import sqlite3
 import time
@@ -16,7 +16,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class UserRole(str, Enum):

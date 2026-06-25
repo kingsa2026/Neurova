@@ -13,14 +13,14 @@ from __future__ import annotations
 7. 邀请注册 (POST /api/v1/auth/register/invite)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

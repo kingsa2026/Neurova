@@ -6,9 +6,10 @@
 
 import sqlite3
 import logging
+from neurova.core.logger import get_logger
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # 需要添加索引的表和列

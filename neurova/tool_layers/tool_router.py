@@ -11,11 +11,11 @@ Tool Router v1.0.0 — 统一工具路由器
 
 import asyncio
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import typing
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -74,6 +74,7 @@ class ToolRouter:
         self._builtin_tools: typing.Dict[str, typing.Any] = {}
         self._skill_manager: typing.Optional[typing.Any] = None
         self._execution_engine: typing.Optional[typing.Any] = None
+        self._tool_executor: typing.Optional[typing.Any] = None
         self._mcp_clients: typing.Dict[str, typing.Any] = {}
         self._mcp_configs: typing.Dict[str, typing.Dict] = {}
         self._tool_metadata: typing.Dict[str, typing.Dict] = {}
@@ -122,6 +123,16 @@ class ToolRouter:
         """
         self._execution_engine = execution_engine
         logger.debug("Execution engine set")
+
+    def set_tool_executor(self, tool_executor: typing.Any) -> None:
+        """
+        设置工具执行器（用于内置工具的委托执行）
+
+        Args:
+            tool_executor: ToolExecutor 实例
+        """
+        self._tool_executor = tool_executor
+        logger.debug("Tool executor set")
 
     def get_or_create_mcp(self, server_id: str, config: typing.Dict[str, typing.Any]) -> typing.Any:
         """
@@ -505,5 +516,14 @@ class ToolRouter:
                 return await tool.execute(params)
             else:
                 return tool.execute(params)
-        else:
-            raise ValueError(f"Tool {tool.name} does not have an execute method")
+
+        # [BUGFIX] BuiltinTool 是纯数据类，没有 execute() 方法
+        # 委托给 ToolExecutor 执行（它有完整的 builtin tool 实现）
+        if self._tool_executor and hasattr(tool, "name"):
+            try:
+                return await self._tool_executor._execute_builtin_tool(tool.name, params)
+            except Exception as e:
+                logger.warning("ToolExecutor builtin 执行失败: %s, %s", tool.name, e)
+                raise
+
+        raise ValueError(f"Tool {getattr(tool, 'name', '?')} does not have an execute method and no tool_executor available")

@@ -16,7 +16,7 @@ REST API：
 from __future__ import annotations
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -30,7 +30,7 @@ from neurova.sync.session_sync_manager import (
     get_session_sync_manager,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

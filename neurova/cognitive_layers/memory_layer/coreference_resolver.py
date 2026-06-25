@@ -4,10 +4,10 @@
 解决代词/同义词问题，将 "它"、"这个" 链接到具体实体。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CoreferenceResolver:

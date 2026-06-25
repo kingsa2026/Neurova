@@ -17,6 +17,9 @@ Neurova API Server - 应用入口
 """
 
 import logging
+
+from neurova.core import config
+from neurova.core.logger import get_logger
 import os
 import threading
 import time
@@ -26,7 +29,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AppState:
@@ -777,9 +780,9 @@ def run_server(
         pass
 
     # 从环境变量读取配置
-    host = os.getenv("NEUROVA_HOST", host)
-    port = int(os.getenv("NEUROVA_PORT", port))
-    debug = os.getenv("NEUROVA_DEBUG", "false").lower() == "true" or debug
+    host = config.get("NEUROVA_HOST", host)
+    port = config.get_int("NEUROVA_PORT", port)
+    debug = config.get_bool("NEUROVA_DEBUG", False) or debug
 
     # 创建应用
     app = create_app(host=host, port=port, debug=debug)

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import logging
+from neurova.core.logger import get_logger
 import threading
 import typing
 from dataclasses import dataclass, field
@@ -25,7 +25,7 @@ from typing import Type
 from neurova.core.logger import LogLevel
 from neurova.core.module_system import Module
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── 数据模型 ──────

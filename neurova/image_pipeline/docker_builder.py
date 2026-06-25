@@ -10,14 +10,14 @@ Docker Builder 深度模块
 支持平台、构建参数、错误处理。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import subprocess
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

@@ -9,14 +9,14 @@ Agent 能力发现协议模块
 4. 任务-能力匹配
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CapabilityCategory(str, Enum):

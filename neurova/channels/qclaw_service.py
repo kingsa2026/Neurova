@@ -9,7 +9,7 @@ QClaw 服务类
 """
 
 import hashlib
-import logging
+from neurova.core.logger import get_logger
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
@@ -24,7 +24,7 @@ except ImportError:
 
 from neurova.auth.qclaw_binding_model import QClawBindingModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # QClaw 网关地址（应配置化，不要硬编码）
 QCLAW_API_BASE = "https://jprx.m.qq.com"

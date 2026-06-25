@@ -9,14 +9,14 @@
 5. 温度衰减调度 - 定期执行温度更新
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.mem_core import Memory
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

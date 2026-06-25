@@ -9,11 +9,11 @@
 """
 
 import hashlib
-import logging
+from neurova.core.logger import get_logger
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SemanticSearch:

@@ -6,7 +6,7 @@ Whisper Engine - OpenAI Whisper 音频理解引擎
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from pathlib import Path
@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 from neurova.asr.base import ASRBase
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WhisperEngine(ASRBase):

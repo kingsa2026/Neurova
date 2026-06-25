@@ -10,7 +10,7 @@ from __future__ import annotations
 4. 视频生成 (POST /api/v1/generation/video)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from typing import Optional
 
@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from neurova.api.endpoints import get_agent_instance, get_app_state
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

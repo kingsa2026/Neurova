@@ -4,7 +4,7 @@ LM Studio Provider
 支持本地 LM Studio 服务
 """
 
-import logging
+from neurova.core.logger import get_logger
 import typing
 from typing import Any, Dict
 
@@ -22,7 +22,7 @@ except ImportError:
     ChatOpenAI = None
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LMStudioProvider(BaseProvider):

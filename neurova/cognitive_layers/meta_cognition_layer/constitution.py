@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import uuid
 from dataclasses import dataclass
@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.base_module import BaseModule, ModuleState
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _new_id(prefix: str = "") -> str:

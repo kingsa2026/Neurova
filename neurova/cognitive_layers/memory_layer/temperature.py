@@ -9,11 +9,11 @@
 - 贝叶斯遗忘概率
 """
 
-import logging
+from neurova.core.logger import get_logger
 import math
 from typing import Any, Dict
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _validate_temp(value: float, name: str = "temperature") -> float:

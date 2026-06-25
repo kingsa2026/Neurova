@@ -22,7 +22,7 @@ PostChatPipeline — 对话后处理管线
 - 可独立测试
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -41,7 +41,7 @@ except ImportError:
         LEARNING = "learning"
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class StepStatus(str, Enum):
@@ -320,6 +320,12 @@ class PostChatPipeline:
 
         # 步骤 9.95: 记忆版本快照
         await self._safe_step("version_snapshot", self._step_version_snapshot(user_input))
+
+        # 步骤 9.96: 从对话提取规则并关联经验记忆
+        await self._safe_step(
+            "extract_conversation_rules",
+            self._step_extract_conversation_rules(user_input, reply, actual_session_id),
+        )
 
         # 步骤 10: 主动提问决策
         proactive_question = await self._safe_step(

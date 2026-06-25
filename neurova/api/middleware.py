@@ -10,7 +10,8 @@ FastAPI 中间件集合
 - 认证中间件
 """
 
-import logging
+from neurova.core import config
+from neurova.core.logger import get_logger
 import time
 import uuid
 
@@ -20,7 +21,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -152,11 +153,10 @@ def _load_cors_origins_from_config() -> list:
     3. 默认值
     """
     import json as _json
-    import os as _os
     from pathlib import Path
 
     # 1. 检查环境变量
-    cors_origins_env = _os.getenv("NEUROVA_CORS_ORIGINS", "")
+    cors_origins_env = config.get("NEUROVA_CORS_ORIGINS", "")
     if cors_origins_env:
         return [o.strip() for o in cors_origins_env.split(",") if o.strip()]
 

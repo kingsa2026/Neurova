@@ -12,14 +12,14 @@ from __future__ import annotations
 - ChannelManager 负责生命周期和路由
 """
 
-import logging
+from neurova.core.logger import get_logger
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Coroutine, Dict, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ============================================================
 # 数据模型

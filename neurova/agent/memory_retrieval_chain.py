@@ -16,7 +16,7 @@ MemoryRetrievalChain 深度模块 - 记忆检索责任链
 
 import asyncio
 import hashlib
-import logging
+from neurova.core.logger import get_logger
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RetrievalQuality(Enum):

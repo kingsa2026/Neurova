@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 try:
-    import re
+    import requests
 
     REQUESTS_AVAILABLE = True
 except ImportError:

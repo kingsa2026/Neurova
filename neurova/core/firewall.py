@@ -11,7 +11,7 @@ L2: 文件访问保护
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import re
 import threading
 import time
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

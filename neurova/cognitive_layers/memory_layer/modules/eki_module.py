@@ -6,12 +6,12 @@ EKIModule — 集合卡尔曼反演模块
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import math
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class EKIModule:

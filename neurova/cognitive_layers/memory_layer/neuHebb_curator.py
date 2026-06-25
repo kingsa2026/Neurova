@@ -9,13 +9,13 @@ NeuHebbCurator — Neurova Hebb 检索与排序器
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import math
 from typing import Callable, List, Optional, Tuple
 
 from .neurova_hebb import NeuHebbConfig, NeuHebbMem, NeurovaHebb
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class NeuHebbCurator:

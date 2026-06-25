@@ -12,13 +12,13 @@
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from typing import Any, Dict, Optional
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AutoContextUpdater:

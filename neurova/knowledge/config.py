@@ -3,15 +3,15 @@
 """
 
 import json
-import logging
-import os
+from neurova.core import config
+from neurova.core.logger import get_logger
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FlowKBConfig(BaseModel):
@@ -228,7 +228,7 @@ def save_knowledge_config(config: KnowledgeBaseConfig, config_path: Optional[Pat
 def _find_config_file() -> Optional[Path]:
     """查找配置文件"""
     # 检查环境变量
-    env_path = os.environ.get("NEUROVA_KNOWLEDGE_CONFIG")
+    env_path = config.get("NEUROVA_KNOWLEDGE_CONFIG")
     if env_path:
         return Path(env_path)
 

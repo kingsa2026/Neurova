@@ -6,14 +6,14 @@ MetaCognitionModule — 元认知模块
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CognitiveProcess(str, Enum):

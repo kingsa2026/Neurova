@@ -25,11 +25,11 @@ OpenAI Tool Schema 标准格式:
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import typing
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

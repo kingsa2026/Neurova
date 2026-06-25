@@ -11,14 +11,14 @@
 7. ToolLifecycleManager (tool_lifecycle.py) - 工具生命周期管理（完整版）
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

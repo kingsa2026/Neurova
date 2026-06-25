@@ -8,15 +8,12 @@ D1 任务重构版本：
 - 保留 chat 方法用于底层对话生成
 """
 
-import logging
-import sys
+from neurova.core.logger import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# 添加项目根目录到 sys.path (用于导入 agent.loops)
-project_root = Path(__file__).parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
+# BE-CORE-003 修复: 下方 except 分支使用 logging.warning()，需导入 logging
+import logging
 
 from neurova.context import ContextOrchestrator
 from neurova.core.idle_tracker import IdleTimeTracker
@@ -89,7 +86,7 @@ except ImportError:
     AGENT_LOOP_AVAILABLE = False
     logging.warning("Agent Loop system not available, will use legacy chat methods")
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def debug_log(msg: str) -> None:
@@ -312,19 +309,79 @@ class SubSystemContainer:
         self.config = agent.config
 
     def init_all(self):
-        """按顺序初始化所有子系统"""
-        self.init_memory()
-        self.init_context()
-        self.init_conversation()
-        self.init_management()
-        self.init_voice()
-        self.init_security()
-        self.init_cognition()
-        self.init_evolution()
-        self.init_tools()
-        self.init_pipeline()
-        self.init_loop()
-        self._load_api_keys()
+        """按依赖顺序初始化所有子系统
+
+        使用 InitializationManager 进行拓扑排序, 自动解析依赖关系。
+        依赖图见 _build_dependency_graph()。
+        """
+        order = self._compute_initialization_order()
+
+        # 子系统名 → init 方法映射
+        init_methods = {
+            "memory": self.init_memory,
+            "context": self.init_context,
+            "conversation": self.init_conversation,
+            "management": self.init_management,
+            "voice": self.init_voice,
+            "security": self.init_security,
+            "cognition": self.init_cognition,
+            "evolution": self.init_evolution,
+            "tools": self.init_tools,
+            "pipeline": self.init_pipeline,
+            "loop": self.init_loop,
+            "api_keys": self._load_api_keys,
+        }
+
+        for name in order:
+            method = init_methods.get(name)
+            if method:
+                method()
+
+    def _build_dependency_graph(self) -> Dict[str, List[str]]:
+        """返回子系统依赖图 (基于实际代码分析)
+
+        每个子系统声明其初始化依赖的其他子系统。
+        InitializationManager 使用此图进行拓扑排序。
+
+        依赖关系来源 (代码级证据):
+          - context: 调用 context_orchestrator.init_context_system() (memory 中设置)
+          - voice: 使用 a.memory_manager 和 a.evolution (evolution_orchestrator)
+          - cognition: 使用 a.memory_manager
+          - evolution: 使用 a.tool_memory (memory) 和 a._skill_registry (management)
+          - tools: 使用 a.memory_manager 和 a._skill_registry (management)
+          - pipeline: PostChatPipeline/ChatPipeline 需要 memory/context/tools
+          - loop: LoopManager 需要 agent 已完全初始化 (pipeline)
+        """
+        return {
+            "memory": [],
+            "context": ["memory"],
+            "conversation": [],
+            "management": [],
+            "voice": ["memory", "evolution"],
+            "security": [],
+            "cognition": ["memory"],
+            "evolution": ["memory", "management"],
+            "tools": ["memory", "management"],
+            "pipeline": ["memory", "context", "tools"],
+            "loop": ["pipeline"],
+            "api_keys": [],
+        }
+
+    def _compute_initialization_order(self) -> List[str]:
+        """使用 InitializationManager 计算初始化顺序
+
+        Returns:
+            按依赖顺序排列的子系统名列表
+
+        Raises:
+            ValueError: 如果检测到循环依赖
+        """
+        from neurova.agent.initialization_manager import InitializationManager
+
+        im = InitializationManager()
+        for name, deps in self._build_dependency_graph().items():
+            im.register(name, lambda: None, deps=deps)
+        return im.get_initialization_order()
 
     def init_memory(self):
         """初始化记忆模块"""
@@ -607,7 +664,7 @@ class SubSystemContainer:
                 if a._skill_registry:
                     skill = a._skill_registry.get_skill(tool_name)
                     if skill:
-                        result = a._skill_registry.execute_skill(tool_name, params)
+                        result = await a._skill_registry.execute_skill(tool_name, params)
                         if result.success:
                             return {"success": True, "data": result.data}
                         return {"success": False, "error": result.error}
@@ -635,6 +692,10 @@ class SubSystemContainer:
             logger.warning("ToolMarketplace 初始化失败: %s", e)
 
         a.tool_executor = ToolExecutor(a)
+
+        # [BUGFIX] 将 ToolExecutor 引用注入 ToolRouter，使内置工具可执行
+        if a.tool_router and a.tool_executor:
+            a.tool_router.set_tool_executor(a.tool_executor)
 
     def init_pipeline(self):
         """初始化管线"""

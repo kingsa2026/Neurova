@@ -10,7 +10,7 @@ GrowthLogManager - 反思日志管理器
 - 与 MemoryManager 集成
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import typing
 import uuid
@@ -129,7 +129,7 @@ class GrowthLogManager:
         self.memory_manager = memory_manager
         self.max_logs = max_logs
         self._cache: typing.Dict[str, ReflectionLogEntry] = {}
-        self._logger = logging.getLogger(__name__)
+        self._logger = get_logger(__name__)
         self._initialized = False
 
     async def on_initialize(self) -> None:

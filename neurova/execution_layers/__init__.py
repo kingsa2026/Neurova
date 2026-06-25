@@ -10,7 +10,7 @@ Execution Runtime + Transport Abstraction v1.0.0
   - CloudFunctionExecutor  - gRPCTransport
 """
 
-import logging
+from neurova.core.logger import get_logger
 import os
 import subprocess
 import threading
@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RuntimeType(Enum):

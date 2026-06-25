@@ -13,7 +13,7 @@ Image 定义管道 API 端点 v1.0.0
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from typing import Any, Dict, List, Optional
 
@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from neurova.image_pipeline import get_image_pipeline_manager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

@@ -12,7 +12,7 @@
 - PUT    /v1/enhanced-users/{user_id}/password 修改密码
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

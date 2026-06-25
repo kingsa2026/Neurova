@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from typing import Any, Dict, List
 
@@ -22,7 +22,7 @@ from .models import (
     StepStatus,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SkillChainExecutor:

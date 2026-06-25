@@ -17,14 +17,14 @@ from __future__ import annotations
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 import typing
 from dataclasses import dataclass, field
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── 数据模型 ──────

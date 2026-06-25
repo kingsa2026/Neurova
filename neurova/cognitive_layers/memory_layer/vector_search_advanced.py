@@ -6,7 +6,7 @@
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import math
 import os
 import pickle
@@ -42,7 +42,7 @@ try:
 except ImportError:
     HAS_SENTENCE_TRANSFORMERS = False
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── 基类 ──────

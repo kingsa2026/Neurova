@@ -6,7 +6,7 @@ MemorySettingsConfig — 记忆系统统一配置中心
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import os
 import threading
 from copy import deepcopy
@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # 参数 Schema：定义所有可调参数的元信息

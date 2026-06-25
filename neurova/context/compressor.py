@@ -6,12 +6,12 @@ from __future__ import annotations
 负责压缩上下文列表以适应 Token 预算。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import List, Optional
 
 from neurova.context.pool_models import ContextInput
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ContextCompressor:

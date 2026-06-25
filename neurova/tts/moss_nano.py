@@ -10,7 +10,7 @@ MOSS Nano TTS - MOSS-TTS-Nano ONNX 推理引擎
 
 import asyncio
 import io
-import logging
+from neurova.core.logger import get_logger
 import struct
 import threading
 import time
@@ -25,7 +25,7 @@ except ImportError:
 from neurova.tts.base import TTSBase
 from neurova.tts.model_downloader import ModelDownloader, get_model_downloader
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _create_wav_bytes(

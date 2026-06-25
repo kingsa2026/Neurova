@@ -4,13 +4,13 @@ Agent Builder v1.0.0 — 声明式 Agent 构建器
 隔离层级: 工具全局 + 产物用户层
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 from .templates.personality_templates import PersonalityTemplate
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

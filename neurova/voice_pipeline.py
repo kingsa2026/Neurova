@@ -13,12 +13,12 @@ UnifiedVoicePipeline — 统一语音处理管线
 - 接缝设计：在语音处理与上下文/记忆之间创建清晰接缝
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

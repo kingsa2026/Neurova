@@ -4,7 +4,7 @@
 
 import datetime
 import hashlib
-import logging
+from neurova.core.logger import get_logger
 import secrets
 import typing
 import uuid
@@ -12,7 +12,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

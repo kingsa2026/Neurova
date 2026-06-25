@@ -4,10 +4,10 @@
 这个模块提供向后兼容的接口，让现有代码能够平滑过渡到新的四层情感分类体系。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class EmotionAnalyzerAdapter:

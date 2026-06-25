@@ -6,13 +6,13 @@
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 _VALID_PLAN_STATUSES = {"planned", "running", "completed", "failed", "cancelled"}

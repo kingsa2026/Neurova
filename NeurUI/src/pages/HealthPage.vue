@@ -127,7 +127,7 @@ const runCheck = async (name: string) => {
 
 const recover = async (name: string) => {
   try {
-    await request.post(`/health/recover/${name}`)
+    await healthApi.recoverSubsystem(name)
     message.success(t('common.success'))
     await fetchHealth()
   } catch {

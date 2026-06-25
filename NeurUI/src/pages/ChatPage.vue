@@ -412,10 +412,12 @@
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAgentPage } from '@/composables/useAgentPage'
+import { useASRRestartGuard } from '@/composables/useASRRestartGuard'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import { deleteConsoleSession } from '@/api/modules/console'
 import { secureStorage } from '@/utils/security'
+import { uiMessage } from '@/utils/message'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
 
@@ -492,8 +494,12 @@ const asrAvailable = ref(false)
 const isRecording = ref(false)
 const recordingTimeStr = ref('0:00')
 let recognition: any = null
+// Guard against infinite ASR auto-restart when the recognizer keeps dying.
+const asrRestartGuard = useASRRestartGuard(3)
 let recordingTimer: ReturnType<typeof setInterval> | null = null
 let recordingSeconds = 0
+// Timer for the delayed ASR restart (breaks tight onend→start loops)
+let asrRestartTimer: ReturnType<typeof setTimeout> | null = null
 
 // MediaRecorder for backend ASR fallback
 let mediaRecorder: MediaRecorder | null = null
@@ -870,13 +876,30 @@ function initASR() {
   }
 
   recognition.onend = () => {
-    // Auto-restart if still in recording mode
-    if (isRecording.value) {
-      try {
-        recognition.start()
-      } catch {
-        // Already started
+    // Auto-restart if still in recording mode, but cap consecutive restarts
+    // to avoid an infinite loop when isRecording is stuck true or the
+    // recognizer keeps dying. After the cap, stop and tell the user.
+    if (isRecording.value && asrRestartGuard.canRestart()) {
+      asrRestartGuard.recordRestart()
+      // Delay restart by 1s to break tight onend→start loops and give the
+      // recognizer time to fully reset before we start() it again.
+      asrRestartTimer = setTimeout(() => {
+        asrRestartTimer = null
+        if (!isRecording.value) return
+        try {
+          recognition.start()
+        } catch {
+          // Already started
+        }
+      }, 1000)
+    } else if (isRecording.value && asrRestartGuard.limitReached.value) {
+      console.warn('[ASR] Restart limit reached, stopping auto-restart')
+      isRecording.value = false
+      if (recordingTimer) {
+        clearInterval(recordingTimer)
+        recordingTimer = null
       }
+      uiMessage.warning(t('chat.asrRestartLimit') || 'Speech recognition stopped after multiple retries. Please try again.')
     }
   }
 }
@@ -894,6 +917,8 @@ function startRecording() {
   isRecording.value = true
   recordingSeconds = 0
   recordingTimeStr.value = '0:00'
+  // Fresh user-initiated start → reset the restart counter
+  asrRestartGuard.reset()
 
   try {
     recognition.start()
@@ -914,6 +939,10 @@ function stopRecording() {
   if (recordingTimer) {
     clearInterval(recordingTimer)
     recordingTimer = null
+  }
+  if (asrRestartTimer) {
+    clearTimeout(asrRestartTimer)
+    asrRestartTimer = null
   }
   try {
     recognition?.stop()

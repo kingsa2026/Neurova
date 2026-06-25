@@ -17,6 +17,7 @@ PyJWT>=2.8.0
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.6
+pycryptodome>=3.20.0  # AES-GCM for secret_store encryption
 
 # LLM Providers
 litellm>=1.10.0

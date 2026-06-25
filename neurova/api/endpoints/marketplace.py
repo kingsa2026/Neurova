@@ -11,14 +11,14 @@ from __future__ import annotations
 5. 获取已安装技能 (GET /api/v1/marketplace/installed)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

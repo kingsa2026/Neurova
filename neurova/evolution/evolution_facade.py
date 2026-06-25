@@ -10,11 +10,11 @@
 设计模式: Facade
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

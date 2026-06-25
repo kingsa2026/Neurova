@@ -9,14 +9,14 @@
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import random
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from fastapi import APIRouter, Query, Request
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

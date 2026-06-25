@@ -9,9 +9,8 @@ Model Adapter v1.0.0 — 多 LLM 自适应推理循环
 隔离层级: 全局（无状态路由，无数据残留）
 """
 
-import logging
-
-logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+logger = get_logger(__name__)
 
 try:
     from pydantic import BaseModel

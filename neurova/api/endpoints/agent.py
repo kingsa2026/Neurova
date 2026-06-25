@@ -14,7 +14,7 @@ Agent 管理接口 - Agent Endpoint
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import os
 import uuid
 from pathlib import Path
@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

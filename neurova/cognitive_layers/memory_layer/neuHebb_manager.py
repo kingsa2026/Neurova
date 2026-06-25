@@ -9,14 +9,14 @@ Agent 只与 NeuHebbManager 交互，不直接接触内部子模块。
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Callable, Dict, List, Optional
 
 from .neuHebb_curator import NeuHebbCurator
 from .neuHebb_forge import NeuHebbForge
 from .neurova_hebb import NeuHebbConfig, NeuHebbMem, NeurovaHebb
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class NeuHebbManager:

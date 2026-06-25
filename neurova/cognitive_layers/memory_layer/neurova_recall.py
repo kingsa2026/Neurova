@@ -11,7 +11,7 @@ Neurova 统一记忆检索引擎 — 多维融合 + 意图钻取
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── Enums ──────

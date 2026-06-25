@@ -24,14 +24,36 @@ MemCore — 神经感知记忆核心模块
 """
 
 import asyncio
-import logging
+import concurrent.futures
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+
+def run_async_safely(coro):
+    """安全地运行协程，兼容同步上下文与异步上下文。
+
+    BE-CORE-001 修复: asyncio.run() 在运行中的事件循环内调用会抛
+    RuntimeError: asyncio.run() cannot be called from a running event loop。
+
+    - 无运行中的事件循环（同步上下文）: 直接 asyncio.run(coro)
+    - 有运行中的事件循环（异步上下文）: 在新线程的新事件循环中运行，
+      避免阻塞当前循环并规避 asyncio.run() 的限制
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # 无运行中的事件循环 — 直接运行
+        return asyncio.run(coro)
+    # 处于运行中的事件循环内 — 在独立线程中运行，避免嵌套 asyncio.run
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, coro)
+        return future.result()
 
 
 @dataclass
@@ -579,7 +601,7 @@ class MemCore:
         moe = self.moe_router
         if moe:
             try:
-                results = asyncio.run(moe.retrieve(query, limit=limit))
+                results = run_async_safely(moe.retrieve(query, limit=limit))
                 if results:
                     logger.debug("MoE 检索成功: %s 条结果", len(results))
                     return results

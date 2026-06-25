@@ -4,13 +4,13 @@ Neurova 密码加密工具
 使用 bcrypt 进行密码加密和验证
 """
 
-import logging
+from neurova.core.logger import get_logger
 import secrets
 import typing
 
 import bcrypt
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class PasswordHasher:

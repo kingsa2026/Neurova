@@ -5,10 +5,10 @@
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 消息类型映射
 MESSAGE_TYPE_MAP = {

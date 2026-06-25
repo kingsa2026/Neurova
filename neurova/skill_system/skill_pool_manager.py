@@ -9,7 +9,7 @@ Neurova 技能池管理系统
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import shutil
 import time
 import typing
@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SkillPoolType(str, Enum):

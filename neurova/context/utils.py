@@ -6,13 +6,13 @@ from __future__ import annotations
 提供 Token 估算、上下文合并、按来源过滤等工具函数。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import List
 
 from neurova.context.pool_models import ContextInput, ContextSource
 from neurova.context.token_estimator import EstimationStrategy, TokenEstimator
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ContextPoolUtils:

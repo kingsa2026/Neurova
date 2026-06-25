@@ -6,14 +6,14 @@ Agent 协作模板定义
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TemplateType(str, Enum):

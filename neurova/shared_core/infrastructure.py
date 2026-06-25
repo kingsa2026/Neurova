@@ -14,7 +14,7 @@ Infrastructure Manager - 基础设施管理器（脊髓）
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import typing
 from dataclasses import dataclass, field
@@ -25,7 +25,7 @@ from neurova.core.event_bus import EventBus
 from neurova.core.service_manager import ServiceManager
 from neurova.llm.provider_manager import LLMProviderManager, get_provider_manager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

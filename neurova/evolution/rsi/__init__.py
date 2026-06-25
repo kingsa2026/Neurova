@@ -11,9 +11,8 @@
 - RSI仪表盘
 """
 
-import logging
-
-_logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+_logger = get_logger(__name__)
 
 try:
     from .recursive_ratchet_pruner import Candidate, EnhancedRatchetPruner, RecursiveRatchetPruner

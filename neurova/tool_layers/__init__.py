@@ -18,10 +18,10 @@
 - openai_schema: OpenAI Tool Schema 兼容层
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 导入核心模块
 try:

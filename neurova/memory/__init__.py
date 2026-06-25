@@ -6,10 +6,10 @@ Memory模块兼容性层
 """
 
 import importlib
-import logging
+from neurova.core.logger import get_logger
 import sys
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 从 neurova.cognitive_layers.memory_layer 重新导出主要类（每个单独 try/except,避免一个失败全部 None）
 try:

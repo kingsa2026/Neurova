@@ -8,13 +8,13 @@
 - 生成因果关系的自然语言解释
 """
 
-import logging
+from neurova.core.logger import get_logger
 from collections import deque
 from typing import Any, Dict, List, Set, Tuple
 
 from .graph_traversal import GraphTraversal
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CausalReasoningEngine:

@@ -8,13 +8,13 @@ Neurova 工具守卫 (Tool Guard) 2.0
 from __future__ import annotations
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Pattern, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class GuardSeverity(str, Enum):

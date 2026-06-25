@@ -6,7 +6,7 @@ Agent 自主决策系统 - 实现 Agent 自主做出选择的能力
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 import uuid
@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.base_module import BaseModule, ModuleState
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _new_id(prefix: str = "") -> str:

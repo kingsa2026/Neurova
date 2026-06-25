@@ -17,17 +17,25 @@ API 参考:
 
 import asyncio
 import json
-import logging
+from neurova.core.logger import get_logger
 import time
 from typing import Any, Dict, Optional
+
+logger = get_logger(__name__)
+
+try:
+    import dingtalk_stream
+
+    DINGTALK_STREAM_AVAILABLE = True
+except ImportError:
+    DINGTALK_STREAM_AVAILABLE = False
+    logger.warning("dingtalk_stream 库未安装，Stream 模式将不可用")
 
 from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
     ChannelEventType,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class DingTalkAdapter(ChannelAdapter):

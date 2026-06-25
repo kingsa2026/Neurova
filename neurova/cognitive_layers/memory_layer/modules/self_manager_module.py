@@ -6,13 +6,13 @@ SelfManagerModule — 自我管理模块
 
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

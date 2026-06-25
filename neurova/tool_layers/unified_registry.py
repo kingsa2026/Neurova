@@ -11,11 +11,11 @@ Unified Tool Registry v1.0.0 — 统一工具注册表
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import time
 import typing
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # 导入依赖模块（使用延迟导入避免循环依赖）

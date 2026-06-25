@@ -13,7 +13,7 @@ LoopManager 深度模块 - Agent Loop 生命周期管理
 - 可测试：接口清晰，易于 mock
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -22,7 +22,7 @@ from typing import Any, Callable, List, Optional
 
 from neurova.agent.loops.registry import find_agent_loop
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LoopState(Enum):

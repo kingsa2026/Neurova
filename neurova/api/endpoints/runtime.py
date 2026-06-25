@@ -10,7 +10,7 @@ from __future__ import annotations
 4. 执行垃圾回收 (POST /api/v1/runtime/gc)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 
@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from neurova.api.endpoints import get_app_state
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

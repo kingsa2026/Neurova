@@ -11,7 +11,7 @@ from __future__ import annotations
 5. 获取阻止列表 (GET /api/v1/firewall/blocked)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import List, Optional
@@ -19,7 +19,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

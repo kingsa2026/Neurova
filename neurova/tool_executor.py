@@ -5,7 +5,7 @@ ToolExecutor — 统一工具执行器
 - 文本工具调用解析与执行 (_execute_text_tool_calls)
 - 肌肉记忆工具执行 (_execute_tool_from_memory)
 - Skill/CLI/MCP 工具分派 (_execute_skill_tool, _execute_cli_tool)
-- 集中化工具执行后钩子 (_on_tool_executed)
+- 集中化工具执行后钩子 (on_tool_executed)
 - 内置工具参数信息 (_get_builtin_tool_params)
 
 设计原则：
@@ -14,12 +14,13 @@ ToolExecutor — 统一工具执行器
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
+import shlex
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ToolEngine 延迟导入（避免循环依赖）
 _TOOL_ENGINE_AVAILABLE = False
@@ -195,7 +196,11 @@ class ToolExecutor:
                 )
 
                 # 记录到消息列表
-                self._messages_list.append(
+                # BE-CORE-008 修复: 写入 agent._tool_messages_list（消费者读取此属性），
+                # 而非 self._messages_list（ToolExecutor 本地列表，消费者不可见）
+                if not hasattr(self._agent, "_tool_messages_list"):
+                    self._agent._tool_messages_list = []
+                self._agent._tool_messages_list.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.get("id", ""),
@@ -360,6 +365,8 @@ class ToolExecutor:
         """
         try:
             # 构建完整命令
+            # BE-CORE-011 修复: 用 shlex.quote() 转义 command 和 value，
+            # 防止 shell 元字符（; | & ` $ 等）构成命令注入
             if args:
                 # 将参数字典转换为命令行参数
                 arg_parts = []
@@ -368,10 +375,10 @@ class ToolExecutor:
                         if value:
                             arg_parts.append(f"--{key}")
                     else:
-                        arg_parts.append(f"--{key}={value}")
-                full_command = f"{command} {' '.join(arg_parts)}"
+                        arg_parts.append(f"--{key}={shlex.quote(str(value))}")
+                full_command = f"{shlex.quote(command)} {' '.join(arg_parts)}"
             else:
-                full_command = command
+                full_command = shlex.quote(command)
 
             # 使用 ComputerUseManager 执行命令
             from neurova.computer_use import get_computer_use_manager
@@ -1015,30 +1022,46 @@ class ToolExecutor:
                 "duration_ms": duration_ms,
             }
 
-    def _on_tool_executed(self, tool_name: str, result: Dict, success: bool):
-        """
-        工具执行后钩子
+    def on_tool_executed(
+        self,
+        tool_name: str,
+        params: Dict[str, Any],
+        user_input: str,
+        success: bool,
+        tool_source: str = "",
+        execution_time: float = 0.0,
+    ):
+        """工具执行后钩子 — 闭环学习关键入口
+
+        作为公开接口被 agent_core._on_skill_post_execute 调用，
+        将工具执行事件转发到 tool_memory (肌肉记忆) 和 tool_lifecycle (生命周期)。
 
         Args:
             tool_name: 工具名称
-            result: 执行结果
+            params: 工具参数 (不是执行结果)
+            user_input: 触发工具的用户输入 (作为 problem_text)
             success: 是否成功
+            tool_source: 工具来源 (skill_system / builtin / mcp 等)
+            execution_time: 执行耗时 (秒)
         """
-        # 记录工具使用统计
+        # 记录工具使用统计 → 传播到肌肉记忆 L1/L2/L3
         if self.tool_memory:
             try:
                 self.tool_memory.record_tool_usage(
                     tool_name=tool_name,
                     success=success,
-                    tool_params=result,
+                    execution_time=execution_time,
+                    problem_text=user_input,
+                    tool_source=tool_source,
+                    tool_params=params,
                 )
             except Exception as e:
                 logger.debug("工具记忆记录失败: %s", e)
 
-        # 更新工具生命周期
+        # 更新工具生命周期 (真实方法是 touch, 不是 update_usage)
         if self.tool_lifecycle:
             try:
-                self.tool_lifecycle.update_usage(tool_name, success)
+                self.tool_lifecycle.touch(tool_name, success)
             except Exception as e:
                 logger.debug("工具生命周期更新失败: %s", e)
 

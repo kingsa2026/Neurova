@@ -9,7 +9,7 @@ import base64
 import datetime
 import hashlib
 import json
-import logging
+from neurova.core.logger import get_logger
 import os
 import sqlite3
 
@@ -24,7 +24,7 @@ except ImportError:
     HAS_CRYPTOGRAPHY = False
 
 # 日志配置
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class QClawBinding:

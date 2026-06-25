@@ -10,7 +10,7 @@ from __future__ import annotations
 4. 获取错误统计 (GET /api/v1/analytics/errors)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 import uuid
@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

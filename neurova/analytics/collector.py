@@ -6,7 +6,7 @@ Neurova 数据分析模块 - 数据收集器
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import time
 import typing
 from collections import defaultdict
@@ -31,7 +31,7 @@ from neurova.analytics.models import (
 )
 from neurova.auth.user_model import User
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class MetricsCollector:

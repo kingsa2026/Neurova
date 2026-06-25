@@ -6,7 +6,7 @@ Anthropic Provider
 支持 Anthropic Claude API
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import typing
 
@@ -24,7 +24,7 @@ except ImportError:
     ChatAnthropic = None
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AnthropicProvider(BaseProvider):

@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neurova 项目知识图谱</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #0a0e1a;
+  color: #e0e6f0;
+  overflow: hidden;
+  height: 100vh;
+}
+#header {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: linear-gradient(135deg, rgba(15,20,40,0.95), rgba(20,30,60,0.95));
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(100,140,255,0.15);
+  padding: 12px 24px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+#header h1 {
+  font-size: 20px; font-weight: 600;
+  background: linear-gradient(135deg, #6ea8fe, #a78bfa);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+#header .stats { font-size: 12px; color: #8892a8; display: flex; gap: 16px; }
+#header .stats span { display: flex; align-items: center; gap: 4px; }
+#header .stats .dot { width: 6px; height: 6px; border-radius: 50%; }
+
+#controls {
+  position: fixed; top: 56px; left: 0; right: 0; z-index: 99;
+  background: rgba(12,16,30,0.9); backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(100,140,255,0.1);
+  padding: 8px 24px; display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap;
+}
+.filter-btn {
+  padding: 4px 12px; border-radius: 16px; border: 1px solid rgba(100,140,255,0.2);
+  background: rgba(30,40,70,0.6); color: #8892a8; font-size: 12px;
+  cursor: pointer; transition: all 0.2s; user-select: none;
+}
+.filter-btn:hover { border-color: rgba(100,140,255,0.4); color: #b0b8d0; }
+.filter-btn.active { background: rgba(100,140,255,0.2); border-color: rgba(100,140,255,0.5); color: #6ea8fe; }
+#search {
+  padding: 4px 12px; border-radius: 16px; border: 1px solid rgba(100,140,255,0.2);
+  background: rgba(30,40,70,0.6); color: #e0e6f0; font-size: 12px;
+  width: 200px; outline: none;
+}
+#search::placeholder { color: #556; }
+#search:focus { border-color: rgba(100,140,255,0.5); }
+
+#graph { width: 100vw; height: 100vh; }
+
+#tooltip {
+  position: fixed; pointer-events: none; z-index: 200;
+  background: linear-gradient(135deg, rgba(15,20,45,0.97), rgba(25,35,65,0.97));
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(100,140,255,0.25);
+  border-radius: 12px; padding: 14px 18px;
+  max-width: 380px; display: none;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 60px rgba(100,140,255,0.05);
+}
+#tooltip .tt-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+#tooltip .tt-cat { font-size: 11px; color: #6ea8fe; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+#tooltip .tt-desc { font-size: 12px; color: #a0a8c0; line-height: 1.6; }
+#tooltip .tt-files { font-size: 11px; color: #667; margin-top: 8px; border-top: 1px solid rgba(100,140,255,0.1); padding-top: 6px; }
+#tooltip .tt-files code { color: #a78bfa; font-family: 'Cascadia Code', monospace; }
+
+#detail-panel {
+  position: fixed; top: 100px; right: 20px; width: 340px; z-index: 100;
+  background: linear-gradient(135deg, rgba(15,20,45,0.95), rgba(25,35,65,0.95));
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(100,140,255,0.15);
+  border-radius: 16px; padding: 20px;
+  display: none; max-height: calc(100vh - 140px); overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+#detail-panel .dp-close {
+  position: absolute; top: 12px; right: 14px; cursor: pointer;
+  color: #556; font-size: 18px; transition: color 0.2s;
+}
+#detail-panel .dp-close:hover { color: #6ea8fe; }
+#detail-panel .dp-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+#detail-panel .dp-cat { font-size: 11px; color: #6ea8fe; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+#detail-panel .dp-desc { font-size: 13px; color: #a0a8c0; line-height: 1.7; margin-bottom: 14px; }
+#detail-panel .dp-section { font-size: 12px; font-weight: 600; color: #8892a8; margin: 12px 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+#detail-panel .dp-list { list-style: none; }
+#detail-panel .dp-list li { font-size: 12px; color: #a0a8c0; padding: 3px 0; display: flex; align-items: center; gap: 6px; }
+#detail-panel .dp-list li::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: #6ea8fe; flex-shrink: 0; }
+#detail-panel .dp-conn { margin-top: 8px; }
+#detail-panel .dp-conn-item {
+  font-size: 12px; color: #a0a8c0; padding: 4px 8px; margin: 2px 0;
+  border-radius: 6px; cursor: pointer; transition: background 0.2s;
+  display: flex; align-items: center; gap: 6px;
+}
+#detail-panel .dp-conn-item:hover { background: rgba(100,140,255,0.1); }
+#detail-panel .dp-conn-item .conn-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+#legend {
+  position: fixed; bottom: 20px; left: 20px; z-index: 100;
+  background: rgba(12,16,30,0.9); backdrop-filter: blur(12px);
+  border: 1px solid rgba(100,140,255,0.1);
+  border-radius: 12px; padding: 14px 18px;
+}
+#legend h3 { font-size: 11px; color: #556; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+.legend-item { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 12px; color: #8892a8; cursor: pointer; }
+.legend-item:hover { color: #b0b8d0; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+#minimap {
+  position: fixed; bottom: 20px; right: 20px; z-index: 100;
+  width: 180px; height: 120px;
+  background: rgba(12,16,30,0.8); border: 1px solid rgba(100,140,255,0.1);
+  border-radius: 8px; overflow: hidden;
+}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Neurova 项目知识图谱</h1>
+  <div class="stats">
+    <span><span class="dot" style="background:#6ea8fe"></span> 节点: <b id="node-count">0</b></span>
+    <span><span class="dot" style="background:#a78bfa"></span> 连接: <b id="link-count">0</b></span>
+    <span><span class="dot" style="background:#34d399"></span> 模块: <b id="cat-count">0</b></span>
+  </div>
+</div>
+
+<div id="controls">
+  <input type="text" id="search" placeholder="搜索节点..." />
+  <div id="filter-btns"></div>
+</div>
+
+<div id="tooltip"></div>
+
+<div id="detail-panel">
+  <span class="dp-close" onclick="closeDetail()">&times;</span>
+  <div class="dp-title"></div>
+  <div class="dp-cat"></div>
+  <div class="dp-desc"></div>
+  <div class="dp-section">核心文件</div>
+  <ul class="dp-list dp-files"></ul>
+  <div class="dp-section">关联模块</div>
+  <div class="dp-conn"></div>
+</div>
+
+<div id="legend"></div>
+<div id="minimap"><svg id="minimap-svg" width="180" height="120"></svg></div>
+
+<svg id="graph"></svg>
+
+<script>
+// ===== 知识图谱数据 =====
+const categories = {
+  core:       { label: '核心引擎',     color: '#6ea8fe', desc: 'Agent核心、对话管线、上下文管理' },
+  memory:     { label: '记忆系统',     color: '#f472b6', desc: '17维记忆分类、检索、存储' },
+  cognitive:  { label: '认知层',       color: '#a78bfa', desc: '情感、成长、元认知、知识图谱' },
+  llm:        { label: 'LLM 路由',    color: '#34d399', desc: '多模型客户端、Provider管理' },
+  evolution:  { label: '进化系统',     color: '#fb923c', desc: '模式挖掘、遗传引擎、技能进化' },
+  channels:   { label: '通信通道',     color: '#facc15', desc: '14种平台适配器' },
+  api:        { label: 'API 层',      color: '#2dd4bf', desc: 'FastAPI端点、中间件、认证' },
+  tools:      { label: '工具系统',     color: '#f87171', desc: '工具执行、MCP、浏览器能力' },
+  frontend:   { label: '前端 UI',     color: '#818cf8', desc: 'Vue3 + Pinia + Liquid Glass' },
+  infra:      { label: '基础设施',     color: '#94a3b8', desc: '配置、数据库、安全、日志' },
+  collab:     { label: '协作系统',     color: '#c084fc', desc: 'NeurFlow工作流、多Agent协作' },
+  media:      { label: '多媒体',       color: '#fb7185', desc: 'TTS、ASR、图像管线' },
+};
+
+const nodes = [
+  // === 核心引擎 ===
+  { id: 'agent_core',     label: 'Agent Core',       cat: 'core',      size: 32, desc: '系统心脏，1621行37方法。协调上下文、记忆、LLM、工具执行。通过深度模块化模式拆分。', files: ['neurova/agent_core.py'] },
+  { id: 'chat_pipeline',  label: 'ChatPipeline',     cat: 'core',      size: 24, desc: '对话6步管线：活动追踪→工具检查→记忆检索→Evocate注入→LLM调用→后处理。706行。', files: ['neurova/agent/chat_pipeline.py'] },
+  { id: 'post_pipeline',  label: 'PostChatPipeline', cat: 'core',      size: 18, desc: '后处理管线10+步骤：情感分析、记忆保存、成长记录、元认知更新。', files: ['neurova/post_chat_pipeline.py'] },
+  { id: 'context_orch',   label: 'ContextOrchestrator', cat: 'core',   size: 20, desc: '上下文构建器：系统提示组装、工具描述注入、上下文压缩。', files: ['neurova/context/orchestrator.py', 'neurova/context/builder.py'] },
+  { id: 'context_pool',   label: 'ContextPool',      cat: 'core',      size: 14, desc: '上下文池管理，支持多会话上下文隔离和共享。', files: ['neurova/context_pool.py'] },
+  { id: 'session_mgr',    label: 'SessionManager',   cat: 'core',      size: 14, desc: '会话管理器，处理会话生命周期和状态。', files: ['neurova/session_manager.py'] },
+  { id: 'agent_loop',     label: 'Agent Loop系统',   cat: 'core',      size: 16, desc: '抽象LLM调用接口，支持OpenAI/Anthropic循环，热切换。', files: ['neurova/agent/loops/base.py', 'neurova/agent/loops/openai_loop.py', 'neurova/agent/loops/anthropic_loop.py'] },
+  { id: 'agent_matrix',   label: 'AgentMatrix',      cat: 'core',      size: 14, desc: '多Agent矩阵管理，协调多个Agent实例。', files: ['neurova/agent/matrix/agent_matrix.py'] },
+  { id: 'scheduler',      label: 'Scheduler',        cat: 'core',      size: 12, desc: 'Agent调度器，管理定时任务和周期性操作。', files: ['neurova/agent/scheduler.py'] },
+
+  // === 记忆系统 ===
+  { id: 'mem_core',       label: 'MemCore',          cat: 'memory',    size: 26, desc: '神经感知记忆核心：记忆检索/保存/温度管理/17维分类。', files: ['neurova/mem_core.py'] },
+  { id: 'memory_layer',   label: 'MemoryLayer',      cat: 'memory',    size: 22, desc: '记忆层核心：安全/向量/冲突/缓存/工作记忆等子模块。', files: ['neurova/cognitive_layers/memory_layer/memory_layer.py'] },
+  { id: 'unified_retriever', label: 'UnifiedRetriever', cat: 'memory', size: 18, desc: '多通道语义检索器：BM25+向量+图谱联合检索。', files: ['neurova/cognitive_layers/memory_layer/unified_retriever.py'] },
+  { id: 'temporal_kg',    label: 'TemporalKG',       cat: 'memory',    size: 16, desc: '时序知识图谱：管理时序事实和事件关系。', files: ['neurova/cognitive_layers/memory_layer/temporal_knowledge_graph.py'] },
+  { id: 'pattern_crystal', label: 'PatternCrystallizer', cat: 'memory', size: 15, desc: '经验模式固化器：从对话中提取可复用模式。', files: ['neurova/cognitive_layers/memory_layer/pattern_crystallizer.py'] },
+  { id: 'neu_hebb',       label: 'NeuHebbManager',   cat: 'memory',    size: 15, desc: '结构化推理记忆：基于Hebb学习原理的关联记忆。', files: ['neurova/cognitive_layers/memory_layer/neuHebb_manager.py'] },
+  { id: 'muscle_memory',  label: 'MuscleMemory',     cat: 'memory',    size: 14, desc: 'L1肌肉记忆：工具使用模式自动执行。', files: ['neurova/cognitive_layers/memory_layer/muscle_memory.py'] },
+  { id: 'working_memory', label: 'WorkingMemory',    cat: 'memory',    size: 14, desc: '工作记忆：当前会话的临时记忆空间。', files: ['neurova/cognitive_layers/memory_layer/working_memory.py'] },
+  { id: 'memory_temp',    label: 'MemoryTemperature', cat: 'memory',   size: 14, desc: '记忆温度系统：控制记忆活跃度和检索优先级。', files: ['neurova/cognitive_layers/memory_layer/temperature.py'] },
+  { id: 'vector_store',   label: 'VectorStore',      cat: 'memory',    size: 16, desc: '统一向量存储：TF-IDF/FAISS/ChromaDB后端。', files: ['neurova/cognitive_layers/memory_layer/unified_vector_store.py'] },
+  { id: 'sleep_memory',   label: 'SleepMemory',      cat: 'memory',    size: 12, desc: '睡眠记忆整理：Agent休眠时的记忆巩固和清理。', files: ['neurova/cognitive_layers/memory_layer/sleep.py'] },
+  { id: 'eki',            label: 'ExperienceKI',     cat: 'memory',    size: 14, desc: '经验知识索引：将经验转化为可检索的知识。', files: ['neurova/cognitive_layers/memory_layer/modules/eki_module.py'] },
+
+  // === 认知层 ===
+  { id: 'emotion_layer',  label: 'EmotionLayer',     cat: 'cognitive',  size: 20, desc: '情感上下文注入：17种情感分类，情感传导引擎。', files: ['neurova/cognitive_layers/emotion_context_layer/emotion.py', 'neurova/cognitive_layers/emotion_context_layer/emotion_hub_engine.py'] },
+  { id: 'growth_layer',   label: 'GrowthLayer',      cat: 'cognitive',  size: 16, desc: '成长分析层：追踪Agent能力成长和人格发展。', files: ['neurova/cognitive_layers/growth_layer/analyzer.py'] },
+  { id: 'meta_cognition', label: 'MetaCognition',    cat: 'cognitive',  size: 20, desc: '元认知层：自我反思、自主优化、人格管理、宪法约束。', files: ['neurova/cognitive_layers/meta_cognition_layer/meta_cognition.py', 'neurova/cognitive_layers/meta_cognition_layer/self_reflection.py'] },
+  { id: 'knowledge_graph', label: 'KnowledgeGraph',  cat: 'cognitive',  size: 16, desc: '知识图谱管理器：实体关系抽取和图遍历。', files: ['neurova/cognitive_layers/knowledge_graph/manager.py'] },
+  { id: 'model_adapter',  label: 'ModelAdapter',     cat: 'cognitive',  size: 14, desc: '模型适配器：统一不同LLM的输出格式。', files: ['neurova/cognitive_layers/model_adapter/base.py', 'neurova/cognitive_layers/model_adapter/registry.py'] },
+  { id: 'personality',    label: 'Personality',      cat: 'cognitive',  size: 14, desc: '人格系统：管理Agent独特人格特质和行为倾向。', files: ['neurova/cognitive_layers/meta_cognition_layer/personality.py'] },
+  { id: 'constitution',   label: 'Constitution',     cat: 'cognitive',  size: 12, desc: 'Agent宪法：定义Agent行为底线和价值观。', files: ['neurova/cognitive_layers/meta_cognition_layer/constitution.py'] },
+
+  // === LLM 路由 ===
+  { id: 'llm_client',     label: 'MultiModelClient', cat: 'llm',       size: 22, desc: '多模型统一客户端：封装所有LLM调用。', files: ['neurova/llm/multi_model_client.py'] },
+  { id: 'llm_router',     label: 'LLMRouter',        cat: 'llm',       size: 20, desc: '多模态自适应路由器：10种请求类型智能路由。', files: ['neurova/llm/llm_router.py'] },
+  { id: 'provider_mgr',   label: 'ProviderManager',  cat: 'llm',       size: 18, desc: '服务商管理：OpenAI/Anthropic/Gemini/Ollama/OpenRouter。', files: ['neurova/llm/provider_manager.py'] },
+  { id: 'openai_prov',    label: 'OpenAI Provider',  cat: 'llm',       size: 12, desc: 'OpenAI API适配器。', files: ['neurova/llm/providers/openai_provider.py'] },
+  { id: 'anthropic_prov', label: 'Anthropic Provider', cat: 'llm',     size: 12, desc: 'Anthropic Claude API适配器。', files: ['neurova/llm/providers/anthropic_provider.py'] },
+  { id: 'gemini_prov',    label: 'Gemini Provider',  cat: 'llm',       size: 12, desc: 'Google Gemini API适配器。', files: ['neurova/llm/providers/gemini_provider.py'] },
+  { id: 'ollama_prov',    label: 'Ollama Provider',  cat: 'llm',       size: 12, desc: 'Ollama本地模型适配器。', files: ['neurova/llm/providers/ollama_provider.py'] },
+  { id: 'gen_mgr',        label: 'GeneratorManager', cat: 'llm',       size: 14, desc: '生成器管理：文生图/文生视频/图生视频等。', files: ['neurova/llm/generators/manager.py'] },
+
+  // === 进化系统 ===
+  { id: 'evo_orch',       label: 'EvolutionOrchestrator', cat: 'evolution', size: 18, desc: '统一进化引擎：协调所有进化子系统。', files: ['neurova/evolution/evolution_facade.py'] },
+  { id: 'pattern_miner',  label: 'PatternMiner',     cat: 'evolution',  size: 15, desc: '序列模式挖掘：从历史数据中发现行为模式。', files: ['neurova/evolution/pattern_miner.py'] },
+  { id: 'genetic_engine', label: 'ToolGeneticEngine', cat: 'evolution', size: 15, desc: '工具遗传编程：通过遗传算法优化工具组合。', files: ['neurova/evolution/genetic_engine.py'] },
+  { id: 'tool_lifecycle', label: 'ToolLifecycle',    cat: 'evolution',  size: 14, desc: '工具生命周期管理：创建→使用→评估→淘汰。', files: ['neurova/evolution/tool_lifecycle.py'] },
+  { id: 'nl_synth',       label: 'NLToolSynthesizer', cat: 'evolution', size: 14, desc: '自然语言工具合成：从描述自动生成工具。', files: ['neurova/evolution/nl_synthesizer.py'] },
+  { id: 'skill_mgr',      label: 'SkillSystem',      cat: 'evolution',  size: 16, desc: '技能管理：技能注册/搜索/安装/进化。', files: ['neurova/skills/agent_skill_manager.py', 'neurova/skills/registry.py'] },
+  { id: 'rsi',            label: 'RSI引擎',          cat: 'evolution',  size: 14, desc: '递归自改进系统：收敛分析+回滚管理+部署控制。', files: ['neurova/evolution/rsi/orchestrator.py'] },
+
+  // === 通信通道 ===
+  { id: 'channel_mgr',    label: 'ChannelManager',   cat: 'channels',   size: 20, desc: '通道管理器：统一管理14种通信渠道。', files: ['neurova/channels/manager.py'] },
+  { id: 'feishu',         label: '飞书',             cat: 'channels',   size: 14, desc: '飞书/Lark消息通道。', files: ['neurova/channels/feishu.py'] },
+  { id: 'dingtalk',       label: '钉钉',             cat: 'channels',   size: 14, desc: '钉钉消息通道。', files: ['neurova/channels/dingtalk.py'] },
+  { id: 'wechat',         label: '微信',             cat: 'channels',   size: 14, desc: '微信消息通道（含AI功能）。', files: ['neurova/channels/wechat.py'] },
+  { id: 'wecom',          label: '企业微信',         cat: 'channels',   size: 12, desc: '企业微信消息通道。', files: ['neurova/channels/wecom.py'] },
+  { id: 'telegram',       label: 'Telegram',         cat: 'channels',   size: 14, desc: 'Telegram Bot通道（含命令/管理）。', files: ['neurova/channels/telegram.py'] },
+  { id: 'discord',        label: 'Discord',          cat: 'channels',   size: 12, desc: 'Discord Bot通道。', files: ['neurova/channels/discord.py'] },
+  { id: 'qq',             label: 'QQ',               cat: 'channels',   size: 12, desc: 'QQ/QQBot消息通道。', files: ['neurova/channels/qq.py', 'neurova/channels/qqbot.py'] },
+  { id: 'mqtt',           label: 'MQTT',             cat: 'channels',   size: 10, desc: 'MQTT物联网消息通道。', files: ['neurova/channels/mqtt.py'] },
+  { id: 'websocket',      label: 'WebSocket',        cat: 'channels',   size: 12, desc: 'WebSocket实时通信通道。', files: ['neurova/channels/websocket.py'] },
+  { id: 'sip',            label: 'SIP',              cat: 'channels',   size: 10, desc: 'SIP语音通信通道。', files: ['neurova/channels/sip.py'] },
+  { id: 'mobile',         label: 'MobilePairing',    cat: 'channels',   size: 10, desc: '移动设备QR码配对通道。', files: ['neurova/channels/mobile_pairing.py'] },
+
+  // === API 层 ===
+  { id: 'fastapi_app',    label: 'FastAPI App',      cat: 'api',        size: 22, desc: 'API入口：create_app()创建FastAPI实例，挂载所有路由。', files: ['neurova/api/app.py'] },
+  { id: 'api_endpoints',  label: 'API Endpoints',    cat: 'api',        size: 24, desc: '77+端点：chat/agent/memory/knowledge/model/skill等。', files: ['neurova/api/endpoints/'] },
+  { id: 'api_auth',       label: 'API Auth',         cat: 'api',        size: 14, desc: 'API认证：JWT令牌、API Key管理。', files: ['neurova/api/auth.py', 'neurova/api/api_key_manager.py'] },
+  { id: 'api_middleware',  label: 'Middleware',       cat: 'api',        size: 12, desc: '中间件：CORS、日志、错误处理。', files: ['neurova/api/middleware.py'] },
+  { id: 'api_deps',       label: 'Dependencies',     cat: 'api',        size: 12, desc: '依赖注入：agent_ref获取、认证校验。', files: ['neurova/api/deps.py'] },
+  { id: 'openplatform',   label: 'OpenPlatform',     cat: 'api',        size: 12, desc: '开放平台：事件订阅、Webhook管理。', files: ['neurova/api/openplatform/routes.py'] },
+
+  // === 工具系统 ===
+  { id: 'tool_executor',  label: 'ToolExecutor',     cat: 'tools',      size: 22, desc: '统一工具执行器：解析/执行CLI/Skill/MCP工具调用。', files: ['neurova/tool_executor.py'] },
+  { id: 'tool_orch',      label: 'ToolOrchestrator', cat: 'tools',      size: 16, desc: '工具编排器：多工具协调和依赖管理。', files: ['neurova/tool_layers/tool_orchestrator.py'] },
+  { id: 'mcp_client',     label: 'MCPClient',        cat: 'tools',      size: 14, desc: 'MCP协议客户端：连接外部MCP服务器。', files: ['neurova/tool_layers/mcp_client.py'] },
+  { id: 'tool_market',    label: 'ToolMarketplace',  cat: 'tools',      size: 14, desc: '工具市场：工具发现/安装/版本管理。', files: ['neurova/tool_layers/tool_marketplace.py'] },
+  { id: 'browser_cap',    label: 'BrowserCapability', cat: 'tools',     size: 12, desc: '浏览器能力：Computer Use视觉控制。', files: ['neurova/computer_use/browser_manager.py', 'neurova/computer_use/vision.py'] },
+  { id: 'tool_pipeline',  label: 'ToolPipeline',     cat: 'tools',      size: 12, desc: '工具管线：工具调用前后处理链。', files: ['neurova/agent/tool_pipeline.py'] },
+
+  // === 前端 UI ===
+  { id: 'vue_app',        label: 'Vue3 App',         cat: 'frontend',   size: 22, desc: 'Vue3+TS+Pinia入口：Liquid Glass UI风格。', files: ['NeurUI/src/main.ts', 'NeurUI/src/App.vue'] },
+  { id: 'router',         label: 'Vue Router',       cat: 'frontend',   size: 16, desc: '路由配置：68+页面路由，认证守卫。', files: ['NeurUI/src/router/index.ts'] },
+  { id: 'pinia_stores',   label: 'Pinia Stores',     cat: 'frontend',   size: 16, desc: '状态管理：app/auth/agents/health/notifications。', files: ['NeurUI/src/stores/'] },
+  { id: 'api_modules',    label: 'API Modules',      cat: 'frontend',   size: 18, desc: '50+API模块：封装所有后端接口调用。', files: ['NeurUI/src/api/modules/'] },
+  { id: 'glass_ui',       label: 'Glass Components', cat: 'frontend',   size: 16, desc: 'Liquid Glass组件库：Button/Card/Input/Nav/Panel。', files: ['NeurUI/src/components/'] },
+  { id: 'chat_page',      label: 'ChatPage',         cat: 'frontend',   size: 18, desc: '聊天页面(47KB)：核心对话交互界面。', files: ['NeurUI/src/pages/ChatPage.vue'] },
+  { id: 'dashboard',      label: 'DashboardPage',    cat: 'frontend',   size: 14, desc: '仪表板：系统概览和关键指标。', files: ['NeurUI/src/pages/DashboardPage.vue'] },
+  { id: 'agent_pages',    label: 'Agent管理(15页)',  cat: 'frontend',   size: 16, desc: 'Agent管理页面组：Form/List/Skill/Channel/Emotion等。', files: ['NeurUI/src/pages/Agent*.vue'] },
+  { id: 'ops_pages',      label: '运维页面',         cat: 'frontend',   size: 14, desc: '运维页面组：Monitor/Health/Audit/Security/Firewall。', files: ['NeurUI/src/pages/MonitorPage.vue', 'NeurUI/src/pages/HealthPage.vue'] },
+  { id: 'knowledge_pages', label: '知识页面',        cat: 'frontend',   size: 14, desc: '知识管理：Knowledge/KnowledgeGraph/ExperienceKnowledge。', files: ['NeurUI/src/pages/Knowledge*.vue'] },
+  { id: 'workflow_page',  label: 'WorkflowPage',     cat: 'frontend',   size: 14, desc: '工作流页面(50KB)：NeurFlow可视化编排。', files: ['NeurUI/src/workflow/WorkflowPage.vue'] },
+  { id: 'i18n',           label: 'i18n国际化',       cat: 'frontend',   size: 12, desc: '11种语言支持：zh/en/ja/ko/fr/de/es/ar/hi/it/ru。', files: ['NeurUI/src/i18n/'] },
+
+  // === 基础设施 ===
+  { id: 'config',         label: 'ConfigManager',    cat: 'infra',      size: 16, desc: '配置管理：环境变量/JSON配置/LLM预设。', files: ['neurova/core/config.py', 'neurova/core/config_manager.py'] },
+  { id: 'database',       label: 'Database',         cat: 'infra',      size: 16, desc: 'SQLite数据库：threading.RLock保护，线程安全。', files: ['neurova/core/database.py'] },
+  { id: 'event_bus',      label: 'EventBus',         cat: 'infra',      size: 16, desc: '事件总线：模块间松耦合通信。', files: ['neurova/core/event_bus.py', 'neurova/core/event_bus_enhanced.py'] },
+  { id: 'security',       label: 'Security',         cat: 'infra',      size: 16, desc: '安全系统：RBAC/审计/数据脱敏/工具守卫/认知安全。', files: ['neurova/security/'] },
+  { id: 'logger',         label: 'Logger',           cat: 'infra',      size: 12, desc: '日志系统：分级日志、追踪记录。', files: ['neurova/core/logger.py', 'neurova/core/trace_recorder.py'] },
+  { id: 'plugin_sys',     label: 'PluginSystem',     cat: 'infra',      size: 14, desc: '插件系统：插件生命周期/清单/注册。', files: ['neurova/plugins/plugin_manager.py'] },
+  { id: 'startup_mgr',    label: 'StartupManager',   cat: 'infra',      size: 12, desc: '启动管理器：系统初始化流程编排。', files: ['neurova/core/startup_manager.py'] },
+  { id: 'firewall',       label: 'Firewall',         cat: 'infra',      size: 12, desc: '防火墙：网络安全策略和访问控制。', files: ['neurova/core/firewall.py'] },
+  { id: 'sandbox',        label: 'ThoughtSandbox',   cat: 'infra',      size: 12, desc: '思维沙箱：安全执行隔离环境。', files: ['neurova/sandbox/thought_sandbox.py'] },
+
+  // === 协作系统 ===
+  { id: 'neurflow',       label: 'NeurFlow',         cat: 'collab',     size: 18, desc: '工作流引擎：DAG编排/节点注册/变量解析/执行引擎。', files: ['neurova/collaboration/neurflow/execution_engine.py', 'neurova/collaboration/neurflow/dag.py'] },
+  { id: 'collab_iso',     label: 'CollabIsolation',  cat: 'collab',     size: 12, desc: '协作隔离：多Agent协作资源隔离。', files: ['neurova/collaboration/collaboration_isolation.py'] },
+  { id: 'workflow_orch',  label: 'WorkflowOrch',     cat: 'collab',     size: 14, desc: '工作流编排器：跨Agent任务协调。', files: ['neurova/collaborate/workflow/orchestrator.py'] },
+  { id: 'templates',      label: 'FlowTemplates',    cat: 'collab',     size: 12, desc: '工作流模板：数据分析/编程/写作/电商等预置模板。', files: ['neurova/collaboration/neurflow/templates/'] },
+
+  // === 多媒体 ===
+  { id: 'tts',            label: 'TTS Engine',       cat: 'media',      size: 16, desc: '文本转语音：Edge TTS/MOSS Nano/SAPI5。', files: ['neurova/tts/manager.py', 'neurova/tts/edge_tts.py'] },
+  { id: 'asr',            label: 'ASR Engine',       cat: 'media',      size: 14, desc: '语音识别：FunASR/Whisper引擎。', files: ['neurova/asr/manager.py', 'neurova/asr/whisper_engine.py'] },
+  { id: 'voice_engine',   label: 'VoiceEngine',      cat: 'media',      size: 14, desc: '语音引擎：语音管线/语音记忆桥接/语音适配。', files: ['neurova/voice_engine.py', 'neurova/voice_pipeline.py'] },
+  { id: 'image_pipeline', label: 'ImagePipeline',    cat: 'media',      size: 12, desc: '图像管线：Docker构建/图像处理。', files: ['neurova/image_pipeline/'] },
+  { id: 'embedding',      label: 'Embedding',        cat: 'media',      size: 12, desc: 'ONNX嵌入模型：本地向量化。', files: ['neurova/embedding/onnx_embedding.py'] },
+];
+
+const links = [
+  // Agent Core 核心连接
+  { source: 'agent_core', target: 'chat_pipeline',  strength: 3, label: '对话管线' },
+  { source: 'agent_core', target: 'post_pipeline',  strength: 3, label: '后处理' },
+  { source: 'agent_core', target: 'context_orch',   strength: 3, label: '上下文构建' },
+  { source: 'agent_core', target: 'mem_core',       strength: 3, label: '记忆检索' },
+  { source: 'agent_core', target: 'tool_executor',  strength: 3, label: '工具执行' },
+  { source: 'agent_core', target: 'llm_router',     strength: 3, label: 'LLM调用' },
+  { source: 'agent_core', target: 'emotion_layer',  strength: 2, label: '情感注入' },
+  { source: 'agent_core', target: 'meta_cognition', strength: 2, label: '元认知' },
+  { source: 'agent_core', target: 'session_mgr',    strength: 2, label: '会话管理' },
+  { source: 'agent_core', target: 'agent_loop',     strength: 2, label: '循环调用' },
+  { source: 'agent_core', target: 'agent_matrix',   strength: 1, label: '多Agent' },
+  { source: 'agent_core', target: 'scheduler',      strength: 1, label: '调度' },
+
+  // ChatPipeline
+  { source: 'chat_pipeline', target: 'context_orch',   strength: 2, label: '构建上下文' },
+  { source: 'chat_pipeline', target: 'mem_core',       strength: 2, label: '检索记忆' },
+  { source: 'chat_pipeline', target: 'llm_client',     strength: 2, label: 'LLM调用' },
+  { source: 'chat_pipeline', target: 'post_pipeline',  strength: 2, label: '后处理' },
+
+  // 记忆系统内部
+  { source: 'mem_core', target: 'memory_layer',       strength: 3, label: '记忆层' },
+  { source: 'mem_core', target: 'unified_retriever',  strength: 2, label: '检索' },
+  { source: 'mem_core', target: 'memory_temp',        strength: 2, label: '温度' },
+  { source: 'mem_core', target: 'vector_store',       strength: 2, label: '向量' },
+  { source: 'memory_layer', target: 'unified_retriever', strength: 2, label: '检索器' },
+  { source: 'memory_layer', target: 'working_memory',    strength: 2, label: '工作记忆' },
+  { source: 'memory_layer', target: 'muscle_memory',     strength: 1, label: '肌肉记忆' },
+  { source: 'memory_layer', target: 'sleep_memory',      strength: 1, label: '睡眠整理' },
+  { source: 'memory_layer', target: 'eki',               strength: 1, label: '经验索引' },
+  { source: 'unified_retriever', target: 'vector_store',  strength: 2, label: '向量检索' },
+  { source: 'unified_retriever', target: 'temporal_kg',   strength: 1, label: '时序检索' },
+  { source: 'unified_retriever', target: 'pattern_crystal', strength: 1, label: '模式检索' },
+  { source: 'unified_retriever', target: 'neu_hebb',      strength: 1, label: 'Hebb检索' },
+  { source: 'temporal_kg', target: 'knowledge_graph',     strength: 1, label: '图谱关联' },
+
+  // 认知层
+  { source: 'emotion_layer', target: 'growth_layer',    strength: 1, label: '情感成长' },
+  { source: 'emotion_layer', target: 'meta_cognition',  strength: 1, label: '情感反思' },
+  { source: 'meta_cognition', target: 'personality',    strength: 2, label: '人格管理' },
+  { source: 'meta_cognition', target: 'constitution',   strength: 1, label: '宪法约束' },
+  { source: 'meta_cognition', target: 'growth_layer',   strength: 1, label: '成长追踪' },
+  { source: 'post_pipeline', target: 'emotion_layer',   strength: 2, label: '情感分析' },
+  { source: 'post_pipeline', target: 'meta_cognition',  strength: 2, label: '元认知更新' },
+  { source: 'post_pipeline', target: 'mem_core',        strength: 2, label: '记忆保存' },
+
+  // LLM
+  { source: 'llm_router', target: 'llm_client',     strength: 3, label: '路由调用' },
+  { source: 'llm_router', target: 'provider_mgr',   strength: 2, label: 'Provider选择' },
+  { source: 'provider_mgr', target: 'openai_prov',   strength: 1, label: 'OpenAI' },
+  { source: 'provider_mgr', target: 'anthropic_prov', strength: 1, label: 'Anthropic' },
+  { source: 'provider_mgr', target: 'gemini_prov',   strength: 1, label: 'Gemini' },
+  { source: 'provider_mgr', target: 'ollama_prov',   strength: 1, label: 'Ollama' },
+  { source: 'llm_client', target: 'model_adapter',   strength: 1, label: '模型适配' },
+  { source: 'llm_client', target: 'gen_mgr',         strength: 1, label: '生成器' },
+  { source: 'agent_loop', target: 'llm_client',      strength: 2, label: '循环调用' },
+
+  // 进化系统
+  { source: 'evo_orch', target: 'pattern_miner',   strength: 2, label: '模式挖掘' },
+  { source: 'evo_orch', target: 'genetic_engine',  strength: 2, label: '遗传引擎' },
+  { source: 'evo_orch', target: 'tool_lifecycle',  strength: 2, label: '生命周期' },
+  { source: 'evo_orch', target: 'nl_synth',        strength: 1, label: 'NL合成' },
+  { source: 'evo_orch', target: 'rsi',             strength: 1, label: '自改进' },
+  { source: 'evo_orch', target: 'skill_mgr',       strength: 2, label: '技能进化' },
+  { source: 'tool_executor', target: 'tool_lifecycle', strength: 1, label: '工具使用' },
+  { source: 'skill_mgr', target: 'tool_executor',  strength: 1, label: '技能执行' },
+
+  // 通道
+  { source: 'channel_mgr', target: 'feishu',     strength: 1, label: '飞书' },
+  { source: 'channel_mgr', target: 'dingtalk',   strength: 1, label: '钉钉' },
+  { source: 'channel_mgr', target: 'wechat',     strength: 1, label: '微信' },
+  { source: 'channel_mgr', target: 'wecom',      strength: 1, label: '企微' },
+  { source: 'channel_mgr', target: 'telegram',   strength: 1, label: 'TG' },
+  { source: 'channel_mgr', target: 'discord',    strength: 1, label: 'DC' },
+  { source: 'channel_mgr', target: 'qq',         strength: 1, label: 'QQ' },
+  { source: 'channel_mgr', target: 'mqtt',       strength: 1, label: 'MQTT' },
+  { source: 'channel_mgr', target: 'websocket',  strength: 1, label: 'WS' },
+  { source: 'channel_mgr', target: 'sip',        strength: 1, label: 'SIP' },
+  { source: 'channel_mgr', target: 'mobile',     strength: 1, label: 'Mobile' },
+  { source: 'channel_mgr', target: 'agent_core', strength: 2, label: '消息路由' },
+
+  // API
+  { source: 'fastapi_app', target: 'api_endpoints',  strength: 3, label: '路由挂载' },
+  { source: 'fastapi_app', target: 'api_auth',       strength: 2, label: '认证' },
+  { source: 'fastapi_app', target: 'api_middleware',  strength: 2, label: '中间件' },
+  { source: 'api_endpoints', target: 'agent_core',   strength: 2, label: 'Agent调用' },
+  { source: 'api_endpoints', target: 'mem_core',     strength: 1, label: '记忆API' },
+  { source: 'api_endpoints', target: 'channel_mgr',  strength: 1, label: '通道API' },
+  { source: 'api_endpoints', target: 'skill_mgr',    strength: 1, label: '技能API' },
+  { source: 'api_deps', target: 'agent_core',        strength: 2, label: '依赖注入' },
+  { source: 'fastapi_app', target: 'api_deps',       strength: 1, label: '依赖' },
+  { source: 'fastapi_app', target: 'openplatform',   strength: 1, label: '开放平台' },
+
+  // 工具
+  { source: 'tool_executor', target: 'tool_orch',    strength: 2, label: '工具编排' },
+  { source: 'tool_executor', target: 'mcp_client',   strength: 1, label: 'MCP' },
+  { source: 'tool_orch', target: 'tool_market',      strength: 1, label: '工具市场' },
+  { source: 'tool_orch', target: 'browser_cap',      strength: 1, label: '浏览器' },
+  { source: 'tool_executor', target: 'tool_pipeline', strength: 1, label: '管线' },
+
+  // 前端
+  { source: 'vue_app', target: 'router',        strength: 2, label: '路由' },
+  { source: 'vue_app', target: 'pinia_stores',  strength: 2, label: '状态' },
+  { source: 'vue_app', target: 'glass_ui',      strength: 2, label: '组件' },
+  { source: 'vue_app', target: 'i18n',          strength: 1, label: '国际化' },
+  { source: 'router', target: 'chat_page',      strength: 1, label: '聊天' },
+  { source: 'router', target: 'dashboard',      strength: 1, label: '仪表板' },
+  { source: 'router', target: 'agent_pages',    strength: 1, label: 'Agent' },
+  { source: 'router', target: 'ops_pages',      strength: 1, label: '运维' },
+  { source: 'router', target: 'knowledge_pages', strength: 1, label: '知识' },
+  { source: 'router', target: 'workflow_page',  strength: 1, label: '工作流' },
+  { source: 'api_modules', target: 'fastapi_app', strength: 3, label: 'HTTP调用' },
+  { source: 'chat_page', target: 'api_modules',  strength: 2, label: 'API调用' },
+  { source: 'dashboard', target: 'api_modules',  strength: 1, label: 'API调用' },
+  { source: 'agent_pages', target: 'api_modules', strength: 1, label: 'API调用' },
+  { source: 'pinia_stores', target: 'api_modules', strength: 1, label: '数据同步' },
+
+  // 基础设施
+  { source: 'agent_core', target: 'config',       strength: 1, label: '配置' },
+  { source: 'agent_core', target: 'database',     strength: 1, label: '数据库' },
+  { source: 'agent_core', target: 'event_bus',    strength: 1, label: '事件' },
+  { source: 'agent_core', target: 'security',     strength: 1, label: '安全' },
+  { source: 'agent_core', target: 'logger',       strength: 1, label: '日志' },
+  { source: 'fastapi_app', target: 'startup_mgr', strength: 1, label: '启动' },
+  { source: 'security', target: 'firewall',       strength: 1, label: '防火墙' },
+  { source: 'security', target: 'sandbox',        strength: 1, label: '沙箱' },
+  { source: 'config', target: 'database',         strength: 1, label: 'DB配置' },
+  { source: 'plugin_sys', target: 'event_bus',    strength: 1, label: '插件事件' },
+
+  // 协作
+  { source: 'neurflow', target: 'workflow_orch',  strength: 2, label: '编排' },
+  { source: 'neurflow', target: 'templates',      strength: 1, label: '模板' },
+  { source: 'neurflow', target: 'collab_iso',     strength: 1, label: '隔离' },
+  { source: 'agent_matrix', target: 'neurflow',   strength: 1, label: '多Agent协作' },
+  { source: 'workflow_page', target: 'neurflow',  strength: 2, label: '可视化' },
+
+  // 多媒体
+  { source: 'tts', target: 'voice_engine',        strength: 2, label: '语音合成' },
+  { source: 'asr', target: 'voice_engine',        strength: 2, label: '语音识别' },
+  { source: 'voice_engine', target: 'agent_core', strength: 1, label: '语音交互' },
+  { source: 'embedding', target: 'vector_store',  strength: 1, label: '向量化' },
+  { source: 'gen_mgr', target: 'image_pipeline',  strength: 1, label: '图像生成' },
+  { source: 'context_orch', target: 'context_pool', strength: 1, label: '上下文池' },
+];
+
+// ===== 渲染引擎 =====
+const width = window.innerWidth;
+const height = window.innerHeight;
+
+const svg = d3.select('#graph').attr('width', width).attr('height', height);
+const g = svg.append('g');
+
+// 缩放
+const zoom = d3.zoom().scaleExtent([0.2, 4]).on('zoom', (e) => {
+  g.attr('transform', e.transform);
+  updateMinimap(e.transform);
+});
+svg.call(zoom);
+
+// 力模拟
+const simulation = d3.forceSimulation(nodes)
+  .force('link', d3.forceLink(links).id(d => d.id).distance(d => 120 - d.strength * 15).strength(d => d.strength * 0.15))
+  .force('charge', d3.forceManyBody().strength(-400))
+  .force('center', d3.forceCenter(width / 2, height / 2))
+  .force('collision', d3.forceCollide().radius(d => d.size + 10))
+  .force('x', d3.forceX(width / 2).strength(0.03))
+  .force('y', d3.forceY(height / 2).strength(0.03));
+
+// 渐变定义
+const defs = svg.append('defs');
+Object.entries(categories).forEach(([key, cat]) => {
+  const grad = defs.append('radialGradient').attr('id', `grad-${key}`);
+  grad.append('stop').attr('offset', '0%').attr('stop-color', cat.color).attr('stop-opacity', 0.9);
+  grad.append('stop').attr('offset', '100%').attr('stop-color', cat.color).attr('stop-opacity', 0.4);
+});
+
+// 连线
+const linkG = g.append('g').attr('class', 'links');
+const linkElements = linkG.selectAll('line')
+  .data(links).enter().append('line')
+  .attr('stroke', d => {
+    const sc = categories[nodes.find(n => n.id === (d.source.id || d.source))?.cat]?.color || '#334';
+    return sc;
+  })
+  .attr('stroke-opacity', d => 0.08 + d.strength * 0.06)
+  .attr('stroke-width', d => d.strength * 0.8);
+
+// 节点组
+const nodeG = g.append('g').attr('class', 'nodes');
+const nodeElements = nodeG.selectAll('g')
+  .data(nodes).enter().append('g')
+  .attr('cursor', 'pointer')
+  .call(d3.drag()
+    .on('start', dragStart)
+    .on('drag', dragged)
+    .on('end', dragEnd));
+
+// 光晕
+nodeElements.append('circle')
+  .attr('r', d => d.size + 6)
+  .attr('fill', d => categories[d.cat].color)
+  .attr('opacity', 0.08);
+
+// 主圆
+nodeElements.append('circle')
+  .attr('r', d => d.size)
+  .attr('fill', d => `url(#grad-${d.cat})`)
+  .attr('stroke', d => categories[d.cat].color)
+  .attr('stroke-width', 1.5)
+  .attr('stroke-opacity', 0.5);
+
+// 标签
+nodeElements.append('text')
+  .text(d => d.label)
+  .attr('text-anchor', 'middle')
+  .attr('dy', d => d.size + 14)
+  .attr('fill', d => categories[d.cat].color)
+  .attr('font-size', d => Math.max(9, Math.min(12, d.size * 0.5)))
+  .attr('font-weight', 500)
+  .attr('opacity', 0.85);
+
+// 交互
+const tooltip = d3.select('#tooltip');
+nodeElements
+  .on('mouseover', function(e, d) {
+    if (isHighlighting) return;
+    d3.select(this).select('circle:nth-child(2)')
+      .transition().duration(200)
+      .attr('r', d.size + 4)
+      .attr('stroke-width', 2.5)
+      .attr('stroke-opacity', 0.9);
+    highlightConnected(d);
+    showTooltip(e, d);
+  })
+  .on('mousemove', (e) => {
+    tooltip.style('left', (e.pageX + 16) + 'px').style('top', (e.pageY - 10) + 'px');
+  })
+  .on('mouseout', function(e, d) {
+    if (isHighlighting) return;
+    d3.select(this).select('circle:nth-child(2)')
+      .transition().duration(200)
+      .attr('r', d.size)
+      .attr('stroke-width', 1.5)
+      .attr('stroke-opacity', 0.5);
+    resetHighlight();
+    tooltip.style('display', 'none');
+  })
+  .on('click', (e, d) => {
+    e.stopPropagation();
+    showDetail(d);
+  });
+
+svg.on('click', () => { closeDetail(); resetHighlight(); });
+
+// 力更新
+simulation.on('tick', () => {
+  linkElements
+    .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+    .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+  nodeElements.attr('transform', d => `translate(${d.x},${d.y})`);
+});
+
+// 拖拽
+function dragStart(e, d) { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
+function dragged(e, d) { d.fx = e.x; d.fy = e.y; }
+function dragEnd(e, d) { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }
+
+// 高亮
+let isHighlighting = false;
+function highlightConnected(d) {
+  isHighlighting = true;
+  const connected = new Set();
+  links.forEach(l => {
+    const sid = l.source.id || l.source;
+    const tid = l.target.id || l.target;
+    if (sid === d.id) connected.add(tid);
+    if (tid === d.id) connected.add(sid);
+  });
+  connected.add(d.id);
+  nodeElements.transition().duration(200)
+    .attr('opacity', n => connected.has(n.id) ? 1 : 0.1);
+  linkElements.transition().duration(200)
+    .attr('stroke-opacity', l => {
+      const sid = l.source.id || l.source;
+      const tid = l.target.id || l.target;
+      return (sid === d.id || tid === d.id) ? 0.5 : 0.02;
+    })
+    .attr('stroke-width', l => {
+      const sid = l.source.id || l.source;
+      const tid = l.target.id || l.target;
+      return (sid === d.id || tid === d.id) ? l.strength * 1.5 : l.strength * 0.5;
+    });
+}
+function resetHighlight() {
+  isHighlighting = false;
+  nodeElements.transition().duration(300).attr('opacity', 1);
+  linkElements.transition().duration(300)
+    .attr('stroke-opacity', d => 0.08 + d.strength * 0.06)
+    .attr('stroke-width', d => d.strength * 0.8);
+}
+
+// Tooltip
+function showTooltip(e, d) {
+  const cat = categories[d.cat];
+  tooltip.html(`
+    <div class="tt-cat" style="color:${cat.color}">${cat.label}</div>
+    <div class="tt-title">${d.label}</div>
+    <div class="tt-desc">${d.desc}</div>
+    <div class="tt-files">${d.files.map(f => `<code>${f}</code>`).join('<br>')}</div>
+  `).style('display', 'block')
+    .style('left', (e.pageX + 16) + 'px')
+    .style('top', (e.pageY - 10) + 'px');
+}
+
+// Detail Panel
+function showDetail(d) {
+  const cat = categories[d.cat];
+  const panel = d3.select('#detail-panel');
+  panel.select('.dp-title').text(d.label).style('color', cat.color);
+  panel.select('.dp-cat').text(cat.label).style('color', cat.color);
+  panel.select('.dp-desc').text(d.desc);
+  const filesList = panel.select('.dp-files').html('');
+  d.files.forEach(f => filesList.append('li').text(f));
+  const connDiv = panel.select('.dp-conn').html('');
+  links.forEach(l => {
+    const sid = l.source.id || l.source;
+    const tid = l.target.id || l.target;
+    if (sid === d.id || tid === d.id) {
+      const otherId = sid === d.id ? tid : sid;
+      const other = nodes.find(n => n.id === otherId);
+      if (!other) return;
+      const oc = categories[other.cat];
+      const item = connDiv.append('div').attr('class', 'dp-conn-item')
+        .on('click', () => {
+          const node = nodeElements.filter(n => n.id === otherId);
+          const transform = d3.zoomTransform(svg.node());
+          svg.transition().duration(500).call(
+            zoom.transform,
+            d3.zoomIdentity.translate(width/2, height/2).scale(transform.k).translate(-other.x, -other.y)
+          );
+          showDetail(other);
+          highlightConnected(other);
+        });
+      item.append('span').attr('class', 'conn-dot').style('background', oc.color);
+      item.append('span').text(`${other.label} (${l.label})`);
+    }
+  });
+  panel.style('display', 'block');
+  isHighlighting = true;
+  highlightConnected(d);
+}
+function closeDetail() {
+  d3.select('#detail-panel').style('display', 'none');
+  resetHighlight();
+}
+
+// 过滤器
+let activeFilters = new Set(Object.keys(categories));
+const filterDiv = d3.select('#filter-btns');
+Object.entries(categories).forEach(([key, cat]) => {
+  filterDiv.append('span')
+    .attr('class', 'filter-btn active')
+    .attr('data-cat', key)
+    .style('border-color', cat.color + '40')
+    .html(`<span style="color:${cat.color}">●</span> ${cat.label}`)
+    .on('click', function() {
+      const btn = d3.select(this);
+      if (activeFilters.has(key)) {
+        activeFilters.delete(key);
+        btn.classed('active', false);
+      } else {
+        activeFilters.add(key);
+        btn.classed('active', true);
+      }
+      applyFilters();
+    });
+});
+
+function applyFilters() {
+  const query = d3.select('#search').property('value').toLowerCase();
+  nodeElements.transition().duration(300)
+    .attr('opacity', d => {
+      if (!activeFilters.has(d.cat)) return 0.05;
+      if (query && !d.label.toLowerCase().includes(query) && !d.desc.toLowerCase().includes(query)) return 0.1;
+      return 1;
+    });
+  linkElements.transition().duration(300)
+    .attr('stroke-opacity', l => {
+      const sn = nodes.find(n => n.id === (l.source.id || l.source));
+      const tn = nodes.find(n => n.id === (l.target.id || l.target));
+      if (!sn || !tn) return 0.02;
+      if (!activeFilters.has(sn.cat) || !activeFilters.has(tn.cat)) return 0.02;
+      return 0.08 + l.strength * 0.06;
+    });
+}
+
+d3.select('#search').on('input', applyFilters);
+
+// 图例
+const legendDiv = d3.select('#legend');
+legendDiv.append('h3').text('图例');
+Object.entries(categories).forEach(([key, cat]) => {
+  const count = nodes.filter(n => n.cat === key).length;
+  legendDiv.append('div').attr('class', 'legend-item')
+    .html(`<span class="legend-dot" style="background:${cat.color}"></span>${cat.label} (${count})`)
+    .on('click', () => {
+      activeFilters.clear();
+      activeFilters.add(key);
+      d3.selectAll('.filter-btn').classed('active', false);
+      d3.select(`.filter-btn[data-cat="${key}"]`).classed('active', true);
+      applyFilters();
+    });
+});
+
+// Minimap
+const minimapSvg = d3.select('#minimap-svg');
+const minimapG = minimapSvg.append('g');
+function updateMinimap(transform) {
+  minimapG.selectAll('*').remove();
+  const scale = 0.08;
+  nodes.forEach(d => {
+    if (!activeFilters.has(d.cat)) return;
+    minimapG.append('circle')
+      .attr('cx', 90 + (d.x - width/2) * scale)
+      .attr('cy', 60 + (d.y - height/2) * scale)
+      .attr('r', 2)
+      .attr('fill', categories[d.cat].color)
+      .attr('opacity', 0.6);
+  });
+}
+
+// 统计
+d3.select('#node-count').text(nodes.length);
+d3.select('#link-count').text(links.length);
+d3.select('#cat-count').text(Object.keys(categories).length);
+
+// 初始缩放适配
+setTimeout(() => {
+  svg.transition().duration(800).call(
+    zoom.transform,
+    d3.zoomIdentity.translate(width * 0.05, height * 0.05).scale(0.9)
+  );
+}, 500);
+
+// 窗口调整
+window.addEventListener('resize', () => {
+  const w = window.innerWidth, h = window.innerHeight;
+  svg.attr('width', w).attr('height', h);
+  simulation.force('center', d3.forceCenter(w / 2, h / 2));
+  simulation.alpha(0.3).restart();
+});
+</script>
+</body>
+</html>

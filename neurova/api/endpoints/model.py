@@ -11,14 +11,14 @@ from __future__ import annotations
 5. 模型连接检查 (POST /api/v1/models/check-connection)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from typing import List
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

@@ -4,10 +4,10 @@ Agent 技能管理器
 为 Agent 提供任务拆解、技能需求分析和主动获取能力。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AgentSkillManager:

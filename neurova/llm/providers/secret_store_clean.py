@@ -10,14 +10,14 @@ import base64
 import datetime
 import hashlib
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

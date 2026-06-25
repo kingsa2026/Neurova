@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import base64
 import io
-import logging
+from neurova.core.logger import get_logger
 import time
 import typing
 from dataclasses import dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 try:
     import numpy as np

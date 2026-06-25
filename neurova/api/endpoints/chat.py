@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

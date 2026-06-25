@@ -13,13 +13,13 @@ VoiceMemoryBridge — 语音记忆桥接器
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class VoiceMemoryType(Enum):

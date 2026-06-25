@@ -4,12 +4,12 @@
 提供全局线程池实例，避免每次操作都创建新的 ThreadPoolExecutor。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ThreadPoolManager:

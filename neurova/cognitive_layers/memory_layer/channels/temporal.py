@@ -4,12 +4,12 @@ TemporalDecay — 时序衰减函数
 支持多种衰减曲线：指数、线性、对数。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import math
 from datetime import datetime, timezone
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TemporalDecay:

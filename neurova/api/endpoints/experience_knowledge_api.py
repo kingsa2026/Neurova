@@ -3,14 +3,14 @@ Experience Knowledge Base API - 经验知识库接口
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import typing
 import uuid
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

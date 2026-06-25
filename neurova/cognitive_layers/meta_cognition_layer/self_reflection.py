@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from collections import Counter
@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class PatternType(str, Enum):

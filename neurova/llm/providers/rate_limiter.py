@@ -5,14 +5,14 @@
 import asyncio
 import enum
 import functools
-import logging
+from neurova.core.logger import get_logger
 import random
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CircuitState(enum.Enum):

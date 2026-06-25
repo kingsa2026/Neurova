@@ -10,7 +10,7 @@ Agent 死信队列模块
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -19,7 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .message_protocol import AgentMessage, DeadLetterMessage, DeadLetterReason
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

@@ -5,14 +5,14 @@ Agent 调度器
 提供 Agent 任务调度和执行管理功能。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
 from .models import FlowContext, ScheduledTask
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AgentScheduler:

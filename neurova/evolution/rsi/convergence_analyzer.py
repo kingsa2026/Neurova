@@ -4,11 +4,11 @@
 为 RSI 提供严格的数学证明，确保递归过程不会发散
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

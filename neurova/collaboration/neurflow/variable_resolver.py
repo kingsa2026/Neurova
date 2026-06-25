@@ -4,12 +4,12 @@ Neurflow 变量解析器 — 垂直切片 5
 序列化阶段保留原始引用，执行阶段才解析
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Union
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

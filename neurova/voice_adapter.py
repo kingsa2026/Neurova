@@ -16,11 +16,11 @@ VoiceEngineAdapter — 语音引擎适配器
 - VoiceAdapter：实现 ChannelAdapter 接口，用于 Twilio 语音通话渠道
 """
 
-import logging
+from neurova.core.logger import get_logger
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Union
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class VoiceEngineAdapter(ABC):

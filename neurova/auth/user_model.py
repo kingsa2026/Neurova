@@ -13,12 +13,12 @@ Neurova 用户数据库模型
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import os
 import sqlite3
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class User:

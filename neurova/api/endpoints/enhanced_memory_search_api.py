@@ -5,13 +5,13 @@ Enhanced Memory Search API - 增强版记忆检索API
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import typing
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

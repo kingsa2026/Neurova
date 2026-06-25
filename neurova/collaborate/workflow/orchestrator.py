@@ -5,14 +5,14 @@
 管理工作流的执行过程，协调多个 Agent 的协作。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 from typing import Any, Callable, Dict, List, Optional
 
 from ..models import AgentRole, TaskStep, WorkflowDefinition
 from .models import FlowContext, FlowEvent, FlowPhase
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FlowOrchestrator:

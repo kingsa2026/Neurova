@@ -10,14 +10,14 @@ from __future__ import annotations
 import collections
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import os
 import typing
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AlertLevel(Enum):

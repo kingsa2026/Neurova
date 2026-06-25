@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

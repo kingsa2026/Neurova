@@ -11,14 +11,14 @@
 - GET    /v1/tools/examples          获取 Schema 示例
 """
 
-import logging
+from neurova.core.logger import get_logger
 from enum import Enum
 from typing import Any, Dict, List
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

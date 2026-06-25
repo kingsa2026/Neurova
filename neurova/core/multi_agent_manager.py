@@ -11,14 +11,14 @@ MultiAgentManager - 多 Agent 管理器（大脑/办公室 + 共用小脑/脑干
 """
 
 import asyncio
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 import typing
 from dataclasses import dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── 数据模型 ──────

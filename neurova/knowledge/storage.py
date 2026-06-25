@@ -7,13 +7,13 @@
 import datetime
 import hashlib
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _new_id(prefix: str = "") -> str:

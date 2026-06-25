@@ -17,6 +17,7 @@ Neurova 模块化启动系统
 
 import enum
 import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from abc import ABC
@@ -24,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Type
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ModuleState(enum.Enum):

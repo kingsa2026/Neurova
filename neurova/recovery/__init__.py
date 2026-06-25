@@ -5,9 +5,8 @@ Neurova 恢复系统 — 记忆写入安全兜底
     ShutdownGuard: 管理 sentinel 标记、优雅关闭、崩溃恢复
 """
 
-import logging
-
-_logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+_logger = get_logger(__name__)
 
 try:
     from neurova.recovery.shutdown_guard import ShutdownGuard

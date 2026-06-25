@@ -14,14 +14,14 @@ ContextOrchestrator — 统一上下文构建模块
 - 可独立测试：不依赖 Agent 类的完整初始化
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Dict, List, Optional
 
 from .builder import ContextBuilder
 from .injector import UnifiedContextInjector
 from .models import TokenBudget
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ContextOrchestrator:

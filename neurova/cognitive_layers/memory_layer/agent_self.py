@@ -4,14 +4,14 @@ Agent 自我管理模块 - 提供核心指令、心跳任务等功能
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── Enums ──────

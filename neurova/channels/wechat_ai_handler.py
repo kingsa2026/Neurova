@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-import logging
+from neurova.core.logger import get_logger
 import os
 import re
 from datetime import datetime
@@ -17,7 +17,7 @@ from neurova.channels.models import ContentType, UnifiedMessage
 if TYPE_CHECKING:
     pass
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WeChatAIHandlerMixin:

@@ -8,7 +8,8 @@ Skill Market Searcher - 技能市场搜索器
 
 import asyncio
 import json
-import logging
+from neurova.core import config
+from neurova.core.logger import get_logger
 import os
 import time
 import urllib.error
@@ -18,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -444,7 +445,7 @@ class SkillMarketSearcher:
         Returns:
             Optional[str]: GitHub Token
         """
-        return os.environ.get("GITHUB_TOKEN")
+        return config.get("GITHUB_TOKEN")
 
     def clear_cache(self):
         """清除所有缓存"""

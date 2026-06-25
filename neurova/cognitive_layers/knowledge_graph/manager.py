@@ -6,7 +6,7 @@
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 import uuid
@@ -16,7 +16,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class NodeType(str, Enum):

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from collections import defaultdict
@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any, Callable, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class EventPriority(IntEnum):

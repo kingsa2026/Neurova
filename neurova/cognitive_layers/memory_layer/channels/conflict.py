@@ -4,13 +4,13 @@ ConflictDetector — 冲突检测器
 检测语义矛盾的记忆对。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass
 from typing import List, Optional
 
 from .base import ChannelResult
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

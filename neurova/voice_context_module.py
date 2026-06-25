@@ -12,11 +12,11 @@ VoiceContextModule — 语音上下文集成深度模块
 - 适配器模式：适配 VoiceMemoryBridge 与 ContextPool 的接口差异
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

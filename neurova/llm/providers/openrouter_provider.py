@@ -6,7 +6,7 @@ OpenRouter Provider
 支持 OpenRouter API（访问多个模型）
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import typing
 
@@ -24,7 +24,7 @@ except ImportError:
     ChatOpenAI = None
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class OpenRouterProvider(BaseProvider):

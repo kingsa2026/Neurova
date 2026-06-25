@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
+from neurova.core.logger import get_logger
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
@@ -21,7 +21,7 @@ except ImportError:
 if TYPE_CHECKING:
     pass
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WeChatAuthMixin:

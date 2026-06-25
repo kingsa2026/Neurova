@@ -6,7 +6,7 @@ from __future__ import annotations
 共享导入、请求/响应模型、辅助函数
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Request
@@ -17,7 +17,7 @@ from neurova.interfaces.api_standard import (
     ErrorCodes,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["记忆管理"])
 

@@ -5,11 +5,11 @@
 """
 
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class DreamMixin:

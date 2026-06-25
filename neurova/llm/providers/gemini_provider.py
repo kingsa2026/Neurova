@@ -6,7 +6,7 @@ Gemini Provider
 支持 Google Gemini API
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import typing
 
@@ -24,7 +24,7 @@ except ImportError:
     ChatGoogleGenerativeAI = None
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class GeminiProvider(BaseProvider):

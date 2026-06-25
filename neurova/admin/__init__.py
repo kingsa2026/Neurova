@@ -7,9 +7,8 @@ Neurova 管理员服务
 3. 数据清理
 """
 
-import logging
-
-_logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+_logger = get_logger(__name__)
 
 try:
     from neurova.admin.admin_service import AdminService

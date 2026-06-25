@@ -6,7 +6,7 @@
 
 import copy
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from collections import OrderedDict
@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── Enums ──────

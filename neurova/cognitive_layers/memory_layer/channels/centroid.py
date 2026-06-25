@@ -5,12 +5,12 @@ CentroidInitializer — 从通道描述自动生成质心向量
 质心从通道的 description 字段自动生成。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any
 
 from .registry import ChannelRegistry
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CentroidInitializer:

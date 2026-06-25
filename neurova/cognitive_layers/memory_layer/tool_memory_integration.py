@@ -7,12 +7,12 @@
 3. 提供工具推荐
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

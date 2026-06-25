@@ -8,7 +8,7 @@ MoE Memory Router — 稀疏门控专家混合记忆路由器
   3. 可塑性: centroid drift (LTP/LTD 更新质心位置)
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -19,7 +19,7 @@ from neurova.cognitive_layers.memory_layer.unified_vector_store import (
     vector_normalize,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

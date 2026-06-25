@@ -15,7 +15,7 @@ from __future__ import annotations
 - GET  /api/v1/channel-adapters/channels/health/all         - 渠道健康检查
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from neurova.channels.manager import get_channel_manager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["渠道管理"])
 

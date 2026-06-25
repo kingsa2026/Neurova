@@ -17,14 +17,16 @@ LLM 服务商管理接口 - Provider Endpoint
 11. 模型连接检查 (POST /api/v1/providers/{provider_id}/models/{model}/check-connection)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Path, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+from neurova.api.auth import get_current_user
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -81,7 +83,7 @@ def _get_provider_manager():
 
 
 @router.get("", response_model=List[ProviderInfo])
-async def list_providers(request: Request):
+async def list_providers(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
     """列出所有服务商"""
     _get_request_id(request)
 
@@ -114,7 +116,11 @@ async def list_providers(request: Request):
 
 
 @router.post("/activate-model")
-async def activate_model(request: Request, body: ActivateModelRequest):
+async def activate_model(
+    request: Request,
+    body: ActivateModelRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """激活模型"""
     _get_request_id(request)
 
@@ -142,7 +148,7 @@ async def activate_model(request: Request, body: ActivateModelRequest):
 
 
 @router.get("/active-model")
-async def get_active_model(request: Request):
+async def get_active_model(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取当前活跃模型"""
     _get_request_id(request)
 
@@ -161,7 +167,11 @@ async def get_active_model(request: Request):
 
 
 @router.get("/{provider_id}", response_model=ProviderInfo)
-async def get_provider(request: Request, provider_id: str = Path(...)):
+async def get_provider(
+    request: Request,
+    provider_id: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取服务商详情"""
     _get_request_id(request)
 
@@ -189,7 +199,11 @@ async def get_provider(request: Request, provider_id: str = Path(...)):
 
 
 @router.post("", response_model=ProviderInfo)
-async def create_provider(request: Request, body: CreateProviderRequest):
+async def create_provider(
+    request: Request,
+    body: CreateProviderRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """添加服务商"""
     _get_request_id(request)
 
@@ -233,6 +247,7 @@ async def update_provider(
     request: Request,
     provider_id: str = Path(...),
     body: UpdateProviderRequest = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """更新服务商"""
     _get_request_id(request)
@@ -293,7 +308,11 @@ async def update_provider(
 
 
 @router.delete("/{provider_id}")
-async def delete_provider(request: Request, provider_id: str = Path(...)):
+async def delete_provider(
+    request: Request,
+    provider_id: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """删除服务商"""
     _get_request_id(request)
 
@@ -314,7 +333,11 @@ async def delete_provider(request: Request, provider_id: str = Path(...)):
 
 
 @router.get("/{provider_id}/models/discover")
-async def discover_models(request: Request, provider_id: str = Path(...)):
+async def discover_models(
+    request: Request,
+    provider_id: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """发现模型"""
     _get_request_id(request)
 
@@ -340,7 +363,11 @@ async def discover_models(request: Request, provider_id: str = Path(...)):
 
 
 @router.post("/{provider_id}/check-connection")
-async def check_provider_connection(request: Request, provider_id: str = Path(...)):
+async def check_provider_connection(
+    request: Request,
+    provider_id: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """检查服务商连接"""
     _get_request_id(request)
 

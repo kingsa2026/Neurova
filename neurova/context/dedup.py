@@ -6,12 +6,12 @@ from __future__ import annotations
 多阶段去重，保留关键上下文。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Dict, List
 
 from neurova.context.pool_models import ContextInput, ContextSource
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class DriftSafeDeduplicator:

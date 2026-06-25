@@ -12,7 +12,7 @@ from __future__ import annotations
 6. 获取技能提示 (GET /api/v1/skills/tips)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

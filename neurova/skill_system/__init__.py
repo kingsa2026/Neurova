@@ -9,11 +9,11 @@ Neurova 技能系统
 """
 
 import importlib.util
-import logging
+from neurova.core.logger import get_logger
 import sys
 from typing import Any, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _get_skill_module(module_name: str) -> Optional[Any]:

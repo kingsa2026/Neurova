@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-import logging
+from neurova.core.logger import get_logger
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from neurova.channels import ContentType, MessageChannel, UnifiedMessage
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TelegramParserMixin:

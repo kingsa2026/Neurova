@@ -18,6 +18,8 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 try:
+    import pyvoip
+
     PYVOIP_AVAILABLE = True
 except ImportError:
     PYVOIP_AVAILABLE = False

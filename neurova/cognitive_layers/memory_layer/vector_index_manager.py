@@ -8,7 +8,7 @@
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import os
 import threading
 import time
@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ────── Enums ──────

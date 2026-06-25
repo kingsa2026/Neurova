@@ -10,12 +10,12 @@
 
 import sqlite3
 import threading
-import logging
+from neurova.core.logger import get_logger
 from typing import Optional
 from contextlib import contextmanager
 from queue import Queue, Empty, Full
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SQLiteConnectionPool:

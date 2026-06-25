@@ -4,12 +4,12 @@ RSI 监控指标管理器
 为 RSI 提供可观测性，人类需要能够理解和审计每层递归的改进
 """
 
-import logging
+from neurova.core.logger import get_logger
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AlertLevel(Enum):

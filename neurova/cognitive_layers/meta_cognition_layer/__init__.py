@@ -12,9 +12,8 @@ Meta Cognition Layer - 元认知层
 ...
 """
 
-import logging
-
-_logger = logging.getLogger(__name__)
+from neurova.core.logger import get_logger
+_logger = get_logger(__name__)
 
 try:
     from neurova.agent_core import Agent

@@ -17,7 +17,7 @@
 - GET    /v1/file-flows/stats              获取文件统计
 """
 
-import logging
+from neurova.core.logger import get_logger
 import mimetypes
 import time
 import uuid
@@ -28,7 +28,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

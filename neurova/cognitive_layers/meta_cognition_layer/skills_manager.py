@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime
 import json
-import logging
+from neurova.core.logger import get_logger
 import re
 import threading
 import uuid
@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SkillStatus(str, Enum):

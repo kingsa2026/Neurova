@@ -12,13 +12,13 @@ import collections
 import datetime
 import functools
 import inspect
-import logging
+from neurova.core.logger import get_logger
 import typing
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def cache_token(func_name: str, args: tuple, kwargs: dict) -> str:

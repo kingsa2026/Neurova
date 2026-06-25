@@ -7,13 +7,13 @@ ConflictDetector V2 — 基于向量的冲突检测
 3. 版本 (Version): 同一记忆的不同表述
 """
 
-import logging
+from neurova.core.logger import get_logger
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

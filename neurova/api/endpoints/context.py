@@ -13,7 +13,7 @@ from __future__ import annotations
 7. 压缩上下文 (POST /api/v1/context/{context_id}/compress)
 """
 
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from neurova.api.auth import get_current_user
 from neurova.context_pool import ContextInput, ContextSource
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter()
 

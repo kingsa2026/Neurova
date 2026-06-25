@@ -17,7 +17,7 @@ API 参考:
 
 import asyncio
 import json
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
 from neurova.channels.base import (
@@ -26,7 +26,7 @@ from neurova.channels.base import (
     ChannelEventType,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FeishuAdapter(ChannelAdapter):

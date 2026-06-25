@@ -10,7 +10,7 @@ Agent 通信协议模块
 """
 
 import json
-import logging
+from neurova.core.logger import get_logger
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -18,7 +18,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ProtocolVersion:

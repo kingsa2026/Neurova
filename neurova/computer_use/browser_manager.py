@@ -13,14 +13,14 @@ Browser Manager - 浏览器自动化管理器
 import asyncio
 import base64
 import json
-import logging
+from neurova.core.logger import get_logger
 import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 可选依赖
 try:

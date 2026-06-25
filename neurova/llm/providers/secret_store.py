@@ -1,27 +1,42 @@
 """
-Secret store with simple XOR obfuscation and JSON persistence.
+Secret store with AES-GCM encryption and JSON persistence.
+
+安全说明:
+    使用 AES-256-GCM 进行认证加密，替代不安全的 XOR 混淆。
+    - 每次加密使用随机 salt（PBKDF2 密钥派生）和随机 nonce（AES-GCM IV）
+    - GCM 模式提供机密性和完整性认证
+    - 向后兼容旧 XOR 数据（仅用于解密迁移，不再用于新加密）
 """
 
 import base64
 import datetime
 import hashlib
 import json
-import logging
 import os
+import secrets
+from neurova.core import config
+from neurova.core.logger import get_logger
 import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 _PREFIX = "enc:"
+_PREFIX_V2 = "enc:v2:"
 _SALT = b"neurova-secret-store-v1"
 _SALT_LEGACY = b"neurova-secret-store-legacy"
 _VERSION_BYTE = 0x01
 _DEFAULT_PATH = "./data/secrets.json"
 _ITERATIONS = 10000
+
+# AES-GCM 参数
+_PBKDF2_ITERATIONS = 200000  # NIST 推荐的最小迭代次数
+_AES_KEY_SIZE = 32  # AES-256
+_GCM_NONCE_SIZE = 12  # 96-bit nonce (NIST 推荐)
+_GCM_TAG_SIZE = 16  # 128-bit tag
 
 
 def _new_id(prefix: str = "") -> str:
@@ -66,6 +81,7 @@ def _derive_key(master_key: str = "") -> bytes:
 
 
 def _xor_encrypt(plaintext: bytes, key: bytes) -> bytes:
+    """旧版 XOR 混淆（仅用于解密遗留数据，不再用于新加密）"""
     if not key:
         return bytes(plaintext)
     klen = len(key)
@@ -73,6 +89,62 @@ def _xor_encrypt(plaintext: bytes, key: bytes) -> bytes:
     for i, b in enumerate(plaintext):
         out[i] = b ^ key[i % klen]
     return bytes(out)
+
+
+def _derive_aes_key(master_key: str, salt: bytes) -> bytes:
+    """使用 PBKDF2-SHA256 派生 AES-256 密钥"""
+    mk = _coerce_master(master_key).encode("utf-8")
+    return hashlib.pbkdf2_hmac(
+        "sha256", mk, salt, iterations=_PBKDF2_ITERATIONS, dklen=_AES_KEY_SIZE
+    )
+
+
+def _aes_gcm_encrypt(plaintext: bytes, master_key: str) -> str:
+    """使用 AES-256-GCM 加密，返回 v2 格式字符串"""
+    from Crypto.Cipher import AES
+
+    # 每次加密使用随机 salt 和 nonce
+    salt = secrets.token_bytes(16)
+    nonce = secrets.token_bytes(_GCM_NONCE_SIZE)
+
+    # 派生密钥
+    key = _derive_aes_key(master_key, salt)
+
+    # AES-GCM 加密
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+
+    # 格式: enc:v2:<salt_b64>:<nonce_b64>:<ct_b64>:<tag_b64>
+    return (
+        _PREFIX_V2
+        + base64.urlsafe_b64encode(salt).decode("ascii")
+        + ":"
+        + base64.urlsafe_b64encode(nonce).decode("ascii")
+        + ":"
+        + base64.urlsafe_b64encode(ciphertext).decode("ascii")
+        + ":"
+        + base64.urlsafe_b64encode(tag).decode("ascii")
+    )
+
+
+def _aes_gcm_decrypt(payload: str, master_key: str) -> bytes:
+    """解密 v2 格式的 AES-256-GCM 密文"""
+    from Crypto.Cipher import AES
+
+    parts = payload.split(":")
+    # 格式: enc:v2:<salt_b64>:<nonce_b64>:<ct_b64>:<tag_b64>
+    # split 后: ["enc", "v2", "<salt_b64>", "<nonce_b64>", "<ct_b64>", "<tag_b64>"]
+    if len(parts) != 6:
+        raise ValueError("invalid v2 payload format")
+
+    salt = base64.urlsafe_b64decode(parts[2])
+    nonce = base64.urlsafe_b64decode(parts[3])
+    ciphertext = base64.urlsafe_b64decode(parts[4])
+    tag = base64.urlsafe_b64decode(parts[5])
+
+    key = _derive_aes_key(master_key, salt)
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    return cipher.decrypt_and_verify(ciphertext, tag)
 
 
 def _try_decode_b64(payload: str) -> bytes:
@@ -92,13 +164,12 @@ def encrypt_api_key(plaintext: str, master_key: str = "") -> str:
     if not isinstance(plaintext, str):
         plaintext = str(plaintext)
     mk = _coerce_master(master_key)
-    key = _derive_key(mk)
-    data = bytes([_VERSION_BYTE]) + plaintext.encode("utf-8")
-    enc = _xor_encrypt(data, key)
-    return _PREFIX + base64.urlsafe_b64encode(enc).decode("ascii")
+    # 使用 AES-256-GCM 加密（替代不安全的 XOR）
+    return _aes_gcm_encrypt(plaintext.encode("utf-8"), mk)
 
 
 def _decrypt_with_key(payload: bytes, key: bytes) -> str:
+    """旧版 XOR 解密（仅用于向后兼容遗留数据）"""
     dec = _xor_encrypt(payload, key)
     if not dec or dec[0] != _VERSION_BYTE:
         raise ValueError("decryption failed: invalid version marker")
@@ -116,6 +187,17 @@ def decrypt_api_key(encrypted: Any, master_key: str = "") -> str:
             encrypted = str(encrypted)
         except Exception:
             return ""
+
+    # v2 格式：AES-256-GCM 加密
+    if encrypted.startswith(_PREFIX_V2):
+        mk = _coerce_master(master_key)
+        try:
+            plaintext_bytes = _aes_gcm_decrypt(encrypted, mk)
+            return plaintext_bytes.decode("utf-8")
+        except Exception as exc:
+            raise ValueError(f"AES-GCM decryption failed: {exc}") from exc
+
+    # 旧版格式：XOR 混淆（仅用于解密遗留数据以支持迁移）
     if not encrypted.startswith(_PREFIX):
         return encrypted
     payload = encrypted[len(_PREFIX) :]
@@ -317,8 +399,8 @@ def get_secret_store() -> SecretStore:
     global _singleton
     with _singleton_lock:
         if _singleton is None:
-            mk = os.environ.get("NEUROVA_MASTER_KEY", "")
-            path = os.environ.get("NEUROVA_SECRETS_PATH", _DEFAULT_PATH)
+            mk = config.get("NEUROVA_MASTER_KEY", "")
+            path = config.get("NEUROVA_SECRETS_PATH", _DEFAULT_PATH)
             try:
                 _singleton = SecretStore(master_key=mk, storage_path=path)
             except Exception as exc:

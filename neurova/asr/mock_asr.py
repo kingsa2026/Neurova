@@ -4,12 +4,12 @@ Mock ASR Engine - 模拟 ASR 引擎
 用于测试和开发的模拟 ASR 引擎。
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict
 
 from neurova.asr.base import ASRBase
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class MockASREngine(ASRBase):

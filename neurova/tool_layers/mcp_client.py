@@ -9,11 +9,11 @@ MCP Client — Agent 作为 MCP 消费者
 
 import asyncio
 import datetime
-import logging
+from neurova.core.logger import get_logger
 import subprocess
 import typing
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ToolNotFoundError(Exception):

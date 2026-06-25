@@ -7,7 +7,7 @@ TTS Manager - TTS 引擎管理器
 3. mock: 模拟 TTS（测试用）
 """
 
-import logging
+from neurova.core.logger import get_logger
 from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel
@@ -26,7 +26,7 @@ try:
 except ImportError:
     SAPI5TTS = None
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Fallback 引擎优先级
 FALLBACK_CHAIN = ["moss-nano", "edge-tts", "sapi5", "mock"]

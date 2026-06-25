@@ -48,7 +48,8 @@ from neurova.agent.tool_execution_manager import (
 
 # ContextOrchestrator 已统一到 neurova.context 包
 # from neurova.agent.context_orchestrator import ContextOrchestrator  # 已删除，使用 neurova.context
-from neurova.agent.tool_executor import ToolExecutor
+# ToolExecutor 已统一到 neurova.tool_executor
+from neurova.tool_executor import ToolExecutor
 
 # 从 mem_core 导入记忆核心模块
 from neurova.mem_core import MemCore

@@ -4,12 +4,12 @@
 提供文生图、图生图、视频生成等 AI 能力。
 """
 
-import logging
+from neurova.core.logger import get_logger
 import os
 import tempfile
 from typing import Generator, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AIMixin:
