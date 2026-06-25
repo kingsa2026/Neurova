@@ -1,0 +1,14 @@
+{
+  "name": "neurova-harmony",
+  "version": "1.0.0",
+  "description": "Neurova 鸿蒙 App - ArkTS 纯重写版本",
+  "main": "",
+  "author": "Neurova Team",
+  "license": "Apache-2.0",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.21",
+    "@ohos/hvigor-ohos-plugin": "5.0.0",
+    "@ohos/hvigor": "5.0.0"
+  }
+}

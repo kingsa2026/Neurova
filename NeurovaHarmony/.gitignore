@@ -1,0 +1,20 @@
+# HarmonyOS 工程忽略文件
+/node_modules
+/oh_modules
+/.hvigor
+/.cxx
+/.test
+/build
+/.preview
+/local.properties
+*.log
+.DS_Store
+
+# M5.3.2 签名文件忽略规则（参见 docs/HARMONYOS_SIGNING_GUIDE.md 第 9.1 节）
+# 密钥库与证书禁止提交 git，避免泄露风险
+/signing/
+*.p12
+*.p7b
+*.cer
+*.csr
+*.keystore

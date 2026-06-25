@@ -1,0 +1,69 @@
+# Neurova HarmonyOS 混淆规则
+# M5.2.4 包体积优化：启用 release 模式混淆以减小包体积（目标 ≤30MB）
+#
+# 设计原则：
+#   - 保留 ArkUI 必需的反射元数据（@Component/@Entry struct 名、@Builder 方法）
+#   - 保留导出的 public API（export class/export function 顶层符号）
+#   - 保留类型信息用于 @Observed/@ObjectLink 响应式机制
+#   - 保留 @ohos/hypium 测试入口符号
+
+# ========== 1. ArkUI 装饰器相关 ==========
+# 保留所有 @Entry / @Component struct 名称（Navigation 组件需要通过名称反射）
+-keep-file-name
+# 保留 build 方法及其调用的所有 @Builder 方法（ArkUI 通过反射调用）
+-keep
+  @*.builder
+  <estest>
+
+# ========== 2. 导出符号 ==========
+# 保留所有 export 的顶层符号（库 API、ViewHelper 类）
+-keep
+  export
+
+# ========== 3. 反射关键类 ==========
+# 保留所有 @Component / @Entry 装饰的 struct（Navigation navDestination 反射需要）
+-keep
+  @ArkUi.Component
+  struct *
+  {
+    @ArkUi.Builder *;
+  }
+
+# 保留所有 @Observed 类（响应式机制通过 Reflect.getMetadata 读取）
+-keep
+  @ArkUi.Observed
+  class *
+
+# ========== 4. 测试入口 ==========
+# 保留 ohosTest 测试套件入口（List.test.ets 中 default export）
+-keep
+  *Test*
+
+# ========== 5. 类型信息 ==========
+# 保留 enum 名称与值（避免序列化/反序列化失败）
+-keep
+  enum *
+
+# 保留接口（避免类型推断丢失）
+-keep
+  interface *
+
+# ========== 6. 命名空间 ==========
+# 保留顶层命名空间（避免 import 路径失败）
+-keep-file-name
+  ApiFacade
+  Router
+  EventBus
+  Logger
+  StyleManager
+  ConfigManager
+  MessageManager
+  ErrorManager
+  StateManager
+  HttpClient
+  WebSocketAdapter
+  ModuleManager
+
+# ========== 7. 保留字符串字面量 ==========
+# 保留 RouteNames 常量值（NavPathStack 通过字符串匹配路由）
+-keep-string-constants

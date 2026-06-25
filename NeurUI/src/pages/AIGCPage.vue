@@ -389,11 +389,10 @@ function pollVideoStatus(taskId: string) {
   border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.2s;
 }
 
 .gallery-item:hover {
-  transform: scale(1.03);
+  background: rgba(255,255,255,0.04);
 }
 
 .gallery-item img {

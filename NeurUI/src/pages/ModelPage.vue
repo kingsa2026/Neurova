@@ -1969,7 +1969,6 @@ watch(() => defaultConfig.provider_id, () => {
 }
 .nr-mm-btn-submit:hover {
   box-shadow: 0 6px 24px rgba(99, 102, 241, 0.35), inset 0 1px 0 rgba(255,255,255,0.15);
-  transform: translateY(-1px);
 }
 .nr-mm-btn-submit:disabled {
   opacity: 0.4;

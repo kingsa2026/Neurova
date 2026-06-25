@@ -350,11 +350,10 @@ onMounted(fetchMedia)
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.3s;
 }
 
 .media-thumb:hover img {
-  transform: scale(1.05);
+  opacity: 0.85;
 }
 
 .thumb-placeholder {

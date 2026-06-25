@@ -199,8 +199,8 @@ onMounted(fetchBoards)
 .column-header { display: flex; justify-content: space-between; align-items: center; padding: 0 4px; }
 .column-header h4 { color: var(--nr-text-primary); margin: 0; font-size: 14px; }
 .column-body { display: flex; flex-direction: column; gap: 8px; min-height: 120px; }
-.task-card { cursor: pointer; transition: transform 0.2s; }
-.task-card:hover { transform: translateY(-2px); }
+.task-card { cursor: pointer; }
+.task-card:hover { background: rgba(255,255,255,0.03); }
 .task-title { color: var(--nr-text-primary); font-size: 14px; font-weight: 500; margin-bottom: 6px; }
 .task-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .meta-text { font-size: 11px; color: var(--nr-text-tertiary); }
