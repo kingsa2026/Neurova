@@ -257,7 +257,7 @@ class ToolExecutionLogger:
         """析构函数"""
         try:
             self.close()
-        except:
+        except Exception:  # 修复 P0-11: 收窄裸 except
             pass
 
     def _update_stats(self, entry: ToolExecutionEntry) -> None:

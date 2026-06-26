@@ -2,6 +2,8 @@
  * Security utilities for input validation and sanitization.
  */
 
+import DOMPurify from 'dompurify'
+
 const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,20}$/
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
 
@@ -137,6 +139,97 @@ export function sanitizeHtml(html: string): string {
       // Remove data: URIs in src/href (potential XSS vector)
       .replace(/(?:href|src)\s*=\s*(?:"data:[^"]*"|'data:[^']*')/gi, '')
   )
+}
+
+// ============================================================================
+// P0-7 (C7): XSS 三层防御
+// ============================================================================
+
+/**
+ * 转义 HTML 特殊字符（层 1：引号转义）
+ *
+ * 修复 P0-7：原 ChatPage.vue 的 escapeHtml 只转义 & < >，
+ * 未转义 " ' → 注入 onclick="evil()" 或 onclick='evil()' 可绕过。
+ *
+ * 转义 5 个字符：& < > " '
+ * - & → &amp; (必须最先)
+ * - < → &lt;
+ * - > → &gt;
+ * - " → &quot;
+ * - ' → &#x27;
+ */
+export function escapeHtml(text: string): string {
+  if (!text || typeof text !== 'string') return ''
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+}
+
+/**
+ * 允许的 URL 协议白名单（层 2：URL 协议校验）
+ */
+const SAFE_URL_PROTOCOLS = ['http:', 'https:', 'mailto:', 'tel:']
+
+/**
+ * 校验 URL 协议安全性（层 2：URL 协议白名单）
+ *
+ * 修复 P0-7：原 ChatPage.vue markdown 链接替换直接插入 URL，
+ * 无协议校验 → [x](javascript:alert(1)) 可执行。
+ *
+ * 允许：http, https, mailto, tel, data:image/*（图片内联）
+ * 拒绝：javascript:, data:text/html, data:application/, 协议相对 URL 等
+ *
+ * 返回空字符串表示 URL 不安全（调用方应原样转义显示而非插入 href）。
+ */
+export function sanitizeUrl(url: string): string {
+  if (!url || typeof url !== 'string') return ''
+  const trimmed = url.trim()
+  if (!trimmed) return ''
+
+  // 拒绝协议相对 URL（//evil.com）— 已知反模式，可能被用于绕过协议校验
+  if (trimmed.startsWith('//')) return ''
+
+  // data:image/ 协议允许（图片内联场景）
+  if (/^data:image\//i.test(trimmed)) {
+    return trimmed
+  }
+
+  try {
+    // 用 URL 构造函数解析协议；第二个参数 base 兜底无 window 场景
+    const parsed = new URL(trimmed, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
+    if (SAFE_URL_PROTOCOLS.includes(parsed.protocol.toLowerCase())) {
+      return trimmed
+    }
+    return ''
+  } catch {
+    // URL 解析失败，不安全
+    return ''
+  }
+}
+
+/**
+ * DOMPurify 严格 HTML 清洗（层 3：DOMPurify 兜底）
+ *
+ * 修复 P0-7：即使 escapeHtml 和 sanitizeUrl 有遗漏，DOMPurify 作为最终兜底
+ * 剥离所有危险标签和属性（script, on*, javascript:, iframe 等）。
+ *
+ * 允许的标签：p, br, strong, em, a, code, pre, div, span, img, ul, ol, li 等
+ * 允许的属性：href (仅安全协议), src (仅安全协议), alt, title, class, target, rel, loading
+ */
+export function sanitizeHtmlStrict(html: string): string {
+  if (!html || typeof html !== 'string') return ''
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [
+      'p', 'br', 'strong', 'em', 'a', 'code', 'pre', 'div', 'span',
+      'img', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'table', 'thead', 'tbody', 'tr', 'th', 'td', 'button',
+    ],
+    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'target', 'rel', 'loading'],
+    ALLOW_DATA_ATTR: false,
+  })
 }
 
 /**

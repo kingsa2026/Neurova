@@ -11,6 +11,8 @@ from __future__ import annotations
 - 模型切换时的上下文适配
 """
 
+import threading
+
 from neurova.core.logger import get_logger
 from datetime import datetime
 from typing import Any, Dict, List
@@ -98,6 +100,11 @@ class ContextPool:
         self._cache_version = 0
         self._last_build_version = -1
 
+        # 并发保护：保护 _cache / _cache_version / _collector._contexts 等共享状态
+        # 使用 RLock 因为 merge_with 等方法会重入调用 add_context
+        # 遵循 AGENTS.md "Thread safety: use threading.RLock for shared state"
+        self._lock = threading.RLock()
+
     @property
     def isolation_key(self) -> str:
         """生成隔离键"""
@@ -105,33 +112,34 @@ class ContextPool:
         return f"{self.user_id}:{self.agent_id}:{session_part}"
 
     def add_context(self, context):
-        if self.auto_tag and hasattr(self, "_auto_tagger"):
-            context = self._auto_tagger.auto_tag(context)
+        with self._lock:
+            if self.auto_tag and hasattr(self, "_auto_tagger"):
+                context = self._auto_tagger.auto_tag(context)
 
-        # [FIX] 添加时去重：已存在相同 hash 的条目则跳过
-        if context.hash:
-            existing = [c for c in self._collector._contexts if c.hash == context.hash]
-            if existing:
-                # 若新条目优先级更高则替换，否则跳过
-                existing_entry = existing[0]
-                if context.priority > existing_entry.priority:
-                    idx = self._collector._contexts.index(existing_entry)
-                    self._collector._contexts[idx] = context
-                    self._cache_version += 1
-                    logger.debug("ContextPool 替换条目: hash=%s, priority=%s→%s",
-                                 context.hash[:8], existing_entry.priority, context.priority)
-                else:
-                    logger.debug("ContextPool 跳过重复: hash=%s, source=%s",
-                                 context.hash[:8], context.source.value if context.source else "?")
-                return
+            # [FIX] 添加时去重：已存在相同 hash 的条目则跳过
+            if context.hash:
+                existing = [c for c in self._collector._contexts if c.hash == context.hash]
+                if existing:
+                    # 若新条目优先级更高则替换，否则跳过
+                    existing_entry = existing[0]
+                    if context.priority > existing_entry.priority:
+                        idx = self._collector._contexts.index(existing_entry)
+                        self._collector._contexts[idx] = context
+                        self._cache_version += 1
+                        logger.debug("ContextPool 替换条目: hash=%s, priority=%s→%s",
+                                     context.hash[:8], existing_entry.priority, context.priority)
+                    else:
+                        logger.debug("ContextPool 跳过重复: hash=%s, source=%s",
+                                     context.hash[:8], context.source.value if context.source else "?")
+                    return
 
-        if hasattr(self, "max_size") and self.max_size > 0:
-            current_size = len(self._collector._contexts)
-            if current_size >= self.max_size:
-                self._collector._contexts.pop(0)
+            if hasattr(self, "max_size") and self.max_size > 0:
+                current_size = len(self._collector._contexts)
+                if current_size >= self.max_size:
+                    self._collector._contexts.pop(0)
 
-        self._collector.add_context(context)
-        self._cache_version += 1
+            self._collector.add_context(context)
+            self._cache_version += 1
 
     def _filter_ttl(self, items: List) -> List:
         """按 TTL 过滤条目（提取公共方法供 get_contexts 和 draw 复用）"""
@@ -149,22 +157,24 @@ class ContextPool:
         return valid
 
     def get_contexts(self) -> List:
-        contexts = self._collector.collect()
-        return self._filter_ttl(contexts)
+        with self._lock:
+            contexts = self._collector.collect()
+            return self._filter_ttl(contexts)
 
     def cleanup_expired(self) -> int:
         """清理过期条目，返回移除数量"""
-        if not hasattr(self, "ttl_seconds") or self.ttl_seconds <= 0:
-            return 0
+        with self._lock:
+            if not hasattr(self, "ttl_seconds") or self.ttl_seconds <= 0:
+                return 0
 
-        original_count = len(self._collector._contexts)
-        self._collector._contexts = self._filter_ttl(self._collector._contexts)
+            original_count = len(self._collector._contexts)
+            self._collector._contexts = self._filter_ttl(self._collector._contexts)
 
-        removed_count = original_count - len(self._collector._contexts)
-        if removed_count > 0:
-            self._cache_version += 1
+            removed_count = original_count - len(self._collector._contexts)
+            if removed_count > 0:
+                self._cache_version += 1
 
-        return removed_count
+            return removed_count
 
     @staticmethod
     def get_token_budget_for_model(model_name: str, default_budget: int = 16000) -> int:
@@ -210,52 +220,59 @@ class ContextPool:
         return base_budget
 
     def build_context_for_model(self, model_name: str) -> List[Dict[str, Any]]:
-        cache_key = f"{self.isolation_key}:{model_name}"
-        if cache_key in self._cache and self._last_build_version == self._cache_version:
-            return self._cache[cache_key]
+        with self._lock:
+            cache_key = f"{self.isolation_key}:{model_name}"
+            if cache_key in self._cache and self._last_build_version == self._cache_version:
+                return self._cache[cache_key]
 
-        contexts = self.get_contexts()
+            contexts = self.get_contexts()
 
-        messages = []
-        for ctx in contexts:
-            msg = self._converter.convert_for_model(ctx, model_name)
-            messages.append(msg)
+            messages = []
+            for ctx in contexts:
+                msg = self._converter.convert_for_model(ctx, model_name)
+                messages.append(msg)
 
-        self._cache[cache_key] = messages
-        self._last_build_version = self._cache_version
+            self._cache[cache_key] = messages
+            self._last_build_version = self._cache_version
 
-        return messages
+            return messages
 
     def convert_context_for_model(self, model_name: str) -> List[Dict[str, Any]]:
         return self.build_context_for_model(model_name)
 
     def compress_context(self):
-        contexts = self.get_contexts()
-        compressed = self._compressor.compress(contexts)
-        self._collector._contexts = compressed
+        with self._lock:
+            contexts = self.get_contexts()
+            compressed = self._compressor.compress(contexts)
+            self._collector._contexts = compressed
 
     def merge_with(self, other_pool: "ContextPool"):
-        other_contexts = other_pool.get_contexts()
-        for ctx in other_contexts:
-            self._collector.add_context(ctx)
+        with self._lock:
+            other_contexts = other_pool.get_contexts()
+            for ctx in other_contexts:
+                # 重入 add_context（RLock 允许重入）
+                self.add_context(ctx)
 
     def clear(self):
-        self._collector._contexts.clear()
-        self._cache.clear()
-        self._cache_version += 1
+        with self._lock:
+            self._collector._contexts.clear()
+            self._cache.clear()
+            self._cache_version += 1
 
     def draw(self, need: str = None) -> List:
-        all_drops = self._collector.collect()
-        # [FIX] draw() 也应用 TTL 过期过滤（之前绕过 get_contexts() 的 TTL 检查）
-        all_drops = self._filter_ttl(all_drops)
-        deduped = self._deduplicator.dedup(all_drops, stage="output")
-        return self._drawer.draw(deduped, need=need)
+        with self._lock:
+            all_drops = self._collector.collect()
+            # [FIX] draw() 也应用 TTL 过期过滤（之前绕过 get_contexts() 的 TTL 检查）
+            all_drops = self._filter_ttl(all_drops)
+            deduped = self._deduplicator.dedup(all_drops, stage="output")
+            return self._drawer.draw(deduped, need=need)
 
     def dedup(self, stage: str = "input") -> int:
-        all_drops = self._collector.collect()
-        deduped = self._deduplicator.dedup(all_drops, stage=stage)
-        self._collector._contexts = deduped
-        return len(deduped)
+        with self._lock:
+            all_drops = self._collector.collect()
+            deduped = self._deduplicator.dedup(all_drops, stage=stage)
+            self._collector._contexts = deduped
+            return len(deduped)
 
 
 from neurova.context.pool_models import ContextSource, ContextInput

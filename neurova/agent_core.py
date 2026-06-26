@@ -1137,13 +1137,14 @@ class Agent:
                 from neurova.evolution import AutoSkillBuilder
 
                 self.skill_packer = AutoSkillBuilder(
-                    min_occurrences=3,
+                    min_pattern_occurrences=3,  # 修复 P0-8: 参数名 min_occurrences → min_pattern_occurrences（对齐 skill_encapsulation.py 签名）
                     min_success_rate=0.7,
                 )
                 logger.info("Agent %s: AutoSkillBuilder 已初始化", self.config.name)
 
-            except ImportError as e:
-                logger.warning("AutoSkillBuilder 初始化失败: %s", e)
+            except Exception as e:  # 修复 P0-8: ImportError → Exception，覆盖 TypeError 等构造异常
+                logger.warning("Agent %s: AutoSkillBuilder 初始化失败: %s", self.config.name, e)
+                self.skill_packer = None  # 修复 P0-8: 显式置 None，避免后续引用未定义属性
 
         logger.info("Agent %s 的 Router 已初始化", self.config.name)
         return self._router

@@ -491,7 +491,7 @@ class ContextInjector:
                 if isinstance(timestamp, str):
                     try:
                         timestamp = datetime.datetime.fromisoformat(timestamp)
-                    except:
+                    except (ValueError, TypeError):  # 修复 P0-11: 替换裸 except
                         pass
 
                 if isinstance(timestamp, datetime.datetime):

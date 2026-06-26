@@ -6,6 +6,7 @@ Neurova 数据分析模块 - 数据收集器
 """
 
 import asyncio
+import threading
 from neurova.core.logger import get_logger
 import time
 import typing
@@ -800,21 +801,31 @@ class MetricsCollector:
                 self._add_time_series_point(f"agent.{agent_id}.cost", cost)
 
 
+# 单例并发保护：双重检查锁模式
+# 修复 P0-2 (C2)：原 hasattr(get_collector, "_instance") 写法无锁，TOCTOU
+# 模板：neurova/cognitive/orchestrator.py:358-369
+_collector_singleton: Optional[MetricsCollector] = None
+_collector_lock = threading.Lock()
+
+
 def get_collector() -> MetricsCollector:
     """
-    获取收集器实例（单例模式）
+    获取收集器实例（单例模式，并发安全）
 
     Returns:
         MetricsCollector实例
     """
-    if not hasattr(get_collector, "_instance"):
-        get_collector._instance = MetricsCollector()
-    return get_collector._instance
+    global _collector_singleton
+    with _collector_lock:
+        if _collector_singleton is None:
+            _collector_singleton = MetricsCollector()
+        return _collector_singleton
 
 
 def reset_collector():
     """
     重置收集器实例（用于测试）
     """
-    if hasattr(get_collector, "_instance"):
-        del get_collector._instance
+    global _collector_singleton
+    with _collector_lock:
+        _collector_singleton = None
