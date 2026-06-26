@@ -33,7 +33,7 @@
       <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/channel`" :label="t('nav.channels')" :collapsed="sidebarCollapsed">
         <template #icon><GlobalOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/session-sync" :label="t('nav.conversations')" :collapsed="sidebarCollapsed">
+      <GlassNavItem to="/collaboration/session-sync" :label="t('nav.conversations')" :collapsed="sidebarCollapsed">
         <template #icon><MessageOutlined /></template>
       </GlassNavItem>
       <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/scheduler`" :label="t('nav.scheduler')" :collapsed="sidebarCollapsed">

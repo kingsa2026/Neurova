@@ -200,3 +200,44 @@ export function instantiateTemplate(templateId: string, data: { name?: string; v
 export function getNeurflowStats() {
   return api.get<ApiResponse<{ storage: unknown; nodes: unknown }>>(`${BASE}/stats`)
 }
+
+// --- ComfyUI 整合（Infinite-Canvas） ---
+
+/** ComfyUI 服务状态。 */
+export interface ComfyuiStatus {
+  available: boolean
+  host: string | null
+}
+
+/** ComfyUI 节点执行结果。 */
+export interface ComfyuiExecuteResult {
+  status: 'success' | 'failed'
+  output: Record<string, unknown> | null
+  error: string | null
+}
+
+/** 导入 ComfyUI API 格式工作流为 Neurflow WorkflowDefinition。 */
+export function importComfyuiWorkflow(data: {
+  name: string
+  description?: string
+  workflow: Record<string, unknown>
+}) {
+  return api.post<ApiResponse<{ workflow: WorkflowDefinition; message: string }>>(
+    `${BASE}/comfyui/import`,
+    data,
+  )
+}
+
+/** 检查 ComfyUI 服务可用性。 */
+export function getComfyuiStatus() {
+  return api.get<ApiResponse<ComfyuiStatus>>(`${BASE}/comfyui/status`)
+}
+
+/** 直接执行单个 ComfyUI 节点。 */
+export function executeComfyuiNode(data: {
+  class_type: string
+  config?: Record<string, unknown>
+  inputs?: Record<string, unknown>
+}) {
+  return api.post<ComfyuiExecuteResult>(`${BASE}/comfyui/execute`, data)
+}

@@ -18,9 +18,9 @@
       <div class="quick-actions">
         <GlassButton variant="secondary" size="sm" @click="$router.push('/collaboration/templates')">{{ t('collab.templates') }}</GlassButton>
         <GlassButton variant="secondary" size="sm" @click="$router.push('/collaboration/history')">{{ t('collab.history') }}</GlassButton>
-        <GlassButton variant="secondary" size="sm" @click="$router.push('/projects')">{{ t('collab.projects') }}</GlassButton>
-        <GlassButton variant="secondary" size="sm" @click="$router.push('/teams')">{{ t('collab.teams') }}</GlassButton>
-        <GlassButton variant="secondary" size="sm" @click="$router.push('/tasks')">{{ t('collab.tasks') }}</GlassButton>
+        <GlassButton variant="secondary" size="sm" @click="$router.push('/collaboration/projects')">{{ t('collab.projects') }}</GlassButton>
+        <GlassButton variant="secondary" size="sm" @click="$router.push('/collaboration/teams')">{{ t('collab.teams') }}</GlassButton>
+        <GlassButton variant="secondary" size="sm" @click="$router.push('/collaboration/tasks')">{{ t('collab.tasks') }}</GlassButton>
       </div>
     </GlassPanel>
 
