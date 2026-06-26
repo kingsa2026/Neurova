@@ -58,9 +58,13 @@ class WeComAdapter(ChannelAdapter):
         self._encoding_aes_key = config.extra.get("encoding_aes_key", "")
         self._corpid = config.extra.get("corpid", "")
         self._agentid = config.extra.get("agentid", "")
+        # 修复 P0-6 (C5): 捕获主事件循环引用，供同步回调线程安全调度
+        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
 
     async def connect(self) -> bool:
         """建立企业微信连接"""
+        # 修复 P0-6 (C5): 捕获主 loop 引用，供 handle_callback 跨线程调度
+        self._main_loop = asyncio.get_event_loop()
         try:
             if self.config.use_stream:
                 return await self._connect_stream()
@@ -173,22 +177,15 @@ class WeComAdapter(ChannelAdapter):
             )
 
             # 触发事件
-            # 使用 call_soon_threadsafe 调度到主事件循环，避免跨事件循环问题
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 如果事件循环正在运行，使用 call_soon_threadsafe
-                    asyncio.run_coroutine_threadsafe(
-                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg), loop
-                    )
-                else:
-                    # 如果事件循环未运行，直接运行
-                    loop.run_until_complete(self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg))
-            except RuntimeError:
-                # 如果没有事件循环，创建新的
-                loop = asyncio.new_event_loop()
-                loop.run_until_complete(self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg))
-                loop.close()
+            # 修复 P0-6 (C5): 用 _main_loop 引用 + run_coroutine_threadsafe 调度到主 loop
+            # 原代码用 asyncio.get_event_loop() 在子线程中不可靠，except 分支创建新 loop 破坏主 loop
+            if self._main_loop and self._main_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg),
+                    self._main_loop,
+                )
+            else:
+                logger.warning("WeCom: 主事件循环未运行，丢弃消息")
 
             # 被动回复（示例: 回复文本）
             return self._build_reply_xml(from_user, to_user_name, "收到您的消息，正在处理中...")

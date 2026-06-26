@@ -63,7 +63,9 @@ class MultiModelLLMClient:
     """
 
     _instance = None
-    _lock = threading.Lock()
+    # 使用 RLock（可重入锁）：__new__ 持锁后 __init__ 重入调用，Lock 会永久阻塞
+    # 修复 P0-3 (C6): 原 threading.Lock() 不可重入，__init__ 内重入会死锁
+    _lock = threading.RLock()
 
     def __new__(cls, *args, **kwargs):
         with cls._lock:
@@ -76,19 +78,23 @@ class MultiModelLLMClient:
         provider_manager: Optional[LLMProviderManager] = None,
         strategy: LoadBalancingStrategy = LoadBalancingStrategy.PRIORITY_FIRST,
     ):
-        if hasattr(self, "_initialized") and self._initialized:
-            return
-        self._initialized = True
+        # 修复 P0-3 (C6): __init__ 的 _initialized 检查必须在锁内，
+        # 否则两线程可同时通过 hasattr 检查（TOCTOU）
+        # 注：__init__ 是实例方法，无 cls 参数，用 type(self) 获取类引用
+        with type(self)._lock:
+            if hasattr(self, "_initialized") and self._initialized:
+                return
+            self._initialized = True
 
-        self._provider_manager = provider_manager or get_provider_manager()
-        self._clients: Dict[str, ModelClient] = {}  # key: provider_id/model
-        self._current_provider_id: Optional[str] = None
-        self._current_model: Optional[str] = None
-        self._round_robin_index = 0
-        self._init_lock = threading.Lock()
+            self._provider_manager = provider_manager or get_provider_manager()
+            self._clients: Dict[str, ModelClient] = {}  # key: provider_id/model
+            self._current_provider_id: Optional[str] = None
+            self._current_model: Optional[str] = None
+            self._round_robin_index = 0
+            self._init_lock = threading.Lock()
 
-        # 初始化默认客户端
-        self._initialize_default_clients()
+            # 初始化默认客户端
+            self._initialize_default_clients()
 
     def _initialize_default_clients(self) -> None:
         """初始化默认客户端"""

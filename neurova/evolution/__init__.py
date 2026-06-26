@@ -8,6 +8,7 @@
 from neurova.core.logger import get_logger
 _logger = get_logger(__name__)
 
+# 核心进化模块
 try:
     from .closed_loop import (
         AdaptiveToolWeights,
@@ -19,8 +20,9 @@ try:
         get_evolution_orchestrator,
         reset_evolution_orchestrator,
     )
-except ImportError as _e:
-    _logger.debug("closed_loop 模块未可用: %s", _e)
+except Exception as _e:
+    # 修复 P0-9 (H2): ImportError → Exception，覆盖运行时错误；debug → warning
+    _logger.warning("closed_loop 模块加载失败: %s", _e)
     EvolutionOrchestrator = None
     ToolLifecycleManager = None
     AdaptiveToolWeights = None
@@ -38,8 +40,9 @@ try:
         get_evolution_event_bridge,
         reset_evolution_event_bridge,
     )
-except ImportError as _e:
-    _logger.debug("event_driven 模块未可用: %s", _e)
+except Exception as _e:
+    # 修复 P0-9 (H2): ImportError → Exception
+    _logger.warning("event_driven 模块加载失败: %s", _e)
     EvolutionEventBridge = None
     EvolutionEvent = None
     get_evolution_event_bridge = None
@@ -52,11 +55,22 @@ try:
         EnhancedRatchetPruner,
         RecursiveRatchetPruner,
     )
-except ImportError as _e:
-    _logger.debug("rsi 模块未可用: %s", _e)
+except Exception as _e:
+    # 修复 P0-9 (H2): ImportError → Exception
+    _logger.warning("rsi 模块加载失败: %s", _e)
     RecursiveRatchetPruner = None
     EnhancedRatchetPruner = None
     Candidate = None
+
+# 技能自动构建（修复 P0-8/P0-9: 新增导出，配合 agent_core.py 的 AutoSkillBuilder 初始化）
+try:
+    from .skill_encapsulation import (
+        AutoSkillBuilder,
+    )
+except Exception as _e:
+    # 修复 P0-9 (H2): ImportError → Exception
+    _logger.warning("skill_encapsulation 模块加载失败: %s", _e)
+    AutoSkillBuilder = None
 
 __all__ = [
     # 核心进化模块
@@ -77,4 +91,6 @@ __all__ = [
     "RecursiveRatchetPruner",
     "EnhancedRatchetPruner",
     "Candidate",
+    # 技能自动构建（修复 P0-8/P0-9）
+    "AutoSkillBuilder",
 ]

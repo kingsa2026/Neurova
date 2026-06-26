@@ -262,8 +262,8 @@ class EnhancedContextBuilder:
         try:
             memory_stats = self._memory_rw_manager.get_stats()
             stats["memory_manager"] = memory_stats
-        except:
-            pass
+        except Exception as e:  # 修复 P0-11: 替换裸 except
+            logger.warning("获取 memory_rw_manager 统计失败: %s", e)
 
         return stats
 

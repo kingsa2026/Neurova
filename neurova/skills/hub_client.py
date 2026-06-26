@@ -625,8 +625,8 @@ class SkillHubClient:
                 import yaml
 
                 config = yaml.safe_load(match.group(1))
-            except:
-                pass
+            except Exception:  # 修复 P0-11: yaml 可能 ImportError + YAMLError，收窄并记日志
+                logger.debug("解析 skill YAML front matter 失败", exc_info=True)
 
         return config
 

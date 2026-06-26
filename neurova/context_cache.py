@@ -52,7 +52,8 @@ class CacheEntry:
         """估算上下文数据大小"""
         try:
             return len(json.dumps(self.context_data, ensure_ascii=False).encode("utf-8"))
-        except:
+        except (TypeError, ValueError, OverflowError):
+            # 修复 P0-11: 替换裸 except，收窄到 JSON 序列化可能抛的异常
             return 0
 
     def touch(self):

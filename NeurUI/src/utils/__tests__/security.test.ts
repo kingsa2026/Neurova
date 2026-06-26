@@ -7,6 +7,9 @@ import {
   limitInputLength,
   sanitizeHtml,
   secureStorage,
+  escapeHtml,
+  sanitizeUrl,
+  sanitizeHtmlStrict,
 } from '@/utils/security'
 
 describe('validateUsername', () => {
@@ -166,5 +169,154 @@ describe('secureStorage', () => {
 
   it('returns fallback for missing objects', () => {
     expect(secureStorage.getObject('missing', { default: true })).toEqual({ default: true })
+  })
+})
+
+// ============================================================================
+// P0-7 (C7): XSS 三层防御测试
+// ============================================================================
+
+describe('escapeHtml (P0-7: 层 1 — 引号转义)', () => {
+  it('转义 & < > 基本字符', () => {
+    expect(escapeHtml('a & b < c > d')).toBe('a &amp; b &lt; c &gt; d')
+  })
+
+  it('转义双引号（修复 P0-7：原实现遗漏）', () => {
+    // 修复前：escapeHtml 只转义 & < >，双引号未转义
+    // 攻击向量：注入 onclick="evil()" 可绕过
+    expect(escapeHtml('"onmouseover="evil()')).toBe(
+      '&quot;onmouseover=&quot;evil()',
+    )
+  })
+
+  it('转义单引号（修复 P0-7：原实现遗漏）', () => {
+    // 攻击向量：注入 onclick='evil()' 可绕过
+    expect(escapeHtml("'onmouseover='evil()")).toBe(
+      '&#x27;onmouseover=&#x27;evil()',
+    )
+  })
+
+  it('组合攻击：完整 attribute injection payload', () => {
+    const payload = `" onmouseover="alert(1)" title="`
+    const result = escapeHtml(payload)
+    expect(result).not.toContain('"')
+    // 修复后所有双引号都被转义，无法逃逸属性
+    expect(result).toBe('&quot; onmouseover=&quot;alert(1)&quot; title=&quot;')
+  })
+
+  it('处理空输入和非法输入', () => {
+    expect(escapeHtml('')).toBe('')
+    expect(escapeHtml(null as any)).toBe('')
+    expect(escapeHtml(undefined as any)).toBe('')
+  })
+})
+
+describe('sanitizeUrl (P0-7: 层 2 — URL 协议白名单)', () => {
+  it('允许 http/https 协议', () => {
+    expect(sanitizeUrl('http://example.com')).toBe('http://example.com')
+    expect(sanitizeUrl('https://example.com/path?q=1')).toBe(
+      'https://example.com/path?q=1',
+    )
+  })
+
+  it('允许 mailto 协议', () => {
+    expect(sanitizeUrl('mailto:user@example.com')).toBe(
+      'mailto:user@example.com',
+    )
+  })
+
+  it('允许 tel 协议', () => {
+    expect(sanitizeUrl('tel:+8613800138000')).toBe('tel:+8613800138000')
+  })
+
+  it('拒绝 javascript: 协议（核心 XSS 向量）', () => {
+    // 修复前：markdown 链接 [x](javascript:alert(1)) 直接插入 href，可执行
+    expect(sanitizeUrl('javascript:alert(1)')).toBe('')
+    expect(sanitizeUrl('JavaScript:alert(1)')).toBe('')
+    expect(sanitizeUrl('  javascript:alert(1)  ')).toBe('')
+  })
+
+  it('拒绝 data: 协议（非 image 场景）', () => {
+    expect(sanitizeUrl('data:text/html,<script>alert(1)</script>')).toBe('')
+  })
+
+  it('拒绝相对路径协议注入', () => {
+    // 防止 //evil.com 或 /\evil.com 绕过
+    expect(sanitizeUrl('//evil.com')).not.toBe('//evil.com')
+  })
+
+  it('允许 data:image/ 协议（图片内联）', () => {
+    const dataImg = 'data:image/png;base64,iVBORw0KGgo='
+    expect(sanitizeUrl(dataImg)).toBe(dataImg)
+  })
+
+  it('处理空输入和非法输入', () => {
+    expect(sanitizeUrl('')).toBe('')
+    expect(sanitizeUrl(null as any)).toBe('')
+    expect(sanitizeUrl(undefined as any)).toBe('')
+  })
+})
+
+describe('sanitizeHtmlStrict (P0-7: 层 3 — DOMPurify 兜底)', () => {
+  it('保留安全 HTML（strong/em/a/code 等）', () => {
+    const safe = '<p>Hello <strong>World</strong> <em>italic</em></p>'
+    const result = sanitizeHtmlStrict(safe)
+    expect(result).toContain('<strong>World</strong>')
+    expect(result).toContain('<em>italic</em>')
+  })
+
+  it('保留带安全 href 的 <a> 标签', () => {
+    const safe = '<a href="https://example.com" target="_blank">link</a>'
+    const result = sanitizeHtmlStrict(safe)
+    expect(result).toContain('href="https://example.com"')
+    expect(result).toContain('>link</a>')
+  })
+
+  it('剥离 <script> 标签', () => {
+    const evil = '<script>alert("xss")</script><p>safe</p>'
+    const result = sanitizeHtmlStrict(evil)
+    expect(result).not.toContain('<script')
+    expect(result).not.toContain('alert')
+    expect(result).toContain('<p>safe</p>')
+  })
+
+  it('剥离 on* 事件处理器（核心 XSS 向量）', () => {
+    const evil = '<img src="x" onerror="alert(1)">'
+    const result = sanitizeHtmlStrict(evil)
+    expect(result).not.toContain('onerror')
+    expect(result).not.toContain('alert')
+  })
+
+  it('剥离 javascript: 协议的 href', () => {
+    const evil = '<a href="javascript:alert(1)">click</a>'
+    const result = sanitizeHtmlStrict(evil)
+    expect(result).not.toContain('javascript:')
+    expect(result).not.toContain('alert')
+  })
+
+  it('剥离 javascript: 协议的 src', () => {
+    const evil = '<img src="javascript:alert(1)">'
+    const result = sanitizeHtmlStrict(evil)
+    expect(result).not.toContain('javascript:')
+  })
+
+  it('剥离 iframe/object/embed 标签', () => {
+    const evil = '<iframe src="evil.com"></iframe><object data="evil"></object>'
+    const result = sanitizeHtmlStrict(evil)
+    expect(result).not.toContain('<iframe')
+    expect(result).not.toContain('<object')
+  })
+
+  it('组合攻击：img onerror payload', () => {
+    const evil = '<img src=x onerror=alert(1)>'
+    const result = sanitizeHtmlStrict(evil)
+    expect(result).not.toContain('onerror')
+    expect(result).not.toContain('alert')
+  })
+
+  it('处理空输入和非法输入', () => {
+    expect(sanitizeHtmlStrict('')).toBe('')
+    expect(sanitizeHtmlStrict(null as any)).toBe('')
+    expect(sanitizeHtmlStrict(undefined as any)).toBe('')
   })
 })

@@ -63,9 +63,13 @@ class DingTalkAdapter(ChannelAdapter):
         self._stream_client = None
         self._access_token = None
         self._token_expires_at = 0
+        # 修复 P0-5 (C4): 捕获主事件循环引用，供同步回调线程安全调度
+        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
 
     async def connect(self) -> bool:
         """建立钉钉连接"""
+        # 修复 P0-5 (C4): 捕获主 loop 引用，供 _handle_bot_message 跨线程调度
+        self._main_loop = asyncio.get_event_loop()
         try:
             if self.config.use_stream:
                 return await self._connect_stream()
@@ -177,22 +181,15 @@ class DingTalkAdapter(ChannelAdapter):
             channel_msg.metadata["session_webhook"] = data.get("sessionWebhook", "")
 
             # 同步回调转异步
-            # 使用 call_soon_threadsafe 调度到主事件循环，避免跨事件循环问题
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 如果事件循环正在运行，使用 call_soon_threadsafe
-                    asyncio.run_coroutine_threadsafe(
-                        self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg), loop
-                    )
-                else:
-                    # 如果事件循环未运行，直接运行
-                    loop.run_until_complete(self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg))
-            except RuntimeError:
-                # 如果没有事件循环，创建新的
-                loop = asyncio.new_event_loop()
-                loop.run_until_complete(self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg))
-                loop.close()
+            # 修复 P0-5 (C4): 用 _main_loop 引用 + run_coroutine_threadsafe 调度到主 loop
+            # 原代码用 asyncio.get_event_loop() 在子线程中不可靠，except 分支创建新 loop 破坏主 loop
+            if self._main_loop and self._main_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg),
+                    self._main_loop,
+                )
+            else:
+                logger.warning("DingTalk: 主事件循环未运行，丢弃消息")
 
         except Exception as e:
             logger.exception("DingTalk message handler error: %s", e)

@@ -401,5 +401,5 @@ class MemoryReadWriteManager:
         try:
             if self._write_queue:
                 self.batch_write()
-        except:
+        except Exception:  # 修复 P0-11: 收窄裸 except，避免捕获 KeyboardInterrupt/SystemExit
             pass

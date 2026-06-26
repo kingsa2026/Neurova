@@ -416,7 +416,7 @@ import { useASRRestartGuard } from '@/composables/useASRRestartGuard'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import { deleteConsoleSession } from '@/api/modules/console'
-import { secureStorage } from '@/utils/security'
+import { secureStorage, escapeHtml, sanitizeUrl, sanitizeHtmlStrict } from '@/utils/security'
 import { uiMessage } from '@/utils/message'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
@@ -1214,13 +1214,15 @@ function renderRichContent(text: string): string {
   let html = escapeHtml(text)
 
   // Code blocks with language label and copy button
+  // 修复 P0-7: 移除 inline onclick，改用 data-code 属性 + 事件委托
+  // （DOMPurify 会剥离 inline 事件处理器，inline onclick 无效且不安全）
   html = html.replace(
     /```(\w*)\n([\s\S]*?)```/g,
     (_, lang, code) =>
       `<div class="nr-code-wrap">` +
       `<div class="nr-code-header">` +
       `<span class="nr-code-lang">${lang || 'code'}</span>` +
-      `<button class="nr-code-copy-btn" onclick="navigator.clipboard.writeText(this.closest('.nr-code-wrap').querySelector('code').textContent).then(()=>{this.textContent='✓';setTimeout(()=>{this.textContent='${t('common.copy')}'},1500)})">${t('common.copy')}</button>` +
+      `<button class="nr-code-copy-btn" data-code="${encodeURIComponent(code.trim())}">${t('common.copy')}</button>` +
       `</div>` +
       `<pre class="nr-code-block"><code>${code.trim()}</code></pre>` +
       `</div>`,
@@ -1236,36 +1238,61 @@ function renderRichContent(text: string): string {
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>')
 
   // Images (inline markdown images → clickable lightbox)
+  // 修复 P0-7: 用 sanitizeUrl 校验 URL，拒绝 javascript: 等危险协议
   html = html.replace(
     /!\[([^\]]*)\]\(([^)]+)\)/g,
-    '<div class="nr-inline-image">' +
-      '<img src="$2" alt="$1" loading="lazy" />' +
-      '<span class="nr-img-caption">$1</span>' +
-      '</div>',
+    (_, alt, url) => {
+      const safeUrl = sanitizeUrl(url)
+      if (!safeUrl) return '' // 危险 URL 直接丢弃图片
+      return `<div class="nr-inline-image">` +
+        `<img src="${safeUrl}" alt="${escapeHtml(alt)}" loading="lazy" />` +
+        `<span class="nr-img-caption">${escapeHtml(alt)}</span>` +
+        `</div>`
+    },
   )
 
   // Links
+  // 修复 P0-7: 用 sanitizeUrl 校验 URL，拒绝 javascript: 等危险协议
   html = html.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener" class="nr-msg-link">$1</a>',
+    (_, linkText, url) => {
+      const safeUrl = sanitizeUrl(url)
+      if (!safeUrl) return escapeHtml(linkText) // 危险 URL 退化为纯文本
+      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="nr-msg-link">${escapeHtml(linkText)}</a>`
+    },
   )
 
   // Line breaks
   html = html.replace(/\n/g, '<br/>')
 
-  return html
+  // 修复 P0-7 层 3: DOMPurify 兜底，剥离任何遗漏的危险标签/属性
+  return sanitizeHtmlStrict(html)
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
-/** Handle clicks within rendered content (e.g., image lightbox). */
+/** Handle clicks within rendered content (image lightbox + code copy). */
 function handleContentClick(e: MouseEvent) {
   const target = e.target as HTMLElement
+
+  // 修复 P0-7: 事件委托处理代码块复制按钮
+  const copyBtn = target.closest('.nr-code-copy-btn') as HTMLButtonElement | null
+  if (copyBtn) {
+    const rawCode = copyBtn.getAttribute('data-code') || ''
+    const code = decodeURIComponent(rawCode)
+    navigator.clipboard.writeText(code).then(() => {
+      copyBtn.textContent = '✓'
+      setTimeout(() => {
+        copyBtn.textContent = t('common.copy')
+      }, 1500)
+    }).catch(() => {
+      copyBtn.textContent = '✗'
+      setTimeout(() => {
+        copyBtn.textContent = t('common.copy')
+      }, 1500)
+    })
+    return
+  }
+
+  // 图片 lightbox
   if (target.tagName === 'IMG' && target.closest('.nr-inline-image')) {
     const img = target as HTMLImageElement
     openLightbox(img.src, img.alt)

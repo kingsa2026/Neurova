@@ -411,7 +411,7 @@ class VerificationCodeModel:
                     import ast
 
                     metadata = ast.literal_eval(row["metadata"])
-                except:
+                except (ValueError, SyntaxError):  # 修复 P0-11: 替换裸 except
                     metadata = None
 
             return VerificationCode(
