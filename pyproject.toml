@@ -94,4 +94,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short"
+# 使用 importlib import mode 避免重名测试模块冲突
+# （tests/ 下有 ad-hoc 文件与 unit/ 下的同名文件，prepend 模式会冲突）
+addopts = "-v --tb=short --import-mode=importlib"

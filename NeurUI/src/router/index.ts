@@ -187,6 +187,81 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/NeuronPage.vue'),
       },
 
+      // ----- 协作模块（嵌套路由统一管理） -----
+      // 设计原则：所有协作域页面归入 /collaboration/* 命名空间
+      // 包含：中心枢纽 / 会话 / 模板 / 历史 / 工作流 / 画布设计 / 项目 / 团队 / 任务 / Webhook / 会话同步 / NEURON 图谱
+      {
+        path: 'collaboration',
+        name: 'Collaboration',
+        component: () => import('@/pages/CollaborationPage.vue'),
+      },
+      {
+        path: 'collaboration/hub',
+        name: 'CollaborationHub',
+        component: () => import('@/modules/collaboration/CollaborationHubPage.vue'),
+      },
+      {
+        path: 'collaboration/sessions',
+        name: 'CollaborationSessions',
+        component: () => import('@/pages/CollaborationPage.vue'),
+      },
+      {
+        path: 'collaboration/templates',
+        name: 'CollaborationTemplates',
+        component: () => import('@/pages/CollaborationTemplatePage.vue'),
+      },
+      {
+        path: 'collaboration/history',
+        name: 'CollaborationHistory',
+        component: () => import('@/pages/CollaborationHistoryPage.vue'),
+      },
+      {
+        path: 'collaboration/workflows',
+        name: 'CollaborationWorkflows',
+        component: () => import('@/workflow/WorkflowPage.vue'),
+      },
+      {
+        path: 'collaboration/canvas',
+        name: 'CollaborationCanvas',
+        component: () => import('@/modules/collaboration/CanvasDesignerPage.vue'),
+      },
+      {
+        path: 'collaboration/canvas/:id',
+        name: 'CollaborationCanvasEdit',
+        component: () => import('@/modules/collaboration/CanvasDesignerPage.vue'),
+        props: true,
+      },
+      {
+        path: 'collaboration/projects',
+        name: 'CollaborationProjects',
+        component: () => import('@/pages/ProjectPage.vue'),
+      },
+      {
+        path: 'collaboration/teams',
+        name: 'CollaborationTeams',
+        component: () => import('@/pages/TeamPage.vue'),
+      },
+      {
+        path: 'collaboration/tasks',
+        name: 'CollaborationTasks',
+        component: () => import('@/pages/TaskPage.vue'),
+      },
+      {
+        path: 'collaboration/webhooks',
+        name: 'CollaborationWebhooks',
+        component: () => import('@/pages/WebhookPage.vue'),
+      },
+      {
+        path: 'collaboration/session-sync',
+        name: 'CollaborationSessionSync',
+        component: () => import('@/pages/SessionSyncPage.vue'),
+      },
+      {
+        path: 'collaboration/neuron',
+        name: 'CollaborationNeuron',
+        component: () => import('@/views/NeuronPage.vue'),
+      },
+
       // ----- Global routes -----
       {
         path: 'chat',
@@ -244,55 +319,33 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/ToolLayerPage.vue'),
       },
 
-      // ----- Workflows -----
+      // ----- Workflows（重定向到协作模块下的工作流页） -----
       {
         path: 'workflows',
-        name: 'Workflows',
-        component: () => import('@/workflow/WorkflowPage.vue'),
+        redirect: '/collaboration/workflows',
       },
 
-      // ----- Collaboration -----
-      {
-        path: 'collaboration',
-        name: 'Collaboration',
-        component: () => import('@/pages/CollaborationPage.vue'),
-      },
-      {
-        path: 'collaboration/templates',
-        name: 'CollaborationTemplates',
-        component: () => import('@/pages/CollaborationTemplatePage.vue'),
-      },
-      {
-        path: 'collaboration/history',
-        name: 'CollaborationHistory',
-        component: () => import('@/pages/CollaborationHistoryPage.vue'),
-      },
+      // ----- 旧协作路由重定向到新的嵌套路径 -----
+      // 保持向后兼容：旧书签 /projects → /collaboration/projects
       {
         path: 'projects',
-        name: 'Projects',
-        component: () => import('@/pages/ProjectPage.vue'),
+        redirect: '/collaboration/projects',
       },
       {
         path: 'teams',
-        name: 'Teams',
-        component: () => import('@/pages/TeamPage.vue'),
+        redirect: '/collaboration/teams',
       },
       {
         path: 'tasks',
-        name: 'Tasks',
-        component: () => import('@/pages/TaskPage.vue'),
+        redirect: '/collaboration/tasks',
       },
-
-      // ----- Channels -----
       {
         path: 'session-sync',
-        name: 'SessionSync',
-        component: () => import('@/pages/SessionSyncPage.vue'),
+        redirect: '/collaboration/session-sync',
       },
       {
         path: 'webhooks',
-        name: 'Webhooks',
-        component: () => import('@/pages/WebhookPage.vue'),
+        redirect: '/collaboration/webhooks',
       },
 
       // ----- System -----

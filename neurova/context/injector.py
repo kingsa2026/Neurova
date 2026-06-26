@@ -599,16 +599,31 @@ class UnifiedContextInjector(BaseModule):
             # 创建经验知识库实例
             ekb = ExperienceKnowledgeBase()
 
-            # 查找相似经验
-            similar = ekb.find_similar_experiences(query, top_k=3)
+            # 查找相似经验（2.0 契约：skill_name=None 跨技能，context 为 dict）
+            similar = ekb.find_similar_experiences(
+                skill_name=None,
+                context={"user_input": query},
+                limit=3,
+            )
 
             if not similar:
                 return ""
 
             parts = ["\n## 相关经验"]
             for exp in similar[:3]:  # 最多显示3条
-                context_summary = exp.get("context", "")[:50]
-                result_summary = exp.get("result", "")[:50]
+                # 2.0: context 是 dict，从中提取 user_input 作为摘要
+                ctx = exp.get("context") or {}
+                if isinstance(ctx, dict):
+                    context_summary = str(ctx.get("user_input", ""))[:50]
+                else:
+                    context_summary = str(ctx)[:50]
+                # 2.0: result 是 dict 或 None
+                result_data = exp.get("result")
+                if isinstance(result_data, dict):
+                    result_summary = str(result_data.get("output", ""))[:50]
+                else:
+                    result_summary = str(result_data or "")[:50]
+                # success 在 2.0 中是 int 0/1
                 success_mark = "✓" if exp.get("success") else "✗"
                 parts.append(f"{success_mark} {context_summary} → {result_summary}")
 

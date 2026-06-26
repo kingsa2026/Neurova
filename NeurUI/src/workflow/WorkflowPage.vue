@@ -3,9 +3,18 @@
     <div class="page-header">
       <h2>{{ t('workflow.title') }}</h2>
       <div class="header-actions">
-        <GlassButton variant="ghost" size="sm" @click="handleImport">{{ t('workflow.importWf') }}</GlassButton>
+        <GlassButton variant="ghost" size="sm" @click="handleImportComfyui">{{ t('workflow.importWf') }}</GlassButton>
         <GlassButton variant="primary" size="sm" @click="showCreateModal = true">{{ t('workflow.create') }}</GlassButton>
       </div>
+    </div>
+
+    <!-- ComfyUI 服务状态指示器 -->
+    <div class="comfyui-status" :class="{ available: comfyuiStatus.available }">
+      <span class="status-dot" />
+      <span class="status-text">
+        ComfyUI: {{ comfyuiStatus.available ? `已连接 (${comfyuiStatus.host})` : '未连接' }}
+      </span>
+      <GlassButton variant="ghost" size="sm" @click="fetchComfyuiStatus">检测</GlassButton>
     </div>
 
     <!-- Stats row -->
@@ -77,6 +86,33 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- ComfyUI 导入 modal -->
+    <a-modal
+      v-model:open="showComfyuiImportModal"
+      title="导入 ComfyUI 工作流"
+      :ok-text="comfyuiImporting ? '导入中…' : '导入'"
+      :confirm-loading="comfyuiImporting"
+      @ok="handleComfyuiImportSubmit"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="工作流名称" required>
+          <a-input v-model:value="comfyuiImportForm.name" placeholder="例如：SDXL 文生图" />
+        </a-form-item>
+        <a-form-item label="描述（可选）">
+          <a-input v-model:value="comfyuiImportForm.description" type="textarea" :rows="2" placeholder="工作流描述" />
+        </a-form-item>
+        <a-form-item label="ComfyUI 工作流 JSON 文件" required>
+          <input
+            type="file"
+            accept=".json,application/json"
+            @change="handleComfyuiFileUpload"
+          />
+          <p v-if="comfyuiImportForm.fileName" class="file-name">已选择: {{ comfyuiImportForm.fileName }}</p>
+          <p v-else class="file-hint">选择 ComfyUI API 格式导出的 JSON 文件</p>
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -84,6 +120,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
+import { importComfyuiWorkflow, getComfyuiStatus } from '@/api/modules/neurflow'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 
@@ -115,6 +152,20 @@ const showDetail = ref(false)
 const detailWorkflow = ref<Workflow | null>(null)
 
 const createForm = reactive({ name: '', description: '' })
+
+// ComfyUI 整合状态
+const comfyuiStatus = reactive<{ available: boolean; host: string | null }>({
+  available: false,
+  host: null,
+})
+const showComfyuiImportModal = ref(false)
+const comfyuiImporting = ref(false)
+const comfyuiImportForm = reactive<{
+  name: string
+  description: string
+  fileName: string
+  workflow: Record<string, unknown> | null
+}>({ name: '', description: '', fileName: '', workflow: null })
 
 const stats = computed(() => [
   { label: t('common.total'), value: workflows.value.length },
@@ -182,8 +233,73 @@ async function handleExport(id: string) {
   } catch { /* handled */ }
 }
 
-function handleImport() {
-  /* placeholder for file upload trigger */
+function handleImportComfyui() {
+  /* 打开 ComfyUI 导入 modal */
+  comfyuiImportForm.name = ''
+  comfyuiImportForm.description = ''
+  comfyuiImportForm.fileName = ''
+  comfyuiImportForm.workflow = null
+  showComfyuiImportModal.value = true
+}
+
+function handleComfyuiFileUpload(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  comfyuiImportForm.fileName = file.name
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    try {
+      const text = String(e.target?.result ?? '')
+      comfyuiImportForm.workflow = JSON.parse(text) as Record<string, unknown>
+    } catch {
+      comfyuiImportForm.workflow = null
+      alert('JSON 文件解析失败，请检查文件格式')
+    }
+  }
+  reader.readAsText(file)
+}
+
+async function handleComfyuiImportSubmit() {
+  if (!comfyuiImportForm.name) {
+    alert('请输入工作流名称')
+    return
+  }
+  if (!comfyuiImportForm.workflow) {
+    alert('请选择 ComfyUI 工作流 JSON 文件')
+    return
+  }
+  comfyuiImporting.value = true
+  try {
+    await importComfyuiWorkflow({
+      name: comfyuiImportForm.name,
+      description: comfyuiImportForm.description,
+      workflow: comfyuiImportForm.workflow,
+    })
+    showComfyuiImportModal.value = false
+    await fetchWorkflows()
+  } catch {
+    /* handled by interceptor */
+  } finally {
+    comfyuiImporting.value = false
+  }
+}
+
+async function fetchComfyuiStatus() {
+  try {
+    const res = await getComfyuiStatus() as unknown as
+      | { data?: { available: boolean; host: string | null } }
+      | { available: boolean; host: string | null }
+    // 兼容两种响应包装：{ data: {...} } 或直接 {...}
+    const data = ('data' in res && res.data) ? res.data : (res as { available: boolean; host: string | null })
+    if (data) {
+      comfyuiStatus.available = data.available
+      comfyuiStatus.host = data.host
+    }
+  } catch {
+    comfyuiStatus.available = false
+    comfyuiStatus.host = null
+  }
 }
 
 async function handleValidate(id: string) {
@@ -206,7 +322,10 @@ async function handleDelete(id: string) {
   } catch { /* handled */ }
 }
 
-onMounted(fetchWorkflows)
+onMounted(() => {
+  fetchWorkflows()
+  fetchComfyuiStatus()
+})
 </script>
 
 <style scoped>
@@ -225,4 +344,33 @@ onMounted(fetchWorkflows)
 .detail-body p { color: var(--nr-text-secondary); font-size: 14px; }
 .detail-body h4 { color: var(--nr-text-primary); margin: 0; }
 .detail-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* ComfyUI 状态指示器 */
+.comfyui-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--nr-bg-secondary, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.08));
+  font-size: 13px;
+  color: var(--nr-text-secondary);
+}
+.comfyui-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  transition: background 0.2s;
+}
+.comfyui-status.available .status-dot {
+  background: #52c41a;
+}
+.comfyui-status .status-text {
+  flex: 1;
+  font-family: var(--nr-font-display, sans-serif);
+}
+.file-name { color: var(--nr-text-primary); font-size: 13px; margin-top: 6px; }
+.file-hint { color: var(--nr-text-tertiary); font-size: 12px; margin-top: 6px; }
 </style>

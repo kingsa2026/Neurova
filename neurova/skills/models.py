@@ -335,11 +335,53 @@ class SkillExecutionStats:
     avg_duration: float = 0.0
 
 
+@dataclass
+class ExperienceRecord:
+    """经验记录
+
+    2.0 契约（来源：tests/test_experience_knowledge_base.py + 设计文档
+    docs/dev_progress/module_designs/experience_knowledge_base.md）：
+    - skill_name: 关联的技能名
+    - context: 调用上下文 (通常含 user_input/topic)
+    - result: 技能输出结果 (失败时可为 None)
+    - success: 是否成功
+    - timestamp: ISO 字符串
+    - feedback: 用户/系统反馈
+    """
+
+    skill_name: str = ""
+    context: Dict[str, Any] = field(default_factory=dict)
+    result: Optional[Dict[str, Any]] = None
+    success: bool = False
+    timestamp: str = ""
+    feedback: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "skill_name": self.skill_name,
+            "context": dict(self.context) if self.context else {},
+            "result": dict(self.result) if self.result else None,
+            "success": self.success,
+            "timestamp": self.timestamp,
+            "feedback": self.feedback,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ExperienceRecord":
+        return cls(
+            skill_name=data.get("skill_name", ""),
+            context=dict(data.get("context", {})) if data.get("context") else {},
+            result=dict(data.get("result")) if data.get("result") else None,
+            success=bool(data.get("success", False)),
+            timestamp=data.get("timestamp", ""),
+            feedback=data.get("feedback", ""),
+        )
+
+
 # Alias for backward compatibility
 SkillInfo = Skill
 SkillSource = SkillSource
 SkillEvolutionRecord = SkillExecutionLog
-ExperienceRecord = SkillExecutionLog
 SkillManifest = Skill
 PluginEntryPoints = Dict[str, Any]
 SkillRecord = Skill

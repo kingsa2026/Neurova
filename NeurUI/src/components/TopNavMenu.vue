@@ -57,6 +57,7 @@ import {
   TeamOutlined, ProjectOutlined, ClockCircleOutlined,
   BranchesOutlined, ApiOutlined, HistoryOutlined,
   SettingOutlined, UserOutlined, BellOutlined, AlertOutlined,
+  BgColorsOutlined, ApartmentOutlined,
 } from '@ant-design/icons-vue'
 
 const route = useRoute()
@@ -86,7 +87,6 @@ const categories: NavCategory[] = [
       { to: '/skill-pool', labelKey: 'nav.skillPool', icon: AppstoreOutlined },
       { to: '/marketplace/skills', labelKey: 'nav.skillMarket', icon: ShopOutlined },
       { to: '/aigc', labelKey: 'nav.aigc', icon: RocketOutlined },
-      { to: '/workflows', labelKey: 'nav.workflows', icon: NodeIndexOutlined },
     ],
   },
   {
@@ -124,14 +124,26 @@ const categories: NavCategory[] = [
     labelKey: 'nav.collaboration',
     icon: TeamOutlined,
     items: [
-      { to: '/collaboration', labelKey: 'nav.collaboration', icon: TeamOutlined },
+      // 协作中心枢纽（聚合入口）
+      { to: '/collaboration/hub', labelKey: 'nav.collabHub', icon: DashboardOutlined },
+      // 会话管理
+      { to: '/collaboration/sessions', labelKey: 'nav.collabSessions', icon: TeamOutlined },
+      // 工作流（从 knowledge 分类移入协作）
+      { to: '/collaboration/workflows', labelKey: 'nav.workflows', icon: RocketOutlined },
+      // 画布设计器（新增）
+      { to: '/collaboration/canvas', labelKey: 'nav.collabCanvas', icon: BgColorsOutlined },
+      // 模板与历史
       { to: '/collaboration/templates', labelKey: 'nav.collaborationtemplates', icon: NodeIndexOutlined },
       { to: '/collaboration/history', labelKey: 'nav.collaborationhistory', icon: HistoryOutlined },
-      { to: '/projects', labelKey: 'nav.projects', icon: ProjectOutlined },
-      { to: '/teams', labelKey: 'nav.teams', icon: TeamOutlined },
-      { to: '/tasks', labelKey: 'nav.tasks', icon: ClockCircleOutlined },
-      { to: '/webhooks', labelKey: 'nav.webhooks', icon: BranchesOutlined },
-      { to: '/session-sync', labelKey: 'nav.sessionsync', icon: ApiOutlined },
+      // 项目管理
+      { to: '/collaboration/projects', labelKey: 'nav.projects', icon: ProjectOutlined },
+      { to: '/collaboration/teams', labelKey: 'nav.teams', icon: ApartmentOutlined },
+      { to: '/collaboration/tasks', labelKey: 'nav.tasks', icon: ClockCircleOutlined },
+      // 集成通道
+      { to: '/collaboration/webhooks', labelKey: 'nav.webhooks', icon: BranchesOutlined },
+      { to: '/collaboration/session-sync', labelKey: 'nav.sessionsync', icon: ApiOutlined },
+      // NEURON 依赖图谱（协作底层）
+      { to: '/collaboration/neuron', labelKey: 'nav.neuron', icon: RocketOutlined },
     ],
   },
   {

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # skills imports
+from neurova.skills.executor import SkillExecutor, SkillResult
 from neurova.skills.models import Skill
 
 
@@ -52,7 +53,7 @@ class SkillRegistry:
     """
 
     _instance = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __new__(cls, *args, **kwargs):
         """单例模式实现"""
@@ -69,6 +70,7 @@ class SkillRegistry:
             return
 
         self._skills: typing.Dict[str, typing.Tuple[Skill, Path]] = {}
+        self._executors: typing.Dict[str, SkillExecutor] = {}
         self._startup_hooks: typing.List[HookRegistration] = []
         self._shutdown_hooks: typing.List[HookRegistration] = []
         self._control_commands: typing.List[ControlCommandRegistration] = []
@@ -133,8 +135,29 @@ class SkillRegistry:
                 except Exception as e:
                     self._logger.error("事件回调执行失败: %s", e)
 
-    def execute_skill(self, skill_id: str, *args, **kwargs) -> typing.Any:
-        """执行技能
+    def register_executor(self, executor: SkillExecutor) -> None:
+        """注册技能执行器
+
+        将 executor 关联到其 skill_id。execute_skill() 会通过 executor 执行。
+
+        Args:
+            executor: SkillExecutor 实例
+        """
+        with self._lock:
+            self._executors[executor.skill_id] = executor
+        self._logger.debug("已注册执行器: %s", executor.skill_id)
+
+    async def execute_skill(self, skill_id: str, *args, **kwargs) -> typing.Any:
+        """执行技能（async）
+
+        A8: 改为 async def 以适配 4 个 await 调用点
+        （agent_core.py:670/tool_router.py:485/router.py:235/base.py:103）
+
+        查找 manifest → 触发 skill_executing 事件 → 查找 executor → 调用 executor.execute()
+        → 触发 skill_executed 事件 → 返回 SkillResult
+
+        如果有 manifest 但无 executor，返回失败的 SkillResult。
+        如果连 manifest 都没有，抛出 ValueError。
 
         Args:
             skill_id: 技能ID
@@ -142,8 +165,14 @@ class SkillRegistry:
             **kwargs: 关键字参数
 
         Returns:
-            执行结果
+            SkillResult: 执行结果
+
+        Raises:
+            ValueError: 技能未注册
         """
+        import asyncio
+        import inspect as _inspect
+
         skill_info = self.get_skill(skill_id)
         if skill_info is None:
             raise ValueError(f"技能 {skill_id} 未注册")
@@ -151,9 +180,27 @@ class SkillRegistry:
         manifest, path = skill_info
         self._trigger_event("skill_executing", {"skill_id": skill_id})
 
-        # 这里可以添加实际的技能执行逻辑
-        # 目前返回一个模拟结果
-        return {"skill_id": skill_id, "status": "executed"}
+        executor = self._executors.get(skill_id)
+        if executor is None:
+            result = SkillResult(
+                success=False,
+                error=f"技能 {skill_id} 未注册执行器",
+            )
+        else:
+            try:
+                # 兼容 sync 和 async executor
+                if _inspect.iscoroutinefunction(executor.execute):
+                    result = await executor.execute(*args, **kwargs)
+                else:
+                    # sync executor 用 to_thread 包装避免阻塞事件循环
+                    result = await asyncio.to_thread(executor.execute, *args, **kwargs)
+                if not isinstance(result, SkillResult):
+                    result = SkillResult(success=True, output=result)
+            except Exception as e:
+                result = SkillResult(success=False, error=str(e))
+
+        self._trigger_event("skill_executed", {"skill_id": skill_id, "result": result})
+        return result
 
     def unregister_skill(self, skill_id: str) -> bool:
         """取消注册技能
@@ -192,6 +239,84 @@ class SkillRegistry:
             技能信息列表
         """
         return list(self._skills.values())
+
+    def set_skill_enabled(self, skill_id: str, enabled: bool) -> bool:
+        """设置技能的 enabled 状态（持久化到 manifest）
+
+        C2: 为 enable/disable 端点提供持久化能力。
+
+        Args:
+            skill_id: 技能ID
+            enabled: True 启用 / False 禁用
+
+        Returns:
+            bool: 是否成功设置（技能不存在返回 False）
+        """
+        with self._lock:
+            if skill_id not in self._skills:
+                return False
+            manifest, path = self._skills[skill_id]
+            manifest.enabled = enabled
+            # 同时更新 updated_at 时间戳（如果字段存在）
+            try:
+                from datetime import datetime
+                manifest.updated_at = datetime.now().isoformat()
+            except Exception:
+                pass
+            self._skills[skill_id] = (manifest, path)
+            event_name = "skill_enabled" if enabled else "skill_disabled"
+            self._trigger_event(event_name, {"skill_id": skill_id, "enabled": enabled})
+            return True
+
+    def list_skills(self) -> typing.List[Skill]:
+        """列出所有已注册技能的 manifest 对象
+
+        A7: 返回 List[Skill] 对象（非 Dict），适配 5 个调用点的对象属性访问
+        （agent_core.py:587/chat_pipeline.py:529/router.py:395/agent_skill_manager.py:224/cognition_orchestrator.py:406）
+
+        Returns:
+            Skill 对象列表，每项含 id/name/description/version/status/keywords 等字段
+        """
+        return [manifest for manifest, _path in self._skills.values()]
+
+    def list_skills_as_dict(self) -> typing.List[typing.Dict[str, typing.Any]]:
+        """列出所有已注册技能的 manifest 摘要（Dict 格式，向后兼容）
+
+        Returns:
+            dict 列表，每项含 id/name/description/version 等字段
+        """
+        result = []
+        for manifest, _path in self._skills.values():
+            result.append(
+                {
+                    "id": manifest.id,
+                    "name": manifest.name,
+                    "description": manifest.description,
+                    "version": manifest.version,
+                    "source": manifest.source.value if manifest.source else None,
+                    "enabled": manifest.enabled,
+                }
+            )
+        return result
+
+    def get_skill_names(self) -> typing.List[str]:
+        """获取所有已注册技能的 ID 列表
+
+        Returns:
+            skill id 列表
+        """
+        return list(self._skills.keys())
+
+    def has_skill(self, skill_id: str) -> bool:
+        """检查技能是否已注册
+
+        Args:
+            skill_id: 技能ID
+
+        Returns:
+            是否已注册
+        """
+        return skill_id in self._skills
 
     def register_startup_hook(
         self, skill_id: str, hook_name: str, callback: typing.Callable, priority: int = 100
@@ -353,6 +478,7 @@ class SkillRegistry:
         """清空注册表"""
         with self._lock:
             self._skills.clear()
+            self._executors.clear()
             self._startup_hooks.clear()
             self._shutdown_hooks.clear()
             self._control_commands.clear()
