@@ -128,8 +128,10 @@ class ExplainabilityModule:
             # 分析因素
             if factors and top_id in factors:
                 top_factors = factors[top_id]
-                max_factor = max(top_factors.items(), key=lambda x: x[1])
-                reasons.append(f"主要匹配因素: {max_factor[0]} ({max_factor[1]:.2f})")
+                # Bug 17 修复: 防空字典 max() 抛 ValueError
+                if top_factors:
+                    max_factor = max(top_factors.items(), key=lambda x: x[1])
+                    reasons.append(f"主要匹配因素: {max_factor[0]} ({max_factor[1]:.2f})")
 
         # 计算置信度
         confidence = 0.0

@@ -158,9 +158,10 @@ class IsolationContext:
         Returns:
             IsolationContext实例
         """
-        # 优先使用agent_id，其次使用owner作为agent_id
-        final_agent_id = agent_id or owner or "default"
-        final_user_id = user_id or "default"
+        # Bug 20 修复: owner 不应作为 agent_id 的 fallback
+        # 旧版语义: owner 是数据归属者, 不是 agent_id; 强行 fallback 会污染隔离边界
+        final_agent_id = agent_id or "default"
+        final_user_id = user_id or owner or "default"
 
         return cls(
             agent_id=final_agent_id,

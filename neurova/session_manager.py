@@ -5,6 +5,7 @@
 
 import json
 from neurova.core.logger import get_logger
+from neurova.session_repository import SessionRepository
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -53,6 +54,8 @@ class SessionRecord:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     total_messages: int = 0
+    title: str = ""
+    user_id: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -60,8 +63,11 @@ class SessionRecord:
         return data
 
 
-class SessionManager:
-    """会话管理器 - 直接即时写入文件，无内存缓存"""
+class SessionManager(SessionRepository):
+    """会话管理器 - 直接即时写入文件，无内存缓存。
+
+    实现 SessionRepository ABC，作为文件层 adapter（FileSessionRepository 等价物）。
+    """
 
     _instance = None
     _lock = Lock()
@@ -88,8 +94,13 @@ class SessionManager:
         return self._file_locks[key]
 
     def _get_session_dir(self, agent_id: str) -> Path:
-        """获取agent的session目录"""
-        agent_dir = self._sessions_dir / agent_id
+        """获取agent的session目录（agent_id 为空时归入 "default"）。
+
+        #1 改造：console 接入后允许 agent_id="" 创建会话，但根目录不能放 session
+        文件（会被 list_sessions 漏扫），统一归入 default/。
+        """
+        effective_agent_id = agent_id or "default"
+        agent_dir = self._sessions_dir / effective_agent_id
         agent_dir.mkdir(exist_ok=True)
         return agent_dir
 
@@ -283,9 +294,34 @@ class SessionManager:
 
         return results
 
-    def create_session(self, agent_id: str) -> str:
-        """创建新的session_id"""
-        return str(uuid.uuid4())[:8]
+    def create_session(self, agent_id: str = "", user_id: str = "", title: str = "") -> str:
+        """创建新的 session_id 并落盘空 session 文件。
+
+        Args:
+            agent_id: Agent ID（用于分目录存储）
+            user_id: 用户 ID（写入 user_id 字段，便于 list_sessions 过滤）
+            title: 会话标题（默认 "新对话"）
+
+        Returns:
+            session_id（8 位短 uuid）
+        """
+        session_id = str(uuid.uuid4())[:8]
+        date = datetime.now().strftime("%Y-%m-%d")
+        now = datetime.now().isoformat()
+        file_path = self._get_session_file(agent_id, session_id, date)
+        session_data = {
+            "agent_id": agent_id,
+            "session_id": session_id,
+            "session_date": date,
+            "messages": [],
+            "created_at": now,
+            "updated_at": now,
+            "total_messages": 0,
+            "title": title or "新对话",
+            "user_id": user_id,
+        }
+        self._write_session_file(file_path, session_data)
+        return session_id
 
     def delete_session(self, agent_id: str, session_id: str, date: str = None) -> bool:
         """删除指定的session文件"""
@@ -402,6 +438,147 @@ class SessionManager:
 
         # 返回最近的 max_messages 条消息
         return all_messages[-max_messages:] if len(all_messages) > max_messages else all_messages
+
+    # ══════════════════════════════════════════════════════════════
+    # SessionRepository 接口实现（补全方法）
+    # ══════════════════════════════════════════════════════════════
+
+    def save_message(
+        self,
+        agent_id: str,
+        session_id: str,
+        role: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """保存单条消息到 session（不要求 user+assistant 配对）。
+
+        与现有 add_message（配对写入）共存：本方法供 SessionRepository 接口使用。
+        """
+        date = datetime.now().strftime("%Y-%m-%d")
+        file_path = self._get_session_file(agent_id, session_id, date)
+        session_data = self._read_session_file(file_path)
+
+        now = datetime.now().isoformat()
+        msg: Dict[str, Any] = {
+            "role": role,
+            "content": content,
+            "timestamp": now,
+        }
+        if metadata:
+            msg["metadata"] = metadata
+
+        if session_data is None:
+            # 文件不存在（可能跨日），创建新记录
+            session_data = {
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "session_date": date,
+                "messages": [msg],
+                "created_at": now,
+                "updated_at": now,
+                "total_messages": 1,
+                "title": "新对话",
+                "user_id": "",
+            }
+        else:
+            if "messages" not in session_data:
+                session_data["messages"] = []
+            session_data["messages"].append(msg)
+            session_data["updated_at"] = now
+            session_data["total_messages"] = len(session_data["messages"])
+
+        return self._write_session_file(file_path, session_data)
+
+    def get_history(self, agent_id: str, session_id: str, max_messages: int = 0) -> List[Dict[str, Any]]:
+        """获取 session 所有日期的所有消息（聚合）。
+
+        Args:
+            max_messages: 0 表示全部；>0 取最近 N 条
+        """
+        sessions = self._get_session_data_list(agent_id, session_id)
+        if not sessions:
+            return []
+
+        # 按日期升序聚合（旧→新）
+        sessions.sort(key=lambda x: x.get("session_date", ""))
+        all_messages: List[Dict[str, Any]] = []
+        for session in sessions:
+            for msg in session.get("messages", []):
+                if isinstance(msg, dict):
+                    all_messages.append(msg)
+
+        if max_messages > 0 and len(all_messages) > max_messages:
+            return all_messages[-max_messages:]
+        return all_messages
+
+    def list_sessions(self, agent_id: str = "", user_id: str = "") -> List[Dict[str, Any]]:
+        """列出所有会话摘要（按 agent_id/user_id 过滤）。
+
+        返回字段：session_id / agent_id / title / created_at / updated_at / total_messages / user_id
+        按 created_at 倒序。
+        """
+        # 确定扫描目录范围
+        if agent_id:
+            agent_dirs = [self._get_session_dir(agent_id)]
+        else:
+            agent_dirs = [d for d in self._sessions_dir.iterdir() if d.is_dir()]
+
+        summaries: List[Dict[str, Any]] = []
+        seen_session_ids: Dict[str, Dict[str, Any]] = {}
+
+        for agent_dir in agent_dirs:
+            for file_path in agent_dir.glob("session_*.json"):
+                session_data = self._read_session_file(file_path)
+                if not session_data:
+                    continue
+
+                sid = session_data.get("session_id", "")
+                s_user_id = session_data.get("user_id", "")
+                s_agent_id = session_data.get("agent_id", "")
+
+                # user_id 过滤（空 user_id 不过滤）
+                if user_id and s_user_id and s_user_id != user_id:
+                    continue
+
+                # 同一 session_id 多日期文件，取最新日期作为代表
+                created_at = session_data.get("created_at", "")
+                existing = seen_session_ids.get(sid)
+                if existing is None or created_at > existing.get("created_at", ""):
+                    summary = {
+                        "id": sid,
+                        "session_id": sid,
+                        "agent_id": s_agent_id,
+                        "title": session_data.get("title", "新对话"),
+                        "user_id": s_user_id,
+                        "created_at": created_at,
+                        "updated_at": session_data.get("updated_at", ""),
+                        "total_messages": session_data.get("total_messages", 0),
+                    }
+                    seen_session_ids[sid] = summary
+
+        summaries = list(seen_session_ids.values())
+        summaries.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        return summaries
+
+    def rename_session(self, agent_id: str, session_id: str, title: str) -> bool:
+        """重命名 session（写入所有日期文件的 title 字段）。"""
+        agent_dir = self._get_session_dir(agent_id)
+        file_paths = list(agent_dir.glob(f"session_{session_id}_*.json"))
+        if not file_paths:
+            logger.warning("rename_session: 未找到 session_id=%s 的文件", session_id)
+            return False
+
+        ok = True
+        for file_path in file_paths:
+            session_data = self._read_session_file(file_path)
+            if not session_data:
+                ok = False
+                continue
+            session_data["title"] = title
+            if not self._write_session_file(file_path, session_data):
+                ok = False
+        return ok
 
 
 def get_session_manager() -> SessionManager:

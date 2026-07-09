@@ -105,6 +105,24 @@ def __getattr__(name: str) -> Any:
             _sys.modules.pop(_cache_key, None)
             raise
         return _mod.create_default_skills
+    elif name == "SkillRegistryProtocol":
+        # 候选 1: 从被遮蔽的 skill_system.py 加载 Protocol(架构深化)
+        import importlib.util as _iu
+        import os as _os
+        import sys as _sys
+        _cache_key = "neurova.skill_system_module_standalone"
+        if _cache_key in _sys.modules:
+            return _sys.modules[_cache_key].SkillRegistryProtocol
+        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
+        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
+        _mod = _iu.module_from_spec(_spec)
+        _sys.modules[_cache_key] = _mod
+        try:
+            _spec.loader.exec_module(_mod)
+        except Exception:
+            _sys.modules.pop(_cache_key, None)
+            raise
+        return _mod.SkillRegistryProtocol
     else:
         raise AttributeError(f"module 'neurova.skill_system' has no attribute '{name}'")
 

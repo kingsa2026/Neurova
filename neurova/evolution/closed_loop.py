@@ -186,12 +186,18 @@ from neurova.evolution.genetic_engine import ToolGeneticEngine
 from neurova.evolution.pattern_miner import PatternMiner
 
 
-class NLToolSynthesizer:
-    """自然语言工具合成器 — 基于频繁模式生成工具模板"""
+class PatternBasedToolSynthesizer:
+    """基于频繁模式的工具合成器 — 从 PatternMiner 的频繁模式生成工具模板。
+
+    Bug N-2 修复: 原类名 NLToolSynthesizer 与 nl_synthesizer.py 的真实
+    NLToolSynthesizer（502 行完整实现）同名冲突，导致 EvolutionOrchestrator
+    持有 stub 实例而非真实 NL 合成器。重命名为 PatternBasedToolSynthesizer
+    以消除歧义——此类只做基于模式的合成，不做 NL 描述合成。
+    """
 
     def __init__(self, pattern_miner: Optional[PatternMiner] = None):
         self.pattern_miner = pattern_miner
-        logger.info("NLToolSynthesizer initialized")
+        logger.info("PatternBasedToolSynthesizer initialized")
 
     def synthesize_from_patterns(self, top_n: int = 5) -> List[Dict[str, Any]]:
         """从频繁模式合成工具模板列表。"""
@@ -212,7 +218,7 @@ class EvolutionOrchestrator:
         self.tool_lifecycle = tool_lifecycle or ToolLifecycleManager()
         self.pattern_miner = PatternMiner()
         self.genetic_engine = ToolGeneticEngine()
-        self.tool_synthesizer = NLToolSynthesizer(self.pattern_miner)
+        self.tool_synthesizer = PatternBasedToolSynthesizer(self.pattern_miner)
         self.experience_feedback = ExperienceFeedback()
         self.crystallizer = crystallizer
 

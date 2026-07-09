@@ -128,15 +128,15 @@ async def list_mcp_tools(server_id: str):
 async def list_all_tools(source: Optional[str] = Query(default=None)):
     """列出所有可用工具
 
-    从 ToolEngine 获取动态工具列表，支持按来源过滤。
+    聚合多源工具：ToolEngine（动态注册）+ agent._builtin_tools（内置工具）。
+    支持按来源过滤。ToolEngine 为空时仍返回内置工具列表。
     """
     engine = get_tool_engine()
-
-    # 从 ToolEngine 获取工具列表
-    tool_definitions = engine.list_tools(status=ToolStatus.AVAILABLE)
-
-    # 转换为 API 格式
     tools = []
+    seen_tool_ids = set()  # 按 tool_id 去重
+
+    # 源 1：从 ToolEngine 获取动态注册的工具
+    tool_definitions = engine.list_tools(status=ToolStatus.AVAILABLE)
     for tool_def in tool_definitions:
         # 确定工具来源
         tool_source = "builtin"
@@ -145,16 +145,41 @@ async def list_all_tools(source: Optional[str] = Query(default=None)):
         elif tool_def.owner:
             tool_source = "user"
 
-        tools.append(
-            ToolInfo(
-                tool_id=tool_def.name,
-                name=tool_def.name,
-                description=tool_def.description,
-                source=tool_source,
-                parameters={"type": "object", "properties": {p.name: p.to_dict() for p in tool_def.parameters}},
-                server_id=None,
+        if tool_def.name not in seen_tool_ids:
+            seen_tool_ids.add(tool_def.name)
+            tools.append(
+                ToolInfo(
+                    tool_id=tool_def.name,
+                    name=tool_def.name,
+                    description=tool_def.description,
+                    source=tool_source,
+                    parameters={"type": "object", "properties": {p.name: p.to_dict() for p in tool_def.parameters}},
+                    server_id=None,
+                )
             )
-        )
+
+    # 源 2：从 agent._builtin_tools 获取内置工具（BuiltinToolRegistry）
+    # 当 ToolEngine 未注册内置工具时，这是唯一的工具来源
+    try:
+        from neurova.api.endpoints import get_agent_instance
+
+        agent = get_agent_instance()
+        if agent and hasattr(agent, "_builtin_tools") and agent._builtin_tools:
+            for builtin_tool in agent._builtin_tools.list_tools():
+                if builtin_tool.name not in seen_tool_ids:
+                    seen_tool_ids.add(builtin_tool.name)
+                    tools.append(
+                        ToolInfo(
+                            tool_id=builtin_tool.name,
+                            name=builtin_tool.name,
+                            description=builtin_tool.description,
+                            source="builtin",
+                            parameters=builtin_tool.parameters,
+                            server_id=None,
+                        )
+                    )
+    except Exception as e:
+        logger.debug("获取 agent 内置工具列表失败: %s", e)
 
     # 按来源过滤
     if source:
@@ -191,13 +216,23 @@ async def execute_tool(body: ToolExecuteRequest):
         agent = get_agent_instance()
         if agent and hasattr(agent, "tool_executor"):
             result = await agent.tool_executor.execute(body.tool_name, body.arguments)
+            # 检查执行结果是否包含 error 字段（工具执行失败）
+            # 避免把 {error: ...} 当作成功结果返回 code:0，导致前端误显示成功
+            if isinstance(result, dict) and "error" in result:
+                return {
+                    "code": 1,
+                    "error": result["error"],
+                    "data": {"execution_time": time.time() - start},
+                }
             return {"code": 0, "data": {"result": result, "execution_time": time.time() - start}}
     except Exception as e:
         logger.warning("Tool execution via agent failed: %s", e)
 
+    # 所有执行路径失败 → 返回明确错误（不再返回 simulated 假成功）
     return {
-        "code": 0,
-        "data": {"result": f"Tool '{body.tool_name}' executed (simulated)", "execution_time": time.time() - start},
+        "code": 1,
+        "error": f"工具 '{body.tool_name}' 执行失败：未找到可用执行路径",
+        "data": {"execution_time": time.time() - start},
     }
 
 

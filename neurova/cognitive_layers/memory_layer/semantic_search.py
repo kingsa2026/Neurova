@@ -236,9 +236,41 @@ class SemanticSearch:
 _semantic_search: Optional[SemanticSearch] = None
 
 
-def get_semantic_search(embedding_model=None) -> SemanticSearch:
-    """获取语义搜索实例"""
+def get_semantic_search(embedding_model=None, use_embedding: bool = True) -> SemanticSearch:
+    """获取语义搜索实例（单例）
+
+    Bug 12 修复：首次创建时若 embedding_model 为 None，尝试从全局 embedding 工厂懒加载；
+    后续调用忽略参数（保持单例稳定）。如需重置，调用 _reset_semantic_search()。
+
+    Args:
+        embedding_model: 嵌入模型（可选，None 时尝试从全局工厂加载）
+        use_embedding: 是否使用嵌入模型
+
+    Returns:
+        SemanticSearch 实例
+    """
     global _semantic_search
     if _semantic_search is None:
-        _semantic_search = SemanticSearch(embedding_model=embedding_model)
+        # 若调用方未提供 embedding_model，尝试从全局工厂懒加载
+        if embedding_model is None and use_embedding:
+            try:
+                from neurova.embedding import get_embedding_engine
+
+                embedding_model = get_embedding_engine()
+            except Exception as e:
+                logger.warning("全局 embedding 引擎不可用，降级为关键词模式: %s", e)
+                embedding_model = None
+        _semantic_search = SemanticSearch(
+            embedding_model=embedding_model,
+            use_embedding=use_embedding,
+        )
     return _semantic_search
+
+
+def _reset_semantic_search():
+    """测试用：重置单例
+
+    生产代码不应调用此函数。
+    """
+    global _semantic_search
+    _semantic_search = None

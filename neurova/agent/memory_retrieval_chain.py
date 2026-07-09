@@ -16,6 +16,7 @@ MemoryRetrievalChain 深度模块 - 记忆检索责任链
 
 import asyncio
 import hashlib
+import time
 from neurova.core.logger import get_logger
 import threading
 from collections import OrderedDict
@@ -235,6 +236,9 @@ class MemoryRetrievalChain:
                 cache_result = await self._retrieve_from_cache(context)
                 if cache_result and cache_result.quality >= context.min_quality:
                     result = cache_result
+                    # BUG#3: 质量不达标路径采用 cache_result 后补齐 cache_hits 统计
+                    with self._stats_lock:
+                        self._statistics["cache_hits"] += 1
 
             # 更新缓存
             self._update_cache(context.query, result)
@@ -309,7 +313,7 @@ class MemoryRetrievalChain:
         for retriever in self._retrievers:
             try:
                 logger.debug("Trying retriever: %s", retriever.name)
-                start_time = asyncio.get_event_loop().time()
+                start_time = time.monotonic()
 
                 # C-2: 添加超时控制
                 try:
@@ -320,7 +324,7 @@ class MemoryRetrievalChain:
                     logger.warning("Retriever %s timed out after %.1fs", retriever.name, context.timeout)
                     continue
 
-                elapsed = asyncio.get_event_loop().time() - start_time
+                elapsed = time.monotonic() - start_time
                 result.retrieval_time = elapsed
 
                 if result.memories and result.quality >= context.min_quality:
@@ -360,7 +364,7 @@ class MemoryRetrievalChain:
                 retrieval_time=0.0,
             )
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.monotonic()
 
         # 并行执行所有检索器
         tasks = []
@@ -381,12 +385,12 @@ class MemoryRetrievalChain:
                 source="parallel_all_failed",
                 quality=0.0,
                 quality_level=RetrievalQuality.FAILED,
-                retrieval_time=asyncio.get_event_loop().time() - start_time,
+                retrieval_time=time.monotonic() - start_time,
             )
 
         # 选择质量最高的结果
         best_result = max(valid_results, key=lambda r: r.quality)
-        best_result.retrieval_time = asyncio.get_event_loop().time() - start_time
+        best_result.retrieval_time = time.monotonic() - start_time
 
         return best_result
 
@@ -401,12 +405,23 @@ class MemoryRetrievalChain:
             RetrievalResult 实例
         """
         all_results = []
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.monotonic()
 
         for retriever in self._retrievers:
             try:
-                result = await retriever.retrieve(context)
-                result.retrieval_time = asyncio.get_event_loop().time() - start_time
+                # BUG#2: _retrieve_best 同样需要尊重 context.timeout
+                try:
+                    result = await asyncio.wait_for(
+                        retriever.retrieve(context), timeout=context.timeout
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Retriever %s timed out after %.1fs (best)",
+                        retriever.name,
+                        context.timeout,
+                    )
+                    continue
+                result.retrieval_time = time.monotonic() - start_time
                 all_results.append(result)
             except Exception as e:
                 logger.warning("Retriever %s failed: %s", retriever.name, e)
@@ -418,7 +433,7 @@ class MemoryRetrievalChain:
                 source="best_all_failed",
                 quality=0.0,
                 quality_level=RetrievalQuality.FAILED,
-                retrieval_time=asyncio.get_event_loop().time() - start_time,
+                retrieval_time=time.monotonic() - start_time,
             )
 
         # 选择质量最高的结果
@@ -444,19 +459,31 @@ class MemoryRetrievalChain:
                 retrieval_time=0.0,
             )
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.monotonic()
 
         # 尝试主检索器（第一个）
         primary_retriever = self._retrievers[0]
         try:
             logger.debug("Trying primary retriever: %s", primary_retriever.name)
-            result = await primary_retriever.retrieve(context)
-            result.retrieval_time = asyncio.get_event_loop().time() - start_time
+            # BUG#2: 主检索器同样需要尊重 context.timeout
+            try:
+                result = await asyncio.wait_for(
+                    primary_retriever.retrieve(context), timeout=context.timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Primary retriever %s timed out after %.1fs",
+                    primary_retriever.name,
+                    context.timeout,
+                )
+                result = None
+            if result is not None:
+                result.retrieval_time = time.monotonic() - start_time
 
-            if result.memories and result.quality >= context.min_quality:
-                return result
-            else:
-                logger.debug("Primary retriever %s failed quality check", primary_retriever.name)
+                if result.memories and result.quality >= context.min_quality:
+                    return result
+                else:
+                    logger.debug("Primary retriever %s failed quality check", primary_retriever.name)
 
         except Exception as e:
             logger.warning("Primary retriever %s failed: %s", primary_retriever.name, e)
@@ -465,11 +492,25 @@ class MemoryRetrievalChain:
         for retriever in self._retrievers[1:]:
             try:
                 logger.debug("Falling back to retriever: %s", retriever.name)
-                result = await retriever.retrieve(context)
-                result.retrieval_time = asyncio.get_event_loop().time() - start_time
+                # BUG#2: 备用检索器同样需要尊重 context.timeout
+                try:
+                    result = await asyncio.wait_for(
+                        retriever.retrieve(context), timeout=context.timeout
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Fallback retriever %s timed out after %.1fs",
+                        retriever.name,
+                        context.timeout,
+                    )
+                    continue
+                result.retrieval_time = time.monotonic() - start_time
 
-                if result.memories:
+                # BUG#5: 备用检索器也要检查 quality >= min_quality(与 _retrieve_chain:326 对齐)
+                if result.memories and result.quality >= context.min_quality:
                     return result
+                else:
+                    logger.debug("Fallback retriever %s failed quality check", retriever.name)
 
             except Exception as e:
                 logger.warning("Fallback retriever %s failed: %s", retriever.name, e)
@@ -481,7 +522,7 @@ class MemoryRetrievalChain:
             source="fallback_exhausted",
             quality=0.0,
             quality_level=RetrievalQuality.FAILED,
-            retrieval_time=asyncio.get_event_loop().time() - start_time,
+            retrieval_time=time.monotonic() - start_time,
         )
 
     async def _safe_retrieve(self, retriever: Retriever, context: RetrievalContext) -> Optional[RetrievalResult]:

@@ -105,7 +105,9 @@ class EnhancedContextBuilder:
 
         # 检索记忆
         if include_memories:
-            memories = self._retrieve_memories(query, limit=5)
+            memories = self._retrieve_memories(
+                query, limit=5, user_id=user_id, agent_id=agent_id
+            )
             context_parts["memories"] = [
                 {
                     "content": m.content if hasattr(m, "content") else str(m),
@@ -129,17 +131,27 @@ class EnhancedContextBuilder:
 
         return context_parts
 
-    def _retrieve_memories(self, query: str, limit: int = 5) -> List[Any]:
+    def _retrieve_memories(
+        self,
+        query: str,
+        limit: int = 5,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+    ) -> List[Any]:
         """检索相关记忆。
 
         Args:
             query: 查询文本
             limit: 返回数量限制
+            user_id: 用户 ID(透传给 recall_memories 用于缓存隔离)
+            agent_id: Agent ID(透传给 recall_memories 用于缓存隔离)
 
         Returns:
             相关记忆列表
         """
-        return self._memory_rw_manager.recall_memories(query, limit=limit)
+        return self._memory_rw_manager.recall_memories(
+            query, limit=limit, user_id=user_id, agent_id=agent_id
+        )
 
     def add_message_to_session(
         self,

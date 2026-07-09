@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from neurova.mem_core import Memory
+from neurova.cognitive_layers.memory_layer.models import Memory
 
 logger = get_logger(__name__)
 
@@ -74,18 +74,28 @@ class MemoryReadWriteManager:
 
         logger.debug("MemoryReadWriteManager initialized with batch_size=%s", batch_size)
 
-    def recall_memories(self, query: str, limit: int = 10) -> List[Memory]:
+    def recall_memories(
+        self,
+        query: str,
+        limit: int = 10,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+    ) -> List[Memory]:
         """检索记忆。
 
         Args:
             query: 查询文本
             limit: 返回数量限制
+            user_id: 用户 ID(用于缓存隔离,防止跨用户污染)
+            agent_id: Agent ID(用于缓存隔离)
 
         Returns:
             相关记忆列表
         """
         # 先检查缓存
-        cache_key = f"recall:{query}:{limit}"
+        # 修复 M-1: cache_key 必须包含 user_id/agent_id,
+        # 否则 user A 的检索结果会被 user B 命中(跨用户缓存污染)
+        cache_key = f"recall:{user_id or '_'}:{agent_id or '_'}:{query}:{limit}"
         if cache_key in self._cache:
             self._cache_hits += 1
             return self._cache[cache_key]
@@ -387,14 +397,18 @@ class MemoryReadWriteManager:
         logger.debug("Flush completed")
 
     def _invalidate_cache(self, memory_id: str) -> None:
-        """清除与指定记忆相关的缓存。"""
-        keys_to_remove = []
-        for key in self._cache:
-            if memory_id in key:
-                keys_to_remove.append(key)
+        """清除与指定记忆相关的缓存。
 
-        for key in keys_to_remove:
-            del self._cache[key]
+        修复 M-4: 旧实现 `if memory_id in key` 用子串匹配,存在两个问题:
+        1. 子串误匹配 — `mem_1` 会误命中 `mem_10`/`mem_100`/`mem_1_old`
+        2. 永不命中真实缓存 — 缓存 key 格式为 `recall:{user}:{agent}:{query}:{limit}`
+           和 `get:{limit}:{offset}`,根本不含 memory_id,导致 update/delete 后
+           缓存永不失效,返回陈旧数据
+
+        由于缓存 key 不含 memory_id,无法精确关联到具体条目,因此改为清空全部缓存。
+        这是过失效(安全)策略:宁可多清也不允许陈旧数据泄漏。
+        """
+        self._cache.clear()
 
     def __del__(self):
         """析构函数：确保队列被清空。"""

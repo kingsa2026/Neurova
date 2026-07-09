@@ -11,6 +11,7 @@
 
 from neurova.core.logger import get_logger
 import math
+import threading
 from typing import Any, Dict
 
 logger = get_logger(__name__)
@@ -29,6 +30,42 @@ def _validate_score(value: float, name: str = "score") -> float:
     """校验 0-1 范围的分数输入"""
     _validate_temp(value, name)
     return max(0.0, min(1.0, float(value)))
+
+
+class _hybrid_method:
+    """混合方法描述符: 实例调用使用实例参数, 类调用使用默认实例.
+
+    BUG-3 修复: 原 on_access/on_decay 先定义为实例方法, 后用 @classmethod 覆盖,
+    导致 engine.on_access() 实际调用 classmethod (使用默认实例, 忽略自定义参数).
+    此描述符实现:
+    - 类调用 TemperatureEngine.on_access(...) → 委托到 _get_default() (向后兼容)
+    - 实例调用 engine.on_access(...) → 使用该实例的参数 (bug 修复)
+    """
+
+    def __init__(self, func):
+        self._func = func
+        self.__name__ = getattr(func, "__name__", "hybrid_method")
+
+    def __set_name__(self, owner, name):
+        self.__name__ = name
+
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            default = owner._get_default()
+
+            def class_wrapper(*args, **kwargs):
+                # 防御: 若此 wrapper 被当作类属性恢复(如测试 spy 还原后),
+                # 实例访问会把它绑定为 bound method, 首参为实例.
+                # 检测并使用该实例, 避免重复传入 default 导致参数冲突.
+                if args and isinstance(args[0], owner):
+                    actual = args[0]
+                    return self._func(actual, *args[1:], **kwargs)
+                return self._func(default, *args, **kwargs)
+            return class_wrapper
+        else:
+            def instance_wrapper(*args, **kwargs):
+                return self._func(instance, *args, **kwargs)
+            return instance_wrapper
 
 
 class TemperatureEngine:
@@ -63,6 +100,8 @@ class TemperatureEngine:
 
     # 默认实例（供类方法调用时使用，避免重复创建）
     _default_instance: "TemperatureEngine" = None
+    # BUG-14 修复: _get_default() 单例创建需锁保护, 防止并发创建多实例
+    _default_lock = threading.Lock()
 
     def __init__(
         self,
@@ -83,6 +122,7 @@ class TemperatureEngine:
 
         logger.debug("TemperatureEngine 初始化: decay_rate=%s", base_decay_rate)
 
+    @_hybrid_method
     def on_access(
         self,
         current_temp: float,
@@ -148,6 +188,7 @@ class TemperatureEngine:
         # 限制在有效范围内
         return max(0.0, min(100.0, new_temp))
 
+    @_hybrid_method
     def on_decay(
         self,
         current_temp: float,
@@ -221,7 +262,7 @@ class TemperatureEngine:
         if is_crystallized:
             return {
                 'new_temp': current_temp,
-                'lifecycle_stage': self._determine_stage(current_temp, days_idle, is_important),
+                'lifecycle_stage': 'crystallized',
                 'days_idle': days_idle,
                 'decay_amount': 0.0,
             }
@@ -473,48 +514,20 @@ class TemperatureEngine:
             },
         }
 
-    # ── 向后兼容: 类方法调用方式 ──
-    # 旧代码: TemperatureEngine.on_access(50.0) 仍然可用
-    # 新代码: engine = TemperatureEngine(base_decay_rate=0.2); engine.on_access(50.0)
+    # ── 默认实例管理 ──
+    # on_access/on_decay 是实例方法（定义在类上方），不应被 classmethod 覆盖。
+    # 旧代码如需以类方式调用，应显式使用 TemperatureEngine._get_default().on_access(...)
 
     @classmethod
     def _get_default(cls) -> "TemperatureEngine":
-        """获取或创建默认实例"""
+        """获取或创建默认实例（双重检查锁保护）
+
+        BUG-14 修复: 原 _get_default() 无锁保护, 并发调用可能创建多个实例。
+        现使用双重检查锁 (DCL) 模式: 第一次无锁检查避免热路径加锁,
+        第二次持锁检查避免并发创建多实例。
+        """
         if cls._default_instance is None:
-            cls._default_instance = cls()
+            with cls._default_lock:
+                if cls._default_instance is None:
+                    cls._default_instance = cls()
         return cls._default_instance
-
-    @classmethod
-    def on_access(
-        cls,
-        current_temp: float,
-        importance: float = 0.5,
-        recall_count: int = 0,
-        access_count: int = 0,
-        emotion_score: float = 0.0,
-        relation_count: int = 0,
-    ) -> float:
-        """向后兼容: 类方法调用 → 委托给默认实例的 impl"""
-        return cls._get_default()._on_access_impl(
-            current_temp, importance, recall_count, access_count, emotion_score, relation_count
-        )
-
-    @classmethod
-    def on_decay(
-        cls,
-        current_temp: float,
-        last_accessed: str = None,
-        days_idle: float = 0.0,
-        importance: float = 0.5,
-        emotion_score: float = 0.0,
-        recall_count: int = 0,
-        relation_count: int = 0,
-        is_important: bool = False,
-        is_crystallized: bool = False,
-        combo_multiplier: float = 1.0,
-    ) -> dict:
-        """向后兼容: 类方法调用 → 委托给默认实例的 impl"""
-        return cls._get_default()._on_decay_impl(
-            current_temp, last_accessed, days_idle, importance, emotion_score,
-            recall_count, relation_count, is_important, is_crystallized, combo_multiplier,
-        )

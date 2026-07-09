@@ -25,9 +25,9 @@ except ImportError as _e:
     _mem_layer_logger.debug("unified_vector_store 未可用: %s", _e)
 
 try:
-    from .schema import LifecycleStage, MemoryCategory, MemoryType
+    from .models import LifecycleStage, MemoryCategory, MemoryType
 except ImportError as _e:
-    _mem_layer_logger.debug("schema 未可用: %s", _e)
+    _mem_layer_logger.debug("models 未可用: %s", _e)
 
 try:
     from .conflict_detector_v2 import ConflictDetector

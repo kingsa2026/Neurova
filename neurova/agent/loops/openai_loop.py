@@ -45,6 +45,12 @@ class OpenAILoop(BaseAgentLoop):
         """
         # 准备请求参数
         self._tool_rounds = 0  # 重置计数器
+        # Bug B-10 修复:每次 predict_step 重置 _tools_supported = True。
+        # 原实现一次性 400 后永久设为 False,后续所有 chat 都不注入 tools,
+        # 工具调用静默失效,需重启 agent 才恢复。
+        # 现改为 per-request 禁用:本次请求 400 后本次不传 tools,
+        # 但不污染下一次 chat 请求(可能是不同模型/不同 schema)。
+        self._tools_supported = True
         request_params = {
             "messages": messages,
             "stream": stream,

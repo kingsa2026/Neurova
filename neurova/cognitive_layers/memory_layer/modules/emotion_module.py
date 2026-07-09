@@ -86,7 +86,8 @@ class EmotionModule:
         self._conn: Optional[sqlite3.Connection] = None
         # 情感保护计数器（高强度情感触发保护机制时递增）
         self._protection_triggered: int = 0
-        self._emotional_protection_threshold: float = 0.8
+        # Bug 14 修复: 移除重复的私有阈值 _emotional_protection_threshold,
+        # 统一使用公开属性 emotional_protection_threshold(可被 RSI 调整)
         self.emotional_protection_threshold: float = 0.5  # RSI 可优化参数
         self.emotional_protection_factor: float = 0.3  # RSI 可优化参数
 
@@ -113,8 +114,9 @@ class EmotionModule:
                 try:
                     data = json.loads(row[1])
                     self._memory_emotions[row[0]] = EmotionState.from_dict(data)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Bug 15 修复: 记录损坏记录的 warning,而非静默吞异常
+                    logger.warning("跳过损坏的情感记录 %s: %s", row[0], e)
 
             logger.debug("EmotionModule DB loaded: %s emotions", len(self._memory_emotions))
         except Exception as e:
@@ -184,7 +186,9 @@ class EmotionModule:
         """
         with self._lock:
             # 检查是否触发情感保护（高强度负面情感）
-            if emotion.intensity >= self._emotional_protection_threshold and emotion.valence < 0:
+            # Bug 14 修复: 使用公开属性 emotional_protection_threshold(可被 RSI 调整),
+            # 而非已移除的私有 _emotional_protection_threshold
+            if emotion.intensity >= self.emotional_protection_threshold and emotion.valence < 0:
                 self._protection_triggered += 1
 
             self._memory_emotions[memory_id] = emotion

@@ -10,6 +10,7 @@
 from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import threading
 from typing import Any, Dict, List
 
 logger = get_logger(__name__)
@@ -58,6 +59,8 @@ class ToolMemoryIntegration:
         self.tool_lifecycle = tool_lifecycle
         self.usage_history: List[ToolUsageRecord] = []
         self.tool_stats: Dict[str, Dict[str, Any]] = {}
+        # 并发锁：保护 usage_history 和 tool_stats 的读写
+        self._lock = threading.RLock()
         # RSI 可优化参数
         self.success_bonus: float = 0.1
         self.failure_penalty: float = 0.05
@@ -83,6 +86,9 @@ class ToolMemoryIntegration:
         1. 新接口: record_tool_usage(problem_text=..., tool_name=..., tool_source=..., ...)
         2. 旧接口: record_tool_usage(tool_name, success, execution_time, context)
         """
+        # Bug 11: 统一归一化 tool_name，避免 None 污染 tool_stats 键
+        tool_name = tool_name or "unknown"
+
         # 合并上下文
         merged_context = dict(context or {})
         if problem_text:
@@ -95,60 +101,67 @@ class ToolMemoryIntegration:
             merged_context["error_msg"] = error_msg
 
         record = ToolUsageRecord(
-            tool_name=tool_name or "unknown",
+            tool_name=tool_name,
             success=success,
             execution_time=execution_time,
             context=merged_context,
         )
-        self.usage_history.append(record)
 
-        # 更新统计
-        if tool_name not in self.tool_stats:
-            self.tool_stats[tool_name] = {"total": 0, "success": 0, "fail": 0, "avg_time": 0.0}
+        with self._lock:
+            self.usage_history.append(record)
 
-        stats = self.tool_stats[tool_name]
-        stats["total"] += 1
-        if success:
-            stats["success"] += 1
-        else:
-            stats["fail"] += 1
+            # 更新统计
+            if tool_name not in self.tool_stats:
+                self.tool_stats[tool_name] = {"total": 0, "success": 0, "fail": 0, "avg_time": 0.0}
 
-        # 更新平均时间
-        total_time = stats["avg_time"] * (stats["total"] - 1) + execution_time
-        stats["avg_time"] = total_time / stats["total"]
+            stats = self.tool_stats[tool_name]
+            stats["total"] += 1
+            if success:
+                stats["success"] += 1
+            else:
+                stats["fail"] += 1
+
+            # 更新平均时间
+            total_time = stats["avg_time"] * (stats["total"] - 1) + execution_time
+            stats["avg_time"] = total_time / stats["total"]
 
         # 传播到肌肉记忆（闭环关键）
         if self.muscle_memory:
             try:
                 query = problem_text or tool_name or "unknown"
                 self.muscle_memory.record_usage(
-                    tool_name=tool_name or "unknown",
+                    tool_name=tool_name,
                     query=query,
                     parameters=tool_params or {},
                     success=success,
                     result_summary=error_msg or "",
                     metadata={"tool_source": tool_source} if tool_source else None,
                 )
+            except (TypeError, AttributeError):
+                # Bug 12: 编程错误不应被吞掉，re-raise
+                raise
             except Exception as e:
-                logger.debug("肌肉记忆记录失败: %s", e)
+                logger.exception("肌肉记忆记录失败: %s", e)
 
         logger.debug("Recorded tool usage: %s, success=%s", tool_name, success)
 
     def get_tool_stats(self, tool_name: str = None) -> Dict[str, Any]:
         """获取工具统计"""
-        if tool_name:
-            return self.tool_stats.get(tool_name, {})
-        return self.tool_stats
+        with self._lock:
+            if tool_name:
+                return self.tool_stats.get(tool_name, {})
+            return self.tool_stats
 
     def get_tool_recommendations(self, context: Dict[str, Any] = None) -> List[str]:
         """获取工具推荐"""
-        # 基于成功率排序
-        sorted_tools = sorted(
-            self.tool_stats.items(),
-            key=lambda x: x[1]["success"] / max(x[1]["total"], 1),
-            reverse=True,
-        )
-        return [tool_name for tool_name, _ in sorted_tools[:5]]
+        # Bug 15: sorted() 必须在锁保护下执行，防止并发修改导致 RuntimeError
+        with self._lock:
+            sorted_tools = sorted(
+                self.tool_stats.items(),
+                key=lambda x: x[1]["success"] / max(x[1]["total"], 1),
+                reverse=True,
+            )
+            return [tool_name for tool_name, _ in sorted_tools[:5]]
 
     def get_feedback(self) -> Dict[str, Any]:
         """
@@ -208,6 +221,15 @@ class ToolMemoryIntegration:
                         "match_level": best_item.level.value,
                         "dynamic_threshold": dynamic_threshold,
                     }
+
+                    # Bug 13: 命中肌肉记忆路径时记录一次使用，使 muscle_memory_hits 计数 > 0
+                    self.record_tool_usage(
+                        tool_name=tool_name,
+                        success=True,
+                        tool_source="muscle_memory",
+                        problem_text=user_input,
+                        tool_params=best_item.parameters,
+                    )
 
                     if confidence >= dynamic_threshold:
                         return result, "auto_execute"
@@ -309,6 +331,8 @@ class ToolMemoryIntegration:
 
             return state in (ToolLifecycleState.ARCHIVED, ToolLifecycleState.DEGRADED)
         except Exception:
+            # Bug 14: 静默吞异常改为记录日志
+            logger.exception("检查工具 %s 生命周期状态失败", tool_name)
             return False
 
     def _cleanup_deprecated_tools(self) -> int:
@@ -319,7 +343,8 @@ class ToolMemoryIntegration:
         cleaned = 0
         from neurova.evolution.tool_lifecycle import ToolLifecycleState
 
-        for layer_name in ("l1_items", "l2_items", "l3_items"):
+        # Bug 10: 实际属性名是 _l1/_l2/_l3（不是 l1_items/l2_items/l3_items）
+        for layer_name in ("_l1", "_l2", "_l3"):
             layer = getattr(self.muscle_memory, layer_name, None)
             if not layer:
                 continue
@@ -334,7 +359,7 @@ class ToolMemoryIntegration:
                         layer.pop(item_id, None)
                         cleaned += 1
                 except Exception:
-                    pass
+                    logger.exception("清理工具 %s 时检查状态失败", tool_name)
 
         return cleaned
 

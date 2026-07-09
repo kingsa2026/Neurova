@@ -269,18 +269,22 @@ class EvolutionFacade:
     def synthesize_tools(self, top_n: int = 5) -> List[Dict[str, Any]]:
         """
         合成工具（基于频繁模式）
-        
+
         Args:
             top_n: 合成前N个工具
-            
+
         Returns:
             List[Dict]: 合成的工具列表
         """
-        if not self._orchestrator or not hasattr(self._orchestrator, 'nl_synthesizer'):
+        # Bug N-3 修复: 三重断裂
+        # 1. 属性名: nl_synthesizer → tool_synthesizer（匹配 closed_loop.py:221）
+        # 2. 方法名: synthesize → synthesize_from_patterns（匹配 PatternBasedToolSynthesizer）
+        # 3. 签名: top_n= 已正确（synthesize_from_patterns 接受 top_n）
+        if not self._orchestrator or not hasattr(self._orchestrator, 'tool_synthesizer'):
             return []
-        
+
         try:
-            tools = self._orchestrator.nl_synthesizer.synthesize(top_n=top_n)
+            tools = self._orchestrator.tool_synthesizer.synthesize_from_patterns(top_n=top_n)
             return tools if isinstance(tools, list) else []
         except Exception as e:
             logger.warning("合成工具失败: %s", e)

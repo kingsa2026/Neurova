@@ -83,7 +83,7 @@ class ONNXEmbeddingEngine:
         self._dimension = 0
         self._initialized = False
         self._backend_type = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
         # 推理统计
         self._total_requests = 0
@@ -99,15 +99,16 @@ class ONNXEmbeddingEngine:
 
     @property
     def stats(self) -> Dict[str, Any]:
-        avg_ms = self._total_inference_ms / self._total_requests if self._total_requests > 0 else 0
-        return {
-            "model_name": self._model_name,
-            "dimension": self._dimension,
-            "initialized": self._initialized,
-            "total_requests": self._total_requests,
-            "total_inference_ms": round(self._total_inference_ms, 2),
-            "avg_inference_ms": round(avg_ms, 2),
-        }
+        with self._lock:
+            avg_ms = self._total_inference_ms / self._total_requests if self._total_requests > 0 else 0
+            return {
+                "model_name": self._model_name,
+                "dimension": self._dimension,
+                "initialized": self._initialized,
+                "total_requests": self._total_requests,
+                "total_inference_ms": round(self._total_inference_ms, 2),
+                "avg_inference_ms": round(avg_ms, 2),
+            }
 
     async def initialize(self) -> bool:
         """
@@ -310,8 +311,9 @@ class ONNXEmbeddingEngine:
                     show_progress_bar=False,
                 )
                 inference_ms = (time.time() - start_time) * 1000
-                self._total_requests += len(texts)
-                self._total_inference_ms += inference_ms
+                with self._lock:
+                    self._total_requests += len(texts)
+                    self._total_inference_ms += inference_ms
 
                 return EmbeddingResult(
                     vectors=embeddings.tolist(),
@@ -384,8 +386,9 @@ class ONNXEmbeddingEngine:
             vectors = embeddings.tolist()
 
             inference_ms = (time.time() - start_time) * 1000
-            self._total_requests += len(texts)
-            self._total_inference_ms += inference_ms
+            with self._lock:
+                self._total_requests += len(texts)
+                self._total_inference_ms += inference_ms
 
             return EmbeddingResult(
                 vectors=vectors,

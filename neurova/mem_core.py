@@ -44,6 +44,9 @@ def run_async_safely(coro):
     - 无运行中的事件循环（同步上下文）: 直接 asyncio.run(coro)
     - 有运行中的事件循环（异步上下文）: 在新线程的新事件循环中运行，
       避免阻塞当前循环并规避 asyncio.run() 的限制
+
+    BUG 7 修复: 协程在传入前已创建, 若 ThreadPoolExecutor 路径失败,
+    协程未被 await 也未 close() → 泄漏。用 try/except 确保异常路径关闭协程。
     """
     try:
         asyncio.get_running_loop()
@@ -51,79 +54,21 @@ def run_async_safely(coro):
         # 无运行中的事件循环 — 直接运行
         return asyncio.run(coro)
     # 处于运行中的事件循环内 — 在独立线程中运行，避免嵌套 asyncio.run
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(asyncio.run, coro)
-        return future.result()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result()
+    except Exception:
+        # 异常路径: 协程可能未被 asyncio.run 消费, 显式 close 避免泄漏
+        # (asyncio.run 已消费的协程, close() 是 no-op, 无副作用)
+        coro.close()
+        raise
 
 
-@dataclass
-class Memory:
-    """记忆数据模型
-
-    具有类型安全和数据验证的记忆数据类。
-    支持向后兼容的 **kwargs 构造方式。
-    """
-
-    id: str = ""
-    content: str = ""
-    importance: float = 0.5
-    temperature: float = 1.0
-    last_accessed: float = field(default_factory=time.time)
-    metadata: Optional[Dict[str, Any]] = None
-
-    def __post_init__(self):
-        """后初始化处理，支持向后兼容的 **kwargs 构造方式"""
-        # 类型转换和验证
-        if not isinstance(self.importance, (int, float)):
-            try:
-                self.importance = float(self.importance)
-            except (ValueError, TypeError):
-                raise TypeError(f"importance 必须是数字，当前值: {self.importance}")
-
-        if not isinstance(self.temperature, (int, float)):
-            try:
-                self.temperature = float(self.temperature)
-            except (ValueError, TypeError):
-                raise TypeError(f"temperature 必须是数字，当前值: {self.temperature}")
-
-        # 验证重要性范围
-        if not (0.0 <= self.importance <= 1.0):
-            raise ValueError(f"importance 必须在 [0.0, 1.0] 范围内，当前值: {self.importance}")
-
-        # 验证温度非负
-        if self.temperature < 0.0:
-            raise ValueError(f"temperature 必须非负，当前值: {self.temperature}")
-
-        # 如果没有提供 id，自动生成
-        if not self.id:
-            self.id = f"memory_{int(time.time() * 1000)}"
-
-        # 确保 metadata 是字典
-        if self.metadata is None:
-            self.metadata = {}
-
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return {
-            "id": self.id,
-            "content": self.content,
-            "importance": self.importance,
-            "temperature": self.temperature,
-            "last_accessed": self.last_accessed,
-            "metadata": self.metadata or {},
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Memory":
-        """从字典创建 Memory 实例"""
-        return cls(
-            id=data.get("id", ""),
-            content=data.get("content", ""),
-            importance=data.get("importance", 0.5),
-            temperature=data.get("temperature", 1.0),
-            last_accessed=data.get("last_accessed", time.time()),
-            metadata=data.get("metadata"),
-        )
+# 注：mem_core.Memory dataclass 已删除（Tier 4A.2 统一 dataclass）。
+# 唯一 Memory dataclass 现为 neurova.cognitive_layers.memory_layer.models.Memory。
+# 旧导入 `from neurova.mem_core import Memory` 的使用方已改为从 models 导入。
+# 详见 docs/adr/0001-unify-memory-dataclass.md。
 
 
 @dataclass
@@ -370,28 +315,25 @@ class MemCore:
             self.temperature_engine = TemperatureEngine()
 
             # Neurova 统一记忆检索引擎（多维融合 + 意图钻取）
+            # Bug 9 修复：原构造签名 (storage=, temperature_engine=, emotion_analyzer=,
+            # tkg=, vector_search=, config=) 与真实签名完全不符，会抛 TypeError。
+            # 真实签名: (memory_manager, max_workers, timeout_seconds, intent_detector,
+            #           intent_strategy, use_plugins, registry, fusion_mode, density_scale)
+            # 所有依赖通过 memory_manager 间接访问，无需重复注入。
             if self.storage:
                 from neurova.cognitive_layers.memory_layer.neurova_recall import NeurovaRecallEngine
 
                 self.recall_engine = NeurovaRecallEngine(
-                    storage=self.storage,
-                    temperature_engine=self.temperature_engine,
-                    emotion_analyzer=None,
-                    tkg=None,
-                    vector_search=None,
-                    config={
-                        "enable_temperature": True,
-                        "enable_category": True,
-                        "enable_graph": True,
-                        "enable_emotion": True,
-                        "enable_drill": True,
-                        "drill_max_depth": 3,
-                        "max_seeds": 10,
-                        "max_total": 20,
-                        "relevance_threshold": 0.15,
-                    },
+                    memory_manager=self.memory_manager,
+                    max_workers=4,
+                    timeout_seconds=10.0,
+                    use_plugins=True,
+                    fusion_mode="legacy",
                 )
                 logger.info("Agent %s: NeurovaRecallEngine（多维融合+钻取）已启用", self.config.name)
+            else:
+                self.recall_engine = None
+                logger.warning("Agent %s: storage 不可用，NeurovaRecallEngine 未启用", self.config.name)
 
             # 初始化附件管理器（Agent隔离 + 用户隔离）
             from neurova.cognitive_layers.memory_layer.attachment_manager import AttachmentManager
@@ -435,9 +377,9 @@ class MemCore:
 
             # 初始化缓冲模块
             self.buffer_module = BufferModule()
-            # 将对话缓冲区和写入队列注入到缓冲模块
-            self.buffer_module._buffer = self.conversation_buffer
-            from neurova.cognitive_layers.memory_layer.conversation_buffer import MemoryWriteQueue
+            # BUG 4 修复: 不覆盖 _buffer(List[Dict] 类型契约),
+            # 改为在 BufferModule 上单独持有 ConversationBuffer 引用
+            self.buffer_module._conv_buffer = self.conversation_buffer
 
             # 始终创建 MemoryWriteQueue，传递 memory_manager 作为降级后端
             self.buffer_module._write_queue = MemoryWriteQueue(
@@ -653,17 +595,25 @@ class MemCore:
         """
         try:
             # 刷新对话缓冲区
+            # BUG 1 修复: ConversationBuffer 只有 flush(), 不存在 flush_to_long_term_memory()。
+            # flush() 返回 List[MemoryItem], 通过 MemoryWriteQueue 写入长期存储。
             if self.conversation_buffer and self.conversation_buffer.is_full():
-                self.conversation_buffer.flush_to_long_term_memory()
+                items = self.conversation_buffer.flush()
+                if items and hasattr(self, 'memory_manager'):
+                    queue = getattr(self.memory_manager, '_write_queue', None)
+                    if queue:
+                        queue.enqueue_batch(items)
                 logger.debug("对话缓冲区已 flush")
 
             # 刷新写入队列
             if self.buffer_module and hasattr(self.buffer_module, "_write_queue"):
                 queue = self.buffer_module._write_queue
                 if queue and hasattr(queue, "flush_to_storage"):
-                    result = queue.flush_to_storage()
-                    if result.get("written", 0) > 0:
-                        logger.debug("写入队列已 flush: %s 条", result['written'])
+                    # BUG 3 修复: flush_to_storage() 返回 int(written 计数),
+                    # 不是 dict, 不能用 result.get("written", 0)
+                    written = queue.flush_to_storage()
+                    if written > 0:
+                        logger.debug("写入队列已 flush: %s 条", written)
         except Exception as e:
             logger.warning("检索前 flush 失败: %s", e)
 
@@ -704,8 +654,13 @@ class MemCore:
                 self.conversation_buffer.add_agent_message(agent_response)
 
                 # 如果缓冲区满了，刷新到长期记忆
+                # BUG 1 修复: 调用 flush()(返回 List[MemoryItem]) 而非不存在的 flush_to_long_term_memory()
                 if self.conversation_buffer.is_full():
-                    self.conversation_buffer.flush_to_long_term_memory()
+                    items = self.conversation_buffer.flush()
+                    if items and hasattr(self, 'memory_manager'):
+                        queue = getattr(self.memory_manager, '_write_queue', None)
+                        if queue:
+                            queue.enqueue_batch(items)
 
             logger.debug("对话记忆已保存: user_input=%s...", user_input[:50])
         except Exception as e:
@@ -721,28 +676,38 @@ class MemCore:
         Args:
             user_input: 用户输入
             agent_response: Agent 回复
+
+        Notes:
+            优先使用 agent._conversation_context（ConversationContext deep module），
+            集中 invariant：role 校验 + 自动 trim + 线程安全。
+            若 _conversation_context 不存在（旧路径），fallback 到裸 list 操作。
         """
         try:
-            # 添加到对话历史
-            self.conversation_history.append(
-                {
-                    "role": "user",
-                    "content": user_input,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }
-            )
-            self.conversation_history.append(
-                {
-                    "role": "assistant",
-                    "content": agent_response,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }
-            )
+            ctx = getattr(self._agent, "_conversation_context", None)
+            now_iso = datetime.now(UTC).isoformat()
 
-            # 限制历史长度
-            max_history = 100
-            if len(self.conversation_history) > max_history:
-                self.conversation_history = self.conversation_history[-max_history:]
+            if ctx is not None:
+                # Deep module 路径：invariant 由 ConversationContext 保证
+                # 先同步现有 list 到 ctx（处理外部直接操作 list 的情况）
+                current_list = getattr(self._agent, "conversation_history", [])
+                if current_list and len(current_list) != len(ctx):
+                    ctx.clear()
+                    ctx.extend(current_list)
+                ctx.append("user", user_input, metadata={"timestamp": now_iso})
+                ctx.append("assistant", agent_response, metadata={"timestamp": now_iso})
+                # 同步回 list（保持兼容）
+                self._agent.conversation_history = ctx.to_list()
+            else:
+                # Fallback 路径：裸 list 操作（兼容旧 Agent 未初始化 _conversation_context）
+                self.conversation_history.append(
+                    {"role": "user", "content": user_input, "timestamp": now_iso}
+                )
+                self.conversation_history.append(
+                    {"role": "assistant", "content": agent_response, "timestamp": now_iso}
+                )
+                max_history = 100
+                if len(self.conversation_history) > max_history:
+                    self.conversation_history = self.conversation_history[-max_history:]
 
             logger.debug("对话历史已更新: 长度=%s", len(self.conversation_history))
         except Exception as e:
@@ -805,22 +770,29 @@ class MemCore:
     def update_memory_temperature(self, memory_id: str, interaction_type: str = "view"):
         """更新记忆温度
 
+        委托给 MemoryManager.update_memory_temperature，由其调用 Memory.touch()
+        应用 access_count++ / temperature +10 / last_accessed_at 更新。
+
         Args:
             memory_id: 记忆ID
             interaction_type: 交互类型（view, use, recall）
         """
-        if not self.temperature_engine:
+        # 委托给 MemoryManager（其内部调用 Memory.touch()）
+        # 不直接调用 TemperatureEngine — TemperatureEngine 没有 update_temperature 方法，
+        # 仅暴露 on_access / on_decay 用于贝叶斯温度计算（由 manager.run_decay_cycle 调用）。
+        memory_manager = self.memory_manager
+        if memory_manager is None:
+            logger.debug("跳过温度更新：memory_manager 未初始化, memory_id=%s", memory_id)
             return
 
         try:
-            # 更新温度
-            self.temperature_engine.update_temperature(
-                memory_id=memory_id,
-                interaction_type=interaction_type,
+            memory_manager.update_memory_temperature(
+                memory_id, interaction_type=interaction_type
             )
             logger.debug("记忆温度已更新: memory_id=%s, type=%s", memory_id, interaction_type)
         except Exception as e:
-            logger.warning("记忆温度更新失败: %s", e)
+            # 缩窄异常类型不可能（manager 实现可能抛多种），但记录完整堆栈以避免静默吞没
+            logger.warning("记忆温度更新失败: %s", e, exc_info=True)
 
     # ══════════════════════════════════════════════════════════════
     # 记忆统计

@@ -136,7 +136,7 @@ class ToolExecutor:
             return reply
 
         results = []
-        for tool_name, args_str in matches:
+        for idx, (tool_name, args_str) in enumerate(matches):
             try:
                 # 尝试解析 JSON 参数
                 try:
@@ -146,6 +146,23 @@ class ToolExecutor:
 
                 result = await self._execute_single_tool(tool_name, arguments)
                 results.append(f"\n\n**{tool_name} 结果**: {json.dumps(result, ensure_ascii=False)[:2000]}")
+
+                # Bug T-4 修复: 文本模式也写入 _tool_messages_list，与 list 模式（line 203-209）一致
+                # 否则 chat_pipeline._collect_tool_messages() 收不到工具结果，
+                # 前端 AGENT_TOOL_RESULT 事件的 tool_messages 永远为空
+                # Bug A-2 修复: 添加 tool_name 字段，与 base.py 格式一致，
+                # 使 post_chat_pipeline 的 tm.get("tool_name") 可正常工作
+                if not hasattr(self._agent, "_tool_messages_list"):
+                    self._agent._tool_messages_list = []
+                self._agent._tool_messages_list.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": f"text_{tool_name}_{idx}",
+                        "name": tool_name,
+                        "tool_name": tool_name,
+                        "content": json.dumps(result, ensure_ascii=False),
+                    }
+                )
             except Exception as e:
                 logger.error("Text tool execution failed: %s", e)
                 results.append(f"\n\n**{tool_name} 错误**: {str(e)}")
@@ -198,12 +215,15 @@ class ToolExecutor:
                 # 记录到消息列表
                 # BE-CORE-008 修复: 写入 agent._tool_messages_list（消费者读取此属性），
                 # 而非 self._messages_list（ToolExecutor 本地列表，消费者不可见）
+                # Bug A-2 修复: 添加 tool_name 字段，与 base.py 格式一致，
+                # 使 post_chat_pipeline 的 tm.get("tool_name") 可正常工作
                 if not hasattr(self._agent, "_tool_messages_list"):
                     self._agent._tool_messages_list = []
                 self._agent._tool_messages_list.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.get("id", ""),
+                        "tool_name": tool_name,
                         "content": json.dumps(result, ensure_ascii=False),
                     }
                 )
@@ -398,9 +418,25 @@ class ToolExecutor:
             logger.error("CLI 工具执行失败: %s", e)
             return {"error": f"CLI 工具执行失败: {str(e)}"}
 
+    async def execute(self, tool_name: str, params: Dict) -> Dict:
+        """执行工具（公开入口，供 API 端点 / Agent Loop 调用）
+
+        这是 ToolExecutor 的主公开接口。内部委托给 _execute_single_tool，
+        后者实现四级回退链：ToolEngine → 内置工具 → Skill → ToolRouter。
+        将复杂回退链隐藏在单一公开方法背后，使 API 端点无需感知内部细节。
+
+        Args:
+            tool_name: 工具名称
+            params: 工具参数
+
+        Returns:
+            执行结果 dict（成功含 success/result 字段，失败含 error 字段）
+        """
+        return await self._execute_single_tool(tool_name, params)
+
     async def _execute_single_tool(self, tool_name: str, params: Dict) -> Dict:
         """
-        执行单个工具
+        执行单个工具（内部实现，含四级回退链）
 
         Args:
             tool_name: 工具名称
@@ -1084,9 +1120,24 @@ class ToolExecutor:
             return {}
 
     def get_tool_messages(self) -> List[Dict]:
-        """获取工具消息列表"""
-        return self._messages_list.copy()
+        """获取工具消息列表。
+
+        Bug N-4 修复: 消费者（chat_pipeline._collect_tool_messages、
+        Agent.get_tool_messages）读取 agent._tool_messages_list，原代码返回
+        self._messages_list（ToolExecutor 本地列表），属性名不匹配导致工具消息丢失。
+        改为读 agent._tool_messages_list，与写入端（line 155, 217）一致。
+        """
+        agent_list = getattr(self._agent, "_tool_messages_list", None)
+        if agent_list is None:
+            return []
+        return list(agent_list)
 
     def clear_tool_messages(self):
-        """清空工具消息列表"""
-        self._messages_list.clear()
+        """清空工具消息列表。
+
+        Bug N-4 修复: 清空 agent._tool_messages_list（消费者读取的列表），
+        而非 self._messages_list（本地列表，清空不影响消费者，导致跨轮次累积）。
+        """
+        agent_list = getattr(self._agent, "_tool_messages_list", None)
+        if agent_list is not None:
+            agent_list.clear()

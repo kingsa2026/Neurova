@@ -9,7 +9,7 @@ from neurova.core.logger import get_logger
 _logger = get_logger(__name__)
 
 try:
-    from neurova.mem_core import Memory
+    from neurova.cognitive_layers.memory_layer.models import Memory
 except ImportError as _e:
     _logger.debug("Memory 未可用: %s", _e)
     Memory = None

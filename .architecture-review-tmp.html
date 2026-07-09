@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Neurova 会话存储架构深化审查</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .badge-strong { background: #16a34a; color: white; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+  .badge-worth { background: #2563eb; color: white; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+  .badge-spec { background: #6b7280; color: white; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+  .before-box { background: #fef2f2; border: 2px dashed #dc2626; border-radius: 12px; padding: 16px; }
+  .after-box { background: #f0fdf4; border: 2px solid #16a34a; border-radius: 12px; padding: 16px; }
+  .module-shallow { background: #fee2e2; padding: 6px 10px; border-radius: 6px; font-size: 12px; margin: 4px 0; }
+  .module-deep { background: #bbf7d0; padding: 6px 10px; border-radius: 6px; font-size: 12px; margin: 4px 0; font-weight: 600; }
+  .arrow { text-align: center; font-size: 24px; color: #6b7280; margin: 8px 0; }
+  .callout { background: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px; border-radius: 4px; margin: 12px 0; }
+</style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
+
+<div class="max-w-7xl mx-auto px-6 py-10">
+
+  <header class="mb-12 text-center">
+    <h1 class="text-4xl font-extrabold text-slate-800 mb-3">Neurova 会话存储架构深化审查</h1>
+    <p class="text-slate-600">Architecture Review · 2026-06-28 · 7 个深化候选</p>
+    <p class="text-sm text-slate-500 mt-2">方法论：improve-codebase-architecture · zoom-out · bug-hunt</p>
+  </header>
+
+  <section class="bg-white rounded-2xl shadow-xl p-8 mb-10">
+    <h2 class="text-2xl font-bold mb-4 text-slate-800">执行摘要</h2>
+    <p class="text-slate-700 mb-4">zoom-out 探索发现 <strong>5 套活跃会话存储 + 1 套孤儿表 + 1 套瘫痪 API</strong>，无任何 <code class="bg-slate-100 px-2 py-1 rounded">SessionRepository</code> 抽象。6 个 <code class="bg-slate-100 px-2 py-1 rounded">Session*</code> 类全是具体类，靠鸭子类型重复实现 save/load/list 语义。这是<strong>统一抽象的强信号</strong>（One adapter = hypothetical seam. Two adapters = real seam. — 我们有 5 个 adapter）。</p>
+    <div class="grid grid-cols-5 gap-3 mt-6">
+      <div class="bg-red-50 p-3 rounded-lg text-center"><div class="text-2xl font-bold text-red-600">5</div><div class="text-xs text-slate-600">活跃存储</div></div>
+      <div class="bg-orange-50 p-3 rounded-lg text-center"><div class="text-2xl font-bold text-orange-600">1</div><div class="text-xs text-slate-600">孤儿表</div></div>
+      <div class="bg-yellow-50 p-3 rounded-lg text-center"><div class="text-2xl font-bold text-yellow-600">1</div><div class="text-xs text-slate-600">瘫痪 API</div></div>
+      <div class="bg-blue-50 p-3 rounded-lg text-center"><div class="text-2xl font-bold text-blue-600">0</div><div class="text-xs text-slate-600">抽象接口</div></div>
+      <div class="bg-green-50 p-3 rounded-lg text-center"><div class="text-2xl font-bold text-green-600">7</div><div class="text-xs text-slate-600">深化候选</div></div>
+    </div>
+  </section>
+
+  <section class="bg-white rounded-2xl shadow-xl p-8 mb-10">
+    <h2 class="text-2xl font-bold mb-4 text-slate-800">现状地图（5 套活跃存储）</h2>
+    <div class="mermaid">
+graph TB
+    subgraph Frontend
+      ChatPage["ChatPage.vue<br/>局部 ref 状态"]
+    end
+    subgraph BackendAPI
+      ConsoleAPI["/console/chat/*<br/>_CHAT_SESSIONS 内存字典<br/>+ console_sessions.json"]
+      ChatAPI["/v1/chat/sessions/*<br/>死端点瘫痪"]
+      SyncAPI["/v1/sync/sessions/*<br/>SessionSyncManager"]
+    end
+    subgraph AgentCore
+      Agent["Agent.conversation_history<br/>LLM 真实上下文"]
+      MemCore["MemCore.save_to_session"]
+      ChatPipeline["ChatPipeline<br/>_restore_session_history"]
+    end
+    subgraph Persistence
+      SessionManager["SessionManager<br/>文件 sessions/agent/sid_date.json"]
+      SQLite["SQLite 孤儿表<br/>sessions / session_messages"]
+    end
+    ChatPage -->|HTTP| ConsoleAPI
+    ConsoleAPI -.->|不调用| SessionManager
+    ChatAPI -.->|hasattr 永远 False| SessionManager
+    ConsoleAPI --> Agent
+    Agent --> MemCore
+    MemCore --> SessionManager
+    ChatPipeline -->|恢复历史| SessionManager
+    ChatPipeline -->|覆盖| Agent
+    SyncAPI --> SyncMgr2["SessionSyncManager<br/>纯内存"]
+    SyncMgr2 -.->|不持久化| SessionManager
+    SQLite -.->|无代码引用| SQLite
+    style ConsoleAPI fill:#fee2e2
+    style ChatAPI fill:#fee2e2
+    style SQLite fill:#fee2e2
+    style SyncMgr2 fill:#fef3c7
+    style Agent fill:#fef3c7
+    </div>
+    <p class="text-sm text-slate-500 mt-4">红色 = shallow/瘫痪 · 黄色 = 无封装/无持久化 · 绿色（下方候选）= 深化目标</p>
+  </section>
+
+  <div class="bg-white rounded-2xl shadow-xl p-8 mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold text-slate-800">候选 #1：删除 _CHAT_SESSIONS，统一到 SessionManager</h2>
+      <span class="badge-worth">Worth exploring</span>
+    </div>
+    <div class="grid grid-cols-2 gap-6">
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Files</h3>
+        <p class="text-sm text-slate-600 mb-3"><code>neurova/api/endpoints/console.py:72-94, 144-270</code><br/><code>data/console_sessions.json</code></p>
+        <h3 class="font-semibold text-slate-700 mb-2">Problem</h3>
+        <p class="text-sm text-slate-600 mb-3">Console API 用模块级 Dict + JSON 文件做会话存储，与 Agent 内部用的 SessionManager 完全独立。两份数据不同步，console 历史与 agent 持久化的历史是两套。这是上轮 H-1/H-2 bug 的根因。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Solution</h3>
+        <p class="text-sm text-slate-600 mb-3">删除 _CHAT_SESSIONS + _SESSIONS_FILE，console 端点改为调用 SessionManager。会话列表用 get_sessions_by_agent(agent_id)，历史用 get_recent_context，发消息由 agent.chat 自动落盘。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Benefits</h3>
+        <ul class="text-sm text-slate-600 list-disc pl-5">
+          <li><strong>Locality</strong>：会话存储集中到一处</li>
+          <li><strong>Leverage</strong>：console 与 agent 共享同一历史源</li>
+          <li>消除 console_sessions.json 与 sessions/ 文件不一致</li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Before / After</h3>
+        <div class="before-box mb-3">
+          <div class="text-xs font-bold text-red-600 mb-2">BEFORE（2 套并行存储）</div>
+          <div class="module-shallow">console._CHAT_SESSIONS（内存+JSON）</div>
+          <div class="module-shallow">SessionManager（文件）</div>
+          <div class="text-xs text-red-500 mt-2">→ 数据不同步，H-1/H-2 bug 根因</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="after-box">
+          <div class="text-xs font-bold text-green-600 mb-2">AFTER（单一存储）</div>
+          <div class="module-deep">SessionManager（文件）</div>
+          <div class="text-xs text-slate-500 mt-2">console API 直接调用</div>
+        </div>
+      </div>
+    </div>
+    <div class="callout mt-4"><strong>依赖：</strong>此候选依赖候选 #3（SessionRepository 接口）先落地，否则 console 端点会直接耦合 SessionManager 具体类。</div>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow-xl p-8 mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold text-slate-800">候选 #2：抽 Pinia store + useChat composable</h2>
+      <span class="badge-worth">Worth exploring</span>
+    </div>
+    <div class="grid grid-cols-2 gap-6">
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Files</h3>
+        <p class="text-sm text-slate-600 mb-3"><code>NeurUI/src/pages/ChatPage.vue:478-514</code>（14 个 ref/reactive）<br/><code>NeurUI/src/stores/</code>（无 chat store）<br/><code>NeurUI/src/composables/</code>（无 useChat）</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Problem</h3>
+        <p class="text-sm text-slate-600 mb-3">ChatPage.vue 把 messages / sessions / currentSessionId / isStreaming 等 14 个状态全放在局部 ref。违反用户规则"建立统一的状态管理库"。无法跨组件共享聊天状态（如顶栏未读数、侧栏会话切换）。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Solution</h3>
+        <p class="text-sm text-slate-600 mb-3">抽 stores/chat.ts（Pinia store：sessions/currentSessionId/messages）+ composables/useChat.ts（封装 SSE 流式调用、错误处理、UI 提示）。ChatPage.vue 只负责模板渲染。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Benefits</h3>
+        <ul class="text-sm text-slate-600 list-disc pl-5">
+          <li><strong>Leverage</strong>：任意组件读聊天状态</li>
+          <li><strong>Locality</strong>：状态变更集中</li>
+          <li>符合用户规则"统一状态管理库"</li>
+          <li>ChatPage.vue 从 700+ 行瘦身</li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Before / After</h3>
+        <div class="before-box mb-3">
+          <div class="text-xs font-bold text-red-600 mb-2">BEFORE（状态散落）</div>
+          <div class="module-shallow">ChatPage.vue × 14 ref</div>
+          <div class="text-xs text-red-500 mt-2">→ 其他组件无法访问</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="after-box">
+          <div class="text-xs font-bold text-green-600 mb-2">AFTER（store + composable）</div>
+          <div class="module-deep">useChatStore（Pinia）</div>
+          <div class="module-deep">useChat（composable）</div>
+          <div class="text-xs text-slate-500 mt-2">ChatPage.vue 仅渲染</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow-xl p-8 mb-8 border-l-8 border-green-500">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold text-slate-800">候选 #3：定义 SessionRepository 接口（统一 seam）</h2>
+      <span class="badge-strong">Strong</span>
+    </div>
+    <div class="grid grid-cols-2 gap-6">
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Files</h3>
+        <p class="text-sm text-slate-600 mb-3"><code>neurova/session_manager.py:63</code>（SessionManager）<br/><code>neurova/api/endpoints/console.py:72</code>（_CHAT_SESSIONS）<br/><code>neurova/sync/session_sync_manager.py:207</code>（SessionSyncManager）<br/><code>neurova/memory/scripts/init_db.py:76</code>（SQLite 表）</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Problem</h3>
+        <p class="text-sm text-slate-600 mb-3">5 个 adapter 事实满足同一接口（save/load/list/delete session），但<strong>无任何 ABC/Protocol</strong>。每个 adapter 自己定义方法名和签名（add_message vs set_messages vs create_session），调用方必须知道具体类。<strong>Two adapters = real seam</strong>，我们有 5 个。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Solution</h3>
+        <p class="text-sm text-slate-600 mb-3">定义 SessionRepository ABC：save_message / get_history / list_sessions / create_session / delete_session / rename_session。3 个具体 adapter 实现：FileSessionRepository（SessionManager）/ MemorySessionRepository（SessionSyncManager）/ SqliteSessionRepository（新）。Console API 只依赖 ABC。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Benefits</h3>
+        <ul class="text-sm text-slate-600 list-disc pl-5">
+          <li><strong>The interface is the test surface</strong>：可 mock 测试</li>
+          <li><strong>Locality</strong>：存储策略变更集中</li>
+          <li>候选 #1/#5 的前置条件</li>
+          <li>消除鸭子类型重复</li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Before / After</h3>
+        <div class="before-box mb-3">
+          <div class="text-xs font-bold text-red-600 mb-2">BEFORE（5 个具体类，无共享接口）</div>
+          <div class="module-shallow">SessionManager.add_message(agent_id, session_id, user, assistant, ...)</div>
+          <div class="module-shallow">_CHAT_SESSIONS[sid] = {...}</div>
+          <div class="module-shallow">SessionSyncManager.create_session(...)</div>
+          <div class="module-shallow">SQLite sessions 表（孤儿）</div>
+          <div class="module-shallow">agent.conversation_history = []</div>
+          <div class="text-xs text-red-500 mt-2">→ 调用方必须知道具体类</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="after-box">
+          <div class="text-xs font-bold text-green-600 mb-2">AFTER（统一 seam）</div>
+          <div class="module-deep">SessionRepository (ABC)</div>
+          <div class="text-xs text-slate-500 mt-2 ml-2">├─ FileSessionRepository</div>
+          <div class="text-xs text-slate-500 ml-2">├─ MemorySessionRepository</div>
+          <div class="text-xs text-slate-500 ml-2">└─ SqliteSessionRepository</div>
+          <div class="text-xs text-green-600 mt-2">→ 调用方依赖 ABC，可替换</div>
+        </div>
+      </div>
+    </div>
+    <div class="callout mt-4"><strong>ADR 建议：</strong>此候选影响范围大，建议落地时同步写 ADR-0008「SessionRepository 统一接口」，记录 3 个 adapter 的取舍（文件 vs 内存 vs SQLite）。</div>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow-xl p-8 mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold text-slate-800">候选 #4：删除 SQLite 孤儿表</h2>
+      <span class="badge-spec">Speculative</span>
+    </div>
+    <div class="grid grid-cols-2 gap-6">
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Files</h3>
+        <p class="text-sm text-slate-600 mb-3"><code>neurova/memory/scripts/init_db.py:76, 90, 104</code><br/><code>docs/architecture/11-database-architecture.md</code>（引用）</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Problem</h3>
+        <p class="text-sm text-slate-600 mb-3">sessions / session_messages / session_context_snapshots 三张表只有 CREATE TABLE，无任何 INSERT/SELECT/UPDATE。<strong>Deletion test</strong>：删除后 complexity 不变（无代码引用）。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Solution</h3>
+        <p class="text-sm text-slate-600 mb-3">选项 A：删除 DDL（简单）。选项 B：作为候选 #3 的 SqliteSessionRepository 落地（复杂，但提供事务性持久化）。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Benefits</h3>
+        <ul class="text-sm text-slate-600 list-disc pl-5">
+          <li>选项 A：减少 schema 噪音</li>
+          <li>选项 B：提供 ACID 持久化（候选 #3 的第 3 个 adapter）</li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Deletion Test</h3>
+        <div class="before-box mb-3">
+          <div class="text-xs font-bold text-red-600 mb-2">删除前</div>
+          <div class="module-shallow">3 张表 + 0 处代码引用</div>
+        </div>
+        <div class="arrow">↓ 删除</div>
+        <div class="after-box">
+          <div class="text-xs font-bold text-green-600 mb-2">删除后</div>
+          <div class="text-sm text-slate-600">complexity 不变 ✓<br/>（pass-through，应删除或激活）</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow-xl p-8 mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold text-slate-800">候选 #5：SessionSyncManager 接入 SessionRepository</h2>
+      <span class="badge-worth">Worth exploring</span>
+    </div>
+    <div class="grid grid-cols-2 gap-6">
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Files</h3>
+        <p class="text-sm text-slate-600 mb-3"><code>neurova/sync/session_sync_manager.py:207-239, 612-622</code><br/><code>neurova/agent/chat_pipeline.py:268-296</code>（_sync_event 调用方）</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Problem</h3>
+        <p class="text-sm text-slate-600 mb-3">SessionSyncManager 维护第 3 套"会话列表+历史"内存镜像（UnifiedSession.history），面向跨渠道广播。与 _CHAT_SESSIONS 并行存在、语义不同、不互通、不与 SessionManager 同步。进程重启即丢。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Solution</h3>
+        <p class="text-sm text-slate-600 mb-3">SessionSyncManager 实现为 MemorySessionRepository（候选 #3 的 adapter 之一），只做事件广播 + 内存缓存，持久化委托给 FileSessionRepository。ChatPipeline._sync_event 通过 ABC 接口调用。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Benefits</h3>
+        <ul class="text-sm text-slate-600 list-disc pl-5">
+          <li>消除第 3 套存储的独立性</li>
+          <li>跨渠道广播与持久化解耦</li>
+          <li>依赖候选 #3</li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Before / After</h3>
+        <div class="before-box mb-3">
+          <div class="text-xs font-bold text-red-600 mb-2">BEFORE</div>
+          <div class="module-shallow">SessionSyncManager（纯内存，独立）</div>
+          <div class="text-xs text-red-500 mt-2">→ 进程重启即丢，不与文件同步</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="after-box">
+          <div class="text-xs font-bold text-green-600 mb-2">AFTER</div>
+          <div class="module-deep">MemorySessionRepository（缓存+广播）</div>
+          <div class="text-xs text-slate-500 mt-2">→ 持久化委托 FileSessionRepository</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow-xl p-8 mb-8 border-l-8 border-green-500">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold text-slate-800">候选 #6：封装 agent.conversation_history</h2>
+      <span class="badge-strong">Strong</span>
+    </div>
+    <div class="grid grid-cols-2 gap-6">
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Files</h3>
+        <p class="text-sm text-slate-600 mb-3"><code>neurova/agent_core.py:472, 1364</code>（属性定义+重置）<br/><code>neurova/agent/chat_pipeline.py:348-359</code>（_restore_session_history）</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Problem</h3>
+        <p class="text-sm text-slate-600 mb-3">conversation_history 是 LLM 推理时真实读的"会话状态"，但只是 Agent 实例的普通 list 属性，无封装、无 invariant。_restore_session_history 只在 len(saved) > len(current) 时才覆盖（chat_pipeline.py:357），存在一致性缝隙。<strong>Deletion test</strong>：删除后 complexity 重新出现在每个读它的步骤（ChatPipeline/PostChatPipeline/LLMRouter）。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Solution</h3>
+        <p class="text-sm text-slate-600 mb-3">抽 ConversationContext 深度模块：封装 list + invariant（只增不删、role 交替、token 上限）+ restore_from(repository) 方法。Agent 持有 ConversationContext 而非裸 list。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Benefits</h3>
+        <ul class="text-sm text-slate-600 list-disc pl-5">
+          <li><strong>Locality</strong>：上下文 invariant 集中</li>
+          <li><strong>Leverage</strong>：LLM 调用方只读不写</li>
+          <li>消除 _restore_session_history 一致性缝隙</li>
+          <li>token 截断策略集中（目前散落）</li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Before / After</h3>
+        <div class="before-box mb-3">
+          <div class="text-xs font-bold text-red-600 mb-2">BEFORE（裸 list 属性）</div>
+          <div class="module-shallow">agent.conversation_history: list</div>
+          <div class="text-xs text-red-500 mt-2">→ ChatPipeline 直接覆盖，无 invariant</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="after-box">
+          <div class="text-xs font-bold text-green-600 mb-2">AFTER（深度模块）</div>
+          <div class="module-deep">ConversationContext</div>
+          <div class="text-xs text-slate-500 mt-2">→ restore_from(repo) / append() / truncate()</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow-xl p-8 mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold text-slate-800">候选 #7：删除 /v1/chat/sessions 死端点</h2>
+      <span class="badge-spec">Speculative</span>
+    </div>
+    <div class="grid grid-cols-2 gap-6">
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">Files</h3>
+        <p class="text-sm text-slate-600 mb-3"><code>neurova/api/endpoints/chat.py:290-317, 330-400</code><br/><code>neurova/api/endpoints/__init__.py:190</code>（路由注册）</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Problem</h3>
+        <p class="text-sm text-slate-600 mb-3">GET /v1/chat/sessions 和 POST /v1/chat/sessions 用 hasattr(agent, "session_manager") and hasattr(session_manager, "list_sessions") 守卫，但 SessionManager <strong>没有 list_sessions 方法</strong>，守卫永远 False。端点返回空列表 / 不持久化的临时 dict。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Solution</h3>
+        <p class="text-sm text-slate-600 mb-3">选项 A：删除端点（路由已挂载但瘫痪）。选项 B：补全 SessionManager.list_sessions + create_session(title, user_id)，让端点工作。选项 C：接入候选 #3 的 SessionRepository。</p>
+        <h3 class="font-semibold text-slate-700 mb-2">Benefits</h3>
+        <ul class="text-sm text-slate-600 list-disc pl-5">
+          <li>选项 A：减少 API 噪音</li>
+          <li>选项 B/C：提供第 4 套会话 API（与 console 重复）</li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="font-semibold text-slate-700 mb-2">证据</h3>
+        <div class="before-box">
+          <div class="text-xs font-bold text-red-600 mb-2">hasattr 守卫永远 False</div>
+          <pre class="text-xs text-slate-700 bg-white p-2 rounded">if hasattr(agent, "session_manager") and \
+   hasattr(session_manager, "list_sessions"):
+    # SessionManager 无 list_sessions 方法
+    # → 永远不进入此分支
+    sessions = session_manager.list_sessions(...)</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="bg-gradient-to-r from-green-50 to-blue-50 rounded-2xl shadow-xl p-8 mb-8 border-l-8 border-green-600">
+    <h2 class="text-3xl font-bold mb-4 text-slate-800">🏆 Top Recommendation</h2>
+    <p class="text-slate-700 mb-4">先做 <strong>候选 #3（SessionRepository 接口）</strong>，因为：</p>
+    <ol class="text-slate-700 list-decimal pl-6 mb-4 space-y-2">
+      <li><strong>它是其他候选的前置条件</strong>：#1（删 _CHAT_SESSIONS）、#5（SessionSyncManager 接入）、#6（ConversationContext.restore_from）都依赖统一的 SessionRepository seam</li>
+      <li><strong>Deletion test 通过</strong>：删除 SessionRepository 抽象后，complexity 重新出现在 5 个调用方（console / chat.py / sync / agent / chat_pipeline），证明它在 earning its keep</li>
+      <li><strong>Two adapters = real seam</strong>：我们有 5 个 adapter 事实满足同一接口，是强信号</li>
+      <li><strong>The interface is the test surface</strong>：定义 ABC 后，所有存储层可 mock 测试，消除当前"必须真实文件系统"的测试摩擦</li>
+    </ol>
+    <p class="text-slate-700 mb-4">落地顺序建议：</p>
+    <div class="mermaid">
+graph LR
+    A["#3 SessionRepository ABC"] --> B["#6 ConversationContext"]
+    A --> C["#1 删 _CHAT_SESSIONS"]
+    A --> D["#5 SessionSyncManager 接入"]
+    C --> E["#4 SQLite adapter 或删表"]
+    D --> F["#7 删/补 /v1/chat/sessions"]
+    B --> G["#2 Pinia store + useChat"]
+    style A fill:#16a34a,color:white
+    style B fill:#16a34a,color:white
+    </div>
+    <p class="text-sm text-slate-500 mt-4">绿色 = Strong 候选；其余依赖 #3 落地后逐步推进。</p>
+  </section>
+
+  <footer class="text-center text-slate-500 text-sm py-8">
+    <p>报告生成于 2026-06-28 · 方法论：improve-codebase-architecture skill</p>
+    <p class="mt-2">此报告未进 repo，仅存于 OS temp 目录。选定候选后进入 grilling loop 敲定接口细节。</p>
+  </footer>
+
+</div>
+
+<script>
+mermaid.initialize({ startOnLoad: true, theme: "default", securityLevel: "loose" });
+</script>
+</body>
+</html>

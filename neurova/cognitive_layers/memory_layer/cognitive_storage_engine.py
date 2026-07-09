@@ -87,6 +87,63 @@ class UnifiedMemoryNode:
         d["updated_at"] = self.updated_at.isoformat()
         return d
 
+    def to_memory(self):
+        """转换为 models.Memory（领域模型）
+
+        Tier 4A.5：量纲映射
+        - temperature: 0-100 量纲一致（无需转换）
+        - memory_type: CSE.MemoryType → models.MemoryType（同名枚举值映射）
+        - importance: UnifiedMemoryNode 无此字段 → 默认 50.0
+        """
+        from neurova.cognitive_layers.memory_layer.models import (
+            Memory,
+            MemoryType as ModelMemoryType,
+        )
+
+        # CSE.MemoryType 与 models.MemoryType 同名同值，按 value 映射
+        def _map_memory_type(cse_val):
+            if isinstance(cse_val, ModelMemoryType):
+                return cse_val
+            try:
+                return ModelMemoryType(cse_val.value if hasattr(cse_val, "value") else cse_val)
+            except (ValueError, KeyError):
+                return ModelMemoryType.SEMANTIC
+
+        return Memory(
+            id=self.id,
+            content=self.content,
+            memory_type=_map_memory_type(self.memory_type),
+            temperature=self.temperature,  # 0-100 量纲一致
+            metadata=dict(self.metadata) if self.metadata else {},
+            access_count=self.access_count,
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+        )
+
+    @classmethod
+    def from_memory(cls, mem) -> "UnifiedMemoryNode":
+        """从 models.Memory 构造（量纲一致，无 importance 字段）
+
+        Tier 4A.5：temperature 0-100 量纲一致，importance 字段丢弃（UnifiedMemoryNode 无此字段）
+        """
+        # models.MemoryType → CSE.MemoryType
+        def _map_memory_type(model_val):
+            try:
+                return MemoryType(model_val.value if hasattr(model_val, "value") else model_val)
+            except (ValueError, KeyError):
+                return MemoryType.SEMANTIC
+
+        return cls(
+            id=mem.id,
+            content=mem.content,
+            memory_type=_map_memory_type(mem.memory_type),
+            temperature=mem.temperature,  # 0-100 量纲一致
+            metadata=dict(mem.metadata) if mem.metadata else {},
+            access_count=mem.access_count,
+            created_at=mem.created_at,
+            updated_at=mem.updated_at,
+        )
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "UnifiedMemoryNode":
         """从字典反序列化"""
@@ -145,6 +202,13 @@ _CREATE_FTS_TRIGGER_SQL = [
     """
     CREATE TRIGGER IF NOT EXISTS cse_ad AFTER DELETE ON memories BEGIN
         DELETE FROM memories_fts WHERE rowid = old.rowid;
+    END
+    """,
+    # Bug 2 修复: UPDATE content 时同步 FTS 索引（delete-then-insert 标准模式）
+    """
+    CREATE TRIGGER IF NOT EXISTS cse_au AFTER UPDATE ON memories BEGIN
+        DELETE FROM memories_fts WHERE rowid = old.rowid;
+        INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);
     END
     """,
 ]

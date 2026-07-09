@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from neurova.api.endpoints import get_agent_instance
+from neurova.session_repository import get_session_repository
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -69,35 +70,6 @@ class ConnectionManager:
 _manager = ConnectionManager()
 _CONSOLE_UPLOAD_DIR = Path(config.get("NEUROVA_CONSOLE_UPLOADS", "uploads/console"))
 _CONSOLE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-_CHAT_SESSIONS: typing.Dict[str, dict] = {}
-_SESSIONS_FILE = Path("data/console_sessions.json")
-_SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-
-def _load_sessions_from_disk():
-    """从磁盘加载会话"""
-    if _SESSIONS_FILE.exists():
-        try:
-            with open(_SESSIONS_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                _CHAT_SESSIONS.update(data)
-                logger.info("Loaded %d sessions from disk", len(data))
-        except Exception as e:
-            logger.warning("Failed to load sessions: %s", e)
-
-
-def _save_sessions_to_disk():
-    """将会话持久化到磁盘"""
-    try:
-        with open(_SESSIONS_FILE, "w", encoding="utf-8") as f:
-            json.dump(_CHAT_SESSIONS, f, ensure_ascii=False, indent=2, default=str)
-    except Exception as e:
-        logger.warning("Failed to save sessions: %s", e)
-
-
-# 启动时加载
-_load_sessions_from_disk()
 
 
 def _safe_filename(filename: str) -> str:
@@ -140,19 +112,29 @@ class CommandRequest(BaseModel):
 async def post_console_chat(body: ChatRequest, request: Request):
     """流式聊天接口（SSE）"""
     user_id = _get_user_id(request)
-    session_id = body.session_id or str(uuid.uuid4())
-    session = _CHAT_SESSIONS.setdefault(
-        session_id,
-        {"id": session_id, "user_id": user_id, "agent_id": getattr(body, "agent_id", "") or "", "messages": [], "created_at": datetime.datetime.utcnow().isoformat()},
+    repo = get_session_repository()
+    agent_id = getattr(body, "agent_id", "") or ""
+
+    # 会话 ID：客户端传入或新建
+    if body.session_id:
+        session_id = body.session_id
+    else:
+        session_id = repo.create_session(agent_id=agent_id, user_id=user_id, title="新对话")
+
+    # 追加用户消息到历史
+    repo.save_message(
+        agent_id=agent_id,
+        session_id=session_id,
+        role="user",
+        content=body.message,
+        metadata={"timestamp": datetime.datetime.utcnow().isoformat()},
     )
 
-    # 只保留最近一轮对话（避免旧消息泄漏到新请求）
-    session["messages"] = [
-        {"role": "user", "content": body.message, "timestamp": datetime.datetime.utcnow().isoformat()}
-    ]
-
-    # 不传递历史给 agent，每次请求独立
-    history_for_agent = []
+    # Bug B-2 修复:不强制传空历史给 agent。
+    # 原代码 history_for_agent = [] 导致 LLM 缺对话上下文,
+    # 工具参数因指代不清而错误(如"搜一下他"不知道"他"是谁)。
+    # 现在不传 history metadata,让 agent.chat() 自己从 session 恢复历史。
+    # 历史已通过 repo.save_message 持久化,前端展示不受影响。
 
     # Try to get agent for real response
     reply = ""
@@ -161,7 +143,7 @@ async def post_console_chat(body: ChatRequest, request: Request):
     try:
         agent = get_agent_instance(agent_id=body.agent_id or "default")
         if agent:
-            response = await agent.chat(body.message, session_id=session_id, metadata={"history": history_for_agent})
+            response = await agent.chat(body.message, session_id=session_id)
             if isinstance(response, dict):
                 reply = response.get("text", str(response))
                 reasoning = response.get("reasoning")
@@ -174,13 +156,19 @@ async def post_console_chat(body: ChatRequest, request: Request):
         logger.warning("Console chat error: %s", e, exc_info=True)
         reply = f"Error: {str(e)}"
 
-    assistant_msg = {"role": "assistant", "content": reply, "timestamp": datetime.datetime.utcnow().isoformat()}
+    # 追加 assistant 消息到历史
+    assistant_metadata = {"timestamp": datetime.datetime.utcnow().isoformat()}
     if reasoning:
-        assistant_msg["reasoning"] = reasoning
+        assistant_metadata["reasoning"] = reasoning
     if tool_messages:
-        assistant_msg["tool_messages"] = tool_messages
-    session["messages"].append(assistant_msg)
-    _save_sessions_to_disk()
+        assistant_metadata["tool_messages"] = tool_messages
+    repo.save_message(
+        agent_id=agent_id,
+        session_id=session_id,
+        role="assistant",
+        content=reply,
+        metadata=assistant_metadata,
+    )
 
     if body.stream:
 
@@ -223,25 +211,26 @@ async def post_console_chat_stop(session_id: str):
 @router.get("/chat/history")
 async def get_chat_history(session_id: str, request: Request):
     """获取聊天历史"""
-    session = _CHAT_SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return {"code": 0, "message": "success", "data": {"messages": session["messages"], "session_id": session_id}}
+    repo = get_session_repository()
+    # history 端点没有 agent_id 参数，用空字符串查询（SessionManager 支持）
+    messages = repo.get_history(agent_id="", session_id=session_id)
+    if not messages:
+        # 尝试扫描所有 agent 目录（session_id 唯一）
+        sessions = repo.list_sessions()
+        matched = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
+        if not matched:
+            raise HTTPException(status_code=404, detail="Session not found")
+        agent_id = matched[0].get("agent_id", "")
+        messages = repo.get_history(agent_id=agent_id, session_id=session_id)
+    return {"code": 0, "message": "success", "data": {"messages": messages, "session_id": session_id}}
 
 
 @router.post("/chat/new")
 async def post_console_chat_new(request: Request):
     """创建新会话"""
     user_id = _get_user_id(request)
-    session_id = str(uuid.uuid4())
-    _CHAT_SESSIONS[session_id] = {
-        "id": session_id,
-        "user_id": user_id,
-        "agent_id": "",
-        "messages": [],
-        "created_at": datetime.datetime.utcnow().isoformat(),
-    }
-    _save_sessions_to_disk()
+    repo = get_session_repository()
+    session_id = repo.create_session(agent_id="", user_id=user_id, title="新对话")
     return {"code": 0, "message": "Session created", "data": {"session_id": session_id}}
 
 
@@ -249,12 +238,18 @@ async def post_console_chat_new(request: Request):
 async def get_chat_sessions(request: Request, agent_id: str = Query(default="")):
     """列出所有会话（按 agent_id 过滤）"""
     user_id = _get_user_id(request)
-    sessions = [s for s in _CHAT_SESSIONS.values() if s.get("user_id") == user_id]
-    if agent_id:
-        sessions = [s for s in sessions if s.get("agent_id") == agent_id]
-    sessions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    repo = get_session_repository()
+    sessions = repo.list_sessions(agent_id=agent_id, user_id=user_id)
     # 只返回摘要信息，不返回完整消息列表
-    summaries = [{"id": s["id"], "title": s.get("title", "新对话"), "agent_id": s.get("agent_id", ""), "created_at": s.get("created_at", "")} for s in sessions]
+    summaries = [
+        {
+            "id": s.get("session_id") or s.get("id", ""),
+            "title": s.get("title", "新对话"),
+            "agent_id": s.get("agent_id", ""),
+            "created_at": s.get("created_at", ""),
+        }
+        for s in sessions
+    ]
     return {"code": 0, "message": "success", "data": {"sessions": summaries, "total": len(summaries)}}
 
 
@@ -262,14 +257,39 @@ async def get_chat_sessions(request: Request, agent_id: str = Query(default=""))
 async def delete_chat_session(session_id: str, request: Request):
     """删除指定会话"""
     user_id = _get_user_id(request)
-    session = _CHAT_SESSIONS.get(session_id)
-    if not session:
+    repo = get_session_repository()
+    # 查找 session 验证 user_id（SessionRepository 不接受 user_id 参数）
+    sessions = repo.list_sessions()
+    target = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
+    if not target:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.get("user_id") != user_id:
+    if target[0].get("user_id") != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    del _CHAT_SESSIONS[session_id]
-    _save_sessions_to_disk()
+    agent_id = target[0].get("agent_id", "")
+    repo.delete_session(agent_id=agent_id, session_id=session_id)
     return {"code": 0, "message": "Session deleted"}
+
+
+class RenameSessionRequest(BaseModel):
+    title: str
+
+
+@router.put("/chat/sessions/{session_id}")
+async def rename_chat_session(session_id: str, body: RenameSessionRequest, request: Request):
+    """重命名指定会话"""
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    # 查找 session 验证 user_id
+    sessions = repo.list_sessions()
+    target = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
+    if not target:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if target[0].get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    agent_id = target[0].get("agent_id", "")
+    new_title = body.title.strip() or target[0].get("title", "新对话")
+    repo.rename_session(agent_id=agent_id, session_id=session_id, title=new_title)
+    return {"code": 0, "message": "Session renamed", "data": {"id": session_id, "title": new_title}}
 
 
 # ── File endpoints ─────────────────────────────────────
@@ -419,10 +439,12 @@ async def websocket_console(websocket: WebSocket, client_id: str):
                 ws_session_id = data.get("session_id") or str(uuid.uuid4())
                 try:
                     agent = get_agent_instance()
+                    # Bug V2-4 修复:不强制传 metadata={"history": []}。
+                    # 原代码强制空历史,LLM 缺对话上下文,工具参数指代不清。
+                    # 现在不传 metadata,让 agent.chat() 自行从 session 恢复历史。
                     reply = await agent.chat(
                         message,
                         session_id=ws_session_id,
-                        metadata={"history": []},
                     ) if agent else f"Echo: {message}"
                 except Exception:
                     reply = f"Echo: {message}"

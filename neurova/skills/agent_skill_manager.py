@@ -4,6 +4,8 @@ Agent 技能管理器
 为 Agent 提供任务拆解、技能需求分析和主动获取能力。
 """
 
+from pathlib import Path
+
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
@@ -40,23 +42,58 @@ class AgentSkillManager:
         self.skill_registry = skill_registry
         self.auto_acquire = auto_acquire
 
-        # 初始化子模块（占位符实现）
-        try:
-            from neurova.skills.market_importer import SkillMarketImporter
-            from neurova.skills.market_searcher import SkillMarketSearcher
-            from neurova.skills.skill_need_analyzer import SkillNeedAnalyzer
-            from neurova.skills.task_decomposer import TaskDecomposer
+        # P0-B1 修复：每个子模块独立初始化，避免单个失败导致整体崩溃
+        # 之前：一个 ImportError 会让 decomposer/searcher/importer/analyzer 全部变 None
+        self.decomposer = self._init_decomposer()
+        self.searcher = self._init_searcher()
+        self.importer = self._init_importer()
+        self.analyzer = self._init_analyzer()
 
-            self.decomposer = TaskDecomposer()
-            self.searcher = SkillMarketSearcher()
-            self.importer = SkillMarketImporter()
-            self.analyzer = SkillNeedAnalyzer(skill_registry=skill_registry)
-        except ImportError as e:
-            logger.warning("Could not initialize skill modules: %s", e)
-            self.decomposer = None
-            self.searcher = None
-            self.importer = None
-            self.analyzer = None
+    def _init_decomposer(self):
+        """独立初始化 TaskDecomposer"""
+        try:
+            from neurova.skills.task_decomposer import TaskDecomposer
+            return TaskDecomposer()
+        except Exception as e:
+            logger.warning("Could not initialize TaskDecomposer: %s", e)
+            return None
+
+    def _init_searcher(self):
+        """独立初始化 SkillMarketSearcher"""
+        try:
+            from neurova.skills.market_searcher import SkillMarketSearcher
+            return SkillMarketSearcher()
+        except Exception as e:
+            logger.warning("Could not initialize SkillMarketSearcher: %s", e)
+            return None
+
+    def _init_importer(self):
+        """独立初始化 MarketImporter
+
+        P0-B1 修复：原代码 import SkillMarketImporter（类名错误，实际是 MarketImporter）
+        导致 ImportError，进而让整个 try 块的所有模块都变 None。
+        """
+        try:
+            from neurova.skills.market_importer import MarketImporter
+            # MarketImporter 需要 skills_dir 参数；使用默认目录
+            return MarketImporter(skills_dir=Path(".agents/skills"))
+        except Exception as e:
+            logger.warning("Could not initialize MarketImporter: %s", e)
+            return None
+
+    def _init_analyzer(self):
+        """独立初始化 SkillNeedAnalyzer
+
+        P0-B1 修复：原代码 SkillNeedAnalyzer(skill_registry=skill_registry) 抛 TypeError
+        （SkillNeedAnalyzer.__init__ 只接受 config，不接受 skill_registry）
+        """
+        try:
+            from neurova.skills.skill_need_analyzer import SkillNeedAnalyzer
+            # SkillNeedAnalyzer 只接受 config 参数（不含 skill_registry）
+            return SkillNeedAnalyzer()
+        except Exception as e:
+            logger.warning("Could not initialize SkillNeedAnalyzer: %s", e)
+            return None
 
     async def analyze_task(
         self,
@@ -82,12 +119,33 @@ class AgentSkillManager:
                 "skills_needed": [],
             }
 
-        # 分析技能需求
-        analysis = await self.analyzer.analyze_and_acquire(
-            task=task,
-            context=context,
-            auto_acquire=self.auto_acquire,
-        )
+        # P0-B2 修复：SkillNeedAnalyzer.analyze_and_acquire 是同步函数
+        # 原签名：def analyze_and_acquire(self, request: str) -> List[SkillAcquisitionResult]
+        # 适配为 AgentSkillManager 期望的 dict 格式
+        try:
+            acquisition_results = self.analyzer.analyze_and_acquire(request=task)
+            skills_needed = [
+                {
+                    "skill_name": r.skill_name,
+                    "success": r.success,
+                    "source": r.source,
+                    "version": r.version,
+                    "error": r.error,
+                }
+                for r in acquisition_results
+            ]
+            analysis = {
+                "success": any(r.success for r in acquisition_results) if acquisition_results else True,
+                "skills_needed": skills_needed,
+                "auto_acquire": self.auto_acquire,
+            }
+        except Exception as e:
+            logger.error("analyze_and_acquire failed: %s", e, exc_info=True)
+            analysis = {
+                "success": False,
+                "error": str(e),
+                "skills_needed": [],
+            }
 
         logger.info("Task analysis completed, found %s skills needed", len(analysis.get('skills_needed', [])))
         return analysis
@@ -112,10 +170,13 @@ class AgentSkillManager:
         if not self.analyzer:
             return []
 
-        suggestions = await self.analyzer.suggest_skills(
-            task=task,
-            context=context,
-        )
+        # P0-B2 修复：SkillNeedAnalyzer.suggest_skills 是同步函数
+        # 原签名：def suggest_skills(self, request: str, max_suggestions: int = 5) -> List[Dict[str, Any]]
+        try:
+            suggestions = self.analyzer.suggest_skills(request=task)
+        except Exception as e:
+            logger.error("suggest_skills failed: %s", e, exc_info=True)
+            suggestions = []
 
         logger.info("Suggested %s skills", len(suggestions))
         return suggestions

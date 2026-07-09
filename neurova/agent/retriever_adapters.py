@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import time
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List
 
@@ -39,7 +40,7 @@ class UnifiedRetrieverAdapter:
         """执行检索"""
         from neurova.agent.memory_retrieval_chain import RetrievalResult
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.monotonic()
 
         try:
             # 调用 UnifiedRetriever
@@ -48,7 +49,7 @@ class UnifiedRetrieverAdapter:
                 limit=context.limit,
             )
 
-            elapsed = asyncio.get_event_loop().time() - start_time
+            elapsed = time.monotonic() - start_time
 
             # 评估质量
             quality = self.get_quality_score(memories, context.query)
@@ -112,6 +113,11 @@ class UnifiedRetrieverAdapter:
 class MoERetrieverAdapter:
     """适配 MoEMemoryRouter"""
 
+    # BUG#7: 路由质量经验常量
+    # 经验来源:MoE 路由在专家激活权重稳定时,平均路由置信度约为 0.8
+    # (基于 gating_network.route 的 softmax 输出统计经验值)
+    DEFAULT_ROUTING_SCORE = 0.8
+
     def __init__(self, moe_router):
         """
         参数:
@@ -133,16 +139,17 @@ class MoERetrieverAdapter:
         """执行检索"""
         from neurova.agent.memory_retrieval_chain import RetrievalResult
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.monotonic()
 
         try:
             # 调用 MoEMemoryRouter
-            memories = self._router.retrieve(
+            # BUG#1: MoEMemoryRouter.retrieve 是 async,必须 await(否则返回 coroutine,len() 抛 TypeError)
+            memories = await self._router.retrieve(
                 query=context.query,
                 limit=context.limit,
             )
 
-            elapsed = asyncio.get_event_loop().time() - start_time
+            elapsed = time.monotonic() - start_time
 
             # 评估质量
             quality = self.get_quality_score(memories, context.query)
@@ -169,8 +176,8 @@ class MoERetrieverAdapter:
         # 基础分数：结果数量
         count_score = min(len(memories) / 5, 1.0)  # 5条结果为满分
 
-        # 路由分数：MoE 路由质量
-        routing_score = 0.8  # 默认路由质量
+        # 路由分数：MoE 路由质量(使用类常量,便于统一调参与回归)
+        routing_score = self.DEFAULT_ROUTING_SCORE
 
         # 综合分数
         quality = 0.7 * count_score + 0.3 * routing_score
@@ -203,6 +210,8 @@ class CacheRetrieverAdapter:
         self._cache = cache_manager
         self._name = "CacheRetriever"
         self._priority = 30  # 低优先级
+        # BUG#4: _simple_cache 必须在 __init__ 初始化,否则 getattr 永远返回临时 {}
+        self._simple_cache: Dict[str, List[Dict[str, Any]]] = {}
 
     @property
     def name(self) -> str:
@@ -216,25 +225,30 @@ class CacheRetrieverAdapter:
         """执行检索"""
         from neurova.agent.memory_retrieval_chain import RetrievalResult
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.monotonic()
 
         try:
             # 从缓存检索
             memories = []
+            # BUG#4: cache_key 始终基于 query 计算(无 cache_manager 时用作 _simple_cache 的键)
+            cache_key = context.query[:100].strip().lower()
 
             if self._cache:
                 # 使用缓存管理器
                 memories = self._cache.get(context.query, [])
             else:
-                # 简单内存缓存
-                cache_key = context.query[:100].strip().lower()
-                memories = getattr(self, "_simple_cache", {}).get(cache_key, [])
+                # 简单内存缓存(BUG#4: 直接用 self._simple_cache,不再用 getattr 死代码)
+                memories = self._simple_cache.get(cache_key, [])
 
-            elapsed = asyncio.get_event_loop().time() - start_time
+            elapsed = time.monotonic() - start_time
 
             # 评估质量
             quality = self.get_quality_score(memories, context.query)
             quality_level = self._quality_from_score(quality)
+
+            # BUG#4: retrieve 成功后写入 _simple_cache(无 cache_manager 时作为本地缓存)
+            if not self._cache:
+                self._simple_cache[cache_key] = memories
 
             return RetrievalResult(
                 memories=memories,
@@ -297,7 +311,7 @@ class FallbackRetrieverAdapter:
         """执行检索"""
         from neurova.agent.memory_retrieval_chain import RetrievalResult
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.monotonic()
 
         try:
             # 使用 MemoryAgent 的基础检索
@@ -306,7 +320,7 @@ class FallbackRetrieverAdapter:
                 limit=context.limit,
             )
 
-            elapsed = asyncio.get_event_loop().time() - start_time
+            elapsed = time.monotonic() - start_time
 
             # 评估质量
             quality = self.get_quality_score(memories, context.query)

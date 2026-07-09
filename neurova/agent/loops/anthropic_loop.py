@@ -86,12 +86,52 @@ class AnthropicLoop(BaseAgentLoop):
 
         OpenAI: [{"role": "user", "content": "Hello"}]
         Anthropic: [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}]
+
+        Bug A-3 修复 [HIGH]: 原代码不处理 "tool" role 和 assistant 的 tool_calls，
+        导致 Anthropic API 拒绝请求或行为未定义。
+
+        修复:
+        1. "tool" role → "user" role + tool_result content block
+           （Anthropic 要求 tool result 作为 user message 的 content block）
+        2. assistant 的 tool_calls → tool_use content block
+           （Anthropic 要求 tool use 作为 assistant message 的 content block）
+        3. 连续的 tool result 合并到同一个 user message
+           （Anthropic 要求 tool result 必须紧跟在 assistant tool_use 之后，
+            多个 tool result 应合并为一个 user message 的多个 content block）
         """
+        import json as _json
+
         anthropic_messages = []
 
         for msg in messages:
             role = msg["role"]
-            content = msg["content"]
+            content = msg.get("content")
+
+            # Bug A-3 修复 1: "tool" role → "user" role + tool_result block
+            if role == "tool":
+                tool_call_id = msg.get("tool_call_id", "")
+                tool_content = content if isinstance(content, str) else _json.dumps(content)
+                tool_result_block = {
+                    "type": "tool_result",
+                    "tool_use_id": tool_call_id,
+                    "content": tool_content,
+                }
+                # 合并到前一个 user message（如果它是 tool_result 容器）
+                if (
+                    anthropic_messages
+                    and anthropic_messages[-1]["role"] == "user"
+                    and isinstance(anthropic_messages[-1]["content"], list)
+                    and any(
+                        isinstance(c, dict) and c.get("type") == "tool_result"
+                        for c in anthropic_messages[-1]["content"]
+                    )
+                ):
+                    anthropic_messages[-1]["content"].append(tool_result_block)
+                else:
+                    anthropic_messages.append(
+                        {"role": "user", "content": [tool_result_block]}
+                    )
+                continue
 
             # 转换 role
             if role == "assistant":
@@ -104,11 +144,38 @@ class AnthropicLoop(BaseAgentLoop):
             else:
                 ant_role = role
 
-            # 转换 content
+            # Bug A-3 修复 2: assistant 的 tool_calls → tool_use block
+            ant_content = []
             if isinstance(content, str):
-                ant_content = [{"type": "text", "text": content}]
-            else:
+                if content:
+                    ant_content.append({"type": "text", "text": content})
+            elif isinstance(content, list):
                 ant_content = content  # 已经是正确格式
+            elif content is None:
+                pass  # assistant 只有 tool_calls 时 content 为 None
+
+            # 转换 tool_calls → tool_use block
+            tool_calls = msg.get("tool_calls")
+            if tool_calls and ant_role == "assistant":
+                for tc in tool_calls:
+                    func = tc.get("function", {})
+                    args_str = func.get("arguments", "{}")
+                    try:
+                        args_dict = _json.loads(args_str) if isinstance(args_str, str) else args_str
+                    except (_json.JSONDecodeError, TypeError):
+                        args_dict = {"raw": args_str}
+                    ant_content.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc.get("id", ""),
+                            "name": func.get("name", ""),
+                            "input": args_dict,
+                        }
+                    )
+
+            # 确保 content 不为空（Anthropic 要求 content 非空）
+            if not ant_content:
+                ant_content = [{"type": "text", "text": ""}]
 
             anthropic_messages.append({"role": ant_role, "content": ant_content})
 

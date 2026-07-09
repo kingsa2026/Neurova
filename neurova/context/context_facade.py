@@ -283,27 +283,56 @@ class ContextFacade:
         return context
 
 
-# 全局单例
-_facade_instance: Optional[ContextFacade] = None
+# 按 agent_id 缓存的单例（Bug C-4 修复：避免不同 Agent 共享同一 facade）
+# 旧代码用单一全局 _facade_instance，多 Agent 场景下第二个 Agent 拿到第一个的 facade
+# 修复：用 Dict 按 agent_id 区分，无 agent_id 时退化为全局单例（兼容旧调用）
+_facade_instances: Dict[str, ContextFacade] = {}
+_facade_default: Optional[ContextFacade] = None
 
 
 def get_context_facade(agent_ref=None) -> ContextFacade:
     """
     获取上下文门面单例
-    
+
+    Bug C-4 修复：按 agent_id 区分单例，避免多 Agent 污染
+
     Args:
         agent_ref: Agent实例引用
-        
+
     Returns:
         ContextFacade: 门面实例
     """
-    global _facade_instance
-    if _facade_instance is None and agent_ref is not None:
-        _facade_instance = ContextFacade(agent_ref)
-    return _facade_instance
+    global _facade_default
+
+    # 无 agent_ref：返回默认单例（兼容旧调用）
+    if agent_ref is None:
+        return _facade_default
+
+    # 提取 agent_id 作为缓存键
+    agent_id = None
+    try:
+        agent_id = getattr(getattr(agent_ref, "config", None), "agent_id", None)
+    except Exception:
+        pass
+
+    # 无 agent_id：退化为全局单例
+    if not agent_id:
+        if _facade_default is None:
+            _facade_default = ContextFacade(agent_ref)
+        return _facade_default
+
+    # 有 agent_id：按 id 缓存
+    if agent_id not in _facade_instances:
+        new_facade = ContextFacade(agent_ref)
+        _facade_instances[agent_id] = new_facade
+        # Bug C-4 回归修复：同步更新 _facade_default 作为最近创建的 facade
+        # 让无参调用 get_context_facade() 仍能返回最近一次创建的实例（兼容旧测试）
+        _facade_default = new_facade
+    return _facade_instances[agent_id]
 
 
 def reset_context_facade():
-    """重置门面单例（用于测试）"""
-    global _facade_instance
-    _facade_instance = None
+    """重置所有门面单例（用于测试）"""
+    global _facade_default
+    _facade_instances.clear()
+    _facade_default = None

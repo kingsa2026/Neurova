@@ -133,7 +133,13 @@ class NLToolSynthesizer:
     解析自然语言描述，推断工具需求，生成结构化工具定义。
     """
 
-    def __init__(self, min_confidence: float = 0.3, max_sequence_length: int = 5, enable_pattern_mining: bool = True):
+    def __init__(
+        self,
+        min_confidence: float = 0.3,
+        max_sequence_length: int = 5,
+        enable_pattern_mining: bool = True,
+        pattern_miner: typing.Any = None,
+    ):
         """
         初始化合成器
 
@@ -141,15 +147,20 @@ class NLToolSynthesizer:
             min_confidence: 最小置信度阈值
             max_sequence_length: 最大序列长度
             enable_pattern_mining: 是否启用模式挖掘
+            pattern_miner: 可选的 PatternMiner 实例（P0-B3 修复：
+                agent_core.py 传入 pattern_miner=a.pattern_miner 以集成进化子系统。
+                之前签名不接受此参数，导致 TypeError → tool_synthesizer 永远为 None）
         """
         self._min_confidence = min_confidence
         self._max_sequence_length = max_sequence_length
         self._enable_pattern_mining = enable_pattern_mining
+        # P0-B3: 保留 pattern_miner 引用供合成流程使用（可选）
+        self._pattern_miner = pattern_miner
 
         # 内置工具模式库
         self._tool_patterns = self._load_tool_patterns()
 
-        logger.info("NLToolSynthesizer initialized")
+        logger.info("NLToolSynthesizer initialized (pattern_miner=%s)", pattern_miner is not None)
 
     def _load_tool_patterns(self) -> typing.Dict[str, typing.Any]:
         """加载工具模式库"""
@@ -199,7 +210,12 @@ class NLToolSynthesizer:
         try:
             # 阶段1: 解析描述
             tool.stage = SynthesisStage.PARSING
-            self.parse_description(description)
+            # Bug N-10 修复: 原代码丢弃 parse_description 返回值，下游方法
+            # (detect_category/generate_schema/suggest_tool_sequence) 全部重新
+            # 从字符串解析，既浪费计算又丢失结构化信息。现将解析结果存入
+            # tool.metadata，使合成工具携带结构化解析信息供消费者使用。
+            parsed_description = self.parse_description(description)
+            tool.metadata["parsed_description"] = parsed_description
             result.stages_completed.append(SynthesisStage.PARSING)
 
             # 阶段2: 检测分类
@@ -288,11 +304,16 @@ class NLToolSynthesizer:
         verb_patterns = ["搜索", "查找", "查询", "读取", "写入", "处理", "分析", "生成", "获取", "创建"]
         noun_patterns = ["文件", "数据", "图片", "文本", "网页", "数据库", "接口", "任务", "用户"]
 
-        for word in words:
-            if word in verb_patterns:
-                verbs.append(word)
-            elif word in noun_patterns:
-                nouns.append(word)
+        # Bug N-10 修复: CJK 文本无空格分隔，re.findall 把整段中文当作一个 word，
+        # 导致 `word in verb_patterns` 永远不匹配（"搜索用户数据" != "搜索"）。
+        # 改为在原文中做子串匹配，与 detect_category 的 keyword 匹配方式一致。
+        desc_lower = description.lower()
+        for pattern in verb_patterns:
+            if pattern in desc_lower:
+                verbs.append(pattern)
+        for pattern in noun_patterns:
+            if pattern in desc_lower:
+                nouns.append(pattern)
 
         return {
             "original": description,
@@ -484,14 +505,19 @@ class NLToolSynthesizer:
 
         返回:
             str: 工具名称
+
+        Bug T-3 修复: OpenAI function calling 工具名规范为 ^[a-zA-Z0-9_-]{1,64}$，
+        不允许中文。原正则 [\\u4e00-\\u9fff] 匹配中文字符导致工具名含中文被 LLM 拒绝。
+        修复: 只提取 ASCII 单词，中文描述回退到 category（category 来自 CATEGORY_KEYWORDS 映射，恒为 ASCII）。
         """
-        # 提取关键名词
-        words = re.findall(r"[\w\u4e00-\u9fff]+", description.lower())
+        # 只提取 ASCII 单词（字母开头，含字母数字下划线），避免中文进入工具名
+        words = re.findall(r"[a-zA-Z][a-zA-Z0-9_]+", description.lower())
         nouns = [w for w in words if len(w) > 1][:3]
 
         if nouns:
             name_part = "_".join(nouns)
         else:
+            # 中文描述无 ASCII 词时回退到 category（恒为 ASCII，如 search/file/web）
             name_part = category
 
         return f"{name_part}_tool"

@@ -165,9 +165,10 @@ def _load_cors_origins_from_config() -> list:
     if config_file.exists():
         try:
             with open(config_file, "r", encoding="utf-8") as f:
-                config = _json.load(f)
-                if "origins" in config and config["origins"]:
-                    return config["origins"]
+                # 注意：变量名用 cors_config，避免遮蔽模块级 config
+                cors_config = _json.load(f)
+                if "origins" in cors_config and cors_config["origins"]:
+                    return cors_config["origins"]
         except Exception as e:
             logger.warning("Failed to load CORS config from file: %s", e)
 

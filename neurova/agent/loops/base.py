@@ -95,23 +95,30 @@ class BaseAgentLoop(ABC):
                     }
                 )
 
-                # 执行工具：优先 SkillRegistry → 失败则 fallback ToolRouter
+                # 执行工具：优先 SkillRegistry → 失败/异常则 fallback ToolRouter
                 exec_result = None
 
-                # 1. 尝试 SkillRegistry
+                # 1. 尝试 SkillRegistry（异常时 fallback 到 ToolRouter，不直接报错）
                 if self.agent.skill_registry:
-                    skill_result = await self.agent.skill_registry.execute_skill(_tc_function_name, _tc_arguments)
-                    # SkillRegistry 找不到该 skill 时返回 None；找到但执行失败返回 success=False
-                    if skill_result is not None and getattr(skill_result, "success", False):
-                        from types import SimpleNamespace
+                    try:
+                        skill_result = await self.agent.skill_registry.execute_skill(_tc_function_name, _tc_arguments)
+                        # SkillRegistry 找不到该 skill 时返回 None；找到但执行失败返回 success=False
+                        if skill_result is not None and getattr(skill_result, "success", False):
+                            from types import SimpleNamespace
 
-                        exec_result = SimpleNamespace(
-                            success=True,
-                            data=getattr(skill_result, "data", None),
-                            error=None,
-                            metadata={},
+                            exec_result = SimpleNamespace(
+                                success=True,
+                                data=getattr(skill_result, "data", None),
+                                error=None,
+                                metadata={},
+                            )
+                            logger.info("Tool executed via SkillRegistry: %s", _tc_function_name)
+                    except Exception as skill_err:
+                        # Bug B-4 修复: SkillRegistry 异常时 fallback 到 ToolRouter,不直接报错
+                        logger.warning(
+                            "SkillRegistry 执行 %s 抛异常,尝试 ToolRouter fallback: %s",
+                            _tc_function_name, skill_err,
                         )
-                        logger.info("Tool executed via SkillRegistry: %s", _tc_function_name)
 
                 # 2. Fallback: ToolRouter（内置工具 + MCP 工具）
                 if exec_result is None and hasattr(self.agent, "tool_router") and self.agent.tool_router:
@@ -150,6 +157,7 @@ class BaseAgentLoop(ABC):
                         {
                             "role": "tool",
                             "tool_call_id": _tc_id,
+                            "name": _tc_function_name,
                             "content": content,
                         }
                     )
@@ -174,6 +182,7 @@ class BaseAgentLoop(ABC):
                         {
                             "role": "tool",
                             "tool_call_id": _tc_id,
+                            "name": _tc_function_name,
                             "content": json.dumps({"error": err}),
                         }
                     )
@@ -193,6 +202,7 @@ class BaseAgentLoop(ABC):
                     {
                         "role": "tool",
                         "tool_call_id": _tc_id,
+                        "name": _tc_function_name,
                         "content": json.dumps({"error": str(e)}),
                     }
                 )
@@ -206,54 +216,5 @@ class BaseAgentLoop(ABC):
                     }
                 )
 
-                # 记录异常结果
-                if hasattr(self.agent, "_tool_messages_list"):
-                    self.agent._tool_messages_list.append(
-                        {
-                            "type": "tool_result",
-                            "tool_name": tool_call.get("function", {}).get("name", "unknown"),
-                            "result": f"Error: {str(e)}",
-                            "success": False,
-                            "timestamp": datetime.now().isoformat(),
-                        }
-                    )
-
         return new_messages
 
-    def _build_tools_from_skills(self) -> List[Dict]:
-        """
-        将 Agent 的 Skills 转换为 OpenAI Tool Schema
-
-        返回:
-            tools: OpenAI 兼容的 tool 列表
-        """
-        tools = []
-
-        if not self.agent.skill_registry:
-            return tools
-
-        # 尝试使用 OpenAI Schema Adapter (如果存在)
-        try:
-            from neurova.skill_system.compat import OpenAISchemaAdapter
-
-            use_adapter = True
-        except ImportError:
-            use_adapter = False
-
-        for skill_name, skill in self.agent.skill_registry.skills.items():
-            if use_adapter:
-                tool_schema = OpenAISchemaAdapter.skill_to_tool_schema(skill)
-            else:
-                # 简化版：仅转换基本信息
-                tool_schema = {
-                    "type": "function",
-                    "function": {
-                        "name": skill.name,
-                        "description": skill.description,
-                        "parameters": {"type": "object", "properties": {}, "required": []},
-                    },
-                }
-
-            tools.append(tool_schema)
-
-        return tools

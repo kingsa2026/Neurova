@@ -173,7 +173,11 @@ class RecursiveRatchetPruner:
         logger.info("Starting recursive pruning with %s candidates", len(candidates))
 
         for round_num in range(self.rounds):
-            if len(current_candidates) <= 1:
+            # P0-C1 修复：第一轮必须执行（以过滤违反硬约束/复杂度过高的无效候选）。
+            # 原代码无条件 early-exit，导致单候选输入绕过粗筛过滤，
+            # 违反硬约束或复杂度过高的候选被原样返回。
+            # 现仅在 round_num > 0 时启用 early-exit 优化。
+            if round_num > 0 and len(current_candidates) <= 1:
                 logger.info("Only %s candidate(s) remaining, stopping early", len(current_candidates))
                 break
 

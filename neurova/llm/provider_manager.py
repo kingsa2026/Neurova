@@ -1,10 +1,60 @@
 """
 LLM 服务商配置管理器
 
-职责:
+文件路径: `neurova/llm/provider_manager.py`
+
+职责
+====
 1. 管理多个服务商配置（API Key、Base URL、默认模型等）
-2. 支持配置持久化（JSON 文件）
+2. 支持配置持久化（JSON 文件,默认 `~/.neurova/config/providers.json`）
 3. 提供服务商选择和模型切换能力
+4. 健康检查、负载均衡、自动故障转移
+
+主要组件
+========
+- `LoadBalancingStrategy`: 负载均衡策略枚举(ROUND_ROBIN/WEIGHTED_RANDOM/PRIORITY_FIRST/...)
+- `ProviderConfig`: 服务商配置 dataclass(id/name/provider/base_url/api_key/models/...)
+- `LLMProviderManager`: 服务商管理器主体类(继承 Module),管理 `_providers` 字典
+
+单例管理(线程安全)
+==================
+- `get_provider_manager(config_path=None) -> LLMProviderManager`
+    获取单例。使用模块级 `_provider_manager_lock`(threading.Lock)+ 双重检查锁定,
+    确保并发首次调用只创建一个实例。
+    参照 `neurova.llm.providers.secret_store.get_secret_store()` 的模式。
+- `reset_provider_manager() -> None`
+    清除模块级 `_provider_manager = None`,使下次 `get_provider_manager()` 重新创建实例。
+    在 `_provider_manager_lock` 保护下清除,避免与并发 `get_provider_manager()` 竞态。
+
+reset 链路(与 MultiModelLLMClient 协同)
+========================================
+`MultiModelLLMClient.reset()` 在清除自己状态后,会延迟导入并调用
+`reset_provider_manager()`,确保 reset 链路穿透到 provider_manager 层。
+
+场景:首次初始化时 api_key 解密失败(pycryptodome 缺失等),providers 缓存了空 api_key。
+配置修复后,需 `MultiModelLLMClient.reset()` → `reset_provider_manager()` →
+下次 `get_provider_manager()` 重新加载 providers,才能让 `_clients` 非空。
+
+线程安全
+========
+- `LLMProviderManager._config_lock`(threading.RLock):保护 `_providers` 字典的读写
+- `_provider_manager_lock`(threading.Lock):保护模块级 `_provider_manager` 单例的创建/清除
+
+调用点
+======
+- `neurova/llm/multi_model_client.py`: `__init__` 通过 `get_provider_manager()` 获取单例;
+  `reset()` 调用 `reset_provider_manager()` 穿透 reset 链路
+- `neurova/agent_core.py:757`: `_load_api_keys` 延迟导入获取 provider 配置
+- `neurova/shared_core/infrastructure.py:26,126`: InfrastructureManager 持有 provider_manager
+- `neurova/api/app.py:217,219,271`: 启动时初始化并存入 app_state
+- `neurova/api/deps.py:184` + `neurova/api/endpoints/__init__.py:57`:
+  FastAPI 依赖从 app_state 读取(同名 wrapper,不直接调本模块)
+
+测试
+====
+- `tests/unit/llm/test_provider_manager_reset.py`: reset 链路 + 线程安全测试
+- `tests/unit/llm/test_provider_manager.py`: 基础功能测试
+- `tests/unit/llm/test_multi_model_client_reinit.py`: MultiModelLLMClient reset 测试
 """
 
 import json
@@ -204,7 +254,13 @@ class ProviderConfig:
                 data["api_key"] = decrypt_api_key(data["encrypted_api_key"])
                 logger.info("Decrypted API key for provider %s", data.get('name', 'unknown'))
             except Exception as e:
-                logger.warning("Failed to decrypt API key: %s", e)
+                # 使用 ERROR 级别(原为 WARNING):解密失败意味着 LLM 链路会瘫痪,
+                # WARNING 在生产日志中容易被忽略,导致"Loaded N providers"误导性成功
+                logger.error(
+                    "Failed to decrypt API key for provider %s: %s",
+                    data.get("name", "unknown"),
+                    e,
+                )
         # 移除不需要的字段
         data.pop("encrypted_api_key", None)
         return cls(**data)
@@ -216,8 +272,6 @@ class LLMProviderManager(Module):
     MODULE_ID = "llm_provider_manager"
     MODULE_NAME = "LLM Provider Manager"
     MODULE_VERSION = "1.0.0"
-    _instance = None
-    _lock = threading.Lock()
 
     def __init__(self, config=None, event_bus=None):
         super().__init__(config=config, event_bus=event_bus)
@@ -870,14 +924,48 @@ class LLMProviderManager(Module):
 
 
 _provider_manager: Optional[LLMProviderManager] = None
+_provider_manager_lock = threading.Lock()
 
 
 def get_provider_manager(config_path: Optional[str] = None) -> LLMProviderManager:
-    """获取 LLMProviderManager 单例"""
+    """获取 LLMProviderManager 单例(线程安全,双重检查锁定)
+
+    实现:参照 `neurova.llm.providers.secret_store.get_secret_store()` 的模式,
+    使用模块级 `_provider_manager_lock` + 双重检查锁定,确保并发首次调用
+    只创建一个实例。
+
+    参数:
+        config_path: 可选的配置文件路径(仅在首次创建实例时生效)
+
+    返回:
+        LLMProviderManager 单例
+    """
     global _provider_manager
+    # 第一次检查(无锁,快速路径)
     if _provider_manager is None:
-        _provider_manager = LLMProviderManager(config={"config_path": config_path})
+        with _provider_manager_lock:
+            # 第二次检查(持锁,防止并发重复创建)
+            if _provider_manager is None:
+                _provider_manager = LLMProviderManager(config={"config_path": config_path})
     return _provider_manager
+
+
+def reset_provider_manager() -> None:
+    """重置 LLMProviderManager 单例(线程安全)
+
+    清除模块级 `_provider_manager`,使下次 `get_provider_manager()` 重新创建实例。
+    用于与 `MultiModelLLMClient.reset()` 协同,确保 reset 链路穿透到 provider_manager 层。
+
+    场景:
+    - 首次初始化时 api_key 解密失败(pycryptodome 缺失等),providers 缓存了空 api_key
+    - 配置修复后,需 reset 才能让下次 get_provider_manager() 重新加载 providers
+
+    线程安全:
+    - 在 `_provider_manager_lock` 保护下清除,避免与并发 get_provider_manager() 竞态
+    """
+    global _provider_manager
+    with _provider_manager_lock:
+        _provider_manager = None
 
 
 __all__ = [
@@ -885,4 +973,5 @@ __all__ = [
     "ProviderConfig",
     "LLMProviderManager",
     "get_provider_manager",
+    "reset_provider_manager",
 ]

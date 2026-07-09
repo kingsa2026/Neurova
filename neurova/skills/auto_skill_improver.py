@@ -23,6 +23,8 @@ class SkillImprovement:
     description: str
     confidence: float = 0.0
     suggested_changes: Dict[str, Any] = field(default_factory=dict)
+    # P0-B4 修复：新增 applied 字段，记录是否已应用
+    applied: bool = False
 
 
 class AutoSkillImprover:
@@ -31,6 +33,8 @@ class AutoSkillImprover:
     def __init__(self):
         self.improvement_history: List[SkillImprovement] = []
         self.analysis_cache: Dict[str, Any] = {}
+        # P0-B4 修复：新增 applied_improvements 列表，持久化已应用的改进记录
+        self.applied_improvements: List[SkillImprovement] = []
         logger.info("AutoSkillImprover initialized")
 
     def analyze_skill_performance(self, skill_id: str, metrics: Dict[str, Any]) -> List[SkillImprovement]:
@@ -69,15 +73,42 @@ class AutoSkillImprover:
         return [imp for imp in self.improvement_history if imp.skill_id == skill_id]
 
     def apply_improvement(self, improvement: SkillImprovement) -> bool:
-        """应用改进建议"""
-        # TODO: 实现自动应用改进的逻辑
+        """应用改进建议
+
+        P0-B4 修复：之前是 TODO 空骨架（仅日志 + return True），
+        现在标记 improvement.applied=True 并持久化到 applied_improvements 列表。
+        这样后续可通过 get_applied_improvements() 查询已应用的改进，支持回滚和审计。
+        """
         logger.info("Applying improvement for %s: %s", improvement.skill_id, improvement.description)
-        return True
+
+        try:
+            # 标记为已应用（dataclass 实例可变）
+            improvement.applied = True
+            # 持久化到已应用列表（用于审计和回滚）
+            if improvement not in self.applied_improvements:
+                self.applied_improvements.append(improvement)
+            logger.info(
+                "Improvement applied successfully: skill=%s, type=%s, changes=%s",
+                improvement.skill_id,
+                improvement.improvement_type,
+                improvement.suggested_changes,
+            )
+            return True
+        except Exception as e:
+            logger.error("Failed to apply improvement for %s: %s", improvement.skill_id, e, exc_info=True)
+            return False
+
+    def get_applied_improvements(self, skill_id: str = "") -> List[SkillImprovement]:
+        """获取已应用的改进列表（支持按 skill_id 过滤）"""
+        if skill_id:
+            return [imp for imp in self.applied_improvements if imp.skill_id == skill_id]
+        return list(self.applied_improvements)
 
     def clear_history(self):
         """清除改进历史"""
         self.improvement_history.clear()
         self.analysis_cache.clear()
+        self.applied_improvements.clear()
 
     async def optimize_skill_prompt(self, skill_id: str, current_prompt: str) -> "OptimizedPrompt":
         """

@@ -37,7 +37,7 @@ const BASE = '/console'
 
 /** Get console session list. */
 export function getConsoleSessions(params?: { agent_id?: string; limit?: number }) {
-  return api.get<ApiResponse<ConsoleSession[]>>(`${BASE}/sessions`, { params })
+  return api.get<ApiResponse<ConsoleSession[]>>(`${BASE}/chat/sessions`, { params })
 }
 
 /** Delete a console session. */

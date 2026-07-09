@@ -290,9 +290,60 @@ class Memory:
         self.updated_at = self.last_accessed_at
 
     def decay(self, hours: float = 1.0, rate: float = 1.0):
-        """温度衰减"""
-        self.temperature = max(0.0, self.temperature - rate * hours)
-        self.updated_at = datetime.now(timezone.utc)
+        """温度衰减 — 委托 TemperatureEngine.on_decay 贝叶斯遗忘曲线
+
+        Bug M-5 修复：原实现 temp -= rate * hours 是线性衰减，完全绕过
+        TemperatureEngine.on_decay 的贝叶斯曲线（curve_factor/emotion_protect/
+        saturation/importance_weight/important_protection）。现委托引擎计算，
+        与 MemoryManager.run_decay_cycle 保持一致的语义。
+
+        贝叶斯特性：
+          - 固化记忆（CRYSTALLIZED）不衰减
+          - 高温记忆（>=80）不衰减
+          - 今天访问过的记忆（days_idle < 1.0）不衰减
+
+        Args:
+            hours: 保留参数（贝叶斯曲线用 days_idle，不直接使用 hours）
+            rate:  保留参数（贝叶斯曲线通过 curve_factor 等因子调整，不直接使用 rate）
+        """
+        # 延迟导入避免循环依赖（与 manager.run_decay_cycle 一致）
+        from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
+
+        now = datetime.now(timezone.utc)
+
+        # 计算 days_idle（贝叶斯曲线的核心输入）
+        last_accessed = self.last_accessed_at or self.created_at
+        if last_accessed.tzinfo is None:
+            last_accessed = last_accessed.replace(tzinfo=timezone.utc)
+        days_idle = max(0.0, (now - last_accessed).total_seconds() / 86400.0)
+
+        # 情感分数（EmotionType → 0.0-1.0，与 manager 一致）
+        emotion_score = 0.0 if self.emotion == EmotionType.NEUTRAL else 0.5
+
+        # 归一化 importance（0-100 → 0.0-1.0）
+        importance_norm = max(0.0, min(1.0, float(self.importance) / 100.0))
+
+        # 固化 / 重要检测（与 manager 一致）
+        is_crystallized = self.lifecycle_stage == LifecycleStage.CRYSTALLIZED
+        # BUG-4 修复: 原表达式 `A or B if C else D` 在空 metadata 时高重要性记忆保护失效
+        is_important = importance_norm >= 0.8 or bool(
+            (self.metadata or {}).get("is_important", False)
+        )
+
+        # 委托贝叶斯曲线
+        # BUG-3 修复: on_decay 现为实例方法, 显式通过 _get_default() 获取默认实例
+        result = TemperatureEngine._get_default().on_decay(
+            current_temp=self.temperature,
+            days_idle=days_idle,
+            importance=importance_norm,
+            emotion_score=emotion_score,
+            recall_count=self.access_count,
+            relation_count=0,
+            is_important=is_important,
+            is_crystallized=is_crystallized,
+        )
+        self.temperature = result["new_temp"]
+        self.updated_at = now
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -302,7 +353,7 @@ class Memory:
             "category": self.category.value,
             "lifecycle_stage": self.lifecycle_stage.value,
             "perspective": self.perspective.value,
-            "emotion": self.emotion.value if hasattr(self.emotion, "value") else str(self.emotion),
+            "emotion": self.emotion.value,
             "temperature": self.temperature,
             "importance": self.importance,
             "access_count": self.access_count,
@@ -318,7 +369,7 @@ class Memory:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Memory":
+    def from_dict(cls, data: Dict[str, Any], isolation_context: Optional["IsolationContext"] = None) -> "Memory":
         def _parse_enum(enum_cls, val, default):
             if isinstance(val, enum_cls):
                 return val
@@ -336,6 +387,20 @@ class Memory:
                 except ValueError:
                     return datetime.now(timezone.utc)
             return datetime.now(timezone.utc)
+
+        # Bug 2 修复: 若未传 isolation_context, 则从 agent_id/neuser_id/user_id 字段重建
+        if isolation_context is None:
+            agent_id = data.get("agent_id", "")
+            neuser_id = data.get("neuser_id", "")
+            user_id = data.get("user_id", "")
+            # 任一字段非空即视为有效, 构造 IsolationContext (延迟导入避免循环依赖)
+            if agent_id or neuser_id or user_id:
+                from neurova.cognitive_layers.memory_layer.isolation import IsolationContext
+                isolation_context = IsolationContext(
+                    agent_id=agent_id or "default",
+                    neuser_id=neuser_id or "default",
+                    user_id=user_id or "default",
+                )
 
         return cls(
             id=data.get("id", ""),
@@ -356,4 +421,5 @@ class Memory:
             share_group_ids=data.get("share_group_ids", []),
             created_at=_parse_dt(data.get("created_at")),
             updated_at=_parse_dt(data.get("updated_at")),
+            isolation_context=isolation_context,
         )

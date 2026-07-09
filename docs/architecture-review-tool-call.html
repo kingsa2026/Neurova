@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>架构深化报告 - 工具调用链路（2026-07-02）</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .badge-strong { background: #dc2626; color: white; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+  .badge-worth { background: #f59e0b; color: white; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+  .badge-spec { background: #6b7280; color: white; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+  .card { transition: transform 0.2s, box-shadow 0.2s; }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+  .diagram-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
+  .arrow { color: #6b7280; font-weight: bold; }
+  .deleted { text-decoration: line-through; color: #94a3b8; }
+  .new { color: #16a34a; font-weight: 600; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<div class="max-w-6xl mx-auto px-6 py-10">
+
+  <header class="mb-10">
+    <h1 class="text-3xl font-bold text-slate-900 mb-2">架构深化报告</h1>
+    <p class="text-slate-600">范围:Agent 工具调用链路 · 日期:2026-07-02 · 方法:improve-codebase-architecture skill</p>
+    <p class="text-sm text-slate-500 mt-2">基于 12 个已修复断点(V1+V2+V3)的根因分析,识别 4 个深化候选。词汇遵循 LANGUAGE.md:Module / Interface / Depth / Seam / Adapter / Leverage / Locality / Deletion test。</p>
+  </header>
+
+  <!-- 概览 -->
+  <section class="mb-12">
+    <h2 class="text-2xl font-semibold mb-4">模块地图(zoom-out 视角)</h2>
+    <div class="diagram-box">
+      <pre class="mermaid">
+graph LR
+  subgraph "API Seam"
+    A1[chat.py]
+    A2[console.py]
+  end
+  subgraph "Pipeline Module"
+    P1[ChatPipeline<br/>6-step]
+    P2[stream/non-stream<br/>branch]
+  end
+  subgraph "Loop Module"
+    L1[BaseAgentLoop<br/>handle_tool_calls]
+    L2[OpenAILoop<br/>predict_step]
+  end
+  subgraph "Tool Discovery Seam"
+    T1[ContextOrchestrator<br/>build_tools_for_llm]
+    T2[ToolRouter<br/>_discover_skill_tools<br/>_resolve_skill_tool]
+  end
+  subgraph "SkillRegistry 双实现 ❗"
+    S1[类A: skill_system.py<br/>register skill<br/>list_skills → List]
+    S2[类B: skills/registry.py<br/>register_skill manifest,path<br/>skills → Dict tuple]
+  end
+  A1 --> P1
+  A2 --> P1
+  P1 --> L2
+  L2 --> L1
+  L1 --> T2
+  P1 --> T1
+  T1 --> S1
+  T2 --> S2
+  T1 -.skills.items.-> S1
+  T2 -.skills.-> S2
+      </pre>
+    </div>
+    <p class="text-sm text-slate-600 mt-3">
+      <span class="font-semibold">架构债根源</span>:SkillRegistry 存在两个实现(类 A 和类 B),API 完全不兼容。
+      调用方(orchestrator / tool_router / chat_pipeline)混用两套 API,导致 12 个断点中至少 4 个(V2-1/V2-2/V2-5/V2-7)围绕此根因。
+    </p>
+  </section>
+
+  <!-- 候选 1 -->
+  <section class="card bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-xl font-semibold text-slate-900">候选 1 · 统一 SkillRegistry 双实现为 Protocol</h3>
+      <span class="badge-strong">Strong</span>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div>
+        <p class="text-sm font-semibold text-slate-700 mb-1">涉及文件</p>
+        <ul class="text-sm text-slate-600 list-disc list-inside">
+          <li><code>neurova/skill_system.py</code>(类 A)</li>
+          <li><code>neurova/skills/registry.py</code>(类 B)</li>
+          <li><code>neurova/context/orchestrator.py</code></li>
+          <li><code>neurova/tool_layers/tool_router.py</code></li>
+          <li><code>neurova/agent/chat_pipeline.py</code></li>
+        </ul>
+      </div>
+      <div>
+        <p class="text-sm font-semibold text-slate-700 mb-1">问题</p>
+        <p class="text-sm text-slate-600">类 A 用 <code>register(skill)</code> + <code>list_skills()</code>,类 B 用 <code>register_skill(manifest, path)</code> + <code>.skills</code> 返回元组。调用方各自猜测 API,三处静默失败(orchestrator / tool_router / chat_pipeline)。</p>
+      </div>
+    </div>
+    <p class="text-sm text-slate-700 mb-3"><span class="font-semibold">方案:</span>定义 <code>SkillRegistryProtocol</code>(typing.Protocol),显式声明 <code>skills: Dict[str, Skill]</code>、<code>register(skill)</code>、<code>register_skill(manifest, path=None)</code>、<code>list_skills()</code> 四个方法。两个实现都满足 Protocol,调用方依赖 Protocol 而非具体类。</p>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div class="diagram-box">
+        <p class="text-xs text-slate-500 mb-2">Before(双实现,API 混用)</p>
+        <pre class="text-xs">orchestrator -&gt; 类A.skills  ❌ AttributeError
+tool_router  -&gt; 类B.skills    ❌ 元组未解包
+chat_pipeline-&gt; 类B.register_skill ❌ AttributeError
+          (3 处静默失败)</pre>
+      </div>
+      <div class="diagram-box">
+        <p class="text-xs text-slate-500 mb-2">After(Protocol 统一 seam)</p>
+        <pre class="text-xs">orchestrator -&gt; Protocol.skills  ✅
+tool_router  -&gt; Protocol.skills  ✅
+chat_pipeline-&gt; Protocol.register_skill ✅
+          (Protocol 保证 API 一致)</pre>
+      </div>
+    </div>
+    <p class="text-sm text-slate-700"><span class="font-semibold">收益:</span><span class="new">Leverage↑</span> 调用方不再猜测 API;<span class="new">Locality↑</span> 元组解包逻辑收敛到 Protocol 实现内部;Deletion test 通过(删除 Protocol 后 complexity 重新散布到 N 个调用方)。</p>
+  </section>
+
+  <!-- 候选 2 -->
+  <section class="card bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-xl font-semibold text-slate-900">候选 2 · ToolRouter 提取 <code>_unpack_skill</code> helper</h3>
+      <span class="badge-worth">Worth exploring</span>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div>
+        <p class="text-sm font-semibold text-slate-700 mb-1">涉及文件</p>
+        <ul class="text-sm text-slate-600 list-disc list-inside">
+          <li><code>neurova/tool_layers/tool_router.py</code>(_discover_skill_tools, _resolve_skill_tool)</li>
+        </ul>
+      </div>
+      <div>
+        <p class="text-sm font-semibold text-slate-700 mb-1">问题</p>
+        <p class="text-sm text-slate-600">V2-2 和 V2-7 都在 <code>tool_router.py</code> 内重复实现"如果是元组/列表则取 [0]"的解包逻辑,分散在两个方法中。</p>
+      </div>
+    </div>
+    <p class="text-sm text-slate-700 mb-3"><span class="font-semibold">方案:</span>提取 <code>_unpack_skill(value) -&gt; Skill</code> 私有 helper,两处调用点共用。</p>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div class="diagram-box">
+        <p class="text-xs text-slate-500 mb-2">Before(逻辑分散)</p>
+        <pre class="text-xs"># _discover_skill_tools (L210)
+if isinstance(skill, (tuple, list)):
+    skill = skill[0]
+
+# _resolve_skill_tool (L420)
+if isinstance(skill, (tuple, list)):
+    skill = skill[0]
+<span class="deleted"># 重复逻辑,易漏改</span></pre>
+      </div>
+      <div class="diagram-box">
+        <p class="text-xs text-slate-500 mb-2">After(逻辑收敛)</p>
+        <pre class="text-xs">def _unpack_skill(self, value):
+    if isinstance(value, (tuple, list)):
+        return value[0]
+    return value
+
+# 两处调用统一为:
+skill = self._unpack_skill(skill)
+<span class="new"># 单点修改,Locality↑</span></pre>
+      </div>
+    </div>
+    <p class="text-sm text-slate-700"><span class="font-semibold">收益:</span><span class="new">Locality↑</span> 元组解包逻辑单点维护;<span class="new">Testability↑</span> helper 可独立单测;Deletion test 边缘(helper 删除后逻辑散回两处,但 complexity 不消失,因此是 weak pass)。</p>
+  </section>
+
+  <!-- 候选 3 -->
+  <section class="card bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-xl font-semibold text-slate-900">候选 3 · 静默 <code>except Exception</code> → <code>logger.exception</code></h3>
+      <span class="badge-worth">Worth exploring</span>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div>
+        <p class="text-sm font-semibold text-slate-700 mb-1">涉及文件</p>
+        <ul class="text-sm text-slate-600 list-disc list-inside">
+          <li><code>neurova/context/orchestrator.py:760</code></li>
+          <li><code>neurova/agent/loops/base.py:199</code></li>
+          <li><code>neurova/agent/chat_pipeline.py:571</code></li>
+        </ul>
+      </div>
+      <div>
+        <p class="text-sm font-semibold text-slate-700 mb-1">问题</p>
+        <p class="text-sm text-slate-600">三处关键路径用 <code>except Exception: pass</code> 或 <code>except Exception as e: continue</code> 吞掉异常。V2-1 的 AttributeError 就是被 orchestrator.py:760 静默吞掉,导致 Skill 工具永远不进 LLM tools 列表,且日志无任何痕迹。</p>
+      </div>
+    </div>
+    <p class="text-sm text-slate-700 mb-3"><span class="font-semibold">方案:</span>将 <code>except Exception</code> 替换为 <code>except Exception: logger.exception("...")</code>,保留控制流(不 re-raise),但确保异常进入日志。</p>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div class="diagram-box">
+        <p class="text-xs text-slate-500 mb-2">Before(静默吞异常)</p>
+        <pre class="text-xs">try:
+    tools = self.skill_registry.skills.items()
+except Exception:
+    pass  <span class="deleted"># 静默!无日志</span></pre>
+      </div>
+      <div class="diagram-box">
+        <p class="text-xs text-slate-500 mb-2">After(可观测)</p>
+        <pre class="text-xs">try:
+    tools = self.skill_registry.skills.items()
+except Exception:
+    logger.exception(
+        "Skill 工具加载失败"
+    )  <span class="new"># 控制流不变,但可观测</span></pre>
+      </div>
+    </div>
+    <p class="text-sm text-slate-700"><span class="font-semibold">收益:</span><span class="new">Observability↑</span> 未来类似 V2-1 的静默失败会立即在日志暴露;改动极小(每处 +1 行);Deletion test 通过(删除 logger.exception 后异常重新消失,debug 成本上升)。</p>
+    <p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-3">
+      <span class="font-semibold">推荐优先执行</span>:最小成本(6 行改动),最高收益(避免未来类似 bug 静默失败)。
+    </p>
+  </section>
+
+  <!-- 候选 4 -->
+  <section class="card bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-xl font-semibold text-slate-900">候选 4 · ChatPipeline 流式/非流式分支统一</h3>
+      <span class="badge-spec">Speculative</span>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div>
+        <p class="text-sm font-semibold text-slate-700 mb-1">涉及文件</p>
+        <ul class="text-sm text-slate-600 list-disc list-inside">
+          <li><code>neurova/agent/chat_pipeline.py:890</code>(stream 分支)</li>
+          <li><code>neurova/agent/loops/openai_loop.py</code>(predict_step)</li>
+        </ul>
+      </div>
+      <div>
+        <p class="text-sm font-semibold text-slate-700 mb-1">问题</p>
+        <p class="text-sm text-slate-600">V2-6 是 latent bug:<code>predict_step</code> 是 async def,流式分支调用时缺 <code>await</code> 返回 coroutine,非流式分支不触发。任何直接调用 <code>agent.chat(stream=True)</code> 的代码都会 TypeError。</p>
+      </div>
+    </div>
+    <p class="text-sm text-slate-700 mb-3"><span class="font-semibold">方案:</span>将 stream 决策下沉到 <code>predict_step</code> 内部,统一返回 <code>AsyncIterator</code>。ChatPipeline 不再分支,统一 <code>async for event in await self.loop.predict_step(...)</code>。</p>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div class="diagram-box">
+        <p class="text-xs text-slate-500 mb-2">Before(分支决策在 Pipeline)</p>
+        <pre class="text-xs">if stream:
+    gen = await self.loop.predict_step(stream=True)  <span class="new"># V2-6 修复后</span>
+else:
+    resp = await self.loop.predict_step(stream=False)
+    # 处理 resp...
+<span class="deleted"># 两套处理逻辑,latent bug 温床</span></pre>
+      </div>
+      <div class="diagram-box">
+        <p class="text-xs text-slate-500 mb-2">After(决策下沉到 Loop)</p>
+        <pre class="text-xs"># predict_step 统一返回 AsyncIterator
+async for event in await self.loop.predict_step(...):
+    handle(event)
+<span class="new"># 单套处理逻辑</span></pre>
+      </div>
+    </div>
+    <p class="text-sm text-slate-700"><span class="font-semibold">收益:</span><span class="new">Leverage↑</span> ChatPipeline 不再关心 stream 细节;<span class="new">Locality↑</span> stream 决策集中在 Loop;但 Deletion test 边缘(改动涉及 Loop 接口变更,影响所有调用方)。</p>
+    <p class="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded p-2 mt-3">
+      <span class="font-semibold">Speculative 警告</span>:改动面较大(~30 行),涉及 Loop 接口变更,可能引发回归。建议在候选 3 之后、有完整流式测试覆盖时再执行。
+    </p>
+  </section>
+
+  <!-- Top 推荐 -->
+  <section class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6 mb-6">
+    <h2 class="text-xl font-semibold text-slate-900 mb-3">Top 推荐</h2>
+    <p class="text-sm text-slate-700 mb-2">
+      <span class="font-semibold">优先执行候选 3(静默 except → logger.exception)</span>。理由:
+    </p>
+    <ol class="text-sm text-slate-700 list-decimal list-inside space-y-1">
+      <li>改动最小(6 行),零回归风险</li>
+      <li>直接解决 V2-1 类静默失败的可观测性问题</li>
+      <li>无需重构接口,不动现有调用方</li>
+      <li>立即提升未来类似 bug 的发现速度</li>
+    </ol>
+    <p class="text-sm text-slate-700 mt-3">
+      其次执行<span class="font-semibold">候选 2(<code>_unpack_skill</code> helper)</span>,收敛 V2-2 和 V2-7 的重复逻辑。
+      候选 1(Protocol)是长期目标但改动较大,建议在候选 3+2 稳定后规划。
+      候选 4 暂缓,需先补齐流式测试覆盖。
+    </p>
+  </section>
+
+  <footer class="text-xs text-slate-500 text-center mt-10">
+    生成方法:bug-hunt + zoom-out + tdd + improve-codebase-architecture skill 链式调用 ·
+    词汇遵循 LANGUAGE.md(Module / Interface / Depth / Seam / Adapter / Leverage / Locality / Deletion test)
+  </footer>
+
+</div>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'default' });
+</script>
+</body>
+</html>

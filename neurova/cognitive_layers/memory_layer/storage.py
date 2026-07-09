@@ -48,6 +48,82 @@ class MemoryRecord:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
+    def to_memory(self):
+        """转换为 models.Memory（领域模型）
+
+        Tier 4A.3：量纲映射
+        - importance: 0+ → 0-100（乘 100，clamp 到 [0, 100]）
+        - temperature: MemoryRecord 无此字段 → 默认 100.0
+        - created_at/updated_at: ISO 字符串 → datetime
+        """
+        from datetime import datetime, timezone
+
+        from neurova.cognitive_layers.memory_layer.models import (
+            Memory,
+            MemoryType,
+        )
+
+        def _safe_enum(val, default):
+            if isinstance(val, MemoryType):
+                return val
+            try:
+                return MemoryType(val)
+            except (ValueError, KeyError):
+                return default
+
+        def _parse_dt(val):
+            if isinstance(val, datetime):
+                return val
+            if isinstance(val, str):
+                try:
+                    return datetime.fromisoformat(val)
+                except ValueError:
+                    return datetime.now(timezone.utc)
+            return datetime.now(timezone.utc)
+
+        return Memory(
+            id=self.id,
+            content=self.content,
+            memory_type=_safe_enum(self.memory_type, MemoryType.SEMANTIC),
+            importance=min(100.0, max(0.0, float(self.importance) * 100.0)),
+            metadata=dict(self.metadata) if self.metadata else {},
+            agent_id=self.agent_id,
+            neuser_id=self.neuser_id,
+            user_id=self.user_id,
+            shared=self.shared,
+            share_group_ids=list(self.share_group_ids) if self.share_group_ids else [],
+            access_count=self.access_count,
+            created_at=_parse_dt(self.created_at),
+            updated_at=_parse_dt(self.updated_at),
+        )
+
+    @classmethod
+    def from_memory(cls, mem) -> "MemoryRecord":
+        """从 models.Memory 构造（量纲反向映射）
+
+        Tier 4A.3：
+        - importance: 0-100 → 0+（除 100）
+        - tags: 从 metadata.tags 提取（若有）
+        - owner: 从 metadata.owner 提取（默认 'default'）
+        """
+        return cls(
+            id=mem.id,
+            content=mem.content,
+            memory_type=mem.memory_type.value if hasattr(mem.memory_type, "value") else str(mem.memory_type),
+            owner=(mem.metadata or {}).get("owner", "default"),
+            tags=list((mem.metadata or {}).get("tags", [])),
+            metadata=dict(mem.metadata) if mem.metadata else {},
+            importance=float(mem.importance) / 100.0,
+            access_count=mem.access_count,
+            created_at=mem.created_at.isoformat() if hasattr(mem.created_at, "isoformat") else _now_iso(),
+            updated_at=mem.updated_at.isoformat() if hasattr(mem.updated_at, "isoformat") else _now_iso(),
+            agent_id=mem.agent_id,
+            neuser_id=mem.neuser_id,
+            user_id=mem.user_id,
+            shared=mem.shared,
+            share_group_ids=list(mem.share_group_ids) if mem.share_group_ids else [],
+        )
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MemoryRecord":
         known = {
@@ -221,7 +297,13 @@ class MemoryStorage:
             payload.setdefault("id", mid)
             try:
                 rec = MemoryRecord.from_dict(payload)
-            except TypeError:
+            except TypeError as exc:
+                # Bug 18 修复: 原代码 except TypeError: continue 静默吞,
+                # 数据损坏无任何诊断。改为 warning 日志后跳过。
+                logger.warning(
+                    "跳过损坏的 memory 记录 %s: %s (payload keys=%s)",
+                    mid, exc, list(payload.keys()),
+                )
                 continue
             self._records[rec.id] = rec
             self._index.add(rec)
@@ -396,10 +478,28 @@ class MemoryStorage:
                     continue
                 if owner is not None and rec.owner != owner:
                     continue
-                if start_time is not None and rec.created_at < start_time:
-                    continue
-                if end_time is not None and rec.created_at > end_time:
-                    continue
+                # Bug 19 修复: 原代码 rec.created_at < start_time 是字符串比较,
+                # ISO 8601 不同时区表示的相同时刻字符串不同, 导致时区敏感比较错误。
+                # 现用 datetime.fromisoformat() 解析为 aware datetime 后比较。
+                if start_time is not None:
+                    try:
+                        rec_dt = datetime.datetime.fromisoformat(rec.created_at)
+                        start_dt = datetime.datetime.fromisoformat(start_time)
+                        if rec_dt < start_dt:
+                            continue
+                    except (ValueError, TypeError):
+                        # 解析失败回退到字符串比较 (与原行为兼容)
+                        if rec.created_at < start_time:
+                            continue
+                if end_time is not None:
+                    try:
+                        rec_dt = datetime.datetime.fromisoformat(rec.created_at)
+                        end_dt = datetime.datetime.fromisoformat(end_time)
+                        if rec_dt > end_dt:
+                            continue
+                    except (ValueError, TypeError):
+                        if rec.created_at > end_time:
+                            continue
                 if tags is not None:
                     if not any(t in rec.tags for t in tags):
                         continue
@@ -422,9 +522,24 @@ class MemoryStorage:
             candidates.sort(key=lambda r: r.created_at)
             return [r.to_dict() for r in candidates]
 
-    def batch_save(self, payloads: List[Dict[str, Any]]) -> List[str]:
+    def batch_save(
+        self,
+        payloads: List[Dict[str, Any]],
+        isolation_context: Optional["IsolationContext"] = None,
+    ) -> List[str]:
+        """批量保存记忆
+
+        Bug 15 修复: 增加 isolation_context 参数, 写入 MemoryRecord 时
+        填充 agent_id/neuser_id/user_id, 否则默认 "default" 导致跨用户污染。
+        """
         with self._lock:
             ids: List[str] = []
+            # Bug 15 修复: 从隔离上下文获取三层隔离字段
+            agent_id = isolation_context.agent_id if isolation_context else "default"
+            neuser_id = isolation_context.neuser_id if isolation_context else "default"
+            user_id = isolation_context.user_id if isolation_context else "default"
+            shared = isolation_context.shared if isolation_context else False
+            share_group_ids = list(isolation_context.share_group_ids) if isolation_context else []
             for payload in payloads:
                 mid = _new_id("mem_")
                 now = _now_iso()
@@ -441,6 +556,11 @@ class MemoryStorage:
                     access_count=int(payload.get("access_count", 0) or 0),
                     created_at=payload.get("created_at") or now,
                     updated_at=payload.get("updated_at") or now,
+                    agent_id=agent_id,
+                    neuser_id=neuser_id,
+                    user_id=user_id,
+                    shared=shared,
+                    share_group_ids=share_group_ids,
                 )
                 self._records[mid] = rec
                 self._index.add(rec)
@@ -464,6 +584,57 @@ class MemoryStorage:
     def list_all(self) -> List[Dict[str, Any]]:
         with self._lock:
             return [rec.to_dict() for rec in self._records.values()]
+
+    def get_recent_memories(
+        self,
+        days: Optional[int] = None,
+        limit: int = 100,
+        agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """获取最近 N 天的记忆（按 created_at DESC 排序）
+
+        Bug 10 修复：补全 8 处调用方所需的 get_recent_memories 方法。
+
+        Args:
+            days: 时间窗口（天），None 表示不限制
+            limit: 返回上限
+            agent_id/user_id: 三层隔离过滤（None 表示不过滤）
+
+        Returns:
+            List[Dict]: 记忆字典列表
+        """
+        cutoff_iso = None
+        if days is not None:
+            cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+            cutoff_iso = cutoff.isoformat()
+
+        with self._lock:
+            records = list(self._records.values())
+
+        filtered = []
+        for r in records:
+            if cutoff_iso and r.created_at < cutoff_iso:
+                continue
+            if agent_id is not None and r.agent_id != agent_id:
+                continue
+            if user_id is not None and r.user_id != user_id:
+                continue
+            filtered.append(r)
+
+        filtered.sort(key=lambda r: r.created_at, reverse=True)
+        return [r.to_dict() for r in filtered[:limit]]
+
+    def delete_memory(self, memory_id: str) -> bool:
+        """删除单条记忆
+
+        Bug 10 修复：补全 8 处调用方所需的 delete_memory 方法。
+        Bug 17 修复：委托到 delete 消除重复代码, 保持单一实现源。
+
+        Returns:
+            True 如果删除成功，False 如果记忆不存在
+        """
+        return self.delete(memory_id)
 
     def clear(self) -> int:
         with self._lock:

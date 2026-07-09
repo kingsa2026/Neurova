@@ -13,7 +13,6 @@ try:
     from .closed_loop import (
         AdaptiveToolWeights,
         EvolutionOrchestrator,
-        NLToolSynthesizer,
         PatternMiner,
         ToolGeneticEngine,
         ToolLifecycleManager,
@@ -28,9 +27,18 @@ except Exception as _e:
     AdaptiveToolWeights = None
     PatternMiner = None
     ToolGeneticEngine = None
-    NLToolSynthesizer = None
     get_evolution_orchestrator = None
     reset_evolution_orchestrator = None
+
+# P0-B3 修复：导入真实的 NLToolSynthesizer（nl_synthesizer.py，502 行完整实现）
+# 之前 __init__.py 从 closed_loop.py 导入同名占位符（10 行 stub），
+# 导致 agent_core.py 拿到的是 stub，调用 pattern_miner kwarg 时虽然能构造，
+# 但缺少 synthesize/suggest_tool_sequence 等真实方法。
+try:
+    from .nl_synthesizer import NLToolSynthesizer
+except Exception as _e:
+    _logger.warning("nl_synthesizer 模块加载失败: %s", _e)
+    NLToolSynthesizer = None
 
 # 事件驱动闭环
 try:

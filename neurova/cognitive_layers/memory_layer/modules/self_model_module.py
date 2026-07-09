@@ -116,7 +116,9 @@ class SelfModelModule:
             capability_matches = []
             for req in requirements:
                 for cap, conf in self._known_capabilities.items():
-                    if req.lower() in cap.lower() or cap.lower() in req.lower():
+                    # Bug 13 修复: 改子串匹配为精确匹配(大小写不敏感),
+                    # 避免 "go" 通过子串匹配 "golang" 等误报
+                    if req.lower() == cap.lower():
                         capability_matches.append((req, cap, conf))
 
             # 计算能力覆盖

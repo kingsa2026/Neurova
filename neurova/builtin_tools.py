@@ -188,6 +188,53 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["query"],
         },
     },
+    # Bug W-1 修复: 补齐 weather / web_search schema
+    # 原本 tool_executor.py 已实现 _execute_weather / _execute_web_search，
+    # 但未注册到 _BUILTIN_SCHEMAS（LLM 工具列表的单一事实源），
+    # 导致 LLM 永远看不到这两个工具，agent 只能回复"无法获取实时信息"。
+    # 参数与 tool_executor._execute_weather / _execute_web_search 的读取逻辑对齐。
+    "weather": {
+        "description": "【实时天气查询】通过 wttr.in 服务获取指定地点的实时天气信息。可查询当前天气、温度、降水、风力等。支持中文城市名（如'许昌'、'北京'）或英文地名。需要实时天气信息时必须调用此工具，不要回复'无法获取'。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "查询地点（城市名，如'许昌'、'北京'、'Shanghai'）",
+                },
+                "city": {
+                    "type": "string",
+                    "description": "城市名（location 的别名，二选一即可）",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "地点查询字符串（location 的别名，二选一即可）",
+                },
+            },
+            "required": ["location"],
+        },
+    },
+    "web_search": {
+        "description": "【实时网络搜索】通过搜索引擎查询互联网上的实时信息（新闻、股价、百科、技术文档等）。当用户需要 memory_search 无法提供的实时或外部信息时调用此工具。返回搜索结果摘要文本。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "搜索查询词",
+                },
+                "q": {
+                    "type": "string",
+                    "description": "搜索查询词（query 的别名，二选一即可）",
+                },
+                "keywords": {
+                    "type": "string",
+                    "description": "搜索关键词（query 的别名，二选一即可）",
+                },
+            },
+            "required": ["query"],
+        },
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════

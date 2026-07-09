@@ -90,6 +90,11 @@ export type AppEvents = {
   'notification:show': { type: 'success' | 'error' | 'warning' | 'info'; message: string }
   // API 事件
   'api:rate-limited': { requestId: string; retryAfter?: number; message?: string }
+  // 聊天会话事件(#2 / ADR 0008:useChat composable 发射)
+  'chat:session-created': { sessionId: string; agentId: string }
+  'chat:session-switched': { sessionId: string }
+  'chat:session-deleted': { sessionId: string }
+  'chat:session-renamed': { sessionId: string; title: string }
 }
 
 // ────── 全局事件总线单例 ──────

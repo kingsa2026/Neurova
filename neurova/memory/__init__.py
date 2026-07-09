@@ -85,11 +85,6 @@ except ImportError:
     VectorSearch = None
 
 try:
-    from neurova.cognitive_layers.memory_layer.proactive_recall import ProactiveRecall
-except ImportError:
-    ProactiveRecall = None
-
-try:
     from neurova.cognitive_layers.memory_layer.proactive_question import ProactiveQuestion
 except ImportError:
     ProactiveQuestion = None
@@ -120,7 +115,7 @@ except ImportError:
     ConversationBuffer = None
 
 try:
-    from neurova.mem_core import Memory
+    from neurova.cognitive_layers.memory_layer.models import Memory
 except ImportError:
     Memory = None
 
@@ -168,7 +163,6 @@ _MODULE_MAP = {
     "sleep": "neurova.cognitive_layers.memory_layer.sleep",
     "compression": "neurova.cognitive_layers.memory_layer.compression",
     "vector_search": "neurova.cognitive_layers.memory_layer.vector_search",
-    "proactive_recall": "neurova.cognitive_layers.memory_layer.proactive_recall",
     "proactive_question": "neurova.cognitive_layers.memory_layer.proactive_question",
     "agent_self": "neurova.cognitive_layers.memory_layer.agent_self",
     "conversation_buffer": "neurova.cognitive_layers.memory_layer.conversation_buffer",
@@ -196,7 +190,6 @@ __all__ = [
     "SleepConsolidation",
     "MemoryCompressor",
     "VectorSearch",
-    "ProactiveRecall",
     "ProactiveQuestionManager",
     "AgentSelfManager",
     "ConversationBuffer",

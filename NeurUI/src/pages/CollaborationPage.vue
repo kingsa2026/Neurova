@@ -70,8 +70,8 @@
 
       <!-- Step 1: Select template -->
       <div v-if="initStep === 0">
-        <a-spin :spinning="loadingTemplates">
-          <a-empty v-if="!loadingTemplates && templates.length === 0" :description="t('common.noData')" />
+        <a-spin :spinning="loading">
+          <a-empty v-if="!loading && templates.length === 0" :description="t('common.noData')" />
           <div v-else class="tpl-list">
             <div
               v-for="tpl in templates"
@@ -131,62 +131,54 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
-import { message } from 'ant-design-vue'
+import { useCollaboration } from '@/composables/useCollaboration'
+import type { CollabSession, CollabTemplate } from '@/api/modules/collaboration'
 
 const { t } = useI18n()
+
+// ── 统一通过 composable 访问 store + uiMessage + error/logger ──
+const {
+  sessions, templates, loading,
+  loadSessions, loadTemplates, startSession,
+} = useCollaboration()
 
 // ── Initiate drawer state ──
 const showInitiate = ref(false)
 const initStep = ref(0)
 const starting = ref(false)
-const loadingTemplates = ref(false)
-const templates = ref<{ id: string; name: string; description: string; type: string }[]>([])
 const initForm = reactive({ templateId: '', participants: [] as string[], name: '', description: '' })
-const selectedTemplateName = computed(() => templates.value.find((t) => t.id === initForm.templateId)?.name ?? '-')
-
-async function fetchTemplates() {
-  loadingTemplates.value = true
-  try {
-    const res: any = await request.get('/collaboration/templates')
-    const raw = res?.data ?? res ?? []
-    templates.value = Array.isArray(raw) ? raw : (raw?.data ?? [])
-  } catch { templates.value = [] }
-  finally { loadingTemplates.value = false }
-}
+const selectedTemplateName = computed(() =>
+  (templates.value as CollabTemplate[]).find((tpl) => tpl.id === initForm.templateId)?.name ?? '-',
+)
 
 async function handleStart() {
   starting.value = true
   try {
-    await request.post('/collaboration/start', { templateId: initForm.templateId, participants: initForm.participants, name: initForm.name, description: initForm.description })
-    message.success(t('common.success'))
-    showInitiate.value = false
-    initStep.value = 0
-    initForm.templateId = ''
-    initForm.participants = []
-    initForm.name = ''
-    initForm.description = ''
-    fetchSessions()
-  } catch { message.error(t('common.error')) }
-  finally { starting.value = false }
+    const ok = await startSession({
+      templateId: initForm.templateId,
+      participants: initForm.participants,
+      name: initForm.name,
+      description: initForm.description,
+    })
+    if (ok) {
+      showInitiate.value = false
+      initStep.value = 0
+      initForm.templateId = ''
+      initForm.participants = []
+      initForm.name = ''
+      initForm.description = ''
+      // composable 内部已触发 fetchSessions，无需重复
+    }
+  } finally {
+    starting.value = false
+  }
 }
 
-interface Session {
-  id: string
-  name: string
-  description: string
-  status: string
-  participants?: string[]
-  createdAt: string
-}
-
-const sessions = ref<Session[]>([])
-const loading = ref(false)
 const showDetail = ref(false)
-const selectedSession = ref<Session | null>(null)
+const selectedSession = ref<CollabSession | null>(null)
 
 const columns = [
   { title: t('common.name'), dataIndex: 'name', key: 'name' },
@@ -196,29 +188,20 @@ const columns = [
 ]
 
 const stats = computed(() => [
-  { label: t('common.total'), value: sessions.value.length },
-  { label: t('common.active'), value: sessions.value.filter((s) => s.status === 'active').length },
-  { label: t('collab.history'), value: sessions.value.filter((s) => s.status === 'completed').length },
+  { label: t('common.total'), value: (sessions.value as CollabSession[]).length },
+  { label: t('common.active'), value: (sessions.value as CollabSession[]).filter((s) => s.status === 'active').length },
+  { label: t('collab.history'), value: (sessions.value as CollabSession[]).filter((s) => s.status === 'completed').length },
 ])
 
-async function fetchSessions() {
-  loading.value = true
-  try {
-    const res = await request.get('/collaboration/templates') as unknown as Session[]
-    sessions.value = res ?? []
-  } catch {
-    sessions.value = []
-  } finally {
-    loading.value = false
-  }
-}
-
-function handleViewSession(record: Session) {
+function handleViewSession(record: CollabSession) {
   selectedSession.value = record
   showDetail.value = true
 }
 
-onMounted(() => { fetchSessions(); fetchTemplates() })
+onMounted(() => {
+  loadSessions()   // 修复 P0: 端点正确（composable → store → listSessions → /collaboration/sessions）
+  loadTemplates()
+})
 </script>
 
 <style scoped>
