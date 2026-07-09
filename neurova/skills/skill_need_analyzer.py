@@ -69,8 +69,11 @@ class SkillNeedAnalyzer:
         self.config = config or {}
 
         # 初始化组件
+        # P0-B1 修复：SkillMarketSearcher.__init__ 只接受 cache_dir，不接受 config
+        # 只从 config 中提取相关字段（cache_dir），避免 TypeError
+        cache_dir = self.config.get("cache_dir") if isinstance(self.config, dict) else None
         self.task_decomposer = TaskDecomposer(config=config)
-        self.market_searcher = SkillMarketSearcher(config=config)
+        self.market_searcher = SkillMarketSearcher(cache_dir=cache_dir)
 
         # 已安装技能缓存
         self._installed_skills: Dict[str, Skill] = {}

@@ -140,8 +140,19 @@ class AgentLLMClient:
                 return result.get("response", result)
             else:
                 # 失败时返回一个包含错误信息的简单对象
+                # 透明化:记录原始 error/model/provider 字段,便于运维诊断根因
+                # 不抹除原始错误信息(遵循"放大视角找根因"原则)
+                # 缺字段时 fallback 为 "unknown",不抛 KeyError
+                # 现实场景: MultiModelLLMClient "No client available" 路径不含 model/provider
+                error_msg = result.get('error', 'Unknown error')
+                model = result.get('model', 'unknown')
+                provider = result.get('provider', 'unknown')
+                logger.warning(
+                    "LLM call failed — error=%s, model=%s, provider=%s",
+                    error_msg, model, provider
+                )
                 from neurova.llm_client import LLMResponse
-                return LLMResponse(content=f"[LLM Error] {result.get('error', 'Unknown error')}")
+                return LLMResponse(content=f"[LLM Error] {error_msg}")
         return result
 
     async def chat_stream(self, messages, **kwargs):
@@ -280,10 +291,32 @@ class AgentConfig:
 
 
 class _NullSystem:
-    """空系统占位符 — 当闭环系统不可用时用作 fallback"""
+    """空系统占位符 — 当闭环系统不可用时用作 fallback
+
+    P0-A2 修复：提供中性默认反馈信号（performance_score=0.5），
+    使 RSI 在缺失真实系统时仍能运行（虽效果有限），而非收到空 dict 导致空转。
+    """
+
+    # 提供可优化参数的默认值（与 RSIIntegrationManager.OPTIMIZABLE_PARAMETERS 对齐）
+    base_decay_rate = 0.1
+    similarity_threshold = 0.8
+    merge_threshold = 0.9
+    emotional_protection_threshold = 0.5
+    emotional_protection_factor = 1.0
+    crystallize_min_observations = 3
+    crystallize_min_success_rate = 0.7
+    pattern_min_support = 2
+    success_bonus = 0.1
+    failure_penalty = 0.1
+    decay_rate = 0.05
+    muscle_memory_threshold = 0.85
 
     def get_feedback(self):
-        return {}
+        # 返回中性性能指标（0.5 = 既不差也不好），RSI 据此生成保守优化
+        return {"performance_score": 0.5, "status": "null_fallback"}
+
+    def get_status(self):
+        return {"status": "null_fallback", "active": False}
 
 
 class SubSystemContainer:
@@ -446,8 +479,14 @@ class SubSystemContainer:
 
     def init_conversation(self):
         """初始化对话状态"""
+        from neurova.conversation_context import ConversationContext
+
         a = self.agent
         a.conversation_history = []
+        # _conversation_context 是 update_history 路径的 deep module 辅助状态
+        # 提供 invariant：role 校验 + 自动 trim + 线程安全
+        # conversation_history（list）保持兼容，两者通过 MemCore.update_history 同步
+        a._conversation_context = ConversationContext(max_messages=100)
         a._current_user_input = None
         a._current_trace_id = ""
         a._trajectory_recorder = get_trajectory_recorder()

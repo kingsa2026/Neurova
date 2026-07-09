@@ -167,26 +167,14 @@ class AgentMemoryLayer:
                 if self._storage:
                     from neurova.cognitive_layers.memory_layer.neurova_recall import NeurovaRecallEngine
 
+                    # Bug 14 修复：改用真实签名（memory_manager= 是唯一注入点）
+                    # 旧签名 storage=/temperature_engine=/config= 等 6 个 kwarg 全部不匹配，运行时必抛 TypeError
                     self._recall_engine = NeurovaRecallEngine(
-                        storage=self._storage,
-                        temperature_engine=self._temperature_engine,
-                        emotion_analyzer=None,
-                        tkg=None,
-                        vector_search=None,
-                        config=self._config.get(
-                            "recall_config",
-                            {
-                                "enable_temperature": True,
-                                "enable_category": True,
-                                "enable_graph": True,
-                                "enable_emotion": True,
-                                "enable_drill": True,
-                                "drill_max_depth": 3,
-                                "max_seeds": 10,
-                                "max_total": 20,
-                                "relevance_threshold": 0.15,
-                            },
-                        ),
+                        memory_manager=self._memory_manager,
+                        max_workers=4,
+                        timeout_seconds=10.0,
+                        use_plugins=True,
+                        fusion_mode="legacy",
                     )
 
                 # 初始化工作记忆

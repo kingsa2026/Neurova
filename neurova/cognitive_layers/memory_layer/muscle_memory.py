@@ -17,6 +17,7 @@ from neurova.core.logger import get_logger
 import re
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -124,9 +125,6 @@ class MuscleMemory:
         # 关键词索引: keyword -> set(item_id)
         self._keyword_index: Dict[str, set] = {}
 
-        # 向量指纹索引: fingerprint -> item_id
-        self._vector_index: Dict[str, str] = {}
-
         # 工具名称索引: tool_name -> set(item_id)
         self._tool_index: Dict[str, set] = {}
 
@@ -154,30 +152,31 @@ class MuscleMemory:
         fingerprint = self._extract_keywords(query)
         vector_fp = self._text_to_embedding_hash(query)
 
-        results = []
+        with self._lock:
+            results = []
 
-        # L1: 精确匹配（毫秒级）
-        l1_matches = self._match_l1(tool_name, fingerprint, vector_fp)
-        results.extend(l1_matches)
+            # L1: 精确匹配（毫秒级）
+            l1_matches = self._match_l1(tool_name, fingerprint, vector_fp)
+            results.extend(l1_matches)
 
-        # L2: 模糊匹配
-        l2_matches = self._match_l2(tool_name, fingerprint, vector_fp)
-        results.extend(l2_matches)
+            # L2: 模糊匹配
+            l2_matches = self._match_l2(tool_name, fingerprint, vector_fp)
+            results.extend(l2_matches)
 
-        # L3: 广泛检索
-        l3_matches = self._match_l3(tool_name, fingerprint, vector_fp)
-        results.extend(l3_matches)
+            # L3: 广泛检索
+            l3_matches = self._match_l3(tool_name, fingerprint, vector_fp)
+            results.extend(l3_matches)
 
-        # 去重并按置信度排序
-        seen = set()
-        unique_results = []
-        for item, conf in results:
-            if item.id not in seen:
-                seen.add(item.id)
-                unique_results.append((item, conf))
+            # 去重并按置信度排序
+            seen = set()
+            unique_results = []
+            for item, conf in results:
+                if item.id not in seen:
+                    seen.add(item.id)
+                    unique_results.append((item, conf))
 
-        unique_results.sort(key=lambda x: x[1], reverse=True)
-        return unique_results[:top_k]
+            unique_results.sort(key=lambda x: x[1], reverse=True)
+            return unique_results[:top_k]
 
     def match_by_query(
         self,
@@ -199,64 +198,74 @@ class MuscleMemory:
         fingerprint = self._extract_keywords(query)
         vector_fp = self._text_to_embedding_hash(query)
 
-        results = []
+        with self._lock:
+            results = []
 
-        # 搜索所有层级（不按工具名过滤）
-        for store, min_conf in [
-            (self._l1, 0.5),
-            (self._l2, 0.3),
-            (self._l3, 0.2),
-        ]:
-            for item_id, item in store.items():
-                conf = self._compute_confidence(item, fingerprint, vector_fp)
-                if conf > min_conf:
-                    results.append((item, conf))
+            # 搜索所有层级（不按工具名过滤）
+            for store, min_conf in [
+                (self._l1, 0.5),
+                (self._l2, 0.3),
+                (self._l3, 0.2),
+            ]:
+                for item_id, item in store.items():
+                    conf = self._compute_confidence(item, fingerprint, vector_fp)
+                    if conf > min_conf:
+                        results.append((item, conf))
 
-        # 去重并按置信度排序
-        seen = set()
-        unique_results = []
-        for item, conf in results:
-            if item.id not in seen:
-                seen.add(item.id)
-                unique_results.append((item, conf))
+            # 去重并按置信度排序
+            seen = set()
+            unique_results = []
+            for item, conf in results:
+                if item.id not in seen:
+                    seen.add(item.id)
+                    unique_results.append((item, conf))
 
-        unique_results.sort(key=lambda x: x[1], reverse=True)
-        return unique_results[:top_k]
+            unique_results.sort(key=lambda x: x[1], reverse=True)
+            return unique_results[:top_k]
 
     def _match_l1(self, tool_name: str, fingerprint: str, vector_fp: str) -> List[Tuple[MuscleMemoryItem, float]]:
         """L1 精确匹配"""
-        results = []
-        for item_id, item in self._l1.items():
-            if item.tool_name != tool_name:
-                continue
-            conf = self._compute_confidence(item, fingerprint, vector_fp)
-            if conf > 0.7:
-                results.append((item, conf))
-        return results
+        with self._lock:
+            results = []
+            for item_id, item in self._l1.items():
+                if item.tool_name != tool_name:
+                    continue
+                conf = self._compute_confidence(item, fingerprint, vector_fp)
+                if conf > 0.7:
+                    results.append((item, conf))
+            return results
 
     def _match_l2(self, tool_name: str, fingerprint: str, vector_fp: str) -> List[Tuple[MuscleMemoryItem, float]]:
         """L2 模糊匹配"""
-        results = []
-        for item_id, item in self._l2.items():
-            if item.tool_name != tool_name:
-                continue
-            conf = self._compute_confidence(item, fingerprint, vector_fp)
-            if conf > 0.5:
-                results.append((item, conf))
-        return results
+        with self._lock:
+            results = []
+            for item_id, item in self._l2.items():
+                if item.tool_name != tool_name:
+                    continue
+                conf = self._compute_confidence(item, fingerprint, vector_fp)
+                if conf > 0.5:
+                    results.append((item, conf))
+            return results
 
     def _match_l3(self, tool_name: str, fingerprint: str, vector_fp: str) -> List[Tuple[MuscleMemoryItem, float]]:
         """L3 广泛检索"""
-        results = []
-        tool_items = self._tool_index.get(tool_name, set())
-        for item_id in tool_items:
-            item = self._l3.get(item_id)
-            if item is None:
-                continue
-            conf = self._compute_confidence(item, fingerprint, vector_fp)
-            if conf > 0.3:
-                results.append((item, conf))
-        return results
+        with self._lock:
+            results = []
+            tool_items = self._tool_index.get(tool_name, set())
+            # 利用 _keyword_index 缩小候选集（关键词命中且与工具索引有交集时优先使用）
+            keyword_hits: set = set()
+            for kw in fingerprint.split(","):
+                if kw:
+                    keyword_hits |= self._keyword_index.get(kw, set())
+            candidates = (keyword_hits & tool_items) if (keyword_hits & tool_items) else tool_items
+            for item_id in candidates:
+                item = self._l3.get(item_id)
+                if item is None:
+                    continue
+                conf = self._compute_confidence(item, fingerprint, vector_fp)
+                if conf > 0.3:
+                    results.append((item, conf))
+            return results
 
     def _compute_confidence(
         self,
@@ -265,18 +274,23 @@ class MuscleMemory:
         vector_fp: str,
     ) -> float:
         """计算匹配置信度"""
+        # 空指纹不产生虚假匹配
+        if not fingerprint and not item.query_fingerprint:
+            return 0.0
+
         score = 0.0
 
         # 关键词指纹匹配
         if item.query_fingerprint == fingerprint:
             score += 0.6
         else:
-            # 部分匹配
-            overlap = len(set(item.query_fingerprint.split(",")) & set(fingerprint.split(",")))
-            total = max(
-                len(set(item.query_fingerprint.split(","))),
-                len(set(fingerprint.split(","))),
-            )
+            # 部分匹配（过滤空字符串避免 "".split(",") 产生 [""]）
+            item_kws = {k for k in item.query_fingerprint.split(",") if k}
+            query_kws = {k for k in fingerprint.split(",") if k}
+            if not item_kws or not query_kws:
+                return 0.0
+            overlap = len(item_kws & query_kws)
+            total = max(len(item_kws), len(query_kws))
             if total > 0:
                 score += 0.4 * (overlap / total)
 
@@ -408,15 +422,20 @@ class MuscleMemory:
         demoted = 0
 
         with self._lock:
-            # L1 降级到 L2
-            to_demote_l1 = []
-            for item_id, item in self._l1.items():
-                if now - item.last_used > _FORGET_THRESHOLDS[MemoryLevel.L1]:
-                    to_demote_l1.append(item_id)
+            # 注意：扫描顺序必须是 L3 → L2 → L1（从低到高），
+            # 这样高层的降级不会在同一轮被低层再次扫描，避免级联降级。
+            # 例如：L1→L2 降级后，L2 扫描已完成，不会立即再 L2→L3。
 
-            for item_id in to_demote_l1:
-                item = self._l1.pop(item_id)
-                self._demote_item(item)
+            # L3 删除
+            to_delete = []
+            for item_id, item in self._l3.items():
+                if now - item.last_used > _FORGET_THRESHOLDS[MemoryLevel.L3]:
+                    to_delete.append(item_id)
+
+            for item_id in to_delete:
+                item = self._l3.pop(item_id)
+                self._remove_from_keyword_index(item)
+                self._remove_from_tool_index(item)
                 demoted += 1
 
             # L2 降级到 L3
@@ -430,16 +449,15 @@ class MuscleMemory:
                 self._demote_item(item)
                 demoted += 1
 
-            # L3 删除
-            to_delete = []
-            for item_id, item in self._l3.items():
-                if now - item.last_used > _FORGET_THRESHOLDS[MemoryLevel.L3]:
-                    to_delete.append(item_id)
+            # L1 降级到 L2（最后扫描，降级到 L2 后不会被本轮 L2 扫描再次降级）
+            to_demote_l1 = []
+            for item_id, item in self._l1.items():
+                if now - item.last_used > _FORGET_THRESHOLDS[MemoryLevel.L1]:
+                    to_demote_l1.append(item_id)
 
-            for item_id in to_delete:
-                item = self._l3.pop(item_id)
-                self._remove_from_keyword_index(item)
-                self._remove_from_tool_index(item)
+            for item_id in to_demote_l1:
+                item = self._l1.pop(item_id)
+                self._demote_item(item)
                 demoted += 1
 
         if demoted > 0:
@@ -503,26 +521,9 @@ class MuscleMemory:
 
     def _generate_item_id(self, tool_name: str, query: str) -> str:
         """生成条目 ID"""
-        raw = f"{tool_name}:{query}:{time.time()}"
+        # 加入 uuid4 防止同一秒内高频记录产生 ID 碰撞
+        raw = f"{tool_name}:{query}:{time.time()}:{uuid.uuid4().hex}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-    def _extract_param_template(self, parameters: Dict[str, Any]) -> Dict[str, str]:
-        """提取参数模板（将值替换为类型标签）"""
-        template = {}
-        for key, value in parameters.items():
-            if isinstance(value, str):
-                template[key] = "<str>"
-            elif isinstance(value, (int, float)):
-                template[key] = "<num>"
-            elif isinstance(value, bool):
-                template[key] = "<bool>"
-            elif isinstance(value, list):
-                template[key] = "<list>"
-            elif isinstance(value, dict):
-                template[key] = "<dict>"
-            else:
-                template[key] = "<any>"
-        return template
 
     def _find_item(self, tool_name: str, fingerprint: str, vector_fp: str) -> Optional[MuscleMemoryItem]:
         """查找已有条目"""
@@ -532,6 +533,9 @@ class MuscleMemory:
             for store in (self._l1, self._l2, self._l3):
                 item = store.get(item_id)
                 if item and item.query_fingerprint == fingerprint:
+                    # 联合判定 vector_fp：若双方都非空则必须相等，避免不同向量指纹的记录被错误合并
+                    if vector_fp and item.vector_fingerprint and item.vector_fingerprint != vector_fp:
+                        continue
                     return item
         return None
 
@@ -561,14 +565,6 @@ class MuscleMemory:
         """从工具索引移除"""
         if item.tool_name in self._tool_index:
             self._tool_index[item.tool_name].discard(item.id)
-
-    def _item_to_result(self, item: MuscleMemoryItem) -> Dict[str, Any]:
-        """将条目转换为结果字典"""
-        return item.to_dict()
-
-    def _get_vector_store(self):
-        """获取向量存储（占位）"""
-        return None
 
     def _save_all(self) -> None:
         """保存所有层级"""

@@ -13,7 +13,7 @@
     <!-- 概览统计卡片 -->
     <div class="hub-stats">
       <GlassCard
-        v-for="stat in stats"
+        v-for="stat in statCards"
         :key="stat.key"
         :title="t(stat.labelKey)"
         variant="subtle"
@@ -76,11 +76,11 @@
  * 协作中心页 — 统一入口枢纽
  *
  * 不承载业务逻辑，仅作为协作域所有子模块的导航中心：
- * - 概览统计（会话/项目/任务/工作流数量）
+ * - 概览统计（会话/项目/任务/工作流数量，来自 store.stats 真实数据）
  * - 功能模块导航网格（11 个子模块入口）
- * - 最近活动会话预览
+ * - 最近活动会话预览（来自 store.history 共享状态）
  */
-import { ref, computed, onMounted, type Component } from 'vue'
+import { computed, onMounted, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -91,27 +91,29 @@ import {
 import GlassCard from '@/components/GlassCard.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
-import { listHistory } from '@/api/modules/collaboration'
+import { useCollaboration } from '@/composables/useCollaboration'
 
 const router = useRouter()
 const { t } = useI18n()
 
-interface CollabSession {
-  id: string
-  name: string
-  status: string
-}
+// ── 统一通过 composable 访问 store ──
+// history / loading / stats 均来自 store 共享状态；loadHistory / loadStats 触发拉取
+const { history, loading, stats: collabStats, loadHistory, loadStats } = useCollaboration()
 
-const recentSessions = ref<CollabSession[]>([])
-const loadingSessions = ref(false)
+// 最近活动：取 history 前 5 条（history 已是 CollabSession[]，无需本地类型）
+const recentSessions = computed(() => history.value.slice(0, 5))
+const loadingSessions = loading
 
-// 概览统计（简化：实际数量从各子模块 API 获取，这里用占位）
-const stats = computed(() => [
-  { key: 'sessions', labelKey: 'collab.sessions', value: recentSessions.value.length, icon: TeamOutlined, route: '/collaboration/sessions' },
-  { key: 'templates', labelKey: 'collab.templates', value: '—', icon: NodeIndexOutlined, route: '/collaboration/templates' },
-  { key: 'workflows', labelKey: 'collab.workflows', value: '—', icon: RocketOutlined, route: '/collaboration/workflows' },
-  { key: 'projects', labelKey: 'collab.projects', value: '—', icon: ProjectOutlined, route: '/collaboration/projects' },
-])
+// 概览统计：真实数据来自 store.stats；stats 未加载时用 '—' 占位
+const statCards = computed(() => {
+  const s = collabStats.value
+  return [
+    { key: 'sessions', labelKey: 'collab.sessions', value: s?.sessions ?? '—', icon: TeamOutlined, route: '/collaboration/sessions' },
+    { key: 'templates', labelKey: 'collab.templates', value: s?.templates ?? '—', icon: NodeIndexOutlined, route: '/collaboration/templates' },
+    { key: 'workflows', labelKey: 'collab.workflows', value: s?.workflows ?? '—', icon: RocketOutlined, route: '/collaboration/workflows' },
+    { key: 'projects', labelKey: 'collab.projects', value: s?.projects ?? '—', icon: ProjectOutlined, route: '/collaboration/projects' },
+  ]
+})
 
 // 11 个功能模块导航
 const modules: { route: string; labelKey: string; descKey: string; icon: Component }[] = [
@@ -132,20 +134,10 @@ function navigateTo(route: string) {
   router.push(route)
 }
 
-async function fetchRecentSessions() {
-  loadingSessions.value = true
-  try {
-    const res = await listHistory() as unknown
-    const data = (res as { data?: CollabSession[] })?.data ?? (res as CollabSession[])
-    recentSessions.value = Array.isArray(data) ? data : []
-  } catch {
-    recentSessions.value = []
-  } finally {
-    loadingSessions.value = false
-  }
-}
-
-onMounted(fetchRecentSessions)
+onMounted(() => {
+  loadHistory()
+  loadStats()
+})
 </script>
 
 <style scoped>

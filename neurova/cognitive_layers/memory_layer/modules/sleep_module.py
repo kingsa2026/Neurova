@@ -134,13 +134,14 @@ class SleepModule:
         Returns:
             是否巩固
         """
-        if not self._is_sleeping:
-            return False
-
-        if importance < self._consolidation_threshold:
-            return False
-
+        # Bug 12 修复: _is_sleeping 检查移入锁内,修复 TOCTOU 竞态
         with self._lock:
+            if not self._is_sleeping:
+                return False
+
+            if importance < self._consolidation_threshold:
+                return False
+
             self._consolidation_count += 1
 
             if self._on_consolidate:
@@ -149,7 +150,7 @@ class SleepModule:
                 except Exception as e:
                     logger.warning("Consolidation callback failed: %s", e)
 
-            logger.debug("Consolidated memory '%.2f' (importance=%s)", memory_id, importance)
+            logger.debug("Consolidated memory '%s' (importance=%s)", memory_id, importance)
             return True
 
     def cleanup_memory(
@@ -167,13 +168,14 @@ class SleepModule:
         Returns:
             是否清理
         """
-        if not self._is_sleeping:
-            return False
-
-        if importance > self._cleanup_threshold:
-            return False
-
+        # Bug 12 修复: _is_sleeping 检查移入锁内,修复 TOCTOU 竞态
         with self._lock:
+            if not self._is_sleeping:
+                return False
+
+            if importance > self._cleanup_threshold:
+                return False
+
             self._cleanup_count += 1
 
             if self._on_cleanup:
@@ -182,7 +184,7 @@ class SleepModule:
                 except Exception as e:
                     logger.warning("Cleanup callback failed: %s", e)
 
-            logger.debug("Cleaned up memory '%.2f' (importance=%s)", memory_id, importance)
+            logger.debug("Cleaned up memory '%s' (importance=%s)", memory_id, importance)
             return True
 
     def dream(
@@ -200,14 +202,15 @@ class SleepModule:
         Returns:
             梦境产物，如果没有发生梦境返回 None
         """
-        if not self._is_sleeping:
-            return None
-
-        # 随机决定是否发生梦境
-        if random.random() > self._dream_probability:
-            return None
-
+        # Bug 12 修复: _is_sleeping 检查移入锁内,修复 TOCTOU 竞态
         with self._lock:
+            if not self._is_sleeping:
+                return None
+
+            # 随机决定是否发生梦境
+            if random.random() > self._dream_probability:
+                return None
+
             self._dream_count += 1
 
             # 随机选择2-3个记忆进行组合
@@ -246,8 +249,10 @@ class SleepModule:
         Returns:
             处理结果：consolidated, cleaned, dreamed
         """
-        if not self._is_sleeping:
-            return {"consolidated": [], "cleaned": [], "dreamed": []}
+        # 审计建议修复: _is_sleeping 检查移入锁内, 消除 TOCTOU 竞态
+        with self._lock:
+            if not self._is_sleeping:
+                return {"consolidated": [], "cleaned": [], "dreamed": []}
 
         consolidated = []
         cleaned = []

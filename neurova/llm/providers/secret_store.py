@@ -24,6 +24,30 @@ from typing import Any, Dict, List, Optional
 logger = get_logger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# pycryptodome 依赖检测(fail-fast)
+# ---------------------------------------------------------------------------
+# secret_store 是 pycryptodome (Crypto 模块) 的唯一消费者。
+# 之前用懒导入(在 _aes_gcm_encrypt / _aes_gcm_decrypt 函数体内 from Crypto.Cipher import AES),
+# 导致 pycryptodome 缺失时:
+#   - decrypt_api_key 抛 ValueError("AES-GCM decryption failed: No module named 'Crypto'")
+#   - provider_manager.py 的 from_dict catch 后只 logger.warning(易被忽略)
+#   - 静默创建 api_key=None 的 ProviderConfig,整个 LLM 链路瘫痪但日志显示"Loaded N providers"
+# 改为模块顶部显式检测,缺失时 HAS_CRYPTO=False 并立即记 ERROR 日志,
+# 调用 _aes_gcm_* 时直接抛 RuntimeError("pycryptodome not installed — run: pip install pycryptodome")
+# ---------------------------------------------------------------------------
+try:
+    from Crypto.Cipher import AES as _AES_MODULE  # noqa: F401
+    HAS_CRYPTO = True
+except ImportError:
+    HAS_CRYPTO = False
+    _AES_MODULE = None
+    logger.error(
+        "pycryptodome not installed — API key encryption/decryption disabled. "
+        "Run: pip install pycryptodome"
+    )
+
+
 _PREFIX = "enc:"
 _PREFIX_V2 = "enc:v2:"
 _SALT = b"neurova-secret-store-v1"
@@ -101,7 +125,12 @@ def _derive_aes_key(master_key: str, salt: bytes) -> bytes:
 
 def _aes_gcm_encrypt(plaintext: bytes, master_key: str) -> str:
     """使用 AES-256-GCM 加密，返回 v2 格式字符串"""
-    from Crypto.Cipher import AES
+    if not HAS_CRYPTO:
+        # fail-fast:依赖缺失时立即抛 RuntimeError,而非懒导入后再抛 ImportError
+        # 被 encrypt_api_key 直接向上抛出,不被捕获包装
+        raise RuntimeError(
+            "pycryptodome not installed — run: pip install pycryptodome"
+        )
 
     # 每次加密使用随机 salt 和 nonce
     salt = secrets.token_bytes(16)
@@ -111,7 +140,7 @@ def _aes_gcm_encrypt(plaintext: bytes, master_key: str) -> str:
     key = _derive_aes_key(master_key, salt)
 
     # AES-GCM 加密
-    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    cipher = _AES_MODULE.new(key, _AES_MODULE.MODE_GCM, nonce=nonce)
     ciphertext, tag = cipher.encrypt_and_digest(plaintext)
 
     # 格式: enc:v2:<salt_b64>:<nonce_b64>:<ct_b64>:<tag_b64>
@@ -129,7 +158,11 @@ def _aes_gcm_encrypt(plaintext: bytes, master_key: str) -> str:
 
 def _aes_gcm_decrypt(payload: str, master_key: str) -> bytes:
     """解密 v2 格式的 AES-256-GCM 密文"""
-    from Crypto.Cipher import AES
+    if not HAS_CRYPTO:
+        # fail-fast:依赖缺失时立即抛 RuntimeError,而非懒导入后再抛 ImportError
+        raise RuntimeError(
+            "pycryptodome not installed — run: pip install pycryptodome"
+        )
 
     parts = payload.split(":")
     # 格式: enc:v2:<salt_b64>:<nonce_b64>:<ct_b64>:<tag_b64>
@@ -143,7 +176,7 @@ def _aes_gcm_decrypt(payload: str, master_key: str) -> bytes:
     tag = base64.urlsafe_b64decode(parts[5])
 
     key = _derive_aes_key(master_key, salt)
-    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    cipher = _AES_MODULE.new(key, _AES_MODULE.MODE_GCM, nonce=nonce)
     return cipher.decrypt_and_verify(ciphertext, tag)
 
 
@@ -194,6 +227,11 @@ def decrypt_api_key(encrypted: Any, master_key: str = "") -> str:
         try:
             plaintext_bytes = _aes_gcm_decrypt(encrypted, mk)
             return plaintext_bytes.decode("utf-8")
+        except RuntimeError:
+            # fail-fast 异常(如 pycryptodome 缺失)直接穿透,不被包装为 ValueError
+            # 原因:依赖缺失是根因,与"AES-GCM 解密失败"是不同层级的问题,
+            # 包装为 ValueError 会抹除根本原因的语义信号
+            raise
         except Exception as exc:
             raise ValueError(f"AES-GCM decryption failed: {exc}") from exc
 

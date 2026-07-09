@@ -145,6 +145,8 @@
  *
  * 骨架版本：使用原生 HTML5 拖拽 + 绝对定位实现。
  * 后续可升级为 Vue Flow（@vue-flow/core）获得完整画布能力。
+ *
+ * 数据流：所有持久化通过 useCollaboration composable → store → api，页面不直接调用后端。
  */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
@@ -155,22 +157,13 @@ import {
   ClockCircleOutlined, DatabaseOutlined,
 } from '@ant-design/icons-vue'
 import GlassButton from '@/components/GlassButton.vue'
-import { getNeurflowStats } from '@/api/modules/neurflow'
+import { useCollaboration } from '@/composables/useCollaboration'
+import type { CanvasNodeSnapshot, CanvasEdgeSnapshot } from '@/api/modules/collaboration'
 
 const route = useRoute()
 const { t } = useI18n()
 
-interface CanvasNode {
-  id: string
-  type: string
-  label: string
-  icon: string
-  position: { x: number; y: number }
-  inputs: { id: string; label: string }[]
-  outputs: { id: string; label: string }[]
-  config: Record<string, unknown>
-}
-
+// 节点库条目（UI 概念，非持久化类型）：含分类与默认配置，落到画布后转为 CanvasNodeSnapshot
 interface PaletteNode {
   type: string
   label: string
@@ -181,9 +174,14 @@ interface PaletteNode {
   defaultConfig: Record<string, unknown>
 }
 
+// ── 统一通过 composable 访问 store ──
+// saveCanvas / runCanvas / loadCanvas 已封装 uiMessage 与错误处理
+const { saveCanvas, runCanvas, loadCanvas } = useCollaboration()
+
 const workflowName = ref('')
-const canvasNodes = ref<CanvasNode[]>([])
-const canvasEdges = ref<{ id: string; x1: number; y1: number; x2: number; y2: number }[]>([])
+const canvasNodes = ref<CanvasNodeSnapshot[]>([])
+const canvasEdges = ref<CanvasEdgeSnapshot[]>([])
+const canvasId = ref<string | null>(null)
 const selectedNodeId = ref<string | null>(null)
 const nodeSearch = ref('')
 const canvasRef = ref<HTMLElement>()
@@ -268,7 +266,7 @@ function addNodeToCanvas(node: PaletteNode) {
 
 function addNodeAt(paletteNode: PaletteNode, x: number, y: number) {
   dragCounter += 1
-  const canvasNode: CanvasNode = {
+  const canvasNode: CanvasNodeSnapshot = {
     id: `node-${Date.now()}-${dragCounter}`,
     type: paletteNode.type,
     label: paletteNode.label,
@@ -290,10 +288,10 @@ function selectNode(id: string) {
 }
 
 // 节点拖拽移动
-let draggingNode: CanvasNode | null = null
+let draggingNode: CanvasNodeSnapshot | null = null
 let dragOffset = { x: 0, y: 0 }
 
-function startDrag(event: MouseEvent, node: CanvasNode) {
+function startDrag(event: MouseEvent, node: CanvasNodeSnapshot) {
   draggingNode = node
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   dragOffset.x = event.clientX - rect.left
@@ -316,32 +314,45 @@ function startDrag(event: MouseEvent, node: CanvasNode) {
   document.addEventListener('mouseup', onUp)
 }
 
-// 工具栏操作
-function handleSave() {
-  // TODO: 调用 API 保存工作流
-  console.log('保存画布:', { nodes: canvasNodes.value, edges: canvasEdges.value })
+// 工具栏操作 ── 通过 composable 落库，不再 console.log 占位
+async function handleSave() {
+  const name = workflowName.value || t('collab.canvasNew')
+  const saved = await saveCanvas({
+    id: canvasId.value ?? undefined,
+    name,
+    nodes: canvasNodes.value,
+    edges: canvasEdges.value,
+  })
+  if (saved?.id) {
+    canvasId.value = saved.id
+    workflowName.value = saved.name
+  }
 }
 
-function handleRun() {
-  // TODO: 调用 API 执行工作流
-  console.log('执行画布:', { nodes: canvasNodes.value, edges: canvasEdges.value })
+async function handleRun() {
+  // 没保存过则先保存，拿到 id 再执行
+  if (!canvasId.value) {
+    await handleSave()
+    if (!canvasId.value) return
+  }
+  await runCanvas(canvasId.value)
 }
 
 // 初始化：如果 URL 有 :id 参数，加载已有工作流
 onMounted(async () => {
   const workflowId = route.params.id as string | undefined
-  if (workflowId) {
-    workflowName.value = `工作流 ${workflowId}`
-    // TODO: 调用 API 加载工作流节点
-  } else {
+  if (!workflowId) {
     workflowName.value = ''
+    return
   }
-
-  // 加载节点统计信息（用于节点库展示）
-  try {
-    await getNeurflowStats()
-  } catch {
-    // 忽略统计加载失败
+  const snapshot = await loadCanvas(workflowId)
+  if (snapshot) {
+    canvasId.value = snapshot.id ?? workflowId
+    workflowName.value = snapshot.name
+    canvasNodes.value = snapshot.nodes ?? []
+    canvasEdges.value = snapshot.edges ?? []
+  } else {
+    workflowName.value = `工作流 ${workflowId}`
   }
 })
 </script>

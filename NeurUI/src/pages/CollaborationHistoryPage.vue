@@ -57,30 +57,22 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listHistory } from '@/api/modules/collaboration'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import { useCollaboration } from '@/composables/useCollaboration'
+import type { CollabSession } from '@/api/modules/collaboration'
 
 const { t } = useI18n()
 
-interface Session {
-  id: string
-  name: string
-  description: string
-  status: string
-  participants?: string[]
-  createdAt: string
-  completedAt?: string
-}
+// ── 统一通过 composable 访问 store ──
+const { history, loading, loadHistory } = useCollaboration()
 
-const sessions = ref<Session[]>([])
-const loading = ref(false)
 const showDetail = ref(false)
-const selectedSession = ref<Session | null>(null)
+const selectedSession = ref<CollabSession | null>(null)
 const filters = reactive({ keyword: '', status: undefined as string | undefined, date: '' })
 
 const filteredSessions = computed(() =>
-  sessions.value.filter((s) => {
+  (history.value as CollabSession[]).filter((s) => {
     if (filters.keyword && !s.name.toLowerCase().includes(filters.keyword.toLowerCase())) return false
     if (filters.status && s.status !== filters.status) return false
     if (filters.date && !s.createdAt.startsWith(filters.date)) return false
@@ -88,25 +80,12 @@ const filteredSessions = computed(() =>
   })
 )
 
-async function fetchHistory() {
-  loading.value = true
-  try {
-    const res: any = await listHistory()
-    const raw = res?.data ?? res ?? []
-    sessions.value = Array.isArray(raw) ? raw : (raw?.data ?? [])
-  } catch {
-    sessions.value = []
-  } finally {
-    loading.value = false
-  }
-}
-
-function handleView(session: Session) {
+function handleView(session: CollabSession) {
   selectedSession.value = session
   showDetail.value = true
 }
 
-onMounted(fetchHistory)
+onMounted(loadHistory)
 </script>
 
 <style scoped>

@@ -71,50 +71,12 @@ def create_all_tables(conn: sqlite3.Connection):
         );
 
         -- ==========================================
-        -- 副表: 会话记录
-        -- ==========================================
-        CREATE TABLE IF NOT EXISTS sessions (
-            id TEXT PRIMARY KEY,
-            agent_id TEXT NOT NULL DEFAULT 'yi_ling',
-            user_id TEXT,
-            title TEXT DEFAULT 'New Session',
-            status TEXT DEFAULT 'active' CHECK(status IN ('active', 'archived', 'closed')),
-            message_count INTEGER DEFAULT 0,
-            total_tokens INTEGER DEFAULT 0,
-            summary TEXT,
-            last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        -- 副表: 会话消息
-        CREATE TABLE IF NOT EXISTS session_messages (
-            id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
-            content TEXT NOT NULL,
-            token_count INTEGER DEFAULT 0,
-            sequence_num INTEGER,
-            is_summary INTEGER DEFAULT 0,
-            metadata TEXT DEFAULT '{}',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-        );
-
-        -- 副表: 上下文快照
-        CREATE TABLE IF NOT EXISTS session_context_snapshots (
-            id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            query_hash TEXT NOT NULL,
-            snapshot_data TEXT NOT NULL,
-            token_count INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            expires_at TIMESTAMP,
-            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-        );
-
-        -- ==========================================
         -- 副表: 情感记录
         -- ==========================================
+        -- #4 已删除孤儿表:sessions / session_messages / session_context_snapshots
+        -- 这三张表仅有 CREATE TABLE,无任何 INSERT/SELECT/UPDATE 代码引用。
+        -- 会话持久化由 SessionManager 文件层负责(sessions/<agent_id>/session_<sid>_<date>.json)。
+        -- 详见 docs/adr/0008-session-repository.md
         CREATE TABLE IF NOT EXISTS memory_emotions (
             id TEXT PRIMARY KEY,
             memory_id TEXT NOT NULL,
@@ -427,12 +389,9 @@ def create_all_indexes(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_memories_crystallized ON memories(agent_id, crystallized_at DESC) WHERE is_crystallized = 1;
         CREATE INDEX IF NOT EXISTS idx_memories_decay_scan ON memories(lifecycle_stage, last_accessed_at ASC) WHERE is_crystallized = 0;
 
-        -- 会话索引
-        CREATE INDEX IF NOT EXISTS idx_sessions_agent_status ON sessions(agent_id, status, last_activity_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_sessions_user_active ON sessions(user_id, status) WHERE status = 'active';
-        CREATE INDEX IF NOT EXISTS idx_messages_session_seq ON session_messages(session_id, sequence_num ASC);
-        CREATE INDEX IF NOT EXISTS idx_messages_session_recent ON session_messages(session_id, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON session_context_snapshots(session_id, query_hash, expires_at);
+        -- 会话索引(#4 已删除:idx_sessions_agent_status / idx_sessions_user_active /
+        -- idx_messages_session_seq / idx_messages_session_recent / idx_snapshots_lookup)
+        -- 对应的 sessions / session_messages / session_context_snapshots 孤儿表已删除。
 
         -- 副表外键与查询索引
         CREATE INDEX IF NOT EXISTS idx_emotions_memory ON memory_emotions(memory_id);

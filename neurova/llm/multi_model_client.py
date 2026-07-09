@@ -1,11 +1,27 @@
 """
 多模型 LLM 客户端管理器
 
+文件路径: neurova/llm/multi_model_client.py
+
 职责:
 1. 管理多个 LLM 客户端实例（按服务商和模型组织）
 2. 支持运行时切换当前活跃模型
 3. 支持按模型名称自动路由请求
 4. 支持负载均衡策略
+
+单例初始化契约 (LLM-2 修复):
+- `_initialized` 标志仅在 `_initialize_default_clients()` 成功后置位
+- 首次初始化失败时（如 api_key 解密失败、provider 未就绪）:
+  * `_initialized` 不被置位 → 下次 `__init__` 会重试
+  * 异常被记录到日志后重新抛出（不吞掉错误）
+- 正常路径（无异常）时 `_initialized = True`，防止重复初始化
+- `reset()` 可手动清除单例和 `_initialized`，强制下次重新初始化
+- `chat()` 检测 `_clients` 为空时会自动 `refresh_all_providers()` 自愈
+
+历史修复:
+- P0-3 (C6): `__init__` 的 `_initialized` 检查移入 `cls._lock` (RLock) 内，修复 TOCTOU
+- LLM-2: `_initialized = True` 从 `_initialize_default_clients()` 之前移到之后，
+         修复首次初始化失败后永久跳过重试的 bug
 """
 
 import asyncio
@@ -84,27 +100,85 @@ class MultiModelLLMClient:
         with type(self)._lock:
             if hasattr(self, "_initialized") and self._initialized:
                 return
-            self._initialized = True
 
             self._provider_manager = provider_manager or get_provider_manager()
             self._clients: Dict[str, ModelClient] = {}  # key: provider_id/model
             self._current_provider_id: Optional[str] = None
             self._current_model: Optional[str] = None
             self._round_robin_index = 0
-            self._init_lock = threading.Lock()
+            # 使用 RLock：refresh_provider() 持锁后调用 _initialize_provider_clients()
+            # 后者也获取 _init_lock，Lock 会死锁；RLock 可重入避免死锁
+            self._init_lock = threading.RLock()
 
             # 初始化默认客户端
-            self._initialize_default_clients()
+            # 修复 LLM-2: _initialized = True 原位于 _initialize_default_clients() 之前 (line 87),
+            # 导致首次初始化失败后 _initialized 已为 True，下次 __init__ 直接 return 永久跳过重试。
+            # 现仅在 _initialize_default_clients() 成功后置位，失败时不置位以允许下次 __init__ 重试。
+            # 不吞掉异常：记录日志后重新抛出（遵循"不抹除报错信息"原则）。
+            try:
+                self._initialize_default_clients()
+                self._initialized = True
+            except Exception as e:
+                logger.error("Failed to initialize default clients: %s", e)
+                raise
+
+    @classmethod
+    def reset(cls) -> None:
+        """重置单例，允许重新初始化。
+
+        用途：当首次初始化因配置缺失（如 api_key 解密失败、provider 未就绪）
+        导致 _clients 为空时，配置修复后调用 reset() 可让下次 get_multi_model_client()
+        重新初始化。
+
+        线程安全：在 cls._lock（RLock）保护下清除 _instance 和模块级单例。
+
+        reset 链路穿透：同时调用 reset_provider_manager()，清除 provider_manager 单例。
+        否则下次 __init__ → get_provider_manager() 仍返回旧的 _provider_manager
+        （已缓存了空 api_key 的 providers），reset 链路在 provider_manager 处断裂。
+        """
+        with cls._lock:
+            # 清除实例级 _initialized 标志（防止已存在的实例阻止重新初始化）
+            instance = cls._instance
+            if instance is not None and hasattr(instance, "_initialized"):
+                instance._initialized = False
+            # 清除类级单例
+            cls._instance = None
+        # 清除模块级单例（在锁外，因为 get_multi_model_client 自己会加锁）
+        global _multi_model_client
+        _multi_model_client = None
+
+        # 清除 provider_manager 单例，确保 reset 链路穿透到 provider_manager 层
+        # 延迟导入避免循环依赖（multi_model_client 顶部已 import provider_manager，
+        # 但为保持 reset() 自包含与可测试性，这里显式延迟导入）
+        try:
+            from neurova.llm.provider_manager import reset_provider_manager
+            reset_provider_manager()
+        except ImportError as e:
+            logger.warning("Could not reset provider_manager: %s", e)
 
     def _initialize_default_clients(self) -> None:
-        """初始化默认客户端"""
+        """初始化默认客户端
+
+        三重门控诊断日志 (修复 antipattern: 原 `if A and B and C:` 失败时无任何分支日志):
+        - 三条件各自独立 return, 每个分支打 WARNING 指明具体失败原因
+        - 三条件都满足时, 保持原逻辑 (调 _initialize_provider_clients + 设当前模型)
+        - 关键诊断点: api_key 为空通常是 pycryptodome 缺失导致解密失败, 必须显式日志
+        """
         default_provider = self._provider_manager.get_default_provider()
-        if default_provider and default_provider.enabled and default_provider.api_key:
-            self._initialize_provider_clients(default_provider)
-            if default_provider.default_model:
-                self._current_provider_id = default_provider.id
-                self._current_model = default_provider.default_model
-                logger.info("Initialized default client: %s/%s", default_provider.id, default_provider.default_model)
+        if not default_provider:
+            logger.warning("Skip init default clients: no default provider configured")
+            return
+        if not default_provider.enabled:
+            logger.warning("Skip init default clients: default provider %s is disabled", default_provider.id)
+            return
+        if not default_provider.api_key:
+            logger.warning("Skip init default clients: default provider %s has empty api_key (decrypt failed?)", default_provider.id)
+            return
+        self._initialize_provider_clients(default_provider)
+        if default_provider.default_model:
+            self._current_provider_id = default_provider.id
+            self._current_model = default_provider.default_model
+            logger.info("Initialized default client: %s/%s", default_provider.id, default_provider.default_model)
 
     def _initialize_provider_clients(self, provider: ProviderConfig) -> None:
         """为服务商初始化客户端"""
@@ -274,6 +348,17 @@ class MultiModelLLMClient:
         """发送聊天请求"""
         # [METRICS] 结构化日志：记录 LLM 调用的消息结构和模型信息
         client = self._get_client_for_request(model, provider_id)
+
+        # 自愈：_clients 为空时尝试 refresh_all_providers()
+        # 场景：首次初始化时 api_key 解密失败/pycryptodome 缺失 → _clients 空
+        # 后续配置修复后（如 pycryptodome 安装），refresh 可恢复 clients
+        if not client and not self._clients:
+            logger.info("Auto-refreshing providers due to empty _clients")
+            try:
+                self.refresh_all_providers()
+                client = self._get_client_for_request(model, provider_id)
+            except Exception as e:
+                logger.warning("Auto-refresh failed: %s", e, exc_info=True)
 
         _role_counts: Dict[str, int] = {}
         for m in messages:

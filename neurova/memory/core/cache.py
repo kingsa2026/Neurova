@@ -301,8 +301,10 @@ class MemoryCache:
         Returns:
             缓存值
         """
-        value = self.get(key)
-        if value is None:
+        # 用 _MISSING 哨兵区分"键不存在(miss)"与"键存在但值为 None"
+        # 否则合法缓存的 None 会被误判为 miss,导致 factory 反复执行
+        value = self.get(key, _MISSING)
+        if value is _MISSING:
             value = factory()
             self.set(key, value, ttl=ttl)
         return value
@@ -319,8 +321,10 @@ class MemoryCache:
         """
         result = {}
         for key in keys:
-            value = self.get(key)
-            if value is not None:
+            # 用 _MISSING 哨兵区分 miss 与合法 None,
+            # 已缓存(含 None)的键才进 result,真正 miss 的键被排除
+            value = self.get(key, _MISSING)
+            if value is not _MISSING:
                 result[key] = value
         return result
 
@@ -479,6 +483,11 @@ def reset_global_cache():
 # ============================================================
 
 
+# 哨兵对象:用于区分"键不存在(miss)"与"键存在但值为 None"
+# 不能用 None 作默认值,否则合法缓存的 None 会被误判为 miss
+_MISSING = object()
+
+
 def cached(
     ttl: Optional[float] = None,
     key_prefix: str = "",
@@ -506,17 +515,16 @@ def cached(
             key_parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
             cache_key = ":".join(filter(None, key_parts))
 
-            # 尝试从缓存获取
-            result = cache.get(cache_key)
-            if result is not None:
-                return result
+            # 尝试从缓存获取(用哨兵区分"键不存在"与"已缓存 None")
+            result = cache.get(cache_key, _MISSING)
+            if result is not _MISSING:
+                return result  # 命中,包括已缓存的合法 None
 
             # 执行函数
             result = func(*args, **kwargs)
 
-            # 存入缓存
-            if result is not None:
-                cache.set(cache_key, result, ttl=ttl)
+            # 无条件存入缓存(包括合法 None)
+            cache.set(cache_key, result, ttl=ttl)
 
             return result
 

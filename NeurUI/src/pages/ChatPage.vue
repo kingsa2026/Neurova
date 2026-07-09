@@ -411,11 +411,14 @@
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { storeToRefs } from 'pinia'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useASRRestartGuard } from '@/composables/useASRRestartGuard'
 import { useAppStore } from '@/stores/app'
+import { useChatStore } from '@/stores/chat'
+import { useChat } from '@/composables/useChat'
+import type { ChatMessage, Session, PendingFile } from '@/types/chat'
 import { api } from '@/api'
-import { deleteConsoleSession } from '@/api/modules/console'
 import { secureStorage, escapeHtml, sanitizeUrl, sanitizeHtmlStrict } from '@/utils/security'
 import { uiMessage } from '@/utils/message'
 import GlassButton from '@/components/GlassButton.vue'
@@ -432,55 +435,30 @@ const props = defineProps<{
 const isMainLayout = computed(() => props.layoutMode === 'main')
 
 // ---------------------------------------------------------------------------
-// Types
+// Store-backed domain state (single source of truth via Pinia)
+// #2 / ADR 0008: ChatPage 不再持有领域状态,统一由 useChatStore 管理。
+// sessions/currentSessionId/messages/isStreaming/inputText/searchQuery 通过
+// storeToRefs 解构为本地 ref(保持响应性 + 模板兼容),所有 mutation 走 store actions。
 // ---------------------------------------------------------------------------
-interface ChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-  reasoning?: string
-  reasoningOpen?: boolean
-  toolCalls?: Array<{ name: string; arguments: string; result?: string }>
-  toolOpen?: boolean
-  toolCall?: { name: string; arguments: string }  // legacy single, kept for compat
-  toolResult?: string  // legacy single, kept for compat
-  attachments?: Array<{ name: string; type?: string; preview?: string; size?: number }>
-  audioUrl?: string
-  audioPlaying?: boolean
-  audioProgress?: number
-  audioCurrentTime?: number
-  audioDuration?: number
-  audioSpeed?: number
-  audioEl?: HTMLAudioElement | null
-  ttsLoading?: boolean
-  streaming?: boolean
-}
-
-interface Session {
-  id: string
-  title: string
-  updatedAt?: string
-}
-
-interface PendingFile {
-  name: string
-  file: File
-  type?: string
-  preview?: string
-}
+const chatStore = useChatStore()
+const {
+  messages,
+  sessions,
+  currentSessionId,
+  inputText,
+  searchQuery,
+  isStreaming,
+  currentSessionTitle,
+  filteredSessions,
+} = storeToRefs(chatStore)
 
 // ---------------------------------------------------------------------------
-// State
+// Local UI state (UI concerns, not domain state)
 // ---------------------------------------------------------------------------
 const messagesRef = ref<HTMLElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
-const messages = ref<ChatMessage[]>([])
-const sessions = ref<Session[]>([])
-const currentSessionId = ref<string | null>(null)
-const inputText = ref('')
-const searchQuery = ref('')
-const isStreaming = ref(false)
 const pendingFiles = ref<PendingFile[]>([])
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const historyPanelOpen = ref(true)
@@ -516,90 +494,42 @@ const renameModal = reactive({ open: false, sessionId: '', title: '' })
 let abortController: AbortController | null = null
 
 // ---------------------------------------------------------------------------
-// Computed
+// Session Management (delegated to useChat composable)
+// #2 / ADR 0008: 所有 session CRUD 通过 useChat 统一函数调用库,禁止直接调后端 API。
+// 5 个 session 函数(load/create/switch/delete/rename)委托给 useChat,
+// 本地仅保留"无参模板适配 + UI 副作用(scrollToBottom / modal)"包装。
 // ---------------------------------------------------------------------------
-const currentSessionTitle = computed(() => sessions.value.find(s => s.id === currentSessionId.value)?.title ?? '')
-
-const filteredSessions = computed(() => {
-  if (!searchQuery.value) return sessions.value
-  const q = searchQuery.value.toLowerCase()
-  return sessions.value.filter((s) => s.title.toLowerCase().includes(q))
+const {
+  loadSessions: _loadSessions,
+  createSession: _createSession,
+  switchSession: _switchSession,
+  deleteSession: _deleteSession,
+  renameSession: _renameSession,
+  loadingSessions,
+  switchingSession,
+} = useChat({
+  errorMessage: (key, fallback) => t(key) || fallback,
+  onError: (msg) => uiMessage.error(msg),
 })
 
-// ---------------------------------------------------------------------------
-// Session Management
-// ---------------------------------------------------------------------------
-async function loadSessions() {
-  try {
-    const agentParam = agentId.value ? `?agent_id=${agentId.value}` : ''
-    const res: any = await api.get(`/console/chat/sessions${agentParam}`)
-    const data = res?.data ?? res
-    const sessionList = data?.sessions ?? data ?? []
-    sessions.value = sessionList.map(
-      (s: any) => ({ id: s.session_id || s.id, title: s.title || s.name || '新对话', updatedAt: s.created_at || s.updated_at }),
-    )
-    if (sessions.value.length > 0 && !currentSessionId.value) {
-      switchSession(sessions.value[0].id)
-    }
-  } catch {
-    sessions.value = []
-  }
+/** 加载当前 agent 的 session 列表(模板 onMounted / agentId watch 调用)。 */
+async function loadSessions(): Promise<void> {
+  await _loadSessions(agentId.value)
 }
 
-async function createSession() {
-  const newId = crypto.randomUUID()
-  const newSession: Session = { id: newId, title: `${t('chat.newChat')} - ${new Date().toLocaleString()}` }
-  sessions.value.unshift(newSession)
-  switchSession(newId)
+/** 创建新会话(模板按钮无参调用),委托给 useChat.createSession。 */
+async function createSession(): Promise<void> {
+  await _createSession(agentId.value, t('chat.newChat'))
 }
 
-async function switchSession(sessionId: string) {
-  currentSessionId.value = sessionId
-  messages.value = []
-  try {
-    const res: any = await api.get(`/console/chat/history?session_id=${sessionId}`)
-    const data = res?.data ?? res
-    const history = Array.isArray(data) ? data : data?.messages ?? data?.items ?? []
-    messages.value = history.map((m: any) => {
-      // Build toolCalls array from tool_messages
-      const toolCalls: Array<{ name: string; arguments: string; result?: string }> = []
-      const toolMessages = m.tool_messages || []
-      for (const tm of toolMessages) {
-        if (tm.type === 'tool_call') {
-          toolCalls.push({
-            name: tm.tool_name || tm.name || '',
-            arguments: typeof tm.params === 'string' ? tm.params : JSON.stringify(tm.params || tm.arguments || {}, null, 2),
-          })
-        } else if (tm.type === 'tool_result') {
-          const resultText = typeof tm.result === 'string' ? tm.result : JSON.stringify(tm.result || '', null, 2)
-          if (toolCalls.length > 0) {
-            toolCalls[toolCalls.length - 1].result = resultText
-          }
-        }
-      }
-      // legacy single fallback
-      const toolCall = toolCalls.length > 0 ? toolCalls[0] : (m.tool_call ? {
-        name: m.tool_call.name || m.tool_call.function?.name || '',
-        arguments: m.tool_call.arguments || m.tool_call.function?.arguments || '',
-      } : undefined)
-      const toolResult = toolCalls.length > 0 ? toolCalls[0].result : (m.tool_result || undefined)
-      return {
-        role: m.role === 'user' ? 'user' : 'assistant',
-        content: m.content || '',
-        reasoning: m.reasoning || m.reasoning_content || undefined,
-        reasoningOpen: false,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        toolCall,
-        toolResult,
-      }
-    })
-    scrollToBottom()
-  } catch (err) {
-    console.error('[Chat] Failed to load history:', err)
-  }
+/** 切换会话,补充 scrollToBottom UI 副作用(历史加载后滚到底部)。 */
+async function switchSession(sessionId: string): Promise<void> {
+  await _switchSession(sessionId)
+  scrollToBottom()
 }
 
-function renameSession(sessionId: string) {
+/** 打开重命名 modal(只读取 sessions,不调 API)。 */
+function renameSession(sessionId: string): void {
   const session = sessions.value.find((s) => s.id === sessionId)
   if (!session) return
   renameModal.sessionId = sessionId
@@ -607,30 +537,16 @@ function renameSession(sessionId: string) {
   renameModal.open = true
 }
 
-async function confirmRename() {
+/** 确认重命名(modal @ok),委托给 useChat.renameSession。 */
+async function confirmRename(): Promise<void> {
   if (!renameModal.title.trim()) return
-  try {
-    await api.put(`/chat/sessions/${renameModal.sessionId}`, { title: renameModal.title.trim() })
-    const session = sessions.value.find((s) => s.id === renameModal.sessionId)
-    if (session) session.title = renameModal.title.trim()
-  } catch (err) {
-    console.error('[Chat] Rename failed:', err)
-  }
-  renameModal.open = false
+  const ok = await _renameSession(renameModal.sessionId, renameModal.title.trim())
+  if (ok) renameModal.open = false
 }
 
-async function deleteSession(sessionId: string) {
-  try {
-    await deleteConsoleSession(sessionId)
-    sessions.value = sessions.value.filter((s) => s.id !== sessionId)
-    if (currentSessionId.value === sessionId) {
-      currentSessionId.value = null
-      messages.value = []
-      if (sessions.value.length > 0) switchSession(sessions.value[0].id)
-    }
-  } catch (err) {
-    console.error('[Chat] Delete session failed:', err)
-  }
+/** 删除会话,委托给 useChat.deleteSession。 */
+async function deleteSession(sessionId: string): Promise<void> {
+  await _deleteSession(sessionId)
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +554,7 @@ async function deleteSession(sessionId: string) {
 // ---------------------------------------------------------------------------
 async function sendMessage() {
   const text = inputText.value.trim()
-  if (!text && pendingFiles.length === 0) return
+  if (!text && pendingFiles.value.length === 0) return
   if (isStreaming.value) return
   if (!agentId.value) return
 
@@ -656,7 +572,7 @@ async function sendMessage() {
       size: f.file.size,
     })),
   }
-  messages.value.push(userMsg)
+  chatStore.addMessage(userMsg)
 
   // Prepare assistant placeholder
   const assistantMsg: ChatMessage = {
@@ -668,12 +584,12 @@ async function sendMessage() {
     toolOpen: false,
     streaming: true,
   }
-  messages.value.push(assistantMsg)
+  chatStore.addMessage(assistantMsg)
 
-  inputText.value = ''
+  chatStore.setInputText('')
   const filesToUpload = [...pendingFiles.value]
   pendingFiles.value = []
-  isStreaming.value = true
+  chatStore.setStreaming(true)
   scrollToBottom()
 
   // Upload files first if any
@@ -750,7 +666,7 @@ async function sendMessage() {
     }
   } finally {
     assistantMsg.streaming = false
-    isStreaming.value = false
+    chatStore.setStreaming(false)
     abortController = null
     scrollToBottom()
   }
@@ -814,8 +730,8 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       msg.streaming = false
       // Auto-create session if this is the first exchange
       if (!currentSessionId.value && event.session_id) {
-        currentSessionId.value = event.session_id
-        sessions.value.unshift({
+        chatStore.setCurrentSession(event.session_id)
+        chatStore.addSession({
           id: event.session_id,
           title: inputText.value.slice(0, 50) || t('chat.newChat'),
         })
@@ -830,7 +746,7 @@ function processSSEEvent(event: any, msg: ChatMessage) {
 
 function stopStreaming() {
   abortController?.abort()
-  isStreaming.value = false
+  chatStore.setStreaming(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -863,7 +779,7 @@ function initASR() {
       }
     }
     if (finalTranscript) {
-      inputText.value += (inputText.value ? ' ' : '') + finalTranscript
+      chatStore.setInputText(inputText.value + (inputText.value ? ' ' : '') + finalTranscript)
       nextTick(() => autoResize())
     }
   }
@@ -1357,8 +1273,8 @@ watch(
 // 切换 agent 时重新加载 sessions
 watch(agentId, (newId, oldId) => {
   if (newId && newId !== oldId) {
-    messages.value = []
-    currentSessionId.value = null
+    chatStore.clearMessages()
+    chatStore.setCurrentSession(null)
     loadSessions()
   }
 })

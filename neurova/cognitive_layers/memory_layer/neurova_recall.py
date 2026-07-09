@@ -10,11 +10,13 @@ Neurova 统一记忆检索引擎 — 多维融合 + 意图钻取
   不是"遍历"，而是"钻探"——有意图、有方向、可解释地深入
 """
 
+import asyncio
 import datetime
 from neurova.core.logger import get_logger
 import math
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -451,6 +453,9 @@ class RecalledMemory:
     channel: RecallChannel = RecallChannel.TEXT
     metadata: Dict[str, Any] = field(default_factory=dict)
     recalled_at: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
+    # BUG-2 修复: 记忆的原始创建时间（用于时间衰减计算），从原始 memory 的 created_at/timestamp 提取
+    # 默认回退到 recalled_at，保持向后兼容
+    created_at: Optional[datetime.datetime] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式
@@ -464,6 +469,7 @@ class RecalledMemory:
             "channel": self.channel.value,
             "metadata": self.metadata,
             "recalled_at": self.recalled_at.isoformat(),
+            "created_at": (self.created_at or self.recalled_at).isoformat(),
         }
         # 从 metadata 中提取 channel_scores（NeRF 体渲染数据）
         if self.metadata and "channel_scores" in self.metadata:
@@ -556,7 +562,8 @@ class NeurovaRecallEngine:
 
             self._registry = get_channel_registry()
             # 自动注册内置通道（如果尚未注册）
-            if not self._registry.get_all():
+            # BUG-13 修复: 用 get_active() 替代 get_all(), 与 recall 路径一致
+            if not self._registry.get_active():
                 for channel_cls in BUILTIN_CHANNELS:
                     channel = channel_cls()
                     self._registry.register(channel)
@@ -573,6 +580,8 @@ class NeurovaRecallEngine:
         self._cascade_engine = None
         self._absence_reasoner = None
         self._dependency_extractor = None
+        # BUG-3 修复: 用独立标志判断是否完整初始化, 避免 _dependency_graph 部分赋值后永久返回 True
+        self._neuron_initialized = False
 
         # 默认通道权重（无意图时的 fallback）
         self._channel_weights = {
@@ -748,7 +757,7 @@ class NeurovaRecallEngine:
     def _run_with_timeout(self, func, *args, **kwargs) -> Any:
         """带超时执行"""
         from neurova.core.thread_pool import get_thread_pool
-        
+
         executor = get_thread_pool()
         future = executor.submit(func, *args, **kwargs)
         try:
@@ -756,6 +765,31 @@ class NeurovaRecallEngine:
         except TimeoutError:
             logger.warning("执行超时: %s", func.__name__)
             return []
+
+    @staticmethod
+    def _run_coroutine_in_thread(coro) -> Any:
+        """在独立线程中运行协程, 用 asyncio.run() 创建并关闭独立 event loop。
+
+        BUG-5 修复: 替代废弃的 asyncio.get_event_loop() + loop.run_until_complete()。
+        - 避开 "This event loop is already running" RuntimeError (在已有运行 loop 时)
+        - 确保每次创建的 loop 都被 close, 无资源泄漏
+        """
+        import concurrent.futures
+
+        result_box: Dict[str, Any] = {}
+
+        def _worker():
+            try:
+                result_box["value"] = asyncio.run(coro)
+            except BaseException as e:  # noqa: BLE001 — 显式存异常, 主线程 re-raise
+                result_box["error"] = e
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+        thread.join(timeout=None)
+        if "error" in result_box:
+            raise result_box["error"]
+        return result_box.get("value")
 
     def _phase1_multichannel_recall(
         self,
@@ -801,13 +835,22 @@ class NeurovaRecallEngine:
             elif channel == RecallChannel.VOICE:
                 futures[executor.submit(self._channel_voice, query, limit)] = channel
 
-        for future in as_completed(futures):
-            channel = futures[future]
-            try:
-                results = future.result(timeout=self.timeout_seconds)
-                all_results.extend(results)
-            except Exception as e:
-                logger.error("通道 %s 检索失败: %s", channel.value, e)
+        # BUG-8 修复: as_completed 添加 timeout, 防止某通道永不返回时永久挂起
+        try:
+            for future in as_completed(futures, timeout=self.timeout_seconds):
+                channel = futures[future]
+                try:
+                    results = future.result(timeout=self.timeout_seconds)
+                    all_results.extend(results)
+                except (TypeError, AttributeError, NameError, ImportError) as e:
+                    # BUG-7 修复: 编程错误必须 re-raise, 不能静默吞掉
+                    logger.error("通道 %s 编程错误: %s", channel.value, e)
+                    raise
+                except Exception as e:
+                    logger.error("通道 %s 检索失败: %s", channel.value, e)
+        except FuturesTimeoutError:
+            logger.warning("部分通道检索超时 (timeout=%ss), 返回已完成的 %d 条结果",
+                           self.timeout_seconds, len(all_results))
 
         deduplicated = self._deduplicate_results(all_results)
 
@@ -830,15 +873,16 @@ class NeurovaRecallEngine:
         channel_weights: Optional[Dict[RecallChannel, float]] = None,
     ) -> List[RecalledMemory]:
         """插件模式：通过 ChannelRegistry 执行通道检索"""
-        import asyncio
-
         from .channels.base import ChannelResult
 
         # 映射 RecallChannel → 通道名称
         channel_name_map = {rc.value: rc.value for rc in RecallChannel}
 
         all_results: List[RecalledMemory] = []
-        weights = channel_weights if self._channel_weights else {}
+        # BUG-4 修复: 检查参数 channel_weights 而非实例属性 self._channel_weights
+        # 之前: `channel_weights if self._channel_weights else {}` — self._channel_weights 永远 truthy
+        # 导致 channel_weights=None 时 weights=None, 后续 weights.get() 抛 AttributeError
+        weights = channel_weights if channel_weights else {}
 
         # 获取启用的插件通道
         enabled_names = {rc.value for rc in channels}
@@ -847,14 +891,8 @@ class NeurovaRecallEngine:
         if not plugin_channels:
             return []
 
-        # 异步并行执行
-        loop = None
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
+        # BUG-5 修复: 不再用废弃的 asyncio.get_event_loop(), 且确保 loop 关闭。
+        # 在独立线程中用 asyncio.run() 运行协程 — 避开 "event loop already running" 问题。
         async def _run_all():
             tasks = []
             for ch in plugin_channels:
@@ -869,7 +907,7 @@ class NeurovaRecallEngine:
                 )
             return await asyncio.gather(*tasks, return_exceptions=True)
 
-        results_list = loop.run_until_complete(_run_all())
+        results_list = self._run_coroutine_in_thread(_run_all())
 
         for channel_results in results_list:
             if isinstance(channel_results, Exception):
@@ -926,7 +964,11 @@ class NeurovaRecallEngine:
                 ))
             
             logger.debug("温度通道检索: %s, 返回 %d 条", query, len(results))
-            
+
+        except (TypeError, AttributeError, NameError, ImportError) as e:
+            # BUG-7 修复: 编程错误必须 re-raise, 不能被 except Exception 静默吞掉
+            logger.error("温度通道编程错误: %s", e)
+            raise
         except Exception as e:
             logger.warning("温度通道检索失败: %s", e)
         
@@ -953,22 +995,30 @@ class NeurovaRecallEngine:
             
             # 搜索
             matching_ids = search.search_by_keywords(query, limit=limit)
-            
+
             # 转换为RecalledMemory
-            id_to_memory = {m.get("id", ""): m for m in all_memories}
+            # Bug 13 修复：用已转换的 memory_dicts 避免对象无 .get() 方法被 except 吞掉
+            id_to_memory = {m.get("id", ""): m for m in memory_dicts}
             for mid in matching_ids:
                 if mid in id_to_memory:
                     mem = id_to_memory[mid]
+                    mem_content = mem.get("content", "")
+                    # Bug 13 修复：用真实相似度替代硬编码 0.8
+                    score = search.compute_similarity(query, mem_content) if query and mem_content else 0.0
                     results.append(RecalledMemory(
                         memory_id=mid,
-                        content=mem.get("content", ""),
-                        score=0.8,
+                        content=mem_content,
+                        score=score,
                         channel=RecallChannel.TEXT,
-                        metadata={"match_type": "semantic"},
+                        metadata={"match_type": "semantic" if search._use_embedding else "keyword"},
                     ))
             
             logger.debug("文本通道检索: %s, 返回 %d 条", query, len(results))
-            
+
+        except (TypeError, AttributeError, NameError, ImportError) as e:
+            # BUG-7 修复: 编程错误必须 re-raise
+            logger.error("文本通道编程错误: %s", e)
+            raise
         except Exception as e:
             logger.warning("文本通道检索失败: %s", e)
         
@@ -1003,7 +1053,11 @@ class NeurovaRecallEngine:
             results = results[:limit]
             
             logger.debug("分类通道检索: %s (category=%s), 返回 %d 条", query, category, len(results))
-            
+
+        except (TypeError, AttributeError, NameError, ImportError) as e:
+            # BUG-7 修复: 编程错误必须 re-raise
+            logger.error("分类通道编程错误: %s", e)
+            raise
         except Exception as e:
             logger.warning("分类通道检索失败: %s", e)
         
@@ -1027,9 +1081,18 @@ class NeurovaRecallEngine:
         return "general"
 
     def _ensure_neuron_components(self) -> bool:
-        """惰性初始化 NEURON 组件，返回是否可用"""
-        if self._dependency_graph is not None:
+        """惰性初始化 NEURON 组件，返回是否可用
+
+        BUG-3 修复: 用 _neuron_initialized 标志判断是否完整初始化。
+        部分组件赋值后失败时, 回滚已赋值组件, 下次调用重试。
+        """
+        if self._neuron_initialized:
             return True
+        # 清理可能的部分赋值 (上次调用失败遗留)
+        self._dependency_graph = None
+        self._cascade_engine = None
+        self._absence_reasoner = None
+        self._dependency_extractor = None
         try:
             from .dependency_graph import DependencyGraph
             from .cascade_engine import CascadeEngine
@@ -1040,8 +1103,15 @@ class NeurovaRecallEngine:
             self._cascade_engine = CascadeEngine(self._dependency_graph)
             self._absence_reasoner = AbsenceReasoner(self._dependency_graph)
             self._dependency_extractor = MOEDependencyExtractor()
+            self._neuron_initialized = True
             return True
         except Exception as e:
+            # 回滚已赋值组件, 避免部分初始化状态
+            self._dependency_graph = None
+            self._cascade_engine = None
+            self._absence_reasoner = None
+            self._dependency_extractor = None
+            self._neuron_initialized = False
             logger.debug("NEURON 组件初始化失败: %s", e)
             return False
 
@@ -1074,10 +1144,16 @@ class NeurovaRecallEngine:
                 for entity_id in downstream + upstream:
                     entity_node = self._dependency_graph.entities.get(entity_id)
                     if entity_node and "memory_id" in entity_node.metadata:
+                        # Bug 13 修复：用 query 与 entity_node.name 的相似度替代硬编码 0.8
+                        try:
+                            from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
+                            graph_score = get_semantic_search().compute_similarity(query, entity_node.name) if query else 0.5
+                        except Exception:
+                            graph_score = 0.5
                         recalled_memories.append(RecalledMemory(
                             memory_id=entity_node.metadata["memory_id"],
                             content=entity_node.name,
-                            score=0.8,
+                            score=graph_score,
                             channel=RecallChannel.GRAPH,
                         ))
 
@@ -1093,6 +1169,10 @@ class NeurovaRecallEngine:
                             score=effect.confidence,
                             channel=RecallChannel.GRAPH,
                         ))
+        except (TypeError, AttributeError, NameError, ImportError) as e:
+            # BUG-7 修复: 编程错误必须 re-raise
+            logger.error("图通道编程错误: %s", e)
+            raise
         except Exception as e:
             logger.debug("图通道检索异常: %s", e)
 
@@ -1119,8 +1199,6 @@ class NeurovaRecallEngine:
 
         try:
             # 分析查询情感
-            pass
-
             emotion_module = getattr(self.memory_manager, "emotion_module", None)
             if not emotion_module:
                 return []
@@ -1139,28 +1217,33 @@ class NeurovaRecallEngine:
 
             results = []
             for mid in memory_ids:
-                mem_dict = self.memory_manager.recall(query="", limit=1)
-                # 找到对应记忆
-                mem_obj = self.memory_manager._memories.get(mid)
-                if mem_obj:
+                # BUG-6 修复: 用公共 API get_memory 替代直接访问 _memories 私有属性
+                # BUG-10 修复: 删除未使用的 mem_dict = self.memory_manager.recall(...) 死代码
+                mem_dict = self.memory_manager.get_memory(mid)
+                if mem_dict:
                     mem_emotion = emotion_module.get_emotion(mid)
                     score = mem_emotion.intensity if mem_emotion else 0.5
 
                     results.append(
                         RecalledMemory(
                             memory_id=mid,
-                            content=mem_obj.content,
+                            content=mem_dict.get("content", ""),
                             score=score,
                             channel=RecallChannel.EMOTION,
                             metadata={
                                 "emotion": emotion_state.primary_emotion.value,
-                                "intensity": emotion_state.intensity,
+                                # BUG-14 修复: 用记忆自身的情感强度 (mem_emotion) 而非查询强度 (emotion_state)
+                                "intensity": mem_emotion.intensity if mem_emotion else 0.5,
                             },
                         )
                     )
 
             return results
 
+        except (TypeError, AttributeError, NameError, ImportError) as e:
+            # BUG-7 修复: 编程错误必须 re-raise
+            logger.error("情感通道编程错误: %s", e)
+            raise
         except Exception as e:
             logger.debug("情感通道检索失败: %s", e)
             return []
@@ -1195,10 +1278,12 @@ class NeurovaRecallEngine:
                         # 提取置信度和时间
                         record_data = meta.get("record", {})
                         confidence = record_data.get("confidence", 0.5)
-                        mem_dict.get("timestamp", "")
+                        # BUG-11 修复: 赋值 timestamp 而非独立表达式 (无副作用)
+                        timestamp_str = mem_dict.get("timestamp", "")
 
-                        # 计算分数（置信度 + 时间衰减）
-                        recency_score = 1.0  # 简化：假设都是近期记忆
+                        # BUG-12 修复: 用真实时间戳计算 recency_score (指数衰减)
+                        # 而非硬编码 1.0
+                        recency_score = self._compute_voice_recency_score(timestamp_str)
                         score = confidence * 0.7 + recency_score * 0.3
 
                         voice_memories.append(
@@ -1221,9 +1306,49 @@ class NeurovaRecallEngine:
 
             return voice_memories[:limit]
 
+        except (TypeError, AttributeError, NameError, ImportError) as e:
+            # BUG-7 修复: 编程错误必须 re-raise
+            logger.error("语音通道编程错误: %s", e)
+            raise
         except Exception as e:
             logger.debug("语音通道检索失败: %s", e)
             return []
+
+    def _compute_voice_recency_score(self, timestamp_str: str) -> float:
+        """根据时间戳计算语音记忆的 recency_score (指数衰减)
+
+        BUG-12 修复: 替代硬编码 1.0, 用真实时间戳计算时间衰减分数。
+        - 无时间戳或解析失败: 回退到 0.5 (中性)
+        - 近期记忆: 接近 1.0
+        - 旧记忆: 指数衰减趋近 0
+
+        Args:
+            timestamp_str: ISO 格式时间戳字符串
+
+        Returns:
+            float: recency_score [0, 1]
+        """
+        if not timestamp_str:
+            return 0.5  # 无时间戳时中性回退
+
+        try:
+            # 尝试解析 ISO 格式时间戳
+            ts = datetime.datetime.fromisoformat(timestamp_str)
+            # 如果 naive datetime, 假设为 UTC
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=datetime.timezone.utc)
+
+            now = datetime.datetime.now(datetime.timezone.utc)
+            age_hours = max(0.0, (now - ts).total_seconds() / 3600.0)
+
+            # 指数衰减: 24h 半衰期 (与 _recency_score 对齐)
+            # exp(-age_hours / 24) → 1天后 ~0.37, 7天后 ~0.05
+            decay_constant = 24.0
+            recency = math.exp(-age_hours / decay_constant)
+            return max(0.0, min(1.0, recency))
+        except (ValueError, TypeError):
+            # 时间戳格式无效, 回退到中性分数
+            return 0.5
 
     def _fusion_score(
         self,
@@ -1248,8 +1373,8 @@ class NeurovaRecallEngine:
         weights = channel_weights if channel_weights else self._channel_weights
         channel_weight = weights.get(memory.channel, 0.1)
 
-        # 时间衰减（越新越好）
-        time_decay = self._recency_score(memory.recalled_at)
+        # 时间衰减（越新越好）— BUG-2 修复: 用 created_at 而非 recalled_at
+        time_decay = self._recency_score(memory)
 
         # 融合分数
         fusion_score = base_score * channel_weight * time_decay
@@ -1346,10 +1471,25 @@ class NeurovaRecallEngine:
 
         return result
 
-    def _recency_score(self, recalled_at: datetime.datetime) -> float:
-        """计算时间衰减分数"""
+    def _recency_score(self, memory: "RecalledMemory") -> float:
+        """计算时间衰减分数
+
+        BUG-2 修复: 使用 memory.created_at (记忆原始创建时间) 而非 recalled_at (召回时间)。
+        若 created_at 为 None (向后兼容), 回退到 recalled_at。
+
+        Args:
+            memory: 召回的记忆对象
+
+        Returns:
+            float: 时间衰减分数 (0.1 ~ 1.0)
+        """
+        # 优先用 created_at; 为 None 时回退到 recalled_at (向后兼容)
+        reference_time = memory.created_at if memory.created_at is not None else memory.recalled_at
         now = datetime.datetime.now(datetime.timezone.utc)
-        age_hours = (now - recalled_at).total_seconds() / 3600
+        # 时区对齐: 若 reference_time 是 naive datetime, 视为 UTC
+        if reference_time.tzinfo is None:
+            reference_time = reference_time.replace(tzinfo=datetime.timezone.utc)
+        age_hours = (now - reference_time).total_seconds() / 3600
 
         # 指数衰减
         decay_rate = 0.1  # 每小时衰减10%
@@ -1428,11 +1568,6 @@ class NeurovaRecallEngine:
             return DrillIntent.VALIDATE
 
         return default_intent
-
-    def _infer_category(self, query: str) -> Optional[str]:
-        """推断查询类别"""
-        # 简化实现
-        return None
 
     def _active_channels(self, intent: DrillIntent) -> List[RecallChannel]:
         """根据意图确定活跃通道"""

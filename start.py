@@ -23,6 +23,7 @@ Neurova 统一启动脚本
     python start.py --cli        # 启动后端 + CLI 聊天
     python start.py --chat       # 启动前后端 + 自动打开浏览器
     python start.py --restart     # 交互式重启前后端
+    python start.py --force-restart  # 强制重启（跳过确认 + 强制释放端口）
     python start.py --restart --backend  # 仅重启后端
     python start.py --check      # 仅检查服务状态
     python start.py --skip-install  # 跳过自动环境检查
@@ -68,16 +69,16 @@ def _get_backend_python() -> list:
     return [sys.executable]
 
 
-def start_backend(port: int = BACKEND_PORT, log_file: str = "server.log") -> subprocess.Popen:
+def start_backend(port: int = BACKEND_PORT, log_file: str = None) -> tuple:
     """
     启动后端服务器
 
     Args:
         port: 后端端口
-        log_file: 日志文件路径，默认写入 logs/server.log
+        log_file: 日志文件名，写入 logs/{log_file}。传 None 则不重定向（输出到控制台）。
 
     Returns:
-        subprocess.Popen: 服务器进程
+        tuple: (subprocess.Popen 进程, 日志文件句柄 或 None)
     """
     print(f"\n  {c('▸', Colors.CYAN)} {c('启动后端服务', Colors.BOLD)}")
     print(f"    地址: {c(f'http://localhost:{port}', Colors.SKY_BLUE_BRIGHT)}")
@@ -88,22 +89,24 @@ def start_backend(port: int = BACKEND_PORT, log_file: str = "server.log") -> sub
     env = os.environ.copy()
     env["NEUROVA_PORT"] = str(port)
 
-    log_dir = ROOT_DIR / "logs"
-    log_dir.mkdir(exist_ok=True)
-    stdout_target = open(log_dir / log_file, "w", encoding="utf-8")
-    stderr_target = subprocess.STDOUT
+    # Bug S-4 修复: 支持 log_file=None，此时不打开日志文件，输出到控制台
+    stdout_target = None
+    if log_file:
+        log_dir = ROOT_DIR / "logs"
+        log_dir.mkdir(exist_ok=True)
+        stdout_target = open(log_dir / log_file, "w", encoding="utf-8")
 
     cmd = _get_backend_python() + [str(get_backend_script())]
-    
+
     kwargs = {
         "cwd": str(ROOT_DIR),
         "env": env,
     }
-    
+
     if stdout_target:
         kwargs["stdout"] = stdout_target
-        kwargs["stderr"] = stderr_target
-    
+        kwargs["stderr"] = subprocess.STDOUT
+
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
 
@@ -260,6 +263,10 @@ def restart_services(
     """
     services = check_all_services()
 
+    # Bug S-1 修复: 在函数作用域内定义 processes，避免 NameError
+    # 原代码在"没有需要停止的服务"分支引用 processes，但该变量未定义
+    processes = []  # [(name, process, log_handle)]
+
     # 确定需要停止的服务
     need_stop_backend = restart_backend and services["backend"]["occupied"]
     need_stop_frontend = restart_frontend and services["frontend"]["occupied"]
@@ -277,6 +284,7 @@ def restart_services(
                     print(f"  {c('✗', Colors.RED)} 后端启动超时")
                 print(f"  请检查日志: logs/server.log")
                 return 1
+            processes.append(("Backend", proc, log_fh))
         if restart_frontend:
             check_node_deps()
             proc = start_frontend(frontend_port)
@@ -316,13 +324,9 @@ def restart_services(
     if need_stop_frontend:
         print(f"  {c('▸', Colors.CYAN)} {c('停止前端', Colors.BOLD)} ...")
         kill_port(frontend_port)
-        # 同时终止 node 进程（Vite dev server）
-        if sys.platform == "win32":
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "node.exe"],
-                capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
+        # Bug S-2 修复: 删除原代码中按进程映像名杀全部 Node 进程的 Windows 命令
+        # 原代码会误杀系统上所有 Node 进程（VSCode、其他 dev server、Discord 等）
+        # 现在只用 kill_port(frontend_port) 精准释放端口，跨平台且不误杀
         wait_for_port_free(frontend_port, timeout=10)
         print()
 
@@ -544,6 +548,7 @@ def main():
   python start.py --chat       # 启动前后端 + 自动打开浏览器
   python start.py --check      # 检查服务状态
   python start.py --restart    # 交互式重启前后端
+  python start.py --force-restart  # 强制重启（跳过确认）
   python start.py --restart --backend  # 仅重启后端
         """,
     )
@@ -554,6 +559,7 @@ def main():
     parser.add_argument("--chat", action="store_true", help="启动前后端 + 自动打开浏览器聊天")
     parser.add_argument("--check", action="store_true", help="检查服务状态并退出")
     parser.add_argument("--restart", action="store_true", help="交互式重启服务")
+    parser.add_argument("--force-restart", action="store_true", help="强制重启（跳过确认 + 强制释放端口）")
     parser.add_argument("--yes", "-y", action="store_true", help="跳过确认提示（用于脚本/批处理调用）")
     parser.add_argument("--backend-port", type=int, default=BACKEND_PORT, help="后端端口")
     parser.add_argument("--frontend-port", type=int, default=FRONTEND_PORT, help="前端端口")
@@ -581,7 +587,8 @@ def main():
         return 0
 
     # 重启服务
-    if args.restart:
+    # Bug S-3 修复: --force-restart 等价于 --restart + --yes
+    if args.restart or args.force_restart:
         restart_backend = not args.frontend or args.backend
         restart_frontend = not args.backend or args.frontend
         if not args.backend and not args.frontend:
@@ -592,7 +599,7 @@ def main():
             restart_frontend=restart_frontend,
             backend_port=args.backend_port,
             frontend_port=args.frontend_port,
-            auto_yes=args.yes,
+            auto_yes=args.yes or args.force_restart,
         )
 
     processes = []  # [(name, process, log_handle)]
@@ -610,7 +617,7 @@ def main():
             if check_port(args.backend_port):
                 print(f"  {c('✓', Colors.GREEN)} 后端已在运行 (端口 {args.backend_port})")
             else:
-                proc, log_fh = start_backend(args.backend_port)
+                proc, log_fh = start_backend(args.backend_port, log_file="server.log")
                 processes.append(("Backend", proc, log_fh))
                 if not wait_for_server(port=args.backend_port):
                     print(f"\n  {c('✗', Colors.RED)} 后端启动失败")
@@ -630,7 +637,7 @@ def main():
         elif args.cli:
             check_python_deps()
             if not check_port(args.backend_port):
-                proc, log_fh = start_backend(args.backend_port)
+                proc, log_fh = start_backend(args.backend_port, log_file="server.log")
                 processes.append(("Backend", proc, log_fh))
                 if not wait_for_server(port=args.backend_port):
                     print(f"\n  {c('✗', Colors.RED)} 后端启动失败")

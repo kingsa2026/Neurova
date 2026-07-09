@@ -16,6 +16,7 @@ ContextOrchestrator — 统一上下文构建模块
 
 from neurova.core.logger import get_logger
 from typing import Dict, List, Optional
+import datetime
 
 from .builder import ContextBuilder
 from .injector import UnifiedContextInjector
@@ -80,7 +81,9 @@ class ContextOrchestrator:
 
     @property
     def skill_registry(self):
-        return self._agent._skill_registry
+        # Bug C-6 修复：用 getattr 保护，避免未设置 _skill_registry 的 Agent 抛 AttributeError
+        # 对比 line 99 growth_log_manager 已用 getattr，此处保持一致
+        return getattr(self._agent, "_skill_registry", None)
 
     @property
     def soul(self):
@@ -171,6 +174,11 @@ class ContextOrchestrator:
         if self.config.constitution:
             system_instructions.append(self.config.constitution)
 
+        # Bug T-1 修复:注入当前时间上下文(避免 LLM 误用训练截止日期回答时间问题)
+        # build_context 是 chat_pipeline 实际调用的路径(build_system_prompt 只是工具方法,未被调用),
+        # 所以必须在此处注入时间,否则 LLM 看不到真实当前时间。
+        system_instructions.append(self._build_current_time_section())
+
         # 使用配置的行为规则
         developer_instructions = list(self.config.behavior_rules)
         if tools_desc:
@@ -243,6 +251,38 @@ class ContextOrchestrator:
             self.context_pool.add_context(
                 ContextInput(source=ContextSource.USER_INPUT, content=user_input, priority=90)
             )
+
+            # Bug C-3 修复：注入 tool_memory_context（含执行状态 + 自动执行结果）
+            # 旧代码构建了 tool_memory_context 但从未 add_context，LLM 看不到工具执行状态
+            # 仅当有实际工具结果或自动执行结果时才注入（tool_decision="do_not_execute" 是默认值，不触发）
+            if tool_memory_result or auto_execute_result:
+                import json as _json
+
+                tool_lines = []
+                if tool_memory_result:
+                    if isinstance(tool_memory_result, dict):
+                        if tool_memory_result.get("tool_name"):
+                            tool_lines.append(f"工具: {tool_memory_result['tool_name']}")
+                        if tool_memory_result.get("result"):
+                            tool_lines.append(f"结果: {tool_memory_result['result']}")
+                    else:
+                        tool_lines.append(f"工具记忆: {tool_memory_result}")
+                if auto_execute_result:
+                    if isinstance(auto_execute_result, dict):
+                        tool_lines.append(f"自动执行: {_json.dumps(auto_execute_result, ensure_ascii=False)}")
+                    else:
+                        tool_lines.append(f"自动执行: {auto_execute_result}")
+                if tool_memory_context.get("tool_decision") and tool_memory_context["tool_decision"] != "do_not_execute":
+                    tool_lines.append(f"决策: {tool_memory_context['tool_decision']}")
+                if tool_lines:
+                    tool_content = "[工具记忆] " + " | ".join(tool_lines)
+                    self.context_pool.add_context(
+                        ContextInput(
+                            source=ContextSource.TOOL_CALL,
+                            content=tool_content,
+                            priority=85,  # 高于 memory(70)，低于 user_input(90)
+                        )
+                    )
 
             # 添加对话历史（保留 role 信息）
             for msg in conversation_context:
@@ -465,8 +505,9 @@ class ContextOrchestrator:
         # Phase 3.5: 从候选池构建上下文
         if not hasattr(self._agent, "context_builder") or self._agent.context_builder is None:
             logger.warning("context_builder 不可用，降级为简单上下文构建")
+            # Bug T-1 修复:降级路径也注入当前时间(避免 LLM 误用训练截止日期)
             return [
-                {"role": "system", "content": self.soul or "You are a helpful assistant."},
+                {"role": "system", "content": "\n\n".join(system_instructions)},
                 {"role": "user", "content": user_input},
             ]
 
@@ -491,6 +532,8 @@ class ContextOrchestrator:
 
         使用配置的行为规则，确保 build_system_prompt() 和 chat() 中的
         developer_instructions 保持一致。
+
+        Bug T-1 修复:在 prompt 末尾注入当前时间上下文,避免 LLM 误用训练截止日期。
         """
         parts = [self.soul]
 
@@ -509,7 +552,106 @@ class ContextOrchestrator:
         if tools_desc:
             parts.append("\n\n## 可用工具\n" + tools_desc)
 
+        # Bug T-1 修复:注入当前时间上下文(避免 LLM 误用训练截止日期回答时间问题)
+        # 动态读取系统时间,每次调用 build_system_prompt 都反映当前时刻。
+        parts.append(self._build_current_time_section())
+
         return "\n".join(parts)
+
+    def _build_current_time_section(self) -> str:
+        """构建当前时间上下文段(供 build_system_prompt 调用)。
+
+        格式:
+            ## 当前时间
+            当前日期:2026年6月28日 星期日
+            当前时刻:17:42:18
+            时区:Asia/Shanghai (UTC+08:00)
+
+        说明:
+        - 日期用中文格式(YYYY年MM月DD日)+ 星期,便于 LLM 回答"今天星期几"。
+        - 时刻用 24 小时制,便于 LLM 回答"现在几点"。
+        - 时区用 IANA 名称 + UTC 偏移,避免 LLM 误判时区。
+        - 此段在 build_system_prompt 末尾,不影响既有 soul/personality/constitution 段。
+        """
+        now = datetime.datetime.now()
+        today = now.date()
+        weekdays_zh = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        weekday_zh = weekdays_zh[today.weekday()]
+
+        # 获取本地时区(优先用 zoneinfo,回退到本地时间)
+        try:
+            from zoneinfo import ZoneInfo
+            local_tz = ZoneInfo(self._get_local_timezone_name())
+            tz_offset = local_tz.utcoffset(now)
+            tz_name = str(local_tz)
+        except Exception:
+            # 回退:用系统本地时区偏移
+            tz_offset = now.utcoffset() if now.utcoffset() else datetime.timedelta(0)
+            tz_name = "Local"
+
+        # 格式化 UTC 偏移为 +08:00 形式
+        total_seconds = int(tz_offset.total_seconds())
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        tz_offset_str = f"{'+' if hours >= 0 else '-'}{abs(hours):02d}:{minutes:02d}"
+
+        date_str = f"{today.year}年{today.month}月{today.day}日"
+        time_str = now.strftime("%H:%M:%S")
+
+        return (
+            f"\n\n## 当前时间\n"
+            f"当前日期:{date_str} {weekday_zh}\n"
+            f"当前时刻:{time_str}\n"
+            f"时区:{tz_name} (UTC{tz_offset_str})\n"
+            f"提示:以上是系统注入的真实当前时间,请基于此时间回答用户的时间相关问题,"
+            f"不要使用训练数据中的截止日期。"
+        )
+
+    def _get_local_timezone_name(self) -> str:
+        """获取本地时区 IANA 名称(供 _build_current_time_section 使用)。
+
+        优先级:
+        1. 环境变量 TZ(用户显式设置)
+        2. Windows 注册表 / /etc/localtime 软链(系统默认)
+        3. 回退到 Asia/Shanghai(中国用户默认)
+        """
+        import os
+
+        # 1. 环境变量
+        env_tz = os.environ.get("TZ")
+        if env_tz:
+            return env_tz
+
+        # 2. 尝试从系统获取
+        try:
+            import time as _time
+            # time.tzname 返回 (标准时区名, 夏令时时区名),如 ('中国标准时间', '中国夏令时')
+            # 这些不是 IANA 名称,但我们可以映射常见情况
+            tzname = _time.tzname[0] if _time.tzname else ""
+            if "China" in tzname or "中国" in tzname or "PRC" in tzname:
+                return "Asia/Shanghai"
+            if "Tokyo" in tzname or "Japan" in tzname or "日本" in tzname:
+                return "Asia/Tokyo"
+            if "Seoul" in tzname or "Korea" in tzname or "韩国" in tzname:
+                return "Asia/Seoul"
+            # 其他情况:用 UTC 偏移推断
+            offset_sec = -_time.timezone if not _time.daylight else -_time.altzone
+            offset_hours = offset_sec / 3600
+            if offset_hours == 8:
+                return "Asia/Shanghai"
+            if offset_hours == 9:
+                return "Asia/Tokyo"
+            if offset_hours == 0:
+                return "UTC"
+            if offset_hours == -5:
+                return "America/New_York"
+            if offset_hours == -8:
+                return "America/Los_Angeles"
+        except Exception:
+            pass
+
+        # 3. 回退到中国默认时区(本项目主要用户群体)
+        return "Asia/Shanghai"
 
     # ══════════════════════════════════════════════════════════════
     # 工具构建
@@ -524,7 +666,8 @@ class ContextOrchestrator:
             lines = ["\n\n## 可用工具\n你可以调用以下工具来完成任务。调用格式：\n`[TOOL_CALL:工具名(参数=值, ...)]`\n"]
             lines.append("⚠️ **工具使用原则**：\n"
                          "- `memory_search` 和 `voice_memory_search` 仅用于检索本Agent自身存储的历史记忆，不能搜索互联网\n"
-                         "- 需要实时信息（天气、新闻、股价等）时，请直接回复告知用户你无法获取，不要尝试用记忆搜索工具\n"
+                         "- 需要实时信息（天气、新闻、股价等）时，请使用 `weather` 或 `web_search` 工具获取，不要用记忆搜索工具查实时信息\n"
+                         "- `weather` 工具可查实时天气（支持中文城市名，如'许昌'）；`web_search` 工具可查新闻、股价等实时网络信息\n"
                          "- `computer_shell` 可执行本地命令，但注意安全性和权限\n")
             for t in tools:
                 fn = t["function"]
@@ -579,8 +722,8 @@ class ContextOrchestrator:
                                 },
                             }
                         )
-            except Exception as e:
-                logger.warning("从 ToolRouter 获取工具列表失败: %s", e)
+            except Exception:
+                logger.exception("从 ToolRouter 获取工具列表失败")
 
         # 2. Skill Registry 工具 — 用实际参数 schema 替换 ToolRouter 的占位符
         if self.skill_registry:
@@ -614,8 +757,8 @@ class ContextOrchestrator:
                         tools[existing_idx] = schema
                     else:
                         tools.append(schema)
-            except Exception as e:
-                logger.warning("从 SkillRegistry 获取工具失败: %s", e)
+            except Exception:
+                logger.exception("从 SkillRegistry 获取工具失败")
 
         # 过滤掉格式不正确的工具（某些 provider 要求 tools 中每个元素都必须有 function 字段）
         valid_tools = []

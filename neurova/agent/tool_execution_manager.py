@@ -15,6 +15,7 @@ ToolExecutionManager 深度模块 - 异步工具执行管理
 
 import asyncio
 from neurova.core.logger import get_logger
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -139,6 +140,8 @@ class ToolExecutionManager:
         self._contexts: Dict[str, ToolExecutionContext] = {}
         self._status_callbacks: List[Callable[[ExecutionEvent], None]] = []
         self._running_tasks: Dict[str, asyncio.Task] = {}
+        # Bug 9 修复: 添加 _lock 保护 _contexts 的并发访问(cleanup/遍历/删除)
+        self._lock = threading.RLock()
 
         logger.debug("ToolExecutionManager initialized")
 
@@ -293,7 +296,11 @@ class ToolExecutionManager:
         task = self._running_tasks.get(context_id)
         if task and not task.done():
             task.cancel()
-            # 注意：不在此处 await task，因为 execute 方法会处理 CancelledError
+            # Bug 10 修复: await task 避免 pending 警告(原代码注释"不在此处 await"是 bug)
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
         # 更新状态
         self._set_status(context_id, ExecutionStatus.CANCELLED, "Execution cancelled")
@@ -333,18 +340,20 @@ class ToolExecutionManager:
         now = datetime.now(timezone.utc)
         cleaned = 0
 
-        for context_id, context in list(self._contexts.items()):
-            if context.status in [
-                ExecutionStatus.COMPLETED,
-                ExecutionStatus.FAILED,
-                ExecutionStatus.TIMEOUT,
-                ExecutionStatus.CANCELLED,
-            ]:
-                if context.completed_at:
-                    age = (now - context.completed_at).total_seconds()
-                    if age > max_age_seconds:
-                        del self._contexts[context_id]
-                        cleaned += 1
+        # Bug 9 修复: cleanup 遍历+删除 _contexts 必须持锁,防止与并发 execute 竞态
+        with self._lock:
+            for context_id, context in list(self._contexts.items()):
+                if context.status in [
+                    ExecutionStatus.COMPLETED,
+                    ExecutionStatus.FAILED,
+                    ExecutionStatus.TIMEOUT,
+                    ExecutionStatus.CANCELLED,
+                ]:
+                    if context.completed_at:
+                        age = (now - context.completed_at).total_seconds()
+                        if age > max_age_seconds:
+                            del self._contexts[context_id]
+                            cleaned += 1
 
         return cleaned
 
@@ -417,7 +426,10 @@ class ToolExecutionManager:
         except asyncio.TimeoutError:
             logger.warning("Tool execution timeout: %s (>%ss)", context.tool_name, context.timeout)
             self._set_status(context.context_id, ExecutionStatus.TIMEOUT, f"Timeout after {context.timeout}s")
-            # 注意：任务仍在后台运行，但超时后我们不再等待
+            # Bug 7 修复: 超时后取消后台 task,避免资源泄漏(原代码注释"任务仍在后台运行"是 bug)
+            task = self._running_tasks.get(context.context_id)
+            if task and not task.done():
+                task.cancel()
 
     async def _execute_elastic(self, context: ToolExecutionContext, executor: Any) -> None:
         """
@@ -434,6 +446,11 @@ class ToolExecutionManager:
             try:
                 # 弹性超时：每次重试增加超时时间
                 current_timeout = base_timeout * (1 + retry_count * 0.5)
+
+                # Bug 8 修复: 重试前 cancel 旧 task,避免覆盖 _running_tasks 导致旧 task 泄漏
+                old_task = self._running_tasks.get(context.context_id)
+                if old_task and not old_task.done():
+                    old_task.cancel()
 
                 # 创建异步任务并存储引用
                 task = asyncio.create_task(
@@ -499,7 +516,7 @@ class ToolExecutionManager:
         except Exception as e:
             logger.error("Tool execution failed: %s, error: %s", context.tool_name, e)
             self._set_status(context.context_id, ExecutionStatus.FAILED, f"Execution failed: {str(e)}")
-            context.error = str(e)
+            # Bug 11 修复: 不在此处赋值 error 字段,由 execute() 统一处理避免双重赋值
 
     def __repr__(self) -> str:
         """字符串表示"""

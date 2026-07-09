@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 logger = get_logger(__name__)
 
@@ -197,9 +197,34 @@ class WebSearchSkill(Skill):
             )
 
     async def _search_web(self, query: str, params: Dict) -> List[Dict]:
-        """搜索网络"""
-        # 这里应该实现网络搜索逻辑
-        return []
+        """搜索网络
+
+        Bug W-4 修复: 原为 `return []` 空实现（stub），导致 Skill 路径即使被调用也返回空。
+        现使用 urllib 直接发起搜索请求，与 tool_executor._execute_web_search 逻辑对齐，
+        保证 WebSearchSkill 路径独立可用（不依赖 ToolExecutor / agent_ref）。
+        """
+        if not query:
+            return []
+        try:
+            import urllib.request
+            import urllib.parse
+            import re
+
+            url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&hl=zh-CN"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                html = resp.read().decode("utf-8", errors="replace")
+            snippets = re.findall(r'<div[^>]*class="[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL)
+            text = re.sub(r"<[^>]+>", "", " ".join(snippets[:5]))
+            text = re.sub(r"\s+", " ", text).strip()[:500]
+            return [
+                {
+                    "query": query,
+                    "snippet": text or f"搜索 '{query}' 完成，但未能提取摘要。",
+                }
+            ]
+        except Exception as e:
+            return [{"query": query, "error": f"搜索失败: {e}"}]
 
 
 class FileOperationSkill(Skill):
@@ -265,6 +290,50 @@ class FileOperationSkill(Skill):
             return {"error": str(e)}
 
 
+@runtime_checkable
+class SkillRegistryProtocol(Protocol):
+    """SkillRegistry 统一接口协议(架构深化候选 1)。
+
+    根因: 类 A (neurova/skill_system.py SkillRegistry) 和类 B
+    (neurova/skills/registry.py SkillRegistry) API 完全不兼容,导致
+    V2-1/V2-2/V2-5/V2-7 四处静默失败。此 Protocol 显式声明统一 seam,
+    两个实现都应满足此接口。调用方应依赖 Protocol 而非具体类。
+
+    Deletion test: 删除此 Protocol 后,API 不匹配的 complexity 重新散布到
+    orchestrator/tool_router/chat_pipeline 三个调用方,因此 Protocol earns its keep。
+
+    Interface(seam):
+        - skills: Dict[str, Skill] — 已注册 Skill 字典(类 B 实现需解包元组)
+        - register(skill: Skill) -> None — 注册单个 Skill
+        - register_skill(manifest, path=None) -> bool — 兼容 API,接受 manifest
+        - list_skills() -> List[Any] — 列出所有 Skill 信息
+        - execute_skill(name, args, context=None) -> Any — 异步执行 Skill
+    """
+
+    @property
+    def skills(self) -> Dict[str, "Skill"]:
+        """已注册的 Skill 字典。"""
+        ...
+
+    def register(self, skill: "Skill") -> None:
+        """注册单个 Skill。"""
+        ...
+
+    def register_skill(self, manifest: Any, path: Optional[Any] = None) -> bool:
+        """兼容 API:接受 manifest 对象注册 Skill。"""
+        ...
+
+    def list_skills(self) -> List[Any]:
+        """列出所有 Skill 信息。"""
+        ...
+
+    async def execute_skill(
+        self, skill_name: str, params: Dict[str, Any], context: Optional[Dict] = None
+    ) -> "SkillResult":
+        """异步执行 Skill。"""
+        ...
+
+
 class SkillRegistry:
     """Skill 注册表"""
 
@@ -277,6 +346,42 @@ class SkillRegistry:
         """注册 Skill"""
         self._skills[skill.name] = skill
         skill.add_event_handler(self._on_skill_event)
+
+    @property
+    def skills(self) -> Dict[str, Skill]:
+        """已注册的 Skill 字典(只读视图)。
+
+        Bug V2-1 修复:orchestrator.py:731 和 base.py:241 都用
+        `skill_registry.skills.items()` 迭代,但原实现只有私有 _skills 字段,
+        访问 .skills 抛 AttributeError,被 except Exception 静默吞掉,
+        导致 Skill 工具永远不进入 LLM tools 列表。
+        暴露此 property 让外部代码能以 .skills 访问。
+        """
+        return self._skills
+
+    def register_skill(self, manifest, path=None) -> bool:
+        """兼容 API:接受 manifest + path 两参数注册 Skill。
+
+        Bug V2-5 修复:chat_pipeline.py:647 调用
+        `skill_registry.register_skill(manifest, sentinel_path)`,
+        但类 A SkillRegistry 只有 `register(skill)`(单参数),
+        调用抛 AttributeError,被 except 吞掉,合成工具永远无法注册。
+
+        此方法接受 manifest 对象,从中提取 name/description 构造 Skill 后
+        委托到 register()。如果 manifest 已是 Skill 实例,直接注册。
+        """
+        try:
+            if isinstance(manifest, Skill):
+                self.register(manifest)
+                return True
+            # manifest 可能是任意对象,尝试从常用字段构造 Skill
+            name = getattr(manifest, "name", None) or getattr(manifest, "id", None) or str(manifest)
+            description = getattr(manifest, "description", "") or ""
+            skill = Skill(name=name, description=description)
+            self.register(skill)
+            return True
+        except Exception:
+            return False
 
     def unregister(self, skill_name: str):
         """注销 Skill"""

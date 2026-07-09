@@ -1,7 +1,7 @@
 {
   "name": "Neurova",
   "description": "",
-  "model": "sensenova-6.7-flash-lite",
+  "model": "deepseek-v4-flash",
   "provider": "sensetime",
   "personality": "",
   "constitution": ""

@@ -1,6 +1,11 @@
 """
 附件存储管理器 - 管理记忆系统的文件附件
 
+权威实现 (canonical): 本模块是 AttachmentManager 的权威实现，
+提供完整的 SQLite + 文件存储 API（_init_db / save_attachment /
+get_attachment / delete_attachment）。core/attachment_manager.py
+为旧版兼容入口，不应再扩展。
+
 功能:
 - 文件存储与检索
 - 附件与记忆的关联管理
@@ -918,8 +923,17 @@ class AttachmentManager:
                 logger.info("AttachmentManager closed")
 
     def __del__(self):
-        """析构函数"""
-        self.close()
+        """析构函数
+
+        BUG-11 修复: 析构期间不应获取锁（GC 期间锁可能不可用或导致死锁）。
+        直接 try/except 关闭连接，不获取锁。
+        """
+        try:
+            if getattr(self, "_conn", None):
+                self._conn.close()
+                self._conn = None
+        except Exception:
+            pass
 
 
 # 全局单例

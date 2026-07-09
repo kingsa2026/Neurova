@@ -23,6 +23,7 @@ PostChatPipeline — 对话后处理管线
 """
 
 from neurova.core.logger import get_logger
+import contextvars
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -72,9 +73,17 @@ class PostChatPipeline:
     支持依赖注入和步骤状态跟踪。
     """
 
+    # Bug #6 fix: 使用 contextvar 隔离并发 process() 调用的 _step_results
+    # 每个 async task 拥有独立的 context，避免并发请求互相覆盖步骤结果
+    _step_results_ctx: contextvars.ContextVar = contextvars.ContextVar(
+        "post_chat_step_results"
+    )
+
     def __init__(self, agent_ref):
         self._agent = agent_ref
-        self._step_results: List[StepResult] = []
+        # Bug #6 fix: _step_results_store 作为 fallback，供非 process() 场景下直接访问
+        # （如 _safe_step 单元测试）。process() 调用时通过 contextvar 隔离。
+        self._step_results_store: List[StepResult] = []
         self._dependencies: Dict[str, Any] = {}
 
         # 显式声明所有依赖组件
@@ -101,6 +110,23 @@ class PostChatPipeline:
     @property
     def _agt(self):
         return self._agent
+
+    @property
+    def _step_results(self) -> List[StepResult]:
+        """Bug #6 fix: 从 contextvar 读取当前调用的步骤结果列表
+
+        - process() 调用时：通过 contextvar 隔离，每个并发调用拥有独立列表
+        - 非 process() 场景（如 _safe_step 单元测试）：回退到 _step_results_store
+        """
+        try:
+            return self._step_results_ctx.get()
+        except LookupError:
+            return self._step_results_store
+
+    @_step_results.setter
+    def _step_results(self, value: List[StepResult]) -> None:
+        """Bug #6 fix: 设置 contextvar，隔离并发调用的步骤结果"""
+        self._step_results_ctx.set(value)
 
     def configure(
         self,
@@ -222,10 +248,38 @@ class PostChatPipeline:
         # 降级到agent_ref
         return getattr(self._agent, name, None)
 
+    # P0-C2 修复：编程错误不应被 _safe_step 吞没。
+    # 原代码用 `except Exception` 捕获所有异常（含 TypeError/AttributeError/
+    # NameError/ImportError/SyntaxError），导致真实 bug 被降级为 default 值，
+    # pipeline 继续运行，bug 永不暴露。违反 bug-hunt 规则 #3 "Never bypass"。
+    # 现将这些"编程错误"类型显式 re-raise，让调用方看到真实 bug；运营错误
+    # （OSError/ValueError/RuntimeError/ConnectionError/TimeoutError 等）维持降级。
+    _PROGRAMMING_ERRORS = (
+        TypeError,
+        AttributeError,
+        NameError,
+        ImportError,
+        SyntaxError,
+        IndentationError,
+    )
+
     async def _safe_step(self, step_name: str, coro, default=None):
-        """P-1: 安全执行单个步骤,异常只记录不传播"""
+        """P-1: 安全执行单个步骤,异常只记录不传播
+
+        P0-C2 修复：编程错误（TypeError/AttributeError/NameError/ImportError/SyntaxError）
+        会 re-raise，让真实 bug 暴露给调用方；运营错误（OSError/ValueError/
+        RuntimeError 等）仍按原逻辑降级为 default 值。
+        """
         try:
             return await coro
+        except self._PROGRAMMING_ERRORS:
+            # P0-C2: 编程错误必须 re-raise，不能被吞没
+            logger.error(
+                "Step '%s' raised a programming error (re-raising, not degrading)",
+                step_name,
+                exc_info=True,
+            )
+            raise
         except Exception as e:
             logger.error("Step '%s' failed: %s", step_name, e, exc_info=True)
             self._step_results.append(
@@ -234,9 +288,21 @@ class PostChatPipeline:
             return default
 
     def _safe_step_sync(self, step_name: str, func, default=None):
-        """P-1: 安全执行同步步骤,异常只记录不传播"""
+        """P-1: 安全执行同步步骤,异常只记录不传播
+
+        P0-C2 修复：编程错误（TypeError/AttributeError/NameError/ImportError/SyntaxError）
+        会 re-raise，让真实 bug 暴露给调用方；运营错误仍按原逻辑降级为 default 值。
+        """
         try:
             return func()
+        except self._PROGRAMMING_ERRORS:
+            # P0-C2: 编程错误必须 re-raise，不能被吞没
+            logger.error(
+                "Step '%s' raised a programming error (re-raising, not degrading)",
+                step_name,
+                exc_info=True,
+            )
+            raise
         except Exception as e:
             logger.error("Step '%s' failed: %s", step_name, e, exc_info=True)
             self._step_results.append(
@@ -265,19 +331,22 @@ class PostChatPipeline:
             "step_results": List[StepResult],
         }
         """
-        # 清空步骤结果
-        self._step_results.clear()
+        # Bug #6 fix: 每次调用创建新的步骤结果列表，通过 contextvar 隔离并发调用
+        # 原 self._step_results.clear() 会修改共享列表，并发请求互相覆盖
+        self._step_results = []
 
         # P-1: 每个步骤用 _safe_step 包裹,异常只记录不传播
         # 步骤 6: 保存到 session 文件
+        # Bug #4 fix: save_session 失败时回退到原始 session_id（而非 session_id or ""）
+        # 避免 None 被转为空字符串，导致记忆存到 "default" session
         actual_session_id = await self._safe_step(
             "save_session",
             self._step_save_session(user_input, reply, session_id, save_memory, metadata),
-            default=session_id or "",
+            default=session_id,
         )
 
         # 步骤 6.5: 保存对话记忆到数据库
-        await self._safe_step("save_memory", self._step_save_memory(user_input, reply, actual_session_id))
+        await self._safe_step("save_memory", self._step_save_memory(user_input, reply, actual_session_id, save_memory))
 
         # 步骤 6.6: 更新记忆温度（批量衰减）
         self._safe_step_sync("update_memory_temperature", self._step_update_memory_temperature)
@@ -406,7 +475,8 @@ class PostChatPipeline:
         """保存到 session 文件（备份机制）"""
         step_name = "save_session"
         start_time = time.time()
-        result_session_id = session_id or ""
+        # Bug #4 fix: 保留原始 session_id（包括 None），不通过 or "" 转为空字符串
+        result_session_id = session_id
 
         if not save_memory:
             self._step_results.append(
@@ -445,6 +515,10 @@ class PostChatPipeline:
                 )
             )
         except Exception as e:
+            # Bug #1 fix: 编程错误（TypeError/AttributeError/NameError 等）必须 re-raise
+            # 不能被降级为 FAILED 静默返回，否则 P0-C2 的 re-raise 机制失效
+            if isinstance(e, self._PROGRAMMING_ERRORS):
+                raise
             logger.warning("Session备份失败: %s", e)
             self._step_results.append(
                 StepResult(
@@ -462,10 +536,24 @@ class PostChatPipeline:
         user_input: str,
         reply: str,
         session_id: str,
+        save_memory: bool = False,
     ):
         """保存对话记忆到记忆数据库"""
         step_name = "save_memory"
         start_time = time.time()
+
+        # Bug 修复: save_memory=False 时跳过整个步骤 (与 _step_save_session:451 对齐)
+        # 原代码无条件调用 _step_save_memory, 导致 save_memory=False 仍写入记忆
+        if not save_memory:
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="save_memory=False, 跳过记忆保存",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
+            return
 
         # 获取依赖组件
         memory_manager = self._get_dependency("memory_manager")
@@ -489,8 +577,13 @@ class PostChatPipeline:
 
             # 使用对话缓冲区
             if conversation_buffer:
-                conversation_buffer.add_user_message(user_input, session_id=session_id or "default")
-                conversation_buffer.add_agent_message(reply, session_id=session_id or "default")
+                # Bug 修复: ConversationBuffer.add_user_message(self, message: str) 不接受
+                # session_id 参数 (conversation_buffer.py:79)。session_id 已通过
+                # memory_manager.remember(metadata={"session_id": ...}) 存储到长期记忆
+                # (下方行 542), ConversationBuffer 只是快速上下文缓冲, 无 session 维度。
+                # 与 mem_core.py:635-637 的正确用法对齐。
+                conversation_buffer.add_user_message(user_input)
+                conversation_buffer.add_agent_message(reply)
                 logger.debug("对话已添加到缓冲区")
 
             # 使用记忆管理器
@@ -498,13 +591,13 @@ class PostChatPipeline:
                 # 保存用户消息记忆
                 user_memory_id = memory_manager.remember(
                     content=f"用户: {user_input}",
-                    memory_type="conversation",
+                    memory_type="episodic",
                     metadata={"sender_type": "user", "session_id": session_id or "default"},
                 )
                 # 保存助手回复记忆
                 agent_memory_id = memory_manager.remember(
                     content=f"助手: {reply}",
-                    memory_type="conversation",
+                    memory_type="episodic",
                     metadata={"sender_type": "agent", "session_id": session_id or "default"},
                 )
                 logger.debug("对话已直接写入记忆数据库")
@@ -522,6 +615,10 @@ class PostChatPipeline:
                 )
             )
         except Exception as e:
+            # Bug #1 fix: 编程错误（TypeError/AttributeError/NameError 等）必须 re-raise
+            # 不能被降级为 FAILED 静默返回，否则 P0-C2 的 re-raise 机制失效
+            if isinstance(e, self._PROGRAMMING_ERRORS):
+                raise
             logger.warning("对话记忆保存失败: %s", e)
             self._step_results.append(
                 StepResult(
@@ -534,6 +631,12 @@ class PostChatPipeline:
 
     def _save_emotion_to_memory(self, memory_manager, user_input: str, memory_id: str):
         """将情感信息保存到记忆"""
+        # Bug #7 fix: memory_id 为 None 或空字符串时不调用 set_emotion
+        # 避免 emotion_module.set_emotion(None, ...) 导致下游 KeyError/AttributeError
+        if not memory_id:
+            logger.debug("跳过情感保存: memory_id 为空")
+            return
+
         emotion_module = getattr(memory_manager, "emotion_module", None)
         if not emotion_module:
             return
@@ -663,15 +766,15 @@ class PostChatPipeline:
                     status=StepStatus.SKIPPED,
                     message="growth_analyzer not available",
                     duration_ms=(time.time() - start_time) * 1000,
-                    data={"score": None},
+                    data={"score": 0.75},
                 )
             )
-            return 0.5  # 中性默认值
+            return 0.75  # P0-D1: 中性偏高默认值（与测试规约一致）
 
         try:
             w = user_input.replace("？", "").replace("?", "").replace("！", "").replace("!", "").strip()
             if not w:
-                return 0.5
+                return 0.75
 
             # P-6: 中文分词改进 — 按标点和空格切分,再按字符类型聚合
             import re
@@ -716,7 +819,7 @@ class PostChatPipeline:
                 )
             )
 
-        return 0.5
+        return 0.75  # P0-D1: 异常降级默认值（与测试规约一致）
 
     # ============================================================
     # 反思相关常量和方法
@@ -909,6 +1012,19 @@ class PostChatPipeline:
         step_name = "record_experience"
         start_time = time.time()
 
+        # Bug #3 fix: save_memory=False 时跳过经验记录，避免写入 evolution
+        # 原代码无条件执行，导致 save_memory=False 仍触发 evolution 记录
+        if not save_memory:
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="save_memory=False, skip experience recording",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
+            return
+
         evolution = self._get_dependency("evolution")
         if not evolution:
             self._step_results.append(
@@ -1037,6 +1153,18 @@ class PostChatPipeline:
 
     async def _step_p0_post_processing(self, save_memory: bool):
         """P0: 执行所有 P0 接线模块的后处理"""
+        # Bug #3 fix: save_memory=False 时跳过所有 P0 后处理步骤
+        # 原代码无条件执行，导致 save_memory=False 仍触发 evolution/lifecycle 等模块
+        if not save_memory:
+            self._step_results.append(
+                StepResult(
+                    step_name="p0_post_processing",
+                    status=StepStatus.SKIPPED,
+                    message="save_memory=False, skip all P0 post-processing",
+                )
+            )
+            return
+
         await self._step_lifecycle_evaluate()
         await self._step_pattern_mining()
         await self._step_genetic_evolution()
@@ -1067,13 +1195,21 @@ class PostChatPipeline:
                 logger.info("🔄 工具生命周期评估: %s", lifecycle_report)
 
             # 对降级/归档的工具应用权重衰减
-            if evolution and hasattr(evolution, "_tool_weights"):
+            # Bug #9 fix: 使用公开的 tool_weights API，而非直接访问 _tool_weights 私有属性
+            # 原代码: if evolution and hasattr(evolution, "_tool_weights"):
+            #         evolution._tool_weights[tool_name].adaptive_multiplier *= factor
+            # 修复后: 通过 tool_weights.record_failure() 公开方法操作
+            tool_weights = getattr(evolution, "tool_weights", None) if evolution else None
+            if tool_weights:
                 decay = lifecycle_report.get("decay", {})
                 if decay:
                     for tool_name, factor in decay.items():
-                        if tool_name in evolution._tool_weights:
-                            # P-4: ToolWeight 是 dataclass,不能直接 *= ;操作 adaptive_multiplier
-                            evolution._tool_weights[tool_name].adaptive_multiplier *= factor
+                        # 通过公开 API 检查工具是否存在
+                        entry = tool_weights.get_tool_entry(tool_name) if hasattr(tool_weights, "get_tool_entry") else None
+                        if entry:
+                            # 降级/归档工具视为失败信号，通过公开方法记录
+                            if hasattr(tool_weights, "record_failure"):
+                                tool_weights.record_failure(tool_name)
                     logger.debug("📉 工具权重衰减: %s 个工具", len(decay))
 
             self._step_results.append(
@@ -1144,7 +1280,28 @@ class PostChatPipeline:
             if skill_packer and patterns:
                 templates = pattern_miner.to_skill_template_list()
                 for tmpl in templates:
-                    skill_packer.observe(tools=tmpl["tools"], support=tmpl["support"], auto_registered=True)
+                    # 修复 P0-6：observe 签名是 (tool_sequence, context, success, duration, metadata)
+                    # 原错误签名 observe(tools=, support=, auto_registered=) 会抛 TypeError 被外层 except 吞没
+                    skill_packer.observe(
+                        tool_sequence=tmpl["tools"],
+                        context="自动挖掘模式",
+                        success=True,
+                        duration=0.0,
+                        metadata={"support": tmpl.get("support", 0), "auto_registered": True},
+                    )
+
+                # 修复 P0-1：将封装的技能注册到 SkillRegistry
+                # 原代码只存 AutoSkillBuilder 内存 dict，永远进不了 Registry
+                try:
+                    from neurova.skills.registry import SkillRegistry
+
+                    registry = SkillRegistry()
+                    if hasattr(skill_packer, "register_to_skill_registry"):
+                        registered = skill_packer.register_to_skill_registry(registry)
+                        if registered > 0:
+                            logger.info("📋 自动注册 %s 个技能到 SkillRegistry", registered)
+                except Exception as reg_err:
+                    logger.warning("自动技能注册失败: %s", reg_err)
 
             self._step_results.append(
                 StepResult(
@@ -1225,20 +1382,46 @@ class PostChatPipeline:
             logger.info("🧬 ToolGeneticEngine 进化完成: 种群=%s, 新个体=%s", len(genetic_engine.population), len(new_gen))
 
             # 将进化结果反馈到工具权重
+            # Bug #9 fix: 使用公开的 tool_weights API 检查工具是否存在，而非 _registered_tools 私有属性
+            # 原代码: if tool_name in evolution._registered_tools:
+            # 修复后: 通过 tool_weights.get_tool_entry(tool_name) 公开方法检查
+            tool_weights = getattr(evolution, "tool_weights", None)
             for genotype in new_gen:
                 for tool_name in genotype.tools:
-                    if tool_name in evolution._registered_tools:
-                        # 高适应度个体的工具应获得权重提升
-                        if genotype.fitness > 0.5:
-                            evolution.tool_weights.update_weight(tool_name, True)
+                    if tool_weights and hasattr(tool_weights, "get_tool_entry"):
+                        entry = tool_weights.get_tool_entry(tool_name)
+                        if entry:
+                            # 高适应度个体的工具应获得权重提升
+                            if genotype.fitness > 0.5:
+                                tool_weights.update_weight(tool_name, True)
+
+            # Bug A-6 修复: 将高适应度进化工具注册到 SkillRegistry
+            # 之前进化成果只停留在 genetic_engine 内部种群，下次对话时
+            # chat_pipeline._check_nl_synthesis 仍因 has_tool=False 触发重复合成
+            registered_to_registry = 0
+            skill_registry = getattr(self._agt, "_skill_registry", None)
+            if skill_registry is not None and hasattr(genetic_engine, "register_to_skill_registry"):
+                try:
+                    registered_to_registry = genetic_engine.register_to_skill_registry(skill_registry)
+                    if registered_to_registry > 0:
+                        logger.info(
+                            "🧬 已注册 %s 个进化工具到 SkillRegistry（避免下次对话重复合成）",
+                            registered_to_registry,
+                        )
+                except Exception as reg_err:
+                    logger.warning("进化工具注册到 SkillRegistry 失败: %s", reg_err)
 
             self._step_results.append(
                 StepResult(
                     step_name=step_name,
                     status=StepStatus.EXECUTED,
-                    message=f"Genetic evolution completed: {len(new_gen)} new individuals",
+                    message=f"Genetic evolution completed: {len(new_gen)} new individuals, {registered_to_registry} registered to SkillRegistry",
                     duration_ms=(time.time() - start_time) * 1000,
-                    data={"population_size": len(genetic_engine.population), "new_individuals": len(new_gen)},
+                    data={
+                        "population_size": len(genetic_engine.population),
+                        "new_individuals": len(new_gen),
+                        "registered_to_skill_registry": registered_to_registry,
+                    },
                 )
             )
         except Exception as e:
@@ -1782,6 +1965,19 @@ class PostChatPipeline:
                             step_name=step_name,
                             status=StepStatus.SKIPPED,
                             message="llm_client not available",
+                            duration_ms=(time.time() - start_time) * 1000,
+                        )
+                    )
+                    return
+                
+                # Bug #8 fix: dependency_graph=None 时不能传给 ConversationRuleExtractor 构造器
+                # 原代码无条件传 dependency_graph（可能为 None），导致下游 AttributeError/TypeError
+                if dependency_graph is None:
+                    self._step_results.append(
+                        StepResult(
+                            step_name=step_name,
+                            status=StepStatus.SKIPPED,
+                            message="dependency_graph not available, cannot create rule_extractor",
                             duration_ms=(time.time() - start_time) * 1000,
                         )
                     )

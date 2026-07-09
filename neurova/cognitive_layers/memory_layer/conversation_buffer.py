@@ -9,11 +9,16 @@
 - 情感分析集成
 """
 
+import threading
+
 from neurova.core.logger import get_logger
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+# BUG-2 修复: 引入 MemoryType 用于验证 classification 合法性
+from neurova.cognitive_layers.memory_layer.models import MemoryType
 
 logger = get_logger(__name__)
 
@@ -67,6 +72,7 @@ class ConversationBuffer:
         self._current_turn: Optional[ConversationTurn] = None
         self._last_flush_time = datetime.now()
         self._total_bytes = 0
+        self._lock = threading.RLock()  # 断点 M-3 修复: 保护 _buffer/_turns/_current_turn 并发访问
 
         logger.debug(
             f"ConversationBuffer 初始化: memory_limit={memory_limit_bytes}, "
@@ -83,7 +89,7 @@ class ConversationBuffer:
             bool: 是否成功添加
         """
         try:
-            # 创建内存项
+            # 创建内存项(不涉及共享状态, 锁外创建)
             item = MemoryItem(
                 id=f"user_{datetime.now().timestamp()}",
                 content=message,
@@ -91,17 +97,19 @@ class ConversationBuffer:
                 classification="user_message",
             )
 
-            # 添加到缓冲区
-            self._buffer.append(item)
-            self._total_bytes += len(message.encode("utf-8"))
+            # 断点 M-3 修复: 用 RLock 保护 _buffer/_total_bytes/_current_turn 并发访问
+            with self._lock:
+                # 添加到缓冲区
+                self._buffer.append(item)
+                self._total_bytes += len(message.encode("utf-8"))
 
-            # 更新当前轮次
-            if self._current_turn is None:
-                self._current_turn = ConversationTurn(
-                    user_message=message, agent_message="", timestamp=datetime.now(), is_complete=False
-                )
-            else:
-                self._current_turn.user_message = message
+                # 更新当前轮次
+                if self._current_turn is None:
+                    self._current_turn = ConversationTurn(
+                        user_message=message, agent_message="", timestamp=datetime.now(), is_complete=False
+                    )
+                else:
+                    self._current_turn.user_message = message
 
             logger.debug("添加用户消息: %s 字节", len(message))
             return True
@@ -120,7 +128,7 @@ class ConversationBuffer:
             bool: 是否成功添加
         """
         try:
-            # 创建内存项
+            # 创建内存项(不涉及共享状态, 锁外创建)
             item = MemoryItem(
                 id=f"agent_{datetime.now().timestamp()}",
                 content=message,
@@ -128,18 +136,20 @@ class ConversationBuffer:
                 classification="agent_message",
             )
 
-            # 添加到缓冲区
-            self._buffer.append(item)
-            self._total_bytes += len(message.encode("utf-8"))
+            # 断点 M-3 修复: 用 RLock 保护 _buffer/_total_bytes/_current_turn/_turns 并发访问
+            with self._lock:
+                # 添加到缓冲区
+                self._buffer.append(item)
+                self._total_bytes += len(message.encode("utf-8"))
 
-            # 更新当前轮次
-            if self._current_turn is not None:
-                self._current_turn.agent_message = message
-                self._current_turn.is_complete = True
+                # 更新当前轮次
+                if self._current_turn is not None:
+                    self._current_turn.agent_message = message
+                    self._current_turn.is_complete = True
 
-                # 保存完成的轮次
-                self._turns.append(self._current_turn)
-                self._current_turn = None
+                    # 保存完成的轮次
+                    self._turns.append(self._current_turn)
+                    self._current_turn = None
 
             logger.debug("添加AI消息: %s 字节", len(message))
             return True
@@ -154,20 +164,23 @@ class ConversationBuffer:
         Returns:
             bool: 缓冲区是否已满
         """
-        # 检查内存限制
-        if self._total_bytes >= self.memory_limit_bytes:
-            return True
+        # BUG 5 修复: 读取 _total_bytes/_turns/_last_flush_time 必须持有 _lock,
+        # 与 add_user_message/add_agent_message/flush 的写入方保持互斥, 避免数据竞争。
+        with self._lock:
+            # 检查内存限制
+            if self._total_bytes >= self.memory_limit_bytes:
+                return True
 
-        # 检查轮次限制
-        if len(self._turns) >= self.turn_limit:
-            return True
+            # 检查轮次限制
+            if len(self._turns) >= self.turn_limit:
+                return True
 
-        # 检查超时
-        time_since_flush = (datetime.now() - self._last_flush_time).total_seconds()
-        if time_since_flush >= self.timeout_seconds:
-            return True
+            # 检查超时
+            time_since_flush = (datetime.now() - self._last_flush_time).total_seconds()
+            if time_since_flush >= self.timeout_seconds:
+                return True
 
-        return False
+            return False
 
     def flush(self) -> List[MemoryItem]:
         """刷新缓冲区，返回所有内存项
@@ -175,12 +188,14 @@ class ConversationBuffer:
         Returns:
             List[MemoryItem]: 内存项列表
         """
-        items = list(self._buffer)
-        self._buffer.clear()
-        self._turns.clear()
-        self._current_turn = None
-        self._total_bytes = 0
-        self._last_flush_time = datetime.now()
+        # 断点 M-3 修复: 用 RLock 保护清空操作, 避免与 add_*_message 并发 race
+        with self._lock:
+            items = list(self._buffer)
+            self._buffer.clear()
+            self._turns.clear()
+            self._current_turn = None
+            self._total_bytes = 0
+            self._last_flush_time = datetime.now()
 
         logger.debug("刷新缓冲区: %s 个项目", len(items))
         return items
@@ -191,16 +206,19 @@ class ConversationBuffer:
         Returns:
             Dict[str, Any]: 统计信息
         """
-        return {
-            "buffer_size": len(self._buffer),
-            "total_bytes": self._total_bytes,
-            "memory_limit_bytes": self.memory_limit_bytes,
-            "turn_limit": self.turn_limit,
-            "timeout_seconds": self.timeout_seconds,
-            "current_turns": len(self._turns),
-            "has_current_turn": self._current_turn is not None,
-            "last_flush_time": self._last_flush_time.isoformat(),
-        }
+        # BUG 6 修复: 读取 _buffer/_total_bytes/_turns/_current_turn/_last_flush_time
+        # 必须持有 _lock, 与写入方保持互斥, 避免数据竞争。
+        with self._lock:
+            return {
+                "buffer_size": len(self._buffer),
+                "total_bytes": self._total_bytes,
+                "memory_limit_bytes": self.memory_limit_bytes,
+                "turn_limit": self.turn_limit,
+                "timeout_seconds": self.timeout_seconds,
+                "current_turns": len(self._turns),
+                "has_current_turn": self._current_turn is not None,
+                "last_flush_time": self._last_flush_time.isoformat(),
+            }
 
 
 class MemoryWriteQueue:
@@ -221,7 +239,7 @@ class MemoryWriteQueue:
         self.agent_id = agent_id
         self._memory_manager = memory_manager
         self._queue: List[MemoryItem] = []
-        self._lock = None
+        self._lock = threading.RLock()  # 断点 M-2 修复: 锁初始化为 RLock(原为 None, 无同步)
 
         logger.debug(
             f"MemoryWriteQueue 初始化: agent_id={agent_id}, storage={'有' if storage else '无'}, memory_manager={'有' if memory_manager else '无'}"
@@ -241,7 +259,9 @@ class MemoryWriteQueue:
             bool: 是否成功添加
         """
         try:
-            self._queue.append(item)
+            # 断点 M-2 修复: 用 RLock 保护 _queue 并发访问
+            with self._lock:
+                self._queue.append(item)
             logger.debug("添加项目到队列: %s", item.id)
             return True
         except Exception as e:
@@ -258,7 +278,9 @@ class MemoryWriteQueue:
             bool: 是否成功添加
         """
         try:
-            self._queue.extend(items)
+            # 断点 M-2 修复: 用 RLock 保护 _queue 批量写入
+            with self._lock:
+                self._queue.extend(items)
             logger.debug("批量添加项目到队列: %s 个项目", len(items))
             return True
         except Exception as e:
@@ -271,9 +293,6 @@ class MemoryWriteQueue:
         Returns:
             int: 成功写入的项目数量
         """
-        if not self._queue:
-            return 0
-
         # 优先使用 CognitiveStorageEngine，降级使用 MemoryManager
         storage = self.storage
         memory_manager = getattr(self, "_memory_manager", None)
@@ -284,7 +303,15 @@ class MemoryWriteQueue:
 
         written = 0
         errors = 0
-        items_to_write = list(self._queue)  # 复制一份，避免写入过程中修改
+        # 断点 M-2 修复: 用 RLock 保护"复制+清空"原子操作
+        # 避免复制后清空前其他线程 enqueue 导致新数据丢失
+        # BUG-10 修复: 原空队列检查在锁外 (TOCTOU race),
+        # 检查后到获取锁之间队列可能被其他线程修改。现移入锁内。
+        with self._lock:
+            if not self._queue:
+                return 0
+            items_to_write = list(self._queue)  # 复制一份，避免写入过程中修改
+            self._queue.clear()
 
         for item in items_to_write:
             try:
@@ -293,9 +320,19 @@ class MemoryWriteQueue:
                     continue
 
                 # 提取分类信息
-                classification = getattr(item, "classification", None) or (
+                # BUG-2 修复: classification 可能是 "user_message"/"agent_message"
+                # 等非法 MemoryType 枚举值, 传给 storage.save 会破坏下游枚举解析。
+                # 修复: 非法值 fallback 到 EPISODIC(对话记忆), 原值保存在
+                # metadata._original_classification 供回溯。
+                raw_classification = getattr(item, "classification", None) or (
                     item.get("classification", "conversation") if isinstance(item, dict) else "conversation"
                 )
+                # 合法枚举值集合
+                _valid_types = {mt.value for mt in MemoryType}
+                if raw_classification in _valid_types:
+                    classification = raw_classification
+                else:
+                    classification = MemoryType.EPISODIC.value
                 categories = getattr(item, "categories", None) or (
                     item.get("categories", []) if isinstance(item, dict) else []
                 )
@@ -303,6 +340,9 @@ class MemoryWriteQueue:
 
                 # 提取元数据
                 metadata = {}
+                # BUG-2 修复: 非法分类原值保存在 metadata._original_classification
+                if raw_classification != classification:
+                    metadata["_original_classification"] = raw_classification
                 meta_trace = getattr(item, "meta_trace", None) or (
                     item.get("meta_trace", None) if isinstance(item, dict) else None
                 )
@@ -344,11 +384,14 @@ class MemoryWriteQueue:
                 errors += 1
                 logger.warning("写入单条记忆失败: %s", e)
 
-        # 清空已写入的队列
-        self._queue.clear()
-
         if written > 0:
-            logger.info("批量写入 %s 条记忆到存储" + (f"，%s 条失败" if errors else "", written, errors))
+            # Bug C-1 修复：原代码括号位置错误导致 str + tuple → TypeError
+            # 错误写法: logger.info("...%s..." + (f"...%s..." if errors else "", written, errors))
+            # 正确写法：errors > 0 时附加失败信息
+            if errors > 0:
+                logger.info("批量写入 %s 条记忆到存储，%s 条失败", written, errors)
+            else:
+                logger.info("批量写入 %s 条记忆到存储", written)
         elif errors > 0:
             logger.warning("批量写入全部失败: %s 条", errors)
 

@@ -81,9 +81,13 @@ class ChatPipeline:
         self._memory_retrieval_chain = MemoryRetrievalChain()
         self._init_memory_retrieval_chain()
         # 初始化 CrystallizedExperienceManager（深度模块）
+        # Bug 4 修复: 注入 memory_manager(有 recall() 方法) 而非 memory_agent(MemCore,无 recall)
+        # Bug 5 修复: 传入 agent_id/user_id 用于缓存键隔离,防止跨用户污染
         self._crystallized_experience_manager = CrystallizedExperienceManager(
             crystallizer=self.crystallizer,
-            memory_manager=getattr(self._agent, "memory_agent", None),
+            memory_manager=getattr(self._agent, "memory_manager", None),
+            agent_id=getattr(self.config, "agent_id", None),
+            user_id=getattr(self.config, "user_id", None),
         )
         logger.debug(
             "ChatPipeline initialized with ToolExecutionManager, MemoryRetrievalChain, and CrystallizedExperienceManager"
@@ -523,22 +527,131 @@ class ChatPipeline:
 
             skill_registry = getattr(self._agent, "_skill_registry", None)
             has_tool = False
-            if skill_registry:
+            # Bug A-1 修复 [HIGH]: 原代码 `kw in s.name.lower() for kw in ctx.user_input.lower().split()`
+            # 有两个问题:
+            # 1. CJK tokenization: split() 对中文不分词，"搜索用户数据" 整段一个词，
+            #    "搜索用户数据" in "search_tool" 永远 False
+            # 2. 方向反了: 应检查 skill 的关键词是否在 user_input 中，而非反过来
+            #    （skill name 通常是英文如 "search_tool"，user_input 通常是中文如 "搜索用户数据"）
+            # 修复: 双向匹配——英文 token 保留原方向（user_input 词在 skill 文本中），
+            #       CJK 关键词反向匹配（skill 文本中的中文词在 user_input 中），
+            #       与 N-10 修复方式一致（子串匹配）。
+            # 注意: 用 `is not None` 而非真值检查——SkillRegistry 定义了 __len__，
+            # 空注册表时 bool(registry)==False（与 N-1 同一根因）。
+            if skill_registry is not None:
+                user_input_lower = ctx.user_input.lower()
                 has_tool = any(
-                    skill_registry.get_skill(s.name)
+                    self._skill_keywords_match_input(s, user_input_lower)
                     for s in skill_registry.list_skills()
-                    if any(kw in s.name.lower() for kw in ctx.user_input.lower().split())
                 )
 
             if not has_tool:
+                # Bug T-1 修复: synthesize 签名是 (description, context=None)，
+                # 原代码传 author_id 不存在该参数 → TypeError 被外层 except 吞掉，NL 合成永远失败
                 synth_result = self.tool_synthesizer.synthesize(
                     description=ctx.user_input,
-                    author_id=self.config.agent_id,
+                    context={"author_id": self.config.agent_id},
                 )
-                if synth_result and synth_result.stage.value == "COMPLETED":
-                    logger.info("NL工具合成: %s (置信度=%.2f)", synth_result.tool.name, synth_result.confidence)
-        except Exception as e:
-            logger.warning("NL工具合成检查失败: %s", e)
+                # Bug T-2 修复: ToolSynthesisResult 无 stage/tool/confidence 字段，
+                # 它们在 synthesized_tool 上；且 SynthesisStage.COMPLETED.value == "completed"（小写）
+                if synth_result and synth_result.success and synth_result.synthesized_tool:
+                    tool = synth_result.synthesized_tool
+                    if tool.stage.value == "completed":
+                        logger.info(
+                            "NL工具合成: %s (置信度=%.2f)",
+                            tool.name,
+                            tool.confidence,
+                        )
+                        # Bug N-1 修复 [CRITICAL]: 原代码合成成功后只 log，从不注册。
+                        # 导致每次相同请求都重新合成，且合成出的工具永远无法被 agent
+                        # 发现和调用——整个 NL 合成管线是死代码。
+                        # 修复: 将 SynthesizedTool 转为 Skill manifest 并注册到
+                        # skill_registry，使后续轮次可通过 list_skills/get_skill 发现。
+                        # 注意: 用 `is not None` 而非真值检查——SkillRegistry 定义了
+                        # __len__，空注册表时 bool(registry)==False，会导致空注册表时
+                        # 跳过注册（恰好是最需要注册的场景）。
+                        if skill_registry is not None:
+                            self._register_synthesized_tool(skill_registry, tool)
+        except Exception:
+            logger.exception("NL工具合成检查失败")
+
+    def _skill_keywords_match_input(self, skill, user_input_lower: str) -> bool:
+        """检查 skill 的关键词是否出现在 user_input 中（兼容 CJK）。
+
+        Bug A-1: 原代码 `kw in s.name.lower() for kw in ctx.user_input.lower().split()`
+        方向反了且 CJK 不分词。本方法实现双向匹配：
+
+        1. 英文 token 匹配（保留原方向）: user_input 中的英文词出现在 skill 文本中
+        2. CJK 关键词匹配（反向）: skill 文本中的中文关键词出现在 user_input 中
+
+        Args:
+            skill: Skill manifest 对象（含 name/description）
+            user_input_lower: 已小写的用户输入
+
+        Returns:
+            bool: 是否匹配
+        """
+        import re
+
+        # 收集 skill 的文本字段
+        texts = []
+        if skill.name:
+            texts.append(skill.name.lower())
+        if skill.description:
+            texts.append(skill.description.lower())
+        skill_text = " ".join(texts)
+
+        # 1. 英文 token 匹配（原逻辑: user_input 的英文词在 skill 文本中）
+        for kw in user_input_lower.split():
+            if kw and len(kw) >= 3 and re.search(r"[a-z]", kw) and kw in skill_text:
+                return True
+
+        # 2. CJK 关键词双向子串匹配（与 N-10 修复方式一致）
+        #    从 skill_text 中找中文关键词，检查是否在 user_input 中
+        cjk_keywords = [
+            "搜索", "查找", "查询", "读取", "写入", "处理", "分析",
+            "生成", "获取", "创建", "下载", "转换", "文件", "数据",
+            "图片", "文本", "网页", "数据库", "接口", "任务", "用户",
+        ]
+        for kw in cjk_keywords:
+            if kw in skill_text and kw in user_input_lower:
+                return True
+
+        return False
+
+    def _register_synthesized_tool(self, skill_registry, synthesized_tool):
+        """将合成的工具注册到 skill_registry。
+
+        Bug N-1: 将 SynthesizedTool 转为 Skill manifest 并注册，使后续轮次
+        可通过 list_skills/get_skill 发现已合成的工具，避免重复合成。
+
+        Args:
+            skill_registry: SkillRegistry 实例
+            synthesized_tool: SynthesizedTool 实例
+        """
+        from pathlib import Path
+
+        from neurova.skills.models import Skill, SkillSource
+
+        manifest = Skill(
+            id=synthesized_tool.tool_id or synthesized_tool.name,
+            name=synthesized_tool.name,
+            description=synthesized_tool.description,
+            source=SkillSource.LOCAL,
+            config={
+                "parameters_schema": synthesized_tool.parameters_schema,
+                "tool_sequence": synthesized_tool.tool_sequence,
+                "confidence": synthesized_tool.confidence,
+                "category": synthesized_tool.category,
+                "synthesized": True,
+            },
+        )
+        # 合成工具无文件路径，用哨兵路径标记
+        sentinel_path = Path("<synthesized>") / manifest.id
+        if skill_registry.register_skill(manifest, sentinel_path):
+            logger.info("已注册合成工具到 skill_registry: %s", manifest.id)
+        else:
+            logger.debug("合成工具 %s 已存在，跳过注册", manifest.id)
 
     # ══════════════════════════════════════════════════════════════
     # Step 1: 检索与上下文构建
@@ -589,11 +702,15 @@ class ChatPipeline:
 
     async def _retrieve_memories(self, ctx: ChatContext):
         """统一检索（使用 MemoryRetrievalChain 深度模块）"""
+        # Bug C-2 修复：ChatContext 无 user_id 字段，应从 metadata 取值
+        # 对比同文件 line 283 正确写法: (ctx.metadata or {}).get("user_id", "anonymous")
+        user_id = (ctx.metadata or {}).get("user_id", "anonymous")
+
         # 创建检索上下文
         retrieval_context = RetrievalContext(
             query=ctx.user_input,
             limit=10,
-            user_id=getattr(ctx, "user_id", None),
+            user_id=user_id,
             session_id=ctx.session_id,
             strategy=RetrievalStrategy.CHAIN,  # 责任链策略（按优先级降级）
             min_quality=0.3,  # 最低质量要求
@@ -763,14 +880,29 @@ class ChatPipeline:
             return await self._call_legacy(ctx)
 
     async def _call_loop_stream(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
-        """流式调用 Agent Loop"""
+        """流式调用 Agent Loop。
+
+        Bug N-6 修复: 原 else 分支 `reply_parts.append(str(event))` 把所有非
+        content 事件（reasoning/tool_call/tool_result/done）的字典字符串表示
+        拼入回复，污染最终文本，导致 execute_text_tool_calls 在污染文本上跑正则。
+
+        修复: 仅 content 事件的 data 进入回复；其他事件是元数据（思考过程、
+        工具调用、工具结果、完成信号），不属于回复文本，跳过即可。done 事件的
+        reply 字段是完整回复的快照，可作为空回复时的兜底。
+        """
         reply_parts = []
-        gen = self.loop.predict_step(messages=ctx.context, tools=tools_for_llm, stream=True)
+        # Bug V2-6 修复:predict_step 是 async def,返回 coroutine。
+        # 原代码 `gen = self.loop.predict_step(...)` 缺 await,对 coroutine
+        # 迭代会抛 TypeError: 'coroutine' object is not async iterable。
+        gen = await self.loop.predict_step(messages=ctx.context, tools=tools_for_llm, stream=True)
         async for event in gen:
             if isinstance(event, dict) and event.get("type") == "content":
                 reply_parts.append(event.get("data", ""))
-            else:
-                reply_parts.append(str(event))
+            elif isinstance(event, dict) and event.get("type") == "done":
+                # done 事件携带完整回复快照，仅在未累积到 content 时兜底
+                if not reply_parts and event.get("reply"):
+                    reply_parts.append(event["reply"])
+            # reasoning / tool_call / tool_result 等元数据事件不入回复
         return "".join(reply_parts)
 
     async def _call_loop_normal(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
@@ -828,10 +960,9 @@ class ChatPipeline:
 
             _tools = tools_for_llm if continue_round == 1 else None
 
-            if _tools and getattr(response, "tool_calls", None):
-                tool_call_rounds += 1
-                if tool_call_rounds >= MAX_TOOL_CALL_ROUNDS:
-                    _tools = None
+            # Bug A-5 修复: 删除死代码——while 条件 (line 938) 已保证
+            # `not getattr(response, "tool_calls", None)`，此处的
+            # `if _tools and getattr(response, "tool_calls", None):` 永远 False。
 
             logger.info("截断续写第 %s 轮 (tools=%s, 已输出 %s 字符)", continue_round, 'on' if _tools else 'off', len(reply))
 
@@ -858,11 +989,10 @@ class ChatPipeline:
                 if self._agent._detect_content_loop(recent_contents, SIMILARITY_THRESHOLD):
                     break
 
-            # 护栏 D: 工具调用循环
-            if getattr(response, "tool_calls", None):
-                tool_call_rounds += 1
-                if tool_call_rounds >= MAX_TOOL_CALL_ROUNDS:
-                    _tools = None
+            # Bug A-5 修复: 删除死代码——while 条件 (line 938) 已保证
+            # `not getattr(response, "tool_calls", None)`，如果新 response 有
+            # tool_calls，下一轮 while 条件会 False 退出循环，此处的
+            # `_tools = None` 不会影响任何后续行为。
 
             reply += new_content
 
@@ -981,49 +1111,9 @@ class ChatPipeline:
                     logger.warning("结晶器观察失败: %s", e)
 
         # PostChatPipeline - 优先使用 PipelineExecutor
-        pipeline_executor = getattr(self._agent, "pipeline_executor", None)
-        if pipeline_executor:
-            try:
-                from neurova.pipeline_executor import PipelineRequest
-
-                request = PipelineRequest(
-                    user_input=ctx.user_input,
-                    reply=ctx.reply,
-                    session_id=ctx.session_id,
-                    save_memory=ctx.save_memory,
-                    enable_tts=ctx.enable_tts,
-                    metadata=ctx.metadata or {},
-                )
-                response = await pipeline_executor.execute(request)
-                # 转换为旧格式以保持兼容性
-                post_result = {
-                    "actual_session_id": response.session_id,
-                    "audio_path": response.audio_url,
-                    "audio_data": response.metadata.get("audio_data"),
-                    "cognitive_score": response.cognitive_score,
-                    "proactive_question": response.metadata.get("proactive_question"),
-                }
-            except Exception as e:
-                logger.warning("PipelineExecutor 执行失败，fallback 到 post_chat_pipeline: %s", e)
-                # Fallback 到旧的 post_chat_pipeline
-                post_result = await self.post_chat_pipeline.process(
-                    user_input=ctx.user_input,
-                    reply=ctx.reply,
-                    session_id=ctx.session_id,
-                    save_memory=ctx.save_memory,
-                    enable_tts=ctx.enable_tts,
-                    metadata=ctx.metadata,
-                )
-        else:
-            # Fallback 到旧的 post_chat_pipeline
-            post_result = await self.post_chat_pipeline.process(
-                user_input=ctx.user_input,
-                reply=ctx.reply,
-                session_id=ctx.session_id,
-                save_memory=ctx.save_memory,
-                enable_tts=ctx.enable_tts,
-                metadata=ctx.metadata,
-            )
+        # Bug #5+11: 提取 _run_post_chat_pipeline 辅助方法，消除 fallback 代码重复
+        # Bug #5: 检查 post_chat_pipeline 是否为 None，避免 AttributeError
+        post_result = await self._run_post_chat_pipeline(ctx)
 
         # 组装结果
         ctx.result = {
@@ -1048,6 +1138,54 @@ class ChatPipeline:
                 data={"result": ctx.result},
             )
             self._trajectory_recorder.end_trace(ctx.trace_id)
+
+    async def _run_post_chat_pipeline(self, ctx: ChatContext) -> Dict[str, Any]:
+        """Bug #5+11: 提取的 post_chat_pipeline 调用辅助方法
+
+        优先使用 PipelineExecutor，失败时 fallback 到 post_chat_pipeline。
+        Bug #5: 检查 post_chat_pipeline 是否为 None，避免 AttributeError。
+        Bug #11: 消除 fallback 代码重复。
+        """
+        pipeline_executor = getattr(self._agent, "pipeline_executor", None)
+        if pipeline_executor:
+            try:
+                from neurova.pipeline_executor import PipelineRequest
+
+                request = PipelineRequest(
+                    user_input=ctx.user_input,
+                    reply=ctx.reply,
+                    session_id=ctx.session_id,
+                    save_memory=ctx.save_memory,
+                    enable_tts=ctx.enable_tts,
+                    metadata=ctx.metadata or {},
+                )
+                response = await pipeline_executor.execute(request)
+                # 转换为旧格式以保持兼容性
+                return {
+                    "actual_session_id": response.session_id,
+                    "audio_path": response.audio_url,
+                    "audio_data": response.metadata.get("audio_data"),
+                    "cognitive_score": response.cognitive_score,
+                    "proactive_question": response.metadata.get("proactive_question"),
+                }
+            except Exception as e:
+                logger.warning("PipelineExecutor 执行失败，fallback 到 post_chat_pipeline: %s", e)
+
+        # Bug #5: 检查 post_chat_pipeline 是否为 None，避免 AttributeError
+        if self.post_chat_pipeline is None:
+            raise RuntimeError(
+                "post_chat_pipeline is not initialized — cannot execute post-chat processing. "
+                "Either initialize Agent.post_chat_pipeline or configure pipeline_executor."
+            )
+
+        return await self.post_chat_pipeline.process(
+            user_input=ctx.user_input,
+            reply=ctx.reply,
+            session_id=ctx.session_id,
+            save_memory=ctx.save_memory,
+            enable_tts=ctx.enable_tts,
+            metadata=ctx.metadata,
+        )
 
     def _collect_tool_messages(self) -> List[Dict]:
         """收集工具调用消息"""

@@ -438,6 +438,54 @@ class AutoSkillBuilder:
         """获取所有技能模板"""
         return list(self._templates.values())
 
+    def register_to_skill_registry(self, registry) -> int:
+        """将封装的技能模板注册到 SkillRegistry
+
+        桥接 AutoSkillBuilder（内存 dict）与 SkillRegistry（中央注册表），
+        使自动封装的技能能在下次对话中被检索使用。
+
+        Args:
+            registry: SkillRegistry 实例
+
+        Returns:
+            int: 成功注册的技能数量
+        """
+        from neurova.skills.models import Skill, SkillSource
+
+        registered_count = 0
+        with self._lock:
+            for template_id, template in self._templates.items():
+                if not template.is_active:
+                    continue
+
+                # 转换 SkillTemplate → Skill
+                skill = Skill(
+                    id=template_id,
+                    name=template.name,
+                    version="0.1.0",
+                    description=template.description,
+                    author="auto_skill_builder",
+                    source=SkillSource.LOCAL,
+                    enabled=True,
+                    config={
+                        "tool_sequence": template.tool_sequence,
+                        "context_template": template.context_template,
+                        "success_rate": template.success_rate,
+                        "parameter_hints": template.parameter_hints,
+                    },
+                )
+
+                # 注册到 SkillRegistry（path 用占位符，自动技能无文件路径）
+                try:
+                    success = registry.register_skill(skill, None)
+                    if success:
+                        registered_count += 1
+                        logger.info("自动注册技能 %s 到 SkillRegistry", template_id)
+                except Exception as e:
+                    logger.warning("注册技能 %s 失败: %s", template_id, e)
+
+        return registered_count
+
     def deactivate_template(self, template_id: str) -> bool:
         """停用技能模板"""
         with self._lock:

@@ -301,27 +301,113 @@ class SessionSyncManager:
             )
             session.add_event(event)
 
+            # #5-C 自动过期清理：每次创建新会话时触发清理
+            self._cleanup_expired_unlocked()
+
+            # #5-A 执行 max_sessions 上限：超限后驱逐 last_activity 最旧的活跃会话
+            self._enforce_max_sessions_unlocked()
+
             logger.info("Created new session: %s for user=%s, agent=%s", session.session_id, user_id, agent_id)
             return session
 
+    def _cleanup_expired_unlocked(self) -> int:
+        """清理过期会话（无锁版本，调用方必须已持有 self._lock）。
+
+        #5-C：抽出无锁版本避免 RLock 重入层级混乱。
+        """
+        now = datetime.now(timezone.utc)
+        expired = []
+        for session_id, session in self._sessions.items():
+            if session.status == "ended":
+                expired.append(session_id)
+                continue
+            elapsed = (now - session.last_activity).total_seconds()
+            if elapsed > self._session_timeout:
+                expired.append(session_id)
+
+        for session_id in expired:
+            self._end_session_unlocked(session_id)
+
+        if expired:
+            logger.info("Auto-cleaned up %s expired sessions", len(expired))
+        return len(expired)
+
+    def _enforce_max_sessions_unlocked(self) -> int:
+        """驱逐最旧会话以满足 max_sessions 上限（无锁版本，调用方必须已持有 self._lock）。
+
+        #5-A：原 _max_sessions 配置声明但无引用，此处补全执行逻辑。
+        返回被驱逐的会话数。
+        """
+        if self._max_sessions <= 0:
+            return 0
+
+        evicted = 0
+        while len(self._sessions) > self._max_sessions:
+            # 找到 last_activity 最旧的活跃会话
+            oldest_sid = None
+            oldest_time = None
+            for sid, session in self._sessions.items():
+                if session.status != "active":
+                    continue
+                if oldest_time is None or session.last_activity < oldest_time:
+                    oldest_time = session.last_activity
+                    oldest_sid = sid
+
+            if oldest_sid is None:
+                break
+            self._end_session_unlocked(oldest_sid)
+            evicted += 1
+
+        if evicted:
+            logger.info("Evicted %s oldest sessions to enforce max_sessions=%s", evicted, self._max_sessions)
+        return evicted
+
+    def _end_session_unlocked(self, session_id: str) -> bool:
+        """从 _sessions 真正删除会话（无锁版本，调用方必须已持有 self._lock）。
+
+        #5-C/#5-A：cleanup_expired_sessions 与 _enforce_max_sessions_unlocked 共用。
+        与公开方法 end_session 不同：end_session 仅标记 status='ended' 保留 dict 项
+        （调用方可能仍需查 history）；本方法用于内部清理，真正删除以释放内存。
+        """
+        session = self._sessions.pop(session_id, None)
+        if not session:
+            return False
+
+        session.status = "ended"
+
+        # 清理用户映射
+        key = (session.user_id, session.agent_id)
+        if self._user_sessions.get(key) == session_id:
+            del self._user_sessions[key]
+
+        # 清理外部 ID 映射
+        to_remove = [k for k, v in self._external_mapping.items() if v == session_id]
+        for k in to_remove:
+            del self._external_mapping[k]
+
+        return True
+
     def get_session(self, session_id: str) -> Optional[UnifiedSession]:
         """获取会话"""
-        return self._sessions.get(session_id)
+        with self._lock:
+            return self._sessions.get(session_id)
 
     def get_session_by_user(self, user_id: str, agent_id: str = "default") -> Optional[UnifiedSession]:
         """通过用户 ID 获取会话"""
-        key = (user_id, agent_id)
-        session_id = self._user_sessions.get(key)
-        if session_id:
-            return self._sessions.get(session_id)
-        return None
+        with self._lock:
+            key = (user_id, agent_id)
+            session_id = self._user_sessions.get(key)
+            if session_id:
+                return self._sessions.get(session_id)
+            return None
 
     def get_session_by_external_id(self, external_id: str) -> Optional[UnifiedSession]:
         """通过外部 ID 获取会话"""
-        session_id = self._external_mapping.get(external_id)
-        if session_id:
-            return self._sessions.get(session_id)
-        return None
+        with self._lock:
+            session_id = self._external_mapping.get(external_id)
+            if session_id:
+                return self._sessions.get(session_id)
+            return None
 
     def end_session(self, session_id: str) -> bool:
         """结束会话"""
@@ -353,16 +439,17 @@ class SessionSyncManager:
         self, user_id: Optional[str] = None, agent_id: Optional[str] = None, status: Optional[str] = None
     ) -> List[UnifiedSession]:
         """列出会话"""
-        sessions = list(self._sessions.values())
+        with self._lock:
+            sessions = list(self._sessions.values())
 
-        if user_id:
-            sessions = [s for s in sessions if s.user_id == user_id]
-        if agent_id:
-            sessions = [s for s in sessions if s.agent_id == agent_id]
-        if status:
-            sessions = [s for s in sessions if s.status == status]
+            if user_id:
+                sessions = [s for s in sessions if s.user_id == user_id]
+            if agent_id:
+                sessions = [s for s in sessions if s.agent_id == agent_id]
+            if status:
+                sessions = [s for s in sessions if s.status == status]
 
-        return sessions
+            return sessions
 
     # -----------------------------------------------------------------------
     # 渠道连接管理
@@ -538,19 +625,21 @@ class SessionSyncManager:
         self, session_id: str, limit: int = 100, event_types: Optional[List[EventType]] = None
     ) -> List[SessionEvent]:
         """获取会话历史"""
-        session = self._sessions.get(session_id)
-        if not session:
-            return []
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return []
 
-        return session.get_history(limit, event_types)
+            return session.get_history(limit, event_types)
 
     def get_history_by_user(self, user_id: str, agent_id: str = "default", limit: int = 100) -> List[SessionEvent]:
         """通过用户 ID 获取历史"""
-        session = self.get_session_by_user(user_id, agent_id)
-        if not session:
-            return []
+        with self._lock:
+            session = self._sessions.get(self._user_sessions.get((user_id, agent_id), ""))
+            if not session:
+                return []
 
-        return session.get_history(limit)
+            return session.get_history(limit)
 
     # -----------------------------------------------------------------------
     # 映射管理
@@ -571,38 +660,57 @@ class SessionSyncManager:
     def cleanup_expired_sessions(self) -> int:
         """清理过期会话"""
         with self._lock:
-            now = datetime.now(timezone.utc)
-            expired = []
-
-            for session_id, session in self._sessions.items():
-                if session.status == "ended":
-                    expired.append(session_id)
-                    continue
-
-                elapsed = (now - session.last_activity).total_seconds()
-                if elapsed > self._session_timeout:
-                    expired.append(session_id)
-
-            for session_id in expired:
-                self.end_session(session_id)
-
-            if expired:
-                logger.info("Cleaned up %s expired sessions", len(expired))
-
-            return len(expired)
+            return self._cleanup_expired_unlocked()
 
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
-        active_sessions = sum(1 for s in self._sessions.values() if s.status == "active")
-        total_channels = sum(len(s.active_channels) for s in self._sessions.values())
+        with self._lock:
+            active_sessions = sum(1 for s in self._sessions.values() if s.status == "active")
+            total_channels = sum(len(s.active_channels) for s in self._sessions.values())
 
-        return {
-            "total_sessions": len(self._sessions),
-            "active_sessions": active_sessions,
-            "total_channels": total_channels,
-            "user_mappings": len(self._user_sessions),
-            "external_mappings": len(self._external_mapping),
-        }
+            return {
+                "total_sessions": len(self._sessions),
+                "active_sessions": active_sessions,
+                "total_channels": total_channels,
+                "user_mappings": len(self._user_sessions),
+                "external_mappings": len(self._external_mapping),
+            }
+
+    def get_messages(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """获取会话消息事件（仅 USER_MESSAGE + AGENT_REPLY），返回 List[Dict]。
+
+        #5 深化：调用方（ChatPipeline/ChannelManager）多次需要"仅消息事件"，
+        原来需各自过滤 SessionEvent，违反 locality。集中到 deep module 内。
+
+        Args:
+            session_id: 会话 ID
+            limit: 最多返回 N 条（0 表示全部）
+
+        Returns:
+            List[Dict]，每条含 event_type / role / content / timestamp / payload
+        """
+        message_event_types = {EventType.USER_MESSAGE, EventType.AGENT_REPLY}
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return []
+
+            events = [e for e in session.history if e.event_type in message_event_types]
+            if limit > 0:
+                events = events[-limit:]
+
+            return [
+                {
+                    "event_type": e.event_type.value,
+                    "role": "user" if e.event_type == EventType.USER_MESSAGE else "assistant",
+                    "content": e.payload.get("content", ""),
+                    "timestamp": e.timestamp.isoformat(),
+                    "session_id": e.session_id,
+                    "source_channel": e.source_channel,
+                    "payload": dict(e.payload),
+                }
+                for e in events
+            ]
 
 
 # ---------------------------------------------------------------------------

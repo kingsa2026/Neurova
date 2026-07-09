@@ -460,6 +460,84 @@ class ToolGeneticEngine:
         logger.info("Rejected tool: %s", genotype.tools)
         return False
 
+    def register_to_skill_registry(self, registry) -> int:
+        """将高适应度的工具基因型注册到 SkillRegistry
+
+        Bug A-6 修复 [MED]: 之前 ToolGeneticEngine 仅通过 register_if_valid
+        把基因型塞进内部种群，**从不向 SkillRegistry 注册**。导致进化算法
+        产生的高适应度工具组合永远停留在遗传引擎内部，下次对话时
+        chat_pipeline._check_nl_synthesis 仍因 has_tool=False 触发重复合成。
+
+        仿照 evolution/skill_encapsulation.py:441-487
+        AutoSkillBuilder.register_to_skill_registry 实现：遍历种群，
+        将 fitness >= validation_threshold 的个体转换为 Skill manifest
+        注册到 SkillRegistry。
+
+        Args:
+            registry: SkillRegistry 实例
+
+        Returns:
+            int: 成功注册的技能数量
+        """
+        from neurova.skills.models import Skill, SkillSource
+
+        registered_count = 0
+        for genotype in self._population:
+            # 仅注册高适应度个体
+            if genotype.fitness < self._validation_threshold:
+                logger.debug(
+                    "跳过低适应度基因型 (fitness=%.3f < threshold=%.3f): %s",
+                    genotype.fitness,
+                    self._validation_threshold,
+                    genotype.tools,
+                )
+                continue
+
+            # 构建稳定的 skill id（基于工具序列）
+            tool_sequence = list(genotype.tool_sequence)
+            skill_id = "genetic_" + "_".join(tool_sequence)
+
+            # 已存在则跳过（避免重复注册）
+            if registry.has_skill(skill_id):
+                logger.debug("进化工具 %s 已注册，跳过", skill_id)
+                continue
+
+            # 转换 ToolGenotype → Skill manifest
+            skill = Skill(
+                id=skill_id,
+                name=skill_id,
+                version="0.1.0",
+                description=(
+                    f"遗传进化工具组合（适应度 {genotype.fitness:.2f}）: "
+                    f"{' → '.join(tool_sequence)}"
+                ),
+                author="genetic_engine",
+                source=SkillSource.LOCAL,
+                enabled=True,
+                config={
+                    "tool_sequence": tool_sequence,
+                    "fitness": genotype.fitness,
+                    "success_rate": genotype.success_rate,
+                    "execution_time_ms": genotype.execution_time_ms,
+                    "reuse_count": genotype.reuse_count,
+                    "generation": genotype.generation,
+                },
+            )
+
+            try:
+                success = registry.register_skill(skill, None)
+                if success:
+                    registered_count += 1
+                    logger.info(
+                        "注册进化工具 %s 到 SkillRegistry (fitness=%.3f)",
+                        skill_id,
+                        genotype.fitness,
+                    )
+            except Exception as e:
+                logger.warning("注册进化工具 %s 失败: %s", skill_id, e)
+
+        return registered_count
+
     def _average_fitness(self) -> float:
         """计算种群平均适应度。"""
         if not self._population:

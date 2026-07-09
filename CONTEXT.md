@@ -61,6 +61,41 @@ Agent (1621 行, 37 方法)
 | 时序 | TemporalKnowledgeGraph | 时序事实管理 |
 | Hebb | NeuHebbManager | 结构化推理记忆 |
 
+#### 持久化领域模型（Tier 4A 统一）
+
+记忆系统使用 **3+1 套 dataclass**，各司其职，通过显式转换方法互操作。架构决策详见 [ADR 索引](docs/adr/README.md)。
+
+**相关 ADR**：
+- [ADR 0001: 统一 Memory dataclass](docs/adr/0001-unify-memory-dataclass.md) — 3+1 套量纲统一
+- [ADR 0002: 保留 UnifiedMemoryNode](docs/adr/0002-retain-unified-memory-node.md) — LSM-Tree 独立数据模型
+- [ADR 0003: 记忆系统架构](docs/adr/0003-memory-system-architecture.md) — 分层 + 深度模块
+- [ADR 0004: CognitiveStorageEngine LSM-Tree](docs/adr/0004-cognitive-storage-engine-lsm.md) — 五层架构 L0-L4
+- [ADR 0005: NeurovaRecallEngine 签名](docs/adr/0005-neurova-recall-engine-signature.md) — `memory_manager` 唯一注入点
+- [ADR 0006: embedding 工厂](docs/adr/0006-embedding-factory.md) — 懒加载 + 单例 + 测试重置
+- [ADR 0007: API 端点 RRF 融合](docs/adr/0007-semantic-search-api-rrf.md) — Okapi BM25 + RRF 三路融合
+- [ADR 0008: SessionRepository 统一接口](docs/adr/0008-session-repository.md) — 5 套会话存储收敛到 ABC
+
+| dataclass | 文件 | 字段数 | temperature | importance | 用途 |
+|-----------|------|--------|-------------|------------|------|
+| `Memory` | `cognitive_layers/memory_layer/models.py:249` | 21 | 0-100 | 0-100 | **主领域模型**，业务逻辑层使用 |
+| `MemoryRecord` | `cognitive_layers/memory_layer/storage.py:29` | 15 | 无 | 0+ | 持久化层（JSON 序列化） |
+| `UnifiedMemoryNode` | `cognitive_layers/memory_layer/cognitive_storage_engine.py:54` | 11 | 0-100 | 无 | LSM-Tree 五层架构（L0-L4） |
+
+**量纲规范**：
+- `temperature` 统一 0-100 量纲（`MemoryRecord` 无此字段）
+- `importance` 在 `models.Memory` 为 0-100，在 `MemoryRecord` 为 0+（转换时乘/除 100）
+
+**转换方法约定**（量纲映射集中处理）：
+- `MemoryRecord.to_memory()` — 0+ importance → 0-100（乘 100，clamp）
+- `MemoryRecord.from_memory()` — 0-100 importance → 0+（除 100）
+- `UnifiedMemoryNode.to_memory()` — temperature 量纲一致，importance 丢弃（无此字段）
+- `UnifiedMemoryNode.from_memory()` — temperature 量纲一致，importance 丢弃
+
+**历史变更**：
+- 2026-06-27：删除冗余的 `mem_core.Memory`（6 字段，0+/0-1 量纲），统一为 3+1 套（ADR 0001）
+- 2026-06-27：保留 `UnifiedMemoryNode` 作为第 4 套（ADR 0002），LSM-Tree 独立演进
+- 2026-06-27：补全 ADR 0003-0007，覆盖架构 / LSM-Tree / RecallEngine 签名 / embedding 工厂 / RRF 融合
+
 ### LLM 路由 (`neurova/llm/`)
 
 - **MultiModelLLMClient** — 多模型统一客户端

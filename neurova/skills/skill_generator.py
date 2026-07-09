@@ -227,37 +227,14 @@ class SkillGenerator:
             return SkillValidationResult(valid=False, errors=[f"验证过程出错: {str(e)}"])
 
     async def _analyze_requirement(self, requirement: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """分析技能需求"""
-        # 使用 LLM 分析需求
-        if self.llm_client:
-            prompt = f"""
-            分析以下技能需求，提取关键信息：
-            
-            需求: {requirement}
-            上下文: {context}
-            
-            请返回 JSON 格式的分析结果，包含：
-            1. 功能描述
-            2. 输入输出格式
-            3. 依赖项
-            4. 复杂度评估
-            5. 安全考虑
-            """
+        """分析技能需求
 
-            # 模拟 LLM 调用
-            analysis = {
-                "功能描述": requirement,
-                "输入输出格式": {"input": "dict", "output": "dict"},
-                "依赖项": [],
-                "复杂度评估": "中等",
-                "安全考虑": [],
-                "context": context or {},
-            }
-
-            return analysis
-
-        # 默认分析
-        return {
+        P0-B4 修复：之前在 `if self.llm_client:` 分支中仍返回硬编码模拟数据，
+        从未实际调用 LLM。现在改为实际调用 llm_client.chat 并解析 JSON 返回。
+        当 llm_client 不可用时，回退到默认分析（保持向后兼容）。
+        """
+        # 默认分析结果（无 LLM 时使用）
+        default_analysis = {
             "功能描述": requirement,
             "输入输出格式": {"input": "dict", "output": "dict"},
             "依赖项": [],
@@ -265,6 +242,58 @@ class SkillGenerator:
             "安全考虑": [],
             "context": context or {},
         }
+
+        # 使用 LLM 分析需求
+        if not self.llm_client:
+            return default_analysis
+
+        prompt = f"""
+        分析以下技能需求，提取关键信息：
+
+        需求: {requirement}
+        上下文: {context}
+
+        请返回 JSON 格式的分析结果，包含：
+        1. 功能描述
+        2. 输入输出格式
+        3. 依赖项
+        4. 复杂度评估
+        5. 安全考虑
+        """
+
+        # P0-B4 修复：实际调用 LLM 而非返回硬编码模拟数据
+        try:
+            # llm_client.chat 可能是 async（返回 coroutine）或 sync（直接返回字符串）
+            import inspect
+            response = self.llm_client.chat(prompt)
+            if inspect.isawaitable(response):
+                response = await response
+
+            # 解析 LLM 返回的 JSON
+            import json
+            # 尝试提取 JSON 内容（LLM 可能返回带 markdown 代码块的字符串）
+            response_text = response if isinstance(response, str) else str(response)
+            # 移除可能的 markdown 代码块标记
+            json_text = response_text.strip()
+            if json_text.startswith("```"):
+                # 去除首行 ``` 和末行 ```
+                lines = json_text.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                json_text = "\n".join(lines).strip()
+
+            analysis = json.loads(json_text)
+            # 保留 context 字段（LLM 可能未返回）
+            analysis.setdefault("context", context or {})
+            logger.info("LLM 分析需求完成: %s", requirement[:50])
+            return analysis
+        except Exception as e:
+            logger.warning(
+                "LLM 分析需求失败，回退到默认分析: %s", e, exc_info=True
+            )
+            return default_analysis
 
     async def _generate_skill_code(self, analysis: Dict[str, Any]) -> str:
         """生成技能代码"""
@@ -417,7 +446,11 @@ def get_metadata() -> Dict[str, Any]:
             warnings.append("建议添加文档字符串")
 
         # 检查类型提示
-        if "->" not in code and ":" not in code.split("def ")[1] if "def " in code else True:
+        # Bug N-9 修复: 原三元表达式 `A and B if C else True` 被 Python 解析为
+        # `(A and B) if C else True`，导致无函数代码走 else 返回 True 错误添加警告，
+        # 有函数时因函数定义本身含冒号使 `":" not in split("def ")[1]` 为 False 反而不警告。
+        # 修复: 只在有函数且无返回类型注解(->)时提示。
+        if "def " in code and "->" not in code:
             warnings.append("建议添加类型提示")
 
         return warnings

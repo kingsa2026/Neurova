@@ -78,6 +78,9 @@ class MetaCognitionModule:
         # 当前认知状态
         self._current_process: Optional[CognitiveProcess] = None
         self._process_start_time: Optional[float] = None
+        # Bug 16 修复: 用 Dict 替代单一槽位,支持并发过程不互相覆盖
+        # event_id -> (process_type, start_time)
+        self._active_processes: Dict[str, tuple] = {}
 
     @property
     def name(self) -> str:
@@ -110,6 +113,8 @@ class MetaCognitionModule:
         with self._lock:
             self._current_process = process_type
             self._process_start_time = time.time()
+            # Bug 16 修复: 记录每个 event_id 对应的过程信息,避免并发覆盖
+            self._active_processes[event_id] = (process_type, time.time())
 
         return event_id
 
@@ -133,11 +138,16 @@ class MetaCognitionModule:
             认知事件记录
         """
         with self._lock:
-            duration_ms = 0.0
-            if self._process_start_time:
-                duration_ms = (time.time() - self._process_start_time) * 1000
-
-            process_type = self._current_process or CognitiveProcess.REASONING
+            # Bug 16 修复: 通过 event_id 从 dict 取回对应过程类型,而非单一槽位
+            process_info = self._active_processes.pop(event_id, None)
+            if process_info:
+                process_type, start_time = process_info
+                duration_ms = (time.time() - start_time) * 1000
+            else:
+                process_type = self._current_process or CognitiveProcess.REASONING
+                duration_ms = 0.0
+                if self._process_start_time:
+                    duration_ms = (time.time() - self._process_start_time) * 1000
 
             event = CognitiveEvent(
                 event_id=event_id,
@@ -156,9 +166,10 @@ class MetaCognitionModule:
             # 更新统计
             self._update_stats(event)
 
-            # 重置当前状态
-            self._current_process = None
-            self._process_start_time = None
+            # 重置当前状态(仅当无活跃过程时)
+            if not self._active_processes:
+                self._current_process = None
+                self._process_start_time = None
 
             return event
 

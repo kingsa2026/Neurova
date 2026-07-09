@@ -105,6 +105,8 @@ class CrystallizedExperienceManager:
         retry_delay_ms: float = 100.0,
         cache_ttl_seconds: float = 300.0,  # 5分钟缓存
         health_check_interval: float = 60.0,
+        agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ):
         """
         初始化结晶经验管理器
@@ -116,6 +118,8 @@ class CrystallizedExperienceManager:
             retry_delay_ms: 重试延迟（毫秒）
             cache_ttl_seconds: 缓存过期时间（秒）
             health_check_interval: 健康检查间隔（秒）
+            agent_id: Agent ID（用于缓存键隔离，防止跨用户污染）
+            user_id: User ID（用于缓存键隔离，防止跨用户污染）
         """
         self._crystallizer = crystallizer
         self._memory_manager = memory_manager
@@ -123,6 +127,9 @@ class CrystallizedExperienceManager:
         self._retry_delay_ms = retry_delay_ms
         self._cache_ttl_seconds = cache_ttl_seconds
         self._health_check_interval = health_check_interval
+        # Bug 5 修复: 缓存键需包含 agent_id/user_id,防止跨用户污染
+        self._agent_id = agent_id
+        self._user_id = user_id
 
         # 缓存：{query_hash: (result, timestamp)}
         self._cache: Dict[str, tuple] = {}
@@ -410,8 +417,12 @@ class CrystallizedExperienceManager:
     # ══════════════════════════════════════════════════════════════
 
     def _hash_query(self, query: str) -> str:
-        """计算查询哈希"""
-        return f"{hash(query)}_{len(query)}"
+        """计算查询哈希
+
+        Bug 5 修复: 缓存键包含 agent_id/user_id,防止跨用户污染。
+        不同 agent/user 的相同查询应产生不同缓存键。
+        """
+        return f"{hash(query)}_{len(query)}_{self._agent_id}_{self._user_id}"
 
     def _get_from_cache(self, query: str) -> Optional[RetrievalResult]:
         """从缓存获取结果"""

@@ -50,6 +50,7 @@ from neurova.cognitive_layers.memory_layer.models import (
     LifecycleStage,
     Memory,
     MemoryCategory,
+    MemoryPerspective,
     MemoryType,
 )
 
@@ -60,13 +61,74 @@ _default_manager: Optional["MemoryManager"] = None
 _manager_lock = threading.Lock()
 
 
+# TemperatureEngine._determine_stage 返回的字符串 → LifecycleStage 枚举映射
+# 注意：temperature 模块用 'secondary'/'deleted'，LifecycleStage 用 'consolidated'/'forgotten'
+_STAGE_STRING_TO_ENUM = {
+    "active": LifecycleStage.ACTIVE,
+    "secondary": LifecycleStage.ACTIVE,        # secondary 表示仍可用，归到 ACTIVE
+    "consolidated": LifecycleStage.CONSOLIDATED,
+    "archived": LifecycleStage.ARCHIVED,
+    "deleted": LifecycleStage.FORGOTTEN,        # deleted 表示已遗忘
+    "forgotten": LifecycleStage.FORGOTTEN,
+    "crystallized": LifecycleStage.CRYSTALLIZED,
+}
+
+
+def _map_lifecycle_stage(stage_str: str) -> Optional[LifecycleStage]:
+    """将 TemperatureEngine 返回的阶段字符串映射到 LifecycleStage 枚举
+
+    Args:
+        stage_str: temperature 模块返回的阶段字符串（'active'/'secondary'/'archived'/'deleted' 等）
+
+    Returns:
+        对应的 LifecycleStage 枚举值；未识别的字符串返回 None（保持原阶段不变）
+    """
+    return _STAGE_STRING_TO_ENUM.get(stage_str)
+
+
+def _is_valid_category(category: str) -> bool:
+    """判断字符串是否是合法 MemoryCategory 枚举值"""
+    try:
+        MemoryCategory(category)
+        return True
+    except (ValueError, KeyError):
+        return False
+
+
+def _filter_by_category(mems: List[Memory], category: str) -> List[Memory]:
+    """按 category 过滤记忆列表
+
+    支持两种模式：
+    1. 合法 MemoryCategory 枚举值（如 'general'/'conversation'） → 按 m.category.value 精确匹配
+    2. 任意字符串（测试或自定义标签）→ 按 metadata._original_category 匹配
+       （remember 时若 category 非法枚举，会 fallback 到 GENERAL 但在 metadata 中保留原始字符串）
+    """
+    if _is_valid_category(category):
+        return [m for m in mems if m.category.value == category]
+    # 非法枚举字符串：按 remember 时保留的 metadata._original_category 匹配
+    return [m for m in mems if m.metadata.get("_original_category") == category]
+
+
 class MemoryManager:
     """记忆管理器 Facade — 通过 EventBus 路由到各子模块"""
 
-    def __init__(self, db_path: str = "neurova_memory.db", agent_id: str = "default", user_id: str = "default"):
+    def __init__(
+        self,
+        db_path: str = "neurova_memory.db",
+        agent_id: str = "default",
+        neuser_id: str = "default",
+        user_id: str = "default",
+        enable_buffer: bool = True,
+    ):
+        # P-4 修复: 空路径校验, 测试期望 MemoryManager(db_path="") 抛 ValueError
+        if not db_path:
+            raise ValueError("db_path must not be empty")
+
         self._db_path = db_path
         self._agent_id = agent_id
+        self._neuser_id = neuser_id
         self._user_id = user_id
+        self._enable_buffer = enable_buffer
         self._bus = EventBus()
         self._started = False
 
@@ -79,14 +141,30 @@ class MemoryManager:
         self._storage = None
         self._emotion_analyzer = None
         self._auto_classifier = None
-        self._conversation_buffer = None
+        self._conversation_buffer = None  # 受 enable_buffer 控制,下方按需初始化
         self._conflict_detector = None
         self._relation_manager = None
         self._sleep_consolidation = None
         self._explainability_manager = None
         self._forgetting_recovery = None
         self._emotion_conduction = None
-        self._write_queue = None
+        # Bug 5 修复: _write_queue 必须在 __init__ 中初始化为 MemoryWriteQueue 实例
+        # 原代码 self._write_queue = None 后从未赋值, 导致 flush_buffer 永远返回 0
+        try:
+            from neurova.cognitive_layers.memory_layer.conversation_buffer import MemoryWriteQueue
+            self._write_queue = MemoryWriteQueue(
+                storage=None, agent_id=agent_id, memory_manager=self,
+            )
+        except Exception as e:
+            logger.warning("MemoryWriteQueue init failed (fallback to None): %s", e)
+            self._write_queue = None
+        # Bug 9 修复: 共享 ThreadPoolExecutor 限制并发线程数,
+        # 原实现 _extract_dependency_async 每次 remember 都新建 Thread, 高频调用会创建无限线程
+        from concurrent.futures import ThreadPoolExecutor
+        self._dependency_executor = ThreadPoolExecutor(
+            max_workers=min(4, (os.cpu_count() or 2)),
+            thread_name_prefix="mem-dep",
+        )
         # EKI/Sleep 模块（阶段2委托）
         self._eki_module = None
         self._sleep_module = None
@@ -112,9 +190,24 @@ class MemoryManager:
         self._emotion_module = EmotionModule(db_path=db_path)
         self._emotion_module.init()
 
+        # MemoryStorage 实例（提供 get_recent_memories / delete_memory 等接口）
+        # Bug 8 修复：原 self._storage = None 永远不被重新赋值，导致下游 8 处调用方 AttributeError
+        self._init_storage()
+
         # SQLite 持久化（记忆跨重启保留）
         self._init_persistence_db()
         self._load_from_db()
+
+        # ConversationBuffer (受 enable_buffer 控制; 关闭时跳过以降低开销/便于测试隔离)
+        if self._enable_buffer:
+            try:
+                from neurova.cognitive_layers.memory_layer.conversation_buffer import ConversationBuffer
+
+                self._conversation_buffer = ConversationBuffer()
+                logger.debug("ConversationBuffer initialized")
+            except Exception as e:
+                logger.warning("ConversationBuffer init failed: %s", e)
+                self._conversation_buffer = None
 
         # 统计
         self._stats = {
@@ -124,8 +217,29 @@ class MemoryManager:
         }
 
         logger.info(
-            f"MemoryManager initialized: agent_id={agent_id}, user_id={user_id}, memories_loaded={len(self._memories)}"
+            f"MemoryManager initialized: agent_id={agent_id}, neuser_id={neuser_id}, "
+            f"user_id={user_id}, enable_buffer={self._enable_buffer}, "
+            f"memories_loaded={len(self._memories)}"
         )
+
+    def _init_storage(self):
+        """初始化 MemoryStorage 实例（提供 get_recent_memories / delete_memory 等接口）
+
+        Bug 8 修复：原 __init__ 中 self._storage = None 后从未重新赋值，
+        导致 mem_core.py / compression.py / memory_layer.py 共 8 处调用方
+        在访问 storage.get_recent_memories / storage.delete_memory 时 AttributeError。
+        """
+        try:
+            from neurova.cognitive_layers.memory_layer.storage import MemoryStorage
+
+            db_dir = os.path.dirname(self._db_path) or "."
+            storage_dir = os.path.join(db_dir, "memory_storage")
+            os.makedirs(storage_dir, exist_ok=True)
+            self._storage = MemoryStorage(storage_dir=storage_dir)
+            logger.debug("MemoryStorage initialized: %s", storage_dir)
+        except Exception as e:
+            logger.warning("MemoryStorage init failed: %s", e)
+            self._storage = None
 
     def _init_persistence_db(self):
         """初始化 SQLite 持久化数据库"""
@@ -167,14 +281,20 @@ class MemoryManager:
             self._persist_db_path = None
 
     def _load_from_db(self):
-        """从 SQLite 加载记忆到内存"""
+        """从 SQLite 加载记忆到内存
+
+        Bug 4 修复: WHERE 子句原仅按 agent_id 过滤, 跨 neuser_id/user_id 加载记忆。
+        现加上 AND neuser_id=? AND user_id=? 保证三层隔离。
+        """
         if not getattr(self, "_persist_db_path", None):
             return
         try:
             conn = sqlite3.connect(self._persist_db_path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT * FROM memories WHERE agent_id = ? ORDER BY created_at DESC", (self._agent_id,)
+                "SELECT * FROM memories WHERE agent_id = ? AND neuser_id = ? AND user_id = ? "
+                "ORDER BY created_at DESC",
+                (self._agent_id, self._neuser_id, self._user_id),
             ).fetchall()
             conn.close()
 
@@ -279,6 +399,10 @@ class MemoryManager:
         return self._agent_id
 
     @property
+    def neuser_id(self) -> str:
+        return self._neuser_id
+
+    @property
     def user_id(self) -> str:
         return self._user_id
 
@@ -298,6 +422,12 @@ class MemoryManager:
         importance: float = 50.0,
         metadata: Optional[Dict[str, Any]] = None,
         emotion: Optional[str] = None,
+        # M-7 修复: API 层显式接收的 4 个数据参数, 不再落入 kwargs 黑洞
+        is_important: Optional[bool] = None,
+        is_crystallized: Optional[bool] = None,
+        emotion_score: Optional[float] = None,
+        perspective: Optional[str] = None,
+        # 控制参数(留 kwargs): auto_analyze_emotion / auto_classify / classification_context
         **kwargs,
     ) -> str:
         """存储一条记忆"""
@@ -324,6 +454,8 @@ class MemoryManager:
                 parsed_memory_type = memory_type
 
             # 安全解析 category（防御无效枚举值）
+            # P-3 修复: 非法枚举字符串 fallback 到 GENERAL, 但在 metadata._original_category
+            # 保留原始字符串, 使 recall(category="任意标签") 仍能匹配
             if isinstance(category, str):
                 try:
                     parsed_category = MemoryCategory(category)
@@ -333,6 +465,33 @@ class MemoryManager:
             else:
                 parsed_category = category
 
+            # M-7 修复: 把数据参数合并进 metadata(不覆盖用户已传字段)
+            final_metadata = dict(metadata or {})
+            if is_important is not None:
+                final_metadata["is_important"] = is_important
+            if is_crystallized is not None:
+                final_metadata["is_crystallized"] = is_crystallized
+            if emotion_score is not None:
+                final_metadata["emotion_score"] = emotion_score
+
+            # P-3 修复: 非法枚举 category 字符串保留到 metadata, 供 recall 按原始标签过滤
+            if isinstance(category, str) and parsed_category == MemoryCategory.GENERAL and category != "general":
+                final_metadata["_original_category"] = category
+
+            # M-7 修复: perspective 字符串转 MemoryPerspective 枚举, 写入 Memory.perspective
+            parsed_perspective = MemoryPerspective.FIRST_PERSON
+            if perspective is not None:
+                if isinstance(perspective, MemoryPerspective):
+                    parsed_perspective = perspective
+                elif isinstance(perspective, str):
+                    try:
+                        parsed_perspective = MemoryPerspective(perspective)
+                    except (ValueError, KeyError):
+                        logger.warning(
+                            "Invalid perspective '%s', falling back to FIRST_PERSON",
+                            perspective,
+                        )
+
             mem = Memory(
                 id=mem_id,
                 content=content,
@@ -341,8 +500,10 @@ class MemoryManager:
                 temperature=temperature,
                 importance=importance,
                 emotion=emotion_val,
-                metadata=metadata or {},
+                metadata=final_metadata,
+                perspective=parsed_perspective,
                 agent_id=self._agent_id,
+                neuser_id=self._neuser_id,
                 user_id=self._user_id,
             )
             self._memories[mem_id] = mem
@@ -359,8 +520,9 @@ class MemoryManager:
                     if emotion_state and emotion_state.primary_emotion.value != "neutral":
                         self._emotion_module.set_emotion(mem_id, emotion_state)
                         mem.emotion = emotion_state.primary_emotion
-                except Exception:
-                    pass
+                except Exception as e:
+                    # BUG-9 修复: 原代码静默吞掉情感分析异常, 改为 warning 记录
+                    logger.warning("自动情感标注失败（记忆 %s）: %s", mem_id, e)
 
             # 发射事件
             self._bus.emit(
@@ -379,48 +541,63 @@ class MemoryManager:
     def _extract_dependency_async(
         self, memory_id: str, content: str, metadata: Optional[Dict[str, Any]]
     ) -> None:
-        """后台异步提取依赖关系（失败不影响主流程）"""
+        """后台异步提取依赖关系（失败不影响主流程）
+
+        BUG-8 修复: 原事件循环 API 在 Python 3.12+ 弃用,
+        且异常被 debug 级吞掉。改用 threading.Thread 跑 coroutine,
+        异常级别提升到 warning。
+
+        Bug 9 修复: 改用共享 ThreadPoolExecutor 限制线程数,
+        原实现每次 remember 都新建 Thread, 高频调用会创建无限线程。
+        """
         try:
             from .moe_dependency_extractor import MOEDependencyExtractor
 
             if not hasattr(self, "_dependency_extractor"):
                 self._dependency_extractor = MOEDependencyExtractor()
 
-            import asyncio
+            extractor = self._dependency_extractor
 
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # 已在事件循环中，用 create_task 包装
-                asyncio.ensure_future(
-                    self._dependency_extractor.extract_from_memory(
-                        memory_id=memory_id, content=content, metadata=metadata,
+            def _run_in_executor():
+                import asyncio
+
+                try:
+                    asyncio.run(
+                        extractor.extract_from_memory(
+                            memory_id=memory_id, content=content, metadata=metadata,
+                        )
                     )
-                )
-            else:
-                loop.run_until_complete(
-                    self._dependency_extractor.extract_from_memory(
-                        memory_id=memory_id, content=content, metadata=metadata,
-                    )
-                )
+                except Exception as exc:
+                    logger.warning("依赖提取失败（不影响记忆存储）: %s", exc)
+
+            # Bug 9 修复: 提交到共享 ThreadPoolExecutor, 由 executor 限制并发线程数
+            self._dependency_executor.submit(_run_in_executor)
         except Exception as e:
-            logger.debug("依赖提取失败（不影响记忆存储）: %s", e)
+            logger.warning("依赖提取初始化失败（不影响记忆存储）: %s", e)
 
     def recall(
         self, query: str = "", category: Optional[str] = None, limit: int = 10, min_temperature: float = 0.0, **kwargs
     ) -> List[Dict[str, Any]]:
         """检索记忆
-        
+
         支持两种检索模式：
         1. 语义搜索（默认）：使用语义相似度匹配
         2. 关键词搜索：使用子字符串匹配（兼容旧版）
+
+        P-3 修复:
+          - 排除 lifecycle_stage == FORGOTTEN 的记忆（forget 后不应再被 recall 返回）
+          - category 支持任意字符串（非法枚举值按 metadata._original_category 匹配）
         """
         with self._lock:
             self._stats["recall_count"] += 1
             results = list(self._memories.values())
 
-            # 按分类过滤
+            # P-3 修复: 排除已遗忘记忆（forget soft-delete 后不应被 recall 返回）
+            results = [m for m in results if m.lifecycle_stage != LifecycleStage.FORGOTTEN]
+
+            # 按分类过滤（支持合法枚举值 + 任意字符串标签）
             if category:
-                results = [m for m in results if m.category.value == category]
+                results = _filter_by_category(results, category)
 
             # 按温度过滤
             if min_temperature > 0:
@@ -428,7 +605,7 @@ class MemoryManager:
 
             # 检索模式
             use_semantic = kwargs.get("use_semantic", True)
-            
+
             if query:
                 if use_semantic:
                     # 语义搜索模式
@@ -445,6 +622,9 @@ class MemoryManager:
             # 发射事件
             for m in results[:limit]:
                 m.touch()
+                # Bug 6 修复: recall 触发 touch() 更新温度/访问次数后必须持久化,
+                # 否则重启后访问次数/温度丢失
+                self._persist_memory(m)
                 self._bus.emit(
                     MemoryEvent(
                         type=MemoryEvent.MEMORY_ACCESSED,
@@ -456,31 +636,44 @@ class MemoryManager:
             return [m.to_dict() for m in results[:limit]]
     
     def _semantic_recall(self, query: str, memories: list, limit: int) -> list:
-        """语义搜索检索"""
+        """语义搜索检索
+
+        BUG-2 修复: 原实现 `if not search._keyword_index:` 只首次构建索引,
+        新记忆永不进入；不同 agent_id 互相覆盖。
+        现每次调用都重建索引（传入当前 agent 的 memories），保证：
+        (a) 新增记忆立即可被检索
+        (b) 不同 agent_id 互不干扰（每次用自己的 memories 重建）
+
+        Bug 8 修复: 入口加用户过滤, 防止跨 agent_id/user_id 检索到其他用户记忆。
+        """
+        # Bug 8 修复: 只搜索当前用户(agent_id+user_id)的记忆
+        memories = [
+            m for m in memories
+            if m.agent_id == self._agent_id and m.user_id == self._user_id
+        ]
         try:
             from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
-            
+
             search = get_semantic_search()
-            
+
             # 构建记忆字典列表
             memory_dicts = [m.to_dict() for m in memories]
-            
-            # 构建关键词索引（如果尚未构建）
-            if not search._keyword_index:
-                search.build_keyword_index(memory_dicts)
-            
+
+            # BUG-2 修复: 每次调用都重建索引，确保新记忆进入且 agent_id 隔离
+            search.build_keyword_index(memory_dicts)
+
             # 使用关键词搜索
             matching_ids = search.search_by_keywords(query, limit=limit * 2)
-            
+
             # 按匹配顺序排序记忆
             id_to_memory = {m.id: m for m in memories}
             sorted_memories = []
             for mid in matching_ids:
                 if mid in id_to_memory:
                     sorted_memories.append(id_to_memory[mid])
-            
+
             return sorted_memories[:limit]
-            
+
         except Exception as e:
             logger.warning("语义搜索失败，降级到关键词匹配: %s", e)
             # 降级到简单关键词匹配
@@ -488,43 +681,50 @@ class MemoryManager:
             return [m for m in memories if query_lower in m.content.lower()][:limit]
 
     def get_memory(self, memory_id: str) -> Optional[Dict[str, Any]]:
-        """获取单条记忆"""
-        mem = self._memories.get(memory_id)
-        if mem:
-            mem.touch()
-            self._bus.emit(
-                MemoryEvent(
-                    type=MemoryEvent.MEMORY_ACCESSED,
-                    source="memory_manager",
-                    payload={"memory_id": mem.id},
+        """获取单条记忆
+
+        BUG-7 修复: 加 self._lock 保护, 避免并发 forget 时 RuntimeError。
+        """
+        with self._lock:
+            mem = self._memories.get(memory_id)
+            if mem:
+                mem.touch()
+                self._bus.emit(
+                    MemoryEvent(
+                        type=MemoryEvent.MEMORY_ACCESSED,
+                        source="memory_manager",
+                        payload={"memory_id": mem.id},
+                    )
                 )
-            )
-            return mem.to_dict()
-        return None
+                return mem.to_dict()
+            return None
 
     def update_memory(self, memory_id: str, **kwargs) -> bool:
         """更新记忆"""
-        mem = self._memories.get(memory_id)
-        if not mem:
-            return False
-        if "content" in kwargs:
-            mem.content = kwargs["content"]
-        if "temperature" in kwargs:
-            mem.temperature = kwargs["temperature"]
-        if "importance" in kwargs:
-            mem.importance = kwargs["importance"]
-        if "category" in kwargs:
-            mem.category = (
-                MemoryCategory(kwargs["category"]) if isinstance(kwargs["category"], str) else kwargs["category"]
-            )
-        if "lifecycle_stage" in kwargs:
-            stage_val = kwargs["lifecycle_stage"]
-            if isinstance(stage_val, str):
-                mem.lifecycle_stage = LifecycleStage(stage_val)
-            elif isinstance(stage_val, LifecycleStage):
-                mem.lifecycle_stage = stage_val
-        mem.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
-        self._persist_memory(mem)  # 更新持久化
+        # Bug 5 修复：加 RLock 保护，避免并发 forget 导致 _memories.get 返回 None 后继续操作
+        with self._lock:
+            mem = self._memories.get(memory_id)
+            if not mem:
+                return False
+            if "content" in kwargs:
+                mem.content = kwargs["content"]
+            if "temperature" in kwargs:
+                mem.temperature = kwargs["temperature"]
+            if "importance" in kwargs:
+                mem.importance = kwargs["importance"]
+            if "category" in kwargs:
+                mem.category = (
+                    MemoryCategory(kwargs["category"]) if isinstance(kwargs["category"], str) else kwargs["category"]
+                )
+            if "lifecycle_stage" in kwargs:
+                stage_val = kwargs["lifecycle_stage"]
+                if isinstance(stage_val, str):
+                    mem.lifecycle_stage = LifecycleStage(stage_val)
+                elif isinstance(stage_val, LifecycleStage):
+                    mem.lifecycle_stage = stage_val
+            mem.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+            self._persist_memory(mem)  # 更新持久化
+        # bus.emit 在锁外执行，避免持锁调用 handler 导致递归死锁
         self._bus.emit(
             MemoryEvent(
                 type=MemoryEvent.MEMORY_UPDATED,
@@ -536,15 +736,18 @@ class MemoryManager:
 
     def forget(self, memory_id: str, soft: bool = True) -> bool:
         """遗忘记忆"""
-        if memory_id not in self._memories:
-            return False
-        if soft:
-            self._memories[memory_id].lifecycle_stage = LifecycleStage.FORGOTTEN
-            self._persist_memory(self._memories[memory_id])  # 更新持久化
-        else:
-            del self._memories[memory_id]
-            self._delete_persisted_memory(memory_id)  # 删除持久化
-        self._stats["total_memories"] = len(self._memories)
+        # Bug 5 修复：加 RLock 保护，避免并发 forget 同一 memory_id 抛 KeyError
+        with self._lock:
+            if memory_id not in self._memories:
+                return False
+            if soft:
+                self._memories[memory_id].lifecycle_stage = LifecycleStage.FORGOTTEN
+                self._persist_memory(self._memories[memory_id])  # 更新持久化
+            else:
+                del self._memories[memory_id]
+                self._delete_persisted_memory(memory_id)  # 删除持久化
+            self._stats["total_memories"] = len(self._memories)
+        # bus.emit 在锁外执行，避免持锁调用 handler 导致递归死锁
         self._bus.emit(
             MemoryEvent(
                 type=MemoryEvent.MEMORY_DELETED,
@@ -558,10 +761,31 @@ class MemoryManager:
         """搜索记忆（recall 别名）"""
         return self.recall(query=query, limit=limit)
 
-    def get_memories(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-        """获取记忆列表"""
+    def get_memories(
+        self,
+        category: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """获取记忆列表（可按 category 过滤）
+
+        Args:
+            category: 可选分类过滤。支持两种模式：
+                      (1) 合法 MemoryCategory 枚举值 → 按 m.category.value 匹配
+                      (2) 任意字符串 → 按 metadata._original_category 匹配（remember 时保留）
+            limit: 返回上限
+            offset: 偏移量
+        """
         with self._lock:
             mems = list(self._memories.values())
+
+            # 排除已遗忘记忆（forget 后不应被 get_memories 返回）
+            mems = [m for m in mems if m.lifecycle_stage != LifecycleStage.FORGOTTEN]
+
+            # 按分类过滤
+            if category:
+                mems = _filter_by_category(mems, category)
+
             mems.sort(key=lambda m: m.created_at, reverse=True)
             return [m.to_dict() for m in mems[offset : offset + limit]]
 
@@ -581,18 +805,41 @@ class MemoryManager:
     # ────── Buffer Operations ──────
 
     def flush_buffer(self) -> int:
-        """刷新缓冲区"""
-        if self._write_queue:
-            return self._write_queue.flush_to_storage()
-        return 0
+        """刷新缓冲区
+
+        BUG-1 修复: 原 _write_queue = None 永不赋值, 导致永远返回 0。
+        现委托到 _ensure_buffer_module().flush()（与 flush_all_pending_updates 一致）。
+        """
+        try:
+            module = self._ensure_buffer_module()
+            return module.flush()
+        except Exception as e:
+            logger.warning("flush_buffer failed: %s", e)
+            return 0
 
     def get_buffer_stats(self) -> Dict[str, Any]:
         """获取缓冲区统计"""
         return {"buffer_size": 0, "pending_writes": 0}
 
-    def force_write(self) -> int:
-        """强制写入"""
+    def force_write(self, content: Optional[str] = None, **kwargs) -> Any:
+        """强制写入
+
+        P-1 修复: 支持两种语义
+        - 传入 content: 立即 remember 并返回 memory_id（str）— 测试期望的契约
+        - 不传 content: 刷新待写缓冲区返回写入数量（int）— 保留旧语义
+        """
+        if content is not None:
+            return self.remember(content, **kwargs)
         return self.flush_buffer()
+
+    def add_memory(self, content: str, **kwargs) -> str:
+        """添加记忆（remember 的别名, P-1 修复契约补全）
+
+        Args:
+            content: 记忆内容
+            **kwargs: 透传给 remember 的参数（category/memory_type/emotion 等）
+        """
+        return self.remember(content, **kwargs)
 
     # ────── Stats ──────
 
@@ -618,10 +865,25 @@ class MemoryManager:
     # ────── Emotion (analyze_emotion 真实实现, 其余 stub 抛出 NotImplementedError) ──────
 
     def analyze_emotion(self, text: str) -> Dict[str, Any]:
-        """分析情感（委托给 emotion_analyzer, 真实实现）"""
-        if self._emotion_analyzer:
-            return self._emotion_analyzer.analyze(text)
-        return {"emotion": EmotionType.NEUTRAL.value, "confidence": 0.5}
+        """分析文本情感（P-2 修复: 返回 {score, tags} 字典, 委托到 EmotionModule.analyze_text_emotion）
+
+        Args:
+            text: 待分析文本
+
+        Returns:
+            {"score": float, "tags": List[str]}
+            - score: 情感强度 0.0-1.0 (取自 EmotionState.intensity)
+            - tags: 情感标签列表 (含 primary_emotion.value)
+        """
+        if not text:
+            return {"score": 0.0, "tags": []}
+        try:
+            emotion = self._emotion_module.analyze_text_emotion(text)
+            tags = [emotion.primary_emotion.value] if emotion.primary_emotion else []
+            return {"score": float(emotion.intensity), "tags": tags}
+        except Exception as e:
+            logger.warning("analyze_emotion failed: %s", e)
+            return {"score": 0.0, "tags": []}
 
     def get_emotion_summary(self) -> Dict[str, Any]:
         """获取情感摘要（委托到 EmotionModule.get_stats）"""
@@ -631,21 +893,91 @@ class MemoryManager:
         """获取情感分布（委托到 EmotionModule.get_stats）"""
         return self._emotion_module.get_stats().get("emotion_distribution", {})
 
-    def update_emotional_state(self, text: str) -> Dict[str, Any]:
-        """更新情感状态（委托到 EmotionModule.analyze_text_emotion）"""
-        emotion = self._emotion_module.analyze_text_emotion(text)
+    def update_emotional_state(self, state) -> Dict[str, Any]:
+        """更新情感状态（P-2 修复: 接受 dict 或 str）
+
+        Args:
+            state: 情感状态。两种模式：
+                   (1) dict: 如 {"joy": 0.8, "sadness": 0.1} — 直接合并到 emotion_module 当前状态
+                   (2) str: 文本 — 委托到 analyze_text_emotion 分析后更新
+
+        Returns:
+            更新后的情感状态 dict
+        """
+        if isinstance(state, dict):
+            # dict 模式: 合并情感状态到 emotion_module
+            try:
+                from neurova.cognitive_layers.memory_layer.modules.emotion_module import (
+                    EmotionState,
+                    EmotionType,
+                )
+                # 找出最高强度的情感作为 primary
+                emotion_map = {
+                    "joy": EmotionType.JOY,
+                    "sadness": EmotionType.SADNESS,
+                    "anger": EmotionType.ANGER,
+                    "fear": EmotionType.FEAR,
+                    "surprise": EmotionType.SURPRISE,
+                    "neutral": EmotionType.NEUTRAL,
+                }
+                primary = EmotionType.NEUTRAL
+                max_intensity = 0.0
+                for key, value in state.items():
+                    etype = emotion_map.get(key.lower())
+                    if etype and isinstance(value, (int, float)) and value > max_intensity:
+                        primary = etype
+                        max_intensity = float(value)
+                if max_intensity == 0.0:
+                    intensity = 0.3
+                    valence = 0.0
+                    arousal = 0.2
+                else:
+                    intensity = min(1.0, max_intensity)
+                    valence_map = {
+                        EmotionType.JOY: 0.8, EmotionType.SADNESS: -0.6,
+                        EmotionType.ANGER: -0.7, EmotionType.FEAR: -0.5,
+                        EmotionType.SURPRISE: 0.3, EmotionType.NEUTRAL: 0.0,
+                    }
+                    arousal_map = {
+                        EmotionType.JOY: 0.6, EmotionType.SADNESS: 0.3,
+                        EmotionType.ANGER: 0.8, EmotionType.FEAR: 0.7,
+                        EmotionType.SURPRISE: 0.9, EmotionType.NEUTRAL: 0.2,
+                    }
+                    valence = valence_map.get(primary, 0.0)
+                    arousal = arousal_map.get(primary, 0.5)
+                emotion = EmotionState(
+                    primary_emotion=primary,
+                    intensity=intensity,
+                    valence=valence,
+                    arousal=arousal,
+                )
+                # 记录到 emotion_module (用一个固定 key 表示当前状态)
+                self._emotion_module.set_emotion("_current_state", emotion)
+                return emotion.to_dict()
+            except Exception as e:
+                logger.warning("update_emotional_state(dict) failed: %s", e)
+                return {}
+        # str 模式: 委托到 analyze_text_emotion
+        emotion = self._emotion_module.analyze_text_emotion(state)
         return emotion.to_dict()
 
     def get_emotional_state(self) -> Dict[str, Any]:
         """获取当前情感状态（委托到 EmotionModule.get_feedback）"""
         return self._emotion_module.get_feedback()
 
-    def get_dominant_emotion(self) -> str:
-        """获取主导情感（委托到 EmotionModule.get_stats）"""
+    def get_dominant_emotion(self) -> tuple:
+        """获取主导情感（P-2 修复: 返回 (emotion_str, score_float) tuple）
+
+        Returns:
+            (emotion_str, score): 主导情感字符串及其强度分数
+            无数据时返回 ("neutral", 0.0)
+        """
         distribution = self._emotion_module.get_stats().get("emotion_distribution", {})
         if not distribution:
-            return "neutral"
-        return max(distribution, key=distribution.get)
+            return ("neutral", 0.0)
+        emotion_str = max(distribution, key=distribution.get)
+        score = float(distribution[emotion_str])
+        return (emotion_str, score)
 
     def get_emotion_bias(self) -> float:
         """获取情感偏置（委托到 EmotionModule._emotion_weight）"""
@@ -699,24 +1031,118 @@ class MemoryManager:
     # ────── Temperature ──────
 
     def update_memory_temperature(self, memory_id: str, interaction_type: str = "recall") -> bool:
-        mem = self._memories.get(memory_id)
-        if not mem:
-            return False
-        mem.touch()
-        return True
+        """更新记忆温度
+
+        BUG-7 修复: 加 self._lock 保护读路径。
+        Bug 7 修复: touch() 后必须持久化, 否则重启后温度/访问次数丢失。
+        """
+        with self._lock:
+            mem = self._memories.get(memory_id)
+            if not mem:
+                return False
+            mem.touch()
+            self._persist_memory(mem)
+            return True
 
     def run_decay_cycle(self, hours: float = 1.0, rate: float = 1.0) -> int:
+        """运行温度衰减周期 — 应用 TemperatureEngine.on_decay 贝叶斯遗忘曲线
+
+        Bug 2 修复：原实现直接调 Memory.decay()（简单线性 temp -= rate*hours），
+        完全绕过 TemperatureEngine.on_decay 的贝叶斯曲线（curve_factor/emotion_protect/
+        saturation/importance_weight/relation_protection/important_protection）。
+
+        贝叶斯特性：
+          - 固化记忆（lifecycle_stage=CRYSTALLIZED）不衰减
+          - 高温记忆（>=80）不衰减
+          - 今天访问过的记忆（days_idle < 1.0）不衰减
+          - 衰减后根据 _determine_stage 更新 lifecycle_stage
+
+        Bug 5 关联：加 RLock 保护遍历与修改，保证线程安全。
+
+        Args:
+            hours: 保留参数（贝叶斯曲线使用 days_idle，不直接使用 hours）
+            rate:  保留参数（贝叶斯曲线通过 curve_factor 等因子调整，不直接使用 rate）
+
+        Returns:
+            处理的记忆数量
+        """
+        # 延迟导入避免循环依赖
+        from datetime import datetime, timezone
+        from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
+
+        engine = TemperatureEngine()
+        now = datetime.now(timezone.utc)
         count = 0
-        for mem in self._memories.values():
-            if mem.temperature > 0:
-                mem.decay(hours, rate)
+
+        # 加锁保护遍历与修改（Bug 5 关联）
+        with self._lock:
+            # 用 list() 复制视图，避免迭代过程中其他线程修改 dict 抛 RuntimeError
+            for mem in list(self._memories.values()):
+                # 已删除/已遗忘记忆跳过
+                if mem.temperature <= 0:
+                    continue
+
+                # 计算 days_idle（贝叶斯曲线的核心输入）
+                last_accessed = mem.last_accessed_at or mem.created_at
+                if last_accessed.tzinfo is None:
+                    last_accessed = last_accessed.replace(tzinfo=timezone.utc)
+                days_idle = max(0.0, (now - last_accessed).total_seconds() / 86400.0)
+
+                # 计算 emotion_score（EmotionType → 0.0-1.0）
+                # 简化映射：NEUTRAL=0.0，其他情感默认 0.5 中等强度
+                # （真实强度需 emotion_module 分析，此处用类别信号已足够触发情感保护）
+                emotion_score = 0.0 if mem.emotion == EmotionType.NEUTRAL else 0.5
+
+                # 归一化 importance（0-100 → 0.0-1.0）
+                importance_norm = max(0.0, min(1.0, float(mem.importance) / 100.0))
+
+                # 检测固化状态
+                is_crystallized = mem.lifecycle_stage == LifecycleStage.CRYSTALLIZED
+
+                # 检测重要记忆（importance >= 80 或 metadata.is_important）
+                # BUG-4 修复: 原表达式 `A or B if C else D` 在空 metadata 时
+                # 高重要性记忆保护失效（返回 False）。改为显式括号 + `(metadata or {}) 防御 None。
+                is_important = importance_norm >= 0.8 or bool(
+                    (mem.metadata or {}).get("is_important", False)
+                )
+
+                # 调用 TemperatureEngine.on_decay 应用贝叶斯曲线
+                result = engine.on_decay(
+                    current_temp=mem.temperature,
+                    days_idle=days_idle,
+                    importance=importance_norm,
+                    emotion_score=emotion_score,
+                    recall_count=mem.access_count,
+                    relation_count=0,  # 关联记忆数需 relation_manager，此处简化为 0
+                    is_important=is_important,
+                    is_crystallized=is_crystallized,
+                )
+
+                # 应用新温度
+                mem.temperature = result["new_temp"]
+                mem.updated_at = now
+
+                # 更新生命周期阶段（temperature 字符串 → LifecycleStage 枚举）
+                new_stage = _map_lifecycle_stage(result.get("lifecycle_stage", ""))
+                if new_stage is not None:
+                    mem.lifecycle_stage = new_stage
+
+                # BUG-5 修复: 持久化温度/阶段变更到 SQLite（原实现不调用 _persist_memory）
+                self._persist_memory(mem)
+
                 count += 1
+
         return count
 
     def get_crystallized(self, limit: int = 10) -> List[Dict[str, Any]]:
-        return [m.to_dict() for m in self._memories.values() if m.lifecycle_stage == LifecycleStage.CRYSTALLIZED][
-            :limit
-        ]
+        """获取固化记忆
+
+        BUG-7 修复: 加 self._lock 保护读路径。
+        """
+        with self._lock:
+            return [m.to_dict() for m in self._memories.values() if m.lifecycle_stage == LifecycleStage.CRYSTALLIZED][
+                :limit
+            ]
 
     def get_hot_memories(self, limit: int = 10, min_temperature: float = 80.0) -> List[Dict[str, Any]]:
         return self.recall(limit=limit, min_temperature=min_temperature)
@@ -1278,8 +1704,22 @@ class MemoryManager:
 
         return results
 
-    def remember_with_trace(self, content: str, trace: Dict[str, Any], **kwargs) -> str:
-        return self.remember(content, **kwargs)
+    def remember_with_trace(
+        self, content: str, trace: Optional[Dict[str, Any]] = None, **kwargs
+    ) -> str:
+        """带痕迹地记住（P-1 修复: trace 可选, 默认空 dict）
+
+        Args:
+            content: 记忆内容
+            trace: 痕迹数据（可选, 默认空 dict; 透传到 metadata.trace 便于后续追踪）
+            **kwargs: 透传给 remember 的参数
+        """
+        if trace is None:
+            trace = {}
+        merged_metadata = dict(kwargs.pop("metadata", {}) or {})
+        if trace:
+            merged_metadata["trace"] = trace
+        return self.remember(content, metadata=merged_metadata, **kwargs)
 
     def recall_with_trace(self, query: str, **kwargs) -> List[Dict[str, Any]]:
         return self.recall(query, **kwargs)
@@ -1306,11 +1746,19 @@ class MemoryManager:
             logger.info("RelationModule lazily initialized")
         return self._relation_module
 
-    def get_traces_by_trigger(self, **kwargs) -> List[Dict[str, Any]]:
-        """按触发器获取追踪（委托到 ConflictModule.get_conflicts）"""
+    def get_traces_by_trigger(
+        self, trigger: Optional[str] = None, limit: int = 10, **kwargs
+    ) -> List[Dict[str, Any]]:
+        """按触发器获取追踪（P-1 修复: 接受 trigger 位置参数 + limit）
+
+        Args:
+            trigger: 触发器名称（如 'remember'/'recall'）; 当前 ConflictModule 未按触发器过滤, 返回全部
+            limit: 返回上限
+        """
         module = self._ensure_conflict_module()
         conflicts = module.get_conflicts()
-        return [c.to_dict() for c in conflicts]
+        traces = [c.to_dict() for c in conflicts]
+        return traces[:limit]
 
     def detect_conflict(self, **kwargs) -> List[Dict[str, Any]]:
         """检测冲突（委托到 ConflictModule.detect_conflict）"""
@@ -1396,15 +1844,19 @@ class MemoryManager:
         return self._sleep_module
 
     def _collect_memories_for_sleep(self) -> List[Dict[str, Any]]:
-        """收集所有记忆用于睡眠处理"""
-        memories = []
-        for mem_id, mem in self._memories.items():
-            memories.append({
-                "id": mem_id,
-                "content": mem.content,
-                "importance": mem.importance / 100.0,  # 归一化到 0-1
-            })
-        return memories
+        """收集所有记忆用于睡眠处理
+
+        BUG-7 修复: 加 self._lock 保护读路径。
+        """
+        with self._lock:
+            memories = []
+            for mem_id, mem in self._memories.items():
+                memories.append({
+                    "id": mem_id,
+                    "content": mem.content,
+                    "importance": mem.importance / 100.0,  # 归一化到 0-1
+                })
+            return memories
 
     def run_light_sleep_cycle(self) -> Dict[str, Any]:
         """轻度睡眠周期（巩固重要记忆）"""
@@ -1421,13 +1873,21 @@ class MemoryManager:
         }
 
     def run_rem_sleep_cycle(self) -> Dict[str, Any]:
-        """REM 睡眠周期（含梦境回放）"""
+        """REM 睡眠周期（含梦境回放）
+
+        BUG-12 修复: 不再直接修改 module._dream_probability 私有属性,
+        改为保存/恢复模式避免并发调用互相覆盖。
+        """
         module = self._ensure_sleep_module()
         module.start_sleep()
         memories = self._collect_memories_for_sleep()
-        # REM 提高梦境概率
-        module._dream_probability = 0.5
-        result = module.process_memories(memories)
+        # BUG-12 修复: 保存原始值, 处理后恢复（避免并发污染）
+        original_dream_prob = module._dream_probability
+        try:
+            module._dream_probability = 0.5
+            result = module.process_memories(memories)
+        finally:
+            module._dream_probability = original_dream_prob
         stats = module.end_sleep()
         return {
             "cycle": "rem",
@@ -1438,14 +1898,25 @@ class MemoryManager:
         }
 
     def run_deep_sleep_cycle(self) -> Dict[str, Any]:
-        """深度睡眠周期（强化巩固 + 清理）"""
+        """深度睡眠周期（强化巩固 + 清理）
+
+        BUG-12 修复: 不再直接修改 module._consolidation_threshold / _cleanup_threshold,
+        改为保存/恢复模式避免并发污染。
+        """
         module = self._ensure_sleep_module()
         module.start_sleep()
-        # 深度睡眠降低巩固阈值，提高清理力度
-        module._consolidation_threshold = 0.5
-        module._cleanup_threshold = 0.3
-        memories = self._collect_memories_for_sleep()
-        result = module.process_memories(memories)
+        # BUG-12 修复: 保存原始值, 处理后恢复
+        original_consolidation = module._consolidation_threshold
+        original_cleanup = module._cleanup_threshold
+        try:
+            # 深度睡眠降低巩固阈值，提高清理力度
+            module._consolidation_threshold = 0.5
+            module._cleanup_threshold = 0.3
+            memories = self._collect_memories_for_sleep()
+            result = module.process_memories(memories)
+        finally:
+            module._consolidation_threshold = original_consolidation
+            module._cleanup_threshold = original_cleanup
         stats = module.end_sleep()
         return {
             "cycle": "deep",
@@ -1455,14 +1926,24 @@ class MemoryManager:
         }
 
     def run_dormant_cycle(self) -> Dict[str, Any]:
-        """休眠周期（仅清理，不巩固）"""
+        """休眠周期（仅清理，不巩固）
+
+        BUG-12 修复: 保存/恢复私有属性避免并发污染。
+        """
         module = self._ensure_sleep_module()
         module.start_sleep()
-        # 休眠周期只清理低重要性记忆
-        module._consolidation_threshold = 1.0  # 不巩固
-        module._cleanup_threshold = 0.4  # 更激进清理
-        memories = self._collect_memories_for_sleep()
-        result = module.process_memories(memories)
+        # BUG-12 修复: 保存原始值, 处理后恢复
+        original_consolidation = module._consolidation_threshold
+        original_cleanup = module._cleanup_threshold
+        try:
+            # 休眠周期只清理低重要性记忆
+            module._consolidation_threshold = 1.0  # 不巩固
+            module._cleanup_threshold = 0.4  # 更激进清理
+            memories = self._collect_memories_for_sleep()
+            result = module.process_memories(memories)
+        finally:
+            module._consolidation_threshold = original_consolidation
+            module._cleanup_threshold = original_cleanup
         stats = module.end_sleep()
         return {
             "cycle": "dormant",
@@ -1484,10 +1965,15 @@ class MemoryManager:
         return self._explainability_module
 
     def explain_memory(self, memory_id: str) -> Dict[str, Any]:
-        mem = self._memories.get(memory_id)
-        if mem:
-            return {"memory_id": memory_id, "content": mem.content, "reason": "direct recall"}
-        return {"memory_id": memory_id, "error": "not found"}
+        """解释记忆
+
+        BUG-7 修复: 加 self._lock 保护读路径。
+        """
+        with self._lock:
+            mem = self._memories.get(memory_id)
+            if mem:
+                return {"memory_id": memory_id, "content": mem.content, "reason": "direct recall"}
+            return {"memory_id": memory_id, "error": "not found"}
 
     def get_explanation_chain(self, **kwargs) -> List[Dict[str, Any]]:
         """获取解释链（委托到 ExplainabilityModule.get_explanations）"""
@@ -1520,37 +2006,69 @@ class MemoryManager:
         return self._forgetting_recovery_module
 
     def archive_memory(self, memory_id: str) -> bool:
-        mem = self._memories.get(memory_id)
-        if mem:
-            mem.lifecycle_stage = LifecycleStage.ARCHIVED
-            return True
-        return False
+        """归档记忆
+
+        BUG-6 修复: 加 _persist_memory 持久化 lifecycle_stage 变更。
+        BUG-7 修复: 加 self._lock 保护读写路径。
+        """
+        with self._lock:
+            mem = self._memories.get(memory_id)
+            if mem:
+                mem.lifecycle_stage = LifecycleStage.ARCHIVED
+                # BUG-6 修复: 持久化 lifecycle_stage 变更
+                self._persist_memory(mem)
+                return True
+            return False
 
     def delete_memory_soft(self, memory_id: str) -> bool:
         return self.forget(memory_id, soft=True)
 
     def recover_from_archive(self, memory_id: str) -> bool:
-        mem = self._memories.get(memory_id)
-        if mem:
-            mem.lifecycle_stage = LifecycleStage.ACTIVE
-            return True
-        return False
+        """从归档恢复记忆
+
+        BUG-6 修复: 加 _persist_memory 持久化 lifecycle_stage 变更。
+        BUG-7 修复: 加 self._lock 保护读写路径。
+        """
+        with self._lock:
+            mem = self._memories.get(memory_id)
+            if mem:
+                mem.lifecycle_stage = LifecycleStage.ACTIVE
+                # BUG-6 修复: 持久化 lifecycle_stage 变更
+                self._persist_memory(mem)
+                return True
+            return False
 
     def recover_from_delete(self, memory_id: str) -> bool:
         return self.recover_from_archive(memory_id)
 
     def get_archived_memories(self, limit: int = 10) -> List[Dict[str, Any]]:
-        return [m.to_dict() for m in self._memories.values() if m.lifecycle_stage == LifecycleStage.ARCHIVED][:limit]
+        """获取已归档记忆
+
+        BUG-7 修复: 加 self._lock 保护读路径。
+        """
+        with self._lock:
+            return [m.to_dict() for m in self._memories.values() if m.lifecycle_stage == LifecycleStage.ARCHIVED][:limit]
 
     def get_deleted_memories(self, limit: int = 10) -> List[Dict[str, Any]]:
-        return [m.to_dict() for m in self._memories.values() if m.lifecycle_stage == LifecycleStage.FORGOTTEN][:limit]
+        """获取已删除记忆
+
+        BUG-7 修复: 加 self._lock 保护读路径。
+        """
+        with self._lock:
+            return [m.to_dict() for m in self._memories.values() if m.lifecycle_stage == LifecycleStage.FORGOTTEN][:limit]
 
     def get_recovery_history(self) -> List[Dict[str, Any]]:
-        """获取恢复历史（委托到 ForgettingRecoveryModule，收集所有记忆的复习记录）"""
+        """获取恢复历史（委托到 ForgettingRecoveryModule，收集所有记忆的复习记录）
+
+        Bug 10 修复: 原代码直接访问 module 私有字典的键集合,
+        若 ForgettingRecoveryModule 实现变更会 AttributeError。现用 getattr 安全访问。
+        """
         module = self._ensure_forgetting_recovery_module()
+        # Bug 10 修复: 用 getattr 安全访问私有属性, 缺失时返回空 dict
+        retention_map = getattr(module, "_retention", {}) or {}
         # 收集所有已注册记忆的复习历史，转换为 dict 列表
         history: List[Dict[str, Any]] = []
-        for memory_id in list(module._retention.keys()):
+        for memory_id in list(retention_map.keys()):
             review_timestamps = module.get_review_history(memory_id)
             if review_timestamps:
                 history.append(
@@ -1568,8 +2086,24 @@ class MemoryManager:
 
     # ────── Relation (委托到 modules/relation_module.py) ──────
 
-    def relate(self, source_id: str, target_id: str, relation_type: str = "related") -> bool:
-        """建立记忆间关系（委托到 RelationModule.add_relation）"""
+    def relate(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: str = "related",
+        weight: Optional[float] = None,
+    ) -> bool:
+        """建立记忆间关系（委托到 RelationModule.add_relation）
+
+        P-1 修复: 增加 weight 参数, 映射到 RelationModule.add_relation 的 strength。
+        RelationModule 用 strength 表示关系强度 (0.0-1.0), 与 weight 同义。
+
+        Args:
+            source_id: 源记忆 ID
+            target_id: 目标记忆 ID
+            relation_type: 关系类型字符串（'similar'/'association' 等, 不合法时 fallback ASSOCIATION）
+            weight: 关系权重 (0.0-1.0, 默认 None → 0.5)
+        """
         module = self._ensure_relation_module()
         from neurova.cognitive_layers.memory_layer.modules.relation_module import RelationType
 
@@ -1577,10 +2111,22 @@ class MemoryManager:
             rtype = RelationType(relation_type)
         except ValueError:
             rtype = RelationType.ASSOCIATION
-        module.add_relation(source_id=source_id, target_id=target_id, relation_type=rtype, strength=0.5)
+        strength = 0.5 if weight is None else float(weight)
+        module.add_relation(
+            source_id=source_id, target_id=target_id, relation_type=rtype, strength=strength
+        )
         return True
 
-    def recall_with_associations(self, query: str, depth: int = 1, **kwargs) -> List[Dict[str, Any]]:
+    def recall_with_associations(
+        self, query: str = "", depth: int = 1, **kwargs
+    ) -> List[Dict[str, Any]]:
+        """检索记忆并附带关联（P-1 修复: query 可选, 默认空字符串）
+
+        Args:
+            query: 检索查询（可选, 默认空字符串返回全部按 limit 限制）
+            depth: 关联展开深度（保留参数, 当前实现等价于 recall）
+            **kwargs: 透传给 recall 的参数（category/limit/min_temperature 等）
+        """
         return self.recall(query, **kwargs)
 
     def recall_graph(self, query: str, **kwargs) -> Dict[str, Any]:
@@ -1624,11 +2170,22 @@ class MemoryManager:
 
 
 def get_memory_manager(
-    agent_id: str = "default", user_id: str = "default", db_path: str = "neurova_memory.db"
+    agent_id: str = "default",
+    user_id: str = "default",
+    db_path: str = "neurova_memory.db",
+    neuser_id: str = "default",
 ) -> MemoryManager:
-    """获取/创建默认 MemoryManager 单例"""
+    """获取/创建默认 MemoryManager 单例
+
+    P-4 修复: 增加 neuser_id 参数, 与 MemoryManager.__init__ 契约对齐
+    """
     global _default_manager
     with _manager_lock:
         if _default_manager is None:
-            _default_manager = MemoryManager(db_path=db_path, agent_id=agent_id, user_id=user_id)
+            _default_manager = MemoryManager(
+                db_path=db_path,
+                agent_id=agent_id,
+                neuser_id=neuser_id,
+                user_id=user_id,
+            )
         return _default_manager

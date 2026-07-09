@@ -9,7 +9,8 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 import threading
 import time
-from typing import Any, Dict, List, Optional
+import uuid
+from typing import Any, Dict, List, Optional, Union
 
 logger = get_logger(__name__)
 
@@ -41,7 +42,8 @@ class BufferModule:
         self._auto_flush = auto_flush
 
         self._buffer: List[Dict[str, Any]] = []
-        self._write_queue: List[Dict[str, Any]] = []
+        # BUG-11 修复: 类型注解与实际不符, 运行时可能持有 MemoryWriteQueue 实例
+        self._write_queue: Union[List[Dict[str, Any]], Any] = []
         self._lock = threading.RLock()
         self._flush_thread: Optional[threading.Thread] = None
         self._running = False
@@ -147,29 +149,40 @@ class BufferModule:
         Returns:
             刷入的条目数
         """
+        # BUG-7 修复: 锁内只做 _move_to_write_queue 复制,
+        # 释放锁后再调 flush_to_storage (SQLite I/O), 避免 add_turn 被阻塞
+        # BUG-8 修复: 锁内复制回调列表, 释放锁后再遍历, 避免慢回调长时间持锁
         with self._lock:
             if not self._buffer:
                 return 0
 
             self._move_to_write_queue()
 
-            # 执行写入队列
-            if hasattr(self._write_queue, "flush_to_storage"):
-                # 使用 MemoryWriteQueue 的批量写入
-                count = self._write_queue.flush_to_storage()
-            else:
-                # 旧模式：清空列表
-                count = len(self._write_queue)
-                self._write_queue.clear()
+            # 锁内获取 write_queue 引用(不持有锁做 I/O)
+            write_queue = self._write_queue
 
-            # 触发回调
-            for callback in self._on_flush_callbacks:
-                try:
-                    callback(count)
-                except Exception as e:
-                    logger.warning("Flush callback failed: %s", e)
+            # 锁内复制回调列表, 释放锁后遍历
+            callbacks = list(self._on_flush_callbacks)
 
-            return count
+        # 执行写入队列 (锁外, 避免阻塞 add_turn)
+        if hasattr(write_queue, "flush_to_storage"):
+            # 使用 MemoryWriteQueue 的批量写入
+            count = write_queue.flush_to_storage()
+        else:
+            # 旧模式：清空列表
+            count = len(write_queue)
+            # BUG-7: 清空操作需要重新获取锁(与 add_turn/_move_to_write_queue 互斥)
+            with self._lock:
+                write_queue.clear()
+
+        # 触发回调 (锁外执行, 避免慢回调阻塞 add_turn)
+        for callback in callbacks:
+            try:
+                callback(count)
+            except Exception as e:
+                logger.warning("Flush callback failed: %s", e)
+
+        return count
 
     def clear(self) -> int:
         """
@@ -178,28 +191,64 @@ class BufferModule:
         Returns:
             清除的条目数
         """
+        # BUG-11 修复: clear() 先设置 _running=False 阻止后台 flush_thread 继续写入,
+        # 再清空数据, 避免 clear 后 flush_thread 把数据写回
+        self._running = False
+
         with self._lock:
-            count = len(self._buffer) + len(self._write_queue)
+            # Bug C-5 修复：_write_queue 可能是 List 或 MemoryWriteQueue
+            # MemoryWriteQueue 无 __len__/clear，需类型分支处理
+            buffer_count = len(self._buffer)
+            if hasattr(self._write_queue, "_queue"):
+                # MemoryWriteQueue 实例
+                queue_count = len(self._write_queue._queue)
+                self._write_queue._queue.clear()
+            else:
+                # List 实例
+                queue_count = len(self._write_queue)
+                self._write_queue.clear()
+            count = buffer_count + queue_count
             self._buffer.clear()
-            self._write_queue.clear()
             return count
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
         with self._lock:
+            # Bug C-5 修复：_write_queue 可能是 MemoryWriteQueue
+            if hasattr(self._write_queue, "_queue"):
+                write_queue_size = len(self._write_queue._queue)
+            else:
+                write_queue_size = len(self._write_queue)
             return {
                 "buffer_size": len(self._buffer),
                 "buffer_capacity": self._buffer_size,
-                "write_queue_size": len(self._write_queue),
+                "write_queue_size": write_queue_size,
                 "flush_interval": self._flush_interval,
                 "auto_flush": self._auto_flush,
                 "running": self._running,
             }
 
-    def add_to_write_queue(self, item: Dict[str, Any]) -> None:
-        """添加到写入队列"""
+    def add_to_write_queue(self, item: Dict[str, Any]) -> bool:
+        """添加到写入队列
+
+        注：若 _write_queue 是 MemoryWriteQueue，应通过 add_turn + flush 流程
+        此方法仅兼容旧 List 模式，新模式下发出警告并返回 False
+
+        Returns:
+            bool: True 表示成功添加; False 表示不支持(MemoryWriteQueue 模式)
+        """
+        # BUG-10 修复: MemoryWriteQueue 模式下返回 False 而非静默忽略 None,
+        # 使调用方有感知
         with self._lock:
-            self._write_queue.append(item)
+            # Bug C-5 修复：_write_queue 可能是 MemoryWriteQueue（无 append 方法）
+            if hasattr(self._write_queue, "enqueue_batch"):
+                # MemoryWriteQueue 实例：Dict 项无法直接 enqueue（需 MemoryItem）
+                logger.warning("add_to_write_queue 不支持 MemoryWriteQueue 模式，请用 add_turn + flush")
+                return False
+            else:
+                # List 实例
+                self._write_queue.append(item)
+                return True
 
     def _move_to_write_queue(self) -> None:
         """将缓冲区内容移动到写入队列"""
@@ -229,7 +278,9 @@ class BufferModule:
                         timestamp = datetime.now()
 
                     item = MemoryItem(
-                        id=item_dict.get("id", str(datetime.now().timestamp())),
+                        # BUG-9 修复: 原用 str(datetime.now().timestamp()) 同秒碰撞,
+                        # 改用 uuid.uuid4().hex 保证唯一性
+                        id=item_dict.get("id", uuid.uuid4().hex),
                         content=item_dict.get("content", ""),
                         timestamp=timestamp,
                         classification=classification,
@@ -258,12 +309,16 @@ class BufferModule:
                 if not self._running:
                     break
 
+                # BUG-6 修复: 原 TOCTOU 竞态 — with self._lock 内 _move_to_write_queue,
+                # 释放锁后 if self._write_queue: 无锁访问, 可能被 clear() 清空导致漏数据。
+                # 修复: 将 _write_queue 检查移入锁内, 释放锁后再调 flush()
                 with self._lock:
                     if self._buffer:
                         self._move_to_write_queue()
+                    has_queue = bool(self._write_queue)
 
-                # 执行写入
-                if self._write_queue:
+                # 执行写入 (锁外, 避免阻塞 add_turn)
+                if has_queue:
                     self.flush()
 
             except Exception as e:

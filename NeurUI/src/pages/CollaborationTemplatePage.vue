@@ -57,27 +57,27 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listTemplates, createTemplate, updateTemplate, deleteTemplate } from '@/api/modules/collaboration'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import { useCollaboration } from '@/composables/useCollaboration'
+import type { CollabTemplate, CreateTemplatePayload } from '@/api/modules/collaboration'
 
 const { t } = useI18n()
 
-interface Template {
-  id: string
-  name: string
-  description: string
-  type: string
-  participants?: string[]
-}
+// ── 统一通过 composable 访问 store ──
+// templates / loading 来自 store 共享状态；saveTemplate / removeTemplate 已封装 uiMessage
+const { templates, loading, loadTemplates, saveTemplate, removeTemplate } = useCollaboration()
 
-const templates = ref<Template[]>([])
-const loading = ref(false)
 const showModal = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
 
-const form = reactive({ name: '', description: '', type: '', participants: [] as string[] })
+const form = reactive<CreateTemplatePayload>({
+  name: '',
+  description: '',
+  type: '',
+  participants: [],
+})
 
 function resetForm() {
   form.name = ''
@@ -92,7 +92,7 @@ function openCreate() {
   showModal.value = true
 }
 
-function openEdit(tpl: Template) {
+function openEdit(tpl: CollabTemplate) {
   editingId.value = tpl.id
   form.name = tpl.name
   form.description = tpl.description
@@ -101,43 +101,29 @@ function openEdit(tpl: Template) {
   showModal.value = true
 }
 
-async function fetchTemplates() {
-  loading.value = true
-  try {
-    const res = await listTemplates() as unknown as Template[]
-    templates.value = res ?? []
-  } catch {
-    templates.value = []
-  } finally {
-    loading.value = false
-  }
-}
-
 async function handleSave() {
   if (!form.name) return
   saving.value = true
   try {
-    if (editingId.value) {
-      await updateTemplate(editingId.value, { ...form })
-    } else {
-      await createTemplate({ ...form })
+    const ok = await saveTemplate({ ...form }, editingId.value ?? undefined)
+    if (ok) {
+      showModal.value = false
+      resetForm()
+      await loadTemplates()
     }
-    showModal.value = false
-    resetForm()
-    await fetchTemplates()
-  } catch { /* handled */ } finally {
+  } finally {
     saving.value = false
   }
 }
 
 async function handleDelete(id: string) {
-  try {
-    await deleteTemplate(id)
-    await fetchTemplates()
-  } catch { /* handled */ }
+  const ok = await removeTemplate(id)
+  if (ok) {
+    await loadTemplates()
+  }
 }
 
-onMounted(fetchTemplates)
+onMounted(loadTemplates)
 </script>
 
 <style scoped>

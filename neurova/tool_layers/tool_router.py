@@ -94,6 +94,20 @@ class ToolRouter:
         }
         logger.debug("Registered builtin tool: %s", name)
 
+    def _unpack_skill(self, value: typing.Any) -> typing.Any:
+        """从可能包装的值中提取 Skill 对象(架构深化候选 2)。
+
+        收敛 V2-2 和 V2-7 的元组解包重复逻辑:
+        - 类 A (neurova/skill_system.py) 的 .skills 返回 Dict[str, Skill]
+        - 类 B (neurova/skills/registry.py) 的 .skills 返回 Dict[str, Tuple[Skill, Path]]
+
+        Locality↑: 元组解包逻辑单点维护。
+        Testability↑: helper 可独立单测。
+        """
+        if isinstance(value, (tuple, list)) and value:
+            return value[0]
+        return value
+
     def register_builtin_batch(self, tools: typing.Dict[str, typing.Any]) -> None:
         """
         批量注册内置工具
@@ -199,6 +213,8 @@ class ToolRouter:
 
         if skills and isinstance(skills, dict):
             for skill_name, skill in skills.items():
+                # 候选 2: 元组解包收敛到 _unpack_skill helper(原 V2-2 内联逻辑)
+                skill = self._unpack_skill(skill)
                 if skill_name not in self._builtin_tools:
                     desc = getattr(skill, "description", "") or ""
                     params = getattr(skill, "parameters", {}) or {}
@@ -208,6 +224,23 @@ class ToolRouter:
                         description=desc,
                         parameters=params,
                     )
+        elif skills and isinstance(skills, list):
+            # Bug V2-2 修复:类 A SkillRegistry.list_skills() 返回 List[SkillInfo](列表),
+            # 原实现只检查 isinstance(skills, dict),list 路径完全跳过,
+            # Skill 工具的第二条发现路径也断。
+            for skill in skills:
+                # SkillInfo 对象有 name 属性
+                skill_name = getattr(skill, "name", None)
+                if not skill_name or skill_name in self._builtin_tools:
+                    continue
+                desc = getattr(skill, "description", "") or ""
+                params = getattr(skill, "parameters", {}) or {}
+                tools[skill_name] = _SkillToolProxy(
+                    name=skill_name,
+                    skill_name=skill_name,
+                    description=desc,
+                    parameters=params,
+                )
         return tools
 
     def _discover_mcp_tools(self) -> typing.Dict[str, _MCPToolProxy]:
@@ -391,6 +424,8 @@ class ToolRouter:
         skills = getattr(self._skill_manager, "skills", {})
         if skills and tool_name in skills:
             skill = skills[tool_name]
+            # 候选 2: 元组解包收敛到 _unpack_skill helper(原 V2-7 内联逻辑)
+            skill = self._unpack_skill(skill)
 
         desc = ""
         params = {}
