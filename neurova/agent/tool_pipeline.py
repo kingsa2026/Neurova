@@ -12,24 +12,27 @@
 
 from neurova.core.logger import get_logger
 import time
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# ADR 0010: ToolExecutionContext 单一规范定义位于 tool_layers.types。
+# 本模块的 7 字段重复定义已删除并 re-export 规范版本（14 字段）。
+from neurova.tool_layers.types import ToolExecutionContext
+
 logger = get_logger(__name__)
 
-
-@dataclass
-class ToolExecutionContext:
-    """工具执行上下文"""
-    tool_name: str
-    params: Dict[str, Any]
-    user_input: str
-    success: bool
-    tool_source: str = "skill_system"
-    execution_time: float = 0.0
-    timestamp: float = field(default_factory=time.time)
+# C2/ADR 0010: 本模块的 ToolExecutionPipeline 及其步骤类为死代码
+# （生产路径从不调用，仅被 tests/unit/agent/test_tool_pipeline.py 引用）。
+# 保留以兼容旧 import 路径，但不应在新代码中使用。
+warnings.warn(
+    "neurova.agent.tool_pipeline is dead code (C2/ADR 0010); "
+    "use neurova.agent.tool_execution_manager instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 @dataclass

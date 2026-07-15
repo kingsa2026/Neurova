@@ -68,17 +68,20 @@ class AgentSkillManager:
             return None
 
     def _init_importer(self):
-        """独立初始化 MarketImporter
+        """初始化 SkillHubClient（真实 HTTP 下载/安装/更新）
 
-        P0-B1 修复：原代码 import SkillMarketImporter（类名错误，实际是 MarketImporter）
-        导致 ImportError，进而让整个 try 块的所有模块都变 None。
+        ADR 0012: 用 SkillHubClient 替换 stub MarketImporter。
+        SkillHubClient 是唯一能从 GitHub/ClawHub/LobeHub 真实下载安装的深度 Module。
+
+        同时把实例赋给 self.importer，便于 __new__ + _init_importer() 单步初始化测试。
         """
         try:
-            from neurova.skills.market_importer import MarketImporter
-            # MarketImporter 需要 skills_dir 参数；使用默认目录
-            return MarketImporter(skills_dir=Path(".agents/skills"))
+            from neurova.skills.hub_client import SkillHubClient
+            self.importer = SkillHubClient()
+            return self.importer
         except Exception as e:
-            logger.warning("Could not initialize MarketImporter: %s", e)
+            logger.warning("Could not initialize SkillHubClient: %s", e)
+            self.importer = None
             return None
 
     def _init_analyzer(self):
@@ -181,33 +184,25 @@ class AgentSkillManager:
         logger.info("Suggested %s skills", len(suggestions))
         return suggestions
 
-    async def search_skill_in_markets(
+    def search_skill(
         self,
         skill_name: str,
         markets: Optional[List[str]] = None,
-        limit_per_market: int = 10,
+        limit_per_market: int = 5,
     ) -> List[Dict[str, Any]]:
-        """
-        在市场中搜索技能
+        """搜索技能 — 同步调用下游 searcher
 
-        Args:
-            skill_name: 技能名称
-            markets: 市场列表
-            limit_per_market: 每个市场的结果限制
-
-        Returns:
-            搜索结果列表
+        ADR 0012 修复:
+        - 下游 market searcher 的批量搜索方法是同步的（改为同步调用）
+        - 真实签名: search_all_markets(query, limit) — 无 markets/limit_per_market 参数
+        - markets 参数保留为兼容签名（实际由 searcher 内部已注册源决定）
         """
         logger.info("Agent %s searching for skill: %s", self.agent_id, skill_name)
 
         if not self.searcher:
             return []
 
-        results = await self.searcher.search_all_markets(
-            query=skill_name,
-            markets=markets,
-            limit_per_market=limit_per_market,
-        )
+        results = self.searcher.search_all_markets(skill_name, limit=limit_per_market)
 
         logger.info("Found %s results for skill: %s", len(results), skill_name)
         return results
@@ -217,15 +212,12 @@ class AgentSkillManager:
         skill_name: str,
         market: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        获取技能
+        """获取技能 — 修复签名三重不匹配
 
-        Args:
-            skill_name: 技能名称
-            market: 市场名称
-
-        Returns:
-            获取结果
+        ADR 0012 修复:
+        - search_market/search_all_markets 是同步方法，去掉 await
+        - 去掉不存在的 limit_per_market 参数，用 limit
+        - 改用 SkillHubClient 的真实 install_skill 方法（替换原 stub 调用）
         """
         logger.info("Agent %s acquiring skill: %s", self.agent_id, skill_name)
 
@@ -235,18 +227,11 @@ class AgentSkillManager:
                 "error": "Market modules not available",
             }
 
-        # 搜索技能
+        # 搜索技能 — 同步调用（去掉 await）
         if market:
-            results = await self.searcher.search_market(
-                market=market,
-                query=skill_name,
-                limit=1,
-            )
+            results = self.searcher.search_market(market=market, query=skill_name, limit=1)
         else:
-            results = await self.searcher.search_all_markets(
-                query=skill_name,
-                limit_per_market=1,
-            )
+            results = self.searcher.search_all_markets(skill_name, limit=5)
 
         if not results:
             logger.warning("Skill %s not found in any market", skill_name)
@@ -258,16 +243,74 @@ class AgentSkillManager:
         # 获取第一个结果
         skill_info = results[0]
 
-        # 导入技能
-        import_result = await self.importer.import_from_market(
-            market=skill_info.get("market", "unknown"),
-            skill_id=skill_info.get("id", ""),
-            skill_data=skill_info,
-        )
+        # 导入技能 — 用 SkillHubClient 的真实安装方法（替换原 stub 调用）
+        # SkillHubClient.install_skill 接受 RemoteSkill 对象
+        try:
+            if hasattr(self.importer, "install_skill"):
+                from neurova.skills.hub_client import RemoteSkill, SkillSource
+
+                # 将搜索结果统一转为 RemoteSkill
+                if isinstance(skill_info, RemoteSkill):
+                    remote_skill = skill_info
+                elif isinstance(skill_info, dict):
+                    # 字符串 source 转 SkillSource 枚举（github/clawhub/lobehub/modelscope/local）
+                    raw_source = (
+                        skill_info.get("source")
+                        or skill_info.get("market")
+                        or "github"
+                    )
+                    try:
+                        source_enum = (
+                            raw_source
+                            if isinstance(raw_source, SkillSource)
+                            else SkillSource(str(raw_source).lower())
+                        )
+                    except ValueError:
+                        source_enum = SkillSource.GITHUB
+
+                    remote_skill = RemoteSkill(
+                        name=skill_info.get("name", skill_name),
+                        source=source_enum,
+                        description=skill_info.get("description", ""),
+                        version=skill_info.get("version", "0.0.0"),
+                        url=skill_info.get("url", ""),
+                        download_url=skill_info.get("download_url", ""),
+                    )
+                else:
+                    # SearchResult 等带属性对象
+                    raw_source = getattr(skill_info, "source", "github")
+                    try:
+                        source_enum = (
+                            raw_source
+                            if isinstance(raw_source, SkillSource)
+                            else SkillSource(str(raw_source).lower())
+                        )
+                    except ValueError:
+                        source_enum = SkillSource.GITHUB
+
+                    remote_skill = RemoteSkill(
+                        name=getattr(skill_info, "name", skill_name),
+                        source=source_enum,
+                        description=getattr(skill_info, "description", ""),
+                        version=getattr(skill_info, "version", "0.0.0"),
+                        url=getattr(skill_info, "url", ""),
+                        download_url=getattr(skill_info, "download_url", ""),
+                    )
+
+                success = self.importer.install_skill(remote_skill)
+                import_result = {"success": bool(success)}
+            else:
+                import_result = {
+                    "success": False,
+                    "error": "Importer does not support install_skill",
+                }
+        except Exception as e:
+            logger.exception("Failed to install skill %s: %s", skill_name, e)
+            import_result = {"success": False, "error": str(e)}
 
         logger.info("Skill %s acquired successfully", skill_name)
         return {
-            "success": True,
+            "success": import_result.get("success", False),
             "skill_name": skill_name,
             "import_result": import_result,
         }

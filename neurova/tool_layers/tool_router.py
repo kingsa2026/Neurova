@@ -95,18 +95,13 @@ class ToolRouter:
         logger.debug("Registered builtin tool: %s", name)
 
     def _unpack_skill(self, value: typing.Any) -> typing.Any:
-        """从可能包装的值中提取 Skill 对象(架构深化候选 2)。
+        """从可能包装的值中提取 Skill 对象（委托到共享函数）。
 
-        收敛 V2-2 和 V2-7 的元组解包重复逻辑:
-        - 类 A (neurova/skill_system.py) 的 .skills 返回 Dict[str, Skill]
-        - 类 B (neurova/skills/registry.py) 的 .skills 返回 Dict[str, Tuple[Skill, Path]]
-
-        Locality↑: 元组解包逻辑单点维护。
-        Testability↑: helper 可独立单测。
+        原私有逻辑已提升为 neurova.skill_system.compat.unpack_skill 自由函数，
+        此方法保留为薄委托以保持调用方签名不变（lines 217/428）。
         """
-        if isinstance(value, (tuple, list)) and value:
-            return value[0]
-        return value
+        from neurova.skill_system.compat import unpack_skill
+        return unpack_skill(value)
 
     def register_builtin_batch(self, tools: typing.Dict[str, typing.Any]) -> None:
         """
@@ -209,7 +204,7 @@ class ToolRouter:
                 try:
                     skills = list_fn()
                 except Exception:
-                    pass
+                    logger.exception("list_skills() 调用失败")
 
         if skills and isinstance(skills, dict):
             for skill_name, skill in skills.items():
@@ -269,8 +264,8 @@ class ToolRouter:
                                     description=desc,
                                     parameters=params,
                                 )
-                except Exception as e:
-                    logger.debug("Failed to list MCP tools from %s: %s", server_id, e)
+                except Exception:
+                    logger.exception("Failed to list MCP tools from %s", server_id)
         return tools
 
     async def route(
@@ -412,6 +407,7 @@ class ToolRouter:
                 if not has_skill_fn(tool_name):
                     return None
             except Exception:
+                logger.exception("has_skill() 检查失败: %s", tool_name)
                 return None
         else:
             # 回退：检查 skills 字典
@@ -479,8 +475,8 @@ class ToolRouter:
                             description=desc,
                             parameters=params,
                         )
-            except Exception as e:
-                logger.debug("Failed to scan MCP tools from %s: %s", server_id, e)
+            except Exception:
+                logger.exception("Failed to scan MCP tools from %s", server_id)
 
         return None
 

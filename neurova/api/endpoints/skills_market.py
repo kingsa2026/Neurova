@@ -21,6 +21,9 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
+_DEPRECATED = True
+"""已废弃 — ADR 0013: 统一到 skill_pool_api.py。此端点为 demo 实现（_init_sample_skills 硬编码数据）。"""
+
 
 # ── Enums ──────────────────────────────────────────────
 

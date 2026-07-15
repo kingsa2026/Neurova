@@ -321,12 +321,20 @@ class ToolMemoryIntegration:
         return self.confidence_threshold
 
     def _should_demote_from_muscle_memory(self, tool_name: str) -> bool:
-        """检查工具是否应从肌肉记忆中降级（已废弃/已降级）"""
+        """检查工具是否应从肌肉记忆中降级（已废弃/已降级）。
+
+        H6 修复: 统一 ToolLifecycleManager 后 get_state 返回
+        Optional[ToolLifecycleState] 枚举，此处显式处理 None（未注册工具）
+        并与枚举常量比较，避免字符串 vs 枚举的永远 False 比较。
+        """
         if not self.tool_lifecycle:
             return False
 
         try:
             state = self.tool_lifecycle.get_state(tool_name)
+            if state is None:
+                # 未注册工具不降级
+                return False
             from neurova.evolution.tool_lifecycle import ToolLifecycleState
 
             return state in (ToolLifecycleState.ARCHIVED, ToolLifecycleState.DEGRADED)

@@ -483,21 +483,32 @@ class ChatPipeline:
             logger.warning(f"记录工具失败教训时出错: {tool_name}, 错误: {e}", exc_info=True)
 
     async def _check_skill_acquisition(self, ctx: ChatContext):
-        """主动技能获取检查"""
+        """主动技能获取检查
+
+        ADR 0012 修复:
+        - 正确 await analyze_task（async def）
+        - 对齐返回字段：skills_needed / auto_acquire
+        - except 用 logger.exception 记录完整 traceback，非静默吞掉
+        """
         if not self.skill_manager or not self.skill_manager.auto_acquire:
             return
 
         try:
-            result = self.skill_manager.analyze_task(ctx.user_input)
-            if result:
-                sc = result.get("success_count", 0)
-                if sc > 0:
-                    acquired = [r.get("skill_name") for r in result.get("acquisition_results", []) if r.get("success")]
-                    logger.info("主动技能获取: 成功安装 %s 个技能 %s", sc, acquired)
-                elif result.get("missing_skills"):
-                    logger.info("需要技能: %s，但未在市场中找到", result['missing_skills'])
-        except Exception as e:
-            logger.warning("主动技能获取检查失败: %s", e)
+            result = await self.skill_manager.analyze_task(ctx.user_input)
+            if not result:
+                return
+
+            skills_needed = result.get("skills_needed", [])
+            auto_acquire = result.get("auto_acquire", False)
+
+            if auto_acquire and skills_needed:
+                acquired = [r.get("skill_name") for r in skills_needed if isinstance(r, dict) and r.get("success")]
+                if acquired:
+                    logger.info("主动技能获取: 成功安装 %s 个技能 %s", len(acquired), acquired)
+                else:
+                    logger.info("需要技能: %s，但未在市场中找到", [r.get("skill_name") for r in skills_needed if isinstance(r, dict)])
+        except Exception:
+            logger.exception("主动技能获取检查失败")
 
     async def _check_nl_synthesis(self, ctx: ChatContext):
         """NL 工具合成检查"""
@@ -889,20 +900,42 @@ class ChatPipeline:
         修复: 仅 content 事件的 data 进入回复；其他事件是元数据（思考过程、
         工具调用、工具结果、完成信号），不属于回复文本，跳过即可。done 事件的
         reply 字段是完整回复的快照，可作为空回复时的兜底。
+
+        C1 修复: 原生 function-calling 模式的 tool_call/tool_result 事件原先被
+        完全丢弃，导致 _collect_tool_messages() 在原生模式下返回空、
+        AGENT_TOOL_RESULT 事件不携带工具消息。现将这两类事件接入
+        _tool_messages_list（与文本模式工具调用写入同一列表），保持 N-6 修复
+        （不入回复文本）不变。
         """
         reply_parts = []
+        # C1: 捕获原生 function-calling 的工具事件，循环后合并到 _tool_messages_list
+        native_tool_events: List[Dict] = []
         # Bug V2-6 修复:predict_step 是 async def,返回 coroutine。
         # 原代码 `gen = self.loop.predict_step(...)` 缺 await,对 coroutine
         # 迭代会抛 TypeError: 'coroutine' object is not async iterable。
         gen = await self.loop.predict_step(messages=ctx.context, tools=tools_for_llm, stream=True)
         async for event in gen:
-            if isinstance(event, dict) and event.get("type") == "content":
+            if not isinstance(event, dict):
+                continue
+            etype = event.get("type")
+            if etype == "content":
                 reply_parts.append(event.get("data", ""))
-            elif isinstance(event, dict) and event.get("type") == "done":
+            elif etype == "done":
                 # done 事件携带完整回复快照，仅在未累积到 content 时兜底
                 if not reply_parts and event.get("reply"):
                     reply_parts.append(event["reply"])
-            # reasoning / tool_call / tool_result 等元数据事件不入回复
+            elif etype in ("tool_call", "tool_result"):
+                # C1: 原生 function-calling 元数据，接入工具消息列表
+                native_tool_events.append(event)
+            # reasoning 等其他元数据事件不入回复
+        # C1: 合并原生工具事件到 _tool_messages_list，供 _collect_tool_messages() 读取
+        if native_tool_events:
+            tool_list = getattr(self._agent, "_tool_messages_list", None)
+            if tool_list is None:
+                tool_list = []
+                self._agent._tool_messages_list = tool_list
+            tool_list.extend(native_tool_events)
+            logger.debug("原生模式捕获 %d 个工具事件", len(native_tool_events))
         return "".join(reply_parts)
 
     async def _call_loop_normal(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:

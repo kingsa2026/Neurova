@@ -22,6 +22,9 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
+_DEPRECATED = True
+"""已废弃 — ADR 0013: 统一到 skill_pool_api.py。此端点调用 stub MarketImporter。"""
+
 # 导入技能市场导入器
 try:
     from neurova.skills.market_importer import ImportStatus, MarketImporter, MarketSkill, get_market_importer

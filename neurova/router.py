@@ -391,7 +391,9 @@ async def _clear_command(message: Message, groups: str) -> RouteResult:
 async def _skills_command(message: Message, groups: str) -> RouteResult:
     """列出可用 Skill"""
     skill_registry = message.metadata.get("skill_registry")
-    if skill_registry:
+    # H12 修复: 用 `is not None` 替代 falsy 检查 — 空 registry（无 __len__ 或 skills() 返回空）
+    # 不应被当作"未配置"而跳过技能枚举。
+    if skill_registry is not None:
         skills = skill_registry.list_skills()
         if not skills:
             return RouteResult(

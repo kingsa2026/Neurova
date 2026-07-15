@@ -6,6 +6,7 @@
 
 import datetime
 from neurova.core.logger import get_logger
+from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import typing
 
 from fastapi import APIRouter, HTTPException
@@ -98,13 +99,13 @@ async def check_version_update(body: VersionCheckRequest):
     return {
         "code": 0,
         "message": "success",
-        "data": VersionCheckResponse(
+        "data": safe_model_dump(VersionCheckResponse(  # s9: pydantic v1 兼容
             skill_id=skill_id,
             current_version=current,
             latest_version=latest,
             has_update=has_update,
             changelog=version_info.get("changelog", ""),
-        ).model_dump(),
+        )),
     }
 
 

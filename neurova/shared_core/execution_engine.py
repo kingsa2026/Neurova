@@ -18,21 +18,11 @@ import threading
 import typing
 import uuid
 from dataclasses import dataclass, field
-from enum import Enum
+
+# ADR 0009: ExecutionStatus 单一规范定义位于 tool_layers.types
+from neurova.tool_layers.types import ExecutionStatus
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class ExecutionStatus(Enum):
-    """执行状态"""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    TIMEOUT = "timeout"
 
 
 @dataclass

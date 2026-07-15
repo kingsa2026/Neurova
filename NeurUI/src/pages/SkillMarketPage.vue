@@ -143,8 +143,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { request } from '@/api'
-import { installSkillFromUrl, installSkillFromZip } from '@/api/modules/skill-pool'
+import * as skillPoolApi from '@/api/modules/skill-pool'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -225,11 +224,12 @@ async function handleZipFileChange(e: Event) {
 
   message.loading({ content: t('market.uploading'), key: 'zip-upload', duration: 0 })
   try {
-    await installSkillFromZip(file)
+    await skillPoolApi.installSkillFromZip(file)
     message.success({ content: t('market.installSuccess'), key: 'zip-upload' })
     fetchSkills()
-  } catch {
-    message.error({ content: t('market.installFailed'), key: 'zip-upload' })
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('market.installFailed')
+    message.error({ content: msg, key: 'zip-upload' })
   }
 }
 
@@ -244,39 +244,46 @@ async function handleUrlInstall() {
 
   urlInstalling.value = true
   try {
-    await installSkillFromUrl(url)
+    await skillPoolApi.installSkillFromUrl(url)
     message.success(t('market.installSuccess'))
     showUrlModal.value = false
     installUrl.value = ''
     fetchSkills()
-  } catch {
-    message.error(t('market.installFailed'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('market.installFailed')
+    message.error(msg)
   } finally {
     urlInstalling.value = false
   }
 }
 
 async function fetchCategories() {
-  try {
-    const res: any = await request.get('/skills-market/categories')
-    const data = res?.data ?? res
-    categories.value = Array.isArray(data) ? data : data?.items ?? []
-  } catch {
-    // Categories optional
+  // Categories are derived locally from the loaded skills list — no dedicated
+  // backend endpoint exists. We group by `skill.category` and de-duplicate.
+  const counts = new Map<string, { name: string; icon?: string; count: number }>()
+  for (const s of skills.value) {
+    const id = s.category ?? 'general'
+    const entry = counts.get(id)
+    if (entry) entry.count += 1
+    else counts.set(id, { name: id, icon: '📁', count: 1 })
   }
+  categories.value = Array.from(counts, ([id, v]) => ({ id, ...v }))
 }
 
 async function fetchSkills() {
   loading.value = true
   try {
-    const res: any = await request.get('/skills-market/skills')
-    const data = res?.data ?? res
+    const res = await skillPoolApi.getPublicSkills()
+    const data: any = (res as any)?.data ?? res
     skills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({
       ...s,
       _installing: false,
     }))
-  } catch {
-    message.error(t('market.loadError'))
+    // Refresh category counts based on the freshly loaded list.
+    fetchCategories()
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('market.loadError')
+    message.error(msg)
   } finally {
     loading.value = false
   }
@@ -286,25 +293,25 @@ async function toggleInstall(skill: MarketSkill) {
   skill._installing = true
   try {
     if (skill.installed) {
-      await request.delete(`/marketplace/skills/${skill.id}/install`)
+      await skillPoolApi.uninstallSkill(skill.id, 'default')
       skill.installed = false
       skill.install_count = Math.max(0, (skill.install_count ?? 1) - 1)
       message.success(t('market.uninstallSuccess'))
     } else {
-      await request.post('/skills-market/install', { skill_id: skill.id })
+      await skillPoolApi.installSkill(skill.id, 'default')
       skill.installed = true
       skill.install_count = (skill.install_count ?? 0) + 1
       message.success(t('market.installSuccess'))
     }
-  } catch {
-    message.error(t('market.actionError'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('market.actionError')
+    message.error(msg)
   } finally {
     skill._installing = false
   }
 }
 
 onMounted(() => {
-  fetchCategories()
   fetchSkills()
 })
 </script>

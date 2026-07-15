@@ -4,9 +4,17 @@
     <GlassPanel class="pool-header">
       <div class="header-row">
         <h2 class="page-title">{{ t('skillPool.title') }}</h2>
-        <GlassButton variant="primary" size="sm" @click="openCreateModal">
-          {{ t('skillPool.createSkill') }}
-        </GlassButton>
+        <div class="header-actions">
+          <GlassButton variant="secondary" size="sm" @click="showUrlModal = true">
+            {{ t('skillPool.installFromUrl') }}
+          </GlassButton>
+          <GlassButton variant="secondary" size="sm" @click="triggerZipUpload">
+            {{ t('skillPool.importZip') }}
+          </GlassButton>
+          <GlassButton variant="primary" size="sm" @click="openCreateModal">
+            {{ t('skillPool.createSkill') }}
+          </GlassButton>
+        </div>
       </div>
     </GlassPanel>
 
@@ -123,6 +131,35 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- URL Install Modal -->
+    <a-modal
+      v-model:open="showUrlModal"
+      :title="t('skillPool.urlInputTitle')"
+      :ok-text="t('skillPool.install')"
+      :confirm-loading="urlInstalling"
+      @ok="handleUrlInstall"
+      @cancel="showUrlModal = false"
+    >
+      <div style="margin-bottom: 8px; color: var(--nr-text-secondary); font-size: 13px;">
+        {{ t('skillPool.urlInputDesc') }}
+      </div>
+      <a-input
+        v-model:value="installUrl"
+        :placeholder="t('skillPool.urlInputPlaceholder')"
+        allow-clear
+        @press-enter="handleUrlInstall"
+      />
+    </a-modal>
+
+    <!-- Hidden ZIP file input -->
+    <input
+      ref="zipFileInput"
+      type="file"
+      accept=".zip"
+      style="display: none"
+      @change="handleZipFileChange"
+    />
   </div>
 </template>
 
@@ -166,6 +203,54 @@ const modalVisible = ref(false)
 const saving = ref(false)
 const editingSkill = ref<PoolSkill | null>(null)
 const form = ref({ name: '', description: '', category: '', code: '' })
+
+// URL / ZIP import state
+const showUrlModal = ref(false)
+const installUrl = ref('')
+const urlInstalling = ref(false)
+const zipFileInput = ref<HTMLInputElement | null>(null)
+
+function triggerZipUpload() {
+  zipFileInput.value?.click()
+}
+
+async function handleZipFileChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  input.value = ''
+  if (!file.name.endsWith('.zip')) {
+    message.error(t('skillPool.zipInvalid'))
+    return
+  }
+  message.loading({ content: t('skillPool.uploading'), key: 'zip-upload', duration: 0 })
+  try {
+    await skillPoolApi.installSkillFromZip(file)
+    message.success({ content: t('skillPool.installSuccess'), key: 'zip-upload' })
+    fetchPrivate()
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skillPool.installError')
+    message.error({ content: msg, key: 'zip-upload' })
+  }
+}
+
+async function handleUrlInstall() {
+  const url = installUrl.value.trim()
+  if (!url) return
+  urlInstalling.value = true
+  try {
+    await skillPoolApi.installSkillFromUrl(url)
+    message.success(t('skillPool.installSuccess'))
+    showUrlModal.value = false
+    installUrl.value = ''
+    fetchPrivate()
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skillPool.installError')
+    message.error(msg)
+  } finally {
+    urlInstalling.value = false
+  }
+}
 
 const filteredPublic = computed(() => {
   const q = publicSearch.value.toLowerCase()
@@ -214,8 +299,9 @@ async function fetchPublic() {
     const res = await skillPoolApi.getPublicSkills({ search: publicSearch.value || undefined })
     const data = res?.data
     publicSkills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({ ...s, _installing: false }))
-  } catch {
-    message.error(t('skillPool.loadError'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skillPool.loadError')
+    message.error(msg)
   } finally {
     publicLoading.value = false
   }
@@ -227,8 +313,9 @@ async function fetchPrivate() {
     const res = await skillPoolApi.getPrivateSkills('_all')
     const data = res?.data
     privateSkills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({ ...s, _installing: false }))
-  } catch {
-    message.error(t('skillPool.loadError'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skillPool.loadError')
+    message.error(msg)
   } finally {
     privateLoading.value = false
   }
@@ -246,8 +333,9 @@ async function saveSkill() {
     }
     modalVisible.value = false
     fetchPrivate()
-  } catch {
-    message.error(t('skillPool.saveError'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skillPool.saveError')
+    message.error(msg)
   } finally {
     saving.value = false
   }
@@ -259,8 +347,9 @@ async function installPublic(skill: PoolSkill) {
     await skillPoolApi.installSkill(skill.id, '_current')
     skill.install_count = (skill.install_count ?? 0) + 1
     message.success(t('skillPool.installSuccess'))
-  } catch {
-    message.error(t('skillPool.installError'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skillPool.installError')
+    message.error(msg)
   } finally {
     skill._installing = false
   }
@@ -276,8 +365,9 @@ async function toggleShare(skill: PoolSkill) {
     }
     skill.shared = !skill.shared
     message.success(skill.shared ? t('skillPool.shareSuccess') : t('skillPool.unshareSuccess'))
-  } catch {
-    message.error(t('skillPool.shareError'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skillPool.shareError')
+    message.error(msg)
   }
 }
 
@@ -285,8 +375,9 @@ async function pushToPool(skill: PoolSkill) {
   try {
     await skillPoolApi.pushSkill(skill.id)
     message.success(t('skillPool.pushSuccess'))
-  } catch {
-    message.error(t('skillPool.pushError'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skillPool.pushError')
+    message.error(msg)
   }
 }
 
@@ -301,8 +392,9 @@ function deleteSkill(skill: PoolSkill) {
         await skillPoolApi.deleteSkill(skill.id)
         privateSkills.value = privateSkills.value.filter((s) => s.id !== skill.id)
         message.success(t('skillPool.deleteSuccess'))
-      } catch {
-        message.error(t('skillPool.deleteError'))
+      } catch (err: any) {
+        const msg = err?.response?.data?.error || err?.message || t('skillPool.deleteError')
+        message.error(msg)
       }
     },
   })
@@ -325,6 +417,13 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .page-title {

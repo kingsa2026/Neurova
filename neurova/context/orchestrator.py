@@ -728,7 +728,10 @@ class ContextOrchestrator:
         # 2. Skill Registry 工具 — 用实际参数 schema 替换 ToolRouter 的占位符
         if self.skill_registry:
             try:
-                for skill_name, skill in self.skill_registry.skills.items():
+                from neurova.skill_system.compat import unpack_skill  # H2 fix: 解包 class B 的 tuple
+
+                for skill_name, raw_skill in self.skill_registry.skills.items():
+                    skill = unpack_skill(raw_skill)  # H2 fix: 类 B 返回 (Skill, Path) 元组，需解包
                     # 尝试用 OpenAI Schema Adapter 生成带参数的 schema
                     try:
                         from neurova.skill_system.compat import OpenAISchemaAdapter

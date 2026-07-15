@@ -10,6 +10,7 @@
 """
 
 from neurova.core.logger import get_logger
+from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -106,7 +107,7 @@ async def update_user_group(group_id: str, body: UserGroupUpdate):
         raise HTTPException(status_code=404, detail="User group not found")
     if group.get("is_system"):
         raise HTTPException(status_code=403, detail="Cannot modify system group")
-    for k, v in body.model_dump(exclude_none=True).items():
+    for k, v in safe_model_dump(body, exclude_none=True).items():  # s9: pydantic v1 兼容
         group[k] = v
     group["updated_at"] = time.time()
     return UserGroupInfo(**group)

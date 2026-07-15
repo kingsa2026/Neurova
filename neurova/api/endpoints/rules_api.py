@@ -13,6 +13,7 @@
 """
 
 from neurova.core.logger import get_logger
+from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -160,7 +161,7 @@ async def update_rule(rule_id: str, body: RuleUpdate):
     if not rule:
         raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
 
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in safe_model_dump(body, exclude_none=True).items():  # s9: pydantic v1 兼容
         rule[field] = value
     rule["updated_at"] = time.time()
     return RuleInfo(**rule)

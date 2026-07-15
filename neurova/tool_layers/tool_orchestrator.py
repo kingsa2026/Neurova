@@ -16,23 +16,13 @@ from neurova.core.logger import get_logger
 import time
 import typing
 from dataclasses import dataclass, field
-from enum import Enum
 
 # tool_layers imports
 from neurova.tool_layers.capability_graph import ToolCapabilityGraph
+# ADR 0009: ExecutionStatus 单一规范定义位于 tool_layers.types
+from neurova.tool_layers.types import ExecutionStatus
 
 logger = get_logger(__name__)
-
-
-class ExecutionStatus(str, Enum):
-    """执行状态枚举"""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCESS = "success"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-    TIMEOUT = "timeout"
 
 
 @dataclass
@@ -178,11 +168,11 @@ class ToolOrchestrator:
                             )
 
             # 检查所有步骤是否成功
-            all_success = all(s.status == ExecutionStatus.SUCCESS for s in step_results)
+            all_success = all(s.status == ExecutionStatus.COMPLETED for s in step_results)
 
             return OrchestrationResult(
                 goal=goal,
-                status=ExecutionStatus.SUCCESS if all_success else ExecutionStatus.FAILED,
+                status=ExecutionStatus.COMPLETED if all_success else ExecutionStatus.FAILED,
                 steps=step_results,
                 total_duration_ms=(time.time() - start_time) * 1000,
                 error=None if all_success else "Some steps failed",
@@ -263,7 +253,7 @@ class ToolOrchestrator:
             # 失败降级
             if result.status == ExecutionStatus.FAILED:
                 fallback_result = await self._try_fallback(f"step_{step_offset}", layer[0], context, result.error)
-                if fallback_result.status == ExecutionStatus.SUCCESS:
+                if fallback_result.status == ExecutionStatus.COMPLETED:
                     return [fallback_result]
                 else:
                     return [
@@ -301,7 +291,7 @@ class ToolOrchestrator:
                 # 失败降级
                 if result.status == ExecutionStatus.FAILED:
                     fallback_result = await self._try_fallback(result.step_id, result.tool_name, context, result.error)
-                    if fallback_result.status == ExecutionStatus.SUCCESS:
+                    if fallback_result.status == ExecutionStatus.COMPLETED:
                         final_results.append(fallback_result)
                     else:
                         final_results.append(
@@ -429,7 +419,7 @@ class ToolOrchestrator:
             return StepResult(
                 step_id=step_id,
                 tool_name=tool_name,
-                status=ExecutionStatus.SUCCESS,
+                status=ExecutionStatus.COMPLETED,
                 output=output,
                 duration_ms=duration_ms,
             )
@@ -469,7 +459,7 @@ class ToolOrchestrator:
 
             result = await self._execute_step(f"{step_id}_fallback", fallback_tool, params)
 
-            if result.status == ExecutionStatus.SUCCESS:
+            if result.status == ExecutionStatus.COMPLETED:
                 logger.info("Fallback %s succeeded", fallback_tool)
                 return result
 
@@ -530,7 +520,7 @@ class ToolOrchestrator:
             if dep in previous_tools:
                 # 检查依赖是否成功
                 for result in previous_results:
-                    if result.tool_name == dep and result.status != ExecutionStatus.SUCCESS:
+                    if result.tool_name == dep and result.status != ExecutionStatus.COMPLETED:
                         return False
             else:
                 # 依赖未执行，不能并行

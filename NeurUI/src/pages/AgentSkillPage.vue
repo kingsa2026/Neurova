@@ -17,6 +17,9 @@
           style="max-width: 320px"
         />
         <div class="toolbar-actions">
+          <GlassButton variant="secondary" size="sm" @click="openMarketImportModal">
+            {{ t('skill.importFromMarket') }}
+          </GlassButton>
           <GlassButton variant="primary" size="sm" @click="refreshSkills">
             {{ t('common.refresh') }}
           </GlassButton>
@@ -83,6 +86,40 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- Import Skill from Market Modal -->
+    <a-modal
+      v-model:open="marketImportVisible"
+      :title="t('skill.importFromMarket')"
+      :footer="null"
+      width="640px"
+    >
+      <a-input-search
+        v-model:value="marketSearch"
+        :placeholder="t('skill.marketSearchPlaceholder')"
+        allow-clear
+        style="margin-bottom: 12px"
+      />
+      <a-spin :spinning="marketLoading">
+        <div v-if="filteredMarketSkills.length" class="market-import-list">
+          <div v-for="s in filteredMarketSkills" :key="s.id" class="market-import-row">
+            <div class="market-import-info">
+              <div class="market-import-name">{{ s.name }}</div>
+              <div class="market-import-desc">{{ s.description }}</div>
+            </div>
+            <GlassButton
+              variant="primary"
+              size="sm"
+              :loading="s._installing"
+              @click="installFromMarket(s)"
+            >
+              {{ t('skill.install') }}
+            </GlassButton>
+          </div>
+        </div>
+        <a-empty v-else :description="t('skill.noMarketSkills')" />
+      </a-spin>
+    </a-modal>
   </div>
 </template>
 
@@ -90,7 +127,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { request } from '@/api'
+import * as skillPoolApi from '@/api/modules/skill-pool'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -105,6 +142,14 @@ interface Skill {
   _toggling?: boolean
 }
 
+interface MarketSkill {
+  id: string
+  name: string
+  description: string
+  category?: string
+  _installing?: boolean
+}
+
 const props = defineProps<{ agentId: string }>()
 const { t } = useI18n()
 
@@ -117,6 +162,20 @@ const executeVisible = ref(false)
 const executing = ref(false)
 const activeSkill = ref<Skill | null>(null)
 const executeArgs = ref('')
+
+// Market import modal state
+const marketImportVisible = ref(false)
+const marketLoading = ref(false)
+const marketSearch = ref('')
+const marketSkills = ref<MarketSkill[]>([])
+
+const filteredMarketSkills = computed(() => {
+  const q = marketSearch.value.toLowerCase()
+  if (!q) return marketSkills.value
+  return marketSkills.value.filter(
+    (s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
+  )
+})
 
 const enabledCount = computed(() => skills.value.filter((s) => s.enabled).length)
 const totalExecutions = computed(() =>
@@ -134,14 +193,15 @@ const filteredSkills = computed(() => {
 async function refreshSkills() {
   loading.value = true
   try {
-    const res: any = await request.get(`/skills?agent_id=${props.agentId}`)
-    const data = res?.data ?? res
+    const res = await skillPoolApi.getAgentSkills(props.agentId)
+    const data: any = (res as any)?.data ?? res
     skills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({
       ...s,
       _toggling: false,
     }))
-  } catch {
-    message.error(t('skill.loadError'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skill.loadError')
+    message.error(msg)
   } finally {
     loading.value = false
   }
@@ -150,11 +210,12 @@ async function refreshSkills() {
 async function toggleSkill(skill: Skill, enabled: boolean) {
   skill._toggling = true
   try {
-    await request.put(`/skills/${skill.id}/enable`, { enabled })
+    await skillPoolApi.enableSkill(skill.id, enabled)
     skill.enabled = enabled
     message.success(enabled ? t('skill.enabledSuccess') : t('skill.disabledSuccess'))
-  } catch {
-    message.error(t('skill.toggleError'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skill.toggleError')
+    message.error(msg)
   } finally {
     skill._toggling = false
   }
@@ -176,21 +237,57 @@ async function runExecute() {
     } catch {
       // keep as string if not valid JSON
     }
-    await request.post(`/skills/${activeSkill.value.id}/execute`, {
-      agent_id: props.agentId,
-      arguments: parsedArgs,
-    })
+    await skillPoolApi.executeSkill(activeSkill.value.id, props.agentId, parsedArgs)
     activeSkill.value.execution_count = (activeSkill.value.execution_count ?? 0) + 1
     message.success(t('skill.executeSuccess'))
     executeVisible.value = false
-  } catch {
-    message.error(t('skill.executeError'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skill.executeError')
+    message.error(msg)
   } finally {
     executing.value = false
   }
 }
 
 onMounted(refreshSkills)
+
+async function openMarketImportModal() {
+  marketImportVisible.value = true
+  marketSearch.value = ''
+  await fetchMarketSkills()
+}
+
+async function fetchMarketSkills() {
+  marketLoading.value = true
+  try {
+    const res = await skillPoolApi.getPublicSkills()
+    const data: any = (res as any)?.data ?? res
+    marketSkills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({
+      ...s,
+      _installing: false,
+    }))
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skill.loadError')
+    message.error(msg)
+  } finally {
+    marketLoading.value = false
+  }
+}
+
+async function installFromMarket(skill: MarketSkill) {
+  skill._installing = true
+  try {
+    await skillPoolApi.installSkill(skill.id, props.agentId)
+    message.success(t('skill.installSuccess'))
+    // Refresh agent skills so the new skill appears in the grid.
+    await refreshSkills()
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skill.installError')
+    message.error(msg)
+  } finally {
+    skill._installing = false
+  }
+}
 </script>
 
 <style scoped>
@@ -248,5 +345,42 @@ onMounted(refreshSkills)
   gap: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--nr-glass-border);
+}
+
+.market-import-list {
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.market-import-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 8px;
+}
+
+.market-import-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.market-import-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+}
+
+.market-import-desc {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

@@ -95,14 +95,45 @@ export function pushSkill(skillId: string) {
 
 /** Install a skill from a remote URL. */
 export function installSkillFromUrl(url: string, version?: string) {
-  return api.post<ApiResponse<{ url: string }>>('/skill-market/install', { url, version })
+  return api.post<ApiResponse<{ url: string }>>(`${BASE}/install-from-url`, { url, version })
 }
 
 /** Install a skill from a ZIP file upload. */
 export function installSkillFromZip(file: File) {
   const formData = new FormData()
   formData.append('file', file)
-  return api.post<ApiResponse<{ message: string }>>('/skill-market/install/zip', formData, {
+  return api.post<ApiResponse<{ message: string }>>(`${BASE}/install-from-zip`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Agent Skill Management (uninstall / list / toggle / execute)
+// ---------------------------------------------------------------------------
+
+/** Uninstall a skill from an agent (cancel push). */
+export function uninstallSkill(skillId: string, agentId: string) {
+  return api.delete<ApiResponse<null>>(`${BASE}/private/${skillId}/push`, {
+    params: { agent_id: agentId },
+  })
+}
+
+/** List all skills installed on an agent. */
+export function getAgentSkills(agentId: string) {
+  return api.get<ApiResponse<Skill[]>>(`${BASE}/agent/${agentId}/skills`)
+}
+
+/** Enable or disable a private skill. */
+export function enableSkill(skillId: string, enabled: boolean) {
+  return api.put<ApiResponse<Skill>>(`${BASE}/private/${skillId}`, {
+    config: { enabled },
+  })
+}
+
+/** Execute a private skill with arguments on behalf of an agent. */
+export function executeSkill(skillId: string, agentId: string, args: Record<string, unknown>) {
+  return api.post<ApiResponse<unknown>>(`${BASE}/private/${skillId}/execute`, {
+    agent_id: agentId,
+    arguments: args,
   })
 }

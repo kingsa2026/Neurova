@@ -53,7 +53,9 @@ class ModelInfo(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        return self.model_dump()
+        # s9: pydantic v1 兼容 — v1 只有 .dict(), v2 中 .dict() 是 deprecated alias 但仍可用.
+        # 原代码 self.model_dump() 在 v1.10 下会 AttributeError.
+        return self.dict()
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ModelInfo":
@@ -74,7 +76,8 @@ class ProviderInfo(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        return self.model_dump()
+        # s9: pydantic v1 兼容 — 同 ModelInfo.to_dict
+        return self.dict()
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ProviderInfo":

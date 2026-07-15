@@ -438,6 +438,11 @@ class ToolExecutor:
         """
         执行单个工具（内部实现，含四级回退链）
 
+        H5 修复: 所有执行路径（builtin/skill/ToolRouter/ToolEngine）统一在
+        finally 中调用 on_tool_executed，确保记忆/生命周期钩子不被遗漏。
+        Skill 路径可能由 agent_core._on_skill_post_execute 二次触发，此处
+        允许重复（记录统计幂等，重复计数优于完全遗漏）。
+
         Args:
             tool_name: 工具名称
             params: 参数
@@ -445,63 +450,94 @@ class ToolExecutor:
         Returns:
             执行结果
         """
-        # 优先使用 ToolEngine（如果可用）
-        if self.tool_engine:
-            try:
-                # 获取 user_id 和 agent_id（如果可用）
-                user_id = getattr(self._agent, "user_id", None)
-                agent_id = getattr(self._agent, "agent_id", None)
+        start = time.time()
+        success = False
+        result = None
+        tool_source = "unknown"
+        try:
+            # 优先使用 ToolEngine（如果可用）
+            if self.tool_engine:
+                try:
+                    # 获取 user_id 和 agent_id（如果可用）
+                    user_id = getattr(self._agent, "user_id", None)
+                    agent_id = getattr(self._agent, "agent_id", None)
 
-                result = await self.tool_engine.execute_with_safeguards(
-                    tool_name=tool_name, parameters=params, user_id=user_id, agent_id=agent_id
+                    result = await self.tool_engine.execute_with_safeguards(
+                        tool_name=tool_name, parameters=params, user_id=user_id, agent_id=agent_id
+                    )
+                    logger.debug("ToolEngine 执行成功: %s", tool_name)
+                    success = True
+                    tool_source = "mcp"
+                    return result
+                except ValueError as e:
+                    # 工具未注册或不可用，回退到其他方式
+                    logger.debug("ToolEngine 工具 %s 未注册或不可用: %s", tool_name, e)
+                except Exception as e:
+                    logger.warning("ToolEngine 执行失败: %s, %s", tool_name, e)
+
+            # 回退到原有逻辑
+            # 内置工具
+            builtin_tools = [
+                "memory_search",
+                "search",
+                "web_search",
+                "weather",
+                "file_read",
+                "file_write",
+                "file_create",
+                "file_delete",
+                "file_edit",
+                "computer_screenshot",
+                "computer_click",
+                "computer_type",
+                "computer_scroll",
+                "computer_shell",
+                "emotion_analyze",
+                "voice_memory_search",
+                "run_code",
+                "execute_code",
+            ]
+
+            if tool_name in builtin_tools:
+                tool_source = "builtin"
+                result = await self._execute_builtin_tool(tool_name, params)
+                success = True
+                return result
+
+            # Skill 工具
+            if self._skill_registry and self._skill_registry.has_skill(tool_name):
+                tool_source = "skill_system"
+                result = await self.execute_skill_tool(tool_name, params)
+                success = True
+                return result
+
+            # 通过工具路由器
+            if self.tool_router:
+                try:
+                    tool_source = "tool_router"
+                    result = await self.tool_router.route(tool_name, params)
+                    success = True
+                    return result
+                except Exception as e:
+                    logger.debug("工具路由器执行失败: %s", e)
+
+            return {"error": f"未知工具: {tool_name}"}
+        finally:
+            # H5: 所有路径统一触发 on_tool_executed（成功/失败均触发）
+            elapsed = time.time() - start
+            try:
+                self.on_tool_executed(
+                    tool_name=tool_name,
+                    params=params,
+                    user_input=getattr(self._agent, "_current_user_input", ""),
+                    success=success,
+                    tool_source=tool_source,
+                    execution_time=elapsed,
+                    result=result if isinstance(result, dict) else None,
                 )
-                logger.debug("ToolEngine 执行成功: %s", tool_name)
-                return result
-            except ValueError as e:
-                # 工具未注册或不可用，回退到其他方式
-                logger.debug("ToolEngine 工具 %s 未注册或不可用: %s", tool_name, e)
-            except Exception as e:
-                logger.warning("ToolEngine 执行失败: %s, %s", tool_name, e)
-
-        # 回退到原有逻辑
-        # 内置工具
-        builtin_tools = [
-            "memory_search",
-            "search",
-            "web_search",
-            "weather",
-            "file_read",
-            "file_write",
-            "file_create",
-            "file_delete",
-            "file_edit",
-            "computer_screenshot",
-            "computer_click",
-            "computer_type",
-            "computer_scroll",
-            "computer_shell",
-            "emotion_analyze",
-            "voice_memory_search",
-            "run_code",
-            "execute_code",
-        ]
-
-        if tool_name in builtin_tools:
-            return await self._execute_builtin_tool(tool_name, params)
-
-        # Skill 工具
-        if self._skill_registry and self._skill_registry.has_skill(tool_name):
-            return await self.execute_skill_tool(tool_name, params)
-
-        # 通过工具路由器
-        if self.tool_router:
-            try:
-                result = await self.tool_router.route(tool_name, params)
-                return result
-            except Exception as e:
-                logger.debug("工具路由器执行失败: %s", e)
-
-        return {"error": f"未知工具: {tool_name}"}
+            except Exception:
+                # 不让钩子异常吞掉工具执行结果，但必须记录堆栈
+                logger.exception("on_tool_executed 钩子失败: %s", tool_name)
 
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
         """执行内置工具"""
@@ -1066,11 +1102,15 @@ class ToolExecutor:
         success: bool,
         tool_source: str = "",
         execution_time: float = 0.0,
+        result: Optional[Dict[str, Any]] = None,
     ):
         """工具执行后钩子 — 闭环学习关键入口
 
         作为公开接口被 agent_core._on_skill_post_execute 调用，
         将工具执行事件转发到 tool_memory (肌肉记忆) 和 tool_lifecycle (生命周期)。
+
+        H3 修复: 新增 result 参数，传播工具执行结果到记忆/生命周期层。
+        record_tool_usage 签名含 **kwargs，result 会被安全接收。
 
         Args:
             tool_name: 工具名称
@@ -1079,6 +1119,7 @@ class ToolExecutor:
             success: 是否成功
             tool_source: 工具来源 (skill_system / builtin / mcp 等)
             execution_time: 执行耗时 (秒)
+            result: 工具执行结果 dict (H3，可 None)
         """
         # 记录工具使用统计 → 传播到肌肉记忆 L1/L2/L3
         if self.tool_memory:
@@ -1090,16 +1131,18 @@ class ToolExecutor:
                     problem_text=user_input,
                     tool_source=tool_source,
                     tool_params=params,
+                    result=result,
                 )
-            except Exception as e:
-                logger.debug("工具记忆记录失败: %s", e)
+            except Exception:
+                # H11: 不静默吞错，记录异常堆栈
+                logger.exception("工具记忆记录失败: %s", tool_name)
 
         # 更新工具生命周期 (真实方法是 touch, 不是 update_usage)
         if self.tool_lifecycle:
             try:
                 self.tool_lifecycle.touch(tool_name, success)
-            except Exception as e:
-                logger.debug("工具生命周期更新失败: %s", e)
+            except Exception:
+                logger.exception("工具生命周期更新失败: %s", tool_name)
 
     def _get_builtin_tool_params(self, tool_name: str) -> Optional[Dict]:
         """
