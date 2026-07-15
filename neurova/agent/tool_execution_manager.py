@@ -19,68 +19,19 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 logger = get_logger(__name__)
 
 
-class TimeoutStrategy(Enum):
-    """超时策略枚举"""
-
-    STRICT = "strict"  # 严格超时
-    ELASTIC = "elastic"  # 弹性超时（自动续时）
-    INFINITE = "infinite"  # 无限等待
-
-
-class ExecutionStatus(Enum):
-    """执行状态枚举"""
-
-    PENDING = "pending"  # 等待执行
-    RUNNING = "running"  # 执行中
-    COMPLETED = "completed"  # 执行完成
-    TIMEOUT = "timeout"  # 执行超时
-    CANCELLED = "cancelled"  # 已取消
-    FAILED = "failed"  # 执行失败
-
-
-@dataclass
-class ToolExecutionContext:
-    """工具执行上下文"""
-
-    context_id: str
-    tool_name: str
-    params: Dict[str, Any]
-    user_input: str
-    timeout: float = 30.0
-    strategy: TimeoutStrategy = TimeoutStrategy.STRICT
-    status: ExecutionStatus = ExecutionStatus.PENDING
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    completed_at: Optional[datetime] = None
-    retries: int = 0
-    max_retries: int = 3
-    metadata: Optional[Dict[str, Any]] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return {
-            "context_id": self.context_id,
-            "tool_name": self.tool_name,
-            "params": self.params,
-            "user_input": self.user_input,
-            "timeout": self.timeout,
-            "strategy": self.strategy.value,
-            "status": self.status.value,
-            "result": self.result,
-            "error": self.error,
-            "created_at": self.created_at.isoformat(),
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-            "retries": self.retries,
-            "max_retries": self.max_retries,
-            "metadata": self.metadata,
-        }
+# ADR 0009/0010: ExecutionStatus / TimeoutStrategy / ToolExecutionContext
+# 的单一规范定义位于 neurova.tool_layers.types，本模块 re-export 以保持
+# 既有 import 路径（from neurova.agent.tool_execution_manager import ...）可用。
+from neurova.tool_layers.types import (
+    ExecutionStatus,
+    TimeoutStrategy,
+    ToolExecutionContext,
+)
 
 
 @dataclass

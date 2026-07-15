@@ -212,13 +212,18 @@ class ToolEngine:
     def _create_default_guard(self):
         """创建默认的工具守卫"""
 
+        # C3/M5 修复: 返回规范 ToolGuardResult（.safe/.should_block），
+        # 而非自定义 stub（旧 stub 用 .is_safe，与 security.tool_guard API 不一致）
+        from neurova.security.tool_guard import ToolGuardResult
+
         class DefaultGuard:
-            def guard(self, **kwargs):
-                return type("GuardResult", (), {"is_safe": True, "findings": []})()
+            def guard(self, tool_input="", context=None, **kwargs):
+                return ToolGuardResult(
+                    safe=True,
+                    tool_name=(context.get("tool_name", "") if context else ""),
+                )
 
         return DefaultGuard()
-
-        logger.info("ToolEngine 初始化完成")
 
     def register_tool(
         self,
@@ -489,6 +494,21 @@ class ToolEngine:
             func = self._tool_funcs.get(tool_name)
             if func is None:
                 raise ValueError(f"工具未注册: {tool_name}")
+
+            # C3 修复: 执行前安全检查 — 之前完全绕过了 tool_guard
+            if self.tool_guard:
+                guard_result = self.tool_guard.guard(
+                    tool_input=str(parameters or {}),
+                    context={"tool_name": tool_name, "parameters": parameters or {}},
+                )
+                # 规范 API: ToolGuardResult.should_block（= not safe）
+                if hasattr(guard_result, "should_block") and guard_result.should_block:
+                    raise ValueError(
+                        f"工具被安全守卫阻止: {tool_name}, findings: {getattr(guard_result, 'findings', [])}"
+                    )
+                # 兼容旧 API: 自定义 stub 返回 .is_safe
+                elif hasattr(guard_result, "is_safe") and not guard_result.is_safe:
+                    raise ValueError(f"工具被安全守卫阻止: {tool_name}")
 
             # 准备参数
             prepared = self.prepare_arguments(tool_name, parameters or {})

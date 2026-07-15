@@ -4,6 +4,7 @@ Shared Config API - 共享配置管理接口
 
 import datetime
 from neurova.core.logger import get_logger
+from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import typing
 
 from fastapi import APIRouter, HTTPException
@@ -90,7 +91,7 @@ async def add_llm_provider(body: LLMProviderRequest):
     if name in _shared_config["llm_providers"]:
         raise HTTPException(status_code=409, detail=f"Provider '{name}' already exists")
 
-    provider = body.model_dump()
+    provider = safe_model_dump(body)  # s9: pydantic v1 兼容
     provider["created_at"] = datetime.datetime.utcnow().isoformat()
     provider["updated_at"] = provider["created_at"]
     _shared_config["llm_providers"][name] = provider
@@ -115,7 +116,7 @@ async def update_llm_provider(name: str, body: LLMProviderRequest):
     if name not in _shared_config["llm_providers"]:
         raise HTTPException(status_code=404, detail=f"Provider '{name}' not found")
 
-    provider = body.model_dump()
+    provider = safe_model_dump(body)  # s9: pydantic v1 兼容
     provider["updated_at"] = datetime.datetime.utcnow().isoformat()
     provider["created_at"] = _shared_config["llm_providers"][name].get("created_at", provider["updated_at"])
     _shared_config["llm_providers"][name] = provider
@@ -151,7 +152,7 @@ async def add_mcp_server(body: MCPServerRequest):
     if name in _shared_config["mcp_servers"]:
         raise HTTPException(status_code=409, detail=f"MCP server '{name}' already exists")
 
-    server = body.model_dump()
+    server = safe_model_dump(body)  # s9: pydantic v1 兼容
     server["created_at"] = datetime.datetime.utcnow().isoformat()
     server["updated_at"] = server["created_at"]
     _shared_config["mcp_servers"][name] = server
@@ -176,7 +177,7 @@ async def update_mcp_server(name: str, body: MCPServerRequest):
     if name not in _shared_config["mcp_servers"]:
         raise HTTPException(status_code=404, detail=f"MCP server '{name}' not found")
 
-    server = body.model_dump()
+    server = safe_model_dump(body)  # s9: pydantic v1 兼容
     server["updated_at"] = datetime.datetime.utcnow().isoformat()
     server["created_at"] = _shared_config["mcp_servers"][name].get("created_at", server["updated_at"])
     _shared_config["mcp_servers"][name] = server

@@ -14,6 +14,9 @@
 | [0006](./0006-embedding-factory.md) | embedding 工厂 + 单例模式 | Accepted | 2026-06-27 |
 | [0007](./0007-semantic-search-api-rrf.md) | 语义搜索 API 端点 RRF 融合 | Accepted | 2026-06-27 |
 | [0008](./0008-session-repository.md) | SessionRepository 统一会话存储接口 | Accepted | 2026-06-28 |
+| [0009](./0009-unify-execution-status.md) | 统一 ExecutionStatus 枚举 | Accepted | 2026-07-09 |
+| [0010](./0010-unify-tool-execution-context.md) | 统一 ToolExecutionContext dataclass | Accepted | 2026-07-09 |
+| [0011](./0011-unify-skill-registry.md) | 统一 SkillRegistry | Accepted | 2026-07-09 |
 
 ## 主题分类
 
@@ -32,6 +35,11 @@
 
 ### 会话存储
 - [ADR 0008: SessionRepository 统一接口](./0008-session-repository.md) — 5 套会话存储收敛到 ABC
+
+### 工具层
+- [ADR 0009: 统一 ExecutionStatus](./0009-unify-execution-status.md) — 4 个不兼容枚举收敛到 tool_layers/types.py
+- [ADR 0010: 统一 ToolExecutionContext](./0010-unify-tool-execution-context.md) — 2 个不兼容 dataclass 收敛 + 删除死代码
+- [ADR 0011: 统一 SkillRegistry](./0011-unify-skill-registry.md) — class A 为规范，class B re-export
 
 ## ADR 编写规范
 

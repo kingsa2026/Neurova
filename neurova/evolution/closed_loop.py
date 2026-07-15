@@ -18,6 +18,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
+# H7 修复: 删除本地 Version A ToolLifecycleManager（touch 仅 1 参、get_state 返回字符串），
+# 统一 re-export tool_lifecycle.py 的 Version B（touch 接受 success、get_state 返回枚举、有锁）。
+# 这消除 split-brain：tool_executor.py 调用 touch(name, success) 不再 TypeError，
+# _should_demote_from_muscle_memory 的枚举比较不再永远 False。
+from neurova.evolution.tool_lifecycle import ToolLifecycleManager, ToolLifecycleState
+
 logger = get_logger(__name__)
 
 
@@ -32,82 +38,6 @@ class ToolWeight:
     last_used: Optional[datetime] = None
     adaptive_multiplier: float = 1.0
     lifecycle_state: str = "active"  # active, degraded, archived, frozen
-
-
-class ToolLifecycleManager:
-    """工具生命周期管理器 — 记录工具使用状态"""
-
-    def __init__(self):
-        self._usage_counts: Dict[str, int] = {}
-        self._last_used: Dict[str, datetime] = {}
-        self._lock = threading.Lock()
-        logger.info("ToolLifecycleManager initialized")
-
-    def touch(self, tool_name: str) -> None:
-        """记录工具被使用一次"""
-        with self._lock:
-            self._usage_counts[tool_name] = self._usage_counts.get(tool_name, 0) + 1
-            self._last_used[tool_name] = datetime.now(UTC)
-            logger.debug("Tool touched: %s (count: %s)", tool_name, self._usage_counts[tool_name])
-
-    def get_usage_count(self, tool_name: str) -> int:
-        """获取工具使用次数"""
-        with self._lock:
-            return self._usage_counts.get(tool_name, 0)
-
-    def get_last_used(self, tool_name: str) -> Optional[datetime]:
-        """获取工具最后使用时间"""
-        with self._lock:
-            return self._last_used.get(tool_name)
-
-    def get_state(self, tool_name: str) -> str:
-        """CL-3: 获取工具生命周期状态(供 EvolutionOrchestrator 使用)"""
-        with self._lock:
-            count = self._usage_counts.get(tool_name, 0)
-            if count == 0:
-                return "unused"
-            last_used = self._last_used.get(tool_name)
-            if last_used:
-                days_idle = (datetime.now(UTC) - last_used).total_seconds() / 86400
-                if days_idle > 30:
-                    return "archived"
-                elif days_idle > 7:
-                    return "degraded"
-            return "active"
-
-    def evaluate(self, tool_name: str = None) -> Dict[str, Any]:
-        """
-        评估工具生命周期状态
-
-        Args:
-            tool_name: 工具名称，如果为 None 则评估所有工具
-
-        Returns:
-            评估结果字典
-        """
-        with self._lock:
-            if tool_name:
-                # 评估单个工具
-                count = self._usage_counts.get(tool_name, 0)
-                last_used = self._last_used.get(tool_name)
-                return {
-                    "tool_name": tool_name,
-                    "usage_count": count,
-                    "last_used": last_used.isoformat() if last_used else None,
-                    "status": "active" if count > 0 else "unused",
-                }
-            else:
-                # 评估所有工具
-                results = {}
-                for name in set(self._usage_counts) | set(self._last_used):
-                    count = self._usage_counts.get(name, 0)
-                    last_used = self._last_used.get(name)
-                    results[name] = {
-                        "usage_count": count,
-                        "last_used": last_used.isoformat() if last_used else None,
-                        "status": "active" if count > 0 else "unused",
-                    }
-                return results
 
 
 class AdaptiveToolWeights:

@@ -116,9 +116,12 @@ except ImportError as _e:
     _logger.debug("skills.evolution_engine 模块未可用: %s", _e)
 
 try:
-    pass
+    from neurova.skills.hub_client import SkillHubClient, RemoteSkill, SkillSource
 except ImportError as _e:
     _logger.debug("skills.hub_client 模块未可用: %s", _e)
+    SkillHubClient = None
+    RemoteSkill = None
+    SkillSource = None
 
 try:
     pass
@@ -161,9 +164,10 @@ except ImportError as _e:
     _logger.debug("skills.skill_packager 模块未可用: %s", _e)
 
 try:
-    pass
+    from neurova.skills.skill_service import SkillService
 except ImportError as _e:
     _logger.debug("skills.skill_service 模块未可用: %s", _e)
+    SkillService = None
 
 try:
     pass

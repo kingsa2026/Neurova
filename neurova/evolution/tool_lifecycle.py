@@ -9,6 +9,7 @@ Phase 2 P2-3: 管理工具从活跃到归档的完整生命周期。
 """
 
 from neurova.core.logger import get_logger
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -79,6 +80,9 @@ class ToolLifecycleManager:
         archived_after_seconds: Optional[float] = None,
         frozen_after_seconds: Optional[float] = None,
     ):
+        # H7 修复: 使用 RLock（不是 Lock），因为 evaluate 调用 _transition、
+        # get_lifecycle_report 调用 get_tools_by_state 等可重入场景
+        self._lock = threading.RLock()
         self._entries: Dict[str, ToolLifecycleEntry] = {}
         self._degraded_after = degraded_after_seconds or self.DEGRADED_AFTER_SECONDS
         self._archived_after = archived_after_seconds or self.ARCHIVED_AFTER_SECONDS
@@ -87,121 +91,137 @@ class ToolLifecycleManager:
 
     def register_tool(self, tool_name: str) -> ToolLifecycleEntry:
         """注册一个工具到生命周期管理。"""
-        if tool_name not in self._entries:
-            self._entries[tool_name] = ToolLifecycleEntry(tool_name=tool_name)
-            logger.debug("Registered tool: %s", tool_name)
-        return self._entries[tool_name]
+        with self._lock:
+            if tool_name not in self._entries:
+                self._entries[tool_name] = ToolLifecycleEntry(tool_name=tool_name)
+                logger.debug("Registered tool: %s", tool_name)
+            return self._entries[tool_name]
 
     def touch(self, tool_name: str, success: bool = True) -> None:
-        """记录工具被调用。"""
-        if tool_name not in self._entries:
-            self.register_tool(tool_name)
+        """记录工具被调用（H1: 接受 success 参数）。"""
+        with self._lock:
+            if tool_name not in self._entries:
+                self.register_tool(tool_name)
 
-        entry = self._entries[tool_name]
-        entry.total_calls += 1
-        if success:
-            entry.success_calls += 1
-        else:
-            entry.failure_calls += 1
-        entry.last_used = self._now()
+            entry = self._entries[tool_name]
+            entry.total_calls += 1
+            if success:
+                entry.success_calls += 1
+            else:
+                entry.failure_calls += 1
+            entry.last_used = self._now()
 
-        # 如果工具已降级或归档，重新激活
-        if entry.state in (ToolLifecycleState.DEGRADED, ToolLifecycleState.ARCHIVED):
-            self._transition(tool_name, ToolLifecycleState.ACTIVE)
+            # 如果工具已降级或归档，重新激活
+            if entry.state in (ToolLifecycleState.DEGRADED, ToolLifecycleState.ARCHIVED):
+                self._transition(tool_name, ToolLifecycleState.ACTIVE)
+
+    def get_usage_count(self, tool_name: str) -> int:
+        """获取工具总使用次数（兼容 Version A API）。"""
+        with self._lock:
+            entry = self._entries.get(tool_name)
+            return entry.total_calls if entry else 0
 
     def evaluate(self, tool_name: Optional[str] = None) -> Dict[str, Any]:
         """评估工具生命周期状态。"""
-        if tool_name:
-            if tool_name not in self._entries:
-                return {"error": f"Tool {tool_name} not found"}
-            entry = self._entries[tool_name]
-            return entry.to_dict()
+        with self._lock:
+            if tool_name:
+                if tool_name not in self._entries:
+                    return {"error": f"Tool {tool_name} not found"}
+                entry = self._entries[tool_name]
+                return entry.to_dict()
 
-        # 评估所有工具
-        results = {}
-        for name, entry in self._entries.items():
-            # 根据不活跃时间自动转换状态
-            inactive = entry.inactive_seconds
-            if inactive >= self._frozen_after and entry.state != ToolLifecycleState.FROZEN:
-                self._transition(name, ToolLifecycleState.FROZEN)
-            elif inactive >= self._archived_after and entry.state not in (
-                ToolLifecycleState.ARCHIVED,
-                ToolLifecycleState.FROZEN,
-            ):
-                self._transition(name, ToolLifecycleState.ARCHIVED)
-            elif inactive >= self._degraded_after and entry.state == ToolLifecycleState.ACTIVE:
-                self._transition(name, ToolLifecycleState.DEGRADED)
+            # 评估所有工具
+            results = {}
+            for name, entry in self._entries.items():
+                # 根据不活跃时间自动转换状态
+                inactive = entry.inactive_seconds
+                if inactive >= self._frozen_after and entry.state != ToolLifecycleState.FROZEN:
+                    self._transition(name, ToolLifecycleState.FROZEN)
+                elif inactive >= self._archived_after and entry.state not in (
+                    ToolLifecycleState.ARCHIVED,
+                    ToolLifecycleState.FROZEN,
+                ):
+                    self._transition(name, ToolLifecycleState.ARCHIVED)
+                elif inactive >= self._degraded_after and entry.state == ToolLifecycleState.ACTIVE:
+                    self._transition(name, ToolLifecycleState.DEGRADED)
 
-            results[name] = entry.to_dict()
+                results[name] = entry.to_dict()
 
-        return results
+            return results
 
     def revive(self, tool_name: str) -> bool:
         """将工具恢复到 ACTIVE 状态。"""
-        if tool_name not in self._entries:
-            return False
+        with self._lock:
+            if tool_name not in self._entries:
+                return False
 
-        self._transition(tool_name, ToolLifecycleState.ACTIVE)
-        return True
+            self._transition(tool_name, ToolLifecycleState.ACTIVE)
+            return True
 
     def delete_tool(self, tool_name: str) -> bool:
         """删除工具。"""
-        if tool_name in self._entries:
-            del self._entries[tool_name]
-            return True
-        return False
+        with self._lock:
+            if tool_name in self._entries:
+                del self._entries[tool_name]
+                return True
+            return False
 
     def get_state(self, tool_name: str) -> Optional[ToolLifecycleState]:
-        """获取工具的生命周期状态。"""
-        if tool_name in self._entries:
-            return self._entries[tool_name].state
-        return None
+        """获取工具的生命周期状态（H6: 返回枚举而非字符串）。"""
+        with self._lock:
+            if tool_name in self._entries:
+                return self._entries[tool_name].state
+            return None
 
     def apply_decay(self) -> Dict[str, int]:
         """应用遗忘衰减，返回各状态变更计数。"""
-        changes: Dict[str, int] = {"degraded": 0, "archived": 0, "frozen": 0}
+        with self._lock:
+            changes: Dict[str, int] = {"degraded": 0, "archived": 0, "frozen": 0}
 
-        for name, entry in self._entries.items():
-            inactive = entry.inactive_seconds
-            old_state = entry.state
+            for name, entry in self._entries.items():
+                inactive = entry.inactive_seconds
+                old_state = entry.state
 
-            if inactive >= self._frozen_after and old_state != ToolLifecycleState.FROZEN:
-                self._transition(name, ToolLifecycleState.FROZEN)
-                changes["frozen"] += 1
-            elif inactive >= self._archived_after and old_state not in (
-                ToolLifecycleState.ARCHIVED,
-                ToolLifecycleState.FROZEN,
-            ):
-                self._transition(name, ToolLifecycleState.ARCHIVED)
-                changes["archived"] += 1
-            elif inactive >= self._degraded_after and old_state == ToolLifecycleState.ACTIVE:
-                self._transition(name, ToolLifecycleState.DEGRADED)
-                changes["degraded"] += 1
+                if inactive >= self._frozen_after and old_state != ToolLifecycleState.FROZEN:
+                    self._transition(name, ToolLifecycleState.FROZEN)
+                    changes["frozen"] += 1
+                elif inactive >= self._archived_after and old_state not in (
+                    ToolLifecycleState.ARCHIVED,
+                    ToolLifecycleState.FROZEN,
+                ):
+                    self._transition(name, ToolLifecycleState.ARCHIVED)
+                    changes["archived"] += 1
+                elif inactive >= self._degraded_after and old_state == ToolLifecycleState.ACTIVE:
+                    self._transition(name, ToolLifecycleState.DEGRADED)
+                    changes["degraded"] += 1
 
-        return changes
+            return changes
 
     def get_tools_by_state(self, state: ToolLifecycleState) -> List[str]:
         """获取指定状态的工具列表。"""
-        return [name for name, entry in self._entries.items() if entry.state == state]
+        with self._lock:
+            return [name for name, entry in self._entries.items() if entry.state == state]
 
     def get_lifecycle_report(self) -> Dict[str, int]:
         """获取生命周期报告。"""
-        report = {"total": len(self._entries)}
-        for state in ToolLifecycleState:
-            report[state.value] = len(self.get_tools_by_state(state))
-        return report
+        with self._lock:
+            report = {"total": len(self._entries)}
+            for state in ToolLifecycleState:
+                report[state.value] = len(self.get_tools_by_state(state))
+            return report
 
     def _transition(self, tool_name: str, new_state: ToolLifecycleState) -> None:
         """转换工具状态。"""
-        if tool_name not in self._entries:
-            return
+        with self._lock:
+            if tool_name not in self._entries:
+                return
 
-        entry = self._entries[tool_name]
-        old_state = entry.state
-        entry.state = new_state
-        entry.state_changed_at = self._now()
+            entry = self._entries[tool_name]
+            old_state = entry.state
+            entry.state = new_state
+            entry.state_changed_at = self._now()
 
-        logger.debug("Tool %s: %s → %s", tool_name, old_state.value, new_state.value)
+            logger.debug("Tool %s: %s → %s", tool_name, old_state.value, new_state.value)
 
     def _now(self) -> float:
         """获取当前时间。"""

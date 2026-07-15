@@ -10,6 +10,7 @@
 """
 
 from neurova.core.logger import get_logger
+from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import os
 import tempfile
 import zipfile
@@ -20,6 +21,9 @@ from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+_DEPRECATED = True
+"""已废弃 — ADR 0013: 统一到 skill_pool_api.py。此端点为 stub 实现（内存 list + 硬编码数据）。"""
 
 
 class SearchSkillRequest(BaseModel):
@@ -93,7 +97,7 @@ async def search_skills(body: SearchSkillRequest):
         results = [
             r for r in results if body.query.lower() in r.name.lower() or body.query.lower() in r.description.lower()
         ]
-    return {"code": 0, "data": {"skills": [r.model_dump() for r in results[: body.limit]]}}
+    return {"code": 0, "data": {"skills": [safe_model_dump(r) for r in results[: body.limit]]}}  # s9: pydantic v1 兼容
 
 
 @router.post("/install")

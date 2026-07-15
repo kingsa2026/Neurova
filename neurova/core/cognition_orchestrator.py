@@ -395,7 +395,8 @@ class CognitionOrchestrator:
         返回:
             Optional[Any]: 选中的技能
         """
-        if not self._registry:
+        # H12 修复: 用 `is None` 替代 falsy 检查 — 空 registry 不应被当作"未配置"
+        if self._registry is None:
             return None
 
         # 简单的关键词匹配（实际实现可能使用更复杂的算法）

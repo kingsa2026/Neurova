@@ -13,6 +13,7 @@
 """
 
 from neurova.core.logger import get_logger
+from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -120,7 +121,7 @@ async def update_user(user_id: str, body: UserUpdate):
     user = _users_store.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    for k, v in body.model_dump(exclude_none=True).items():
+    for k, v in safe_model_dump(body, exclude_none=True).items():  # s9: pydantic v1 兼容
         user[k] = v
     user["updated_at"] = time.time()
     return UserInfo(**{k: v for k, v in user.items() if k != "password"})

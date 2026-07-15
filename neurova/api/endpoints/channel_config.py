@@ -36,6 +36,7 @@ from neurova.channels.telegram import create_telegram_adapter
 from neurova.channels.wechat import create_wechat_adapter
 from neurova.channels.wecom import create_wecom_adapter
 from neurova.channels.xiaoyi import create_xiaoyi_adapter
+from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 
 logger = get_logger(__name__)
 
@@ -161,7 +162,7 @@ async def create_or_update_config(request: ChannelConfigRequest):
     """创建或更新渠道配置，并可选地自动注册适配器"""
     # 持久化配置
     configs = _load_configs()
-    config_data = request.model_dump()
+    config_data = safe_model_dump(request)  # s9: pydantic v1 兼容
     # 不保存明文密钥到文件
     if request.app_secret:
         config_data["_app_secret_stored"] = True

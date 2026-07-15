@@ -25,6 +25,23 @@ from neurova.core.logger import get_logger
 logger = get_logger(__name__)
 
 
+def unpack_skill(value: Any) -> Any:
+    """从可能包装的值中提取 Skill 对象。
+
+    类 A (skill_system.py) 的 .skills 返回 Dict[str, Skill] — 直接返回
+    类 B (skills/registry.py) 的 .skills 返回 Dict[str, Tuple[Skill, Path]] — 解包取 [0]
+
+    ADR 0011: class A 为规范，class B 将 re-export class A，
+    但保留此 helper 以防御性处理历史遗留的 tuple 包装。
+
+    Locality↑: 元组解包逻辑单点维护（原 ToolRouter._unpack_skill 私有方法提升）。
+    Testability↑: 自由函数可独立单测，无需实例化 ToolRouter。
+    """
+    if isinstance(value, (tuple, list)) and value:
+        return value[0]
+    return value
+
+
 class OpenAISchemaAdapter:
     """Skill → OpenAI function call schema 适配器
 
@@ -94,4 +111,4 @@ class OpenAISchemaAdapter:
         }
 
 
-__all__ = ["OpenAISchemaAdapter"]
+__all__ = ["OpenAISchemaAdapter", "unpack_skill"]

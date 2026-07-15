@@ -438,17 +438,22 @@ class AutoSkillBuilder:
         """获取所有技能模板"""
         return list(self._templates.values())
 
-    def register_to_skill_registry(self, registry) -> int:
-        """将封装的技能模板注册到 SkillRegistry
+    def register_to_skill_registry(self, registry, skill_service=None) -> int:
+        """将封装的技能模板注册到 SkillRegistry (并可选持久化到 SkillService)
 
         桥接 AutoSkillBuilder（内存 dict）与 SkillRegistry（中央注册表），
         使自动封装的技能能在下次对话中被检索使用。
 
+        s3 P0 #2: 新增 skill_service 参数. 提供时, 同步写入 SkillService 磁盘 manifest,
+        使前端 GET /private 聚合 SkillService.list_skills() 时能展示自动技能.
+        不提供时, 保留原行为 (仅写 registry), 向后兼容.
+
         Args:
             registry: SkillRegistry 实例
+            skill_service: 可选, SkillService 实例. 提供则持久化到磁盘.
 
         Returns:
-            int: 成功注册的技能数量
+            int: 成功注册到 SkillRegistry 的技能数量
         """
         from neurova.skills.models import Skill, SkillSource
 
@@ -483,6 +488,24 @@ class AutoSkillBuilder:
                         logger.info("自动注册技能 %s 到 SkillRegistry", template_id)
                 except Exception as e:
                     logger.warning("注册技能 %s 失败: %s", template_id, e)
+
+                # s3: 同步写入 SkillService 持久化 (如果提供)
+                if skill_service is not None:
+                    try:
+                        skill_service.register_auto_skill(
+                            skill_id=template_id,
+                            name=template.name,
+                            description=template.description,
+                            version="0.1.0",
+                            config={
+                                "tool_sequence": template.tool_sequence,
+                                "context_template": template.context_template,
+                                "success_rate": template.success_rate,
+                                "parameter_hints": template.parameter_hints,
+                            },
+                        )
+                    except Exception as e:
+                        logger.warning("持久化技能 %s 到 SkillService 失败: %s", template_id, e)
 
         return registered_count
 

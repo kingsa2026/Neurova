@@ -12,6 +12,7 @@
 """
 
 from neurova.core.logger import get_logger
+from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -187,7 +188,7 @@ async def update_task(task_id: str, body: TaskUpdate):
     if not task:
         raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
 
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in safe_model_dump(body, exclude_none=True).items():  # s9: pydantic v1 兼容
         task[field] = value
     task["updated_at"] = time.time()
     return TaskInfo(**task)

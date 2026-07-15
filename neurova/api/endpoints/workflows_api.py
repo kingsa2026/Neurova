@@ -16,6 +16,7 @@
 """
 
 from neurova.core.logger import get_logger
+from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -115,7 +116,7 @@ async def create_workflow(body: WorkflowCreate):
         "description": body.description,
         "status": "draft",
         "project_id": body.project_id,
-        "steps": [s.model_dump() for s in steps],
+        "steps": [safe_model_dump(s) for s in steps],  # s9: pydantic v1 兼容
         "created_at": now,
         "updated_at": now,
     }
@@ -144,7 +145,7 @@ async def update_workflow(workflow_id: str, body: WorkflowUpdate):
     wf = _workflows.get(workflow_id)
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
-    for k, v in body.model_dump(exclude_none=True).items():
+    for k, v in safe_model_dump(body, exclude_none=True).items():  # s9: pydantic v1 兼容
         wf[k] = v
     wf["updated_at"] = time.time()
     return WorkflowInfo(**wf)
@@ -192,9 +193,9 @@ async def add_step(workflow_id: str, body: WorkflowStepCreate):
     step = WorkflowStep(
         step_id=str(uuid.uuid4()), name=body.name, step_type=body.step_type, config=body.config, order=body.order
     )
-    wf["steps"].append(step.model_dump())
+    wf["steps"].append(safe_model_dump(step))  # s9: pydantic v1 兼容
     wf["updated_at"] = time.time()
-    return {"code": 0, "data": step.model_dump()}
+    return {"code": 0, "data": safe_model_dump(step)}  # s9: pydantic v1 兼容
 
 
 @router.put("/{workflow_id}/steps/{step_id}")
@@ -204,7 +205,7 @@ async def update_step(workflow_id: str, step_id: str, body: WorkflowStepUpdate):
         raise HTTPException(status_code=404, detail="Workflow not found")
     for s in wf["steps"]:
         if s.get("step_id") == step_id:
-            for k, v in body.model_dump(exclude_none=True).items():
+            for k, v in safe_model_dump(body, exclude_none=True).items():  # s9: pydantic v1 兼容
                 s[k] = v
             wf["updated_at"] = time.time()
             return {"code": 0, "data": s}

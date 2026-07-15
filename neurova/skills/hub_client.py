@@ -19,6 +19,7 @@ from neurova.core import config
 from neurova.core.logger import get_logger
 import re
 import tarfile
+import threading
 import time
 import zipfile
 from dataclasses import dataclass, field
@@ -258,6 +259,11 @@ class SkillHubClient:
         self._cache: Dict[str, Any] = {}
         self._cache_ttl: Dict[str, float] = {}
 
+        # AGENTS.md 规定：threading.RLock 用于共享状态
+        # 保护 _cache / _cache_ttl / _sources 在并发搜索/安装下的原子性
+        # 对照：pool_service.py:70, market_importer.py:100, evolution_engine.py:99
+        self._lock = threading.RLock()
+
         # 安装目录
         self._installed_dir = self._base_dir / "installed"
         self._installed_dir.mkdir(parents=True, exist_ok=True)
@@ -309,12 +315,13 @@ class SkillHubClient:
             source_type: 源类型
             config: 源配置
         """
-        self._sources[name] = {
-            "type": source_type,
-            "config": config,
-            "enabled": True,
-        }
-        logger.debug("Registered skill source: %s", name)
+        with self._lock:
+            self._sources[name] = {
+                "type": source_type,
+                "config": config,
+                "enabled": True,
+            }
+            logger.debug("Registered skill source: %s", name)
 
     def search_skills(self, query: str, sources: List[str] = None, limit: int = 20) -> List[RemoteSkill]:
         """
@@ -329,14 +336,16 @@ class SkillHubClient:
             远程技能列表
         """
         if sources is None:
-            sources = list(self._sources.keys())
+            with self._lock:
+                sources = list(self._sources.keys())
 
         all_results = []
 
         for source_name in sources:
-            if source_name not in self._sources:
-                logger.warning("Unknown source: %s", source_name)
-                continue
+            with self._lock:
+                if source_name not in self._sources:
+                    logger.warning("Unknown source: %s", source_name)
+                    continue
 
             try:
                 if source_name == "github":

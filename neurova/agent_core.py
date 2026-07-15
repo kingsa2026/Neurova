@@ -22,7 +22,10 @@ from neurova.llm_client import LLMConfig
 from neurova.mem_core import MemCore
 from neurova.router import MessageRouter, RouteResult
 from neurova.skills.agent_skill_manager import AgentSkillManager  # will be migrated to evolution
-from neurova.skills.registry import SkillRegistry
+# ADR 0011: 从 skill_system 导入规范 SkillRegistry（class A），
+# 而非 skills/registry.py 的 class B（tuple 返回/__len__ falsy/register 双参）。
+# 运行时实例本就来自 skill_system.create_default_skills()，此处仅类型注解对齐。
+from neurova.skill_system import SkillRegistry
 
 # Neurova-Evocate: Neurova Hebb 记忆系统
 try:

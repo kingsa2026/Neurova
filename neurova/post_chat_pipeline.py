@@ -1297,9 +1297,21 @@ class PostChatPipeline:
 
                     registry = SkillRegistry()
                     if hasattr(skill_packer, "register_to_skill_registry"):
-                        registered = skill_packer.register_to_skill_registry(registry)
+                        # s3 P0 #2: 同时持久化到 SkillService, 使前端 GET /private 可见
+                        skill_service = None
+                        try:
+                            from neurova.skills.skill_service import SkillService
+
+                            agent_id = getattr(self._agt.config, "agent_id", "default")
+                            skill_service = SkillService(agent_id=agent_id)
+                        except Exception as svc_err:
+                            logger.warning("创建 SkillService 失败, 自动技能仅写 registry: %s", svc_err)
+
+                        registered = skill_packer.register_to_skill_registry(
+                            registry, skill_service=skill_service
+                        )
                         if registered > 0:
-                            logger.info("📋 自动注册 %s 个技能到 SkillRegistry", registered)
+                            logger.info("📋 自动注册 %s 个技能到 SkillRegistry (并持久化到 SkillService)", registered)
                 except Exception as reg_err:
                     logger.warning("自动技能注册失败: %s", reg_err)
 
@@ -1469,7 +1481,8 @@ class PostChatPipeline:
 
                 # 尝试从 skill_registry 获取信息
                 skill = None
-                if skill_registry:
+                # H12 修复: 用 `is not None` 替代 falsy 检查 — 空 registry 不应跳过查询
+                if skill_registry is not None:
                     skill = skill_registry.get_skill(tool_name)
 
                 # 构建市场工具

@@ -12,6 +12,7 @@ Webhook 管理 API
 """
 
 from neurova.core.logger import get_logger
+from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -107,7 +108,7 @@ async def update_webhook(webhook_id: str, body: WebhookUpdate):
     wh = _webhooks.get(webhook_id)
     if not wh:
         raise HTTPException(status_code=404, detail="Webhook not found")
-    for k, v in body.model_dump(exclude_none=True).items():
+    for k, v in safe_model_dump(body, exclude_none=True).items():  # s9: pydantic v1 兼容
         wh[k] = v
     wh["updated_at"] = time.time()
     return WebhookInfo(**wh)
