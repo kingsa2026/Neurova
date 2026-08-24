@@ -32,6 +32,7 @@ class TextGenerationRequest(BaseModel):
     max_tokens: int = Field(default=1000, description="最大 token 数")
     temperature: float = Field(default=0.7, description="温度参数")
     stream: bool = Field(default=False, description="是否流式输出")
+    session_id: Optional[str] = Field(default=None, description="会话ID（用于历史连续性）")
 
 
 class ImageGenerationRequest(BaseModel):
@@ -83,10 +84,12 @@ async def generate_text(request: Request, body: TextGenerationRequest):
 
     try:
         # 使用 Agent 的 chat 方法进行文本生成
+        # S7 修复 (B-2 #10): 不注入 "history": [],保留其他 metadata 字段,
+        # 让 agent.chat() 自行从 session 恢复历史.
         response = await agent.chat(
             user_input=body.prompt,
+            session_id=body.session_id,
             metadata={
-                "history": [],
                 "generation_type": "text",
                 "max_tokens": body.max_tokens,
                 "temperature": body.temperature,
@@ -111,15 +114,8 @@ async def generate_image(request: Request, body: ImageGenerationRequest):
     """图像生成"""
     request_id = _get_request_id(request)
 
-    # TODO: 实现图像生成
-    return {
-        "code": 0,
-        "data": {
-            "message": "Image generation not yet implemented",
-            "prompt": body.prompt,
-            "request_id": request_id,
-        },
-    }
+    # 图像生成尚未实现：返回诚实的 501，而非伪造成功（code:0）误导客户端（P2-#19）
+    raise HTTPException(status_code=501, detail="Image generation not yet implemented")
 
 
 @router.post("/audio")
@@ -203,12 +199,5 @@ async def generate_video(request: Request, body: VideoGenerationRequest):
     """视频生成"""
     request_id = _get_request_id(request)
 
-    # TODO: 实现视频生成
-    return {
-        "code": 0,
-        "data": {
-            "message": "Video generation not yet implemented",
-            "prompt": body.prompt,
-            "request_id": request_id,
-        },
-    }
+    # 视频生成尚未实现：返回诚实的 501，而非伪造成功（code:0）误导客户端（P2-#19）
+    raise HTTPException(status_code=501, detail="Video generation not yet implemented")

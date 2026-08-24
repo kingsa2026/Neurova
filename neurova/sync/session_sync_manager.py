@@ -392,6 +392,85 @@ class SessionSyncManager:
         with self._lock:
             return self._sessions.get(session_id)
 
+    def register_or_create_session(
+        self,
+        session_id: Optional[str],
+        user_id: str,
+        agent_id: str = "default",
+        external_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> UnifiedSession:
+        """注册外部 session_id 或创建新会话 (S2 修复 split-brain).
+
+        Bug (Critical #2/#3): 原 create_session 总是生成新 session_id,
+        导致 chat_pipeline._sync_event 用 ctx.session_id 查不到时丢弃 ctx.session_id,
+        文件层 (SessionManager) 与内存层 (SessionSyncManager) session_id 永不收敛.
+
+        修复:
+        - session_id 非 None: 若已注册则返回,否则用该 session_id 创建 UnifiedSession
+        - session_id 为 None: 退化为 create_session 行为 (生成新 ID)
+
+        Args:
+            session_id: 外部 session_id (来自 SessionManager/ctx.session_id), None 则自动生成
+            user_id: 用户 ID
+            agent_id: Agent ID
+            external_id: 外部 ID (渠道特定)
+            metadata: 会话元数据
+
+        Returns:
+            UnifiedSession 实例 (session_id 与传入一致, 或新生成)
+        """
+        # session_id=None: 退化为 create_session (生成新 ID)
+        if session_id is None:
+            return self.create_session(
+                user_id=user_id, agent_id=agent_id, external_id=external_id, metadata=metadata
+            )
+
+        with self._lock:
+            # 已注册: 返回现有 session (幂等)
+            existing = self._sessions.get(session_id)
+            if existing and existing.status == "active":
+                # 更新外部 ID 映射
+                if external_id:
+                    self._external_mapping[external_id] = session_id
+                logger.debug("Reusing registered session: %s", session_id)
+                return existing
+
+            # 未注册: 用传入的 session_id 创建 UnifiedSession (不生成新 ID)
+            session = UnifiedSession(
+                session_id=session_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                max_history_size=self._max_history_size,
+                metadata=metadata or {},
+            )
+
+            # 注册映射
+            self._sessions[session_id] = session
+            # _user_sessions 按 (user_id, agent_id) 映射 — 与 create_session 一致
+            key = (user_id, agent_id)
+            self._user_sessions[key] = session_id
+
+            if external_id:
+                self._external_mapping[external_id] = session_id
+
+            # 发送会话创建事件
+            event = SessionEvent(
+                event_type=EventType.SESSION_CREATED,
+                session_id=session_id,
+                source_channel="system",
+                payload={"user_id": user_id, "agent_id": agent_id, "external_session_id": session_id},
+            )
+            session.add_event(event)
+
+            self._cleanup_expired_unlocked()
+            self._enforce_max_sessions_unlocked()
+
+            logger.info(
+                "Registered external session: %s for user=%s, agent=%s", session_id, user_id, agent_id
+            )
+            return session
+
     def get_session_by_user(self, user_id: str, agent_id: str = "default") -> Optional[UnifiedSession]:
         """通过用户 ID 获取会话"""
         with self._lock:
@@ -539,6 +618,11 @@ class SessionSyncManager:
         """
         广播事件到所有活跃渠道
 
+        S6 修复 (High #7): 锁内复制 channels,锁外 await send_callback.
+        Bug: 直接迭代 session.active_channels.items() 无锁,
+        register_channel/unregister_channel 并发时 RuntimeError
+        "dictionary changed size during iteration".
+
         Args:
             session_id: 会话 ID
             event: 会话事件
@@ -547,22 +631,27 @@ class SessionSyncManager:
         Returns:
             成功发送的渠道数量
         """
-        session = self._sessions.get(session_id)
-        if not session:
-            logger.warning("Session not found: %s", session_id)
-            return 0
+        # S6: 锁内复制 session 引用 + channels 列表,避免迭代期间 dict 变更
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                logger.warning("Session not found: %s", session_id)
+                return 0
 
-        # 设置事件属性
-        event.session_id = session_id
+            # 设置事件属性
+            event.session_id = session_id
 
-        # 保存到历史
-        session.add_event(event)
+            # 保存到历史
+            session.add_event(event)
 
-        # 并发发送到所有渠道
+            # S6: 复制 channels 到局部变量 (锁内),后续迭代在锁外
+            channels_snapshot = list(session.active_channels.items())
+
+        # 并发发送到所有渠道 (锁外,避免长时间持锁阻塞 register/unregister)
         sent_count = 0
         tasks = []
 
-        for channel_type, conn in session.active_channels.items():
+        for channel_type, conn in channels_snapshot:
             if exclude_channel and channel_type == exclude_channel:
                 continue
 
@@ -595,16 +684,26 @@ class SessionSyncManager:
         同步广播事件（用于非异步上下文）
 
         注意：这会阻塞当前线程，仅在无法使用异步时使用。
+
+        S6 补全 (审计 WARN #1): 与 async broadcast_event 同根因,锁内复制 channels,
+        锁外调用 send_callback. 原 sync 版本无锁迭代 session.active_channels.items(),
+        register_channel/unregister_channel 并发时 RuntimeError.
         """
-        session = self._sessions.get(session_id)
-        if not session:
-            return 0
+        # S6 补全: 锁内复制 session 引用 + channels 列表,避免迭代期间 dict 变更
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                logger.warning("Session not found (sync): %s", session_id)
+                return 0
 
-        event.session_id = session_id
-        session.add_event(event)
+            event.session_id = session_id
+            session.add_event(event)
+            # 锁内复制 channels 到局部变量,后续迭代在锁外
+            channels_snapshot = list(session.active_channels.items())
 
+        # 同步发送到所有渠道 (锁外,避免长时间持锁阻塞 register/unregister)
         sent_count = 0
-        for channel_type, conn in session.active_channels.items():
+        for channel_type, conn in channels_snapshot:
             if exclude_channel and channel_type == exclude_channel:
                 continue
 

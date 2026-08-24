@@ -1,0 +1,4126 @@
+{
+  "generatedAt": "2026-08-14T11:29:06.239540",
+  "databaseFiles": [
+    {
+      "path": "data/11e01f4a/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/2ddec2e7/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/31717abe/memory.db",
+      "sizeBytes": 4096,
+      "sizeMB": 0.0,
+      "tables": []
+    },
+    {
+      "path": "data/48e8b603/memory.db",
+      "sizeBytes": 4096,
+      "sizeMB": 0.0,
+      "tables": []
+    },
+    {
+      "path": "data/5ddaeb4e/memory.db",
+      "sizeBytes": 4096,
+      "sizeMB": 0.0,
+      "tables": []
+    },
+    {
+      "path": "data/6612c134/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/71a0fa28/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/89f2fa2d/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/8af9a319/memory.db",
+      "sizeBytes": 4096,
+      "sizeMB": 0.0,
+      "tables": []
+    },
+    {
+      "path": "data/a8610259/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/agent_1/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/collaboration.db",
+      "sizeBytes": 180224,
+      "sizeMB": 0.17,
+      "tables": [
+        {
+          "name": "chat_groups",
+          "kind": "table",
+          "ddl": "CREATE TABLE chat_groups (\n                group_id TEXT PRIMARY KEY,\n                project_id TEXT NOT NULL,\n                name TEXT NOT NULL,\n                config TEXT DEFAULT '{}',\n                created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n                memory_id TEXT,\n                FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE\n            )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "group_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "project_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "config",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "memory_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [
+            {
+              "id": 0,
+              "seq": 0,
+              "table": "projects",
+              "from": "project_id",
+              "to": "project_id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "sqlite_autoindex_chat_groups_1",
+              "unique": true,
+              "columns": [
+                "group_id"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/default/memory.db",
+      "sizeBytes": 266240,
+      "sizeMB": 0.25,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 100
+        }
+      ]
+    },
+    {
+      "path": "data/experience_knowledge.db",
+      "sizeBytes": 45056,
+      "sizeMB": 0.04,
+      "tables": [
+        {
+          "name": "experience_records",
+          "kind": "table",
+          "ddl": "CREATE TABLE experience_records (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                skill_name TEXT NOT NULL,\n                context TEXT NOT NULL,\n                result TEXT,\n                success INTEGER NOT NULL,\n                timestamp TEXT NOT NULL,\n                feedback TEXT,\n                agent_id TEXT,\n                session_id TEXT,\n                execution_time REAL,\n                confidence_score REAL,\n                tags TEXT,\n                created_at TEXT DEFAULT CURRENT_TIMESTAMP\n            )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "skill_name",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "context",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "result",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "success",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "timestamp",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "feedback",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "agent_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "session_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "execution_time",
+              "type": "REAL",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "confidence_score",
+              "type": "REAL",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "tags",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 12,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_success",
+              "unique": false,
+              "columns": [
+                "success"
+              ]
+            }
+          ],
+          "rowCount": 8
+        }
+      ]
+    },
+    {
+      "path": "data/f2e74e10/memory.db",
+      "sizeBytes": 4096,
+      "sizeMB": 0.0,
+      "tables": []
+    },
+    {
+      "path": "data/kai/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/knowledge.db",
+      "sizeBytes": 57344,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memory_knowledge_links",
+          "kind": "table",
+          "ddl": "CREATE TABLE memory_knowledge_links (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                user_id TEXT NOT NULL,\n                memory_id TEXT NOT NULL,\n                knowledge_id TEXT NOT NULL,\n                knowledge_source TEXT NOT NULL,\n                link_type TEXT DEFAULT 'related',\n                confidence REAL DEFAULT 1.0,\n                metadata TEXT,\n                created_at TEXT NOT NULL DEFAULT (datetime('now')),\n                UNIQUE(user_id, memory_id, knowledge_id)\n            )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "user_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "knowledge_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "knowledge_source",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "link_type",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'related'",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "confidence",
+              "type": "REAL",
+              "notnull": false,
+              "default": "1.0",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "datetime('now')",
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_links_knowledge",
+              "unique": false,
+              "columns": [
+                "knowledge_id",
+                "knowledge_source"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/longmeval/memory.db",
+      "sizeBytes": 20738048,
+      "sizeMB": 19.78,
+      "tables": [
+        {
+          "name": "dream_reports",
+          "kind": "table",
+          "ddl": "CREATE TABLE dream_reports (\n                id TEXT PRIMARY KEY,\n                neuser_id TEXT NOT NULL DEFAULT 'default',\n                user_id TEXT NOT NULL DEFAULT 'default',\n                agent_id TEXT NOT NULL DEFAULT 'yi_ling',\n                session_id TEXT,\n                report_type TEXT NOT NULL DEFAULT 'sleep_consolidation',\n                total_processed INTEGER DEFAULT 0,\n                merged_count INTEGER DEFAULT 0,\n                archived_count INTEGER DEFAULT 0,\n                merged_details TEXT DEFAULT '[]',\n                archived_ids TEXT DEFAULT '[]',\n                consolidation_quality REAL DEFAULT 0.0,\n                emotional_intensity REAL DEFAULT 0.0,\n                memory_coherence_score REAL DEFAULT 0.0,\n                sleep_start_at TEXT,\n                sleep_end_at TEXT,\n                created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n                metadata TEXT DEFAULT '{}'\n            )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "neuser_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'default'",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "user_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'default'",
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "agent_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'yi_ling'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "session_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "report_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'sleep_consolidation'",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "total_processed",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "merged_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "archived_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "merged_details",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'[]'",
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "archived_ids",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'[]'",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "consolidation_quality",
+              "type": "REAL",
+              "notnull": false,
+              "default": "0.0",
+              "pk": 0
+            },
+            {
+              "cid": 12,
+              "name": "emotional_intensity",
+              "type": "REAL",
+              "notnull": false,
+              "default": "0.0",
+              "pk": 0
+            },
+            {
+              "cid": 13,
+              "name": "memory_coherence_score",
+              "type": "REAL",
+              "notnull": false,
+              "default": "0.0",
+              "pk": 0
+            },
+            {
+              "cid": 14,
+              "name": "sleep_start_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 15,
+              "name": "sleep_end_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 16,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            },
+            {
+              "cid": 17,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_dream_reports_neuser_user",
+              "unique": false,
+              "columns": [
+                "neuser_id",
+                "user_id"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/memory_links.db",
+      "sizeBytes": 36864,
+      "sizeMB": 0.04,
+      "tables": [
+        {
+          "name": "memory_links",
+          "kind": "table",
+          "ddl": "CREATE TABLE memory_links (\n                link_id TEXT PRIMARY KEY,\n                memory_id TEXT NOT NULL,\n                entity_type TEXT NOT NULL,\n                entity_id TEXT NOT NULL,\n                link_type TEXT DEFAULT 'related',\n                created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n                created_by TEXT\n            )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "link_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "memory_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "entity_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "entity_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "link_type",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'related'",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "created_by",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_memory_links_entity",
+              "unique": false,
+              "columns": [
+                "entity_type",
+                "entity_id"
+              ]
+            }
+          ],
+          "rowCount": 1
+        }
+      ]
+    },
+    {
+      "path": "data/neurova.db",
+      "sizeBytes": 0,
+      "sizeMB": 0.0,
+      "tables": []
+    },
+    {
+      "path": "data/neurova_memories_persist.db",
+      "sizeBytes": 24576,
+      "sizeMB": 0.02,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n                    id TEXT PRIMARY KEY,\n                    content TEXT NOT NULL,\n                    memory_type TEXT NOT NULL DEFAULT 'semantic',\n                    category TEXT NOT NULL DEFAULT 'general',\n                    lifecycle_stage TEXT NOT NULL DEFAULT 'active',\n                    perspective TEXT NOT NULL DEFAULT 'first_person',\n                    emotion TEXT NOT NULL DEFAULT 'neutral',\n                    temperature REAL NOT NULL DEFAULT 100.0,\n                    importance REAL NOT NULL DEFAULT 50.0,\n                    access_count INTEGER NOT NULL DEFAULT 0,\n                    metadata TEXT NOT NULL DEFAULT '{}',\n                    agent_id TEXT NOT NULL DEFAULT 'default',\n                    neuser_id TEXT NOT NULL DEFAULT 'default',\n                    user_id TEXT NOT NULL DEFAULT 'default',\n                    shared INTEGER NOT NULL DEFAULT 0,\n                    created_at TEXT NOT NULL,\n                    updated_at TEXT NOT NULL,\n                    last_accessed_at TEXT\n                )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'semantic'",
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "lifecycle_stage",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'active'",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "perspective",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'first_person'",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "emotion",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'neutral'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "importance",
+              "type": "REAL",
+              "notnull": true,
+              "default": "50.0",
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "agent_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'default'",
+              "pk": 0
+            },
+            {
+              "cid": 12,
+              "name": "neuser_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'default'",
+              "pk": 0
+            },
+            {
+              "cid": 13,
+              "name": "user_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'default'",
+              "pk": 0
+            },
+            {
+              "cid": 14,
+              "name": "shared",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 15,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 16,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 17,
+              "name": "last_accessed_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_mem_type",
+              "unique": false,
+              "columns": [
+                "memory_type"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/qclaw_bindings.db",
+      "sizeBytes": 24576,
+      "sizeMB": 0.02,
+      "tables": [
+        {
+          "name": "qclaw_bindings",
+          "kind": "table",
+          "ddl": "CREATE TABLE qclaw_bindings (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    neuser_id TEXT NOT NULL,\n                    user_id TEXT NOT NULL,\n                    app_id TEXT NOT NULL,\n                    app_secret_encrypted TEXT NOT NULL,\n                    app_name TEXT,\n                    webhook_url TEXT,\n                    status TEXT DEFAULT 'active',\n                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,\n                    last_used_at TEXT,\n                    extra_config TEXT DEFAULT '{}',\n                    UNIQUE(neuser_id, user_id, app_id)\n                )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "neuser_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "user_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "app_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "app_secret_encrypted",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "app_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "webhook_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "status",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'active'",
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "last_used_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "extra_config",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_qclaw_app",
+              "unique": false,
+              "columns": [
+                "app_id"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/rbac.db",
+      "sizeBytes": 45056,
+      "sizeMB": 0.04,
+      "tables": [
+        {
+          "name": "permission_requests",
+          "kind": "table",
+          "ddl": "CREATE TABLE permission_requests (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                requester_id TEXT NOT NULL,\n                target_user_id TEXT NOT NULL,\n                action TEXT NOT NULL,\n                role_id TEXT,\n                permissions TEXT,\n                reason TEXT NOT NULL,\n                status TEXT DEFAULT 'pending',\n                approver_id TEXT,\n                approver_comment TEXT,\n                created_at TEXT NOT NULL,\n                processed_at TEXT\n            )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "requester_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "target_user_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "action",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "role_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "permissions",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "reason",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "status",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'pending'",
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "approver_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "approver_comment",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "processed_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_permission_requests_status",
+              "unique": false,
+              "columns": [
+                "status"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/test/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/test-001/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/test-fix/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/test-tools/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/test-tools2/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/test_001/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/test_agent/memory.db",
+      "sizeBytes": 204800,
+      "sizeMB": 0.2,
+      "tables": [
+        {
+          "name": "attachments",
+          "kind": "table",
+          "ddl": "CREATE TABLE attachments (\n                id TEXT PRIMARY KEY,\n                original_name TEXT NOT NULL,\n                stored_name TEXT NOT NULL,\n                file_path TEXT NOT NULL,\n                file_size INTEGER NOT NULL,\n                mime_type TEXT,\n                file_category TEXT,\n                content_hash TEXT,\n                memory_id TEXT,\n                metadata TEXT DEFAULT '{}',\n                created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,\n                FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE SET NULL\n            )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "original_name",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "stored_name",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "file_path",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "file_size",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "mime_type",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "file_category",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "content_hash",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "memory_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [
+            {
+              "id": 0,
+              "seq": 0,
+              "table": "memories",
+              "from": "memory_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "SET NULL",
+              "match": "NONE"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "idx_attachments_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/test_agent/memory_tkg.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "fact_relations",
+          "kind": "table",
+          "ddl": "CREATE TABLE fact_relations (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                source_fact_id TEXT NOT NULL,\n                target_fact_id TEXT NOT NULL,\n                relation_type TEXT NOT NULL,\n                created_at TEXT NOT NULL,\n                \n                UNIQUE(source_fact_id, target_fact_id, relation_type)\n            )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "source_fact_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "target_fact_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "relation_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_target_fact",
+              "unique": false,
+              "columns": [
+                "target_fact_id"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/test_memory.db",
+      "sizeBytes": 12288,
+      "sizeMB": 0.01,
+      "tables": [
+        {
+          "name": "memory_emotions",
+          "kind": "table",
+          "ddl": "CREATE TABLE memory_emotions (\n                    memory_id TEXT PRIMARY KEY,\n                    emotion_data TEXT NOT NULL,\n                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n                )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "memory_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "emotion_data",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "created_at",
+              "type": "TIMESTAMP",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "updated_at",
+              "type": "TIMESTAMP",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "sqlite_autoindex_memory_emotions_1",
+              "unique": true,
+              "columns": [
+                "memory_id"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/test_memory_enhanced.db",
+      "sizeBytes": 12288,
+      "sizeMB": 0.01,
+      "tables": [
+        {
+          "name": "memory_emotions",
+          "kind": "table",
+          "ddl": "CREATE TABLE memory_emotions (\n                    memory_id TEXT PRIMARY KEY,\n                    emotion_data TEXT NOT NULL,\n                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n                )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "memory_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "emotion_data",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "created_at",
+              "type": "TIMESTAMP",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "updated_at",
+              "type": "TIMESTAMP",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "sqlite_autoindex_memory_emotions_1",
+              "unique": true,
+              "columns": [
+                "memory_id"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/test_persist/memory.db",
+      "sizeBytes": 4096,
+      "sizeMB": 0.0,
+      "tables": []
+    },
+    {
+      "path": "data/users.db",
+      "sizeBytes": 98304,
+      "sizeMB": 0.09,
+      "tables": [
+        {
+          "name": "enhanced_users",
+          "kind": "table",
+          "ddl": "CREATE TABLE enhanced_users (\n            id INTEGER PRIMARY KEY AUTOINCREMENT,\n            username TEXT UNIQUE NOT NULL,\n            password_hash TEXT NOT NULL,\n            group_type TEXT NOT NULL DEFAULT 'user',\n            status TEXT NOT NULL DEFAULT 'active',\n            created_at TEXT NOT NULL DEFAULT (datetime('now')),\n            updated_at TEXT NOT NULL DEFAULT (datetime('now')),\n            last_login TEXT,\n            login_count INTEGER DEFAULT 0\n        , role TEXT DEFAULT NULL, language TEXT DEFAULT \"zh-CN\", timezone TEXT DEFAULT \"Asia/Shanghai\", theme TEXT DEFAULT \"light\", notifications BOOLEAN DEFAULT 1, last_active TEXT, failed_attempts INTEGER DEFAULT 0, locked_until TEXT, reset_token TEXT, reset_token_expires TEXT, display_name TEXT, avatar_url TEXT, bio TEXT, email TEXT)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "username",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "password_hash",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "group_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'user'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "status",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'active'",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "datetime('now')",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "datetime('now')",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "last_login",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "login_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "role",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "NULL",
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "language",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "\"zh-CN\"",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "timezone",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "\"Asia/Shanghai\"",
+              "pk": 0
+            },
+            {
+              "cid": 12,
+              "name": "theme",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "\"light\"",
+              "pk": 0
+            },
+            {
+              "cid": 13,
+              "name": "notifications",
+              "type": "BOOLEAN",
+              "notnull": false,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 14,
+              "name": "last_active",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 15,
+              "name": "failed_attempts",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 16,
+              "name": "locked_until",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 17,
+              "name": "reset_token",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 18,
+              "name": "reset_token_expires",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 19,
+              "name": "display_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 20,
+              "name": "avatar_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 21,
+              "name": "bio",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 22,
+              "name": "email",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_enhanced_users_email",
+              "unique": false,
+              "columns": [
+                "email"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "data/verification_codes.db",
+      "sizeBytes": 32768,
+      "sizeMB": 0.03,
+      "tables": [
+        {
+          "name": "register_rate_limits",
+          "kind": "table",
+          "ddl": "CREATE TABLE register_rate_limits (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                ip_address TEXT NOT NULL,\n                attempted_at REAL NOT NULL,\n                success BOOLEAN NOT NULL DEFAULT 0\n            )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "ip_address",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "attempted_at",
+              "type": "REAL",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "success",
+              "type": "BOOLEAN",
+              "notnull": true,
+              "default": "0",
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_register_rate_limits_ip",
+              "unique": false,
+              "columns": [
+                "ip_address"
+              ]
+            }
+          ],
+          "rowCount": 5
+        }
+      ]
+    },
+    {
+      "path": "data/yi_ling/memory.db",
+      "sizeBytes": 53248,
+      "sizeMB": 0.05,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n    id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "layer",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "embedding",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "trace_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_cse_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "neurflow.db",
+      "sizeBytes": 73728,
+      "sizeMB": 0.07,
+      "tables": [
+        {
+          "name": "agents",
+          "kind": "table",
+          "ddl": "CREATE TABLE agents (\n                    agent_id TEXT PRIMARY KEY,\n                    name TEXT NOT NULL,\n                    role TEXT NOT NULL,\n                    config_json TEXT DEFAULT '{}',\n                    flow_id TEXT,\n                    created_at REAL,\n                    archived_at REAL,\n                    status TEXT DEFAULT 'active',\n                    capabilities_json TEXT DEFAULT '[]',\n                    metadata_json TEXT DEFAULT '{}'\n                )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "agent_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "name",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "role",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "config_json",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "flow_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "created_at",
+              "type": "REAL",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "archived_at",
+              "type": "REAL",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "status",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'active'",
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "capabilities_json",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'[]'",
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "metadata_json",
+              "type": "TEXT",
+              "notnull": false,
+              "default": "'{}'",
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_agents_status",
+              "unique": false,
+              "columns": [
+                "status"
+              ]
+            }
+          ],
+          "rowCount": 0
+        }
+      ]
+    },
+    {
+      "path": "neurova_memories_persist.db",
+      "sizeBytes": 71217152,
+      "sizeMB": 67.92,
+      "tables": [
+        {
+          "name": "memories",
+          "kind": "table",
+          "ddl": "CREATE TABLE memories (\n                    id TEXT PRIMARY KEY,\n                    content TEXT NOT NULL,\n                    memory_type TEXT NOT NULL DEFAULT 'semantic',\n                    category TEXT NOT NULL DEFAULT 'general',\n                    lifecycle_stage TEXT NOT NULL DEFAULT 'active',\n                    perspective TEXT NOT NULL DEFAULT 'first_person',\n                    emotion TEXT NOT NULL DEFAULT 'neutral',\n                    temperature REAL NOT NULL DEFAULT 100.0,\n                    importance REAL NOT NULL DEFAULT 50.0,\n                    access_count INTEGER NOT NULL DEFAULT 0,\n                    metadata TEXT NOT NULL DEFAULT '{}',\n                    agent_id TEXT NOT NULL DEFAULT 'default',\n                    neuser_id TEXT NOT NULL DEFAULT 'default',\n                    user_id TEXT NOT NULL DEFAULT 'default',\n                    shared INTEGER NOT NULL DEFAULT 0,\n                    created_at TEXT NOT NULL,\n                    updated_at TEXT NOT NULL,\n                    last_accessed_at TEXT\n                )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "memory_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'semantic'",
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "category",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'general'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "lifecycle_stage",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'active'",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "perspective",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'first_person'",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "emotion",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'neutral'",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "temperature",
+              "type": "REAL",
+              "notnull": true,
+              "default": "100.0",
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "importance",
+              "type": "REAL",
+              "notnull": true,
+              "default": "50.0",
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "access_count",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'{}'",
+              "pk": 0
+            },
+            {
+              "cid": 11,
+              "name": "agent_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'default'",
+              "pk": 0
+            },
+            {
+              "cid": 12,
+              "name": "neuser_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'default'",
+              "pk": 0
+            },
+            {
+              "cid": 13,
+              "name": "user_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default": "'default'",
+              "pk": 0
+            },
+            {
+              "cid": 14,
+              "name": "shared",
+              "type": "INTEGER",
+              "notnull": true,
+              "default": "0",
+              "pk": 0
+            },
+            {
+              "cid": 15,
+              "name": "created_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 16,
+              "name": "updated_at",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 17,
+              "name": "last_accessed_at",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_mem_type",
+              "unique": false,
+              "columns": [
+                "memory_type"
+              ]
+            }
+          ],
+          "rowCount": 278173
+        }
+      ]
+    },
+    {
+      "path": "neurova_memory.db",
+      "sizeBytes": 2658304,
+      "sizeMB": 2.54,
+      "tables": [
+        {
+          "name": "memory_emotions",
+          "kind": "table",
+          "ddl": "CREATE TABLE memory_emotions (\n                    memory_id TEXT PRIMARY KEY,\n                    emotion_data TEXT NOT NULL,\n                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n                )",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "memory_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "emotion_data",
+              "type": "TEXT",
+              "notnull": true,
+              "default": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "created_at",
+              "type": "TIMESTAMP",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "updated_at",
+              "type": "TIMESTAMP",
+              "notnull": false,
+              "default": "CURRENT_TIMESTAMP",
+              "pk": 0
+            }
+          ],
+          "foreignKeys": [],
+          "indexes": [
+            {
+              "name": "idx_memory_emotions_created_at",
+              "unique": false,
+              "columns": [
+                "created_at"
+              ]
+            }
+          ],
+          "rowCount": 11587
+        }
+      ]
+    }
+  ],
+  "codeCreateTableDefinitions": [
+    {
+      "file": "neurova/cognitive_layers/memory_layer/cognitive_storage_engine.py",
+      "table": "memories",
+      "ddl": "CREATE TABLE memories (id TEXT PRIMARY KEY,\n    content TEXT NOT NULL,\n    memory_type TEXT NOT NULL,\n    category TEXT NOT NULL DEFAULT 'general',\n    temperature REAL NOT NULL DEFAULT 100.0,\n    layer INTEGER NOT NULL DEFAULT 1,\n    metadata TEXT DEFAULT '{}',\n    embedding TEXT,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    access_count INTEGER DEFAULT 0,\n    trace_id TEXT\n)\n\"\"\"\n\n_CREATE_INDEXES_SQL = [\n    \"CREATE INDEX IF NOT EXISTS idx_cse_memory_type ON memories(memory_type)\",\n    \"CREATE INDEX IF NOT EXISTS idx_cse_category ON memories(category)\",\n    \"CREATE INDEX IF NOT EXISTS idx_cse_temperature ON memories(temperature)\",\n    \"CREATE INDEX IF NOT EXISTS idx_cse_trace_id ON memories(trace_id)\",\n    \"CREATE INDEX IF NOT EXISTS idx_cse_created_at ON memories(created_at)\",\n]\n\n# FTS5 for full-text search\n_CREATE_FTS_SQL = \"\"\"\nCREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(content)\n\"\"\"\n\n_CREATE_FTS_TRIGGER_SQL = [\n    \"\"\"\n    CREATE TRIGGER IF NOT EXISTS cse_ai AFTER INSERT ON memories BEGIN\n        INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content)"
+    },
+    {
+      "file": "neurova/cognitive_layers/memory_layer/schema.py",
+      "table": "memories",
+      "ddl": "CREATE TABLE memories (id TEXT PRIMARY KEY,\n                neuser_id TEXT NOT NULL DEFAULT 'default',\n                user_id TEXT NOT NULL DEFAULT 'default',\n                agent_id TEXT NOT NULL,\n                type TEXT NOT NULL,\n                category TEXT NOT NULL,\n                categories TEXT DEFAULT '[]',\n                content TEXT NOT NULL,\n                channel TEXT DEFAULT 'default',\n                weight REAL DEFAULT 1.0,\n                importance REAL DEFAULT 0.5,\n                temperature REAL DEFAULT 50.0,\n                lifecycle_stage TEXT DEFAULT 'active',\n                is_important INTEGER DEFAULT 0,\n                is_crystallized INTEGER DEFAULT 0,\n                crystallized_at TEXT,\n                emotion_score REAL DEFAULT 0.0,\n                emotion_tags TEXT DEFAULT '[]',\n                perspective TEXT DEFAULT 'ai_inference',\n                perspective_confidence REAL DEFAULT 1.0,\n                source TEXT,\n                access_count INTEGER DEFAULT 0,\n                last_accessed_at TEXT,\n                created_at TEXT NOT NULL,\n                updated_at TEXT NOT NULL,\n                expires_at TEXT,\n                attachment_ids TEXT DEFAULT '[]',\n                metadata TEXT DEFAULT '{}'\n            )\n        \"\"\")\n\n        # ── FTS5 全文搜索 ──\n        try:\n            cursor.execute(\"\"\"\n                CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts\n                USING fts5(content)\n            \"\"\")\n            cursor.execute(\"\"\"\n                CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN\n                    INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content)"
+    },
+    {
+      "file": "neurova/cognitive_layers/memory_layer/schema.py",
+      "table": "dream_reports",
+      "ddl": "CREATE TABLE dream_reports (id TEXT PRIMARY KEY,\n                neuser_id TEXT NOT NULL DEFAULT 'default',\n                user_id TEXT NOT NULL DEFAULT 'default',\n                agent_id TEXT NOT NULL DEFAULT 'yi_ling',\n                session_id TEXT,\n                report_type TEXT NOT NULL DEFAULT 'sleep_consolidation',\n                total_processed INTEGER DEFAULT 0,\n                merged_count INTEGER DEFAULT 0,\n                archived_count INTEGER DEFAULT 0,\n                merged_details TEXT DEFAULT '[]',\n                archived_ids TEXT DEFAULT '[]',\n                consolidation_quality REAL DEFAULT 0.0,\n                emotional_intensity REAL DEFAULT 0.0,\n                memory_coherence_score REAL DEFAULT 0.0,\n                sleep_start_at TEXT,\n                sleep_end_at TEXT,\n                created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n                metadata TEXT DEFAULT '{}'\n            )\n        \"\"\")\n\n        # ── dream_reports 索引 ──\n        try:\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_dream_reports_neuser_id ON dream_reports(neuser_id)\")\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_dream_reports_user_id ON dream_reports(user_id)\")\n            cursor.execute(\n                \"CREATE INDEX IF NOT EXISTS idx_dream_reports_neuser_user ON dream_reports(neuser_id, user_id)\"\n            )\n        except sqlite3.OperationalError:\n            pass\n\n        # ── memories 辅助索引 ──\n        cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_memories_agent_id ON memories(agent_id)\")\n        cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type)\")\n        cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)\")\n        cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_memories_channel ON memories(channel)\")\n        cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_memories_temperature ON memories(temperature)\")\n        cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_memories_lifecycle ON memories(lifecycle_stage)\")\n        cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_memories_crystallized ON memories(is_crystallized)\")\n        cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at)\")\n        # MoE 路由器复合索引（加速 _layer0_exact_index 查询）— 像髓鞘化的神经通路\n        cursor.execute(\n            \"CREATE INDEX IF NOT EXISTS idx_memories_moe_composite ON memories(category, lifecycle_stage, is_crystallized)\"\n        )\n\n        # ── memory_relations 表 ──\n        cursor.execute(\"\"\"\n            CREATE TABLE IF NOT EXISTS memory_relations (\n                id TEXT PRIMARY KEY,\n                source_memory_id TEXT NOT NULL,\n                target_memory_id TEXT NOT NULL,\n                relation_type TEXT NOT NULL DEFAULT 'related',\n                strength REAL NOT NULL DEFAULT 1.0,\n                source_neuser_id TEXT NOT NULL DEFAULT 'default',\n                source_user_id TEXT NOT NULL DEFAULT 'default',\n                created_at TEXT NOT NULL,\n                FOREIGN KEY (source_memory_id) REFERENCES memories(id) ON DELETE CASCADE,\n                FOREIGN KEY (target_memory_id) REFERENCES memories(id) ON DELETE CASCADE\n            )\n        \"\"\")\n        cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_mr_source ON memory_relations(source_memory_id)\")\n        cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_mr_target ON memory_relations(target_memory_id)\")\n        cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_mr_type ON memory_relations(relation_type)\")\n\n        # ── trigger_chains 表 ──\n        cursor.execute(\"\"\"\n            CREATE TABLE IF NOT EXISTS trigger_chains (\n                chain_id TEXT PRIMARY KEY,\n                trigger_type TEXT NOT NULL,\n                trigger_source TEXT NOT NULL,\n                started_at TEXT NOT NULL,\n                completed_at TEXT,\n                success INTEGER DEFAULT 0,\n                result_memory_ids TEXT DEFAULT '[]',\n                neuser_id TEXT NOT NULL DEFAULT 'default',\n                user_id TEXT NOT NULL DEFAULT 'default',\n                agent_id TEXT NOT NULL DEFAULT 'yi_ling',\n                created_at TEXT DEFAULT CURRENT_TIMESTAMP\n            )\n        \"\"\")\n\n        # ── trigger_chain_nodes 表 ──\n        cursor.execute(\"\"\"\n            CREATE TABLE IF NOT EXISTS trigger_chain_nodes (\n                node_id TEXT PRIMARY KEY,\n                chain_id TEXT NOT NULL,\n                node_type TEXT NOT NULL,\n                description TEXT NOT NULL,\n                timestamp TEXT NOT NULL,\n                input TEXT DEFAULT '{}',\n                output TEXT DEFAULT '{}',\n                parent_node_id TEXT,\n                neuser_id TEXT NOT NULL DEFAULT 'default',\n                user_id TEXT NOT NULL DEFAULT 'default',\n                agent_id TEXT NOT NULL DEFAULT 'yi_ling',\n                created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n                FOREIGN KEY (chain_id) REFERENCES trigger_chains(chain_id) ON DELETE CASCADE\n            )\n        \"\"\")\n\n        # ── 索引 ──\n        try:\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_tc_neuser_id ON trigger_chains(neuser_id)\")\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_tc_user_id ON trigger_chains(user_id)\")\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_tc_agent_id ON trigger_chains(agent_id)\")\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_tc_trigger_type ON trigger_chains(trigger_type)\")\n\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_tcn_chain_id ON trigger_chain_nodes(chain_id)\")\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_tcn_neuser_id ON trigger_chain_nodes(neuser_id)\")\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_tcn_user_id ON trigger_chain_nodes(user_id)\")\n        except sqlite3.OperationalError:\n            pass\n\n        conn.commit()\n        logger.info(\"Database schema initialized\")\n\n\ndef migrate_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:\n    \"\"\"数据库迁移：为现有表添加新字段（如果不存在）\n\n    Args:\n        conn: 数据库连接\n        lock: 线程锁\n    \"\"\"\n    try:\n        with lock:\n            # memories 表：添加 neuser_id\n            try:\n                conn.execute(\"ALTER TABLE memories ADD COLUMN neuser_id TEXT NOT NULL DEFAULT 'default'\")\n                logger.info(\"Migrated memories table: added neuser_id column\")\n            except sqlite3.OperationalError:\n                pass\n\n            # memories 表：添加 user_id\n            try:\n                conn.execute(\"ALTER TABLE memories ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'\")\n                logger.info(\"Migrated memories table: added user_id column\")\n            except sqlite3.OperationalError:\n                pass\n\n            # dream_reports 表：添加 neuser_id\n            try:\n                conn.execute(\"ALTER TABLE dream_reports ADD COLUMN neuser_id TEXT NOT NULL DEFAULT 'default'\")\n                logger.info(\"Migrated dream_reports table: added neuser_id column\")\n            except sqlite3.OperationalError:\n                pass\n\n            # memories 表：添加 categories\n            try:\n                conn.execute(\"ALTER TABLE memories ADD COLUMN categories TEXT DEFAULT '[]'\")\n                logger.info(\"Migrated memories table: added categories column\")\n            except sqlite3.OperationalError:\n                pass\n\n            # memories 表：添加 importance\n            try:\n                conn.execute(\"ALTER TABLE memories ADD COLUMN importance REAL DEFAULT 0.5\")\n                logger.info(\"Migrated memories table: added importance column\")\n            except sqlite3.OperationalError:\n                pass\n\n            # dream_reports 表：添加 user_id\n            try:\n                conn.execute(\"ALTER TABLE dream_reports ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'\")\n                logger.info(\"Migrated dream_reports table: added user_id column\")\n            except sqlite3.OperationalError:\n                pass\n\n            # 用户隔离索引（幂等）\n            try:\n                conn.execute(\"CREATE INDEX IF NOT EXISTS idx_memories_neuser_id ON memories(neuser_id)\")\n                conn.execute(\"CREATE INDEX IF NOT EXISTS idx_memories_user_id ON memories(user_id)\")\n                conn.execute(\"CREATE INDEX IF NOT EXISTS idx_memories_neuser_user ON memories(neuser_id, user_id)\")\n                conn.execute(\"CREATE INDEX IF NOT EXISTS idx_dream_reports_neuser_id ON dream_reports(neuser_id)\")\n                conn.execute(\"CREATE INDEX IF NOT EXISTS idx_dream_reports_user_id ON dream_reports(user_id)\")\n                conn.execute(\n                    \"CREATE INDEX IF NOT EXISTS idx_dream_reports_neuser_user ON dream_reports(neuser_id, user_id)\"\n                )\n                conn.commit()\n                logger.info(\"Database migration completed successfully\")\n            except sqlite3.OperationalError:\n                pass\n\n    except Exception as e:\n        logger.error(\"Database migration failed: %s\", e)"
+    },
+    {
+      "file": "neurova/cognitive_layers/memory_layer/temporal_knowledge_graph.py",
+      "table": "temporal_facts",
+      "ddl": "CREATE TABLE temporal_facts (id TEXT PRIMARY KEY,\n            subject TEXT NOT NULL,\n            predicate TEXT NOT NULL,\n            object TEXT NOT NULL,\n            relation_type TEXT NOT NULL,\n            confidence REAL DEFAULT 1.0,\n            status TEXT DEFAULT 'active',\n            valid_from TEXT NOT NULL,\n            valid_until TEXT,\n            created_at TEXT NOT NULL,\n            updated_at TEXT NOT NULL,\n            source_memory_id TEXT,\n            source_text TEXT,\n            extraction_method TEXT,\n            metadata TEXT,\n            tags TEXT)"
+    },
+    {
+      "file": "neurova/cognitive_layers/memory_layer/temporal_knowledge_graph.py",
+      "table": "fact_conflicts",
+      "ddl": "CREATE TABLE fact_conflicts (id INTEGER PRIMARY KEY AUTOINCREMENT,\n            fact1_id TEXT NOT NULL,\n            fact2_id TEXT NOT NULL,\n            conflict_type TEXT NOT NULL,\n            description TEXT,\n            severity REAL DEFAULT 0.5,\n            detected_at TEXT NOT NULL,\n            resolved BOOLEAN DEFAULT 0,\n            resolution TEXT)"
+    },
+    {
+      "file": "neurova/cognitive_layers/memory_layer/version_control.py",
+      "table": "memory_versions",
+      "ddl": "CREATE TABLE memory_versions (version_id TEXT PRIMARY KEY,\n                        memory_id TEXT NOT NULL,\n                        version_type TEXT NOT NULL,\n                        timestamp TEXT NOT NULL,\n                        content TEXT NOT NULL,\n                        metadata TEXT,\n                        parent_version_id TEXT,\n                        changes TEXT,\n                        author TEXT,\n                        description TEXT\n                    )\n                \"\"\")\n\n                # 创建索引\n                self._storage.execute(\"\"\"\n                    CREATE INDEX IF NOT EXISTS idx_memory_versions_memory_id \n                    ON memory_versions(memory_id)\n                \"\"\")\n\n                self._storage.execute(\"\"\"\n                    CREATE INDEX IF NOT EXISTS idx_memory_versions_timestamp \n                    ON memory_versions(timestamp)\n                \"\"\")\n\n                # 加载现有版本\n                self._load_versions()\n\n        except Exception as e:\n            logger.warning(\"初始化版本表失败: %s\", e)\n\n    def _load_versions(self) -> None:\n        \"\"\"加载现有版本\"\"\"\n        if self._storage is None:\n            return\n\n        try:\n            if hasattr(self._storage, \"fetch_all\"):\n                rows = self._storage.fetch_all(\"SELECT * FROM memory_versions ORDER BY timestamp DESC\")\n\n                for row in rows:\n                    version = self._row_to_version(row)\n                    if version:\n                        self._versions[version.memory_id].append(version)\n                        self._version_index[version.version_id] = version\n                        self._stats[\"total_versions\"] += 1\n\n                logger.info(\"加载了 %s 个版本\", self._stats['total_versions'])\n        except Exception as e:\n            logger.warning(\"加载版本失败: %s\", e)\n\n    def _row_to_version(self, row: Any) -> Optional[MemoryVersion]:\n        \"\"\"将数据库行转换为版本对象\n\n        Args:\n            row: 数据库行\n\n        Returns:\n            版本对象\n        \"\"\"\n        try:\n            if isinstance(row, dict):\n                return MemoryVersion.from_dict(row)\n            elif isinstance(row, (tuple, list)):\n                # 假设列顺序：version_id, memory_id, version_type, timestamp, content, metadata, parent_version_id, changes, author, description\n                return MemoryVersion(\n                    version_id=row[0],\n                    memory_id=row[1],\n                    version_type=VersionType(row[2]),\n                    timestamp=datetime.datetime.fromisoformat(row[3]),\n                    content=row[4],\n                    metadata=json.loads(row[5]) if row[5] else {},\n                    parent_version_id=row[6],\n                    changes=json.loads(row[7]) if row[7] else None,\n                    author=row[8] or \"system\",\n                    description=row[9] or \"\",\n                )\n            return None\n        except Exception as e:\n            logger.warning(\"转换版本行失败: %s\", e)\n            return None\n\n    def _save_version(self, version: MemoryVersion) -> None:\n        \"\"\"保存版本到存储\n\n        Args:\n            version: 版本对象\n        \"\"\"\n        if self._storage is None:\n            return\n\n        try:\n            if hasattr(self._storage, \"execute\"):\n                self._storage.execute(\n                    \"\"\"\n                    INSERT OR REPLACE INTO memory_versions \n                    (version_id, memory_id, version_type, timestamp, content, metadata, parent_version_id, changes, author, description)\n                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n                    \"\"\",\n                    (\n                        version.version_id,\n                        version.memory_id,\n                        version.version_type.value,\n                        version.timestamp.isoformat(),\n                        version.content,\n                        json.dumps(version.metadata),\n                        version.parent_version_id,\n                        json.dumps(version.changes) if version.changes else None,\n                        version.author,\n                        version.description,\n                    ),\n                )\n        except Exception as e:\n            logger.warning(\"保存版本失败: %s\", e)\n\n    def create_snapshot(\n        self,\n        memory_id: str,\n        content: str,\n        metadata: Optional[Dict[str, Any]] = None,\n        author: str = \"system\",\n        description: str = \"\",\n    ) -> MemoryVersion:\n        \"\"\"创建快照\n\n        Args:\n            memory_id: 记忆ID\n            content: 记忆内容\n            metadata: 附加元数据\n            author: 作者\n            description: 描述\n\n        Returns:\n            创建的版本\n        \"\"\"\n        with self._lock:\n            # 生成版本ID\n            version_id = f\"v_{memory_id}_{int(time.time() * 1000)}\"\n\n            # 获取父版本\n            parent_version_id = None\n            if memory_id in self._versions and self._versions[memory_id]:\n                parent_version_id = self._versions[memory_id][-1].version_id\n\n            # 创建版本\n            version = MemoryVersion(\n                version_id=version_id,\n                memory_id=memory_id,\n                version_type=VersionType.SNAPSHOT,\n                timestamp=datetime.datetime.now(datetime.timezone.utc),\n                content=content,\n                metadata=metadata or {},\n                parent_version_id=parent_version_id,\n                author=author,\n                description=description,\n            )\n\n            # 添加到索引\n            self._versions[memory_id].append(version)\n            self._version_index[version_id] = version\n\n            # 限制版本数量\n            self._cleanup_old_versions(memory_id)\n\n            # 保存到存储\n            self._save_version(version)\n\n            # 更新统计\n            self._stats[\"total_versions\"] += 1\n            self._stats[\"total_snapshots\"] += 1\n\n            logger.debug(\"创建快照: %s for memory %s\", version_id, memory_id)\n            return version\n\n    def _cleanup_old_versions(self, memory_id: str) -> None:\n        \"\"\"清理旧版本\n\n        Args:\n            memory_id: 记忆ID\n        \"\"\"\n        versions = self._versions[memory_id]\n\n        # 限制每个记忆的版本数\n        if len(versions) > self._max_versions_per_memory:\n            # 保留最新的版本\n            removed = versions[: -self._max_versions_per_memory]\n            versions[:] = versions[-self._max_versions_per_memory :]\n\n            # 从索引中移除\n            for v in removed:\n                if v.version_id in self._version_index:\n                    del self._version_index[v.version_id]\n\n            self._stats[\"total_versions\"] -= len(removed)\n\n        # 限制总版本数\n        total_versions = sum(len(v) for v in self._versions.values())\n        if total_versions > self._max_total_versions:\n            # 找到最旧的版本并移除\n            all_versions = []\n            for mem_id, vers in self._versions.items():\n                for v in vers:\n                    all_versions.append((mem_id, v))\n\n            all_versions.sort(key=lambda x: x[1].timestamp)\n\n            # 移除最旧的版本\n            to_remove = total_versions - self._max_total_versions\n            for i in range(min(to_remove, len(all_versions))):\n                mem_id, v = all_versions[i]\n                if mem_id in self._versions:\n                    self._versions[mem_id] = [x for x in self._versions[mem_id] if x.version_id != v.version_id]\n                if v.version_id in self._version_index:\n                    del self._version_index[v.version_id]\n                self._stats[\"total_versions\"] -= 1\n\n    def get_version_history(\n        self,\n        memory_id: str,\n        limit: int = 50,\n        version_type: Optional[VersionType] = None,\n    ) -> List[MemoryVersion]:\n        \"\"\"获取版本历史\n\n        Args:\n            memory_id: 记忆ID\n            limit: 返回数量限制\n            version_type: 版本类型过滤\n\n        Returns:\n            版本列表\n        \"\"\"\n        with self._lock:\n            versions = self._versions.get(memory_id, [])\n\n            if version_type:\n                versions = [v for v in versions if v.version_type == version_type]\n\n            # 按时间排序，最新的在前\n            versions.sort(key=lambda v: v.timestamp, reverse=True)\n\n            return versions[:limit]\n\n    def get_version(self, version_id: str) -> Optional[MemoryVersion]:\n        \"\"\"获取特定版本\n\n        Args:\n            version_id: 版本ID\n\n        Returns:\n            版本对象\n        \"\"\"\n        with self._lock:\n            return self._version_index.get(version_id)\n\n    def rollback_to_version(self, version_id: str) -> Optional[MemoryVersion]:\n        \"\"\"回滚到特定版本\n\n        Args:\n            version_id: 版本ID\n\n        Returns:\n            回滚后的版本，如果失败返回None\n        \"\"\"\n        with self._lock:\n            # 获取目标版本\n            target_version = self._version_index.get(version_id)\n            if not target_version:\n                logger.warning(\"版本不存在: %s\", version_id)\n                return None\n\n            # 创建回滚版本\n            rollback_version = self.create_snapshot(\n                memory_id=target_version.memory_id,\n                content=target_version.content,\n                metadata={\n                    **target_version.metadata,\n                    \"rollback_from\": version_id,\n                    \"rollback_timestamp\": datetime.datetime.now(datetime.timezone.utc).isoformat(),\n                },\n                author=\"system\",\n                description=f\"回滚到版本 {version_id}\",\n            )\n\n            # 更新版本类型\n            rollback_version.version_type = VersionType.ROLLBACK\n\n            # 更新统计\n            self._stats[\"total_rollbacks\"] += 1\n\n            logger.info(\"回滚到版本: %s\", version_id)\n            return rollback_version\n\n    def compare_versions(self, version_id_1: str, version_id_2: str) -> Optional[VersionDiff]:\n        \"\"\"比较两个版本\n\n        Args:\n            version_id_1: 版本1 ID\n            version_id_2: 版本2 ID\n\n        Returns:\n            版本差异\n        \"\"\"\n        with self._lock:\n            version_1 = self._version_index.get(version_id_1)\n            version_2 = self._version_index.get(version_id_2)\n\n            if not version_1 or not version_2:\n                logger.warning(\"版本不存在\")\n                return None\n\n            # 简单的内容差异比较\n            content_diff = \"\"\n            if version_1.content != version_2.content:\n                content_diff = f\"内容已更改 (长度: {len(version_1.content)} -> {len(version_2.content)})\"\n\n            # 元数据差异\n            metadata_diff = {}\n            all_keys = set(version_1.metadata.keys()) | set(version_2.metadata.keys())\n            for key in all_keys:\n                val1 = version_1.metadata.get(key)\n                val2 = version_2.metadata.get(key)\n                if val1 != val2:\n                    metadata_diff[key] = {\"from\": val1, \"to\": val2}\n\n            # 时间差异\n            timestamp_diff = (version_2.timestamp - version_1.timestamp).total_seconds()\n\n            # 变更摘要\n            changes_summary = []\n            if content_diff:\n                changes_summary.append(\"内容已修改\")\n            if metadata_diff:\n                changes_summary.append(f\"元数据有 {len(metadata_diff)} 处变更\")\n\n            return VersionDiff(\n                version_id_1=version_id_1,\n                version_id_2=version_id_2,\n                content_diff=content_diff,\n                metadata_diff=metadata_diff,\n                timestamp_diff_seconds=timestamp_diff,\n                changes_summary=changes_summary,\n            )\n\n    def get_latest_version(self, memory_id: str) -> Optional[MemoryVersion]:\n        \"\"\"获取最新版本\n\n        Args:\n            memory_id: 记忆ID\n\n        Returns:\n            最新版本\n        \"\"\"\n        with self._lock:\n            versions = self._versions.get(memory_id, [])\n            if not versions:\n                return None\n\n            # 按时间排序，返回最新的\n            versions.sort(key=lambda v: v.timestamp, reverse=True)\n            return versions[0]\n\n    def _get_current_version(self, memory_id: str) -> Optional[str]:\n        \"\"\"获取当前版本ID\n\n        Args:\n            memory_id: 记忆ID\n\n        Returns:\n            版本ID\n        \"\"\"\n        latest = self.get_latest_version(memory_id)\n        return latest.version_id if latest else None\n\n    def _safe_json_loads(self, json_str: Optional[str]) -> Dict[str, Any]:\n        \"\"\"安全JSON解析\n\n        Args:\n            json_str: JSON字符串\n\n        Returns:\n            解析后的字典\n        \"\"\"\n        if not json_str:\n            return {}\n\n        try:\n            return json.loads(json_str)\n        except json.JSONDecodeError as e:\n            logger.warning(\"JSON解析失败: %s\", e)\n            return {}\n\n    def get_stats(self) -> Dict[str, Any]:\n        \"\"\"获取统计信息\n\n        Returns:\n            统计信息字典\n        \"\"\"\n        with self._lock:\n            return {\n                **self._stats,\n                \"memories_with_versions\": len(self._versions),\n            }\n\n    def clear(self) -> None:\n        \"\"\"清空版本历史\"\"\"\n        with self._lock:\n            self._versions.clear()\n            self._version_index.clear()\n\n            self._stats = {\n                \"total_versions\": 0,\n                \"total_snapshots\": 0,\n                \"total_rollbacks\": 0,\n                \"total_merges\": 0,\n            }\n\n            logger.info(\"版本历史已清空\")\n\n\n# 全局实例管理\n_version_control_instances: Dict[str, MemoryVersionControl] = {}\n_version_control_lock = threading.Lock()\n\n\ndef get_version_control(\n    storage: Any = None,\n    instance_id: str = \"default\",\n) -> MemoryVersionControl:\n    \"\"\"获取版本控制单例\n\n    Args:\n        storage: 存储引擎\n        instance_id: 实例ID\n\n    Returns:\n        版本控制实例\n    \"\"\"\n    global _version_control_instances\n\n    with _version_control_lock:\n        if instance_id not in _version_control_instances:\n            _version_control_instances[instance_id] = MemoryVersionControl(storage=storage)\n        return _version_control_instances[instance_id]\n\n\ndef reset_version_control(instance_id: Optional[str] = None) -> None:\n    \"\"\"重置版本控制单例\n\n    Args:\n        instance_id: 实例ID，为None时重置所有\n    \"\"\"\n    global _version_control_instances\n\n    with _version_control_lock:\n        if instance_id is None:\n            _version_control_instances.clear()\n        elif instance_id in _version_control_instances:\n            _version_control_instances[instance_id].clear()\n            del _version_control_instances[instance_id]\n\n\ndef reset_all_version_control() -> None:\n    \"\"\"重置所有版本控制单例\"\"\"\n    reset_version_control(None)"
+    },
+    {
+      "file": "neurova/security/audit_logger.py",
+      "table": "audit_logs",
+      "ddl": "CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    event_type TEXT NOT NULL,\n                    severity TEXT NOT NULL,\n                    user_id TEXT,\n                    action TEXT,\n                    details TEXT,\n                    timestamp REAL NOT NULL,\n                    ip_address TEXT,\n                    user_agent TEXT,\n                    resource_type TEXT,\n                    resource_id TEXT,\n                    metadata TEXT,\n                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n                )\n            \"\"\")\n\n            # 创建索引\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_event_type ON audit_logs(event_type)\")\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_user_id ON audit_logs(user_id)\")\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_timestamp ON audit_logs(timestamp)\")\n            cursor.execute(\"CREATE INDEX IF NOT EXISTS idx_severity ON audit_logs(severity)\")\n\n            conn.commit()\n            conn.close()\n\n            logger.info(\"Audit database initialized\")\n\n        except Exception as e:\n            logger.error(\"Failed to initialize audit database: %s\", e)\n            raise\n\n    def log(self, entry: AuditLogEntry) -> bool:\n        \"\"\"\n        记录审计日志\n\n        Args:\n            entry: 审计日志条目\n\n        Returns:\n            bool: 是否成功\n        \"\"\"\n        try:\n            conn = self._get_conn()\n            cursor = conn.cursor()\n\n            cursor.execute(\n                \"\"\"\n                INSERT INTO audit_logs (\n                    event_type, severity, user_id, action, details,\n                    timestamp, ip_address, user_agent, resource_type,\n                    resource_id, metadata\n                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            \"\"\",\n                (\n                    entry.event_type.value,\n                    entry.severity.value,\n                    entry.user_id,\n                    entry.action,\n                    json.dumps(entry.details),\n                    entry.timestamp,\n                    entry.ip_address,\n                    entry.user_agent,\n                    entry.resource_type,\n                    entry.resource_id,\n                    json.dumps(entry.metadata),\n                ),\n            )\n\n            conn.commit()\n            conn.close()\n\n            logger.debug(\"Audit log recorded: %s - %s\", entry.event_type.value, entry.action)\n            return True\n\n        except Exception as e:\n            logger.error(\"Failed to record audit log: %s\", e)\n            return False\n\n    def log_auth_login(self, user_id: str, ip_address: str = \"\", user_agent: str = \"\", success: bool = True) -> bool:\n        \"\"\"记录登录事件\"\"\"\n        entry = AuditLogEntry(\n            event_type=AuditEventType.AUTH_LOGIN if success else AuditEventType.AUTH_FAILED,\n            severity=AuditSeverity.MEDIUM if success else AuditSeverity.HIGH,\n            user_id=user_id,\n            action=\"Login successful\" if success else \"Login failed\",\n            ip_address=ip_address,\n            user_agent=user_agent,\n        )\n        return self.log(entry)\n\n    def log_auth_logout(self, user_id: str, ip_address: str = \"\") -> bool:\n        \"\"\"记录登出事件\"\"\"\n        entry = AuditLogEntry(\n            event_type=AuditEventType.AUTH_LOGOUT,\n            severity=AuditSeverity.LOW,\n            user_id=user_id,\n            action=\"User logged out\",\n            ip_address=ip_address,\n        )\n        return self.log(entry)\n\n    def log_config_change(self, user_id: str, config_key: str, old_value: Any = None, new_value: Any = None) -> bool:\n        \"\"\"记录配置变更\"\"\"\n        entry = AuditLogEntry(\n            event_type=AuditEventType.CONFIG_CHANGE,\n            severity=AuditSeverity.HIGH,\n            user_id=user_id,\n            action=f\"Config changed: {config_key}\",\n            details={\n                \"config_key\": config_key,\n                \"old_value\": str(old_value) if old_value is not None else None,\n                \"new_value\": str(new_value) if new_value is not None else None,\n            },\n        )\n        return self.log(entry)\n\n    def log_user_change(\n        self, user_id: str, target_user_id: str, change_type: str, details: Dict[str, Any] = None\n    ) -> bool:\n        \"\"\"记录用户变更\"\"\"\n        entry = AuditLogEntry(\n            event_type=AuditEventType.USER_CHANGE,\n            severity=AuditSeverity.MEDIUM,\n            user_id=user_id,\n            action=f\"User {change_type}: {target_user_id}\",\n            details=details or {},\n            resource_type=\"user\",\n            resource_id=target_user_id,\n        )\n        return self.log(entry)\n\n    def log_role_change(self, user_id: str, target_user_id: str, old_role: str, new_role: str) -> bool:\n        \"\"\"记录角色变更\"\"\"\n        entry = AuditLogEntry(\n            event_type=AuditEventType.ROLE_CHANGE,\n            severity=AuditSeverity.HIGH,\n            user_id=user_id,\n            action=f\"Role changed for user {target_user_id}\",\n            details={\"old_role\": old_role, \"new_role\": new_role},\n            resource_type=\"user\",\n            resource_id=target_user_id,\n        )\n        return self.log(entry)\n\n    def log_api_key_change(self, user_id: str, api_key_id: str, action: str, details: Dict[str, Any] = None) -> bool:\n        \"\"\"记录 API 密钥变更\"\"\"\n        entry = AuditLogEntry(\n            event_type=AuditEventType.API_KEY_CHANGE,\n            severity=AuditSeverity.MEDIUM,\n            user_id=user_id,\n            action=f\"API key {action}: {api_key_id}\",\n            details=details or {},\n            resource_type=\"api_key\",\n            resource_id=api_key_id,\n        )\n        return self.log(entry)\n\n    def query(\n        self,\n        event_type: Optional[AuditEventType] = None,\n        user_id: Optional[str] = None,\n        severity: Optional[AuditSeverity] = None,\n        start_time: Optional[float] = None,\n        end_time: Optional[float] = None,\n        limit: int = 100,\n        offset: int = 0,\n    ) -> List[AuditLogEntry]:\n        \"\"\"\n        查询审计日志\n\n        Args:\n            event_type: 事件类型过滤\n            user_id: 用户ID过滤\n            severity: 严重级别过滤\n            start_time: 开始时间\n            end_time: 结束时间\n            limit: 限制数量\n            offset: 偏移量\n\n        Returns:\n            List[AuditLogEntry]: 审计日志列表\n        \"\"\"\n        try:\n            conn = self._get_conn()\n            cursor = conn.cursor()\n\n            query = \"SELECT * FROM audit_logs WHERE 1=1\"\n            params = []\n\n            if event_type:\n                query += \" AND event_type = ?\"\n                params.append(event_type.value)\n\n            if user_id:\n                query += \" AND user_id = ?\"\n                params.append(user_id)\n\n            if severity:\n                query += \" AND severity = ?\"\n                params.append(severity.value)\n\n            if start_time:\n                query += \" AND timestamp >= ?\"\n                params.append(start_time)\n\n            if end_time:\n                query += \" AND timestamp <= ?\"\n                params.append(end_time)\n\n            query += \" ORDER BY timestamp DESC LIMIT ? OFFSET ?\"\n            params.extend([limit, offset])\n\n            cursor.execute(query, params)\n            results = cursor.fetchall()\n            conn.close()\n\n            entries = []\n            for row in results:\n                entry = AuditLogEntry(\n                    event_type=AuditEventType(row[\"event_type\"]),\n                    severity=AuditSeverity(row[\"severity\"]),\n                    user_id=row[\"user_id\"] or \"\",\n                    action=row[\"action\"] or \"\",\n                    details=json.loads(row[\"details\"]) if row[\"details\"] else {},\n                    timestamp=row[\"timestamp\"],\n                    ip_address=row[\"ip_address\"] or \"\",\n                    user_agent=row[\"user_agent\"] or \"\",\n                    resource_type=row[\"resource_type\"] or \"\",\n                    resource_id=row[\"resource_id\"] or \"\",\n                    metadata=json.loads(row[\"metadata\"]) if row[\"metadata\"] else {},\n                )\n                entries.append(entry)\n\n            return entries\n\n        except Exception as e:\n            logger.error(\"Failed to query audit logs: %s\", e)\n            return []\n\n    def get_by_id(self, log_id: int) -> Optional[AuditLogEntry]:\n        \"\"\"根据ID获取审计日志\"\"\"\n        try:\n            conn = self._get_conn()\n            cursor = conn.cursor()\n\n            cursor.execute(\"SELECT * FROM audit_logs WHERE id = ?\", (log_id,))\n            row = cursor.fetchone()\n            conn.close()\n\n            if not row:\n                return None\n\n            return AuditLogEntry(\n                event_type=AuditEventType(row[\"event_type\"]),\n                severity=AuditSeverity(row[\"severity\"]),\n                user_id=row[\"user_id\"] or \"\",\n                action=row[\"action\"] or \"\",\n                details=json.loads(row[\"details\"]) if row[\"details\"] else {},\n                timestamp=row[\"timestamp\"],\n                ip_address=row[\"ip_address\"] or \"\",\n                user_agent=row[\"user_agent\"] or \"\",\n                resource_type=row[\"resource_type\"] or \"\",\n                resource_id=row[\"resource_id\"] or \"\",\n                metadata=json.loads(row[\"metadata\"]) if row[\"metadata\"] else {},\n            )\n\n        except Exception as e:\n            logger.error(\"Failed to get audit log by ID: %s\", e)\n            return None\n\n    def get_statistics(self, start_time: Optional[float] = None, end_time: Optional[float] = None) -> Dict[str, Any]:\n        \"\"\"\n        获取审计统计信息\n\n        Args:\n            start_time: 开始时间\n            end_time: 结束时间\n\n        Returns:\n            Dict: 统计信息\n        \"\"\"\n        try:\n            conn = self._get_conn()\n            cursor = conn.cursor()\n\n            query = \"SELECT COUNT(*) as total FROM audit_logs WHERE 1=1\"\n            params = []\n\n            if start_time:\n                query += \" AND timestamp >= ?\"\n                params.append(start_time)\n\n            if end_time:\n                query += \" AND timestamp <= ?\"\n                params.append(end_time)\n\n            cursor.execute(query, params)\n            total = cursor.fetchone()[\"total\"]\n\n            # 按事件类型统计\n            query = \"SELECT event_type, COUNT(*) as count FROM audit_logs WHERE 1=1\"\n            if start_time:\n                query += \" AND timestamp >= ?\"\n                params.append(start_time)\n            if end_time:\n                query += \" AND timestamp <= ?\"\n                params.append(end_time)\n            query += \" GROUP BY event_type\"\n\n            cursor.execute(query, params)\n            by_event_type = {row[\"event_type\"]: row[\"count\"] for row in cursor.fetchall()}\n\n            # 按严重级别统计\n            query = \"SELECT severity, COUNT(*) as count FROM audit_logs WHERE 1=1\"\n            if start_time:\n                query += \" AND timestamp >= ?\"\n                params.append(start_time)\n            if end_time:\n                query += \" AND timestamp <= ?\"\n                params.append(end_time)\n            query += \" GROUP BY severity\"\n\n            cursor.execute(query, params)\n            by_severity = {row[\"severity\"]: row[\"count\"] for row in cursor.fetchall()}\n\n            conn.close()\n\n            return {\n                \"total\": total,\n                \"by_event_type\": by_event_type,\n                \"by_severity\": by_severity,\n                \"time_range\": {\"start\": start_time, \"end\": end_time},\n            }\n\n        except Exception as e:\n            logger.error(\"Failed to get audit statistics: %s\", e)\n            return {}\n\n    def export_csv(self, file_path: str, **kwargs) -> bool:\n        \"\"\"\n        导出审计日志为 CSV\n\n        Args:\n            file_path: 文件路径\n            **kwargs: 查询参数\n\n        Returns:\n            bool: 是否成功\n        \"\"\"\n        try:\n            entries = self.query(**kwargs)\n\n            with open(file_path, \"w\", newline=\"\", encoding=\"utf-8\") as f:\n                writer = csv.writer(f)\n\n                # 写入表头\n                writer.writerow(\n                    [\n                        \"ID\",\n                        \"Event Type\",\n                        \"Severity\",\n                        \"User ID\",\n                        \"Action\",\n                        \"Timestamp\",\n                        \"IP Address\",\n                        \"User Agent\",\n                        \"Resource Type\",\n                        \"Resource ID\",\n                        \"Details\",\n                        \"Metadata\",\n                    ]\n                )\n\n                # 写入数据\n                for i, entry in enumerate(entries, 1):\n                    writer.writerow(\n                        [\n                            i,\n                            entry.event_type.value,\n                            entry.severity.value,\n                            entry.user_id,\n                            entry.action,\n                            datetime.datetime.fromtimestamp(entry.timestamp).isoformat(),\n                            entry.ip_address,\n                            entry.user_agent,\n                            entry.resource_type,\n                            entry.resource_id,\n                            json.dumps(entry.details),\n                            json.dumps(entry.metadata),\n                        ]\n                    )\n\n            logger.info(\"Audit logs exported to CSV: %s\", file_path)\n            return True\n\n        except Exception as e:\n            logger.error(\"Failed to export audit logs to CSV: %s\", e)\n            return False\n\n    def export_json(self, file_path: str, **kwargs) -> bool:\n        \"\"\"\n        导出审计日志为 JSON\n\n        Args:\n            file_path: 文件路径\n            **kwargs: 查询参数\n\n        Returns:\n            bool: 是否成功\n        \"\"\"\n        try:\n            entries = self.query(**kwargs)\n\n            data = {\n                \"export_time\": datetime.datetime.now().isoformat(),\n                \"total_entries\": len(entries),\n                \"entries\": [entry.to_dict() for entry in entries],\n            }\n\n            with open(file_path, \"w\", encoding=\"utf-8\") as f:\n                json.dump(data, f, indent=2, ensure_ascii=False)\n\n            logger.info(\"Audit logs exported to JSON: %s\", file_path)\n            return True\n\n        except Exception as e:\n            logger.error(\"Failed to export audit logs to JSON: %s\", e)\n            return False\n\n    def archive_old_logs(self, days_old: int = 90) -> int:\n        \"\"\"\n        归档旧日志\n\n        Args:\n            days_old: 天数阈值\n\n        Returns:\n            int: 归档的日志数量\n        \"\"\"\n        try:\n            cutoff_time = time.time() - (days_old * 24 * 60 * 60)\n\n            conn = self._get_conn()\n            cursor = conn.cursor()\n\n            # 先统计数量\n            cursor.execute(\"SELECT COUNT(*) as count FROM audit_logs WHERE timestamp < ?\", (cutoff_time,))\n            count = cursor.fetchone()[\"count\"]\n\n            # 删除旧日志\n            cursor.execute(\"DELETE FROM audit_logs WHERE timestamp < ?\", (cutoff_time,))\n\n            conn.commit()\n            conn.close()\n\n            logger.info(\"Archived %s audit logs older than %s days\", count, days_old)\n            return count\n\n        except Exception as e:\n            logger.error(\"Failed to archive old audit logs: %s\", e)\n            return 0\n\n    def cleanup(self) -> bool:\n        \"\"\"\n        清理数据库（压缩和优化）\n\n        Returns:\n            bool: 是否成功\n        \"\"\"\n        try:\n            conn = self._get_conn()\n            cursor = conn.cursor()\n\n            # 压缩数据库\n            cursor.execute(\"VACUUM\")\n\n            # 重新索引\n            cursor.execute(\"REINDEX\")\n\n            conn.close()\n\n            logger.info(\"Audit database cleaned up\")\n            return True\n\n        except Exception as e:\n            logger.error(\"Failed to cleanup audit database: %s\", e)\n            return False\n\n\n# 全局实例\n_audit_logger: Optional[AuditLogger] = None\n\n\ndef get_audit_logger(db_path: Optional[str] = None) -> AuditLogger:\n    \"\"\"\n    获取审计日志管理器单例\n\n    Args:\n        db_path: 数据库路径\n\n    Returns:\n        AuditLogger: 审计日志管理器实例\n    \"\"\"\n    global _audit_logger\n    if _audit_logger is None:\n        _audit_logger = AuditLogger(db_path)\n    return _audit_logger\n\n\ndef log_audit(\n    event_type: AuditEventType, severity: AuditSeverity, user_id: str = \"\", action: str = \"\", **kwargs\n) -> bool:\n    \"\"\"\n    便捷函数：记录审计日志\n\n    Args:\n        event_type: 事件类型\n        severity: 严重级别\n        user_id: 用户ID\n        action: 操作描述\n        **kwargs: 其他参数\n\n    Returns:\n        bool: 是否成功\n    \"\"\"\n    logger_instance = get_audit_logger()\n    entry = AuditLogEntry(event_type=event_type, severity=severity, user_id=user_id, action=action, **kwargs)\n    return logger_instance.log(entry)"
+    },
+    {
+      "file": "neurova/security/compliance_reporter.py",
+      "table": "reports",
+      "ddl": "CREATE TABLE reports (report_id TEXT PRIMARY KEY,\n                    title TEXT,\n                    template TEXT,\n                    status TEXT,\n                    created_at TEXT,\n                    completed_at TEXT,\n                    file_path TEXT,\n                    error_message TEXT,\n                    metadata TEXT\n                )\n            \"\"\")\n            conn.execute(\"\"\"\n                CREATE TABLE IF NOT EXISTS subscriptions (\n                    subscription_id TEXT PRIMARY KEY,\n                    template TEXT,\n                    frequency TEXT,\n                    recipients TEXT,\n                    enabled INTEGER,\n                    created_at TEXT,\n                    last_generated TEXT\n                )\n            \"\"\")\n            conn.commit()\n        finally:\n            self._close_conn(conn)\n\n    def create_report(\n        self,\n        title: str,\n        template: ReportTemplate = ReportTemplate.SECURITY_OVERVIEW,\n        metadata: Optional[Dict[str, Any]] = None,\n    ) -> ComplianceReport:\n        \"\"\"创建报告\"\"\"\n        with self._lock:\n            report = ComplianceReport(\n                title=title,\n                template=template,\n                metadata=metadata or {},\n            )\n\n            # 保存到数据库\n            conn = self._get_conn()\n            try:\n                conn.execute(\n                    \"INSERT INTO reports (report_id, title, template, status, created_at, metadata) VALUES (?, ?, ?, ?, ?, ?)\",\n                    (\n                        report.report_id,\n                        report.title,\n                        report.template.value,\n                        report.status.value,\n                        report.created_at.isoformat(),\n                        json.dumps(report.metadata),\n                    ),\n                )\n                conn.commit()\n            finally:\n                self._close_conn(conn)\n\n            logger.info(\"创建报告: %s, 标题: %s\", report.report_id, title)\n\n            return report\n\n    def generate_report(self, report_id: str) -> ComplianceReport:\n        \"\"\"生成报告\"\"\"\n        with self._lock:\n            # 获取报告\n            report = self.get_report(report_id)\n            if not report:\n                raise ValueError(f\"报告不存在: {report_id}\")\n\n            # 更新状态为生成中\n            report.status = ReportStatus.GENERATING\n            self._update_report_status(report)\n\n            try:\n                # 生成报告内容\n                content = self._generate_report_content(report)\n\n                # 保存报告文件\n                file_name = f\"{report.report_id}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.html\"\n                file_path = self._reports_dir / file_name\n\n                with open(file_path, \"w\", encoding=\"utf-8\") as f:\n                    f.write(content)\n\n                # 更新报告状态\n                report.status = ReportStatus.COMPLETED\n                report.completed_at = datetime.datetime.now(datetime.timezone.utc)\n                report.content = content\n                report.file_path = str(file_path)\n\n                self._update_report_status(report)\n\n                logger.info(\"报告生成完成: %s\", report_id)\n\n            except Exception as e:\n                report.status = ReportStatus.FAILED\n                report.error_message = str(e)\n                self._update_report_status(report)\n                logger.error(\"报告生成失败: %s, 错误: %s\", report_id, e)\n\n            return report\n\n    def _update_report_status(self, report: ComplianceReport):\n        \"\"\"更新报告状态\"\"\"\n        conn = self._get_conn()\n        try:\n            conn.execute(\n                \"UPDATE reports SET status=?, completed_at=?, file_path=?, error_message=? WHERE report_id=?\",\n                (\n                    report.status.value,\n                    report.completed_at.isoformat() if report.completed_at else None,\n                    report.file_path,\n                    report.error_message,\n                    report.report_id,\n                ),\n            )\n            conn.commit()\n        finally:\n            self._close_conn(conn)\n\n    def _generate_report_content(self, report: ComplianceReport) -> str:\n        \"\"\"生成报告内容\"\"\"\n        template = report.template\n\n        if template == ReportTemplate.SECURITY_OVERVIEW:\n            return self._generate_security_overview(report)\n        elif template == ReportTemplate.GDPR_COMPLIANCE:\n            return self._generate_gdpr_compliance(report)\n        elif template == ReportTemplate.EQUAL_PROTECTION:\n            return self._generate_equal_protection(report)\n        elif template == ReportTemplate.AUDIT_SUMMARY:\n            return self._generate_audit_summary(report)\n        elif template == ReportTemplate.ACCESS_CONTROL:\n            return self._generate_access_control(report)\n        else:\n            return self._generate_generic_report(report)\n\n    def _generate_security_overview(self, report: ComplianceReport) -> str:\n        \"\"\"生成安全概览报告\"\"\"\n        now = datetime.datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")\n\n        html = f\"\"\"\n<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n    <meta charset=\"UTF-8\">\n    <title>Neurova 安全概览报告</title>\n    <style>\n        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; }}\n        .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+    },
+    {
+      "file": "tests/unit/test_sqlite_orphan_tables.py",
+      "table": "sessions",
+      "ddl": "CREATE TABLE sessions (\" not in content, (\n            \"#4 失败:init_db.py 仍包含孤儿表 sessions 的 CREATE TABLE 定义\"\n        )\n\n    def test_init_db_source_no_session_messages_table(self):\n        \"\"\"RED: init_db.py 不应包含 session_messages 表定义\"\"\"\n        with open(INIT_DB_PATH, \"r\", encoding=\"utf-8\") as f:\n            content = f.read()\n\n        assert \"CREATE TABLE IF NOT EXISTS session_messages (\" not in content, (\n            \"#4 失败:init_db.py 仍包含孤儿表 session_messages 的 CREATE TABLE 定义\"\n        )\n\n    def test_init_db_source_no_session_context_snapshots_table(self):\n        \"\"\"RED: init_db.py 不应包含 session_context_snapshots 表定义\"\"\"\n        with open(INIT_DB_PATH, \"r\", encoding=\"utf-8\") as f:\n            content = f.read()\n\n        assert \"CREATE TABLE IF NOT EXISTS session_context_snapshots (\" not in content, (\n            \"#4 失败:init_db.py 仍包含孤儿表 session_context_snapshots 的 CREATE TABLE 定义\"\n        )\n\n\nclass TestOrphanIndexesRemoved:\n    \"\"\"验证 5 个孤儿索引已从 init_db.py 中删除\n\n    注意:只检查 CREATE INDEX 语句,允许注释中保留索引名(用于代码考古)。\n    \"\"\"\n\n    ORPHAN_INDEX_NAMES = [\n        \"idx_sessions_agent_status\",\n        \"idx_sessions_user_active\",\n        \"idx_messages_session_seq\",\n        \"idx_messages_session_recent\",\n        \"idx_snapshots_lookup\",\n    ]\n\n    def test_init_db_source_no_orphan_indexes(self):\n        \"\"\"RED: init_db.py 不应包含孤儿索引的 CREATE INDEX 语句\"\"\"\n        with open(INIT_DB_PATH, \"r\", encoding=\"utf-8\") as f:\n            content = f.read()\n\n        for idx_name in self.ORPHAN_INDEX_NAMES:\n            # 只检查 CREATE INDEX 语句,允许注释中保留索引名\n            create_pattern = f\"CREATE INDEX IF NOT EXISTS {idx_name}\"\n            assert create_pattern not in content, (\n                f\"#4 失败:init_db.py 仍包含孤儿索引的 CREATE INDEX 语句: {idx_name}\"\n            )\n\n\n# ---------------------------------------------------------------------------\n# RED 测试:验证运行 init_db 后,SQLite 数据库中不存在孤儿表\n# ---------------------------------------------------------------------------\n\n\nclass TestOrphanTablesNotCreated:\n    \"\"\"验证运行 init_db 后,SQLite 数据库中不创建孤儿表\"\"\"\n\n    def test_init_db_creates_no_sessions_table(self, init_db_module, temp_db):\n        \"\"\"RED: 运行 init_db 后,sessions 表不应存在于 SQLite 数据库\"\"\"\n        init_db_module.init_db(temp_db)\n\n        conn = sqlite3.connect(temp_db)\n        cursor = conn.execute(\n            \"SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'\"\n        )\n        tables = cursor.fetchall()\n        conn.close()\n\n        assert len(tables) == 0, (\n            f\"#4 失败:运行 init_db 后仍创建了 sessions 表(应为孤儿表已删除): {tables}\"\n        )\n\n    def test_init_db_creates_no_session_messages_table(self, init_db_module, temp_db):\n        \"\"\"RED: 运行 init_db 后,session_messages 表不应存在\"\"\"\n        init_db_module.init_db(temp_db)\n\n        conn = sqlite3.connect(temp_db)\n        cursor = conn.execute(\n            \"SELECT name FROM sqlite_master WHERE type='table' AND name='session_messages'\"\n        )\n        tables = cursor.fetchall()\n        conn.close()\n\n        assert len(tables) == 0, (\n            f\"#4 失败:运行 init_db 后仍创建了 session_messages 表: {tables}\"\n        )\n\n    def test_init_db_creates_no_session_context_snapshots_table(self, init_db_module, temp_db):\n        \"\"\"RED: 运行 init_db 后,session_context_snapshots 表不应存在\"\"\"\n        init_db_module.init_db(temp_db)\n\n        conn = sqlite3.connect(temp_db)\n        cursor = conn.execute(\n            \"SELECT name FROM sqlite_master WHERE type='table' AND name='session_context_snapshots'\"\n        )\n        tables = cursor.fetchall()\n        conn.close()\n\n        assert len(tables) == 0, (\n            f\"#4 失败:运行 init_db 后仍创建了 session_context_snapshots 表: {tables}\"\n        )\n\n    def test_init_db_creates_no_orphan_indexes(self, init_db_module, temp_db):\n        \"\"\"RED: 运行 init_db 后,5 个孤儿索引不应存在\"\"\"\n        init_db_module.init_db(temp_db)\n\n        conn = sqlite3.connect(temp_db)\n        cursor = conn.execute(\n            \"SELECT name FROM sqlite_master WHERE type='index' AND name IN \"\n            \"('idx_sessions_agent_status', 'idx_sessions_user_active', \"\n            \"'idx_messages_session_seq', 'idx_messages_session_recent', 'idx_snapshots_lookup')\"\n        )\n        indexes = cursor.fetchall()\n        conn.close()\n\n        assert len(indexes) == 0, (\n            f\"#4 失败:运行 init_db 后仍创建了孤儿索引: {indexes}\"\n        )\n\n\n# ---------------------------------------------------------------------------\n# GREEN 守卫:验证非孤儿表(应保留)不受影响\n# ---------------------------------------------------------------------------\n\n\nclass TestNonOrphanTablesPreserved:\n    \"\"\"验证非孤儿表(memories, memory_emotions, users 等)不受影响\"\"\"\n\n    def test_init_db_still_creates_memories_table(self, init_db_module, temp_db):\n        \"\"\"GREEN 守卫:memories 主表应仍然被创建\"\"\"\n        init_db_module.init_db(temp_db)\n\n        conn = sqlite3.connect(temp_db)\n        cursor = conn.execute(\n            \"SELECT name FROM sqlite_master WHERE type='table' AND name='memories'\"\n        )\n        tables = cursor.fetchall()\n        conn.close()\n\n        assert len(tables) == 1, (\n            f\"GREEN 守卫失败:memories 主表应被创建,但实际: {tables}\"\n        )\n\n    def test_init_db_still_creates_memory_emotions_table(self, init_db_module, temp_db):\n        \"\"\"GREEN 守卫:memory_emotions 副表应仍然被创建\"\"\"\n        init_db_module.init_db(temp_db)\n\n        conn = sqlite3.connect(temp_db)\n        cursor = conn.execute(\n            \"SELECT name FROM sqlite_master WHERE type='table' AND name='memory_emotions'\"\n        )\n        tables = cursor.fetchall()\n        conn.close()\n\n        assert len(tables) == 1, (\n            f\"GREEN 守卫失败:memory_emotions 副表应被创建,但实际: {tables}\")"
+    },
+    {
+      "file": "tests/unit/security/test_enhanced_user_model.py",
+      "table": "users",
+      "ddl": "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT,\n                username TEXT UNIQUE NOT NULL,\n                email TEXT UNIQUE,\n                password_hash TEXT NOT NULL,\n                role TEXT NOT NULL DEFAULT 'user',\n                status TEXT NOT NULL DEFAULT 'active',\n                created_at TEXT NOT NULL DEFAULT (datetime('now')),\n                updated_at TEXT NOT NULL DEFAULT (datetime('now')),\n                last_login TEXT,\n                login_count INTEGER DEFAULT 0,\n                failed_attempts INTEGER DEFAULT 0,\n                locked_until TEXT,\n                reset_token TEXT,\n                reset_token_expires TEXT\n            )\n        ''')\n        \n        # 插入旧数据\n        password_hash = bcrypt.hashpw(\"password123\".encode(), bcrypt.gensalt()).decode()\n        cursor.execute('''\n            INSERT INTO users (username, email, password_hash, role)\n            VALUES (?, ?, ?, ?)\n        ''', (\"olduser\", \"old@example.com\", password_hash, \"admin\"))\n        \n        conn.commit()\n        conn.close()\n        \n        # 重新初始化用户模型（触发迁移）\n        db_path = str(tmp_path / \"enhanced_users.db\")\n        new_user_model = EnhancedUserModel(\n            data_dir=tmp_path,\n            db_path=db_path,\n            group_manager=setup[\"group_manager\"],\n            quota_manager=setup[\"quota_manager\"],\n        )\n        \n        # 验证迁移\n        user = new_user_model.get_user_by_username(\"olduser\")\n        assert user is not None\n        assert user[\"group_type\"] == \"admin\"  # role应该映射到group_type\n\n\nif __name__ == \"__main__\":\n    pytest.main([__file__, \"-v\"])"
+    }
+  ],
+  "tableIndex": {
+    "agents": {
+      "inDatabases": [
+        {
+          "db": "neurflow.db",
+          "name": "agents"
+        }
+      ],
+      "definedInCode": []
+    },
+    "attachments": {
+      "inDatabases": [
+        {
+          "db": "data/test_agent/memory.db",
+          "name": "attachments"
+        }
+      ],
+      "definedInCode": []
+    },
+    "chat_groups": {
+      "inDatabases": [
+        {
+          "db": "data/collaboration.db",
+          "name": "chat_groups"
+        }
+      ],
+      "definedInCode": []
+    },
+    "dream_reports": {
+      "inDatabases": [
+        {
+          "db": "data/longmeval/memory.db",
+          "name": "dream_reports"
+        }
+      ],
+      "definedInCode": [
+        "neurova/cognitive_layers/memory_layer/schema.py"
+      ]
+    },
+    "enhanced_users": {
+      "inDatabases": [
+        {
+          "db": "data/users.db",
+          "name": "enhanced_users"
+        }
+      ],
+      "definedInCode": []
+    },
+    "experience_records": {
+      "inDatabases": [
+        {
+          "db": "data/experience_knowledge.db",
+          "name": "experience_records"
+        }
+      ],
+      "definedInCode": []
+    },
+    "fact_relations": {
+      "inDatabases": [
+        {
+          "db": "data/test_agent/memory_tkg.db",
+          "name": "fact_relations"
+        }
+      ],
+      "definedInCode": []
+    },
+    "memories": {
+      "inDatabases": [
+        {
+          "db": "data/11e01f4a/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/2ddec2e7/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/6612c134/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/71a0fa28/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/89f2fa2d/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/a8610259/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/agent_1/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/default/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/kai/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/neurova_memories_persist.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/test/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/test-001/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/test-fix/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/test-tools/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/test-tools2/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/test_001/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "data/yi_ling/memory.db",
+          "name": "memories"
+        },
+        {
+          "db": "neurova_memories_persist.db",
+          "name": "memories"
+        }
+      ],
+      "definedInCode": [
+        "neurova/cognitive_layers/memory_layer/cognitive_storage_engine.py",
+        "neurova/cognitive_layers/memory_layer/schema.py"
+      ]
+    },
+    "memory_emotions": {
+      "inDatabases": [
+        {
+          "db": "data/test_memory.db",
+          "name": "memory_emotions"
+        },
+        {
+          "db": "data/test_memory_enhanced.db",
+          "name": "memory_emotions"
+        },
+        {
+          "db": "neurova_memory.db",
+          "name": "memory_emotions"
+        }
+      ],
+      "definedInCode": []
+    },
+    "memory_knowledge_links": {
+      "inDatabases": [
+        {
+          "db": "data/knowledge.db",
+          "name": "memory_knowledge_links"
+        }
+      ],
+      "definedInCode": []
+    },
+    "memory_links": {
+      "inDatabases": [
+        {
+          "db": "data/memory_links.db",
+          "name": "memory_links"
+        }
+      ],
+      "definedInCode": []
+    },
+    "permission_requests": {
+      "inDatabases": [
+        {
+          "db": "data/rbac.db",
+          "name": "permission_requests"
+        }
+      ],
+      "definedInCode": []
+    },
+    "qclaw_bindings": {
+      "inDatabases": [
+        {
+          "db": "data/qclaw_bindings.db",
+          "name": "qclaw_bindings"
+        }
+      ],
+      "definedInCode": []
+    },
+    "register_rate_limits": {
+      "inDatabases": [
+        {
+          "db": "data/verification_codes.db",
+          "name": "register_rate_limits"
+        }
+      ],
+      "definedInCode": []
+    }
+  }
+}

@@ -301,7 +301,9 @@ class MessageRouter:
                 )
             else:
                 # 普通文本消息：使用 Agent 处理聊天
-                response = await self._agent.chat(message.content, metadata=message.metadata if "history" in (message.metadata or {}) else {"history": []})
+                # S7 修复 (B-2 #10): 不条件注入 {"history": []},保留完整 metadata,
+                # 让 agent.chat() 自行从 session 恢复历史.
+                response = await self._agent.chat(message.content, metadata=message.metadata or {})
 
             return RouteResult(
                 success=True,
@@ -473,7 +475,8 @@ def create_default_router(
     router = MessageRouter(agent, skill_registry, memory_manager)
 
     # 注册默认处理器
-    router.register_handler(MessageType.CHAT, lambda msg: agent.chat(msg.content, metadata={"history": []}) if agent else None)
+    # S7 修复 (B-2 #10): 不注入 {"history": []},让 agent.chat() 从 session 恢复历史.
+    router.register_handler(MessageType.CHAT, lambda msg: agent.chat(msg.content) if agent else None)
     router.register_handler(MessageType.COMMAND, lambda msg: None)  # 已内置处理
     router.register_handler(MessageType.SKILL_REQUEST, lambda msg: None)  # 已内置处理
     router.register_handler(MessageType.MEMORY_REQUEST, lambda msg: None)  # 已内置处理

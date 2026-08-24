@@ -2,11 +2,11 @@
 SessionRepository 统一接口（Deep Module）
 
 将多套会话存储统一到 ABC 后面：
-- _CHAT_SESSIONS（console.py 内存字典 + data/console_sessions.json）
-- SessionManager（neurova/session_manager.py 文件层）
-- SessionSyncManager（neurova/api/endpoints/session_sync.py 纯内存）
-- agent.conversation_history（裸 list 属性）
-- SQLite sessions/session_messages（孤儿表）
+- ~~_CHAT_SESSIONS（console.py 内存字典 + data/console_sessions.json）~~ — 已删除 (D1/ADR 0008 候选 #1, S1 修复副产品)
+- SessionManager（neurova/session_manager.py 文件层）— 已实现 SessionRepository (ADR 0008 落地)
+- SessionSyncManager（neurova/sync/session_sync_manager.py 纯内存）— 部分接入 (S2 `register_or_create_session` 落地,SessionSyncManager 不实现 SessionRepository ABC:其核心 API `broadcast_event`/`register_or_create_session` 与 ABC CRUD 契约语义不匹配,完整 ABC 包裹会丢失广播语义 → 候选 #5 永久 deferred,详见 ADR 0008)
+- agent.conversation_history（裸 list 属性）— 待封装 (D3/候选 #6)
+- ~~SQLite sessions/session_messages（孤儿表）~~ — 已删除 (D4/候选 #4): `neurova/memory/scripts/init_db.py:76-79` 标注三张孤儿表 (sessions / session_messages / session_context_snapshots) 已删除,会话持久化由 SessionManager 文件层负责
 
 每个 adapter 实现此接口，调用方通过 get_session_repository() 获取实例。
 

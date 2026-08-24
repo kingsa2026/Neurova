@@ -13,7 +13,9 @@ ToolExecutor — 统一工具执行器
 - 可独立测试：不依赖 Agent 类的完整初始化
 """
 
+import ast
 import json
+from neurova.builtin_tools import get_builtin_tool_params
 from neurova.core.logger import get_logger
 import shlex
 import time
@@ -142,7 +144,15 @@ class ToolExecutor:
                 try:
                     arguments = json.loads(args_str) if args_str.strip() else {}
                 except json.JSONDecodeError:
-                    arguments = {}
+                    # 非 JSON 参数不要静默设为空字典——会导致 run_code/file_write 等
+                    # 破坏性工具以空参数执行（P2-#12）。先尝试字面量解析，失败则保留
+                    # 原始文本，交由工具层决定，而非丢失参数。
+                    try:
+                        parsed = ast.literal_eval(args_str)
+                        arguments = parsed if isinstance(parsed, dict) else {"_raw": args_str}
+                    except (ValueError, SyntaxError):
+                        logger.warning("工具 %s 参数非合法 JSON，按原始文本处理: %r", tool_name, args_str)
+                        arguments = {"_raw": args_str}
 
                 result = await self._execute_single_tool(tool_name, arguments)
                 results.append(f"\n\n**{tool_name} 结果**: {json.dumps(result, ensure_ascii=False)[:2000]}")
@@ -476,29 +486,9 @@ class ToolExecutor:
                     logger.warning("ToolEngine 执行失败: %s, %s", tool_name, e)
 
             # 回退到原有逻辑
-            # 内置工具
-            builtin_tools = [
-                "memory_search",
-                "search",
-                "web_search",
-                "weather",
-                "file_read",
-                "file_write",
-                "file_create",
-                "file_delete",
-                "file_edit",
-                "computer_screenshot",
-                "computer_click",
-                "computer_type",
-                "computer_scroll",
-                "computer_shell",
-                "emotion_analyze",
-                "voice_memory_search",
-                "run_code",
-                "execute_code",
-            ]
-
-            if tool_name in builtin_tools:
+            # 内置工具：以 builtin_tools.py 的注册表为单一事实源动态判断，
+            # 避免硬编码白名单与 ToolRouter/实际注册不一致（P2-#13）。
+            if get_builtin_tool_params(tool_name) is not None:
                 tool_source = "builtin"
                 result = await self._execute_builtin_tool(tool_name, params)
                 success = True

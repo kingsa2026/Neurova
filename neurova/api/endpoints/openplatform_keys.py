@@ -70,7 +70,7 @@ async def create_api_key(body: CreateApiKeyRequest, request: Request):
     uid = _get_uid(request)
     kid = str(uuid.uuid4())[:12]
     full, h, prefix = _gen_key()
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     data = {
         "id": kid,
         "name": body.name,
@@ -111,7 +111,7 @@ async def update_api_key(key_id: str, body: UpdateApiKeyRequest, request: Reques
         k["scopes"] = body.scopes
     if body.enabled is not None:
         k["enabled"] = body.enabled
-    k["updated_at"] = datetime.datetime.utcnow().isoformat()
+    k["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     return {"code": 0, "message": "Key updated", "data": k}
 
 
@@ -123,7 +123,7 @@ async def revoke_api_key(key_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Key not found")
     k["revoked"] = True
     k["enabled"] = False
-    k["revoked_at"] = datetime.datetime.utcnow().isoformat()
+    k["revoked_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     return {"code": 0, "message": "Key revoked"}
 
 

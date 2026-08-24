@@ -299,6 +299,28 @@ class SkillPoolManager:
         data = metadata.get(skill_id)
         return SkillMetadata.from_dict(data) if data else None
 
+    def install_public_skill(self, metadata: SkillMetadata) -> bool:
+        """安装/注册一个公共技能（写入公共技能池元数据）。
+
+        2.0 此前仅提供公共技能的读取路径（list_public_skills/get_public_skill），
+        缺少写入能力；补齐公共技能的注册入口，使公共技能池可被正确写入与检索。
+        """
+        if not isinstance(metadata, SkillMetadata):
+            logger.error("install_public_skill: metadata 必须为 SkillMetadata 实例")
+            return False
+        try:
+            public_metadata = self._load_public_metadata()
+            public_metadata[metadata.skill_id] = metadata.to_dict()
+            self._save_public_metadata(public_metadata)
+
+            # 创建技能目录占位（与私有技能保持一致结构）
+            skill_dir = self._public_pool_dir / metadata.skill_id
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            return True
+        except Exception as e:
+            logger.exception("install_public_skill 失败: %s", e)
+            return False
+
     # ------------------------------------------------------------------
     # 专属技能 API
     # ------------------------------------------------------------------

@@ -31,11 +31,12 @@ except ImportError as _e:
     MessageChannel = None
 
 try:
-    from neurova.channels.models import ContentType, UnifiedMessage
+    from neurova.channels.models import ContentType, UnifiedMessage, UserIdentity
 except ImportError as _e:
     _logger.debug("channels.models 未可用: %s", _e)
     ContentType = None
     UnifiedMessage = None
+    UserIdentity = None
 
 try:
     from neurova.channels.manager import ChannelManager, get_channel_manager
@@ -94,4 +95,5 @@ __all__ = [
     "SessionMessage",
     "SessionRecord",
     "get_session_manager",
+    "UserIdentity",
 ]

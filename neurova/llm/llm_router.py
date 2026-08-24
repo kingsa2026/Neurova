@@ -19,6 +19,7 @@ LLM Router - 多模态自适应路由器
 
 from neurova.core.logger import get_logger
 import re
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -243,6 +244,78 @@ class LLMRouter:
         return all(cap in capabilities for cap in required)
 
 
+# ---------------------------------------------------------------------------
+# 全局单例与 Provider 同步
+# ---------------------------------------------------------------------------
+# 根因修复（code-review P0-#4）：原先每次调用都 `LLMRouter()` 新建空实例且从未
+# 调用 `register_provider()`，导致 `select_model()` 永远返回 None、多模态路由
+# 静默降级。改为共享单例 + 从 LLMProviderManager 单例惰性同步 provider。
+
+_router_instance: Optional["LLMRouter"] = None
+_router_lock = threading.Lock()
+
+
+def get_llm_router() -> "LLMRouter":
+    """获取全局 LLMRouter 单例（懒初始化）。"""
+    global _router_instance
+    if _router_instance is None:
+        with _router_lock:
+            if _router_instance is None:
+                _router_instance = LLMRouter()
+    return _router_instance
+
+
+def _infer_capabilities(model_name: str) -> List[ModelCapability]:
+    """根据模型名关键词推断能力（覆盖常见视觉/音频/视频/生成场景）。"""
+    n = (model_name or "").lower()
+    caps = {ModelCapability.TEXT}
+    if any(k in n for k in ["vision", "vl", "image", "视觉", "看图", "多模态", "multimodal"]):
+        caps.add(ModelCapability.VISION)
+    if any(k in n for k in ["audio", "语音", "asr", "whisper"]):
+        caps.add(ModelCapability.AUDIO)
+        caps.add(ModelCapability.STT)
+    if any(k in n for k in ["tts", "语音合成"]):
+        caps.add(ModelCapability.TTS)
+    if any(k in n for k in ["video", "视频"]):
+        caps.add(ModelCapability.VIDEO)
+    if any(k in n for k in ["dall", "stable-diffusion", "sd-", "绘画", "生图", "flux", "imagen"]):
+        caps.add(ModelCapability.IMAGE_GENERATION)
+    return list(caps)
+
+
+def register_provider_from_config(
+    provider_id: str, provider_name: str, model_names: List[str]
+) -> None:
+    """将 ProviderConfig 风格的 providers 注册到全局 LLMRouter。"""
+    router = get_llm_router()
+    models = [
+        {
+            "name": m,
+            "capabilities": [c.value for c in _infer_capabilities(m)],
+            "priority": 1,
+            "health_status": "healthy",
+            "response_time": 0.0,
+            "weight": 1.0,
+        }
+        for m in (model_names or [])
+    ]
+    router.register_provider(provider_id, provider_name, models)
+
+
+def sync_llm_router() -> None:
+    """Best-effort：将 LLMProviderManager 单例的 providers 同步到全局 LLMRouter。"""
+    try:
+        from neurova.llm.provider_manager import get_provider_manager
+
+        mgr = get_provider_manager()
+        if mgr is None:
+            return
+        for pid, pconf in mgr._providers.items():
+            register_provider_from_config(pid, pconf.name, pconf.models)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("sync_llm_router 失败（多模态路由将惰性回退）: %s", e)
+
+
 # 便捷函数
 def select_model_for_request(
     request_type: RequestType, required_capabilities: Optional[List[ModelCapability]] = None
@@ -257,7 +330,10 @@ def select_model_for_request(
     Returns:
         最佳模型选择结果
     """
-    router = LLMRouter()
+    router = get_llm_router()
+    # 惰性同步：首次调用且无 provider 时，尝试从 LLMProviderManager 拉取
+    if not router._providers:
+        sync_llm_router()
     return router.select_model(request_type, required_capabilities)
 
 

@@ -181,7 +181,7 @@ def _init_sample_skills():
             "icon": "⏰",
         },
     ]
-    now = datetime.datetime.utcnow().isoformat()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     for s in samples:
         s["created_at"] = now
         _SKILLS_STORE[s["id"]] = s
@@ -336,7 +336,7 @@ async def rate_skill(skill_id: str, body: SkillReview, request: Request):
         "user": body.user,
         "rating": body.rating,
         "comment": body.comment,
-        "created_at": datetime.datetime.utcnow().isoformat(),
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
     reviews.append(review)
 

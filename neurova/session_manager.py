@@ -6,11 +6,12 @@
 import json
 from neurova.core.logger import get_logger
 from neurova.session_repository import SessionRepository
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from threading import Lock
+from threading import Lock, RLock
 from typing import Any, Dict, List, Optional
 
 try:
@@ -85,13 +86,33 @@ class SessionManager(SessionRepository):
             self._sessions_dir = Path("sessions")
             self._sessions_dir.mkdir(exist_ok=True)
             self._file_locks: Dict[str, Lock] = {}
+            # S3 修复 (Critical #4 TOCTOU): 保护 _file_locks dict 的独立 RLock.
+            # RLock 允许 _get_file_lock 在持锁时被同线程重入调用 (如 __init__ 内部).
+            self._file_locks_lock = RLock()
 
     def _get_file_lock(self, file_path) -> Lock:
-        """获取文件的线程锁"""
+        """获取文件的线程锁 (S3 修复 TOCTOU: DCL 双重检查锁定).
+
+        Bug (Critical #4): 原 `if key not in dict: dict[key] = Lock()` 是
+        check-then-act 模式,两线程可同时通过检查,各自创建 Lock 并覆盖,
+        导致两线程拿到不同 Lock 实例 → 文件竞态.
+
+        修复: 用 _file_locks_lock (RLock) 保护 dict,双重检查锁定:
+        - Fast path: 无锁检查 dict.get(key) → 命中直接返回
+        - Slow path: 持锁后再次检查 (double-check) → 未命中则创建
+        """
         key = str(file_path)
-        if key not in self._file_locks:
-            self._file_locks[key] = Lock()
-        return self._file_locks[key]
+        # Fast path: 无锁读 (命中率高时避免加锁开销)
+        lock = self._file_locks.get(key)
+        if lock is not None:
+            return lock
+        # Slow path: 持锁创建 (DCL)
+        with self._file_locks_lock:
+            lock = self._file_locks.get(key)
+            if lock is None:
+                lock = Lock()
+                self._file_locks[key] = lock
+            return lock
 
     def _get_session_dir(self, agent_id: str) -> Path:
         """获取agent的session目录（agent_id 为空时归入 "default"）。
@@ -125,23 +146,41 @@ class SessionManager(SessionRepository):
             return None
 
     def _write_session_file(self, file_path: Path, data: Dict[str, Any]) -> bool:
-        """写入session文件"""
+        """写入session文件 (向后兼容: 内部获取 file_lock).
+
+        新代码应直接调用 _write_session_file_unlocked 并在调用前持有 file_lock,
+        以保证 read-modify-write 原子性 (S4 修复).
+        """
+        file_lock = self._get_file_lock(file_path)
+        with file_lock:
+            return self._write_session_file_unlocked(file_path, data)
+
+    def _write_session_file_unlocked(self, file_path: Path, data: Dict[str, Any]) -> bool:
+        """写入session文件 (无锁版本,调用方必须已持有 file_lock).
+
+        S4 修复 (Critical #5 跨锁 RMW): 从 _write_session_file 抽出无锁版本,
+        供 add_message 在 `with file_lock:` 块内调用,避免:
+        1. read-modify-write 跨锁边界 (read 无锁, write 有锁 → lost update)
+        2. Lock 不可重入 (add_message 持锁后调 _write_session_file 会再次获取
+           同一 file_lock → 死锁)
+        """
         try:
-            file_lock = self._get_file_lock(file_path)
-            with file_lock:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    if HAS_FCNTL:
-                        try:
-                            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                            json.dump(data, f, ensure_ascii=False, indent=2)
-                            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                        except OSError:
-                            json.dump(data, f, ensure_ascii=False, indent=2)
-                    else:
+            with open(file_path, "w", encoding="utf-8") as f:
+                if HAS_FCNTL:
+                    try:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                         json.dump(data, f, ensure_ascii=False, indent=2)
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    except OSError:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                else:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            logger.error("写入session文件失败: %s", e)
+            # WARN #4 优化 (摘要+详情分层): 内层降级为 debug,保留诊断细节.
+            # 外层 add_message 失败时已 logger.error (带 agent_id/session_id/file_path
+            # 上下文),内层重复 error 会产生双 error 日志 noise. 内层 debug = 详情层.
+            logger.debug("写入 session 文件失败 (内层详情): %s", e, exc_info=True)
             return False
 
     def add_message(
@@ -153,54 +192,72 @@ class SessionManager(SessionRepository):
         metadata: Dict[str, Any] = None,
         date: str = None,
     ) -> str:
-        """添加一条对话（user + assistant 两条消息）到session"""
+        """添加一条对话（user + assistant 两条消息）到session
+
+        S4 修复 (Critical #5 跨锁 RMW): read-modify-write 整体置于 file_lock 内.
+        Bug: 原 read 在锁外, write 在锁内,两线程可同时 read 同一旧状态,
+        后写者覆盖先写者的更新 (lost update).
+        """
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
 
         file_path = self._get_session_file(agent_id, session_id, date)
+        file_lock = self._get_file_lock(file_path)
 
-        # 读取现有数据
-        session_data = self._read_session_file(file_path)
+        # S4: 整个 read-modify-write 在 file_lock 内,保证原子性
+        with file_lock:
+            # 读取现有数据
+            session_data = self._read_session_file(file_path)
 
-        now = datetime.now().isoformat()
-        user_msg = {
-            "role": "user",
-            "content": user_content,
-            "timestamp": now,
-        }
-        assistant_msg = {
-            "role": "assistant",
-            "content": assistant_content,
-            "timestamp": now,
-        }
-        if metadata:
-            user_msg["metadata"] = metadata
-            assistant_msg["metadata"] = metadata
-
-        new_messages = [user_msg, assistant_msg]
-
-        if session_data is None:
-            # 创建新的session记录
-            session_data = {
-                "agent_id": agent_id,
-                "session_id": session_id,
-                "session_date": date,
-                "messages": new_messages,
-                "created_at": now,
-                "updated_at": now,
-                "total_messages": len(new_messages),
+            now = datetime.now().isoformat()
+            user_msg = {
+                "role": "user",
+                "content": user_content,
+                "timestamp": now,
             }
-        else:
-            # 更新现有session记录
-            if "messages" not in session_data:
-                session_data["messages"] = []
+            assistant_msg = {
+                "role": "assistant",
+                "content": assistant_content,
+                "timestamp": now,
+            }
+            if metadata:
+                user_msg["metadata"] = metadata
+                assistant_msg["metadata"] = metadata
 
-            session_data["messages"].extend(new_messages)
-            session_data["updated_at"] = now
-            session_data["total_messages"] = len(session_data["messages"])
+            new_messages = [user_msg, assistant_msg]
 
-        # 写入文件
-        self._write_session_file(file_path, session_data)
+            if session_data is None:
+                # 创建新的session记录
+                session_data = {
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "session_date": date,
+                    "messages": new_messages,
+                    "created_at": now,
+                    "updated_at": now,
+                    "total_messages": len(new_messages),
+                }
+            else:
+                # 更新现有session记录
+                if "messages" not in session_data:
+                    session_data["messages"] = []
+
+                session_data["messages"].extend(new_messages)
+                session_data["updated_at"] = now
+                session_data["total_messages"] = len(session_data["messages"])
+
+            # 写入文件 (无锁版本,避免重入死锁)
+            # WARN #4 修复: 检查返回值,失败时 logger.error + 抛 IOError.
+            # 原代码静默忽略写入失败 → lost update 用户无感.
+            write_ok = self._write_session_file_unlocked(file_path, session_data)
+            if not write_ok:
+                logger.error(
+                    "add_message 写入 session 文件失败: agent_id=%s, session_id=%s, file=%s",
+                    agent_id, session_id, file_path,
+                )
+                raise IOError(
+                    f"写入 session 文件失败: agent_id={agent_id}, session_id={session_id}"
+                )
 
         return f"{agent_id}_{session_id}"
 
@@ -320,7 +377,16 @@ class SessionManager(SessionRepository):
             "title": title or "新对话",
             "user_id": user_id,
         }
-        self._write_session_file(file_path, session_data)
+        # 幽灵 session 防御 (chat.loadHistoryFailed toast 后端根因修复):
+        # _write_session_file_unlocked except 块只 logger.debug 返回 False,
+        # 若不检查返回值, create_session 仍返回 session_id 给前端 → 前端拿到
+        # ID 加入 sidebar → 用户点击 GET /history → 404 → toast.
+        # fail-fast: 文件写入失败时抛 RuntimeError, 让 HTTP 端点返回 500,
+        # 前端 onError 弹 toast, 不创建幽灵 session.
+        # 详见 docs/bugfix-delete-session-userid-mismatch.md "§8 幽灵 session 自愈".
+        if not self._write_session_file(file_path, session_data):
+            logger.error("create_session 持久化失败 (silent failure antipattern 修复): session_id=%s, file=%s", session_id, file_path)
+            raise RuntimeError(f"Failed to persist session file: {file_path}")
         return session_id
 
     def delete_session(self, agent_id: str, session_id: str, date: str = None) -> bool:

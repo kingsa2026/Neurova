@@ -75,7 +75,7 @@ def _init_sample_plugins():
             "config": {"theme": "default"},
         },
     ]
-    now = datetime.datetime.utcnow().isoformat()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     for p in samples:
         p["created_at"] = now
         p["updated_at"] = now
@@ -198,10 +198,10 @@ async def install_plugin(plugin_id: str, body: InstallPluginRequest):
         if plugin.get("status") != "disabled":
             return {"code": 0, "message": "Plugin already installed", "data": plugin}
         plugin["status"] = "disabled"
-        plugin["updated_at"] = datetime.datetime.utcnow().isoformat()
+        plugin["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         return {"code": 0, "message": "Plugin installed", "data": plugin}
 
-    now = datetime.datetime.utcnow().isoformat()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     plugin = {
         "id": plugin_id,
         "name": plugin_id,
@@ -245,7 +245,7 @@ async def load_plugin(plugin_id: str):
     if not plugin:
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
     plugin["loaded"] = True
-    plugin["updated_at"] = datetime.datetime.utcnow().isoformat()
+    plugin["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     return {"code": 0, "message": "Plugin loaded", "data": plugin}
 
 
@@ -256,7 +256,7 @@ async def unload_plugin(plugin_id: str):
     if not plugin:
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
     plugin["loaded"] = False
-    plugin["updated_at"] = datetime.datetime.utcnow().isoformat()
+    plugin["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     return {"code": 0, "message": "Plugin unloaded", "data": plugin}
 
 
@@ -268,7 +268,7 @@ async def enable_plugin(plugin_id: str):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
     plugin["status"] = "enabled"
     plugin["loaded"] = True
-    plugin["updated_at"] = datetime.datetime.utcnow().isoformat()
+    plugin["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     logger.info("Plugin enabled: %s", plugin_id)
     return {"code": 0, "message": "Plugin enabled", "data": plugin}
 
@@ -280,7 +280,7 @@ async def disable_plugin(plugin_id: str):
     if not plugin:
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
     plugin["status"] = "disabled"
-    plugin["updated_at"] = datetime.datetime.utcnow().isoformat()
+    plugin["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     logger.info("Plugin disabled: %s", plugin_id)
     return {"code": 0, "message": "Plugin disabled", "data": plugin}
 

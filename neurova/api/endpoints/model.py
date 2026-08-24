@@ -189,7 +189,7 @@ async def switch_model(request: Request, body: SwitchModelRequest):
     loop_rebuilt = False
     try:
         if hasattr(agent, "rebuild_loop"):
-            loop_rebuilt = agent.rebuild_loop(model=body.model_id)
+            loop_rebuilt = agent.rebuild_loop(model_name=body.model_id)
     except Exception as e:
         logger.error(f"Switch model error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to switch model: {str(e)}")

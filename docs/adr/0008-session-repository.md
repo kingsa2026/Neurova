@@ -71,12 +71,12 @@ class SessionRepository(ABC):
 
 ### 不在本 ADR 范围
 
-- 删除 `_CHAT_SESSIONS`（候选 #1）
-- 删除 SQLite 孤儿表（候选 #4）
-- `agent.conversation_history` 封装（候选 #6）
-- `SessionSyncManager` 接入（候选 #5）
-- 删除 `/v1/chat/sessions` 死端点（候选 #7）
-- 前端 Pinia store（候选 #2）
+- ~~删除 `_CHAT_SESSIONS`（候选 #1）~~ — **已落地 (D1)**: S1 修复副产品,console.py 已接入 `get_session_repository()`,`_CHAT_SESSIONS` 字典+JSON 双写已删除
+- ~~删除 SQLite 孤儿表（候选 #4）~~ — **已落地 (D4)**: `neurova/memory/scripts/init_db.py:76-79` 标注三张孤儿表 (sessions / session_messages / session_context_snapshots) 已删除 — 这三张表仅有 CREATE TABLE,无任何 INSERT/SELECT/UPDATE 代码引用,会话持久化由 SessionManager 文件层负责
+- ~~`agent.conversation_history` 封装（候选 #6）~~ — **已落地 (D3)**: `ConversationContext` deep module (165 行,role 校验 + RLock + 自动 trim + 深拷贝) 已实现;`MemCore.update_history` 已优先走 ctx 路径,fallback 已删除 (显式 raise RuntimeError 要求 `init_conversation()`)
+- `SessionSyncManager` 接入（候选 #5）— **永久 deferred**: S2 已落地 `register_or_create_session` (文件层与内存层 session_id 收敛);**完整 ABC 接入不推进**,理由:SessionSyncManager 核心 API (`broadcast_event` / `register_or_create_session` / `add_event_listener`) 与 SessionRepository ABC CRUD 契约 (`create_session` / `save_message` / `get_history` / `list_sessions` / `delete_session` / `rename_session` / `get_session`) 语义不匹配;ChatPipeline 当前架构职责分离清晰 — 文件持久化走 SessionRepository (SessionManager),跨渠道广播直接调 SessionSyncManager API;强行包裹为 `MemorySessionRepository` 会丢失广播语义变成假 ABC 实现
+- ~~删除 `/v1/chat/sessions` 死端点（候选 #7）~~ — **已落地 (D4)**: chat.py 4 个 `/sessions` 端点 (GET/POST/PUT/DELETE) 已删除,前端已迁移到 `/api/v1/console/chat/sessions` (console.py + SessionRepository);`TestEmptyAgentId` 4 测试已标记 obsolete skip
+- 前端 Pinia store（候选 #2）— 仍 deferred
 
 ## Consequences
 

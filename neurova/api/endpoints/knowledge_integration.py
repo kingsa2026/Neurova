@@ -44,7 +44,7 @@ async def sync_knowledge_to_memory(body: dict, request: Request):
     link = {
         "knowledge_id": knowledge_id,
         "memory_id": memory_id,
-        "synced_at": datetime.datetime.utcnow().isoformat(),
+        "synced_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "user_id": getattr(request.state, "user_id", "anonymous"),
     }
     _sync_links.append(link)
@@ -59,7 +59,7 @@ async def sync_memory_to_kb(body: dict, request: Request):
     link = {
         "memory_id": memory_id,
         "knowledge_id": knowledge_id,
-        "synced_at": datetime.datetime.utcnow().isoformat(),
+        "synced_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "user_id": getattr(request.state, "user_id", "anonymous"),
     }
     _sync_links.append(link)
@@ -111,7 +111,7 @@ async def analyze_knowledge_gaps(body: AnalyzeGapsRequest, request: Request):
     return {
         "code": 0,
         "message": "success",
-        "data": {"gaps": gaps, "analyzed_at": datetime.datetime.utcnow().isoformat()},
+        "data": {"gaps": gaps, "analyzed_at": datetime.datetime.now(datetime.timezone.utc).isoformat()},
     }
 
 
@@ -122,7 +122,7 @@ async def learn_from_knowledge(body: LearnRequest, request: Request):
         "id": str(uuid.uuid4())[:12],
         "topic": body.topic,
         "depth": body.depth,
-        "learned_at": datetime.datetime.utcnow().isoformat(),
+        "learned_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "items_learned": 0,
         "status": "completed",
     }

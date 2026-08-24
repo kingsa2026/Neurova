@@ -114,7 +114,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 import {
-  listMCPServers, listTools, registerMCPServer, unregisterMCPServer, testMCPServer, installTool, executeTool,
+  listMCPServers, listTools, registerMCPServer, unregisterMCPServer, testMCPServer, installTool as installToolApi, executeTool,
   type MCPServer, type Tool,
 } from '@/api/modules/tool-layers'
 
@@ -219,7 +219,7 @@ const executeTool = (tool: any) => {
 
 const installTool = async (tool: any) => {
   try {
-    await installTool(tool.id)
+    await installToolApi(tool.id)
     message.success(t('common.success'))
     await fetchTools()
   } catch {

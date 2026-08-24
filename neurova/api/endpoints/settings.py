@@ -10,6 +10,9 @@ from __future__ import annotations
 4. 更新特定设置 (PUT /api/v1/settings/{key})
 5. 获取 CORS 配置 (GET /api/v1/settings/cors)
 6. 更新 CORS 配置 (PUT /api/v1/settings/cors)
+
+路由顺序说明：/cors 必须在 /{key} 之前注册，否则 "cors" 会被
+路径参数 {key} 捕获（GET /cors → get_setting("cors") → 404）。
 """
 
 import json
@@ -24,7 +27,7 @@ from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/v1/settings")
 
 # 默认设置
 _default_settings = {
@@ -97,41 +100,7 @@ async def update_settings(request: Request, body: UpdateSettingsRequest):
     )
 
 
-@router.get("/{key}")
-async def get_setting(request: Request, key: str = Path(...)):
-    """获取特定设置"""
-    _get_request_id(request)
-
-    if key not in _default_settings:
-        raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
-
-    return {
-        "code": 0,
-        "data": {
-            "key": key,
-            "value": _default_settings[key],
-        },
-    }
-
-
-@router.put("/{key}")
-async def update_setting(request: Request, key: str = Path(...), value: Any = Body(...)):
-    """更新特定设置"""
-    _get_request_id(request)
-
-    _default_settings[key] = value
-
-    return {
-        "code": 0,
-        "message": f"Setting '{key}' updated",
-        "data": {
-            "key": key,
-            "value": value,
-        },
-    }
-
-
-# ─── CORS 配置管理 ───
+# ─── CORS 配置管理（必须在 /{key} 之前注册，避免被路径参数遮蔽）───
 
 
 class CorsConfigResponse(BaseModel):
@@ -239,3 +208,40 @@ async def update_cors_config(request: Request, body: UpdateCorsConfigRequest):
         allow_headers=config.get("allow_headers", ["Authorization", "Content-Type", "Accept", "X-Request-ID"]),
         updated_at=str(time.time()),
     )
+
+
+# ─── 单个设置（/{key} 必须放在 /cors 之后）───
+
+
+@router.get("/{key}")
+async def get_setting(request: Request, key: str = Path(...)):
+    """获取特定设置"""
+    _get_request_id(request)
+
+    if key not in _default_settings:
+        raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
+
+    return {
+        "code": 0,
+        "data": {
+            "key": key,
+            "value": _default_settings[key],
+        },
+    }
+
+
+@router.put("/{key}")
+async def update_setting(request: Request, key: str = Path(...), value: Any = Body(...)):
+    """更新特定设置"""
+    _get_request_id(request)
+
+    _default_settings[key] = value
+
+    return {
+        "code": 0,
+        "message": f"Setting '{key}' updated",
+        "data": {
+            "key": key,
+            "value": value,
+        },
+    }

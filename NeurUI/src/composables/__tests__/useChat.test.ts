@@ -120,6 +120,31 @@ describe('useChat', () => {
       await loadSessions('')
       expect(api.get).toHaveBeenCalledWith('/console/chat/sessions')
     })
+
+    // ── chat.loadHistoryFailed 修复契约 (遗留边界情况) ──────────────
+    // loadSessions auto-select 第一个 session 是副作用, 历史加载失败不应弹 toast
+    // 让用户误以为页面加载失败. 原因: switchSession 接口不再 toast (返回
+    // SwitchResult), 调用方 (loadSessions) 静默消费失败结果.
+    it('auto-selecting first session on history load failure does NOT call onError (side-effect, silent)', async () => {
+      // sessions list 加载成功
+      vi.mocked(api.get).mockResolvedValueOnce({
+        data: { sessions: [{ session_id: 's1', title: 'A' }] },
+      } as any)
+      // switchSession 内部 GET history 失败 (模拟 session 后端不存在)
+      vi.mocked(api.get).mockRejectedValueOnce(new Error('history 404'))
+
+      const onError = vi.fn()
+      const errorMessage = vi.fn((k: string, f: string) => f)
+
+      const { loadSessions, store } = useChat({ onError, errorMessage })
+      await loadSessions('agent-1')
+
+      // 副作用: session 列表已加载, currentSessionId 已切换
+      expect(store.sessions).toHaveLength(1)
+      expect(store.currentSessionId).toBe('s1')
+      // 关键契约: 不应弹"加载历史对话失败"toast (页面加载的副作用)
+      expect(onError).not.toHaveBeenCalledWith('加载历史对话失败')
+    })
   })
 
   // -------------------------------------------------------------------------
@@ -127,6 +152,17 @@ describe('useChat', () => {
   // -------------------------------------------------------------------------
 
   describe('createSession', () => {
+    it('sends agent_id and title in the POST body (multi-agent isolation)', async () => {
+      vi.mocked(api.post).mockResolvedValueOnce({ data: { session_id: 'new-1' } } as any)
+      vi.mocked(api.get).mockResolvedValueOnce({ data: [] } as any)
+      const { createSession } = useChat()
+      await createSession('agent-1', 'My Chat')
+      expect(api.post).toHaveBeenCalledWith('/console/chat/new', {
+        agent_id: 'agent-1',
+        title: 'My Chat',
+      })
+    })
+
     it('creates session on backend, prepends to store, and switches to it', async () => {
       vi.mocked(api.post).mockResolvedValueOnce({
         data: { session_id: 'new-1' },
@@ -137,7 +173,7 @@ describe('useChat', () => {
       const { createSession, store } = useChat()
       const newId = await createSession('agent-1', '新对话')
 
-      expect(api.post).toHaveBeenCalledWith('/console/chat/new')
+      expect(api.post).toHaveBeenCalledWith('/console/chat/new', { agent_id: 'agent-1', title: '新对话' })
       expect(newId).toBe('new-1')
       expect(store.sessions).toHaveLength(1)
       expect(store.sessions[0].id).toBe('new-1')
@@ -171,15 +207,53 @@ describe('useChat', () => {
       expect(onError).toHaveBeenCalledWith('创建会话失败')
     })
 
-    it('falls back to crypto.randomUUID when backend omits session_id', async () => {
+    // ── 幽灵 session 防御 (chat.loadHistoryFailed toast 根因修复) ───────
+    // 旧契约: 后端不返回 session_id 时 fallback 到 crypto.randomUUID() 生成
+    // 前端 UUID, 但这个 UUID 后端不知道, 存到 store 后用户点击它 GET /history
+    // → 404 → toast "加载历史对话失败" (chat.loadHistoryFailed raw key bug).
+    // 新契约: 后端不返回 session_id 时返回 null + 弹 toast, 不创建幽灵 session.
+    // 详见 docs/bugfix-delete-session-userid-mismatch.md "幽灵 session 自愈".
+    it('returns null and does NOT create ghost session when backend omits session_id (no UUID fallback)', async () => {
+      // 后端返回 200 但 data 里没有 session_id (异常响应, 例如旧版本后端)
       vi.mocked(api.post).mockResolvedValueOnce({ data: {} } as any)
-      vi.mocked(api.get).mockResolvedValueOnce({ data: [] } as any)
+      const onError = vi.fn()
+      const errorMessage = vi.fn((k: string, f: string) => f)
 
-      const { createSession } = useChat()
+      const { createSession, store } = useChat({ onError, errorMessage })
+      const result = await createSession('agent-1')
+
+      // 关键: 不创建幽灵 session (无 UUID fallback)
+      expect(result).toBeNull()
+      expect(store.sessions).toHaveLength(0)
+      // 弹 toast 提示用户创建失败
+      expect(onError).toHaveBeenCalled()
+      expect(errorMessage).toHaveBeenCalledWith('chat.createSessionFailed', '创建会话失败')
+    })
+
+    // ── chat.loadHistoryFailed 修复契约 (createSession 副作用) ───────
+    // 创建会话已成功, 但 switchSession 加载新会话历史失败时, 不应弹
+    // "加载历史对话失败" toast 掩盖创建成功结果. 原因: switchSession 接口
+    // 不再 toast, createSession 静默消费失败结果.
+    it('does NOT call onError when post-create history load fails (creation succeeded, side-effect silent)', async () => {
+      // 创建成功
+      vi.mocked(api.post).mockResolvedValueOnce({
+        data: { session_id: 'new-1' },
+      } as any)
+      // switchSession 内部 GET history 失败
+      vi.mocked(api.get).mockRejectedValueOnce(new Error('history 404'))
+
+      const onError = vi.fn()
+      const errorMessage = vi.fn((k: string, f: string) => f)
+
+      const { createSession, store } = useChat({ onError, errorMessage })
       const newId = await createSession('agent-1')
 
-      expect(newId).toBeTruthy()
-      expect(newId!.length).toBeGreaterThan(10) // UUID format
+      // 创建已成功 (不应被历史加载失败拖累)
+      expect(newId).toBe('new-1')
+      expect(store.sessions[0].id).toBe('new-1')
+      expect(store.currentSessionId).toBe('new-1')
+      // 关键契约: 不应弹"加载历史对话失败"toast
+      expect(onError).not.toHaveBeenCalledWith('加载历史对话失败')
     })
   })
 
@@ -246,25 +320,145 @@ describe('useChat', () => {
       })
     })
 
-    it('clears messages on API error and calls onError', async () => {
+    // ── SwitchResult 契约 (架构深化: silent boolean → result 类型) ──────
+    // switchSession 不再内部弹 toast, 错误策略由调用方 own:
+    //   - loadSessions/createSession/deleteSession (副作用调用): 静默
+    //   - ChatPage.switchSession wrapper (用户主动): 调 notifySwitchFailure
+
+    it('returns { ok: true } on successful history load', async () => {
+      vi.mocked(api.get).mockResolvedValueOnce({ data: [] } as any)
+      const { switchSession } = useChat()
+      const result = await switchSession('s1')
+      expect(result).toEqual({ ok: true })
+    })
+
+    it('returns { ok: false, error } and clears messages on API error (does NOT call onError — caller decides)', async () => {
       vi.mocked(api.get).mockRejectedValueOnce(new Error('server'))
       const onError = vi.fn()
       const errorMessage = vi.fn((k: string, f: string) => f)
 
       const { switchSession, store } = useChat({ onError, errorMessage })
-      await switchSession('s1')
+      const result = await switchSession('s1')
 
+      expect(result.ok).toBe(false)
+      expect((result as any).error).toBeInstanceOf(Error)
       expect(store.messages).toEqual([])
+      // 新契约: switchSession 不再内部弹 toast, 由调用方通过 notifySwitchFailure 决定
+      expect(onError).not.toHaveBeenCalled()
+    })
+
+    // ── 幽灵 session 自愈 (chat.loadHistoryFailed toast 根因修复) ───────
+    // 场景: sidebar 里有后端不存在的 session (幽灵 session, 例如前端 UUID
+    // fallback 残留), 用户点击它 GET /history → 404.
+    // 旧契约: catch 块仅 console.error + return { ok: false }, 幽灵 session
+    // 永远留在 sidebar, 用户每次点击都触发 toast.
+    // 新契约: 404 时自动从 store 移除该 session, 自愈清理, 避免反复 toast.
+    // 详见 docs/bugfix-delete-session-userid-mismatch.md "幽灵 session 自愈".
+    it('auto-removes ghost session from store on 404 (self-healing)', async () => {
+      // 模拟 axios 404 错误: error.response.status === 404
+      const err: any = new Error('Request failed with status code 404')
+      err.response = { status: 404 }
+      vi.mocked(api.get).mockRejectedValueOnce(err)
+
+      const { switchSession, store } = useChat()
+      // 预置 store: 含一个幽灵 session 和一个真实 session
+      store.setSessions([
+        { id: 'ghost-uuid-1', title: 'Ghost' },
+        { id: 'real-1', title: 'Real' },
+      ])
+      store.setCurrentSession('ghost-uuid-1')
+
+      const result = await switchSession('ghost-uuid-1')
+
+      // 失败结果仍然返回 (调用方可弹 toast 提示用户)
+      expect(result.ok).toBe(false)
+      // 关键自愈: 幽灵 session 被自动移除
+      expect(store.sessions.find((s) => s.id === 'ghost-uuid-1')).toBeUndefined()
+      expect(store.sessions).toHaveLength(1)
+      expect(store.sessions[0].id).toBe('real-1')
+    })
+
+    it('does NOT remove session on non-404 error (e.g. 500, preserves session for retry)', async () => {
+      // 非 404 错误 (如服务器 500) 不应删除 session, 因为 session 可能仍然有效
+      // (例如后端临时故障, 重试可能成功)
+      const err: any = new Error('Request failed with status code 500')
+      err.response = { status: 500 }
+      vi.mocked(api.get).mockRejectedValueOnce(err)
+
+      const { switchSession, store } = useChat()
+      store.setSessions([{ id: 's1', title: 'Session 1' }])
+
+      const result = await switchSession('s1')
+
+      expect(result.ok).toBe(false)
+      // 服务器错误: 保留 session (不是它的错, 重试可能恢复)
+      expect(store.sessions).toHaveLength(1)
+      expect(store.sessions[0].id).toBe('s1')
+    })
+
+    it('does NOT remove session on network error (no response.status, preserves session)', async () => {
+      // 网络错误 (无 response.status, 例如断网) 不应删除 session
+      vi.mocked(api.get).mockRejectedValueOnce(new Error('Network Error'))
+
+      const { switchSession, store } = useChat()
+      store.setSessions([{ id: 's1', title: 'Session 1' }])
+
+      const result = await switchSession('s1')
+
+      expect(result.ok).toBe(false)
+      // 网络错误: 保留 session
+      expect(store.sessions).toHaveLength(1)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // notifySwitchFailure — 用户主动场景的错误策略 helper
+  // -------------------------------------------------------------------------
+  describe('notifySwitchFailure', () => {
+    it('calls onError with i18n message when result is failure', () => {
+      const onError = vi.fn()
+      const errorMessage = vi.fn((k: string, f: string) => `i18n:${k}/${f}`)
+      const { notifySwitchFailure } = useChat({ onError, errorMessage })
+
+      notifySwitchFailure({ ok: false, error: new Error('history 404') })
+
+      expect(errorMessage).toHaveBeenCalledWith('chat.loadHistoryFailed', '加载历史对话失败')
+      expect(onError).toHaveBeenCalledWith('i18n:chat.loadHistoryFailed/加载历史对话失败')
+    })
+
+    it('does NOT call onError when result is ok', () => {
+      const onError = vi.fn()
+      const errorMessage = vi.fn((k: string, f: string) => f)
+      const { notifySwitchFailure } = useChat({ onError, errorMessage })
+
+      notifySwitchFailure({ ok: true })
+
+      expect(onError).not.toHaveBeenCalled()
+    })
+
+    it('falls back to hardcoded message when errorMessage option is absent', () => {
+      const onError = vi.fn()
+      const { notifySwitchFailure } = useChat({ onError })
+
+      notifySwitchFailure({ ok: false, error: new Error('boom') })
+
       expect(onError).toHaveBeenCalledWith('加载历史对话失败')
     })
   })
 
   // -------------------------------------------------------------------------
-  // deleteSession
+  // deleteSession — DeleteResult 契约 (架构深化: boolean → discriminated union)
   // -------------------------------------------------------------------------
+  // 与 switchSession 的 SwitchResult 模式平行:
+  //   - deleteSession 不再内部弹 toast, 仅返回 { ok: true | false, error? }
+  //   - 错误策略由调用方 own:
+  //     * 副作用调用 (无): 无
+  //     * 用户主动调用 (ChatPage.deleteSession wrapper): 调 notifyDeleteFailure
+  //   - 替换原 `return false` 浅返回模式 — 接口不再吞错, 调用方决策空间完整.
+  //   - 详见 docs/bugfix-delete-session-userid-mismatch.md "前端错误反馈策略深化" 小节.
 
   describe('deleteSession', () => {
-    it('deletes on backend, removes from store, returns true', async () => {
+    it('deletes on backend, removes from store, returns { ok: true }', async () => {
       vi.mocked(deleteConsoleSession).mockResolvedValueOnce({} as any)
       const { deleteSession, store } = useChat()
       store.setSessions([
@@ -275,7 +469,7 @@ describe('useChat', () => {
       const result = await deleteSession('s1')
 
       expect(deleteConsoleSession).toHaveBeenCalledWith('s1')
-      expect(result).toBe(true)
+      expect(result).toEqual({ ok: true })
       expect(store.sessions).toHaveLength(1)
       expect(store.sessions[0].id).toBe('s2')
     })
@@ -318,11 +512,94 @@ describe('useChat', () => {
       expect(store.messages).toEqual([])
     })
 
-    it('returns false on API error', async () => {
-      vi.mocked(deleteConsoleSession).mockRejectedValueOnce(new Error('server'))
-      const { deleteSession } = useChat()
+    // ── DeleteResult 契约 (架构深化) ──────────────────────────────────
+    // Slice 2 RED: deleteSession 失败时返回 { ok: false, error }, 不调 onError.
+    // 契约与 switchSession 平行 — 错误策略由调用方通过 notifyDeleteFailure 决定.
+    it('returns { ok: false, error } on API failure and does NOT call onError (caller decides)', async () => {
+      vi.mocked(deleteConsoleSession).mockRejectedValueOnce(new Error('403 Forbidden'))
+      const onError = vi.fn()
+      const errorMessage = vi.fn((k: string, f: string) => f)
+
+      const { deleteSession, store } = useChat({ onError, errorMessage })
+      store.setSessions([{ id: 's1', title: 'A' }])
+
       const result = await deleteSession('s1')
-      expect(result).toBe(false)
+
+      expect(result.ok).toBe(false)
+      expect((result as any).error).toBeInstanceOf(Error)
+      expect((result as any).error.message).toBe('403 Forbidden')
+      // 失败时 session 不应从 store 移除 (removeSession 在 try 块, API 失败时不执行)
+      expect(store.sessions).toHaveLength(1)
+      // 关键契约: deleteSession 不内部弹 toast, 由调用方通过 notifyDeleteFailure 决定
+      expect(onError).not.toHaveBeenCalled()
+    })
+
+    // BUG: chat.deleteSessionFailed — 旧契约返回 boolean, 调用方无法区分
+    // "网络错误"vs"403"vs"500", 且 catch 块静默吞错 (return false) 让 UI 无反馈.
+    // 修复契约: deleteSession 返回 DeleteResult discriminated union, 让错误
+    // 结构流向调用方; ChatPage wrapper 调 notifyDeleteFailure 弹 toast.
+    it('when deleting the active session, does NOT call onError if the auto-switched session fails to load history', async () => {
+      vi.mocked(deleteConsoleSession).mockResolvedValueOnce({} as any)
+      // switchSession 内部 GET history 失败 (模拟剩余会话在后端不存在)
+      vi.mocked(api.get).mockRejectedValueOnce(new Error('history 404'))
+
+      const onError = vi.fn()
+      const errorMessage = vi.fn((k: string, f: string) => f)
+
+      const { deleteSession, store } = useChat({ onError, errorMessage })
+      store.setSessions([
+        { id: 's1', title: 'A' },
+        { id: 's2', title: 'B' },
+      ])
+      store.setCurrentSession('s1')
+
+      const result = await deleteSession('s1')
+
+      // 删除本身成功 (不应被副作用失败拖累) — 返回 { ok: true }
+      expect(result).toEqual({ ok: true })
+      // 自动 switch 到 s2 (虽然历史加载失败, currentSessionId 应已切换)
+      expect(store.currentSessionId).toBe('s2')
+      // 关键契约: 不应弹"加载历史对话失败"toast, 因为这是删除操作的副作用
+      expect(onError).not.toHaveBeenCalledWith('加载历史对话失败')
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // notifyDeleteFailure — 用户主动删除场景的错误策略 helper
+  // -------------------------------------------------------------------------
+  // 与 notifySwitchFailure 平行: ChatPage.deleteSession wrapper 调用此函数,
+  // 失败时弹 toast 让用户知道删除失败. 副作用调用 (无) 不调, 避免误提示.
+
+  describe('notifyDeleteFailure', () => {
+    // Slice 3 RED: notifyDeleteFailure 在失败时调 onError 弹 i18n 消息
+    it('calls onError with i18n message when result is failure', () => {
+      const onError = vi.fn()
+      const errorMessage = vi.fn((k: string, f: string) => `i18n:${k}/${f}`)
+      const { notifyDeleteFailure } = useChat({ onError, errorMessage })
+
+      notifyDeleteFailure({ ok: false, error: new Error('403 Forbidden') })
+
+      expect(errorMessage).toHaveBeenCalledWith('chat.deleteSessionFailed', '删除会话失败')
+      expect(onError).toHaveBeenCalledWith('i18n:chat.deleteSessionFailed/删除会话失败')
+    })
+
+    it('does NOT call onError when result is ok', () => {
+      const onError = vi.fn()
+      const errorMessage = vi.fn((k: string, f: string) => f)
+      const { notifyDeleteFailure } = useChat({ onError, errorMessage })
+
+      notifyDeleteFailure({ ok: true })
+
+      expect(onError).not.toHaveBeenCalled()
+    })
+
+    it('falls back to hardcoded message when errorMessage option is absent', () => {
+      const onError = vi.fn()
+      const { notifyDeleteFailure } = useChat({ onError })
+
+      notifyDeleteFailure({ ok: false, error: new Error('boom') })
+
+      expect(onError).toHaveBeenCalledWith('删除会话失败')
     })
   })
 

@@ -504,12 +504,17 @@ class ContextOrchestrator:
 
         # Phase 3.5: 从候选池构建上下文
         if not hasattr(self._agent, "context_builder") or self._agent.context_builder is None:
-            logger.warning("context_builder 不可用，降级为简单上下文构建")
+            logger.warning("context_builder 不可用，降级为简单上下文构建（保留已收集的候选上下文，避免丢失记忆/对话）")
             # Bug T-1 修复:降级路径也注入当前时间(避免 LLM 误用训练截止日期)
-            return [
-                {"role": "system", "content": "\n\n".join(system_instructions)},
-                {"role": "user", "content": user_input},
-            ]
+            # 根因修复（P2-#16）: 降级路径原先直接丢弃已构建的 candidate_pool，
+            # 导致记忆/对话上下文全部丢失。此处保留候选上下文，仅丢失优先级压缩。
+            fallback = [{"role": "system", "content": "\n\n".join(system_instructions)}]
+            for item in candidate_pool:
+                content = getattr(item, "content", None)
+                if content:
+                    fallback.append({"role": "user", "content": str(content)})
+            fallback.append({"role": "user", "content": user_input})
+            return fallback
 
         context = self.context_builder.build_from_pool(
             candidate_pool,

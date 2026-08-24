@@ -37,7 +37,7 @@ _RECORDS: typing.Dict[str, typing.List[dict]] = {}  # skill_name -> [records]
 async def add_experience_record(body: AddExperienceRecordRequest, request: Request):
     """添加经验记录到经验知识库"""
     record_id = str(uuid.uuid4())[:12]
-    now = datetime.datetime.utcnow().isoformat()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     record = {
         "id": record_id,
         "skill_name": body.skill_name,

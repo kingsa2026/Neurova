@@ -382,7 +382,8 @@ class AgentTaskExecutor(TaskExecutor):
                 return {"success": False, "error": "No message provided"}
 
             # 执行 Agent
-            result = agent.chat(message, stream=False, metadata={"history": []})
+            # S7 修复 (B-2 #10): 不注入 {"history": []},让 agent.chat() 从 session 恢复历史.
+            result = agent.chat(message, stream=False)
 
             return {
                 "success": True,

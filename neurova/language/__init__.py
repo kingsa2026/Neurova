@@ -12,3 +12,7 @@ Neurova language - 多语言国际化系统
 ...
 """
 
+from neurova.language.models import Language
+
+__all__ = ["Language"]
+

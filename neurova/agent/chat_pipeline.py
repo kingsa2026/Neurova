@@ -278,17 +278,17 @@ class ChatPipeline:
         try:
             from neurova.sync.session_sync_manager import SessionEvent
 
-            # 查找或创建会话
+            # S2 修复 (Critical #2/#3 split-brain): 用 register_or_create_session
+            # 注册 ctx.session_id (而非 create_session 生成新 ID),保证文件层
+            # (SessionManager) 与内存层 (SessionSyncManager) session_id 收敛.
             session_id = ctx.session_id or "default"
-            session = sync_manager.get_session(session_id)
-
-            if not session:
-                # 创建新会话
-                user_id = (ctx.metadata or {}).get("user_id", "anonymous")
-                session = sync_manager.create_session(
-                    user_id=user_id, agent_id=self.config.agent_id, metadata={"source": "chat_pipeline"}
-                )
-                session_id = session.session_id
+            user_id = (ctx.metadata or {}).get("user_id", "anonymous")
+            sync_manager.register_or_create_session(
+                session_id=session_id,
+                user_id=user_id,
+                agent_id=self.config.agent_id,
+                metadata={"source": "chat_pipeline"},
+            )
 
             # 创建事件
             event = SessionEvent(event_type=event_type, session_id=session_id, source_channel="agent", payload=payload)
@@ -297,7 +297,10 @@ class ChatPipeline:
             await sync_manager.broadcast_event(session_id, event)
 
         except Exception as e:
-            logger.debug("SessionSyncManager event sync failed: %s", e)
+            # WARN #2 修复: 升级 debug → warning + exc_info=True.
+            # 原 logger.debug 吞掉异常,丢失堆栈,运维无法定位广播失败根因.
+            # 事件同步失败非致命 (不影响主对话流程),但应可观测.
+            logger.warning("SessionSyncManager event sync failed: %s", e, exc_info=True)
 
     # ══════════════════════════════════════════════════════════════
     # Step 0: 初始化 Agent 状态
