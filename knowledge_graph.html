@@ -181,6 +181,7 @@ const nodes = [
   { id: 'agent_loop',     label: 'Agent Loop系统',   cat: 'core',      size: 16, desc: '抽象LLM调用接口，支持OpenAI/Anthropic循环，热切换。', files: ['neurova/agent/loops/base.py', 'neurova/agent/loops/openai_loop.py', 'neurova/agent/loops/anthropic_loop.py'] },
   { id: 'agent_matrix',   label: 'AgentMatrix',      cat: 'core',      size: 14, desc: '多Agent矩阵管理，协调多个Agent实例。', files: ['neurova/agent/matrix/agent_matrix.py'] },
   { id: 'scheduler',      label: 'Scheduler',        cat: 'core',      size: 12, desc: 'Agent调度器，管理定时任务和周期性操作。', files: ['neurova/agent/scheduler.py'] },
+  { id: 'session_repo',   label: 'SessionRepository', cat: 'core',      size: 14, desc: '会话仓库：会话持久化与多端同步的数据访问层。', files: ['neurova/session_repository.py'] },
 
   // === 记忆系统 ===
   { id: 'mem_core',       label: 'MemCore',          cat: 'memory',    size: 26, desc: '神经感知记忆核心：记忆检索/保存/温度管理/17维分类。', files: ['neurova/mem_core.py'] },
@@ -223,6 +224,7 @@ const nodes = [
   { id: 'nl_synth',       label: 'NLToolSynthesizer', cat: 'evolution', size: 14, desc: '自然语言工具合成：从描述自动生成工具。', files: ['neurova/evolution/nl_synthesizer.py'] },
   { id: 'skill_mgr',      label: 'SkillSystem',      cat: 'evolution',  size: 16, desc: '技能管理：技能注册/搜索/安装/进化。', files: ['neurova/skills/agent_skill_manager.py', 'neurova/skills/registry.py'] },
   { id: 'rsi',            label: 'RSI引擎',          cat: 'evolution',  size: 14, desc: '递归自改进系统：收敛分析+回滚管理+部署控制。', files: ['neurova/evolution/rsi/orchestrator.py'] },
+  { id: 'meta_skill',     label: 'MetaSkill',        cat: 'evolution',  size: 14, desc: '元技能系统：技能生成/项目转技能/技能链/提示优化。', files: ['neurova/skills/skill_generator.py', 'neurova/skills/project_to_skill.py', 'neurova/skills/skill_chain_executor.py', 'neurova/skills/prompt_optimizer.py'] },
 
   // === 通信通道 ===
   { id: 'channel_mgr',    label: 'ChannelManager',   cat: 'channels',   size: 20, desc: '通道管理器：统一管理14种通信渠道。', files: ['neurova/channels/manager.py'] },
@@ -237,6 +239,7 @@ const nodes = [
   { id: 'websocket',      label: 'WebSocket',        cat: 'channels',   size: 12, desc: 'WebSocket实时通信通道。', files: ['neurova/channels/websocket.py'] },
   { id: 'sip',            label: 'SIP',              cat: 'channels',   size: 10, desc: 'SIP语音通信通道。', files: ['neurova/channels/sip.py'] },
   { id: 'mobile',         label: 'MobilePairing',    cat: 'channels',   size: 10, desc: '移动设备QR码配对通道。', files: ['neurova/channels/mobile_pairing.py'] },
+  { id: 'notifications',  label: 'Notifications',     cat: 'channels',   size: 14, desc: '通知中心：负一屏推送、任务完成自动推送、用户级隔离配置。', files: ['neurova/notifications/manager.py', 'neurova/notifications/negative_screen.py'] },
 
   // === API 层 ===
   { id: 'fastapi_app',    label: 'FastAPI App',      cat: 'api',        size: 22, desc: 'API入口：create_app()创建FastAPI实例，挂载所有路由。', files: ['neurova/api/app.py'] },
@@ -253,6 +256,8 @@ const nodes = [
   { id: 'tool_market',    label: 'ToolMarketplace',  cat: 'tools',      size: 14, desc: '工具市场：工具发现/安装/版本管理。', files: ['neurova/tool_layers/tool_marketplace.py'] },
   { id: 'browser_cap',    label: 'BrowserCapability', cat: 'tools',     size: 12, desc: '浏览器能力：Computer Use视觉控制。', files: ['neurova/computer_use/browser_manager.py', 'neurova/computer_use/vision.py'] },
   { id: 'tool_pipeline',  label: 'ToolPipeline',     cat: 'tools',      size: 12, desc: '工具管线：工具调用前后处理链。', files: ['neurova/agent/tool_pipeline.py'] },
+  { id: 'benchmark',      label: 'Benchmark',        cat: 'tools',      size: 12, desc: '基准测试框架：推理/记忆/工具使用/性能套件。', files: ['neurova/benchmark/__init__.py'] },
+  { id: 'execution_layers', label: 'ExecutionLayers', cat: 'tools',    size: 12, desc: '执行运行时：Local/Docker执行器 + HTTP/WS传输层。', files: ['neurova/execution_layers/__init__.py'] },
 
   // === 前端 UI ===
   { id: 'vue_app',        label: 'Vue3 App',         cat: 'frontend',   size: 22, desc: 'Vue3+TS+Pinia入口：Liquid Glass UI风格。', files: ['NeurUI/src/main.ts', 'NeurUI/src/App.vue'] },
@@ -276,8 +281,9 @@ const nodes = [
   { id: 'logger',         label: 'Logger',           cat: 'infra',      size: 12, desc: '日志系统：分级日志、追踪记录。', files: ['neurova/core/logger.py', 'neurova/core/trace_recorder.py'] },
   { id: 'plugin_sys',     label: 'PluginSystem',     cat: 'infra',      size: 14, desc: '插件系统：插件生命周期/清单/注册。', files: ['neurova/plugins/plugin_manager.py'] },
   { id: 'startup_mgr',    label: 'StartupManager',   cat: 'infra',      size: 12, desc: '启动管理器：系统初始化流程编排。', files: ['neurova/core/startup_manager.py'] },
-  { id: 'firewall',       label: 'Firewall',         cat: 'infra',      size: 12, desc: '防火墙：网络安全策略和访问控制。', files: ['neurova/core/firewall.py'] },
+  { id: 'tool_guard',     label: 'ToolGuard',        cat: 'infra',      size: 12, desc: '安全护栏：工具调用守卫、技能扫描、认知安全。', files: ['neurova/security/tool_guard.py', 'neurova/security/skill_scanner.py'] },
   { id: 'sandbox',        label: 'ThoughtSandbox',   cat: 'infra',      size: 12, desc: '思维沙箱：安全执行隔离环境。', files: ['neurova/sandbox/thought_sandbox.py'] },
+  { id: 'sync',           label: 'SessionSync',      cat: 'infra',      size: 12, desc: '会话同步：多端会话状态同步管理器。', files: ['neurova/sync/session_sync_manager.py'] },
 
   // === 协作系统 ===
   { id: 'neurflow',       label: 'NeurFlow',         cat: 'collab',     size: 18, desc: '工作流引擎：DAG编排/节点注册/变量解析/执行引擎。', files: ['neurova/collaboration/neurflow/execution_engine.py', 'neurova/collaboration/neurflow/dag.py'] },
@@ -418,7 +424,7 @@ const links = [
   { source: 'agent_core', target: 'security',     strength: 1, label: '安全' },
   { source: 'agent_core', target: 'logger',       strength: 1, label: '日志' },
   { source: 'fastapi_app', target: 'startup_mgr', strength: 1, label: '启动' },
-  { source: 'security', target: 'firewall',       strength: 1, label: '防火墙' },
+  { source: 'security', target: 'tool_guard',     strength: 1, label: '安全护栏' },
   { source: 'security', target: 'sandbox',        strength: 1, label: '沙箱' },
   { source: 'config', target: 'database',         strength: 1, label: 'DB配置' },
   { source: 'plugin_sys', target: 'event_bus',    strength: 1, label: '插件事件' },
@@ -437,6 +443,14 @@ const links = [
   { source: 'embedding', target: 'vector_store',  strength: 1, label: '向量化' },
   { source: 'gen_mgr', target: 'image_pipeline',  strength: 1, label: '图像生成' },
   { source: 'context_orch', target: 'context_pool', strength: 1, label: '上下文池' },
+
+  // 近期新增模块
+  { source: 'channel_mgr', target: 'notifications',     strength: 1, label: '推送通知' },
+  { source: 'session_mgr', target: 'session_repo',      strength: 2, label: '会话仓库' },
+  { source: 'session_mgr', target: 'sync',              strength: 1, label: '会话同步' },
+  { source: 'tool_executor', target: 'benchmark',       strength: 1, label: '基准测试' },
+  { source: 'tool_executor', target: 'execution_layers', strength: 1, label: '执行运行时' },
+  { source: 'skill_mgr', target: 'meta_skill',          strength: 1, label: '元技能生成' },
 ];
 
 // ===== 渲染引擎 =====

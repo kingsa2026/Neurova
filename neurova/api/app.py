@@ -654,7 +654,7 @@ async def _on_shutdown(app_state: AppState) -> None:
     for agent_id, agent in app_state.agents.items():
         try:
             if hasattr(agent, "shutdown"):
-                agent.shutdown()
+                await agent.shutdown()
                 logger.info("Agent '%s' shut down", agent_id)
         except Exception as e:
             logger.warning("Agent '%s' shutdown error: %s", agent_id, e)
@@ -742,6 +742,13 @@ def create_app(
         @app.on_event("startup")
         async def startup_event():
             await _on_startup(_app_state)
+            # 将 LLM Provider 同步到全局 LLMRouter，使多模态路由可用（P0-#4）
+            try:
+                from neurova.llm.llm_router import sync_llm_router
+
+                sync_llm_router()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("LLMRouter 同步失败（多模态路由将惰性初始化）: %s", e)
 
         @app.on_event("shutdown")
         async def shutdown_event():

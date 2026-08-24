@@ -404,6 +404,10 @@ class SkillRegistry:
         """获取所有 Skill 名称"""
         return list(self._skills.keys())
 
+    def clear(self) -> None:
+        """清空所有已注册技能（主要用于测试与重置）。"""
+        self._skills.clear()
+
     async def execute_skill(
         self, skill_name: str, params: Dict[str, Any], context: Optional[Dict] = None
     ) -> SkillResult:
@@ -558,9 +562,38 @@ def create_default_skills(memory_manager=None) -> SkillRegistry:
     """
     registry = SkillRegistry()
 
-    # 注册默认 Skill
-    registry.register(MemorySkill(memory_manager))
-    registry.register(WebSearchSkill())
-    registry.register(FileOperationSkill())
+    # 优先使用内置 executor（功能更完整，且文件操作带沙箱路径防护）。
+    # 通过 ExecutorBackedSkill 把同步 executor 桥接为异步 Skill，
+    # 使 execute_skill() 真正调用到这些 executor 的实现。
+    try:
+        from neurova.skills.builtin import create_builtin_executor_skills
+
+        for skill in create_builtin_executor_skills(memory_manager):
+            registry.register(skill)
+    except Exception as exc:
+        logger.warning("内置 executor 注册失败，回退到内置 Skill 子类: %s", exc)
+        registry.register(MemorySkill(memory_manager))
+        registry.register(WebSearchSkill())
+        registry.register(FileOperationSkill())
 
     return registry
+
+
+# ------------------------------------------------------------------
+# 全局单例
+# ------------------------------------------------------------------
+
+_skill_registry_singleton = None
+
+
+def get_skill_registry(memory_manager=None) -> "SkillRegistry":
+    """获取全局 SkillRegistry 单例。
+
+    生产代码（如 neurflow/node_registry.py、adapters.py）通过
+    `from neurova.skill_system import get_skill_registry` 获取默认注册表。
+    首次调用时惰性创建；后续调用（无论是否传 memory_manager）返回同一实例。
+    """
+    global _skill_registry_singleton
+    if _skill_registry_singleton is None:
+        _skill_registry_singleton = create_default_skills(memory_manager)
+    return _skill_registry_singleton

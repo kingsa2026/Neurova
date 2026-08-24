@@ -17,8 +17,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel
+
+from neurova.api.auth import get_current_user_or_default
 
 logger = get_logger(__name__)
 
@@ -261,6 +263,7 @@ def _convert_notification_to_item(notification: Notification) -> NotificationIte
 @router.get("", response_model=List[NotificationItem])
 async def get_notifications(
     request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
     read: Optional[bool] = Query(default=None, description="已读状态筛选"),
     notification_type: Optional[str] = Query(default=None, description="通知类型筛选"),
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
@@ -270,7 +273,7 @@ async def get_notifications(
     try:
         # 获取当前用户（从依赖注入）
         # 这里简化处理，实际应该从请求中获取用户ID
-        user_id = "default_user"  # TODO: 从认证中获取实际用户ID
+        user_id = current_user["user_id"]
 
         # 获取通知管理器
         manager = get_notification_manager()
@@ -295,12 +298,12 @@ async def get_notifications(
 
 
 @router.get("/unread-count")
-async def get_unread_count(request: Request):
+async def get_unread_count(request: Request, current_user: Dict[str, Any] = Depends(get_current_user_or_default)):
     """获取未读通知数量"""
     try:
         # 获取当前用户（从依赖注入）
         # 这里简化处理，实际应该从请求中获取用户ID
-        user_id = "default_user"  # TODO: 从认证中获取实际用户ID
+        user_id = current_user["user_id"]
 
         # 获取通知管理器
         manager = get_notification_manager()
@@ -324,6 +327,7 @@ async def get_unread_count(request: Request):
 @router.put("/{notification_id}/read")
 async def mark_as_read(
     request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
     notification_id: str = Path(..., description="通知ID"),
 ):
     """标记通知已读"""
@@ -332,7 +336,7 @@ async def mark_as_read(
     try:
         # 获取当前用户（从依赖注入）
         # 这里简化处理，实际应该从请求中获取用户ID
-        user_id = "default_user"  # TODO: 从认证中获取实际用户ID
+        user_id = current_user["user_id"]
 
         # 获取通知管理器
         manager = get_notification_manager()
@@ -363,14 +367,14 @@ async def mark_as_read(
 
 
 @router.put("/read-all")
-async def mark_all_as_read(request: Request):
+async def mark_all_as_read(request: Request, current_user: Dict[str, Any] = Depends(get_current_user_or_default)):
     """标记所有通知已读"""
     request_id = _get_request_id(request)
 
     try:
         # 获取当前用户（从依赖注入）
         # 这里简化处理，实际应该从请求中获取用户ID
-        user_id = "default_user"  # TODO: 从认证中获取实际用户ID
+        user_id = current_user["user_id"]
 
         # 获取通知管理器
         manager = get_notification_manager()
@@ -396,6 +400,7 @@ async def mark_all_as_read(request: Request):
 @router.delete("/{notification_id}")
 async def delete_notification(
     request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
     notification_id: str = Path(..., description="通知ID"),
 ):
     """删除通知"""
@@ -404,7 +409,7 @@ async def delete_notification(
     try:
         # 获取当前用户（从依赖注入）
         # 这里简化处理，实际应该从请求中获取用户ID
-        user_id = "default_user"  # TODO: 从认证中获取实际用户ID
+        user_id = current_user["user_id"]
 
         # 获取通知管理器
         manager = get_notification_manager()
@@ -435,14 +440,14 @@ async def delete_notification(
 
 
 @router.get("/push-statistics")
-async def get_push_statistics(request: Request):
+async def get_push_statistics(request: Request, current_user: Dict[str, Any] = Depends(get_current_user_or_default)):
     """获取推送统计"""
     request_id = _get_request_id(request)
 
     try:
         # 获取当前用户（从依赖注入）
         # 这里简化处理，实际应该从请求中获取用户ID
-        user_id = "default_user"  # TODO: 从认证中获取实际用户ID
+        user_id = current_user["user_id"]
 
         # 获取通知管理器
         manager = get_notification_manager()

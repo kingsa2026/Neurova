@@ -446,9 +446,12 @@ class MCPToolClient:
         Returns:
             工具执行结果
         """
-        # 这里应该实现独立的 MCP 协议执行逻辑
-        # 暂时抛出 NotImplementedError
-        raise NotImplementedError("Independent MCP execution not implemented")
+        # 根因修复（P2-#14）: 原先直接抛出 NotImplementedError，调用即崩溃。
+        # 复用底层 MCP 管理器执行（功能等价于 execute_tool，且已通过防火墙/权限校验）。
+        mcp_manager = self._get_mcp_manager()
+        if mcp_manager is None:
+            raise RuntimeError("MCP manager unavailable, cannot execute tool independently")
+        return await mcp_manager.execute_tool(server_id, tool_name, params)
 
 
 class MockMCPManager:

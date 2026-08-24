@@ -128,14 +128,19 @@ def _get_app_state():
 
 
 def load_agents_config() -> Dict[str, Any]:
-    """加载 Agent 配置列表"""
-    config_path = Path("agents.json")
-    if config_path.exists():
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning("Failed to load agents config: %s", e)
+    """加载 Agent 配置列表（固定在项目根目录，避免依赖 CWD）"""
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent / "agents.json",
+        Path("agents.json"),
+    ]
+    for config_path in candidates:
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning("Failed to load agents config: %s", e)
+                return {}
     return {}
 
 
@@ -514,7 +519,8 @@ async def make_decision(
         if body.constraints:
             prompt += f"\n\n约束条件: {', '.join(body.constraints)}"
 
-        response = await agent.chat(user_input=prompt, metadata={"history": []})
+        # S7 修复 (B-2 #10): 不注入 {"history": []},让 agent.chat() 从 session 恢复历史.
+        response = await agent.chat(user_input=prompt)
 
         return {
             "code": 0,

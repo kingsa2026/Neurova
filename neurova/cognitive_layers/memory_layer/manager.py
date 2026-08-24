@@ -1026,6 +1026,20 @@ class MemoryManager:
         return {"memory_id": memory_id, "categories": categories, "tags": tags}
 
     def classify_and_remember(self, content: str, **kwargs) -> str:
+        # 根因修复（P2-#15）: 原先直接 remember 而完全丢弃分类结果。
+        # 先分类，再将分类类别并入 tags，使记忆携带分类信息。
+        try:
+            cls = self.classify_memory(content)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("classify_and_remember 分类失败，仅记忆原文: %s", e)
+            cls = None
+        if isinstance(cls, dict):
+            cats = cls.get("categories") or []
+            if cats:
+                tags = kwargs.get("tags")
+                if not isinstance(tags, list):
+                    tags = []
+                kwargs["tags"] = tags + [str(c) for c in cats]
         return self.remember(content, **kwargs)
 
     # ────── Temperature ──────

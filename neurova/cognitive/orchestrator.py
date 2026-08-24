@@ -22,7 +22,7 @@ def _new_id(prefix: str) -> str:
 
 
 def _now_iso() -> str:
-    return datetime.datetime.utcnow().isoformat() + "Z"
+    return datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z"
 
 
 class AttentionLevel(str, Enum):

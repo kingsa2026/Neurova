@@ -215,11 +215,11 @@ const fetchProvidersAndModels = async () => {
       : (modelsRes as any)?.data ?? (modelsRes as any)?.models ?? []
 
     allModelOptions.value = rawModels
-      .filter((m: any) => m.provider && m.provider !== 'system')
+      .filter((m: any) => m.provider_id && m.provider_id !== 'system')
       .map((m: any) => ({
         value: m.model_id || m.id,
         label: m.name || m.model_id || m.id,
-        provider_id: m.provider,
+        provider_id: m.provider_id,
       }))
   } catch (err: any) {
     console.warn('[AgentFormPage] fetchProvidersAndModels failed:', err)

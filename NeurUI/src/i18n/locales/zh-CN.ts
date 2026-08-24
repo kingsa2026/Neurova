@@ -357,6 +357,15 @@ export default {
     ttsLoading: '合成中...',
     playTTS: '语音播报',
     fileTooLarge: '文件超过50MB限制',
+    // ── 错误提示 keys (chat.loadHistoryFailed toast 异常显示 bug 修复) ──
+    // 旧契约 `t(key) || fallback` 在 vue-i18n 缺失 key 时不工作
+    // (t(missingKey) 返回 key 本身 truthy, || 短路不触发), 显式定义
+    // 这些 keys 确保 fallback 机制正常, toast 显示中文而非 raw key.
+    // 详见 docs/bugfix-delete-session-userid-mismatch.md "i18n fallback resolver".
+    loadHistoryFailed: '加载历史对话失败',
+    deleteSessionFailed: '删除会话失败',
+    createSessionFailed: '创建会话失败',
+    renameFailed: '重命名失败',
   },
   memory: {
     title: '记忆管理',

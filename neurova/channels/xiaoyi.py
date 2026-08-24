@@ -12,7 +12,7 @@ import hmac
 import json
 from neurova.core.logger import get_logger
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -114,7 +114,7 @@ class XiaoYiAdapter(ChannelAdapter):
             path = parsed.path
 
             # 生成时间戳
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             date_str = now.strftime("%Y%m%dT%H%M%SZ")
 
             # 生成随机数

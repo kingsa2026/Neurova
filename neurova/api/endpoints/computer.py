@@ -123,7 +123,7 @@ _action_log: typing.List[dict] = []
 def _log_action(action: str, detail: dict):
     import datetime
 
-    _action_log.append({"action": action, "detail": detail, "timestamp": datetime.datetime.utcnow().isoformat()})
+    _action_log.append({"action": action, "detail": detail, "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()})
     if len(_action_log) > 1000:
         _action_log.pop(0)
 

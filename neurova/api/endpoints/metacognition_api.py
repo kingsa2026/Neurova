@@ -59,7 +59,7 @@ async def get_metacognition_records(
 async def create_metacognition_record(agent_id: str, body: MetacognitionRecordCreate, request: Request):
     """创建一条元认知记录"""
     record_id = str(uuid.uuid4())[:12]
-    now = datetime.datetime.utcnow().isoformat()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     record = {
         "id": record_id,
@@ -99,7 +99,7 @@ async def get_metacognition_stats(agent_id: str, request: Request):
         categories[cat] = categories.get(cat, 0) + 1
 
     # Recent (last 24h)
-    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(hours=24)).isoformat()
+    cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=24)).isoformat()
     recent = sum(1 for r in records if r.get("created_at", "") >= cutoff)
 
     return {

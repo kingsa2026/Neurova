@@ -13,7 +13,7 @@ router = APIRouter()
 @router.get("/recent")
 async def get_recent_memories(days: int = Query(7, ge=1, le=365), limit: int = Query(50, ge=1, le=200)):
     """获取最近N天的记忆"""
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     start = (now - datetime.timedelta(days=days)).isoformat()
     return {
         "code": 0,
@@ -42,7 +42,7 @@ async def get_memories_grouped(
     group_by: str = Query("day", regex="^(day|week|month)$"), days: int = Query(30, ge=1, le=365)
 ):
     """获取记忆时间线（按天/周/月分组）"""
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     groups = []
     for i in range(min(days, 30)):
         d = now - datetime.timedelta(days=i)

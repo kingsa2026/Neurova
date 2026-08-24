@@ -68,7 +68,7 @@ async def list_sandboxes(agent_id: str, status: typing.Optional[str] = None):
 async def start_thought_sandbox(body: SandboxStartRequest):
     """为 Agent 开启思维沙箱"""
     sandbox_id = str(uuid.uuid4())[:12]
-    now = datetime.datetime.utcnow().isoformat()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     sandbox = {
         "sandbox_id": sandbox_id,
@@ -117,21 +117,22 @@ async def execute_step(sandbox_id: str, body: StepRequest):
             prompt = f"[Sandbox: {sandbox['topic']}]\nStep {sandbox['current_step'] + 1}\nInput: {body.input}"
             if body.context:
                 prompt += f"\nContext: {body.context}"
-            result = await agent.chat(prompt, metadata={"history": []})
+            # S7 修复 (B-2 #10): 不注入 {"history": []},让 agent.chat() 从 session 恢复历史.
+            result = await agent.chat(prompt)
             thought = result if isinstance(result, str) else str(result)
-    except Exception:
-        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning("沙箱步骤中 Agent 思考失败，使用占位思考: %s", e)
 
     step_data = {
         "step": sandbox["current_step"] + 1,
         "input": body.input,
         "context": body.context,
         "thought": thought,
-        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
     sandbox["steps"].append(step_data)
     sandbox["current_step"] += 1
-    sandbox["updated_at"] = datetime.datetime.utcnow().isoformat()
+    sandbox["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     return {
         "code": 0,
@@ -149,7 +150,7 @@ async def commit_sandbox(sandbox_id: str, body: SandboxCommitRequest):
 
     sandbox["status"] = "committed"
     sandbox["conclusion"] = body.conclusion
-    sandbox["updated_at"] = datetime.datetime.utcnow().isoformat()
+    sandbox["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     # Try to save to memory
     if body.save_to_memory:

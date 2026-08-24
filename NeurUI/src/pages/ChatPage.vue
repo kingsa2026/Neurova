@@ -421,6 +421,7 @@ import type { ChatMessage, Session, PendingFile } from '@/types/chat'
 import { api } from '@/api'
 import { secureStorage, escapeHtml, sanitizeUrl, sanitizeHtmlStrict } from '@/utils/security'
 import { uiMessage } from '@/utils/message'
+import { resolveI18nMessage } from '@/utils/i18n'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
 
@@ -505,10 +506,22 @@ const {
   switchSession: _switchSession,
   deleteSession: _deleteSession,
   renameSession: _renameSession,
+  // 用户主动调用 switchSession / deleteSession 失败时弹 toast 的错误策略 helper
+  // (#2 / ADR 0008 函数调用库契约的一部分 — switchSession / deleteSession 本身
+  //  不弹 toast, 调用方按需调 notifySwitchFailure / notifyDeleteFailure;
+  //  副作用调用方如 loadSessions/createSession 不调).
+  notifySwitchFailure: _notifySwitchFailure,
+  notifyDeleteFailure: _notifyDeleteFailure,
   loadingSessions,
   switchingSession,
 } = useChat({
-  errorMessage: (key, fallback) => t(key) || fallback,
+  // 修复 chat.loadHistoryFailed toast 异常显示 bug:
+  // 旧契约 `t(key) || fallback` 在 vue-i18n 缺失 key 时不工作 —
+  // vue-i18n Composition API (legacy: false) 在缺失 key 时返回 key 字符串
+  // 本身 (truthy), 导致 `|| fallback` 短路求值不触发, toast 显示 raw key.
+  // resolveI18nMessage 用 `t(key) === key` 检测缺失翻译信号, 缺失时返回 fallback.
+  // 详见 docs/bugfix-delete-session-userid-mismatch.md "i18n fallback resolver" 小节.
+  errorMessage: (key, fallback) => resolveI18nMessage(t, key, fallback),
   onError: (msg) => uiMessage.error(msg),
 })
 
@@ -522,9 +535,18 @@ async function createSession(): Promise<void> {
   await _createSession(agentId.value, t('chat.newChat'))
 }
 
-/** 切换会话,补充 scrollToBottom UI 副作用(历史加载后滚到底部)。 */
+/**
+ * 切换会话 (用户主动点击侧栏 session 项):
+ *   1. 调 useChat.switchSession — 返回 SwitchResult (不弹 toast)
+ *   2. 用户主动场景 → 调 notifySwitchFailure,历史加载失败时弹 toast
+ *   3. 补充 scrollToBottom UI 副作用 (历史加载后滚到底部)
+ *
+ * 注: loadSessions/createSession/deleteSession 内部自动切换不弹 toast
+ * (副作用场景), 不调 notifySwitchFailure — 详见 useChat.ts 的 silent 契约.
+ */
 async function switchSession(sessionId: string): Promise<void> {
-  await _switchSession(sessionId)
+  const result = await _switchSession(sessionId)
+  _notifySwitchFailure(result)
   scrollToBottom()
 }
 
@@ -544,9 +566,10 @@ async function confirmRename(): Promise<void> {
   if (ok) renameModal.open = false
 }
 
-/** 删除会话,委托给 useChat.deleteSession。 */
+/** 删除会话,委托给 useChat.deleteSession; 失败时弹 toast 让用户感知. */
 async function deleteSession(sessionId: string): Promise<void> {
-  await _deleteSession(sessionId)
+  const result = await _deleteSession(sessionId)
+  _notifyDeleteFailure(result)
 }
 
 // ---------------------------------------------------------------------------

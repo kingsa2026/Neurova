@@ -147,7 +147,7 @@ async def build_agent(body: BuildRequest, request):
     """创建 Agent 实例"""
     user_id = getattr(request.state, "user_id", "anonymous")
     agent_id = str(uuid.uuid4())[:12]
-    now = datetime.datetime.utcnow().isoformat()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     # Resolve template
     template = None

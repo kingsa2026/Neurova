@@ -376,7 +376,7 @@ async def get_channel_weights(intent: str = Query(default="exploratory")):
 @router.post("/decay")
 async def decay_activations():
     """手动触发激活衰减"""
-    now = datetime.datetime.utcnow().isoformat()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     return {"code": 0, "message": "Activation decay triggered", "data": {"triggered_at": now, "affected_count": 0}}
 
 

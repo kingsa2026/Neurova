@@ -14,10 +14,12 @@ import typing
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
+from typing import Any, Dict
 
+from neurova.api.deps import require_admin
 from neurova.api.endpoints import get_agent_instance
 from neurova.session_repository import get_session_repository
 
@@ -121,20 +123,12 @@ async def post_console_chat(body: ChatRequest, request: Request):
     else:
         session_id = repo.create_session(agent_id=agent_id, user_id=user_id, title="新对话")
 
-    # 追加用户消息到历史
-    repo.save_message(
-        agent_id=agent_id,
-        session_id=session_id,
-        role="user",
-        content=body.message,
-        metadata={"timestamp": datetime.datetime.utcnow().isoformat()},
-    )
-
-    # Bug B-2 修复:不强制传空历史给 agent。
-    # 原代码 history_for_agent = [] 导致 LLM 缺对话上下文,
-    # 工具参数因指代不清而错误(如"搜一下他"不知道"他"是谁)。
-    # 现在不传 history metadata,让 agent.chat() 自己从 session 恢复历史。
-    # 历史已通过 repo.save_message 持久化,前端展示不受影响。
+    # S1 修复 (Critical #1 双写冲突): console 不再调 repo.save_message.
+    # 持久化完全委托给 ChatPipeline._step_save_session → _save_to_session →
+    # sm.add_message (成对原子写入 user+assistant).
+    # 原代码 console + pipeline 各自独立写 session 文件,单次对话后
+    # messages 数组含 4 条 [user, user, assistant, assistant].
+    # Bug B-2 修复:不强制传空历史给 agent,让 agent.chat() 自己从 session 恢复历史.
 
     # Try to get agent for real response
     reply = ""
@@ -143,7 +137,14 @@ async def post_console_chat(body: ChatRequest, request: Request):
     try:
         agent = get_agent_instance(agent_id=body.agent_id or "default")
         if agent:
-            response = await agent.chat(body.message, session_id=session_id)
+            # WARN #3 修复: 传 metadata={"user_id": user_id}.
+            # 原代码不传 metadata,ChatPipeline 用 "anonymous" 兜底,
+            # 导致记忆保存/事件广播拿不到真实 user_id.
+            response = await agent.chat(
+                body.message,
+                session_id=session_id,
+                metadata={"user_id": user_id},
+            )
             if isinstance(response, dict):
                 reply = response.get("text", str(response))
                 reasoning = response.get("reasoning")
@@ -156,20 +157,8 @@ async def post_console_chat(body: ChatRequest, request: Request):
         logger.warning("Console chat error: %s", e, exc_info=True)
         reply = f"Error: {str(e)}"
 
-    # 追加 assistant 消息到历史
-    assistant_metadata = {"timestamp": datetime.datetime.utcnow().isoformat()}
-    if reasoning:
-        assistant_metadata["reasoning"] = reasoning
-    if tool_messages:
-        assistant_metadata["tool_messages"] = tool_messages
-    repo.save_message(
-        agent_id=agent_id,
-        session_id=session_id,
-        role="assistant",
-        content=reply,
-        metadata=assistant_metadata,
-    )
-
+    # S1: assistant_metadata 仅用于 SSE event_stream (reasoning/tool_messages 展示),
+    # 不再传给 repo.save_message (持久化由 pipeline 负责).
     if body.stream:
 
         async def event_stream():
@@ -230,7 +219,16 @@ async def post_console_chat_new(request: Request):
     """创建新会话"""
     user_id = _get_user_id(request)
     repo = get_session_repository()
-    session_id = repo.create_session(agent_id="", user_id=user_id, title="新对话")
+    agent_id = ""
+    title = "新对话"
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if isinstance(body, dict):
+        agent_id = body.get("agent_id") or ""
+        title = body.get("title") or "新对话"
+    session_id = repo.create_session(agent_id=agent_id, user_id=user_id, title=title)
     return {"code": 0, "message": "Session created", "data": {"session_id": session_id}}
 
 
@@ -263,7 +261,13 @@ async def delete_chat_session(session_id: str, request: Request):
     target = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
     if not target:
         raise HTTPException(status_code=404, detail="Session not found")
-    if target[0].get("user_id") != user_id:
+    # user_id 校验与 SessionManager.list_sessions (session_manager.py:598) 过滤逻辑一致:
+    # 空 user_id (None 或 "") 视为"共享", 允许任何已认证用户删除.
+    # 修复 "看得到删不掉" 死锁 — list 端点宽松过滤让空 user_id 的 session 对所有用户可见,
+    # delete 端点必须一致地允许删除, 否则用户能在列表看到却无法删除.
+    # 详见 docs/bugfix-delete-session-userid-mismatch.md
+    target_user_id = target[0].get("user_id") or ""
+    if target_user_id and user_id and target_user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
     agent_id = target[0].get("agent_id", "")
     repo.delete_session(agent_id=agent_id, session_id=session_id)
@@ -279,12 +283,14 @@ async def rename_chat_session(session_id: str, body: RenameSessionRequest, reque
     """重命名指定会话"""
     user_id = _get_user_id(request)
     repo = get_session_repository()
-    # 查找 session 验证 user_id
+    # 查找 session 验证 user_id（与 delete_chat_session 保持一致：空 user_id 视为共享，
+    # 允许任何已认证用户重命名，避免"看得到改不了"的死锁，P2-#20）。
     sessions = repo.list_sessions()
     target = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
     if not target:
         raise HTTPException(status_code=404, detail="Session not found")
-    if target[0].get("user_id") != user_id:
+    target_user_id = target[0].get("user_id") or ""
+    if target_user_id and user_id and target_user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
     agent_id = target[0].get("agent_id", "")
     new_title = body.title.strip() or target[0].get("title", "新对话")
@@ -311,7 +317,7 @@ async def post_console_upload(request: Request, file: UploadFile = File(...)):
         "size": len(content),
         "content_type": file.content_type or "application/octet-stream",
         "path": str(dest),
-        "uploaded_at": datetime.datetime.utcnow().isoformat(),
+        "uploaded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
     return {"code": 0, "message": "File uploaded", "data": file_info}
 
@@ -387,15 +393,19 @@ async def get_system_status():
     except Exception:
         status = {
             "note": "psutil not available, showing basic info",
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
     return {"code": 0, "message": "success", "data": status}
 
 
 @router.post("/debug/command")
-async def post_debug_run_command(body: CommandRequest):
-    """运行调试命令"""
-    allowed = {"ls", "pwd", "echo", "whoami", "date", "env", "python --version", "node --version"}
+async def post_debug_run_command(
+    body: CommandRequest, current_user: Dict[str, Any] = Depends(require_admin())
+):
+    """运行调试命令（仅限管理员，避免任意命令执行 / 密钥泄露）"""
+    # 注意： deliberately 排除 `env` —— 它会泄露全部环境变量（含密钥/令牌），
+    # 属安全敏感命令，绝不允许通过 HTTP 调试接口执行（P1-#7）。
+    allowed = {"ls", "pwd", "echo", "whoami", "date", "python --version", "node --version"}
     cmd = body.command.strip()
     if cmd not in allowed and not any(cmd.startswith(a) for a in ["echo "]):
         raise HTTPException(status_code=403, detail=f"Command '{cmd}' not allowed. Allowed: {sorted(allowed)}")

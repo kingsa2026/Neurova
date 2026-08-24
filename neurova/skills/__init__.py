@@ -169,6 +169,21 @@ except ImportError as _e:
     _logger.debug("skills.skill_service 模块未可用: %s", _e)
     SkillService = None
 
+# 技能注册表工厂（从被遮蔽的 neurova.skill_system 包加载）
+# 使 `from neurova.skills import create_default_skills / get_skill_registry /
+# SkillRegistry` 可用，作为技能子系统的统一外观入口。
+try:
+    from neurova.skill_system import (
+        SkillRegistry,
+        create_default_skills,
+        get_skill_registry,
+    )
+except ImportError as _e:
+    _logger.debug("skill registry 导出失败 (neurova.skill_system 未可用): %s", _e)
+    SkillRegistry = None
+    create_default_skills = None
+    get_skill_registry = None
+
 try:
     pass
 except ImportError as _e:

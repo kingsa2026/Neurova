@@ -330,6 +330,15 @@ export default {
     ttsLoading: 'Synthesizing...',
     playTTS: 'Read Aloud',
     fileTooLarge: 'File exceeds 50MB limit',
+    // ── Error message keys (chat.loadHistoryFailed toast bug fix) ──
+    // Explicit definitions ensure resolveI18nMessage helper returns the
+    // translated string (not the raw key) when these are referenced by
+    // notifySwitchFailure / notifyDeleteFailure / createSession / renameSession.
+    // See docs/bugfix-delete-session-userid-mismatch.md "i18n fallback resolver".
+    loadHistoryFailed: 'Failed to load chat history',
+    deleteSessionFailed: 'Failed to delete session',
+    createSessionFailed: 'Failed to create session',
+    renameFailed: 'Failed to rename session',
   },
   memory: {
     title: 'Memory Management',

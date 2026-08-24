@@ -547,8 +547,8 @@ class SubSystemContainer:
                 from neurova.voice_pipeline import get_voice_pipeline
 
                 a.voice_pipeline = get_voice_pipeline()
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001
+                logger.warning("语音管线初始化失败（可选，已跳过）: %s", e)
 
         a.voice_memory_bridge = None
         if (c.enable_tts or c.enable_asr) and a.memory_manager:
@@ -749,8 +749,8 @@ class SubSystemContainer:
             from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
 
             a.neurflow_executor = get_workflow_executor()
-        except ImportError:
-            pass
+        except ImportError as e:
+            logger.warning("NeurFlow 工作流执行器不可用（可选，已跳过）: %s", e)
 
         a.chat_pipeline = ChatPipeline(a)
 
@@ -877,7 +877,7 @@ class Agent:
             media_to_request_type = {
                 "image": LLMRequestType.IMAGE_UNDERSTANDING,
                 "voice": LLMRequestType.AUDIO_UNDERSTANDING,
-                "video": LLMRequestType.VIDEO_GENERATION,  # 视频理解暂用同类型
+                "video": LLMRequestType.VIDEO_UNDERSTANDING,  # 视频理解
                 "document": LLMRequestType.CHAT,  # 文档走普通聊天
             }
             request_type = media_to_request_type.get(media_type, LLMRequestType.CHAT)
@@ -898,9 +898,7 @@ class Agent:
             logger.warning("多模态模型选择失败，使用当前模型: %s", e)
 
         # 2. 构建多模态上下文描述
-        metadata.get("media_url", "")
         filename = metadata.get("filename", "")
-        metadata.get("mime_type", "")
         audio_bytes = metadata.get("audio_bytes")  # 语音消息可能包含音频数据
 
         media_descriptions = {
@@ -997,7 +995,22 @@ class Agent:
 
     @property
     def skill_registry(self) -> Optional[SkillRegistry]:
-        """获取 Skill 注册中心"""
+        """获取 Skill 注册中心（懒初始化兼容层）
+
+        若尚未绑定则通过 create_default_skills() 创建默认注册表，
+        保证 memory/web_search/file_operation 等内置 skill 可用。
+        """
+        if self._skill_registry is None:
+            try:
+                from neurova.skill_system import create_default_skills
+                self._skill_registry = create_default_skills(
+                    memory_manager=getattr(self, "memory_manager", None)
+                )
+            except Exception as _e:
+                logger.warning(
+                    "Agent %s: 懒初始化 SkillRegistry 失败: %s", self.config.name, _e
+                )
+                self._skill_registry = None
         return self._skill_registry
 
     @skill_registry.setter
@@ -1005,6 +1018,57 @@ class Agent:
         """设置 Skill 注册中心"""
         self._skill_registry = value
         logger.info("Agent %s 已绑定 SkillRegistry", self.config.name)
+
+    @property
+    def skill_manifest_provider(self) -> "SkillManifestProvider":
+        """获取 Skill 清单 Provider（懒初始化）"""
+        provider = getattr(self, "_skill_manifest_provider", None)
+        if provider is None:
+            from neurova.skills.manifest_provider import SkillManifestProvider
+            from neurova.skills.manifest_source import (
+                LocalBuiltinSource,
+                RemoteHubSource,
+            )
+            provider = SkillManifestProvider(
+                sources=[LocalBuiltinSource(), RemoteHubSource()]
+            )
+            self._skill_manifest_provider = provider
+        return self._skill_manifest_provider
+
+    @skill_manifest_provider.setter
+    def skill_manifest_provider(self, value) -> None:
+        """设置 Skill 清单 Provider（支持注入 mock 用于测试）"""
+        self._skill_manifest_provider = value
+
+    def get_skill_manifest(self) -> list:
+        """按需拉取 Skill 清单（委托给 skill_manifest_provider）"""
+        return self.skill_manifest_provider.list_manifests()
+
+    def load_skill(self, skill_id: str, factory=None):
+        """按需实例化并缓存 Skill
+
+        - 已缓存则直接返回；
+        - 提供 factory 时由 factory(agent=self) 创建并缓存；
+        - 无 factory 时回退到 skill_registry.get_skill()。
+        """
+        cache = getattr(self, "_loaded_skills", None)
+        if cache is None:
+            cache = {}
+            self._loaded_skills = cache
+        if skill_id in cache:
+            return cache[skill_id]
+        if factory is None:
+            registry = self.skill_registry
+            if registry is None:
+                return None
+            skill = registry.get_skill(skill_id)
+            if skill is None:
+                return None
+            cache[skill_id] = skill
+            return skill
+        skill = factory(agent=self)
+        cache[skill_id] = skill
+        return skill
 
     def _load_identity(self):
         """加载 Agent 身份和性格"""

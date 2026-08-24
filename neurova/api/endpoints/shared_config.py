@@ -48,7 +48,7 @@ _shared_config: dict = {
     "llm_providers": {},
     "mcp_servers": {},
     "general": {"debug": False, "log_level": "info", "max_tokens": 4096},
-    "updated_at": datetime.datetime.utcnow().isoformat(),
+    "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }
 
 
@@ -69,7 +69,7 @@ async def get_shared_config():
 async def update_shared_config(body: dict):
     """更新共享配置（完整替换）"""
     global _shared_config
-    body["updated_at"] = datetime.datetime.utcnow().isoformat()
+    body["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     _shared_config = body
     return {"code": 0, "message": "Config updated", "data": _shared_config}
 
@@ -92,10 +92,10 @@ async def add_llm_provider(body: LLMProviderRequest):
         raise HTTPException(status_code=409, detail=f"Provider '{name}' already exists")
 
     provider = safe_model_dump(body)  # s9: pydantic v1 兼容
-    provider["created_at"] = datetime.datetime.utcnow().isoformat()
+    provider["created_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     provider["updated_at"] = provider["created_at"]
     _shared_config["llm_providers"][name] = provider
-    _shared_config["updated_at"] = datetime.datetime.utcnow().isoformat()
+    _shared_config["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     logger.info("Added LLM provider: %s", name)
     return {"code": 0, "message": "Provider added", "data": provider}
@@ -117,10 +117,10 @@ async def update_llm_provider(name: str, body: LLMProviderRequest):
         raise HTTPException(status_code=404, detail=f"Provider '{name}' not found")
 
     provider = safe_model_dump(body)  # s9: pydantic v1 兼容
-    provider["updated_at"] = datetime.datetime.utcnow().isoformat()
+    provider["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     provider["created_at"] = _shared_config["llm_providers"][name].get("created_at", provider["updated_at"])
     _shared_config["llm_providers"][name] = provider
-    _shared_config["updated_at"] = datetime.datetime.utcnow().isoformat()
+    _shared_config["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     return {"code": 0, "message": "Provider updated", "data": provider}
 
@@ -131,7 +131,7 @@ async def delete_llm_provider(name: str):
     if name not in _shared_config["llm_providers"]:
         raise HTTPException(status_code=404, detail=f"Provider '{name}' not found")
     del _shared_config["llm_providers"][name]
-    _shared_config["updated_at"] = datetime.datetime.utcnow().isoformat()
+    _shared_config["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     return {"code": 0, "message": "Provider deleted"}
 
 
@@ -153,10 +153,10 @@ async def add_mcp_server(body: MCPServerRequest):
         raise HTTPException(status_code=409, detail=f"MCP server '{name}' already exists")
 
     server = safe_model_dump(body)  # s9: pydantic v1 兼容
-    server["created_at"] = datetime.datetime.utcnow().isoformat()
+    server["created_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     server["updated_at"] = server["created_at"]
     _shared_config["mcp_servers"][name] = server
-    _shared_config["updated_at"] = datetime.datetime.utcnow().isoformat()
+    _shared_config["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     logger.info("Added MCP server: %s", name)
     return {"code": 0, "message": "MCP server added", "data": server}
@@ -178,10 +178,10 @@ async def update_mcp_server(name: str, body: MCPServerRequest):
         raise HTTPException(status_code=404, detail=f"MCP server '{name}' not found")
 
     server = safe_model_dump(body)  # s9: pydantic v1 兼容
-    server["updated_at"] = datetime.datetime.utcnow().isoformat()
+    server["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     server["created_at"] = _shared_config["mcp_servers"][name].get("created_at", server["updated_at"])
     _shared_config["mcp_servers"][name] = server
-    _shared_config["updated_at"] = datetime.datetime.utcnow().isoformat()
+    _shared_config["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     return {"code": 0, "message": "MCP server updated", "data": server}
 
@@ -192,7 +192,7 @@ async def delete_mcp_server(name: str):
     if name not in _shared_config["mcp_servers"]:
         raise HTTPException(status_code=404, detail=f"MCP server '{name}' not found")
     del _shared_config["mcp_servers"][name]
-    _shared_config["updated_at"] = datetime.datetime.utcnow().isoformat()
+    _shared_config["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     return {"code": 0, "message": "MCP server deleted"}
 
 
@@ -217,7 +217,7 @@ async def import_config(body: ImportConfigRequest):
     """导入完整的共享配置"""
     global _shared_config
     if body.overwrite:
-        body.config["updated_at"] = datetime.datetime.utcnow().isoformat()
+        body.config["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         _shared_config = body.config
     else:
         # Merge
@@ -226,6 +226,6 @@ async def import_config(body: ImportConfigRequest):
                 _shared_config[key].update(body.config[key])
         if "general" in body.config:
             _shared_config["general"].update(body.config["general"])
-        _shared_config["updated_at"] = datetime.datetime.utcnow().isoformat()
+        _shared_config["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     return {"code": 0, "message": "Config imported", "data": {"overwrite": body.overwrite}}

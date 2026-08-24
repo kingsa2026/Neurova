@@ -168,7 +168,7 @@ async def auto_update_agent_skills(request):
             installed[skill_id] = latest
             updated.append({"skill_id": skill_id, "old_version": current_ver, "new_version": latest})
 
-            notif_id = f"notif-{skill_id}-{int(datetime.datetime.utcnow().timestamp())}"
+            notif_id = f"notif-{skill_id}-{int(datetime.datetime.now(datetime.timezone.utc).timestamp())}"
             _NOTIFICATIONS_STORE.setdefault(user_id, []).append(
                 {
                     "id": notif_id,
@@ -178,7 +178,7 @@ async def auto_update_agent_skills(request):
                     "new_version": latest,
                     "message": f"{skill_id} updated from {current_ver} to {latest}",
                     "read": False,
-                    "created_at": datetime.datetime.utcnow().isoformat(),
+                    "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 }
             )
 

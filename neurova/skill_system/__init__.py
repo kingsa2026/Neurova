@@ -105,6 +105,28 @@ def __getattr__(name: str) -> Any:
             _sys.modules.pop(_cache_key, None)
             raise
         return _mod.create_default_skills
+    elif name == "get_skill_registry":
+        # 候选: 从被遮蔽的 skill_system.py 加载单例工厂。
+        # 生产代码（neurflow/node_registry.py、adapters.py）依赖
+        # `from neurova.skill_system import get_skill_registry`，此前未在代理中
+        # 暴露，导致导入失败；与 create_default_skills/SkillRegistry 复用同一
+        # standalone 模块缓存。
+        import importlib.util as _iu
+        import os as _os
+        import sys as _sys
+        _cache_key = "neurova.skill_system_module_standalone"
+        if _cache_key in _sys.modules:
+            return _sys.modules[_cache_key].get_skill_registry
+        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
+        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
+        _mod = _iu.module_from_spec(_spec)
+        _sys.modules[_cache_key] = _mod
+        try:
+            _spec.loader.exec_module(_mod)
+        except Exception:
+            _sys.modules.pop(_cache_key, None)
+            raise
+        return _mod.get_skill_registry
     elif name == "SkillRegistryProtocol":
         # 候选 1: 从被遮蔽的 skill_system.py 加载 Protocol(架构深化)
         import importlib.util as _iu

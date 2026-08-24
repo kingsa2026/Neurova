@@ -30,6 +30,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import RLock
 from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
@@ -53,14 +54,15 @@ def run_async_safely(coro):
     except RuntimeError:
         # 无运行中的事件循环 — 直接运行
         return asyncio.run(coro)
-    # 处于运行中的事件循环内 — 在独立线程中运行，避免嵌套 asyncio.run
+    # 处于运行中的事件循环内 — 在现有事件循环上线程安全地调度协程，
+    # 避免新建事件循环（新建循环会导致协程内创建的子任务绑定到错误循环而失败，P2-#17）。
+    loop = asyncio.get_running_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, coro)
-            return future.result()
+        return future.result()
     except Exception:
-        # 异常路径: 协程可能未被 asyncio.run 消费, 显式 close 避免泄漏
-        # (asyncio.run 已消费的协程, close() 是 no-op, 无副作用)
+        # 异常路径: 协程未被消费, 显式 close 避免泄漏
+        # (run_coroutine_threadsafe 未消费的协程, close() 是 no-op, 无副作用)
         coro.close()
         raise
 
@@ -157,6 +159,9 @@ class MemCore:
 
     def __init__(self, agent_ref):
         self._agent = agent_ref
+        # S5 修复 (Critical #6): 保护 update_history 的 read-modify-write.
+        # conversation_history 是裸 list,无锁并发修改会 lost update.
+        self._history_lock = RLock()
 
     # ---- 属性代理（方便内部访问） ----
     @property
@@ -309,6 +314,7 @@ class MemCore:
             self.memory_manager = MemoryManager(
                 db_path,
                 agent_id=self.config.agent_id,
+                neuser_id=neuser_id,
                 user_id=user_id,
             )
             self.storage = getattr(self.memory_manager, "storage", None)
@@ -512,6 +518,15 @@ class MemCore:
             logger.warning("记忆检索失败: %s", e)
             return []
 
+    def unified_experience_recall(self, query: str, limit: int = 5) -> List[Dict]:
+        """统一经验召回
+
+        检索与用户输入相关的历史经验记忆。经验以记忆形式统一存储，
+        因此复用 MemCore.recall 的检索通道（自动刷新缓冲区并优先使用
+        recall_engine / MoE 路由器）。
+        """
+        return self.recall(query, limit)
+
     def get_memories(self, limit: int = 100, offset: int = 0) -> List[Dict]:
         """获取记忆列表（用于 API 端点）
 
@@ -678,40 +693,36 @@ class MemCore:
             agent_response: Agent 回复
 
         Notes:
-            优先使用 agent._conversation_context（ConversationContext deep module），
-            集中 invariant：role 校验 + 自动 trim + 线程安全。
-            若 _conversation_context 不存在（旧路径），fallback 到裸 list 操作。
+            S5 修复 (Critical #6): 整体方法体由 _history_lock 保护,
+            防止并发 update_history 调用的 read-modify-write 跨锁边界.
+            D3 修复 (ADR 0008 候选 #6): 删除 fallback 路径,
+            agent._conversation_context 是必填的 (由 Agent.init_conversation 初始化).
+            未初始化时显式抛 RuntimeError,杜绝 split-brain 风险.
         """
-        try:
+        # S5: 整个 read-modify-write 在 _history_lock 内,保证原子性
+        with self._history_lock:
             ctx = getattr(self._agent, "_conversation_context", None)
+            if ctx is None:
+                # D3: 不再走兼容分支,显式失败要求先 init_conversation()
+                raise RuntimeError(
+                    "Agent 未初始化 _conversation_context;请调用 agent.init_conversation() "
+                    "后再使用 update_history()。 D3 删除 fallback 路径以消除 split-brain 风险."
+                )
+
             now_iso = datetime.now(UTC).isoformat()
 
-            if ctx is not None:
-                # Deep module 路径：invariant 由 ConversationContext 保证
-                # 先同步现有 list 到 ctx（处理外部直接操作 list 的情况）
-                current_list = getattr(self._agent, "conversation_history", [])
-                if current_list and len(current_list) != len(ctx):
-                    ctx.clear()
-                    ctx.extend(current_list)
-                ctx.append("user", user_input, metadata={"timestamp": now_iso})
-                ctx.append("assistant", agent_response, metadata={"timestamp": now_iso})
-                # 同步回 list（保持兼容）
-                self._agent.conversation_history = ctx.to_list()
-            else:
-                # Fallback 路径：裸 list 操作（兼容旧 Agent 未初始化 _conversation_context）
-                self.conversation_history.append(
-                    {"role": "user", "content": user_input, "timestamp": now_iso}
-                )
-                self.conversation_history.append(
-                    {"role": "assistant", "content": agent_response, "timestamp": now_iso}
-                )
-                max_history = 100
-                if len(self.conversation_history) > max_history:
-                    self.conversation_history = self.conversation_history[-max_history:]
+            # Deep module 路径:invariant 由 ConversationContext 保证
+            # 先同步现有 list 到 ctx (处理外部直接操作 list 的情况)
+            current_list = getattr(self._agent, "conversation_history", [])
+            if current_list and len(current_list) != len(ctx):
+                ctx.clear()
+                ctx.extend(current_list)
+            ctx.append("user", user_input, metadata={"timestamp": now_iso})
+            ctx.append("assistant", agent_response, metadata={"timestamp": now_iso})
+            # 同步回 list (保持兼容)
+            self._agent.conversation_history = ctx.to_list()
 
-            logger.debug("对话历史已更新: 长度=%s", len(self.conversation_history))
-        except Exception as e:
-            logger.warning("对话历史更新失败: %s", e)
+            logger.debug("对话历史已更新: 长度=%s", len(self._agent.conversation_history))
 
     # ══════════════════════════════════════════════════════════════
     # Session 文件保存（B5 闭环修复：GAP-3）

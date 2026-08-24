@@ -128,8 +128,8 @@ async def run_benchmark(body: BenchmarkRunRequest, request: Request):
         "avg_latency_ms": latency_ms,
         "tags": body.tags,
         "config": body.config or {},
-        "started_at": datetime.datetime.utcnow().isoformat(),
-        "completed_at": datetime.datetime.utcnow().isoformat(),
+        "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
 
     _RUNS_STORE[run_id] = run_data

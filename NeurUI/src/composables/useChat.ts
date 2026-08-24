@@ -5,6 +5,7 @@ import { useChatStore } from '@/stores/chat'
 import type { ChatMessage, Session } from '@/types/chat'
 import bus from '@/bus'
 
+
 /**
  * useChat — composable that wires the chat store to backend session APIs.
  *
@@ -22,6 +23,34 @@ import bus from '@/bus'
  *   - chat:session-renamed   { sessionId, title }
  *   - chat:session-switched  { sessionId }
  */
+
+/**
+ * switchSession 的执行结果类型.
+ *
+ * 架构契约: switchSession 不再内部决定错误策略 (是否弹 toast), 仅返回 ok/error.
+ * 错误策略由调用方 own:
+ *   - 副作用调用 (loadSessions 自动选第一个 / createSession 创建后切换 /
+ *     deleteSession 删除后切换): 仅 console.error, 不弹 toast
+ *   - 用户主动调用 (ChatPage.switchSession wrapper): 调 notifySwitchFailure
+ *
+ * 替换原 `silent: boolean` 浅参数模式 — 接口不再泄漏调用上下文, 决策空间
+ * 留给调用方. 详见 docs/bugfix-delete-session-toast.md "架构深化" 小节.
+ */
+export type SwitchResult = { ok: true } | { ok: false; error: unknown }
+
+/**
+ * deleteSession 的执行结果类型.
+ *
+ * 架构契约: 与 SwitchResult 平行 — deleteSession 不再内部弹 toast, 仅返回
+ * ok/error. 错误策略由调用方 own:
+ *   - 副作用调用 (无): 无
+ *   - 用户主动调用 (ChatPage.deleteSession wrapper): 调 notifyDeleteFailure
+ *
+ * 替换原 `Promise<boolean>` 浅返回模式 — 旧契约吞错 (catch 块 `return false`
+ * 不调 onError) 导致 UI 无反馈 (chat.deleteSessionFailed bug).
+ * 详见 docs/bugfix-delete-session-userid-mismatch.md "前端错误反馈策略深化" 小节.
+ */
+export type DeleteResult = { ok: true } | { ok: false; error: unknown }
 
 export interface UseChatOptions {
   /** i18n error message resolver, e.g. (key, fallback) => t(key) || fallback */
@@ -61,6 +90,9 @@ export function useChat(options: UseChatOptions = {}) {
       )
       store.setSessions(mapped)
       if (store.sessions.length > 0 && !store.currentSessionId) {
+        // 副作用调用: 自动选第一个 session. switchSession 返回失败结果但
+        // loadSessions 静默消费 (不调 notifySwitchFailure), 避免页面加载时
+        // auto-select 历史失败弹 toast 让用户误以为加载失败 (chat.loadHistoryFailed).
         await switchSession(store.sessions[0].id)
       }
     } catch {
@@ -77,14 +109,28 @@ export function useChat(options: UseChatOptions = {}) {
    */
   async function createSession(agentId: string, defaultTitle: string = '新对话'): Promise<string | null> {
     try {
-      const res: any = await api.post('/console/chat/new')
+      const res: any = await api.post('/console/chat/new', { agent_id: agentId, title: defaultTitle })
       const data = res?.data ?? res
-      const newId: string = data?.session_id || data?.id || crypto.randomUUID()
+      // 幽灵 session 防御 (chat.loadHistoryFailed toast 根因修复):
+      // 旧契约 fallback `|| crypto.randomUUID()` 会生成前端 UUID, 后端不知道,
+      // 存到 store 后用户点击 GET /history → 404 → toast "加载历史对话失败".
+      // 新契约: 后端不返回 session_id 时返回 null + 弹 toast, 不创建幽灵 session.
+      // 详见 docs/bugfix-delete-session-userid-mismatch.md "幽灵 session 自愈".
+      const newId: string | undefined = data?.session_id || data?.id
+      if (!newId) {
+        console.error('[Chat] Create session failed: backend response missing session_id', res)
+        const msg = options.errorMessage?.('chat.createSessionFailed', '创建会话失败') ?? '创建会话失败'
+        options.onError?.(msg)
+        return null
+      }
       const newSession: Session = {
         id: newId,
-        title: `${defaultTitle} - ${new Date().toLocaleString()}`,
+        title: defaultTitle,
       }
       store.addSession(newSession)
+      // 副作用调用: 创建成功后自动切换. switchSession 返回失败结果但
+      // createSession 静默消费 (不调 notifySwitchFailure), 因为创建已成功,
+      // 历史加载失败不应掩盖创建结果.
       await switchSession(newId)
       bus.emit('chat:session-created', { sessionId: newId, agentId })
       return newId
@@ -99,8 +145,18 @@ export function useChat(options: UseChatOptions = {}) {
   /**
    * Switch to a session: set it as current, clear messages, and load its
    * history from the backend.
+   *
+   * 契约: 本函数不弹 toast, 仅返回 SwitchResult. 错误策略 (是否提示用户)
+   * 由调用方决定:
+   *   - 副作用调用 (loadSessions/createSession/deleteSession 内部自动切换):
+   *     仅消费 result, 不调 notifySwitchFailure → 静默
+   *   - 用户主动调用 (ChatPage.switchSession wrapper 包装点击): 调
+   *     notifySwitchFailure(result) → 失败时弹 toast
+   *
+   * 这是原 `silent: boolean` 浅参数模式的深化替代 — 接口不再泄漏调用
+   * 上下文, 决策权交还调用方.
    */
-  async function switchSession(sessionId: string): Promise<void> {
+  async function switchSession(sessionId: string): Promise<SwitchResult> {
     store.setCurrentSession(sessionId)
     store.clearMessages()
     switchingSession.value = true
@@ -152,13 +208,39 @@ export function useChat(options: UseChatOptions = {}) {
       })
       store.setMessages(mapped)
       bus.emit('chat:session-switched', { sessionId })
+      return { ok: true }
     } catch (err) {
       console.error('[Chat] Failed to load history:', err)
-      const msg = options.errorMessage?.('chat.loadHistoryFailed', '加载历史对话失败') ?? '加载历史对话失败'
-      options.onError?.(msg)
       store.clearMessages()
+      // 幽灵 session 自愈 (chat.loadHistoryFailed toast 根因修复):
+      // 404 表示后端不存在该 session (例如前端 UUID fallback 残留 / 后端
+      // session 文件被删), 自动从 store 移除, 避免用户反复点击触发 toast.
+      // 非 404 错误 (如 500 服务器故障 / 网络错误) 保留 session, 因为可能重试成功.
+      // 详见 docs/bugfix-delete-session-userid-mismatch.md "幽灵 session 自愈".
+      const status = (err as any)?.response?.status
+      if (status === 404) {
+        store.removeSession(sessionId)
+        if (store.currentSessionId === sessionId) {
+          store.setCurrentSession(null)
+        }
+      }
+      return { ok: false, error: err }
     } finally {
       switchingSession.value = false
+    }
+  }
+
+  /**
+   * 用户主动切换场景的错误策略: 历史加载失败时弹 toast.
+   *
+   * 仅 ChatPage.switchSession wrapper (用户点击侧栏 session 项) 应调用此函数.
+   * 副作用调用 (loadSessions/createSession/deleteSession 内部自动切换) 不调,
+   * 避免让用户误以为主操作失败.
+   */
+  function notifySwitchFailure(result: SwitchResult): void {
+    if (!result.ok) {
+      const msg = options.errorMessage?.('chat.loadHistoryFailed', '加载历史对话失败') ?? '加载历史对话失败'
+      options.onError?.(msg)
     }
   }
 
@@ -166,8 +248,16 @@ export function useChat(options: UseChatOptions = {}) {
    * Delete a session on the backend and update the store. If the deleted
    * session was active, switch to the first remaining session (or clear
    * current session if none remain).
+   *
+   * 契约: 本函数不弹 toast, 仅返回 DeleteResult. 错误策略 (是否提示用户)
+   * 由调用方决定:
+   *   - 副作用调用 (无): 无
+   *   - 用户主动调用 (ChatPage.deleteSession wrapper): 调 notifyDeleteFailure
+   *
+   * 这是原 `Promise<boolean>` 浅返回模式的深化替代 — 旧契约 catch 块
+   * `return false` 吞错, 让 UI 无反馈 (chat.deleteSessionFailed bug).
    */
-  async function deleteSession(sessionId: string): Promise<boolean> {
+  async function deleteSession(sessionId: string): Promise<DeleteResult> {
     try {
       await deleteConsoleSession(sessionId)
       store.removeSession(sessionId)
@@ -175,14 +265,32 @@ export function useChat(options: UseChatOptions = {}) {
         store.setCurrentSession(null)
         store.clearMessages()
         if (store.sessions.length > 0) {
+          // 副作用调用: 删除后自动切换. switchSession 不再 toast,
+          // 失败结果由 deleteSession 静默消费 (不调 notifySwitchFailure),
+          // 避免让用户误以为删除失败.
           await switchSession(store.sessions[0].id)
         }
       }
       bus.emit('chat:session-deleted', { sessionId })
-      return true
+      return { ok: true }
     } catch (err) {
       console.error('[Chat] Delete session failed:', err)
-      return false
+      return { ok: false, error: err }
+    }
+  }
+
+  /**
+   * 用户主动删除场景的错误策略: 删除失败时弹 toast.
+   *
+   * 仅 ChatPage.deleteSession wrapper (用户点击删除菜单项) 应调用此函数.
+   * 副作用调用 (无) 不调, 避免误提示.
+   *
+   * 与 notifySwitchFailure 平行 — 错误策略集中, 调用方 own toast 决策.
+   */
+  function notifyDeleteFailure(result: DeleteResult): void {
+    if (!result.ok) {
+      const msg = options.errorMessage?.('chat.deleteSessionFailed', '删除会话失败') ?? '删除会话失败'
+      options.onError?.(msg)
     }
   }
 
@@ -217,5 +325,8 @@ export function useChat(options: UseChatOptions = {}) {
     switchSession,
     deleteSession,
     renameSession,
+    // error policy helpers — 仅用户主动调用方调用 (ChatPage wrappers)
+    notifySwitchFailure,
+    notifyDeleteFailure,
   }
 }
