@@ -199,13 +199,13 @@ const fetchAnalytics = async () => {
   try {
     const range = timeRange.value
     const [perfRes, behaviorRes, errorRes] = await Promise.all([
-      analyticsApi.getPerformanceStats(range),
-      analyticsApi.getBehaviorStats(range),
-      analyticsApi.getErrorStats(range),
+      analyticsApi.getPerformanceAnalytics({ period: range }),
+      analyticsApi.getBehaviorAnalytics({ period: range }),
+      analyticsApi.getErrorAnalytics({ period: range }),
     ])
-    perfData.value = perfRes ?? {}
-    behaviorData.value = behaviorRes ?? {}
-    errorData.value = errorRes ?? {}
+    perfData.value = (perfRes?.data ?? {}) as Record<string, any>
+    behaviorData.value = (behaviorRes?.data ?? {}) as Record<string, any>
+    errorData.value = (errorRes?.data ?? {}) as Record<string, any>
   } catch {
     // silent
   }

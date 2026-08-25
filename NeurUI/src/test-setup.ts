@@ -1,6 +1,6 @@
 import { config } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { vi } from 'vitest'
+import { beforeEach, vi } from 'vitest'
 
 // Setup Pinia for all tests
 beforeEach(() => {

@@ -15,7 +15,7 @@ from neurova.core.logger import get_logger
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
@@ -372,3 +372,278 @@ async def get_collaboration_history(
     except Exception as e:
         logger.exception("Error getting collaboration history: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to get collaboration history: {str(e)}")
+
+
+@router.get("/sessions")
+async def list_collaboration_sessions(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    """获取协作会话列表（由协作项目派生，data 为 JSON 数组，供前端 store 直接消费）"""
+    if get_collaboration_manager is None:
+        raise HTTPException(status_code=503, detail="Collaboration service not available")
+
+    try:
+        manager = get_collaboration_manager()
+        projects = manager.list_projects(limit=limit, offset=offset)
+
+        sessions = []
+        for project in projects:
+            sessions.append(
+                {
+                    "id": project.project_id,
+                    "name": project.name,
+                    "description": project.description,
+                    "status": project.status.value if hasattr(project.status, "value") else str(project.status),
+                    "created_at": project.created_at,
+                    "updated_at": project.updated_at,
+                    "members": list(project.members.keys()),
+                    "owner_id": project.owner_id,
+                }
+            )
+
+        return {"code": 0, "message": "success", "data": sessions}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error listing collaboration sessions: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to list collaboration sessions: {str(e)}")
+
+
+@router.get("/stats")
+async def get_collaboration_stats(request: Request):
+    """协作概览统计：项目/模板/进行中会话/工作流 计数"""
+    if get_collaboration_manager is None:
+        raise HTTPException(status_code=503, detail="Collaboration service not available")
+
+    try:
+        manager = get_collaboration_manager()
+        projects = manager.list_projects()
+
+        active_sessions = 0
+        total_workflows = 0
+        for project in projects:
+            status_value = (
+                project.status.value if hasattr(project.status, "value") else str(project.status)
+            )
+            if status_value == "active":
+                active_sessions += 1
+            try:
+                workflows = manager.list_project_workflows(project.project_id)
+                total_workflows += len(workflows or [])
+            except Exception as e:  # noqa: BLE001 - 单项目统计失败不影响整体
+                logger.debug("统计项目 %s 工作流失败: %s", project.project_id, e)
+
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "projects": len(projects),
+                # 模板与项目同源（见 /templates 的派生逻辑）
+                "templates": len(projects),
+                # 进行中的协作会话数 = 处于 active 状态的项目数
+                "sessions": active_sessions,
+                "workflows": total_workflows,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error getting collaboration stats: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to get collaboration stats: {str(e)}")
+
+
+# ── 画布（Canvas Designer） ────────────────────────────────────
+
+
+def _get_canvas_store():
+    from neurova.collaboration.canvas_store import get_canvas_store
+
+    return get_canvas_store()
+
+
+@router.post("/canvas")
+async def create_canvas(request: Request, payload: Dict[str, Any] = Body(...)):
+    """创建画布快照，返回带 id 的完整记录"""
+    try:
+        record = _get_canvas_store().create(payload)
+        return {"code": 0, "message": "success", "data": record}
+    except Exception as e:
+        logger.exception("Error creating canvas: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to create canvas: {str(e)}")
+
+
+@router.get("/canvas")
+async def list_canvases(request: Request):
+    """画布摘要列表（不含节点数据），按更新时间倒序——前端"我的画布"入口"""
+    try:
+        items = _get_canvas_store().list()
+        return {"code": 0, "message": "success", "data": items}
+    except Exception as e:
+        logger.exception("Error listing canvases: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to list canvases: {str(e)}")
+
+
+@router.get("/canvas/{canvas_id}")
+async def get_canvas_detail(request: Request, canvas_id: str):
+    """读取画布快照"""
+    record = _get_canvas_store().get(canvas_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
+    return {"code": 0, "message": "success", "data": record}
+
+
+@router.put("/canvas/{canvas_id}")
+async def update_canvas_detail(
+    request: Request, canvas_id: str, payload: Dict[str, Any] = Body(...)
+):
+    """更新画布快照"""
+    record = _get_canvas_store().update(canvas_id, payload)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
+    return {"code": 0, "message": "success", "data": record}
+
+
+@router.delete("/canvas/{canvas_id}")
+async def delete_canvas_detail(request: Request, canvas_id: str):
+    """删除画布快照（工作流=画布工作流，删除即删除该工作流）"""
+    deleted = _get_canvas_store().delete(canvas_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
+    return {"code": 0, "message": "success", "data": {"id": canvas_id, "deleted": True}}
+
+
+@router.post("/comfyui/import-canvas")
+async def import_comfyui_as_canvas(request: Request, payload: Dict[str, Any] = Body(...)):
+    """导入 ComfyUI 工作流 JSON 直接落为画布快照
+
+    工作流 = 无限画布工作流：导入结果是一张可编辑画布，
+    而非独立的 neurflow 工作流定义（定义只是执行时的内部编译产物）。
+    Body: {name, description?, workflow: ComfyUI API JSON}
+    """
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="缺少工作流名称")
+    comfy_workflow = payload.get("workflow")
+    if not isinstance(comfy_workflow, dict) or not comfy_workflow:
+        raise HTTPException(status_code=400, detail="缺少 ComfyUI 工作流 JSON")
+
+    try:
+        from neurova.collaboration.neurflow.comfyui_importer import import_comfyui_workflow
+        from neurova.collaboration.neurflow.node_registry import get_node_registry
+        from neurova.collaboration.canvas_bridge import definition_to_canvas
+
+        try:
+            from neurova.collaboration.neurflow import comfyui_nodes
+
+            comfyui_nodes.register_comfyui_nodes(get_node_registry())
+        except Exception:  # noqa: BLE001 - comfyui 节点注册失败不阻断导入（端口留空）
+            logger.warning("comfyui 节点注册失败，导入画布端口为空", exc_info=True)
+
+        definition = import_comfyui_workflow(
+            comfy_workflow, name=name, description=str(payload.get("description") or "")
+        )
+        snapshot = definition_to_canvas(definition, name=name)
+        snapshot.pop("metadata", None)
+        record = _get_canvas_store().create(snapshot)
+        return {"code": 0, "message": "success", "data": record}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Error importing comfyui canvas: %s", e)
+        raise HTTPException(status_code=500, detail=f"导入画布失败: {str(e)}")
+
+
+@router.post("/canvas/{canvas_id}/run")
+async def run_canvas_workflow(request: Request, canvas_id: str, body: Dict[str, Any] = None):
+    """执行画布工作流（画布快照 → neurflow WorkflowDefinition → 执行引擎）
+
+    Body（可选）: {"session_id": "聊天会话ID"} —— 工作流内 agent 节点派生的
+    子 Agent 事件将广播到该会话（聊天页子 Agent 小窗的数据源）。
+
+    返回: {runId: neurflow execution_id, status}，用
+    GET /canvas/{canvas_id}/runs/{run_id} 轮询执行状态。
+    """
+    record = _get_canvas_store().get(canvas_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
+
+    body = body or {}
+    session_id = body.get("session_id")
+
+    try:
+        from neurova.collaboration.canvas_bridge import canvas_to_workflow
+        from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
+
+        workflow = canvas_to_workflow(record, name=record.get("name") or canvas_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"画布转换失败: {str(e)}")
+
+    executor = get_workflow_executor()
+    execution = executor.create_instance(workflow, inputs={}, user_id="canvas")
+
+    # 后台执行（立即返回 execution_id 供前端轮询；session_id 透传给蜂群事件）
+    import asyncio
+
+    asyncio.create_task(
+        executor.execute(
+            workflow,
+            inputs={},
+            user_id="canvas",
+            agent_id=body.get("agent_id"),
+            session_id=session_id,
+            instance=execution,
+        )
+    )
+
+    return {
+        "code": 0,
+        "message": "accepted",
+        "data": {
+            "runId": execution.id,
+            "status": "running",
+            "workflow_id": workflow.id,
+        },
+    }
+
+
+@router.get("/canvas/{canvas_id}/runs/{run_id}")
+async def get_canvas_run_status(canvas_id: str, run_id: str):
+    """查询画布运行状态（代理 neurflow execution）"""
+    from neurova.collaboration.neurflow.execution_engine import (
+        ExecutionStatus,
+        get_workflow_executor,
+    )
+
+    executor = get_workflow_executor()
+    instance = executor._instances.get(run_id)
+    if instance is None:
+        raise HTTPException(status_code=404, detail=f"运行不存在: {run_id}")
+
+    engine_status = executor.get_status(run_id)
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "run_id": run_id,
+            "canvas_id": canvas_id,
+            "status": engine_status.value if hasattr(engine_status, "value") else str(engine_status),
+            "node_results": {
+                nid: {
+                    "status": r.status,
+                    "output": r.output,
+                    "error": r.error,
+                    "duration": r.duration,
+                }
+                for nid, r in (instance.node_results or {}).items()
+            },
+            "outputs": instance.outputs or {},
+            "error": instance.error,
+            "duration": instance.duration,
+        },
+    }

@@ -43,6 +43,13 @@ def _get_tool_engine_class():
     return _ToolEngine
 
 
+def _get_approval_manager():
+    """获取审批管理器（模块级函数，便于测试注入）。"""
+    from neurova.security.approval_manager import get_approval_manager
+
+    return get_approval_manager()
+
+
 class ToolExecutor:
     """统一工具执行器
 
@@ -444,7 +451,8 @@ class ToolExecutor:
         """
         return await self._execute_single_tool(tool_name, params)
 
-    async def _execute_single_tool(self, tool_name: str, params: Dict) -> Dict:
+    async def _execute_single_tool(self, tool_name: str, params: Dict,
+                                   skip_governance: bool = False) -> Dict:
         """
         执行单个工具（内部实现，含四级回退链）
 
@@ -456,6 +464,7 @@ class ToolExecutor:
         Args:
             tool_name: 工具名称
             params: 参数
+            skip_governance: 跳过治理预检（仅供审批通过后的重放使用）
 
         Returns:
             执行结果
@@ -465,6 +474,14 @@ class ToolExecutor:
         result = None
         tool_source = "unknown"
         try:
+            # 方案 P0-1.5: 统一治理预检 —— DENY 拦截、SANDBOX 隔离执行、
+            # ASK 待确认；ALLOW / 无裁决内容返回 None 放行。
+            precheck = (None if skip_governance
+                        else self._governance_precheck(tool_name, params))
+            if precheck is not None:
+                result = precheck
+                return result
+
             # 优先使用 ToolEngine（如果可用）
             if self.tool_engine:
                 try:
@@ -529,6 +546,137 @@ class ToolExecutor:
                 # 不让钩子异常吞掉工具执行结果，但必须记录堆栈
                 logger.exception("on_tool_executed 钩子失败: %s", tool_name)
 
+    def _governance_precheck(self, tool_name: str, params: Dict) -> Optional[Dict]:
+        """
+        执行前统一治理预检（方案 P0-1.5 集成点）。
+
+        覆盖所有执行路径（ToolEngine/builtin/skill/router），对携带
+        命令或文件路径的工具做四级裁决：allow / deny / ask / sandbox。
+
+        Returns:
+            None: 放行（无可裁决内容，或裁决为 ALLOW）。
+            Dict: DENY/SANDBOX/ASK 的替代结果，调用方应直接返回。
+        """
+        try:
+            from neurova.security.governance import GovernanceDecision, get_governance
+        except Exception:
+            return None  # 治理模块不可用时放行（可选依赖）
+
+        if not isinstance(params, dict):
+            return None
+
+        command = ""
+        for key in ("command", "code"):
+            value = params.get(key)
+            if isinstance(value, str) and value.strip():
+                command = value
+                break
+        file_path = params.get("file_path") or params.get("path")
+        file_path = file_path if isinstance(file_path, str) and file_path else None
+
+        # 无可裁决内容（如 memory_search / screenshot 等），直接放行
+        if not command and not file_path:
+            return None
+
+        try:
+            verdict = get_governance().evaluate(
+                command=command,
+                tool_name=tool_name,
+                user_id=getattr(self._agent, "user_id", None),
+                file_paths=file_path,
+            )
+        except Exception as e:
+            logger.warning("治理预检异常，放行 %s: %s", tool_name, e)
+            return None
+
+        self._audit_governance(tool_name, verdict.to_dict(), params)
+
+        if verdict.decision == GovernanceDecision.DENY:
+            logger.warning("治理拦截工具 %s: %s", tool_name, "; ".join(verdict.reasons))
+            return {
+                "success": False,
+                "error": "被治理策略拦截: " + "; ".join(verdict.reasons),
+                "governance": verdict.to_dict(),
+            }
+
+        if verdict.decision == GovernanceDecision.SANDBOX:
+            if command:
+                from neurova.sandbox.exec_sandbox import execute_in_sandbox
+
+                sandbox_result = execute_in_sandbox(command, severity=verdict.severity)
+                sandbox_result["governance"] = verdict.to_dict()
+                return sandbox_result
+            # 文件类操作暂无文件系统沙箱后端：降级为阻止并说明原因
+            logger.warning("文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s", file_path)
+            return {
+                "success": False,
+                "error": "该文件位置受保护，已阻止访问: " + "; ".join(verdict.reasons),
+                "governance": verdict.to_dict(),
+            }
+
+        if verdict.decision == GovernanceDecision.ASK:
+            # ASK 语义：创建待审批记录（metadata 存完整调用供批准后重放），
+            # 前端据 approval_id 弹出确认框
+            approval_id = self._create_approval_request(tool_name, params, verdict)
+            return {
+                "success": False,
+                "pending_approval": True,
+                "approval_id": approval_id,
+                "tool_name": tool_name,
+                "params": params,
+                "error": "操作待用户确认: " + "; ".join(verdict.reasons),
+                "governance": verdict.to_dict(),
+            }
+
+        return None  # ALLOW 放行
+
+    def _create_approval_request(self, tool_name: str, params: Dict, verdict) -> Optional[str]:
+        """为 ASK 裁决创建待审批请求；失败不阻断主流程（返回 None 走原语义）。"""
+        try:
+            am = _get_approval_manager()
+            command = str(params.get("command") or params.get("code") or "")
+            request = am.create_approval_request(
+                agent_id=str(getattr(self._agent, "agent_id", "") or "default"),
+                user_id=str(getattr(self._agent, "user_id", "") or ""),
+                command=command or f"{tool_name}({params})",
+                description=f"工具 {tool_name} 待人工确认",
+                danger_reason="; ".join(verdict.reasons),
+                metadata={
+                    "tool_name": tool_name,
+                    "params": params,
+                    "governance": verdict.to_dict(),
+                },
+            )
+            return getattr(request, "request_id", None)
+        except Exception as e:  # noqa: BLE001 - 审批系统故障时保持可用
+            logger.warning("创建审批请求失败，ASK 降级为直接拒绝: %s", e)
+            return None
+
+    def _audit_governance(self, tool_name: str, governance_info: Dict, params: Dict) -> None:
+        """记录治理裁决到审计日志；任何失败不影响工具执行。"""
+        try:
+            from neurova.security.audit_logger import (
+                AuditEventType,
+                AuditLogEntry,
+                AuditLogger,
+            )
+
+            decision = governance_info.get("decision", "unknown")
+            AuditLogger().log(
+                AuditLogEntry(
+                    event_type=(
+                        AuditEventType.TOOL_EXECUTION
+                        if decision == "allow"
+                        else AuditEventType.SECURITY_EVENT
+                    ),
+                    user_id=str(getattr(self._agent, "user_id", "") or ""),
+                    action=f"governance:{decision}",
+                    details={"tool": tool_name, "governance": governance_info},
+                )
+            )
+        except Exception:
+            logger.debug("治理审计日志写入失败: %s", tool_name, exc_info=True)
+
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
         """执行内置工具"""
         # 简单的内置工具实现
@@ -564,8 +712,69 @@ class ToolExecutor:
             return await self._execute_voice_memory_search(params)
         elif tool_name in ("run_code", "execute_code"):
             return await self._execute_run_code(params)
+        elif tool_name == "spawn_subagent":
+            return await self._execute_spawn_subagent(params)
+        elif tool_name == "subagent_status":
+            return await self._execute_subagent_status(params)
+        elif tool_name == "list_agents":
+            return await self._execute_list_agents(params)
         else:
             return {"error": f"未知内置工具: {tool_name}"}
+
+    # ── 蜂群工具（SwarmManager 深度模块的薄封装） ────────────────
+
+    async def _execute_spawn_subagent(self, params: Dict) -> Dict:
+        """蜂群派生子 Agent 执行任务"""
+        from neurova.agent.swarm import get_swarm_manager
+
+        task = params.get("task", "")
+        if not task:
+            return {"error": "缺少 task 参数"}
+
+        swarm = get_swarm_manager()
+        return await swarm.spawn(
+            task=str(task),
+            agent_id=params.get("agent_id") or None,
+            session_id=getattr(self._agent, "_current_session_id", None),
+            background=bool(params.get("background", False)),
+            origin="chat",
+            stream=True,
+            initiator_agent=self._agent,
+        )
+
+    async def _execute_subagent_status(self, params: Dict) -> Dict:
+        """查询后台子 Agent 状态/结果"""
+        from neurova.agent.swarm import get_swarm_manager
+
+        subagent_id = params.get("subagent_id", "")
+        if not subagent_id:
+            return {"error": "缺少 subagent_id 参数"}
+        return get_swarm_manager().status(subagent_id)
+
+    async def _execute_list_agents(self, params: Dict) -> Dict:
+        """列出可用 Agent（供蜂群派生时挑选执行者）"""
+        agents_info = []
+        try:
+            from neurova.api.endpoints import get_app_state
+
+            state = get_app_state()
+            agents = (state or {}).get("agents", {}) or {}
+            for aid, agent in agents.items():
+                if agent is None:
+                    continue
+                cfg = getattr(agent, "config", None)
+                llm_cfg = getattr(cfg, "llm_config", None)
+                agents_info.append(
+                    {
+                        "agent_id": aid,
+                        "name": getattr(cfg, "name", aid),
+                        "description": (getattr(cfg, "description", "") or "")[:120],
+                        "model": getattr(llm_cfg, "model", "") if llm_cfg else "",
+                    }
+                )
+        except ImportError:
+            return {"error": "Agent 注册中心不可用"}
+        return {"agents": agents_info, "count": len(agents_info)}
 
     async def _execute_web_search(self, params: Dict) -> Dict:
         """执行网页搜索"""

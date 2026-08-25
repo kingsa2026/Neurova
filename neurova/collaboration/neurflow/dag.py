@@ -19,6 +19,15 @@ class CycleResult:
     message: str = ""
 
 
+def is_loop_back_edge(edge: WorkflowEdge) -> bool:
+    """判断是否为 loop 回边（body 出口回到 loop 节点的 loop_body 端口）。
+
+    回边是循环语义的一部分：判环/拓扑排序时豁免，由执行引擎按迭代驱动。
+    其余任何环仍然拒绝（防误放行）。
+    """
+    return getattr(edge, "target_handle", None) == "loop_body"
+
+
 @dataclass
 class SortResult:
     """拓扑排序结果"""
@@ -62,12 +71,12 @@ class CycleDetector:
         if not nodes:
             return CycleResult(has_cycle=False)
 
-        # 构建邻接表
+        # 构建邻接表（豁免 loop 回边——回边是循环语义，不参与判环）
         graph: Dict[str, List[str]] = defaultdict(list)
         node_ids = {n.id for n in nodes}
 
         for edge in edges:
-            if edge.source in node_ids and edge.target in node_ids:
+            if edge.source in node_ids and edge.target in node_ids and not is_loop_back_edge(edge):
                 graph[edge.source].append(edge.target)
 
         # Tarjan 算法状态
@@ -153,12 +162,12 @@ class TopologicalSorter:
 
         node_ids = {n.id for n in nodes}
 
-        # 构建邻接表和入度表
+        # 构建邻接表和入度表（豁免 loop 回边——由引擎按迭代驱动）
         graph: Dict[str, List[str]] = defaultdict(list)
         in_degree: Dict[str, int] = {n.id: 0 for n in nodes}
 
         for edge in edges:
-            if edge.source in node_ids and edge.target in node_ids:
+            if edge.source in node_ids and edge.target in node_ids and not is_loop_back_edge(edge):
                 graph[edge.source].append(edge.target)
                 in_degree[edge.target] += 1
 

@@ -601,8 +601,8 @@ async function fetchDefaultConfig() {
   try {
     const res = await getSettings()
     const settings = res?.data
-    if (settings?.default_provider) defaultConfig.provider_id = settings.default_provider
-    if (settings?.default_model) defaultConfig.model_id = settings.default_model
+    if (settings?.llm?.default_provider) defaultConfig.provider_id = settings.llm.default_provider
+    if (settings?.llm?.default_model) defaultConfig.model_id = settings.llm.default_model
   } catch {
     message.error(t('common.error'))
   }

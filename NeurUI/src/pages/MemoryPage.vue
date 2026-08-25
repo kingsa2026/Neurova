@@ -123,6 +123,9 @@
         <a-checkbox v-model:checked="semanticSearch" class="semantic-toggle">
           {{ t('memory.semanticSearch') || 'Semantic Search' }}
         </a-checkbox>
+        <a-button class="md-edit-btn" @click="openMarkdownEditor">
+          📝 Markdown 查看/编辑
+        </a-button>
       </div>
     </GlassCard>
 
@@ -336,11 +339,41 @@
         </a-upload>
       </a-form>
     </a-modal>
+
+    <!-- Markdown view/edit modal (P1 记忆可解释性) -->
+    <a-modal
+      v-model:open="mdModal.open"
+      title="📝 记忆 Markdown 查看/编辑"
+      width="860px"
+      :confirm-loading="mdModal.saving"
+      ok-text="保存修改"
+      cancel-text="关闭"
+      @ok="saveMarkdownEdits"
+    >
+      <div class="md-toolbar">
+        <a-button size="small" :loading="mdModal.loading" @click="openMarkdownEditor">
+          ↻ 重新导出
+        </a-button>
+        <span class="md-hint">
+          可直接编辑正文文本；保存时仅应用文本变更，向量索引不受影响。
+        </span>
+      </div>
+      <a-textarea
+        v-model:value="mdModal.markdown"
+        class="md-editor"
+        :rows="22"
+        placeholder="正在加载记忆导出..."
+      />
+      <div v-if="mdModal.lastStats" class="md-stats">
+        上次保存：更新 {{ mdModal.lastStats.updated }} 条 · 未变更 {{ mdModal.lastStats.unchanged }} 条 ·
+        缺失 {{ mdModal.lastStats.missing }} 条 · 冲突 {{ mdModal.lastStats.conflicts ?? 0 }} 条
+      </div>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
@@ -385,6 +418,61 @@ const showImportModal = ref(false)
 const selectedMemory = ref<any>(null)
 const importJson = ref('')
 const importMergeMode = ref<'skip' | 'overwrite' | 'merge'>('skip')
+
+// Markdown 查看/编辑（P1 记忆可解释性）
+const mdModal = reactive({
+  open: false,
+  loading: false,
+  saving: false,
+  markdown: '',
+  lastStats: null as { updated: number; unchanged: number; missing: number; conflicts?: number } | null,
+})
+
+/** 打开弹窗并导出当前 Agent 记忆为可读 Markdown */
+async function openMarkdownEditor(): Promise<void> {
+  mdModal.open = true
+  mdModal.loading = true
+  try {
+    const resp: any = await memoryApi.exportMemoryMarkdown(agentId.value || undefined)
+    const payload = resp?.data ?? resp
+    mdModal.markdown = payload?.data?.markdown ?? ''
+    if (!mdModal.markdown) message.warning('该 Agent 暂无可导出的记忆')
+  } catch (e) {
+    console.error('[MemoryPage] export markdown failed:', e)
+    message.error('导出失败，请稍后重试')
+  } finally {
+    mdModal.loading = false
+  }
+}
+
+/** 提交编辑后的 Markdown；后端版本化 diff 后仅写回文本层 */
+async function saveMarkdownEdits(): Promise<void> {
+  if (mdModal.saving) return
+  mdModal.saving = true
+  try {
+    const resp: any = await memoryApi.importMemoryMarkdown(
+      mdModal.markdown,
+      agentId.value || undefined
+    )
+    const payload = resp?.data ?? resp
+    mdModal.lastStats = payload?.data?.stats ?? null
+    const stats = mdModal.lastStats
+    if (stats && stats.updated > 0) {
+      message.success(`已更新 ${stats.updated} 条记忆`)
+      fetchMemories()
+      fetchStats()
+    } else if (stats && (stats.conflicts ?? 0) > 0) {
+      message.warning(`检测到 ${stats.conflicts} 条并发冲突，未覆盖`)
+    } else {
+      message.info('没有需要应用的修改')
+    }
+  } catch (e) {
+    console.error('[MemoryPage] import markdown failed:', e)
+    message.error('保存失败，请稍后重试')
+  } finally {
+    mdModal.saving = false
+  }
+}
 
 // Stats from API
 const memoryStats = ref<MemoryStats | null>(null)
@@ -544,13 +632,15 @@ const fetchMemories = async () => {
 const createMemory = async () => {
   creating.value = true
   try {
-    await memoryApi.createMemory({
-      agent_id: agentId.value,
-      content: createForm.value.content,
-      type: createForm.value.type,
-      importance: createForm.value.importance,
-      tags: createForm.value.tags.length > 0 ? createForm.value.tags : undefined,
-    })
+    await memoryApi.createMemory(
+      {
+        content: createForm.value.content,
+        type: createForm.value.type,
+        importance: createForm.value.importance,
+        tags: createForm.value.tags.length > 0 ? createForm.value.tags : undefined,
+      },
+      agentId.value,
+    )
     message.success(t('common.success'))
     showCreateModal.value = false
     createForm.value = { content: '', type: 'short_term', category: 'general', importance: 0.5, tags: [] }
@@ -859,6 +949,34 @@ onMounted(() => {
 
 .semantic-toggle {
   font-size: 13px;
+  color: var(--nr-text-secondary);
+}
+
+/* Markdown view/edit modal (P1) */
+.md-edit-btn {
+  margin-left: auto;
+}
+
+.md-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.md-hint {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+}
+
+.md-editor {
+  font-family: var(--nr-font-mono, monospace);
+  font-size: 12px;
+}
+
+.md-stats {
+  margin-top: 8px;
+  font-size: 12px;
   color: var(--nr-text-secondary);
 }
 

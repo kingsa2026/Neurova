@@ -91,7 +91,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listFiles, uploadFile, getFileContent, getFileVersions, deleteFile } from '@/api/modules/files'
+import { listFiles, uploadFile, getFileContent, getFileVersions, deleteFile as deleteFileApi } from '@/api/modules/files'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
@@ -210,7 +210,7 @@ const deleteFile = (id: string) => {
     content: t('agent.deleteConfirm'),
     onOk: async () => {
       try {
-        await deleteFile(id)
+        await deleteFileApi(id)
         message.success(t('common.success'))
         await fetchFiles()
       } catch {

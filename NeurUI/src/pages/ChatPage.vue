@@ -338,6 +338,16 @@
           </GlassButton>
         </div>
       </div>
+
+      <!-- 蜂群子 Agent 对话小窗（右下角堆叠，可最小化） -->
+      <div class="subagent-window-stack">
+        <SubAgentPanel
+          v-for="win in subAgentWindows"
+          :key="win.subagentId"
+          :state="win"
+          @close="closeSubAgentWindow"
+        />
+      </div>
     </main>
 
     <!-- Right Panel: Conversation History (main layout mode) -->
@@ -405,6 +415,36 @@
         @update:model-value="renameModal.title = $event"
       />
     </a-modal>
+
+    <!-- Governance Approval Modal (P0: ASK 人工确认) -->
+    <a-modal
+      v-model:open="approvalModal.open"
+      title="⚠️ 操作需要确认"
+      :confirm-loading="approvalModal.loading"
+      ok-text="批准执行"
+      cancel-text="拒绝"
+      @ok="confirmApproval"
+      @cancel="rejectApproval"
+    >
+      <div class="approval-body">
+        <div class="approval-field">
+          <span class="approval-label">工具</span>
+          <a-tag color="orange">{{ approvalModal.toolName || '未知' }}</a-tag>
+        </div>
+        <div v-if="approvalModal.command" class="approval-field">
+          <span class="approval-label">内容</span>
+          <pre class="approval-command">{{ approvalModal.command }}</pre>
+        </div>
+        <div v-if="approvalModal.reason" class="approval-field">
+          <span class="approval-label">原因</span>
+          <span class="approval-reason">{{ approvalModal.reason }}</span>
+        </div>
+        <a-checkbox v-model:checked="approvalAddWhitelist">
+          批准并加入白名单（此后同类命令免确认）
+        </a-checkbox>
+        <p class="approval-hint">该操作被安全策略标记为需人工确认，请核实后再放行。</p>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -419,11 +459,18 @@ import { useChatStore } from '@/stores/chat'
 import { useChat } from '@/composables/useChat'
 import type { ChatMessage, Session, PendingFile } from '@/types/chat'
 import { api } from '@/api'
+import {
+  approveRequest as apiApproveRequest,
+  rejectRequest as apiRejectRequest,
+  addWhitelistEntry,
+} from '@/api/modules/governance'
 import { secureStorage, escapeHtml, sanitizeUrl, sanitizeHtmlStrict } from '@/utils/security'
 import { uiMessage } from '@/utils/message'
 import { resolveI18nMessage } from '@/utils/i18n'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
+import SubAgentPanel, { type SubAgentWindowState } from '@/components/chat/SubAgentPanel.vue'
+import { useSessionSync } from '@/composables/useSessionSync'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -464,6 +511,46 @@ const pendingFiles = ref<PendingFile[]>([])
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const historyPanelOpen = ref(true)
 
+// ---------------------------------------------------------------------------
+// 蜂群子 Agent 小窗：订阅会话 WS 事件（subagent_started/chunk/completed），
+// 每个子 Agent 一个可最小化的浮动小窗
+// ---------------------------------------------------------------------------
+const subAgentWindows = ref<Record<string, SubAgentWindowState>>({})
+
+function onSessionSyncEvent(event: { event_type: string; payload: Record<string, unknown> }) {
+  const p = event.payload as Record<string, string>
+  const sid = p?.subagent_id
+  if (!sid) return
+  if (event.event_type === 'subagent_started') {
+    subAgentWindows.value[sid] = {
+      subagentId: sid,
+      agentName: p.agent_name || sid,
+      task: p.task || '',
+      chunks: [],
+      status: 'running',
+      report: '',
+    }
+  } else if (event.event_type === 'subagent_chunk') {
+    const win = subAgentWindows.value[sid]
+    if (win && p.data !== undefined) {
+      win.chunks.push({ type: String(p.chunk_type || 'content'), data: String(p.data) })
+    }
+  } else if (event.event_type === 'subagent_completed') {
+    const win = subAgentWindows.value[sid]
+    if (win) {
+      win.status = (p.status as SubAgentWindowState['status']) || 'completed'
+      win.report = String(p.report || '')
+      win.error = p.error || null
+    }
+  }
+}
+
+function closeSubAgentWindow(subagentId: string) {
+  delete subAgentWindows.value[subagentId]
+}
+
+useSessionSync(() => currentSessionId.value, onSessionSyncEvent)
+
 // Drag & Drop
 const isDragOver = ref(false)
 let dragCounter = 0
@@ -491,6 +578,17 @@ const ttsAvailable = ref(true) // assume available, verify on mount
 const lightbox = reactive({ open: false, src: '', alt: '' })
 
 const renameModal = reactive({ open: false, sessionId: '', title: '' })
+
+// 治理审批弹窗（P0: ASK 人工确认）
+const approvalModal = reactive({
+  open: false,
+  loading: false,
+  approvalId: '',
+  toolName: '',
+  command: '',
+  reason: '',
+})
+const approvalAddWhitelist = ref(false)
 
 let abortController: AbortController | null = null
 
@@ -564,6 +662,66 @@ async function confirmRename(): Promise<void> {
   if (!renameModal.title.trim()) return
   const ok = await _renameSession(renameModal.sessionId, renameModal.title.trim())
   if (ok) renameModal.open = false
+}
+
+// ---------------------------------------------------------------------------
+// Governance Approval (P0: ASK 人工确认)
+// ---------------------------------------------------------------------------
+
+/** 批准执行；勾选白名单时先加入免检列表再批准 */
+async function confirmApproval(): Promise<void> {
+  if (!approvalModal.approvalId || approvalModal.loading) return
+  approvalModal.loading = true
+  try {
+    if (approvalAddWhitelist.value) {
+      const pattern = extractWhitelistPattern(approvalModal.command)
+      if (pattern) {
+        await addWhitelistEntry({
+          pattern,
+          match_type: 'prefix',
+          note: `来自审批 ${approvalModal.approvalId}`,
+        })
+      }
+    }
+    const resp = await apiApproveRequest(approvalModal.approvalId, '用户确认')
+    approvalModal.open = false
+    const data = (resp as any)?.data?.data ?? (resp as any)?.data
+    if (data?.executed && data?.result) {
+      uiMessage.success('已批准并执行完成')
+    } else {
+      uiMessage.success('已批准')
+    }
+  } catch (e) {
+    console.error('[Approval] approve failed:', e)
+    uiMessage.error('批准失败，请稍后重试')
+  } finally {
+    approvalModal.loading = false
+  }
+}
+
+/** 拒绝执行 */
+async function rejectApproval(): Promise<void> {
+  if (!approvalModal.approvalId || approvalModal.loading) return
+  approvalModal.loading = true
+  try {
+    await apiRejectRequest(approvalModal.approvalId, '用户拒绝')
+    approvalModal.open = false
+    uiMessage.info('已拒绝该操作')
+  } catch (e) {
+    console.error('[Approval] reject failed:', e)
+    uiMessage.error('操作失败，请稍后重试')
+  } finally {
+    approvalModal.loading = false
+  }
+}
+
+/** 从命令中提取适合加入白名单的前缀（首个词或可执行文件名） */
+function extractWhitelistPattern(command: string): string {
+  const trimmed = (command || '').trim()
+  if (!trimmed) return ''
+  // 取第一段管道/分号之前的内容的首个 token 作为前缀
+  const head = trimmed.split(/[|;&]/)[0].trim()
+  return head.split(/\s+/)[0] || head
 }
 
 /** 删除会话,委托给 useChat.deleteSession; 失败时弹 toast 让用户感知. */
@@ -723,6 +881,19 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       // legacy compat
       msg.toolResult = typeof event.result === 'string' ? event.result : JSON.stringify(event.result, null, 2)
       break
+
+    case 'approval_required': {
+      // 治理 ASK: 弹出人工确认框（P0）
+      approvalModal.approvalId = event.approval_id || ''
+      approvalModal.toolName = event.tool_name || ''
+      const params = typeof event.params === 'string' ? event.params : JSON.stringify(event.params ?? {}, null, 2)
+      approvalModal.command =
+        params !== '{}' ? params : (event.command || '')
+      approvalModal.reason = event.reason || ''
+      approvalAddWhitelist.value = false
+      approvalModal.open = true
+      break
+    }
 
     case 'message':
     case 'content':
@@ -1510,6 +1681,25 @@ onBeforeUnmount(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
+  position: relative;
+
+  /* 蜂群子 Agent 小窗堆叠（右下角） */
+  .subagent-window-stack {
+    position: absolute;
+    right: 16px;
+    bottom: 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 90;
+    pointer-events: none;
+    max-height: 70%;
+    overflow: visible;
+
+    :deep(.subagent-panel) {
+      pointer-events: auto;
+    }
+  }
   min-width: 0;
 }
 
@@ -1698,6 +1888,53 @@ onBeforeUnmount(() => {
   overflow-x: auto;
   font-family: var(--nr-font-mono);
   max-height: 120px;
+}
+
+/* Governance approval modal (P0) */
+.approval-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.approval-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.approval-label {
+  min-width: 42px;
+  font-size: 13px;
+  color: var(--nr-text-secondary);
+  line-height: 22px;
+  flex-shrink: 0;
+}
+
+.approval-command {
+  font-size: 12px;
+  color: var(--nr-text-primary, inherit);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 140px;
+  flex: 1;
+}
+
+.approval-reason {
+  font-size: 13px;
+  color: rgba(255, 170, 80, 0.9);
+  line-height: 1.5;
+}
+
+.approval-hint {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  margin: 4px 0 0;
 }
 
 .nr-tool-result {

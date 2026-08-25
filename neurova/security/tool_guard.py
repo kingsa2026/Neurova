@@ -8,6 +8,7 @@ Neurova 工具守卫 (Tool Guard) 2.0
 from __future__ import annotations
 
 import datetime
+import os
 from neurova.core.logger import get_logger
 import re
 from dataclasses import dataclass, field
@@ -37,6 +38,8 @@ class GuardThreatCategory(str, Enum):
     NETWORK_EXFILTRATION = "network_exfiltration"  # 网络外泄
     PRIVILEGE_ESCALATION = "privilege_escalation"  # 权限提升
     DATA_LEAKAGE = "data_leakage"  # 数据泄漏
+    REMOTE_CONTROL = "remote_control"  # 远程控制（反弹 shell 等）
+    DESTRUCTIVE_COMMAND = "destructive_command"  # 毁灭性命令（rm -rf / 等）
 
 
 @dataclass
@@ -190,7 +193,9 @@ class RuleBasedToolGuardian(BaseGuardian):
                 rule_id="curl_pipe",
                 name="curl | sh",
                 pattern=r"(curl|wget)\s+.*\|\s*(sh|bash|zsh)",
-                severity=GuardSeverity.CRITICAL,
+                # HIGH（而非 CRITICAL）：远程脚本执行可沙箱隔离，
+                # 由 GovernancePolicy 路由到 SANDBOX；彻底阻断会破坏合法安装流程
+                severity=GuardSeverity.HIGH,
                 category=GuardThreatCategory.NETWORK_EXFILTRATION,
                 message="检测到远程脚本执行（curl | sh）",
             ),
@@ -300,24 +305,58 @@ class ShellEvasionGuardian(BaseGuardian):
 
     def _compile_evasion_patterns(self) -> List[Pattern]:
         """编译逃逸检测模式"""
+        # (正则, 严重度, 威胁类别, 描述)；CRITICAL = 毁灭性/远控，DENY
         patterns = [
-            # 命令替换
-            (r"\$\([^)]*\)", GuardThreatCategory.SHELL_EVASION, "命令替换 $()"),
-            (r"`[^`]+`", GuardThreatCategory.SHELL_EVASION, "反引号命令替换"),
-            # Base64 编码
-            (r"base64\s+(-d|--decode)", GuardThreatCategory.SHELL_EVASION, "Base64 解码"),
-            # 十六进制编码
-            (r"\\x[0-9a-fA-F]{2}", GuardThreatCategory.SHELL_EVASION, "十六进制编码"),
-            # 管道到解释器
-            (r"\|\s*(python[23]?|perl|ruby|node|php)\b", GuardThreatCategory.SHELL_EVASION, "管道到脚本解释器"),
-            # Null 字节
-            (r"\\x00", GuardThreatCategory.SHELL_EVASION, "Null 字节注入"),
-            # 环境变量展开
-            (r"\$\{[^}]*\}", GuardThreatCategory.SHELL_EVASION, "环境变量展开"),
-            # 进程替换
-            (r"<\([^)]*\)", GuardThreatCategory.SHELL_EVASION, "进程替换"),
+            # ── CRITICAL: 反弹 shell / 远程控制 ──────────────────
+            (r"/dev/tcp/[^\s'\"]+", GuardSeverity.CRITICAL, GuardThreatCategory.REMOTE_CONTROL,
+             "反弹 shell (/dev/tcp)"),
+            (r"\bnc(?:at)?\s+(-e\s|-c\s|\-\-exec\b|\-\-sh-exec\b)", GuardSeverity.CRITICAL,
+             GuardThreatCategory.REMOTE_CONTROL, "nc 反弹 shell (-e/-c)"),
+            (r"\bsocat\s+.*EXEC:", GuardSeverity.CRITICAL, GuardThreatCategory.REMOTE_CONTROL,
+             "socat 反弹 shell (EXEC)"),
+            (r"\bbash\s+-i\s+>&", GuardSeverity.CRITICAL, GuardThreatCategory.REMOTE_CONTROL,
+             "交互式反弹 shell"),
+            # ── CRITICAL: 毁灭性命令 ────────────────────────────
+            (r"\brm\s+(-\w+\s+)*-\w*(rf|fr)\w*\s+/(?:\s|$)", GuardSeverity.CRITICAL,
+             GuardThreatCategory.DESTRUCTIVE_COMMAND, "递归删除根目录"),
+            (r"\brm\s+(-\w+\s+)*-\w*(rf|fr)\w*\s+[cC]:[\\/]+(?:windows|users|program)",
+             GuardSeverity.CRITICAL, GuardThreatCategory.DESTRUCTIVE_COMMAND,
+             "递归删除 Windows 系统/用户目录"),
+            (r"\bmkfs(?:\.\w+)?\b", GuardSeverity.CRITICAL, GuardThreatCategory.DESTRUCTIVE_COMMAND,
+             "格式化文件系统"),
+            (r"\bdd\s+if=/dev/(?:zero|random|urandom)\s+of=/dev/", GuardSeverity.CRITICAL,
+             GuardThreatCategory.DESTRUCTIVE_COMMAND, "dd 覆写磁盘"),
+            (r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;?\s*:", GuardSeverity.CRITICAL,
+             GuardThreatCategory.DESTRUCTIVE_COMMAND, "fork 炸弹"),
+            (r"\bchmod\s+(-R\s+)?777\s+/(?:\s|$)", GuardSeverity.CRITICAL,
+             GuardThreatCategory.DESTRUCTIVE_COMMAND, "全盘开放权限"),
+            # ── HIGH: Shell 逃逸技术 ────────────────────────────
+            (r"\$\([^)]*\)", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
+             "命令替换 $()"),
+            (r"`[^`]+`", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
+             "反引号命令替换"),
+            (r"base64\s+(-d|--decode)", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
+             "Base64 解码"),
+            (r"\\x[0-9a-fA-F]{2}", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
+             "十六进制编码"),
+            (r"\|\s*(python[23]?|perl|ruby|node|php)\b", GuardSeverity.HIGH,
+             GuardThreatCategory.SHELL_EVASION, "管道到脚本解释器"),
+            # curl | sh / wget | bash：远程脚本直接执行（方案 P0-1.2 明确要求）
+            (r"\|\s*(sudo\s+)?(ba|z|da|k)?sh\b", GuardSeverity.HIGH,
+             GuardThreatCategory.SHELL_EVASION, "管道到 shell 执行"),
+            (r"\|\s*(ba|z|k)?sh\s*$", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
+             "管道到 shell 执行"),
+            (r"\\x00", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
+             "Null 字节注入"),
+            (r"\$\{[^}]*\}", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
+             "环境变量展开"),
+            (r"<\([^)]*\)", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
+             "进程替换"),
         ]
-        return [(re.compile(p, re.IGNORECASE), cat, desc) for p, cat, desc in patterns]
+        return [
+            (re.compile(p, re.IGNORECASE), severity, cat, desc)
+            for p, severity, cat, desc in patterns
+        ]
 
     def _has_command_substitution(self, text: str) -> bool:
         """检查命令替换"""
@@ -341,16 +380,16 @@ class ShellEvasionGuardian(BaseGuardian):
         """检测 Shell 逃逸"""
         findings: List[GuardFinding] = []
 
-        for pattern, category, desc in self._evasion_patterns:
+        for pattern, severity, category, desc in self._evasion_patterns:
             match = pattern.search(tool_input)
             if match:
                 finding = GuardFinding(
-                    rule_id=f"shell_evasion_{desc.replace(' ', '_').lower()}",
-                    severity=GuardSeverity.HIGH,
+                    rule_id=f"shell_{desc.replace(' ', '_').lower()}",
+                    severity=severity,
                     category=category,
-                    message=f"检测到 Shell 逃逸模式: {desc}",
+                    message=f"检测到高危模式: {desc}",
                     evidence=match.group(),
-                    suggestion="避免使用 Shell 逃逸技术",
+                    suggestion="该命令被治理策略拦截或要求沙箱执行",
                 )
                 findings.append(finding)
 
@@ -359,6 +398,12 @@ class ShellEvasionGuardian(BaseGuardian):
 
 class FilePathGuardian(BaseGuardian):
     """文件路径守护者"""
+
+    # 方案 P0-1.3: 用户敏感目录（按目录名匹配，跨平台）
+    _USER_SENSITIVE_DIRS = {".ssh", ".aws", ".gnupg", ".kube", ".docker"}
+    # 方案 P0-1.3: 敏感凭据文件（按文件名/后缀匹配）
+    _SENSITIVE_FILES = {".env", ".netrc", "id_rsa", "id_ed25519", "id_ecdsa",
+                        "credentials", "credentials.json"}
 
     def __init__(self):
         self._protected_paths = {
@@ -372,6 +417,8 @@ class FilePathGuardian(BaseGuardian):
             "/proc/self/mem",
         }
         self._safe_paths = {"/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"}
+        # Windows 系统目录（大小写不敏感前缀匹配）
+        self._windows_protected_prefixes = ("c:\\windows", "c:\\program files")
 
     @property
     def name(self) -> str:
@@ -380,6 +427,20 @@ class FilePathGuardian(BaseGuardian):
     def _is_likely_path_param(self, value: str) -> bool:
         """判断是否是路径参数"""
         return "/" in value or "\\" in value or ".." in value
+
+    def _match_sensitive_component(self, path: str) -> Optional[str]:
+        """检查路径中是否包含用户敏感目录或凭据文件，返回命中描述。"""
+        parts = re.split(r"[\\/]+", path.lower())
+        if not parts:
+            return None
+        for i, part in enumerate(parts[:-1]):
+            if part in self._USER_SENSITIVE_DIRS:
+                return f"用户敏感目录 ~/{part}"
+        basename = parts[-1]
+        for stem in (basename, os.path.splitext(basename)[0]):
+            if stem in self._SENSITIVE_FILES:
+                return f"敏感凭据文件 {stem}"
+        return None
 
     def guard(self, tool_input: str, context: Dict[str, Any]) -> List[GuardFinding]:
         """检查文件路径安全性"""
@@ -409,21 +470,59 @@ class FilePathGuardian(BaseGuardian):
                 )
             )
 
-        # 检查系统保护路径
-        if path not in self._safe_paths:
+        # 检查系统保护路径（兼容 ~ 展开形式与原始形式）
+        expanded = os.path.expanduser(path)
+        candidates = {path, expanded}
+        hit_protected: Optional[str] = None
+        for candidate in candidates:
+            norm = candidate.replace("\\", "/")
+            if norm in self._safe_paths:
+                continue
             for protected in self._protected_paths:
-                if path.startswith(protected):
-                    findings.append(
-                        GuardFinding(
-                            rule_id="protected_path",
-                            severity=GuardSeverity.HIGH,
-                            category=GuardThreatCategory.PATH_TRAVERSAL,
-                            message=f"访问受保护路径: {protected}",
-                            evidence=path,
-                            suggestion=f"路径 {protected} 受系统保护",
-                        )
-                    )
+                if norm.startswith(protected) or candidate.startswith(protected):
+                    hit_protected = protected
                     break
+            if hit_protected:
+                break
+        if hit_protected:
+            findings.append(
+                GuardFinding(
+                    rule_id="protected_path",
+                    severity=GuardSeverity.HIGH,
+                    category=GuardThreatCategory.PATH_TRAVERSAL,
+                    message=f"访问受保护路径: {hit_protected}",
+                    evidence=path,
+                    suggestion=f"路径 {hit_protected} 受系统保护",
+                )
+            )
+
+        # 检查 Windows 系统目录（大小写不敏感）
+        lowered = path.lower()
+        if any(lowered.startswith(p) for p in self._windows_protected_prefixes):
+            findings.append(
+                GuardFinding(
+                    rule_id="windows_system_path",
+                    severity=GuardSeverity.HIGH,
+                    category=GuardThreatCategory.PATH_TRAVERSAL,
+                    message=f"访问 Windows 系统目录: {path}",
+                    evidence=path,
+                    suggestion="Windows 系统目录受保护，禁止工具直接读写",
+                )
+            )
+
+        # 方案 P0-1.3: 用户敏感目录 / 凭据文件（~/.ssh、~/.aws、.env 等）
+        sensitive_hit = self._match_sensitive_component(path)
+        if sensitive_hit:
+            findings.append(
+                GuardFinding(
+                    rule_id="sensitive_user_path",
+                    severity=GuardSeverity.HIGH,
+                    category=GuardThreatCategory.DATA_LEAKAGE,
+                    message=f"访问用户敏感位置: {sensitive_hit}",
+                    evidence=path,
+                    suggestion="凭据类文件禁止通过 Agent 工具读写",
+                )
+            )
 
         # 检查通配符
         if "*" in path or "?" in path:

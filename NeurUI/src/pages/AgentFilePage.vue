@@ -121,7 +121,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
-import { listFiles, uploadFile, getFileContent, updateFile, deleteFile } from '@/api/modules/files'
+import { listFiles, uploadFile as uploadFileApi, getFileContent, updateFile, deleteFile } from '@/api/modules/files'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
@@ -236,7 +236,7 @@ async function uploadFile(file: File) {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('agent_id', props.agentId)
-    await uploadFile(formData)
+    await uploadFileApi(formData)
     message.success(t('file.uploadSuccess'))
     fetchFiles()
   } catch {

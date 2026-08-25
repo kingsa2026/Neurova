@@ -100,6 +100,12 @@ class ContextPool:
         self._cache_version = 0
         self._last_build_version = -1
 
+        # Scroll Context 式被驱逐轮次台账（方案 P1-2.2）：
+        # 容量/TTL 驱逐不再直接丢弃，而是归档到有界台账供按需召回
+        self._eviction_ledger: List[Any] = []
+        self._evicted_total = 0
+        self._max_eviction_ledger = 500
+
         # 并发保护：保护 _cache / _cache_version / _collector._contexts 等共享状态
         # 使用 RLock 因为 merge_with 等方法会重入调用 add_context
         # 遵循 AGENTS.md "Thread safety: use threading.RLock for shared state"
@@ -133,13 +139,49 @@ class ContextPool:
                                      context.hash[:8], context.source.value if context.source else "?")
                     return
 
-            if hasattr(self, "max_size") and self.max_size > 0:
-                current_size = len(self._collector._contexts)
-                if current_size >= self.max_size:
-                    self._collector._contexts.pop(0)
-
+            # [无损归档] 不再按 max_size 驱逐最旧条目——池的定位是永久归档，
+            # "永不丢失上下文"是硬约束；容量控制只发生在视图层（Drawer 按预算
+            # 整条选取）。驱逐台账（_archive_evicted）保留兼容，主流程不再触发。
             self._collector.add_context(context)
             self._cache_version += 1
+
+    # ── Scroll Context: 被驱逐轮次台账与召回（方案 P1-2.2） ──────
+
+    def _archive_evicted(self, item) -> None:
+        """把被驱逐条目归档进有界台账；台账满时淘汰最旧记录。"""
+        self._eviction_ledger.append(item)
+        self._evicted_total += 1
+        overflow = len(self._eviction_ledger) - max(0, int(self._max_eviction_ledger))
+        if overflow > 0:
+            del self._eviction_ledger[:overflow]
+
+    def recall_evicted(self, query: str = None, limit: int = 20) -> List:
+        """
+        按需召回被驱逐的上下文轮次。
+
+        Args:
+            query: 内容子串过滤（不区分大小写）；None 返回最近驱逐的条目
+            limit: 最多返回条数
+
+        Returns:
+            ContextInput 列表，按驱逐时间倒序（最新优先）；
+            只读操作，不影响活动池。
+        """
+        with self._lock:
+            snapshot = list(reversed(self._eviction_ledger))
+            if query:
+                needle = query.lower()
+                snapshot = [c for c in snapshot if needle in str(c.content).lower()]
+            return snapshot[:limit]
+
+    def get_eviction_stats(self) -> Dict[str, Any]:
+        """驱逐台账统计。"""
+        with self._lock:
+            return {
+                "evicted_total": self._evicted_total,
+                "ledger_size": len(self._eviction_ledger),
+                "ledger_capacity": self._max_eviction_ledger,
+            }
 
     def _filter_ttl(self, items: List) -> List:
         """按 TTL 过滤条目（提取公共方法供 get_contexts 和 draw 复用）"""
@@ -162,15 +204,20 @@ class ContextPool:
             return self._filter_ttl(contexts)
 
     def cleanup_expired(self) -> int:
-        """清理过期条目，返回移除数量"""
+        """清理过期条目，返回移除数量（过期条目归档进驱逐台账）"""
         with self._lock:
             if not hasattr(self, "ttl_seconds") or self.ttl_seconds <= 0:
                 return 0
 
+            valid = self._filter_ttl(self._collector._contexts)
+            removed_items = [c for c in self._collector._contexts if c not in valid]
             original_count = len(self._collector._contexts)
-            self._collector._contexts = self._filter_ttl(self._collector._contexts)
+            self._collector._contexts = valid
 
-            removed_count = original_count - len(self._collector._contexts)
+            removed_count = original_count - len(valid)
+            for item in removed_items:
+                self._archive_evicted(item)
+
             if removed_count > 0:
                 self._cache_version += 1
 

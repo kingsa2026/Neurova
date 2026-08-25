@@ -207,11 +207,12 @@ import {
   type Entity,
   type CascadeResult,
   type AbsenceResult,
+  type NeuronStats,
 } from '@/api/neuron'
 
 // 状态
 const activeTab = ref('graph')
-const stats = ref<Record<string, number>>({})
+const stats = ref<NeuronStats>({ total_entities: 0, total_edges: 0, entity_types: 0, dependency_types: 0 })
 const healthStatus = ref('healthy')
 const entities = ref<Entity[]>([])
 const selectedEntity = ref('')

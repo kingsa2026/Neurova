@@ -97,8 +97,8 @@ import {
   scroll,
   navigate,
   extractPage,
-  smartClick,
-  visualParse,
+  smartClick as smartClickApi,
+  visualParse as visualParseApi,
   shell,
 } from '@/api/modules/computer'
 import GlassCard from '@/components/GlassCard.vue'
@@ -194,7 +194,7 @@ const browserExtract = async () => {
 
 const smartClick = async () => {
   try {
-    await smartClick(agentId, clickX.value, clickY.value)
+    await smartClickApi(agentId, clickX.value, clickY.value)
     message.success(t('common.success'))
     await takeScreenshot()
   } catch { message.error(t('common.error')) }
@@ -202,7 +202,7 @@ const smartClick = async () => {
 
 const visualParse = async () => {
   try {
-    const res: any = await visualParse(agentId)
+    const res: any = await visualParseApi(agentId)
     message.info(JSON.stringify(res?.data ?? res))
   } catch { message.error(t('common.error')) }
 }

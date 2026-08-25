@@ -55,8 +55,18 @@ export interface CanvasNodeSnapshot {
   config: Record<string, unknown>
 }
 
+/** 连线端点的语义引用（节点 + 端口）。旧快照可能只有坐标，故为可选。 */
+export interface CanvasPortRef {
+  nodeId: string
+  portId: string
+}
+
 export interface CanvasEdgeSnapshot {
   id: string
+  /** 起点：源节点的输出端口 */
+  source?: CanvasPortRef
+  /** 终点：目标节点的输入端口 */
+  target?: CanvasPortRef
   x1: number
   y1: number
   x2: number
@@ -128,9 +138,46 @@ export function saveCanvas(payload: SaveCanvasPayload) {
   return api.post<ApiResponse<CanvasSnapshot>>(`${BASE}/canvas`, payload)
 }
 
-/** Run a canvas workflow. */
-export function runCanvas(canvasId: string) {
-  return api.post<ApiResponse<{ runId: string }>>(`${BASE}/canvas/${canvasId}/run`)
+/** 画布摘要（列表用，不含节点大对象） */
+export interface CanvasSummary {
+  id: string
+  name: string
+  node_count: number
+  edge_count: number
+  created_at?: number
+  updated_at?: number
+}
+
+/** List saved canvas summaries (newest first) — "我的画布"入口. */
+export function listCanvases() {
+  return api.get<ApiResponse<CanvasSummary[]>>(`${BASE}/canvas`)
+}
+
+/** 画布运行状态（节点级结果，供画布着色与输出查看） */
+export interface CanvasRunStatus {
+  run_id: string
+  canvas_id: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused'
+  node_results: Record<
+    string,
+    { status: string; output: unknown; error?: string | null; duration: number }
+  >
+  outputs: Record<string, unknown>
+  error?: string | null
+  duration?: number | null
+}
+
+/** Run a canvas workflow（session_id 可选：子 Agent 事件广播到该聊天会话）. */
+export function runCanvas(canvasId: string, payload?: { session_id?: string; agent_id?: string }) {
+  return api.post<ApiResponse<{ runId: string; status: string; workflow_id: string }>>(
+    `${BASE}/canvas/${canvasId}/run`,
+    payload ?? {},
+  )
+}
+
+/** Poll a canvas run's execution status. */
+export function getCanvasRun(canvasId: string, runId: string) {
+  return api.get<ApiResponse<CanvasRunStatus>>(`${BASE}/canvas/${canvasId}/runs/${runId}`)
 }
 
 /** Get a canvas workflow by id. */

@@ -57,8 +57,11 @@ class ContextOrchestrator:
                 agent_id=getattr(agent_ref, "agent_id", "default"),
                 max_tokens=max_tokens,
                 auto_tag=auto_tag,
+                ttl_seconds=0,  # [无损归档] 池是永久归档，TTL 不门禁调取（永不丢失）
             )
-            logger.info("ContextPool 初始化完成，模型: %s，Token 预算: %s", model_name, max_tokens)
+            logger.info(
+                "ContextPool 初始化完成（无损归档模式），模型: %s，Token 预算: %s", model_name, max_tokens
+            )
         else:
             self.context_pool = None
 
@@ -234,27 +237,127 @@ class ContextOrchestrator:
         tool_memory_context["tool_decision"] = tool_decision
 
         if self.use_pool and self.context_pool:
-            self.context_pool.clear()
-            # 添加系统指令
+            # ════════════════════════════════════════════════════════
+            # 归档层（无损活水）：把可复用的上下文沉淀进池
+            # 池 = 永久归档（不 clear、不驱逐、不裁剪），视图按需调取。
+            # 目标：① 省 token（无关归档不进视图）② 永不丢失 ③ 缓存命中
+            # ════════════════════════════════════════════════════════
+
+            # 归档对话轮次（老轮次可被后续语义召回 → 对话永不丢失）
+            for msg in conversation_context:
+                self.context_pool.add_context(
+                    ContextInput(
+                        source=ContextSource.CONVERSATION,
+                        content=msg["content"],
+                        priority=60,
+                        metadata={"role": msg.get("role", "user")},
+                    )
+                )
+
+            # 归档记忆
+            for memory in relevant_memories or []:
+                if isinstance(memory, dict):
+                    content = memory.get("content", str(memory))
+                else:
+                    content = str(memory)
+                self.context_pool.add_context(ContextInput(source=ContextSource.MEMORY, content=content, priority=70))
+
+            # 归档经验
+            for experience in experience_items or []:
+                if isinstance(experience, dict):
+                    content = experience.get("content", str(experience))
+                else:
+                    content = str(experience)
+                self.context_pool.add_context(
+                    ContextInput(source=ContextSource.EXPERIENCE, content=content, priority=70)
+                )
+
+            # 归档结晶经验（认知图谱 PatternCrystallizer 产物）
+            for pattern in crystallized_patterns or []:
+                if isinstance(pattern, dict):
+                    content = pattern.get("content", str(pattern))
+                else:
+                    content = str(pattern)
+                self.context_pool.add_context(
+                    ContextInput(
+                        source=ContextSource.EXPERIENCE,
+                        content=f"[结晶经验] {content}",
+                        priority=80,  # 结晶经验优先级高于普通经验
+                    )
+                )
+
+            # 归档反思日志（持久教训，可被语义召回）
+            for log in reflection_logs:
+                self.context_pool.add_context(
+                    ContextInput(source=ContextSource.REFLECTION, content=log.get("lesson", str(log)), priority=60)
+                )
+
+            # ════════════════════════════════════════════════════════
+            # 视图层（按需调取 + 稳定前缀）
+            # 顺序设计（缓存友好）：
+            #   [固定 system 前缀] → [对话窗口 append-only] →
+            #   [语义调取块] → [本轮瞬态] → [当前输入]
+            # 调取块变化只影响尾部，不破坏前缀缓存。
+            # ════════════════════════════════════════════════════════
+
+            # 1. 固定 system 前缀（每轮字节级一致 → 前缀缓存命中）
+            context: List[Dict] = []
             for instruction in system_instructions:
-                self.context_pool.add_context(
-                    ContextInput(source=ContextSource.SYSTEM_INSTRUCTION, content=instruction, priority=100)
-                )
-
-            # 添加开发者指令
+                context.append({"role": "system", "content": instruction})
             for instruction in developer_instructions:
-                self.context_pool.add_context(
-                    ContextInput(source=ContextSource.DEVELOPER_INSTRUCTION, content=instruction, priority=90)
-                )
+                context.append({"role": "system", "content": instruction})
 
-            # 添加用户输入
-            self.context_pool.add_context(
-                ContextInput(source=ContextSource.USER_INPUT, content=user_input, priority=90)
-            )
+            # 2. 对话窗口（原始时序，append-only）
+            for msg in conversation_context:
+                context.append({"role": msg.get("role", "user"), "content": msg["content"]})
 
-            # Bug C-3 修复：注入 tool_memory_context（含执行状态 + 自动执行结果）
-            # 旧代码构建了 tool_memory_context 但从未 add_context，LLM 看不到工具执行状态
-            # 仅当有实际工具结果或自动执行结果时才注入（tool_decision="do_not_execute" 是默认值，不触发）
+            # 3. 本轮检索产物直接注入（不经抽屉门槛——它们由上游检索链按当前
+            #    查询专门检索，是"本轮相关"的定义本身；同时已归档供未来召回）
+            window_hashes = {
+                ContextInput.compute_hash(ContextSource.CONVERSATION, msg["content"])
+                for msg in conversation_context
+            }
+            injected_hashes = set(window_hashes)
+            for memory in relevant_memories or []:
+                content = memory.get("content", str(memory)) if isinstance(memory, dict) else str(memory)
+                injected_hashes.add(ContextInput.compute_hash(ContextSource.MEMORY, content))
+                context.append({"role": "system", "content": f"[记忆] {content}"})
+            for experience in experience_items or []:
+                content = experience.get("content", str(experience)) if isinstance(experience, dict) else str(experience)
+                injected_hashes.add(ContextInput.compute_hash(ContextSource.EXPERIENCE, content))
+                context.append({"role": "system", "content": f"[经验] {content}"})
+            for pattern in crystallized_patterns or []:
+                content = pattern.get("content", str(pattern)) if isinstance(pattern, dict) else str(pattern)
+                crystallized_content = f"[结晶经验] {content}"
+                injected_hashes.add(ContextInput.compute_hash(ContextSource.EXPERIENCE, crystallized_content))
+                context.append({"role": "system", "content": f"[经验] {crystallized_content}"})
+            for log in reflection_logs:
+                lesson = log.get("lesson", str(log))
+                injected_hashes.add(ContextInput.compute_hash(ContextSource.REFLECTION, lesson))
+                context.append({"role": "system", "content": f"[反思] {lesson}"})
+
+            # 4. 跨轮语义调取块：从归档池按当前输入召回**历史**相关内容
+            #    排除已注入条目（窗口 + 本轮产物），只召回往轮归档
+            drawn_contexts = self.context_pool.draw(need=user_input)
+            logger.debug("ContextPool.draw() 调取 %s 条归档", len(drawn_contexts))
+            for ctx in drawn_contexts:
+                if ctx.hash and ctx.hash in injected_hashes:
+                    continue  # 已在窗口或本轮产物中，跳过避免重复
+                if ctx.source == ContextSource.CONVERSATION:
+                    role_label = "助手" if (ctx.metadata or {}).get("role") == "assistant" else "用户"
+                    context.append({"role": "system", "content": f"[历史回忆] {role_label}: {ctx.content}"})
+                elif ctx.source == ContextSource.MEMORY:
+                    context.append({"role": "system", "content": f"[记忆] {ctx.content}"})
+                elif ctx.source == ContextSource.EXPERIENCE:
+                    context.append({"role": "system", "content": f"[经验] {ctx.content}"})
+                elif ctx.source == ContextSource.REFLECTION:
+                    context.append({"role": "system", "content": f"[反思] {ctx.content}"})
+                else:
+                    # 兜底：其他归档来源保持 system 角色
+                    context.append({"role": "system", "content": ctx.content})
+
+            # 4. 本轮瞬态上下文（不入池归档，紧贴当前输入）
+            # Bug C-3 修复：工具执行状态注入（仅当有实际工具结果时）
             if tool_memory_result or auto_execute_result:
                 import json as _json
 
@@ -275,110 +378,32 @@ class ContextOrchestrator:
                 if tool_memory_context.get("tool_decision") and tool_memory_context["tool_decision"] != "do_not_execute":
                     tool_lines.append(f"决策: {tool_memory_context['tool_decision']}")
                 if tool_lines:
-                    tool_content = "[工具记忆] " + " | ".join(tool_lines)
-                    self.context_pool.add_context(
-                        ContextInput(
-                            source=ContextSource.TOOL_CALL,
-                            content=tool_content,
-                            priority=85,  # 高于 memory(70)，低于 user_input(90)
-                        )
-                    )
+                    context.append({"role": "system", "content": "[工具记忆] " + " | ".join(tool_lines)})
 
-            # 添加对话历史（保留 role 信息）
-            for msg in conversation_context:
-                self.context_pool.add_context(
-                    ContextInput(
-                        source=ContextSource.CONVERSATION,
-                        content=msg["content"],
-                        priority=60,
-                        metadata={"role": msg.get("role", "user")},
-                    )
-                )
-
-            # 添加记忆
-            for memory in relevant_memories or []:
-                if isinstance(memory, dict):
-                    content = memory.get("content", str(memory))
-                else:
-                    content = str(memory)
-                self.context_pool.add_context(ContextInput(source=ContextSource.MEMORY, content=content, priority=70))
-
-            # 添加经验
-            for experience in experience_items or []:
-                if isinstance(experience, dict):
-                    content = experience.get("content", str(experience))
-                else:
-                    content = str(experience)
-                self.context_pool.add_context(
-                    ContextInput(source=ContextSource.EXPERIENCE, content=content, priority=70)
-                )
-
-            # 添加结晶经验（认知图谱 PatternCrystallizer 产物）
-            for pattern in crystallized_patterns or []:
-                if isinstance(pattern, dict):
-                    content = pattern.get("content", str(pattern))
-                else:
-                    content = str(pattern)
-                self.context_pool.add_context(
-                    ContextInput(
-                        source=ContextSource.EXPERIENCE,
-                        content=f"[结晶经验] {content}",
-                        priority=80,  # 结晶经验优先级高于普通经验
-                    )
-                )
-
-            # 添加情感状态
+            # 情感状态（每轮瞬态）
             if agent_emotion:
-                self.context_pool.add_context(
-                    ContextInput(
-                        source=ContextSource.EMOTION,
-                        content=f"用户情感: {agent_emotion.get('label', 'neutral')}",
-                        priority=50,
-                    )
-                )
+                context.append({"role": "system", "content": f"[情感] 用户情感: {agent_emotion.get('label', 'neutral')}"})
 
-            # 添加语音上下文
+            # 语音上下文（每轮瞬态）
             if voice_context:
                 try:
-                    from neurova.voice_context_module import VoiceContextModule
-
-                    voice_module = VoiceContextModule()
-                    voice_module.inject_metadata(self.context_pool, voice_context)
+                    content_parts = []
+                    if voice_context.get("text"):
+                        content_parts.append(f"语音识别文本: {voice_context['text']}")
+                    if voice_context.get("confidence", 0) > 0:
+                        content_parts.append(f"识别置信度: {voice_context['confidence']:.2f}")
+                    emotion = voice_context.get("emotion")
+                    if emotion and emotion.get("primary_emotion") != "neutral":
+                        content_parts.append(
+                            f"语音情感: {emotion['primary_emotion']} " f"(置信度: {emotion.get('confidence', 0):.2f})"
+                        )
+                    if content_parts:
+                        context.append({"role": "system", "content": "\n".join(content_parts)})
                 except Exception as e:
                     logger.debug("语音上下文注入跳过: %s", e)
 
-            # 添加反思日志
-            for log in reflection_logs:
-                self.context_pool.add_context(
-                    ContextInput(source=ContextSource.REFLECTION, content=log.get("lesson", str(log)), priority=60)
-                )
-
-            # 使用 ContextPool.draw() 获取相关上下文
-            drawn_contexts = self.context_pool.draw(need=user_input)
-            logger.debug("ContextPool.draw() 完成，共 %s 个上下文", len(drawn_contexts))
-
-            # 将 drawn_contexts 转换为消息格式
-            context = []
-            for ctx in drawn_contexts:
-                if ctx.source == ContextSource.SYSTEM_INSTRUCTION:
-                    context.append({"role": "system", "content": ctx.content})
-                elif ctx.source == ContextSource.DEVELOPER_INSTRUCTION:
-                    context.append({"role": "system", "content": ctx.content})
-                elif ctx.source == ContextSource.USER_INPUT:
-                    context.append({"role": "user", "content": ctx.content})
-                elif ctx.source == ContextSource.CONVERSATION:
-                    role = ctx.metadata.get("role", "user") if ctx.metadata else "user"
-                    context.append({"role": role, "content": ctx.content})
-                elif ctx.source == ContextSource.MEMORY:
-                    context.append({"role": "system", "content": f"[记忆] {ctx.content}"})
-                elif ctx.source == ContextSource.EXPERIENCE:
-                    context.append({"role": "system", "content": f"[经验] {ctx.content}"})
-                elif ctx.source == ContextSource.EMOTION:
-                    context.append({"role": "system", "content": f"[情感] {ctx.content}"})
-                elif ctx.source == ContextSource.REFLECTION:
-                    context.append({"role": "system", "content": f"[反思] {ctx.content}"})
-                else:
-                    context.append({"role": "system", "content": ctx.content})
+            # 5. 当前用户输入最后追加，确保是 LLM 看到的最后一条 user 消息
+            context.append({"role": "user", "content": user_input})
 
             return context
 
@@ -569,12 +594,13 @@ class ContextOrchestrator:
         格式:
             ## 当前时间
             当前日期:2026年6月28日 星期日
-            当前时刻:17:42:18
             时区:Asia/Shanghai (UTC+08:00)
 
         说明:
         - 日期用中文格式(YYYY年MM月DD日)+ 星期,便于 LLM 回答"今天星期几"。
-        - 时刻用 24 小时制,便于 LLM 回答"现在几点"。
+        - [缓存稳定] 只保留日期精度,不再注入 时:分:秒——本段位于 system 固定
+          前缀中,秒级时刻会使上下文前缀每秒变化,LLM prompt 缓存命中率归零。
+          日期精度在一天之内保持前缀字节级稳定,且足以纠正训练截止日期误用。
         - 时区用 IANA 名称 + UTC 偏移,避免 LLM 误判时区。
         - 此段在 build_system_prompt 末尾,不影响既有 soul/personality/constitution 段。
         """
@@ -601,12 +627,10 @@ class ContextOrchestrator:
         tz_offset_str = f"{'+' if hours >= 0 else '-'}{abs(hours):02d}:{minutes:02d}"
 
         date_str = f"{today.year}年{today.month}月{today.day}日"
-        time_str = now.strftime("%H:%M:%S")
 
         return (
             f"\n\n## 当前时间\n"
             f"当前日期:{date_str} {weekday_zh}\n"
-            f"当前时刻:{time_str}\n"
             f"时区:{tz_name} (UTC{tz_offset_str})\n"
             f"提示:以上是系统注入的真实当前时间,请基于此时间回答用户的时间相关问题,"
             f"不要使用训练数据中的截止日期。"

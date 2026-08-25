@@ -117,7 +117,7 @@ async function fetchSessions() {
   loading.value = true
   try {
     const res = await request.get('/sync/sessions') as unknown as SyncSession[] | { data: SyncSession[] }
-    sessions.value = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : []
+    sessions.value = Array.isArray(res) ? res : Array.isArray(res.data) ? res.data : []
   } catch { sessions.value = [] } finally { loading.value = false }
 }
 
