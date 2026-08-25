@@ -151,7 +151,7 @@ async function fetchChannels() {
         if (built) {
           built.enabled = apiCh.enabled ?? built.enabled
         } else {
-          builtInChannels.value.push({ id: apiCh.id, name: apiCh.name, type: apiCh.type, enabled: apiCh.enabled ?? true, icon: '🔌', color: '#6366f1' })
+          builtInChannels.value.push({ id: apiCh.id, name: apiCh.name, type: apiCh.type, enabled: apiCh.enabled ?? true, iconSrc: '', color: '#6366f1' })
         }
       }
     }

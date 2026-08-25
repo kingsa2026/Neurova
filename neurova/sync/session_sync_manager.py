@@ -50,6 +50,11 @@ class EventType(str, Enum):
     AGENT_ERROR = "agent_error"
     AGENT_STREAM_CHUNK = "agent_stream_chunk"
 
+    # 蜂群子 Agent（swarm）：主 Agent 派生的子 Agent 生命周期
+    SUBAGENT_STARTED = "subagent_started"
+    SUBAGENT_CHUNK = "subagent_chunk"
+    SUBAGENT_COMPLETED = "subagent_completed"
+
     # 会话状态
     SESSION_CREATED = "session_created"
     SESSION_RESUMED = "session_resumed"

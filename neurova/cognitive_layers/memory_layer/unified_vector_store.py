@@ -14,6 +14,7 @@ UnifiedVectorStore — 三合一向量索引
 """
 
 from neurova.core.logger import get_logger
+import hashlib
 import math
 from datetime import datetime
 from pathlib import Path
@@ -221,7 +222,10 @@ class UnifiedVectorStore:
         if not self._idf_values:
             result = [0.0] * dim
             for token in tokens:
-                idx = hash(token) % dim
+                # [确定性] 必须用稳定哈希：Python 内建 hash() 受 PYTHONHASHSEED
+                # 随机化影响，跨进程同一 token 落点不同，导致无关文本的余弦
+                # 相似度变成随机噪声（曾引发语义调取门槛随机失效）
+                idx = int(hashlib.sha256(token.encode("utf-8")).hexdigest(), 16) % dim
                 result[idx] += 1.0
             norm = vector_norm(result)
             if norm > 0:

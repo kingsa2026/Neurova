@@ -212,7 +212,7 @@ import {
 
 const router = useRouter()
 const route = useRoute()
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const agentStore = useAgentStore()
@@ -235,13 +235,15 @@ const breadcrumbs = computed(() => {
   for (const r of matched) {
     if (r.path && r.path !== '/') {
       const name = r.name as string
-      // Try multiple key formats: lowercase, camelCase (first letter lowercase), and original
-      const lowerKey = `nav.${name.toLowerCase()}`
-      // Convert PascalCase to camelCase: "SkillPool" -> "skillPool"
-      const camelKey = `nav.${name.charAt(0).toLowerCase() + name.slice(1)}`
-      const originalKey = `nav.${name}`
-      const label = t(lowerKey) !== lowerKey ? t(lowerKey) : (t(camelKey) !== camelKey ? t(camelKey) : (t(originalKey) !== originalKey ? t(originalKey) : name))
-      crumbs.push({ path: r.path, label })
+      // 用 te() 先做存在性检查，避免对缺失键逐个触发 intlify 告警；
+      // 依次尝试 小写 / camelCase / 原名 三种键格式，都不存在则回退路由名
+      const candidates = [
+        `nav.${name.toLowerCase()}`,
+        `nav.${name.charAt(0).toLowerCase() + name.slice(1)}`,
+        `nav.${name}`,
+      ]
+      const hit = candidates.find(k => te(k))
+      crumbs.push({ path: r.path, label: hit ? t(hit) : name })
     }
   }
   return crumbs

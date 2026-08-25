@@ -13,6 +13,10 @@ export interface Channel {
   description?: string
   token?: string
   webhookUrl?: string
+  /** 渠道图标 URL（前端展示用，可选） */
+  iconSrc?: string
+  /** 渠道主题色（前端展示用，可选） */
+  color?: string
 }
 
 // ---------------------------------------------------------------------------

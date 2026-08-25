@@ -8,6 +8,8 @@ import time
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from neurova.api.endpoints import get_agent_instance
 from neurova.collaboration.neurflow.dag import get_dag_validator
@@ -339,6 +341,13 @@ async def list_nodes(
                 "source": n.source,
                 "version": n.version,
                 "tags": n.tags,
+                # 端口与配置表单（画布动态节点库渲染用）
+                "inputs": [{"id": p.id, "label": p.label} for p in (n.inputs or [])],
+                "outputs": [{"id": p.id, "label": p.label} for p in (n.outputs or [])],
+                "sub_blocks": [
+                    {"id": b.id, "title": b.title, "type": b.type, "required": b.required}
+                    for b in (n.sub_blocks or [])
+                ],
             }
             for n in nodes
         ],
@@ -799,3 +808,57 @@ async def get_stats():
     registry = get_node_registry()
     registry.ensure_builtin()
     return {"storage": storage.get_statistics(), "nodes": registry.get_summary()}
+
+
+# ==================== ComfyUI 集成 ====================
+
+
+class ComfyUIImportRequest(BaseModel):
+    """ComfyUI 工作流导入请求"""
+
+    name: str
+    workflow: Dict[str, Any]
+    description: str = ""
+
+
+class ComfyUIExecuteRequest(BaseModel):
+    """ComfyUI 单节点执行请求"""
+
+    class_type: str
+    config: Dict[str, Any] = {}
+    inputs: Dict[str, Any] = {}
+
+
+@router.post("/comfyui/import", status_code=201)
+async def import_comfyui_workflow_endpoint(request: ComfyUIImportRequest):
+    """导入 ComfyUI API 格式工作流 JSON 为 Neurflow 工作流"""
+    try:
+        from neurova.collaboration.neurflow.comfyui_importer import import_comfyui_workflow
+
+        workflow = import_comfyui_workflow(request.workflow, name=request.name, description=request.description)
+        _get_storage().save_workflow(workflow)
+        return JSONResponse(content={"workflow": workflow.to_dict(), "message": "导入成功"}, status_code=201)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"导入 ComfyUI 工作流失败: {str(e)}")
+
+
+@router.get("/comfyui/status")
+async def get_comfyui_status():
+    """检查 ComfyUI 服务可用性"""
+    from neurova.collaboration.neurflow.comfyui_client import get_comfyui_client
+
+    client = get_comfyui_client()
+    return {"available": client.is_available(), "host": client.host}
+
+
+@router.post("/comfyui/execute")
+async def execute_comfyui_node_endpoint(request: ComfyUIExecuteRequest):
+    """直接执行单个 ComfyUI 节点（提交 prompt 到 ComfyUI /prompt）"""
+    from neurova.collaboration.neurflow.comfyui_nodes import _execute_comfyui_node
+
+    result = await _execute_comfyui_node(f"comfyui:{request.class_type}", request.config, request.inputs)
+    return result

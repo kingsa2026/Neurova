@@ -195,11 +195,11 @@
               <div class="rec-item">
                 <div class="rec-header">
                   <a-tag :color="rec.outcome === 'success' ? 'green' : rec.outcome === 'failure' ? 'red' : 'blue'">
-                    {{ rec.outcome || rec.priority || 'info' }}
+                    {{ rec.outcome || 'info' }}
                   </a-tag>
                   <span class="rec-skill">{{ rec.task_type || rec.skill_name }}</span>
                 </div>
-                <p class="rec-text">{{ rec.context || rec.recommendation || rec.content }}</p>
+                <p class="rec-text">{{ rec.context }}</p>
                 <div v-if="rec.lessons?.length" class="rec-lessons">
                   <div class="lessons-label">{{ t('growth.lesson') + 's' || 'Lessons' }}</div>
                   <ul>
@@ -231,7 +231,7 @@
               <span class="similar-skill">{{ sim.task_type || sim.skill_name }}</span>
               <a-tag :color="sim.outcome === 'success' ? 'green' : sim.outcome === 'failure' ? 'red' : 'default'">{{ sim.outcome }}</a-tag>
             </div>
-            <div class="similar-content">{{ sim.context || sim.content || sim.description }}</div>
+            <div class="similar-content">{{ sim.context }}</div>
             <div v-if="sim.lessons?.length" class="similar-lessons">
               <span class="lessons-label">{{ t('growth.lesson') + 's' || 'Lessons' }}:</span>
               <span v-for="(lesson, idx) in sim.lessons" :key="idx" class="lesson-chip">{{ lesson }}</span>
@@ -368,8 +368,8 @@ const filteredRecords = computed(() => {
   return records.value.filter(
     (r) =>
       (r.task_type || '').toLowerCase().includes(q) ||
-      (r.context || '').toLowerCase().includes(q) ||
-      (r.description || '').toLowerCase().includes(q),
+      (r.skill_name || '').toLowerCase().includes(q) ||
+      (r.context || '').toLowerCase().includes(q),
   )
 })
 

@@ -110,6 +110,46 @@ class CommandRequest(BaseModel):
 # ── Chat endpoints ─────────────────────────────────────
 
 
+def _extract_approval_payload(result_text, tm: dict) -> dict:
+    """
+    从工具结果中提取治理 ASK 待审批信息。
+
+    Args:
+        result_text: 工具结果（JSON 字符串或原始对象，未截断）
+        tm: tool_message 原始条目（兜底取 tool_name）
+
+    Returns:
+        非空 dict 表示需要前端弹审批框；空 dict 表示普通结果。
+    """
+    parsed = None
+    if isinstance(result_text, dict):
+        parsed = result_text
+    elif isinstance(result_text, str):
+        try:
+            candidate = json.loads(result_text)
+            if isinstance(candidate, dict):
+                parsed = candidate
+        except Exception:
+            # 结果可能被上游截断：退化用正则抽取关键字段
+            m = re.search(r'"approval_id"\s*:\s*"([^"]+)"', result_text)
+            if m and '"pending_approval"' in result_text:
+                return {
+                    "approval_id": m.group(1),
+                    "tool_name": tm.get("tool_name", ""),
+                    "params": {},
+                    "reason": "",
+                }
+    if parsed and parsed.get("pending_approval"):
+        return {
+            "approval_id": parsed.get("approval_id"),
+            "tool_name": parsed.get("tool_name") or tm.get("tool_name", ""),
+            "params": parsed.get("params") or {},
+            "reason": parsed.get("error", ""),
+            "governance": parsed.get("governance") or {},
+        }
+    return {}
+
+
 @router.post("/chat")
 async def post_console_chat(body: ChatRequest, request: Request):
     """流式聊天接口（SSE）"""
@@ -177,6 +217,19 @@ async def post_console_chat(body: ChatRequest, request: Request):
                         if isinstance(result_text, dict):
                             result_text = json.dumps(result_text, ensure_ascii=False)
                         yield f"data: {json.dumps({'type': 'tool_result', 'result': str(result_text)[:500]})}\n\n"
+
+                        # P0 人工确认弹窗: 检测治理 ASK 结果，推送结构化审批事件。
+                        # 必须在截断前的完整文本上解析。
+                        approval_payload = _extract_approval_payload(result_text, tm)
+                        if approval_payload:
+                            yield (
+                                "data: "
+                                + json.dumps(
+                                    {"type": "approval_required", **approval_payload},
+                                    ensure_ascii=False,
+                                )
+                                + "\n\n"
+                            )
 
             # 3. 发送回复内容（逐词）
             words = reply.split(" ")

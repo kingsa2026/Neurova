@@ -183,7 +183,7 @@ async function fetchWorkflows() {
   loading.value = true
   try {
     const res = await request.get('/neurflow/workflows') as unknown as Workflow[] | { data: Workflow[] }
-    workflows.value = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : []
+    workflows.value = Array.isArray(res) ? res : Array.isArray(res.data) ? res.data : []
   } catch {
     workflows.value = []
   } finally {

@@ -310,18 +310,29 @@ def sync_mcp(registry) -> int:
 
 def sync_all(registry) -> Dict[str, int]:
     """
-    同步所有节点（工具 + 技能 + MCP）
+    同步所有节点（工具 + 技能 + MCP + ComfyUI）
 
     Args:
         registry: 节点注册表实例
 
     Returns:
-        同步结果字典 {"tools": N, "skills": N, "mcp": N}
+        同步结果字典 {"tools": N, "skills": N, "mcp": N, "comfyui": N}
     """
+    comfyui_count = 0
+    try:
+        from .comfyui_nodes import register_comfyui_nodes
+
+        comfyui_count = register_comfyui_nodes(registry)
+    except Exception as e:  # noqa: BLE001 - comfyui 注册失败不阻断其他同步
+        import logging
+
+        logging.getLogger(__name__).warning("ComfyUI 节点同步失败: %s", e)
+
     return {
         "tools": sync_tools(registry),
         "skills": sync_skills(registry),
         "mcp": sync_mcp(registry),
+        "comfyui": comfyui_count,
     }
 
 

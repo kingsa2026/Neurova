@@ -41,6 +41,12 @@ class SemanticMatchDrawer:
         "source_match": 0.1,
     }
 
+    # [按需调取] 相关性门槛：match_score 低于此值的归档不调入视图。
+    # 全路径统一刻度（见 _calculate_match_score）：0.5 = 不相关基线，
+    # 实测相关内容 ≥0.64 → 门槛 0.55 取空隙中点，双向留余量。
+    # 仅在 need 非空时生效。
+    RELEVANCE_FLOOR = 0.55
+
     def __init__(self, max_tokens: int = 16000):
         self.max_tokens = max_tokens
         self._vector_store = None
@@ -70,8 +76,17 @@ class SemanticMatchDrawer:
         if not drops:
             return []
 
-        conv_items = [(i, d) for i, d in enumerate(drops) if d.source == ContextSource.CONVERSATION]
-        non_conv_items = [d for d in drops if d.source != ContextSource.CONVERSATION]
+        # [按需调取] 相关性门槛：need 存在时，与查询无关的归档整条排除
+        #（留在池中，token 只花在相关内容上）；刻度全路径统一（0.5 基线）
+        threshold_active = bool(need)
+
+        def _relevant(d: ContextInput) -> bool:
+            return (not threshold_active) or self._calculate_match_score(d, need) >= self.RELEVANCE_FLOOR
+
+        conv_items = [
+            (i, d) for i, d in enumerate(drops) if d.source == ContextSource.CONVERSATION and _relevant(d)
+        ]
+        non_conv_items = [d for d in drops if d.source != ContextSource.CONVERSATION and _relevant(d)]
 
         scored_non_conv = []
         for drop in non_conv_items:
@@ -92,7 +107,9 @@ class SemanticMatchDrawer:
                 result_by_pos[pos] = item
                 non_conv_idx += 1
 
-        result = []
+        # [按需调取] 整条选取：分数只决定"取不取"，绝不切片截断内容
+        #（归档无损，视图层超预算的条目整条跳过，留在池中等待后续调取）
+        selected = []
         total_tokens = 0
         for pos in range(len(drops)):
             if pos not in result_by_pos:
@@ -101,17 +118,14 @@ class SemanticMatchDrawer:
             drop_tokens = drop.tokens if drop.tokens > 0 else self._estimate_tokens(drop.content)
 
             if total_tokens + drop_tokens <= self.max_tokens:
-                result.append(drop)
+                selected.append(drop)
                 total_tokens += drop_tokens
-            else:
-                remaining = self.max_tokens - total_tokens
-                if remaining > 100:
-                    truncated = self._truncate_drop(drop, remaining)
-                    if truncated:
-                        result.append(truncated)
-                break
+            # 超预算：整条跳过并继续尝试更小的条目（不截断内容、不中断选取）
 
-        return result
+        # [缓存稳定] 最终顺序按 created_at 稳定排序：
+        # 同一批被调取的条目在不同请求中保持相同相对位置，保住 LLM 前缀缓存
+        selected.sort(key=lambda d: d.created_at or datetime.min)
+        return selected
 
     def _calculate_score(self, drop: ContextInput, need: str = None) -> float:
         match_score = self._calculate_match_score(drop, need) if need else 0.5
@@ -129,30 +143,32 @@ class SemanticMatchDrawer:
         return total
 
     def _calculate_match_score(self, drop: ContextInput, need: str) -> float:
+        """匹配得分，全路径统一刻度：0.5 = 不相关基线，1.0 = 强相关。
+
+        向量路径返回 (cosine+1)/2；关键词路径原始分 ∈[0,1]（0=无匹配），
+        归一化为 0.5 + kw/2 后与向量刻度对齐——相关性门槛因此可以全路径统一，
+        不受"向量库存在但运行时降级"的刻度错配影响（如测试污染 sys.modules）。
+        """
         if not need:
             return 0.5
 
         if self.vector_store:
-            return self._vector_match_score(drop, need)
+            try:
+                need_vec = self.vector_store.encode(need)
 
-        return self._keyword_match_score(drop, need)
+                drop_text = drop.content
+                if drop.tags:
+                    drop_text += " " + " ".join(drop.tags)
+                drop_vec = self.vector_store.encode(drop_text)
 
-    def _vector_match_score(self, drop: ContextInput, need: str) -> float:
-        try:
-            need_vec = self.vector_store.encode(need)
+                from neurova.cognitive_layers.memory_layer.unified_vector_store import cosine_similarity
+                similarity = cosine_similarity(need_vec, drop_vec)
 
-            drop_text = drop.content
-            if drop.tags:
-                drop_text += " " + " ".join(drop.tags)
-            drop_vec = self.vector_store.encode(drop_text)
+                return (similarity + 1) / 2
+            except Exception as e:
+                logger.warning("向量匹配失败，降级到关键词匹配: %s", e)
 
-            from neurova.cognitive_layers.memory_layer.unified_vector_store import cosine_similarity
-            similarity = cosine_similarity(need_vec, drop_vec)
-
-            return (similarity + 1) / 2
-        except Exception as e:
-            logger.warning("向量匹配失败，降级到关键词匹配: %s", e)
-            return self._keyword_match_score(drop, need)
+        return 0.5 + self._keyword_match_score(drop, need) / 2
 
     def _keyword_match_score(self, drop: ContextInput, need: str) -> float:
         need_keywords = [kw.strip() for kw in re.sub(r"[^\w\s]", " ", need).split() if len(kw.strip()) > 1]
@@ -189,27 +205,6 @@ class SemanticMatchDrawer:
             return 1.0
 
         return 0.3
-
-    def _truncate_drop(self, drop: ContextInput, max_tokens: int) -> Optional[ContextInput]:
-        drop_tokens = drop.tokens if drop.tokens > 0 else self._estimate_tokens(drop.content)
-
-        if drop_tokens <= max_tokens:
-            return drop
-
-        ratio = max_tokens / drop_tokens
-        truncated_content = drop.content[: int(len(drop.content) * ratio)]
-
-        return ContextInput(
-            source=drop.source,
-            content=truncated_content + "...",
-            priority=drop.priority,
-            metadata=drop.metadata,
-            tokens=max_tokens,
-            tags=drop.tags,
-            hash=hashlib.md5(truncated_content.encode()).hexdigest(),
-            created_at=drop.created_at,
-            updated_at=drop.updated_at,
-        )
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:

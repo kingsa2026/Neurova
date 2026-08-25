@@ -15,7 +15,9 @@ import type {
   CreateTemplatePayload,
   SaveCanvasPayload,
   CanvasSnapshot,
+  CanvasSummary,
 } from '@/api/modules/collaboration'
+import { listCanvases as listCanvasesApi } from '@/api/modules/collaboration'
 
 export function useCollaboration() {
   const store = useCollaborationStore()
@@ -105,6 +107,16 @@ export function useCollaboration() {
     }
   }
 
+  /** 已保存画布摘要列表（"我的画布"）；失败返回空数组不打断页面 */
+  async function listSavedCanvases(): Promise<CanvasSummary[]> {
+    try {
+      const res = await listCanvasesApi()
+      return (((res as any)?.data ?? res) as CanvasSummary[]) || []
+    } catch {
+      return []
+    }
+  }
+
   return {
     ...refs,
     loadSessions,
@@ -117,6 +129,7 @@ export function useCollaboration() {
     saveCanvas,
     runCanvas,
     loadCanvas,
+    listSavedCanvases,
     $reset: store.$reset,
   }
 }

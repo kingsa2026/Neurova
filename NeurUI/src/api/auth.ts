@@ -1,13 +1,7 @@
 import { api } from './index'
 import type { LoginForm, RegisterForm, AuthTokens } from '@/types/auth'
 import type { User } from '@/types/auth'
-
-interface ApiResponse<T = unknown> {
-  code: number
-  success: boolean
-  message: string
-  data: T
-}
+import type { ApiResponse } from '@/types/response'
 
 export const authAPI = {
   /**

@@ -74,9 +74,9 @@
                   <div class="param-name">{{ formatParamKey(param.key) }}</div>
                   <div class="param-desc">{{ param.description }}</div>
                   <div class="param-meta">
-                    <a-tag size="small" :color="typeColor(param.param_type)">{{ param.param_type }}</a-tag>
-                    <span v-if="param.min_val != null || param.max_val != null" class="param-range">
-                      {{ param.min_val ?? '∞' }} ~ {{ param.max_val ?? '∞' }}
+                    <a-tag size="small" :color="typeColor(param.type)">{{ param.type }}</a-tag>
+                    <span v-if="param.min != null || param.max != null" class="param-range">
+                      {{ param.min ?? '∞' }} ~ {{ param.max ?? '∞' }}
                     </span>
                     <span class="param-default">
                       {{ t('memorySettings.defaultValue') }}: <code>{{ param.default }}</code>
@@ -86,20 +86,20 @@
 
                 <div class="param-control">
                   <!-- Float → Slider + number input -->
-                  <template v-if="param.param_type === 'float'">
+                  <template v-if="param.type === 'float'">
                     <div class="slider-row">
                       <a-slider
                         :value="currentValues[param.key] as number"
-                        :min="param.min_val ?? 0"
-                        :max="param.max_val ?? 1"
+                        :min="param.min ?? 0"
+                        :max="param.max ?? 1"
                         :step="sliderStep(param)"
                         style="flex: 1"
                         @change="(v: number) => setValue(param.key, v)"
                       />
                       <a-input-number
                         :value="currentValues[param.key] as number"
-                        :min="param.min_val ?? 0"
-                        :max="param.max_val ?? 1"
+                        :min="param.min ?? 0"
+                        :max="param.max ?? 1"
                         :step="sliderStep(param)"
                         size="small"
                         style="width: 90px; margin-left: 8px"
@@ -109,11 +109,11 @@
                   </template>
 
                   <!-- Int → Input number -->
-                  <template v-else-if="param.param_type === 'int'">
+                  <template v-else-if="param.type === 'int'">
                     <a-input-number
                       :value="currentValues[param.key] as number"
-                      :min="param.min_val ?? undefined"
-                      :max="param.max_val ?? undefined"
+                      :min="param.min ?? undefined"
+                      :max="param.max ?? undefined"
                       :step="1"
                       style="width: 160px"
                       @change="(v: number | null) => setValue(param.key, v ?? param.default)"
@@ -121,7 +121,7 @@
                   </template>
 
                   <!-- Bool → Switch -->
-                  <template v-else-if="param.param_type === 'bool'">
+                  <template v-else-if="param.type === 'bool'">
                     <a-switch
                       :checked="!!currentValues[param.key]"
                       @change="(v: boolean) => setValue(param.key, v)"
@@ -259,7 +259,7 @@ const typeColor = (type: string) => {
 }
 
 const sliderStep = (param: ParamSchema) => {
-  const range = (param.max_val ?? 1) - (param.min_val ?? 0)
+  const range = (param.max ?? 1) - (param.min ?? 0)
   if (range <= 1) return 0.01
   if (range <= 10) return 0.1
   if (range <= 100) return 1

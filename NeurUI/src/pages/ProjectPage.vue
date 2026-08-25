@@ -85,21 +85,17 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { listProjects, createProject, updateProject, deleteProject as deleteProjectApi } from '@/api/modules/projects'
+import {
+  listProjects,
+  createProject,
+  updateProject,
+  deleteProject as deleteProjectApi,
+  type Project,
+} from '@/api/modules/projects'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 
 const { t } = useI18n()
-
-interface Project {
-  id: string
-  name: string
-  description: string
-  status: string
-  memberCount?: number
-  progress?: number
-  activities?: string[]
-}
 
 const projects = ref<Project[]>([])
 const loading = ref(false)
@@ -134,7 +130,7 @@ function openCreate() { resetForm(); showModal.value = true }
 function openEdit(p: Project) {
   editingId.value = p.id
   form.name = p.name
-  form.description = p.description
+  form.description = p.description ?? ''
   form.status = p.status
   showModal.value = true
 }

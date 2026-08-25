@@ -47,8 +47,7 @@ class ContextInput:
         """初始化后处理"""
         # 自动生成哈希
         if self.hash is None:
-            raw = f"{self.source.value}:{self.content}"
-            self.hash = hashlib.md5(raw.encode()).hexdigest()
+            self.hash = self.compute_hash(self.source, self.content)
 
         # 自动设置时间
         now = datetime.now()
@@ -56,6 +55,16 @@ class ContextInput:
             self.created_at = now
         if self.updated_at is None:
             self.updated_at = now
+
+    @classmethod
+    def compute_hash(cls, source: "ContextSource", content: str) -> str:
+        """统一的内容指纹入口（source 域限定去重指纹，非安全用途）。
+
+        任何需要在池外判断"内容是否已归档"的场景（如对话窗口排除重复调取）
+        都必须经由本方法计算，保证与 __post_init__ 的去重哈希同源。
+        """
+        raw = f"{source.value}:{content}"
+        return hashlib.sha256(raw.encode()).hexdigest()
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""

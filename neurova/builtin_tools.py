@@ -235,6 +235,48 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["query"],
         },
     },
+    "spawn_subagent": {
+        "description": "【蜂群派生子Agent】将一个子任务派交给另一个 Agent 执行（蜂群编排）。当任务可分解为多个相对独立的子任务（如：多主题调研、多文件分析、多视角评审）时，对每个子任务各调用一次本工具即可并行蜂群执行。每个子 Agent 拥有独立的人设/记忆/模型配置。前台模式等待完成并返回最终报告；background=true 立即返回 subagent_id（用 subagent_status 查询结果）。子 Agent 的执行过程会实时显示在聊天界面的子 Agent 小窗中。可先用 list_agents 查看可用的子 Agent。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "交给子 Agent 的完整、自包含的任务描述（子 Agent 看不到当前对话历史，任务描述必须包含它需要的全部上下文）",
+                },
+                "agent_id": {
+                    "type": "string",
+                    "description": "目标子 Agent ID（可选，留空使用默认 Agent；建议先用 list_agents 查看可用 Agent 及其专长）",
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "是否后台执行（true=立即返回，稍后用 subagent_status 查询；false=等待完成直接返回报告）",
+                },
+            },
+            "required": ["task"],
+        },
+    },
+    "subagent_status": {
+        "description": "【查询子Agent状态】查询蜂群派生的后台子 Agent 的执行状态与最终报告。配合 spawn_subagent(background=true) 使用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "subagent_id": {
+                    "type": "string",
+                    "description": "spawn_subagent 返回的 subagent_id",
+                },
+            },
+            "required": ["subagent_id"],
+        },
+    },
+    "list_agents": {
+        "description": "【列出可用Agent】列出系统中所有可用的 Agent（含各自的名字、职责描述、模型配置）。在蜂群派生（spawn_subagent）前调用，以便为子任务挑选最合适的执行者。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════

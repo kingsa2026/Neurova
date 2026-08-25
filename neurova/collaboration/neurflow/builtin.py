@@ -564,37 +564,24 @@ async def exec_end(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
 
 
 async def exec_condition(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """条件分支节点执行器"""
+    """条件分支节点执行器（安全 DSL 求值，无 eval）
+
+    表达式可用变量：$input（工作流输入）、$var（工作流变量）、$node（节点结果）、
+    $current（loop 迭代值，循环体内）、$iteration（当前轮次，循环体内）。
+    语法：比较（== != >= <= > < in）、逻辑（and or not）、len/str/int/float/bool。
+    """
+    from .safe_eval import safe_eval_condition
+
     expression = config.get("expression", "True")
 
-    # 安全的表达式求值（限制可用函数）
-    safe_globals = {
-        "True": True,
-        "False": False,
-        "None": None,
-        "len": len,
-        "str": str,
-        "int": int,
-        "float": float,
-        "bool": bool,
-        "abs": abs,
-        "min": min,
-        "max": max,
+    context = {
+        "$input": ctx.get("inputs", {}),
+        "$var": ctx.get("variables", {}),
+        "$node": ctx.get("node_results", {}),
     }
 
-    # 注入节点结果到上下文
-    node_results = ctx.get("node_results", {})
-    safe_globals["$node"] = node_results
-    safe_globals["$input"] = ctx.get("inputs", {})
-    safe_globals["$var"] = ctx.get("variables", {})
-
-    try:
-        result = eval(expression, {"__builtins__": {}}, safe_globals)
-        branch = "true" if result else "false"
-    except Exception as e:
-        logger.warning("条件表达式求值失败: %s", e)
-        branch = "false"
-        result = False
+    result = safe_eval_condition(expression, context)
+    branch = "true" if result else "false"
 
     return {
         "status": "success",
@@ -603,7 +590,12 @@ async def exec_condition(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[st
 
 
 async def exec_loop(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """循环节点执行器"""
+    """循环节点执行器（占位兜底）
+
+    [引擎级循环] 真实的循环执行由 WorkflowExecutor 主循环拦截 builtin:loop
+    节点并驱动 body 子图迭代（见 execution_engine._run_loop），本执行器
+    仅在脱离引擎直接调用注册表时兜底，返回配置回显。
+    """
     max_iterations = config.get("max_iterations", 10)
     config.get("break_condition", "")
 
@@ -719,20 +711,19 @@ async def exec_llm(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
 
 
 async def exec_agent(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """Agent 调用节点执行器
+    """Agent 调用节点执行器（蜂群分派）
 
-    通过 NeurflowAgentManager 验证 agent_id，然后调用 Agent.chat() 执行任务。
+    通过 SwarmManager 真实分派到 agent_id 对应的 Agent 实例（独立人设/记忆/
+    模型配置），执行过程广播 SUBAGENT_* 事件，报告归档发起者上下文池。
 
     配置参数:
-        agent_id: Agent ID（必需）
-        task: 任务描述（必需）
-        temperature: 温度参数（可选，默认 0.7）
-        max_tokens: 最大 token 数（可选，默认 4096）
+        agent_id: Agent ID（必需；不存在时回退 default）
+        task: 任务描述（必需；支持 ${node_id.output} 引用上游输出，由
+              variable_resolver 在引擎层解析）
+        session_id: 可选，聊天会话 ID（事件广播目标，由引擎上下文透传）
     """
     agent_id = config.get("agent_id", "")
     task = config.get("task", "")
-    temperature = config.get("temperature", 0.7)
-    max_tokens = config.get("max_tokens", 4096)
 
     if not agent_id:
         return {
@@ -748,60 +739,52 @@ async def exec_agent(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, A
             "output": None,
         }
 
-    # 验证 agent_id 是否存在于 NeurflowAgentManager
-    agent_manager = get_agent_manager()
-    agent_info = agent_manager.get_agent(agent_id)
-
-    if agent_info is None:
-        logger.warning("Agent %s 不存在于 NeurflowAgentManager", agent_id)
-        # 即使不存在，也尝试使用全局 Agent 执行
-        # 这允许使用系统 Agent 而不仅仅是团队 Agent
-
-    # 获取实际的 Agent 实例
-    agent = _get_agent()
-    if agent is None:
-        return {
-            "status": "failed",
-            "error": "Agent 未初始化",
-            "output": None,
-        }
+    # 从执行上下文提取会话/定位信息（引擎透传）
+    resolution_context = ctx.get("resolution_context")
+    session_id = getattr(resolution_context, "session_id", None) if resolution_context else None
+    execution_id = getattr(resolution_context, "execution_id", None) if resolution_context else None
 
     try:
-        # 调用 Agent.chat() 执行任务
-        response = await agent.chat(
-            task,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            metadata={"history": []},
+        from neurova.agent.swarm import get_swarm_manager
+
+        swarm = get_swarm_manager()
+        result = await swarm.spawn(
+            task=task,
+            agent_id=agent_id,
+            session_id=session_id,
+            background=False,
+            origin="workflow",
+            stream=True,
+            node_id=ctx.get("node_id"),
+            execution_id=execution_id,
         )
-
-        # 提取响应内容
-        if hasattr(response, "content"):
-            result = response.content
-        elif isinstance(response, str):
-            result = response
-        else:
-            result = str(response)
-
-        return {
-            "status": "success",
-            "output": {
-                "agent_id": agent_id,
-                "task": task,
-                "result": result,
-                "agent_info": {
-                    "name": agent_info.name if agent_info else "系统 Agent",
-                    "role": agent_info.role if agent_info else "assistant",
-                },
-            },
-        }
     except Exception as e:
-        logger.error("Agent 调用失败: %s", e)
+        logger.error("Agent 节点分派失败: %s", e)
         return {
             "status": "failed",
             "error": str(e),
             "output": None,
         }
+
+    if result.get("error"):
+        return {
+            "status": "failed",
+            "error": result["error"],
+            "output": None,
+        }
+
+    return {
+        "status": "success",
+        "output": {
+            "agent_id": result.get("agent_id", agent_id),
+            "resolved_agent_id": result.get("agent_id"),
+            "subagent_id": result.get("subagent_id"),
+            "task": task,
+            "result": result.get("report", ""),
+            "agent_name": result.get("agent_name", ""),
+            "duration": result.get("duration", 0.0),
+        },
+    }
 
 
 async def exec_evolution(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
