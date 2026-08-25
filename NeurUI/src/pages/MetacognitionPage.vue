@@ -440,11 +440,8 @@ const fetchEntries = async () => {
     const res = await metacognitionApi.getMetacognitionEntries(agentId.value, params)
     const data = res?.data
     if (data && typeof data === 'object' && 'items' in data) {
-      entryItems.value = (data as any).items || []
-      entryTotal.value = (data as any).total || 0
-    } else if (Array.isArray(data)) {
-      entryItems.value = data
-      entryTotal.value = data.length
+      entryItems.value = data.items || []
+      entryTotal.value = data.total || 0
     } else {
       entryItems.value = []
       entryTotal.value = 0

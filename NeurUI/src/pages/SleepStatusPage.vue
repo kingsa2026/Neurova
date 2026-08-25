@@ -334,7 +334,7 @@ const fetchDreams = async () => {
 const fetchInsights = async () => {
   insightsLoading.value = true
   try {
-    const res = await sleepApi.getSleepInsights(agentId.value, { page: 1, size: 20 })
+    const res = await sleepApi.getSleepInsights(agentId.value, { limit: 20, offset: 0 })
     const data = res?.data
     if (data && typeof data === 'object' && 'items' in data) {
       insights.value = (data as any).items || []
@@ -393,7 +393,7 @@ const goToSleep = async () => {
 const handleApplyInsight = async (insightId: string) => {
   applyingInsightId.value = insightId
   try {
-    await sleepApi.applyInsight(insightId)
+    await sleepApi.applyInsight(agentId.value, insightId)
     message.success(t('common.success'))
     // Update the insight locally
     const insight = insights.value.find((i) => i.id === insightId)
@@ -407,7 +407,7 @@ const handleApplyInsight = async (insightId: string) => {
 
 const handleResolve = async (conflictId: string, resolution: string) => {
   try {
-    await sleepApi.resolveConflict(conflictId, resolution)
+    await sleepApi.resolveConflict(agentId.value, conflictId, resolution)
     message.success(t('common.success'))
     // Refresh conflicts
     await fetchConflicts()

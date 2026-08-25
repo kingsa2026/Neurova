@@ -9,6 +9,9 @@
 from .base import router  # noqa: F401
 
 # 导入子模块以注册路由
+# 注意：markdown 必须在 crud 之前导入——其字面路由 /markdown 需先于
+# crud 的路径参数路由 /{memory_id} 注册，否则会被吞掉
+from . import markdown  # noqa: F401
 from . import crud  # noqa: F401
 from . import eki  # noqa: F401
 from . import emotion  # noqa: F401

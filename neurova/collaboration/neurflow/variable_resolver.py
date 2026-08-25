@@ -30,6 +30,8 @@ class ResolutionContext:
     inputs: Dict[str, Any] = field(default_factory=dict)
     agent_id: Optional[str] = None
     user_id: Optional[str] = None
+    # 聊天会话 ID（蜂群 agent 节点的事件广播目标；画布/聊天联动用）
+    session_id: Optional[str] = None
     # 外部系统引用（延迟注入）
     memory_manager: Optional[Any] = None
     context_pool: Optional[Any] = None

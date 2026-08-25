@@ -163,3 +163,89 @@ LLM API
 - 消息总数
 - system 消息数
 - 各 role 分布
+
+---
+
+## 二次修复（2026-08-25）：对话历史时序被语义池摧毁（真实根因）
+
+### 截图证据
+
+用户只发送一条新消息（"检查上下文是不是出问题了"），但 LLM 推理显示它把
+4 条历史问题（"为什么会返回500错误？"、"请告诉我模型名称"、"重新加载工具层"、
+"持久化测试消息"）当作当前输入逐条回答。
+
+### 根因链
+
+1. `ContextOrchestrator.build_context()` 把 `USER_INPUT`(priority=90) 和
+   对话历史 `CONVERSATION`(priority=60) 全部放进语义池；
+2. `ContextCollector.collect()` 按 `(-priority, tokens)` 排序 → 所有 user
+   消息（90）聚在所有 assistant 消息（60）之前，user/assistant 交替时序被
+   摧毁；同优先级内按 token 数排序进一步打乱历史顺序；
+3. 历史 user 消息与 USER_INPUT 条目内容相同时 hash 去重，高优先级
+   USER_INPUT 胜出，历史问题以"新输入"身份重新出现在上下文中。
+
+### 修复
+
+**文件**：`neurova/context/orchestrator.py`（build_context 的 ContextPool 路径）
+
+- 用户输入与对话历史**不再进入语义池**（语义池只承载系统指令、记忆、
+  经验等无序富化内容）；
+- `draw()` 返回后，对话历史按**原始时序**拼接，当前用户输入**最后追加**，
+  保证是 LLM 看到的最后一条 user 消息。
+
+### 回归测试
+
+`tests/unit/context/test_conversation_ordering_regression.py`（4 个用例）：
+- 单轮：当前输入是唯一 user 消息且位于末尾
+- 二轮：历史问答按原顺序出现一次，无重复
+- 四轮：每轮历史严格按时间排列、无连续同角色消息
+- system 富化内容（记忆等）仍然存在
+
+同时更新 `test_build_context_with_pool.py` 中 3 个断言了旧错误行为
+（用户输入排在第一位）的用例。
+
+---
+
+## 三次修复（2026-08-25）：画布连线（edge）黑色填充阴影
+
+**文件**：`NeurUI/src/modules/collaboration/CanvasDesignerPage.vue`
+
+**问题**：连线从 `<line>` 重构为 `<path>`（贝塞尔曲线）后，CSS 只设置了
+`stroke` 未设置 `fill`。SVG `<path>` 默认 `fill: black`，开放路径会以黑色
+填充曲线与首尾点连线围成的区域，视觉上呈现为曲线下方的"阴影"。
+
+**修复**：给 `.edge-line`、`.edge-hit`、`.edge-preview` 显式添加 `fill: none`。
+
+---
+
+## 四次重构（2026-08-25）：活水上下文池归档/视图分离
+
+### 设计目标（用户定义）
+
+1. **节省 token** —— 视图只包含与当前输入语义相关的归档内容
+2. **永不丢失** —— 池是无损归档：不 clear、不驱逐、不裁剪、不过期
+3. **缓存命中** —— 稳定前缀设计
+
+### 改动
+
+| 文件 | 改动 |
+|---|---|
+| `neurova/context_pool.py` | 移除 max_size 驱逐（永不丢失）；去重保留 |
+| `neurova/context/collector.py` | `collect()` 不再做预算截断（归档完整性） |
+| `neurova/context/semantic_drawer.py` | 整条选取不切片；相关性门槛 0.55（全路径统一刻度：关键词分归一化为 `0.5 + kw/2`，消除"向量库存在但运行时降级"的刻度错配）；最终按 `created_at` 稳定排序 |
+| `neurova/context/pool_models.py` | hash 收口到 `compute_hash()` 单一入口（MD5→SHA-256） |
+| `neurova/context/orchestrator.py` | 归档层/视图层分离：视图 = [固定 system 前缀] → [对话窗口 append-only] → [本轮检索产物直接注入] → [跨轮语义调取块] → [瞬态] → [当前输入]；池 `ttl_seconds=0` |
+| `neurova/context/orchestrator.py` | 时间注入降为日期精度（移除秒级时刻，修复缓存杀手） |
+| `unified_vector_store.py` | 空词表 hash 编码 `hash(token)` → SHA-256 确定性哈希（修复跨进程非确定性，曾致调取门槛随机失效） |
+
+### 视图层顺序（缓存友好）
+
+调取块位于对话之后、当前输入之前——调取内容逐轮变化只影响尾部，
+不破坏 `[system + 对话窗口]` 前缀缓存。
+
+### 测试
+
+- 新增 `test_context_pool_living_archive.py`（11 用例）：无损归档、按需调取、
+  缓存稳定性三目标各有专项
+- 更新断言旧行为的测试：驱逐（concurrency/optimizations）、切片截断
+  （truncate 重写为整条跳过语义）、collect 截断（test_context_pool）

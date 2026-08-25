@@ -34,11 +34,23 @@ export const useCollaborationStore = defineStore('collaboration', () => {
   const sessionCount = computed(() => sessions.value.length)
 
   // ── Actions ──
+  // 兼容两种后端包裹形态：data 直接为数组，或 data: { history/sessions: [...] } 对象。
+  // 修复：/history 返回 {history:[...], total} 时被整体赋给数组 ref，
+  // 导致页面 history.value.slice is not a function 崩溃。
+  function asArray<T>(payload: unknown, keys: string[] = []): T[] {
+    const p = payload as any
+    if (Array.isArray(p)) return p as T[]
+    for (const k of keys) {
+      if (Array.isArray(p?.[k])) return p[k] as T[]
+    }
+    return []
+  }
+
   async function fetchSessions() {
     loading.value = true
     try {
       const res = await listSessions()
-      sessions.value = ((res as any)?.data ?? res) as CollabSession[]
+      sessions.value = asArray<CollabSession>((res as any)?.data ?? res, ['sessions'])
     } catch (e) {
       error.value = (e as Error).message
       handleError(e, 'fetchSessions')
@@ -52,7 +64,7 @@ export const useCollaborationStore = defineStore('collaboration', () => {
     loading.value = true
     try {
       const res = await listTemplates()
-      templates.value = ((res as any)?.data ?? res) as CollabTemplate[]
+      templates.value = asArray<CollabTemplate>((res as any)?.data ?? res, ['templates'])
     } catch (e) {
       error.value = (e as Error).message
       handleError(e, 'fetchTemplates')
@@ -66,7 +78,7 @@ export const useCollaborationStore = defineStore('collaboration', () => {
     loading.value = true
     try {
       const res = await listHistory()
-      history.value = ((res as any)?.data ?? res) as CollabSession[]
+      history.value = asArray<CollabSession>((res as any)?.data ?? res, ['history'])
     } catch (e) {
       error.value = (e as Error).message
       handleError(e, 'fetchHistory')

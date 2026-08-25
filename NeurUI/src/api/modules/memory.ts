@@ -428,6 +428,41 @@ export function triggerDecay(agentId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Markdown export/import  (prefix: /memory/markdown)  — P1 记忆可解释性
+// ---------------------------------------------------------------------------
+
+/** Markdown 导入结果统计。 */
+export interface MemoryMarkdownImportStats {
+  updated: number
+  unchanged: number
+  missing: number
+  conflicts?: number
+}
+
+/** Export agent memories as readable markdown. */
+export function exportMemoryMarkdown(agentId?: string, params?: { category?: string; limit?: number }) {
+  return api.get<ApiResponse<{ markdown: string }>>(`${BASE}/markdown`, {
+    params: { agent_id: agentId || undefined, ...params },
+  })
+}
+
+/**
+ * Submit (possibly edited) memory markdown. Only text-layer changes are
+ * written back; embeddings / vector index stay untouched.
+ */
+export function importMemoryMarkdown(
+  markdown: string,
+  agentId?: string,
+  strictVersion = false
+) {
+  return api.post<ApiResponse<{ stats: MemoryMarkdownImportStats }>>(
+    `${BASE}/markdown`,
+    { markdown, strict_version: strictVersion },
+    { params: { agent_id: agentId || undefined } }
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Emotion Analysis  (prefix: /memory/emotion)
 // ---------------------------------------------------------------------------
 

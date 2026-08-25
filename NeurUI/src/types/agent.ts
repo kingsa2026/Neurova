@@ -6,6 +6,10 @@ export interface Agent {
   provider?: string
   status: 'active' | 'inactive' | 'sleeping' | 'error'
   avatar?: string
+  /** 人设提示词（后端 agent_config.json 的 system_prompt） */
+  system_prompt?: string
+  /** Agent 角色（如 assistant/researcher，用于蜂群派生时挑选执行者） */
+  role?: string
   createdAt: string
   updatedAt: string
   config?: AgentConfig

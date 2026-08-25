@@ -11,9 +11,11 @@ logger = get_logger(__name__)
 
 # 创建顶层 router
 router = APIRouter()
-acp_router = APIRouter()
 evolution_router = APIRouter()
 rag_router = APIRouter()
+
+# ACP 消息协议路由（真实实现，见 acp_api.py）
+from neurova.api.endpoints.acp_api import router as acp_router  # noqa: E402
 
 # 全局状态（由 app.py 初始化时设置）
 _app_state: Optional[Dict[str, Any]] = None
@@ -213,6 +215,7 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.notifications", "/v1/notifications", "Notifications API"),
         ("neurova.api.endpoints.audit", "/v1/audit", "Audit API"),
         ("neurova.api.endpoints.firewall", "/v1/firewall", "Firewall API"),
+        ("neurova.api.endpoints.governance", "/v1/governance", "Governance API"),
         ("neurova.api.endpoints.analytics", "/v1/analytics", "Analytics API"),
         ("neurova.api.endpoints.collaboration_api", "/v1/collaboration", "Collaboration API"),
         ("neurova.api.endpoints.groups_api", "/v1/groups", "Groups API"),

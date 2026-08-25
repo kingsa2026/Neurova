@@ -397,6 +397,11 @@ class ApprovalManager:
 
             return sorted(requests, key=lambda r: r.created_at, reverse=True)
 
+    def get_request(self, request_id: str) -> Optional[ApprovalRequest]:
+        """按 ID 获取审批请求（任意状态）"""
+        with self._lock:
+            return self._requests.get(request_id)
+
     def _is_in_whitelist(self, command: str) -> bool:
         """检查命令是否在白名单中"""
         command_lower = command.lower().strip()

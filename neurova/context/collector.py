@@ -27,8 +27,10 @@ class ContextCollector:
         self._contexts.append(context)
 
     def collect(self) -> List[ContextInput]:
-        sorted_contexts = sorted(self._contexts, key=lambda x: (-x.priority, x.tokens))
-        return self._apply_token_budget(sorted_contexts)
+        # [归档完整性] collect() 返回全部条目且绝不截断内容：
+        # 上下文池的定位是无损归档（活水），裁剪只允许发生在"视图层"（Drawer
+        # 整条选取），归档本身永不被裁剪/压缩。
+        return sorted(self._contexts, key=lambda x: (-x.priority, x.tokens))
 
     def collect_by_source(self, source) -> List[ContextInput]:
         return [ctx for ctx in self._contexts if ctx.source == source]

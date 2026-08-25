@@ -9,6 +9,7 @@ export interface ExperienceRecord {
   id: string
   agent_id: string
   task_type: string
+  skill_name?: string
   context: string
   outcome: 'success' | 'failure' | 'partial'
   success_rate?: number

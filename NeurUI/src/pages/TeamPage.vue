@@ -65,18 +65,11 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { listTeams, createTeam, updateTeam, deleteTeam as deleteTeamApi, addTeamMembers } from '@/api/modules/teams'
+import { listTeams, createTeam, updateTeam, deleteTeam as deleteTeamApi, addTeamMembers, type Team } from '@/api/modules/teams'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 
 const { t } = useI18n()
-
-interface Team {
-  id: string
-  name: string
-  description: string
-  members?: string[]
-}
 
 const teams = ref<Team[]>([])
 const loading = ref(false)
@@ -107,7 +100,7 @@ function openCreate() { resetTeamForm(); showTeamModal.value = true }
 function openEdit(team: Team) {
   editingId.value = team.id
   teamForm.name = team.name
-  teamForm.description = team.description
+  teamForm.description = team.description ?? ''
   showTeamModal.value = true
 }
 

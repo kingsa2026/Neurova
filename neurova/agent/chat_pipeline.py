@@ -18,7 +18,7 @@ ChatPipeline — 对话流程管线
 
 from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from neurova.agent.crystallized_experience_manager import CrystallizedExperienceManager
 from neurova.agent.memory_retrieval_chain import MemoryRetrievalChain, RetrievalContext, RetrievalStrategy
@@ -43,6 +43,10 @@ class ChatContext:
     session_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     enable_tts: bool = False
+    # [蜂群流式] 可选事件发射器 (event_type, data) -> None：
+    # 流式路径每收到 content/reasoning chunk 时回调，供 SwarmManager
+    # 转发 SUBAGENT_CHUNK 事件；不影响聚合返回值
+    event_emitter: Optional[Callable] = None
 
     # 中间状态
     tool_memory_result: Optional[Dict] = None
@@ -311,6 +315,14 @@ class ChatPipeline:
         self._agent._current_reasoning = None
         self._agent._tool_messages_list = []
         self._agent._current_user_input = ctx.user_input
+        # session_id 透传给工具层（蜂群工具派生子 Agent 时广播事件用）
+        self._agent._current_session_id = ctx.session_id
+        # [蜂群流式] event_emitter 允许经 metadata 透传（Agent.chat 未显式
+        # 传参时）， SwarmManager 以 metadata 携带发射器，此处提取到 ctx
+        if ctx.event_emitter is None and isinstance(ctx.metadata, dict):
+            candidate = ctx.metadata.get("event_emitter")
+            if callable(candidate):
+                ctx.event_emitter = candidate
 
     # ══════════════════════════════════════════════════════════════
     # Step 0: 活动追踪 + 轨迹记录
@@ -917,16 +929,30 @@ class ChatPipeline:
         # 原代码 `gen = self.loop.predict_step(...)` 缺 await,对 coroutine
         # 迭代会抛 TypeError: 'coroutine' object is not async iterable。
         gen = await self.loop.predict_step(messages=ctx.context, tools=tools_for_llm, stream=True)
+        emitter = ctx.event_emitter
         async for event in gen:
             if not isinstance(event, dict):
                 continue
             etype = event.get("type")
             if etype == "content":
                 reply_parts.append(event.get("data", ""))
+                # [蜂群流式] 转发 chunk 给事件发射器（如 SwarmManager）
+                if emitter is not None:
+                    try:
+                        emitter("content", event.get("data", ""))
+                    except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
+                        logger.debug("event_emitter 回调失败: %s", e)
             elif etype == "done":
                 # done 事件携带完整回复快照，仅在未累积到 content 时兜底
                 if not reply_parts and event.get("reply"):
                     reply_parts.append(event["reply"])
+            elif etype == "reasoning":
+                # [蜂群流式] reasoning chunk 同样转发
+                if emitter is not None:
+                    try:
+                        emitter("reasoning", event.get("data", ""))
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("event_emitter 回调失败: %s", e)
             elif etype in ("tool_call", "tool_result"):
                 # C1: 原生 function-calling 元数据，接入工具消息列表
                 native_tool_events.append(event)

@@ -372,7 +372,7 @@ const handleSave = async () => {
 const handleResolve = async (conflictId: string, resolution: string) => {
   resolvingId.value = conflictId
   try {
-    await sleepApi.resolveConflict(conflictId, resolution)
+    await sleepApi.resolveConflict(agentId.value, conflictId, resolution)
     message.success(t('common.success'))
     await fetchConflicts()
   } catch (e: any) {
@@ -396,7 +396,7 @@ const handleCustomResolve = async () => {
   if (!customResolveConflict.value) return
   resolvingId.value = customResolveConflict.value.id
   try {
-    await sleepApi.resolveConflict(customResolveConflict.value.id, customResolveValue.value)
+    await sleepApi.resolveConflict(agentId.value, customResolveConflict.value.id, customResolveValue.value)
     message.success(t('common.success'))
     showResolveModal.value = false
     customResolveValue.value = ''
