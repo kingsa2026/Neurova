@@ -400,6 +400,8 @@ class Memory:
                     agent_id=agent_id or "default",
                     neuser_id=neuser_id or "default",
                     user_id=user_id or "default",
+                    shared=data.get("shared", False),
+                    share_group_ids=tuple(data.get("share_group_ids", []) or []),
                 )
 
         return cls(

@@ -55,6 +55,10 @@ class EventType(str, Enum):
     SUBAGENT_CHUNK = "subagent_chunk"
     SUBAGENT_COMPLETED = "subagent_completed"
 
+    # 电脑/浏览器操作：Agent 执行 computer_*/browser_* 工具时的实时动作流
+    # （驱动聊天页的电脑操作分屏面板）
+    COMPUTER_ACTION = "computer_action"
+
     # 会话状态
     SESSION_CREATED = "session_created"
     SESSION_RESUMED = "session_resumed"

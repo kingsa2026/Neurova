@@ -465,6 +465,159 @@ BUILTIN_NODES: List[Dict[str, Any]] = [
         "outputs": [{"id": "approved", "label": "通过"}, {"id": "rejected", "label": "拒绝"}],
         "source": "builtin",
     },
+    {
+        "type": "builtin:text_input",
+        "label": "文本输入",
+        "icon": "📝",
+        "category": "input",
+        "description": "提供纯文本值给工作流（支持 ${node.output} 变量引用）",
+        "sub_blocks": [
+            {"id": "value", "title": "文本内容", "type": "textarea"},
+        ],
+        "inputs": [],
+        "outputs": [{"id": "text", "label": "文本"}],
+        "source": "builtin",
+    },
+    {
+        "type": "builtin:media_input",
+        "label": "媒体输入",
+        "icon": "🖼️",
+        "category": "input",
+        "description": "提供富媒体载荷（URL / data-url / base64 / 远程 / 上传，不内联二进制）",
+        "sub_blocks": [
+            {
+                "id": "media_type",
+                "title": "媒体类型",
+                "type": "select",
+                "default_value": "file",
+                "options": [
+                    {"label": "图片", "value": "image"},
+                    {"label": "音频", "value": "audio"},
+                    {"label": "视频", "value": "video"},
+                    {"label": "文件", "value": "file"},
+                ],
+            },
+            {
+                "id": "source",
+                "title": "来源",
+                "type": "select",
+                "default_value": "url",
+                "options": [
+                    {"label": "URL", "value": "url"},
+                    {"label": "Data URL", "value": "data-url"},
+                    {"label": "Base64", "value": "base64"},
+                    {"label": "远程资源", "value": "remote"},
+                    {"label": "上传", "value": "upload"},
+                ],
+            },
+            {"id": "source_format", "title": "远程形态", "type": "input"},
+            {"id": "value", "title": "载荷值（URL / data-url / base64，不内联二进制）", "type": "textarea"},
+        ],
+        "inputs": [],
+        "outputs": [{"id": "media", "label": "媒体"}],
+        "source": "builtin",
+    },
+    {
+        "type": "builtin:file_input",
+        "label": "文件输入",
+        "icon": "📄",
+        "category": "input",
+        "description": "提供文件载荷（上传 / 远程 URL），标记文件种类供下游分派",
+        "sub_blocks": [
+            {
+                "id": "source",
+                "title": "来源",
+                "type": "select",
+                "default_value": "url",
+                "options": [
+                    {"label": "上传", "value": "upload"},
+                    {"label": "远程 URL", "value": "url"},
+                ],
+            },
+            {"id": "file_types", "title": "文件种类", "type": "input"},
+            {"id": "value", "title": "远程文件地址", "type": "input"},
+        ],
+        "inputs": [],
+        "outputs": [{"id": "file", "label": "文件"}],
+        "source": "builtin",
+    },
+    {
+        "type": "builtin:knowledge_base",
+        "label": "知识库检索",
+        "icon": "📚",
+        "category": "input",
+        "description": "从本地记忆库或远程知识库 API 检索内容",
+        "sub_blocks": [
+            {
+                "id": "kb_type",
+                "title": "知识库类型",
+                "type": "select",
+                "default_value": "local",
+                "options": [
+                    {"label": "本地记忆库", "value": "local"},
+                    {"label": "飞书知识库", "value": "feishu"},
+                    {"label": "IMA 知识库", "value": "ima"},
+                ],
+            },
+            {"id": "query", "title": "检索词", "type": "input", "required": True},
+            {"id": "limit", "title": "返回条数", "type": "slider", "default_value": 5, "min": 1, "max": 50},
+            {"id": "api_url", "title": "API 地址（远程）", "type": "input"},
+            {"id": "api_key", "title": "API Key（远程）", "type": "input"},
+            {"id": "dataset_id", "title": "数据集 ID（远程）", "type": "input"},
+        ],
+        "inputs": [],
+        "outputs": [{"id": "results", "label": "检索结果"}],
+        "source": "builtin",
+    },
+    {
+        "type": "builtin:remote_api",
+        "label": "远程 API",
+        "icon": "🌐",
+        "category": "input",
+        "description": "调用远程 HTTP API（GET/POST），透传响应",
+        "sub_blocks": [
+            {
+                "id": "method",
+                "title": "方法",
+                "type": "select",
+                "default_value": "GET",
+                "options": [
+                    {"label": "GET", "value": "GET"},
+                    {"label": "POST", "value": "POST"},
+                ],
+            },
+            {"id": "url", "title": "URL", "type": "input", "required": True},
+            {"id": "headers", "title": "请求头（JSON）", "type": "textarea"},
+            {"id": "body", "title": "请求体（JSON）", "type": "textarea"},
+        ],
+        "inputs": [],
+        "outputs": [{"id": "response", "label": "响应"}],
+        "source": "builtin",
+    },
+    {
+        "type": "builtin:output",
+        "label": "输出节点",
+        "icon": "📤",
+        "category": "output",
+        "description": "工作流输出（文本 / 文件引用）",
+        "sub_blocks": [
+            {
+                "id": "output_type",
+                "title": "输出类型",
+                "type": "select",
+                "default_value": "text",
+                "options": [
+                    {"label": "文本", "value": "text"},
+                    {"label": "文件", "value": "file"},
+                ],
+            },
+            {"id": "file_kind", "title": "文件种类（file 时）", "type": "input"},
+            {"id": "name", "title": "输出名称", "type": "input"},
+        ],
+        "inputs": [{"id": "input", "label": "输入"}],
+        "outputs": [{"id": "output", "label": "输出"}],
+        "source": "builtin",
+    },
 ]
 
 
@@ -535,6 +688,39 @@ def _get_channel_manager():
     except ImportError:
         logger.debug("ChannelManager 未可用")
         return None
+
+
+def _get_multi_model_client():
+    """获取多模型客户端实例（用于按 {provider, model} 路由 LLM 调用）"""
+    try:
+        from neurova.llm.multi_model_client import get_multi_model_client
+
+        return get_multi_model_client()
+    except ImportError:
+        logger.debug("MultiModelClient 未可用")
+        return None
+
+
+def _extract_llm_text(response: Any) -> str:
+    """从多种响应形状中安全提取文本内容"""
+    if isinstance(response, str):
+        return response
+    if isinstance(response, dict):
+        choices = response.get("choices")
+        if isinstance(choices, list) and choices:
+            message = choices[0].get("message", {})
+            if isinstance(message, dict):
+                return str(message.get("content", ""))
+        return str(response)
+    # OpenAI 风格对象：choices[0].message.content
+    try:
+        if hasattr(response, "choices") and response.choices:
+            message = response.choices[0].message
+            if hasattr(message, "content"):
+                return str(message.content)
+    except Exception:
+        pass
+    return str(response)
 
 
 # ==================== 节点执行器 ====================
@@ -659,14 +845,15 @@ async def exec_delay(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, A
 
 
 async def exec_llm(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """LLM 调用节点执行器"""
-    agent = _get_agent()
-    if agent is None:
-        return {
-            "status": "failed",
-            "error": "Agent 未初始化",
-            "output": None,
-        }
+    """LLM 调用节点执行器
+
+    - 显式指定 model_provider != 'auto' 且 model_name 时，经多模型客户端
+      对指定 Provider + 模型真正发起调用（支持可联通模型下拉选择）。
+    - 否则回退 Agent.chat()（保持向后兼容）。
+    """
+    provider = config.get("model_provider", "auto")
+    model_name = config.get("model_name", "")
+    explicit_model = provider and provider != "auto" and model_name
 
     prompt = config.get("prompt", "")
     temperature = config.get("temperature", 0.7)
@@ -675,15 +862,67 @@ async def exec_llm(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
 
     # 变量解析已在执行引擎层完成（resolve_config），
     # 但作为防御性编程，如果 prompt 中仍含未解析的变量引用，
-    # 使用 ctx 中的 variable_resolver 进行兜底解析
+    # 使用 ctx 中的 variable_resolver 进行兜底解析（异常时回退原值）
     var_resolver = ctx.get("variable_resolver")
     if var_resolver and ctx.get("resolution_context"):
         import re
 
         if re.search(r"\$[a-zA-Z_]\w*", prompt) or re.search(r"\$[a-zA-Z_]\w*", system_prompt):
             res_ctx = ctx["resolution_context"]
-            prompt = var_resolver.resolve_config(prompt, res_ctx)
-            system_prompt = var_resolver.resolve_config(system_prompt, res_ctx)
+            try:
+                prompt = var_resolver.resolve_config(prompt, res_ctx)
+                system_prompt = var_resolver.resolve_config(system_prompt, res_ctx)
+            except Exception as e:
+                logger.warning("LLM 节点变量解析失败，回退原值: %s", e)
+
+    # ---------- 多模型路由路径 ----------
+    if explicit_model:
+        llm_client = _get_multi_model_client()
+        if llm_client is not None:
+            try:
+                messages = [{"role": "user", "content": prompt}]
+                if system_prompt:
+                    messages.insert(0, {"role": "system", "content": system_prompt})
+
+                result = await llm_client.chat(
+                    messages,
+                    model=model_name,
+                    provider_id=provider,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                if not result.get("success"):
+                    return {
+                        "status": "failed",
+                        "error": result.get("error", "LLM 调用失败"),
+                        "output": None,
+                    }
+                return {
+                    "status": "success",
+                    "output": {
+                        "text": _extract_llm_text(result.get("response")),
+                        "usage": {},
+                    },
+                    "provider": result.get("provider") or provider,
+                    "model": result.get("model") or model_name,
+                }
+            except Exception as e:
+                logger.error("LLM 模型路由调用失败: %s", e)
+                return {
+                    "status": "failed",
+                    "error": str(e),
+                    "output": None,
+                }
+        # 客户端不可用则继续回退 Agent.chat()
+
+    # ---------- Agent.chat 回退路径 ----------
+    agent = _get_agent()
+    if agent is None:
+        return {
+            "status": "failed",
+            "error": "Agent 未初始化",
+            "output": None,
+        }
 
     try:
         response = await agent.chat(
@@ -936,9 +1175,15 @@ async def exec_memory_save(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
 async def exec_context(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
     """获取上下文节点执行器
 
-    从执行上下文中获取 context_pool，按来源过滤并应用 token 预算。
+    优先从执行上下文取 context_pool（ResolutionContext 注入），
+    兼容回退到全局 _get_context_pool()；同时适配 get_contexts()
+    （ContextPool 条目对象）与旧式 get_context()（返回 dict）两种池接口。
+    按来源过滤并应用 token 预算。
     """
     context_pool = ctx.get("context_pool")
+    if context_pool is None:
+        getter = globals().get("_get_context_pool")
+        context_pool = getter() if callable(getter) else None
     if context_pool is None:
         return {
             "status": "failed",
@@ -958,59 +1203,82 @@ async def exec_context(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str,
         else:
             sources = sources_str
 
-        # 获取所有上下文
-        all_contexts = context_pool.get_contexts()
+        # 获取所有上下文：新式 ContextPool（get_contexts → 条目对象列表）
+        # 或旧式接口（get_context → dict 快照）。
+        # 注意：不能用 hasattr 判定——MagicMock 会自动补全任意方法；
+        # 以"get_contexts() 是否返回列表"作为运行时判据。
+        all_contexts = None
+        if hasattr(context_pool, "get_contexts"):
+            try:
+                candidate = context_pool.get_contexts()
+                if isinstance(candidate, list):
+                    all_contexts = candidate
+            except Exception as e:  # noqa: BLE001
+                logger.debug("get_contexts 调用失败，回退旧式接口: %s", e)
 
-        # 按来源过滤
-        from neurova.context_pool import ContextSource
+        if isinstance(all_contexts, list):
+            # ---- 新式条目对象路径 ----
+            from neurova.context_pool import ContextSource
 
-        source_enum_map = {
-            "memory": ContextSource.MEMORY,
-            "emotion": ContextSource.EMOTION,
-            "conversation": ContextSource.CONVERSATION,
-            "experience": ContextSource.EXPERIENCE,
-            "reflection": ContextSource.REFLECTION,
-            "tool_call": ContextSource.TOOL_CALL,
-            "multimodal": ContextSource.MULTIMODAL,
-            "system_instruction": ContextSource.SYSTEM_INSTRUCTION,
-            "developer_instruction": ContextSource.DEVELOPER_INSTRUCTION,
-            "user_input": ContextSource.USER_INPUT,
-        }
+            source_enum_map = {
+                "memory": ContextSource.MEMORY,
+                "emotion": ContextSource.EMOTION,
+                "conversation": ContextSource.CONVERSATION,
+                "experience": ContextSource.EXPERIENCE,
+                "reflection": ContextSource.REFLECTION,
+                "tool_call": ContextSource.TOOL_CALL,
+                "multimodal": ContextSource.MULTIMODAL,
+                "system_instruction": ContextSource.SYSTEM_INSTRUCTION,
+                "developer_instruction": ContextSource.DEVELOPER_INSTRUCTION,
+                "user_input": ContextSource.USER_INPUT,
+            }
 
-        source_enums = set()
-        for s in sources:
-            if s in source_enum_map:
-                source_enums.add(source_enum_map[s])
+            source_enums = set()
+            for s in sources:
+                if s in source_enum_map:
+                    source_enums.add(source_enum_map[s])
 
-        if source_enums:
-            filtered = [ctx_item for ctx_item in all_contexts if ctx_item.source in source_enums]
-        else:
-            filtered = all_contexts
+            filtered = [
+                ctx_item
+                for ctx_item in all_contexts
+                if not source_enums or ctx_item.source in source_enums
+            ]
 
-        # 应用 token 预算截断
-        result = []
-        total_tokens = 0
-        for ctx_item in filtered:
-            item_tokens = ctx_item.tokens or len(ctx_item.content) // 4
-            if total_tokens + item_tokens > token_budget:
-                break
-            result.append(
-                {
-                    "source": ctx_item.source.value if hasattr(ctx_item.source, "value") else str(ctx_item.source),
-                    "content": ctx_item.content,
-                    "priority": ctx_item.priority,
-                    "tokens": item_tokens,
-                }
-            )
-            total_tokens += item_tokens
+            # 应用 token 预算截断
+            result = []
+            total_tokens = 0
+            for ctx_item in filtered:
+                item_tokens = ctx_item.tokens or len(ctx_item.content) // 4
+                if total_tokens + item_tokens > token_budget:
+                    break
+                result.append(
+                    {
+                        "source": ctx_item.source.value if hasattr(ctx_item.source, "value") else str(ctx_item.source),
+                        "content": ctx_item.content,
+                        "priority": ctx_item.priority,
+                        "tokens": item_tokens,
+                    }
+                )
+                total_tokens += item_tokens
 
+            return {
+                "status": "success",
+                "output": result,
+                "metadata": {
+                    "total_contexts": len(all_contexts),
+                    "filtered_count": len(result),
+                    "total_tokens": total_tokens,
+                    "token_budget": token_budget,
+                },
+            }
+
+        # ---- 旧式 dict 快照接口 ----
+        snapshot = context_pool.get_context() or {}
         return {
             "status": "success",
-            "output": result,
+            "output": snapshot,
             "metadata": {
-                "total_contexts": len(all_contexts),
-                "filtered_count": len(result),
-                "total_tokens": total_tokens,
+                "snapshot_keys": list(snapshot.keys()),
                 "token_budget": token_budget,
             },
         }
@@ -1033,6 +1301,9 @@ async def exec_emotion(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str,
     """
     emotion_module = ctx.get("emotion_module")
     if emotion_module is None:
+        getter = globals().get("_get_emotion_module")
+        emotion_module = getter() if callable(getter) else None
+    if emotion_module is None:
         return {
             "status": "failed",
             "error": "emotion_module 未注入到执行上下文（ResolutionContext.emotion_module 为 None）",
@@ -1044,18 +1315,34 @@ async def exec_emotion(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str,
 
     try:
         if mode == "analyze":
-            # 调用 EmotionModule.analyze_text_emotion 分析文本情感
-            emotion_state = emotion_module.analyze_text_emotion(text)
+            # 方法适配：优先 analyze（部分 EmotionModule 实现），退化为
+            # analyze_text_emotion；返回 dict 或对象均可。
+            analyze_fn = getattr(emotion_module, "analyze", None) or getattr(
+                emotion_module, "analyze_text_emotion", None
+            )
+            if analyze_fn is None:
+                return {
+                    "status": "failed",
+                    "error": "emotion_module 缺少 analyze/analyze_text_emotion 方法",
+                    "output": None,
+                }
+            emotion_state = analyze_fn(text)
+            if isinstance(emotion_state, dict):
+                return {
+                    "status": "success",
+                    "output": emotion_state,
+                }
             return {
                 "status": "success",
                 "output": {
-                    "primary_emotion": emotion_state.primary_emotion.value,
-                    "intensity": emotion_state.intensity,
-                    "valence": emotion_state.valence,
-                    "arousal": emotion_state.arousal,
+                    "primary_emotion": getattr(emotion_state.primary_emotion, "value", None)
+                    or str(getattr(emotion_state, "primary_emotion", "")),
+                    "intensity": getattr(emotion_state, "intensity", 0.0),
+                    "valence": getattr(emotion_state, "valence", 0.0),
+                    "arousal": getattr(emotion_state, "arousal", 0.0),
                     "secondary_emotions": (
                         {k.value: v for k, v in emotion_state.secondary_emotions.items()}
-                        if emotion_state.secondary_emotions
+                        if getattr(emotion_state, "secondary_emotions", None)
                         else {}
                     ),
                 },
@@ -1193,6 +1480,358 @@ async def exec_human_input(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
     return {
         "status": "timeout",
         "output": {"prompt": prompt, "user_input": None},
+    }
+
+
+def _resolve_value(value: str, ctx: Dict[str, Any]) -> str:
+    """防御性变量解析：值中残留 ${node.output} / $var 引用时兜底解析（异常回退原值）"""
+    var_resolver = ctx.get("variable_resolver")
+    if var_resolver and ctx.get("resolution_context"):
+        try:
+            resolved = var_resolver.resolve_config(value, ctx["resolution_context"])
+            return resolved if isinstance(resolved, str) else str(resolved)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("输入节点变量解析失败，回退原值: %s", e)
+    return value
+
+
+async def exec_text_input(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """文本输入节点执行器
+
+    把用户配置的纯文本值作为 {text} 输出给下游。
+    值中的 ${node.output} 引用由引擎变量解析器解析后回填。
+    """
+    value = _resolve_value(str(config.get("value", "") or ""), ctx)
+    return {"status": "success", "output": {"text": value}}
+
+
+async def exec_media_input(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """媒体输入节点执行器
+
+    输出结构化媒体载荷 {type, source, value}，仅透传引用/URL/base64 元数据，
+    不加载二进制，避免塞爆节点 config 与存储。
+    - source=url/data-url/base64：value 为对应字符串
+    - source=remote：value 为远程地址（source_format 指明 url 等形态）
+    - source=upload：upload_file 携带上传文件元数据 {name, dataUrl?...}
+    缺省 media_type=file、source=url（覆盖最广的保守默认）。
+    """
+    media_type = str(config.get("media_type") or "file")
+    source = str(config.get("source") or "url")
+
+    if source == "remote":
+        # 远程资源：归一化为其传输形态（url 等）
+        source = str(config.get("source_format") or "url")
+        value = _resolve_value(str(config.get("value", "") or ""), ctx)
+    elif source == "upload":
+        value = ""
+    else:
+        value = _resolve_value(str(config.get("value", "") or ""), ctx)
+
+    media: Dict[str, Any] = {"type": media_type, "source": source, "value": value}
+    if source == "upload":
+        media["file"] = config.get("upload_file") or {}
+
+    return {"status": "success", "output": {"media": media}}
+
+
+async def exec_file_input(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """文件输入节点执行器
+
+    输出 {file: {source, kind, value|file}}：
+    - source=upload：upload_file 元数据透传（含 name/dataUrl）
+    - source=url：value 为远程文件地址
+    file_types 标记文件种类（pdf/docx/video/...），供下游分派。
+    """
+    source = str(config.get("source") or "url")
+    kind = str(config.get("file_types") or "")
+
+    if source == "upload":
+        upload_file = config.get("upload_file") or {}
+        file_payload: Dict[str, Any] = {
+            "source": "upload",
+            "kind": kind,
+            "file": upload_file,
+        }
+    else:
+        file_payload = {
+            "source": "url",
+            "kind": kind,
+            "value": _resolve_value(str(config.get("value", "") or ""), ctx),
+        }
+
+    return {"status": "success", "output": {"file": file_payload}}
+
+
+def _ssrf_allowlisted(host: str) -> bool:
+    """SSRF 放行名单：NEUROVA_SSRF_ALLOWLIST（逗号分隔主机；"*" 关闭防护）"""
+    import os
+
+    raw = os.environ.get("NEUROVA_SSRF_ALLOWLIST", "")
+    entries = {entry.strip().lower() for entry in raw.split(",") if entry.strip()}
+    return "*" in entries or host.lower() in entries
+
+
+def _validate_outbound_url(url: str) -> str:
+    """出站 URL 的 SSRF 边界校验；违规抛 ValueError，通过则返回净化后的 URL。
+
+    - 仅允许 http/https
+    - 主机逐条解析为 IP 后判定：私网/环回/链路本地（含云元数据 169.254.0.0/16）/
+      保留/组播/未指定地址一律拒绝，IPv4-mapped IPv6 折算后判定
+    - NEUROVA_SSRF_ALLOWLIST 可显式放行主机（供纯内网/本机部署的合法调用）
+    """
+    from urllib.parse import urlparse
+    import ipaddress
+    import socket
+
+    parsed = urlparse(str(url or ""))
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"SSRF 防护: 不允许的协议 {parsed.scheme!r}（仅限 http/https）")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("SSRF 防护: URL 缺少主机名")
+    if _ssrf_allowlisted(host):
+        return str(url)
+
+    candidates = []
+    try:
+        candidates.append(ipaddress.ip_address(host))
+    except ValueError:
+        pass  # 域名，走解析
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        for info in socket.getaddrinfo(host, port):
+            addr = info[4][0]
+            try:
+                candidates.append(ipaddress.ip_address(str(addr).split("%")[0]))
+            except ValueError:
+                continue
+    except OSError as e:
+        raise ValueError(f"SSRF 防护: 域名解析失败 {host}: {e}") from e
+
+    checked = set()
+    for ip in candidates:
+        if ip.version == 6 and getattr(ip, "ipv4_mapped", None):
+            ip = ip.ipv4_mapped  # ::ffff:x.y.z.w 按嵌入 IPv4 判定
+        if ip in checked:
+            continue
+        checked.add(ip)
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise ValueError(f"SSRF 防护: 目标 {host} 解析到受限地址 {ip}")
+
+    # 全部解析地址均在允许边界内
+    return str(url)
+
+
+class _OutboundResponse:
+    """requests.Response 的最小兼容层（ok / status_code / json() / text / url）"""
+
+    def __init__(self, status_code: int, body: bytes, url: str):
+        self.status_code = status_code
+        self._body = body
+        self.url = url
+        self.text = body.decode("utf-8", errors="replace")
+
+    @property
+    def ok(self) -> bool:
+        return 200 <= self.status_code < 300
+
+    def json(self) -> Any:
+        import json as _json
+
+        return _json.loads(self.text)
+
+
+def _safe_request(method: str, url: str, **kwargs) -> "_OutboundResponse":
+    """流程节点出站 HTTP 唯一通道（SSRF 防护收敛点）。
+
+    1. _validate_outbound_url 先行校验：协议白名单 + 解析后 IP 边界判定
+    2. 以禁用重定向的 opener 发起请求 —— 任何 3xx 不跟随，杜绝二次跳转绕过边界
+    3. 残余风险：DNS rebinding 的 TOCTOU；严格场景用 NEUROVA_SSRF_ALLOWLIST 圈定可信主机
+    """
+    import json as _json
+    from urllib import request as _urlrequest
+    from urllib.error import HTTPError as _HTTPError
+    from urllib.error import URLError as _URLError
+
+    safe_url = _validate_outbound_url(url)
+
+    headers = {str(k): str(v) for k, v in (kwargs.get("headers") or {}).items()}
+    payload = kwargs.get("json")
+    data = None
+    if payload is not None:
+        data = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers.setdefault("Content-Type", "application/json")
+
+    class _NoRedirectHandler(_urlrequest.HTTPRedirectHandler):
+        """3xx 一律不跟随（返回 None 使 urlopen 抛 HTTPError）"""
+
+        def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+            return None
+
+    req = _urlrequest.Request(safe_url, data=data, headers=headers, method=method.upper())
+    timeout = float(kwargs.get("timeout", 30))
+    try:
+        opener = _urlrequest.build_opener(_NoRedirectHandler())
+        with opener.open(req, timeout=timeout) as raw:
+            status = int(raw.status)
+            body = raw.read()
+            final_url = raw.geturl()
+    except _HTTPError as e:  # 含"重定向被拒绝"的 3xx 响应
+        status = int(e.code)
+        body = e.read() if hasattr(e, "read") else b""
+        final_url = getattr(e, "url", "") or safe_url
+    except _URLError as e:
+        raise ConnectionError(f"出站请求失败: {e}") from e
+
+    return _OutboundResponse(status, body, final_url)
+
+
+async def exec_knowledge_base(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """知识库检索节点执行器
+
+    - kb_type=local：从 memory_manager.search 检索本地记忆库
+    - kb_type=feishu/ima/...：POST 到远程知识库 API（api_url + api_key + dataset_id）
+    """
+    kb_type = str(config.get("kb_type") or "local")
+    query = str(config.get("query", "") or "")
+    limit = int(config.get("limit", 5) or 5)
+
+    if kb_type == "local":
+        memory_manager = ctx.get("memory_manager")
+        if memory_manager is None:
+            return {
+                "status": "failed",
+                "error": "本地知识库不可用：ctx 中缺少 memory_manager",
+                "output": None,
+            }
+        try:
+            items = memory_manager.search(query=query, limit=limit)
+            results = [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in (items or [])
+            ]
+        except Exception as e:  # noqa: BLE001
+            return {"status": "failed", "error": str(e), "output": None}
+        return {
+            "status": "success",
+            "output": {"kb_type": "local", "results": results},
+        }
+
+    # 远程知识库
+    api_url = str(config.get("api_url", "") or "")
+    if not api_url:
+        return {
+            "status": "failed",
+            "error": f"远程知识库({kb_type})缺少 api_url",
+            "output": None,
+        }
+
+    headers: Dict[str, Any] = {}
+    api_key = str(config.get("api_key", "") or "")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    payload = {
+        "query": query,
+        "dataset_id": config.get("dataset_id"),
+        "top_k": limit,
+    }
+
+    try:
+        resp = _safe_request("POST", api_url, json=payload, headers=headers, timeout=30)
+        data = resp.json() if getattr(resp, "ok", False) else {}
+        results = data.get("results", [])
+    except Exception as e:  # noqa: BLE001
+        return {"status": "failed", "error": str(e), "output": None}
+
+    return {
+        "status": "success",
+        "output": {"kb_type": kb_type, "results": results},
+    }
+
+
+async def exec_remote_api(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """远程 API 调用节点执行器（GET / POST）
+
+    输出 {status_code, body}；url 缺失或请求异常返回 failed。
+    """
+    import json as _json
+
+    method = str(config.get("method", "GET") or "GET").upper()
+    url = str(config.get("url", "") or "")
+    if not url:
+        return {"status": "failed", "error": "缺少 url", "output": None}
+
+    try:
+        headers = _json.loads(config.get("headers") or "{}")
+    except Exception:  # noqa: BLE001
+        headers = {}
+    try:
+        body = _json.loads(config.get("body") or "{}")
+    except Exception:  # noqa: BLE001
+        body = {}
+
+    try:
+        resp = _safe_request(method, url, json=body, headers=headers, timeout=30)
+        ok = getattr(resp, "ok", False)
+        try:
+            data = resp.json() if ok else {}
+        except ValueError:
+            data = {"text": resp.text[:2000]}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "failed", "error": str(e), "output": None}
+
+    return {
+        "status": "success",
+        "output": {"status_code": resp.status_code, "body": data},
+    }
+
+
+async def exec_output(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """输出节点执行器（文件 / 文本）。
+
+    从 ctx.inputs["input"] 取上游内容：
+    - output_type=file：内容为 {path...} 结构时原样透传为 content
+    - output_type=text：非字符串内容 JSON 序列化
+    """
+    import json as _json
+
+    output_type = str(config.get("output_type", "text") or "text")
+    inputs = ctx.get("inputs") or {}
+    upstream = inputs.get("input")
+    name = str(config.get("name", "") or "")
+
+    if output_type == "file":
+        if isinstance(upstream, dict):
+            content: Any = upstream
+        else:
+            content = {"path": str(upstream or "")}
+        return {
+            "status": "success",
+            "output": {
+                "output_type": "file",
+                "file_kind": str(config.get("file_kind", "") or ""),
+                "name": name,
+                "content": content,
+            },
+        }
+
+    if isinstance(upstream, str):
+        text = upstream
+    elif upstream is None:
+        text = ""
+    else:
+        text = _json.dumps(upstream, ensure_ascii=False)
+
+    return {
+        "status": "success",
+        "output": {"output_type": "text", "name": name, "text": text},
     }
 
 
@@ -1387,7 +2026,7 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
 # ==================== 执行器注册 ====================
 
 # 执行器映射表
-_EXECUTORS: Dict[str, Callable] = {
+BUILTIN_EXECUTORS: Dict[str, Callable] = {
     "builtin:start": exec_start,
     "builtin:end": exec_end,
     "builtin:condition": exec_condition,
@@ -1407,6 +2046,12 @@ _EXECUTORS: Dict[str, Callable] = {
     "builtin:transform": exec_transform,
     "builtin:human_input": exec_human_input,
     "builtin:approval": exec_approval,
+    "builtin:text_input": exec_text_input,
+    "builtin:media_input": exec_media_input,
+    "builtin:file_input": exec_file_input,
+    "builtin:knowledge_base": exec_knowledge_base,
+    "builtin:remote_api": exec_remote_api,
+    "builtin:output": exec_output,
 }
 
 
@@ -1417,7 +2062,7 @@ def get_builtin_executors() -> Dict[str, Callable]:
     Returns:
         执行器字典 {node_type: executor_function}
     """
-    return dict(_EXECUTORS)
+    return dict(BUILTIN_EXECUTORS)
 
 
 # ==================== 注册函数 ====================
@@ -1432,7 +2077,7 @@ def register_builtin_nodes(registry) -> None:
     """
     for node_def in BUILTIN_NODES:
         # 获取对应的执行器
-        executor = _EXECUTORS.get(node_def["type"])
+        executor = BUILTIN_EXECUTORS.get(node_def["type"])
 
         # 注册节点定义
         registry.register(
@@ -1476,5 +2121,11 @@ __all__ = [
     "exec_variable",
     "exec_transform",
     "exec_human_input",
+    "exec_text_input",
+    "exec_media_input",
+    "exec_file_input",
+    "exec_knowledge_base",
+    "exec_remote_api",
+    "exec_output",
     "exec_approval",
 ]

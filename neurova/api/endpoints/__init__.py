@@ -220,7 +220,6 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.collaboration_api", "/v1/collaboration", "Collaboration API"),
         ("neurova.api.endpoints.groups_api", "/v1/groups", "Groups API"),
         ("neurova.api.endpoints.teams_api", "/v1/teams", "Teams API"),
-        ("neurova.api.endpoints.workflows_api", "/v1/workflows", "Workflows API"),
         ("neurova.api.endpoints.tasks_api", "/v1/tasks", "Tasks API"),
         ("neurova.api.endpoints.projects_api", "/v1/projects", "Projects API"),
         ("neurova.api.endpoints.rules_api", "/v1/rules", "Rules API"),

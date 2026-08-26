@@ -86,6 +86,15 @@ class OpenAISchemaAdapter:
             except Exception as e:
                 logger.debug("skill %s._get_parameters() 失败: %s", skill_name, e)
                 params_info = {}
+        if not params_info:
+            # 技能未实现 _get_parameters 时回退查内置参数表——
+            # 否则内置三技能进 LLM 工具列表后是空参 schema，模型不会调用
+            try:
+                from neurova.skills.builtin.schemas import get_builtin_skill_parameters
+
+                params_info = get_builtin_skill_parameters(skill_name)
+            except ImportError:
+                pass
 
         for pname, pinfo in params_info.items():
             if not isinstance(pinfo, dict):

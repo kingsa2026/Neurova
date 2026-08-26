@@ -172,13 +172,36 @@ class MultiModelLLMClient:
             logger.warning("Skip init default clients: default provider %s is disabled", default_provider.id)
             return
         if not default_provider.api_key:
-            logger.warning("Skip init default clients: default provider %s has empty api_key (decrypt failed?)", default_provider.id)
-            return
+            # 默认服务商无 key（常见于 api_key 解密失败/未配置）时，
+            # 不应因此阻塞整个多模型客户端，回退到任意 enabled 且有 key 的服务商，
+            # 否则 _clients 恒为空 → "[LLM Error] No client available"。
+            logger.warning(
+                "Default provider %s has empty api_key; falling back to a keyed provider",
+                default_provider.id,
+            )
+            default_provider = self._find_kvable_provider()
+            if not default_provider:
+                logger.error(
+                    "No enabled provider with valid api_key found; LLM unavailable until a key is configured"
+                )
+                return
+            logger.info("Falling back default provider -> %s", default_provider.id)
         self._initialize_provider_clients(default_provider)
         if default_provider.default_model:
             self._current_provider_id = default_provider.id
             self._current_model = default_provider.default_model
             logger.info("Initialized default client: %s/%s", default_provider.id, default_provider.default_model)
+
+    def _find_kvable_provider(self) -> Optional[ProviderConfig]:
+        """在所有 enabled provider 中返回第一个具有有效 api_key 的服务商。
+
+        list_providers() 已按 (-priority, name) 排序，因此首个命中即为优先级最高者，
+        保证降级选择确定性。用于默认服务商无 key 时的兜底。
+        """
+        for provider in self._provider_manager.list_providers(enabled_only=True):
+            if provider.api_key:
+                return provider
+        return None
 
     def _initialize_provider_clients(self, provider: ProviderConfig) -> None:
         """为服务商初始化客户端"""
@@ -347,18 +370,9 @@ class MultiModelLLMClient:
     ) -> Dict[str, Any]:
         """发送聊天请求"""
         # [METRICS] 结构化日志：记录 LLM 调用的消息结构和模型信息
+        # _get_client_for_request 内部已处理冷启动自愈与"指定 provider/model 无 key"
+        # 时的兜底，chat() 无需再自行 refresh_all_providers()（避免重复刷新）。
         client = self._get_client_for_request(model, provider_id)
-
-        # 自愈：_clients 为空时尝试 refresh_all_providers()
-        # 场景：首次初始化时 api_key 解密失败/pycryptodome 缺失 → _clients 空
-        # 后续配置修复后（如 pycryptodome 安装），refresh 可恢复 clients
-        if not client and not self._clients:
-            logger.info("Auto-refreshing providers due to empty _clients")
-            try:
-                self.refresh_all_providers()
-                client = self._get_client_for_request(model, provider_id)
-            except Exception as e:
-                logger.warning("Auto-refresh failed: %s", e, exc_info=True)
 
         _role_counts: Dict[str, int] = {}
         for m in messages:
@@ -424,6 +438,29 @@ class MultiModelLLMClient:
             client.increment_request(success=False)
             yield {"error": str(e)}
 
+    def _resolve_available_fallback(self) -> Optional[ModelClient]:
+        """请求的 provider/model 不可用时的兜底客户端。
+
+        目标：只要系统里存在任一个 enabled 且有 api_key 的服务商，就不允许
+        返回 "No client available"。分两步：
+        1. 已有可用客户端 → 直接返回当前/首个客户端；
+        2. _clients 为空（冷启动或初始化失败）→ 触发 refresh_all_providers() 自愈，
+           重建所有 enabled + 有 key 的服务商客户端后再取。
+
+        根因背景：默认服务商（如 sensetime，优先级最高）可能没有 api_key，
+        而其他有效服务商（如 b.ai）反而有 key；若严格按请求的 provider/model
+        查找将永远拿不到客户端，导致 "[LLM Error] No client available"。
+        """
+        current = self.get_current_client()
+        if current:
+            return current
+        logger.info("Auto-refreshing providers due to empty _clients")
+        try:
+            self.refresh_all_providers()
+        except Exception as e:
+            logger.warning("Auto-refresh failed: %s", e, exc_info=True)
+        return self.get_current_client()
+
     def _get_client_for_request(
         self,
         model: Optional[str] = None,
@@ -435,7 +472,16 @@ class MultiModelLLMClient:
             if client:
                 return client
             # 懒加载：尝试为指定的 provider/model 创建客户端
-            return self._try_lazy_init(provider_id, model)
+            client = self._try_lazy_init(provider_id, model)
+            if client:
+                return client
+            # 指定的 provider/model 不可用（如该服务商无 api_key）→ 兜底到可用客户端，
+            # 避免 "[LLM Error] No client available"（agent 配置指向无 key 的服务商）。
+            logger.warning(
+                "Requested provider=%s model=%s unavailable; falling back to an available client",
+                provider_id, model,
+            )
+            return self._resolve_available_fallback()
         elif model:
             client = self.get_client(model=model)
             if client:
@@ -443,10 +489,15 @@ class MultiModelLLMClient:
             # 按模型名查找所有服务商
             for provider in self._provider_manager.list_providers():
                 if model in provider.models:
-                    return self._try_lazy_init(provider.id, model)
-            return None
+                    client = self._try_lazy_init(provider.id, model)
+                    if client:
+                        return client
+            logger.warning(
+                "Requested model=%s unavailable; falling back to an available client", model,
+            )
+            return self._resolve_available_fallback()
         else:
-            return self.get_current_client()
+            return self._resolve_available_fallback()
 
     def _try_lazy_init(self, provider_id: str, model: str) -> Optional[ModelClient]:
         """尝试懒加载客户端 — 为非默认服务商动态创建"""

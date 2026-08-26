@@ -100,6 +100,70 @@ class ChatRequest(BaseModel):
     agent_id: typing.Optional[str] = None
     stream: bool = True
     model: typing.Optional[str] = None
+    # 思考程度：light(简单) / standard(标准) / deep(深度)；空串=默认
+    thinking_effort: typing.Optional[str] = ""
+
+
+# 真流式：发射器队列的结束哨兵
+_EMIT_DONE = object()
+
+
+def _sse_events_from_emitter_item(
+    item: Any,
+    seen_calls: set,
+    seen_results: set,
+) -> typing.List[dict]:
+    """把管线的 (kind, data) 发射器事件转成 0~N 个 SSE 事件 dict。
+
+    - content → chunk；reasoning → reasoning
+    - tool_call（loop 原生 {id, function:{name,arguments}}）→ tool_call
+    - tool_result（{tool_call_id,name,content}）→ tool_result [+approval_required]
+      超长字段脱敏；按 key 去重防止收尾 flush 时重复推送
+    """
+    try:
+        kind, data = item
+        if kind == "content":
+            text = str(data or "")
+            return [{"type": "chunk", "content": text}] if text else []
+        if kind == "reasoning":
+            text = str(data or "")
+            return [{"type": "reasoning", "content": text}] if text else []
+        if kind == "tool_call":
+            fn = (data or {}).get("function") or {}
+            name = str(fn.get("name") or "")
+            arguments = fn.get("arguments", "{}")
+            if not isinstance(arguments, str):
+                arguments = json.dumps(arguments, ensure_ascii=False)
+            key = f"{name}:{arguments}"
+            if not name or key in seen_calls:
+                return []
+            seen_calls.add(key)
+            return [{"type": "tool_call", "name": name, "arguments": arguments}]
+        if kind == "tool_result":
+            tm = data or {}
+            name = str(tm.get("name") or tm.get("tool_name") or "")
+            content = tm.get("content", tm.get("result", ""))
+            if isinstance(content, dict):
+                content = json.dumps(content, ensure_ascii=False)
+            content = str(content)
+            key = str(tm.get("tool_call_id") or f"{name}:{content[:120]}")
+            if key in seen_results:
+                return []
+            seen_results.add(key)
+            events = [
+                {
+                    "type": "tool_result",
+                    "name": name,
+                    "result": _strip_heavy_payload(content)[:2000],
+                }
+            ]
+            approval_payload = _extract_approval_payload(content, {"tool_name": name})
+            if approval_payload:
+                events.append({"type": "approval_required", **approval_payload})
+            return events
+    except Exception:  # noqa: BLE001 - 映射失败丢弃该事件，不中断流
+        return []
+    return []
 
 
 class CommandRequest(BaseModel):
@@ -150,6 +214,58 @@ def _extract_approval_payload(result_text, tm: dict) -> dict:
     return {}
 
 
+def _strip_heavy_payload(result_text: str, max_value_len: int = 1000) -> str:
+    """替换工具结果中超长的字符串字段值（如截图 base64），避免大对象涌入 SSE。
+
+    非 JSON 文本原样返回；截断统一由调用方的 [:500] 处理。
+    """
+    try:
+        parsed = json.loads(result_text)
+    except Exception:
+        return result_text
+    if isinstance(parsed, dict):
+        cleaned = {
+            k: (f"<{len(v)} chars omitted>" if isinstance(v, str) and len(v) > max_value_len else v)
+            for k, v in parsed.items()
+        }
+        return json.dumps(cleaned, ensure_ascii=False)
+    return result_text
+
+
+def _build_tool_events(tm: dict) -> typing.List[dict]:
+    """把单条 tool_message 转成 0~2 个 SSE 事件 dict。
+
+    - tool_call → {"type": "tool_call", name, arguments}
+    - tool_result → {"type": "tool_result", name, result}（超长字段已脱敏）
+      命中治理 ASK 待审批时追加 {"type": "approval_required", ...}
+    """
+    events: typing.List[dict] = []
+    if not isinstance(tm, dict):
+        return events
+    tm_type = tm.get("type", "")
+    if tm_type == "tool_call":
+        events.append(
+            {
+                "type": "tool_call",
+                "name": tm.get("tool_name", ""),
+                "arguments": json.dumps(tm.get("params", {}), ensure_ascii=False),
+            }
+        )
+    elif tm_type == "tool_result":
+        result_text = tm.get("result", "")
+        if isinstance(result_text, dict):
+            result_text = json.dumps(result_text, ensure_ascii=False)
+        result_text = _strip_heavy_payload(str(result_text))
+        events.append({"type": "tool_result", "name": tm.get("tool_name", ""), "result": result_text[:500]})
+
+        # P0 人工确认弹窗: 检测治理 ASK 结果，推送结构化审批事件。
+        # 必须在脱敏/截断前的完整文本上解析。
+        approval_payload = _extract_approval_payload(result_text, tm)
+        if approval_payload:
+            events.append({"type": "approval_required", **approval_payload})
+    return events
+
+
 @router.post("/chat")
 async def post_console_chat(body: ChatRequest, request: Request):
     """流式聊天接口（SSE）"""
@@ -174,24 +290,10 @@ async def post_console_chat(body: ChatRequest, request: Request):
     reply = ""
     reasoning = None
     tool_messages = []
+    agent = None
     try:
         agent = get_agent_instance(agent_id=body.agent_id or "default")
-        if agent:
-            # WARN #3 修复: 传 metadata={"user_id": user_id}.
-            # 原代码不传 metadata,ChatPipeline 用 "anonymous" 兜底,
-            # 导致记忆保存/事件广播拿不到真实 user_id.
-            response = await agent.chat(
-                body.message,
-                session_id=session_id,
-                metadata={"user_id": user_id},
-            )
-            if isinstance(response, dict):
-                reply = response.get("text", str(response))
-                reasoning = response.get("reasoning")
-                tool_messages = response.get("tool_messages", []) or []
-            else:
-                reply = str(response)
-        else:
+        if not agent:
             reply = f"Echo: {body.message}"
     except Exception as e:
         logger.warning("Console chat error: %s", e, exc_info=True)
@@ -199,45 +301,94 @@ async def post_console_chat(body: ChatRequest, request: Request):
 
     # S1: assistant_metadata 仅用于 SSE event_stream (reasoning/tool_messages 展示),
     # 不再传给 repo.save_message (持久化由 pipeline 负责).
+
+    if body.stream and not agent:
+        async def echo_stream():
+            yield f"data: {json.dumps({'type': 'chunk', 'content': reply})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+
+        return StreamingResponse(echo_stream(), media_type="text/event-stream")
+
     if body.stream:
 
         async def event_stream():
-            # 1. 发送思考过程
-            if reasoning:
-                yield f"data: {json.dumps({'type': 'reasoning', 'content': reasoning})}\n\n"
+            """真流式：agent.chat 后台执行，管线产生的思考/内容/工具事件
+            经 event_emitter → 队列 → SSE 即时推送，不再等整轮结束。"""
+            nonlocal reply, reasoning, tool_messages
 
-            # 2. 发送工具调用/结果
-            for tm in tool_messages:
-                if isinstance(tm, dict):
-                    tm_type = tm.get("type", "")
-                    if tm_type == "tool_call":
-                        yield f"data: {json.dumps({'type': 'tool_call', 'name': tm.get('tool_name', ''), 'arguments': json.dumps(tm.get('params', {}), ensure_ascii=False)})}\n\n"
-                    elif tm_type == "tool_result":
-                        result_text = tm.get("result", "")
-                        if isinstance(result_text, dict):
-                            result_text = json.dumps(result_text, ensure_ascii=False)
-                        yield f"data: {json.dumps({'type': 'tool_result', 'result': str(result_text)[:500]})}\n\n"
+            queue: asyncio.Queue = asyncio.Queue()
 
-                        # P0 人工确认弹窗: 检测治理 ASK 结果，推送结构化审批事件。
-                        # 必须在截断前的完整文本上解析。
-                        approval_payload = _extract_approval_payload(result_text, tm)
-                        if approval_payload:
-                            yield (
-                                "data: "
-                                + json.dumps(
-                                    {"type": "approval_required", **approval_payload},
-                                    ensure_ascii=False,
-                                )
-                                + "\n\n"
-                            )
+            def _emit(kind, data):
+                # 管线在事件循环线程内同步回调；put_nowait 不阻塞主流程
+                try:
+                    queue.put_nowait((kind, data))
+                except Exception:  # noqa: BLE001 - 队列异常不拖垮聊天
+                    pass
 
-            # 3. 发送回复内容（逐词）
-            words = reply.split(" ")
-            for i, word in enumerate(words):
-                chunk = word + (" " if i < len(words) - 1 else "")
-                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                await asyncio.sleep(0.02)
-            yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+            metadata = {
+                "user_id": user_id,
+                "thinking_effort": (body.thinking_effort or "").lower(),
+                "event_emitter": _emit,
+                # 开启工具事件实时转发（默认关闭以保持蜂群子 Agent 纯文本流契约）
+                "emit_tool_events": True,
+            }
+
+            async def run_chat():
+                try:
+                    response = await agent.chat(
+                        body.message,
+                        session_id=session_id,
+                        metadata=metadata,
+                        model=getattr(body, "model", None) or None,
+                    )
+                    if isinstance(response, dict):
+                        return {
+                            "text": response.get("text", str(response)),
+                            "reasoning": response.get("reasoning"),
+                            "tool_messages": response.get("tool_messages", []) or [],
+                        }
+                    return {"text": str(response), "reasoning": None, "tool_messages": []}
+                except Exception as e:
+                    logger.warning("Console chat error: %s", e, exc_info=True)
+                    return {"text": f"Error: {str(e)}", "reasoning": None, "tool_messages": []}
+                finally:
+                    # 通知消费循环：本轮事件已全部产生
+                    queue.put_nowait(_EMIT_DONE)
+
+            task = asyncio.create_task(run_chat())
+            seen_calls: set = set()
+            seen_results: set = set()
+
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is _EMIT_DONE:
+                        break
+                    for event in _sse_events_from_emitter_item(item, seen_calls, seen_results):
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            finally:
+                result = await task
+                reply = result["text"]
+                reasoning = result["reasoning"]
+                tool_messages = result["tool_messages"]
+
+                # 收尾 flush：文本模式等未经发射器的工具消息（去重后）
+                for tm in tool_messages:
+                    for event in _build_tool_events(tm):
+                        etype = event.get("type")
+                        if etype == "tool_call":
+                            key = f"{event.get('name', '')}:{event.get('arguments', '')}"
+                            if key in seen_calls:
+                                continue
+                            seen_calls.add(key)
+                        elif etype == "tool_result":
+                            key = str(event.get("name", "")) + ":" + str(event.get("result", ""))[:120]
+                            if key in seen_results:
+                                continue
+                            seen_results.add(key)
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 

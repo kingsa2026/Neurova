@@ -1054,6 +1054,31 @@ class PostChatPipeline:
                     success=tool_success,
                 )
                 logger.info("📚 对话经验已记录 (工具: %s)", tools_used)
+
+                # EKB 写入闭环：同步沉淀到经验知识库（注入侧
+                # context/injector._build_experience_context 的数据源）。
+                # 此前 EKB 只读不写，"相关经验"注入永远查不到对话沉淀。
+                try:
+                    from neurova.skills.experience_knowledge_base import (
+                        ExperienceKnowledgeBase,
+                        ExperienceRecord,
+                    )
+
+                    skill_tag = ",".join(tools_used[:3]) if tools_used else "chat"
+                    ekb = ExperienceKnowledgeBase()
+                    ekb.add_experience_record(
+                        skill_name=skill_tag,
+                        exp=ExperienceRecord(
+                            skill_name=skill_tag,
+                            context={"user_input": user_input},
+                            result={"reply_excerpt": reply[:200]},
+                            success=tool_success,
+                            feedback=user_input[:100],
+                        ),
+                        session_id=str(getattr(self._agent, "session_id", "") or "") or None,
+                    )
+                except Exception as ekb_error:  # noqa: BLE001 - 沉淀失败不阻断主流程
+                    logger.debug("经验知识库写入失败（不阻断）: %s", ekb_error)
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
@@ -1490,10 +1515,19 @@ class PostChatPipeline:
                     from neurova.tool_layers import MarketplaceTool
 
                     mkt_tool = MarketplaceTool(
+                        tool_id=f"auto-{tool_name}",
                         name=tool_name,
                         description=skill.description if skill else f"auto-registered tool: {tool_name}",
-                        schema=skill.to_schema() if skill and hasattr(skill, "to_schema") else {},
-                        agent_id=self._agt.config.agent_id,
+                        # [BUGFIX] 真实 MarketplaceTool dataclass 无 schema/agent_id 字段，
+                        # 且 tool_id 为必填位置参数。原实现传入 schema=/agent_id= 会抛
+                        # TypeError 被 except 吞掉，导致市场发布静默失败。这里补 tool_id，
+                        # 并把 schema/agent_id 作为授权元数据放入 metadata（to_dict 会序列化）。
+                        author=self._agt.config.agent_id,
+                        metadata={
+                            "schema": skill.to_schema() if skill and hasattr(skill, "to_schema") else {},
+                            "agent_id": self._agt.config.agent_id,
+                            "source": "auto-register",
+                        },
                     )
                     marketplace.add_tool(mkt_tool)
                     logger.info("🏪 工具已发布到市场: %s", tool_name)

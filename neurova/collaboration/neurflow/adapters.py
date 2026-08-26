@@ -125,12 +125,23 @@ def tool_to_node(tool_def: Dict[str, Any]) -> NodeDefinition:
     )
 
 
-def skill_to_node(skill_info: Dict[str, Any]) -> NodeDefinition:
+def _info_field(info: Any, key: str, default: Any = None) -> Any:
+    """兼容读取技能/工具信息字段（dict 与属性对象双支持）。
+
+    SkillRegistry.list_skills() 返回属性式的 _SkillInfo，
+    而部分调用方传入普通字典——两种形态都必须工作。
+    """
+    if isinstance(info, dict):
+        return info.get(key, default)
+    return getattr(info, key, default)
+
+
+def skill_to_node(skill_info: Any) -> NodeDefinition:
     """
     SkillRegistry 技能 → 工作流节点定义
 
     Args:
-        skill_info: 技能信息字典
+        skill_info: 技能信息（dict 或属性对象）
             - name: 技能名称
             - description: 技能描述
             - parameters: 参数列表
@@ -140,22 +151,23 @@ def skill_to_node(skill_info: Dict[str, Any]) -> NodeDefinition:
     Returns:
         NodeDefinition 节点定义
     """
-    name = skill_info.get("name", "unknown")
-    parameters = skill_info.get("parameters", [])
+    name = str(_info_field(skill_info, "name", "unknown") or "unknown")
+    parameters = _info_field(skill_info, "parameters", []) or []
+    tags = _info_field(skill_info, "tags", []) or []
 
     return NodeDefinition(
         type=f"skill:{name}",
         label=name,
         icon="📚",
         category="skills",
-        description=skill_info.get("description", f"技能: {name}"),
+        description=str(_info_field(skill_info, "description", f"技能: {name}") or f"技能: {name}"),
         sub_blocks=[param_to_sub_block(p) for p in parameters],
         inputs=[{"id": "input", "label": "输入"}],
         outputs=[{"id": "output", "label": "输出"}],
         source="skill",
         source_id=name,
-        version=skill_info.get("version", "1.0.0"),
-        tags=skill_info.get("tags", []),
+        version=str(_info_field(skill_info, "version", "1.0.0") or "1.0.0"),
+        tags=list(tags),
     )
 
 

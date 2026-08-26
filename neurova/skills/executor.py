@@ -120,6 +120,20 @@ class ExecutorBackedSkill:
             name=self.name, description=self.description, status=self.status
         )
 
+    def _get_parameters(self) -> Dict[str, Any]:
+        """获取该技能的工具参数 Schema（OpenAI function calling 格式）。
+
+        为内置技能返回完整参数定义；否则返回空 dict。
+        （工具 schema 退化修复：避免桥接技能因缺少 _get_parameters 而以空参数进列表，
+        让 LLM 看到"不知道传什么参"而不调用工具。）
+        """
+        try:
+            from neurova.skills.builtin.schemas import get_builtin_skill_parameters
+
+            return get_builtin_skill_parameters(self.name)
+        except Exception:
+            return {}
+
     async def execute(self, params: Dict[str, Any], context: Optional[Dict] = None):
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, self._executor.execute, params)

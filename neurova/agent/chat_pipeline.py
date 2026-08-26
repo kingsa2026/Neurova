@@ -32,6 +32,22 @@ from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrateg
 
 logger = get_logger(__name__)
 
+# ── 思考程度（light/standard/deep）→ 系统提示指令 ──────────────
+# 提示词方式对所有模型通用；standard 为默认行为不注入
+_THINKING_DIRECTIVES: Dict[str, str] = {
+    "light": "【回答模式：简洁速答】跳过冗长分析与铺垫，直接给出要点式简短回答（尽量不超过 5 句话）。不要展示思考过程，除非用户明确要求。",
+    "deep": (
+        "【回答模式：深度思考】请进行充分、严谨的分析后再作答：先拆解问题与约束条件，"
+        "从多角度权衡取舍，必要时分步骤论证、给出依据，并主动指出风险与替代方案；"
+        "输出结构化、深入、可执行的完整回答。"
+    ),
+}
+
+
+def _thinking_directive(effort: Optional[str]) -> str:
+    """思考程度 → 注入系统提示的指令文本；standard/未知/None 返回空（不注入）"""
+    return _THINKING_DIRECTIVES.get((effort or "").lower(), "")
+
 
 @dataclass
 class ChatContext:
@@ -522,14 +538,25 @@ class ChatPipeline:
                     logger.info("主动技能获取: 成功安装 %s 个技能 %s", len(acquired), acquired)
                 else:
                     logger.info("需要技能: %s，但未在市场中找到", [r.get("skill_name") for r in skills_needed if isinstance(r, dict)])
+                    # [BUGFIX] 市场未命中时，不应仅记录日志后放弃：回退到 NL 合成自主创建。
+                    # 此前 `_check_nl_synthesis` 被 `skill_manager.auto_acquire` 互斥屏蔽，
+                    # 导致「查询到所需技能结构但市场无此技能」时既不获取、也不合成——agent
+                    # 永远无法自主创建工具/技能。这里用 force=True 显式绕过该守卫。
+                    await self._check_nl_synthesis(ctx, force=True)
         except Exception:
             logger.exception("主动技能获取检查失败")
 
-    async def _check_nl_synthesis(self, ctx: ChatContext):
-        """NL 工具合成检查"""
+    async def _check_nl_synthesis(self, ctx: ChatContext, force: bool = False):
+        """NL 工具合成检查
+
+        Args:
+            ctx: 对话上下文
+            force: 为 True 时忽略 auto_acquire 互斥守卫，用于「主动技能获取未命中」
+                时的自主创建回退（见 `_check_skill_acquisition`）。
+        """
         if not self.tool_synthesizer:
             return
-        if self.skill_manager and self.skill_manager.auto_acquire:
+        if not force and self.skill_manager and self.skill_manager.auto_acquire:
             return
 
         try:
@@ -838,8 +865,38 @@ class ChatPipeline:
     # Step 3: LLM 调用（含自动续写）
     # ══════════════════════════════════════════════════════════════
 
+    def _apply_thinking_effort(self, ctx: ChatContext):
+        """按 metadata.thinking_effort（light/standard/deep）注入回答深度指令。
+
+        采用提示词方式而非原生 reasoning 参数：对所有模型通用，
+        且避免不支持的 API 因未知参数报 400。
+        """
+        effort = ""
+        if isinstance(ctx.metadata, dict):
+            effort = str(ctx.metadata.get("thinking_effort") or "").lower()
+        directive = _thinking_directive(effort)
+        if not directive:
+            return
+        target = None
+        for msg in ctx.context:
+            if isinstance(msg, dict) and msg.get("role") == "system":
+                target = msg
+                break
+        if target is None:
+            ctx.context.insert(0, {"role": "system", "content": directive})
+        else:
+            existing = str(target.get("content") or "")
+            if "【回答模式" in existing:
+                # 已有思考模式标记时原位替换，避免多轮累积
+                import re
+
+                target["content"] = re.sub(r"【回答模式[^\n]*】[^\n]*", directive, existing, count=1)
+            else:
+                target["content"] = f"{existing}\n\n{directive}".strip()
+
     async def _step_llm_call(self, ctx: ChatContext):
         """Agent Loop 调用 + 自动续写"""
+        self._apply_thinking_effort(ctx)
         tools_for_llm = await self.context_orchestrator.build_tools_for_llm()
 
         # 移除已自动执行的工具
@@ -956,6 +1013,18 @@ class ChatPipeline:
             elif etype in ("tool_call", "tool_result"):
                 # C1: 原生 function-calling 元数据，接入工具消息列表
                 native_tool_events.append(event)
+                # [真流式] 仅当调用方显式开启 emit_tool_events（console SSE 桥接）
+                # 时才转发工具事件；默认关闭——该通道同时服务蜂群子 Agent
+                # 逐 token 流，需保持纯文本契约（见 test_chat_stream_events）
+                if (
+                    emitter is not None
+                    and isinstance(ctx.metadata, dict)
+                    and ctx.metadata.get("emit_tool_events")
+                ):
+                    try:
+                        emitter(etype, event.get("data"))
+                    except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
+                        logger.debug("event_emitter 转发 %s 失败: %s", etype, e)
             # reasoning 等其他元数据事件不入回复
         # C1: 合并原生工具事件到 _tool_messages_list，供 _collect_tool_messages() 读取
         if native_tool_events:

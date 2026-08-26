@@ -48,6 +48,13 @@ sentence-transformers>=2.2.0
 transformers>=4.20.0
 tokenizers>=0.13.0
 
+# Computer Use（桌面控制 + 浏览器自动化）
+# 安装后需执行 `python scripts/setup_computer_use.py --install`
+# 下载 Playwright 的 Chromium 内核（脚本会自动处理）
+pillow>=10.0.0
+pyautogui>=0.9.54
+playwright>=1.40.0
+
 # Testing (dev)
 pytest>=7.4.0
 pytest-asyncio>=0.21.0

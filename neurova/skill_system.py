@@ -57,6 +57,11 @@ class SkillInfo:
 class SkillEvent:
     """Skill 事件"""
 
+    # 事件类型常量（与 _emit_event 传入的字符串一致，供按类型注册回调使用）
+    PRE_EXECUTE = "before_execute"
+    POST_EXECUTE = "after_execute"
+    ERROR = "error"
+
     def __init__(self, event_type: str, skill_name: str, data: Any = None):
         self.event_type = event_type
         self.skill_name = skill_name
@@ -340,6 +345,7 @@ class SkillRegistry:
     def __init__(self, runtime_manager=None):
         self._skills: Dict[str, Skill] = {}
         self._event_handlers: List[Callable] = []
+        self._event_callbacks: Dict[str, List[Callable]] = {}
         self._runtime_manager = runtime_manager
 
     def register(self, skill: Skill):
@@ -378,6 +384,12 @@ class SkillRegistry:
             name = getattr(manifest, "name", None) or getattr(manifest, "id", None) or str(manifest)
             description = getattr(manifest, "description", "") or ""
             skill = Skill(name=name, description=description)
+            # [BUGFIX] 保留 manifest 携带的可执行元数据(config)，避免合成工具注册成
+            # 仅 name/description 的空壳。chat_pipeline._register_synthesized_tool 传入的
+            # neurova.skills.models.Skill 与本地 Skill 是独立类，isinstance 为 False
+            # 会走到此分支，原实现只取 name/description 导致 config 全部丢失。
+            _config = getattr(manifest, "config", None)
+            skill.config = _config if isinstance(_config, dict) else {}
             self.register(skill)
             return True
         except Exception:
@@ -540,6 +552,15 @@ class SkillRegistry:
             except Exception as e:
                 get_logger(__name__).error(f"事件处理失败: {e}")
 
+    def register_event_callback(self, event_type: str, handler: Callable):
+        """按事件类型注册回调。
+
+        与 add_event_handler(handler) 不同：此回调按 event_type 触发，
+        handler 收到 (skill, data) 两个参数（skill 为 None 表示未注册的 skill）。
+        供 agent_core._init_router 按 SkillEvent.POST_EXECUTE 等事件类型注册回调。
+        """
+        self._event_callbacks.setdefault(event_type, []).append(handler)
+
     def _emit_event(self, event_type: str, skill_name: str, data: Any = None):
         """触发事件"""
         event = SkillEvent(event_type, skill_name, data)
@@ -548,6 +569,13 @@ class SkillRegistry:
                 handler(event)
             except Exception as e:
                 get_logger(__name__).error(f"事件处理失败: {e}")
+        # 按事件类型分发给 register_event_callback 注册的回调（传 skill + data）
+        skill = self._skills.get(skill_name)
+        for handler in self._event_callbacks.get(event_type, []):
+            try:
+                handler(skill, data)
+            except Exception as e:
+                get_logger(__name__).error(f"事件回调处理失败: {e}")
 
 
 def create_default_skills(memory_manager=None) -> SkillRegistry:

@@ -107,20 +107,47 @@ class RSIIntegrationManager:
         """
         从四大闭环系统收集反馈信号
 
+        真正闭环修复：为每个系统注入可优化的 performance_score（0..1）——
+        基于 system_performance 的 setpoint 梯度估算（基础反馈 +
+        参数贴近度）。此前 sleep/emotion 的 get_feedback() 不暴露性能键，
+        导致它们的参数永远不被 RSI 优化。
+
         Returns:
-            Dict[str, Any]: 各系统的反馈信号
+            Dict[str, Any]: 各系统的反馈信号（含注入的 performance_score）
         """
+        from neurova.evolution.rsi.system_performance import estimate_system_performance
+
+        optimizable = self.get_optimizable_parameters()
         signals = {}
 
         for system_name, system in self._systems.items():
             try:
                 if hasattr(system, "get_feedback"):
-                    signals[system_name] = system.get_feedback()
+                    signal = system.get_feedback()
                 else:
-                    signals[system_name] = {}
+                    signal = {}
             except Exception as e:
                 logger.error("Failed to collect feedback from %s: %s", system_name, e)
-                signals[system_name] = {"error": str(e)}
+                signal = {"error": str(e)}
+
+            if not isinstance(signal, dict):
+                signal = {}
+
+            # 注入 performance_score（系统自身未暴露时由 setpoint 梯度估算）
+            if not isinstance(signal.get("performance_score"), (int, float)):
+                params = {
+                    p.name: p.current_value
+                    for p in optimizable.get(system_name, [])
+                }
+                params.update({
+                    k: v for k, v in vars(system).items()
+                    if isinstance(v, (int, float))
+                } if hasattr(system, "__dict__") else {})
+                signal["performance_score"] = estimate_system_performance(
+                    system_name, signal, params
+                )
+
+            signals[system_name] = signal
 
         return signals
 

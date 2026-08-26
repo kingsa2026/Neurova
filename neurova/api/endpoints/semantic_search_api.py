@@ -10,7 +10,7 @@ import re
 import typing
 from typing import Any, Dict, List, Tuple
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from neurova.cognitive_layers.memory_layer.manager import get_memory_manager
@@ -18,6 +18,23 @@ from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_s
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+
+def _get_runtime_memory_manager(request: Request):
+    """解析运行时 Agent 的 MemoryManager（断点 S1 修复）。
+
+    模块级单例与运行时 Agent 的 per-agent MemoryManager 内存隔离，
+    导致本 API 曾永远检索不到聊天记忆。现优先取 app.state.agents 中
+    首个活跃 Agent 的 memory_manager，无活跃 Agent 时才降级单例。
+    """
+    agents = getattr(request.app.state, "agents", {}) or {}
+    for agent in agents.values():
+        manager = getattr(agent, "memory_manager", None) or getattr(
+            getattr(agent, "memory_agent", None), "memory_manager", None
+        )
+        if manager is not None:
+            return manager
+    return get_memory_manager()
 
 
 class HybridSearchRequest(BaseModel):
@@ -221,11 +238,11 @@ def _mem_id_to_content_map(all_memories: List[Dict[str, Any]]) -> Dict[str, str]
 
 
 @router.post("/hybrid")
-async def hybrid_search(body: HybridSearchRequest):
+async def hybrid_search(body: HybridSearchRequest, request: Request):
     """混合搜索 - BM25 + 向量 + FTS5 三层融合 (RRF算法)"""
     features = _analyze_query_features(body.query)
     try:
-        mgr = get_memory_manager()
+        mgr = _get_runtime_memory_manager(request)
         all_memories = mgr.get_all_memories() or []
     except Exception as e:
         logger.warning("hybrid_search: 获取记忆失败: %s", e)
@@ -272,10 +289,10 @@ async def hybrid_search(body: HybridSearchRequest):
 
 
 @router.post("/bm25")
-async def bm25_search(body: HybridSearchRequest):
+async def bm25_search(body: HybridSearchRequest, request: Request):
     """纯 BM25 搜索"""
     try:
-        mgr = get_memory_manager()
+        mgr = _get_runtime_memory_manager(request)
         all_memories = mgr.get_all_memories() or []
     except Exception as e:
         logger.warning("bm25_search: 获取记忆失败: %s", e)
@@ -300,10 +317,10 @@ async def bm25_search(body: HybridSearchRequest):
 
 
 @router.post("/vector")
-async def vector_search(body: HybridSearchRequest):
+async def vector_search(body: HybridSearchRequest, request: Request):
     """纯向量搜索"""
     try:
-        mgr = get_memory_manager()
+        mgr = _get_runtime_memory_manager(request)
         all_memories = mgr.get_all_memories() or []
     except Exception as e:
         logger.warning("vector_search: 获取记忆失败: %s", e)
@@ -328,10 +345,10 @@ async def vector_search(body: HybridSearchRequest):
 
 
 @router.post("/compare")
-async def compare_search(body: CompareRequest):
+async def compare_search(body: CompareRequest, request: Request):
     """对比三种搜索方式的结果"""
     try:
-        mgr = get_memory_manager()
+        mgr = _get_runtime_memory_manager(request)
         all_memories = mgr.get_all_memories() or []
     except Exception as e:
         logger.warning("compare_search: 获取记忆失败: %s", e)

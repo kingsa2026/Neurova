@@ -14,6 +14,7 @@ ToolExecutor — 统一工具执行器
 """
 
 import ast
+import asyncio
 import json
 from neurova.builtin_tools import get_builtin_tool_params
 from neurova.core.logger import get_logger
@@ -27,6 +28,52 @@ logger = get_logger(__name__)
 # ToolEngine 延迟导入（避免循环依赖）
 _TOOL_ENGINE_AVAILABLE = False
 _ToolEngine = None
+
+# ── 电脑/浏览器操作工具（Computer Use）─────────────────────────
+# 执行后向会话广播 computer_action 实时事件，驱动聊天页分屏面板
+COMPUTER_USE_TOOLS = frozenset(
+    {
+        "computer_screenshot",
+        "computer_click",
+        "computer_type",
+        "computer_scroll",
+        "computer_shell",
+        "browser_navigate",
+        "browser_click",
+        "browser_type",
+        "browser_screenshot",
+        "browser_extract_text",
+    }
+)
+
+
+def describe_computer_action(tool_name: str, params: Dict) -> str:
+    """生成电脑/浏览器操作的一句话摘要（面板操作日志用）"""
+    if not isinstance(params, dict):
+        params = {}
+    if tool_name == "computer_screenshot":
+        return "截取屏幕"
+    if tool_name == "computer_click":
+        return f"点击屏幕 ({params.get('x', '?')}, {params.get('y', '?')})"
+    if tool_name == "computer_type":
+        text = str(params.get("text", ""))
+        return f"键入文本「{text[:30]}{'…' if len(text) > 30 else ''}」"
+    if tool_name == "computer_scroll":
+        return "滚动屏幕"
+    if tool_name == "computer_shell":
+        cmd = str(params.get("command", ""))
+        return f"执行命令 {cmd[:60]}{'…' if len(cmd) > 60 else ''}"
+    if tool_name == "browser_navigate":
+        return f"打开网页 {params.get('url', '')}"
+    if tool_name == "browser_click":
+        return f"点击页面元素 {params.get('selector') or params.get('text', '')}"
+    if tool_name == "browser_type":
+        return f"在 {params.get('selector', '?')} 中输入文本"
+    if tool_name == "browser_screenshot":
+        return "截取浏览器页面"
+    if tool_name == "browser_extract_text":
+        return "提取页面文本"
+    return tool_name
 
 
 def _get_tool_engine_class():
@@ -421,7 +468,7 @@ class ToolExecutor:
             from neurova.computer_use import get_computer_use_manager
 
             manager = get_computer_use_manager()
-            result = manager.shell(full_command)
+            result = await manager.shell(full_command)
 
             return {
                 "success": result.get("returncode", -1) == 0,
@@ -706,6 +753,16 @@ class ToolExecutor:
             return await self._execute_computer_scroll(params)
         elif tool_name == "computer_shell":
             return await self._execute_computer_shell(params)
+        elif tool_name == "browser_navigate":
+            return await self._execute_browser_navigate(params)
+        elif tool_name == "browser_click":
+            return await self._execute_browser_click(params)
+        elif tool_name == "browser_type":
+            return await self._execute_browser_type(params)
+        elif tool_name == "browser_screenshot":
+            return await self._execute_browser_screenshot(params)
+        elif tool_name == "browser_extract_text":
+            return await self._execute_browser_extract_text(params)
         elif tool_name == "emotion_analyze":
             return await self._execute_emotion_analyze(params)
         elif tool_name == "voice_memory_search":
@@ -784,13 +841,17 @@ class ToolExecutor:
         try:
             import urllib.request
             import urllib.parse
-            url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&hl=zh-CN"
+            # BUGFIX: 原生 google.com/search 页面需 JS 渲染且反爬，静态抓取拿不到摘要。
+            # 改用 Bing HTML 接口（对无 JS 请求返回可解析的 b_caption / b_lineclamp 摘要）。
+            url = f"https://www.bing.com/search?q={urllib.parse.quote(query)}&setlang=zh-hans"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 html = resp.read().decode("utf-8", errors="replace")
-            # 简单提取文本摘要
+            # 优先提取 b_caption 下的 <p>（Bing 摘要），退化为任意 <p>
             import re
-            snippets = re.findall(r'<div[^>]*class="[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL)
+            snippets = re.findall(r'<div[^>]*class="b_caption"[^>]*>[\s\S]*?<p[^>]*>(.*?)</p>', html, re.DOTALL)
+            if not snippets:
+                snippets = re.findall(r'<p[^>]*class="[^"]*"[^>]*>(.*?)</p>', html, re.DOTALL)
             text = re.sub(r'<[^>]+>', '', ' '.join(snippets[:5]))
             text = re.sub(r'\s+', ' ', text).strip()[:500]
             return {"query": query, "results": text or f"搜索 '{query}' 完成，但未能提取摘要。请直接告诉用户搜索结果。"}
@@ -805,11 +866,22 @@ class ToolExecutor:
         try:
             import urllib.request
             import urllib.parse
-            # 使用 wttr.in 天气服务
+            # 使用 wttr.in 天气服务。
+            # BUGFIX: 必须用非浏览器 UA。wttr.in 对 Mozilla/5.0 等浏览器 UA 返回完整 HTML 网页，
+            # 导致 format=3 / lang=zh 参数失效，返回一整页 HTML 污染结果。
+            # 使用 curl UA 才能得到 format=3 的精简文本（如 "许昌: 🌦️ +80°F"）。
             url = f"https://wttr.in/{urllib.parse.quote(location)}?format=3&lang=zh"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "curl/8.5.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 text = resp.read().decode("utf-8", errors="replace").strip()
+            # 兜底：极少数代理/部署环境下即使 curl UA 仍返回 HTML，则从中提取天气行
+            if "<html" in text.lower() or "&lt;" in text:
+                import re
+                body = re.sub(r"<script[\s\S]*?</script>", "", text)
+                body = re.sub(r"<style[\s\S]*?</style>", "", body)
+                body = re.sub(r"<[^>]+>", "", body)
+                body = re.sub(r"\s+", " ", body).strip()
+                text = body[:200]
             return {"location": location, "weather": text}
         except Exception as e:
             return {"location": location, "error": f"天气查询失败: {e}"}
@@ -943,19 +1015,28 @@ class ToolExecutor:
             return {"error": str(e)}
 
     async def _execute_computer_screenshot(self, params: Dict) -> Dict:
-        """执行屏幕截图"""
+        """执行屏幕截图
+
+        LLM 面向结果只含元信息（base64 会撑爆上下文与会话存储），
+        完整截图通过 computer_action 事件实时推给前端分屏面板。
+        """
         try:
             from neurova.computer_use import get_computer_use_manager
 
             manager = get_computer_use_manager()
-            screenshot_data = manager.screenshot()
+            # ImageGrab 是阻塞调用，放线程池避免卡事件循环
+            screenshot_data = await asyncio.to_thread(manager.screenshot)
             if screenshot_data:
                 import base64
 
                 b64_str = base64.b64encode(screenshot_data).decode("utf-8")
-                return {"success": True, "image_base64": b64_str, "format": "png"}
+                result = {"success": True, "format": "png", "size_bytes": len(screenshot_data)}
+                await self._emit_computer_event("computer_screenshot", params, result, screenshot_base64=b64_str)
+                return result
             else:
-                return {"error": "截图失败：无可用后端"}
+                result = {"error": "截图失败：无可用后端"}
+                await self._emit_computer_event("computer_screenshot", params, result)
+                return result
         except Exception as e:
             logger.error("截图执行失败: %s", e)
             return {"error": f"截图执行失败: {str(e)}"}
@@ -973,12 +1054,16 @@ class ToolExecutor:
             from neurova.computer_use import get_computer_use_manager
 
             manager = get_computer_use_manager()
-            success = manager.click(int(x), int(y), button)
+            # pyautogui 阻塞调用放线程池
+            success = await asyncio.to_thread(manager.click, int(x), int(y), button)
 
-            if success:
-                return {"success": True, "x": x, "y": y, "button": button}
-            else:
-                return {"error": "点击操作失败"}
+            result = (
+                {"success": True, "x": x, "y": y, "button": button}
+                if success
+                else {"error": "点击操作失败", "x": x, "y": y}
+            )
+            await self._emit_computer_event("computer_click", params, result)
+            return result
         except Exception as e:
             logger.error("点击执行失败: %s", e)
             return {"error": f"点击执行失败: {str(e)}"}
@@ -993,12 +1078,15 @@ class ToolExecutor:
             from neurova.computer_use import get_computer_use_manager
 
             manager = get_computer_use_manager()
-            success = manager.type_text(text)
+            success = await asyncio.to_thread(manager.type_text, text)
 
-            if success:
-                return {"success": True, "text": text, "length": len(text)}
-            else:
-                return {"error": "输入操作失败"}
+            result = (
+                {"success": True, "text": text, "length": len(text)}
+                if success
+                else {"error": "输入操作失败"}
+            )
+            await self._emit_computer_event("computer_type", params, result)
+            return result
         except Exception as e:
             logger.error("输入执行失败: %s", e)
             return {"error": f"输入执行失败: {str(e)}"}
@@ -1006,26 +1094,23 @@ class ToolExecutor:
     async def _execute_computer_scroll(self, params: Dict) -> Dict:
         """执行屏幕滚动"""
         try:
-            scroll_x = params.get("scroll_x", 0)
             scroll_y = params.get("scroll_y", 0)
-
-            # 计算点击位置（默认屏幕中心）
-            import pyautogui
-
-            screen_width, screen_height = pyautogui.size()
-            x = screen_width // 2
-            y = screen_height // 2
+            # 不指定坐标时在当前指针位置滚动（避免把鼠标强制移到屏幕中心/角落）
+            x = params.get("x")
+            y = params.get("y")
 
             from neurova.computer_use import get_computer_use_manager
 
             manager = get_computer_use_manager()
-            # ComputerUseManager.scroll 只支持垂直滚动，这里我们简化实现
-            success = manager.scroll(x, y, scroll_y)
+            success = await asyncio.to_thread(manager.scroll, x, y, int(scroll_y) or 3)
 
-            if success:
-                return {"success": True, "scroll_x": scroll_x, "scroll_y": scroll_y}
-            else:
-                return {"error": "滚动操作失败"}
+            result = (
+                {"success": True, "scroll_x": params.get("scroll_x", 0), "scroll_y": scroll_y}
+                if success
+                else {"error": "滚动操作失败（需要 pyautogui）"}
+            )
+            await self._emit_computer_event("computer_scroll", params, result)
+            return result
         except Exception as e:
             logger.error("滚动执行失败: %s", e)
             return {"error": f"滚动执行失败: {str(e)}"}
@@ -1040,18 +1125,183 @@ class ToolExecutor:
             from neurova.computer_use import get_computer_use_manager
 
             manager = get_computer_use_manager()
-            result = manager.shell(command)
+            raw = await manager.shell(command)
 
-            return {
-                "success": result.get("returncode", -1) == 0,
-                "returncode": result.get("returncode", -1),
-                "stdout": result.get("stdout", ""),
-                "stderr": result.get("stderr", ""),
+            result = {
+                "success": raw.get("returncode", -1) == 0,
+                "returncode": raw.get("returncode", -1),
+                "stdout": raw.get("stdout", ""),
+                "stderr": raw.get("stderr", ""),
                 "command": command,
             }
+            await self._emit_computer_event("computer_shell", params, result)
+            return result
         except Exception as e:
             logger.error("Shell 命令执行失败: %s", e)
             return {"error": f"Shell 命令执行失败: {str(e)}"}
+
+    # ── 浏览器操作工具（ComputerUseManager → BrowserManager 多后端）──
+
+    @staticmethod
+    def _normalize_browser_result(result: Any) -> Dict:
+        """BrowserResult(dataclass)/dict/None → LLM 面向的紧凑 dict（不含截图大对象）"""
+        if isinstance(result, dict):
+            normalized = dict(result)
+            normalized.pop("image_base64", None)
+            if normalized.get("error"):
+                normalized["success"] = False
+            return normalized
+        if result is None:
+            return {"success": False, "error": "浏览器管理器不可用"}
+        to_dict = getattr(result, "to_dict", None)
+        if not callable(to_dict):
+            return {"success": False, "error": "浏览器返回格式未知"}
+        normalized = dict(to_dict())
+        normalized.pop("has_screenshot", None)
+        if not normalized.get("success") and not normalized.get("error"):
+            normalized["error"] = "浏览器操作失败"
+        return normalized
+
+    async def _emit_computer_event(
+        self,
+        tool_name: str,
+        params: Dict,
+        result: Dict,
+        screenshot_base64: Optional[str] = None,
+    ) -> None:
+        """电脑/浏览器操作实时事件广播（computer_action）
+
+        通过 SessionSyncManager 推送到会话 WS，驱动聊天页分屏面板；
+        广播失败静默处理，绝不影响工具执行主流程。
+        """
+        if tool_name not in COMPUTER_USE_TOOLS:
+            return
+        session_id = getattr(self._agent, "_current_session_id", None)
+        if not session_id:
+            return
+        try:
+            from neurova.sync.session_sync_manager import (
+                EventType,
+                SessionEvent,
+                get_session_sync_manager,
+            )
+
+            payload: Dict[str, Any] = {
+                "tool": tool_name,
+                "params": params,
+                "success": bool(result.get("success")) if isinstance(result, dict) else False,
+                "summary": describe_computer_action(tool_name, params),
+                "timestamp": datetime.now().isoformat(),
+            }
+            error = result.get("error") if isinstance(result, dict) else None
+            if error:
+                payload["error"] = str(error)
+            url = result.get("url") if isinstance(result, dict) else None
+            if url:
+                payload["url"] = url
+            if screenshot_base64:
+                payload["screenshot"] = screenshot_base64
+
+            mgr = get_session_sync_manager()
+            mgr.register_or_create_session(session_id=session_id, user_id="agent")
+            event = SessionEvent(
+                event_type=EventType.COMPUTER_ACTION,
+                session_id=session_id,
+                source_channel="tool",
+                payload=payload,
+            )
+            await mgr.broadcast_event(session_id, event)
+        except Exception as e:  # noqa: BLE001 - 广播失败不影响主流程
+            logger.debug("computer_action 事件广播失败 (%s): %s", tool_name, e)
+
+    async def _execute_browser_navigate(self, params: Dict) -> Dict:
+        """浏览器导航到 URL"""
+        url = str(params.get("url") or "").strip()
+        if not url:
+            return {"error": "缺少 URL 参数"}
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(await manager.browser_navigate(url))
+            await self._emit_computer_event("browser_navigate", params, result)
+            return result
+        except Exception as e:
+            logger.error("浏览器导航失败: %s", e)
+            return {"error": f"浏览器导航失败: {str(e)}"}
+
+    async def _execute_browser_click(self, params: Dict) -> Dict:
+        """点击页面元素（CSS 选择器或可见文本）"""
+        selector = str(params.get("selector") or "").strip()
+        text = str(params.get("text") or "").strip()
+        if not selector and not text:
+            return {"error": "缺少 selector 或 text 参数"}
+        target = selector or f"text={text}"
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(await manager.browser_click(target))
+            await self._emit_computer_event("browser_click", params, result)
+            return result
+        except Exception as e:
+            logger.error("浏览器点击失败: %s", e)
+            return {"error": f"浏览器点击失败: {str(e)}"}
+
+    async def _execute_browser_type(self, params: Dict) -> Dict:
+        """向页面输入框填写文本"""
+        selector = str(params.get("selector") or "").strip()
+        text = params.get("text")
+        if not selector:
+            return {"error": "缺少 selector 参数"}
+        if text is None or str(text) == "":
+            return {"error": "缺少 text 参数"}
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(await manager.browser_type(selector, str(text)))
+            await self._emit_computer_event("browser_type", params, result)
+            return result
+        except Exception as e:
+            logger.error("浏览器输入失败: %s", e)
+            return {"error": f"浏览器输入失败: {str(e)}"}
+
+    async def _execute_browser_screenshot(self, params: Dict) -> Dict:
+        """截取当前页面；完整截图走 computer_action 事件，不进 LLM 消息"""
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            raw = await manager.browser_screenshot()
+            shot_b64 = getattr(raw, "screenshot", None)
+            result = self._normalize_browser_result(raw)
+            if result.get("success") and shot_b64:
+                result.setdefault("format", "png")
+            await self._emit_computer_event("browser_screenshot", params, result, screenshot_base64=shot_b64)
+            return result
+        except Exception as e:
+            logger.error("浏览器截图失败: %s", e)
+            return {"error": f"浏览器截图失败: {str(e)}"}
+
+    async def _execute_browser_extract_text(self, params: Dict) -> Dict:
+        """提取当前页面正文文本"""
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            raw = await manager.browser_extract_text()
+            result = self._normalize_browser_result(raw)
+            data = result.get("data")
+            if isinstance(data, str) and len(data) > 8000:
+                # 超长正文截断后再进 LLM 上下文
+                result["data"] = data[:8000] + "…[已截断]"
+                result["truncated"] = True
+            await self._emit_computer_event("browser_extract_text", params, result)
+            return result
+        except Exception as e:
+            logger.error("页面文本提取失败: %s", e)
+            return {"error": f"页面文本提取失败: {str(e)}"}
 
     async def _execute_emotion_analyze(self, params: Dict) -> Dict:
         """执行情感分析"""

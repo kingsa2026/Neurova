@@ -813,14 +813,6 @@ async def get_stats():
 # ==================== ComfyUI 集成 ====================
 
 
-class ComfyUIImportRequest(BaseModel):
-    """ComfyUI 工作流导入请求"""
-
-    name: str
-    workflow: Dict[str, Any]
-    description: str = ""
-
-
 class ComfyUIExecuteRequest(BaseModel):
     """ComfyUI 单节点执行请求"""
 
@@ -829,21 +821,10 @@ class ComfyUIExecuteRequest(BaseModel):
     inputs: Dict[str, Any] = {}
 
 
-@router.post("/comfyui/import", status_code=201)
-async def import_comfyui_workflow_endpoint(request: ComfyUIImportRequest):
-    """导入 ComfyUI API 格式工作流 JSON 为 Neurflow 工作流"""
-    try:
-        from neurova.collaboration.neurflow.comfyui_importer import import_comfyui_workflow
-
-        workflow = import_comfyui_workflow(request.workflow, name=request.name, description=request.description)
-        _get_storage().save_workflow(workflow)
-        return JSONResponse(content={"workflow": workflow.to_dict(), "message": "导入成功"}, status_code=201)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"导入 ComfyUI 工作流失败: {str(e)}")
+# 注：旧的 POST /comfyui/import「定义优先」导入端点已下线。
+# 工作流 = 无限画布工作流，ComfyUI 导入统一走
+# POST /v1/collaboration/comfyui/import-canvas 落为可编辑画布快照，
+# WorkflowDefinition 只是画布执行时的内部编译产物。
 
 
 @router.get("/comfyui/status")
