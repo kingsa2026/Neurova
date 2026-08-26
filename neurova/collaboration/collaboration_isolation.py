@@ -192,6 +192,80 @@ class ProjectWorkflow:
 
 
 @dataclass
+class ProjectTeam:
+    """项目团队（聚合 Agent 成员，供工作流蜂群编排）"""
+
+    team_id: str = field(default_factory=lambda: f"team_{int(time.time() * 1000)}_{id(object()):x}")
+    name: str = ""
+    description: str = ""
+    # 成员: {agent_id: {agent_name, role}}
+    members: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    created_at: float = field(default_factory=time.time)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "team_id": self.team_id,
+            "name": self.name,
+            "description": self.description,
+            "members": self.members,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ProjectTeam":
+        return cls(
+            team_id=data.get("team_id", ""),
+            name=data.get("name", ""),
+            description=data.get("description", ""),
+            members=data.get("members", {}),
+            created_at=data.get("created_at", time.time()),
+        )
+
+
+@dataclass
+class ProjectTask:
+    """项目任务（绑定工作流定时执行）"""
+
+    task_id: str = field(default_factory=lambda: f"task_{int(time.time() * 1000)}_{id(object()):x}")
+    name: str = ""
+    workflow_id: str = ""  # 画布 id
+    # 调度配置: {type: cron|interval, cron?, interval_seconds?, timezone?}
+    schedule_config: Dict[str, Any] = field(default_factory=dict)
+    next_run_at: Optional[float] = None
+    last_run_at: Optional[float] = None
+    status: str = "active"  # active | paused
+    created_at: float = field(default_factory=time.time)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "name": self.name,
+            "workflow_id": self.workflow_id,
+            "schedule_config": self.schedule_config,
+            "next_run_at": self.next_run_at,
+            "last_run_at": self.last_run_at,
+            "status": self.status,
+            "created_at": self.created_at,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ProjectTask":
+        return cls(
+            task_id=data.get("task_id", ""),
+            name=data.get("name", ""),
+            workflow_id=data.get("workflow_id", ""),
+            schedule_config=data.get("schedule_config", {}),
+            next_run_at=data.get("next_run_at"),
+            last_run_at=data.get("last_run_at"),
+            status=data.get("status", "active"),
+            created_at=data.get("created_at", time.time()),
+            metadata=data.get("metadata", {}),
+        )
+
+
+@dataclass
 class Project:
     """项目"""
 
@@ -217,6 +291,12 @@ class Project:
     # 工作流列表
     workflows: Dict[str, ProjectWorkflow] = field(default_factory=dict)
 
+    # 团队列表（Agent 编排）
+    teams: Dict[str, ProjectTeam] = field(default_factory=dict)
+
+    # 任务列表（定时工作流）
+    tasks: Dict[str, ProjectTask] = field(default_factory=dict)
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -235,6 +315,8 @@ class Project:
             "members": {uid: m.to_dict() for uid, m in self.members.items()},
             "files": {fid: f.to_dict() for fid, f in self.files.items()},
             "workflows": {wid: w.to_dict() for wid, w in self.workflows.items()},
+            "teams": {tid: t.to_dict() for tid, t in self.teams.items()},
+            "tasks": {kid: k.to_dict() for kid, k in self.tasks.items()},
         }
 
     @classmethod
@@ -266,6 +348,14 @@ class Project:
         # 加载工作流
         for wid, workflow_data in data.get("workflows", {}).items():
             project.workflows[wid] = ProjectWorkflow.from_dict(workflow_data)
+
+        # 加载团队
+        for tid, team_data in data.get("teams", {}).items():
+            project.teams[tid] = ProjectTeam.from_dict(team_data)
+
+        # 加载任务
+        for kid, task_data in data.get("tasks", {}).items():
+            project.tasks[kid] = ProjectTask.from_dict(task_data)
 
         return project
 
@@ -332,6 +422,36 @@ class Project:
         """移除工作流"""
         if workflow_id in self.workflows:
             del self.workflows[workflow_id]
+            return True
+        return False
+
+    def get_team(self, team_id: str) -> Optional[ProjectTeam]:
+        """获取团队"""
+        return self.teams.get(team_id)
+
+    def add_team(self, team: ProjectTeam) -> None:
+        """添加团队"""
+        self.teams[team.team_id] = team
+
+    def remove_team(self, team_id: str) -> bool:
+        """移除团队"""
+        if team_id in self.teams:
+            del self.teams[team_id]
+            return True
+        return False
+
+    def get_task(self, task_id: str) -> Optional[ProjectTask]:
+        """获取任务"""
+        return self.tasks.get(task_id)
+
+    def add_task(self, task: ProjectTask) -> None:
+        """添加任务"""
+        self.tasks[task.task_id] = task
+
+    def remove_task(self, task_id: str) -> bool:
+        """移除任务"""
+        if task_id in self.tasks:
+            del self.tasks[task_id]
             return True
         return False
 

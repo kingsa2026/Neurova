@@ -419,6 +419,9 @@ def _sync_skills_from_registry(registry: NodeRegistry) -> int:
     """
     从 SkillRegistry 同步技能节点
 
+    兼容 dict 与属性式（_SkillInfo）两种技能信息形态。
+    复用 adapters.skill_to_node，保持与 sync_skills 单一实现。
+
     Args:
         registry: 节点注册表
 
@@ -426,27 +429,14 @@ def _sync_skills_from_registry(registry: NodeRegistry) -> int:
         同步的技能数量
     """
     try:
+        from neurova.collaboration.neurflow.adapters import skill_to_node
         from neurova.skill_system import get_skill_registry
 
         skill_registry = get_skill_registry()
 
         count = 0
         for skill in skill_registry.list_skills():
-            node_def = NodeDefinition(
-                type=f"skill:{skill['name']}",
-                label=skill.get("name", skill["name"]),
-                icon="📚",
-                category="skills",
-                description=skill.get("description", f"技能: {skill['name']}"),
-                sub_blocks=[],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[{"id": "output", "label": "输出"}],
-                source="skill",
-                source_id=skill["name"],
-                version=skill.get("version", "1.0.0"),
-                tags=skill.get("tags", []),
-            )
-            registry.register(node_def)
+            registry.register(skill_to_node(skill))
             count += 1
 
         return count

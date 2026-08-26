@@ -384,13 +384,13 @@ async def inject_memories(
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-        # 搜索记忆
+        # 搜索记忆（MemoryManager 真实接口：search_memories / get_hot_memories）
         memories = []
         if hasattr(agent, "memory_manager") and agent.memory_manager:
             if query:
-                memories = agent.memory_manager.search(query=query, limit=limit)
+                memories = agent.memory_manager.search_memories(query=query, limit=limit)
             else:
-                memories = agent.memory_manager.get_recent(limit=limit)
+                memories = agent.memory_manager.get_hot_memories(limit=limit)
 
         return {
             "code": 0,

@@ -127,6 +127,13 @@ def _get_app_state():
     return get_app_state()
 
 
+def get_agent_config_manager():
+    """获取 AgentConfigManager 单例（配置持久化：data/agents/agents.json）"""
+    from neurova.agent_config import get_config_manager
+
+    return get_config_manager()
+
+
 def load_agents_config() -> Dict[str, Any]:
     """加载 Agent 配置列表（固定在项目根目录，避免依赖 CWD）"""
     candidates = [
@@ -207,12 +214,11 @@ async def list_agents(request: Request):
             info = agent_to_info(agent)
             agents.append(AgentInfo(**info))
 
-    # 也从配置文件加载
-    config = load_agents_config()
-    if config and "agents" in config:
-        for agent_cfg in config["agents"]:
-            agent_id = agent_cfg.get("agent_id", "unknown")
-            # 检查是否已存在
+    # 从 AgentConfigManager 加载持久化配置（data/agents/agents.json）
+    try:
+        config_manager = get_agent_config_manager()
+        for agent_cfg in config_manager.list_agents():
+            agent_id = agent_cfg.get("id") or agent_cfg.get("agent_id", "unknown")
             if not any(a.agent_id == agent_id for a in agents):
                 agents.append(
                     AgentInfo(
@@ -224,6 +230,8 @@ async def list_agents(request: Request):
                         status="config_only",
                     )
                 )
+    except Exception as e:
+        logger.warning("加载持久化 Agent 配置失败: %s", e)
 
     return agents
 
@@ -235,19 +243,20 @@ async def get_agent(request: Request, agent_id: str = FastAPIPath(...)):
 
     agent = get_agent_from_state(agent_id)
     if not agent:
-        # 尝试从配置加载
-        config = load_agents_config()
-        if config and "agents" in config:
-            for agent_cfg in config["agents"]:
-                if agent_cfg.get("agent_id") == agent_id:
-                    return AgentInfo(
-                        agent_id=agent_id,
-                        name=agent_cfg.get("name", "Unknown"),
-                        description=agent_cfg.get("description", ""),
-                        model=agent_cfg.get("model", ""),
-                        provider=agent_cfg.get("provider", ""),
-                        status="config_only",
-                    )
+        # 尝试从 AgentConfigManager 加载持久化配置
+        try:
+            cfg = get_agent_config_manager().get_agent(agent_id)
+            if cfg:
+                return AgentInfo(
+                    agent_id=agent_id,
+                    name=cfg.get("name", "Unknown"),
+                    description=cfg.get("description", ""),
+                    model=cfg.get("model", ""),
+                    provider=cfg.get("provider", ""),
+                    status="config_only",
+                )
+        except Exception as e:
+            logger.warning("AgentConfigManager.get_agent 失败: %s", e)
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     info = agent_to_info(agent)
@@ -302,6 +311,17 @@ async def create_agent(
             _save_agent_config(agent)
         except Exception as e:
             logger.warning("Failed to persist new agent config: %s", e)
+
+        # B11: 同步持久化到 AgentConfigManager（data/agents/agents.json）
+        try:
+            get_agent_config_manager().create_agent(
+                agent_id=agent_id,
+                name=body.name,
+                description=body.description or "",
+                config={"model": body.model or "", "provider": body.provider or ""},
+            )
+        except Exception as e:
+            logger.warning("AgentConfigManager.create_agent 失败: %s", e)
 
         info = agent_to_info(agent)
         return AgentInfo(**info)
@@ -364,6 +384,17 @@ async def update_agent(
     except Exception as e:
         logger.warning("Failed to persist agent config: %s", e)
 
+    # B11: 同步更新 AgentConfigManager 持久化配置
+    try:
+        updates = {}
+        if body.name is not None:
+            updates["name"] = body.name
+        if body.description is not None:
+            updates["description"] = body.description
+        get_agent_config_manager().update_agent(agent_id, updates)
+    except Exception as e:
+        logger.warning("AgentConfigManager.update_agent 失败: %s", e)
+
     info = agent_to_info(agent)
     return AgentInfo(**info)
 
@@ -389,8 +420,14 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...)):
         except Exception as e:
             logger.warning("Agent shutdown error: %s", e)
 
-    # 移除
+    # 移除运行时实例
     del agents[agent_id]
+
+    # B11: 清理 AgentConfigManager 持久化配置
+    try:
+        get_agent_config_manager().delete_agent(agent_id)
+    except Exception as e:
+        logger.warning("AgentConfigManager.delete_agent 失败: %s", e)
 
     # 清理 workspace 目录（防止重启后被重新加载）
     try:

@@ -10,7 +10,7 @@ D1 任务重构版本：
 
 from neurova.core.logger import get_logger
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 # BE-CORE-003 修复: 下方 except 分支使用 logging.warning()，需导入 logging
 import logging
@@ -25,7 +25,7 @@ from neurova.skills.agent_skill_manager import AgentSkillManager  # will be migr
 # ADR 0011: 从 skill_system 导入规范 SkillRegistry（class A），
 # 而非 skills/registry.py 的 class B（tuple 返回/__len__ falsy/register 双参）。
 # 运行时实例本就来自 skill_system.create_default_skills()，此处仅类型注解对齐。
-from neurova.skill_system import SkillRegistry
+from neurova.skill_system import SkillEvent, SkillRegistry
 
 # Neurova-Evocate: Neurova Hebb 记忆系统
 try:
@@ -289,7 +289,7 @@ class AgentConfig:
             "- 保持温和、友善的语气",
             "- 根据记忆提供个性化的回答",
             "- 如果不确定，诚实地表达不确定性",
-            "- 如果发现用户的问题需要搜索或文件操作，使用 [TOOL_CALL:工具名(参数)] 格式调用工具",
+            "- 当用户的问题需要实时信息、文件或命令操作时，应主动使用可用的工具来辅助回答（具体调用方式由工具调用协议提供）",
         ]
 
 
@@ -619,9 +619,12 @@ class SubSystemContainer:
         a.evolution = None
         if c.enable_evolution or c.enable_experience_summary:
             try:
-                from neurova.evolution import EvolutionOrchestrator
+                # split-brain 修复: 使用全局单例编排器，与 Neurflow 执行器
+                # （get_evolution_orchestrator）共享同一套权重/模式/种群。
+                # 此前 agent 自建实例导致两套进化状态互不可见。
+                from neurova.evolution.closed_loop import get_evolution_orchestrator
 
-                a.evolution = EvolutionOrchestrator()
+                a.evolution = get_evolution_orchestrator()
                 if a._skill_registry:
                     skill_names = [s.name for s in a._skill_registry.list_skills()]
                     a.evolution.register_tools(skill_names)
@@ -1100,7 +1103,7 @@ class Agent:
         """
         self.memory_agent.init_memory_modules(neuser_id=neuser_id, user_id=user_id)
 
-        # Phase 10: 初始化睡眠整理引擎（不启动，仅在 shutdown 时触发）
+        # Phase 10: 初始化睡眠整理引擎 + 启动空闲触发链
         try:
             from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
 
@@ -1112,6 +1115,10 @@ class Agent:
             if hasattr(self, "idle_tracker") and self.idle_tracker:
                 self.idle_tracker.set_sleep_consolidation(self.sleep_consolidation)
                 self.idle_tracker.set_memory_manager(self.memory_manager)
+                # 断点修复：此前从未启动监控线程，空闲整理是死路
+                from neurova.agent_shutdown import bind_and_start_sleep_loop
+
+                bind_and_start_sleep_loop(self)
             logger.info("Agent %s: SleepConsolidation（睡眠整理）已初始化", self.config.name)
         except Exception as e:
             logger.warning("SleepConsolidation 初始化失败: %s", e)
@@ -1341,6 +1348,7 @@ class Agent:
         metadata: Optional[Dict[str, Any]] = None,
         enable_tts: bool = None,
         event_emitter: Optional[Callable] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         与用户对话（底层方法，由 Router 调用）
@@ -1364,6 +1372,24 @@ class Agent:
         }
         """
         logger.info("收到用户输入: %s...", user_input[:50])
+
+        # 聊天页手动模型切换：仅当显式指定了 model 且与当前配置不同时才热切换 Loop。
+        # 未指定（model=None）时保持现有自动路由逻辑，不影响富媒体→多模态 LLM 的自动路由。
+        if model:
+            current_model = (
+                getattr(self.config.llm_config, "model", None)
+                if self.config and self.config.llm_config
+                else None
+            )
+            if model != current_model:
+                logger.info(
+                    "聊天页手动切换模型: %s -> %s", current_model, model
+                )
+                try:
+                    self.rebuild_loop(model)
+                except Exception as e:
+                    logger.warning("聊天页模型热切换失败，使用当前模型: %s", e)
+
         ctx = ChatContext(
             user_input=user_input,
             stream=stream,

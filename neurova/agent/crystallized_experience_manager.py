@@ -195,24 +195,40 @@ class CrystallizedExperienceManager:
                 latency_ms = (time.time() - start_time) * 1000
                 result.latency_ms = latency_ms
 
-                # 成功
+                # 成功：仅当返回非空经验时才视为健康恢复（清零连续失败）
+                if result.experiences:
+                    self._metrics.successful_attempts += 1
+                    self._metrics.consecutive_failures = 0
+                    self._update_health_status()
+
+                    # 缓存结果
+                    if use_cache:
+                        self._put_to_cache(query, result)
+
+                    logger.info(
+                        f"结晶经验检索成功: query={query[:30]}..., "
+                        f"experiences={len(result.experiences)}, "
+                        f"latency={latency_ms:.1f}ms"
+                    )
+                    return result
+
+                # 空结果：检索成功但无匹配，属"中性"状态——
+                # 不清零连续失败（保持当前健康状态），也不降级
                 self._metrics.successful_attempts += 1
-                self._metrics.consecutive_failures = 0
-                self._update_health_status()
-
-                # 缓存结果
-                if use_cache and result.experiences:
-                    self._put_to_cache(query, result)
-
                 logger.info(
-                    f"结晶经验检索成功: query={query[:30]}..., "
-                    f"experiences={len(result.experiences)}, "
+                    f"结晶经验检索无匹配: query={query[:30]}..., "
                     f"latency={latency_ms:.1f}ms"
                 )
                 return result
 
             except Exception as e:
                 last_error = e
+                # 放大视角根因: 每次底层结晶器检索失败都应计入连续失败,
+                # 而非等到全部重试失败后才 +1 —— 否则单次重试内的多次失败会被低估,
+                # 导致健康状态无法按预期降级
+                self._metrics.failed_attempts += 1
+                self._metrics.consecutive_failures += 1
+                self._update_health_status()
                 logger.warning("结晶经验检索失败 (attempt %s/%s): %s", attempt + 1, self._max_retries + 1, e)
 
                 # 重试延迟
@@ -220,9 +236,8 @@ class CrystallizedExperienceManager:
                     await asyncio.sleep(self._retry_delay_ms / 1000)
 
         # 3. 所有重试失败，尝试降级
-        self._metrics.failed_attempts += 1
-        self._metrics.consecutive_failures += 1
-        self._update_health_status()
+        # 注: 连续失败已在循环内的 except 分支逐个累计, 此处仅降级处理,
+        #     避免重复计数(否则单次调用会被额外 +1, 造成连续失败被夸大)
 
         # 触发失败回调
         for callback in self._failure_callbacks:

@@ -19,6 +19,7 @@ from .metrics import create_rsi_metrics
 from .recursive_ratchet_pruner import RecursiveRatchetPruner, Candidate
 from .rollback_manager import create_rollback_manager
 from .self_improvement_proposer import SelfImprovementProposer, ProposalType
+from .system_performance import get_setpoint
 
 logger = get_logger(__name__)
 
@@ -84,39 +85,90 @@ class RSIOrchestrator:
 
         logger.info("RSIOrchestrator initialized")
 
+    def _measure_performance(self) -> float:
+        """实测当前整体性能：四系统 setpoint 梯度估算的平均值。"""
+        from .system_performance import estimate_system_performance
+
+        signals = self.collect_feedback_signals()
+        optimizable = self.integration_manager.get_optimizable_parameters()
+
+        scores = []
+        for system_name in self.integration_manager._systems:
+            feedback = signals.get(system_name, {})
+            if not isinstance(feedback, dict):
+                continue
+            params = {
+                p.name: p.current_value
+                for p in optimizable.get(system_name, [])
+            }
+            scores.append(estimate_system_performance(system_name, feedback, params))
+
+        return sum(scores) / len(scores) if scores else 0.0
+
+    def _snapshot_optimizable(self) -> Dict[str, Any]:
+        """快照全部可优化参数当前值（用于有害调整回滚）"""
+        snapshot = {}
+        for system_name, params in self.integration_manager.get_optimizable_parameters().items():
+            for p in params:
+                snapshot[p.name] = {"system": system_name, "value": p.current_value}
+        return snapshot
+
+    def _restore_optimizable(self, snapshot: Dict[str, Any]) -> None:
+        """按快照恢复参数（仅恢复应用过的那些）"""
+        for param_path, info in snapshot.items():
+            self.integration_manager.apply_optimization(
+                f"{info['system']}.{param_path}", info["value"]
+            )
+
     def run_iteration(self) -> Dict[str, Any]:
         """
-        运行一次 RSI 迭代
+        运行一次 RSI 迭代（真实棘轮：应用 → 实测 → 保留/回滚）
 
         Returns:
             Dict[str, Any]: 迭代结果，包含：
                 - feedback_signals: 反馈信号
                 - convergence: 收敛性分析
                 - optimizations: 优化建议
+                - applied_results: 实际应用结果
+                - applied_count: 成功应用的优化数
+                - gain: 应用后的实测性能增益（有害调整回滚后为 0）
                 - metrics: 监控指标
         """
         # 1. 收集反馈信号
         feedback_signals = self.collect_feedback_signals()
 
-        # 2. 分析收敛性
+        # 2. 分析收敛状态
         convergence = self.convergence_analyzer.analyze_convergence()
 
         # 3. 生成优化建议
         optimizations = self.generate_optimizations(feedback_signals)
 
-        # 4. 应用优化（如果部署控制器允许低风险自动执行）
-        applied_results = []
-        if self.deployment_controller.can_auto_execute("low"):
-            applied_results = self.apply_optimizations(optimizations)
+        # 4. 应用优化（部署控制器允许时）+ 实测增益 + 棘轮保留/回滚
+        applied_results: List[Dict[str, Any]] = []
+        applied_count = 0
+        gain = 0.0
 
-        # 5. 喂入收敛性数据
-        # 增益 = 成功应用的优化数 * 平均反馈性能；成本 = 1.0（固定迭代成本）
-        # 这样 gain_history 会有真实数据，analyze_convergence 才能判断收敛/发散
-        applied_count = sum(1 for r in applied_results if r.get("applied"))
-        avg_performance = self._compute_avg_performance(feedback_signals)
-        gain = applied_count * avg_performance
-        cost = 1.0
-        self.convergence_analyzer.record_iteration(gain=gain, cost=cost)
+        if optimizations and self.deployment_controller.can_auto_execute("low"):
+            perf_before = self._measure_performance()
+            snapshot = self._snapshot_optimizable()
+
+            applied_results = self.apply_optimizations(optimizations)
+            applied_count = sum(1 for r in applied_results if r.get("applied"))
+
+            if applied_count:
+                perf_after = self._measure_performance()
+                gain = perf_after - perf_before
+                if gain < 0:
+                    # 有害调整：回滚到应用前快照（失控漂移的本质防护）
+                    self._restore_optimizable(snapshot)
+                    applied_count = 0
+                    gain = 0.0
+
+        # 5. 喂入收敛数据——只喂有意义的迭代。
+        # 此前每轮无条件喂 gain=0，导致"什么都没做却被判定收敛"的虚假收敛。
+        if applied_count > 0 or gain != 0.0:
+            cost = 1.0  # 固定迭代成本
+            self.convergence_analyzer.record_iteration(gain=gain, cost=cost)
 
         # 6. 更新指标
         self.metrics.record_metric("iteration_count", self._iteration_count)
@@ -124,9 +176,7 @@ class RSIOrchestrator:
         self.metrics.record_metric("optimizations_count", len(optimizations))
         self.metrics.record_metric("applied_count", applied_count)
 
-        # 7. P0-A3 修复：检测到发散/振荡时，升级到 SelfImprovementProposer
-        # 自动参数调整是低风险路径；当其失效（convergence=diverging 或 oscillating with negative trend）
-        # 时，应通过 SelfImprovementProposer 创建人工评审提案，进入中高风险通道。
+        # 7. P0-A3 修复：检测到发散/振荡时，升级给 SelfImprovementProposer
         escalation_proposals = self._escalate_to_proposer_if_needed(convergence, feedback_signals)
 
         # 8. 更新迭代计数
@@ -136,6 +186,9 @@ class RSIOrchestrator:
             "feedback_signals": feedback_signals,
             "convergence": convergence,
             "optimizations": optimizations,
+            "applied_results": applied_results,
+            "applied_count": applied_count,
+            "gain": gain,
             "escalation_proposals": escalation_proposals,
             "metrics": self.metrics.get_dashboard_data(),
         }
@@ -287,21 +340,40 @@ class RSIOrchestrator:
     def _generate_candidates_for_param(
         self, system_name: str, param_info: Any, signals: Dict[str, Any]
     ) -> List[Candidate]:
-        """为单个参数生成多个候选方案（不同调整幅度 5%/10%/15%/20%）"""
-        performance = self._extract_performance(signals)
-        if performance is None:
-            return []
+        """为单个参数生成候选方案（朝 setpoint 方向的分级步进）。
 
+        真正闭环修复：此前按 performance 高低做无脑单调增减（失控漂移
+        的本质）。现改为以 setpoint 为目标，生成 5%/10%/15%/20% 步进
+        靠近的候选；已在 setpoint 的参数不产生候选。
+        """
         param_name = param_info.name
         current_value = param_info.current_value
         if current_value is None or not isinstance(current_value, (int, float)):
             return []
 
+        setpoint = get_setpoint(system_name, param_name)
+        if setpoint is None or not isinstance(setpoint, (int, float)):
+            return []
+
+        try:
+            current_f = float(current_value)
+            setpoint_f = float(setpoint)
+        except (TypeError, ValueError):
+            return []
+
+        delta = setpoint_f - current_f
+        if abs(delta) < 1e-9:
+            return []  # 已在 setpoint
+
+        performance = self._extract_performance(signals)
+
         candidates = []
-        # 生成不同调整幅度的候选（棘轮原则：小幅单调改进）
         for ratio in [0.05, 0.10, 0.15, 0.20]:
-            new_value = self._compute_ratchet_adjustment_ratio(param_name, current_value, performance, ratio)
-            if new_value is None or new_value == current_value:
+            new_value = current_f + delta * ratio
+            # 整数型参数保持整数语义
+            if isinstance(current_value, int):
+                new_value = int(round(new_value))
+            if new_value == current_f:
                 continue
 
             optimization = {
@@ -310,19 +382,23 @@ class RSIOrchestrator:
                 "current_value": current_value,
                 "new_value": new_value,
                 "performance": performance,
-                "reason": f"性能={performance:.2f}，调整 {param_name} 从 {current_value} 到 {new_value}（幅度{ratio*100:.0f}%）",
+                "setpoint": setpoint_f,
+                "reason": (
+                    f"{param_name} 偏离 setpoint {setpoint_f}，"
+                    f"调整 {current_f} → {new_value}（步进 {ratio*100:.0f}%）"
+                ),
             }
 
             candidate = Candidate(
                 id=f"{system_name}.{param_name}.{ratio}",
-                name=f"{param_name}_adjust_{int(ratio*100)}pct",
+                name=f"{param_name}_toward_setpoint_{int(ratio*100)}pct",
                 parameters={
                     "parameter": f"{system_name}.{param_name}",
                     "new_value": new_value,
                     "adjustment_ratio": ratio,
                 },
-                complexity=abs(new_value - current_value) / max(current_value, 0.001),  # 调整幅度作为复杂度
-                heuristic_score=1.0 - abs(ratio - 0.10) * 5,  # 偏好 10% 调整幅度
+                complexity=abs(new_value - current_f) / max(abs(current_f), 0.001),
+                heuristic_score=1.0 - abs(ratio - 0.10) * 5,
                 metadata={"optimization": optimization, "performance": performance},
             )
             candidates.append(candidate)

@@ -97,6 +97,34 @@
           </a-dropdown>
         </div>
         <div class="nr-chat-header-actions">
+          <!-- 思考程度：简单 / 标准 / 深度 -->
+          <div class="nr-thinking-seg" :title="t('chat.thinkingEffort')">
+            <button
+              v-for="opt in thinkingOptions"
+              :key="opt.value"
+              class="nr-thinking-opt"
+              :class="{ active: thinkingEffort === opt.value }"
+              @click="setThinkingEffort(opt.value)"
+            >
+              {{ t(opt.label) }}
+            </button>
+          </div>
+          <a-select
+            v-model:value="selectedModel"
+            class="nr-chat-model-select"
+            :options="chatModelOptions"
+            :loading="chatModelLoading"
+            :title="t('agent.model')"
+            size="small"
+          />
+          <button
+            class="nr-chat-toggle-btn"
+            :class="{ 'cu-active': computerPanelState.open }"
+            :title="t('computerPanel.title')"
+            @click="toggleComputerPanel"
+          >
+            🖥
+          </button>
           <button class="nr-chat-toggle-btn" @click="historyPanelOpen = !historyPanelOpen" :title="t('chat.history')">
             {{ historyPanelOpen ? '›' : '‹' }}
           </button>
@@ -350,6 +378,14 @@
       </div>
     </main>
 
+    <!-- 电脑操作分屏（Agent 使用电脑/浏览器工具时自动展开，ZCode 式跟随） -->
+    <ComputerUsePanel
+      v-if="computerPanelState.open"
+      :state="computerPanelState"
+      :agent-id="agentId"
+      @close="closeComputerPanel"
+    />
+
     <!-- Right Panel: Conversation History (main layout mode) -->
     <aside v-if="isMainLayout && agentId && historyPanelOpen" class="nr-chat-history-panel">
       <div class="nr-history-header">
@@ -470,7 +506,20 @@ import { resolveI18nMessage } from '@/utils/i18n'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
 import SubAgentPanel, { type SubAgentWindowState } from '@/components/chat/SubAgentPanel.vue'
+import ComputerUsePanel from '@/components/chat/ComputerUsePanel.vue'
+import { useComputerPanel, isComputerTool } from '@/composables/useComputerPanel'
+import { useThinkingEffort } from '@/composables/useThinkingEffort'
+import type { ThinkingEffort } from '@/composables/useThinkingEffort'
 import { useSessionSync } from '@/composables/useSessionSync'
+import { listModels } from '@/api/modules/models'
+import { normalizeModel } from '@/types/model'
+
+/** 聊天页可切换的模型选项（空串 = 自动路由） */
+interface ChatModelOption {
+  label: string
+  value: string
+  provider_id: string
+}
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -512,12 +561,27 @@ const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const historyPanelOpen = ref(true)
 
 // ---------------------------------------------------------------------------
+// 思考程度（简单/标准/深度）：持久化于 localStorage，随消息发给后端
+// ---------------------------------------------------------------------------
+const { effort: thinkingEffort, setEffort: setThinkingEffort } = useThinkingEffort()
+const thinkingOptions: Array<{ value: ThinkingEffort; label: string }> = [
+  { value: 'light', label: 'chat.thinkingLight' },
+  { value: 'standard', label: 'chat.thinkingStandard' },
+  { value: 'deep', label: 'chat.thinkingDeep' },
+]
+
+// ---------------------------------------------------------------------------
 // 蜂群子 Agent 小窗：订阅会话 WS 事件（subagent_started/chunk/completed），
 // 每个子 Agent 一个可最小化的浮动小窗
 // ---------------------------------------------------------------------------
 const subAgentWindows = ref<Record<string, SubAgentWindowState>>({})
 
 function onSessionSyncEvent(event: { event_type: string; payload: Record<string, unknown> }) {
+  // 电脑操作实时事件 → 分屏面板（不携带 subagent_id，先于子 Agent 分支处理）
+  if (event.event_type === 'computer_action') {
+    computerPanel.handleComputerAction(event.payload)
+    return
+  }
   const p = event.payload as Record<string, string>
   const sid = p?.subagent_id
   if (!sid) return
@@ -547,6 +611,25 @@ function onSessionSyncEvent(event: { event_type: string; payload: Record<string,
 
 function closeSubAgentWindow(subagentId: string) {
   delete subAgentWindows.value[subagentId]
+}
+
+// ---------------------------------------------------------------------------
+// 电脑操作分屏：Agent 调用 computer_*/browser_* 工具时自动展开，
+// 实时显示操作截图与动作日志（WS computer_action 事件驱动）
+// ---------------------------------------------------------------------------
+const computerPanel = useComputerPanel()
+const computerPanelState = computerPanel.state
+
+function toggleComputerPanel() {
+  if (computerPanelState.open) {
+    computerPanel.close()
+  } else {
+    computerPanel.open()
+  }
+}
+
+function closeComputerPanel() {
+  computerPanel.close()
 }
 
 useSessionSync(() => currentSessionId.value, onSessionSyncEvent)
@@ -589,6 +672,40 @@ const approvalModal = reactive({
   reason: '',
 })
 const approvalAddWhitelist = ref(false)
+
+// ---------------------------------------------------------------------------
+// 手动模型切换（聊天页右上角）
+// 空串'' = 自动路由（默认，不影响富媒体→多模态 LLM 的自动路由）
+// 非空 = 手动指定模型，随消息 POST body 的 model 字段转发到后端热切换
+const chatModelOptions = ref<ChatModelOption[]>([])
+const selectedModel = ref<string>('')
+const chatModelLoading = ref(false)
+
+async function loadChatModels() {
+  chatModelLoading.value = true
+  try {
+    const models = await listModels()
+    const normalized = (models || []).map((m) => normalizeModel(m))
+    // 只展示已启用（可用）的模型，避免用户选到不可用的模型
+    const enabled = normalized.filter((m) => m.enabled !== false)
+    const AUTO_ROUTE_LABEL = '🧠 自动路由 (推荐)'
+    const options: ChatModelOption[] = [
+      { label: AUTO_ROUTE_LABEL, value: '', provider_id: '' },
+      ...enabled.map((m) => ({
+        label: `${m.name || m.id}${m.is_active ? ' ●' : ''}`,
+        value: m.id || m.name,
+        provider_id: m.provider_id || '',
+      })),
+    ]
+    chatModelOptions.value = options
+  } catch (e) {
+    // 加载失败不阻塞聊天，保留"自动路由"选项即可
+    console.warn('[ChatPage] 模型列表加载失败:', e)
+    chatModelOptions.value = []
+  } finally {
+    chatModelLoading.value = false
+  }
+}
 
 let abortController: AbortController | null = null
 
@@ -804,6 +921,11 @@ async function sendMessage() {
         session_id: currentSessionId.value,
         message: text,
         file_ids: fileIds.length > 0 ? fileIds : undefined,
+        // 手动模型切换：携带用户选择的模型。
+        // 含富媒体文件时不携带（置空），交由后端自动路由至多模态能力 LLM。
+        model: fileIds.length > 0 ? undefined : (selectedModel.value || undefined),
+        // 思考程度：light/standard/deep，后端注入对应回答深度指令
+        thinking_effort: thinkingEffort.value,
       }),
       signal: abortController.signal,
     })
@@ -861,6 +983,11 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'reasoning':
     case 'thinking':
       msg.reasoning = (msg.reasoning || '') + (event.content || event.text || '')
+      // 首次收到思考内容时自动展开（用户手动折叠后不再打扰）
+      if (msg.reasoning && !msg.reasoningOpen && !msg.reasoningAutoOpened) {
+        msg.reasoningOpen = true
+        msg.reasoningAutoOpened = true
+      }
       break
 
     case 'tool_call':
@@ -871,6 +998,10 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       })
       // legacy compat
       msg.toolCall = msg.toolCalls[msg.toolCalls.length - 1]
+      // SSE 兜底：电脑/浏览器工具调用即开分屏（主通道为 WS computer_action）
+      if (isComputerTool(event.name || event.tool_name || '')) {
+        computerPanel.handleToolCall(String(event.name || event.tool_name))
+      }
       break
 
     case 'tool_result':
@@ -880,6 +1011,9 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       }
       // legacy compat
       msg.toolResult = typeof event.result === 'string' ? event.result : JSON.stringify(event.result, null, 2)
+      if (isComputerTool(event.name || '')) {
+        computerPanel.markIdle()
+      }
       break
 
     case 'approval_required': {
@@ -1477,6 +1611,7 @@ onMounted(() => {
   loadSessions()
   initASR()
   checkTTSAvailability()
+  loadChatModels()
 })
 
 onBeforeUnmount(() => {
@@ -1635,7 +1770,17 @@ onBeforeUnmount(() => {
 }
 .nr-chat-header-left { display: flex; align-items: center; gap: 12px; }
 .nr-chat-header-left .page-title { margin: 0; font-family: var(--nr-font-display); font-size: 20px; font-weight: 700; color: var(--nr-text-primary); }
-.nr-chat-header-actions { display: flex; gap: 8px; }
+.nr-chat-header-actions { display: flex; gap: 8px; align-items: center; }
+.nr-chat-model-select {
+  min-width: 190px;
+  background: var(--nr-glass-bg);
+  border-radius: 8px;
+}
+.nr-chat-model-select:hover { border-color: var(--nr-glass-border-hover); }
+.nr-chat-model-select .ant-select-selection-item,
+.nr-chat-model-select .ant-select-selection-placeholder {
+  font-size: 13px;
+}
 .nr-chat-toggle-btn {
   width: 32px; height: 32px; border: 1px solid var(--nr-glass-border); border-radius: 8px;
   background: var(--nr-glass-bg); color: var(--nr-text-secondary); font-size: 18px;
@@ -1643,6 +1788,38 @@ onBeforeUnmount(() => {
   transition: all 0.2s ease;
 }
 .nr-chat-toggle-btn:hover { border-color: var(--nr-glass-border-hover); color: var(--nr-text-primary); background: var(--nr-glass-bg-hover); }
+.nr-chat-toggle-btn.cu-active { border-color: rgba(129, 140, 248, 0.7); color: var(--nr-primary-light, #818cf8); background: rgba(99, 102, 241, 0.15); }
+
+/* 思考程度三档选择器（简单/标准/深度） */
+.nr-thinking-seg {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 8px;
+  background: var(--nr-glass-bg);
+}
+.nr-thinking-opt {
+  border: none;
+  background: transparent;
+  color: var(--nr-text-tertiary);
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.nr-thinking-opt:hover { color: var(--nr-text-primary); }
+.nr-thinking-opt.active {
+  color: #fff;
+  background: rgba(99, 102, 241, 0.75);
+}
+@media (max-width: 720px) {
+  .nr-thinking-seg { display: none; }
+}
 .nr-chat-session-select {
   display: flex; align-items: center; gap: 8px; padding: 6px 14px;
   border-radius: 10px; border: 1px solid var(--nr-glass-border);

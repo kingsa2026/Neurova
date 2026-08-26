@@ -240,9 +240,18 @@ class VariableResolver:
             else:
                 logger.warning("memory_manager 没有 get_memory 或 get 方法")
                 return None
+        elif action == "search":
+            # 显式 $memory.search 动作（优先 search 方法本身）
+            search_fn = getattr(context.memory_manager, "search", None) or getattr(
+                context.memory_manager, "search_memories", None
+            )
+            if search_fn is None:
+                logger.warning("memory_manager 没有 search 或 search_memories 方法")
+                return None
+            return search_fn(query or "")
+
         else:
-            # 默认为搜索
-            # 尝试调用 search_memories 方法，如果不存在则回退到 search 方法
+            # 默认为搜索（$memory.query_text 形态）
             if hasattr(context.memory_manager, "search_memories"):
                 return context.memory_manager.search_memories(path)
             elif hasattr(context.memory_manager, "search"):

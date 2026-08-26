@@ -10,6 +10,8 @@ export interface ChatMessage {
   content: string
   reasoning?: string
   reasoningOpen?: boolean
+  /** 流式期间是否已自动展开过思考区（用户手动折叠后不再自动打开） */
+  reasoningAutoOpened?: boolean
   toolCalls?: Array<{ name: string; arguments: string; result?: string }>
   toolOpen?: boolean
   /** legacy single tool call, kept for backward compatibility */

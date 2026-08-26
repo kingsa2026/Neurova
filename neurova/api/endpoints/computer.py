@@ -131,41 +131,76 @@ def _log_action(action: str, detail: dict):
 # ── Desktop endpoints ──────────────────────────────────
 
 
+def _get_manager():
+    """获取 ComputerUseManager（真实桌面/浏览器能力）"""
+    from neurova.computer_use import get_computer_use_manager
+
+    return get_computer_use_manager()
+
+
+def _normalize_browser_result(result) -> dict:
+    """BrowserResult(dataclass)/dict/None → 紧凑 dict"""
+    if isinstance(result, dict):
+        return result
+    if result is None:
+        return {"success": False, "error": "浏览器管理器不可用"}
+    to_dict = getattr(result, "to_dict", None)
+    if callable(to_dict):
+        return dict(to_dict())
+    return {"success": False, "error": "浏览器返回格式未知"}
+
+
 @router.post("/screenshot")
 async def screenshot(body: ScreenshotRequest):
-    """获取桌面截图"""
+    """获取桌面截图（真实实现：PIL ImageGrab 后端）"""
+    import base64
+
     _log_action("screenshot", {"region": body.region})
-    # Placeholder - real implementation needs pyautogui or similar
+    region = tuple(body.region) if body.region else None
+    data = await asyncio.to_thread(_get_manager().screenshot, region)
+    if not data:
+        raise HTTPException(status_code=503, detail="截图失败：无可用后端（需要 PIL/Pillow）")
     return {
         "code": 0,
-        "message": "Screenshot captured (placeholder)",
-        "data": {"format": body.format, "base64": "", "width": 1920, "height": 1080},
+        "message": "Screenshot captured",
+        "data": {"format": body.format, "base64": base64.b64encode(data).decode("utf-8")},
     }
 
 
 @router.post("/click")
 async def click(body: ClickRequest):
-    """鼠标点击操作"""
+    """鼠标点击操作（真实实现：pyautogui）"""
     _log_action("click", {"x": body.x, "y": body.y, "button": body.button})
+    ok = await asyncio.to_thread(_get_manager().click, int(body.x), int(body.y), body.button)
+    if not ok:
+        raise HTTPException(status_code=503, detail="点击失败：需要 pyautogui")
     return {
         "code": 0,
         "message": f"Clicked ({body.x}, {body.y})",
-        "data": {"x": body.x, "y": body.y, "button": body.button},
+        "data": {"success": True, "x": body.x, "y": body.y, "button": body.button},
     }
 
 
 @router.post("/type")
 async def type_text(body: TypeRequest):
-    """键盘输入操作"""
+    """键盘输入操作（真实实现：pyautogui）"""
     _log_action("type", {"length": len(body.text)})
-    return {"code": 0, "message": f"Typed {len(body.text)} characters", "data": {"length": len(body.text)}}
+    ok = await asyncio.to_thread(_get_manager().type_text, body.text, body.interval)
+    if not ok:
+        raise HTTPException(status_code=503, detail="输入失败：需要 pyautogui")
+    return {"code": 0, "message": f"Typed {len(body.text)} characters", "data": {"success": True, "length": len(body.text)}}
 
 
 @router.post("/scroll")
 async def scroll(body: ScrollRequest):
-    """滚轮操作"""
+    """滚轮操作（真实实现：pyautogui）"""
     _log_action("scroll", {"dx": body.dx, "dy": body.dy})
-    return {"code": 0, "message": "Scrolled", "data": {"dx": body.dx, "dy": body.dy}}
+    # dy 负值向下、正值向上，与前端 direction/amount 语义换算
+    clicks = abs(int(body.dy)) or 3
+    ok = await asyncio.to_thread(_get_manager().scroll, None, None, clicks)
+    if not ok:
+        raise HTTPException(status_code=503, detail="滚动失败：需要 pyautogui")
+    return {"code": 0, "message": "Scrolled", "data": {"success": True, "dx": body.dx, "dy": body.dy}}
 
 
 @router.post("/shell")
@@ -260,13 +295,28 @@ async def smart_type(body: SmartTypeRequest):
 
 @router.get("/status")
 async def get_status():
-    """查询 Computer Use 服务状态"""
+    """查询 Computer Use 服务状态（真实探测桌面/浏览器后端可用性）"""
+    desktop_available = False
+    browser_backends: typing.List[str] = []
+    try:
+        manager = _get_manager()
+        desktop_available = getattr(manager, "_screenshot_backend", "basic") != "basic"
+    except Exception as e:
+        logger.warning("探测桌面能力失败: %s", e)
+    try:
+        from neurova.computer_use.browser_manager import get_browser_manager
+
+        browser_backends = list(get_browser_manager().get_status().get("available_backends", []))
+    except Exception as e:
+        logger.warning("探测浏览器后端失败: %s", e)
+
     return {
         "code": 0,
         "message": "success",
         "data": {
-            "desktop_available": False,
-            "browser_available": False,
+            "desktop_available": desktop_available,
+            "browser_available": bool(browser_backends),
+            "browser_backends": browser_backends,
             "vision_available": False,
             "actions_logged": len(_action_log),
             "browser_url": _browser_state.get("url"),
@@ -279,43 +329,70 @@ async def get_status():
 
 @router.post("/browser/navigate")
 async def browser_navigate(body: BrowserNavigateRequest):
-    """浏览器导航"""
+    """浏览器导航（真实实现：BrowserManager 多后端）"""
+    result = await _get_manager().browser_navigate(body.url)
+    normalized = _normalize_browser_result(result)
+    if not normalized.get("success"):
+        raise HTTPException(status_code=502, detail=normalized.get("error") or "导航失败：无可用浏览器后端")
     _browser_state["url"] = body.url
     _browser_state["history"].append(body.url)
     _log_action("browser_navigate", {"url": body.url})
-    return {"code": 0, "message": f"Navigated to {body.url}", "data": {"url": body.url}}
+    return {"code": 0, "message": f"Navigated to {body.url}", "data": normalized}
 
 
 @router.post("/browser/screenshot")
 async def browser_screenshot(body: BrowserScreenshotRequest):
-    """浏览器截图"""
+    """浏览器截图（真实实现）"""
     _log_action("browser_screenshot", {"full_page": body.full_page})
+    raw = await _get_manager().browser_screenshot()
+    shot = getattr(raw, "screenshot", None)  # BrowserResult 携带 base64
+    if not shot:
+        raise HTTPException(status_code=503, detail="截图失败：无可用浏览器后端")
     return {
         "code": 0,
-        "message": "Browser screenshot (placeholder)",
-        "data": {"base64": "", "url": _browser_state.get("url")},
+        "message": "Browser screenshot captured",
+        "data": {"base64": shot, "url": getattr(raw, "url", None) or _browser_state.get("url")},
     }
 
 
 @router.post("/browser/click")
 async def browser_click(body: BrowserClickRequest):
-    """浏览器点击"""
-    _log_action("browser_click", {"selector": body.selector, "text": body.text})
-    return {"code": 0, "message": "Browser click executed", "data": {"selector": body.selector, "text": body.text}}
+    """浏览器点击（selector 或可见文本）"""
+    target = body.selector or (f"text={body.text}" if body.text else "")
+    if not target:
+        raise HTTPException(status_code=422, detail="缺少 selector 或 text 参数")
+    raw = await _get_manager().browser_click(target)
+    normalized = _normalize_browser_result(raw)
+    _log_action("browser_click", {"target": target, "success": normalized.get("success")})
+    return {"code": 0, "message": "Browser click executed", "data": normalized}
 
 
 @router.post("/browser/type")
 async def browser_type(body: BrowserTypeRequest):
-    """浏览器输入"""
+    """浏览器输入（真实实现）"""
+    raw = await _get_manager().browser_type(body.selector, body.text)
+    normalized = _normalize_browser_result(raw)
     _log_action("browser_type", {"selector": body.selector})
-    return {"code": 0, "message": "Typed into element", "data": {"selector": body.selector, "length": len(body.text)}}
+    return {"code": 0, "message": "Typed into element", "data": normalized}
 
 
 @router.post("/browser/extract-text")
 async def browser_extract_text(body: BrowserExtractTextRequest):
-    """浏览器提取文本"""
-    _log_action("browser_extract_text", {"selector": body.selector})
-    return {"code": 0, "message": "Text extracted (placeholder)", "data": {"text": "", "selector": body.selector}}
+    """浏览器提取文本（真实实现）"""
+    raw = await _get_manager().browser_extract_text()
+    normalized = _normalize_browser_result(raw)
+    data = normalized.get("data")
+    if isinstance(data, str) and len(data) > 20000:
+        normalized["data"] = data[:20000] + "…[已截断]"
+        normalized["truncated"] = True
+    _log_action("browser_extract_text", {"selector": body.selector, "size": len(str(data or ""))})
+    return {"code": 0, "message": "Text extracted", "data": {"text": normalized.get("data", ""), "url": normalized.get("url")}}
+
+
+@router.post("/browser/extract")
+async def browser_extract_alias(body: BrowserExtractTextRequest):
+    """浏览器提取内容（/browser/extract-text 的别名，兼容前端 extractPage 调用）"""
+    return await browser_extract_text(body)
 
 
 @router.post("/browser/extract-links")

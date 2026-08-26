@@ -36,7 +36,9 @@ import bus from '@/bus'
  * 替换原 `silent: boolean` 浅参数模式 — 接口不再泄漏调用上下文, 决策空间
  * 留给调用方. 详见 docs/bugfix-delete-session-toast.md "架构深化" 小节.
  */
-export type SwitchResult = { ok: true } | { ok: false; error: unknown }
+export type SwitchResult =
+  | { ok: true }
+  | { ok: false; error: unknown; code?: 'ghost-404' | 'network' | 'server' }
 
 /**
  * deleteSession 的执行结果类型.
@@ -210,20 +212,27 @@ export function useChat(options: UseChatOptions = {}) {
       bus.emit('chat:session-switched', { sessionId })
       return { ok: true }
     } catch (err) {
-      console.error('[Chat] Failed to load history:', err)
-      store.clearMessages()
+      const status = (err as any)?.response?.status
       // 幽灵 session 自愈 (chat.loadHistoryFailed toast 根因修复):
       // 404 表示后端不存在该 session (例如前端 UUID fallback 残留 / 后端
       // session 文件被删), 自动从 store 移除, 避免用户反复点击触发 toast.
       // 非 404 错误 (如 500 服务器故障 / 网络错误) 保留 session, 因为可能重试成功.
       // 详见 docs/bugfix-delete-session-userid-mismatch.md "幽灵 session 自愈".
-      const status = (err as any)?.response?.status
       if (status === 404) {
+        // BUG FIX (delete-404-ghost): 404 自愈属"预期恢复"而非真错误,
+        // 不应以 error 级别污染控制台 (删除会话自动切换落到幽灵时, 旧契约
+        // 无条件 console.error 打印一条吓人的 404). 改记录 warn, 并携带
+        // code='ghost-404' 供 deleteSession 等副作用调用方识别并跳过继续切换.
+        console.warn('[Chat] Ghost session self-healed (404):', sessionId)
+        store.clearMessages()
         store.removeSession(sessionId)
         if (store.currentSessionId === sessionId) {
           store.setCurrentSession(null)
         }
+        return { ok: false, error: err, code: 'ghost-404' }
       }
+      console.error('[Chat] Failed to load history:', err)
+      store.clearMessages()
       return { ok: false, error: err }
     } finally {
       switchingSession.value = false
@@ -264,11 +273,26 @@ export function useChat(options: UseChatOptions = {}) {
       if (store.currentSessionId === sessionId) {
         store.setCurrentSession(null)
         store.clearMessages()
-        if (store.sessions.length > 0) {
-          // 副作用调用: 删除后自动切换. switchSession 不再 toast,
-          // 失败结果由 deleteSession 静默消费 (不调 notifySwitchFailure),
-          // 避免让用户误以为删除失败.
-          await switchSession(store.sessions[0].id)
+        // 副作用调用: 删除后自动切换. switchSession 不再 toast,
+        // 失败结果由 deleteSession 静默消费 (不调 notifySwitchFailure),
+        // 避免让用户误以为删除失败.
+        //
+        // BUG FIX (delete-404-ghost): 旧契约只尝试一次 store.sessions[0],
+        // 若它是幽灵 session (前端 UUID 残留, 后端 404), switchSession 自愈
+        // 移除后, UI 会停在 null / 幽灵上并打印 404 error. 这里循环重试:
+        // 每次命中幽灵 (code='ghost-404', 已被自愈移除), 继续切下一个有效会话,
+        // 直到成功或遇到非幽灵错误. 循环上界 = 剩余会话数, 幽灵逐个被移除.
+        while (store.sessions.length > 0) {
+          const nextId = store.sessions[0].id
+          const r = await switchSession(nextId)
+          if (r.ok) {
+            break
+          }
+          if (r.code !== 'ghost-404') {
+            // 非幽灵错误 (网络/500): 保留该 session, 停止重试, 避免掩盖真错误.
+            break
+          }
+          // 幽灵已从 store 移除 (sessions.length 减小), 循环重新取首位.
         }
       }
       bus.emit('chat:session-deleted', { sessionId })

@@ -687,17 +687,29 @@ class ContextOrchestrator:
     # ══════════════════════════════════════════════════════════════
 
     async def get_tools_description(self) -> str:
-        """获取工具描述文本，用于注入 system prompt（API 不支持 function calling 时的降级）"""
+        """获取工具描述文本，注入 system prompt。
+
+        注意：这里只列工具清单与使用策略，**不教任何调用语法**——
+        原生 function calling 由 tools 参数承载；文本格式教学收敛在
+        get_tool_call_format_hint()，仅供 provider 不支持原生 FC 的降级路径。
+        （历史上无条件教 `[TOOL_CALL:]` 文本格式与原生 tools 双通道冲突，
+        是弱模型不调用工具的首要根因）
+        """
         try:
             tools = await self.build_tools_for_llm()
             if not tools:
                 return ""
-            lines = ["\n\n## 可用工具\n你可以调用以下工具来完成任务。调用格式：\n`[TOOL_CALL:工具名(参数=值, ...)]`\n"]
-            lines.append("⚠️ **工具使用原则**：\n"
-                         "- `memory_search` 和 `voice_memory_search` 仅用于检索本Agent自身存储的历史记忆，不能搜索互联网\n"
-                         "- 需要实时信息（天气、新闻、股价等）时，请使用 `weather` 或 `web_search` 工具获取，不要用记忆搜索工具查实时信息\n"
-                         "- `weather` 工具可查实时天气（支持中文城市名，如'许昌'）；`web_search` 工具可查新闻、股价等实时网络信息\n"
-                         "- `computer_shell` 可执行本地命令，但注意安全性和权限\n")
+            lines = [
+                "\n\n## 可用工具\n",
+                "⚠️ **工具使用策略**：\n"
+                "- 你具备真实工具能力。需要实时信息、文件读写、屏幕/浏览器操作等能力时，"
+                "必须主动调用对应工具完成，不要回复\"我做不到/无法获取\"\n"
+                "- 调用前确认参数完整；调用失败时阅读错误信息，修正参数重试或改用其他工具\n"
+                "- 简单闲聊无需调用工具\n"
+                "- `memory_search` 和 `voice_memory_search` 仅检索本 Agent 自身的历史记忆，"
+                "不能搜互联网；实时信息请用 `weather` / `web_search`\n"
+                "- `computer_shell` 可执行本地命令，注意安全性和权限\n",
+            ]
             for t in tools:
                 fn = t["function"]
                 params_desc = ""
@@ -713,94 +725,145 @@ class ContextOrchestrator:
             return ""
 
     async def build_tools_for_llm(self) -> Optional[List[Dict]]:
-        """聚合所有工具为 OpenAI function call schema（内置 + Skill + MCP + 插件）"""
-        from neurova.builtin_tools import get_builtin_tool_params
+        """聚合所有工具为 OpenAI function call schema（内置 + Skill + MCP + 插件）。
 
-        tools = []
-        user_id = getattr(self.config, "user_id", "default")
-        logger.info(
-            f"[TOOLS] 开始聚合工具, user_id={user_id}, has_tool_router={self.tool_router is not None}, has_skill_registry={self.skill_registry is not None}"
-        )
+        实例方法：委托给底层 `_build_tools_for_llm` 实现，保持 `self` 注入，
+        使 agent_core / chat_pipeline / context_facade 等调用方通过实例正常访问。
+        """
+        return await _build_tools_for_llm(self)
 
-        # 1. ToolRouter 聚合所有工具（含 MCP）
-        if self.tool_router:
-            try:
-                all_tools = self.tool_router.get_all_tools(
-                    agent_id=self.config.agent_id,
-                    user_id=user_id,
+
+def get_tool_call_format_hint() -> str:
+    """文本模式专用的调用格式教学（provider 不支持原生 function calling 时的降级通道）。
+
+    只允许出现在降级后的请求里；原生 FC 请求注入本提示会与 tools 参数
+    形成双通道指令冲突，诱导模型放弃 tool_calls 机制。
+    """
+    return (
+        "\n\n## 工具调用方式\n"
+        "当前接口不支持函数调用，请用文本格式发起工具调用：\n"
+        "`[TOOL_CALL:工具名(参数=值, ...)]`\n"
+        "示例：`[TOOL_CALL:web_search(query=\"今日新闻\")]`\n"
+    )
+
+
+async def _build_tools_for_llm(self) -> Optional[List[Dict]]:
+    """聚合所有工具为 OpenAI function call schema（内置 + Skill + MCP + 插件）"""
+    from neurova.builtin_tools import get_builtin_tool_params
+
+    tools = []
+    user_id = getattr(self.config, "user_id", "default")
+    logger.info(
+        f"[TOOLS] 开始聚合工具, user_id={user_id}, has_tool_router={self.tool_router is not None}, has_skill_registry={self.skill_registry is not None}"
+    )
+
+    # 1. ToolRouter 聚合所有工具（含 MCP）
+    if self.tool_router:
+        try:
+            all_tools = self.tool_router.get_all_tools(
+                agent_id=self.config.agent_id,
+                user_id=user_id,
+            )
+            tool_list = list(all_tools.values()) if isinstance(all_tools, dict) else list(all_tools)
+            logger.info("[TOOLS] ToolRouter 返回 %s 个工具: %s", len(tool_list), [getattr(t, "name", str(t)) for t in tool_list])
+            for t in tool_list:
+                # tool_router 可能返回三种形态：已序列化的 OpenAI schema dict、
+                # 普通 dict 工具、或带 to_openai_format 的对象，需兼容处理。
+                if isinstance(t, dict) and isinstance(t.get("function"), dict) and t["function"].get("name"):
+                    # 已是 OpenAI function call schema，直接采用（避免二次包装/误覆盖）
+                    tools.append(t)
+                    continue
+                if isinstance(t, dict):
+                    tool_name = t.get("name", "") or ""
+                    tool_desc = t.get("description", "") or f"工具: {tool_name}"
+                    builtin_params = get_builtin_tool_params(tool_name)
+                elif hasattr(t, "to_openai_format"):
+                    tools.append(t.to_openai_format())
+                    continue
+                else:
+                    tool_name = getattr(t, "name", "") or ""
+                    tool_desc = getattr(t, "description", "") or f"工具: {tool_name}"
+                    builtin_params = get_builtin_tool_params(tool_name)
+                builtin_params = builtin_params or {}
+                tools.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "description": tool_desc or builtin_params.get("description", f"工具: {tool_name}"),
+                            "parameters": builtin_params.get(
+                                "parameters", {"type": "object", "properties": {}, "required": []}
+                            ),
+                        },
+                    }
                 )
-                tool_list = list(all_tools.values()) if isinstance(all_tools, dict) else list(all_tools)
-                logger.info("[TOOLS] ToolRouter 返回 %s 个工具: %s", len(tool_list), [getattr(t, "name", str(t)) for t in tool_list])
-                for t in tool_list:
-                    if hasattr(t, "to_openai_format"):
-                        tools.append(t.to_openai_format())
-                    else:
-                        tool_name = getattr(t, "name", str(t))
-                        tool_desc = getattr(t, "description", f"工具: {tool_name}")
-                        builtin_params = get_builtin_tool_params(tool_name)
-                        tools.append(
-                            {
-                                "type": "function",
-                                "function": {
-                                    "name": tool_name,
-                                    "description": tool_desc
-                                    or builtin_params.get("description", f"工具: {tool_name}"),
-                                    "parameters": builtin_params.get(
-                                        "parameters", {"type": "object", "properties": {}, "required": []}
-                                    ),
-                                },
-                            }
-                        )
-            except Exception:
-                logger.exception("从 ToolRouter 获取工具列表失败")
+        except Exception:
+            logger.exception("从 ToolRouter 获取工具列表失败")
 
-        # 2. Skill Registry 工具 — 用实际参数 schema 替换 ToolRouter 的占位符
-        if self.skill_registry:
-            try:
-                from neurova.skill_system.compat import unpack_skill  # H2 fix: 解包 class B 的 tuple
+    # 2. Skill Registry 工具 — 用实际参数 schema 替换 ToolRouter 的占位符
+    if self.skill_registry:
+        try:
+            from neurova.skill_system.compat import unpack_skill  # H2 fix: 解包 class B 的 tuple
 
-                for skill_name, raw_skill in self.skill_registry.skills.items():
-                    skill = unpack_skill(raw_skill)  # H2 fix: 类 B 返回 (Skill, Path) 元组，需解包
-                    # 尝试用 OpenAI Schema Adapter 生成带参数的 schema
-                    try:
-                        from neurova.skill_system.compat import OpenAISchemaAdapter
+            for skill_name, raw_skill in self.skill_registry.skills.items():
+                skill = unpack_skill(raw_skill)  # H2 fix: 类 B 返回 (Skill, Path) 元组，需解包
+                # 尝试用 OpenAI Schema Adapter 生成带参数的 schema
+                try:
+                    from neurova.skill_system.compat import OpenAISchemaAdapter
 
-                        schema = OpenAISchemaAdapter.skill_to_tool_schema(skill)
-                    except ImportError:
-                        # Fallback：用 _get_parameters() 构建
-                        params_info = skill._get_parameters() if hasattr(skill, "_get_parameters") else {}
-                        props = {}
-                        required = []
-                        for pname, pinfo in params_info.items():
-                            props[pname] = {"type": pinfo.get("type", "string"), "description": pname}
-                            if pinfo.get("required"):
-                                required.append(pname)
-                        schema = {
-                            "type": "function",
-                            "function": {
-                                "name": skill.name,
-                                "description": skill.description,
-                                "parameters": {"type": "object", "properties": props, "required": required},
-                            },
-                        }
-                    # 替换 ToolRouter 生成的同名工具（参数更完整）
-                    existing_idx = next((i for i, t in enumerate(tools) if t["function"]["name"] == skill_name), -1)
-                    if existing_idx >= 0:
-                        tools[existing_idx] = schema
-                    else:
-                        tools.append(schema)
-            except Exception:
-                logger.exception("从 SkillRegistry 获取工具失败")
+                    schema = OpenAISchemaAdapter.skill_to_tool_schema(skill)
+                except ImportError:
+                    # Fallback：用 _get_parameters() 构建
+                    params_info = skill._get_parameters() if hasattr(skill, "_get_parameters") else {}
+                    props = {}
+                    required = []
+                    for pname, pinfo in params_info.items():
+                        props[pname] = {"type": pinfo.get("type", "string"), "description": pname}
+                        if pinfo.get("required"):
+                            required.append(pname)
+                    schema = {
+                        "type": "function",
+                        "function": {
+                            "name": skill.name,
+                            "description": skill.description,
+                            "parameters": {"type": "object", "properties": props, "required": required},
+                        },
+                    }
+                # 同名合并以"参数定义更完整者"为准：
+                # 历史上无条件用技能 schema 覆盖，导致 web_search 等内置工具
+                # 的完整参数被空参 proxy 抹掉（模型看不到怎么传参）
+                existing_idx = next((i for i, t in enumerate(tools) if t["function"]["name"] == skill_name), -1)
+                if existing_idx >= 0:
+                    existing = tools[existing_idx]
+                    new_props = (schema.get("function", {}).get("parameters", {}) or {}).get("properties", {}) or {}
+                    old_props = (existing.get("function", {}).get("parameters", {}) or {}).get("properties", {}) or {}
+                    tools[existing_idx] = schema if len(new_props) > len(old_props) else existing
+                else:
+                    tools.append(schema)
+        except Exception:
+            logger.exception("从 SkillRegistry 获取工具失败")
 
-        # 过滤掉格式不正确的工具（某些 provider 要求 tools 中每个元素都必须有 function 字段）
-        valid_tools = []
-        for t in tools:
-            if isinstance(t, dict) and "function" in t and isinstance(t["function"], dict) and "name" in t["function"]:
-                valid_tools.append(t)
-            else:
-                logger.warning("跳过格式不正确的工具: %s", t)
-        tools = valid_tools
+    # 过滤掉格式不正确的工具（某些 provider 要求 tools 中每个元素都必须有 function 字段）
+    valid_tools = []
+    for t in tools:
+        if isinstance(t, dict) and "function" in t and isinstance(t["function"], dict) and "name" in t["function"]:
+            valid_tools.append(t)
+        else:
+            logger.warning("跳过格式不正确的工具: %s", t)
+    tools = valid_tools
 
-        if tools:
-            logger.info("🔧 为 LLM 提供 %s 个工具: %s", len(tools), [t['function']['name'] for t in tools])
-        return tools if tools else None
+    # Schema 消毒：provider（尤其国产 OpenAI 兼容端）对 parameters 校验严格，
+    # 缺 type/properties 常触发 400 → 触发降级路径整轮丢失工具
+    for t in tools:
+        params = t["function"].setdefault("parameters", {})
+        if not isinstance(params, dict):
+            params = {}
+            t["function"]["parameters"] = params
+        params.setdefault("type", "object")
+        props = params.setdefault("properties", {})
+        if not isinstance(props, dict):
+            params["properties"] = {}
+
+    if tools:
+        logger.info("🔧 为 LLM 提供 %s 个工具: %s", len(tools), [t['function']['name'] for t in tools])
+    return tools if tools else None

@@ -378,6 +378,39 @@ describe('useChat', () => {
       expect(store.sessions[0].id).toBe('real-1')
     })
 
+    // BUG FIX (delete-404-ghost): 幽灵 session 的 404 是"预期自愈"场景而非真错误。
+    // 旧契约 catch 块无条件 console.error('[Chat] Failed to load history:', err),
+    // 导致删除会话自动切换落到幽灵时, 即使删除成功且幽灵已被自愈移除,
+    // 控制台仍打印一条吓人的 404 error。修复: 404 走自愈分支记录 warn (非 error)。
+    it('logs a WARN (not ERROR) + returns code ghost-404 when self-healing a ghost session on 404', async () => {
+      const err: any = new Error('Request failed with status code 404')
+      err.response = { status: 404 }
+      vi.mocked(api.get).mockRejectedValueOnce(err)
+
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const { switchSession, store } = useChat()
+      store.setSessions([
+        { id: 'ghost-uuid-1', title: 'Ghost' },
+        { id: 'real-1', title: 'Real' },
+      ])
+      store.setCurrentSession('ghost-uuid-1')
+
+      const result = await switchSession('ghost-uuid-1')
+
+      expect(result.ok).toBe(false)
+      expect((result as any).code).toBe('ghost-404')
+      // 幽灵 session 404 属预期恢复, 不应以 error 级别污染控制台
+      expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('Failed to load history'))
+      expect(warnSpy).toHaveBeenCalled()
+      // 自愈仍生效
+      expect(store.sessions.find((s) => s.id === 'ghost-uuid-1')).toBeUndefined()
+
+      errorSpy.mockRestore()
+      warnSpy.mockRestore()
+    })
+
     it('does NOT remove session on non-404 error (e.g. 500, preserves session for retry)', async () => {
       // 非 404 错误 (如服务器 500) 不应删除 session, 因为 session 可能仍然有效
       // (例如后端临时故障, 重试可能成功)
@@ -561,6 +594,47 @@ describe('useChat', () => {
       expect(store.currentSessionId).toBe('s2')
       // 关键契约: 不应弹"加载历史对话失败"toast, 因为这是删除操作的副作用
       expect(onError).not.toHaveBeenCalledWith('加载历史对话失败')
+    })
+
+    // BUG FIX (delete-404-ghost): 删除当前会话后自动切换, 若 store 首位是幽灵
+    // session (前端 UUID 残留, 后端 404), switchSession 应自愈移除它, 且删除
+    // 动效应继续尝试切换到下一个有效会话, 而不是把 UI 留在幽灵/null 上。
+    // 旧契约: 仅尝试一次 store.sessions[0], 落到幽灵时打印 error 且不继续。
+    it('when deleting the active session, skips ghost (404) and lands on next valid session without console.error', async () => {
+      vi.mocked(deleteConsoleSession).mockResolvedValueOnce({} as any)
+      // 第一次 GET history → 幽灵 session (sessions[0]) 404
+      const gErr: any = new Error('Request failed with status code 404')
+      gErr.response = { status: 404 }
+      const apiGetMock = vi.mocked(api.get)
+      apiGetMock.mockRejectedValueOnce(gErr)
+      // 第二次 GET history → 下一个真实 session 成功
+      apiGetMock.mockResolvedValueOnce({ data: [] } as any)
+
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const { deleteSession, store } = useChat()
+      store.setSessions([
+        { id: 'real-1', title: 'Real 1' },
+        { id: 'ghost-uuid-1', title: 'Ghost' },
+        { id: 'real-2', title: 'Real 2' },
+      ])
+      store.setCurrentSession('real-1')
+
+      const result = await deleteSession('real-1')
+
+      // 删除本身成功
+      expect(result).toEqual({ ok: true })
+      // 跳过幽灵, 落在下一个有效会话
+      expect(store.currentSessionId).toBe('real-2')
+      // 幽灵已被自愈移除
+      expect(store.sessions.find((s) => s.id === 'ghost-uuid-1')).toBeUndefined()
+      // 不应以 error 级别打印"加载历史失败"(404 是预期自愈)
+      expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('Failed to load history'))
+      expect(warnSpy).toHaveBeenCalled()
+
+      errorSpy.mockRestore()
+      warnSpy.mockRestore()
     })
   })
 

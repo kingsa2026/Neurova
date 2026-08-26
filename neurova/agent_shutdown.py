@@ -9,6 +9,28 @@ from typing import Any, Dict, Optional
 logger = get_logger(__name__)
 
 
+def bind_and_start_sleep_loop(agent) -> None:
+    """绑定并启动空闲-睡眠整理触发链。
+
+    断点修复：此前 agent_core 只构造 IdleTimeTracker 并注入
+    SleepConsolidation，但从未调用 start() —— 监控线程永不运行，
+    空闲阶段永不切换，最完整的"整理+写回"路径是死路。
+    """
+    tracker = getattr(agent, "idle_tracker", None)
+    if tracker is None:
+        return
+    try:
+        if not getattr(tracker, "_monitor_running", False):
+            try:
+                tracker.initialize()
+            except Exception:  # noqa: BLE001 - 已初始化时容忍
+                pass
+            tracker.start()
+        logger.info("Agent %s: 空闲睡眠整理触发链已启动", agent.config.name)
+    except Exception as e:
+        logger.warning("启动空闲睡眠触发链失败（不影响主流程）: %s", e)
+
+
 async def shutdown_agent(agent) -> None:
     """Agent 关闭时的清理操作
 
@@ -19,19 +41,28 @@ async def shutdown_agent(agent) -> None:
     """
     logger.info("Agent %s 正在关闭...", agent.config.name)
 
-    # Phase 10: 触发睡眠整理
+    # Phase 10: 触发睡眠整理（结果必须写回——此前只打日志，等于无效计算）
     sleep_consolidation = getattr(agent, "sleep_consolidation", None)
-    if sleep_consolidation and agent.memory_manager:
+    memory_manager = getattr(agent, "memory_manager", None)
+    if sleep_consolidation and memory_manager:
         try:
-            # 获取所有记忆进行整理
-            all_memories = agent.memory_manager.recall(query="", limit=1000)
+            # 全量记忆（recall("") 语义不明且依赖检索链）
+            all_memories = memory_manager.get_all_memories()
             if all_memories:
-                # 转换Dict为MemoryRecord
                 from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord
 
                 memory_records = [MemoryRecord.from_dict(m) for m in all_memories]
                 result = sleep_consolidation.run_sleep_cycle(memories=memory_records)
-                logger.info("睡眠整理完成: %s", result)
+
+                from neurova.cognitive_layers.memory_layer.sleep_writeback import (
+                    write_back_consolidation_result,
+                )
+
+                stats = write_back_consolidation_result(memory_manager, result)
+                logger.info(
+                    "关机睡眠整理完成: 处理 %s 条，写回 %s",
+                    len(all_memories), stats,
+                )
         except Exception as e:
             logger.warning("睡眠整理失败: %s", e)
 

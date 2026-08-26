@@ -19,13 +19,6 @@ import typing
 
 logger = get_logger(__name__)
 
-try:
-    import subprocess
-
-    SUBPROCESS_AVAILABLE = True
-except ImportError:
-    SUBPROCESS_AVAILABLE = False
-
 
 class ComputerUseManager:
     """计算机使用管理器 - 整合桌面操作、文件操作和浏览器操作"""
@@ -54,17 +47,13 @@ class ComputerUseManager:
         logger.info("ComputerUseManager 初始化完成")
 
     def _detect_screenshot_backend(self) -> None:
-        """检测截图后端"""
-        if SUBPROCESS_AVAILABLE:
-            try:
-                result = subprocess.run(["python", "-c", "import PIL"], capture_output=True, timeout=5)
-                if result.returncode == 0:
-                    self._screenshot_backend = "PIL"
-                    return
-            except Exception:
-                pass
+        """检测截图后端（进程内探测，解释器即运行环境）"""
+        try:
+            from PIL import ImageGrab  # noqa: F401 - 探测可用性
 
-        self._screenshot_backend = "basic"
+            self._screenshot_backend = "PIL"
+        except ImportError:
+            self._screenshot_backend = "basic"
         logger.info("截图后端: %s", self._screenshot_backend)
 
     def _get_firewall(self):
@@ -90,73 +79,65 @@ class ComputerUseManager:
         return self._browser_manager
 
     def screenshot(self, region: typing.Tuple[int, int, int, int] = None) -> typing.Optional[bytes]:
-        """截取屏幕截图"""
+        """截取屏幕截图（进程内 Pillow，PNG 字节流）"""
         try:
-            if SUBPROCESS_AVAILABLE:
-                import tempfile
+            from PIL import ImageGrab
+            import io
 
-                path = os.path.join(tempfile.gettempdir(), "neurova_screenshot.png")
-
-                # 使用 Python PIL 截图
-                code = (
-                    "from PIL import ImageGrab; "
-                    f"img = ImageGrab.grab({region if region else ''}); "
-                    f"img.save(r'{path}')"
-                )
-                result = subprocess.run(["python", "-c", code], capture_output=True, timeout=10)
-                if result.returncode == 0 and os.path.exists(path):
-                    with open(path, "rb") as f:
-                        data = f.read()
-                    os.remove(path)
-                    return data
-
-            logger.warning("截图失败：无可用后端")
+            img = ImageGrab.grab(region)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+        except ImportError:
+            logger.warning("截图失败：缺少 Pillow（pip install Pillow）")
             return None
         except Exception as e:
             logger.error("截图失败: %s", e)
             return None
 
     def click(self, x: int, y: int, button: str = "left") -> bool:
-        """点击操作"""
+        """点击操作（进程内 pyautogui；坐标强转 int，按钮白名单校验）"""
+        if button not in ("left", "right", "middle"):
+            logger.warning("不支持的鼠标按钮: %r", button)
+            return False
         try:
-            if SUBPROCESS_AVAILABLE:
-                if button == "left":
-                    code = f"import pyautogui; pyautogui.click({x}, {y})"
-                else:
-                    code = f"import pyautogui; pyautogui.rightClick({x}, {y})"
-                result = subprocess.run(["python", "-c", code], capture_output=True, timeout=5)
-                return result.returncode == 0
+            import pyautogui
 
-            logger.warning("点击失败：无可用后端")
+            pyautogui.click(int(x), int(y), button=button)
+            return True
+        except ImportError:
+            logger.warning("点击失败：缺少 pyautogui")
             return False
         except Exception as e:
             logger.error("点击失败: %s", e)
             return False
 
     def type_text(self, text: str, interval: float = 0.05) -> bool:
-        """输入文本"""
+        """输入文本（进程内 pyautogui）"""
         try:
-            if SUBPROCESS_AVAILABLE:
-                import shlex
+            import pyautogui
 
-                safe_text = shlex.quote(text)
-                code = f"import pyautogui; pyautogui.typewrite({safe_text}, interval={interval})"
-                result = subprocess.run(["python", "-c", code], capture_output=True, timeout=30)
-                return result.returncode == 0
-
-            logger.warning("输入失败：无可用后端")
+            pyautogui.typewrite(text, interval=interval)
+            return True
+        except ImportError:
+            logger.warning("输入失败：缺少 pyautogui")
             return False
         except Exception as e:
             logger.error("输入失败: %s", e)
             return False
 
-    def scroll(self, x: int, y: int, clicks: int = 3) -> bool:
-        """滚动操作"""
+    def scroll(self, x: typing.Optional[int], y: typing.Optional[int], clicks: int = 3) -> bool:
+        """滚动操作（x/y 为 None 时在当前指针位置滚动）"""
         try:
-            if SUBPROCESS_AVAILABLE:
-                code = f"import pyautogui; pyautogui.scroll({clicks}, {x}, {y})"
-                result = subprocess.run(["python", "-c", code], capture_output=True, timeout=5)
-                return result.returncode == 0
+            import pyautogui
+
+            if x is None or y is None:
+                pyautogui.scroll(int(clicks))
+            else:
+                pyautogui.scroll(int(clicks), int(x), int(y))
+            return True
+        except ImportError:
+            logger.warning("滚动失败：缺少 pyautogui")
             return False
         except Exception as e:
             logger.error("滚动失败: %s", e)
@@ -209,16 +190,37 @@ class ComputerUseManager:
             logger.error("编辑文件失败: %s", e)
             return False
 
-    def shell(self, command: str, timeout: int = 30) -> typing.Dict[str, typing.Any]:
-        """执行 shell 命令"""
+    async def shell(self, command: str, timeout: int = 30) -> typing.Dict[str, typing.Any]:
+        """执行 shell 命令（委托执行层 LocalExecutor，本模块不自行拼装进程）。
+
+        能力定位就是执行任意 shell 命令；命令内容是否放行由调用链上游的
+        治理预检（allow/deny/ask/sandbox）裁决。进程生成统一走
+        neurova.execution_layers 的运行时抽象，与 run_code 工具同源。
+        """
+        if not command or not command.strip():
+            return {"returncode": -1, "error": "缺少命令"}
         try:
-            if SUBPROCESS_AVAILABLE:
-                result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
-                return {"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr}
-            return {"returncode": -1, "error": "subprocess 不可用"}
-        except subprocess.TimeoutExpired:
-            return {"returncode": -1, "error": "命令超时"}
+            import uuid
+
+            from neurova.execution_layers import LocalExecutor
+
+            runtime = LocalExecutor(runtime_id=f"cu_shell_{uuid.uuid4().hex[:8]}")
+            await runtime.start()
+            try:
+                if os.name == "nt":
+                    cmd, args = "cmd.exe", ["/c", command]
+                else:
+                    cmd, args = "/bin/sh", ["-c", command]
+                exec_result = await runtime.exec(command=cmd, args=args, timeout=timeout)
+                return {
+                    "returncode": exec_result.exit_code,
+                    "stdout": exec_result.stdout or "",
+                    "stderr": exec_result.stderr or "",
+                }
+            finally:
+                await runtime.stop()
         except Exception as e:
+            logger.error("Shell 命令执行失败: %s", e)
             return {"returncode": -1, "error": str(e)}
 
     async def browser_navigate(self, url: str) -> typing.Dict[str, typing.Any]:
@@ -248,6 +250,13 @@ class ComputerUseManager:
         if bm:
             return await bm.type_text(selector, text)
         return False
+
+    async def browser_extract_text(self) -> typing.Any:
+        """提取当前页面正文文本"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.extract_text()
+        return None
 
     async def browser_snapshot(self) -> typing.Optional[str]:
         """浏览器快照"""

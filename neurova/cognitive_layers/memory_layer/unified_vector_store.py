@@ -90,28 +90,27 @@ class UnifiedVectorStore:
         return True
 
     def _select_backend(self, backend: str) -> str:
-        """根据环境自动选择后端"""
+        """根据环境自动选择后端（按真实可用性探测：faiss→fastembed→onnx→tfidf）"""
         if backend != "auto":
             return backend
 
         try:
-            pass
+            import faiss  # noqa: F401
 
             return "faiss"
         except ImportError:
             pass
 
         try:
-            pass
+            import fastembed  # noqa: F401
 
             return "fastembed"
         except ImportError:
             pass
 
-        # Tier 1: ONNX Embedding (默认推荐)
+        # Tier 1: ONNX Embedding (默认推荐，本地模型 models/embedding/bge-small-zh-v1.5)
         try:
-            pass
-
+            from neurova.embedding.onnx_embedding import ONNXEmbeddingEngine  # noqa: F401
 
             return "onnx"
         except ImportError:
