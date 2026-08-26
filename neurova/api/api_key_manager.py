@@ -15,7 +15,8 @@ import json
 import secrets
 import threading
 import time
-from dataclasses import asdict, dataclass
+from datetime import datetime
+from dataclasses import asdict, field, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -26,38 +27,94 @@ logger = get_logger(__name__)
 
 @dataclass
 class APIKey:
-    """API密钥数据"""
+    """API密钥数据
+
+    时间字段兼容 float（epoch 秒，管理器内部使用）与 datetime（外部调用方），
+    序列化时统一为 ISO 字符串。
+    """
 
     key_id: str
-    key_hash: str  # SHA-256 哈希
-    key_prefix: str  # 前8位，用于显示
     agent_id: str
     user_id: str
+    key_hash: str  # SHA-256 哈希
     name: str
-    permissions: List[str]
-    created_at: float
-    expires_at: Optional[float] = None
-    last_used_at: Optional[float] = None
+    created_at: Any  # float epoch 或 datetime
+    expires_at: Any = None  # Optional[float | datetime]
+    last_used_at: Any = None
     is_active: bool = True
-    metadata: Optional[Dict[str, Any]] = None
+    permissions: List[str] = field(default_factory=lambda: ["read", "write"])
+    rate_limit: int = 1000
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    key_prefix: str = ""  # 前8位，用于显示
 
     def __post_init__(self):
-        if not self.created_at:
-            self.created_at = time.time()
+        if isinstance(self.permissions, str):
+            self.permissions = [self.permissions]
+        if self.metadata is None:
+            self.metadata = {}
 
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return asdict(self)
+    @staticmethod
+    def _to_iso(value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+
+    @staticmethod
+    def _parse_time(value: Any) -> Any:
+        if value is None or isinstance(value, datetime):
+            return value
+        if isinstance(value, (int, float)):
+            return value
+        try:
+            return datetime.fromisoformat(str(value))
+        except (ValueError, TypeError):
+            return None
 
     def is_expired(self) -> bool:
         """检查是否过期"""
         if self.expires_at is None:
             return False
-        return time.time() > self.expires_at
+        expires = self._parse_time(self.expires_at)
+        if isinstance(expires, datetime):
+            return datetime.now() > expires
+        return time.time() > float(expires)
 
     def touch(self):
         """更新最后使用时间"""
         self.last_used_at = time.time()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典（含 key_hash，供持久化；对外展示应自行剥离）"""
+        return {
+            "key_id": self.key_id,
+            "agent_id": self.agent_id,
+            "user_id": self.user_id,
+            "key_hash": self.key_hash,
+            "key_prefix": self.key_prefix,
+            "name": self.name,
+            "permissions": list(self.permissions),
+            "rate_limit": self.rate_limit,
+            "created_at": self._to_iso(self.created_at),
+            "expires_at": self._to_iso(self.expires_at),
+            "last_used_at": self._to_iso(self.last_used_at),
+            "is_active": self.is_active,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "APIKey":
+        """从字典恢复（ISO 时间字符串自动解析为 datetime）"""
+        known = {
+            "key_id", "agent_id", "user_id", "key_hash", "key_prefix", "name",
+            "permissions", "rate_limit", "created_at", "expires_at",
+            "last_used_at", "is_active", "metadata",
+        }
+        filtered = {k: v for k, v in data.items() if k in known}
+        filtered["created_at"] = cls._parse_time(filtered.get("created_at")) or time.time()
+        filtered["expires_at"] = cls._parse_time(filtered.get("expires_at"))
+        filtered["last_used_at"] = cls._parse_time(filtered.get("last_used_at"))
+        return cls(**filtered)
+
 
 
 class APIKeyManager:
@@ -100,7 +157,7 @@ class APIKeyManager:
                     data = json.load(f)
 
                 for key_data in data.get("keys", []):
-                    api_key = APIKey(**key_data)
+                    api_key = APIKey.from_dict(key_data)
                     self._keys[api_key.key_id] = api_key
                     self._key_hash_index[api_key.key_hash] = api_key.key_id
 

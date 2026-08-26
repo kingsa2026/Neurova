@@ -36,6 +36,61 @@ from typing import Any, Dict, List, Optional
 logger = get_logger(__name__)
 
 
+class _PersistDbStore:
+    """MemoryManager 持久库（memories 表）的只读 SQL 适配器。
+
+    MoE ExpertDrilldownRetriever 的 L0 下钻需要 store.execute(sql, params)
+    返回可 fetchall 的行集；此前传入的是 JSON MemoryStorage（聊天记忆不在
+    其中，L0 必然空转）。本适配器把检索统一到 recall 的主数据源 persist.db。
+    """
+
+    def __init__(self, db_path: str, agent_id: str, neuser_id: str, user_id: str):
+        import sqlite3
+
+        self._sqlite3 = sqlite3
+        self._db_path = db_path
+        self._agent_id = agent_id
+        self._neuser_id = neuser_id
+        self._user_id = user_id
+
+    class _Rows:
+        def __init__(self, rows: List[Dict[str, Any]]):
+            self._rows = rows
+
+        def fetchall(self) -> List[Dict[str, Any]]:
+            return self._rows
+
+    def execute(self, sql: str, params: Optional[Dict[str, Any]] = None) -> "_PersistDbStore._Rows":
+        import re
+
+        conn = self._sqlite3.connect(self._db_path)
+        try:
+            conn.row_factory = self._sqlite3.Row
+            # 强制三级隔离，防止跨 agent/用户泄漏（与 MemoryManager._load_from_db 一致）
+            conditions = "agent_id = :agent_id AND neuser_id = :neuser_id AND user_id = :user_id"
+            scoped = sql
+            if re.search(r"\bWHERE\b", scoped, re.IGNORECASE):
+                scoped = re.sub(r"\bWHERE\b", f"WHERE {conditions} AND ", scoped, count=1, flags=re.IGNORECASE)
+            else:
+                m = re.search(r"\bORDER BY\b|\bLIMIT\b", scoped, re.IGNORECASE)
+                if m:
+                    scoped = scoped[: m.start()] + f"WHERE {conditions} " + scoped[m.start() :]
+                else:
+                    scoped = scoped.rstrip().rstrip(";") + f" WHERE {conditions}"
+
+            all_params = {
+                "agent_id": self._agent_id,
+                "neuser_id": self._neuser_id,
+                "user_id": self._user_id,
+                **(params or {}),
+            }
+            rows = conn.execute(scoped, all_params).fetchall()
+            return _PersistDbStore._Rows([dict(r) for r in rows])
+        finally:
+            conn.close()
+
+
+
 def run_async_safely(coro):
     """安全地运行协程，兼容同步上下文与异步上下文。
 
@@ -54,17 +109,24 @@ def run_async_safely(coro):
     except RuntimeError:
         # 无运行中的事件循环 — 直接运行
         return asyncio.run(coro)
-    # 处于运行中的事件循环内 — 在现有事件循环上线程安全地调度协程，
-    # 避免新建事件循环（新建循环会导致协程内创建的子任务绑定到错误循环而失败，P2-#17）。
-    loop = asyncio.get_running_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
+
+    # 处于运行中的事件循环内 — 独立线程 + 专用事件循环执行。
+    # 注意：绝不能 run_coroutine_threadsafe(coro, 当前循环) 后在当前线程
+    # 阻塞等待结果——那会让事件循环线程卡死、被调度的协程永远得不到执行
+    # （自死锁）。把整个协程放到新线程的专用循环里跑，协程内部创建的
+    # 所有子任务都绑定到同一个新循环，语义自洽（P2-#17 场景不混用循环）。
+    def _run_in_new_loop():
+        return asyncio.run(coro)
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        return future.result()
-    except Exception:
+        return executor.submit(_run_in_new_loop).result()
+    except BaseException:
         # 异常路径: 协程未被消费, 显式 close 避免泄漏
-        # (run_coroutine_threadsafe 未消费的协程, close() 是 no-op, 无副作用)
         coro.close()
         raise
+    finally:
+        executor.shutdown(wait=False)
 
 
 # 注：mem_core.Memory dataclass 已删除（Tier 4A.2 统一 dataclass）。
@@ -422,37 +484,15 @@ class MemCore:
             raise  # 记忆模块是 Agent 核心依赖，无法降级
 
     def init_moe_router(self):
-        """初始化 MoE 路由器"""
+        """初始化 MoE 路由器（数据源统一：persist.db，断裂 M1 修复）"""
         try:
             from neurova.cognitive_layers.memory_layer.moe_router import MoEMemoryRouter
             from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
 
             vector_store = UnifiedVectorStore()
 
-            if self.storage:
-                try:
-                    memories = self.storage.get_recent_memories(limit=500)
-                    if memories:
-                        memory_items = []
-                        for mem in memories:
-                            memory_items.append(
-                                {
-                                    "id": mem.get("id", ""),
-                                    "content": mem.get("content", ""),
-                                    "metadata": {
-                                        "category": mem.get("category", "unknown"),
-                                        "lifecycle": mem.get("lifecycle", "active"),
-                                        "is_crystallized": mem.get("is_crystallized", False),
-                                    },
-                                }
-                            )
-                        vector_store.index_memories(memory_items)
-                        logger.info("MoE: 已索引 %s 条记忆到向量存储", len(memory_items))
-                    else:
-                        logger.info("MoE: 数据库中没有记忆，跳过索引")
-                except Exception as e:
-                    logger.warning("MoE: 加载记忆失败: %s", e)
-
+            # 专家定义对齐 memories 表真实 schema（此前 is_crystallized 列不存在，
+            # L0 SQL 必然异常返回空）。category 取值来自 MemoryCategory 枚举。
             experts = {
                 "conversation_episodic": {
                     "name": "对话情景记忆",
@@ -462,8 +502,7 @@ class MemCore:
                 },
                 "factual_knowledge": {
                     "name": "事实知识",
-                    "category": "fact",
-                    "is_crystallized": True,
+                    "category": "knowledge",
                     "centroid_text": "事实知识、常识、固化信息",
                 },
                 "tool_muscle": {
@@ -478,9 +517,36 @@ class MemCore:
                 },
             }
 
+            # L0 下钻与初始索引统一指向 persist.db（recall 主数据源）
+            store = self._build_moe_store()
+            if store:
+                try:
+                    rows = store.execute(
+                        "SELECT id, content, category, lifecycle_stage FROM memories "
+                        "ORDER BY temperature DESC LIMIT 500"
+                    ).fetchall()
+                    if rows:
+                        memory_items = [
+                            {
+                                "id": r.get("id", ""),
+                                "content": r.get("content", ""),
+                                "metadata": {
+                                    "category": r.get("category", "general"),
+                                    "lifecycle": r.get("lifecycle_stage", "active"),
+                                },
+                            }
+                            for r in rows
+                        ]
+                        vector_store.index_memories(memory_items)
+                        logger.info("MoE: 已从 persist.db 索引 %s 条记忆", len(memory_items))
+                    else:
+                        logger.info("MoE: persist.db 中没有记忆，跳过初始索引")
+                except Exception as e:
+                    logger.warning("MoE: 加载记忆索引失败: %s", e)
+
             moe_router = MoEMemoryRouter(
                 experts=experts,
-                storage=self.storage,
+                storage=store or self.storage,
                 vector_store=vector_store,
             )
 
@@ -489,6 +555,23 @@ class MemCore:
 
         except Exception as e:
             logger.error("MoE 路由器初始化失败: %s", e)
+
+    def _build_moe_store(self):
+        """构建 MoE L0 下钻的存储适配器（persist.db 只读；不可用时返回 None）"""
+        manager = self.memory_manager
+        db_path = getattr(manager, "_persist_db_path", None) if manager else None
+        if db_path and Path(db_path).exists():
+            try:
+                # 隔离参数以 MemoryManager 为准（与 persist 写入侧一致）
+                return _PersistDbStore(
+                    db_path=db_path,
+                    agent_id=getattr(manager, "_agent_id", "default"),
+                    neuser_id=getattr(manager, "_neuser_id", "default"),
+                    user_id=getattr(manager, "_user_id", "default"),
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("PersistDbStore 构建失败: %s", e)
+        return None
 
     # ══════════════════════════════════════════════════════════════
     # 记忆检索
@@ -570,31 +653,25 @@ class MemCore:
         return self.retrieve_memories(query, limit=limit)
 
     def refresh_moe_index(self):
-        """刷新 MoE 向量索引（断裂1修复）
-
-        从 SQLite 重新加载最近记忆到向量存储，
-        确保新写入的记忆对 MoE 向量路由可见。
-        """
+        """刷新 MoE 向量索引（数据源统一：从 MemoryManager/persist.db 重建）"""
         moe = self.moe_router
-        if not moe or not self.storage:
+        if not moe or not self.memory_manager:
             return
 
         try:
-            memories = self.storage.get_recent_memories(days=365, limit=500)
+            memories = self.memory_manager.get_all_memories()
             if memories:
-                memory_items = []
-                for mem in memories:
-                    memory_items.append(
-                        {
-                            "id": mem.get("id", ""),
-                            "content": mem.get("content", ""),
-                            "metadata": {
-                                "category": mem.get("category", "unknown"),
-                                "lifecycle": mem.get("lifecycle", "active"),
-                                "is_crystallized": mem.get("is_crystallized", False),
-                            },
-                        }
-                    )
+                memory_items = [
+                    {
+                        "id": mem.get("id", ""),
+                        "content": mem.get("content", ""),
+                        "metadata": {
+                            "category": mem.get("category", "general"),
+                            "lifecycle": mem.get("lifecycle_stage", "active"),
+                        },
+                    }
+                    for mem in memories
+                ]
                 moe.vector_store.index_memories(memory_items)
                 # 重新初始化质心
                 moe.vector_store.initialize_centroids(moe.experts)

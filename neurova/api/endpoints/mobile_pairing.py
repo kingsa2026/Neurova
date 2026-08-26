@@ -22,7 +22,7 @@ import time
 import uuid
 from typing import Any, Dict, Optional, Set
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -103,12 +103,51 @@ _user_devices: Dict[str, Set[str]] = {}  # user_id -> set of pairing_ids
 _ws_connections: Dict[str, WebSocket] = {}  # user_id -> WebSocket
 
 # HMAC 密钥（用于生成 WS Token）
-_WS_SECRET = config.get("NEUROVA_WS_SECRET", "neurova-ws-secret-key-2026")
+_DEFAULT_WS_SECRET = "neurova-ws-secret-key-2026"
+
+
+def _get_ws_secret() -> str:
+    """获取 WS HMAC 密钥
+
+    生产环境必须配置 NEUROVA_WS_SECRET，否则拒绝启动（安全设计）。
+    开发环境允许使用默认弱密钥（便于本地调试）。
+    """
+    import os
+
+    env = os.environ.get("NEUROVA_ENV", config.get("NEUROVA_ENV", "development"))
+    secret = os.environ.get("NEUROVA_WS_SECRET") or config.get("NEUROVA_WS_SECRET")
+
+    if not secret:
+        if env in ("production", "prod"):
+            raise HTTPException(
+                status_code=500,
+                detail="NEUROVA_WS_SECRET 未配置，生产环境必须设置此环境变量",
+            )
+        secret = _DEFAULT_WS_SECRET
+
+    return secret
+
+
+_cancelled_sessions: Dict[str, bool] = {}
 
 
 # ---------------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------------
+
+
+def _build_ws_url(request, code=None, token=None) -> str:
+    """从请求的 Host header 推导 WebSocket URL（BE-MOB-001 修复）"""
+    host = request.headers.get("host", "localhost:9527")
+    scheme = getattr(request.url, "scheme", "http")
+    ws_scheme = "wss" if scheme == "https" else "ws"
+    params = []
+    if code:
+        params.append(f"code={code}")
+    if token:
+        params.append(f"token={token}")
+    query = ("?" + "&".join(params)) if params else ""
+    return f"{ws_scheme}://{host}/mobile/ws{query}"
 
 
 def _generate_pairing_code() -> str:
@@ -121,7 +160,7 @@ def _generate_pairing_code() -> str:
 def _generate_ws_token(user_id: str, pairing_id: str) -> str:
     """生成 WebSocket Token（HMAC 签名）"""
     message = f"{user_id}:{pairing_id}:{int(time.time())}"
-    signature = hmac.new(_WS_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+    signature = hmac.new(_get_ws_secret().encode(), message.encode(), hashlib.sha256).hexdigest()
     return f"{message}:{signature}"
 
 
@@ -134,7 +173,7 @@ def _verify_ws_token(token: str) -> Optional[Dict[str, str]]:
 
         user_id, pairing_id, timestamp, signature = parts
         message = f"{user_id}:{pairing_id}:{timestamp}"
-        expected_signature = hmac.new(_WS_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+        expected_signature = hmac.new(_get_ws_secret().encode(), message.encode(), hashlib.sha256).hexdigest()
 
         if not hmac.compare_digest(signature, expected_signature):
             return None
@@ -148,16 +187,27 @@ def _verify_ws_token(token: str) -> Optional[Dict[str, str]]:
         return None
 
 
-def _get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """从 JWT Token 提取 user_id（用户隔离）"""
+async def _get_current_user_id(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> str:
+    """从 JWT Token 提取 user_id（真正的 JWT 解析）"""
     if not credentials:
         raise HTTPException(status_code=401, detail="Missing authorization")
 
-    # 这里简化处理，实际应该验证 JWT
-    credentials.credentials
-    # 模拟从 JWT 中提取 user_id
-    # 实际实现应该使用 jwt.decode()
-    return "default-user"
+    try:
+        from neurova.api.auth import decode_token
+
+        payload = decode_token(credentials.credentials)
+        if payload is None:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        uid = payload.get("sub")
+        if not uid:
+            raise HTTPException(status_code=401, detail="Token missing subject")
+        return uid
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 # ---------------------------------------------------------------------------
@@ -238,12 +288,136 @@ class MobileConnectionManager:
 
 
 # ---------------------------------------------------------------------------
+# WS 消息处理函数（M0.5.2）
+# ---------------------------------------------------------------------------
+
+
+async def _handle_chat_send(ws, data: dict, user_id: str):
+    """处理 chat:send -- 流式聊天核心"""
+    content = (data.get("content") or "").strip()
+    if not content:
+        await ws.send_json({"type": "error", "code": "empty_content", "message": "内容不能为空"})
+        return
+
+    agent_id = data.get("agent_id", "default")
+    session_id = data.get("session_id", f"mobile-{uuid.uuid4().hex[:8]}")
+
+    try:
+        from neurova.api.endpoints import get_agent_instance
+
+        agent = get_agent_instance(agent_id)
+    except Exception:
+        agent = None
+
+    if agent is None:
+        await ws.send_json({"type": "error", "code": "agent_not_found", "message": f"Agent '{agent_id}' 不存在"})
+        return
+
+    try:
+        index = 0
+        if hasattr(agent, "chat_stream") and callable(agent.chat_stream):
+            async for chunk in agent.chat_stream(content=content, session_id=session_id, user_id=user_id):
+                if _cancelled_sessions.get(session_id):
+                    await ws.send_json({"type": "chat:cancelled", "session_id": session_id})
+                    return
+                await ws.send_json({"type": "chat:chunk", "content": str(chunk), "session_id": session_id, "index": index})
+                index += 1
+        else:
+            result = await agent.chat(content=content, session_id=session_id, user_id=user_id)
+            text = result.get("text", "") if isinstance(result, dict) else str(result)
+            await ws.send_json({"type": "chat:chunk", "content": text, "session_id": session_id, "index": index})
+            index += 1
+
+        await ws.send_json({"type": "chat:done", "session_id": session_id, "message_id": f"msg-{uuid.uuid4().hex[:8]}"})
+    except Exception as e:
+        await ws.send_json({"type": "error", "code": "chat_failed", "message": str(e)})
+
+
+async def _handle_chat_cancel(ws, data: dict):
+    """处理 chat:cancel -- 取消进行中的聊天"""
+    session_id = data.get("session_id", "")
+    if session_id:
+        _cancelled_sessions[session_id] = True
+
+
+async def _handle_agent_switch(ws, data: dict):
+    """处理 agent:switch -- 切换 Agent"""
+    agent_id = data.get("agent_id", "")
+    try:
+        from neurova.api.endpoints import get_agent_instance
+
+        agent = get_agent_instance(agent_id)
+    except Exception:
+        agent = None
+
+    if agent is None:
+        await ws.send_json({"type": "error", "code": "agent_not_found", "message": f"Agent '{agent_id}' 不存在"})
+        return
+
+    await ws.send_json({
+        "type": "agent:switched",
+        "agent_id": agent_id,
+        "config": {
+            "agent_id": getattr(agent, "agent_id", agent_id),
+            "name": getattr(agent, "name", agent_id),
+        },
+    })
+
+
+async def _handle_session_list(ws, data: dict):
+    """处理 session:list -- 列出会话"""
+    agent_id = data.get("agent_id", "default")
+    try:
+        from neurova.session_manager import get_session_manager
+
+        sm = get_session_manager()
+        sessions = sm.get_sessions(agent_id)
+        await ws.send_json({"type": "session:list", "sessions": sessions})
+    except Exception as e:
+        await ws.send_json({"type": "error", "code": "session_list_failed", "message": str(e)})
+
+
+async def _handle_session_create(ws, data: dict):
+    """处理 session:create -- 创建新会话"""
+    agent_id = data.get("agent_id", "default")
+    try:
+        from neurova.session_manager import get_session_manager
+
+        sm = get_session_manager()
+        session_id = sm.create_session(agent_id)
+        await ws.send_json({"type": "session:created", "session": {"session_id": session_id, "agent_id": agent_id}})
+    except Exception as e:
+        await ws.send_json({"type": "error", "code": "session_create_failed", "message": str(e)})
+
+
+async def _handle_ws_message(ws, data: dict, user_id: str, pairing_id: str):
+    """WS 消息分发器"""
+    msg_type = data.get("type", "")
+    handlers = {
+        "chat:send": lambda: _handle_chat_send(ws, data, user_id),
+        "chat:cancel": lambda: _handle_chat_cancel(ws, data),
+        "agent:switch": lambda: _handle_agent_switch(ws, data),
+        "session:list": lambda: _handle_session_list(ws, data),
+        "session:create": lambda: _handle_session_create(ws, data),
+    }
+    handler = handlers.get(msg_type)
+    if handler is None:
+        await ws.send_json({"type": "error", "code": "unknown_type", "message": f"Unknown message type: {msg_type}"})
+        return
+    try:
+        await handler()
+    except Exception as e:
+        await ws.send_json({"type": "error", "code": "handler_error", "message": str(e)})
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
 
 @router.post("/pairing/generate", response_model=GeneratePairingResponse)
 async def generate_pairing(
+    request: Request,
     body: GeneratePairingRequest,
     user_id: str = Depends(_get_current_user_id),
 ):
@@ -263,8 +437,8 @@ async def generate_pairing(
         "expires_at": time.time() + expires_in,
     }
 
-    # 生成二维码 URL（包含 WS 连接信息）
-    ws_url = f"ws://localhost:8000/mobile/ws?code={code}"
+    # 生成二维码 URL（从 Host header 推导，BE-MOB-001 修复）
+    ws_url = _build_ws_url(request, code=code)
     qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={ws_url}"
 
     return GeneratePairingResponse(
@@ -276,7 +450,7 @@ async def generate_pairing(
 
 
 @router.get("/pairing/qrcode/{code}")
-async def get_pairing_qrcode(code: str):
+async def get_pairing_qrcode(request: Request, code: str):
     """获取配对二维码图片（PNG）"""
     pairing = _pairing_codes.get(code)
     if not pairing:
@@ -289,7 +463,7 @@ async def get_pairing_qrcode(code: str):
         import qrcode
         from fastapi.responses import Response
 
-        ws_url = f"ws://localhost:8000/mobile/ws?code={code}"
+        ws_url = _build_ws_url(request, code=code)
         qr = qrcode.QRCode(version=1, box_size=10, border=5)
         qr.add_data(ws_url)
         qr.make(fit=True)
@@ -333,7 +507,7 @@ def _generate_svg_qrcode(code: str):
 
 
 @router.post("/pairing/confirm", response_model=ConfirmPairingResponse)
-async def confirm_pairing(body: ConfirmPairingRequest):
+async def confirm_pairing(request: Request, body: ConfirmPairingRequest):
     """确认配对（手机端调用，无需 JWT）"""
     pairing = _pairing_codes.get(body.code)
     if not pairing:
@@ -376,7 +550,7 @@ async def confirm_pairing(body: ConfirmPairingRequest):
     return ConfirmPairingResponse(
         success=True,
         ws_token=ws_token,
-        ws_url=f"ws://localhost:8000/mobile/ws?token={ws_token}",
+        ws_url=_build_ws_url(request, token=ws_token),
         pairing_id=pairing["pairing_id"],
         message="配对成功",
     )
@@ -514,8 +688,8 @@ async def mobile_websocket(websocket: WebSocket):
             if pairing_id in _paired_devices:
                 _paired_devices[pairing_id]["last_active"] = time.time()
 
-            # 处理其他消息（这里可以扩展）
-            logger.info("Received message from %s: %s", pairing_id, message)
+            # 分发消息到处理函数
+            await _handle_ws_message(websocket, message, user_id, pairing_id)
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected: %s", connection_id)

@@ -43,6 +43,31 @@ export interface Provider {
   gen_params?: Record<string, unknown>
 }
 
+/**
+ * 将后端 GET /models 返回的 ModelInfo（{model_id, name, provider, capabilities, ...}）
+ * 归一化为前端 ModelItem 形状（{id, name, provider_id, ...}）。
+ *
+ * 后端字段与前端类型不一致：model_id -> id、provider -> provider_id，
+ * 且后端无 enabled/tags/type 等字段，需在此补齐默认值，避免各处读取 m.provider_id / m.id 时得到 undefined。
+ */
+export function normalizeModel(item: Record<string, any>): ModelItem {
+  const provider = item.provider ?? item.provider_id ?? ''
+  return {
+    id: item.model_id ?? item.id ?? item.name ?? 'unknown',
+    name: item.name ?? item.model_id ?? item.id ?? 'Unknown',
+    provider_id: provider,
+    type: item.type === 'image' || item.type === 'audio' ? item.type : 'text',
+    tags: Array.isArray(item.tags) ? item.tags : [],
+    enabled: item.enabled ?? true,
+    capabilities: Array.isArray(item.capabilities) ? item.capabilities : [],
+    is_active: item.is_active ?? false,
+    context_window: item.context_window,
+    max_tokens: item.max_tokens,
+    pricing: item.pricing,
+    owned_by: item.owned_by ?? provider,
+  }
+}
+
 export interface DefaultLLMConfig {
   provider_id: string
   model_id: string

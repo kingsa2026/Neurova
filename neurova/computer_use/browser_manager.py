@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 
 # 可选依赖
 try:
-    pass
+    import playwright  # noqa: F401 - 仅探测可用性
 
     HAS_PLAYWRIGHT = True
 except ImportError:

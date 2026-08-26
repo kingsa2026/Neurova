@@ -40,21 +40,7 @@ except Exception as _e:
     _logger.warning("nl_synthesizer 模块加载失败: %s", _e)
     NLToolSynthesizer = None
 
-# 事件驱动闭环
-try:
-    from .event_driven import (
-        EvolutionEventBridge,
-        EvolutionEvent,
-        get_evolution_event_bridge,
-        reset_evolution_event_bridge,
-    )
-except Exception as _e:
-    # 修复 P0-9 (H2): ImportError → Exception
-    _logger.warning("event_driven 模块加载失败: %s", _e)
-    EvolutionEventBridge = None
-    EvolutionEvent = None
-    get_evolution_event_bridge = None
-    reset_evolution_event_bridge = None
+# 事件驱动闭环（event_driven.py 已删除：零调用方死代码，2026-08 清理）
 
 # RSI模块（递归自我进化）
 try:
@@ -91,10 +77,6 @@ __all__ = [
     "get_evolution_orchestrator",
     "reset_evolution_orchestrator",
     # 事件驱动闭环
-    "EvolutionEventBridge",
-    "EvolutionEvent",
-    "get_evolution_event_bridge",
-    "reset_evolution_event_bridge",
     # RSI模块
     "RecursiveRatchetPruner",
     "EnhancedRatchetPruner",

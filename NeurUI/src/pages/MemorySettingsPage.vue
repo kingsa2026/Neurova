@@ -259,11 +259,23 @@ const typeColor = (type: string) => {
 }
 
 const sliderStep = (param: ParamSchema) => {
-  const range = (param.max ?? 1) - (param.min ?? 0)
-  if (range <= 1) return 0.01
-  if (range <= 10) return 0.1
-  if (range <= 100) return 1
-  return Math.max(1, Math.round(range / 100))
+  const min = param.min ?? 0
+  const max = param.max ?? 1
+  const range = max - min
+  if (range <= 0) return 1
+
+  // 由区间量级推导合适的步长
+  const raw = range <= 1 ? 0.01 : range <= 10 ? 0.1 : range <= 100 ? 1 : Math.max(1, Math.round(range / 100))
+
+  // 若 (max - min) 是步长的整数倍，直接使用该步长
+  const ticks = range / raw
+  if (Math.abs(ticks - Math.round(ticks)) < 1e-6) return raw
+
+  // 否则（如区间 23.9 配步长 1），改用一个能整除区间的更细步长。
+  // 只有当步长为整数时，ant-design-vue 才会校验 (max - min) 是否为其整数倍；
+  // 回退到非整数步长，可规避该警告并保证滑块刻度均匀。
+  const refined = raw >= 1 ? 0.1 : raw >= 0.1 ? 0.01 : 0.001
+  return range / Math.max(1, Math.round(range / refined))
 }
 
 const isChanged = (key: string) => {

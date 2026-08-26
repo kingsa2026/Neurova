@@ -139,6 +139,56 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["command"],
         },
     },
+    # ── 浏览器操作工具（BrowserManager 多后端：Playwright/Scrapling）──
+    # 执行过程的页面截图会实时推送到聊天页的电脑操作分屏面板
+    "browser_navigate": {
+        "description": "【浏览器导航】在内置自动化浏览器中打开指定 URL。适合访问网页、查看在线内容、登录网站等。打开后可用 browser_extract_text 提取正文、browser_click/browser_type 交互、browser_screenshot 截图。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "要访问的完整 URL（含 https://）"},
+            },
+            "required": ["url"],
+        },
+    },
+    "browser_click": {
+        "description": "【浏览器点击】点击当前页面上的元素。selector 支持 CSS 选择器或 Playwright 的 text= 文本定位；也可只传 text 按可见文本查找（如'登录'按钮）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "selector": {"type": "string", "description": "CSS 选择器（如 #submit-btn、a.login）"},
+                "text": {"type": "string", "description": "按可见文本匹配元素（selector 的替代方案）"},
+            },
+            "required": [],
+        },
+    },
+    "browser_type": {
+        "description": "【浏览器输入】向页面输入框填写文本。先清空原内容再输入，适合搜索框、表单、登录框等。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "selector": {"type": "string", "description": "目标输入框的 CSS 选择器"},
+                "text": {"type": "string", "description": "要输入的文本"},
+            },
+            "required": ["selector", "text"],
+        },
+    },
+    "browser_screenshot": {
+        "description": "【浏览器截图】截取当前浏览器页面的画面。截图会实时显示在聊天页的电脑操作面板中，并返回页面标题和 URL。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    "browser_extract_text": {
+        "description": "【浏览器提取文本】提取当前浏览器页面的正文文字内容，用于阅读网页、总结文章、获取搜索结果等。建议先用 browser_navigate 打开页面。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
     "emotion_analyze": {
         "description": "分析文本情感",
         "parameters": {

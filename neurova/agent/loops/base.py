@@ -4,6 +4,7 @@ Agent Loop 基类 - 定义标准接口
 每个 Loop 实现特定的模型交互逻辑。
 """
 
+import asyncio
 import json
 from neurova.core.logger import get_logger
 from abc import ABC, abstractmethod
@@ -70,9 +71,42 @@ class BaseAgentLoop(ABC):
 
         for tool_call in tool_calls:
             # 每次迭代使用独立的变量名，防止跨迭代器状态污染
-            _tc_function_name = tool_call["function"]["name"]
-            _tc_arguments = json.loads(tool_call["function"]["arguments"])
-            _tc_id = tool_call["id"]
+            _tc_function_name = tool_call.get("function", {}).get("name", "unknown_tool")
+            _tc_id = tool_call.get("id", f"call_{id(tool_call)}")
+
+            # [TOOLROBUST-A] 参数 JSON 解析单独 try：
+            # 原实现在 try 外 json.loads，一遇到某条工具参数是非法 JSON，
+            # handle_tool_calls 整体抛异常 → 被 loop 当作"工具调用失败"降级/回退到
+            # 无工具路径，本轮全部工具静默丢失。
+            # 现在解析失败只把错误作为该工具的结果回传给 LLM，让它自行纠正参数格式。
+            _tc_arguments = {}
+            try:
+                _raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
+                if isinstance(_raw_arguments, str):
+                    _tc_arguments = json.loads(_raw_arguments) if _raw_arguments.strip() else {}
+                elif isinstance(_raw_arguments, dict):
+                    _tc_arguments = _raw_arguments
+            except (json.JSONDecodeError, TypeError, ValueError) as _parse_err:
+                _parse_error = f"工具 {_tc_function_name} 参数 JSON 解析失败: {_parse_err}"
+                logger.warning(_parse_error)
+                new_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": _tc_id,
+                        "name": _tc_function_name,
+                        "content": json.dumps({"error": _parse_error}),
+                    }
+                )
+                self.agent._tool_messages_list.append(
+                    {
+                        "type": "tool_result",
+                        "tool_name": _tc_function_name,
+                        "result": _parse_error,
+                        "success": False,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+                continue
 
             try:
                 # [TOOLBUG] 诊断日志：检查 SkillRegistry 和 ToolRouter 的初始化状态
@@ -124,12 +158,16 @@ class BaseAgentLoop(ABC):
                 if exec_result is None and hasattr(self.agent, "tool_router") and self.agent.tool_router:
                     try:
                         user_id = getattr(self.agent.config, "user_id", "default")
-                        router_result = await self.agent.tool_router.execute(
+                        # [TOOLROBUST] 兼容同步/异步 execute：
+                        # 真实 ToolRouter 通常为 async，但测试/部分适配器可能同步返回结果。
+                        # 只有返回 coroutine 时才 await，否则直接用同步结果。
+                        _router_rv = self.agent.tool_router.execute(
                             tool_name=_tc_function_name,
                             params=_tc_arguments,
-                            agent_id=self.agent.config.agent_id,
+                            agent_id=getattr(self.agent.config, "agent_id", None),
                             user_id=user_id,
                         )
+                        router_result = await _router_rv if asyncio.iscoroutine(_router_rv) else _router_rv
                         if router_result and router_result.success:
                             from types import SimpleNamespace
 

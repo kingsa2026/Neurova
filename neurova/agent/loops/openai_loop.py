@@ -4,6 +4,8 @@ OpenAI Loop - OpenAI 兼容模型适配循环
 支持: GPT-4, GPT-3.5-turbo, GPT-4V, 以及所有 OpenAI 兼容 API
 """
 
+import re
+
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +14,38 @@ from neurova.agent.loops.registry import register_loop
 from neurova.llm_client import LLMResponse
 
 logger = get_logger(__name__)
+
+
+# ══════════════════════════════════════════════════════════════
+# 工具降级判定（模块级，供测试与类方法共用）TOOLROBUST-B
+# ══════════════════════════════════════════════════════════════
+_AUTH_KEYS = re.compile(
+    r"(invalid api key|authentication|unauthorized|forbidden|access denied|401|403|permission|credential)",
+    re.IGNORECASE,
+)
+_HTTP_4XX_KEYS = re.compile(r"\b(400|422|409)\b")
+_TOOL_KEYS = re.compile(r"(tool|function call|tool_choice|schema|parameter|argument)", re.IGNORECASE)
+_SCHEMA_ERR_KEYS = re.compile(
+    r"(missing|invalid).*(parameter|schema|argument|type)|parameters\.type", re.IGNORECASE
+)
+
+
+def _looks_like_unsupported_tools_error(err_str: str) -> bool:
+    """判断错误文本是否属于"function calling 不被 API 支持"，避免误伤认证等非工具错误。
+
+    返回 True 当且仅当：
+    1. 错误文本不包含认证/权限关键词（401/403/"Invalid API key"等）；
+    2. 命中 tools/function/schema/parameter 语义；
+    3. 且同时命中 HTTP 4xx 状态码 或 明确 schema/参数缺失语义（如 "Missing required parameter"），
+       以排除 "4000"/"400ms" 等无关数字误伤。
+    """
+    if not err_str:
+        return False
+    if _AUTH_KEYS.search(err_str):
+        return False
+    if not _TOOL_KEYS.search(err_str):
+        return False
+    return bool(_HTTP_4XX_KEYS.search(err_str) or _SCHEMA_ERR_KEYS.search(err_str))
 
 
 class OpenAILoop(BaseAgentLoop):
@@ -27,6 +61,39 @@ class OpenAILoop(BaseAgentLoop):
         self._tool_rounds = 0  # 递归深度计数
         self._tools_supported = True  # 初始假设支持，400 后设为 False
         logger.info("OpenAILoop initialized for agent: %s", agent.config.name)
+
+    # ══════════════════════════════════════════════════════════════
+    # 工具降级健壮性（TOOLROBUST-B）
+    # ══════════════════════════════════════════════════════════════
+    def _is_tools_rejected_error(self, err_str: str) -> bool:
+        """精确判断是否为"function calling 不被 API 支持"的错误，避免误伤认证等非工具错误。
+
+        委托给模块级 _looks_like_unsupported_tools_error 以复用同一判定逻辑。
+        返回 True 当且仅当：非认证/权限错误，且命中工具语义 + HTTP 4xx 或 schema 参数缺失语义。
+        """
+        return _looks_like_unsupported_tools_error(err_str)
+
+    def _append_tool_hint(self, messages: List[Dict]) -> List[Dict]:
+        """降级后把文本调用教学合并进 system 提示（不新增消息体，保持 system 靠前）。
+
+        复用 context.orchestrator.get_tool_call_format_hint()；任何异常都静默跳过，
+        避免降级路径再次因导入/内容问题抛异常。
+        """
+        try:
+            from neurova.context.orchestrator import get_tool_call_format_hint
+
+            hint = get_tool_call_format_hint()
+        except Exception:
+            hint = ""
+        if not hint:
+            return messages
+        msgs = list(messages)
+        for i, m in enumerate(msgs):
+            if isinstance(m, dict) and m.get("role") == "system":
+                msgs[i] = {**m, "content": (m.get("content") or "") + hint}
+                return msgs
+        msgs.insert(0, {"role": "system", "content": hint})
+        return msgs
 
     async def predict_step(
         self, messages: List[Dict], tools: Optional[List[Dict]] = None, stream: bool = False, **kwargs
@@ -83,11 +150,27 @@ class OpenAILoop(BaseAgentLoop):
                 return await self._predict_normal(request_params)
         except Exception as e:
             err_str = str(e)
-            if tools and ("400" in err_str or "Invalid" in err_str or "Missing" in err_str):
-                logger.warning("工具调用不被 API 支持，已禁用后续 tools 注入: %s", e)
+            # [TOOLROBUST-B] 精确判定 400：
+            # 原实现用宽泛子串 "400"/"Invalid"/"Missing" 判断，会把 "Invalid API key"
+            # 等认证错误误判为"工具不被支持"而静默降级，掩盖真实错误、另本轮无工具可用。
+            # 现在：先排除认证/权限类错误，再要求同时命中 HTTP 4xx 状态码 + tools 语义才算降级。
+            if tools and self._is_tools_rejected_error(err_str):
+                logger.warning(
+                    "[TOOLROBUST-B] function calling 疑似不被 API 支持，本轮降级为无 tools 重试并注入文本教学。错误: %s",
+                    e,
+                )
                 self._tools_supported = False
+                # 标记降级事件，供可观测（agent.ui / 监控可读）
+                try:
+                    if not hasattr(self.agent, "_tool_events"):
+                        self.agent._tool_events = []
+                    self.agent._tool_events.append({"type": "tools_degraded", "reason": err_str[:200]})
+                except Exception:
+                    pass
                 request_params.pop("tools", None)
                 request_params.pop("tool_choice", None)
+                # 降级后注入文本调用教学，避免模型在无 tools 状态下完全不会调工具
+                request_params["messages"] = self._append_tool_hint(request_params["messages"])
                 if stream:
                     return self._predict_stream(request_params)
                 else:
@@ -95,27 +178,55 @@ class OpenAILoop(BaseAgentLoop):
             raise
 
     async def _predict_normal(self, request_params: Dict) -> LLMResponse:
-        """普通预测 (非流式)"""
-        response = await self.llm_client.chat(**request_params)
+        """普通预测 (非流式)。
+
+        [TOOLROBUST-B] 自动降级：带 tools 的请求若被 API 拒绝（工具型 400），
+        去掉 tools 并注入文本调用教学后重试一次，避免整轮崩溃且弱 provider 仍有工具通道。
+        """
+        try:
+            response = await self.llm_client.chat(**request_params)
+        except Exception as e:
+            err_str = str(e)
+            if request_params.get("tools") and self._is_tools_rejected_error(err_str):
+                logger.warning(
+                    "[TOOLROBUST-B] function calling 疑似不被 API 支持，本轮降级为无 tools 重试并注入文本教学。错误: %s",
+                    e,
+                )
+                self._tools_supported = False
+                try:
+                    if not hasattr(self.agent, "_tool_events"):
+                        self.agent._tool_events = []
+                    self.agent._tool_events.append({"type": "tools_degraded", "reason": err_str[:200]})
+                except Exception:
+                    pass
+                request_params.pop("tools", None)
+                request_params.pop("tool_choice", None)
+                # 降级后注入文本调用教学，避免模型在无 tools 状态下完全不会调工具
+                request_params["messages"] = self._append_tool_hint(request_params["messages"])
+                response = await self.llm_client.chat(**request_params)
+            else:
+                raise
 
         # 记录思考过程（用于前端展示）
-        if response.reasoning_content:
+        reasoning_content = getattr(response, "reasoning_content", None)
+        if reasoning_content:
             # 将思考过程存储到 agent 上，供 chat() 方法读取
             if hasattr(self.agent, "_current_reasoning"):
-                self.agent._current_reasoning = response.reasoning_content
-            logger.info("🧠 捕获思考过程: %s 字符", len(response.reasoning_content))
+                self.agent._current_reasoning = reasoning_content
+            logger.info("🧠 捕获思考过程: %s 字符", len(reasoning_content))
 
-        # 处理 tool_calls
-        if response.tool_calls:
+        # 处理 tool_calls（部分 provider 响应无 tool_calls 字段，需容错）
+        tool_calls = getattr(response, "tool_calls", None)
+        if tool_calls:
             self._tool_rounds += 1
             if self._tool_rounds > 10:
                 logger.warning("工具调用轮次超过上限 (%s)，停止递归", self._tool_rounds)
                 return response
 
-            logger.info("LLM returned %s tool calls (round %s)", len(response.tool_calls), self._tool_rounds)
+            logger.info("LLM returned %s tool calls (round %s)", len(tool_calls), self._tool_rounds)
 
             # 执行工具
-            tool_messages = await self.handle_tool_calls(response.tool_calls, request_params["messages"])
+            tool_messages = await self.handle_tool_calls(tool_calls, request_params["messages"])
 
             # 将工具结果添加到消息
             request_params["messages"].extend(tool_messages)
@@ -181,15 +292,14 @@ class OpenAILoop(BaseAgentLoop):
                         request_params["messages"].extend(tool_messages)
                         logger.info("🔄 工具执行完成，递归继续对话 (round %s)", self._tool_rounds)
                         continuation = await self._predict_normal(request_params)
-                        if continuation and continuation.content:
-                            yield {"type": "content", "data": continuation.content}
-                            full_reply = continuation.content  # 使用续写结果作为最终回复
-                        if (
-                            continuation
-                            and hasattr(continuation, "reasoning_content")
-                            and continuation.reasoning_content
-                        ):
-                            yield {"type": "reasoning", "data": continuation.reasoning_content}
+                        if continuation:
+                            cont_content = getattr(continuation, "content", None)
+                            if cont_content:
+                                yield {"type": "content", "data": cont_content}
+                                full_reply = cont_content  # 使用续写结果作为最终回复
+                            cont_reasoning = getattr(continuation, "reasoning_content", None)
+                            if cont_reasoning:
+                                yield {"type": "reasoning", "data": cont_reasoning}
                     else:
                         logger.warning("工具调用轮次超过上限 (%s)，停止递归", self._tool_rounds)
 

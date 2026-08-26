@@ -3,7 +3,6 @@
 
 为 CanvasDesignerPage 提供画布快照的持久化能力：
 - 布局: <base>/canvases/<canvas_id>.json  画布快照
-- 运行: <base>/runs/<run_id>.json         运行记录（受理语义）
 
 设计约束（AGENTS.md）:
 - 线程安全: threading.RLock 保护共享索引
@@ -11,9 +10,9 @@
 - 容错: 单个损坏文件跳过，不影响其余数据读取
 
 运行语义说明:
-当前协作域没有工作流执行引擎（画布边仅含几何坐标，无逻辑连接），
-`create_run` 采用异步作业的「受理」契约——落盘 accepted 记录并返回
-run_id；真实节点执行待工作流引擎接入后在此扩展。
+画布执行由 neurflow 工作流引擎负责（见 collaboration_api.run_canvas_workflow：
+画布快照经 canvas_bridge 编译为 WorkflowDefinition 后交引擎执行，
+执行记录持久化在 neurflow SQLite 中）。本存储只管画布数据本身。
 """
 
 from __future__ import annotations
@@ -32,15 +31,13 @@ _DEFAULT_BASE_DIR = Path("data") / "collaboration"
 
 
 class CanvasStore:
-    """画布快照与运行记录的文件持久化存储。"""
+    """画布快照的文件持久化存储。"""
 
     def __init__(self, base_dir: Optional[Path] = None):
         self._base = Path(base_dir) if base_dir else _DEFAULT_BASE_DIR
         self._canvas_dir = self._base / "canvases"
-        self._run_dir = self._base / "runs"
         self._lock = threading.RLock()
         self._canvas_dir.mkdir(parents=True, exist_ok=True)
-        self._run_dir.mkdir(parents=True, exist_ok=True)
 
     # ── 内部工具 ────────────────────────────────────────────────
 
@@ -119,6 +116,7 @@ class CanvasStore:
                     {
                         "id": data["id"],
                         "name": data.get("name", ""),
+                        "project_id": data.get("project_id"),
                         "node_count": len(data.get("nodes", []) or []),
                         "edge_count": len(data.get("edges", []) or []),
                         "created_at": data.get("created_at"),
@@ -139,27 +137,6 @@ class CanvasStore:
             path.unlink()
         logger.info("画布已删除: %s", canvas_id)
         return True
-
-    # ── 运行记录（受理语义） ────────────────────────────────────
-
-    def create_run(self, canvas_id: str) -> Optional[Dict[str, Any]]:
-        """受理一次画布运行：校验画布存在 → 落盘 accepted 记录。"""
-        snapshot = self.get(canvas_id)
-        if snapshot is None:
-            return None
-        record = {
-            "run_id": f"run_{uuid.uuid4().hex[:12]}",
-            "canvas_id": canvas_id,
-            "canvas_name": snapshot.get("name", ""),
-            "node_count": len(snapshot.get("nodes", []) or []),
-            "edge_count": len(snapshot.get("edges", []) or []),
-            "status": "accepted",
-            "created_at": time.time(),
-        }
-        with self._lock:
-            self._write_json(self._run_dir / f"{record['run_id']}.json", record)
-        logger.info("画布运行已受理: %s (canvas=%s)", record["run_id"], canvas_id)
-        return record
 
 
 # ── 单例生命周期 ────────────────────────────────────────────────

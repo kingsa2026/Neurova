@@ -159,6 +159,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import { useAgentStore } from '@/stores/agents'
 import { listProviders } from '@/api/modules/providers'
 import { listModels } from '@/api/modules/models'
+import { normalizeModel } from '@/types/model'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -215,10 +216,11 @@ const fetchProvidersAndModels = async () => {
       : (modelsRes as any)?.data ?? (modelsRes as any)?.models ?? []
 
     allModelOptions.value = rawModels
-      .filter((m: any) => m.provider_id && m.provider_id !== 'system')
-      .map((m: any) => ({
-        value: m.model_id || m.id,
-        label: m.name || m.model_id || m.id,
+      .map(normalizeModel)
+      .filter((m) => m.provider_id && m.provider_id !== 'system')
+      .map((m) => ({
+        value: m.id,
+        label: m.name || m.id,
         provider_id: m.provider_id,
       }))
   } catch (err: any) {

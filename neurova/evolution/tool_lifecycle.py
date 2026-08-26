@@ -84,9 +84,17 @@ class ToolLifecycleManager:
         # get_lifecycle_report 调用 get_tools_by_state 等可重入场景
         self._lock = threading.RLock()
         self._entries: Dict[str, ToolLifecycleEntry] = {}
-        self._degraded_after = degraded_after_seconds or self.DEGRADED_AFTER_SECONDS
-        self._archived_after = archived_after_seconds or self.ARCHIVED_AFTER_SECONDS
-        self._frozen_after = frozen_after_seconds or self.FROZEN_AFTER_SECONDS
+        # Bug 修复: 用 `or` 回退会把合法的 0.0（立即降级/归档）当作缺省值
+        # 静默替换为默认阈值。改为显式 None 判断。
+        self._degraded_after = (
+            self.DEGRADED_AFTER_SECONDS if degraded_after_seconds is None else degraded_after_seconds
+        )
+        self._archived_after = (
+            self.ARCHIVED_AFTER_SECONDS if archived_after_seconds is None else archived_after_seconds
+        )
+        self._frozen_after = (
+            self.FROZEN_AFTER_SECONDS if frozen_after_seconds is None else frozen_after_seconds
+        )
         logger.debug("ToolLifecycleManager initialized")
 
     def register_tool(self, tool_name: str) -> ToolLifecycleEntry:
@@ -159,12 +167,21 @@ class ToolLifecycleManager:
             return True
 
     def delete_tool(self, tool_name: str) -> bool:
-        """删除工具。"""
+        """删除工具。
+
+        安全守卫：ACTIVE 状态的工具不可直接删除（防止误删正在使用的
+        工具记录）；需先归档（ARCHIVED/FROZEN）或显式 revive 流程。
+        """
         with self._lock:
-            if tool_name in self._entries:
-                del self._entries[tool_name]
-                return True
-            return False
+            entry = self._entries.get(tool_name)
+            if entry is None:
+                return False
+            if entry.state == ToolLifecycleState.ACTIVE:
+                raise ValueError(
+                    f"cannot delete ACTIVE tool '{tool_name}'; archive it first"
+                )
+            del self._entries[tool_name]
+            return True
 
     def get_state(self, tool_name: str) -> Optional[ToolLifecycleState]:
         """获取工具的生命周期状态（H6: 返回枚举而非字符串）。"""

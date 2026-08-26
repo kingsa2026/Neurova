@@ -124,10 +124,7 @@ try:
 except ImportError:
     MemoryManager = None
 
-try:
-    from neurova.cognitive_layers.memory_layer.meta_cognition import MetaCognition
-except ImportError:
-    MetaCognition = None
+# memory_layer/meta_cognition.py 已删除（零调用方死代码，2026-08 清理）
 
 try:
     from neurova.cognitive_layers.memory_layer.models import LifecycleStage, MemoryCategory, MemoryType

@@ -293,7 +293,10 @@ class MemoryWriteQueue:
         Returns:
             int: 成功写入的项目数量
         """
-        # 优先使用 CognitiveStorageEngine，降级使用 MemoryManager
+        # 数据源统一（W2 修复）: 优先写入 memory_manager（recall 可读取的
+        # persist.db）；痕迹库 storage 只存不取，仅作无 manager 时的降级。
+        # 原逻辑优先 storage 导致批量对话记忆进入无人检索的 JSON 库，
+        # 且与 _step_save_memory 的直接 remember 形成双写分裂。
         storage = self.storage
         memory_manager = getattr(self, "_memory_manager", None)
 
@@ -359,8 +362,17 @@ class MemoryWriteQueue:
                     else:
                         metadata["timestamp"] = str(timestamp)
 
-                # 写入 CognitiveStorageEngine
-                if storage and hasattr(storage, "save"):
+                # 写入 MemoryManager（recall 主数据源）
+                if memory_manager and hasattr(memory_manager, "remember"):
+                    memory_manager.remember(
+                        content=content,
+                        memory_type=classification,
+                        category=category,
+                        metadata=metadata,
+                    )
+                    written += 1
+                # 降级写入痕迹库（无 manager 时唯一出口）
+                elif storage and hasattr(storage, "save"):
                     storage.save(
                         content=content,
                         memory_type=classification,
@@ -368,15 +380,6 @@ class MemoryWriteQueue:
                         tags=categories,
                         metadata=metadata,
                         importance=0.5,
-                    )
-                    written += 1
-                # 降级写入 MemoryManager
-                elif memory_manager and hasattr(memory_manager, "remember"):
-                    memory_manager.remember(
-                        content=content,
-                        memory_type=classification,
-                        category=category,
-                        metadata=metadata,
                     )
                     written += 1
 

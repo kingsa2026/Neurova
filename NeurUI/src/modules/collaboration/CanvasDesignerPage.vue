@@ -228,9 +228,41 @@
             </div>
           </template>
 
-          <div class="prop-group" v-for="(value, key) in selectedNode.config" :key="key">
-            <label>{{ key }}</label>
-            <a-input v-model:value="selectedNode.config[key]" size="small" />
+          <!-- 通用配置表单：按节点定义 sub_blocks 渲染（textarea/select/model-selector/input） -->
+          <div class="prop-group" v-for="field in configFields" :key="field.key">
+            <label>{{ field.title }}</label>
+            <a-textarea
+              v-if="field.type === 'textarea'"
+              v-model:value="selectedNode.config[field.key]"
+              :rows="3"
+              size="small"
+            />
+            <template v-else-if="field.type === 'model-selector'">
+              <a-select
+                :value="selectedNode.config.model_name || undefined"
+                :options="modelOptions"
+                size="small"
+                allow-clear
+                show-search
+                option-filter-prop="label"
+                placeholder="选择可联通模型（留空用默认）"
+                @change="handleModelSelect"
+              />
+              <a-select
+                v-model:value="selectedNode.config.model_provider"
+                :options="providerOptions"
+                size="small"
+                style="margin-top: 6px"
+                placeholder="Provider（选模型后自动回填）"
+              />
+            </template>
+            <a-select
+              v-else-if="field.type === 'select'"
+              v-model:value="selectedNode.config[field.key]"
+              :options="field.options"
+              size="small"
+            />
+            <a-input v-else v-model:value="selectedNode.config[field.key]" size="small" />
           </div>
 
           <!-- 执行结果查看 -->
@@ -288,12 +320,13 @@ import { useI18n } from 'vue-i18n'
 import {
   ArrowLeftOutlined, DownOutlined, BgColorsOutlined,
   ApartmentOutlined, RobotOutlined, BulbOutlined,
-  ClockCircleOutlined, DatabaseOutlined,
+  ClockCircleOutlined, DatabaseOutlined, FileOutlined,
 } from '@ant-design/icons-vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useCollaboration } from '@/composables/useCollaboration'
 import { useAgentStore } from '@/stores/agents'
 import { getNodes } from '@/api/modules/neurflow'
+import { useReachableModels, buildModelOptions } from '@/composables/useReachableModels'
 import { runCanvas as runCanvasApi, getCanvasRun, type CanvasRunStatus } from '@/api/modules/collaboration'
 import type { CanvasNodeSnapshot, CanvasEdgeSnapshot } from '@/api/modules/collaboration'
 
@@ -302,6 +335,19 @@ const router = useRouter()
 const { t } = useI18n()
 
 // 节点库条目（UI 概念，非持久化类型）：含分类与默认配置，落到画布后转为 CanvasNodeSnapshot
+/** 配置字段定义（镜像后端 NodeDefinition.sub_blocks） */
+interface SubBlockOption {
+  label: string
+  value: string
+}
+interface SubBlockDef {
+  id: string
+  title?: string
+  type?: string // input | textarea | select | slider | model-selector
+  options?: SubBlockOption[]
+  default_value?: unknown
+  required?: boolean
+}
 interface PaletteNode {
   type: string
   label: string
@@ -310,6 +356,7 @@ interface PaletteNode {
   inputs: { id: string; label: string }[]
   outputs: { id: string; label: string }[]
   defaultConfig: Record<string, unknown>
+  subBlocks?: SubBlockDef[]
 }
 
 // ── 统一通过 composable 访问 store ──
@@ -530,7 +577,14 @@ const paletteCategories = [
     nodes: [
       { type: 'builtin:start', label: '开始', icon: '▶', category: 'builtin', inputs: [], outputs: [{ id: 'out', label: '输出' }], defaultConfig: {} },
       { type: 'builtin:end', label: '结束', icon: '⏹', category: 'builtin', inputs: [{ id: 'in', label: '输入' }], outputs: [], defaultConfig: {} },
-      { type: 'builtin:llm', label: 'LLM 调用', icon: '🤖', category: 'builtin', inputs: [{ id: 'prompt', label: '提示词' }], outputs: [{ id: 'response', label: '响应' }], defaultConfig: { model: 'gpt-4' } },
+      { type: 'builtin:llm', label: 'LLM 调用', icon: '🤖', category: 'builtin', inputs: [{ id: 'input', label: '输入' }], outputs: [{ id: 'output', label: '输出' }, { id: 'usage', label: 'Token 用量' }], defaultConfig: { prompt: '', model_provider: 'auto', model_name: '', temperature: 0.7, max_tokens: 4096, system_prompt: '' }, subBlocks: [
+        { id: 'prompt', title: '提示词', type: 'textarea' },
+        { id: 'model_provider', title: '模型提供商', type: 'select', default_value: 'auto', options: [{ label: '自动选择', value: 'auto' }] },
+        { id: 'model_name', title: '模型名称', type: 'model-selector' },
+        { id: 'temperature', title: '温度', type: 'slider', default_value: 0.7, min: 0, max: 2 },
+        { id: 'max_tokens', title: '最大 Tokens', type: 'slider', default_value: 4096, min: 100, max: 128000 },
+        { id: 'system_prompt', title: '系统提示', type: 'textarea' },
+      ] },
       { type: 'builtin:agent', label: 'Agent 调用', icon: '🧠', category: 'builtin', inputs: [{ id: 'task', label: '任务' }], outputs: [{ id: 'result', label: '结果' }], defaultConfig: {} },
       { type: 'builtin:condition', label: '条件分支', icon: '❓', category: 'builtin', inputs: [{ id: 'in', label: '输入' }], outputs: [{ id: 'true', label: '真' }, { id: 'false', label: '假' }], defaultConfig: {} },
     ] as PaletteNode[],
@@ -552,6 +606,48 @@ const paletteCategories = [
     nodes: [
       { type: 'builtin:memory-load', label: '记忆加载', icon: '💾', category: 'data', inputs: [], outputs: [{ id: 'memory', label: '记忆' }], defaultConfig: {} },
       { type: 'builtin:memory-save', label: '记忆保存', icon: '📝', category: 'data', inputs: [{ id: 'data', label: '数据' }], outputs: [], defaultConfig: {} },
+    ] as PaletteNode[],
+  },
+  {
+    name: 'input',
+    labelKey: 'collab.catInput',
+    icon: FileOutlined,
+    nodes: [
+      {
+        type: 'builtin:text_input',
+        label: '文本输入',
+        icon: '📝',
+        category: 'input',
+        inputs: [],
+        outputs: [{ id: 'text', label: '文本' }],
+        defaultConfig: { value: '' },
+        subBlocks: [
+          { id: 'value', title: '文本内容（支持 ${上游节点ID.output} 引用）', type: 'textarea' },
+        ],
+      },
+      {
+        type: 'builtin:media_input',
+        label: '媒体输入',
+        icon: '🖼️',
+        category: 'input',
+        inputs: [],
+        outputs: [{ id: 'media', label: '媒体' }],
+        defaultConfig: { media_type: 'file', source: 'url', value: '' },
+        subBlocks: [
+          { id: 'media_type', title: '媒体类型', type: 'select', default_value: 'file', options: [
+            { label: '图片', value: 'image' },
+            { label: '音频', value: 'audio' },
+            { label: '视频', value: 'video' },
+            { label: '文件', value: 'file' },
+          ] },
+          { id: 'source', title: '来源格式', type: 'select', default_value: 'url', options: [
+            { label: 'URL', value: 'url' },
+            { label: 'Data URL', value: 'data-url' },
+            { label: 'Base64', value: 'base64' },
+          ] },
+          { id: 'value', title: '载荷值（URL / data-url / base64，不内联二进制）', type: 'textarea' },
+        ],
+      },
     ] as PaletteNode[],
   },
 ]
@@ -605,7 +701,7 @@ async function loadDynamicNodes() {
       category?: string
       inputs?: { id: string; label: string }[]
       outputs?: { id: string; label: string }[]
-      sub_blocks?: { id: string; title: string }[]
+      sub_blocks?: SubBlockDef[]
     }>
     dynamicNodes.value = items
       .filter(n => !String(n.type).startsWith('builtin:'))
@@ -616,7 +712,10 @@ async function loadDynamicNodes() {
         category: n.category || 'extensions',
         inputs: n.inputs ?? [],
         outputs: n.outputs ?? [],
-        defaultConfig: Object.fromEntries((n.sub_blocks ?? []).map(b => [b.id, ''])),
+        defaultConfig: Object.fromEntries(
+          (n.sub_blocks ?? []).map(b => [b.id, b.default_value ?? '']),
+        ),
+        subBlocks: n.sub_blocks ?? [],
       }))
   } catch {
     // 动态节点库不可用时静默降级为静态节点库
@@ -661,6 +760,58 @@ function addNodeAt(paletteNode: PaletteNode, x: number, y: number) {
 
 // 节点选中
 const selectedNode = computed(() => canvasNodes.value.find(n => n.id === selectedNodeId.value) || null)
+
+// ── 可联通模型下拉（builtin:llm 的 model-selector 数据源，惰性加载） ──
+const { models: reachableModels, load: loadReachableModels } = useReachableModels()
+const modelOptions = computed(() => buildModelOptions(reachableModels.value))
+const providerOptions = computed(() => {
+  const providers = new Set(reachableModels.value.filter(m => m.enabled !== false).map(m => m.provider_id))
+  return [{ label: '自动选择', value: 'auto' }, ...[...providers].map(p => ({ label: p, value: p }))]
+})
+function handleModelSelect(value: unknown) {
+  const node = selectedNode.value
+  if (!node) return
+  if (!value) {
+    node.config.model_name = ''
+    return
+  }
+  node.config.model_name = value
+  // 选模型自动回填 provider（与 model_provider 字段联动）
+  const hit = reachableModels.value.find(m => m.id === value)
+  if (hit?.provider_id) node.config.model_provider = hit.provider_id
+}
+
+/** 属性面板配置字段：优先取节点定义 sub_blocks；无定义时回退为普通输入框 */
+const configFields = computed(() => {
+  const node = selectedNode.value
+  if (!node) return []
+  const def = paletteCategories
+    .flatMap(c => c.nodes)
+    .concat(dynamicNodes.value)
+    .find(n => n.type === node.type)
+  const blocks = def?.subBlocks ?? []
+  if (blocks.length > 0) {
+    return blocks.map(b => ({
+      key: b.id,
+      title: b.title || b.id,
+      type: b.type || 'input',
+      options: (b.options ?? []).map(o => ({ label: o.label, value: o.value })),
+      min: undefined as number | undefined,
+      max: undefined as number | undefined,
+    }))
+  }
+  // 回退：遍历现有 config 键（旧快照/未知类型兼容）
+  return Object.keys(node.config).map(k => ({ key: k, title: k, type: 'input', options: [] as { label: string; value: string }[], min: undefined, max: undefined }))
+})
+
+// 选中 LLM 节点时惰性拉取模型列表
+watch(
+  () => selectedNode.value?.type,
+  (type) => {
+    if (type === 'builtin:llm') void loadReachableModels()
+  },
+  { immediate: true },
+)
 
 function formatNodeOutput(status: { status: string; output?: unknown; error?: string | null }): string {
   if (status.error) return `错误: ${status.error}`
