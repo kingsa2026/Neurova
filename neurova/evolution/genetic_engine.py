@@ -162,6 +162,20 @@ class ToolGeneticEngine:
         self._population.append(genotype)
         logger.debug("Added genotype to population: %s", genotype.tools)
 
+    def record_reuse(self, tool_sequence: List[str]) -> bool:
+        """工具序列被执行时递增复用次数（reuse_count）。
+
+        此前 reuse_count 全库只读从不递增，导致 reuse_bonus 恒为 0、
+        fitness 永远压不上去，遗传产物注册为技能后无法形成正反馈闭环。
+        返回是否命中种群中的某个基因型。
+        """
+        normalized = list(tool_sequence or [])
+        for genotype in self._population:
+            if list(genotype.tool_sequence) == normalized:
+                genotype.reuse_count += 1
+                return True
+        return False
+
     def select_elite(self, n: int) -> List[ToolGenotype]:
         """精英选择：选择适应度最高的 n 个个体。
 

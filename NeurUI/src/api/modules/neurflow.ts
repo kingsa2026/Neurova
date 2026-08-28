@@ -60,6 +60,28 @@ export interface WorkflowExecution {
   error?: string
 }
 
+export interface SubBlockDef {
+  /** 配置项 ID（兼容后端 name 键） */
+  id: string
+  /** 显示标题（兼容后端 label 键） */
+  title: string
+  /** input | textarea | select | slider | json | code | file ... */
+  type: string
+  required?: boolean
+  default_value?: unknown
+  options?: Array<{ label: string; value: string } | string>
+  placeholder?: string
+  description?: string
+  min?: number
+  max?: number
+  language?: string
+}
+
+export interface NodePortDef {
+  id: string
+  label: string
+}
+
 export interface NodeDefinition {
   type: string
   label: string
@@ -69,6 +91,10 @@ export interface NodeDefinition {
   source: string
   version?: string
   tags?: string[]
+  /** 配置表单（画布动态节点库渲染 select/slider/textarea 等） */
+  sub_blocks?: SubBlockDef[]
+  inputs?: NodePortDef[]
+  outputs?: NodePortDef[]
 }
 
 // ---------------------------------------------------------------------------

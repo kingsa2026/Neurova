@@ -1,6 +1,6 @@
 # Neurflow 实施进度跟踪
 
-> **最后更新**: 2026-06-09 03:15  
+> **最后更新**: 2026-08-28  
 > **基于规范**: docs/neurflow-dev-spec.md v1.0.0
 
 ---
@@ -14,6 +14,7 @@
 | Phase 3: 深度集成 | 100% | ✅ 完成 |
 | 集成测试 | 100% | ✅ 完成 |
 | 中等优先级断裂点修复 | 100% | ✅ 完成 |
+| 外部 API 集成（drama/commerce） | 100% | ✅ 完成 |
 
 **总体完成度**: 100%
 
@@ -41,6 +42,17 @@
 | execution_engine.py | `execution_engine.py` | ✅ 完成 | 15 tests | DAG 执行 + ExecutionEventType 枚举 + 公共 API |
 | agent_manager.py | `agent_manager.py` | ✅ 完成 | 12 tests | 团队 Agent 管理 + 单例 |
 | 工作流模板 | `templates/` | ✅ 完成 | 25 tests | 7 个领域模板（编程/写作/媒体/文档/数据/电商/网站） |
+
+### 外部 API 集成（drama/commerce）
+
+| 任务 | 文件 | 状态 | 备注 |
+|------|------|------|------|
+| 视频生成节点集成 | `drama_nodes.py` | ✅ 完成 | scene-gen → ImageGenClient、video-compose → VideoGenClient、video-publish → PublishPlatformClient，API 不可用时自动降级 |
+| 电商节点集成 | `commerce_nodes.py` | ✅ 完成 | price-monitor/inventory-sync/review-respond/sales-report/competitor-analysis → CommercePlatformClient，API 不可用时自动降级 |
+| 广告投放节点扩展 | `commerce_nodes.py` / `external_api.py` | ✅ 完成 | 新增 ad-streaming/ad-monitor/ad-strategy/ad-cross 4 节点，ad-monitor → CommercePlatformClient.fetch_ad_metrics，Agent 可用时自动生成投放策略，否则规则降级 |
+| 平台选项标准化 | `drama_nodes.py` / `commerce_nodes.py` | ✅ 完成 | 视频发布 5 平台、电商 10 平台统一为 `{value, label}` 结构 |
+| .env.example 更新 | `.env.example` | ✅ 完成 | 补充图像/视频/发布/电商全部 API Key 配置项 |
+| 前端节点库对齐 | `CanvasDesignerPage.vue` | ✅ 完成 | 静态 commerce 分类（12 电商节点含 4 广告节点）兜底 + sub_blocks 字段映射（label/default/options/min/max）+ slider 渲染分支，动态/静态去重协同；前端 480 测试、后端 483 测试全部通过 |
 
 ### 中等优先级断裂点修复
 
@@ -140,7 +152,8 @@
 | **neurflow_api.py** | **36** | **100%** |
 | **中等优先级断裂点修复** | **9** | **100%** |
 | **集成测试** | **34** | **100%** |
-| **总计** | **331** | **100%** |
+| **drama/commerce 节点 + 集成测试** | **492** | **100%** |
+| **总计** | **492** | **100%** |
 
 ---
 

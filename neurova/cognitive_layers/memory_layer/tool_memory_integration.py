@@ -49,6 +49,10 @@ class ToolMemoryIntegration:
         temperature_threshold: float = 30.0,
         tool_weights=None,
         tool_lifecycle=None,
+        success_bonus: float = 0.1,
+        failure_penalty: float = 0.05,
+        decay_rate: float = 0.01,
+        muscle_memory_threshold: float = 0.8,
         **kwargs,
     ):
         self.memory_layer = memory_layer
@@ -61,11 +65,11 @@ class ToolMemoryIntegration:
         self.tool_stats: Dict[str, Dict[str, Any]] = {}
         # 并发锁：保护 usage_history 和 tool_stats 的读写
         self._lock = threading.RLock()
-        # RSI 可优化参数
-        self.success_bonus: float = 0.1
-        self.failure_penalty: float = 0.05
-        self.decay_rate: float = 0.01
-        self.muscle_memory_threshold: float = 0.8
+        # RSI 可优化参数（可由 RSI 编排器调整，作用于肌肉记忆自动执行阈值）
+        self.success_bonus: float = success_bonus
+        self.failure_penalty: float = failure_penalty
+        self.decay_rate: float = decay_rate
+        self.muscle_memory_threshold: float = muscle_memory_threshold
         logger.info("ToolMemoryIntegration initialized")
 
     def record_tool_usage(
@@ -302,9 +306,14 @@ class ToolMemoryIntegration:
 
         公式: threshold = base / sqrt(adaptive_multiplier)
         限制在 [0.3, 1.0]
+
+        基准使用 muscle_memory_threshold（RSI 可优化参数），而非
+        confidence_threshold（关键词匹配的固定阈值）。此前基准写死
+        confidence_threshold，导致 RSI 调 muscle_memory_threshold 后
+        系统行为完全不变（死参数），闭环断裂。
         """
         if not self.tool_weights:
-            return self.confidence_threshold
+            return self.muscle_memory_threshold
 
         try:
             weight_obj = self.tool_weights.get_weight(tool_name)
@@ -313,12 +322,12 @@ class ToolMemoryIntegration:
                 if multiplier > 0:
                     import math
 
-                    threshold = self.confidence_threshold / math.sqrt(multiplier)
+                    threshold = self.muscle_memory_threshold / math.sqrt(multiplier)
                     return max(0.3, min(1.0, threshold))
         except Exception as e:
             logger.debug("获取工具权重失败: %s", e)
 
-        return self.confidence_threshold
+        return self.muscle_memory_threshold
 
     def _should_demote_from_muscle_memory(self, tool_name: str) -> bool:
         """检查工具是否应从肌肉记忆中降级（已废弃/已降级）。

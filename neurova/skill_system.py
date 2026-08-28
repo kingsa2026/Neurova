@@ -9,6 +9,7 @@ D1 任务重构版本：
 """
 
 from neurova.core.logger import get_logger
+import asyncio
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -119,6 +120,108 @@ class Skill:
                 handler(event)
             except Exception as e:
                 get_logger(__name__).error(f"事件处理失败: {e}")
+
+
+class ToolSequenceSkill(Skill):
+    """把 manifest.config.tool_sequence 解释为可执行的多步技能。
+
+    模式挖掘器（pattern_miner）、自然语言合成器（nl_synthesizer）、
+    自动技能封装器（AutoSkillBuilder）产出的 manifest 都用相同的
+    tool_sequence 形态。注册到 SkillRegistry 后，调用方即可实际执行
+    序列内每一步（通过 tool_router），而不只是拿到一个空壳 Skill。
+
+    占位符约定：步骤 params 中的 `{step_<idx>.<field>}` 会被替换为
+    前置步骤执行结果的对应字段，方便步间变量传递。
+    """
+
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        tool_sequence: list,
+        tool_router: Any = None,
+    ):
+        super().__init__(name=name, description=description)
+        self.config = {"tool_sequence": tool_sequence}
+        self._tool_router = tool_router
+
+    async def execute(
+        self, params: Dict[str, Any], context: Optional[Dict[str, Any]] = None
+    ) -> SkillResult:
+        sequence = (self.config or {}).get("tool_sequence") or []
+        if not sequence:
+            return SkillResult(success=False, error="技能 tool_sequence 为空")
+
+        step_outputs: Dict[int, Any] = {}
+        for idx, step in enumerate(sequence):
+            if not isinstance(step, dict):
+                return SkillResult(
+                    success=False,
+                    error=f"第 {idx} 步格式错误：必须是 dict",
+                )
+            tool_name = step.get("tool")
+            step_params = step.get("params") or {}
+            if not tool_name:
+                return SkillResult(success=False, error=f"第 {idx} 步缺少 tool 字段")
+            if not self._tool_router:
+                return SkillResult(
+                    success=False,
+                    error="自动技能执行需要 Agent 工具路由器（AgentSkill Manager未启用）",
+                )
+            rendered = self._render_params(step_params, step_outputs)
+            try:
+                _rv = self._tool_router.execute(
+                    tool_name=tool_name,
+                    params=rendered,
+                    agent_id=context.get("agent_id") if context else None,
+                    user_id=context.get("user_id") if context else None,
+                )
+                result = await _rv if asyncio.iscoroutine(_rv) else _rv
+            except Exception as exc:
+                return SkillResult(
+                    success=False,
+                    error=f"第 {idx} 步工具 {tool_name} 异常: {exc}",
+                )
+            if result is None or not getattr(result, "success", False):
+                return SkillResult(
+                    success=False,
+                    error=getattr(result, "error", None)
+                    or f"第 {idx} 步工具 {tool_name} 失败",
+                )
+            step_outputs[idx] = getattr(result, "result", None)
+        return SkillResult(success=True, data=step_outputs)
+
+    @staticmethod
+    def _render_params(
+        params: Dict[str, Any], step_outputs: Dict[int, Any]
+    ) -> Dict[str, Any]:
+        """把 `{step_<idx>.<field>}` 占位符替换为前序步骤输出。"""
+        import re
+
+        pattern = re.compile(r"\{step_(\d+)(?:\.([\w\.]+))?\}")
+
+        def lookup(match):
+            idx = int(match.group(1))
+            path = match.group(2)
+            value = step_outputs.get(idx)
+            if value is None or not path:
+                return ""
+            for part in path.split("."):
+                if isinstance(value, dict):
+                    value = value.get(part)
+                else:
+                    value = getattr(value, part, None)
+                if value is None:
+                    return ""
+            return str(value)
+
+        rendered: Dict[str, Any] = {}
+        for key, value in params.items():
+            if isinstance(value, str):
+                rendered[key] = pattern.sub(lookup, value)
+            else:
+                rendered[key] = value
+        return rendered
 
 
 class MemorySkill(Skill):
@@ -375,21 +478,35 @@ class SkillRegistry:
 
         此方法接受 manifest 对象,从中提取 name/description 构造 Skill 后
         委托到 register()。如果 manifest 已是 Skill 实例,直接注册。
+
+        当 manifest.config 含 tool_sequence（来自模式挖掘 / NL 合成 / AutoSkillBuilder
+        的自动技能 manifest）时，自动构造可执行的 ToolSequenceSkill，
+        让"能看见不能调"的空壳变回真正可运行的技能。
         """
         try:
             if isinstance(manifest, Skill):
                 self.register(manifest)
                 return True
-            # manifest 可能是任意对象,尝试从常用字段构造 Skill
             name = getattr(manifest, "name", None) or getattr(manifest, "id", None) or str(manifest)
             description = getattr(manifest, "description", "") or ""
-            skill = Skill(name=name, description=description)
-            # [BUGFIX] 保留 manifest 携带的可执行元数据(config)，避免合成工具注册成
-            # 仅 name/description 的空壳。chat_pipeline._register_synthesized_tool 传入的
-            # neurova.skills.models.Skill 与本地 Skill 是独立类，isinstance 为 False
-            # 会走到此分支，原实现只取 name/description 导致 config 全部丢失。
             _config = getattr(manifest, "config", None)
-            skill.config = _config if isinstance(_config, dict) else {}
+            config_dict = _config if isinstance(_config, dict) else {}
+
+            # 自动技能：含 tool_sequence 时构造可执行子类
+            if isinstance(config_dict.get("tool_sequence"), list) and config_dict["tool_sequence"]:
+                tool_router = getattr(self, "tool_router", None)
+                skill = ToolSequenceSkill(
+                    name=name,
+                    description=description,
+                    tool_sequence=config_dict["tool_sequence"],
+                    tool_router=tool_router,
+                )
+                skill.config = config_dict  # 保留原 manifest 的所有元数据
+                self.register(skill)
+                return True
+
+            skill = Skill(name=name, description=description)
+            skill.config = config_dict
             self.register(skill)
             return True
         except Exception:

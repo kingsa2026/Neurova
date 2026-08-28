@@ -15,11 +15,16 @@
 - GET  /v1/projects/{project_id}/teams/{team_id}/agents
 - POST /v1/projects/{project_id}/tasks            （注册 Workflow 定时作业）
 - POST /v1/projects/{project_id}/tasks/{task_id}/pause|resume
+
+数据源说明：项目 CRUD 与团队/任务统一走 collaboration_isolation 管理器
+（单一数据源 + 落盘持久化）。历史上这里曾用内存 dict / 不存在的
+ProjectManager 做兜底，与团队任务的存储不同源，导致建完项目后
+/teams、/tasks 恒 404 且重启丢数据 —— 该路径已删除。
 """
 
 from neurova.core.logger import get_logger
 import time
-import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -28,6 +33,9 @@ from pydantic import BaseModel, Field
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# 无鉴权上下文时的默认所有者（API 层暂无用户会话，权限校验在 manager 内按成员角色执行）
+_DEFAULT_OWNER = "default"
 
 
 class ProjectInfo(BaseModel):
@@ -71,134 +79,154 @@ class ProjectStats(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 内存存储
+# 数据源：collaboration_isolation（单一存储）
 # ---------------------------------------------------------------------------
 
-_projects_store: Dict[str, Dict[str, Any]] = {}
+
+def _get_iso_manager():
+    """获取协作隔离管理器（项目持久化存储）"""
+    from neurova.collaboration.collaboration_isolation import get_collaboration_manager
+
+    return get_collaboration_manager()
 
 
-def _get_pm():
-    """获取 ProjectManager"""
+def _get_scheduler():
+    """获取 TaskScheduler 单例（不可用时返回 None，任务仅落库不调度）"""
     try:
-        from neurova.projects.project_manager import ProjectManager
+        from neurova.agent.scheduler import get_scheduler
 
-        return ProjectManager()
-    except Exception:
+        return get_scheduler()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("TaskScheduler 不可用，任务将不会定时执行: %s", e)
         return None
 
 
+def _project_to_info(project) -> ProjectInfo:
+    """Project → ProjectInfo（对外 API 形状）"""
+    return ProjectInfo(
+        project_id=project.project_id,
+        name=project.name,
+        description=project.description,
+        status=project.status.value,
+        owner_id=project.owner_id,
+        teams_count=len(project.teams),
+        tasks_count=len(project.tasks),
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+    )
+
+
+def _require_project(iso, project_id: str):
+    """取项目；不存在或已软删除 → 404"""
+    project = iso.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+    from neurova.collaboration.collaboration_isolation import ProjectStatus
+
+    if project.status == ProjectStatus.DELETED:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+    return project
+
+
 # ---------------------------------------------------------------------------
-# 路由
+# 路由：项目 CRUD
 # ---------------------------------------------------------------------------
 
 
 @router.post("", response_model=ProjectInfo)
 async def create_project(body: ProjectCreate):
-    """创建新项目"""
-    project_id = str(uuid.uuid4())
-    now = time.time()
-
-    pm = _get_pm()
-    if pm and hasattr(pm, "create_project"):
-        try:
-            result = await pm.create_project(name=body.name, description=body.description)
-            return ProjectInfo(**result)
-        except Exception as e:
-            logger.warning("ProjectManager.create_project failed: %s", e)
-
-    project = {
-        "project_id": project_id,
-        "name": body.name,
-        "description": body.description,
-        "status": "active",
-        "owner_id": "default",
-        "teams_count": 0,
-        "tasks_count": 0,
-        "created_at": now,
-        "updated_at": now,
-    }
-    _projects_store[project_id] = project
-    return ProjectInfo(**project)
+    """创建新项目（持久化到 collaboration/projects 目录）"""
+    iso = _get_iso_manager()
+    project = iso.create_project(name=body.name, description=body.description, owner_id=_DEFAULT_OWNER)
+    if project is None:
+        raise HTTPException(status_code=500, detail="项目创建失败")
+    return _project_to_info(project)
 
 
 @router.get("", response_model=List[ProjectInfo])
 async def list_projects(
     status: Optional[str] = Query(default=None, description="按状态筛选"),
 ):
-    """列出所有项目"""
-    pm = _get_pm()
-    if pm and hasattr(pm, "list_projects"):
-        try:
-            projects = await pm.list_projects(status=status)
-            return [ProjectInfo(**p) for p in projects]
-        except Exception as e:
-            logger.warning("ProjectManager.list_projects failed: %s", e)
-
-    projects = list(_projects_store.values())
+    """列出所有项目（不含已删除）"""
+    iso = _get_iso_manager()
+    projects = iso.list_projects()
     if status:
-        projects = [p for p in projects if p.get("status") == status]
-    return [ProjectInfo(**p) for p in projects]
+        projects = [p for p in projects if p.status.value == status]
+    return [_project_to_info(p) for p in projects]
 
 
 @router.get("/{project_id}", response_model=ProjectInfo)
 async def get_project(project_id: str):
     """获取项目详情"""
-    pm = _get_pm()
-    if pm and hasattr(pm, "get_project"):
-        try:
-            project = await pm.get_project(project_id)
-            if project:
-                return ProjectInfo(**project)
-        except Exception as e:
-            logger.warning("ProjectManager.get_project failed: %s", e)
-
-    project = _projects_store.get(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
-    return ProjectInfo(**project)
+    iso = _get_iso_manager()
+    project = _require_project(iso, project_id)
+    return _project_to_info(project)
 
 
 @router.put("/{project_id}", response_model=ProjectInfo)
 async def update_project(project_id: str, body: ProjectUpdate):
-    """更新项目"""
-    project = _projects_store.get(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+    """更新项目（名称/描述经 manager 权限校验；状态映射 archive/restore）"""
+    from neurova.collaboration.collaboration_isolation import ProjectStatus
 
+    iso = _get_iso_manager()
+    project = _require_project(iso, project_id)
+
+    updates: Dict[str, Any] = {}
     if body.name is not None:
-        project["name"] = body.name
+        updates["name"] = body.name
     if body.description is not None:
-        project["description"] = body.description
-    if body.status is not None:
-        project["status"] = body.status
-    project["updated_at"] = time.time()
+        updates["description"] = body.description
 
-    return ProjectInfo(**project)
+    if updates:
+        updated = iso.update_project(project_id, _DEFAULT_OWNER, updates)
+        if updated is None:
+            raise HTTPException(status_code=403, detail="无权限更新项目")
+        project = updated
+
+    if body.status is not None:
+        if body.status == "deleted":
+            raise HTTPException(status_code=400, detail="请使用 DELETE 端点删除项目")
+        try:
+            new_status = ProjectStatus(body.status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"无效的项目状态: {body.status}")
+
+        if new_status == ProjectStatus.ARCHIVED:
+            project.archive()
+        elif new_status == ProjectStatus.ACTIVE:
+            project.restore()
+        else:
+            project.status = new_status
+            project.updated_at = time.time()
+        iso._save_project(project)
+
+    return _project_to_info(project)
 
 
 @router.delete("/{project_id}")
 async def delete_project(project_id: str):
-    """删除项目"""
-    if project_id not in _projects_store:
-        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
-    del _projects_store[project_id]
+    """删除项目（软删除，数据保留在磁盘）"""
+    iso = _get_iso_manager()
+    _require_project(iso, project_id)
+
+    if not iso.delete_project(project_id, _DEFAULT_OWNER):
+        raise HTTPException(status_code=403, detail="无权限删除项目")
     return {"code": 0, "message": "Project deleted"}
 
 
 @router.get("/{project_id}/stats", response_model=ProjectStats)
 async def get_project_stats(project_id: str):
-    """获取项目统计"""
-    project = _projects_store.get(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+    """获取项目统计（团队/任务/工作流计数来自同一存储）"""
+    iso = _get_iso_manager()
+    project = _require_project(iso, project_id)
 
     return ProjectStats(
         project_id=project_id,
-        teams_count=project.get("teams_count", 0),
-        tasks_count=project.get("tasks_count", 0),
+        teams_count=len(project.teams),
+        tasks_count=len(project.tasks),
         completed_tasks=0,
-        active_tasks=0,
-        workflows_count=0,
+        active_tasks=sum(1 for t in project.tasks.values() if t.status == "active"),
+        workflows_count=len(project.workflows),
     )
 
 
@@ -223,33 +251,8 @@ class ProjectTaskCreate(BaseModel):
     name: str = Field(..., description="任务名称")
     workflow_id: str = Field(..., description="画布工作流 ID")
     description: str = ""
-    # {type: cron|interval, cron?, interval_seconds?, timezone?}
+    # {type: cron|interval, cron?, interval_seconds?, timezone?, start_date?, end_date?}
     schedule_config: Dict[str, Any] = Field(default_factory=dict)
-
-
-def _get_iso_manager():
-    """获取协作隔离管理器（项目持久化存储）"""
-    from neurova.collaboration.collaboration_isolation import get_collaboration_manager
-
-    return get_collaboration_manager()
-
-
-def _get_scheduler():
-    """获取 TaskScheduler 单例（不可用时返回 None，任务仅落库不调度）"""
-    try:
-        from neurova.agent.scheduler import get_scheduler
-
-        return get_scheduler()
-    except Exception as e:  # noqa: BLE001
-        logger.warning("TaskScheduler 不可用，任务将不会定时执行: %s", e)
-        return None
-
-
-def _require_project(iso, project_id: str):
-    project = iso.get_project(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
-    return project
 
 
 @router.post("/{project_id}/teams")
@@ -306,6 +309,21 @@ async def list_project_tasks(project_id: str):
     return {"code": 0, "message": "success", "data": {"tasks": [t.to_dict() for t in project.tasks.values()]}}
 
 
+def _parse_schedule_datetime(value: Any, field: str) -> Optional[datetime]:
+    """解析 ISO 8601 日期边界（start_date/end_date）；非法值 → 400"""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"无效的 {field}: {value!r}（需 ISO 8601 格式，如 2026-09-01T09:30:00）",
+        )
+
+
 @router.post("/{project_id}/tasks")
 async def create_project_task(project_id: str, body: ProjectTaskCreate):
     if not body.workflow_id.strip():
@@ -314,6 +332,10 @@ async def create_project_task(project_id: str, body: ProjectTaskCreate):
     sched_type = str(body.schedule_config.get("type", "cron"))
     if sched_type not in ("cron", "interval"):
         raise HTTPException(status_code=400, detail=f"不支持的调度类型: {sched_type}（仅 cron/interval）")
+
+    # 日期边界（一次性任务靠 end_date 防止 cron 周年重复触发）
+    start_dt = _parse_schedule_datetime(body.schedule_config.get("start_date"), "start_date")
+    end_dt = _parse_schedule_datetime(body.schedule_config.get("end_date"), "end_date")
 
     iso = _get_iso_manager()
     project = _require_project(iso, project_id)
@@ -351,6 +373,8 @@ async def create_project_task(project_id: str, body: ProjectTaskCreate):
                     cron=body.schedule_config.get("cron"),
                     interval_seconds=body.schedule_config.get("interval_seconds"),
                     timezone=str(body.schedule_config.get("timezone", "Asia/Shanghai")),
+                    start_date=start_dt,
+                    end_date=end_dt,
                 ),
                 request=TaskRequest(
                     type=TaskType.WORKFLOW,

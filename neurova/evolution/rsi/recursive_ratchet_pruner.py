@@ -235,6 +235,27 @@ class RecursiveRatchetPruner:
         # 返回最终最优方案
         result = current_candidates[0] if current_candidates else None
 
+        # 真棘轮守卫：若最后一个筛选阶段是细筛（完整验证）且最优候选
+        # 验证得分为 0（未通过验证），则不应返回任何候选——否则编排器会把
+        # 明确无效的方案当作"最优"应用（P0 缺陷：此前返回 score=0 的候选，
+        # 由下游 rollback 兜底，但浪费迭代且掩盖剪枝语义）。
+        # 仅在 validation_fn 实际提供（细筛确实执行了完整验证）时才过滤：
+        # 未提供 validation_fn 时 fine 阶段回退用 quick_eval 分数（validation_score
+        # 恒为 0.0），此时过滤会误伤合法候选；early-exit（未进入细筛）同样不误伤。
+        if (
+            result
+            and validation_fn is not None
+            and self.prune_history
+            and self.prune_history[-1].precision == self.PRECISION_FINE
+        ):
+            if result.validation_score <= 0.0:
+                logger.warning(
+                    "最佳候选 %s 未通过细筛验证 (score=%.3f)，返回 None 拒绝该方案",
+                    result.id,
+                    result.validation_score,
+                )
+                return None
+
         if result:
             # R-2: 根据实际经过的阶段选择正确的 score 字段
             if self.prune_history:

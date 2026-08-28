@@ -39,6 +39,7 @@ from neurova.core.logger import get_logger
 import os
 import sqlite3
 import threading
+import time
 from typing import Any, Dict, List, Optional
 
 from neurova.cognitive_layers.memory_layer.bus_event import (
@@ -136,6 +137,8 @@ class MemoryManager:
         self._memories: Dict[str, Memory] = {}
         self._counter = 0
         self._lock = threading.RLock()
+        self._last_decay_at: Optional[float] = None   # 节流：上次 run_decay_cycle 的 monotonic 时间戳
+        self._decay_cursor: int = 0                   # 轮询：有界衰减的游标
 
         # 子模块引用（延迟初始化）
         self._storage = None
@@ -1058,7 +1061,13 @@ class MemoryManager:
             self._persist_memory(mem)
             return True
 
-    def run_decay_cycle(self, hours: float = 1.0, rate: float = 1.0) -> int:
+    def run_decay_cycle(
+        self,
+        hours: float = 1.0,
+        rate: float = 1.0,
+        max_memories: Optional[int] = None,
+        min_interval_seconds: float = 0.0,
+    ) -> int:
         """运行温度衰减周期 — 应用 TemperatureEngine.on_decay 贝叶斯遗忘曲线
 
         Bug 2 修复：原实现直接调 Memory.decay()（简单线性 temp -= rate*hours），
@@ -1076,10 +1085,23 @@ class MemoryManager:
         Args:
             hours: 保留参数（贝叶斯曲线使用 days_idle，不直接使用 hours）
             rate:  保留参数（贝叶斯曲线通过 curve_factor 等因子调整，不直接使用 rate）
+            max_memories: 单次处理上限（防 116 万条全量阻塞事件循环），None=不限制
+            min_interval_seconds: 节流窗口（秒），距上次运行不足此值时跳过，0=不节流
 
         Returns:
             处理的记忆数量
         """
+        # 节流检查：距上次运行不足 min_interval_seconds 时跳过
+        if min_interval_seconds > 0 and self._last_decay_at is not None:
+            elapsed = time.monotonic() - self._last_decay_at
+            if elapsed < min_interval_seconds:
+                logger.debug(
+                    "run_decay_cycle 节流跳过: 距上次 %.1fs < %.1fs",
+                    elapsed,
+                    min_interval_seconds,
+                )
+                return 0
+
         # 延迟导入避免循环依赖
         from datetime import datetime, timezone
         from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
@@ -1091,7 +1113,18 @@ class MemoryManager:
         # 加锁保护遍历与修改（Bug 5 关联）
         with self._lock:
             # 用 list() 复制视图，避免迭代过程中其他线程修改 dict 抛 RuntimeError
-            for mem in list(self._memories.values()):
+            all_items = list(self._memories.values())
+
+            # 有界处理：轮询游标选 max_memories 条，避免全量阻塞事件循环
+            if max_memories is not None and max_memories > 0 and len(all_items) > max_memories:
+                n = len(all_items)
+                start = self._decay_cursor % n
+                items = [all_items[(start + i) % n] for i in range(max_memories)]
+                self._decay_cursor = (start + max_memories) % n
+            else:
+                items = all_items
+
+            for mem in items:
                 # 已删除/已遗忘记忆跳过
                 if mem.temperature <= 0:
                     continue
@@ -1145,6 +1178,9 @@ class MemoryManager:
                 self._persist_memory(mem)
 
                 count += 1
+
+        # 记录本次运行时间（节流窗口基准）
+        self._last_decay_at = time.monotonic()
 
         return count
 

@@ -144,6 +144,31 @@ def _register_default_health_checks(health_checker) -> None:
     )
 
 
+def _get_default_llm():
+    """获取默认 LLM 服务商和模型，返回 (provider_id, model_name)"""
+    provider = ""
+    model = "gpt-4"
+    try:
+        from neurova.llm.provider_manager import get_provider_manager
+
+        pm = get_provider_manager()
+        # 优先用默认服务商（需要有 API Key）
+        dp = pm.get_default_provider()
+        if dp and dp.api_key:
+            provider = dp.id
+            model = dp.default_model or (dp.models[0] if dp.models else "gpt-4")
+        else:
+            # 默认服务商没有 Key，找第一个有 Key 的
+            for p in pm.list_providers():
+                if p.api_key and p.enabled:
+                    provider = p.id
+                    model = p.default_model or (p.models[0] if p.models else "gpt-4")
+                    break
+    except Exception:
+        pass
+    return provider, model
+
+
 def _load_saved_agents(app_state: AppState, default_workspace: str) -> None:
     """从 workspace 目录加载已持久化的 agent 配置"""
     import json as _json
@@ -155,7 +180,30 @@ def _load_saved_agents(app_state: AppState, default_workspace: str) -> None:
             continue
         config_path = os.path.join(workspaces_dir, agent_id, "agent_config.json")
         if not os.path.exists(config_path):
-            continue
+            workspace = os.path.join(workspaces_dir, agent_id)
+            has_data = os.path.isdir(os.path.join(workspace, "memory"))
+            if has_data:
+                # 自动重建 agent_config.json，恢复有记忆数据的 agent
+                logger.info(
+                    "Agent '%s' 存在记忆数据但缺少配置，自动重建 agent_config.json", agent_id
+                )
+                provider, model = _get_default_llm()
+                restored_cfg = {
+                    "name": agent_id,
+                    "model": model,
+                    "provider": provider,
+                    "description": "（自动恢复）",
+                    "enable_memory": True,
+                }
+                try:
+                    with open(config_path, "w", encoding="utf-8") as f:
+                        _json.dump(restored_cfg, f, ensure_ascii=False, indent=2)
+                    logger.info("已自动为 agent '%s' 重建配置文件", agent_id)
+                except Exception as e:
+                    logger.warning("自动重建 agent '%s' 配置失败: %s", agent_id, e)
+                    continue
+            else:
+                continue
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 cfg = _json.load(f)
@@ -255,34 +303,19 @@ def _initialize_components(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("NEUTokenManager init failed: %s", e)
 
-    # 初始化默认 Agent — 使用 provider_manager 的默认服务商和模型
+    # 计算默认工作目录（在 try 块外，供 _load_saved_agents 使用）
+    default_workspace = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "agent_workspaces", "default"
+    )
+
+    # 初始化默认 Agent
     try:
         from neurova.agent_core import Agent, AgentConfig
 
-        default_workspace = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "..", "agent_workspaces", "default"
-        )
         os.makedirs(default_workspace, exist_ok=True)
 
         # 从 provider_manager 获取默认 provider/model
-        _default_llm_provider = ""
-        _default_llm_model = "gpt-4"
-        try:
-            pm = get_provider_manager()
-            # 优先用默认服务商（需要有 API Key）
-            dp = pm.get_default_provider()
-            if dp and dp.api_key:
-                _default_llm_provider = dp.id
-                _default_llm_model = dp.default_model or (dp.models[0] if dp.models else "gpt-4")
-            else:
-                # 默认服务商没有 Key，找第一个有 Key 的
-                for p in pm.list_providers():
-                    if p.api_key and p.enabled:
-                        _default_llm_provider = p.id
-                        _default_llm_model = p.default_model or (p.models[0] if p.models else "gpt-4")
-                        break
-        except Exception:
-            pass
+        _default_llm_provider, _default_llm_model = _get_default_llm()
 
         config = AgentConfig(
             name="Neurova",
@@ -295,11 +328,11 @@ def _initialize_components(app_state: AppState) -> None:
         agent = Agent(config=config)
         app_state.add_agent("default", agent)
         logger.info("Default Agent initialized")
-
-        # 加载已持久化的 agent（从 workspace 中的 agent_config.json）
-        _load_saved_agents(app_state, default_workspace)
     except Exception as e:
         logger.warning("Default Agent init failed: %s", e)
+
+    # 加载已持久化的 agent（独立于默认 Agent 初始化，确保即使默认 Agent 失败也能加载已有 agent）
+    _load_saved_agents(app_state, default_workspace)
 
     # 初始化 TTS Manager
     try:

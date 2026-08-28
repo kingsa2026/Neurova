@@ -22,8 +22,14 @@ router = APIRouter()
 
 
 def _get_app_state(request: Request) -> Any:
-    """获取应用状态"""
-    return getattr(request.app, "state", None)
+    """获取全局应用状态（Dict，由 app.py 通过 set_app_state 注入）
+
+    注意：不能使用 request.app.state（Starlette State 对象），
+    真正的 agent 列表在 neurova.api.endpoints 模块级 _app_state 中。
+    """
+    from neurova.api.endpoints import get_app_state
+
+    return get_app_state()
 
 
 @router.get("/home/data")
@@ -33,17 +39,19 @@ async def get_home_data(request: Request):
         # 尝试从实际模块获取数据
         app_state = _get_app_state(request)
 
-        # 获取 agent 数量
+        # 获取 agent 数量（从 app_state["agents"] 字典统计）
         agent_count = 0
-        if app_state and hasattr(app_state, "agent"):
-            agent_count = 1  # 当前 agent
+        if app_state:
+            agents = app_state.get("agents") or {}
+            if isinstance(agents, dict):
+                agent_count = len(agents)
 
         # 获取记忆数量
         memory_count = 0
-        if app_state and hasattr(app_state, "memory_manager"):
+        if app_state:
             try:
-                mm = app_state.memory_manager
-                if hasattr(mm, "get_stats"):
+                mm = app_state.get("memory_manager")
+                if mm and hasattr(mm, "get_stats"):
                     stats = mm.get_stats()
                     memory_count = stats.get("total_memories", 0)
             except Exception:

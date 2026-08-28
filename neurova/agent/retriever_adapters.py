@@ -43,11 +43,15 @@ class UnifiedRetrieverAdapter:
         start_time = time.monotonic()
 
         try:
-            # 调用 UnifiedRetriever
-            memories = self._retriever.retrieve(
+            # 调用 UnifiedRetriever（兼容同步 / async 两种实现）
+            result = self._retriever.retrieve(
                 query=context.query,
                 limit=context.limit,
             )
+            if asyncio.iscoroutine(result):
+                memories = await result
+            else:
+                memories = result
 
             elapsed = time.monotonic() - start_time
 

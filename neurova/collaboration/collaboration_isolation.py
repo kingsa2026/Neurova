@@ -14,12 +14,19 @@ from neurova.core.logger import get_logger
 import shutil
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 logger = get_logger(__name__)
+
+
+# 实体 ID 唯一性：纯毫秒时间戳在同一毫秒内会碰撞（互相覆盖），
+# id(object()) 因地址复用同样不可靠；统一加 uuid 片段保证唯一
+def _unique_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
 class ProjectStatus(str, Enum):
@@ -101,7 +108,7 @@ class ProjectMember:
 class ProjectFile:
     """项目文件"""
 
-    file_id: str = field(default_factory=lambda: f"file_{int(time.time() * 1000)}")
+    file_id: str = field(default_factory=lambda: _unique_id("file"))
     name: str = ""
     path: str = ""
     file_type: str = ""  # file, folder
@@ -131,7 +138,7 @@ class ProjectFile:
     def from_dict(cls, data: Dict[str, Any]) -> "ProjectFile":
         """从字典创建"""
         return cls(
-            file_id=data.get("file_id", f"file_{int(time.time() * 1000)}"),
+            file_id=data.get("file_id", _unique_id("file")),
             name=data.get("name", ""),
             path=data.get("path", ""),
             file_type=data.get("file_type", "file"),
@@ -148,7 +155,7 @@ class ProjectFile:
 class ProjectWorkflow:
     """项目工作流"""
 
-    workflow_id: str = field(default_factory=lambda: f"workflow_{int(time.time() * 1000)}")
+    workflow_id: str = field(default_factory=lambda: _unique_id("workflow"))
     name: str = ""
     description: str = ""
     definition: Dict[str, Any] = field(default_factory=dict)
@@ -178,7 +185,7 @@ class ProjectWorkflow:
     def from_dict(cls, data: Dict[str, Any]) -> "ProjectWorkflow":
         """从字典创建"""
         return cls(
-            workflow_id=data.get("workflow_id", f"workflow_{int(time.time() * 1000)}"),
+            workflow_id=data.get("workflow_id", _unique_id("workflow")),
             name=data.get("name", ""),
             description=data.get("description", ""),
             definition=data.get("definition", {}),
@@ -195,7 +202,7 @@ class ProjectWorkflow:
 class ProjectTeam:
     """项目团队（聚合 Agent 成员，供工作流蜂群编排）"""
 
-    team_id: str = field(default_factory=lambda: f"team_{int(time.time() * 1000)}_{id(object()):x}")
+    team_id: str = field(default_factory=lambda: _unique_id("team"))
     name: str = ""
     description: str = ""
     # 成员: {agent_id: {agent_name, role}}
@@ -226,7 +233,7 @@ class ProjectTeam:
 class ProjectTask:
     """项目任务（绑定工作流定时执行）"""
 
-    task_id: str = field(default_factory=lambda: f"task_{int(time.time() * 1000)}_{id(object()):x}")
+    task_id: str = field(default_factory=lambda: _unique_id("task"))
     name: str = ""
     workflow_id: str = ""  # 画布 id
     # 调度配置: {type: cron|interval, cron?, interval_seconds?, timezone?}
@@ -269,7 +276,7 @@ class ProjectTask:
 class Project:
     """项目"""
 
-    project_id: str = field(default_factory=lambda: f"project_{int(time.time() * 1000)}")
+    project_id: str = field(default_factory=lambda: _unique_id("project"))
     name: str = ""
     description: str = ""
     owner_id: str = ""
@@ -323,7 +330,7 @@ class Project:
     def from_dict(cls, data: Dict[str, Any]) -> "Project":
         """从字典创建"""
         project = cls(
-            project_id=data.get("project_id", f"project_{int(time.time() * 1000)}"),
+            project_id=data.get("project_id", _unique_id("project")),
             name=data.get("name", ""),
             description=data.get("description", ""),
             owner_id=data.get("owner_id", ""),
@@ -1160,8 +1167,11 @@ class CollaborationIsolationManager:
                     continue
 
                 # 如果用户是所有者，删除项目
+                # （hard_delete_project 按 OWNER 校验调用者，而管理员不是
+                #   项目成员——传 admin_id 恒被拒；此处已确认 owner_id ==
+                #   user_id，以 owner 身份执行，admin 权限由本函数语义保证）
                 if project.owner_id == user_id:
-                    if self.hard_delete_project(project_id, admin_id):
+                    if self.hard_delete_project(project_id, user_id):
                         deleted_count += 1
 
         logger.info("Admin %s deleted %s projects of user %s", admin_id, deleted_count, user_id)

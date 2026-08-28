@@ -310,7 +310,7 @@ async def create_agent(
         try:
             _save_agent_config(agent)
         except Exception as e:
-            logger.warning("Failed to persist new agent config: %s", e)
+            logger.error("Failed to persist new agent config: %s", e, exc_info=True)
 
         # B11: 同步持久化到 AgentConfigManager（data/agents/agents.json）
         try:
@@ -321,7 +321,7 @@ async def create_agent(
                 config={"model": body.model or "", "provider": body.provider or ""},
             )
         except Exception as e:
-            logger.warning("AgentConfigManager.create_agent 失败: %s", e)
+            logger.error("AgentConfigManager.create_agent 失败: %s", e, exc_info=True)
 
         info = agent_to_info(agent)
         return AgentInfo(**info)
@@ -382,7 +382,7 @@ async def update_agent(
     try:
         _save_agent_config(agent)
     except Exception as e:
-        logger.warning("Failed to persist agent config: %s", e)
+        logger.error("Failed to persist agent config: %s", e, exc_info=True)
 
     # B11: 同步更新 AgentConfigManager 持久化配置
     try:
@@ -412,6 +412,10 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...)):
     if agent_id not in agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
+    # 禁止删除系统默认 Agent（保护其工作目录与记忆数据）
+    if agent_id == "default":
+        raise HTTPException(status_code=400, detail="Cannot delete default agent")
+
     # 关闭 Agent
     agent = agents[agent_id]
     if hasattr(agent, "shutdown"):
@@ -430,17 +434,16 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...)):
         logger.warning("AgentConfigManager.delete_agent 失败: %s", e)
 
     # 清理 workspace 目录（防止重启后被重新加载）
+    # 使用 shutil.rmtree 彻底删除整个工作目录，避免残留 memory/attachments 等子目录
+    # 导致重启后出现"有数据但无 agent_config.json"的幽灵 agent
     try:
         workspaces_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "agent_workspaces")
         agent_workspace = os.path.join(workspaces_dir, agent_id)
-        config_file = os.path.join(agent_workspace, "agent_config.json")
-        if os.path.exists(config_file):
-            os.remove(config_file)
-            logger.info("Removed agent_config.json for %s", agent_id)
-        # 如果目录为空则删除
-        if os.path.exists(agent_workspace) and not os.listdir(agent_workspace):
-            os.rmdir(agent_workspace)
-            logger.info("Removed empty workspace for %s", agent_id)
+        if os.path.isdir(agent_workspace):
+            import shutil
+
+            shutil.rmtree(agent_workspace, ignore_errors=True)
+            logger.info("Removed workspace for %s: %s", agent_id, agent_workspace)
     except Exception as e:
         logger.warning("Failed to clean workspace for %s: %s", agent_id, e)
 

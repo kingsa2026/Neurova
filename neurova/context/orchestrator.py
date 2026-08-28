@@ -39,10 +39,18 @@ class ContextOrchestrator:
     - growth_log_manager, recall_engine
     """
 
-    def __init__(self, agent_ref, use_pool: bool = True, auto_tag: bool = False):
+    def __init__(
+        self,
+        agent_ref,
+        use_pool: bool = True,
+        auto_tag: bool = False,
+        session_id: str = None,
+    ):
         self._agent = agent_ref
         self.use_pool = use_pool
         self.auto_tag = auto_tag
+        # 根因 C 修复: 持有 session_id 标识, 让 session 隔离在 pool/chunk 级别都生效
+        self._session_id = session_id
 
         # 初始化 ContextPool（如果启用）
         if use_pool:
@@ -55,15 +63,27 @@ class ContextOrchestrator:
             self.context_pool = ContextPool(
                 user_id=getattr(agent_ref, "user_id", "default"),
                 agent_id=getattr(agent_ref, "agent_id", "default"),
+                session_id=session_id,
                 max_tokens=max_tokens,
                 auto_tag=auto_tag,
                 ttl_seconds=0,  # [无损归档] 池是永久归档，TTL 不门禁调取（永不丢失）
             )
             logger.info(
-                "ContextPool 初始化完成（无损归档模式），模型: %s，Token 预算: %s", model_name, max_tokens
+                "ContextPool 初始化完成（无损归档模式），模型: %s，Token 预算: %s, session_id: %s",
+                model_name, max_tokens, session_id,
             )
         else:
             self.context_pool = None
+
+    def set_session_id(self, session_id: str) -> None:
+        """根因 C 修复: 运行时切换 session_id（用于跨 session 调取）"""
+        self._session_id = session_id
+        if self.context_pool is not None:
+            self.context_pool.session_id = session_id
+
+    @property
+    def session_id(self) -> Optional[str]:
+        return self._session_id
 
     # ---- 属性代理（方便内部访问） ----
     @property

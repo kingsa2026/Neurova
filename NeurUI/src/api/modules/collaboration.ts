@@ -142,6 +142,8 @@ export function saveCanvas(payload: SaveCanvasPayload) {
 export interface CanvasSummary {
   id: string
   name: string
+  /** 画布归属项目（轻量项目脚手架：工作流=画布，可归属项目） */
+  project_id?: string | null
   node_count: number
   edge_count: number
   created_at?: number
@@ -188,4 +190,18 @@ export function getCanvas(canvasId: string) {
 /** Update an existing canvas workflow. */
 export function updateCanvas(canvasId: string, payload: SaveCanvasPayload) {
   return api.put<ApiResponse<CanvasSnapshot>>(`${BASE}/canvas/${canvasId}`, payload)
+}
+
+/** Delete a canvas workflow. */
+export function deleteCanvas(canvasId: string) {
+  return api.delete<ApiResponse<{ id: string; deleted: boolean }>>(`${BASE}/canvas/${canvasId}`)
+}
+
+/** Import a ComfyUI workflow JSON as an editable canvas. */
+export function importComfyuiCanvas(payload: {
+  name: string
+  description?: string
+  workflow: Record<string, unknown>
+}) {
+  return api.post<ApiResponse<CanvasSnapshot>>(`${BASE}/comfyui/import-canvas`, payload)
 }
