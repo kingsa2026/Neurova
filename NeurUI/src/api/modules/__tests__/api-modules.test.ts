@@ -727,9 +727,49 @@ describe('projects API', () => {
     expect(mockGet).toHaveBeenCalledWith('/projects')
   })
 
-  it('getProject calls GET /projects/{id}', async () => {
-    await projects.getProject('p1')
+  it('getProjectInfo calls GET /projects/{id}', async () => {
+    await projects.getProjectInfo('p1')
     expect(mockGet).toHaveBeenCalledWith('/projects/p1')
+  })
+
+  it('listProjectTeams calls GET /projects/{id}/teams', async () => {
+    await projects.listProjectTeams('p1')
+    expect(mockGet).toHaveBeenCalledWith('/projects/p1/teams')
+  })
+
+  it('createProjectTeam calls POST /projects/{id}/teams', async () => {
+    await projects.createProjectTeam('p1', { name: 'T' })
+    expect(mockPost).toHaveBeenCalledWith('/projects/p1/teams', { name: 'T' })
+  })
+
+  it('addTeamMember calls POST /projects/{id}/teams/{tid}/members', async () => {
+    await projects.addTeamMember('p1', 't1', { agent_id: 'a1' })
+    expect(mockPost).toHaveBeenCalledWith('/projects/p1/teams/t1/members', { agent_id: 'a1' })
+  })
+
+  it('listProjectTasks calls GET /projects/{id}/tasks', async () => {
+    await projects.listProjectTasks('p1')
+    expect(mockGet).toHaveBeenCalledWith('/projects/p1/tasks')
+  })
+
+  it('createProjectTask calls POST /projects/{id}/tasks', async () => {
+    await projects.createProjectTask('p1', {
+      name: 'K',
+      workflow_id: 'wf1',
+      schedule_config: { type: 'cron', cron: '0 9 * * *' },
+    })
+    expect(mockPost).toHaveBeenCalledWith('/projects/p1/tasks', {
+      name: 'K',
+      workflow_id: 'wf1',
+      schedule_config: { type: 'cron', cron: '0 9 * * *' },
+    })
+  })
+
+  it('pause/resumeProjectTask call POST pause|resume', async () => {
+    await projects.pauseProjectTask('p1', 't1')
+    expect(mockPost).toHaveBeenCalledWith('/projects/p1/tasks/t1/pause')
+    await projects.resumeProjectTask('p1', 't1')
+    expect(mockPost).toHaveBeenCalledWith('/projects/p1/tasks/t1/resume')
   })
 
   it('createProject calls POST /projects', async () => {

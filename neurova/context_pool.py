@@ -119,6 +119,10 @@ class ContextPool:
 
     def add_context(self, context):
         with self._lock:
+            # 根因 A 修复: 自动注入 session_id/agent_id/user_id 到 chunk.metadata
+            # (用户显式传入的字段优先,不被覆盖)
+            self._inject_isolation_tags(context)
+
             if self.auto_tag and hasattr(self, "_auto_tagger"):
                 context = self._auto_tagger.auto_tag(context)
 
@@ -144,6 +148,96 @@ class ContextPool:
             # 整条选取）。驱逐台账（_archive_evicted）保留兼容，主流程不再触发。
             self._collector.add_context(context)
             self._cache_version += 1
+
+    def _inject_isolation_tags(self, context) -> None:
+        """根因 A 修复: 把 session_id/agent_id/user_id 注入到 chunk.metadata
+
+        用户显式传入的字段优先, 不会被覆盖。
+        """
+        if context.metadata is None:
+            context.metadata = {}
+        # 仅在缺失时注入, 尊重用户显式传入的值
+        if "session_id" not in context.metadata and self.session_id is not None:
+            context.metadata["session_id"] = self.session_id
+        if "agent_id" not in context.metadata and self.agent_id is not None:
+            context.metadata["agent_id"] = self.agent_id
+        if "user_id" not in context.metadata and self.user_id is not None:
+            context.metadata["user_id"] = self.user_id
+
+    def query(
+        self,
+        query: str = None,
+        source=None,
+        session_id: str = None,
+        tags: Optional[List[str]] = None,
+        limit: int = 20,
+    ) -> List[Any]:
+        """按需调取上下文(默认当前 session 优先)
+
+        Args:
+            query: 关键词过滤(不区分大小写, content 包含即可)
+            source: 按 ContextSource 过滤
+            session_id: 按 metadata.session_id 过滤(用于跨池/跨 session 调取)
+            tags: 按 tags 列表过滤(任一匹配即可)
+            limit: 最多返回条数
+
+        默认行为:
+            1. 若显式传 session_id → 只返回该 session 的 chunk
+            2. 若未传 session_id 但 pool 有 session_id → 当前 session 优先,
+               限流后剩余名额由跨 session chunk 兜底
+            3. 若 pool 无 session_id → 按 priority 降序(向后兼容)
+
+        Returns:
+            List[ContextInput], 当前 session 优先, 同 session 内按 priority 降序
+        """
+        with self._lock:
+            candidates = self._filter_ttl(list(self._collector._contexts))
+
+        # 关键词过滤
+        if query:
+            q = query.lower()
+            candidates = [c for c in candidates if q in c.content.lower()]
+
+        # source 过滤
+        if source is not None:
+            candidates = [c for c in candidates if c.source == source]
+
+        # 显式 session_id 过滤: 严格限定
+        if session_id is not None:
+            candidates = [
+                c for c in candidates
+                if (c.metadata or {}).get("session_id") == session_id
+            ]
+            candidates.sort(key=lambda c: c.priority, reverse=True)
+            return candidates[:limit]
+
+        # tags 过滤
+        if tags:
+            tag_set = set(tags)
+            candidates = [c for c in candidates if tag_set.intersection(set(c.tags or []))]
+
+        # 当前 session 优先策略:
+        # 1) 分离当前 session 的 chunk 和跨 session 的 chunk
+        # 2) 当前 session 排在最前(按 priority 降序)
+        # 3) 跨 session 兜底(按 priority 降序)
+        # 4) 合并后按 limit 截断
+        if self.session_id is not None:
+            current_session = [
+                c for c in candidates
+                if (c.metadata or {}).get("session_id") == self.session_id
+            ]
+            other_sessions = [
+                c for c in candidates
+                if (c.metadata or {}).get("session_id") != self.session_id
+            ]
+            current_session.sort(key=lambda c: c.priority, reverse=True)
+            other_sessions.sort(key=lambda c: c.priority, reverse=True)
+            merged = current_session + other_sessions
+            return merged[:limit]
+
+        # 无 session 概念: 按 priority 降序(向后兼容)
+        candidates.sort(key=lambda c: c.priority, reverse=True)
+        return candidates[:limit]
 
     # ── Scroll Context: 被驱逐轮次台账与召回（方案 P1-2.2） ──────
 

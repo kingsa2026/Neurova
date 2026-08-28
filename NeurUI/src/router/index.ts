@@ -234,7 +234,13 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'collaboration/projects',
         name: 'CollaborationProjects',
-        component: () => import('@/pages/ProjectPage.vue'),
+        component: () => import('@/projects/ProjectListPage.vue'),
+      },
+      {
+        path: 'projects/:id',
+        name: 'ProjectDetail',
+        component: () => import('@/projects/ProjectDetailPage.vue'),
+        props: true,
       },
       {
         path: 'collaboration/teams',

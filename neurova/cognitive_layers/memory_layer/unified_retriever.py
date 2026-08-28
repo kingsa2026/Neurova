@@ -52,7 +52,7 @@ class UnifiedRetriever:
             f"Hebb: {'是' if hebb_manager else '否'}"
         )
 
-    def retrieve(
+    async def retrieve(
         self,
         query: str,
         limit: int = 10,
@@ -78,7 +78,7 @@ class UnifiedRetriever:
         # 方案B：兼容旧检索器（迁移期间）
         if self._moe:
             try:
-                moe_results = self._moe.retrieve(query)
+                moe_results = await self._moe.retrieve(query, limit=limit)
                 results.extend(moe_results)
             except Exception as e:
                 logger.warning("MoE 检索失败: %s", e)

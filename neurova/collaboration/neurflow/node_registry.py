@@ -282,12 +282,14 @@ class NodeRegistry:
 
     def sync_all(self) -> Dict[str, int]:
         """
-        同步所有节点
+        同步所有节点（工具/技能/MCP/ComfyUI/电商/短剧视频）
 
         Returns:
             同步结果字典
         """
-        return {"tools": self.sync_tools(), "skills": self.sync_skills(), "mcp": self.sync_mcp()}
+        from .adapters import sync_all as _sync_all
+
+        return _sync_all(self)
 
     # ==================== 内部方法 ====================
 

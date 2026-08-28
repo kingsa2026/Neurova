@@ -186,7 +186,7 @@ class AgentConfig:
         enable_streaming: bool = False,
         enable_active_skill_acquisition: bool = False,  # 主动技能获取
         llm_provider: str = "",  # LLM 服务商 ID
-        enable_skill_packer: bool = False,  # 自动打包技能
+        enable_skill_packer: bool = True,  # 自动打包技能（默认开启：让反复出现的工具序列沉淀为可执行技能）
         enable_cognitive_capabilities: bool = True,  # 认知能力
         enable_evolution: bool = True,  # 进化能力
         enable_experience_summary: bool = True,  # 经验总结
@@ -1195,6 +1195,14 @@ class Agent:
         except Exception as e:
             logger.warning("Agent %s: RSI 初始化失败: %s", self.config.name, e)
 
+        # 根因 3 修复: 将 RSI 注入到 evolution 单例, 让经验/工具/记忆信号能触发递归进化
+        if self.rsi_orchestrator is not None and evolution is not None:
+            evolution.rsi_orchestrator = self.rsi_orchestrator
+            logger.info(
+                "Agent %s: RSI 已注入到 EvolutionOrchestrator 单例, 闭环已激活",
+                self.config.name,
+            )
+
         # 5. 初始化 ReasoningTraceManager
         self.trace_manager = ReasoningTraceManager(
             engine=self.cognitive_engine,
@@ -1469,9 +1477,14 @@ class Agent:
                 logger.debug("memory_manager 未初始化，跳过温度更新")
                 return
 
-            # 使用 MemoryManager.run_decay_cycle() 批量衰减所有记忆温度
+            # 使用 MemoryManager.run_decay_cycle() 批量衰减记忆温度
             # 衰减参数：hours=1.0 表示每小时衰减一次，rate=1.0 使用默认衰减率
-            count = self.memory_manager.run_decay_cycle(hours=1.0, rate=1.0)
+            # 性能修复(2026-08-28): 116 万条记忆全量遍历会阻塞事件循环 → HTTP 超时
+            #   1. max_memories=500: 单次最多处理 500 条（轮询游标公平覆盖）
+            #   2. min_interval_seconds=300: 5 分钟内不重复运行（节流）
+            count = self.memory_manager.run_decay_cycle(
+                hours=1.0, rate=1.0, max_memories=500, min_interval_seconds=300.0
+            )
             if count > 0:
                 logger.debug("记忆温度已更新: %s 条记忆", count)
         except Exception as e:

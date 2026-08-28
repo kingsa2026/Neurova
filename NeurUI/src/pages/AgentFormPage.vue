@@ -215,8 +215,8 @@ const fetchProvidersAndModels = async () => {
       ? modelsRes
       : (modelsRes as any)?.data ?? (modelsRes as any)?.models ?? []
 
-    allModelOptions.value = rawModels
-      .map(normalizeModel)
+    allModelOptions.value = (rawModels as unknown[])
+      .map((item) => normalizeModel(item as Record<string, any>))
       .filter((m) => m.provider_id && m.provider_id !== 'system')
       .map((m) => ({
         value: m.id,

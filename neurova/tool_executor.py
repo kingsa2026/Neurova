@@ -775,6 +775,8 @@ class ToolExecutor:
             return await self._execute_subagent_status(params)
         elif tool_name == "list_agents":
             return await self._execute_list_agents(params)
+        elif tool_name == "create_skill":
+            return await self._execute_create_skill(params)
         else:
             return {"error": f"未知内置工具: {tool_name}"}
 
@@ -832,6 +834,63 @@ class ToolExecutor:
         except ImportError:
             return {"error": "Agent 注册中心不可用"}
         return {"agents": agents_info, "count": len(agents_info)}
+
+    async def _execute_create_skill(self, params: Dict) -> Dict:
+        """让 LLM 主动创建可复用技能（一组工具步骤的封装）。
+
+        创建后立即通过 SkillRegistry.register_skill 注册，借助
+        ToolSequenceSkill 的执行体解释器立刻可被调用——下一轮 LLM
+        就能在工具列表中看到这个技能并直接调用。
+        """
+        from types import SimpleNamespace
+
+        name = (params.get("name") or "").strip()
+        description = (params.get("description") or "").strip()
+        steps = params.get("steps")
+        if not name or not description or not steps:
+            missing = [
+                k
+                for k, v in (
+                    ("name", name),
+                    ("description", description),
+                    ("steps", steps),
+                )
+                if not v
+            ]
+            return {"error": f"create_skill 缺少必填参数: {', '.join(missing)}"}
+        if not isinstance(steps, list) or not all(isinstance(s, dict) for s in steps):
+            return {"error": "create_skill.steps 必须是对象列表"}
+
+        tool_sequence: list = []
+        for idx, step in enumerate(steps):
+            step_name = step.get("name")
+            step_params = step.get("params") or {}
+            if not step_name or not isinstance(step_params, dict):
+                return {
+                    "error": f"第 {idx} 步格式错误：必须包含 name 字段和 params 对象"
+                }
+            tool_sequence.append({"tool": step_name, "params": step_params})
+
+        manifest = SimpleNamespace(
+            name=name,
+            id=name,
+            description=description,
+            config={"tool_sequence": tool_sequence, "source": "llm_created"},
+        )
+        registry = getattr(self._agent, "_skill_registry", None)
+        if registry is None:
+            return {"error": "当前 Agent 尚未初始化 SkillRegistry"}
+        if not registry.register_skill(manifest):
+            return {"error": f"注册技能 {name} 失败"}
+        return {
+            "success": True,
+            "skill_name": name,
+            "step_count": len(tool_sequence),
+            "message": (
+                f"技能 {name} 已创建并在 SkillRegistry 中注册，"
+                f"下轮对话起 LLM 即可在工具列表中直接调用"
+            ),
+        }
 
     async def _execute_web_search(self, params: Dict) -> Dict:
         """执行网页搜索"""

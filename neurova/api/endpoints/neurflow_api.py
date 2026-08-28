@@ -29,6 +29,58 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+def _port_to_dict(p) -> Dict[str, Any]:
+    """
+    将端口（input/output）序列化为字典。
+
+    兼容两种存储格式：NodePort 对象或 dict。
+    """
+    if isinstance(p, dict):
+        return {"id": p.get("id", ""), "label": p.get("label", "")}
+    return {"id": getattr(p, "id", ""), "label": getattr(p, "label", "")}
+
+
+def _sub_block_to_dict(b) -> Dict[str, Any]:
+    """
+    将 sub_block 序列化为前端画布可用的完整字典。
+
+    兼容两种存储格式：
+    - SubBlockConfig 对象（属性访问）
+    - dict（注册表实际存储格式，键名可能有 id/name、title/label、default_value/default 之分）
+
+    返回包含 default_value/options/min/max/placeholder 等完整字段，
+    供前端画布节点库渲染 select/slider/textarea 等配置表单。
+    """
+    if isinstance(b, dict):
+        return {
+            "id": b.get("id") or b.get("name") or "",
+            "title": b.get("title") or b.get("label") or "",
+            "type": b.get("type", "input"),
+            "required": bool(b.get("required", False)),
+            "default_value": b.get("default_value", b.get("default")),
+            "options": b.get("options") or [],
+            "placeholder": b.get("placeholder", ""),
+            "description": b.get("description", ""),
+            "min": b.get("min"),
+            "max": b.get("max"),
+            "language": b.get("language"),
+        }
+    # SubBlockConfig / 其他对象
+    return {
+        "id": getattr(b, "id", ""),
+        "title": getattr(b, "title", ""),
+        "type": getattr(b, "type", "input"),
+        "required": bool(getattr(b, "required", False)),
+        "default_value": getattr(b, "default_value", None),
+        "options": getattr(b, "options", None) or [],
+        "placeholder": getattr(b, "placeholder", ""),
+        "description": getattr(b, "description", ""),
+        "min": getattr(b, "min", None),
+        "max": getattr(b, "max", None),
+        "language": getattr(b, "language", None),
+    }
+
+
 def _get_storage() -> NeurflowStorage:
     """获取存储实例（延迟初始化）"""
     if not hasattr(_get_storage, "_instance"):
@@ -322,6 +374,9 @@ async def list_nodes(
 ):
     """列出所有已注册节点"""
     registry = get_node_registry()
+    # 确保内置节点 + 适配器节点（工具/技能/MCP/ComfyUI/电商/短剧视频）均已注册
+    registry.ensure_builtin()
+    registry.sync_all()
 
     if category:
         nodes = registry.list_by_category(category)
@@ -342,12 +397,9 @@ async def list_nodes(
                 "version": n.version,
                 "tags": n.tags,
                 # 端口与配置表单（画布动态节点库渲染用）
-                "inputs": [{"id": p.id, "label": p.label} for p in (n.inputs or [])],
-                "outputs": [{"id": p.id, "label": p.label} for p in (n.outputs or [])],
-                "sub_blocks": [
-                    {"id": b.id, "title": b.title, "type": b.type, "required": b.required}
-                    for b in (n.sub_blocks or [])
-                ],
+                "inputs": [_port_to_dict(p) for p in (n.inputs or [])],
+                "outputs": [_port_to_dict(p) for p in (n.outputs or [])],
+                "sub_blocks": [_sub_block_to_dict(b) for b in (n.sub_blocks or [])],
             }
             for n in nodes
         ],
@@ -407,9 +459,9 @@ async def get_node(node_type: str):
             "icon": node.icon,
             "category": node.category,
             "description": node.description,
-            "sub_blocks": [s.__dict__ for s in node.sub_blocks],
-            "inputs": [i.__dict__ for i in node.inputs],
-            "outputs": [o.__dict__ for o in node.outputs],
+            "sub_blocks": [_sub_block_to_dict(s) for s in node.sub_blocks],
+            "inputs": [_port_to_dict(i) for i in node.inputs],
+            "outputs": [_port_to_dict(o) for o in node.outputs],
             "source": node.source,
             "version": node.version,
             "tags": node.tags,

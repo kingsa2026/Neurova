@@ -185,6 +185,24 @@ def __getattr__(name: str) -> Any:
             _sys.modules.pop(_cache_key, None)
             raise
         return _mod.SkillEvent
+    elif name == "ToolSequenceSkill":
+        # 技能执行体解释器：manifest.tool_sequence → 多步可执行技能
+        import importlib.util as _iu
+        import os as _os
+        import sys as _sys
+        _cache_key = "neurova.skill_system_module_standalone"
+        if _cache_key in _sys.modules:
+            return _sys.modules[_cache_key].ToolSequenceSkill
+        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
+        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
+        _mod = _iu.module_from_spec(_spec)
+        _sys.modules[_cache_key] = _mod
+        try:
+            _spec.loader.exec_module(_mod)
+        except Exception:
+            _sys.modules.pop(_cache_key, None)
+            raise
+        return _mod.ToolSequenceSkill
     else:
         raise AttributeError(f"module 'neurova.skill_system' has no attribute '{name}'")
 
@@ -206,13 +224,13 @@ try:
 except ImportError as e:
     logger.warning("Failed to import skill_pool_manager: %s", e)
 
-# 导入 Skill 类（从模块导入）
+# 导入 Skill 类（从被遮蔽的 skill_system.py 模块导入，避免占位降级）
 try:
-    from neurova.skill_system.skill_pool_manager import Skill as _PoolSkill
+    from neurova.skill_system import Skill
 
-    Skill = _PoolSkill
+    _ = Skill  # 复用 standalone 模块中的规范 Skill 类
 except ImportError as e:
-    logger.debug("Skill 从 skill_pool_manager 导入失败，使用占位: %s", e)
+    logger.debug("Skill 从 skill_system 导入失败，使用占位: %s", e)
 
     class Skill:  # type: ignore[no-redef]
         def __init__(self, name, description=""):

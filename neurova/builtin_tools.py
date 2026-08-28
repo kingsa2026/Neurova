@@ -327,6 +327,33 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": [],
         },
     },
+    "create_skill": {
+        "description": "【创建可执行技能】当你发现一组工具调用反复出现（可由 LLM 直接复用）时，把它们组合成持久化的可执行技能；之后任何对话都能通过 `name` 一键调用。技能 = 一次或多次工具调用的有序执行 + 可选的步间占位符（`{step_<idx>.<field>}` 引用前序步骤的输出字段）。创建后立即在本会话与 SkillRegistry 中可见可调。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "技能唯一标识（小写下划线），例：weather_then_save"},
+                "description": {"type": "string", "description": "技能的功能与触发场景说明，LLM 用此判断是否调用"},
+                "steps": {
+                    "type": "array",
+                    "description": "按顺序执行的工具步骤列表",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "被调用的内置工具名，如 web_search / browser_screenshot / file_write"},
+                            "params": {
+                                "type": "object",
+                                "description": "传给该工具的参数字典（支持 `{step_<idx>.<field>}` 占位符引用前序步骤输出）",
+                            },
+                        },
+                        "required": ["name", "params"],
+                    },
+                    "minItems": 1,
+                },
+            },
+            "required": ["name", "description", "steps"],
+        },
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════

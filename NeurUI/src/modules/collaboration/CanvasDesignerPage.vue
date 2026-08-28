@@ -262,6 +262,13 @@
               :options="field.options"
               size="small"
             />
+            <a-slider
+              v-else-if="field.type === 'slider'"
+              v-model:value="selectedNode.config[field.key]"
+              :min="field.min ?? 0"
+              :max="field.max ?? 100"
+              style="width: 100%"
+            />
             <a-input v-else v-model:value="selectedNode.config[field.key]" size="small" />
           </div>
 
@@ -320,7 +327,7 @@ import { useI18n } from 'vue-i18n'
 import {
   ArrowLeftOutlined, DownOutlined, BgColorsOutlined,
   ApartmentOutlined, RobotOutlined, BulbOutlined,
-  ClockCircleOutlined, DatabaseOutlined, FileOutlined,
+  ClockCircleOutlined, DatabaseOutlined, FileOutlined, ShoppingOutlined,
 } from '@ant-design/icons-vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useCollaboration } from '@/composables/useCollaboration'
@@ -347,6 +354,8 @@ interface SubBlockDef {
   options?: SubBlockOption[]
   default_value?: unknown
   required?: boolean
+  min?: number
+  max?: number
 }
 interface PaletteNode {
   type: string
@@ -569,6 +578,23 @@ function ctxZoomOut() { zoomOut(); closeCtxMenu() }
 function ctxResetView() { resetView(); closeCtxMenu() }
 
 // 节点库分类
+/** 电商平台选项（与后端 commerce_nodes._COMMERCE_PLATFORM_OPTIONS 对齐） */
+const COMMERCE_PLATFORM_OPTIONS: SubBlockOption[] = [
+  { value: 'amazon', label: '亚马逊 Amazon' },
+  { value: 'taobao', label: '淘宝 Taobao' },
+  { value: 'jd', label: '京东 JD' },
+  { value: 'douyin-ecom', label: '抖音电商 Douyin Ecom' },
+  { value: 'tiktok', label: 'TikTok' },
+  { value: 'pdd', label: '拼多多 PDD' },
+  { value: 'ali1688', label: '1688' },
+  { value: 'xiaohongshu', label: '小红书 Xiaohongshu' },
+  { value: 'xianyu', label: '闲鱼 Xianyu' },
+  { value: 'shein', label: '希音 SHEIN' },
+]
+
+/** 字符串数组 → SubBlockOption[] 转换 */
+const strOpts = (list: string[]): SubBlockOption[] => list.map(v => ({ label: v, value: v }))
+
 const paletteCategories = [
   {
     name: 'builtin',
@@ -650,7 +676,238 @@ const paletteCategories = [
       },
     ] as PaletteNode[],
   },
+  // 电商运营节点（与后端 commerce_nodes.COMMERCE_NODES 对齐，作为静态兜底；
+  // 后端启动后动态节点中重复 type 会被 staticNodeTypes 过滤，配置以静态为准）
+  {
+    key: 'commerce',
+    name: 'commerce',
+    icon: ShoppingOutlined,
+    labelKey: 'collab.catCommerce',
+    nodes: [
+      {
+        type: 'builtin:price-monitor',
+        label: '价格监控',
+        icon: '💰',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '商品输入' }],
+        outputs: [
+          { id: 'output', label: '监控结果' },
+          { id: 'alerts', label: '告警列表' },
+        ],
+        defaultConfig: { platform: 'amazon', products: 'B0XXXXXX', alert_threshold: '50', check_interval: 6 },
+        subBlocks: [
+          { id: 'platform', title: '监控平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'products', title: '商品列表（逗号分隔）', type: 'textarea', default_value: 'B0XXXXXX' },
+          { id: 'alert_threshold', title: '告警阈值（元）', type: 'input', default_value: '50' },
+          { id: 'check_interval', title: '检查间隔（小时）', type: 'slider', default_value: 6, min: 1, max: 168 },
+        ],
+      },
+      {
+        type: 'builtin:ad-copy',
+        label: '广告文案生成',
+        icon: '📢',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '商品信息' }],
+        outputs: [{ id: 'output', label: '广告文案' }],
+        defaultConfig: { platform: 'amazon', product: '', style: 'promotion', language: 'zh' },
+        subBlocks: [
+          { id: 'platform', title: '投放平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'product', title: '商品名称', type: 'input', default_value: '' },
+          { id: 'style', title: '文案风格', type: 'select', default_value: 'promotion', options: strOpts(['促销促销', '种草安利', '品牌故事', '痛点营销', '节日借势']) },
+          { id: 'language', title: '目标语言', type: 'input', default_value: 'zh' },
+        ],
+      },
+      {
+        type: 'builtin:review-respond',
+        label: '评论自动回复',
+        icon: '💬',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '评论输入' }],
+        outputs: [
+          { id: 'output', label: '回复结果' },
+          { id: 'sentiment', label: '情感分析' },
+        ],
+        defaultConfig: { platform: 'taobao', reviews: '', tone: 'friendly' },
+        subBlocks: [
+          { id: 'platform', title: '平台', type: 'select', default_value: 'taobao', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'reviews', title: '评论内容（每行一条）', type: 'textarea', default_value: '' },
+          { id: 'tone', title: '回复语气', type: 'select', default_value: 'friendly', options: strOpts(['友好专业', '轻松活泼', '正式官方', '关怀安抚']) },
+        ],
+      },
+      {
+        type: 'builtin:product-listing',
+        label: '商品上架 / Listing 优化',
+        icon: '📦',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '商品数据' }],
+        outputs: [
+          { id: 'output', label: 'Listing 结果' },
+          { id: 'title', label: '优化标题' },
+        ],
+        defaultConfig: { platform: 'amazon', product_name: '', features: '', keywords: '' },
+        subBlocks: [
+          { id: 'platform', title: '平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'product_name', title: '商品名称', type: 'input', default_value: '' },
+          { id: 'features', title: '商品卖点（逗号分隔）', type: 'textarea', default_value: '' },
+          { id: 'keywords', title: '目标关键词', type: 'input', default_value: '' },
+        ],
+      },
+      {
+        type: 'builtin:inventory-sync',
+        label: '库存同步',
+        icon: '📊',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '库存数据' }],
+        outputs: [
+          { id: 'output', label: '同步结果' },
+          { id: 'alerts', label: '低库存告警' },
+        ],
+        defaultConfig: { platform: 'amazon', low_stock_threshold: '10' },
+        subBlocks: [
+          { id: 'platform', title: '同步平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'low_stock_threshold', title: '低库存阈值', type: 'input', default_value: '10' },
+        ],
+      },
+      {
+        type: 'builtin:competitor-analysis',
+        label: '竞品分析',
+        icon: '🔍',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '竞品数据' }],
+        outputs: [{ id: 'output', label: '分析结果' }],
+        defaultConfig: { platform: 'amazon', competitors: '' },
+        subBlocks: [
+          { id: 'platform', title: '平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'competitors', title: '竞品列表（ASIN/ID/链接，逗号分隔）', type: 'textarea', default_value: '' },
+        ],
+      },
+      {
+        type: 'builtin:keyword-research',
+        label: '关键词研究',
+        icon: '🏷️',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '种子词输入' }],
+        outputs: [
+          { id: 'output', label: '关键词列表' },
+          { id: 'keywords', label: '关键词数组' },
+        ],
+        defaultConfig: { platform: 'taobao', seed_keywords: '', language: 'zh' },
+        subBlocks: [
+          { id: 'platform', title: '平台', type: 'select', default_value: 'taobao', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'seed_keywords', title: '种子关键词', type: 'input', default_value: '' },
+          { id: 'language', title: '语言', type: 'input', default_value: 'zh' },
+        ],
+      },
+      {
+        type: 'builtin:sales-report',
+        label: '销售报表',
+        icon: '📈',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '销售数据' }],
+        outputs: [{ id: 'output', label: '报表结果' }],
+        defaultConfig: { platform: 'amazon', period: '2025-01', metrics: 'sales,orders' },
+        subBlocks: [
+          { id: 'platform', title: '平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'period', title: '统计周期', type: 'input', default_value: '2025-01' },
+          { id: 'metrics', title: '指标（逗号分隔）', type: 'input', default_value: 'sales,orders' },
+        ],
+      },
+      {
+        type: 'builtin:ad-streaming',
+        label: '广告流投放',
+        icon: '📡',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '活动信息' }],
+        outputs: [
+          { id: 'output', label: '投放计划' },
+          { id: 'campaign', label: '活动详情' },
+        ],
+        defaultConfig: { platform: 'amazon', budget: '1000', targeting: '自动定向', objective: '转化' },
+        subBlocks: [
+          { id: 'platform', title: '投放平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'budget', title: '日预算（元）', type: 'input', default_value: '1000' },
+          { id: 'targeting', title: '定向方式', type: 'select', default_value: '自动定向', options: strOpts(['自动定向', '手动定向', '人群定向', '关键词定向']) },
+          { id: 'objective', title: '投放目标', type: 'select', default_value: '转化', options: strOpts(['转化', '点击', '曝光', '加购']) },
+        ],
+      },
+      {
+        type: 'builtin:ad-monitor',
+        label: '广告监控',
+        icon: '👁️',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '广告数据' }],
+        outputs: [
+          { id: 'output', label: '监控结果' },
+          { id: 'alerts', label: '异常告警' },
+        ],
+        defaultConfig: { platform: 'amazon', ad_ids: 'camp_001, camp_002', metrics: 'impressions,clicks,conversions,spend', alert_threshold: '500' },
+        subBlocks: [
+          { id: 'platform', title: '监控平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'ad_ids', title: '广告ID列表（逗号分隔）', type: 'textarea', default_value: 'camp_001, camp_002' },
+          { id: 'metrics', title: '监控指标（逗号分隔）', type: 'input', default_value: 'impressions,clicks,conversions,spend' },
+          { id: 'alert_threshold', title: '告警阈值（花费元）', type: 'input', default_value: '500' },
+        ],
+      },
+      {
+        type: 'builtin:ad-strategy',
+        label: '广告策略',
+        icon: '🧠',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '投放目标' }],
+        outputs: [
+          { id: 'output', label: '策略结果' },
+          { id: 'strategy', label: '策略建议' },
+        ],
+        defaultConfig: { platform: 'amazon', goal: 'increase_sales', budget: '5000', product: '' },
+        subBlocks: [
+          { id: 'platform', title: '投放平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'goal', title: '投放目标', type: 'select', default_value: 'increase_sales', options: strOpts(['increase_sales', 'increase_orders', 'reduce_cpa', 'brand_awareness', 'clearance']) },
+          { id: 'budget', title: '总预算（元）', type: 'input', default_value: '5000' },
+          { id: 'product', title: '投放商品', type: 'input', default_value: '' },
+        ],
+      },
+      {
+        type: 'builtin:ad-cross',
+        label: '跨渠道广告投放',
+        icon: '🔗',
+        category: 'commerce',
+        inputs: [{ id: 'input', label: '商品信息' }],
+        outputs: [
+          { id: 'output', label: '投放计划' },
+          { id: 'channels', label: '各渠道分配' },
+        ],
+        defaultConfig: { platforms: 'amazon, taobao', total_budget: '10000', product: '', objective: '转化' },
+        subBlocks: [
+          { id: 'platforms', title: '投放平台（逗号分隔）', type: 'textarea', default_value: 'amazon, taobao' },
+          { id: 'total_budget', title: '总预算（元）', type: 'input', default_value: '10000' },
+          { id: 'product', title: '投放商品', type: 'input', default_value: '' },
+          { id: 'objective', title: '统一目标', type: 'select', default_value: '转化', options: strOpts(['转化', '点击', '曝光', '加购']) },
+        ],
+      },
+    ] as PaletteNode[],
+  },
 ]
+
+/**
+ * 静态分类已定义的节点 type 集合。
+ * 动态节点库（/neurflow/nodes）中与静态节点重复的类型会被过滤；
+ * 注意：不能按 builtin: 前缀过滤，drama/commerce/comfyui 等适配器节点的
+ * type 也是 builtin:xxx，但 category 为 media/commerce 等独立分类。
+ */
+const staticNodeTypes = new Set(paletteCategories.flatMap(c => c.nodes.map(n => n.type)))
+
+/** 动态分类中文名映射（i18n key，category → collab.catXxx） */
+const DYNAMIC_CATEGORY_LABELS: Record<string, string> = {
+  flow: 'collab.catFlow',
+  ai: 'collab.catAI',
+  memory: 'collab.catMemory',
+  output: 'collab.catOutput',
+  commerce: 'collab.catCommerce',
+  media: 'collab.catMedia',
+  skills: 'collab.catSkills',
+  tools: 'collab.catTools',
+  mcp: 'collab.catMCP',
+}
 
 const expandedCategories = reactive(new Set<string>(['builtin']))
 
@@ -664,21 +921,28 @@ function toggleCategory(name: string) {
 
 const filteredCategories = computed(() => {
   // 静态分类 + 动态节点库（/neurflow/nodes：tool/skill/mcp/comfyui 等注册类型）
-  const staticTypes = new Set(paletteCategories.flatMap(c => c.nodes.map(n => n.type)))
-  const dynamicByCategory = new Map<string, PaletteNode[]>()
-  for (const dn of dynamicNodes.value) {
-    if (staticTypes.has(dn.type)) continue
-    const list = dynamicByCategory.get(dn.category) ?? []
-    list.push(dn)
-    dynamicByCategory.set(dn.category, list)
+  // 1. 深拷贝静态分类，避免重复分类（comfyui/data/input 等已有静态分类）
+  type DynamicCat = { name: string; icon: object; labelKey: string; nodes: PaletteNode[] }
+  const catMap = new Map<string, DynamicCat>()
+  for (const cat of paletteCategories) {
+    catMap.set(cat.name, { name: cat.name, icon: cat.icon, labelKey: cat.labelKey, nodes: [...cat.nodes] })
   }
-  const dynamicCategories = [...dynamicByCategory.entries()].map(([category, nodes]) => ({
-    name: category,
-    icon: ApartmentOutlined,
-    labelKey: category,
-    nodes,
-  }))
-  const allCategories = [...paletteCategories, ...dynamicCategories]
+  // 2. 按 category 分组动态节点
+  for (const dn of dynamicNodes.value) {
+    if (staticNodeTypes.has(dn.type)) continue
+    const existing = catMap.get(dn.category)
+    if (existing) {
+      existing.nodes.push(dn) // 合并到现有静态分类
+    } else {
+      catMap.set(dn.category, {
+        name: dn.category,
+        icon: ApartmentOutlined,
+        labelKey: DYNAMIC_CATEGORY_LABELS[dn.category] ?? dn.category,
+        nodes: [dn],
+      })
+    }
+  }
+  const allCategories = [...catMap.values()]
 
   if (!nodeSearch.value) return allCategories
   const q = nodeSearch.value.toLowerCase()
@@ -694,29 +958,50 @@ const filteredCategories = computed(() => {
 async function loadDynamicNodes() {
   try {
     const res = await getNodes()
-    const items = (res?.data?.nodes ?? []) as Array<{
+    // 注意：axios 拦截器已 return response.data 解包，/neurflow/nodes 返回 { total, nodes }
+    //（无外层 data 包装），取 res.nodes；兼容旧包装结构 res.data.nodes
+    const items = ((res as any)?.nodes ?? (res as any)?.data?.nodes ?? []) as Array<{
       type: string
       label: string
       icon?: string
       category?: string
       inputs?: { id: string; label: string }[]
       outputs?: { id: string; label: string }[]
-      sub_blocks?: SubBlockDef[]
+      sub_blocks?: Record<string, any>[]
     }>
+    // 后端 sub_blocks 字段（label/name/default/options/min/max）→ 前端 SubBlockDef（title/default_value/options/min/max）
+    // options 兼容对象数组 {value,label} 与纯字符串数组（电商/广告节点常见）
+    const mapSubBlock = (b: Record<string, any>): SubBlockDef => {
+      const raw = Array.isArray(b.options) ? b.options : []
+      const options = raw.map((o: any) =>
+        typeof o === 'string' ? { label: o, value: o } : { label: o.label ?? o.value, value: o.value ?? o.label },
+      )
+      const sb: SubBlockDef = {
+        id: String(b.id),
+        title: (b.label as string) ?? (b.name as string) ?? String(b.id),
+        type: (b.type as string) || 'input',
+        options,
+        default_value: b.default ?? b.default_value,
+      }
+      if (typeof b.min === 'number') sb.min = b.min
+      if (typeof b.max === 'number') sb.max = b.max
+      return sb
+    }
     dynamicNodes.value = items
-      .filter(n => !String(n.type).startsWith('builtin:'))
-      .map(n => ({
-        type: n.type,
-        label: n.label,
-        icon: n.icon || '🧩',
-        category: n.category || 'extensions',
-        inputs: n.inputs ?? [],
-        outputs: n.outputs ?? [],
-        defaultConfig: Object.fromEntries(
-          (n.sub_blocks ?? []).map(b => [b.id, b.default_value ?? '']),
-        ),
-        subBlocks: n.sub_blocks ?? [],
-      }))
+      .filter(n => !staticNodeTypes.has(n.type))
+      .map(n => {
+        const subBlocks = (n.sub_blocks ?? []).map(mapSubBlock)
+        return {
+          type: n.type,
+          label: n.label,
+          icon: n.icon || '🧩',
+          category: n.category || 'extensions',
+          inputs: n.inputs ?? [],
+          outputs: n.outputs ?? [],
+          defaultConfig: Object.fromEntries(subBlocks.map(b => [b.id, b.default_value ?? ''])),
+          subBlocks,
+        }
+      })
   } catch {
     // 动态节点库不可用时静默降级为静态节点库
   }
@@ -796,8 +1081,8 @@ const configFields = computed(() => {
       title: b.title || b.id,
       type: b.type || 'input',
       options: (b.options ?? []).map(o => ({ label: o.label, value: o.value })),
-      min: undefined as number | undefined,
-      max: undefined as number | undefined,
+      min: b.min,
+      max: b.max,
     }))
   }
   // 回退：遍历现有 config 键（旧快照/未知类型兼容）
