@@ -82,6 +82,24 @@ try:
 except ImportError as _e:
     _logger.debug("neurflow.templates 未可用: %s", _e)
 
+try:
+    from .commerce_nodes import (
+        COMMERCE_NODES,
+        register_commerce_nodes,
+        get_commerce_executors,
+    )
+except ImportError as _e:
+    _logger.debug("neurflow.commerce_nodes 未可用: %s", _e)
+
+try:
+    from .drama_nodes import (
+        DRAMA_NODES,
+        register_drama_nodes,
+        get_drama_executors,
+    )
+except ImportError as _e:
+    _logger.debug("neurflow.drama_nodes 未可用: %s", _e)
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -137,6 +155,14 @@ __all__ = [
     "TemplateRegistry",
     "get_template_registry",
     "reset_template_registry",
+    # 电商运营节点
+    "COMMERCE_NODES",
+    "register_commerce_nodes",
+    "get_commerce_executors",
+    # AI 短剧视频节点
+    "DRAMA_NODES",
+    "register_drama_nodes",
+    "get_drama_executors",
     # 版本
     "__version__",
 ]

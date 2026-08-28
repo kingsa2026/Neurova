@@ -60,7 +60,7 @@ export function useReachableModels() {
           ? (data as { models: unknown[] }).models
           : []
       // 后端 GET /models 返回 {model_id, provider,...}，归一化为前端 ModelItem（含 id/provider_id）
-      models.value = list.map(normalizeModel)
+      models.value = list.map((item) => normalizeModel(item as Record<string, any>))
       loaded.value = true
     } catch {
       // /models 不可用时降级为空列表（下拉显示"无可用模型"）

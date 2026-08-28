@@ -684,8 +684,9 @@ const chatModelLoading = ref(false)
 async function loadChatModels() {
   chatModelLoading.value = true
   try {
-    const models = await listModels()
-    const normalized = (models || []).map((m) => normalizeModel(m))
+    const modelsRes = await listModels()
+    const rawModels = Array.isArray(modelsRes) ? modelsRes : modelsRes?.models ?? []
+    const normalized = rawModels.map((m) => normalizeModel(m))
     // 只展示已启用（可用）的模型，避免用户选到不可用的模型
     const enabled = normalized.filter((m) => m.enabled !== false)
     const AUTO_ROUTE_LABEL = '🧠 自动路由 (推荐)'

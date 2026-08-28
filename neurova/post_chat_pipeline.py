@@ -23,6 +23,7 @@ PostChatPipeline — 对话后处理管线
 """
 
 from neurova.core.logger import get_logger
+import asyncio
 import contextvars
 import time
 from dataclasses import dataclass, field
@@ -349,7 +350,12 @@ class PostChatPipeline:
         await self._safe_step("save_memory", self._step_save_memory(user_input, reply, actual_session_id, save_memory))
 
         # 步骤 6.6: 更新记忆温度（批量衰减）
-        self._safe_step_sync("update_memory_temperature", self._step_update_memory_temperature)
+        # 性能修复(2026-08-28): run_decay_cycle 全量遍历海量记忆 + SQLite 持久化是同步阻塞操作，
+        # 直接在事件循环执行会导致 HTTP 对话请求超时/无响应。
+        # 通过 asyncio.to_thread 移到工作线程，避免卡死事件循环。
+        await asyncio.to_thread(
+            self._safe_step_sync, "update_memory_temperature", self._step_update_memory_temperature
+        )
 
         # 步骤 7: TTS 语音生成
         tts_result = await self._safe_step(
@@ -1408,9 +1414,18 @@ class PostChatPipeline:
             from neurova.evolution.genetic_engine import ToolGenotype
 
             for pattern in top_patterns:
+                # 用真实成功率替换硬编码 0.5：
+                # 否则 fitness 恒 ≤ 0.5×1 + 0 = 0.5，永远达不到注册阈值 0.8，
+                # 遗传进化产物永远无法注册为可复用技能（闭环断裂根因之一）
+                if isinstance(pattern, dict):
+                    seq = pattern.get("tools") or []
+                    p_success = pattern.get("success_rate") or 0.5
+                else:
+                    seq = getattr(pattern, "tools", [])
+                    p_success = getattr(pattern, "success_rate", None) or 0.5
                 genotype = ToolGenotype(
-                    tool_sequence=pattern.tools,
-                    success_rate=0.5,
+                    tool_sequence=seq,
+                    success_rate=float(p_success),
                 )
                 genetic_engine.add_to_population(genotype)
 

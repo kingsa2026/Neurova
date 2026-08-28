@@ -425,13 +425,25 @@ class RSIOrchestrator:
             opt = candidate.metadata.get("optimization", {})
             new_value = opt.get("new_value", 0)
             current = opt.get("current_value", 0)
-            perf = candidate.metadata.get("performance", 0.5)
-            # 性能低时应激进调整（增大调整幅度），性能高时应保守
-            direction_ok = (perf < 0.7 and new_value != current) or (perf > 0.9 and new_value != current)
+            setpoint = opt.get("setpoint", None)
+            # 候选由 _generate_candidates_for_param 生成，已保证向 setpoint 方向步进。
+            # 验证语义：值确实改变，且若已知 setpoint，调整方向必须朝 setpoint 靠近。
+            # （此前用性能分 0.7/0.9 带宽做硬门，导致 0.7~0.9 死区里所有候选被拒，
+            #   表现为"该优化的参数永远不被优化"。真正的棘轮门是应用后的实测增益 +
+            #   回滚，此处的方向校验只负责排除反向调整。）
+            direction_ok = new_value != current
+            if (
+                direction_ok
+                and isinstance(setpoint, (int, float))
+                and isinstance(new_value, (int, float))
+                and isinstance(current, (int, float))
+            ):
+                toward = abs(float(setpoint) - float(new_value)) < abs(float(setpoint) - float(current))
+                direction_ok = toward
             return {
                 "valid": direction_ok,
                 "score": 1.0 if direction_ok else 0.0,
-                "details": f"perf={perf}, direction_ok={direction_ok}",
+                "details": f"current={current}, new={new_value}, setpoint={setpoint}",
             }
 
         try:

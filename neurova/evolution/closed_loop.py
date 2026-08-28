@@ -143,6 +143,7 @@ class EvolutionOrchestrator:
         self,
         tool_lifecycle: Optional[Any] = None,
         crystallizer: Optional[Any] = None,
+        rsi_orchestrator: Optional[Any] = None,
     ):
         self.tool_weights = AdaptiveToolWeights()
         self.tool_lifecycle = tool_lifecycle or ToolLifecycleManager()
@@ -151,6 +152,14 @@ class EvolutionOrchestrator:
         self.tool_synthesizer = PatternBasedToolSynthesizer(self.pattern_miner)
         self.experience_feedback = ExperienceFeedback()
         self.crystallizer = crystallizer
+
+        # 根因 2 修复: 持有 RSIOrchestrator 引用, 使经验/工具/记忆信号可触发递归进化
+        self.rsi_orchestrator = rsi_orchestrator
+
+        # RSI 迭代节流: 避免每条经验都触发全量进化(默认 60s 一次)
+        self._last_rsi_iteration_at: float = 0.0
+        self._rsi_iteration_interval: float = 60.0
+        self._rsi_iteration_count: int = 0
 
         # 工具注册表
         self._registered_tools: List[str] = []
@@ -297,6 +306,11 @@ class EvolutionOrchestrator:
 
         logger.info("Experience recorded: task='%s', tools=%s, success=%s", task, tools, success)
 
+        # 根因 1 修复: 经验记录后, 触发 RSI 闭环(节流保护)
+        rsi_state = self._maybe_trigger_rsi(force=False)
+        if rsi_state is None:
+            rsi_state = {"triggered": False, "reason": "throttled_or_no_rsi"}
+
         return {
             "insights_count": result.get("insights_created", 0),
             "tools_mentioned": result.get("tools_mentioned", []),
@@ -304,7 +318,59 @@ class EvolutionOrchestrator:
             "task": task,
             "success": success,
             "association": result.get("associations_updated", 0),
+            # 根因 1 修复: 返回 RSI 状态字段, 让调用方可观测闭环是否真正生效
+            "rsi": rsi_state,
         }
+
+    def on_rsi_iterate(self, force: bool = False) -> Dict[str, Any]:
+        """
+        根因 2 修复: 主动触发一次 RSI 迭代(棘轮剪枝递归进化)
+
+        Args:
+            force: True 跳过节流(用于测试/手动触发), False 受 _rsi_iteration_interval 限制
+
+        Returns:
+            包含 RSI 迭代结果的字典; 若 RSI 未配置, 返回 {"triggered": False, "reason": "no_rsi"}
+        """
+        if self.rsi_orchestrator is None:
+            logger.debug("RSI 跳过: 未配置 rsi_orchestrator")
+            return {"triggered": False, "reason": "no_rsi"}
+
+        if not force:
+            now = time.time()
+            if now - self._last_rsi_iteration_at < self._rsi_iteration_interval:
+                return {"triggered": False, "reason": "throttled"}
+
+        try:
+            rsi_result = self.rsi_orchestrator.run_iteration()
+            self._last_rsi_iteration_at = time.time()
+            self._rsi_iteration_count += 1
+            # RSI 标准返回 Dict, 包含 convergence/applied_count/gain
+            if not isinstance(rsi_result, dict):
+                rsi_result = {"raw": rsi_result}
+            should_continue = False
+            try:
+                should_continue = bool(self.rsi_orchestrator.should_continue())
+            except Exception:
+                pass
+            return {
+                "triggered": True,
+                "iteration": self._rsi_iteration_count,
+                "convergence": rsi_result.get("convergence"),
+                "applied_count": rsi_result.get("applied_count", 0),
+                "gain": rsi_result.get("gain", 0.0),
+                "should_continue": should_continue,
+                "rsi_result": rsi_result,
+            }
+        except Exception as e:
+            logger.warning("RSI 迭代失败: %s", e)
+            return {"triggered": False, "reason": "error", "error": str(e)}
+
+    def _maybe_trigger_rsi(self, force: bool = False) -> Optional[Dict[str, Any]]:
+        """内部辅助: 尝试触发 RSI 迭代(节流控制), 无 RSI 时返回 None"""
+        if self.rsi_orchestrator is None:
+            return None
+        return self.on_rsi_iterate(force=force)
 
     def _maybe_evaluate_lifecycle(self) -> None:
         """检查是否需要触发生命周期评估。"""

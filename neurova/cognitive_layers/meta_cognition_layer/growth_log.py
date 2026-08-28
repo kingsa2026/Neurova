@@ -337,7 +337,7 @@ class GrowthLogManager:
         self._logger.info("生成反思日志: %s - %s", entry.id, title)
         return entry
 
-    async def read_logs(
+    def read_logs(
         self, type: Optional[ReflectionType] = None, status: Optional[ReflectionLogStatus] = None, limit: int = 50
     ) -> typing.List[ReflectionLogEntry]:
         """读取反思日志
@@ -372,7 +372,7 @@ class GrowthLogManager:
         Returns:
             格式化的反思日志文本
         """
-        entries = await self.read_logs(status=ReflectionLogStatus.VALIDATED, limit=limit)
+        entries = self.read_logs(status=ReflectionLogStatus.VALIDATED, limit=limit)
 
         if not entries:
             return ""
@@ -494,7 +494,7 @@ class GrowthLogManager:
 
         return stats
 
-    async def get_pending_logs(self, limit: int = 50) -> typing.List[ReflectionLogEntry]:
+    def get_pending_logs(self, limit: int = 50) -> typing.List[ReflectionLogEntry]:
         """获取待处理的日志
 
         Args:
@@ -503,9 +503,9 @@ class GrowthLogManager:
         Returns:
             待处理的日志列表
         """
-        return await self.read_logs(status=ReflectionLogStatus.PENDING, limit=limit)
+        return self.read_logs(status=ReflectionLogStatus.PENDING, limit=limit)
 
-    async def get_validated_logs(self, limit: int = 50) -> typing.List[ReflectionLogEntry]:
+    def get_validated_logs(self, limit: int = 50) -> typing.List[ReflectionLogEntry]:
         """获取已验证的日志
 
         Args:
@@ -514,4 +514,4 @@ class GrowthLogManager:
         Returns:
             已验证的日志列表
         """
-        return await self.read_logs(status=ReflectionLogStatus.VALIDATED, limit=limit)
+        return self.read_logs(status=ReflectionLogStatus.VALIDATED, limit=limit)

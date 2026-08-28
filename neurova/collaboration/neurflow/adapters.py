@@ -322,13 +322,13 @@ def sync_mcp(registry) -> int:
 
 def sync_all(registry) -> Dict[str, int]:
     """
-    同步所有节点（工具 + 技能 + MCP + ComfyUI）
+    同步所有节点（工具 + 技能 + MCP + ComfyUI + 电商 + 短剧视频）
 
     Args:
         registry: 节点注册表实例
 
     Returns:
-        同步结果字典 {"tools": N, "skills": N, "mcp": N, "comfyui": N}
+        同步结果字典 {"tools": N, "skills": N, "mcp": N, "comfyui": N, "commerce": N, "drama": N}
     """
     comfyui_count = 0
     try:
@@ -340,11 +340,33 @@ def sync_all(registry) -> Dict[str, int]:
 
         logging.getLogger(__name__).warning("ComfyUI 节点同步失败: %s", e)
 
+    commerce_count = 0
+    try:
+        from .commerce_nodes import register_commerce_nodes
+
+        commerce_count = register_commerce_nodes(registry)
+    except Exception as e:  # noqa: BLE001 - commerce 注册失败不阻断其他同步
+        import logging
+
+        logging.getLogger(__name__).warning("电商节点同步失败: %s", e)
+
+    drama_count = 0
+    try:
+        from .drama_nodes import register_drama_nodes
+
+        drama_count = register_drama_nodes(registry)
+    except Exception as e:  # noqa: BLE001 - drama 注册失败不阻断其他同步
+        import logging
+
+        logging.getLogger(__name__).warning("短剧视频节点同步失败: %s", e)
+
     return {
         "tools": sync_tools(registry),
         "skills": sync_skills(registry),
         "mcp": sync_mcp(registry),
         "comfyui": comfyui_count,
+        "commerce": commerce_count,
+        "drama": drama_count,
     }
 
 
