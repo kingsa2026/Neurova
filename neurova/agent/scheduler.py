@@ -362,7 +362,13 @@ class AgentTaskExecutor(TaskExecutor):
     async def execute(self, task: AutomationTask, execution: TaskExecution) -> Dict[str, Any]:
         """通过 Agent 执行任务"""
         try:
-            from neurova.api.app import app_state
+            # P1 修复: 原 `from neurova.api.app import app_state` 导入不存在的名称，
+            # 每次执行都 ImportError；改用模块提供的 get_app_state() 访问器。
+            from neurova.api.app import get_app_state
+
+            app_state = get_app_state()
+            if app_state is None:
+                return {"success": False, "error": "App state not initialized"}
 
             agent_id = task.request.agent_id if task.request else None
             if not agent_id and hasattr(app_state, "default_agent"):
@@ -383,7 +389,8 @@ class AgentTaskExecutor(TaskExecutor):
 
             # 执行 Agent
             # S7 修复 (B-2 #10): 不注入 {"history": []},让 agent.chat() 从 session 恢复历史.
-            result = agent.chat(message, stream=False)
+            # P1 修复: agent.chat 是协程，必须 await，否则任务从不真正执行。
+            result = await agent.chat(message, stream=False)
 
             return {
                 "success": True,
@@ -633,7 +640,9 @@ class TaskScheduler:
                 old_task = self._tasks[task_id]
 
                 # 移除旧的调度器任务
-                if self._apscheduler and task_id in self._apscheduler.get_jobs():
+                # P1 修复: get_jobs() 返回 Job 对象列表，`task_id in ...` 恒 False；
+                # 用 get_job(id) 按 id 精确查询。
+                if self._apscheduler and self._apscheduler.get_job(task_id) is not None:
                     self._apscheduler.remove_job(task_id)
 
                 # 更新任务
@@ -662,17 +671,18 @@ class TaskScheduler:
                 return False
 
             try:
-                # 移除调度器任务
-                if self._apscheduler and task_id in self._apscheduler.get_jobs():
+                # 移除调度器任务（P1 修复: 用 get_job(id) 精确查询，见 update_task）
+                if self._apscheduler and self._apscheduler.get_job(task_id) is not None:
                     self._apscheduler.remove_job(task_id)
 
                 # 移除依赖关系
                 for other_id in self._dependency_graph:
                     self._dependency_graph[other_id].discard(task_id)
 
-                del self._dependency_graph[task_id]
+                self._dependency_graph.pop(task_id, None)
                 del self._tasks[task_id]
-                del self._executions[task_id]
+                # P1 修复: 执行记录可能不存在，del 会 KeyError 中断删除流程
+                self._executions.pop(task_id, None)
 
                 logger.info("Task deleted: %s", task_id)
                 self._emit_event("task_deleted", {"task_id": task_id})
@@ -712,8 +722,8 @@ class TaskScheduler:
             if task_id not in self._tasks:
                 return None
 
-            # 移除调度器任务
-            if self._apscheduler and task_id in self._apscheduler.get_jobs():
+            # 移除调度器任务（P1 修复: 用 get_job(id) 精确查询，见 update_task）
+            if self._apscheduler and self._apscheduler.get_job(task_id) is not None:
                 self._apscheduler.remove_job(task_id)
 
             task = self._tasks[task_id]
@@ -948,18 +958,27 @@ class TaskScheduler:
         await self.execute_task(task.id, triggered_by="retry")
 
     def _check_dependencies(self, task_id: str) -> bool:
-        """检查任务依赖是否满足"""
-        dependents = self._dependency_graph.get(task_id, set())
-        for dep_id in dependents:
+        """检查任务依赖是否满足
+
+        P1 修复: 原实现遍历 _dependency_graph[task_id]（存的是下游 dependents，
+        不是上游依赖），且用 execution id 键去匹配 task id，门控永远放行。
+        现改为遍历任务自身声明的上游依赖（task.dependencies）。
+        """
+        task = self._tasks.get(task_id)
+        if not task:
+            return True
+
+        for dep in task.dependencies:
+            dep_id = dep.task_id
             dep_task = self._tasks.get(dep_id)
             if not dep_task:
                 continue
 
-            # 检查是否有依赖任务正在运行
-            if dep_id in self._running_executions:
+            # 上游依赖任务正在运行（_running_executions 以 execution id 为键）
+            if any(e.task_id == dep_id for e in self._running_executions.values()):
                 return False
 
-            # 检查依赖任务的最后执行状态
+            # 上游依赖任务的最后执行状态为失败
             executions = self._executions.get(dep_id, [])
             if executions:
                 last_execution = executions[-1]

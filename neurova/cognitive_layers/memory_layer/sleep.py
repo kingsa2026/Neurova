@@ -10,9 +10,13 @@
 
 from neurova.core.logger import get_logger
 import math
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from .isolation import IsolationContext
 
 logger = get_logger(__name__)
 
@@ -160,6 +164,25 @@ class SleepConsolidation:
         self._total_memories_processed: int = 0
         self._total_merged: int = 0
         self._temperature_sum: float = 0.0
+
+        # API 能力状态（此前 /api/v1/sleep 端点因缺少这些能力而全部降级为 mock）
+        self._is_sleeping: bool = False
+        self._sleep_phase: str = "awake"
+        self._last_sleep_time: Optional[float] = None
+        self._last_wake_time: Optional[float] = None
+        self._sleep_started_at: Optional[float] = None
+        self._total_sleep_duration: float = 0.0
+        self._sleep_cycles: int = 0
+        self._dream_logs: List[Dict[str, Any]] = []
+        self._merge_history: List[Dict[str, Any]] = []
+        self._settings: Dict[str, Any] = {
+            "auto_sleep_enabled": True,
+            "sleep_threshold_minutes": 30,
+            "sleep_duration_minutes": 60,
+            "dream_replay_enabled": True,
+            "memory_consolidation_enabled": True,
+            "conflict_resolution_enabled": True,
+        }
 
         logger.debug(
             f"SleepConsolidation 初始化: " f"similarity={similarity_threshold}, " f"archive={archive_threshold}"
@@ -424,3 +447,156 @@ class SleepConsolidation:
 
         logger.info("睡眠周期完成: 阶段=%s, 处理=%s 条记忆", phase, len(memories))
         return result
+
+    # ────── API 能力层（/api/v1/sleep 端点契约）──────
+
+    def is_sleeping(self) -> bool:
+        """当前是否处于睡眠状态"""
+        return self._is_sleeping
+
+    def get_sleep_phase(self) -> str:
+        """当前睡眠阶段"""
+        return self._sleep_phase
+
+    def get_last_sleep_time(self) -> Optional[float]:
+        """最近一次入睡时间戳"""
+        return self._last_sleep_time
+
+    def get_last_wake_time(self) -> Optional[float]:
+        """最近一次唤醒时间戳"""
+        return self._last_wake_time
+
+    def get_total_sleep_duration(self) -> float:
+        """累计睡眠时长（秒）"""
+        return self._total_sleep_duration
+
+    def get_sleep_cycles(self) -> int:
+        """累计睡眠周期数"""
+        return self._sleep_cycles
+
+    def start_sleep(self, duration_minutes: int = 60) -> Dict[str, Any]:
+        """主动进入睡眠：立即执行一轮真实的记忆整理并写回
+
+        Args:
+            duration_minutes: 名义睡眠时长（分钟），整理本身同步完成
+
+        Returns:
+            整理统计 dict
+        """
+        if self._is_sleeping:
+            return {"message": "already_sleeping", "sleep_cycles": self._sleep_cycles}
+
+        now = time.time()
+        self._is_sleeping = True
+        self._sleep_phase = "deep_sleep"
+        self._last_sleep_time = now
+        self._sleep_started_at = now
+        self._sleep_cycles += 1
+
+        result: Dict[str, Any] = {
+            "total_processed": 0,
+            "merged_count": 0,
+            "archived_count": 0,
+            "write_back": {},
+        }
+
+        if self._settings.get("memory_consolidation_enabled", True) and self.memory_manager:
+            try:
+                all_memories = self.memory_manager.get_all_memories()
+                if all_memories:
+                    records = [MemoryRecord.from_dict(m) for m in all_memories]
+                    cycle = self.run_sleep_cycle(records, phase="deep_sleep")
+
+                    from neurova.cognitive_layers.memory_layer.sleep_writeback import (
+                        write_back_consolidation_result,
+                    )
+
+                    write_stats = write_back_consolidation_result(self.memory_manager, cycle)
+
+                    result = {
+                        "total_processed": cycle["total_processed"],
+                        "merged_count": cycle["merged_count"],
+                        "archived_count": cycle["archived_count"],
+                        "write_back": write_stats,
+                    }
+
+                    agent_id = records[0].agent_id if records else "default"
+                    involved = [m.id for m in records]
+                    self._dream_logs.insert(
+                        0,
+                        {
+                            "dream_id": f"dream_{int(now * 1000)}_{self._sleep_cycles}",
+                            "agent_id": agent_id,
+                            "timestamp": now,
+                            "dream_type": "replay",
+                            "content": (
+                                f"整理 {cycle['total_processed']} 条记忆，"
+                                f"合并 {cycle['merged_count']} 组，归档 {cycle['archived_count']} 条"
+                            ),
+                            "memories_involved": involved,
+                            "insights_generated": cycle["merged_count"],
+                            "duration": time.time() - now,
+                        },
+                    )
+                    for merge_result in cycle["merge_results"]:
+                        if len(merge_result.source_ids) < 2:
+                            continue  # 单例簇不是真实合并
+                        self._merge_history.append(
+                            {
+                                "merge_id": merge_result.merged_id,
+                                "agent_id": agent_id,
+                                "timestamp": now,
+                                "source_memories": merge_result.source_ids,
+                                "target_memory": merge_result.merged_id,
+                                "merge_type": "consolidation",
+                                "success": True,
+                                "conflicts_resolved": 0,
+                            }
+                        )
+            except Exception as e:
+                logger.warning("主动睡眠整理失败: %s", e)
+
+        logger.info("主动睡眠开始: 时长=%s 分钟, 处理=%s 条", duration_minutes, result["total_processed"])
+        return result
+
+    def wake(self) -> Dict[str, Any]:
+        """唤醒：结束睡眠状态并累计时长"""
+        now = time.time()
+        if self._sleep_started_at:
+            self._total_sleep_duration += max(0.0, now - self._sleep_started_at)
+        self._is_sleeping = False
+        self._sleep_phase = "awake"
+        self._last_wake_time = now
+        self._sleep_started_at = None
+        return {
+            "total_sleep_duration": self._total_sleep_duration,
+            "sleep_cycles": self._sleep_cycles,
+        }
+
+    def get_dream_logs(self, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+        """获取梦境（整理回放）记录，最新在前"""
+        return self._dream_logs[offset : offset + limit]
+
+    def get_dream_insights(self, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+        """获取梦境洞察（当前由合并记录派生，无独立洞察时返回空）"""
+        return []
+
+    def get_memory_merges(self, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+        """获取记忆合并历史，最新在前"""
+        return self._merge_history[offset : offset + limit]
+
+    def get_conflict_resolutions(self, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+        """获取冲突解决历史（当前整理流程不产生冲突记录）"""
+        return []
+
+    def get_settings(self) -> Dict[str, Any]:
+        """获取睡眠设置"""
+        return dict(self._settings)
+
+    def update_settings(self, updates: Dict[str, Any]) -> None:
+        """更新睡眠设置（未知键忽略）"""
+        if not isinstance(updates, dict):
+            return
+        for key, value in updates.items():
+            if key in self._settings:
+                self._settings[key] = value

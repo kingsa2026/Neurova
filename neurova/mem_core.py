@@ -30,10 +30,28 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+import threading
 from threading import RLock
 from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
+
+
+def _parse_ts(value: Optional[str]) -> Optional[datetime]:
+    """宽松解析 ISO 时间戳（记忆 created_at / 轮次消息 timestamp）。
+
+    时区混用（naive/aware）会导致相减抛 TypeError：统一按 UTC 补齐 naive 值。
+    解析失败返回 None（调用方回退为"取第一条"）。
+    """
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
 
 
 class _PersistDbStore:
@@ -203,6 +221,89 @@ class Conversation:
             updated_at=data.get("updated_at", time.time()),
             metadata=data.get("metadata"),
         )
+
+
+def _background_index_memories(
+    vector_store,
+    fetch_page,
+    index_limit: int,
+    batch_size: int = 500,
+    batch_delay: float = 0.05,
+) -> int:
+    """后台渐进语义索引（daemon 线程目标函数）
+
+    通过 fetch_page(offset, size) 按温度降序分页读取全库记忆，灌入 MoE
+    向量索引，突破初始 500 条的覆盖局限。新增条数达到 index_limit 或
+    数据扫尽即停止；已索引 id 由 index_memories(incremental=True) 去重跳过。
+
+    Args:
+        vector_store: MoE 向量存储
+        fetch_page: (offset, size) -> List[Dict]，持久层分页读取闭包
+        index_limit: 索引覆盖上限（vector_search.moe_index_limit）
+        batch_size: 每批条数
+        batch_delay: 批间休眠秒数（让出 CPU）
+
+    Returns:
+        实际新增索引条数
+    """
+    indexed_before = len(vector_store.memory_ids)
+    budget = max(0, index_limit - indexed_before)
+    if budget == 0:
+        logger.info("MoE 后台索引: 已达上限 %s 条，跳过", index_limit)
+        return 0
+
+    offset = 0
+    last_first_id = None
+    total_added = 0
+    while budget > 0:
+        rows = fetch_page(offset, batch_size)
+        if not rows:
+            logger.info(
+                "MoE 后台索引: 全库扫描完成，新增 %s 条，总索引 %s 条",
+                total_added,
+                len(vector_store.memory_ids),
+            )
+            break
+
+        # 游标无进展守卫（持久层不支持 OFFSET 分页时防死循环）
+        first_id = rows[0].get("id") if rows else None
+        if first_id is not None and first_id == last_first_id:
+            logger.warning("MoE 后台索引: 分页游标无进展，提前终止")
+            break
+        last_first_id = first_id
+
+        offset += len(rows)
+        memory_items = [
+            {
+                "id": r.get("id", ""),
+                "content": r.get("content", ""),
+                "metadata": {
+                    "category": r.get("category", "general"),
+                    "lifecycle": r.get("lifecycle_stage", "active"),
+                },
+            }
+            for r in rows
+        ][:budget]  # 批内按剩余预算精确截断，避免末批溢出上限
+
+        before = len(vector_store.memory_ids)
+        try:
+            vector_store.index_memories(memory_items, incremental=True)
+        except Exception as e:
+            logger.warning("MoE 后台索引批次失败，跳过该批: %s", e)
+            continue
+
+        added = len(vector_store.memory_ids) - before
+        total_added += added
+        budget -= added
+        time.sleep(batch_delay)
+
+    logger.info(
+        "MoE 后台索引结束: 新增 %s 条，总索引 %s 条（上限 %s）",
+        total_added,
+        len(vector_store.memory_ids),
+        index_limit,
+    )
+    return total_added
 
 
 class MemCore:
@@ -544,11 +645,52 @@ class MemCore:
                 except Exception as e:
                     logger.warning("MoE: 加载记忆索引失败: %s", e)
 
+            # 激活阈值配置化（memory-settings 配置页）: threshold.default，
+            # settings 默认 0.3 与历史硬编码一致。
+            from neurova.cognitive_layers.memory_layer.settings_config import (
+                get_memory_settings,
+            )
+
             moe_router = MoEMemoryRouter(
                 experts=experts,
                 storage=store or self.storage,
                 vector_store=vector_store,
+                activation_threshold=float(
+                    get_memory_settings().get("threshold.default", 0.3)
+                ),
             )
+
+            # 后台渐进语义索引：突破初始 500 条覆盖局限，按温度降序
+            # 分批把全库记忆灌入 MoE 向量索引，直到 moe_index_limit 或全库完成。
+            # daemon 线程：边索引边可查，服务退出自动结束。
+            try:
+                index_limit = int(
+                    get_memory_settings().get("vector_search.moe_index_limit", 20000)
+                )
+                if store and index_limit > 500:
+
+                    def _fetch_page(offset: int, size: int):
+                        # _PersistDbStore.execute 要求命名参数 Dict，
+                        # 并自动注入三级隔离 WHERE 条件
+                        return store.execute(
+                            "SELECT id, content, category, lifecycle_stage "
+                            "FROM memories "
+                            "WHERE lifecycle_stage != 'forgotten' "
+                            "ORDER BY temperature DESC "
+                            "LIMIT :limit OFFSET :offset",
+                            {"limit": size, "offset": offset},
+                        ).fetchall()
+
+                    indexer = threading.Thread(
+                        target=_background_index_memories,
+                        args=(vector_store, _fetch_page, index_limit),
+                        daemon=True,
+                        name="moe-semantic-indexer",
+                    )
+                    indexer.start()
+                    logger.info("MoE 后台语义索引线程已启动（上限 %s 条）", index_limit)
+            except Exception as e:
+                logger.warning("MoE 后台索引线程启动失败: %s", e)
 
             self._agent._moe_router = moe_router
             logger.info("MoE 路由器初始化成功")
@@ -759,6 +901,145 @@ class MemCore:
             logger.warning("对话记忆保存失败: %s", e)
 
     # ══════════════════════════════════════════════════════════════
+    # 对话记忆清除/反馈（轮次删除、编辑覆写、点赞点踩质量闭环）
+    # ══════════════════════════════════════════════════════════════
+
+    # 点踩温度抑制量（负值；like 走 touch() 的原生 +10 强化）
+    DISLIKE_TEMPERATURE_DELTA = -15.0
+
+    def _find_round_memories(
+        self,
+        session_id: str,
+        user_input: str,
+        agent_response: str,
+        approx_ts: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """按轮次内容定位记忆 dict 列表（delete_round_memories / 反馈温度共享）。
+
+        匹配契约与 _step_save_memory 的落库格式对齐：
+        content == "用户: {user_input}" / "助手: {agent_response}"，
+        metadata.session_id == session_id，metadata.sender_type == user/agent。
+
+        同内容多轮重复（如"继续"）时按 created_at 与轮次消息时间戳
+        （approx_ts）的接近程度取最近一条，不误伤历史轮。
+        """
+        memory_manager = self.memory_manager
+        if not memory_manager or not session_id:
+            return []
+
+        targets = []
+        if user_input:
+            targets.append(("user", f"用户: {user_input}"))
+        if agent_response:
+            targets.append(("agent", f"助手: {agent_response}"))
+        if not targets:
+            return []
+
+        try:
+            all_memories = memory_manager.get_all_memories()
+        except Exception as e:
+            logger.warning("轮次记忆定位失败（读取记忆失败）: %s", e)
+            return []
+
+        ref_ts = _parse_ts(approx_ts)
+        matched: List[Dict[str, Any]] = []
+        for sender_type, content in targets:
+            candidates = [
+                m for m in all_memories
+                if isinstance(m, dict)
+                and (m.get("metadata") or {}).get("session_id") == session_id
+                and (m.get("metadata") or {}).get("sender_type") == sender_type
+                and m.get("content") == content
+            ]
+            if not candidates:
+                continue
+            # created_at 与轮次时间最近者优先；无法解析时间时取第一条
+            target = min(
+                candidates,
+                key=lambda m: abs(
+                    (_parse_ts(m.get("created_at")) - ref_ts).total_seconds()
+                )
+                if (_parse_ts(m.get("created_at")) is not None and ref_ts is not None)
+                else float("inf"),
+            )
+            if target.get("id"):
+                matched.append(target)
+        return matched
+
+    def delete_round_memories(
+        self,
+        session_id: str,
+        user_input: str,
+        agent_response: str,
+        approx_ts: Optional[str] = None,
+    ) -> int:
+        """删除一轮对话对应的记忆（编辑覆写/删除轮次时调用）。
+
+        Returns:
+            成功删除的记忆条数。memory_manager 不可用或异常时返回 0
+            （best-effort，不阻断轮次删除主流程）。
+        """
+        memory_manager = self.memory_manager
+        if not memory_manager or not session_id:
+            return 0
+
+        deleted_count = 0
+        for target in self._find_round_memories(session_id, user_input, agent_response, approx_ts):
+            memory_id = target.get("id")
+            try:
+                if memory_manager.forget(memory_id, soft=False):
+                    deleted_count += 1
+                    logger.debug("轮次记忆已删除: memory_id=%s, session_id=%s", memory_id, session_id)
+            except Exception as e:
+                logger.warning("轮次记忆删除失败: memory_id=%s, %s", memory_id, e)
+        return deleted_count
+
+    def apply_feedback_to_memories(
+        self,
+        session_id: str,
+        user_input: str,
+        agent_response: str,
+        feedback: str,
+        approx_ts: Optional[str] = None,
+    ) -> int:
+        """把点赞/点踩反馈作用于该轮记忆温度（反馈质量闭环）。
+
+        - like  → update_memory_temperature（touch，+10 强化，召回概率提升）
+        - dislike → update_memory(temperature=max(0, temp-15)) 抑制，加速遗忘
+        - feedback 非 like/dislike（如取消反馈 None）→ 无操作
+
+        Returns:
+            成功更新温度的记忆条数（best-effort，异常不外抛）。
+        """
+        memory_manager = self.memory_manager
+        if not memory_manager or not session_id or feedback not in ("like", "dislike"):
+            return 0
+
+        affected = 0
+        for target in self._find_round_memories(session_id, user_input, agent_response, approx_ts):
+            memory_id = target.get("id")
+            if not memory_id:
+                continue
+            try:
+                if feedback == "like":
+                    if memory_manager.update_memory_temperature(memory_id, interaction_type="use"):
+                        affected += 1
+                else:
+                    current = float(target.get("temperature") or 0.0)
+                    new_temp = max(0.0, current + self.DISLIKE_TEMPERATURE_DELTA)
+                    if memory_manager.update_memory(memory_id, temperature=new_temp):
+                        affected += 1
+            except Exception as e:
+                logger.warning("反馈温度更新失败: memory_id=%s, %s", memory_id, e)
+
+        if affected:
+            logger.info(
+                "反馈已作用于记忆温度: session=%s, feedback=%s, 条数=%s",
+                session_id, feedback, affected,
+            )
+        return affected
+
+    # ══════════════════════════════════════════════════════════════
     # 对话历史更新
     # ══════════════════════════════════════════════════════════════
 
@@ -791,7 +1072,10 @@ class MemCore:
             # Deep module 路径:invariant 由 ConversationContext 保证
             # 先同步现有 list 到 ctx (处理外部直接操作 list 的情况)
             current_list = getattr(self._agent, "conversation_history", [])
-            if current_list and len(current_list) != len(ctx):
+            # P2-2 修复: 原条件 `if current_list and ...` 在 clear_history() 把 list
+            # 清空后 falsy 跳过同步, 旧 ctx 在下次 update 时复活已清空的历史。
+            # 只比较长度: list 为空而 ctx 非空 = 外部已清空, 必须同步清空 ctx。
+            if len(current_list) != len(ctx):
                 ctx.clear()
                 ctx.extend(current_list)
             ctx.append("user", user_input, metadata={"timestamp": now_iso})
@@ -849,6 +1133,7 @@ class MemCore:
             user_content=user_input,
             assistant_content=reply,
             metadata=metadata,
+            assistant_metadata=assistant_metadata,
         )
 
     # ══════════════════════════════════════════════════════════════

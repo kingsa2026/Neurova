@@ -59,6 +59,9 @@ class UnifiedVectorStore:
         self.memory_metadata: List[Dict] = []  # 记忆元数据
         self._centroid_last_access: Dict[str, float] = {}  # 质心最后访问时间
 
+        # numpy 加速矩阵（backend 维度固定时构建；tfidf 维度漂移时为 None 回退 list）
+        self._np_matrix = None
+
         # TF-IDF 相关
         self._tfidf_vocabulary: Dict[str, int] = {}
         self._idf_values: Dict[str, float] = {}
@@ -334,24 +337,35 @@ class UnifiedVectorStore:
             parts.append(f"阶段: {expert_def['lifecycle_stage']}")
         return " | ".join(parts) if parts else "通用记忆"
 
-    def index_memories(self, memories: List[Dict[str, Any]]):
+    def index_memories(self, memories: List[Dict[str, Any]], incremental: bool = False):
         """
         索引记忆列表
 
         Args:
             memories: 记忆字典列表，必须包含 'id' 和 'content'
+            incremental: True 时追加到已有索引（后台渐进索引用），
+                         默认 False 保持原语义（清空重建）
         """
         documents = [m.get("content", "") for m in memories]
 
         # 更新 IDF
         self._update_idf(documents)
 
-        # 编码所有记忆
-        self.memory_vectors = []
-        self.memory_ids = []
-        self.memory_metadata = []
+        if not incremental:
+            self.memory_vectors = []
+            self.memory_ids = []
+            self.memory_metadata = []
+            self._np_matrix = None
 
+        # 增量去重：同 id 不重复索引
+        existing_ids = set(self.memory_ids)
+
+        added = 0
         for mem in memories:
+            mem_id = mem.get("id", "")
+            if mem_id and mem_id in existing_ids:
+                continue
+
             content = mem.get("content", "")
             vec = self.encode(content)
 
@@ -361,10 +375,35 @@ class UnifiedVectorStore:
                 vec = vector_normalize(vec)
 
             self.memory_vectors.append(vec)
-            self.memory_ids.append(mem.get("id", ""))
+            self.memory_ids.append(mem_id)
             self.memory_metadata.append(mem)
+            if mem_id:
+                existing_ids.add(mem_id)
+            added += 1
 
-        logger.info("索引 %s 条记忆", len(memories))
+        self._refresh_numpy_matrix()
+
+        logger.info("索引 %s 条记忆（新增 %s，总索引 %s）", len(memories), added, len(self.memory_ids))
+
+    def _refresh_numpy_matrix(self) -> None:
+        """重建 numpy 加速矩阵；向量维度不齐（tfidf 词表漂移）时置 None 回退暴力搜索"""
+        try:
+            import numpy as np
+        except ImportError:
+            self._np_matrix = None
+            return
+
+        if not self.memory_vectors:
+            self._np_matrix = None
+            return
+
+        dim = len(self.memory_vectors[0])
+        if any(len(v) != dim for v in self.memory_vectors):
+            logger.warning("向量维度不齐，numpy 加速不可用，回退暴力搜索")
+            self._np_matrix = None
+            return
+
+        self._np_matrix = np.asarray(self.memory_vectors, dtype=np.float32)
 
     def get_expert_centroids(self) -> Dict[str, List[float]]:
         """获取所有 Expert 质心"""
@@ -413,6 +452,29 @@ class UnifiedVectorStore:
         norm = vector_norm(query_vec)
         if norm > 0:
             query_vec = vector_normalize(query_vec)
+
+        # numpy 快路径（维度齐 + 无过滤时）：矩阵点积替代逐条暴力扫描
+        if self._np_matrix is not None and not filter_dict:
+            try:
+                import numpy as np
+
+                q = np.asarray(query_vec, dtype=np.float32)
+                if q.shape[0] != self._np_matrix.shape[1]:
+                    self._np_matrix = None  # 查询向量维度漂移，重建
+                else:
+                    sims = self._np_matrix @ q
+                    order = np.argsort(-sims)[:limit]
+                    results = []
+                    for idx in order:
+                        score = float(sims[idx])
+                        if score < 0:
+                            continue
+                        mem = self.memory_metadata[int(idx)].copy()
+                        mem["score"] = score
+                        results.append(mem)
+                    return results
+            except Exception as e:
+                logger.warning("numpy 搜索失败，回退暴力扫描: %s", e)
 
         # 计算相似度
         scores = []

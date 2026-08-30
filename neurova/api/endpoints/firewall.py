@@ -365,16 +365,29 @@ async def get_blocked_ips(
 @router.get("/stats")
 async def get_firewall_stats():
     """获取防火墙统计信息"""
+    if get_firewall is None:
+        raise HTTPException(status_code=503, detail="Firewall service not available")
+
     try:
-        rules = _firewall_rules_store if '_firewall_rules_store' in dir() else []
+        # 规则唯一来源是 firewall 服务（与 /rules 端点一致）。
+        # 原代码引用了根本不存在的模块级变量 _firewall_rules_store，
+        # 触发 NameError 后被 except 吞掉，导致统计永远返回全 0。
+        global_rules = get_firewall().get_global_rules()
+        blocked_ips = global_rules.get("blocked_ips", [])
+        allowed_ips = global_rules.get("allowed_ips", [])
+        blocked_paths = global_rules.get("blocked_paths", [])
+
+        # 规则构成: IP 黑名单 + IP 白名单 + 路径黑名单 + 两条速率限制规则
+        total_rules = len(blocked_ips) + len(allowed_ips) + len(blocked_paths) + 2
+
         return {
             "code": 0,
             "message": "success",
             "data": {
-                "total_rules": len(_firewall_rules_store),
-                "active_rules": len([r for r in _firewall_rules_store if r.get("enabled", True)]),
-                "blocked_ips": 0,
-                "blocked_paths": 0,
+                "total_rules": total_rules,
+                "active_rules": total_rules,  # 规则存在即启用，无 enabled 开关
+                "blocked_ips": len(blocked_ips),
+                "blocked_paths": len(blocked_paths),
             },
         }
     except Exception as e:

@@ -18,12 +18,17 @@ import time
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel
+
+from neurova.api.auth import get_current_user
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+# P2-B 根因修复: 此前全部路由无 JWT 鉴权（对比 chat/agent 端点均用
+# Depends(get_current_user)），任何人可读取睡眠数据、触发睡眠/唤醒。
+# 前端对每个请求附带 Bearer token（NeurUI/src/api/index.ts），严格鉴权安全。
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 class SleepStatusResponse(BaseModel):
@@ -335,8 +340,9 @@ async def get_dream_logs(
         except Exception as e:
             logger.warning("Failed to get dream logs: %s", e)
 
-    # 如果没有数据，返回模拟数据
-    if not dreams:
+    # 根因修复: 仅在完全没有睡眠管理器时才回退模拟数据；
+    # 管理器存在但无数据时应返回空列表（此前真实数据被 mock 假数据掩盖）
+    if not dreams and sleep_manager is None:
         dreams = _generate_mock_dreams(agent_id, limit)
 
     return dreams
@@ -353,10 +359,19 @@ async def get_dream_log(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    # 获取梦境详情
-    dreams = _generate_mock_dreams(agent_id, 100)
+    # 获取梦境详情（优先真实数据，无管理器时才回退模拟数据）
+    sleep_manager = _get_sleep_manager(agent_id)
+    dreams = []
+    if sleep_manager and hasattr(sleep_manager, "get_dream_logs"):
+        try:
+            dreams = sleep_manager.get_dream_logs(limit=100, offset=0)
+        except Exception as e:
+            logger.warning("Failed to get dream logs: %s", e)
+    if not dreams and sleep_manager is None:
+        dreams = _generate_mock_dreams(agent_id, 100)
     for dream in dreams:
-        if dream.dream_id == dream_id:
+        dream_id_value = dream.dream_id if hasattr(dream, "dream_id") else dream.get("dream_id")
+        if dream_id_value == dream_id:
             return dream
 
     raise HTTPException(status_code=404, detail=f"Dream '{dream_id}' not found")
@@ -384,8 +399,8 @@ async def get_dream_insights(
         except Exception as e:
             logger.warning("Failed to get dream insights: %s", e)
 
-    # 如果没有数据，返回模拟数据
-    if not insights:
+    # 仅在无管理器时回退模拟数据（与 dreams 端点契约一致）
+    if not insights and sleep_manager is None:
         insights = _generate_mock_insights(agent_id, limit)
 
     return insights
@@ -402,10 +417,19 @@ async def get_dream_insight(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    # 获取洞察详情
-    insights = _generate_mock_insights(agent_id, 100)
+    # 获取洞察详情（优先真实数据，无管理器时才回退模拟数据）
+    sleep_manager = _get_sleep_manager(agent_id)
+    insights = []
+    if sleep_manager and hasattr(sleep_manager, "get_dream_insights"):
+        try:
+            insights = sleep_manager.get_dream_insights(limit=100, offset=0)
+        except Exception as e:
+            logger.warning("Failed to get dream insights: %s", e)
+    if not insights and sleep_manager is None:
+        insights = _generate_mock_insights(agent_id, 100)
     for insight in insights:
-        if insight.insight_id == insight_id:
+        insight_id_value = insight.insight_id if hasattr(insight, "insight_id") else insight.get("insight_id")
+        if insight_id_value == insight_id:
             return insight
 
     raise HTTPException(status_code=404, detail=f"Insight '{insight_id}' not found")
@@ -433,8 +457,8 @@ async def get_memory_merges(
         except Exception as e:
             logger.warning("Failed to get memory merges: %s", e)
 
-    # 如果没有数据，返回模拟数据
-    if not merges:
+    # 仅在无管理器时回退模拟数据（与 dreams 端点契约一致）
+    if not merges and sleep_manager is None:
         merges = _generate_mock_merges(agent_id, limit)
 
     return merges
@@ -451,10 +475,19 @@ async def get_memory_merge(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    # 获取合并详情
-    merges = _generate_mock_merges(agent_id, 100)
+    # 获取合并详情（优先真实数据，无管理器时才回退模拟数据）
+    sleep_manager = _get_sleep_manager(agent_id)
+    merges = []
+    if sleep_manager and hasattr(sleep_manager, "get_memory_merges"):
+        try:
+            merges = sleep_manager.get_memory_merges(limit=100, offset=0)
+        except Exception as e:
+            logger.warning("Failed to get memory merges: %s", e)
+    if not merges and sleep_manager is None:
+        merges = _generate_mock_merges(agent_id, 100)
     for merge in merges:
-        if merge.merge_id == merge_id:
+        merge_id_value = merge.merge_id if hasattr(merge, "merge_id") else merge.get("merge_id")
+        if merge_id_value == merge_id:
             return merge
 
     raise HTTPException(status_code=404, detail=f"Merge '{merge_id}' not found")
@@ -482,8 +515,8 @@ async def get_conflict_resolutions(
         except Exception as e:
             logger.warning("Failed to get conflict resolutions: %s", e)
 
-    # 如果没有数据，返回模拟数据
-    if not conflicts:
+    # 仅在无管理器时回退模拟数据（与 dreams 端点契约一致）
+    if not conflicts and sleep_manager is None:
         conflicts = _generate_mock_conflicts(agent_id, limit)
 
     return conflicts
@@ -500,10 +533,21 @@ async def get_conflict_resolution(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    # 获取冲突详情
-    conflicts = _generate_mock_conflicts(agent_id, 100)
+    # 获取冲突详情（优先真实数据，无管理器时才回退模拟数据）
+    sleep_manager = _get_sleep_manager(agent_id)
+    conflicts = []
+    if sleep_manager and hasattr(sleep_manager, "get_conflict_resolutions"):
+        try:
+            conflicts = sleep_manager.get_conflict_resolutions(limit=100, offset=0)
+        except Exception as e:
+            logger.warning("Failed to get conflict resolutions: %s", e)
+    if not conflicts and sleep_manager is None:
+        conflicts = _generate_mock_conflicts(agent_id, 100)
     for conflict in conflicts:
-        if conflict.resolution_id == resolution_id:
+        resolution_id_value = (
+            conflict.resolution_id if hasattr(conflict, "resolution_id") else conflict.get("resolution_id")
+        )
+        if resolution_id_value == resolution_id:
             return conflict
 
     raise HTTPException(status_code=404, detail=f"Conflict resolution '{resolution_id}' not found")

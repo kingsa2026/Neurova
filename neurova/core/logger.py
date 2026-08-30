@@ -164,7 +164,12 @@ class LogManager:
         """
         module_level = self._module_levels.get(module, self._default_level)
         level_order = [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARNING, LogLevel.ERROR, LogLevel.CRITICAL]
-        return level_order.index(level) >= level_order.index(module_level)
+        try:
+            return level_order.index(level) >= level_order.index(module_level)
+        except ValueError:
+            # level / module_level 不是 LogLevel 枚举值（例如调用方传入了字符串），
+            # list.index 会抛 ValueError 并中断业务调用。级别无法比较时降级为放行。
+            return True
 
     def log(
         self,

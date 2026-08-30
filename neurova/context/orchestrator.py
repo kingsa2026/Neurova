@@ -15,7 +15,7 @@ ContextOrchestrator — 统一上下文构建模块
 """
 
 from neurova.core.logger import get_logger
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import datetime
 
 from .builder import ContextBuilder
@@ -128,6 +128,125 @@ class ContextOrchestrator:
     # 初始化
     # ══════════════════════════════════════════════════════════════
 
+    def _analyze_user_emotion(self, user_input: str) -> Optional[Dict[str, Any]]:
+        """分析用户情感并更新长期情感状态机
+
+        根因修复（三处断链）:
+        1. 原实现 analyze() 未传 update_state=True → EmotionHubEngine 的 17 情感
+           状态机从不累积，长期情感倾向永远为空；
+        2. EmotionAnalyzer() 用默认 agent_id="default" → 多 agent 情感状态互相污染；
+        3. 返回的分数字典没有 "label" 键，注入点 get("label", "neutral") 恒为 neutral。
+        P1-D: 状态流统一经由 EmotionConductionManager（此前零调用骨架），
+        使其统计/历史/共情融合能力在主流程中真实生效。
+        """
+        try:
+            from neurova.cognitive_layers.emotion_context_layer.emotion_conduction import (
+                get_emotion_conduction_manager,
+            )
+
+            agent_id = str(getattr(getattr(self._agent, "config", None), "agent_id", "default") or "default")
+            manager = get_emotion_conduction_manager(agent_id)
+
+            turn_scores = manager.analyze_text_emotion(user_input)
+            if turn_scores:
+                manager.update_emotional_state(turn_scores)
+
+            # 本轮主导情感（argmax 分数）
+            turn_label = max(turn_scores.items(), key=lambda kv: kv[1])[0] if turn_scores else "neutral"
+            turn_intensity = float(turn_scores.get(turn_label, 0.0)) if turn_scores else 0.0
+
+            if not turn_scores:
+                # 无情感关键词：仅当长期状态机已有倾向时才注入（纯中性且无历史
+                # 时返回 None，避免每轮注入噪音——与旧注入频度契约兼容）
+                dominant = manager.get_dominant_emotion()
+                if not dominant:
+                    return None
+                style = manager.apply_emotion_to_style()
+                return {
+                    "label": "neutral",
+                    "intensity": 0.0,
+                    "scores": {},
+                    "long_term_dominant": dominant,
+                    "tone": style.get("tone", "neutral"),
+                }
+
+            # 长期状态（状态机已随 update 更新）
+            dominant = manager.get_dominant_emotion()
+            style = manager.apply_emotion_to_style()
+
+            return {
+                "label": turn_label or "neutral",
+                "intensity": turn_intensity,
+                "scores": turn_scores,
+                "long_term_dominant": dominant,
+                "tone": style.get("tone", "neutral"),
+            }
+        except Exception as e:
+            logger.debug("情感分析跳过: %s", e)
+            return None
+
+    def _collect_pending_questions(self, limit: int = 2) -> list:
+        """收集待探索问题注入上下文（注入即 mark_asked 进入冷却，防止重复打扰）
+
+        根因修复: QuestionQueueManager 此前零调用——生成的永无出口。
+        """
+        qm = getattr(self._agent, "question_queue_manager", None)
+        if not qm:
+            return []
+        items = []
+        try:
+            for q in qm.get_pending_questions()[:limit]:
+                items.append({"id": q.id, "content": q.content})
+                qm.mark_asked(q.id)
+        except Exception as e:
+            logger.debug("收集待探索问题跳过: %s", e)
+        return items
+
+    def _apply_tool_lifecycle(self, tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
+        """应用工具生命周期过滤与权重排序（委托 EvolutionOrchestrator.on_before_tool_selection）
+
+        根因修复: on_before_tool_selection 此前零生产调用——归档/冻结工具永远
+        出现在 LLM 工具列表中，降级工具不加权。
+        """
+        if not tools:
+            return tools
+        try:
+            evolution = getattr(self._agent, "evolution", None)
+            hook = getattr(evolution, "on_before_tool_selection", None)
+            if not hook:
+                return tools
+
+            names = [t["function"]["name"] for t in tools if isinstance(t, dict) and t.get("function", {}).get("name")]
+            result = hook(available_tools=names)
+            if not isinstance(result, dict):
+                return tools
+
+            filtered = set(result.get("filtered", []) or [])
+            ranking = [n for n in (result.get("ranking", []) or []) if n not in filtered]
+            if not ranking:
+                return tools
+
+            by_name = {
+                t["function"]["name"]: t
+                for t in tools
+                if isinstance(t, dict) and t.get("function", {}).get("name")
+            }
+            ordered = [by_name[n] for n in ranking if n in by_name]
+            # ranking 未覆盖的工具（如新增）保持相对顺序追加在尾部（按名字判断过滤）
+            covered = set(by_name)
+            ordered.extend(
+                t
+                for t in tools
+                if isinstance(t, dict)
+                and t.get("function", {}).get("name")
+                and t["function"]["name"] not in covered
+                and t["function"]["name"] not in filtered
+            )
+            return ordered if ordered else tools
+        except Exception as e:
+            logger.debug("工具生命周期过滤跳过: %s", e)
+            return tools
+
     def init_context_system(self):
         """初始化上下文系统（UnifiedContextInjector + ContextBuilder）
 
@@ -207,19 +326,8 @@ class ContextOrchestrator:
         if tools_desc:
             developer_instructions.append(tools_desc)
 
-        # Phase 2.5: 分析用户输入的情感状态
-        agent_emotion = None
-        try:
-            from neurova.cognitive_layers.emotion_context_layer.emotion import EmotionAnalyzer
-
-            emotion_analyzer = EmotionAnalyzer()
-            agent_emotion = emotion_analyzer.analyze(user_input)
-            if agent_emotion and agent_emotion.get("label") != "neutral":
-                logger.debug(
-                    f"用户情感分析: {agent_emotion.get('label')} (强度: {agent_emotion.get('intensity', 0):.2f})"
-                )
-        except Exception as e:
-            logger.debug("情感分析跳过: %s", e)
+        # Phase 2.5: 分析用户输入的情感状态（并更新长期情感状态机）
+        agent_emotion = self._analyze_user_emotion(user_input)
 
         # Phase 2.8: 收集反思日志
         reflection_logs: list = []
@@ -227,8 +335,14 @@ class ContextOrchestrator:
             try:
                 validated = self.growth_log_manager.get_validated_logs(limit=3)
                 pending = self.growth_log_manager.get_pending_logs(limit=2)
+                # 根因修复: ReflectionLogEntry 的真实字段是 content/type（此前读
+                # l.lesson/l.reflection_type 不存在 → AttributeError 被吞 → 永远为空）
                 reflection_logs = [
-                    {"lesson": l.lesson, "reflection_type": l.reflection_type.value, "status": l.status.value}
+                    {
+                        "lesson": (l.insights[0] if l.insights else l.content) or l.title,
+                        "reflection_type": l.type.value,
+                        "status": l.status.value,
+                    }
                     for l in validated + pending
                 ]
             except Exception as e:
@@ -355,6 +469,8 @@ class ContextOrchestrator:
                 lesson = log.get("lesson", str(log))
                 injected_hashes.add(ContextInput.compute_hash(ContextSource.REFLECTION, lesson))
                 context.append({"role": "system", "content": f"[反思] {lesson}"})
+            for question in self._collect_pending_questions():
+                context.append({"role": "system", "content": f"[待探索问题] {question['content']}"})
 
             # 4. 跨轮语义调取块：从归档池按当前输入召回**历史**相关内容
             #    排除已注入条目（窗口 + 本轮产物），只召回往轮归档
@@ -400,9 +516,14 @@ class ContextOrchestrator:
                 if tool_lines:
                     context.append({"role": "system", "content": "[工具记忆] " + " | ".join(tool_lines)})
 
-            # 情感状态（每轮瞬态）
+            # 情感状态（本轮瞬态 + 长期倾向/回复基调）
             if agent_emotion:
-                context.append({"role": "system", "content": f"[情感] 用户情感: {agent_emotion.get('label', 'neutral')}"})
+                emotion_line = f"[情感] 用户情感: {agent_emotion.get('label', 'neutral')} (强度 {agent_emotion.get('intensity', 0.0):.2f})"
+                if agent_emotion.get("long_term_dominant"):
+                    emotion_line += f"；长期情感倾向: {agent_emotion['long_term_dominant']}"
+                if agent_emotion.get("tone") and agent_emotion.get("tone") != "neutral":
+                    emotion_line += f"；建议回复基调: {agent_emotion['tone']}"
+                context.append({"role": "system", "content": emotion_line})
 
             # 语音上下文（每轮瞬态）
             if voice_context:
@@ -496,7 +617,7 @@ class ContextOrchestrator:
             candidate_pool.append(
                 ContextInput(
                     source=ContextSource.EMOTION,
-                    content=f"用户情感: {agent_emotion.get('label', 'neutral')}",
+                    content=f"用户情感: {agent_emotion.get('label', 'neutral')} (强度 {agent_emotion.get('intensity', 0.0):.2f})",
                     priority=50,
                     metadata=agent_emotion,
                 )
@@ -750,7 +871,7 @@ class ContextOrchestrator:
         实例方法：委托给底层 `_build_tools_for_llm` 实现，保持 `self` 注入，
         使 agent_core / chat_pipeline / context_facade 等调用方通过实例正常访问。
         """
-        return await _build_tools_for_llm(self)
+        return self._apply_tool_lifecycle(await _build_tools_for_llm(self))
 
 
 def get_tool_call_format_hint() -> str:

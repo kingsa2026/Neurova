@@ -29,6 +29,21 @@ from neurova.channels.base import (
 
 logger = get_logger(__name__)
 
+# 回调 XML 请求体大小上限（防实体扩展/资源耗尽；企微消息体远小于此值）
+_MAX_XML_BODY_SIZE = 64 * 1024
+
+
+def _wecom_callback_signature(token: str, timestamp: str, nonce: str, encrypt: str) -> str:
+    """企业微信官方回调签名公式（文档 90968 加解密方案）:
+
+        msg_signature = SHA1(sort(token, timestamp, nonce, msg_encrypt))
+
+    SHA1 为平台强制互操作算法（非本实现的安全选择）；
+    明文模式回调体无 Encrypt 字段时，encrypt 传空串（等价于三元组拼接结果）。
+    """
+    raw = "".join(sorted([token, timestamp, nonce, encrypt]))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
 
 class WeComAdapter(ChannelAdapter):
     """
@@ -76,25 +91,22 @@ class WeComAdapter(ChannelAdapter):
 
     async def _connect_stream(self) -> bool:
         """
-        WebSocket 长连接模式（智能机器人）
+        WebSocket 长连接模式（智能机器人 AI Bot）
 
-        企业微信智能机器人通过 WebSocket 接收消息推送，
-        无需公网 IP，适合本地开发和内网部署。
+        官方接入规范（文档 101039/101463）:
+        - 管理后台智能机器人配置页开启"API 模式-长连接"，获取 BotID + Secret
+          （与回调模式的 Token/EncodingAESKey 是两套凭证，两种模式互斥）
+        - 连接 wss://openws.work.weixin.qq.com 后发送 aibot_subscribe 订阅
+        - 接收 aibot_msg_callback（消息）/ aibot_event_callback（事件），
+          用 aibot_respond_msg 回复；每 30 秒心跳 ping；
+          单机器人仅允许 1 条有效长连接
+        - 官方 SDK: PyPI `wecom-aibot-python-sdk`（推荐直接使用）
+
+        本适配器当前仅覆盖 token 获取与回调验签；长连接协议实现见官方 SDK。
         """
         try:
-            # 企业微信智能机器人 WebSocket 连接
-            # 需要 corpid, secret (应用Secret)
-            # 实际连接使用企业微信官方 SDK 或自行实现 WebSocket
-
-            # 企业微信智能机器人的 WebSocket 连接流程:
-            # 1. 获取 access_token
-            # 2. 建立 WebSocket 连接到 callback.weixin.qq.com
-            # 3. 通过 WebSocket 接收消息推送
-            # 4. 通过 WebSocket 发送回复
-
-            pass
-
-            # 尝试获取 access_token
+            # 获取 access_token 验证凭证有效性（长连接凭证为 BotID+Secret，
+            # 若配置了 corpid/app_secret 则可先行验证自建应用凭证）
             if not self._access_token or time.time() > self._token_expires_at:
                 await self._refresh_access_token()
 
@@ -141,16 +153,23 @@ class WeComAdapter(ChannelAdapter):
             str: 被动回复的 XML（可选）
         """
         try:
-            # 验证签名
+            # 解析 XML: 回调 URL 公网可达，需防实体扩展攻击（拒绝 DOCTYPE/ENTITY 并限制大小）
+            if len(xml_data) > _MAX_XML_BODY_SIZE:
+                logger.warning("WeCom callback rejected: body too large (%d bytes)", len(xml_data))
+                return None
+            if "<!doctype" in xml_data[:1024].lower() or "<!entity" in xml_data[:1024].lower():
+                logger.warning("WeCom callback rejected: DOCTYPE/ENTITY not allowed")
+                return None
+            root = ET.fromstring(xml_data)
+            encrypt = root.findtext("Encrypt", "") or ""
+
+            # 验证签名: msg_signature = SHA1(sort(token, timestamp, nonce, encrypt))
             if self._callback_token:
-                check_list = sorted([self._callback_token, timestamp, nonce])
-                signature = hashlib.sha1("".join(check_list).encode("utf-8")).hexdigest()
+                signature = _wecom_callback_signature(self._callback_token, timestamp, nonce, encrypt)
                 if signature != msg_signature:
                     logger.warning("WeCom callback signature verification failed")
                     return None
 
-            # 解析 XML
-            root = ET.fromstring(xml_data)
             to_user_name = root.findtext("ToUserName", "")
             from_user = root.findtext("FromUserName", "")
             create_time = root.findtext("CreateTime", "")
@@ -210,11 +229,13 @@ class WeComAdapter(ChannelAdapter):
         """
         URL 验证（企业微信回调配置时使用）
 
-        企业微信会发送 GET 请求验证回调 URL 的有效性。
+        官方规范（文档 90968）: GET 验证请求的 msg_signature 为
+        SHA1(sort(token, timestamp, nonce, echostr))，第 4 元为 URL 上
+        的加密 echostr 密文。验证通过后完整实现应解密 echostr 并返回
+        明文（需 EncodingAESKey 的 AES-CBC 解密）；当前返回密文原文。
         """
         if self._callback_token:
-            check_list = sorted([self._callback_token, timestamp, nonce])
-            signature = hashlib.sha1("".join(check_list).encode("utf-8")).hexdigest()
+            signature = _wecom_callback_signature(self._callback_token, timestamp, nonce, echostr)
             if signature != msg_signature:
                 raise ValueError("URL verification signature mismatch")
         return echostr

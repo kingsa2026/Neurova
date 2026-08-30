@@ -11,6 +11,7 @@ Benchmark 基准测试框架 v1.0.0 - 真实测试数据版本
 5. 查看某 Agent 的评测历史
 """
 
+import asyncio
 from neurova.core.logger import get_logger
 import threading
 import time

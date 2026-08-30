@@ -17,6 +17,12 @@ import ast
 import asyncio
 import json
 from neurova.builtin_tools import get_builtin_tool_params
+from neurova.collaboration.canvas_ops import (
+    CanvasOpError,
+    CanvasVersionConflict,
+    get_canvas_op_service,
+)
+from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
 from neurova.core.logger import get_logger
 import shlex
 import time
@@ -43,6 +49,9 @@ COMPUTER_USE_TOOLS = frozenset(
         "browser_type",
         "browser_screenshot",
         "browser_extract_text",
+        "browser_dom_snapshot",
+        "browser_click_role",
+        "browser_fill_role",
     }
 )
 
@@ -73,6 +82,12 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
         return "截取浏览器页面"
     if tool_name == "browser_extract_text":
         return "提取页面文本"
+    if tool_name == "browser_dom_snapshot":
+        return "获取页面可访问性快照"
+    if tool_name == "browser_click_role":
+        return f"点击 {params.get('role', '?')}「{params.get('name', '')}」"
+    if tool_name == "browser_fill_role":
+        return f"在 {params.get('role', '?')}「{params.get('name', '')}」中输入"
     return tool_name
 
 
@@ -104,6 +119,75 @@ class ToolExecutor:
     - _skill_registry, tool_router, tool_memory, tool_lifecycle, skill_packer
     - _tool_messages_list, config
     """
+
+    # 内置工具分派表：工具名 → 执行方法名（调用时 getattr 解析）。
+    # 根因修复：原 if/elif 分派链与 builtin_tools._BUILTIN_SCHEMAS 是两条
+    # 平行结构、无机械关联，历史上已漂移三次——asr_transcribe/tts_synthesize
+    # 有 schema 无执行体（LLM 调用必返回"未知内置工具"），run_code 有执行体
+    # 无 schema（LLM 永远看不到）。改为分派表后，由不变量测试
+    # tests/unit/tools/test_builtin_tools_expansion.py::TestSchemaDispatchConsistency
+    # 保证 _BUILTIN_SCHEMAS ⊆ 本表，新增工具漏配执行体会直接被测试拦截。
+    # 注意：search/execute_code 是历史兼容别名，不可删除。
+    _builtin_dispatch: Dict[str, str] = {
+        "memory_search": "_execute_memory_search",
+        "search": "_execute_web_search",
+        "web_search": "_execute_web_search",
+        "weather": "_execute_weather",
+        "file_read": "_execute_file_read",
+        "file_write": "_execute_file_write",
+        "file_create": "_execute_file_create",
+        "file_delete": "_execute_file_delete",
+        "file_edit": "_execute_file_edit",
+        "file_list": "_execute_file_list",
+        "file_search": "_execute_file_search",
+        "web_fetch": "_execute_web_fetch",
+        "calculator": "_execute_calculator",
+        "get_datetime": "_execute_get_datetime",
+        "computer_screenshot": "_execute_computer_screenshot",
+        "computer_click": "_execute_computer_click",
+        "computer_type": "_execute_computer_type",
+        "computer_scroll": "_execute_computer_scroll",
+        "computer_shell": "_execute_computer_shell",
+        "browser_navigate": "_execute_browser_navigate",
+        "browser_click": "_execute_browser_click",
+        "browser_type": "_execute_browser_type",
+        "browser_screenshot": "_execute_browser_screenshot",
+        "browser_extract_text": "_execute_browser_extract_text",
+        "browser_dom_snapshot": "_execute_browser_dom_snapshot",
+        "browser_click_role": "_execute_browser_click_role",
+        "browser_fill_role": "_execute_browser_fill_role",
+        "planning": "_execute_planning",
+        "emotion_analyze": "_execute_emotion_analyze",
+        "asr_transcribe": "_execute_asr_transcribe",
+        "tts_synthesize": "_execute_tts_synthesize",
+        "voice_memory_search": "_execute_voice_memory_search",
+        "run_code": "_execute_run_code",
+        "execute_code": "_execute_run_code",
+        "spawn_subagent": "_execute_spawn_subagent",
+        "subagent_status": "_execute_subagent_status",
+        "list_agents": "_execute_list_agents",
+        "create_skill": "_execute_create_skill",
+        # 画布交互工具（Phase 1）：语义操作层薄封装，见 _execute_canvas_* 注释
+        "canvas_create": "_execute_canvas_create",
+        "canvas_read": "_execute_canvas_read",
+        "canvas_add_node": "_execute_canvas_add_node",
+        "canvas_connect": "_execute_canvas_connect",
+        "canvas_set_config": "_execute_canvas_set_config",
+        "canvas_move_node": "_execute_canvas_move_node",
+        "canvas_remove_node": "_execute_canvas_remove_node",
+        "canvas_layout": "_execute_canvas_layout",
+        "canvas_run": "_execute_canvas_run",
+        "canvas_list_nodes": "_execute_canvas_list_nodes",
+    }
+
+    # file_search 跳过的噪音目录（依赖/构建/版本控制）
+    _SEARCH_SKIP_DIRS = frozenset({
+        ".git", ".hg", ".svn", "node_modules", "__pycache__",
+        ".venv", "venv", "dist", "build", ".idea", ".vscode",
+    })
+
+    # calculator 指数上限 — 防止 9**999999999 这类表达式撑爆内存
+    _CALC_MAX_EXPONENT = 10000
 
     def __init__(self, agent_ref):
         """
@@ -172,6 +256,19 @@ class ToolExecutor:
         """获取配置"""
         return getattr(self._agent, "config", None)
 
+    def _agent_identity(self) -> tuple:
+        """解析执行身份 (user_id, agent_id)
+
+        P2 修复: user_id/agent_id 位于 agent.config 上，Agent 实例本身没有这两个属性。
+        原实现 getattr(self._agent, "user_id"/"agent_id") 恒为 None/""，
+        导致 ToolEngine 安全防护、治理裁决、审批请求、审计日志全部丢失用户身份。
+        """
+        agent = self._agent
+        config = getattr(agent, "config", None)
+        user_id = getattr(agent, "user_id", None) or getattr(config, "user_id", None)
+        agent_id = getattr(agent, "agent_id", None) or getattr(config, "agent_id", None)
+        return user_id, agent_id
+
     def _ensure_messages_list(self, messages: Optional[List[Dict]] = None) -> List[Dict]:
         """确保消息列表存在"""
         if messages is None:
@@ -225,6 +322,12 @@ class ToolExecutor:
                         "name": tool_name,
                         "tool_name": tool_name,
                         "content": json.dumps(result, ensure_ascii=False),
+                        # P2-12 修复: 补齐 type/success/timestamp, 与 agent/loops/base.py
+                        # 写入格式一致（理由同 list 模式）。
+                        "type": "tool_result",
+                        "result": result,
+                        "success": self._result_is_success(result),
+                        "timestamp": datetime.now().isoformat(),
                     }
                 )
             except Exception as e:
@@ -260,10 +363,28 @@ class ToolExecutor:
                 arguments_str = function.get("arguments", "{}")
 
                 # 解析参数
-                try:
-                    arguments = json.loads(arguments_str)
-                except json.JSONDecodeError:
-                    arguments = {}
+                # P2-7 修复: 原实现在 JSONDecodeError 时静默 arguments={} 继续执行,
+                # 会让 file_write/run_code 等破坏性工具以空参数执行。
+                # 对齐 loops/base.py TOOLROBUST-A 策略: 解析失败不执行, 把错误作为该工具
+                # 的结果回传(success=False), 交由 LLM 自行纠正参数格式。
+                # 同时兼容部分 provider 直接传 dict 参数的情况。
+                if isinstance(arguments_str, dict):
+                    arguments = arguments_str
+                else:
+                    try:
+                        arguments = json.loads(arguments_str) if str(arguments_str).strip() else {}
+                    except (json.JSONDecodeError, TypeError, ValueError) as parse_err:
+                        error_msg = f"工具 {tool_name} 参数 JSON 解析失败: {parse_err}"
+                        logger.warning("%s | 原始参数: %r", error_msg, arguments_str)
+                        results.append(
+                            {
+                                "tool_call_id": tool_call.get("id", ""),
+                                "name": tool_name,
+                                "result": {"error": error_msg},
+                                "success": False,
+                            }
+                        )
+                        continue
 
                 # 执行工具
                 result = await self._execute_single_tool(tool_name, arguments)
@@ -272,7 +393,8 @@ class ToolExecutor:
                         "tool_call_id": tool_call.get("id", ""),
                         "name": tool_name,
                         "result": result,
-                        "success": True,
+                        # P1 一致性修复: 成败依据结果内容判定, 不能无条件 True
+                        "success": self._result_is_success(result),
                     }
                 )
 
@@ -289,6 +411,14 @@ class ToolExecutor:
                         "tool_call_id": tool_call.get("id", ""),
                         "tool_name": tool_name,
                         "content": json.dumps(result, ensure_ascii=False),
+                        # P2-12 修复: 补齐 type/success/timestamp, 与 agent/loops/base.py
+                        # 写入格式一致。否则 post_chat_pipeline._step_marketplace_publish 的
+                        # `tm.get("type")=="tool_result" and tm.get("success")` 恒 False,
+                        # 工具市场自动发布成为死步骤。
+                        "type": "tool_result",
+                        "result": result,
+                        "success": self._result_is_success(result),
+                        "timestamp": datetime.now().isoformat(),
                     }
                 )
 
@@ -305,44 +435,11 @@ class ToolExecutor:
 
         return results
 
-    async def execute_from_memory(self, tool_name: str, params: Dict, context: Optional[Dict] = None) -> Dict:
-        """
-        从肌肉记忆执行工具
-
-        Args:
-            tool_name: 工具名称
-            params: 工具参数
-            context: 上下文信息
-
-        Returns:
-            执行结果
-        """
-        # 检查工具记忆
-        if self.tool_memory:
-            try:
-                # check_tool_memory 接受 user_input 字符串
-                memory_result, _ = self.tool_memory.check_tool_memory(tool_name)
-                if memory_result and memory_result.get("confidence", 0) > 0.8:
-                    # 使用记忆中的结果
-                    return memory_result.get("result", {})
-            except Exception as e:
-                logger.debug("工具记忆检查失败: %s", e)
-
-        # 执行工具
-        result = await self._execute_single_tool(tool_name, params)
-
-        # 记录工具使用
-        if self.tool_memory:
-            try:
-                self.tool_memory.record_tool_usage(
-                    tool_name=tool_name,
-                    success=result is not None,
-                    tool_params=params,
-                )
-            except Exception as e:
-                logger.debug("工具记忆记录失败: %s", e)
-
-        return result
+    # P-E 修复（docs/tool-memory-muscle-analysis.md）：原 execute_from_memory
+    # 同步版已删除——它把工具名当用户输入做语义匹配，且 confidence > 0.8 时
+    # 直接返回 memory_result.get("result", {})（MuscleMemoryItem 无 result 字段，
+    # 恒为空 dict）冒充工具执行结果；该方法无调用方，实际使用的是下方的
+    # execute_from_memory_async（真实执行 + 反馈）。
 
     async def execute_from_memory_async(
         self,
@@ -498,6 +595,22 @@ class ToolExecutor:
         """
         return await self._execute_single_tool(tool_name, params)
 
+    @staticmethod
+    def _result_is_success(result: Any) -> bool:
+        """依据结果内容判定执行成败
+
+        P1 修复: 各执行路径原实现在拿到返回值后无条件 success=True，
+        但 builtin/skill/router 失败时返回 {"error": ...} 而不抛异常，
+        导致失败被记为成功，污染肌肉记忆晋升与生命周期统计。
+        约定: dict 结果含非空 error 键或 success=False 视为失败。
+        """
+        if isinstance(result, dict):
+            if result.get("error"):
+                return False
+            if result.get("success") is False:
+                return False
+        return True
+
     async def _execute_single_tool(self, tool_name: str, params: Dict,
                                    skip_governance: bool = False) -> Dict:
         """
@@ -524,7 +637,7 @@ class ToolExecutor:
             # 方案 P0-1.5: 统一治理预检 —— DENY 拦截、SANDBOX 隔离执行、
             # ASK 待确认；ALLOW / 无裁决内容返回 None 放行。
             precheck = (None if skip_governance
-                        else self._governance_precheck(tool_name, params))
+                        else await self._governance_precheck(tool_name, params))
             if precheck is not None:
                 result = precheck
                 return result
@@ -533,14 +646,15 @@ class ToolExecutor:
             if self.tool_engine:
                 try:
                     # 获取 user_id 和 agent_id（如果可用）
-                    user_id = getattr(self._agent, "user_id", None)
-                    agent_id = getattr(self._agent, "agent_id", None)
+                    user_id, agent_id = self._agent_identity()
 
                     result = await self.tool_engine.execute_with_safeguards(
                         tool_name=tool_name, parameters=params, user_id=user_id, agent_id=agent_id
                     )
                     logger.debug("ToolEngine 执行成功: %s", tool_name)
-                    success = True
+                    # P1 修复: 工具函数可能返回 {"error": ...} 而不抛异常，
+                    # 成败必须依据结果内容判定，不能无条件记为成功。
+                    success = self._result_is_success(result)
                     tool_source = "mcp"
                     return result
                 except ValueError as e:
@@ -555,14 +669,14 @@ class ToolExecutor:
             if get_builtin_tool_params(tool_name) is not None:
                 tool_source = "builtin"
                 result = await self._execute_builtin_tool(tool_name, params)
-                success = True
+                success = self._result_is_success(result)
                 return result
 
             # Skill 工具
             if self._skill_registry and self._skill_registry.has_skill(tool_name):
                 tool_source = "skill_system"
                 result = await self.execute_skill_tool(tool_name, params)
-                success = True
+                success = self._result_is_success(result)
                 return result
 
             # 通过工具路由器
@@ -570,7 +684,7 @@ class ToolExecutor:
                 try:
                     tool_source = "tool_router"
                     result = await self.tool_router.route(tool_name, params)
-                    success = True
+                    success = self._result_is_success(result)
                     return result
                 except Exception as e:
                     logger.debug("工具路由器执行失败: %s", e)
@@ -593,7 +707,8 @@ class ToolExecutor:
                 # 不让钩子异常吞掉工具执行结果，但必须记录堆栈
                 logger.exception("on_tool_executed 钩子失败: %s", tool_name)
 
-    def _governance_precheck(self, tool_name: str, params: Dict) -> Optional[Dict]:
+    async def _governance_precheck(self, tool_name: str, params: Dict) -> Optional[Dict]:
+        """治理预检（async：SANDBOX 判定的 Docker 后端为异步执行）"""
         """
         执行前统一治理预检（方案 P0-1.5 集成点）。
 
@@ -629,7 +744,7 @@ class ToolExecutor:
             verdict = get_governance().evaluate(
                 command=command,
                 tool_name=tool_name,
-                user_id=getattr(self._agent, "user_id", None),
+                user_id=self._agent_identity()[0],
                 file_paths=file_path,
             )
         except Exception as e:
@@ -648,9 +763,11 @@ class ToolExecutor:
 
         if verdict.decision == GovernanceDecision.SANDBOX:
             if command:
-                from neurova.sandbox.exec_sandbox import execute_in_sandbox
+                from neurova.sandbox.exec_sandbox import execute_in_sandbox_async
 
-                sandbox_result = execute_in_sandbox(command, severity=verdict.severity)
+                # 异步入口：auto 模式下需要隔离且 Docker 可用时走容器（跨平台真隔离），
+                # 否则回退平台后端（Windows AppContainer 为占位）
+                sandbox_result = await execute_in_sandbox_async(command, severity=verdict.severity)
                 sandbox_result["governance"] = verdict.to_dict()
                 return sandbox_result
             # 文件类操作暂无文件系统沙箱后端：降级为阻止并说明原因
@@ -682,9 +799,10 @@ class ToolExecutor:
         try:
             am = _get_approval_manager()
             command = str(params.get("command") or params.get("code") or "")
+            _user_id, _agent_id = self._agent_identity()
             request = am.create_approval_request(
-                agent_id=str(getattr(self._agent, "agent_id", "") or "default"),
-                user_id=str(getattr(self._agent, "user_id", "") or ""),
+                agent_id=str(_agent_id or "default"),
+                user_id=str(_user_id or ""),
                 command=command or f"{tool_name}({params})",
                 description=f"工具 {tool_name} 待人工确认",
                 danger_reason="; ".join(verdict.reasons),
@@ -716,7 +834,7 @@ class ToolExecutor:
                         if decision == "allow"
                         else AuditEventType.SECURITY_EVENT
                     ),
-                    user_id=str(getattr(self._agent, "user_id", "") or ""),
+                    user_id=str(self._agent_identity()[0] or ""),
                     action=f"governance:{decision}",
                     details={"tool": tool_name, "governance": governance_info},
                 )
@@ -725,60 +843,11 @@ class ToolExecutor:
             logger.debug("治理审计日志写入失败: %s", tool_name, exc_info=True)
 
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
-        """执行内置工具"""
-        # 简单的内置工具实现
-        if tool_name == "memory_search":
-            return await self._execute_memory_search(params)
-        elif tool_name in ("search", "web_search"):
-            return await self._execute_web_search(params)
-        elif tool_name == "weather":
-            return await self._execute_weather(params)
-        elif tool_name == "file_read":
-            return await self._execute_file_read(params)
-        elif tool_name == "file_write":
-            return await self._execute_file_write(params)
-        elif tool_name == "file_create":
-            return await self._execute_file_create(params)
-        elif tool_name == "file_delete":
-            return await self._execute_file_delete(params)
-        elif tool_name == "file_edit":
-            return await self._execute_file_edit(params)
-        elif tool_name == "computer_screenshot":
-            return await self._execute_computer_screenshot(params)
-        elif tool_name == "computer_click":
-            return await self._execute_computer_click(params)
-        elif tool_name == "computer_type":
-            return await self._execute_computer_type(params)
-        elif tool_name == "computer_scroll":
-            return await self._execute_computer_scroll(params)
-        elif tool_name == "computer_shell":
-            return await self._execute_computer_shell(params)
-        elif tool_name == "browser_navigate":
-            return await self._execute_browser_navigate(params)
-        elif tool_name == "browser_click":
-            return await self._execute_browser_click(params)
-        elif tool_name == "browser_type":
-            return await self._execute_browser_type(params)
-        elif tool_name == "browser_screenshot":
-            return await self._execute_browser_screenshot(params)
-        elif tool_name == "browser_extract_text":
-            return await self._execute_browser_extract_text(params)
-        elif tool_name == "emotion_analyze":
-            return await self._execute_emotion_analyze(params)
-        elif tool_name == "voice_memory_search":
-            return await self._execute_voice_memory_search(params)
-        elif tool_name in ("run_code", "execute_code"):
-            return await self._execute_run_code(params)
-        elif tool_name == "spawn_subagent":
-            return await self._execute_spawn_subagent(params)
-        elif tool_name == "subagent_status":
-            return await self._execute_subagent_status(params)
-        elif tool_name == "list_agents":
-            return await self._execute_list_agents(params)
-        elif tool_name == "create_skill":
-            return await self._execute_create_skill(params)
-        else:
+        """执行内置工具（分派表驱动，见 _builtin_dispatch 注释）"""
+        method_name = self._builtin_dispatch.get(tool_name)
+        if method_name is None:
             return {"error": f"未知内置工具: {tool_name}"}
+        return await getattr(self, method_name)(params)
 
     # ── 蜂群工具（SwarmManager 深度模块的薄封装） ────────────────
 
@@ -892,20 +961,314 @@ class ToolExecutor:
             ),
         }
 
+    # ── 画布工具（CanvasOpService 语义操作层的薄封装） ───────────
+    # 所有写操作经 canvas_ops（与 HTTP 端点 /canvas/{id}/ops 共用同一层，
+    # 乐观锁 + 事件广播）。错误统一转为 {"success": False, "code": ...}
+    # 供 LLM 分支处理：
+    #   version_conflict  → 画布被用户抢占，canvas_read 重读后按新版本重试
+    #   unknown_node_type → canvas_list_nodes 查询可用节点类型
+
+    def _canvas_session_id(self) -> Optional[str]:
+        return getattr(self._agent, "_current_session_id", None)
+
+    @staticmethod
+    def _canvas_error_result(e: Exception) -> Dict:
+        if isinstance(e, CanvasVersionConflict):
+            return {
+                "success": False,
+                "code": "version_conflict",
+                "current_version": getattr(e, "current_version", None),
+                "error": (
+                    f"{e} —— 画布已被其他编辑者更新，请先用 canvas_read "
+                    f"重新读取最新快照，再基于新版本号重试操作"
+                ),
+            }
+        if isinstance(e, CanvasOpError):
+            return {"success": False, "code": e.code, "error": str(e)}
+        return {"success": False, "code": "canvas_error", "error": str(e)}
+
+    async def _canvas_call(self, method: str, **kwargs) -> Dict:
+        """调用 CanvasOpService；业务异常统一转为结构化错误 dict"""
+        try:
+            return await getattr(get_canvas_op_service(), method)(**kwargs)
+        except (CanvasOpError, CanvasVersionConflict) as e:
+            return self._canvas_error_result(e)
+
+    @staticmethod
+    def _is_canvas_error(result: Any) -> bool:
+        return isinstance(result, dict) and result.get("success") is False
+
+    async def _execute_canvas_create(self, params: Dict) -> Dict:
+        name = str(params.get("name") or "").strip()
+        if not name:
+            return {"success": False, "code": "invalid_params", "error": "缺少画布名称 (name)"}
+        record = await self._canvas_call(
+            "create_canvas",
+            name=name,
+            description=str(params.get("description") or ""),
+            session_id=self._canvas_session_id(),
+            actor="agent",
+        )
+        if self._is_canvas_error(record):
+            return record
+        return {
+            "success": True,
+            "canvas_id": record["id"],
+            "version": record.get("version", 1),
+            "message": "画布已创建并实时同步到前端画布页，后续操作请携带此 canvas_id",
+        }
+
+    async def _execute_canvas_read(self, params: Dict) -> Dict:
+        canvas_id = str(params.get("canvas_id") or "").strip()
+        if not canvas_id:
+            return {"success": False, "code": "invalid_params", "error": "缺少 canvas_id"}
+        record = await self._canvas_call("read_canvas", canvas_id=canvas_id)
+        if self._is_canvas_error(record):
+            return record
+        return {
+            "success": True,
+            "canvas": record,
+            "version": record.get("version"),
+            "message": "后续修改操作可将此 version 作为 base_version 传入",
+        }
+
+    async def _execute_canvas_add_node(self, params: Dict) -> Dict:
+        canvas_id = str(params.get("canvas_id") or "").strip()
+        node_type = str(params.get("node_type") or "").strip()
+        if not canvas_id or not node_type:
+            return {
+                "success": False,
+                "code": "invalid_params",
+                "error": "缺少 canvas_id 或 node_type",
+            }
+        node = await self._canvas_call(
+            "add_node",
+            canvas_id=canvas_id,
+            node_type=node_type,
+            config=params.get("config") or None,
+            position=params.get("position") or None,
+            label=params.get("label") or None,
+            base_version=params.get("base_version"),
+            session_id=self._canvas_session_id(),
+            actor="agent",
+        )
+        if self._is_canvas_error(node):
+            return node
+        return {"success": True, "node": node}
+
+    async def _execute_canvas_connect(self, params: Dict) -> Dict:
+        canvas_id = str(params.get("canvas_id") or "").strip()
+        source_node = str(params.get("source_node") or "").strip()
+        target_node = str(params.get("target_node") or "").strip()
+        if not canvas_id or not source_node or not target_node:
+            return {
+                "success": False,
+                "code": "invalid_params",
+                "error": "缺少 canvas_id / source_node / target_node",
+            }
+        edge = await self._canvas_call(
+            "connect",
+            canvas_id=canvas_id,
+            source_node=source_node,
+            target_node=target_node,
+            source_port=params.get("source_port") or None,
+            target_port=params.get("target_port") or None,
+            base_version=params.get("base_version"),
+            session_id=self._canvas_session_id(),
+            actor="agent",
+        )
+        if self._is_canvas_error(edge):
+            return edge
+        return {"success": True, "edge": edge}
+
+    async def _execute_canvas_set_config(self, params: Dict) -> Dict:
+        canvas_id = str(params.get("canvas_id") or "").strip()
+        node_id = str(params.get("node_id") or "").strip()
+        values = params.get("values")
+        if not canvas_id or not node_id:
+            return {
+                "success": False,
+                "code": "invalid_params",
+                "error": "缺少 canvas_id 或 node_id",
+            }
+        if not isinstance(values, dict):
+            return {
+                "success": False,
+                "code": "invalid_params",
+                "error": "values 必须是对象（键为节点表单字段 id）",
+            }
+        node = await self._canvas_call(
+            "set_config",
+            canvas_id=canvas_id,
+            node_id=node_id,
+            values=values,
+            base_version=params.get("base_version"),
+            session_id=self._canvas_session_id(),
+            actor="agent",
+        )
+        if self._is_canvas_error(node):
+            return node
+        return {"success": True, "node": node}
+
+    async def _execute_canvas_move_node(self, params: Dict) -> Dict:
+        canvas_id = str(params.get("canvas_id") or "").strip()
+        node_id = str(params.get("node_id") or "").strip()
+        try:
+            x = float(params.get("x"))
+            y = float(params.get("y"))
+        except (TypeError, ValueError):
+            return {
+                "success": False,
+                "code": "invalid_params",
+                "error": "x / y 必须是数值坐标",
+            }
+        if not canvas_id or not node_id:
+            return {
+                "success": False,
+                "code": "invalid_params",
+                "error": "缺少 canvas_id 或 node_id",
+            }
+        node = await self._canvas_call(
+            "move_node",
+            canvas_id=canvas_id,
+            node_id=node_id,
+            x=x,
+            y=y,
+            base_version=params.get("base_version"),
+            session_id=self._canvas_session_id(),
+            actor="agent",
+        )
+        if self._is_canvas_error(node):
+            return node
+        return {"success": True, "node": node}
+
+    async def _execute_canvas_remove_node(self, params: Dict) -> Dict:
+        canvas_id = str(params.get("canvas_id") or "").strip()
+        node_id = str(params.get("node_id") or "").strip()
+        if not canvas_id or not node_id:
+            return {
+                "success": False,
+                "code": "invalid_params",
+                "error": "缺少 canvas_id 或 node_id",
+            }
+        result = await self._canvas_call(
+            "remove_node",
+            canvas_id=canvas_id,
+            node_id=node_id,
+            base_version=params.get("base_version"),
+            session_id=self._canvas_session_id(),
+            actor="agent",
+        )
+        if self._is_canvas_error(result):
+            return result
+        return {"success": True, **result}
+
+    async def _execute_canvas_layout(self, params: Dict) -> Dict:
+        canvas_id = str(params.get("canvas_id") or "").strip()
+        if not canvas_id:
+            return {"success": False, "code": "invalid_params", "error": "缺少 canvas_id"}
+        positions = await self._canvas_call(
+            "apply_layout",
+            canvas_id=canvas_id,
+            base_version=params.get("base_version"),
+            session_id=self._canvas_session_id(),
+            actor="agent",
+        )
+        if self._is_canvas_error(positions):
+            return positions
+        return {"success": True, "positions": positions}
+
+    async def _execute_canvas_list_nodes(self, params: Dict) -> Dict:
+        limit = params.get("limit") or 20
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 20
+        nodes = await self._canvas_call(
+            "list_nodes",
+            query=params.get("query") or None,
+            category=params.get("category") or None,
+            limit=limit,
+        )
+        if self._is_canvas_error(nodes):
+            return nodes
+        return {"success": True, "nodes": nodes, "count": len(nodes)}
+
+    async def _execute_canvas_run(self, params: Dict) -> Dict:
+        """编译画布 → neurflow 同步执行 → 返回节点级结果摘要"""
+        canvas_id = str(params.get("canvas_id") or "").strip()
+        if not canvas_id:
+            return {"success": False, "code": "invalid_params", "error": "缺少 canvas_id"}
+        record = await self._canvas_call("read_canvas", canvas_id=canvas_id)
+        if self._is_canvas_error(record):
+            return record
+
+        from neurova.collaboration.canvas_bridge import canvas_to_workflow
+
+        try:
+            workflow = canvas_to_workflow(record, name=record.get("name") or canvas_id)
+        except ValueError as e:
+            return {"success": False, "code": "invalid_canvas", "error": str(e)}
+
+        inputs = params.get("inputs") or {}
+        executor = get_workflow_executor()
+        try:
+            instance = executor.create_instance(workflow, inputs=inputs, user_id="agent")
+            instance = await executor.execute(
+                workflow,
+                inputs=inputs,
+                user_id="agent",
+                session_id=self._canvas_session_id(),
+                instance=instance,
+            )
+        except Exception as e:  # noqa: BLE001 - 执行失败要转成 LLM 可读结构
+            logger.exception("画布工作流执行失败: %s", canvas_id)
+            return {"success": False, "code": "run_failed", "error": str(e)}
+
+        status = getattr(instance.status, "value", instance.status)
+        node_results = {}
+        for nid, nr in (getattr(instance, "node_results", None) or {}).items():
+            node_results[nid] = {
+                "status": getattr(nr.status, "value", nr.status),
+                "output": getattr(nr, "output", None),
+                "error": getattr(nr, "error", None),
+                "duration": getattr(nr, "duration", None),
+            }
+        status_str = str(status)
+        return {
+            "success": status_str in ("completed", "succeeded", "success"),
+            "status": status_str,
+            "outputs": getattr(instance, "outputs", None) or {},
+            "error": getattr(instance, "error", None),
+            "node_results": node_results,
+            "duration": getattr(instance, "duration", None),
+        }
+
+    @staticmethod
+    def _blocking_fetch(url: str, user_agent: str, timeout: int = 10) -> str:
+        """阻塞式 HTTP 抓取 — 只允许经 asyncio.to_thread 在线程池中调用。
+
+        P2-11 修复: urllib.request.urlopen 是阻塞调用（最长卡 timeout 秒），
+        原实现直接在事件循环中执行，会卡死整个服务（所有并发会话/心跳全停摆）。
+        """
+        import urllib.request
+
+        req = urllib.request.Request(url, headers={"User-Agent": user_agent})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
     async def _execute_web_search(self, params: Dict) -> Dict:
         """执行网页搜索"""
         query = params.get("query") or params.get("q") or params.get("keywords", "")
         if not query:
             return {"error": "缺少搜索查询"}
         try:
-            import urllib.request
             import urllib.parse
             # BUGFIX: 原生 google.com/search 页面需 JS 渲染且反爬，静态抓取拿不到摘要。
             # 改用 Bing HTML 接口（对无 JS 请求返回可解析的 b_caption / b_lineclamp 摘要）。
             url = f"https://www.bing.com/search?q={urllib.parse.quote(query)}&setlang=zh-hans"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                html = resp.read().decode("utf-8", errors="replace")
+            # P2-11 修复: 阻塞抓取移入线程池，不得卡死事件循环
+            html = await asyncio.to_thread(self._blocking_fetch, url, "Mozilla/5.0")
             # 优先提取 b_caption 下的 <p>（Bing 摘要），退化为任意 <p>
             import re
             snippets = re.findall(r'<div[^>]*class="b_caption"[^>]*>[\s\S]*?<p[^>]*>(.*?)</p>', html, re.DOTALL)
@@ -923,16 +1286,14 @@ class ToolExecutor:
         if not location:
             return {"error": "缺少地点信息"}
         try:
-            import urllib.request
             import urllib.parse
             # 使用 wttr.in 天气服务。
             # BUGFIX: 必须用非浏览器 UA。wttr.in 对 Mozilla/5.0 等浏览器 UA 返回完整 HTML 网页，
             # 导致 format=3 / lang=zh 参数失效，返回一整页 HTML 污染结果。
             # 使用 curl UA 才能得到 format=3 的精简文本（如 "许昌: 🌦️ +80°F"）。
             url = f"https://wttr.in/{urllib.parse.quote(location)}?format=3&lang=zh"
-            req = urllib.request.Request(url, headers={"User-Agent": "curl/8.5.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                text = resp.read().decode("utf-8", errors="replace").strip()
+            # P2-11 修复: 阻塞抓取移入线程池，不得卡死事件循环
+            text = (await asyncio.to_thread(self._blocking_fetch, url, "curl/8.5.0")).strip()
             # 兜底：极少数代理/部署环境下即使 curl UA 仍返回 HTML，则从中提取天气行
             if "<html" in text.lower() or "&lt;" in text:
                 import re
@@ -944,6 +1305,170 @@ class ToolExecutor:
             return {"location": location, "weather": text}
         except Exception as e:
             return {"location": location, "error": f"天气查询失败: {e}"}
+
+    # ── 常规 Agent 工具：网页抓取 / 计算 / 时间（对标 WebFetch 等标配）──
+
+    @staticmethod
+    def _html_to_text(html: str) -> str:
+        """HTML 转纯文本：剥离 script/style/注释/标签，压缩空白"""
+        import re
+
+        body = re.sub(r"<script[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
+        body = re.sub(r"<style[\s\S]*?</style>", "", body, flags=re.IGNORECASE)
+        body = re.sub(r"<!--[\s\S]*?-->", "", body)
+        body = re.sub(r"<[^>]+>", " ", body)
+        body = (
+            body.replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", '"')
+            .replace("&#39;", "'")
+        )
+        lines = [ln.strip() for ln in body.splitlines()]
+        text = "\n".join(ln for ln in lines if ln)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    async def _execute_web_fetch(self, params: Dict) -> Dict:
+        """抓取网页正文并转纯文本（仅 http/https，拒绝 file:// 等本地协议）"""
+        import urllib.parse
+
+        url = (params.get("url") or "").strip()
+        if not url:
+            return {"error": "缺少 url 参数"}
+        scheme = urllib.parse.urlparse(url).scheme.lower()
+        if scheme not in ("http", "https"):
+            return {"error": f"不支持的协议: {scheme or '(空)'}，仅支持 http/https"}
+        try:
+            max_chars = int(params.get("max_chars", 8000))
+        except (TypeError, ValueError):
+            max_chars = 8000
+
+        try:
+            # 阻塞抓取走线程池（复用 P2-11 的 _blocking_fetch），不卡事件循环
+            html = await asyncio.to_thread(self._blocking_fetch, url, "Mozilla/5.0", 15)
+            text = self._html_to_text(html)
+            return {
+                "url": url,
+                "content": text[:max_chars],
+                "chars": len(text),
+                "truncated": len(text) > max_chars,
+            }
+        except Exception as e:
+            return {"url": url, "error": f"网页抓取失败: {e}"}
+
+    async def _execute_calculator(self, params: Dict) -> Dict:
+        """安全数学计算：AST 白名单求值，绝不执行任意代码（无 eval/exec）"""
+        import math
+        import operator
+
+        expression = (params.get("expression") or "").strip()
+        if not expression:
+            return {"error": "缺少 expression 参数"}
+
+        binops = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+            ast.FloorDiv: operator.floordiv,
+            ast.Mod: operator.mod,
+            ast.Pow: operator.pow,
+        }
+        unaryops = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+        functions = {
+            "sqrt": math.sqrt, "abs": abs, "round": round,
+            "min": min, "max": max,
+            "sin": math.sin, "cos": math.cos, "tan": math.tan,
+            "log": math.log, "log2": math.log2, "log10": math.log10,
+            "floor": math.floor, "ceil": math.ceil,
+        }
+        constants = {"pi": math.pi, "e": math.e}
+
+        def eval_node(node):
+            if isinstance(node, ast.Expression):
+                return eval_node(node.body)
+            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                return node.value
+            if isinstance(node, ast.BinOp) and type(node.op) in binops:
+                left = eval_node(node.left)
+                right = eval_node(node.right)
+                if type(node.op) is ast.Pow and abs(right) > self._CALC_MAX_EXPONENT:
+                    raise ValueError(f"指数过大（超过 {self._CALC_MAX_EXPONENT}）")
+                return binops[type(node.op)](left, right)
+            if isinstance(node, ast.UnaryOp) and type(node.op) in unaryops:
+                return unaryops[type(node.op)](eval_node(node.operand))
+            if isinstance(node, ast.Call):
+                if not isinstance(node.func, ast.Name) or node.func.id not in functions:
+                    raise ValueError("仅允许调用白名单函数")
+                if node.keywords:
+                    raise ValueError("不支持关键字参数")
+                return functions[node.func.id](*[eval_node(a) for a in node.args])
+            if isinstance(node, ast.Name) and node.id in constants:
+                return constants[node.id]
+            raise ValueError(f"不支持的语法: {type(node).__name__}")
+
+        try:
+            value = eval_node(ast.parse(expression, mode="eval"))
+        except ZeroDivisionError:
+            return {"expression": expression, "error": "除零错误"}
+        except OverflowError:
+            return {"expression": expression, "error": "数值溢出"}
+        except Exception as e:
+            return {"expression": expression, "error": f"表达式无法计算: {e}"}
+
+        if isinstance(value, float) and value.is_integer() and abs(value) < 1e15:
+            value = int(value)  # 4.0 → 4，便于阅读
+        return {"expression": expression, "result": value}
+
+    async def _execute_get_datetime(self, params: Dict) -> Dict:
+        """获取当前日期时间或换算时间戳（支持 IANA 时区名与 ±HH:MM 偏移）"""
+        import re
+        from datetime import timedelta, timezone as dt_timezone
+
+        tz_param = (params.get("timezone") or params.get("tz") or "").strip()
+        ts_param = params.get("timestamp")
+
+        try:
+            if ts_param is not None and str(ts_param).strip() != "":
+                base_dt = datetime.fromtimestamp(float(ts_param), tz=dt_timezone.utc)
+            else:
+                base_dt = datetime.now(dt_timezone.utc)
+        except (TypeError, ValueError, OSError, OverflowError) as e:
+            return {"error": f"无效的时间戳: {ts_param}（{e}）"}
+
+        if tz_param:
+            tz = None
+            try:
+                from zoneinfo import ZoneInfo
+
+                tz = ZoneInfo(tz_param)
+            except Exception:
+                # IANA 名称解析失败时，尝试 ±HH:MM / GMT+H 风格的偏移
+                m = re.fullmatch(r"(?:GMT|UTC)?\s*([+-])(\d{1,2})(?::?(\d{2}))?", tz_param)
+                if m:
+                    sign = 1 if m.group(1) == "+" else -1
+                    hours, minutes = int(m.group(2)), int(m.group(3) or 0)
+                    if hours <= 23 and minutes <= 59:
+                        tz = dt_timezone(sign * timedelta(hours=hours, minutes=minutes))
+            if tz is None:
+                return {
+                    "error": f"无法解析时区: {tz_param}（支持 Asia/Shanghai 等 IANA 名称或 +08:00 偏移）"
+                }
+            dt = base_dt.astimezone(tz)
+        else:
+            dt = base_dt.astimezone()  # 系统本地时区
+
+        weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        return {
+            "datetime": dt.strftime("%Y-%m-%d %H:%M:%S"),
+            "date": dt.strftime("%Y-%m-%d"),
+            "time": dt.strftime("%H:%M:%S"),
+            "iso": dt.isoformat(),
+            "weekday": weekdays[dt.weekday()],
+            "timezone": str(dt.tzinfo),
+            "timestamp": int(base_dt.timestamp()),
+        }
 
     async def _execute_memory_search(self, params: Dict) -> Dict:
         """执行记忆搜索"""
@@ -1072,6 +1597,161 @@ class ToolExecutor:
                 return {"error": "未找到目标文本"}
         except Exception as e:
             return {"error": str(e)}
+
+    # ── 常规 Agent 工具：文件枚举 / 内容搜索（对标 Glob/Grep）──
+    # 安全设计：path 参数会进入治理预检（_governance_precheck 扫描 path），
+    # 但 pattern 不会；因此此处额外做路径规范化 + 拒绝 .. 段 + 结果约束在
+    # 基准目录内，防止 glob/walk 经 ../ 或符号链接逃逸出预期目录。
+
+    @staticmethod
+    def _safe_search_base(path: str) -> tuple:
+        """规范化搜索根目录并防路径穿越。
+
+        Returns:
+            (绝对路径, None) 或 ("", 错误信息)
+        """
+        import os
+
+        raw = (path or "").strip() or "."
+        normalized = os.path.normpath(raw)
+        segments = [s for s in normalized.replace("\\", "/").split("/") if s not in ("", ".")]
+        if ".." in segments:
+            return "", "路径包含 ..，已禁止（防路径穿越）"
+        return os.path.abspath(normalized), None
+
+    @staticmethod
+    def _path_within(child: str, base: str) -> bool:
+        """child 是否位于 base 目录内（均为绝对路径）"""
+        import os
+
+        return child == base or child.startswith(base + os.sep)
+
+    async def _execute_file_list(self, params: Dict) -> Dict:
+        """文件枚举（glob 模式，默认递归子目录）"""
+        import glob
+        import os
+
+        pattern = params.get("pattern", "")
+        if not pattern:
+            return {"error": "缺少 pattern 参数"}
+        if ".." in pattern.replace("\\", "/").split("/"):
+            return {"error": "pattern 包含 ..，已禁止（防路径穿越）"}
+        base = params.get("path") or "."
+        recursive = bool(params.get("recursive", True))
+
+        try:
+            if os.path.isabs(pattern):
+                # 绝对模式：已单独拒绝 ..，不做基目录约束
+                full_pattern = pattern
+                base_abs = None
+            else:
+                base_abs, err = self._safe_search_base(base)
+                if err:
+                    return {"error": err}
+                if recursive:
+                    # recursive 下 ** 匹配零或多层目录，根目录下的文件也能命中
+                    full_pattern = os.path.join(base_abs, "**", pattern)
+                else:
+                    full_pattern = os.path.join(base_abs, pattern)
+
+            matches = sorted(glob.glob(full_pattern, recursive=recursive))
+            if base_abs is not None:
+                # 纵深防御：结果必须全部落在基准目录内（防符号链接逃逸）
+                matches = [
+                    m for m in matches
+                    if self._path_within(os.path.abspath(m), base_abs)
+                ]
+            limit = 500
+            truncated = len(matches) > limit
+            matches = matches[:limit]
+            return {
+                "files": matches,
+                "count": len(matches),
+                "truncated": truncated,
+                "pattern": pattern,
+            }
+        except Exception as e:
+            return {"error": f"文件枚举失败: {e}"}
+
+    async def _execute_file_search(self, params: Dict) -> Dict:
+        """文件内容搜索（grep：返回 文件/行号/行内容）
+
+        只读操作；遍历范围被 _safe_search_base 规范化并禁止 ..，
+        打开的文件全部来自校验后基准目录内的 os.walk 结果。
+        """
+        import fnmatch
+        import os
+        import re
+
+        pattern = params.get("pattern", "")
+        if not pattern:
+            return {"error": "缺少 pattern 参数"}
+        path = params.get("path", "")
+        if not path:
+            return {"error": "缺少 path 参数"}
+        include = params.get("include") or None
+        try:
+            max_results = int(params.get("max_results", 50))
+        except (TypeError, ValueError):
+            max_results = 50
+
+        target, err = self._safe_search_base(path)
+        if err:
+            return {"error": err}
+        if not os.path.exists(target):
+            return {"error": f"路径不存在: {path}"}
+
+        try:
+            regex = re.compile(pattern)
+        except re.error:
+            # 非法正则降级为字面量匹配，而不是报错
+            regex = re.compile(re.escape(pattern))
+
+        if os.path.isfile(target):
+            candidates = [target]
+        else:
+            candidates = []
+            file_cap = 2000  # 防止超大目录拖垮搜索
+            for root, dirs, names in os.walk(target):
+                dirs[:] = [d for d in dirs if d not in self._SEARCH_SKIP_DIRS]
+                for name in names:
+                    if include and not fnmatch.fnmatch(name, include):
+                        continue
+                    candidates.append(os.path.join(root, name))
+                    if len(candidates) >= file_cap:
+                        break
+                if len(candidates) >= file_cap:
+                    break
+
+        matches = []
+        for candidate in candidates:
+            try:
+                with open(candidate, "r", encoding="utf-8", errors="replace") as f:
+                    if "\x00" in f.read(4096):
+                        continue  # 跳过二进制文件
+                    f.seek(0)
+                    for lineno, line in enumerate(f, 1):
+                        if regex.search(line):
+                            matches.append(
+                                {
+                                    "file": candidate,
+                                    "line": lineno,
+                                    "text": line.strip()[:200],
+                                }
+                            )
+                            if len(matches) >= max_results:
+                                break
+            except (OSError, UnicodeDecodeError):
+                continue
+            if len(matches) >= max_results:
+                break
+
+        return {
+            "matches": matches,
+            "count": len(matches),
+            "truncated": len(matches) >= max_results,
+            "pattern": pattern,
+        }
 
     async def _execute_computer_screenshot(self, params: Dict) -> Dict:
         """执行屏幕截图
@@ -1362,6 +2042,93 @@ class ToolExecutor:
             logger.error("页面文本提取失败: %s", e)
             return {"error": f"页面文本提取失败: {str(e)}"}
 
+    async def _execute_browser_dom_snapshot(self, params: Dict) -> Dict:
+        """获取 aria 可访问性树快照（观察优先：先快照拿 role+name，再 role 定位交互）"""
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            generation = params.get("generation")
+            result = self._normalize_browser_result(
+                await manager.browser_dom_snapshot(generation=int(generation) if generation is not None else None)
+            )
+            data = result.get("data")
+            if isinstance(data, str) and len(data) > 8000:
+                # 超长 aria 树截断后再进 LLM 上下文
+                result["data"] = data[:8000] + "…[已截断]"
+                result["truncated"] = True
+            await self._emit_computer_event("browser_dom_snapshot", params, result)
+            return result
+        except Exception as e:
+            logger.error("页面快照失败: %s", e)
+            return {"error": f"页面快照失败: {str(e)}"}
+
+    async def _execute_browser_click_role(self, params: Dict) -> Dict:
+        """按 ARIA role + accessible name 定位点击（从 dom_snapshot 的快照事实取参）"""
+        role = str(params.get("role") or "").strip()
+        name = params.get("name")
+        generation = params.get("generation")
+        if not role:
+            return {"error": "缺少 role 参数（先调用 browser_dom_snapshot 从快照获取 role+name）"}
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_click_role(
+                    role, str(name) if name is not None else None,
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_click_role", params, result)
+            return result
+        except Exception as e:
+            logger.error("role 点击失败: %s", e)
+            return {"error": f"role 点击失败: {str(e)}"}
+
+    async def _execute_browser_fill_role(self, params: Dict) -> Dict:
+        """按 ARIA role + accessible name 定位输入框填写"""
+        role = str(params.get("role") or "").strip()
+        name = params.get("name")
+        text = params.get("text")
+        generation = params.get("generation")
+        if not role:
+            return {"error": "缺少 role 参数（先调用 browser_dom_snapshot 从快照获取 role+name）"}
+        if text is None:
+            return {"error": "缺少 text 参数（空串表示清空输入框）"}
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_fill_role(
+                    role, str(name) if name is not None else None, str(text),
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_fill_role", params, result)
+            return result
+        except Exception as e:
+            logger.error("role 输入失败: %s", e)
+            return {"error": f"role 输入失败: {str(e)}"}
+
+    async def _execute_planning(self, params: Dict) -> Dict:
+        """任务计划工具：7 个子命令（create/update/list/get/set_active/mark_step/delete）"""
+        command = str(params.get("command") or "").strip()
+        if not command:
+            return {"error": "缺少 command 参数"}
+        try:
+            from neurova.planning import PlanningTool, get_planning_store
+
+            tool = PlanningTool(store=get_planning_store())
+            kwargs = {
+                k: v for k, v in params.items() if k != "command" and v is not None
+            }
+            return await tool.run_command(command=command, **kwargs)
+        except Exception as e:
+            logger.error("planning 工具执行失败: %s", e)
+            return {"error": f"planning 工具执行失败: {str(e)}"}
+
     async def _execute_emotion_analyze(self, params: Dict) -> Dict:
         """执行情感分析"""
         try:
@@ -1444,6 +2211,95 @@ class ToolExecutor:
             "tags": [detected_emotion],
             "score": max_score - 0.5,
             "text": text,
+        }
+
+    # ── 语音工具执行体（修复漂移：schema 早已注册但分派链缺失）──
+
+    async def _execute_asr_transcribe(self, params: Dict) -> Dict:
+        """语音识别：Base64 音频 → 文本（经 agent.asr_manager）"""
+        import base64
+
+        audio_b64 = params.get("audio_data", "")
+        if not audio_b64:
+            return {"error": "缺少 audio_data 参数（Base64 编码音频）"}
+        manager = getattr(self._agent, "asr_manager", None)
+        if manager is None:
+            return {"error": "ASR 未启用（asr_manager 不存在），请先在 Agent 配置中开启 asr"}
+
+        try:
+            audio_bytes = base64.b64decode(audio_b64, validate=True)
+        except Exception as e:
+            return {"error": f"audio_data 不是有效的 Base64: {e}"}
+
+        try:
+            if not getattr(manager, "is_initialized", False):
+                await manager.initialize()
+            result = await manager.transcribe(audio_bytes, language=params.get("language", "zh"))
+        except Exception as e:
+            return {"error": f"语音识别失败: {e}"}
+
+        if isinstance(result, dict):
+            if result.get("error") and not result.get("text"):
+                return {"error": f"语音识别失败: {result['error']}"}
+            return {
+                "success": True,
+                "text": result.get("text", ""),
+                "language": result.get("language"),
+                "duration_sec": result.get("duration_sec"),
+            }
+        return {"success": True, "text": str(result)}
+
+    async def _execute_tts_synthesize(self, params: Dict) -> Dict:
+        """语音合成：文本 → 音频文件（经 agent.tts_manager）
+
+        音频写入临时文件，只回传路径与元信息——把 base64 音频塞进
+        LLM 上下文会撑爆 token（与 computer_screenshot 只回元信息同理）。
+        voice/engine 在 manager 初始化时已配置，且部分引擎的 synthesize
+        签名不接受额外 kwargs，故不透传。
+        """
+        import os
+        import tempfile
+
+        text = params.get("text", "")
+        if not text:
+            return {"error": "缺少 text 参数"}
+        manager = getattr(self._agent, "tts_manager", None)
+        if manager is None:
+            return {"error": "TTS 未启用（tts_manager 不存在），请先在 Agent 配置中开启 tts"}
+
+        try:
+            if not getattr(manager, "is_initialized", False):
+                await manager.initialize()
+            audio = await manager.synthesize(text)
+        except Exception as e:
+            return {"error": f"语音合成失败: {e}"}
+        if not audio:
+            return {"error": "语音合成失败: 引擎返回空数据"}
+
+        # 按文件头识别音频格式
+        suffix = ".bin"
+        if audio.startswith(b"RIFF"):
+            suffix = ".wav"
+        elif audio.startswith(b"ID3") or audio[:1] == b"\xff":
+            suffix = ".mp3"
+        elif audio.startswith(b"OggS"):
+            suffix = ".ogg"
+
+        try:
+            out_dir = os.path.join(tempfile.gettempdir(), "neurova_tts")
+            os.makedirs(out_dir, exist_ok=True)
+            fd, audio_path = tempfile.mkstemp(suffix=suffix, prefix="tts_", dir=out_dir)
+            with os.fdopen(fd, "wb") as f:
+                f.write(audio)
+        except OSError as e:
+            return {"error": f"音频文件写入失败: {e}"}
+
+        return {
+            "success": True,
+            "audio_path": audio_path,
+            "bytes": len(audio),
+            "format": suffix.lstrip("."),
+            "text": text[:100],
         }
 
     async def _execute_voice_memory_search(self, params: Dict) -> Dict:

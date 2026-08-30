@@ -281,11 +281,29 @@ class Memory:
             self.shared = self.isolation_context.shared
             if self.isolation_context.share_group_ids:
                 self.share_group_ids = list(self.isolation_context.share_group_ids)
+        # 温度域统一 [0, 100]（与 touch/on_access/on_decay 的 clamp 一致）。
+        # 超域视为历史污染数据（批量导入曾把 68.6 万条灌到 13363.36，霸占
+        # hot 列表致配置阈值失效），降级为中温 50，加载时即自愈。
+        if self.temperature > 100.0:
+            self.temperature = 50.0
+        elif self.temperature < 0.0:
+            self.temperature = 0.0
 
     def touch(self):
-        """访问一次，温度升高"""
+        """访问一次，温度升高
+
+        升温量/封顶配置化（memory-settings 配置页）: temperature.access_boost /
+        temperature.max，默认 10.0/100.0 与历史硬编码一致。
+        """
+        from neurova.cognitive_layers.memory_layer.settings_config import (
+            get_memory_settings,
+        )
+
+        _cfg = get_memory_settings()
+        boost = float(_cfg.get("temperature.access_boost", 10.0))
+        cap = float(_cfg.get("temperature.max", 100.0))
         self.access_count += 1
-        self.temperature = min(100.0, self.temperature + 10.0)
+        self.temperature = min(cap, self.temperature + boost)
         self.last_accessed_at = datetime.now(timezone.utc)
         self.updated_at = self.last_accessed_at
 

@@ -16,7 +16,11 @@ from neurova.core.logger import get_logger
 import time
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
+
+# aiohttp 是可选依赖，仅在 execute() 内部按需导入；此处只供类型注解使用
+if TYPE_CHECKING:
+    import aiohttp
 
 # api imports
 from neurova.api.openplatform.models import (

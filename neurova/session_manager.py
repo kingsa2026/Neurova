@@ -23,6 +23,39 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+# 净化时标记"应丢弃"的哨兵值（与 None 区分——None 是合法 JSON 值）
+_JSON_DROP = object()
+
+
+def _json_safe(value: Any) -> Any:
+    """递归剔除不可 JSON 序列化的值，返回净化后的副本。
+
+    持久化边界防御: 运行时 metadata 可能携带仅供进程内使用的对象
+    （如 console SSE 桥接注入的 event_emitter 回调函数）。这类值若进入
+    json.dump 会抛 TypeError，配合"先截断后写"将损坏 session 文件。
+    规则: callable 丢弃；dict/list 递归清理；JSON 原生类型原样保留；
+    其他类型尝试序列化，失败则丢弃。
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if callable(value):
+        return _JSON_DROP
+    if isinstance(value, dict):
+        cleaned = {}
+        for k, v in value.items():
+            cv = _json_safe(v)
+            if cv is _JSON_DROP:
+                continue
+            cleaned[k if isinstance(k, str) else str(k)] = cv
+        return cleaned
+    if isinstance(value, (list, tuple)):
+        return [cv for cv in (_json_safe(v) for v in value) if cv is not _JSON_DROP]
+    try:
+        json.dumps(value)
+        return value
+    except (TypeError, ValueError, OverflowError):
+        return _JSON_DROP
+
 
 @dataclass
 class SessionMessage:
@@ -133,6 +166,62 @@ class SessionManager(SessionRepository):
         agent_dir = self._get_session_dir(agent_id)
         return agent_dir / f"session_{session_id}_{date}.json"
 
+    def _get_archived_dir(self, agent_id: str) -> Path:
+        """获取agent的存档目录（sessions/{agent_id}/archived/）。
+
+        存档 = 会话文件整体移入该子目录：现有 list/get/delete/rename 均基于
+        agent_dir 的 session_*.json glob（不递归），移入即从所有现有查询消失，
+        恢复即移回，无需改动任何既有方法。
+        """
+        archived_dir = self._get_session_dir(agent_id) / "archived"
+        archived_dir.mkdir(exist_ok=True)
+        return archived_dir
+
+    def archive_session(self, agent_id: str, session_id: str) -> bool:
+        """存档会话：该 session 的所有日期文件移入 archived/ 子目录。"""
+        agent_dir = self._get_session_dir(agent_id)
+        archived_dir = self._get_archived_dir(agent_id)
+
+        moved = 0
+        for file_path in agent_dir.glob(f"session_{session_id}_*.json"):
+            try:
+                file_lock = self._get_file_lock(file_path)
+                with file_lock:
+                    # os.replace 同卷原子覆盖：恢复时 archived 版本覆盖主目录残留
+                    file_path.replace(archived_dir / file_path.name)
+                    moved += 1
+            except Exception as e:
+                logger.error("存档session文件失败: %s", e)
+                continue
+
+        if moved > 0:
+            logger.info("Session已存档: agent=%s, session=%s, 文件数=%s", agent_id, session_id, moved)
+            return True
+        logger.warning("未找到可存档的session文件（agent_id=%s, session_id=%s）", agent_id, session_id)
+        return False
+
+    def unarchive_session(self, agent_id: str, session_id: str) -> bool:
+        """恢复存档会话：所有日期文件从 archived/ 移回主目录。"""
+        agent_dir = self._get_session_dir(agent_id)
+        archived_dir = self._get_archived_dir(agent_id)
+
+        moved = 0
+        for file_path in archived_dir.glob(f"session_{session_id}_*.json"):
+            try:
+                file_lock = self._get_file_lock(file_path)
+                with file_lock:
+                    file_path.replace(agent_dir / file_path.name)
+                    moved += 1
+            except Exception as e:
+                logger.error("恢复session文件失败: %s", e)
+                continue
+
+        if moved > 0:
+            logger.info("Session已恢复: agent=%s, session=%s, 文件数=%s", agent_id, session_id, moved)
+            return True
+        logger.warning("未找到可恢复的存档文件（agent_id=%s, session_id=%s）", agent_id, session_id)
+        return False
+
     def _read_session_file(self, file_path: Path) -> Optional[Dict[str, Any]]:
         """读取session文件"""
         if not file_path.exists():
@@ -163,18 +252,28 @@ class SessionManager(SessionRepository):
         1. read-modify-write 跨锁边界 (read 无锁, write 有锁 → lost update)
         2. Lock 不可重入 (add_message 持锁后调 _write_session_file 会再次获取
            同一 file_lock → 死锁)
+
+        先序列化后写文件: 原实现先 open("w") 截断文件再 json.dump 流式写入,
+        序列化中途抛异常（如 metadata 混入函数对象）会把文件截断成非法 JSON,
+        损坏已有会话历史。现在先在内存中完成序列化,失败则不触碰文件。
         """
+        try:
+            text = json.dumps(data, ensure_ascii=False, indent=2)
+        except (TypeError, ValueError, OverflowError) as e:
+            logger.debug("session 数据序列化失败, 跳过写入以保护现有文件 (内层详情): %s", e, exc_info=True)
+            return False
+
         try:
             with open(file_path, "w", encoding="utf-8") as f:
                 if HAS_FCNTL:
                     try:
                         fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                        json.dump(data, f, ensure_ascii=False, indent=2)
+                        f.write(text)
                         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
                     except OSError:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
+                        f.write(text)
                 else:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.write(text)
             return True
         except Exception as e:
             # WARN #4 优化 (摘要+详情分层): 内层降级为 debug,保留诊断细节.
@@ -190,6 +289,7 @@ class SessionManager(SessionRepository):
         user_content: str,
         assistant_content: str,
         metadata: Dict[str, Any] = None,
+        assistant_metadata: Dict[str, Any] = None,
         date: str = None,
     ) -> str:
         """添加一条对话（user + assistant 两条消息）到session
@@ -197,12 +297,25 @@ class SessionManager(SessionRepository):
         S4 修复 (Critical #5 跨锁 RMW): read-modify-write 整体置于 file_lock 内.
         Bug: 原 read 在锁外, write 在锁内,两线程可同时 read 同一旧状态,
         后写者覆盖先写者的更新 (lost update).
+
+        R-2 修复: 新增 assistant_metadata——assistant 专属元数据（思考过程
+        reasoning_content、工具调用 tool_calls）。此前 reasoning 经 post_chat
+        管线一路传递到 mem_core.save_to_session 后被静默丢弃，切换页面重开
+        会话后思考过程不显示。不传时保持旧行为：metadata 仍写入双方消息。
         """
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
 
         file_path = self._get_session_file(agent_id, session_id, date)
         file_lock = self._get_file_lock(file_path)
+
+        # 持久化边界净化: metadata 来自调用方（如 console SSE 桥接注入的
+        # event_emitter 函数），不可序列化的运行时对象必须在此剔除，
+        # 否则整轮对话历史无法落盘（见 _json_safe 文档）。
+        if metadata:
+            metadata = _json_safe(metadata)
+        if assistant_metadata:
+            assistant_metadata = _json_safe(assistant_metadata)
 
         # S4: 整个 read-modify-write 在 file_lock 内,保证原子性
         with file_lock:
@@ -220,7 +333,14 @@ class SessionManager(SessionRepository):
                 "content": assistant_content,
                 "timestamp": now,
             }
-            if metadata:
+            # R-2: assistant_metadata 存在时分别写入各消息；否则保留旧行为
+            #（metadata 写入双方，client_timestamp 等轮次定位键依赖此语义）。
+            if assistant_metadata is not None:
+                if metadata:
+                    user_msg["metadata"] = metadata
+                if assistant_metadata:
+                    assistant_msg["metadata"] = assistant_metadata
+            elif metadata:
                 user_msg["metadata"] = metadata
                 assistant_msg["metadata"] = metadata
 
@@ -590,10 +710,29 @@ class SessionManager(SessionRepository):
         else:
             agent_dirs = [d for d in self._sessions_dir.iterdir() if d.is_dir()]
 
+        return self._collect_summaries(agent_dirs, user_id)
+
+    def list_archived_sessions(self, agent_id: str = "", user_id: str = "") -> List[Dict[str, Any]]:
+        """列出存档会话摘要（过滤规则与 list_sessions 一致）。"""
+        if agent_id:
+            archived_dirs = [self._get_archived_dir(agent_id)]
+        else:
+            archived_dirs = [
+                d / "archived"
+                for d in self._sessions_dir.iterdir()
+                if d.is_dir() and (d / "archived").is_dir()
+            ]
+
+        return self._collect_summaries(archived_dirs, user_id)
+
+    def _collect_summaries(self, agent_dirs: List[Path], user_id: str = "") -> List[Dict[str, Any]]:
+        """扫描目录收集会话摘要（list_sessions / list_archived_sessions 共用）。"""
         summaries: List[Dict[str, Any]] = []
         seen_session_ids: Dict[str, Dict[str, Any]] = {}
 
         for agent_dir in agent_dirs:
+            if not agent_dir.is_dir():
+                continue
             for file_path in agent_dir.glob("session_*.json"):
                 session_data = self._read_session_file(file_path)
                 if not session_data:
@@ -645,6 +784,160 @@ class SessionManager(SessionRepository):
             if not self._write_session_file(file_path, session_data):
                 ok = False
         return ok
+
+
+    # ── 轮次操作（前端 chat 页：编辑最后一条用户消息 = 删旧轮+重发；删除一轮；消息反馈） ──
+
+    @staticmethod
+    def _locate_message(
+        messages: List[Dict[str, Any]],
+        timestamp: str,
+        role: Optional[str] = None,
+    ) -> Optional[int]:
+        """按时间戳定位消息索引。
+
+        双路定位: msg.timestamp（后端落盘时间）或 msg.metadata.client_timestamp
+        （前端发送时携带、随 metadata 持久化）。后者兜底"实时轮次客户端
+        时间戳不落盘"的定位失败问题。
+        """
+        for i, msg in enumerate(messages):
+            if not isinstance(msg, dict):
+                continue
+            if role is not None and msg.get("role") != role:
+                continue
+            if msg.get("timestamp") == timestamp:
+                return i
+            meta = msg.get("metadata")
+            if isinstance(meta, dict) and meta.get("client_timestamp") == timestamp:
+                return i
+        return None
+
+    def _iter_session_files(self, agent_id: str, session_id: str) -> List[Path]:
+        """按日期升序返回该 session 的所有文件（旧→新，跨日轮次定位需要）。"""
+        agent_dir = self._get_session_dir(agent_id)
+        return sorted(agent_dir.glob(f"session_{session_id}_*.json"))
+
+    def delete_round(self, agent_id: str, session_id: str, timestamp: str) -> List[Dict[str, Any]]:
+        """删除一轮对话（user 消息 + 其后相邻的 assistant 回复）。
+
+        用于"编辑最后一条用户消息"（删旧轮后由前端走原发送链路重发，
+        管线写入新轮 session 记录与记忆，实现覆写）和"删除任意一轮记录"。
+
+        Returns:
+            被删除的消息 dict 列表（供调用方清除对应记忆）；未定位到轮次
+            或写入失败时返回空列表。
+        """
+        for file_path in self._iter_session_files(agent_id, session_id):
+            file_lock = self._get_file_lock(file_path)
+            with file_lock:
+                session_data = self._read_session_file(file_path)
+                if not session_data:
+                    continue
+                messages = session_data.get("messages", [])
+                idx = self._locate_message(messages, timestamp, role="user")
+                if idx is None:
+                    continue
+
+                deleted = [messages[idx]]
+                # 配对 assistant: add_message 成对相邻写入；流式中断的孤立
+                # user 消息没有后继 assistant，循环自然只删 1 条
+                j = idx + 1
+                while j < len(messages) and messages[j].get("role") == "assistant":
+                    deleted.append(messages[j])
+                    j += 1
+
+                session_data["messages"] = messages[:idx] + messages[j:]
+                session_data["total_messages"] = len(session_data["messages"])
+                session_data["updated_at"] = datetime.now().isoformat()
+                if self._write_session_file_unlocked(file_path, session_data):
+                    return deleted
+                logger.error(
+                    "delete_round 写入失败: agent_id=%s, session_id=%s, file=%s",
+                    agent_id, session_id, file_path,
+                )
+                return []
+        return []
+
+    def get_round(self, agent_id: str, session_id: str, timestamp: str) -> Optional[Dict[str, Any]]:
+        """按轮次定位键读取一轮对话（user + assistant 消息 dict，含 content）。
+
+        先按 role=assistant 双路定位（同轮 user/assistant 共享落盘时间戳或
+        client_timestamp），user 取其前最近一条；无 assistant 命中时回退按
+        role=user 定位（孤立尾 user 消息场景），assistant 返回 None。
+
+        Returns:
+            {"user": msg | None, "assistant": msg | None}；未定位到返回 None。
+        """
+        for file_path in self._iter_session_files(agent_id, session_id):
+            file_lock = self._get_file_lock(file_path)
+            with file_lock:
+                session_data = self._read_session_file(file_path)
+                if not session_data:
+                    continue
+                messages = session_data.get("messages", [])
+
+                idx = self._locate_message(messages, timestamp, role="assistant")
+                if idx is not None:
+                    user_idx = None
+                    for k in range(idx - 1, -1, -1):
+                        if isinstance(messages[k], dict) and messages[k].get("role") == "user":
+                            user_idx = k
+                            break
+                    return {
+                        "user": messages[user_idx] if user_idx is not None else None,
+                        "assistant": messages[idx],
+                    }
+
+                idx = self._locate_message(messages, timestamp, role="user")
+                if idx is not None:
+                    next_msg = messages[idx + 1] if idx + 1 < len(messages) else None
+                    assistant = (
+                        next_msg
+                        if isinstance(next_msg, dict) and next_msg.get("role") == "assistant"
+                        else None
+                    )
+                    return {"user": messages[idx], "assistant": assistant}
+        return None
+
+    def update_message_metadata(
+        self,
+        agent_id: str,
+        session_id: str,
+        timestamp: str,
+        metadata_patch: Dict[str, Any],
+        role: Optional[str] = None,
+    ) -> bool:
+        """按时间戳（+可选 role）定位单条消息，合并 metadata 补丁。
+
+        用于点赞/点踩反馈持久化到 session 消息 metadata（role="assistant"）。
+
+        Returns:
+            定位并写入成功返回 True；未找到或写入失败返回 False。
+        """
+        for file_path in self._iter_session_files(agent_id, session_id):
+            file_lock = self._get_file_lock(file_path)
+            with file_lock:
+                session_data = self._read_session_file(file_path)
+                if not session_data:
+                    continue
+                messages = session_data.get("messages", [])
+                idx = self._locate_message(messages, timestamp, role=role)
+                if idx is None:
+                    continue
+
+                msg = messages[idx]
+                meta = dict(msg.get("metadata") or {})
+                meta.update(metadata_patch)
+                msg["metadata"] = meta
+                session_data["updated_at"] = datetime.now().isoformat()
+                if self._write_session_file_unlocked(file_path, session_data):
+                    return True
+                logger.error(
+                    "update_message_metadata 写入失败: agent_id=%s, session_id=%s, file=%s",
+                    agent_id, session_id, file_path,
+                )
+                return False
+        return False
 
 
 def get_session_manager() -> SessionManager:

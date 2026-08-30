@@ -143,6 +143,17 @@ class ToolRouter:
         self._tool_executor = tool_executor
         logger.debug("Tool executor set")
 
+    def register_mcp_client(self, server_id: str, client: typing.Any) -> None:
+        """
+        显式注册 MCP 客户端（bootstrap 的统一入口）
+
+        Args:
+            server_id: MCP 服务器 ID
+            client: MCPToolClient 实例（需提供同步 list_tools 与 call_tool/execute_tool）
+        """
+        self._mcp_clients[server_id] = client
+        logger.debug("Registered MCP client for server: %s", server_id)
+
     def get_or_create_mcp(self, server_id: str, config: typing.Dict[str, typing.Any]) -> typing.Any:
         """
         获取或创建 MCP 客户端
@@ -239,7 +250,11 @@ class ToolRouter:
         return tools
 
     def _discover_mcp_tools(self) -> typing.Dict[str, _MCPToolProxy]:
-        """从 MCP 客户端发现 MCP 工具"""
+        """从 MCP 客户端发现 MCP 工具
+
+        命名空间名 mcp.{server_id}.{tool} 恒注册（无跨服务器冲突）；
+        裸名仅在与 builtin/Skill/其他 MCP 工具无冲突时注册（不覆盖已有条目）。
+        """
         tools: typing.Dict[str, _MCPToolProxy] = {}
         for server_id, client in self._mcp_clients.items():
             # 尝试从 MCP 客户端获取工具列表
@@ -255,9 +270,16 @@ class ToolRouter:
                     if isinstance(mcp_tools, list):
                         for t in mcp_tools:
                             tool_name = getattr(t, "name", None) or str(t)
-                            if tool_name not in self._builtin_tools:
-                                desc = getattr(t, "description", "") or ""
-                                params = getattr(t, "parameters", {}) or {}
+                            desc = getattr(t, "description", "") or ""
+                            params = getattr(t, "parameters", {}) or {}
+                            namespace_name = f"mcp.{server_id}.{tool_name}"
+                            tools[namespace_name] = _MCPToolProxy(
+                                name=namespace_name,
+                                server_id=server_id,
+                                description=desc,
+                                parameters=params,
+                            )
+                            if tool_name not in self._builtin_tools and tool_name not in tools:
                                 tools[tool_name] = _MCPToolProxy(
                                     name=tool_name,
                                     server_id=server_id,
@@ -358,9 +380,11 @@ class ToolRouter:
 
         try:
             # 根据工具类型选择执行方式
-            if hasattr(tool, "is_mcp") and tool.is_mcp:
+            # 根因修复: 严格 `is True` 判断。Mock/AsyncMock 的自动属性是 truthy Mock，
+            # 旧真值判断会被击穿，把内置工具误路由到 MCP/Skill 分支。
+            if getattr(tool, "is_mcp", False) is True:
                 result = await self._execute_mcp(tool, params)
-            elif hasattr(tool, "is_skill") and tool.is_skill:
+            elif getattr(tool, "is_skill", False) is True:
                 result = await self._execute_skill(tool, params)
             elif self._execution_engine:
                 result = await self._execute_engine(tool, params)
@@ -466,15 +490,18 @@ class ToolRouter:
 
                 for t in mcp_tools:
                     t_name = getattr(t, "name", None) or str(t)
-                    if t_name == tool_name:
-                        desc = getattr(t, "description", "") or ""
-                        params = getattr(t, "parameters", {}) or {}
-                        return _MCPToolProxy(
-                            name=tool_name,
-                            server_id=server_id,
-                            description=desc,
-                            parameters=params,
-                        )
+                    # 命名空间名（mcp.{server_id}.{t_name}）或裸名均可命中；
+                    # proxy.name 保存裸名——它是传给 server 的协议执行名
+                    if tool_name not in (t_name, f"mcp.{server_id}.{t_name}"):
+                        continue
+                    desc = getattr(t, "description", "") or ""
+                    params = getattr(t, "parameters", {}) or {}
+                    return _MCPToolProxy(
+                        name=t_name,
+                        server_id=server_id,
+                        description=desc,
+                        parameters=params,
+                    )
             except Exception:
                 logger.exception("Failed to scan MCP tools from %s", server_id)
 
@@ -491,12 +518,20 @@ class ToolRouter:
         Returns:
             执行结果
         """
-        server_id = getattr(tool, "server_id", None) or getattr(tool, "source", None)
+        # server_id 仅当为已注册的 str 时才采用，否则回退 source
+        # 根因修复: Mock 的自动 server_id 属性是 truthy Mock 对象，旧写法直接采用导致查不到客户端
+        server_id = getattr(tool, "server_id", None)
+        if not isinstance(server_id, str) or server_id not in self._mcp_clients:
+            server_id = getattr(tool, "source", None)
         if not server_id or server_id not in self._mcp_clients:
             raise ValueError(f"MCP client not found for server: {server_id}")
 
         client = self._mcp_clients[server_id]
-        # MCPToolClient 使用 execute_tool(server_id, tool_name, params)
+        # 优先 call_tool(server_id, tool_name, params)（MCPToolClient 主执行入口），
+        # 旧式客户端仅提供 execute_tool 时回退
+        call_tool_fn = getattr(client, "call_tool", None)
+        if callable(call_tool_fn):
+            return await call_tool_fn(server_id, tool.name, params)
         return await client.execute_tool(server_id, tool.name, params)
 
     async def _execute_skill(self, tool: typing.Any, params: typing.Dict[str, typing.Any]) -> typing.Any:

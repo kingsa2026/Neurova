@@ -59,6 +59,10 @@ class EventType(str, Enum):
     # （驱动聊天页的电脑操作分屏面板）
     COMPUTER_ACTION = "computer_action"
 
+    # 画布操作：Agent/用户经 Canvas Op 层修改画布时的语义事件流
+    # （payload: {canvas_id, op, version, actor, data}，驱动画布页实时渲染）
+    CANVAS_OP = "canvas_op"
+
     # 会话状态
     SESSION_CREATED = "session_created"
     SESSION_RESUMED = "session_resumed"

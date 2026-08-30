@@ -56,7 +56,7 @@ async def get_self_model(
         # 从Token中获取用户ID
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         self_model = manager.get_self_model()
         return success_response(
             data=self_model,
@@ -84,7 +84,7 @@ async def update_self_model(
         # 从Token中获取用户ID
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         updates = {}
         if request.narrative_identity is not None:
             updates["narrative_identity"] = request.narrative_identity

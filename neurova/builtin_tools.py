@@ -189,6 +189,73 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": [],
         },
     },
+    # ── 可访问性快照 + role 定位（观察优先协议）──
+    # 协议：先 browser_dom_snapshot 拿结构化页面事实，再从快照里取 role+name 交互；
+    # 快照已包含目标信息时禁止用 evaluate/HTML 探索；禁止猜测 CSS 选择器
+    "browser_dom_snapshot": {
+        "description": "【页面可访问性快照】获取当前页面的 aria 结构化树（按钮/链接/输入框等元素的角色和名称）。与页面交互前必须先调用本工具，从快照事实中获取目标元素的 role 和 name，再用 browser_click_role/browser_fill_role 精确定位；不要凭空猜测 CSS 选择器。返回含本次快照对应的 generation。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "generation": {"type": "integer", "description": "可选。持有的页面代数；页面已变化时返回过期错误提示重新快照"},
+            },
+            "required": [],
+        },
+    },
+    "browser_click_role": {
+        "description": "【按角色点击】通过 ARIA 角色和可访问名称点击页面元素（如 role=button, name=登录）。参数必须来自 browser_dom_snapshot 快照中的事实，不要编造。元素不可点击或页面已变化（generation 过期）时返回错误说明。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "description": "ARIA 角色（button/link/textbox/checkbox 等，来自快照）"},
+                "name": {"type": "string", "description": "可访问名称（来自快照，如按钮文字）"},
+                "generation": {"type": "integer", "description": "可选。最近一次快照返回的 generation；页面被外部操作导航过后会拒绝并提示重新快照"},
+            },
+            "required": ["role"],
+        },
+    },
+    "browser_fill_role": {
+        "description": "【按角色输入】通过 ARIA 角色和可访问名称定位输入框并填写文本（如 role=textbox, name=用户名）。参数必须来自 browser_dom_snapshot 快照；text 传空串表示清空输入框。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "description": "ARIA 角色（textbox/searchbox 等，来自快照）"},
+                "name": {"type": "string", "description": "可访问名称（来自快照，如输入框标签）"},
+                "text": {"type": "string", "description": "要填写的文本（空串=清空）"},
+                "generation": {"type": "integer", "description": "可选。最近一次快照返回的 generation；页面已变化时会拒绝并提示重新快照"},
+            },
+            "required": ["role", "text"],
+        },
+    },
+    # ── 任务计划（计划即工具，SQLite 持久化，跨会话还原）──
+    "planning": {
+        "description": "【任务计划】创建和管理结构化任务计划，适合多步骤长任务：先 create 建立步骤清单，执行过程中用 mark_step 标记各步状态（completed/in_progress/blocked），让用户和后续轮次都能看到全局进度。计划持久化存储，重启后仍可 get 查询继续推进。对于需要多轮才能完成的任务，开工前先建计划。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "enum": ["create", "update", "list", "get", "set_active", "mark_step", "delete"],
+                    "description": "子命令：create 建计划 / update 改标题或步骤 / list 列出全部 / get 查看计划全文（含进度）/ set_active 设为当前活跃计划 / mark_step 标记步骤状态 / delete 删除",
+                },
+                "plan_id": {"type": "string", "description": "计划 ID；create 必填，get/mark_step 缺省时取当前活跃计划"},
+                "title": {"type": "string", "description": "计划标题（create 必填）"},
+                "steps": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "步骤文本列表（create 必填；update 传入时替换步骤清单，已有状态保留）",
+                },
+                "step_index": {"type": "integer", "description": "mark_step：目标步骤下标（0 起）"},
+                "step_status": {
+                    "type": "string",
+                    "enum": ["not_started", "in_progress", "completed", "blocked"],
+                    "description": "mark_step：要设置的状态",
+                },
+                "step_notes": {"type": "string", "description": "mark_step：可选的步骤备注（如完成摘要）"},
+            },
+            "required": ["command"],
+        },
+    },
     "emotion_analyze": {
         "description": "分析文本情感",
         "parameters": {
@@ -352,6 +419,208 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 },
             },
             "required": ["name", "description", "steps"],
+        },
+    },
+    # ── 常规 Agent 工具（2026-08 扩充，对标主流 harness 标配工具基座）──
+    # file_list/file_search ↔ Claude Code Glob/Grep、OpenHands glob/search
+    # web_fetch ↔ Claude Code WebFetch；run_code ↔ DeepSeek code_interpreter
+    # （run_code 执行体早已存在于 tool_executor，此处补 schema 使其对 LLM 可见）
+    # calculator/get_datetime ↔ Hermes function calling 标配
+    "file_list": {
+        "description": "【文件枚举】按 glob 模式列出文件（如 *.py、docs/**/*.md），支持递归子目录。用于查看某目录下存在哪些文件。找到文件后可用 file_read 读取内容，或用 file_search 按内容关键词搜索。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "glob 匹配模式，如 *.py、*.json"},
+                "path": {"type": "string", "description": "搜索的根目录（默认当前工作目录）"},
+                "recursive": {"type": "boolean", "description": "是否递归子目录（默认 true）"},
+            },
+            "required": ["pattern"],
+        },
+    },
+    "file_search": {
+        "description": "【文件内容搜索】按关键词或正则在文件内容中搜索（类似 grep），返回匹配的文件、行号和行内容。可搜索单个文件或整个目录。用于定位某段代码/配置/文本出现在哪些文件的哪一行。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "搜索模式（支持正则；非法正则自动降级为字面量匹配）"},
+                "path": {"type": "string", "description": "要搜索的文件或目录路径"},
+                "include": {"type": "string", "description": "搜索目录时的文件名过滤，如 *.py（可选）"},
+                "max_results": {"type": "integer", "description": "返回的最大匹配条数", "default": 50},
+            },
+            "required": ["pattern", "path"],
+        },
+    },
+    "web_fetch": {
+        "description": "【网页抓取】抓取指定 URL 的内容并转为纯文本（阅读文章、文档、API 响应等）。已知网址要读取其内容时用此工具；不知道网址先用 web_search 搜索。仅支持 http/https 协议。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "要抓取的完整 URL（含 https://）"},
+                "max_chars": {"type": "integer", "description": "返回内容最大字符数（默认 8000，超出截断）"},
+            },
+            "required": ["url"],
+        },
+    },
+    "run_code": {
+        "description": "【代码执行】运行一段 Python 或 shell 代码，返回 stdout/stderr/退出码。用于数据处理、批量文件操作、验证代码逻辑等。代码在本地运行时执行，受治理策略约束。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "要执行的代码字符串"},
+                "language": {"type": "string", "description": "代码语言：python（默认）或 shell"},
+                "timeout": {"type": "integer", "description": "执行超时秒数（默认 60）"},
+            },
+            "required": ["code"],
+        },
+    },
+    "calculator": {
+        "description": "【计算器】精确计算数学表达式。支持 + - * / // % **、括号，以及 sqrt/abs/round/min/max/sin/cos/tan/log/floor/ceil 函数和 pi/e 常量。涉及数值计算时应调用此工具，不要心算，避免算术错误。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "expression": {"type": "string", "description": "数学表达式，如 (1+2)*3、sqrt(16)、round(pi*2, 2)"},
+            },
+            "required": ["expression"],
+        },
+    },
+    "get_datetime": {
+        "description": "【日期时间】获取当前日期时间（含星期、ISO 格式、Unix 时间戳），或将 Unix 时间戳换算为指定时区的日期时间。用于需要当前时间、时区换算、时间戳换算的场合。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "timezone": {"type": "string", "description": "时区名（如 Asia/Shanghai、UTC）或偏移（如 +08:00），默认系统本地时区"},
+                "timestamp": {"type": "number", "description": "Unix 时间戳（秒）；提供时换算该时间戳而非当前时间"},
+            },
+            "required": [],
+        },
+    },
+    # ── 画布交互工具（Phase 1）：Agent 直接搭建/修改/运行画布工作流 ──
+    # 语义操作层（canvas_ops）统一写入口，与用户手动编辑共享乐观锁版本；
+    # 用户可随时抢占编辑，携带 base_version 的过期操作会返回
+    # code=version_conflict + current_version，此时应 canvas_read 重读后重试。
+    "canvas_create": {
+        "description": "【创建画布】新建一张空白工作流画布，返回 canvas_id（后续所有 canvas_* 操作都需要它）。当用户希望你搭建/设计/制作一个工作流、流水线、流程图时先调用本工具。画布会实时显示在前端协作画布页。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "画布名称（简洁描述工作流用途）"},
+                "description": {"type": "string", "description": "画布用途说明（可选）"},
+            },
+            "required": ["name"],
+        },
+    },
+    "canvas_read": {
+        "description": "【读取画布】读取画布完整快照（节点、连线、各节点配置和当前 version）。用于：了解画布现状、version_conflict 后重新获取最新版本再重试。返回的 version 应作为后续修改操作的 base_version。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string", "description": "画布 ID"},
+            },
+            "required": ["canvas_id"],
+        },
+    },
+    "canvas_add_node": {
+        "description": "【添加节点】向画布添加一个节点。node_type 必须是节点库中已注册的类型（不确定时先用 canvas_list_nodes 查询）。返回新节点（含自动生成的 id 与自动落位）。可选携带 base_version 做乐观锁校验。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string", "description": "画布 ID"},
+                "node_type": {"type": "string", "description": "节点类型（如 builtin:start、builtin:llm_chat），用 canvas_list_nodes 查询可用类型"},
+                "config": {"type": "object", "description": "节点初始配置（键为节点表单字段 id，可选）"},
+                "label": {"type": "string", "description": "节点显示名称（可选，默认用节点库名称）"},
+                "position": {"type": "object", "description": "坐标 {x, y}（可选，缺省自动落位）"},
+                "base_version": {"type": "integer", "description": "读取画布时的版本号（可选，用于并发冲突检测）"},
+            },
+            "required": ["canvas_id", "node_type"],
+        },
+    },
+    "canvas_connect": {
+        "description": "【连接节点】在画布上把两个节点用连线接起来（source_node 的输出 → target_node 的输入）。端口 id 缺省时使用默认端口。重复连线会返回 duplicate_edge 错误。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string", "description": "画布 ID"},
+                "source_node": {"type": "string", "description": "上游节点 id"},
+                "target_node": {"type": "string", "description": "下游节点 id"},
+                "source_port": {"type": "string", "description": "上游输出端口 id（可选，默认第一个输出）"},
+                "target_port": {"type": "string", "description": "下游输入端口 id（可选，默认第一个输入）"},
+                "base_version": {"type": "integer", "description": "读取画布时的版本号（可选，用于并发冲突检测）"},
+            },
+            "required": ["canvas_id", "source_node", "target_node"],
+        },
+    },
+    "canvas_set_config": {
+        "description": "【配置节点】修改画布上某节点的配置项（浅合并：只覆盖传入的键，其余保留）。values 的键是节点表单字段 id（可通过 canvas_read 查看节点现有 config）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string", "description": "画布 ID"},
+                "node_id": {"type": "string", "description": "节点 id"},
+                "values": {"type": "object", "description": "要合并进节点配置的键值对"},
+                "base_version": {"type": "integer", "description": "读取画布时的版本号（可选，用于并发冲突检测）"},
+            },
+            "required": ["canvas_id", "node_id", "values"],
+        },
+    },
+    "canvas_move_node": {
+        "description": "【移动节点】调整画布上某节点的坐标位置。一般搭完流程后直接用 canvas_layout 自动布局即可，仅在需要微调时使用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string", "description": "画布 ID"},
+                "node_id": {"type": "string", "description": "节点 id"},
+                "x": {"type": "number", "description": "横坐标"},
+                "y": {"type": "number", "description": "纵坐标"},
+                "base_version": {"type": "integer", "description": "读取画布时的版本号（可选，用于并发冲突检测）"},
+            },
+            "required": ["canvas_id", "node_id", "x", "y"],
+        },
+    },
+    "canvas_remove_node": {
+        "description": "【删除节点】从画布删除某节点，与其相连的连线会一并删除（返回删除的连线数）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string", "description": "画布 ID"},
+                "node_id": {"type": "string", "description": "要删除的节点 id"},
+                "base_version": {"type": "integer", "description": "读取画布时的版本号（可选，用于并发冲突检测）"},
+            },
+            "required": ["canvas_id", "node_id"],
+        },
+    },
+    "canvas_layout": {
+        "description": "【自动布局】按拓扑分层对画布全部节点自动排版（上游在左、下游在右）。建议在添加完节点和连线后调用一次，让画布整齐可读。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string", "description": "画布 ID"},
+                "base_version": {"type": "integer", "description": "读取画布时的版本号（可选，用于并发冲突检测）"},
+            },
+            "required": ["canvas_id"],
+        },
+    },
+    "canvas_run": {
+        "description": "【运行画布】把画布编译为工作流并同步执行，返回整体状态与每个节点的执行结果（状态/输出/错误/耗时）。搭完工作流后用它验证流程是否跑通。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string", "description": "画布 ID"},
+                "inputs": {"type": "object", "description": "工作流全局输入（可选，键值对）"},
+            },
+            "required": ["canvas_id"],
+        },
+    },
+    "canvas_list_nodes": {
+        "description": "【查询节点库】列出/搜索可用节点类型（含 type、名称、分类、来源）。添加节点前如不确定 node_type，先用本工具查询；搜索无果说明节点库缺少该能力，可考虑建议用户创建自定义节点。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "按名称/类型/描述模糊搜索（可选，缺省列出全部）"},
+                "category": {"type": "string", "description": "按分类过滤（可选）"},
+                "limit": {"type": "integer", "description": "最多返回条数（默认 20）"},
+            },
+            "required": [],
         },
     },
 }

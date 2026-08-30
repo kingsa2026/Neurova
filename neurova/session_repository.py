@@ -70,6 +70,48 @@ class SessionRepository(ABC):
     def get_session(self, agent_id: str, session_id: str) -> Optional[Dict]:
         """获取单个会话记录（含 messages 字段）。"""
 
+    @abstractmethod
+    def archive_session(self, agent_id: str, session_id: str) -> bool:
+        """存档会话：从历史会话列表隐藏，可随时恢复（不删数据）。"""
+
+    @abstractmethod
+    def unarchive_session(self, agent_id: str, session_id: str) -> bool:
+        """恢复存档会话为正常会话。"""
+
+    @abstractmethod
+    def list_archived_sessions(self, agent_id: str = "", user_id: str = "") -> List[Dict]:
+        """列出存档会话（过滤规则与 list_sessions 一致），返回摘要列表。"""
+
+    @abstractmethod
+    def delete_round(self, agent_id: str, session_id: str, timestamp: str) -> List[Dict]:
+        """删除一轮对话（user 消息 + 相邻 assistant 回复），返回被删消息列表。
+
+        轮次定位键：msg.timestamp 或 msg.metadata.client_timestamp。
+        未找到返回空列表。供 chat 页"编辑最后一条用户消息（删旧轮+重发）"
+        与"删除一轮记录"使用。
+        """
+
+    @abstractmethod
+    def update_message_metadata(
+        self,
+        agent_id: str,
+        session_id: str,
+        timestamp: str,
+        metadata_patch: Dict,
+        role: Optional[str] = None,
+    ) -> bool:
+        """按时间戳（+可选 role）定位单条消息并合并 metadata 补丁。
+
+        供点赞/点踩反馈持久化（role="assistant"）使用。未找到返回 False。
+        """
+
+    @abstractmethod
+    def get_round(self, agent_id: str, session_id: str, timestamp: str) -> Optional[Dict]:
+        """按轮次定位键读取一轮对话（{"user": msg|None, "assistant": msg|None}）。
+
+        供反馈质量闭环读取该轮内容（定位对应记忆）使用。未找到返回 None。
+        """
+
 
 # ── 工厂函数（单例） ──────────────────────────────────────
 

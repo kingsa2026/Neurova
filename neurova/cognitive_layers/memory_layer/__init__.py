@@ -191,3 +191,9 @@ __all__ = [
     "create_volume_renderer",
     "get_volume_renderer",
 ]
+
+# 上面的 NeRF 系列模块（memory_field / volume_renderer / positional_encoding 等）
+# 都包在 try/except ImportError 中：依赖缺失时对应名字根本不会绑定到本模块。
+# 若 __all__ 仍声明这些名字，`from ... import *` 会抛
+# AttributeError: module has no attribute 'xxx'。这里按实际可用情况裁剪。
+__all__ = [name for name in __all__ if name in globals()]

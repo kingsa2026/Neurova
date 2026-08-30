@@ -151,6 +151,7 @@ class MoERetrieverAdapter:
             memories = await self._router.retrieve(
                 query=context.query,
                 limit=context.limit,
+                progress_cb=getattr(context, "progress_callback", None),
             )
 
             elapsed = time.monotonic() - start_time

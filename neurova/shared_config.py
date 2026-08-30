@@ -50,8 +50,8 @@ class SharedConfigManager:
         """
         self._lock = threading.RLock()
 
-        # 配置文件路径
-        self._config_path = config_path or Path("data/shared_config.json")
+        # 配置文件路径（兼容 str / Path 入参，统一归一化为 Path）
+        self._config_path = Path(config_path) if config_path else Path("data/shared_config.json")
         self._config_path.parent.mkdir(parents=True, exist_ok=True)
 
         # 加载配置
@@ -302,8 +302,16 @@ class SharedConfigManager:
             server: 服务器信息
 
         Returns:
-            是否添加成功
+            是否添加成功（配置非法时拒绝并返回 False）
         """
+        from neurova.tool_layers.mcp_config import validate_mcp_server_config
+
+        try:
+            server = validate_mcp_server_config(server)
+        except ValueError as e:
+            logger.warning("拒绝非法 MCP 服务器配置: %s", e)
+            return False
+
         with self._lock:
             servers = self._config.get("mcp_servers", [])
 
@@ -329,14 +337,22 @@ class SharedConfigManager:
             updates: 更新内容
 
         Returns:
-            是否更新成功
+            是否更新成功（合并后配置非法时拒绝并返回 False）
         """
+        from neurova.tool_layers.mcp_config import validate_mcp_server_config
+
         with self._lock:
             servers = self._config.get("mcp_servers", [])
 
             for i, server in enumerate(servers):
                 if server.get("id") == server_id:
-                    servers[i].update(updates)
+                    merged = {**server, **updates}
+                    try:
+                        validated = validate_mcp_server_config(merged)
+                    except ValueError as e:
+                        logger.warning("拒绝非法 MCP 服务器更新: %s", e)
+                        return False
+                    servers[i] = validated
                     self._config["mcp_servers"] = servers
                     self._save_config()
 

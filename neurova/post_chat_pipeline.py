@@ -23,6 +23,7 @@ PostChatPipeline — 对话后处理管线
 """
 
 from neurova.core.logger import get_logger
+from neurova.cognitive_layers.growth_layer.analyzer import GrowthDimension
 import asyncio
 import contextvars
 import time
@@ -666,7 +667,14 @@ class PostChatPipeline:
         step_name = "generate_tts"
         start_time = time.time()
         config = self._agt.config
-        use_tts = enable_tts and getattr(config, "enable_tts", False)
+        # P2-5 修复: Agent.chat(enable_tts=None) 的契约是 "None 表示使用配置"。
+        # 原实现 `enable_tts and config.enable_tts` 对 None 恒 falsy，而 API 层从不传
+        # enable_tts → 配置了 enable_tts=True 的 Agent 永远不生成 TTS。
+        # 现: None → 按配置; 显式 bool → 覆盖配置（显式 True 时若语音管线不存在仍安全跳过）。
+        if enable_tts is None:
+            use_tts = bool(getattr(config, "enable_tts", False))
+        else:
+            use_tts = bool(enable_tts)
 
         # 优先使用统一语音管线
         voice_pipeline = self._get_dependency("voice_pipeline")
@@ -792,16 +800,21 @@ class PostChatPipeline:
                 # 对纯中文无标点的输入,按固定窗口切分
                 concepts = [w[i:i+4] for i in range(0, len(w), 4) if len(w[i:i+4]) > 1]
 
-            if concepts:
-                growth_analyzer.record_learning(
-                    concepts=concepts,
-                    context="conversation",
-                )
-
             # 实际计算分数: 基于输入长度和概念数量
             length_score = min(1.0, len(w) / 200.0)  # 长度因子
             concept_score = min(1.0, len(concepts) / 10.0)  # 概念丰富度
             score = 0.3 + 0.4 * length_score + 0.3 * concept_score  # 0.3-1.0 范围
+
+            if concepts:
+                # 根因修复: record_learning 真实签名是 (dimension, score, ...)，
+                # 此前传 concepts=..., context=... → TypeError 被吞，成长记录从未写入。
+                growth_analyzer.record_learning(
+                    dimension=GrowthDimension.LEARNING,
+                    score=round(score * 100.0, 2),
+                    task_type="conversation",
+                    description="对话认知分析",
+                    metadata={"concepts": concepts[:10]},
+                )
 
             logger.info("🧠 认知能力分析完成: score=%.2f, concepts=%d", score, len(concepts))
             self._step_results.append(
@@ -910,6 +923,34 @@ class PostChatPipeline:
                 action_items=action_items,
                 confidence=confidence,
             )
+
+            # 根因修复: QuestionQueueManager 此前零调用——反思检测到困惑/不确定时
+            # 生成澄清型问题入队，形成 反思 → 问题队列 → 上下文注入/主动提问 的闭环
+            is_confusion = any(kw in user_input.lower() for kw in self.REFLECTION_CONFUSION_KEYWORDS)
+            is_uncertain = any(kw in reply.lower() for kw in self.REFLECTION_UNCERTAINTY_KEYWORDS)
+            question_manager = self._get_dependency("question_queue_manager")
+            if question_manager and (is_confusion or is_uncertain):
+                try:
+                    from neurova.cognitive_layers.meta_cognition_layer.question_queue import QuestionPriority
+
+                    if is_confusion:
+                        q_content = f"用户对「{user_input[:60]}」有困惑，主动询问具体哪里不清楚"
+                        q_priority = QuestionPriority.HIGH
+                    else:
+                        q_content = f"回答「{user_input[:60]}」时存在不确定，主动确认是否需要补充信息"
+                        q_priority = QuestionPriority.NORMAL
+
+                    pending_contents = {q.content for q in question_manager.get_pending_questions()}
+                    if q_content not in pending_contents:
+                        question_manager.generate_question(
+                            content=q_content,
+                            priority=q_priority,
+                            metadata={"source": "reflection", "reflection_id": entry.id if entry else ""},
+                        )
+                        logger.info("❓ 澄清型问题已入队: %s", q_content[:50])
+                except Exception as qe:
+                    logger.debug("生成澄清型问题失败: %s", qe)
+
             if entry:
                 logger.info(
                     f"🧠 反思日志已生成: {entry.id} (类型: {reflection_type.value}, 触发: {context['trigger']})"
@@ -1603,28 +1644,39 @@ class PostChatPipeline:
             recent_memories = memory_manager.recall(user_input, limit=5)
             new_memory_content = f"用户: {user_input}\n助手: {reply}"
 
-            result = conflict_detector.check_conflict(
-                existing_memories=recent_memories,
-                new_memory=new_memory_content,
-            )
+            # P2-9 修复: 真实 API 是
+            # detect_conflict(new_memory: Memory, existing_memories: List[Memory]) -> List[Dict]。
+            # 原实现调用不存在的 check_conflict()，并假设返回值有
+            # has_conflict/conflicts/confidence/summary 结构 —— 依赖一旦注入必然
+            # AttributeError 被 except 吞掉，冲突检测步骤恒 FAILED（从未真正运行）。
+            from neurova.cognitive_layers.memory_layer.models import Memory
 
-            if result and result.has_conflict:
-                logger.warning(
-                    f"⚠️ 检测到 {len(result.conflicts)} 处记忆冲突 (置信度: {result.confidence:.2f}): {result.summary}"
-                )
-                # 标记为待处理
-                result.status = "pending"
-                for conflict in result.conflicts:
+            existing_memories = [
+                Memory(id=str(m.get("id", "")), content=str(m.get("content", "")))
+                for m in recent_memories
+                if isinstance(m, dict) and m.get("content")
+            ]
+            new_memory = Memory(id="pending_new_memory", content=new_memory_content)
+
+            conflicts = conflict_detector.detect_conflict(new_memory, existing_memories)
+
+            if conflicts:
+                logger.warning("⚠️ 检测到 %s 处记忆冲突", len(conflicts))
+                for conflict in conflicts:
                     logger.info(
-                        f"  冲突: {conflict.conflict_type.value} ({conflict.conflict_level}) - {conflict.description}"
+                        "  冲突: %s (相似度=%.2f, 矛盾分=%.2f) - %s",
+                        conflict.get("type"),
+                        conflict.get("similarity", 0.0),
+                        conflict.get("contradiction_score", 0.0),
+                        conflict.get("description"),
                     )
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
                         status=StepStatus.EXECUTED,
-                        message=f"Detected {len(result.conflicts)} conflicts",
+                        message=f"Detected {len(conflicts)} conflicts",
                         duration_ms=(time.time() - start_time) * 1000,
-                        data={"conflicts_count": len(result.conflicts), "confidence": result.confidence},
+                        data={"conflicts_count": len(conflicts), "conflicts": conflicts},
                     )
                 )
             else:
@@ -1717,71 +1769,53 @@ class PostChatPipeline:
     async def _step_proactive_question(self, user_input: str, reply: str) -> Optional[str]:
         """Step 10: 分析对话后决定是否主动提问
 
+        根因修复: 原依赖 proactive_question_manager 全仓无实例化（恒 None，
+        步骤恒 SKIPPED 死路）。统一接入 mem_core 构造的 QuestionQueueManager：
+        弹出最高优先级待提问问题并标记已提问（进入冷却期）。
+
         Returns:
             主动提问内容（如果没有则返回 None）
         """
         step_name = "proactive_question"
         start_time = time.time()
 
-        proactive_manager = self._get_dependency("proactive_question_manager")
-        if not proactive_manager:
+        question_manager = self._get_dependency("question_queue_manager")
+        if not question_manager:
             self._step_results.append(
                 StepResult(
                     step_name=step_name,
                     status=StepStatus.SKIPPED,
-                    message="proactive_question_manager not available",
+                    message="question_queue_manager not available",
                     duration_ms=(time.time() - start_time) * 1000,
                 )
             )
             return None
 
         try:
-            context = f"用户: {user_input}\n助手: {reply}"
-            should_ask, reason = proactive_manager.should_ask_question(context)
-
-            if should_ask:
-                if hasattr(proactive_manager, "generate_question"):
-                    question = proactive_manager.generate_question(context)
-                    if question:
-                        logger.info("🤔 主动提问: %s (原因: %s)", question, reason)
-                        self._step_results.append(
-                            StepResult(
-                                step_name=step_name,
-                                status=StepStatus.EXECUTED,
-                                message=f"Proactive question generated: {question[:50]}...",
-                                duration_ms=(time.time() - start_time) * 1000,
-                                data={"question": question, "reason": reason},
-                            )
-                        )
-                        return question
-                    else:
-                        logger.debug("主动提问条件满足但未生成问题: %s", reason)
-                        self._step_results.append(
-                            StepResult(
-                                step_name=step_name,
-                                status=StepStatus.SKIPPED,
-                                message=f"Should ask but no question generated: {reason}",
-                                duration_ms=(time.time() - start_time) * 1000,
-                            )
-                        )
-                else:
-                    self._step_results.append(
-                        StepResult(
-                            step_name=step_name,
-                            status=StepStatus.SKIPPED,
-                            message="proactive_manager has no generate_question method",
-                            duration_ms=(time.time() - start_time) * 1000,
-                        )
-                    )
-            else:
+            entry = question_manager.get_next_question()
+            if entry:
+                question_manager.mark_asked(entry.id)
+                logger.info("🤔 主动提问: %s", entry.content[:50])
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
-                        status=StepStatus.SKIPPED,
-                        message=f"Proactive question conditions not met: {reason}",
+                        status=StepStatus.EXECUTED,
+                        message=f"Proactive question: {entry.content[:50]}",
                         duration_ms=(time.time() - start_time) * 1000,
+                        data={"question": entry.content, "question_id": entry.id},
                     )
                 )
+                return entry.content
+
+            logger.debug("问题队列无待提问问题（或全部处于冷却期）")
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="No pending questions in queue",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
         except Exception as e:
             logger.warning("Step 10 主动提问决策失败: %s", e)
             self._step_results.append(
@@ -1805,6 +1839,75 @@ class PostChatPipeline:
         """
         step_name = "rsi_iteration"
         start_time = time.time()
+
+        # 根因修复: AutoSkillImprover 此前零调用——每轮批量扫描技能使用数据，
+        # 对失败率超阈值的技能提出改进提案，并沉淀为反思日志回流上下文
+        try:
+            from neurova.evolution.skill_improver import get_skill_improver
+            from neurova.cognitive_layers.meta_cognition_layer.growth_log import (
+                ReflectionType as _RealReflectionType,
+            )
+
+            proposals = get_skill_improver().propose_pending_improvements()
+            growth_log_manager = self._get_dependency("growth_log_manager")
+            for proposal in proposals[:3]:
+                logger.info("🔧 技能改进提案: %s - %s", proposal.skill_id, (proposal.description or "")[:50])
+                if growth_log_manager:
+                    try:
+                        await growth_log_manager.generate_log(
+                            type=_RealReflectionType.IMPROVEMENT,
+                            title=f"技能改进提案: {proposal.skill_id}",
+                            content=proposal.description or proposal.reason,
+                            insights=[proposal.reason] if proposal.reason else [],
+                            confidence=min(1.0, max(0.0, float(proposal.expected_impact or 0.5))),
+                        )
+                    except Exception as pe:
+                        logger.debug("改进提案写入反思日志失败: %s", pe)
+        except Exception as e:
+            logger.debug("技能改进提案扫描跳过: %s", e)
+
+        # 根因修复: MetaCognition 认知负荷模块此前零调用——每轮用真实轮次指标
+        # （工具步数/错误率/耗时/记忆规模）更新认知状态；低负荷且到达轮次间隔时
+        # 触发记忆巩固（认知负荷 → 睡眠整理 闭环；高负荷不整合是模块自身契约）
+        try:
+            from neurova.cognitive_layers.memory_layer.meta_cognition import get_meta_cognition
+
+            agent_id = str(getattr(getattr(self._agent, "config", None), "agent_id", "default") or "default")
+            meta = get_meta_cognition(agent_id)
+
+            results = list(self._step_results)
+            total_steps = len(results)
+            failed_steps = sum(
+                1 for r in results if getattr(getattr(r, "status", None), "value", "") == "failed"
+            )
+            tool_steps = sum(1 for r in results if "tool" in str(getattr(r, "step_name", "")))
+            response_ms = sum(float(getattr(r, "duration_ms", 0.0) or 0.0) for r in results)
+
+            memory_count = 0
+            memory_manager = self._get_dependency("memory_manager")
+            if memory_manager is not None and hasattr(memory_manager, "get_memory_count"):
+                memory_count = memory_manager.get_memory_count()
+
+            meta.update_state(
+                active_tasks=tool_steps,
+                memory_usage=min(1.0, memory_count / 5000.0),
+                response_time_ms=response_ms,
+                error_rate=(failed_steps / total_steps) if total_steps else 0.0,
+                metadata={"turn_steps": total_steps},
+            )
+
+            turn_count = int(getattr(self._agent, "_turn_count", 0) or 0)
+            if turn_count > 0 and turn_count % 10 == 0 and meta.should_consolidate():
+                idle_tracker = getattr(self._agent, "idle_tracker", None)
+                trigger = getattr(idle_tracker, "trigger_consolidation", None)
+                if trigger:
+                    consolidation_result = trigger()
+                    logger.info(
+                        "🧠 低负荷窗口触发记忆巩固: %s",
+                        "完成" if consolidation_result else "依赖缺失",
+                    )
+        except Exception as e:
+            logger.debug("认知负荷监控跳过: %s", e)
 
         rsi = self._get_dependency("rsi_orchestrator")
         if not rsi:

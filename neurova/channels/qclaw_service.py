@@ -9,13 +9,17 @@ QClaw 服务类
 """
 
 import hashlib
+import hmac
+import logging
 from neurova.core.logger import get_logger
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 try:
-    pass
+    # 原代码此处误写为 `pass`，requests 从未被导入，
+    # 且 except 分支引用的 logging 也未导入 —— 两条路径都会 NameError。
+    import requests
 
     REQUESTS_AVAILABLE = True
 except ImportError:

@@ -10,10 +10,14 @@ D1 任务重构版本：
 
 from neurova.core.logger import get_logger
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 # BE-CORE-003 修复: 下方 except 分支使用 logging.warning()，需导入 logging
 import logging
+
+# SkillManifestProvider 仅在 property 的字符串注解中引用（运行时按需导入）
+if TYPE_CHECKING:
+    from neurova.skills.manifest_provider import SkillManifestProvider
 
 from neurova.context import ContextOrchestrator
 from neurova.core.idle_tracker import IdleTimeTracker
@@ -24,8 +28,9 @@ from neurova.router import MessageRouter, RouteResult
 from neurova.skills.agent_skill_manager import AgentSkillManager  # will be migrated to evolution
 # ADR 0011: 从 skill_system 导入规范 SkillRegistry（class A），
 # 而非 skills/registry.py 的 class B（tuple 返回/__len__ falsy/register 双参）。
-# 运行时实例本就来自 skill_system.create_default_skills()，此处仅类型注解对齐。
-from neurova.skill_system import SkillEvent, SkillRegistry
+# 运行时实例本就来自 create_default_skills()，此处仅类型注解对齐。
+# 统一走 neurova.skills.events 门面，避免把 skill_system 的反射加载细节扩散到调用方。
+from neurova.skills.events import SkillEvent, SkillRegistry
 
 # Neurova-Evocate: Neurova Hebb 记忆系统
 try:
@@ -81,8 +86,11 @@ from neurova.tool_layers import (
 )
 
 # Agent Loop 导入
+# 原代码此处误写为 `pass`，可用性探测形同虚设：无论 Agent Loop 是否真的可用，
+# AGENT_LOOP_AVAILABLE 恒为 True，导致 rebuild_loop() 失去降级保护。
+# 导入 neurova.agent.loops 包会执行 __init__，进而触发 @register_loop 注册。
 try:
-    pass
+    from neurova.agent.loops import find_agent_loop  # noqa: F401
 
     AGENT_LOOP_AVAILABLE = True
 except ImportError:
@@ -464,6 +472,10 @@ class SubSystemContainer:
                     muscle_memory=muscle_memory,
                     confidence_threshold=0.8,
                     temperature_threshold=30.0,
+                    # P-G 修复（docs/tool-memory-muscle-analysis.md）：显式传入
+                    # muscle_memory_threshold（单源 = 本类属性），消除三处默认值
+                    # （0.85/0.8/隐式默认）不一致导致的 RSI 调参失效风险
+                    muscle_memory_threshold=self.muscle_memory_threshold,
                 )
             except Exception as e:
                 logger.warning("ToolMemory 初始化失败: %s", e)
@@ -594,8 +606,12 @@ class SubSystemContainer:
             try:
                 from neurova.cognitive_layers.growth_layer.analyzer import GrowthAnalyzer
 
+                # 根因修复: 此前传 GrowthAnalyzer 不接受的 storage_path → TypeError
+                # 被吞 → growth_analyzer 恒为 None。现签名对齐（workspace_path 为
+                # 持久化目录，成长数据写入 <dir>/growth.json 并跨重启恢复）。
                 a.growth_analyzer = GrowthAnalyzer(
-                    storage_path=str(c.workspace_path / "memory" / "growth"),
+                    agent_id=str(c.agent_id),
+                    workspace_path=str(c.workspace_path / "memory" / "growth"),
                 )
             except Exception as e:
                 logger.warning("认知能力初始化失败: %s", e)
@@ -672,7 +688,7 @@ class SubSystemContainer:
         # [BUGFIX] 提前初始化 SkillRegistry，避免 ToolRouter 获得 None
         if a._skill_registry is None:
             try:
-                from neurova.skill_system import create_default_skills
+                from neurova.skills import create_default_skills
                 a._skill_registry = create_default_skills(memory_manager=a.memory_manager)
                 logger.info("Agent %s: SkillRegistry 在 init_tools 中提前初始化", a.config.name)
             except Exception as _e:
@@ -741,6 +757,15 @@ class SubSystemContainer:
         # [BUGFIX] 将 ToolExecutor 引用注入 ToolRouter，使内置工具可执行
         if a.tool_router and a.tool_executor:
             a.tool_router.set_tool_executor(a.tool_executor)
+
+        # 挂载启动时已连接的 MCP 客户端（连接由 app 启动流程全局建立，此处仅同步注册）
+        if a.tool_router:
+            try:
+                from neurova.tool_layers.mcp_bootstrap import attach_bootstrapped_clients
+
+                attach_bootstrapped_clients(a.tool_router)
+            except Exception as e:
+                logger.debug("MCP 客户端挂载跳过: %s", e)
 
     def init_pipeline(self):
         """初始化管线"""
@@ -1005,7 +1030,7 @@ class Agent:
         """
         if self._skill_registry is None:
             try:
-                from neurova.skill_system import create_default_skills
+                from neurova.skills import create_default_skills
                 self._skill_registry = create_default_skills(
                     memory_manager=getattr(self, "memory_manager", None)
                 )
@@ -1074,8 +1099,13 @@ class Agent:
         return skill
 
     def _load_identity(self):
-        """加载 Agent 身份和性格"""
-        workspace = self.config.workspace_path / "workspace" / "memory"
+        """加载 Agent 身份和性格
+
+        P2-8 修复: 身份文件位于 workspace_path/memory/（与 memory.db、attachments
+        同目录，见 __init__ 标准路径约定）。原实现多拼了一层 "workspace"，
+        去 workspace_path/workspace/memory/ 寻找，自定义 soul.md/personality.md 永不加载。
+        """
+        workspace = self.config.workspace_path / "memory"
 
         # 加载 soul.md
         soul_path = workspace / "soul.md"
@@ -1115,6 +1145,9 @@ class Agent:
             if hasattr(self, "idle_tracker") and self.idle_tracker:
                 self.idle_tracker.set_sleep_consolidation(self.sleep_consolidation)
                 self.idle_tracker.set_memory_manager(self.memory_manager)
+                # P2-6: 注入真实记忆平均温度，替代此前硬编码的 25.0
+                if self.memory_manager is not None:
+                    self.idle_tracker.set_temperature_provider(self.memory_manager.get_average_temperature)
                 # 断点修复：此前从未启动监控线程，空闲整理是死路
                 from neurova.agent_shutdown import bind_and_start_sleep_loop
 
@@ -1219,6 +1252,7 @@ class Agent:
         - MemoryManager（用于记忆操作）
         """
         from neurova.router import create_default_router
+        from neurova.skills import create_default_skills
 
         # 先初始化 SkillRegistry（只在尚未初始化时创建，避免 init_tools 已创建的被覆盖）
         if not self._skill_registry:
@@ -1272,11 +1306,29 @@ class Agent:
 
     def _on_skill_post_execute(self, skill, result, **kwargs):
         """
-        Skill 成功执行后，记录到 ToolMemory（闭环学习）
+        Skill 执行后记录（闭环学习）
 
-        通过 SkillRegistry 的 POST_EXECUTE 事件触发，
-        仅在 result.success == True 时记录。
+        通过 SkillRegistry 的 POST_EXECUTE 事件触发。
+        根因修复: AutoSkillImprover 此前零调用——成败都记录使用数据，
+        供失败模式分析与改进提案（进化闭环的数据采集端）。
         """
+        try:
+            from neurova.evolution.skill_improver import get_skill_improver
+
+            skill_id = str(
+                getattr(skill, "skill_id", "") or getattr(skill, "id", "") or getattr(skill, "name", "") or ""
+            )
+            if skill_id:
+                get_skill_improver().record_usage(
+                    skill_id=skill_id,
+                    success=bool(result and result.success),
+                    duration=float(getattr(result, "execution_time", 0.0) or 0.0),
+                    error_message=str(getattr(result, "error", "") or ""),
+                    metadata={"agent_id": self.config.agent_id},
+                )
+        except Exception as e:
+            logger.debug("技能使用记录失败: %s", e)
+
         if not self.tool_memory or not result or not result.success:
             return
 
@@ -1422,12 +1474,19 @@ class Agent:
         # 1. 重置肌肉记忆的连续成功计数（触发自动降级）
         try:
             muscle = getattr(self.tool_memory, "muscle_memory", None) if self.tool_memory else None
-            if muscle and hasattr(muscle, "items"):
-                for key, item in muscle.items.items():
-                    if hasattr(item, "tool_name") and item.tool_name == tool_name:
-                        item.consecutive_success = 0
-                        logger.info("📉 肌肉记忆降级: %s consecutive_success 重置为 0", tool_name)
-                        break
+            # Bug 修复（docs/tool-memory-muscle-analysis.md P-B）：原实现遍历
+            # muscle.items（属性不存在，恒被 hasattr 跳过）且字段名拼错为
+            # consecutive_success（实际是 consecutive_successes），失败降级静默失效
+            if muscle is not None:
+                reset_any = False
+                for layer in (muscle._l1, muscle._l2, muscle._l3):
+                    for item in layer.values():
+                        if getattr(item, "tool_name", None) == tool_name:
+                            item.consecutive_successes = 0
+                            reset_any = True
+                if reset_any:
+                    muscle._save_all()
+                    logger.info("📉 肌肉记忆降级: %s consecutive_successes 重置为 0", tool_name)
         except Exception as e:
             logger.debug("肌肉记忆降级记录跳过: %s", e)
 
@@ -1495,8 +1554,19 @@ class Agent:
         return self.llm_client.get_stats()
 
     def clear_history(self):
-        """清空对话历史"""
+        """清空对话历史
+
+        P2-2 修复: 此前只清空 conversation_history 列表, 未清空 _conversation_context。
+        MemCore.update_history 以 _conversation_context 为权威源, 清空列表后下次更新会
+        从残留的 context 复活已清空的历史。必须同时清空两者。
+        """
         self.conversation_history = []
+        ctx = getattr(self, "_conversation_context", None)
+        if ctx is not None:
+            try:
+                ctx.clear()
+            except Exception as e:
+                logger.warning("清空 _conversation_context 失败: %s", e)
         logger.info("对话历史已清空")
 
     def get_integration_info(self) -> Dict[str, Any]:

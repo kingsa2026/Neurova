@@ -22,8 +22,10 @@ import uuid
 from pathlib import Path as FilePath
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Path, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
+
+from neurova.api.auth import get_current_user
 
 logger = get_logger(__name__)
 
@@ -87,8 +89,12 @@ async def get_settings(request: Request):
 
 
 @router.put("", response_model=SettingsResponse)
-async def update_settings(request: Request, body: UpdateSettingsRequest):
-    """更新全局设置"""
+async def update_settings(
+    request: Request,
+    body: UpdateSettingsRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """更新全局设置（需认证）"""
     _get_request_id(request)
 
     # TODO: 保存设置到数据库或文件
@@ -166,8 +172,12 @@ async def get_cors_config(request: Request):
 
 
 @router.put("/cors", response_model=CorsConfigResponse)
-async def update_cors_config(request: Request, body: UpdateCorsConfigRequest):
-    """更新 CORS 配置（管理员）"""
+async def update_cors_config(
+    request: Request,
+    body: UpdateCorsConfigRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """更新 CORS 配置（需认证；未认证篡改 CORS 白名单可绕过浏览器同源保护）"""
     _get_request_id(request)
 
     # 验证 origins 格式
@@ -231,8 +241,13 @@ async def get_setting(request: Request, key: str = Path(...)):
 
 
 @router.put("/{key}")
-async def update_setting(request: Request, key: str = Path(...), value: Any = Body(...)):
-    """更新特定设置"""
+async def update_setting(
+    request: Request,
+    key: str = Path(...),
+    value: Any = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """更新特定设置（需认证）"""
     _get_request_id(request)
 
     _default_settings[key] = value

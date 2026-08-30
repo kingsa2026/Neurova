@@ -9,7 +9,10 @@
 
 from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
+
+if TYPE_CHECKING:
+    from .prompt_optimizer import OptimizedPrompt
 
 logger = get_logger(__name__)
 

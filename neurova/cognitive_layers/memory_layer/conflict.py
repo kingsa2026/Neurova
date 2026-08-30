@@ -132,24 +132,6 @@ class ConflictDetector:
         
         return min(1.0, score)
 
-        # 检查否定词
-        negations1 = self._has_negation(content1)
-        negations2 = self._has_negation(content2)
-
-        # 如果一个有否定词，另一个没有，可能是冲突
-        if (negations1 and not negations2) or (negations2 and not negations1):
-            return {
-                "type": "negation_conflict",
-                "memory1_id": memory1.id,
-                "memory2_id": memory2.id,
-                "similarity": similarity,
-                "detection_mode": "semantic" if self._semantic_search else "rule",
-                "description": "一个记忆包含否定词，另一个不包含",
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            }
-
-        return None
-
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """计算文本相似度（简化版）"""
         if not text1 or not text2:

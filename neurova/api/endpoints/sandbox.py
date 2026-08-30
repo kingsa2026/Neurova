@@ -6,12 +6,17 @@ import datetime
 import typing
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from neurova.api.auth import get_current_user
 from neurova.api.endpoints import get_agent_instance
+from neurova.core.logger import get_logger
 
-router = APIRouter()
+logger = get_logger(__name__)
+
+# P0 安全修复: 沙箱 commit 可写入 Agent 持久记忆，所有端点必须认证
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 # ── Models ─────────────────────────────────────────────
@@ -161,8 +166,7 @@ async def commit_sandbox(sandbox_id: str, body: SandboxCommitRequest):
                 if hasattr(agent.memory_manager, "remember"):
                     await agent.memory_manager.remember(memory_content, tags=body.tags + ["sandbox", "conclusion"])
         except Exception as e:
-            from neurova.core.logger import get_logger
-            get_logger(__name__).warning("Failed to save sandbox to memory: %s", e)
+            logger.warning("Failed to save sandbox to memory: %s", e)
 
     return {
         "code": 0,

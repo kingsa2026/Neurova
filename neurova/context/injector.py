@@ -41,7 +41,9 @@ except (ImportError, ModuleNotFoundError):
             self._module_id = module_id
             self._module_name = name
             self._module_version = version
-            self._logger = _logging.getLogger(f"neurova.{module_id}" if module_id else __name__)
+            # 原代码写成 _logging（下划线前缀），模块中只有 logging，
+            # 一旦 BaseModule 走降级分支就会 NameError。
+            self._logger = logging.getLogger(f"neurova.{module_id}" if module_id else __name__)
             self._event_handlers = {}
 
         def log_info(self, msg, data=None):
@@ -409,7 +411,18 @@ class UnifiedContextInjector(BaseModule):
         if emotion_content:
             parts.append(f"\n## 当前情感状态\n{emotion_content}")
 
-        parts.append(f"\n## 当前时间\n{dt.datetime.now().strftime('%Y年%m月%d日 %H:%M')}")
+        # P1-F: 追加时间感知提示（季节/临近节日；纯日期计算，不增加消息条数）
+        time_hint = ""
+        try:
+            from neurova.cognitive_layers.emotion_context_layer.time_awareness import (
+                get_time_awareness,
+            )
+
+            time_hint = get_time_awareness().get_time_context_hint()
+        except Exception as e:
+            self.log_debug(f"时间感知提示跳过: {e}")
+        hint_line = f"\n{time_hint}" if time_hint else ""
+        parts.append(f"\n## 当前时间\n{dt.datetime.now().strftime('%Y年%m月%d日 %H:%M')}{hint_line}")
 
         return "\n".join(parts)
 
@@ -429,7 +442,11 @@ class UnifiedContextInjector(BaseModule):
             parts = []
             for log in logs:
                 status_mark = "✓已验证" if log.status == ReflectionLogStatus.VALIDATED else "○待验证"
-                parts.append(f"- [{status_mark}] {log.situation[:50]}... → {log.lesson[:30]}")
+                # 根因修复: ReflectionLogEntry 的真实字段是 title/content/insights，
+                # 此前读 log.situation/log.lesson（不存在）→ AttributeError 被 except
+                # 吞掉，反思上下文永远是空字符串。
+                lesson = (log.insights[0] if log.insights else log.content) or log.title
+                parts.append(f"- [{status_mark}] {log.title[:50]} → {lesson[:60]}")
 
             return "\n".join(parts)
 
@@ -853,7 +870,8 @@ class UnifiedContextInjector(BaseModule):
             parts = ["[反思日志上下文]\n"]
             for log in logs:
                 status_mark = "✓" if log.status == ReflectionLogStatus.VALIDATED else "○"
-                parts.append(f"\n{status_mark} [{log.reflection_type.value}] {log.lesson}")
+                # 根因修复: 真实字段是 type/content（原 reflection_type/lesson 不存在）
+                parts.append(f"\n{status_mark} [{log.type.value}] {log.content}")
 
             return "".join(parts)
 

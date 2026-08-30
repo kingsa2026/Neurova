@@ -180,6 +180,7 @@ class MemoryManager:
         self._explainability_module = None
         self._meta_cognition_module = None
         self._relation_module = None
+        self._graph_traversal = None
         self._self_model_module = None
         self._self_manager_module = None
         self._tkg_module = None
@@ -421,8 +422,8 @@ class MemoryManager:
         content: str,
         category: str = "general",
         memory_type: str = "semantic",
-        temperature: float = 100.0,
-        importance: float = 50.0,
+        temperature: Optional[float] = None,
+        importance: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
         emotion: Optional[str] = None,
         # M-7 修复: API 层显式接收的 4 个数据参数, 不再落入 kwargs 黑洞
@@ -434,6 +435,20 @@ class MemoryManager:
         **kwargs,
     ) -> str:
         """存储一条记忆"""
+        # 配置化默认值（memory-settings 配置页）: manager.new_memory_temperature /
+        # new_memory_importance。settings 默认 100/50 与历史硬编码一致；
+        # 调用方显式传参时优先于配置。
+        if temperature is None or importance is None:
+            from neurova.cognitive_layers.memory_layer.settings_config import (
+                get_memory_settings,
+            )
+
+            _cfg = get_memory_settings()
+            if temperature is None:
+                temperature = float(_cfg.get("manager.new_memory_temperature", 100.0))
+            if importance is None:
+                importance = float(_cfg.get("manager.new_memory_importance", 50.0))
+
         with self._lock:
             self._counter += 1
             mem_id = kwargs.get("id", f"mem_{self._counter:06d}")
@@ -797,6 +812,18 @@ class MemoryManager:
         with self._lock:
             return [m.to_dict() for m in self._memories.values()]
 
+    def get_average_temperature(self) -> float:
+        """获取全库平均记忆温度（供睡眠阶段判定等使用；空库返回 0.0）"""
+        with self._lock:
+            if not self._memories:
+                return 0.0
+            return sum(m.temperature for m in self._memories.values()) / len(self._memories)
+
+    def get_memory_count(self) -> int:
+        """获取当前记忆总数（轻量 O(1)，供认知负荷评估等使用）"""
+        with self._lock:
+            return len(self._memories)
+
     def query_memories(self, **filters) -> List[Dict[str, Any]]:
         """查询记忆（高级过滤）"""
         return self.recall(
@@ -1106,7 +1133,19 @@ class MemoryManager:
         from datetime import datetime, timezone
         from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
 
-        engine = TemperatureEngine()
+        # 衰减参数配置化（memory-settings 配置页）: temperature.decay_rate /
+        # temperature.min / temperature.max，默认 0.1/0/100 与历史一致。
+        # 每轮新建引擎实例，改配置即时生效。
+        from neurova.cognitive_layers.memory_layer.settings_config import (
+            get_memory_settings,
+        )
+
+        _cfg = get_memory_settings()
+        engine = TemperatureEngine(
+            base_decay_rate=float(_cfg.get("temperature.decay_rate", 0.1)),
+            temp_min=float(_cfg.get("temperature.min", 0.0)),
+            temp_max=float(_cfg.get("temperature.max", 100.0)),
+        )
         now = datetime.now(timezone.utc)
         count = 0
 
@@ -1194,7 +1233,19 @@ class MemoryManager:
                 :limit
             ]
 
-    def get_hot_memories(self, limit: int = 10, min_temperature: float = 80.0) -> List[Dict[str, Any]]:
+    def get_hot_memories(
+        self, limit: int = 10, min_temperature: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        # 阈值配置化（memory-settings 配置页）: manager.hot_memories_threshold，
+        # settings 默认 80.0 与历史硬编码一致；显式传参时优先于配置。
+        if min_temperature is None:
+            from neurova.cognitive_layers.memory_layer.settings_config import (
+                get_memory_settings,
+            )
+
+            min_temperature = float(
+                get_memory_settings().get("manager.hot_memories_threshold", 80.0)
+            )
         return self.recall(limit=limit, min_temperature=min_temperature)
 
     def flush_all_pending_updates(self) -> int:
@@ -1873,6 +1924,189 @@ class MemoryManager:
         """获取记忆图谱（委托到 RelationModule.get_stats）"""
         module = self._ensure_relation_module()
         return module.get_stats()
+
+    # ────── 压缩/合并（MemoryCompressor 接入，compression.* 配置组）──────
+
+    def compress_low_value_memories(
+        self, dry_run: bool = True, limit: int = 500
+    ) -> Dict[str, Any]:
+        """对低重要性记忆执行相似压缩/合并（compression.* 配置组）
+
+        候选：importance（0~100 归一化后）低于 compression.importance_threshold
+        且未固化的记忆，最多 limit 条。MERGE 使用 MemoryCompressor 的语义压缩。
+
+        Args:
+            dry_run: True（默认）只返回合并计划，不修改任何数据
+            limit: 候选上限，防全量遍历阻塞
+
+        Returns:
+            {dry_run, candidates, merged_count, groups, ...}
+        """
+        from neurova.cognitive_layers.memory_layer.settings_config import (
+            get_memory_settings,
+        )
+        from neurova.cognitive_layers.memory_layer.compression import (
+            get_memory_compressor,
+            CompressionStrategy,
+        )
+        from neurova.cognitive_layers.memory_layer.models import LifecycleStage
+
+        cfg = get_memory_settings()
+        imp_threshold = float(cfg.get("compression.importance_threshold", 0.3))
+        sim_threshold = float(cfg.get("compression.similarity_threshold", 0.7))
+        max_per_group = int(cfg.get("compression.max_memories_per_group", 10))
+        window_hours = int(cfg.get("compression.time_window_hours", 24))
+        enable_llm = bool(cfg.get("compression.enable_llm_compression", True))
+
+        candidates = [
+            m
+            for m in self._memories.values()
+            if m.lifecycle_stage not in (LifecycleStage.FORGOTTEN, LifecycleStage.CRYSTALLIZED)
+            and (float(m.importance) / 100.0) < imp_threshold
+        ][:limit]
+
+        if not candidates:
+            return {
+                "dry_run": dry_run,
+                "candidates": 0,
+                "merged_count": 0,
+                "groups": [],
+            }
+
+        compressor = get_memory_compressor(
+            storage=self.storage,
+            llm_client=None,
+            config={
+                "similarity_threshold": sim_threshold,
+                "max_memories_per_group": max_per_group,
+                "time_window_hours": window_hours,
+                "importance_threshold": imp_threshold,
+                "enable_llm_compression": enable_llm,
+            },
+        )
+        result = compressor.compress(
+            [m.to_dict() for m in candidates],
+            strategy=CompressionStrategy.SEMANTIC,
+            threshold=sim_threshold,
+            max_group_size=max_per_group,
+        )
+
+        report = {
+            "dry_run": dry_run,
+            "candidates": len(candidates),
+            "merged_count": result.merged_count,
+            "removed_count": result.removed_count,
+            "groups": result.details.get("groups", []),
+        }
+
+        if dry_run:
+            return report
+
+        # 执行写回：keep 内容更新，组内其他成员软删（FORGOTTEN）
+        with self._lock:
+            for g in report["groups"]:
+                keep_id = g.get("keep_id", "")
+                keep = self._memories.get(keep_id)
+                if keep is None:
+                    continue
+                merged_content = g.get("merged_content") or g.get("keep_content")
+                if merged_content:
+                    keep.content = str(merged_content)
+                    self._persist_memory(keep)
+                for mid in g.get("member_ids", []):
+                    if mid != keep_id and mid in self._memories:
+                        self.forget(mid)
+
+        return report
+
+    # ────── 关系图遍历（GraphTraversal 接入，graph.* 配置组）──────
+
+    def _ensure_graph_traversal(self):
+        """懒加载 GraphTraversal，参数来自 graph.* 配置组"""
+        if self._graph_traversal is None:
+            from neurova.cognitive_layers.memory_layer.settings_config import (
+                get_memory_settings,
+            )
+            from neurova.cognitive_layers.memory_layer.graph_traversal import (
+                GraphTraversal,
+            )
+
+            cfg = get_memory_settings()
+            traversal = GraphTraversal(
+                min_strength=float(cfg.get("graph.min_strength", 0.15))
+            )
+            relation_module = self._ensure_relation_module()
+            for rel in relation_module.get_all():
+                traversal.add_relation(
+                    type(
+                        "R",
+                        (),
+                        {
+                            "source_id": rel.source_id,
+                            "target_id": rel.target_id,
+                            "relation_type": rel.relation_type.value
+                            if hasattr(rel.relation_type, "value")
+                            else str(rel.relation_type),
+                            "strength": rel.strength,
+                            "metadata": rel.metadata or {},
+                        },
+                    )()
+                )
+            self._graph_traversal = traversal
+        return self._graph_traversal
+
+    def traverse_relations(
+        self, memory_id: str, method: str = "bfs", max_depth: int = 3
+    ) -> Dict[str, Any]:
+        """从指定记忆出发遍历关系图（graph.min_strength 过滤弱关系）
+
+        Args:
+            memory_id: 起始记忆 id
+            method: "bfs" 或 "dfs"
+            max_depth: 遍历深度
+
+        Returns:
+            {"nodes": [{"id", "content"}], "edges": [...], "paths": n}
+        """
+        from neurova.cognitive_layers.memory_layer.settings_config import (
+            get_memory_settings,
+        )
+
+        cfg = get_memory_settings()
+        traversal = self._ensure_graph_traversal()
+
+        if method == "dfs":
+            result = traversal.traverse_dfs(memory_id)
+        else:
+            result = traversal.traverse_bfs(memory_id)
+
+        visited_ids = set(result.reachable_ids or [])
+        visited_ids.add(memory_id)
+        nodes = []
+        for node_id in visited_ids:
+            mem = self._memories.get(node_id)
+            if mem is not None:
+                nodes.append({"id": node_id, "content": mem.content})
+        return {
+            "source": memory_id,
+            "method": method,
+            "max_depth": max_depth,
+            "min_strength": float(cfg.get("graph.min_strength", 0.15)),
+            "nodes": nodes,
+            "edges": [
+                {
+                    "source": rel.source_id,
+                    "target": rel.target_id,
+                    "type": rel.relation_type.value
+                    if hasattr(rel.relation_type, "value")
+                    else str(rel.relation_type),
+                    "strength": rel.strength,
+                }
+                for path in (result.paths or [])
+                for rel in path.relations
+            ],
+            "path_count": len(result.paths or []),
+        }
 
     def search_similar_memories(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         return self.recall(query=query, limit=limit)

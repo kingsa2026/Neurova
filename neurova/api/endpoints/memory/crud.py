@@ -118,70 +118,9 @@ async def get_memory_stats(
         raise APIError.internal(f"获取记忆统计失败: {str(e)}")
 
 
-@router.get("/{memory_id}", summary="获取记忆详情")
-async def get_memory(
-    memory_id: str,
-    agent_id: Optional[str] = None,
-    req: Request = None,
-):
-    """
-    获取指定记忆的详细信息
-    """
-    try:
-        # 从Token中获取用户ID
-        neuser_id, user_id = _get_user_ids_from_token(req)
-
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
-
-        # BUG-40: 使用 storage.get 替代搜索，提高效率
-        memory_data = manager.storage.get(memory_id)
-        if not memory_data:
-            raise APIError.not_found(f"记忆不存在: {memory_id}")
-
-        from neurova.cognitive_layers.memory_layer.models import Memory
-
-        target = Memory.from_dict(memory_data)
-
-        return success_response(
-            data=memory_to_dict(target),
-            message="获取成功",
-            request_id=_get_request_id(req),
-        )
-
-    except APIError:
-        raise
-    except Exception as e:
-        logger.exception("获取记忆失败: %s", e)
-        raise APIError(ErrorCodes.MEMORY_NOT_FOUND, f"获取记忆失败: {str(e)}")
-
-
-@router.delete("/{memory_id}", summary="删除记忆")
-async def delete_memory(
-    memory_id: str,
-    agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user_or_default),
-):
-    """
-    删除指定记忆 (遗忘)
-    """
-    try:
-        manager = get_memory_manager(agent_id, user)
-        success = manager.forget(memory_id)
-
-        if not success:
-            raise APIError.not_found(f"记忆不存在: {memory_id}")
-
-        return success_response(
-            data={"memory_id": memory_id},
-            message="记忆已删除",
-            request_id=_get_request_id(None),
-        )
-
-    except APIError:
-        raise
-    except Exception as e:
-        logger.exception("删除记忆失败: %s", e)
-        raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, f"删除记忆失败: {str(e)}")
+# 注意：GET/DELETE /{memory_id} 路径参数路由必须在本文件所有字面路由
+# （/stats、/hot、/crystallized、/decay）之后注册，否则它们会被吞掉
+# （FastAPI 按注册顺序匹配，/hot 曾被当成 memory_id="hot" 处理）。
 
 
 @router.get("/hot", summary="获取高温记忆")
@@ -253,7 +192,10 @@ async def run_decay_cycle(
     """
     try:
         manager = get_memory_manager(agent_id, user)
-        updated_count = manager.run_decay_cycle()
+        # 有界 + 节流：无界全量遍历 116 万级记忆库会长时间阻塞甚至拖垮服务
+        updated_count = manager.run_decay_cycle(
+            max_memories=5000, min_interval_seconds=300
+        )
 
         return success_response(
             data={"updated_count": updated_count},
@@ -266,3 +208,116 @@ async def run_decay_cycle(
     except Exception as e:
         logger.exception("温度衰减失败: %s", e)
         raise APIError.internal(f"温度衰减失败: {str(e)}")
+
+
+@router.get("/{memory_id}", summary="获取记忆详情")
+async def get_memory(
+    memory_id: str,
+    agent_id: Optional[str] = None,
+    req: Request = None,
+):
+    """
+    获取指定记忆的详细信息
+    """
+    try:
+        # 从Token中获取用户ID
+        neuser_id, user_id = _get_user_ids_from_token(req)
+
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
+
+        # BUG-40: 使用 storage.get 替代搜索，提高效率
+        memory_data = manager.storage.get(memory_id)
+        if not memory_data:
+            raise APIError.not_found(f"记忆不存在: {memory_id}")
+
+        from neurova.cognitive_layers.memory_layer.models import Memory
+
+        target = Memory.from_dict(memory_data)
+
+        return success_response(
+            data=memory_to_dict(target),
+            message="获取成功",
+            request_id=_get_request_id(req),
+        )
+
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception("获取记忆失败: %s", e)
+        raise APIError(ErrorCodes.MEMORY_NOT_FOUND, f"获取记忆失败: {str(e)}")
+
+
+@router.post("/compress", summary="压缩低重要性记忆")
+async def compress_low_value_memories(
+    dry_run: bool = Query(default=True, description="True 只返回合并计划不执行"),
+    limit: int = Query(default=500, ge=1, le=5000, description="候选上限"),
+    agent_id: Optional[str] = Query(default=None, description="Agent ID"),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """对低重要性相似记忆执行压缩/合并（参数见 compression.* 配置组）"""
+    try:
+        manager = get_memory_manager(agent_id, user)
+        report = manager.compress_low_value_memories(dry_run=dry_run, limit=limit)
+        return success_response(
+            data=report,
+            message="压缩计划" if dry_run else "压缩完成",
+            request_id=_get_request_id(None),
+        )
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception("记忆压缩失败: %s", e)
+        raise APIError.internal(f"记忆压缩失败: {str(e)}")
+
+
+@router.get("/relations/{memory_id}/traverse", summary="遍历记忆关系图")
+async def traverse_relations(
+    memory_id: str,
+    method: str = Query(default="bfs", pattern="^(bfs|dfs)$"),
+    max_depth: int = Query(default=3, ge=1, le=10),
+    agent_id: Optional[str] = Query(default=None, description="Agent ID"),
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """从指定记忆出发遍历关系图（graph.min_strength 过滤弱关系）"""
+    try:
+        manager = get_memory_manager(agent_id, user)
+        result = manager.traverse_relations(memory_id, method=method, max_depth=max_depth)
+        return success_response(
+            data=result,
+            message="遍历完成",
+            request_id=_get_request_id(None),
+        )
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception("关系图遍历失败: %s", e)
+        raise APIError.internal(f"关系图遍历失败: {str(e)}")
+
+
+@router.delete("/{memory_id}", summary="删除记忆")
+async def delete_memory(
+    memory_id: str,
+    agent_id: Optional[str] = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """
+    删除指定记忆 (遗忘)
+    """
+    try:
+        manager = get_memory_manager(agent_id, user)
+        success = manager.forget(memory_id)
+
+        if not success:
+            raise APIError.not_found(f"记忆不存在: {memory_id}")
+
+        return success_response(
+            data={"memory_id": memory_id},
+            message="记忆已删除",
+            request_id=_get_request_id(None),
+        )
+
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception("删除记忆失败: %s", e)
+        raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, f"删除记忆失败: {str(e)}")

@@ -192,6 +192,40 @@ class TimeAwareness:
                 logger.error("预测事件失败: %s", e)
                 return []
 
+    def get_time_context_hint(self, prediction_days: int = 3) -> str:
+        """生成轻量时间上下文提示（纯日期计算，不读记忆，可每轮调用）
+
+        Returns:
+            形如 "季节:冬;临近节日:元旦(2天内)" 的单行提示；无内容返回 ""
+        """
+        try:
+            season_zh = {"spring": "春", "summer": "夏", "autumn": "秋", "winter": "冬"}
+            month = datetime.datetime.now().month
+            season = "winter"
+            for name, (start, end) in self._SEASONS.items():
+                if name == "winter":
+                    continue
+                if start <= month <= end:
+                    season = name
+                    break
+            if month >= 12 or month <= 2:
+                season = "winter"
+
+            parts = [f"季节:{season_zh[season]}"]
+
+            for holiday in self._predict_chinese_holidays(prediction_days)[:2]:
+                try:
+                    holiday_date = datetime.datetime.fromisoformat(holiday["predicted_date"])
+                    days_until = max(0, (holiday_date - datetime.datetime.now()).days + 1)
+                    parts.append(f"临近节日:{holiday['name']}({days_until}天内)")
+                except (KeyError, ValueError):
+                    continue
+
+            return ";".join(parts)
+        except Exception as e:
+            logger.debug("生成时间上下文提示失败: %s", e)
+            return ""
+
     def get_seasonal_preferences(self) -> Dict[str, Any]:
         """获取季节性偏好
 

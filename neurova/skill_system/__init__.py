@@ -203,6 +203,27 @@ def __getattr__(name: str) -> Any:
             _sys.modules.pop(_cache_key, None)
             raise
         return _mod.ToolSequenceSkill
+    elif name == "Skill":
+        # ADR 0011: 从被遮蔽的 skill_system.py 加载规范 Skill 基类，复用同一
+        # standalone 模块缓存。此前 __getattr__ 缺少 "Skill" 分支，导致本文件底部
+        # `from neurova.skill_system import Skill` 导入失败、回退为无方法的占位类，
+        # 使 SkillRegistry.register() 里 skill.add_event_handler() 抛 AttributeError。
+        import importlib.util as _iu
+        import os as _os
+        import sys as _sys
+        _cache_key = "neurova.skill_system_module_standalone"
+        if _cache_key in _sys.modules:
+            return _sys.modules[_cache_key].Skill
+        _mod_path = _os.path.join(_os.path.dirname(__file__), _os.pardir, "skill_system.py")
+        _spec = _iu.spec_from_file_location(_cache_key, _os.path.abspath(_mod_path))
+        _mod = _iu.module_from_spec(_spec)
+        _sys.modules[_cache_key] = _mod
+        try:
+            _spec.loader.exec_module(_mod)
+        except Exception:
+            _sys.modules.pop(_cache_key, None)
+            raise
+        return _mod.Skill
     else:
         raise AttributeError(f"module 'neurova.skill_system' has no attribute '{name}'")
 

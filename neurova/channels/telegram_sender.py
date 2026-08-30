@@ -39,14 +39,31 @@ class TelegramSenderMixin:
             logger.error("Telegram 消息发送异常: %s", e)
             return False
 
-    def _send_text_message(self: Any, chat_id: str, text: str, parse_mode: str = "Markdown") -> bool:
-        data = self._api_request(
-            "POST",
-            f"/bot{self.bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode},
-        )
+    def _send_text_message(self: Any, chat_id: str, text: str, parse_mode: str = None) -> bool:
+        """发送文本消息。
+
+        parse_mode 缺省取实例配置（默认 legacy "Markdown"，官方仍支持；
+        可配置为 MarkdownV2/HTML）。内容与 parse_mode 语法不匹配时官方
+        返回 400 can't parse entities —— 此时去掉 parse_mode 以纯文本重发。
+        """
+        if parse_mode is None:
+            parse_mode = getattr(self, "parse_mode", "Markdown")
+
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+
+        data = self._api_request("POST", f"/bot{self.bot_token}/sendMessage", json=payload)
         if data.get("ok"):
             return True
+
+        if payload.get("parse_mode") and "can't parse entities" in str(data.get("description", "")):
+            payload.pop("parse_mode")
+            data = self._api_request("POST", f"/bot{self.bot_token}/sendMessage", json=payload)
+            if data.get("ok"):
+                logger.info("Telegram parse_mode 解析失败，已回退纯文本发送")
+                return True
+
         logger.error("Telegram 文本消息发送失败: %s", data)
         return False
 

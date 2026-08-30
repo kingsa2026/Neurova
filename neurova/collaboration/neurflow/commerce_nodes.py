@@ -17,11 +17,12 @@ Neurflow 电商运营节点 — 亚马逊 / 抖音 / 淘宝等平台运营
 """
 import json
 import re
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from .models import NodeDefinition
 from .external_api import CommercePlatformClient
+from .store_connections import get_store_connection_manager
 
 logger = get_logger(__name__)
 
@@ -40,6 +41,165 @@ _COMMERCE_PLATFORM_OPTIONS = [
     {"value": "shein", "label": "希音 SHEIN"},
 ]
 
+# ---- 亚马逊 SP-API 专用选项（依据官方开发文档 developer-docs.amazon.com/sp-api）----
+
+# MarketplaceId（Store Identifiers 文档），画布按常用站点提供下拉
+_AMAZON_MARKETPLACE_OPTIONS = [
+    {"value": "ATVPDKIKX0DER", "label": "美国 US"},
+    {"value": "A2EUQ1WTGCTBG2", "label": "加拿大 CA"},
+    {"value": "A1AM78C64UM0Y8", "label": "墨西哥 MX"},
+    {"value": "A2Q3Y263D00KWC", "label": "巴西 BR"},
+    {"value": "A1F83G8C2ARO7P", "label": "英国 UK"},
+    {"value": "A1PA6795UKMFR9", "label": "德国 DE"},
+    {"value": "A13V1IB3VIYZZH", "label": "法国 FR"},
+    {"value": "APJ6JRA9NG5V4", "label": "意大利 IT"},
+    {"value": "A1RKKUPIHCS9HS", "label": "西班牙 ES"},
+    {"value": "A1VC38T7YXB528", "label": "日本 JP"},
+    {"value": "A19VAU5U5O7RUS", "label": "新加坡 SG"},
+    {"value": "A39IBJ37TRP1C6", "label": "澳大利亚 AU"},
+]
+
+# SP-API 区域端点（NA / EU / FE）
+_AMAZON_REGION_OPTIONS = [
+    {"value": "na", "label": "北美 NA"},
+    {"value": "eu", "label": "欧洲 EU"},
+    {"value": "fe", "label": "远东 FE"},
+]
+
+# Reports API v2021-06-30 常用报表类型
+_AMAZON_REPORT_TYPE_OPTIONS = [
+    {"value": "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL", "label": "订单报表（按下单日期）"},
+    {"value": "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL", "label": "订单报表（按更新日期）"},
+    {"value": "GET_AMAZON_FULFILLED_SHIPMENTS_DATA_GENERAL", "label": "FBA 发货报表"},
+    {"value": "GET_FBA_INVENTORY_RECEIPT_SUMMARY", "label": "FBA 库存收货汇总"},
+    {"value": "GET_MERCHANT_LISTINGS_ALL_DATA", "label": "在售 Listing 报表"},
+    {"value": "GET_BRAND_ANALYTICS_SEARCH_TERMS_REPORT", "label": "品牌分析-搜索词报表"},
+]
+
+# Listings Items API putListingsItem requirements 参数
+_AMAZON_LISTING_REQUIREMENTS_OPTIONS = [
+    {"value": "LISTING", "label": "LISTING（完整 Listing）"},
+    {"value": "LISTING_PRODUCT_ONLY", "label": "LISTING_PRODUCT_ONLY（仅商品信息）"},
+    {"value": "LISTING_OFFER_ONLY", "label": "LISTING_OFFER_ONLY（仅报价/价格）"},
+]
+
+
+# ==================== 联动下拉条件（平台参数随 platform 选择显隐） ====================
+# 契约对齐 models.SubBlockConfig.condition: {field, operator, value}
+# 前端按 condition 过滤属性面板字段；隐藏字段的值保留在 config 中，执行器行为不变。
+
+
+def _platform_eq(platform: str) -> Dict[str, Any]:
+    """仅选中指定平台时可见"""
+    return {"field": "platform", "operator": "eq", "value": platform}
+
+
+def _platform_in(platforms: List[str]) -> Dict[str, Any]:
+    """选中任一列出平台时可见"""
+    return {"field": "platform", "operator": "in", "value": list(platforms)}
+
+
+_STORE_SELECT_PLATFORMS = [
+    "amazon",
+    "taobao",
+    "jd",
+    "pdd",
+    "douyin-ecom",
+    "tiktok",
+    "ali1688",
+    "xiaohongshu",
+    "xianyu",
+]
+
+
+def _store_select_block(require_platform: bool = True) -> Dict[str, Any]:
+    """已连接店铺下拉；值存 config.store_id，执行器据此解析店铺级凭据。
+
+    require_platform=False 时（店铺授权节点）不带 platform 条件——店铺是
+    该节点的下属对象，需在不选平台时也可见。
+    """
+    block: Dict[str, Any] = {
+        "id": "store_id",
+        "name": "store_id",
+        "type": "store-select",
+        "label": "已连接店铺",
+        "default": "",
+    }
+    if require_platform:
+        block["condition"] = _platform_in(_STORE_SELECT_PLATFORMS)
+    return block
+
+
+_FALLBACK_NOTE_TMPL = (
+    "未连接店铺或平台 API 调用失败（原因: {reason}），当前输出为本地模拟数据，仅用于流程演示"
+)
+
+
+async def _resolve_store_creds(platform: str, store_id: str, ctx: Optional[Dict[str, Any]] = None):
+    """已选店铺 → 解析店铺级凭据（按执行上下文的归属用户隔离）。
+
+    未选或解析失败 → (store_id, None) 交由客户端环境变量/降级路径。
+    """
+    if not store_id:
+        return "", None
+    user_id = _ctx_user_id(ctx)
+    try:
+        return store_id, await get_store_connection_manager().resolve_credentials(platform, store_id, user_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("店铺 %s 凭据解析失败（走降级路径）: %s", store_id, exc)
+        return store_id, None
+
+
+def _ctx_user_id(ctx: Optional[Dict[str, Any]] = None) -> str:
+    """从节点执行上下文取归属用户（多用户隔离）"""
+    resolution_context = (ctx or {}).get("resolution_context")
+    if resolution_context is None:
+        return ""
+    return str(getattr(resolution_context, "user_id", "") or "")
+
+
+_WHEN_AMAZON = _platform_eq("amazon")
+
+
+def _platform_scoped_id_blocks(
+    block_id: str,
+    block_type: str,
+    default: Any,
+    label_by_platform: Dict[str, str],
+    fallback_label: str = "",
+) -> List[Dict[str, Any]]:
+    """为商品 ID 字段生成按平台联动的同键变体。
+
+    各变体共享 id/default（config 键唯一），每个变体携带各自平台的 condition，
+    选中某平台时恰好显示一个变体。fallback_label 非空时为未覆盖平台
+    （1688/小红书/闲鱼/SHEIN 等无专属命名）追加一个通用变体。
+    """
+    blocks: List[Dict[str, Any]] = [
+        {
+            "id": block_id,
+            "name": block_id,
+            "type": block_type,
+            "label": label,
+            "default": default,
+            "condition": _platform_eq(platform),
+        }
+        for platform, label in label_by_platform.items()
+    ]
+    if fallback_label:
+        rest = [o["value"] for o in _COMMERCE_PLATFORM_OPTIONS if o["value"] not in label_by_platform]
+        if rest:
+            blocks.append(
+                {
+                    "id": block_id,
+                    "name": block_id,
+                    "type": block_type,
+                    "label": fallback_label,
+                    "default": default,
+                    "condition": _platform_in(rest),
+                }
+            )
+    return blocks
+
 
 # ==================== 电商节点定义 ====================
 
@@ -51,7 +211,7 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
         "label": "价格监控",
         "icon": "💰",
         "category": "commerce",
-        "description": "监控竞品/自营商品价格变化，低于阈值时告警（支持亚马逊/淘宝/抖音等平台）",
+        "description": "监控竞品/自营商品价格变化，低于阈值时告警。亚马逊经 SP-API Product Pricing API（getPricing）按 ASIN 拉取实时价格；淘宝经 TOP taobao.item.get 按 num_iid 拉取；京东经 jingdong.ware.read.findSkuListPage 按 skuId 拉取；拼多多经 pdd.goods.information.get 按 goods_id 拉取（单位分）；抖店经 product.listV2 按 product_id 拉取；TikTok Shop 经 GET /product/202309/products 拉取",
         "sub_blocks": [
             {
                 "id": "platform",
@@ -61,13 +221,41 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
                 "default": "amazon",
                 "options": _COMMERCE_PLATFORM_OPTIONS,
             },
+            _store_select_block(),
+            *_platform_scoped_id_blocks(
+                "products",
+                "textarea",
+                "B0XXXXXX",
+                {
+                    "amazon": "商品列表（逗号分隔）· 亚马逊 ASIN",
+                    "taobao": "商品列表（逗号分隔）· 淘宝 num_iid",
+                    "jd": "商品列表（逗号分隔）· 京东 skuId",
+                    "pdd": "商品列表（逗号分隔）· 拼多多 goods_id",
+                    "douyin-ecom": "商品列表（逗号分隔）· 抖店 product_id",
+                    "tiktok": "商品列表（逗号分隔）· TikTok product_id",
+                    "ali1688": "商品列表（逗号分隔）· 1688 offer ID",
+                    "xiaohongshu": "商品列表（逗号分隔）· 小红书 item_id",
+                    "xianyu": "商品列表（逗号分隔）· 闲鱼商品 ID",
+                },
+                fallback_label="商品列表（逗号分隔）· 商品 ID/链接",
+            ),
             {
-                "id": "products",
-                "name": "products",
-                "type": "textarea",
-                "label": "商品列表（逗号分隔）",
-                "default": "B0XXXXXX",
-                "placeholder": "B0XXXXXXXXX, 商品ID...",
+                "id": "marketplace_id",
+                "name": "marketplace_id",
+                "type": "select",
+                "label": "亚马逊站点（MarketplaceId）",
+                "default": "ATVPDKIKX0DER",
+                "options": _AMAZON_MARKETPLACE_OPTIONS,
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "region",
+                "name": "region",
+                "type": "select",
+                "label": "SP-API 区域端点",
+                "default": "na",
+                "options": _AMAZON_REGION_OPTIONS,
+                "condition": _WHEN_AMAZON,
             },
             {
                 "id": "alert_threshold",
@@ -141,7 +329,7 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
         "label": "评论自动回复",
         "icon": "💬",
         "category": "commerce",
-        "description": "分析买家评论情感并自动生成回复，支持负面评论安抚",
+        "description": "分析买家评论情感并自动生成回复。亚马逊经 SP-API Customer Feedback API 按 ASIN 获取评论主题洞察（正面/负面话题+评论片段）；淘宝经 TOP traderates.get 按 num_iid 拉取真实评论（好评/中评/差评）；京东/拼多多/抖店/TikTok Shop 开放平台不提供评论 API，需手工粘贴。均输出回复草稿供人工发布",
         "sub_blocks": [
             {
                 "id": "platform",
@@ -151,13 +339,34 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
                 "default": "taobao",
                 "options": _COMMERCE_PLATFORM_OPTIONS,
             },
+            _store_select_block(),
+            # 仅亚马逊（SP-API Customer Feedback API）与淘宝（TOP traderates.get）提供评论 API，
+            # 其余平台无评论拉取能力，故不提供变体（由 reviews 手工粘贴字段兜底）
+            *_platform_scoped_id_blocks(
+                "asin",
+                "input",
+                "",
+                {
+                    "amazon": "商品 ASIN（SP-API Customer Feedback API）",
+                    "taobao": "淘宝 num_iid（TOP traderates.get）",
+                },
+            ),
+            {
+                "id": "marketplace_id",
+                "name": "marketplace_id",
+                "type": "select",
+                "label": "亚马逊站点（MarketplaceId）",
+                "default": "ATVPDKIKX0DER",
+                "options": _AMAZON_MARKETPLACE_OPTIONS,
+                "condition": _WHEN_AMAZON,
+            },
             {
                 "id": "reviews",
                 "name": "reviews",
                 "type": "textarea",
                 "label": "评论内容（每行一条）",
                 "default": "",
-                "placeholder": "评论1\n评论2...",
+                "placeholder": "京东/拼多多/抖店/TikTok 等无评论 API 平台手工粘贴",
             },
             {
                 "id": "tone",
@@ -179,7 +388,7 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
         "label": "商品上架 / Listing 优化",
         "icon": "📦",
         "category": "commerce",
-        "description": "生成或优化商品 Listing（标题/五点描述/详情），提升搜索排名与转化",
+        "description": "生成或优化商品 Listing（标题/五点描述/详情）。亚马逊输出符合 Listings Items API（putListingsItem）的提交载荷：sellerId/sku/productType/requirements/attributes；淘宝载荷符合 taobao.item.add、抖店符合 product.createV2、TikTok Shop 符合 POST /product/202309/products",
         "sub_blocks": [
             {
                 "id": "platform",
@@ -213,6 +422,51 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
                 "default": "",
                 "placeholder": "可选，用于 SEO 优化",
             },
+            {
+                "id": "sku",
+                "name": "sku",
+                "type": "input",
+                "label": "卖家 SKU（亚马逊 putListingsItem 路径参数）",
+                "default": "",
+                "placeholder": "例如：SKU-EARBUDS-001",
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "seller_id",
+                "name": "seller_id",
+                "type": "input",
+                "label": "卖家记号 SellerId（Merchant Token）",
+                "default": "",
+                "placeholder": "例如：A1XXXXXXXXXXXX",
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "product_type",
+                "name": "product_type",
+                "type": "input",
+                "label": "产品类型 ProductType",
+                "default": "PRODUCT",
+                "placeholder": "例如：HEADPHONES（Product Type Definitions API 查询）",
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "requirements",
+                "name": "requirements",
+                "type": "select",
+                "label": "提交要求 Requirements",
+                "default": "LISTING",
+                "options": _AMAZON_LISTING_REQUIREMENTS_OPTIONS,
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "marketplace_id",
+                "name": "marketplace_id",
+                "type": "select",
+                "label": "亚马逊站点（MarketplaceId）",
+                "default": "ATVPDKIKX0DER",
+                "options": _AMAZON_MARKETPLACE_OPTIONS,
+                "condition": _WHEN_AMAZON,
+            },
         ],
         "inputs": [{"id": "input", "label": "商品数据"}],
         "outputs": [
@@ -225,7 +479,7 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
         "label": "库存同步",
         "icon": "📊",
         "category": "commerce",
-        "description": "多平台库存同步与低库存预警，避免超卖与断货",
+        "description": "多平台库存同步与低库存预警。亚马逊经 SP-API FBA Inventory API（getInventorySummaries）按 MarketplaceId + sellerSkus（≤50）查询 FBA 库存；淘宝经 taobao.item.get 查 num 库存；京东经 findSkuListPage 查 stockNum；拼多多经 pdd.goods.information.get 查 goods_quantity；抖店经 product.listV2 查 stock_num；TikTok Shop 经 GET products 查 skus.stock_infos",
         "sub_blocks": [
             {
                 "id": "platform",
@@ -234,6 +488,51 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
                 "label": "同步平台",
                 "default": "amazon",
                 "options": _COMMERCE_PLATFORM_OPTIONS,
+            },
+            _store_select_block(),
+            *_platform_scoped_id_blocks(
+                "skus",
+                "textarea",
+                "",
+                {
+                    "amazon": "卖家 SKU 列表（逗号分隔，≤50）· Amazon sellerSku",
+                    "taobao": "商品 ID 列表（逗号分隔）· 淘宝 num_iid",
+                    "jd": "商品 ID 列表（逗号分隔）· 京东 skuId",
+                    "pdd": "商品 ID 列表（逗号分隔）· 拼多多 goods_id",
+                    "douyin-ecom": "商品 ID 列表（逗号分隔）· 抖店 product_id",
+                    "tiktok": "商品 ID 列表（逗号分隔）· TikTok product_id",
+                    "ali1688": "商品 ID 列表（逗号分隔）· 1688 offer ID",
+                    "xiaohongshu": "商品 ID 列表（逗号分隔）· 小红书 item_id",
+                    "xianyu": "商品 ID 列表（逗号分隔）· 闲鱼商品 ID",
+                },
+                fallback_label="商品 ID 列表（逗号分隔）",
+            ),
+            {
+                "id": "marketplace_id",
+                "name": "marketplace_id",
+                "type": "select",
+                "label": "亚马逊站点（MarketplaceId）",
+                "default": "ATVPDKIKX0DER",
+                "options": _AMAZON_MARKETPLACE_OPTIONS,
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "region",
+                "name": "region",
+                "type": "select",
+                "label": "SP-API 区域端点",
+                "default": "na",
+                "options": _AMAZON_REGION_OPTIONS,
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "seller_id",
+                "name": "seller_id",
+                "type": "input",
+                "label": "卖家记号 SellerId（可选）",
+                "default": "",
+                "placeholder": "例如：A1XXXXXXXXXXXX",
+                "condition": _WHEN_AMAZON,
             },
             {
                 "id": "low_stock_threshold",
@@ -255,7 +554,7 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
         "label": "竞品分析",
         "icon": "🔍",
         "category": "commerce",
-        "description": "分析竞品价格、卖点与评论，输出竞争策略建议",
+        "description": "分析竞品价格、卖点与评论，输出竞争策略建议。亚马逊经 SP-API Product Pricing API（getCompetitivePricing）按 ASIN 拉取竞品竞价；淘宝/京东/拼多多/抖音/TikTok 开放 API 仅提供自营数据、不提供竞品数据，由 LLM 基于竞品清单完成分析",
         "sub_blocks": [
             {
                 "id": "platform",
@@ -265,13 +564,41 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
                 "default": "amazon",
                 "options": _COMMERCE_PLATFORM_OPTIONS,
             },
+            _store_select_block(),
+            *_platform_scoped_id_blocks(
+                "competitors",
+                "textarea",
+                "",
+                {
+                    "amazon": "竞品列表（逗号分隔）· Amazon ASIN（getCompetitivePricing）",
+                    "taobao": "竞品列表（逗号分隔）· 淘宝 num_iid",
+                    "jd": "竞品列表（逗号分隔）· 京东 skuId",
+                    "pdd": "竞品列表（逗号分隔）· 拼多多 goods_id",
+                    "douyin-ecom": "竞品列表（逗号分隔）· 抖店 product_id",
+                    "tiktok": "竞品列表（逗号分隔）· TikTok product_id",
+                    "ali1688": "竞品列表（逗号分隔）· 1688 offer ID",
+                    "xiaohongshu": "竞品列表（逗号分隔）· 小红书 item_id",
+                    "xianyu": "竞品列表（逗号分隔）· 闲鱼商品 ID",
+                },
+                fallback_label="竞品列表（ASIN/ID/链接，逗号分隔）",
+            ),
             {
-                "id": "competitors",
-                "name": "competitors",
-                "type": "textarea",
-                "label": "竞品列表（ASIN/ID/链接，逗号分隔）",
-                "default": "",
-                "placeholder": "B0XXXXX, B0YYYYY",
+                "id": "marketplace_id",
+                "name": "marketplace_id",
+                "type": "select",
+                "label": "亚马逊站点（MarketplaceId）",
+                "default": "ATVPDKIKX0DER",
+                "options": _AMAZON_MARKETPLACE_OPTIONS,
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "region",
+                "name": "region",
+                "type": "select",
+                "label": "SP-API 区域端点",
+                "default": "na",
+                "options": _AMAZON_REGION_OPTIONS,
+                "condition": _WHEN_AMAZON,
             },
         ],
         "inputs": [{"id": "input", "label": "竞品数据"}],
@@ -320,7 +647,7 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
         "label": "销售报表",
         "icon": "📈",
         "category": "commerce",
-        "description": "汇总平台销售数据，生成运营分析报表（销量/销售额/趋势）",
+        "description": "汇总平台销售数据，生成运营分析报表。亚马逊经 SP-API Reports API（createReport → getReport → getReportDocument）异步生成报表；淘宝经 taobao.trades.sold.get、京东经 jingdong.pop.order.search、拼多多经 pdd.order.list.get、抖店经 order.searchList、TikTok Shop 经 POST /order/202309/orders/search 拉取真实订单并聚合销售额",
         "sub_blocks": [
             {
                 "id": "platform",
@@ -330,13 +657,41 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
                 "default": "amazon",
                 "options": _COMMERCE_PLATFORM_OPTIONS,
             },
+            _store_select_block(),
+            {
+                "id": "report_type",
+                "name": "report_type",
+                "type": "select",
+                "label": "报表类型（SP-API reportType）",
+                "default": "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
+                "options": _AMAZON_REPORT_TYPE_OPTIONS,
+                "condition": _WHEN_AMAZON,
+            },
             {
                 "id": "period",
                 "name": "period",
                 "type": "input",
                 "label": "统计周期",
                 "default": "2025-01",
-                "placeholder": "YYYY-MM 或 YYYY-MM-DD~YYYY-MM-DD",
+                "placeholder": "YYYY-MM 或 YYYY-MM-DD~YYYY-MM-DD（转 ISO 8601 提交）",
+            },
+            {
+                "id": "marketplace_id",
+                "name": "marketplace_id",
+                "type": "select",
+                "label": "亚马逊站点（MarketplaceId）",
+                "default": "ATVPDKIKX0DER",
+                "options": _AMAZON_MARKETPLACE_OPTIONS,
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "region",
+                "name": "region",
+                "type": "select",
+                "label": "SP-API 区域端点",
+                "default": "na",
+                "options": _AMAZON_REGION_OPTIONS,
+                "condition": _WHEN_AMAZON,
             },
             {
                 "id": "metrics",
@@ -355,7 +710,7 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
         "label": "广告流投放",
         "icon": "📡",
         "category": "commerce",
-        "description": "创建并管理电商平台广告投放计划（活动/预算/定向），支持自动出价与实时放量",
+        "description": "创建并管理电商平台广告投放计划（活动/预算/定向）。亚马逊广告为独立的 Amazon Ads 开放平台（advertising-api.amazon.com），需 LWA client_id/secret 与 profileId",
         "sub_blocks": [
             {
                 "id": "platform",
@@ -389,6 +744,24 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
                 "default": "转化",
                 "options": ["转化", "点击", "曝光", "加购"],
             },
+            {
+                "id": "profile_id",
+                "name": "profile_id",
+                "type": "input",
+                "label": "Amazon Ads profileId",
+                "default": "",
+                "placeholder": "GET /v2/profiles 获取",
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "region",
+                "name": "region",
+                "type": "select",
+                "label": "广告 API 区域端点",
+                "default": "na",
+                "options": _AMAZON_REGION_OPTIONS,
+                "condition": _WHEN_AMAZON,
+            },
         ],
         "inputs": [{"id": "input", "label": "活动信息"}],
         "outputs": [
@@ -401,7 +774,7 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
         "label": "广告监控",
         "icon": "👁️",
         "category": "commerce",
-        "description": "实时监控广告活动投放效果（曝光/点击/转化/花费），识别异常波动并告警",
+        "description": "实时监控广告活动投放效果（曝光/点击/转化/花费）。亚马逊经独立的 Amazon Ads API（v3 reporting 异步报表）拉取 Sponsored Products 活动指标",
         "sub_blocks": [
             {
                 "id": "platform",
@@ -415,9 +788,9 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
                 "id": "ad_ids",
                 "name": "ad_ids",
                 "type": "textarea",
-                "label": "广告ID列表（逗号分隔）",
+                "label": "广告活动ID列表（逗号分隔）",
                 "default": "camp_001, camp_002",
-                "placeholder": "camp_001, camp_002...",
+                "placeholder": "亚马逊为 campaignId（数字）",
             },
             {
                 "id": "metrics",
@@ -425,7 +798,7 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
                 "type": "input",
                 "label": "监控指标（逗号分隔）",
                 "default": "impressions,clicks,conversions,spend",
-                "placeholder": "impressions,clicks,conversions,spend,ctr,roi",
+                "placeholder": "impressions,clicks,conversions,spend,ctr,acos",
             },
             {
                 "id": "alert_threshold",
@@ -434,6 +807,24 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
                 "label": "告警阈值（花费元）",
                 "default": "500",
                 "placeholder": "花费超过该值触发告警",
+            },
+            {
+                "id": "profile_id",
+                "name": "profile_id",
+                "type": "input",
+                "label": "Amazon Ads profileId",
+                "default": "",
+                "placeholder": "GET /v2/profiles 获取",
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "region",
+                "name": "region",
+                "type": "select",
+                "label": "广告 API 区域端点",
+                "default": "na",
+                "options": _AMAZON_REGION_OPTIONS,
+                "condition": _WHEN_AMAZON,
             },
         ],
         "inputs": [{"id": "input", "label": "广告数据"}],
@@ -534,6 +925,23 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
             {"id": "channels", "label": "各渠道分配"},
         ],
     },
+    {
+        "type": "builtin:store-auth",
+        "label": "店铺授权",
+        "icon": "🏪",
+        "category": "commerce",
+        "description": "店铺授权/管理节点：授权并连接一个平台店铺，作为该节点的下属对象；执行时对所选店铺做只读连接测试并回显授权状态。其下游节点（价格监控/库存同步/销售报表等）通过选择同一个店铺获得店铺级凭据",
+        "sub_blocks": [
+            _store_select_block(require_platform=False),
+        ],
+        "inputs": [
+            {"id": "input", "label": "授权来源"},
+        ],
+        "outputs": [
+            {"id": "store", "label": "店铺信息"},
+            {"id": "test", "label": "连接测试结果"},
+        ],
+    },
 ]
 
 
@@ -620,35 +1028,54 @@ async def exec_price_monitor(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dic
     """价格监控执行器
 
     调用电商平台 API 获取商品价格快照，低于阈值时产生告警。
+    亚马逊经 SP-API Product Pricing API（getPricing）按 MarketplaceId + ASIN 查询。
     平台 API 不可用时降级为本地模拟价格数据。
     """
     platform = config.get("platform", "amazon")
     products = config.get("products", "")
     threshold = float(config.get("alert_threshold", 50) or 50)
+    marketplace_id = str(config.get("marketplace_id") or "")
+    region = str(config.get("region") or "na")
+    store_id, store_creds = await _resolve_store_creds(platform, str(config.get("store_id") or ""), ctx)
 
     product_list = [p.strip() for p in str(products).split(",") if p.strip()]
     if not product_list:
         product_list = ["B0XXXXXX"]
 
     # 尝试调用电商平台价格 API
+    reason = ""
     try:
         result = await CommercePlatformClient().fetch_prices(
-            platform=platform, product_ids=product_list
+            platform=platform, product_ids=product_list,
+            marketplace_id=marketplace_id, region=region,
+            store_id=store_id, store_creds=store_creds,
         )
-        if result.get("status") == "success":
+        if result.get("status") != "success":
+            reason = str(result.get("error") or "")
+        else:
             output = result.get("output", {})
             raw_prices = output.get("prices", {})
             prices = []
             alerts = []
             for pid in product_list:
                 price = None
+                currency = ""
                 if isinstance(raw_prices, dict):
-                    price = raw_prices.get(pid) or raw_prices.get("default")
+                    entry = raw_prices.get(pid) or raw_prices.get("default")
+                    if isinstance(entry, dict):
+                        price = entry.get("price")
+                        currency = str(entry.get("currency") or "")
+                    elif entry is not None:
+                        price = entry
                 if price is None:
                     price = 88.0
-                prices.append({"product": pid, "price": float(price), "platform": platform})
-                if float(price) <= threshold:
-                    alerts.append({"product": pid, "price": float(price), "threshold": threshold, "level": "low"})
+                price = float(price)
+                item = {"product": pid, "price": price, "platform": platform}
+                if currency:
+                    item["currency"] = currency
+                prices.append(item)
+                if price <= threshold:
+                    alerts.append({"product": pid, "price": price, "threshold": threshold, "level": "low"})
             return {
                 "status": "success",
                 "output": {
@@ -656,12 +1083,14 @@ async def exec_price_monitor(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dic
                     "alerts": alerts,
                     "threshold": threshold,
                     "platform": platform,
+                    "marketplace_id": marketplace_id,
                     "checked_at": ctx.get("timestamp", "now"),
                     "source": "platform_api",
                 },
             }
     except Exception as e:  # noqa: BLE001
         logger.warning("价格监控 API 失败，降级为本地模拟: %s", e)
+        reason = str(e)
 
     # 模拟价格数据（真实场景从平台 API 拉取）
     mock_prices = {
@@ -687,6 +1116,51 @@ async def exec_price_monitor(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dic
             "platform": platform,
             "checked_at": ctx.get("timestamp", "now"),
             "fallback": True,
+            "note": _FALLBACK_NOTE_TMPL.format(reason=reason or "未选择店铺且无环境变量凭据"),
+        },
+    }
+
+
+async def exec_store_auth(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """店铺授权/管理节点执行器
+
+    店铺是节点的下属对象：执行时对选中的店铺做一次只读连接测试（探针），
+    回显商店状态与凭据就绪情况；未选择店铺时给出引导（指向店铺管理页）。
+    """
+    store_id = str(config.get("store_id") or "")
+    if not store_id:
+        return {
+            "status": "success",
+            "output": {
+                "status": "pending",
+                "note": "未选择店铺：请在节点下拉中选择，或打开店铺管理页完成店铺授权连接",
+            },
+        }
+    user_id = _ctx_user_id(ctx)
+    manager = get_store_connection_manager()
+    store = manager.get_store(store_id, user_id=user_id)
+    if store is None:
+        return {
+            "status": "success",
+            "output": {
+                "status": "error",
+                "note": f"店铺不存在或非当前用户所属: {store_id}",
+            },
+        }
+    try:
+        test = await manager.test_connection(store_id, user_id=user_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("店铺 %s 授权测试失败: %s", store_id, exc)
+        test = {"status": "error", "detail": str(exc)}
+    return {
+        "status": "success",
+        "output": {
+            "store_id": store.store_id,
+            "store_name": store.store_name,
+            "platform": store.platform,
+            "status": test.get("status") or store.status,
+            "last_error": store.last_error,
+            "test": test,
         },
     }
 
@@ -727,14 +1201,20 @@ async def exec_review_respond(config: Dict[str, Any], ctx: Dict[str, Any]) -> Di
     platform = config.get("platform", "taobao")
     reviews_text = config.get("reviews", "") or str(ctx.get("input") or ctx.get("inputs") or "")
     tone = config.get("tone", "friendly")
-    product_id = config.get("product_id", "") or ""
+    product_id = str(config.get("asin") or config.get("product_id") or "")
+    marketplace_id = str(config.get("marketplace_id") or "")
 
-    # 尝试调用电商平台评论 API
+    # 尝试调用电商平台评论 API（亚马逊：Customer Feedback API 评论主题洞察）
+    store_id, store_creds = await _resolve_store_creds(platform, str(config.get("store_id") or ""), ctx)
+    reason = ""
     try:
         result = await CommercePlatformClient().fetch_reviews(
-            platform=platform, product_id=product_id
+            platform=platform, product_id=product_id, marketplace_id=marketplace_id,
+            store_id=store_id, store_creds=store_creds,
         )
-        if result.get("status") == "success":
+        if result.get("status") != "success":
+            reason = str(result.get("error") or "")
+        else:
             output = result.get("output", {})
             raw_reviews = output.get("items", [])
             if isinstance(raw_reviews, list) and raw_reviews:
@@ -746,23 +1226,30 @@ async def exec_review_respond(config: Dict[str, Any], ctx: Dict[str, Any]) -> Di
                         review = r.get("content", "")
                         review_id = r.get("id", "rev_?")
                         rating = r.get("rating")
+                        topic = r.get("topic", "")
+                        preset_sentiment = r.get("sentiment")
                     else:
                         review = str(r)
                         review_id = "rev_?"
                         rating = None
-                    is_negative = any(w in review for w in negative_words)
-                    if rating is not None:
-                        try:
-                            is_negative = is_negative or float(rating) <= 3
-                        except (TypeError, ValueError):
-                            pass
-                    sentiment = "negative" if is_negative else "positive"
-                    sentiments.append({"review": review, "sentiment": sentiment})
-                    if is_negative:
+                        topic = ""
+                        preset_sentiment = None
+                    if preset_sentiment in ("positive", "negative"):
+                        sentiment = preset_sentiment
+                    else:
+                        is_negative = any(w in review for w in negative_words)
+                        if rating is not None:
+                            try:
+                                is_negative = is_negative or float(rating) <= 3
+                            except (TypeError, ValueError):
+                                pass
+                        sentiment = "negative" if is_negative else "positive"
+                    sentiments.append({"review": review, "topic": topic, "sentiment": sentiment})
+                    if sentiment == "negative":
                         reply = f"非常抱歉给您带来不好的体验！我们已经关注到您反馈的问题，正在加紧处理，请您保持联系。感谢您的反馈，帮助我们不断改进。"
                     else:
                         reply = f"感谢您的认可与支持！我们会继续努力，为您提供更优质的商品和服务。"
-                    replies.append({"review_id": review_id, "review": review, "reply": reply, "sentiment": sentiment})
+                    replies.append({"review_id": review_id, "review": review, "topic": topic, "reply": reply, "sentiment": sentiment})
                 return {
                     "status": "success",
                     "output": {
@@ -770,6 +1257,7 @@ async def exec_review_respond(config: Dict[str, Any], ctx: Dict[str, Any]) -> Di
                         "sentiment": sentiments,
                         "platform": platform,
                         "tone": tone,
+                        "note": output.get("note", ""),
                         "source": "platform_api",
                     },
                 }
@@ -803,6 +1291,7 @@ async def exec_review_respond(config: Dict[str, Any], ctx: Dict[str, Any]) -> Di
             "platform": platform,
             "tone": tone,
             "fallback": True,
+            "note": _FALLBACK_NOTE_TMPL.format(reason=reason or "未选择店铺且无环境变量凭据"),
         },
     }
 
@@ -811,6 +1300,8 @@ async def exec_product_listing(config: Dict[str, Any], ctx: Dict[str, Any]) -> D
     """商品上架 / Listing 优化执行器
 
     生成优化后的 Listing 标题与卖点描述。
+    亚马逊平台额外输出符合 Listings Items API（putListingsItem）的提交载荷，
+    包含 sellerId/sku/productType/requirements/attributes 等真实接口字段。
     """
     platform = config.get("platform", "amazon")
     product_name = config.get("product_name", "")
@@ -825,16 +1316,39 @@ async def exec_product_listing(config: Dict[str, Any], ctx: Dict[str, Any]) -> D
     title = f"{product_name} {feature_list[0]} {feature_list[1] if len(feature_list) > 1 else ''}".strip()
     bullet_points = [f"✅ {f}" for f in feature_list]
 
-    return {
-        "status": "success",
-        "output": {
-            "title": title,
-            "bullet_points": bullet_points,
-            "description": "、".join(feature_list),
-            "keywords": keywords or "",
-            "platform": platform,
-        },
+    output: Dict[str, Any] = {
+        "title": title,
+        "bullet_points": bullet_points,
+        "description": "、".join(feature_list),
+        "keywords": keywords or "",
+        "platform": platform,
     }
+
+    if platform == "amazon":
+        sku = str(config.get("sku") or "").strip()
+        seller_id = str(config.get("seller_id") or "").strip()
+        product_type = str(config.get("product_type") or "PRODUCT").strip() or "PRODUCT"
+        requirements = str(config.get("requirements") or "LISTING").strip() or "LISTING"
+        marketplace_id = str(config.get("marketplace_id") or "ATVPDKIKX0DER").strip()
+        output["sp_api_submission"] = {
+            "api": "Listings Items API v2021-08-01",
+            "method": "PUT",
+            "path": f"/listings/2021-08-01/items/{seller_id or '{sellerId}'}/{sku or '{sku}'}",
+            "seller_id": seller_id,
+            "sku": sku,
+            "product_type": product_type,
+            "requirements": requirements,
+            "marketplace_ids": [marketplace_id],
+            "attributes": {
+                "item_name": product_name,
+                "bullet_points": feature_list,
+                "product_description": "、".join(feature_list),
+                "search_keywords": [k.strip() for k in str(keywords).split(",") if k.strip()],
+            },
+            "note": "载荷符合 putListingsItem 请求体；批量上架可用 Feeds API JSON_LISTINGS_FEED",
+        }
+
+    return {"status": "success", "output": output}
 
 
 async def exec_inventory_sync(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -846,17 +1360,26 @@ async def exec_inventory_sync(config: Dict[str, Any], ctx: Dict[str, Any]) -> Di
     platform = config.get("platform", "amazon")
     threshold = int(config.get("low_stock_threshold", 10) or 10)
     skus = config.get("skus", "") or str(ctx.get("input") or ctx.get("inputs") or "")
+    marketplace_id = str(config.get("marketplace_id") or "")
+    region = str(config.get("region") or "na")
+    seller_id = str(config.get("seller_id") or "")
 
     sku_list = [s.strip() for s in str(skus).split(",") if s.strip()]
     if not sku_list:
         sku_list = ["SKU-001"]
 
-    # 尝试调用电商平台库存 API
+    # 尝试调用电商平台库存 API（亚马逊：FBA Inventory API getInventorySummaries）
+    store_id, store_creds = await _resolve_store_creds(platform, str(config.get("store_id") or ""), ctx)
+    reason = ""
     try:
         result = await CommercePlatformClient().fetch_inventory(
-            platform=platform, skus=sku_list
+            platform=platform, skus=sku_list,
+            marketplace_id=marketplace_id, region=region, seller_id=seller_id,
+            store_id=store_id, store_creds=store_creds,
         )
-        if result.get("status") == "success":
+        if result.get("status") != "success":
+            reason = str(result.get("error") or "")
+        else:
             output = result.get("output", {})
             raw_inventory = output.get("inventory", {})
             synced = []
@@ -864,7 +1387,14 @@ async def exec_inventory_sync(config: Dict[str, Any], ctx: Dict[str, Any]) -> Di
             for sku in sku_list:
                 stock = 20
                 if isinstance(raw_inventory, dict):
-                    stock = int(raw_inventory.get(sku) or raw_inventory.get("default") or 20)
+                    entry = raw_inventory.get(sku) or raw_inventory.get("default")
+                    if isinstance(entry, dict):
+                        stock = int(entry.get("totalQuantity") or entry.get("fulfillableQuantity") or 0)
+                    elif entry is not None:
+                        try:
+                            stock = int(entry)
+                        except (TypeError, ValueError):
+                            stock = 20
                 status = "low" if stock <= threshold else "ok"
                 synced.append({"platform": platform, "sku": sku, "stock": stock, "status": status})
                 if status == "low":
@@ -875,6 +1405,7 @@ async def exec_inventory_sync(config: Dict[str, Any], ctx: Dict[str, Any]) -> Di
                     "synced": synced,
                     "alerts": alerts,
                     "low_stock_threshold": threshold,
+                    "marketplace_id": marketplace_id,
                     "source": "platform_api",
                 },
             }
@@ -900,6 +1431,7 @@ async def exec_inventory_sync(config: Dict[str, Any], ctx: Dict[str, Any]) -> Di
             "alerts": alerts,
             "low_stock_threshold": threshold,
             "fallback": True,
+            "note": _FALLBACK_NOTE_TMPL.format(reason=reason or "未选择店铺且无环境变量凭据"),
         },
     }
 
@@ -912,18 +1444,51 @@ async def exec_competitor_analysis(config: Dict[str, Any], ctx: Dict[str, Any]) 
     """
     platform = config.get("platform", "amazon")
     competitors = config.get("competitors", "") or str(ctx.get("input") or ctx.get("inputs") or "")
+    marketplace_id = str(config.get("marketplace_id") or "")
+    region = str(config.get("region") or "na")
 
     comp_list = [c.strip() for c in str(competitors).split(",") if c.strip()]
     if not comp_list:
         comp_list = ["竞品A", "竞品B"]
 
-    # 尝试调用电商平台竞品 API
+    # 尝试调用电商平台竞品 API（亚马逊：Product Pricing API getCompetitivePricing）
+    store_id, store_creds = await _resolve_store_creds(platform, str(config.get("store_id") or ""), ctx)
+    reason = ""
     try:
         result = await CommercePlatformClient().fetch_competitors(
-            platform=platform, keyword=",".join(comp_list)
+            platform=platform, keyword=",".join(comp_list),
+            marketplace_id=marketplace_id, region=region,
+            store_id=store_id, store_creds=store_creds,
         )
-        if result.get("status") == "success":
+        if result.get("status") != "success":
+            reason = str(result.get("error") or "")
+        else:
             output = result.get("output", {})
+            raw_prices = output.get("prices")
+            if isinstance(raw_prices, dict) and raw_prices:
+                analysis = []
+                for asin, entry in raw_prices.items():
+                    price = entry.get("price") if isinstance(entry, dict) else entry
+                    analysis.append(
+                        {
+                            "competitor": asin,
+                            "price": price if price is not None else "待采集",
+                            "currency": entry.get("currency", "") if isinstance(entry, dict) else "",
+                            "price_position": "实时竞价" if price is not None else "待分析",
+                            "key_selling_points": [],
+                            "review_count": "待采集",
+                        }
+                    )
+                return {
+                    "status": "success",
+                    "output": {
+                        "competitors": analysis,
+                        "platform": platform,
+                        "marketplace_id": marketplace_id,
+                        "strategy_suggestion": "基于 SP-API 实时竞品竞价生成，建议人工复核后执行策略。",
+                        "source": "platform_api",
+                    },
+                }
             raw_comps = output.get("items", [])
             if isinstance(raw_comps, list) and raw_comps:
                 analysis = []
@@ -979,6 +1544,7 @@ async def exec_competitor_analysis(config: Dict[str, Any], ctx: Dict[str, Any]) 
             "platform": platform,
             "strategy_suggestion": "建议补充真实竞品数据源以生成完整竞争策略。",
             "fallback": True,
+            "note": _FALLBACK_NOTE_TMPL.format(reason=reason or "未选择店铺且无环境变量凭据"),
         },
     }
 
@@ -1021,27 +1587,49 @@ async def exec_sales_report(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict
     platform = config.get("platform", "amazon")
     period = config.get("period", "2025-01")
     metrics = config.get("metrics", "sales,orders")
+    report_type = str(config.get("report_type") or "")
+    marketplace_id = str(config.get("marketplace_id") or "")
+    region = str(config.get("region") or "na")
 
     metric_list = [m.strip() for m in str(metrics).split(",") if m.strip()]
 
-    # 尝试调用电商平台销售报表 API
+    # 尝试调用电商平台销售报表 API（亚马逊：Reports API createReport → getReport → getReportDocument）
+    store_id, store_creds = await _resolve_store_creds(platform, str(config.get("store_id") or ""), ctx)
+    reason = ""
     try:
         result = await CommercePlatformClient().fetch_sales_report(
-            platform=platform, period=period
+            platform=platform, period=period,
+            report_type=report_type, marketplace_id=marketplace_id, region=region,
+            store_id=store_id, store_creds=store_creds,
         )
-        if result.get("status") == "success":
+        if result.get("status") != "success":
+            reason = str(result.get("error") or "")
+        else:
             output = result.get("output", {})
-            report = {
-                "platform": platform,
-                "period": period,
-                "sales": float(output.get("sales", 0) or 0),
-                "orders": int(output.get("orders", 0) or 0),
-                "units": int(output.get("units", 0) or 0),
-                "avg_order_value": float(output.get("avg_order_value", 0) or 0),
-                "conversion_rate": float(output.get("conversion_rate", 0) or 0),
-                "summary": output.get("summary", f"{platform} {period} 报表生成成功"),
-                "raw": output.get("raw"),
-            }
+            if output.get("report_id"):
+                # SP-API 异步报表流程：返回报表 ID 与文档下载地址
+                report = {
+                    "platform": platform,
+                    "period": period,
+                    "report_id": output.get("report_id"),
+                    "report_document_id": output.get("report_document_id"),
+                    "document_url": output.get("document_url"),
+                    "processing_status": output.get("processing_status"),
+                    "report_type": output.get("report_type", report_type),
+                    "summary": f"SP-API 报表 {output.get('report_id')} 已生成，文档可下载: {output.get('document_url')}",
+                }
+            else:
+                report = {
+                    "platform": platform,
+                    "period": period,
+                    "sales": float(output.get("sales", 0) or 0),
+                    "orders": int(output.get("orders", 0) or 0),
+                    "units": int(output.get("units", 0) or 0),
+                    "avg_order_value": float(output.get("avg_order_value", 0) or 0),
+                    "conversion_rate": float(output.get("conversion_rate", 0) or 0),
+                    "summary": output.get("summary", f"{platform} {period} 报表生成成功"),
+                    "raw": output.get("raw"),
+                }
             return {
                 "status": "success",
                 "output": {
@@ -1075,6 +1663,7 @@ async def exec_sales_report(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict
             "platform": platform,
             "period": period,
             "fallback": True,
+            "note": _FALLBACK_NOTE_TMPL.format(reason=reason or "未选择店铺且无环境变量凭据"),
         },
     }
 
@@ -1093,6 +1682,8 @@ async def exec_ad_streaming(config: dict, ctx: dict) -> dict:
     budget = str(config.get("budget") or "1000")
     targeting = str(config.get("targeting") or "自动定向")
     objective = str(config.get("objective") or "转化")
+    profile_id = str(config.get("profile_id") or "")
+    region = str(config.get("region") or "na")
 
     # 优先尝试调用 Agent 生成投放策略
     agent = _get_agent()
@@ -1114,6 +1705,8 @@ async def exec_ad_streaming(config: dict, ctx: dict) -> dict:
                 "targeting_keywords": output.get("targeting_keywords") or [targeting],
                 "schedule": output.get("schedule", "全天投放"),
                 "objective": objective,
+                "profile_id": profile_id,
+                "region": region,
             }
             return {
                 "status": "success",
@@ -1142,6 +1735,8 @@ async def exec_ad_streaming(config: dict, ctx: dict) -> dict:
         "targeting_keywords": [targeting],
         "schedule": "全天投放",
         "objective": objective,
+        "profile_id": profile_id,
+        "region": region,
         "status": "created",
     }
     return {
@@ -1171,6 +1766,8 @@ async def exec_ad_monitor(config: dict, ctx: dict) -> dict:
     ad_ids_raw = str(config.get("ad_ids") or "camp_001")
     metrics_raw = str(config.get("metrics") or "impressions,clicks,conversions,spend")
     alert_threshold = _to_num(config.get("alert_threshold") or "500")
+    profile_id = str(config.get("profile_id") or "")
+    region = str(config.get("region") or "na")
 
     ad_ids = [a.strip() for a in ad_ids_raw.split(",") if a.strip()] or ["camp_001"]
     metric_list = [m.strip().lower() for m in metrics_raw.split(",") if m.strip()] or [
@@ -1180,11 +1777,13 @@ async def exec_ad_monitor(config: dict, ctx: dict) -> dict:
         "spend",
     ]
 
-    # 优先尝试平台 API
+    # 优先尝试平台 API（亚马逊：Amazon Ads API v3 reporting，需 profileId）
     platform_metrics = None
     try:
         client = CommercePlatformClient()
-        api_result = await client.fetch_ad_metrics(platform, ad_ids, metric_list)
+        api_result = await client.fetch_ad_metrics(
+            platform, ad_ids, metric_list, profile_id=profile_id, region=region
+        )
         if api_result.get("status") == "success":
             items = api_result.get("output", {}).get("items")
             if isinstance(items, list) and items:
@@ -1199,9 +1798,24 @@ async def exec_ad_monitor(config: dict, ctx: dict) -> dict:
         # 平台 API 有数据时优先使用平台数据
         if platform_metrics and idx < len(platform_metrics):
             row = dict(platform_metrics[idx])
-            row.setdefault("ad_id", ad_id)
+            row.setdefault("ad_id", str(row.get("campaign_id") or ad_id))
             row.setdefault("platform", platform)
+            # Amazon Ads 报表字段归一化（purchases7d → conversions）
+            if "conversions" not in row and "purchases7d" in row:
+                row["conversions"] = row.get("purchases7d")
+            for key in ("impressions", "clicks", "conversions", "spend"):
+                value = row.get(key)
+                try:
+                    row[key] = float(value) if value is not None else 0.0
+                except (TypeError, ValueError):
+                    row[key] = 0.0
             metrics.append(row)
+            if row["spend"] > alert_threshold:
+                alerts.append({
+                    "ad_id": row["ad_id"],
+                    "level": "warning",
+                    "message": f"广告 {row['ad_id']} 花费 {row['spend']} 元超过阈值 {alert_threshold} 元",
+                })
             continue
         impressions = 125000 + idx * 13000
         clicks = int(impressions * (0.025 + idx * 0.002))
@@ -1360,6 +1974,7 @@ _COMMERCE_EXECUTORS: Dict[str, Callable] = {
     "builtin:competitor-analysis": exec_competitor_analysis,
     "builtin:keyword-research": exec_keyword_research,
     "builtin:sales-report": exec_sales_report,
+    "builtin:store-auth": exec_store_auth,
     "builtin:ad-streaming": exec_ad_streaming,
     "builtin:ad-monitor": exec_ad_monitor,
     "builtin:ad-strategy": exec_ad_strategy,

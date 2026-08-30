@@ -3,8 +3,8 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from memory.core.manager import MemoryManager
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
 mm = MemoryManager(db_path=str(Path(__file__).parent.parent / "data" / "yi_ling_memory.db"))
 
@@ -80,6 +80,7 @@ for mem in memories:
     short = mem["content"][:40]
     print(f"已固化: {short}...")
 
-print(f"\n当前记忆总数: {mm.count()}")
+# 原代码调用 mm.count()，但 MemoryManager 没有该方法（只有 get_stats()）
+print(f"\n当前记忆总数: {mm.get_stats()['total_memories']}")
 mm.close()
 print("\n这些记忆已永久保存，不会遗忘。")
