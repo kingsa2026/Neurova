@@ -6,11 +6,16 @@ on:
   pull_request:
   workflow_dispatch:
 
-# 静态门禁：把本次代码审计发现的三类低级高危缺陷挡在 CI 里（成本极低）：
-#   1. 语法错误（compileall）
-#   2. 未定义名称（pyflakes "undefined name"）
-#   3. 模块导入即崩（全模块导入巡检）
-# 另跑一遍审计回归测试（tests/unit/test_audit_regressions.py）防止 P0/P1 复发。
+# P0-6 分层门禁（自内向外加固）：
+#   1. static-gate          语法/未定义名/导入巡检（既有，成本极低）
+#   2. lint                 ruff E9+F821（规则集与豁免见 pyproject [tool.ruff.lint]）
+#   3. import-and-regression 模块导入巡检 + 审计回归（既有）
+#   4. unit-tests           受保护测试子集（scripts/ci/protected_tests.txt）
+#                           + 覆盖率门禁（pyproject [tool.coverage.run]，fail_under=60）
+#                           py3.11/3.12 matrix
+#   5. frontend             vue-tsc 类型门禁 + vitest（614 用例）
+#   6. dependency-audit     pip-audit 对锁定版本审计（非阻塞，allow-list 演进中）
+# 原则：只进当前确定全绿的测试；预存失败模块修复后逐个搬入 protected_tests.txt。
 
 jobs:
   static-gate:
@@ -29,6 +34,22 @@ jobs:
       - name: Run fast static gate (syntax + undefined names)
         run: python scripts/ci_static_gate.py --skip-import
 
+  lint:
+    name: Lint (ruff E9 + F821)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: python -m pip install --upgrade pip ruff
+
+      - name: Ruff (规则集与 per-file 豁免见 pyproject)
+        run: python -m ruff check neurova tests --no-cache
+
   import-and-regression:
     name: Import sweep + audit regression tests
     runs-on: ubuntu-latest
@@ -39,7 +60,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements-ci.txt
+          cache-dependency-path: requirements-ci.lock
 
       - name: Install core dependencies (lean set, no torch)
         run: python -m pip install --upgrade pip -r requirements-ci.txt
@@ -49,3 +70,68 @@ jobs:
 
       - name: Run audit regression tests
         run: python -m pytest tests/unit/test_audit_regressions.py -q
+
+  unit-tests:
+    name: Unit tests (protected subset + coverage)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install locked dependencies
+        run: uv pip install --system -r requirements-ci.lock
+
+      - name: Run protected subset with coverage gate (fail_under=60)
+        run: |
+          TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
+          python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
+
+  frontend:
+    name: Frontend (vue-tsc + vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: NeurUI
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: NeurUI/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check (vue-tsc)
+        run: npx vue-tsc --noEmit
+
+      - name: Unit tests (vitest)
+        run: npx vitest run
+
+  dependency-audit:
+    name: Dependency audit (pip-audit, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: python -m pip install --upgrade pip pip-audit
+
+      - name: Audit locked dependency set
+        run: python -m pip_audit -r requirements-ci.lock --progress-spinner off

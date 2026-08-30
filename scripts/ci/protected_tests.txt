@@ -1,0 +1,15 @@
+# P0-6 CI 受保护测试子集（unit-tests job 跑这份清单）
+# 原则：只进当前确定全绿的测试；预存失败模块不进 CI，修复后逐个搬入。
+# 维护方式：每完成一个 P0/P1 项，把它的测试文件加进来。
+tests/unit/test_audit_regressions.py
+tests/unit/security/test_governance_mcp.py
+tests/unit/security/test_url_guard.py
+tests/unit/api/test_tool_layers_auth.py
+tests/unit/api/test_shared_config_mcp_convergence.py
+tests/unit/tools/test_mcp_config.py
+tests/unit/tools/test_mcp_config_security.py
+tests/unit/tools/test_mcp_client.py
+tests/unit/tools/test_mcp_router_integration.py
+tests/unit/tools/test_mcp_user_isolation.py
+tests/unit/tools/test_p0_5_dead_paths.py
+tests/integration/test_tool_engine_integration.py
