@@ -95,6 +95,9 @@ export type AppEvents = {
   'chat:session-switched': { sessionId: string }
   'chat:session-deleted': { sessionId: string }
   'chat:session-renamed': { sessionId: string; title: string }
+  // 会话存档（删除 → 存档：历史列表隐藏，存档卡片页可随时恢复）
+  'chat:session-archived': { sessionId: string }
+  'chat:session-restored': { sessionId: string }
 }
 
 // ────── 全局事件总线单例 ──────

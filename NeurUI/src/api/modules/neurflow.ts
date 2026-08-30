@@ -267,3 +267,56 @@ export function executeComfyuiNode(data: {
 }) {
   return api.post<ComfyuiExecuteResult>(`${BASE}/comfyui/execute`, data)
 }
+
+// ---------------------------------------------------------------------------
+// 店铺连接（/stores）— 对齐 docs/neurflow-store-connection-design.md §5.3
+// ---------------------------------------------------------------------------
+
+export interface ConnectedStore {
+  store_id: string
+  platform: string
+  store_name: string
+  seller_id?: string
+  marketplace_id?: string
+  region?: string
+  status?: string
+  last_error?: string
+  token_expires_at?: number
+  extra?: Record<string, unknown>
+  app_key_masked?: string
+  app_secret_masked?: string
+  access_token_masked?: string
+  refresh_token_masked?: string
+}
+
+export async function listStores(platform?: string): Promise<ConnectedStore[]> {
+  // 注意：axios 拦截器已 return response.data 解包，/stores 直接返回 { stores, total }
+  const body = await api.get<{ stores: ConnectedStore[]; total: number }>(`${BASE}/stores`, {
+    params: platform ? { platform } : undefined,
+  })
+  return body?.stores ?? []
+}
+
+export async function createStore(payload: Record<string, unknown>): Promise<ConnectedStore> {
+  const body = await api.post<{ store: ConnectedStore; message: string }>(`${BASE}/stores`, payload)
+  return body.store
+}
+
+export async function updateStore(storeId: string, payload: Record<string, unknown>): Promise<ConnectedStore> {
+  const body = await api.put<{ store: ConnectedStore }>(`${BASE}/stores/${storeId}`, payload)
+  return body.store
+}
+
+export async function deleteStore(storeId: string): Promise<void> {
+  await api.delete(`${BASE}/stores/${storeId}`)
+}
+
+export async function testStoreConnection(storeId: string): Promise<Record<string, unknown>> {
+  const body = await api.post<{ result: Record<string, unknown> }>(`${BASE}/stores/${storeId}/test`)
+  return body.result
+}
+
+export async function refreshStoreToken(storeId: string): Promise<Record<string, unknown>> {
+  const body = await api.post<{ result: Record<string, unknown> }>(`${BASE}/stores/${storeId}/refresh`)
+  return body.result
+}

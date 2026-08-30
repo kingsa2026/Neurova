@@ -118,6 +118,35 @@
           </div>
         </div>
       </GlassCard>
+
+      <!-- Feedback Quality（点赞/点踩 → 记忆温度闭环的可见性面板） -->
+      <GlassCard :title="t('dashboard.feedbackCard')" variant="default" :radius="20">
+        <div v-if="!feedbackSummary.hasFeedback" class="nr-feedback-empty">
+          {{ t('dashboard.feedbackEmpty') }}
+        </div>
+        <template v-else>
+          <div class="nr-feedback-summary">
+            <div class="nr-feedback-rate">
+              <span class="nr-feedback-rate-value">{{ satisfactionText }}</span>
+              <span class="nr-feedback-rate-label">{{ t('dashboard.feedbackSatisfaction') }}</span>
+            </div>
+            <div class="nr-feedback-counts">
+              <span class="nr-feedback-count nr-feedback-count--like">👍 {{ feedbackSummary.like }}</span>
+              <span class="nr-feedback-count nr-feedback-count--dislike">👎 {{ feedbackSummary.dislike }}</span>
+            </div>
+          </div>
+          <div class="nr-feedback-recent">
+            <div
+              v-for="(item, i) in feedbackSummary.recent.slice(0, 3)"
+              :key="i"
+              class="nr-feedback-item"
+            >
+              <span class="nr-feedback-item-icon">{{ item.feedback === 'like' ? '👍' : '👎' }}</span>
+              <span class="nr-feedback-item-text">{{ item.content || '—' }}</span>
+            </div>
+          </div>
+        </template>
+      </GlassCard>
     </div>
   </div>
 </template>
@@ -132,6 +161,7 @@ import { getHomeData, getHomeTrends } from '@/api/modules/home'
 import { statsApi } from '@/api/modules'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
+import { useFeedbackStats } from '@/composables/useFeedbackStats'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -186,6 +216,15 @@ const chartBars = ref<Array<{ label: string; height: number; value: number }>>([
 
 /** Loading state. */
 const dashboardLoading = ref(false)
+
+// ---------------------------------------------------------------------------
+// 反馈质量卡片（点赞/点踩统计 → 满意度派生；失败保持零状态不拖垮仪表盘）
+// ---------------------------------------------------------------------------
+const {
+  summary: feedbackSummary,
+  satisfactionText,
+  refresh: refreshFeedbackStats,
+} = useFeedbackStats()
 
 /** Format large token counts for display. */
 function formatTokens(n: number): string {
@@ -318,6 +357,7 @@ onMounted(async () => {
     agentStore.loadAgents(),
     fetchDashboardData(),
     fetchSystemHealth(),
+    refreshFeedbackStats(),
   ])
   dashboardLoading.value = false
 })
@@ -416,17 +456,17 @@ onMounted(async () => {
   gap: 14px;
   width: 100%;
   padding: 12px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--nr-glass-border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--nr-glass-bg);
   cursor: pointer;
   transition: all 0.25s ease;
   color: var(--nr-text-primary);
 }
 
 .nr-quick-action-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--nr-glass-bg-hover);
+  border-color: var(--nr-glass-border-hover);
 }
 
 .nr-qa-icon {
@@ -473,13 +513,13 @@ onMounted(async () => {
   width: 100%;
   height: 100%;
   border-radius: 6px 6px 2px 2px;
-  background: linear-gradient(180deg, rgba(99,102,241,0.6) 0%, rgba(99,102,241,0.2) 100%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--nr-primary) 60%, transparent) 0%, color-mix(in srgb, var(--nr-primary) 20%, transparent) 100%);
   transition: background 0.3s;
   animation: bar-grow 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .nr-chart-bar:hover .nr-chart-bar-fill {
-  background: linear-gradient(180deg, rgba(99,102,241,0.8) 0%, rgba(99,102,241,0.35) 100%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--nr-primary) 80%, transparent) 0%, color-mix(in srgb, var(--nr-primary) 35%, transparent) 100%);
 }
 
 @keyframes bar-grow {
@@ -518,7 +558,7 @@ onMounted(async () => {
 }
 
 .nr-activity-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--nr-glass-bg);
 }
 
 .nr-activity-icon {
@@ -551,5 +591,93 @@ onMounted(async () => {
   font-size: 11px;
   color: var(--nr-text-muted);
   font-family: var(--nr-font-mono);
+}
+
+/* ── Feedback Quality card ─────────────────────────────── */
+
+.nr-feedback-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 96px;
+  color: var(--nr-text-muted);
+  font-size: 13px;
+}
+
+.nr-feedback-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.nr-feedback-rate {
+  display: flex;
+  flex-direction: column;
+}
+
+.nr-feedback-rate-value {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--nr-primary);
+  line-height: 1.1;
+  font-family: var(--nr-font-mono);
+}
+
+.nr-feedback-rate-label {
+  font-size: 12px;
+  color: var(--nr-text-muted);
+}
+
+.nr-feedback-counts {
+  display: flex;
+  gap: 8px;
+}
+
+.nr-feedback-count {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.nr-feedback-count--like {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.nr-feedback-count--dislike {
+  background: rgba(229, 72, 77, 0.12);
+  color: #e5484d;
+}
+
+.nr-feedback-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nr-feedback-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+}
+
+.nr-feedback-item-icon {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.nr-feedback-item-text {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

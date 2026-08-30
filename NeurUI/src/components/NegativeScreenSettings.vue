@@ -148,7 +148,7 @@ const loadConfig = async () => {
       config.value.push_url = data.push_url
     }
   } catch (error) {
-    console.error('加载负一屏配置失败:', error)
+    console.error(t('ui.loadNegScreenConfigFailed') + ':', error)
   }
 }
 
@@ -159,7 +159,7 @@ const loadStatistics = async () => {
     const data = res?.data ?? res ?? {}
     statistics.value = data
   } catch (error) {
-    console.error('加载推送统计失败:', error)
+    console.error(t('ui.loadPushStatsFailed') + ':', error)
   }
 }
 
@@ -171,7 +171,7 @@ const saveConfig = async () => {
     message.success(t('negativeScreen.configSaved'))
   } catch (error) {
     message.error(t('negativeScreen.saveFailed'))
-    console.error('保存负一屏配置失败:', error)
+    console.error(t('ui.saveNegScreenConfigFailed') + ':', error)
   } finally {
     saving.value = false
   }
@@ -190,7 +190,7 @@ const deleteConfig = async () => {
     message.success(t('negativeScreen.configDeleted'))
   } catch (error) {
     message.error(t('negativeScreen.deleteFailed'))
-    console.error('删除负一屏配置失败:', error)
+    console.error(t('ui.deleteNegScreenConfigFailed') + ':', error)
   } finally {
     deleting.value = false
   }
@@ -203,9 +203,9 @@ const testPush = async () => {
   
   try {
     const res: any = await request.post('/negative-screen/test', {
-      task_name: '测试推送',
-      task_content: '## 测试内容\n\n这是一条来自 Neurova 的测试推送消息。\n\n**时间**: ' + new Date().toLocaleString(),
-      task_result: '测试完成'
+      task_name: t('ui.testPushTaskName'),
+      task_content: t('ui.testPushContent') + new Date().toLocaleString(),
+      task_result: t('ui.testPushResult')
     })
     
     const data = res?.data ?? res ?? {}

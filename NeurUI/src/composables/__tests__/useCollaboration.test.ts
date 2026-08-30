@@ -45,7 +45,7 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }))
 
-import { useCollaboration } from '@/composables/useCollaboration'
+import { useCollaboration, CanvasVersionConflictError } from '@/composables/useCollaboration'
 import * as collabApi from '@/api/modules/collaboration'
 
 describe('useCollaboration', () => {
@@ -139,5 +139,64 @@ describe('useCollaboration', () => {
 
     expect(result).toEqual(saved)
     expect(mockSuccess).toHaveBeenCalledWith('common.success')
+  })
+
+  // ── Test 7: 已有画布保存时 baseVersion 透传给 updateCanvas（乐观锁） ──
+  it('saveCanvas forwards baseVersion to updateCanvas for existing canvas', async () => {
+    const saved = { id: 'c1', name: 'Canvas', nodes: [], edges: [], version: 6 }
+    ;(collabApi.updateCanvas as any).mockResolvedValue({ data: saved })
+
+    const collab = useCollaboration()
+    const result = await collab.saveCanvas(
+      { id: 'c1', name: 'Canvas', nodes: [], edges: [] },
+      5,
+    )
+
+    expect(result).toEqual(saved)
+    expect(collabApi.updateCanvas).toHaveBeenCalledWith(
+      'c1',
+      expect.objectContaining({ id: 'c1' }),
+      5,
+    )
+  })
+
+  // ── Test 8: 409 版本冲突 → 抛 CanvasVersionConflictError（含服务端版本），不弹通用错误 ──
+  it('saveCanvas throws CanvasVersionConflictError on 409', async () => {
+    const axiosErr = {
+      response: {
+        status: 409,
+        data: { detail: { error: '画布版本冲突', current_version: 7 } },
+      },
+    }
+    ;(collabApi.updateCanvas as any).mockRejectedValue(axiosErr)
+
+    const collab = useCollaboration()
+    let caught: unknown = null
+    try {
+      await collab.saveCanvas({ id: 'c1', name: 'Canvas', nodes: [], edges: [] }, 5)
+    } catch (e) {
+      caught = e
+    }
+
+    expect(caught).toBeInstanceOf(CanvasVersionConflictError)
+    expect((caught as CanvasVersionConflictError).currentVersion).toBe(7)
+    // 冲突交由页面处理（重载+提示），不应弹通用错误
+    expect(mockError).not.toHaveBeenCalled()
+  })
+
+  // ── Test 9: 非 409 失败 → 通用错误提示 + 返回 null（不抛） ──
+  it('saveCanvas shows error and returns null on non-409 failure', async () => {
+    ;(collabApi.updateCanvas as any).mockRejectedValue({
+      response: { status: 500, data: {} },
+    })
+
+    const collab = useCollaboration()
+    const result = await collab.saveCanvas(
+      { id: 'c1', name: 'Canvas', nodes: [], edges: [] },
+      5,
+    )
+
+    expect(result).toBeNull()
+    expect(mockError).toHaveBeenCalledWith('common.error')
   })
 })

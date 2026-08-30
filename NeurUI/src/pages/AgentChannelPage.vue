@@ -120,15 +120,15 @@ function openEdit(ch: Channel) {
 
 // Built-in channel types for this agent
 const builtInChannels = ref<{ id: string; name: string; type: string; enabled: boolean; iconSrc: string; color: string }[]>([
-  { id: 'xiaoyi', name: '小艺', type: 'xiaoyi', enabled: true, iconSrc: 'https://gw.alicdn.com/imgextra/i1/O1CN01EPS9Z81OKhIEcwpCd_!!6000000001687-2-tps-476-476.png', color: '#ec4899' },
-  { id: 'dingtalk', name: '钉钉', type: 'dingtalk', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01w5mzV01tFtE37wkJI_!!6000000005873-2-tps-48-48.png', color: '#2563eb' },
-  { id: 'feishu', name: '飞书', type: 'feishu', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN01wCpTM41LOPeyP7wKc_!!6000000001289-2-tps-48-48.png', color: '#7c3aed' },
+  { id: 'xiaoyi', name: t('ui.chXiaoyi'), type: 'xiaoyi', enabled: true, iconSrc: 'https://gw.alicdn.com/imgextra/i1/O1CN01EPS9Z81OKhIEcwpCd_!!6000000001687-2-tps-476-476.png', color: '#ec4899' },
+  { id: 'dingtalk', name: t('ui.chDingtalk'), type: 'dingtalk', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01w5mzV01tFtE37wkJI_!!6000000005873-2-tps-48-48.png', color: '#2563eb' },
+  { id: 'feishu', name: t('ui.chFeishu'), type: 'feishu', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN01wCpTM41LOPeyP7wKc_!!6000000001289-2-tps-48-48.png', color: '#7c3aed' },
   { id: 'discord', name: 'Discord', type: 'discord', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01OsQiMO1ZYrJXp3TmX_!!6000000003207-2-tps-42-48.png', color: '#5865f2' },
   { id: 'telegram', name: 'Telegram', type: 'telegram', enabled: true, iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN013VVoKf1jsgcNn40KA_!!6000000004604-2-tps-48-48.png', color: '#0088cc' },
   { id: 'qq', name: 'QQ', type: 'qq', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i3/O1CN01ApVkC91JeKBkQfgj9_!!6000000001053-2-tps-41-48.png', color: '#e62117' },
-  { id: 'wechat', name: '微信', type: 'wechat', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01ikAjLG1jhh721iEUc_!!6000000004580-2-tps-48-48.png', color: '#07c160' },
-  { id: 'wecom', name: '企业微信', type: 'wecom', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01oWpOyx1TPnmnrzxlq_!!6000000002375-2-tps-48-48.png', color: '#3370ff' },
-  { id: 'yuanbao', name: '元宝', type: 'yuanbao', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN0164yBmJ1a2AftSglge_!!6000000003271-2-tps-225-225.png', color: '#f59e0b' },
+  { id: 'wechat', name: t('ui.chWechat'), type: 'wechat', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01ikAjLG1jhh721iEUc_!!6000000004580-2-tps-48-48.png', color: '#07c160' },
+  { id: 'wecom', name: t('ui.chWecom'), type: 'wecom', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01oWpOyx1TPnmnrzxlq_!!6000000002375-2-tps-48-48.png', color: '#3370ff' },
+  { id: 'yuanbao', name: t('ui.chYuanbao'), type: 'yuanbao', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN0164yBmJ1a2AftSglge_!!6000000003271-2-tps-225-225.png', color: '#f59e0b' },
   { id: 'matrix', name: 'Matrix', type: 'matrix', enabled: false, iconSrc: 'https://img.alicdn.com/imgextra/i3/O1CN01YfEzZu1DWdqgAdqtu_!!6000000000224-2-tps-48-48.png', color: '#0dbd8b' },
   { id: 'sip', name: 'SIP', type: 'sip', enabled: false, iconSrc: 'https://gw.alicdn.com/imgextra/i1/O1CN016SJ9AO1SpA6L3j0KH_!!6000000002295-2-tps-400-400.png', color: '#64748b' },
   { id: 'mattermost', name: 'Mattermost', type: 'mattermost', enabled: false, iconSrc: 'https://gw.alicdn.com/imgextra/i2/O1CN01A2bvSh1eVig4fDBEF_!!6000000003877-2-tps-400-400.png', color: '#0058cc' },

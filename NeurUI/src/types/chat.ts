@@ -28,6 +28,13 @@ export interface ChatMessage {
   audioEl?: HTMLAudioElement | null
   ttsLoading?: boolean
   streaming?: boolean
+  /** 轮次定位键 + 展示时间：用户消息 = 发送时刻；assistant 消息 = 所在轮的用户发送时刻。
+   *  历史消息来自后端落盘 timestamp（同轮同戳），实时消息为客户端时钟。 */
+  timestamp?: string
+  /** 助手回复完成时刻（仅 assistant；流式结束后设置，用于展示"回复时间"） */
+  repliedAt?: string
+  /** 用户对回复质量的反馈（点赞/点踩），持久化在 session 消息 metadata */
+  feedback?: 'like' | 'dislike'
 }
 
 export interface Session {

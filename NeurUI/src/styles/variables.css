@@ -1,14 +1,27 @@
+/* ═══════════════════════════════════════════════════════════════
+   Neurova 主题令牌
+   ─────────────────────────────────────────────────────────────
+   · Cosmic（深色，默认）— 星空玻璃拟态风格，定义在 :root
+   · Light（浅色）— 参照 DeepSeek 的简洁大方浅色风格，
+     定义在 [data-theme='light']，仅覆盖颜色类令牌；
+     间距/圆角/字体/布局/动效等结构令牌两套主题共享。
+   ═══════════════════════════════════════════════════════════════ */
+
 :root {
-  /* ─── Cosmic Palette ─── */
+  /* ─── Cosmic Palette (Dark Theme) ─── */
   --nr-bg-deep: #06080f;
   --nr-bg-base: #0a0e1a;
   --nr-bg-surface: #111827;
   --nr-bg-elevated: #1a2236;
   --nr-bg-overlay: rgba(10, 14, 26, 0.85);
+  --nr-bg-inset: rgba(0, 0, 0, 0.2);
+  --nr-bg-inset-deep: rgba(0, 0, 0, 0.35);
 
   /* Glass */
+  --nr-glass-rgb: 255, 255, 255;
   --nr-glass-bg: rgba(255, 255, 255, 0.035);
   --nr-glass-bg-hover: rgba(255, 255, 255, 0.06);
+  --nr-glass-bg-active: rgba(255, 255, 255, 0.1);
   --nr-glass-border: rgba(255, 255, 255, 0.08);
   --nr-glass-border-hover: rgba(255, 255, 255, 0.14);
   --nr-glass-blur: 20px;
@@ -17,6 +30,9 @@
   --nr-primary: #6366f1;
   --nr-primary-light: #818cf8;
   --nr-primary-dark: #4f46e5;
+  --nr-primary-soft: rgba(99, 102, 241, 0.12);
+  --nr-primary-soft-border: rgba(99, 102, 241, 0.2);
+  --nr-primary-ring: rgba(99, 102, 241, 0.15);
   --nr-accent: #22d3ee;
   --nr-accent-secondary: #a78bfa;
   --nr-gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
@@ -42,6 +58,15 @@
   --nr-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
   --nr-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
   --nr-shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
+  --nr-panel-shadow: rgba(0, 0, 0, 0.3);
+
+  /* Surfaces */
+  --nr-header-bg: rgba(10, 14, 26, 0.5);
+  --nr-sidebar-bg: rgba(10, 14, 26, 0.7);
+  --nr-bubble-user: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.2));
+  --nr-bubble-user-border: rgba(99, 102, 241, 0.2);
+
+  /* ─── 结构令牌（两套主题共享） ─── */
 
   /* Radius */
   --nr-radius-sm: 6px;
@@ -73,23 +98,62 @@
   --nr-transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ─── Light Theme Override ─── */
+/* ─── Light Theme（DeepSeek 风格：白底浅灰、蓝色主色、柔和阴影） ─── */
 [data-theme='light'] {
-  --nr-bg-deep: #f8fafc;
-  --nr-bg-base: #ffffff;
-  --nr-bg-surface: #f1f5f9;
-  --nr-bg-elevated: #e2e8f0;
-  --nr-glass-bg: rgba(0, 0, 0, 0.02);
-  --nr-glass-bg-hover: rgba(0, 0, 0, 0.04);
-  --nr-glass-border: rgba(0, 0, 0, 0.08);
-  --nr-glass-border-hover: rgba(0, 0, 0, 0.14);
-  --nr-text-primary: rgba(15, 23, 42, 0.95);
-  --nr-text-secondary: rgba(15, 23, 42, 0.65);
-  --nr-text-tertiary: rgba(15, 23, 42, 0.4);
-  --nr-text-muted: rgba(15, 23, 42, 0.2);
-  --nr-border: rgba(0, 0, 0, 0.08);
-  --nr-border-light: rgba(0, 0, 0, 0.04);
-  --nr-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
-  --nr-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
-  --nr-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+  /* Backgrounds */
+  --nr-bg-deep: #f5f6f7;
+  --nr-bg-base: #fafbfc;
+  --nr-bg-surface: #ffffff;
+  --nr-bg-elevated: #f0f2f5;
+  --nr-bg-overlay: rgba(255, 255, 255, 0.9);
+  --nr-bg-inset: #edeff2;
+  --nr-bg-inset-deep: #e6e9ee;
+
+  /* Glass（白底上使用深色半透明叠加） */
+  --nr-glass-rgb: 31, 35, 41;
+  --nr-glass-bg: rgba(31, 35, 41, 0.035);
+  --nr-glass-bg-hover: rgba(31, 35, 41, 0.06);
+  --nr-glass-bg-active: rgba(31, 35, 41, 0.09);
+  --nr-glass-border: rgba(31, 35, 41, 0.1);
+  --nr-glass-border-hover: rgba(31, 35, 41, 0.18);
+
+  /* Brand（DeepSeek 蓝） */
+  --nr-primary: #4d6bfe;
+  --nr-primary-light: #3d5ce0;
+  --nr-primary-dark: #3b57e8;
+  --nr-primary-soft: rgba(77, 107, 254, 0.08);
+  --nr-primary-soft-border: rgba(77, 107, 254, 0.22);
+  --nr-primary-ring: rgba(77, 107, 254, 0.12);
+  --nr-accent: #0891b2;
+  --nr-accent-secondary: #7c3aed;
+  --nr-gradient-primary: linear-gradient(135deg, #4d6bfe 0%, #6a86ff 50%, #8ba3ff 100%);
+  --nr-gradient-accent: linear-gradient(135deg, #0891b2 0%, #4d6bfe 100%);
+  --nr-gradient-warm: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+
+  /* Text（深色墨迹，保证白底对比度） */
+  --nr-text-primary: rgba(31, 35, 41, 0.95);
+  --nr-text-secondary: rgba(31, 35, 41, 0.65);
+  --nr-text-tertiary: rgba(31, 35, 41, 0.45);
+  --nr-text-muted: rgba(31, 35, 41, 0.28);
+
+  /* Status（加深以保证浅底对比度） */
+  --nr-success: #059669;
+  --nr-warning: #d97706;
+  --nr-error: #dc2626;
+  --nr-info: #2563eb;
+
+  /* Borders & Shadows（轻柔浅阴影） */
+  --nr-border: rgba(31, 35, 41, 0.1);
+  --nr-border-light: rgba(31, 35, 41, 0.05);
+  --nr-shadow-sm: 0 1px 3px rgba(31, 35, 41, 0.05), 0 2px 8px rgba(31, 35, 41, 0.05);
+  --nr-shadow-md: 0 4px 16px rgba(31, 35, 41, 0.08);
+  --nr-shadow-lg: 0 8px 32px rgba(31, 35, 41, 0.12);
+  --nr-shadow-glow: 0 0 20px rgba(77, 107, 254, 0.12);
+  --nr-panel-shadow: rgba(31, 35, 41, 0.1);
+
+  /* Surfaces */
+  --nr-header-bg: rgba(255, 255, 255, 0.75);
+  --nr-sidebar-bg: rgba(255, 255, 255, 0.85);
+  --nr-bubble-user: #e9edfd;
+  --nr-bubble-user-border: rgba(77, 107, 254, 0.18);
 }

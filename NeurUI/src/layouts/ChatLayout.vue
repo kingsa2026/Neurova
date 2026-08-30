@@ -84,6 +84,8 @@
 
     <!-- Main Content -->
     <div class="nr-chat-main">
+      <!-- 悬浮主题切换（右上角） -->
+      <ThemeToggle class="nr-chat-theme-toggle" />
       <main class="nr-chat-content">
         <router-view v-slot="{ Component, route }">
           <transition name="fade-slide" mode="out-in">
@@ -105,6 +107,7 @@ import StarBackground from '@/components/StarBackground.vue'
 import GlassNav from '@/components/GlassNav.vue'
 import GlassNavItem from '@/components/GlassNavItem.vue'
 import AgentSwitcher from '@/components/AgentSwitcher.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import type { Agent } from '@/types/agent'
 import {
   MessageOutlined, BellOutlined, GlobalOutlined, ClockCircleOutlined,
@@ -177,7 +180,7 @@ function onAgentSelect(_agent: Agent) {
   height: 32px;
   border: none;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--nr-glass-bg);
   color: var(--nr-text-secondary);
   cursor: pointer;
   display: flex;
@@ -187,7 +190,7 @@ function onAgentSelect(_agent: Agent) {
   transition: all 0.2s;
 }
 .nr-toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--nr-glass-bg-active);
   color: var(--nr-text-primary);
 }
 
@@ -204,7 +207,15 @@ function onAgentSelect(_agent: Agent) {
 }
 .nr-back-link:hover {
   color: var(--nr-text-primary);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--nr-glass-bg);
+}
+
+/* 悬浮主题切换按钮 */
+.nr-chat-theme-toggle {
+  position: absolute;
+  top: 14px;
+  right: 20px;
+  z-index: 60;
 }
 
 /* Nav section label */

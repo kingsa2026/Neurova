@@ -57,15 +57,15 @@ defineExpose({ focus: () => inputRef.value?.focus() })
 }
 .nr-glass-input-wrap {
   display: flex; align-items: center; gap: 8px;
-  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  background: var(--nr-glass-bg); border: 1px solid var(--nr-glass-border);
   border-radius: 10px; padding: 0 14px; height: 42px;
   transition: all 0.25s ease;
   backdrop-filter: blur(10px);
 }
-.nr-glass-input-wrap:hover { border-color: rgba(255,255,255,0.14); }
+.nr-glass-input-wrap:hover { border-color: var(--nr-glass-border-hover); }
 .is-focused .nr-glass-input-wrap {
-  border-color: var(--nr-primary); background: rgba(99,102,241,0.06);
-  box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+  border-color: var(--nr-primary); background: var(--nr-primary-soft);
+  box-shadow: 0 0 0 3px var(--nr-primary-ring);
 }
 .has-error .nr-glass-input-wrap { border-color: var(--nr-error); }
 .is-disabled .nr-glass-input-wrap { opacity: 0.4; pointer-events: none; }

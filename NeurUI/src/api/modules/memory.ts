@@ -1,5 +1,5 @@
 import api from '@/api'
-import type { ApiResponse, PaginatedData, PageParams } from '@/types/response'
+import type { ApiResponse, PaginatedData } from '@/types/response'
 
 // ---------------------------------------------------------------------------
 // Core Types
@@ -377,9 +377,35 @@ export interface ReflectionStats {
 
 const BASE = '/memory'
 
-/** List memories for an agent. */
-export function getMemories(agentId: string, params?: PageParams & { type?: string; category?: string; min_importance?: number; q?: string }) {
-  return api.get<ApiResponse<PaginatedData<MemoryEntry>>>(BASE, { params: { ...params, agent_id: agentId } })
+/**
+ * 解析记忆列表响应 data。
+ * 后端列表端点（GET /memory、/hot、/crystallized）的信封统一为 {count, memories}，
+ * 历史前端按 {items, total} 或数组解析会永远得到空列表。
+ */
+export function extractMemoryList(data: unknown): { items: MemoryEntry[]; total: number } {
+  if (Array.isArray(data)) {
+    return { items: data as MemoryEntry[], total: data.length }
+  }
+  if (data && typeof data === 'object') {
+    const obj = data as Record<string, any>
+    if (Array.isArray(obj.items)) {
+      return { items: obj.items as MemoryEntry[], total: obj.total ?? obj.items.length }
+    }
+    if (Array.isArray(obj.memories)) {
+      return { items: obj.memories as MemoryEntry[], total: obj.count ?? obj.memories.length }
+    }
+  }
+  return { items: [], total: 0 }
+}
+
+/** List memories for an agent. 后端实参: query/category/limit（无分页 offset）。 */
+export function getMemories(
+  agentId: string,
+  params?: { query?: string; category?: string; limit?: number; min_importance?: number },
+) {
+  return api.get<ApiResponse<{ count: number; memories: MemoryEntry[] }>>(BASE, {
+    params: { ...params, agent_id: agentId },
+  })
 }
 
 /** Get a single memory. */

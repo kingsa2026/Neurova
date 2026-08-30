@@ -206,11 +206,11 @@ function isCategoryActive(cat: NavCategory): boolean {
 }
 .nr-topnav-quick:hover {
   color: var(--nr-text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--nr-glass-bg-hover);
 }
 .nr-topnav-quick.is-active {
   color: var(--nr-primary-light);
-  background: rgba(99, 102, 241, 0.12);
+  background: var(--nr-primary-soft);
   font-weight: 550;
 }
 .nr-topnav-quick-label {
@@ -235,11 +235,11 @@ function isCategoryActive(cat: NavCategory): boolean {
 .nr-topnav-cat:hover,
 .nr-topnav-cat.is-active {
   color: var(--nr-text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--nr-glass-bg-hover);
 }
 .nr-topnav-cat.is-active {
   color: var(--nr-primary-light);
-  background: rgba(99, 102, 241, 0.12);
+  background: var(--nr-primary-soft);
 }
 .nr-topnav-cat-arrow {
   font-size: 10px;
@@ -249,14 +249,14 @@ function isCategoryActive(cat: NavCategory): boolean {
 
 /* ── 液态玻璃弹出层 ── */
 .nr-glass-dropdown {
-  background: rgba(10, 14, 26, 0.85);
+  background: var(--nr-bg-overlay);
   backdrop-filter: blur(40px) saturate(180%);
   -webkit-backdrop-filter: blur(40px) saturate(180%);
   border: 1px solid var(--nr-glass-border);
   border-radius: 14px;
   padding: 6px;
   min-width: 180px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--nr-shadow-lg);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -278,11 +278,11 @@ function isCategoryActive(cat: NavCategory): boolean {
 }
 .nr-glass-dropdown-item:hover {
   color: var(--nr-text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--nr-glass-bg-hover);
 }
 .nr-glass-dropdown-item.is-active {
   color: var(--nr-primary-light);
-  background: rgba(99, 102, 241, 0.1);
+  background: var(--nr-primary-soft);
   font-weight: 550;
 }
 

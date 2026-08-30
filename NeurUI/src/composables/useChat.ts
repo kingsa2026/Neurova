@@ -1,9 +1,10 @@
 import { ref } from 'vue'
 import api from '@/api'
-import { deleteConsoleSession } from '@/api/modules/console'
+import { archiveConsoleSession, deleteConsoleSession, unarchiveConsoleSession } from '@/api/modules/console'
 import { useChatStore } from '@/stores/chat'
 import type { ChatMessage, Session } from '@/types/chat'
 import bus from '@/bus'
+import i18n from '@/i18n'
 
 
 /**
@@ -86,7 +87,7 @@ export function useChat(options: UseChatOptions = {}) {
       const mapped: Session[] = sessionList.map(
         (s: any) => ({
           id: s.session_id || s.id,
-          title: s.title || s.name || '新对话',
+          title: s.title || s.name || i18n.global.t('ui.newConversation'),
           updatedAt: s.created_at || s.updated_at,
         }),
       )
@@ -109,7 +110,7 @@ export function useChat(options: UseChatOptions = {}) {
    * switch to it. Uses the backend-returned session_id to avoid frontend/
    * backend id drift (see H-1 in docs/bugfix-history-load-bugs.md).
    */
-  async function createSession(agentId: string, defaultTitle: string = '新对话'): Promise<string | null> {
+  async function createSession(agentId: string, defaultTitle: string = i18n.global.t('ui.newConversation')): Promise<string | null> {
     try {
       const res: any = await api.post('/console/chat/new', { agent_id: agentId, title: defaultTitle })
       const data = res?.data ?? res
@@ -121,7 +122,7 @@ export function useChat(options: UseChatOptions = {}) {
       const newId: string | undefined = data?.session_id || data?.id
       if (!newId) {
         console.error('[Chat] Create session failed: backend response missing session_id', res)
-        const msg = options.errorMessage?.('chat.createSessionFailed', '创建会话失败') ?? '创建会话失败'
+        const msg = options.errorMessage?.('chat.createSessionFailed', i18n.global.t('chat.createSessionFailed')) ?? i18n.global.t('chat.createSessionFailed')
         options.onError?.(msg)
         return null
       }
@@ -138,7 +139,7 @@ export function useChat(options: UseChatOptions = {}) {
       return newId
     } catch (err) {
       console.error('[Chat] Create session failed:', err)
-      const msg = options.errorMessage?.('chat.createSessionFailed', '创建会话失败') ?? '创建会话失败'
+      const msg = options.errorMessage?.('chat.createSessionFailed', i18n.global.t('chat.createSessionFailed')) ?? i18n.global.t('chat.createSessionFailed')
       options.onError?.(msg)
       return null
     }
@@ -198,14 +199,23 @@ export function useChat(options: UseChatOptions = {}) {
                 }
               : undefined
         const toolResult = toolCalls.length > 0 ? toolCalls[0].result : m.tool_result || undefined
+        // R-2 修复：后端 assistant 消息把 reasoning 存进 metadata.reasoning_content
+        //（post_chat 管线 assistant_metadata 传递），历史回放需读取该字段；
+        // 顶层 m.reasoning_content / m.reasoning 兼容旧数据与其他通道。
+        const reasoning = m.reasoning || m.reasoning_content || m.metadata?.reasoning_content
         return {
           role: m.role === 'user' ? 'user' : 'assistant',
           content: m.content || '',
-          reasoning: m.reasoning || m.reasoning_content || undefined,
-          reasoningOpen: false,
+          reasoning,
+          // 带思考过程的历史消息默认展开（与实时流式首片自动展开一致）
+          reasoningOpen: !!reasoning,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
           toolCall,
           toolResult,
+          // 轮次定位键 + 展示时间：同轮 user/assistant 共享后端落盘时间戳；
+          // 旧记录缺 timestamp 时回退 metadata.client_timestamp（chat 请求携带）
+          timestamp: m.timestamp || m.metadata?.client_timestamp || undefined,
+          feedback: m.metadata?.feedback,
         }
       })
       store.setMessages(mapped)
@@ -248,8 +258,27 @@ export function useChat(options: UseChatOptions = {}) {
    */
   function notifySwitchFailure(result: SwitchResult): void {
     if (!result.ok) {
-      const msg = options.errorMessage?.('chat.loadHistoryFailed', '加载历史对话失败') ?? '加载历史对话失败'
+      const msg = options.errorMessage?.('chat.loadHistoryFailed', i18n.global.t('chat.loadHistoryFailed')) ?? i18n.global.t('chat.loadHistoryFailed')
       options.onError?.(msg)
+    }
+  }
+
+  /**
+   * 副作用内部循环：依次切换剩余首个会话，跳过幽灵（404 已自愈移除），
+   * 遇非幽灵错误（网络/500）停止以免掩盖真错误。供 deleteSession /
+   * archiveSession 在移除当前会话后恢复 UI 焦点使用。
+   */
+  async function _switchToFirstAvailable(): Promise<void> {
+    while (store.sessions.length > 0) {
+      const nextId = store.sessions[0].id
+      const r = await switchSession(nextId)
+      if (r.ok) {
+        break
+      }
+      if (r.code !== 'ghost-404') {
+        break
+      }
+      // 幽灵已从 store 移除 (sessions.length 减小), 循环重新取首位.
     }
   }
 
@@ -277,28 +306,87 @@ export function useChat(options: UseChatOptions = {}) {
         // 失败结果由 deleteSession 静默消费 (不调 notifySwitchFailure),
         // 避免让用户误以为删除失败.
         //
-        // BUG FIX (delete-404-ghost): 旧契约只尝试一次 store.sessions[0],
-        // 若它是幽灵 session (前端 UUID 残留, 后端 404), switchSession 自愈
-        // 移除后, UI 会停在 null / 幽灵上并打印 404 error. 这里循环重试:
-        // 每次命中幽灵 (code='ghost-404', 已被自愈移除), 继续切下一个有效会话,
-        // 直到成功或遇到非幽灵错误. 循环上界 = 剩余会话数, 幽灵逐个被移除.
-        while (store.sessions.length > 0) {
-          const nextId = store.sessions[0].id
-          const r = await switchSession(nextId)
-          if (r.ok) {
-            break
-          }
-          if (r.code !== 'ghost-404') {
-            // 非幽灵错误 (网络/500): 保留该 session, 停止重试, 避免掩盖真错误.
-            break
-          }
-          // 幽灵已从 store 移除 (sessions.length 减小), 循环重新取首位.
-        }
+        // BUG FIX (delete-404-ghost): 幽灵循环自愈见 _switchToFirstAvailable.
+        await _switchToFirstAvailable()
       }
       bus.emit('chat:session-deleted', { sessionId })
       return { ok: true }
     } catch (err) {
       console.error('[Chat] Delete session failed:', err)
+      return { ok: false, error: err }
+    }
+  }
+
+  // ── 会话存档（删除 → 存档：历史列表隐藏，存档卡片页可随时恢复） ──────────
+
+  /**
+   * Archive a session: hidden from the history list, data kept on the
+   * backend, restorable at any time via restoreSession.
+   *
+   * 契约与 deleteSession 一致: 不弹 toast, 返回 DeleteResult; 移除的若是
+   * 当前会话, 自动切换到剩余首个可用会话（幽灵循环自愈）.
+   */
+  async function archiveSession(sessionId: string): Promise<DeleteResult> {
+    try {
+      await archiveConsoleSession(sessionId)
+      store.removeSession(sessionId)
+      if (store.currentSessionId === sessionId) {
+        store.setCurrentSession(null)
+        store.clearMessages()
+        // 副作用调用: 存档后自动切换, 失败静默消费 (同 deleteSession).
+        await _switchToFirstAvailable()
+      }
+      bus.emit('chat:session-archived', { sessionId })
+      return { ok: true }
+    } catch (err) {
+      console.error('[Chat] Archive session failed:', err)
+      return { ok: false, error: err }
+    }
+  }
+
+  /**
+   * Load archived sessions for the given agent into the store.
+   * 失败静默清空 — 存档卡片页与主列表同策略 (loadSessions catch 置空).
+   */
+  async function loadArchivedSessions(agentId: string): Promise<void> {
+    try {
+      const agentParam = agentId ? `?agent_id=${agentId}` : ''
+      const res: any = await api.get(`/console/chat/sessions/archived${agentParam}`)
+      const data = res?.data ?? res
+      const archivedList = data?.sessions ?? data ?? []
+      const mapped: Session[] = archivedList.map(
+        (s: any) => ({
+          id: s.session_id || s.id,
+          title: s.title || s.name || i18n.global.t('ui.newConversation'),
+          updatedAt: s.created_at || s.updated_at,
+        }),
+      )
+      store.setArchivedSessions(mapped)
+    } catch (err) {
+      console.error('[Chat] Load archived sessions failed:', err)
+      store.setArchivedSessions([])
+    }
+  }
+
+  /**
+   * Restore an archived session back to the normal history list
+   * (prepend, same as newly created sessions).
+   *
+   * 契约同 deleteSession: 不弹 toast, 返回 DeleteResult, 调用方决定
+   * 是否提示 (ChatPage 存档卡片页的恢复按钮).
+   */
+  async function restoreSession(sessionId: string): Promise<DeleteResult> {
+    try {
+      await unarchiveConsoleSession(sessionId)
+      const restored = store.archivedSessions.find((s) => s.id === sessionId)
+      store.removeArchivedSession(sessionId)
+      if (restored) {
+        store.addSession(restored)
+      }
+      bus.emit('chat:session-restored', { sessionId })
+      return { ok: true }
+    } catch (err) {
+      console.error('[Chat] Restore session failed:', err)
       return { ok: false, error: err }
     }
   }
@@ -313,7 +401,7 @@ export function useChat(options: UseChatOptions = {}) {
    */
   function notifyDeleteFailure(result: DeleteResult): void {
     if (!result.ok) {
-      const msg = options.errorMessage?.('chat.deleteSessionFailed', '删除会话失败') ?? '删除会话失败'
+      const msg = options.errorMessage?.('chat.deleteSessionFailed', i18n.global.t('chat.deleteSessionFailed')) ?? i18n.global.t('chat.deleteSessionFailed')
       options.onError?.(msg)
     }
   }
@@ -331,7 +419,61 @@ export function useChat(options: UseChatOptions = {}) {
       return true
     } catch (err) {
       console.error('[Chat] Rename failed:', err)
-      const msg = options.errorMessage?.('chat.renameFailed', '重命名失败') ?? '重命名失败'
+      const msg = options.errorMessage?.('chat.renameFailed', i18n.global.t('chat.renameFailed')) ?? i18n.global.t('chat.renameFailed')
+      options.onError?.(msg)
+      return false
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Round operations（编辑最后一条用户消息 / 删除一轮 / 点赞点踩）
+  // ---------------------------------------------------------------------------
+
+  /**
+   * 删除一轮对话（user 消息 + 相邻 assistant 回复）。
+   *
+   * 后端同步清除该轮记忆并同步 agent 内存历史；前端在 ok 后本地
+   * removeRoundFrom 保持一致。"编辑最后一条用户消息"复用本函数：
+   * 删旧轮 → setInputText(新文本) → sendMessage() 走原链路覆写。
+   *
+   * 404 视为幂等成功：流式中断的本地轮次未落盘，本地清理照常进行。
+   */
+  async function deleteRound(sessionId: string, timestamp: string): Promise<DeleteResult> {
+    try {
+      await api.delete(
+        `/console/chat/rounds?session_id=${encodeURIComponent(sessionId)}&timestamp=${encodeURIComponent(timestamp)}`,
+      )
+      return { ok: true }
+    } catch (err) {
+      const status = (err as any)?.response?.status
+      if (status === 404) {
+        console.warn('[Chat] Round not found on backend (treated as idempotent delete):', timestamp)
+        return { ok: true }
+      }
+      console.error('[Chat] Delete round failed:', err)
+      return { ok: false, error: err }
+    }
+  }
+
+  /**
+   * 点赞/点踩 agent 回复（持久化到该轮 assistant 消息 metadata）。
+   * feedback=null 表示取消已有反馈。
+   */
+  async function sendFeedback(
+    sessionId: string,
+    timestamp: string,
+    feedback: 'like' | 'dislike' | null,
+  ): Promise<boolean> {
+    try {
+      await api.post('/console/chat/feedback', {
+        session_id: sessionId,
+        timestamp,
+        feedback,
+      })
+      return true
+    } catch (err) {
+      console.error('[Chat] Feedback failed:', err)
+      const msg = options.errorMessage?.('chat.feedbackFailed', i18n.global.t('chat.feedbackFailed')) ?? i18n.global.t('chat.feedbackFailed')
       options.onError?.(msg)
       return false
     }
@@ -349,6 +491,13 @@ export function useChat(options: UseChatOptions = {}) {
     switchSession,
     deleteSession,
     renameSession,
+    // archive actions — 删除 → 存档：历史列表隐藏，存档卡片页可随时恢复
+    archiveSession,
+    loadArchivedSessions,
+    restoreSession,
+    // round actions
+    deleteRound,
+    sendFeedback,
     // error policy helpers — 仅用户主动调用方调用 (ChatPage wrappers)
     notifySwitchFailure,
     notifyDeleteFailure,

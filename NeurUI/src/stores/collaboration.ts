@@ -143,10 +143,12 @@ export const useCollaborationStore = defineStore('collaboration', () => {
     }
   }
 
-  async function saveCanvasAction(payload: SaveCanvasPayload) {
+  async function saveCanvasAction(payload: SaveCanvasPayload, baseVersion?: number) {
     loading.value = true
     try {
-      const res = await (payload.id ? updateCanvas(payload.id, payload) : saveCanvas(payload))
+      const res = await (payload.id
+        ? updateCanvas(payload.id, payload, baseVersion)
+        : saveCanvas(payload))
       currentCanvas.value = ((res as any)?.data ?? res) as CanvasSnapshot
       return currentCanvas.value
     } catch (e) {

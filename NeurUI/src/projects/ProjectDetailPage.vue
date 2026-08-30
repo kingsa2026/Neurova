@@ -104,7 +104,7 @@
                 :options="canvasOptions"
                 show-search
                 option-filter-prop="label"
-                placeholder="选择画布工作流"
+                :placeholder="t('ui.selectCanvasWorkflow')"
               />
             </a-form-item>
             <a-form-item :label="t('project.scheduleType')">

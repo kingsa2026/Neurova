@@ -50,8 +50,8 @@
                 <a-menu-item @click="renameSession(session.id)">
                   {{ t('chat.rename') }}
                 </a-menu-item>
-                <a-menu-item danger @click="deleteSession(session.id)">
-                  {{ t('chat.deleteSession') }}
+                <a-menu-item @click="archiveSession(session.id)">
+                  {{ t('chat.archive') }}
                 </a-menu-item>
               </a-menu>
             </template>
@@ -203,9 +203,32 @@
               </div>
             </div>
 
+            <!-- Edit mode（编辑最后一条用户消息）：内联编辑框替换消息内容 -->
+            <div v-if="isEditingMessage(idx)" class="nr-msg-edit">
+              <textarea
+                v-model="editDraft"
+                class="nr-msg-edit-textarea"
+                rows="3"
+                @keydown.enter.exact.prevent="confirmEditMessage"
+                @keydown.esc.prevent="cancelEditMessage"
+              />
+              <div class="nr-msg-edit-actions">
+                <button
+                  class="nr-edit-btn nr-edit-btn--primary"
+                  :disabled="isStreaming || !editDraft.trim()"
+                  @click="confirmEditMessage"
+                >
+                  {{ t('chat.editResend') }}
+                </button>
+                <button class="nr-edit-btn" @click="cancelEditMessage">
+                  {{ t('common.cancel') }}
+                </button>
+              </div>
+            </div>
+
             <!-- Message Content (Rich Media Rendering) -->
             <div
-              v-if="msg.content"
+              v-else-if="msg.content"
               class="nr-msg-content"
               v-html="renderRichContent(msg.content)"
               @click="handleContentClick"
@@ -278,6 +301,44 @@
               </button>
             </div>
 
+            <!-- Message footer: 时间 + 操作条（复制 / 点赞点踩 / 编辑 / 删除轮次） -->
+            <div v-if="!msg.streaming && !isEditingMessage(idx)" class="nr-msg-footer">
+              <span v-if="displayTime(msg)" class="nr-msg-time">{{ displayTime(msg) }}</span>
+              <span class="nr-msg-footer-spacer" />
+              <button class="nr-msg-action" :title="t('chat.copy')" @click="copyMessage(msg)">⧉</button>
+              <template v-if="msg.role === 'assistant'">
+                <button
+                  class="nr-msg-action"
+                  :class="{ 'nr-msg-action--active': msg.feedback === 'like' }"
+                  :title="t('chat.like')"
+                  @click="rateReply(msg, 'like')"
+                >👍</button>
+                <button
+                  class="nr-msg-action"
+                  :class="{ 'nr-msg-action--active-negative': msg.feedback === 'dislike' }"
+                  :title="t('chat.dislike')"
+                  @click="rateReply(msg, 'dislike')"
+                >👎</button>
+              </template>
+              <template v-else>
+                <button
+                  v-if="isLastUserMessage(idx)"
+                  class="nr-msg-action"
+                  :title="t('chat.editMessage')"
+                  @click="startEditMessage(idx)"
+                >✎</button>
+              </template>
+              <a-popconfirm
+                v-if="msg.role === 'user'"
+                :title="t('chat.deleteRoundConfirm')"
+                :ok-text="t('common.confirm')"
+                :cancel-text="t('common.cancel')"
+                @confirm="deleteRoundAt(idx)"
+              >
+                <button class="nr-msg-action nr-msg-action--danger" :title="t('chat.deleteRound')">🗑</button>
+              </a-popconfirm>
+            </div>
+
             <!-- Streaming indicator -->
             <div v-if="msg.streaming" class="nr-msg-streaming">
               <span class="nr-typing-dot" /><span class="nr-typing-dot" /><span class="nr-typing-dot" />
@@ -314,6 +375,11 @@
           </div>
         </transition>
 
+        <!-- 实时记忆检索进度（临时态：回复开始即消失，不落消息历史） -->
+        <div v-if="retrievalStatus" class="nr-retrieval-status">
+          <span class="nr-retrieval-spinner">⟳</span>
+          <span>{{ retrievalStatus }}</span>
+        </div>
         <div class="nr-input-row">
           <input
             ref="fileInputRef"
@@ -390,6 +456,14 @@
     <aside v-if="isMainLayout && agentId && historyPanelOpen" class="nr-chat-history-panel">
       <div class="nr-history-header">
         <GlassButton variant="primary" size="sm" @click="createSession">+ {{ t('chat.newChat') }}</GlassButton>
+        <GlassButton
+          variant="ghost"
+          size="sm"
+          :class="{ 'is-active': archivedPanelOpen }"
+          @click="toggleArchivedPanel"
+        >
+          🗂 {{ t('chat.archivedSessions') }}
+        </GlassButton>
       </div>
       <div class="nr-history-search">
         <GlassInput
@@ -415,8 +489,8 @@
                 <a-menu-item @click="renameSession(session.id)">
                   {{ t('chat.rename') }}
                 </a-menu-item>
-                <a-menu-item danger @click="deleteSession(session.id)">
-                  {{ t('chat.deleteSession') }}
+                <a-menu-item @click="archiveSession(session.id)">
+                  {{ t('chat.archive') }}
                 </a-menu-item>
               </a-menu>
             </template>
@@ -424,6 +498,26 @@
         </div>
         <div v-if="filteredSessions.length === 0" class="nr-session-empty">
           {{ t('chat.noSessions') }}
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right Panel: Archived Sessions (存档会话卡片页，位于历史会话右侧) -->
+    <aside v-if="isMainLayout && agentId && archivedPanelOpen" class="nr-chat-archived-panel">
+      <div class="nr-history-header">
+        <span class="nr-history-title">{{ t('chat.archivedSessions') }}</span>
+        <button class="nr-archived-close" @click="archivedPanelOpen = false">✕</button>
+      </div>
+      <div class="nr-session-list">
+        <div v-for="session in archivedSessions" :key="session.id" class="nr-session-item archived">
+          <span class="nr-session-icon">🗄</span>
+          <span class="nr-session-name">{{ session.title }}</span>
+          <button class="nr-archived-restore-btn" @click="restoreArchivedSession(session.id)">
+            {{ t('chat.restore') }}
+          </button>
+        </div>
+        <div v-if="archivedSessions.length === 0" class="nr-session-empty">
+          {{ t('chat.noArchivedSessions') }}
         </div>
       </div>
     </aside>
@@ -455,30 +549,30 @@
     <!-- Governance Approval Modal (P0: ASK 人工确认) -->
     <a-modal
       v-model:open="approvalModal.open"
-      title="⚠️ 操作需要确认"
+      :title="t('ui.confirmNeeded')"
       :confirm-loading="approvalModal.loading"
-      ok-text="批准执行"
-      cancel-text="拒绝"
+      :ok-text="t('ui.approveExecute')"
+      :cancel-text="t('ui.reject')"
       @ok="confirmApproval"
       @cancel="rejectApproval"
     >
       <div class="approval-body">
         <div class="approval-field">
-          <span class="approval-label">工具</span>
-          <a-tag color="orange">{{ approvalModal.toolName || '未知' }}</a-tag>
+          <span class="approval-label">{{ t('ui.tool') }}</span>
+          <a-tag color="orange">{{ approvalModal.toolName || t('ui.unknown') }}</a-tag>
         </div>
         <div v-if="approvalModal.command" class="approval-field">
-          <span class="approval-label">内容</span>
+          <span class="approval-label">{{ t('ui.content') }}</span>
           <pre class="approval-command">{{ approvalModal.command }}</pre>
         </div>
         <div v-if="approvalModal.reason" class="approval-field">
-          <span class="approval-label">原因</span>
+          <span class="approval-label">{{ t('ui.reason') }}</span>
           <span class="approval-reason">{{ approvalModal.reason }}</span>
         </div>
         <a-checkbox v-model:checked="approvalAddWhitelist">
-          批准并加入白名单（此后同类命令免确认）
+          {{ t('ui.addToWhitelistAndApprove') }}
         </a-checkbox>
-        <p class="approval-hint">该操作被安全策略标记为需人工确认，请核实后再放行。</p>
+        <p class="approval-hint">{{ t('ui.approvalHint') }}</p>
       </div>
     </a-modal>
   </div>
@@ -541,6 +635,7 @@ const chatStore = useChatStore()
 const {
   messages,
   sessions,
+  archivedSessions,
   currentSessionId,
   inputText,
   searchQuery,
@@ -557,6 +652,8 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
 const pendingFiles = ref<PendingFile[]>([])
+// 实时记忆检索进度（SSE memory_progress；临时态：不落消息历史，回复开始即清空）
+const retrievalStatus = ref('')
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const historyPanelOpen = ref(true)
 
@@ -689,7 +786,7 @@ async function loadChatModels() {
     const normalized = rawModels.map((m) => normalizeModel(m))
     // 只展示已启用（可用）的模型，避免用户选到不可用的模型
     const enabled = normalized.filter((m) => m.enabled !== false)
-    const AUTO_ROUTE_LABEL = '🧠 自动路由 (推荐)'
+    const AUTO_ROUTE_LABEL = t('ui.autoRoute')
     const options: ChatModelOption[] = [
       { label: AUTO_ROUTE_LABEL, value: '', provider_id: '' },
       ...enabled.map((m) => ({
@@ -701,7 +798,7 @@ async function loadChatModels() {
     chatModelOptions.value = options
   } catch (e) {
     // 加载失败不阻塞聊天，保留"自动路由"选项即可
-    console.warn('[ChatPage] 模型列表加载失败:', e)
+    console.warn('[ChatPage] failed to load model list:', e)
     chatModelOptions.value = []
   } finally {
     chatModelLoading.value = false
@@ -722,6 +819,13 @@ const {
   switchSession: _switchSession,
   deleteSession: _deleteSession,
   renameSession: _renameSession,
+  // 存档操作：删除 → 存档（历史列表隐藏，存档卡片页可随时恢复）
+  archiveSession: _archiveSession,
+  loadArchivedSessions: _loadArchivedSessions,
+  restoreSession: _restoreSession,
+  // 轮次操作：删除一轮（编辑覆写复用）/ 点赞点踩反馈
+  deleteRound: _deleteRound,
+  sendFeedback: _sendFeedback,
   // 用户主动调用 switchSession / deleteSession 失败时弹 toast 的错误策略 helper
   // (#2 / ADR 0008 函数调用库契约的一部分 — switchSession / deleteSession 本身
   //  不弹 toast, 调用方按需调 notifySwitchFailure / notifyDeleteFailure;
@@ -797,21 +901,21 @@ async function confirmApproval(): Promise<void> {
         await addWhitelistEntry({
           pattern,
           match_type: 'prefix',
-          note: `来自审批 ${approvalModal.approvalId}`,
+          note: t('ui.approvalNote', { id: approvalModal.approvalId }),
         })
       }
     }
-    const resp = await apiApproveRequest(approvalModal.approvalId, '用户确认')
+    const resp = await apiApproveRequest(approvalModal.approvalId, t('ui.userConfirmed'))
     approvalModal.open = false
     const data = (resp as any)?.data?.data ?? (resp as any)?.data
     if (data?.executed && data?.result) {
-      uiMessage.success('已批准并执行完成')
+      uiMessage.success(t('ui.approvedExecuted'))
     } else {
-      uiMessage.success('已批准')
+      uiMessage.success(t('ui.approved'))
     }
   } catch (e) {
     console.error('[Approval] approve failed:', e)
-    uiMessage.error('批准失败，请稍后重试')
+    uiMessage.error(t('ui.approveFailed'))
   } finally {
     approvalModal.loading = false
   }
@@ -822,12 +926,12 @@ async function rejectApproval(): Promise<void> {
   if (!approvalModal.approvalId || approvalModal.loading) return
   approvalModal.loading = true
   try {
-    await apiRejectRequest(approvalModal.approvalId, '用户拒绝')
+    await apiRejectRequest(approvalModal.approvalId, t('ui.userRejected'))
     approvalModal.open = false
-    uiMessage.info('已拒绝该操作')
+    uiMessage.info(t('ui.rejectedOperation'))
   } catch (e) {
     console.error('[Approval] reject failed:', e)
-    uiMessage.error('操作失败，请稍后重试')
+    uiMessage.error(t('ui.operationFailed'))
   } finally {
     approvalModal.loading = false
   }
@@ -849,6 +953,170 @@ async function deleteSession(sessionId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// 会话存档（删除 → 存档：历史列表隐藏，存档卡片页可随时恢复）
+// ---------------------------------------------------------------------------
+const archivedPanelOpen = ref(false)
+
+/** 存档会话（模板菜单无参调用），失败弹 toast（错误策略与 deleteSession wrapper 一致）。 */
+async function archiveSession(sessionId: string): Promise<void> {
+  const result = await _archiveSession(sessionId)
+  if (!result.ok) {
+    uiMessage.error(resolveI18nMessage(t, 'chat.archiveFailed', t('chat.archiveFailed')))
+  }
+}
+
+/** 打开/关闭存档卡片页，打开时加载当前 agent 的存档会话列表。 */
+async function toggleArchivedPanel(): Promise<void> {
+  archivedPanelOpen.value = !archivedPanelOpen.value
+  if (archivedPanelOpen.value) {
+    await _loadArchivedSessions(agentId.value)
+  }
+}
+
+/** 恢复存档会话为正常会话。 */
+async function restoreArchivedSession(sessionId: string): Promise<void> {
+  const result = await _restoreSession(sessionId)
+  if (!result.ok) {
+    uiMessage.error(resolveI18nMessage(t, 'chat.restoreFailed', t('chat.restoreFailed')))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 轮次操作：时间显示 / 复制 / 点赞点踩 / 编辑最后一条用户消息 / 删除一轮
+// ---------------------------------------------------------------------------
+
+const editIndex = ref<number>(-1)
+const editDraft = ref('')
+
+function isEditingMessage(idx: number): boolean {
+  return editIndex.value === idx
+}
+
+/** 最后一条用户消息 = 其后没有其他 user 消息（编辑按钮只出现在它上面） */
+function isLastUserMessage(idx: number): boolean {
+  return (
+    messages.value[idx]?.role === 'user' &&
+    !messages.value.slice(idx + 1).some((m) => m.role === 'user')
+  )
+}
+
+const _pad2 = (n: number) => String(n).padStart(2, '0')
+
+/** 消息时间展示：今天 → HH:mm；同年 → MM-DD HH:mm；跨年 → YYYY-MM-DD HH:mm */
+function formatMsgTime(ts?: string): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  const now = new Date()
+  const hm = `${_pad2(d.getHours())}:${_pad2(d.getMinutes())}`
+  if (d.getFullYear() !== now.getFullYear()) {
+    return `${d.getFullYear()}-${_pad2(d.getMonth() + 1)}-${_pad2(d.getDate())} ${hm}`
+  }
+  if (d.toDateString() === now.toDateString()) return hm
+  return `${_pad2(d.getMonth() + 1)}-${_pad2(d.getDate())} ${hm}`
+}
+
+/** 展示时间：用户 = 发送时刻；assistant = 回复完成时刻（回退轮次时间） */
+function displayTime(msg: ChatMessage): string {
+  return formatMsgTime(msg.role === 'assistant' ? msg.repliedAt || msg.timestamp : msg.timestamp)
+}
+
+async function copyMessage(msg: ChatMessage): Promise<void> {
+  const text = msg.content || ''
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    uiMessage.success(t('chat.copied'))
+  } catch {
+    // 非安全上下文（如 http 局域网部署）无 clipboard API，回退 execCommand
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      uiMessage.success(t('chat.copied'))
+    } catch {
+      uiMessage.error(t('chat.copyFailed'))
+    }
+  }
+}
+
+/** 点赞/点踩（可切换/取消）：乐观更新本地，失败回滚 */
+async function rateReply(msg: ChatMessage, fb: 'like' | 'dislike'): Promise<void> {
+  if (!currentSessionId.value || !msg.timestamp || isStreaming.value) return
+  const prev = msg.feedback
+  const next = prev === fb ? null : fb
+  msg.feedback = next ?? undefined
+  const ok = await _sendFeedback(currentSessionId.value, msg.timestamp, next)
+  if (!ok) msg.feedback = prev
+}
+
+function startEditMessage(idx: number): void {
+  if (isStreaming.value) return
+  const msg = messages.value[idx]
+  if (!msg || msg.role !== 'user') return
+  editIndex.value = idx
+  editDraft.value = msg.content
+}
+
+function cancelEditMessage(): void {
+  editIndex.value = -1
+  editDraft.value = ''
+}
+
+/**
+ * 确认编辑并重发（覆写旧轮）：
+ * 1. deleteRound 删除旧轮 — 后端清 session 记录 + 该轮记忆 + agent 内存历史
+ * 2. 本地 removeRoundFrom 移除旧轮消息
+ * 3. 新文本走 sendMessage() 原链路 — 管线写入新轮 session 记录与新记忆
+ * （删除+重发 = 覆写：不复制发送逻辑，session/上下文/记忆由既有链路保证一致）
+ */
+async function confirmEditMessage(): Promise<void> {
+  const idx = editIndex.value
+  const msg = messages.value[idx]
+  const newText = editDraft.value.trim()
+  if (!msg || msg.role !== 'user' || !newText || isStreaming.value) return
+  if (!agentId.value || !currentSessionId.value) {
+    uiMessage.error(t('chat.selectAgentFirst'))
+    return
+  }
+  if (!msg.timestamp) {
+    uiMessage.error(t('chat.deleteRoundFailed'))
+    cancelEditMessage()
+    return
+  }
+  const result = await _deleteRound(currentSessionId.value, msg.timestamp)
+  if (!result.ok) {
+    uiMessage.error(t('chat.deleteRoundFailed'))
+    return
+  }
+  chatStore.removeRoundFrom(idx)
+  cancelEditMessage()
+  chatStore.setInputText(newText)
+  await sendMessage()
+}
+
+/** 删除一轮记录（模板 popconfirm 确认后调用） */
+async function deleteRoundAt(idx: number): Promise<void> {
+  const msg = messages.value[idx]
+  if (!msg || msg.role !== 'user' || isStreaming.value || !currentSessionId.value) return
+  if (!msg.timestamp) {
+    uiMessage.error(t('chat.deleteRoundFailed'))
+    return
+  }
+  const result = await _deleteRound(currentSessionId.value, msg.timestamp)
+  if (!result.ok) {
+    uiMessage.error(t('chat.deleteRoundFailed'))
+    return
+  }
+  chatStore.removeRoundFrom(idx)
+}
+
+// ---------------------------------------------------------------------------
 // Message Sending with SSE Streaming
 // ---------------------------------------------------------------------------
 async function sendMessage() {
@@ -861,9 +1129,14 @@ async function sendMessage() {
   if (isRecording.value) stopRecording()
 
   // Build user message
+  // timestamp 同时是轮次定位键：随 client_timestamp 发给后端持久化到
+  // 该轮消息 metadata（服务端 add_message 用自己的 now 落盘，客户端
+  // 时间戳不落盘会导致编辑/删除/反馈无法定位实时轮次）
+  const roundTimestamp = new Date().toISOString()
   const userMsg: ChatMessage = {
     role: 'user',
     content: text,
+    timestamp: roundTimestamp,
     attachments: pendingFiles.value.map((f) => ({
       name: f.name,
       type: f.type,
@@ -874,6 +1147,7 @@ async function sendMessage() {
   chatStore.addMessage(userMsg)
 
   // Prepare assistant placeholder
+  // assistant.timestamp = 所在轮的用户发送时刻（轮次定位键，点赞点踩用）
   const assistantMsg: ChatMessage = {
     role: 'assistant',
     content: '',
@@ -882,8 +1156,12 @@ async function sendMessage() {
     toolCalls: [],
     toolOpen: false,
     streaming: true,
+    timestamp: roundTimestamp,
   }
-  chatStore.addMessage(assistantMsg)
+  // 必须使用 store 返回的 proxy 引用继续写入（R-1 修复）：
+  // 沿用原始引用会绕过 Vue 响应式代理，SSE 事件不触发依赖收集，
+  // 思考/正文会等到组件下次整帧重渲染才一次性出现（无法逐字显示）。
+  const streamingMsg = chatStore.addMessage(assistantMsg)
 
   chatStore.setInputText('')
   const filesToUpload = [...pendingFiles.value]
@@ -922,6 +1200,8 @@ async function sendMessage() {
         session_id: currentSessionId.value,
         message: text,
         file_ids: fileIds.length > 0 ? fileIds : undefined,
+        // 轮次定位键：随 metadata 持久化，供编辑/删除/反馈定位实时轮次
+        client_timestamp: roundTimestamp,
         // 手动模型切换：携带用户选择的模型。
         // 含富媒体文件时不携带（置空），交由后端自动路由至多模态能力 LLM。
         model: fileIds.length > 0 ? undefined : (selectedModel.value || undefined),
@@ -957,7 +1237,7 @@ async function sendMessage() {
 
         try {
           const event = JSON.parse(data)
-          processSSEEvent(event, assistantMsg)
+          processSSEEvent(event, streamingMsg)
         } catch {
           // Non-JSON line, skip
         }
@@ -966,10 +1246,12 @@ async function sendMessage() {
     }
   } catch (err: any) {
     if (err.name !== 'AbortError') {
-      assistantMsg.content += `\n\n**Error:** ${err.message || 'Stream failed.'}`
+      streamingMsg.content += `\n\n**Error:** ${err.message || 'Stream failed.'}`
     }
   } finally {
-    assistantMsg.streaming = false
+    streamingMsg.streaming = false
+    // 回复完成时刻（消息底部时间展示用；轮次定位键仍是 timestamp）
+    streamingMsg.repliedAt = new Date().toISOString()
     chatStore.setStreaming(false)
     abortController = null
     scrollToBottom()
@@ -981,6 +1263,35 @@ function processSSEEvent(event: any, msg: ChatMessage) {
   const type = event.type || event.event
 
   switch (type) {
+    case 'memory_progress': {
+      // 实时记忆检索进度：临时显示，回复内容开始后由 chunk 分支清空
+      const stage = event.stage || ''
+      const retriever = event.retriever || ''
+      const names: Record<string, string> = {
+        unified: '统一检索',
+        MoERetriever: 'MoE 专家路由',
+        CacheRetriever: '缓存检索',
+        FallbackRetriever: '兜底检索',
+      }
+      const rName = names[retriever] || retriever
+      if (stage === 'retriever_start') {
+        retrievalStatus.value = `记忆检索中（${rName}）…`
+      } else if (stage === 'retriever_done') {
+        retrievalStatus.value = `${rName} 完成：命中 ${event.count ?? 0} 条 (${event.ms ?? 0}ms)`
+      } else if (stage === 'retriever_error' || stage === 'retriever_timeout') {
+        retrievalStatus.value = `${rName} 检索异常，降级下一通道…`
+      } else if (stage === 'moe_gate') {
+        retrievalStatus.value = `MoE 专家路由：激活 ${(event.experts || []).length} 个专家`
+      } else if (stage === 'moe_expert') {
+        retrievalStatus.value = `专家下钻 ${event.expert || ''}：${event.count ?? 0} 条`
+      } else if (stage === 'moe_done') {
+        retrievalStatus.value = event.fallback
+          ? `全库语义兜底：命中 ${event.count ?? 0} 条`
+          : `专家检索完成：${event.count ?? 0} 条`
+      }
+      break
+    }
+
     case 'reasoning':
     case 'thinking':
       msg.reasoning = (msg.reasoning || '') + (event.content || event.text || '')
@@ -1034,6 +1345,8 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'content':
     case 'delta':
     case 'chunk':
+      // 回复内容开始 → 检索已结束，清空临时进度显示
+      if (retrievalStatus.value) retrievalStatus.value = ''
       msg.content += event.content || event.text || event.delta || ''
       break
 
@@ -1605,6 +1918,10 @@ watch(agentId, (newId, oldId) => {
     chatStore.clearMessages()
     chatStore.setCurrentSession(null)
     loadSessions()
+    // 存档卡片页开着时随 agent 切换刷新列表
+    if (archivedPanelOpen.value) {
+      _loadArchivedSessions(newId)
+    }
   }
 })
 
@@ -1649,7 +1966,7 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   z-index: 100;
-  background: rgba(99, 102, 241, 0.12);
+  background: var(--nr-primary-soft);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -1688,8 +2005,8 @@ onBeforeUnmount(() => {
   min-width: 280px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(0, 0, 0, 0.15);
+  border-right: 1px solid var(--nr-glass-border);
+  background: var(--nr-bg-inset);
   transition: width 0.3s ease, min-width 0.3s ease;
 }
 
@@ -1728,12 +2045,12 @@ onBeforeUnmount(() => {
 }
 
 .nr-session-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--nr-glass-bg-hover);
 }
 
 .nr-session-item.active {
-  background: rgba(99, 102, 241, 0.12);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: var(--nr-primary-soft);
+  border: 1px solid var(--nr-primary-soft-border);
 }
 
 .nr-session-icon {
@@ -1789,7 +2106,7 @@ onBeforeUnmount(() => {
   transition: all 0.2s ease;
 }
 .nr-chat-toggle-btn:hover { border-color: var(--nr-glass-border-hover); color: var(--nr-text-primary); background: var(--nr-glass-bg-hover); }
-.nr-chat-toggle-btn.cu-active { border-color: rgba(129, 140, 248, 0.7); color: var(--nr-primary-light, #818cf8); background: rgba(99, 102, 241, 0.15); }
+.nr-chat-toggle-btn.cu-active { border-color: color-mix(in srgb, var(--nr-primary-light) 70%, transparent); color: var(--nr-primary-light, #818cf8); background: var(--nr-primary-soft); }
 
 /* 思考程度三档选择器（简单/标准/深度） */
 .nr-thinking-seg {
@@ -1816,7 +2133,7 @@ onBeforeUnmount(() => {
 .nr-thinking-opt:hover { color: var(--nr-text-primary); }
 .nr-thinking-opt.active {
   color: #fff;
-  background: rgba(99, 102, 241, 0.75);
+  background: var(--nr-primary);
 }
 @media (max-width: 720px) {
   .nr-thinking-seg { display: none; }
@@ -1835,7 +2152,7 @@ onBeforeUnmount(() => {
 .nr-glass-dropdown {
   background: var(--nr-bg-surface); backdrop-filter: blur(40px) saturate(180%);
   border: 1px solid var(--nr-glass-border); border-radius: 14px;
-  padding: 6px; min-width: 220px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  padding: 6px; min-width: 220px; box-shadow: var(--nr-shadow-lg);
   display: flex; flex-direction: column; gap: 2px;
 }
 .nr-glass-dropdown-item {
@@ -1844,7 +2161,7 @@ onBeforeUnmount(() => {
   font-size: 13px; cursor: pointer; transition: all 0.18s ease; white-space: nowrap;
 }
 .nr-glass-dropdown-item:hover { color: var(--nr-text-primary); background: var(--nr-glass-bg-hover); }
-.nr-glass-dropdown-item.is-active { color: var(--nr-primary-light); background: rgba(99, 102, 241, 0.1); font-weight: 550; }
+.nr-glass-dropdown-item.is-active { color: var(--nr-primary-light); background: var(--nr-primary-soft); font-weight: 550; }
 .nr-glass-dropdown-divider { height: 1px; background: var(--nr-glass-border); margin: 4px 8px; }
 
 .nr-session-empty {
@@ -1948,7 +2265,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   font-size: 18px;
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--nr-glass-bg);
 }
 
 .nr-msg-body {
@@ -1971,21 +2288,21 @@ onBeforeUnmount(() => {
 }
 
 .nr-msg--user .nr-msg-content {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.2));
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: var(--nr-bubble-user);
+  border: 1px solid var(--nr-bubble-user-border);
   color: var(--nr-text-primary);
 }
 
 .nr-msg--assistant .nr-msg-content {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
   color: var(--nr-text-primary);
 }
 
 /* Reasoning Block */
 .nr-msg-reasoning {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
   border-radius: 10px;
   overflow: hidden;
 }
@@ -2003,7 +2320,7 @@ onBeforeUnmount(() => {
 }
 
 .nr-reasoning-header:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--nr-glass-bg-hover);
 }
 
 .nr-reasoning-toggle {
@@ -2017,7 +2334,7 @@ onBeforeUnmount(() => {
   color: var(--nr-text-tertiary);
   line-height: 1.5;
   white-space: pre-wrap;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid var(--nr-border-light);
 }
 
 /* Tool Call Block */
@@ -2059,7 +2376,7 @@ onBeforeUnmount(() => {
 .nr-tool-args {
   font-size: 12px;
   color: var(--nr-text-secondary);
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--nr-bg-inset);
   border-radius: 6px;
   padding: 8px 10px;
   margin: 0;
@@ -2092,7 +2409,7 @@ onBeforeUnmount(() => {
 .approval-command {
   font-size: 12px;
   color: var(--nr-text-primary, inherit);
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--nr-bg-inset);
   border-radius: 6px;
   padding: 8px 10px;
   margin: 0;
@@ -2105,7 +2422,7 @@ onBeforeUnmount(() => {
 
 .approval-reason {
   font-size: 13px;
-  color: rgba(255, 170, 80, 0.9);
+  color: var(--nr-warning);
   line-height: 1.5;
 }
 
@@ -2117,7 +2434,7 @@ onBeforeUnmount(() => {
 
 .nr-tool-result {
   margin-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--nr-glass-border);
   padding-top: 8px;
 }
 
@@ -2132,7 +2449,7 @@ onBeforeUnmount(() => {
 .nr-tool-result-content {
   font-size: 12px;
   color: var(--nr-text-secondary);
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--nr-bg-inset);
   border-radius: 6px;
   padding: 8px 10px;
   margin: 0;
@@ -2154,16 +2471,16 @@ onBeforeUnmount(() => {
   gap: 8px;
   padding: 8px 12px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
   font-size: 12px;
   color: var(--nr-text-secondary);
   transition: background 0.2s, border-color 0.2s;
 }
 
 .nr-attachment-thumb:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--nr-glass-bg-hover);
+  border-color: var(--nr-glass-border-hover);
 }
 
 .nr-attachment--image {
@@ -2210,8 +2527,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px;
   padding: 8px 14px;
-  background: rgba(99, 102, 241, 0.08);
-  border: 1px solid rgba(99, 102, 241, 0.15);
+  background: var(--nr-primary-soft);
+  border: 1px solid var(--nr-primary-soft-border);
   border-radius: 12px;
   min-width: 280px;
 }
@@ -2222,7 +2539,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   border: none;
   background: var(--nr-primary);
-  color: var(--nr-text-primary);
+  color: #fff;
   font-size: 14px;
   cursor: pointer;
   display: flex;
@@ -2244,7 +2561,7 @@ onBeforeUnmount(() => {
 
 .nr-audio-progress-bar {
   height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--nr-glass-bg-active);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -2265,8 +2582,8 @@ onBeforeUnmount(() => {
 }
 
 .nr-audio-speed-btn {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--nr-glass-bg-hover);
+  border: 1px solid var(--nr-glass-border);
   border-radius: 6px;
   padding: 2px 8px;
   font-size: 11px;
@@ -2276,7 +2593,7 @@ onBeforeUnmount(() => {
 }
 
 .nr-audio-speed-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--nr-glass-bg-active);
 }
 
 /* TTS Action Button */
@@ -2290,8 +2607,8 @@ onBeforeUnmount(() => {
   gap: 6px;
   padding: 4px 12px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--nr-glass-border);
+  background: var(--nr-glass-bg);
   color: var(--nr-text-secondary);
   font-size: 12px;
   cursor: pointer;
@@ -2299,11 +2616,129 @@ onBeforeUnmount(() => {
 }
 
 .nr-tts-btn:hover {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: rgba(99, 102, 241, 0.2);
+  background: var(--nr-primary-soft);
+  border-color: var(--nr-primary-soft-border);
 }
 
 .nr-tts-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Message footer: 时间 + 操作条（复制/点赞/点踩/编辑/删除轮次） */
+.nr-msg-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: 0.75;
+  transition: opacity 0.2s;
+}
+
+.nr-msg:hover .nr-msg-footer {
+  opacity: 1;
+}
+
+.nr-msg-time {
+  font-size: 11px;
+  color: var(--nr-text-muted);
+  font-family: var(--nr-font-mono);
+  user-select: none;
+}
+
+.nr-msg-footer-spacer {
+  flex: 0 0 6px;
+}
+
+.nr-msg-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--nr-text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.nr-msg-action:hover {
+  background: var(--nr-glass-bg-active);
+  color: var(--nr-text-primary);
+}
+
+.nr-msg-action--active {
+  color: var(--nr-primary);
+  background: var(--nr-primary-soft);
+}
+
+.nr-msg-action--active-negative {
+  color: var(--nr-danger, #e5484d);
+  background: rgba(229, 72, 77, 0.12);
+}
+
+.nr-msg-action--danger:hover {
+  color: var(--nr-danger, #e5484d);
+}
+
+/* 编辑最后一条用户消息（内联编辑框） */
+.nr-msg-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nr-msg-edit-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--nr-primary-soft-border);
+  background: var(--nr-glass-bg);
+  color: var(--nr-text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.nr-msg-edit-textarea:focus {
+  outline: none;
+  border-color: var(--nr-primary);
+}
+
+.nr-msg-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.nr-edit-btn {
+  padding: 5px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--nr-glass-border);
+  background: var(--nr-glass-bg);
+  color: var(--nr-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.nr-edit-btn:hover {
+  background: var(--nr-glass-bg-active);
+}
+
+.nr-edit-btn--primary {
+  background: var(--nr-primary-soft);
+  border-color: var(--nr-primary-soft-border);
+  color: var(--nr-primary);
+}
+
+.nr-edit-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -2334,7 +2769,7 @@ onBeforeUnmount(() => {
 /* Input Area */
 .nr-chat-input-area {
   padding: 12px 24px 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--nr-glass-border);
 }
 
 .nr-pending-files {
@@ -2350,8 +2785,8 @@ onBeforeUnmount(() => {
   gap: 8px;
   padding: 6px 12px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
   font-size: 12px;
   color: var(--nr-text-secondary);
 }
@@ -2490,8 +2925,8 @@ onBeforeUnmount(() => {
 .nr-chat-textarea {
   flex: 1;
   resize: none;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
   border-radius: 12px;
   padding: 10px 14px;
   color: var(--nr-text-primary);
@@ -2505,7 +2940,7 @@ onBeforeUnmount(() => {
 
 .nr-chat-textarea:focus {
   border-color: var(--nr-primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  box-shadow: 0 0 0 3px var(--nr-primary-ring);
 }
 
 .nr-chat-textarea::placeholder {
@@ -2517,8 +2952,8 @@ onBeforeUnmount(() => {
   margin: 10px 0;
   border-radius: 10px;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--nr-bg-inset-deep);
+  border: 1px solid var(--nr-glass-border);
 }
 
 :deep(.nr-code-header) {
@@ -2526,8 +2961,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 6px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--nr-glass-bg);
+  border-bottom: 1px solid var(--nr-glass-border);
 }
 
 :deep(.nr-code-lang) {
@@ -2539,8 +2974,8 @@ onBeforeUnmount(() => {
 }
 
 :deep(.nr-code-copy-btn) {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--nr-glass-bg-hover);
+  border: 1px solid var(--nr-glass-border);
   border-radius: 4px;
   padding: 1px 8px;
   font-size: 11px;
@@ -2550,7 +2985,7 @@ onBeforeUnmount(() => {
 }
 
 :deep(.nr-code-copy-btn:hover) {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--nr-glass-bg-active);
   color: var(--nr-text-primary);
 }
 
@@ -2567,7 +3002,7 @@ onBeforeUnmount(() => {
 }
 
 :deep(.nr-code-inline) {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--nr-bg-inset);
   border-radius: 4px;
   padding: 1px 5px;
   font-family: var(--nr-font-mono);
@@ -2583,12 +3018,12 @@ onBeforeUnmount(() => {
   cursor: pointer;
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--nr-glass-border);
   transition: border-color 0.2s;
 }
 
 :deep(.nr-inline-image:hover) {
-  border-color: rgba(99, 102, 241, 0.3);
+  border-color: color-mix(in srgb, var(--nr-primary) 30%, transparent);
 }
 
 :deep(.nr-inline-image img) {
@@ -2603,7 +3038,7 @@ onBeforeUnmount(() => {
   padding: 6px 12px;
   font-size: 11px;
   color: var(--nr-text-muted);
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--nr-bg-inset);
   text-align: center;
 }
 
@@ -2707,8 +3142,41 @@ onBeforeUnmount(() => {
   min-width: 280px;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(0, 0, 0, 0.15);
+  border-left: 1px solid var(--nr-glass-border);
+  background: var(--nr-bg-inset);
+}
+
+.nr-chat-archived-panel {
+  width: 280px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--nr-glass-border);
+  background: var(--nr-bg-inset);
+}
+
+.nr-archived-close {
+  background: none;
+  border: none;
+  color: var(--nr-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 8px;
+}
+
+.nr-archived-restore-btn {
+  background: var(--nr-bg-elevated, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--nr-border-light);
+  border-radius: 8px;
+  color: var(--nr-text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.nr-archived-restore-btn:hover {
+  border-color: var(--nr-primary, var(--nr-border-light));
 }
 
 .nr-history-header {
@@ -2716,7 +3184,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--nr-border-light);
 }
 
 .nr-history-title {
@@ -2727,5 +3195,30 @@ onBeforeUnmount(() => {
 
 .nr-history-search {
   padding: 0 16px 12px;
+}
+
+/* 实时记忆检索进度条（临时态，不落历史） */
+.nr-retrieval-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  margin: 0 16px 6px;
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  background: var(--nr-bg-secondary);
+  border: 1px solid var(--nr-border);
+  border-radius: 10px;
+}
+
+.nr-retrieval-spinner {
+  display: inline-block;
+  animation: nr-retrieval-spin 1.2s linear infinite;
+  color: var(--nr-accent);
+}
+
+@keyframes nr-retrieval-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>
