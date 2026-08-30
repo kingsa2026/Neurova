@@ -157,6 +157,11 @@ class ToolExecutor:
         "browser_click_role": "_execute_browser_click_role",
         "browser_fill_role": "_execute_browser_fill_role",
         "planning": "_execute_planning",
+        "youtube_transcript": "_execute_youtube_transcript",
+        "bilibili_search": "_execute_bilibili_search",
+        "rss_read": "_execute_rss_read",
+        "v2ex_hot": "_execute_v2ex_hot",
+        "social_search": "_execute_social_search",
         "emotion_analyze": "_execute_emotion_analyze",
         "asr_transcribe": "_execute_asr_transcribe",
         "tts_synthesize": "_execute_tts_synthesize",
@@ -262,10 +267,20 @@ class ToolExecutor:
         P2 修复: user_id/agent_id 位于 agent.config 上，Agent 实例本身没有这两个属性。
         原实现 getattr(self._agent, "user_id"/"agent_id") 恒为 None/""，
         导致 ToolEngine 安全防护、治理裁决、审批请求、审计日志全部丢失用户身份。
+
+        三层隔离贯通: agent._current_user_id（JWT 登录用户，经
+        ChatPipeline._init_agent_state 从 metadata 透传）优先于 config 层
+        身份——config 是共享单例的静态配置，请求级登录用户才是归属主体。
         """
         agent = self._agent
+        request_user = getattr(agent, "_current_user_id", None)
         config = getattr(agent, "config", None)
-        user_id = getattr(agent, "user_id", None) or getattr(config, "user_id", None)
+        user_id = (
+            request_user
+            or getattr(agent, "user_id", None)
+            or getattr(config, "user_id", None)
+            or "default"
+        )
         agent_id = getattr(agent, "agent_id", None) or getattr(config, "agent_id", None)
         return user_id, agent_id
 
@@ -675,7 +690,13 @@ class ToolExecutor:
             # Skill 工具
             if self._skill_registry and self._skill_registry.has_skill(tool_name):
                 tool_source = "skill_system"
-                result = await self.execute_skill_tool(tool_name, params)
+                # 隔离注入：身份并入 params（服务端赋值优先，防 LLM 参数伪造）
+                _caller_id = str(self._agent_identity()[0] or "")
+                result = await self.execute_skill_tool(
+                    tool_name,
+                    {**(params or {}), "_caller_user_id": _caller_id},
+                    {"user_id": _caller_id},
+                )
                 success = self._result_is_success(result)
                 return result
 
@@ -683,7 +704,13 @@ class ToolExecutor:
             if self.tool_router:
                 try:
                     tool_source = "tool_router"
-                    result = await self.tool_router.route(tool_name, params)
+                    # P0-3：请求级身份穿透到 MCP 防火墙（多用户共享连接，
+                    # 裁决必须按发起请求的用户）
+                    result = await self.tool_router.route(
+                        tool_name,
+                        params,
+                        user_id=self._agent_identity()[0] or None,
+                    )
                     success = self._result_is_success(result)
                     return result
                 except Exception as e:
@@ -708,49 +735,42 @@ class ToolExecutor:
                 logger.exception("on_tool_executed 钩子失败: %s", tool_name)
 
     async def _governance_precheck(self, tool_name: str, params: Dict) -> Optional[Dict]:
-        """治理预检（async：SANDBOX 判定的 Docker 后端为异步执行）"""
-        """
-        执行前统一治理预检（方案 P0-1.5 集成点）。
+        """执行前统一治理预检（方案 P0-1.5 集成点，async：SANDBOX 的 Docker
+        后端为异步执行）。
 
-        覆盖所有执行路径（ToolEngine/builtin/skill/router），对携带
-        命令或文件路径的工具做四级裁决：allow / deny / ask / sandbox。
+        覆盖所有执行路径（ToolEngine/builtin/skill/router），做四级裁决：
+        allow / deny / ask / sandbox。
+
+        P0-2（评测 M3/M4）：
+        - MCP 工具（mcp.* 命名空间）走 scan_all 全参数扫描——参数键名不再
+          决定是否被裁决
+        - 治理不可用分级 fail-closed：MCP/未知来源 deny + 审计，内置白名单
+          放行（治理是可选增强，不因治理故障瘫痪基础能力）
 
         Returns:
-            None: 放行（无可裁决内容，或裁决为 ALLOW）。
-            Dict: DENY/SANDBOX/ASK 的替代结果，调用方应直接返回。
+            None: 放行（无可裁决内容，或裁决为 ALLOW，或内置工具+治理故障）。
+            Dict: DENY/SANDBOX/ASK/治理故障的替代结果，调用方应直接返回。
         """
+        is_mcp = tool_name.startswith("mcp.")
+        is_builtin = tool_name in self._builtin_dispatch
+
         try:
             from neurova.security.governance import GovernanceDecision, get_governance
-        except Exception:
-            return None  # 治理模块不可用时放行（可选依赖）
 
-        if not isinstance(params, dict):
-            return None
-
-        command = ""
-        for key in ("command", "code"):
-            value = params.get(key)
-            if isinstance(value, str) and value.strip():
-                command = value
-                break
-        file_path = params.get("file_path") or params.get("path")
-        file_path = file_path if isinstance(file_path, str) and file_path else None
-
-        # 无可裁决内容（如 memory_search / screenshot 等），直接放行
-        if not command and not file_path:
-            return None
-
-        try:
-            verdict = get_governance().evaluate(
-                command=command,
-                tool_name=tool_name,
+            verdict = get_governance().evaluate_tool_call(
+                tool_name,
+                params,
                 user_id=self._agent_identity()[0],
-                file_paths=file_path,
+                scan_all=is_mcp,
             )
         except Exception as e:
-            logger.warning("治理预检异常，放行 %s: %s", tool_name, e)
-            return None
+            logger.warning("治理预检不可用 %s（fail-%s）: %s",
+                           tool_name, "open/builtin" if is_builtin else "closed", e)
+            return self._governance_fail_closed(tool_name, is_mcp, is_builtin, f"治理评估异常: {e}")
 
+        if verdict is None:
+            # 无可裁决内容（如 memory_search / screenshot 等），直接放行
+            return None
         self._audit_governance(tool_name, verdict.to_dict(), params)
 
         if verdict.decision == GovernanceDecision.DENY:
@@ -762,6 +782,18 @@ class ToolExecutor:
             }
 
         if verdict.decision == GovernanceDecision.SANDBOX:
+            if is_mcp:
+                # MCP 调用（远端协议/子进程）没有命令行沙箱语义——JSON 参数
+                # 落沙箱执行无意义，按阻断处理（fail-closed 语义一致）
+                logger.warning("MCP 工具 %s 命中沙箱策略但无沙箱执行语义，已阻止", tool_name)
+                return {
+                    "success": False,
+                    "error": "该 MCP 调用命中沙箱策略，已阻止执行: " + "; ".join(verdict.reasons),
+                    "governance": verdict.to_dict(),
+                }
+            from neurova.security.governance import extract_adjudicable_params
+
+            command, file_path = extract_adjudicable_params(params, scan_all=False)
             if command:
                 from neurova.sandbox.exec_sandbox import execute_in_sandbox_async
 
@@ -794,6 +826,29 @@ class ToolExecutor:
 
         return None  # ALLOW 放行
 
+    def _governance_fail_closed(
+        self, tool_name: str, is_mcp: bool, is_builtin: bool, reason: str
+    ) -> Optional[Dict]:
+        """治理不可用时的分级处置（P0-2 fail-open → 分级 fail-closed）。
+
+        - 内置白名单工具：放行（治理是可选增强，基础能力不因治理故障瘫痪）
+        - MCP / 未知来源（动态注册、来源不明）：deny 并留痕——未知代码面
+          在无治理审查时放行等于裸奔
+        """
+        if is_builtin and not is_mcp:
+            return None
+        logger.warning("治理不可用，拒绝非内置工具 %s: %s", tool_name, reason)
+        return {
+            "success": False,
+            "error": f"治理服务不可用，已拒绝执行（fail-closed）: {reason}",
+            "governance": {
+                "decision": "deny",
+                "reasons": [reason],
+                "severity": "none",
+                "finding_count": 0,
+            },
+        }
+
     def _create_approval_request(self, tool_name: str, params: Dict, verdict) -> Optional[str]:
         """为 ASK 裁决创建待审批请求；失败不阻断主流程（返回 None 走原语义）。"""
         try:
@@ -824,9 +879,18 @@ class ToolExecutor:
                 AuditEventType,
                 AuditLogEntry,
                 AuditLogger,
+                AuditSeverity,
             )
 
             decision = governance_info.get("decision", "unknown")
+            # P0-2 修复：severity 是 AuditLogEntry 必填字段，此前未传导致
+            # 所有治理审计写入静默失败（TypeError 被吞），deny 留痕落不了盘
+            audit_severity = {
+                "deny": AuditSeverity.HIGH,
+                "sandbox": AuditSeverity.MEDIUM,
+                "ask": AuditSeverity.MEDIUM,
+                "allow": AuditSeverity.LOW,
+            }.get(decision, AuditSeverity.MEDIUM)
             AuditLogger().log(
                 AuditLogEntry(
                     event_type=(
@@ -834,6 +898,7 @@ class ToolExecutor:
                         if decision == "allow"
                         else AuditEventType.SECURITY_EVENT
                     ),
+                    severity=audit_severity,
                     user_id=str(self._agent_identity()[0] or ""),
                     action=f"governance:{decision}",
                     details={"tool": tool_name, "governance": governance_info},
@@ -843,11 +908,37 @@ class ToolExecutor:
             logger.debug("治理审计日志写入失败: %s", tool_name, exc_info=True)
 
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
-        """执行内置工具（分派表驱动，见 _builtin_dispatch 注释）"""
+        """执行内置工具(分派表驱动,见 _builtin_dispatch 注释)"""
         method_name = self._builtin_dispatch.get(tool_name)
         if method_name is None:
             return {"error": f"未知内置工具: {tool_name}"}
+        # 三层隔离:browser_* 路径注入请求级 userId 到 ContextVar,
+        # 让 BrowserManager(单例)能按 user 池化 camofox 后端,避免 _tabs/_active_target_id 跨用户污染。
+        if tool_name.startswith("browser_"):
+            self._inject_browser_identity()
         return await getattr(self, method_name)(params)
+
+    def _inject_browser_identity(self) -> None:
+        """从 _agent_identity 取 userId,写到 ContextVar + 通知 supervisor track。
+        失败不阻断——单租户场景 userId=None 时仍走 fallback 路径。"""
+        try:
+            user_id, _ = self._agent_identity()
+        except Exception:
+            return
+        if not user_id:
+            return
+        try:
+            from neurova.core.identity_context import set_request_user_id
+
+            set_request_user_id(user_id)
+        except ImportError:
+            pass
+        try:
+            from neurova.computer_use.camofox_supervisor import get_camofox_supervisor
+
+            get_camofox_supervisor().track_user_id(user_id)
+        except Exception:
+            pass
 
     # ── 蜂群工具（SwarmManager 深度模块的薄封装） ────────────────
 
@@ -2113,7 +2204,10 @@ class ToolExecutor:
             return {"error": f"role 输入失败: {str(e)}"}
 
     async def _execute_planning(self, params: Dict) -> Dict:
-        """任务计划工具：7 个子命令（create/update/list/get/set_active/mark_step/delete）"""
+        """任务计划工具：7 个子命令（create/update/list/get/set_active/mark_step/delete）。
+
+        三层隔离：调用者身份 (user_id, agent_id) 注入归属，计划按归属隔离。
+        """
         command = str(params.get("command") or "").strip()
         if not command:
             return {"error": "缺少 command 参数"}
@@ -2121,13 +2215,86 @@ class ToolExecutor:
             from neurova.planning import PlanningTool, get_planning_store
 
             tool = PlanningTool(store=get_planning_store())
+            try:
+                caller_user_id, caller_agent_id = self._agent_identity()
+            except Exception:
+                caller_user_id, caller_agent_id = "default", "default"
             kwargs = {
                 k: v for k, v in params.items() if k != "command" and v is not None
             }
-            return await tool.run_command(command=command, **kwargs)
+            return await tool.run_command(
+                command=command,
+                owner_agent_id=caller_agent_id or "default",
+                owner_user_id=caller_user_id or "default",
+                **kwargs,
+            )
         except Exception as e:
             logger.error("planning 工具执行失败: %s", e)
             return {"error": f"planning 工具执行失败: {str(e)}"}
+
+    # ── Web Reach 平台直达（youtube/bilibili/rss/v2ex/social，共用分发）──
+
+    async def _web_reach_call(self, tool_name: str, params: Dict) -> Dict:
+        """Web Reach 统一分发。阻塞网络/子进程调用放线程池，避免卡事件循环。"""
+        import asyncio as _asyncio
+
+        params = params or {}
+        try:
+            from neurova.web_reach import (
+                bilibili_search,
+                rss_read,
+                social_search,
+                v2ex_hot,
+                web_read,
+                youtube_transcript,
+            )
+
+            if tool_name == "youtube_transcript":
+                url = str(params.get("url") or "").strip()
+                if not url:
+                    return {"error": "缺少 url 参数"}
+                return await _asyncio.to_thread(youtube_transcript, url)
+            if tool_name == "bilibili_search":
+                query = str(params.get("query") or "").strip()
+                if not query:
+                    return {"error": "缺少 query 参数"}
+                return await _asyncio.to_thread(bilibili_search, query, int(params.get("limit", 5)))
+            if tool_name == "rss_read":
+                url = str(params.get("url") or "").strip()
+                if not url:
+                    return {"error": "缺少 url 参数"}
+                return await _asyncio.to_thread(rss_read, url, int(params.get("limit", 10)))
+            if tool_name == "v2ex_hot":
+                return await _asyncio.to_thread(v2ex_hot, int(params.get("limit", 10)))
+            if tool_name == "social_search":
+                platform = str(params.get("platform") or "").strip()
+                query = str(params.get("query") or "").strip()
+                if not platform or not query:
+                    return {"error": "缺少 platform 或 query 参数"}
+                # 三层隔离：请求级登录用户（_current_user_id）作为凭据分桶主体
+                user_id = getattr(self._agent, "_current_user_id", None) or "default"
+                return await _asyncio.to_thread(
+                    social_search, platform, query, user_id=user_id
+                )
+            return {"error": f"未知 web_reach 工具: {tool_name}"}
+        except Exception as e:
+            logger.error("web_reach 工具 %s 执行失败: %s", tool_name, e)
+            return {"error": f"web_reach 工具执行失败: {str(e)}"}
+
+    async def _execute_youtube_transcript(self, params: Dict) -> Dict:
+        return await self._web_reach_call("youtube_transcript", params)
+
+    async def _execute_bilibili_search(self, params: Dict) -> Dict:
+        return await self._web_reach_call("bilibili_search", params)
+
+    async def _execute_rss_read(self, params: Dict) -> Dict:
+        return await self._web_reach_call("rss_read", params)
+
+    async def _execute_v2ex_hot(self, params: Dict) -> Dict:
+        return await self._web_reach_call("v2ex_hot", params)
+
+    async def _execute_social_search(self, params: Dict) -> Dict:
+        return await self._web_reach_call("social_search", params)
 
     async def _execute_emotion_analyze(self, params: Dict) -> Dict:
         """执行情感分析"""
