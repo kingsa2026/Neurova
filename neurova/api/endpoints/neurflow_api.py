@@ -1300,6 +1300,10 @@ async def set_node_mock(node_id: str, body: MockNodeRequest):
 
 from fastapi import Request  # noqa: E402
 from neurova.collaboration.neurflow import webhook_ingress  # noqa: E402
+from neurova.core.trigger_rate_limiter import TriggerRateLimiter  # noqa: E402
+
+# 每 trigger_id 缓存的限流桶（跨请求共享；rate_limiter_for 消费）
+_WEBHOOK_RATE_LIMITERS: Dict[str, TriggerRateLimiter] = {}
 
 
 def _webhook_ingress_deps() -> Dict[str, Any]:
@@ -1347,15 +1351,39 @@ webhook_ingress.set_deps_provider(_webhook_ingress_deps)
 
 @router.post("/triggers/webhook/{trigger_id}/receive")
 async def receive_webhook_trigger(trigger_id: str, request: Request):
-    """外部系统入站触发工作流（HMAC 验签 + 限流 + 派发；逻辑在 webhook_ingress）。"""
+    """外部系统入站触发工作流（HMAC 验签 + 限流 + 派发；逻辑在 webhook_ingress）。
+
+    投递审计：无论成败均落 webhook_deliveries（P1 Step 7 表）。
+    """
     payload = await request.body()
     header_sig = request.headers.get("X-Hub-Signature-256")
     try:
-        return await webhook_ingress.handle_webhook_ingress(
+        result = await webhook_ingress.handle_webhook_ingress(
             trigger_id, payload, header_sig
         )
     except webhook_ingress.IngressRejected as e:
+        sig_valid = e.reason not in ("INVALID_SIGNATURE", "TRIGGER_NOT_FOUND")
+        try:
+            _get_storage().save_delivery(
+                trigger_id=trigger_id,
+                signature_valid=sig_valid,
+                execution_id=None,
+                status_code=e.status_code,
+            )
+        except Exception:
+            logger.warning("delivery record failed (rejected path): %s", trigger_id)
         raise HTTPException(status_code=e.status_code, detail=e.reason)
+
+    try:
+        _get_storage().save_delivery(
+            trigger_id=trigger_id,
+            signature_valid=True,
+            execution_id=(result.get("data") or {}).get("execution_id"),
+            status_code=200,
+        )
+    except Exception:
+        logger.warning("delivery record failed (success path): %s", trigger_id)
+    return result
 
 
 # ==================== P1 Step 6 — 触发器 CRUD API ====================
