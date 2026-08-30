@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # 全局单例（应用启动时由装配方 set_scheduler 注入 APScheduler 实例）
 _manager: Optional["TriggerManager"] = None
+_bootstrapped = False
 
 
 def get_trigger_manager() -> "TriggerManager":
@@ -30,6 +31,45 @@ def get_trigger_manager() -> "TriggerManager":
 def set_trigger_scheduler(scheduler: Any) -> None:
     """应用启动装配：把 APScheduler 实例挂到全局 TriggerManager。"""
     get_trigger_manager()._scheduler = scheduler
+
+
+async def setup_workflow_triggers(
+    loader: Optional[Callable[[], list]] = None,
+    scheduler: Optional[Any] = None,
+) -> int:
+    """应用启动装配（幂等）：启动调度器并恢复启用的 cron 触发器。
+
+    loader 返回启用触发器列表（通常 storage.list_enabled_triggers(CRON)）；
+    scheduler 可注入（默认新建 AsyncIOScheduler 并 start）。
+    返回本次恢复的触发器数（已装配过则返回 0）。
+    """
+    global _bootstrapped
+    if _bootstrapped:
+        return 0
+
+    manager = get_trigger_manager()
+    if scheduler is None:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+        scheduler = AsyncIOScheduler()
+        scheduler.start()
+    set_trigger_scheduler(scheduler)
+
+    restored = await manager.restore_enabled(loader)
+    _bootstrapped = True
+    logger.info("workflow triggers bootstrapped: %s restored", restored)
+    return restored
+
+
+async def shutdown_workflow_triggers() -> None:
+    """应用关闭装配：停掉触发器调度器（若在运行）。"""
+    manager = get_trigger_manager()
+    scheduler = manager._scheduler
+    if scheduler is not None and getattr(scheduler, "running", False):
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            logger.info("trigger scheduler shutdown ignored error", exc_info=True)
 
 
 class TriggerManager:
