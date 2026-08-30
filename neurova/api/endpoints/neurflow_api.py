@@ -1527,3 +1527,30 @@ async def list_trigger_deliveries(trigger_id: str, limit: int = 50):
     """查询 webhook 入站投递记录（调试面板用）。"""
     storage = _get_storage()
     return {"code": 0, "data": storage.list_deliveries(trigger_id, limit=limit)}
+
+
+# ==================== P2 遗留② — 版本 REST API ====================
+
+
+@router.get("/workflows/{workflow_id}/versions")
+async def list_workflow_versions_api(workflow_id: str):
+    """工作流版本历史（倒序；内容指纹快照）。"""
+    storage = _get_storage()
+    if not storage.get_workflow(workflow_id):
+        raise HTTPException(status_code=404, detail="工作流不存在")
+    return {"code": 0, "data": storage.list_workflow_versions(workflow_id)}
+
+
+@router.post("/workflows/{workflow_id}/versions/{version}/rollback")
+async def rollback_workflow_api(workflow_id: str, version: int):
+    """回滚到指定版本（状态保持当前值；回滚本身产生新版本）。"""
+    storage = _get_storage()
+    if not storage.get_workflow(workflow_id):
+        raise HTTPException(status_code=404, detail="工作流不存在")
+    if not storage.rollback_workflow(workflow_id, version):
+        raise HTTPException(status_code=404, detail="版本不存在")
+    return {
+        "code": 0,
+        "message": "rollback ok",
+        "data": {"workflow": storage.get_workflow(workflow_id).to_dict()},
+    }
