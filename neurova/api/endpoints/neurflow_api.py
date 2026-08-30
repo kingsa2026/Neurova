@@ -1269,3 +1269,66 @@ async def set_node_mock(node_id: str, body: MockNodeRequest):
         return {"node_id": node_id, "mocked": False}
     _NODE_MOCKS[node_id] = body.mock_output
     return {"node_id": node_id, "mocked": True}
+
+
+# ==================== P1 Step 4b — Webhook 入站触发（薄壳） ====================
+
+
+from fastapi import Request  # noqa: E402
+from neurova.collaboration.neurflow import webhook_ingress  # noqa: E402
+
+
+def _webhook_ingress_deps() -> Dict[str, Any]:
+    """装配 webhook_ingress 默认 deps（trigger/workflow 加载 + 解密 + 执行）。
+
+    安全语义：仅 PUBLISHED 状态的工作流可被 webhook 派发。
+    """
+    from neurova.core.trigger_rate_limiter import TriggerRateLimiter
+    from neurova.llm.providers.secret_store import decrypt_api_key
+    from neurova.collaboration.neurflow.models import WorkflowStatus
+
+    def load_trigger(tid: str):
+        return _get_storage().get_trigger(tid)
+
+    def load_published_workflow(ref: str):
+        storage = _get_storage()
+        wf = storage.get_workflow(ref)
+        if wf is not None and wf.status == WorkflowStatus.PUBLISHED:
+            return wf
+        return None
+
+    async def run_workflow(workflow, inputs):
+        return await get_workflow_executor().execute(workflow=workflow, inputs=inputs)
+
+    def rate_limiter_for(trigger):
+        """按 trigger_id 缓存 limiter（跨请求共享桶，限流才生效）。"""
+        tid = getattr(trigger, "id", "")
+        limiter = _WEBHOOK_RATE_LIMITERS.get(tid)
+        if limiter is None:
+            limiter = TriggerRateLimiter(getattr(trigger, "rate_limit_per_minute", None))
+            _WEBHOOK_RATE_LIMITERS[tid] = limiter
+        return limiter
+
+    return {
+        "load_trigger": load_trigger,
+        "load_published_workflow": load_published_workflow,
+        "decrypt_secret": decrypt_api_key,
+        "run_workflow": run_workflow,
+        "rate_limiter_for": rate_limiter_for,
+    }
+
+
+webhook_ingress.set_deps_provider(_webhook_ingress_deps)
+
+
+@router.post("/triggers/webhook/{trigger_id}/receive")
+async def receive_webhook_trigger(trigger_id: str, request: Request):
+    """外部系统入站触发工作流（HMAC 验签 + 限流 + 派发；逻辑在 webhook_ingress）。"""
+    payload = await request.body()
+    header_sig = request.headers.get("X-Hub-Signature-256")
+    try:
+        return await webhook_ingress.handle_webhook_ingress(
+            trigger_id, payload, header_sig
+        )
+    except webhook_ingress.IngressRejected as e:
+        raise HTTPException(status_code=e.status_code, detail=e.reason)
