@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+# 静态门禁：把本次代码审计发现的三类低级高危缺陷挡在 CI 里（成本极低）：
+#   1. 语法错误（compileall）
+#   2. 未定义名称（pyflakes "undefined name"）
+#   3. 模块导入即崩（全模块导入巡检）
+# 另跑一遍审计回归测试（tests/unit/test_audit_regressions.py）防止 P0/P1 复发。
+
+jobs:
+  static-gate:
+    name: Static gate (syntax + pyflakes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pyflakes
+        run: python -m pip install --upgrade pip pyflakes
+
+      - name: Run fast static gate (syntax + undefined names)
+        run: python scripts/ci_static_gate.py --skip-import
+
+  import-and-regression:
+    name: Import sweep + audit regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install core dependencies (lean set, no torch)
+        run: python -m pip install --upgrade pip -r requirements-ci.txt
+
+      - name: Run full static gate (incl. module import sweep)
+        run: python scripts/ci_static_gate.py
+
+      - name: Run audit regression tests
+        run: python -m pytest tests/unit/test_audit_regressions.py -q
