@@ -100,3 +100,38 @@ addopts = "-v --tb=short --import-mode=importlib"
 # pytest-timeout 全局挂死保护（Windows 自动用 thread 方法，Linux 用 signal）；
 # 慢测试用 @pytest.mark.timeout(N) 单独放宽，CLI --timeout 可临时覆盖
 timeout = 30
+
+[tool.coverage.run]
+# P0-6：CI 覆盖率门禁的度量范围 = 受保护子集实际 exercising 的模块。
+# context/ 等待 P1-1 测试落地后加入；预存失败模块不进度量。
+# 注意：include 与 source 并用会被忽略（coverage 限制），此处只列 include。
+include = [
+    "*/tool_layers/mcp_client.py",
+    "*/tool_layers/mcp_config.py",
+    "*/tool_layers/mcp_bootstrap.py",
+    "*/tool_layers/tool_router.py",
+    "*/security/url_guard.py",
+    "*/security/governance.py",
+    "*/api/endpoints/tool_layers.py",
+    "*/api/endpoints/shared_config.py",
+]
+
+[tool.ruff.lint]
+# P0-6 起步规则集：语法错误（E9）+ 未定义名（F821）——对应 static gate 的
+# 两类低级高危。F401/F541/F841 等风格项为存量噪音（neurova 200+），待
+# 存量清理后再逐类放开。
+select = ["E9", "F821"]
+
+[tool.ruff.lint.per-file-ignores]
+# F821 存量技术债（建门禁时清点，逐个销账后删除对应行）：
+# - neurflow_api.py：用户并行工作中的 _WEBHOOK_RATE_LIMITERS
+# - test_memory_stream/test_console_api 等：from x import * 星号导入误报
+# - test_minimal_coverage/test_auth_system 等：缺 json/pytest 导入（潜伏）
+"neurova/api/endpoints/neurflow_api.py" = ["F821"]
+"tests/integration/test_memory_stream.py" = ["F821"]
+"tests/test_api/test_console_api.py" = ["F821"]
+"tests/unit/agent/test_agent_llm_error_logging.py" = ["F821"]
+"tests/unit/channels/test_channel_manager.py" = ["F821"]
+"tests/unit/core/test_plugins_modules.py" = ["F821"]
+"tests/unit/security/test_auth_system.py" = ["F821"]
+"tests/unit/test_minimal_coverage.py" = ["F821"]
