@@ -15,6 +15,7 @@ transport 推断（command→stdio / url→http，显式声明优先）、缺必
     timeout_ms  默认 30000，必须为正数
 """
 
+import os.path
 import typing
 
 _ALLOWED_KEYS = {
@@ -27,6 +28,31 @@ _ALLOWED_KEYS = {
 _VALID_TRANSPORTS = {"stdio", "http", "sse"}
 
 _DEFAULT_TIMEOUT_MS = 30000
+
+# shell 拒绝表（P0-1）：stdio MCP server 的 command 是 argv[0]（无 shell
+# 注入面），但显式以 shell 作为 server 进程等于把任意命令执行敞开。
+# 不做解释器白名单——npx/python 本身就能执行任意代码，白名单是安全剧场；
+# 进程派生的权限边界由 API 层角色校验承担（stdio 仅限 admin）。
+# Windows 可执行后缀在匹配前剥离（bash.exe 与 bash 同为 shell）。
+_SHELL_COMMANDS = {
+    "sh", "bash", "zsh", "fish", "csh", "tcsh", "ksh",
+    "cmd", "powershell", "pwsh", "wsl",
+}
+_SHELL_SUFFIXES = (".exe", ".cmd", ".bat")
+
+
+def _reject_shell_command(server: typing.Dict[str, typing.Any]) -> None:
+    command = server.get("command")
+    if not command:
+        return
+    basename = os.path.basename(str(command)).lower()
+    if basename.endswith(_SHELL_SUFFIXES):
+        basename = basename[: -len(basename.rsplit(".", 1)[1]) - 1]
+    if basename in _SHELL_COMMANDS:
+        _reject(
+            f"command 禁止使用 shell（{basename}）——stdio MCP server "
+            "不应包装 shell 执行，请直接指定目标可执行文件"
+        )
 
 
 def _reject(message: str) -> typing.NoReturn:
@@ -109,6 +135,7 @@ def validate_mcp_server_config(server: typing.Dict[str, typing.Any]) -> typing.D
 
     transport = _infer_transport(server)
     _require_transport_inputs(transport, server)
+    _reject_shell_command(server)
 
     normalized = {
         "id": server["id"],
