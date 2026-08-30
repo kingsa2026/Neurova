@@ -17,10 +17,12 @@ from .models import (
     NodePort,
     StoreConnection,
     SubBlockConfig,
+    TriggerType,
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowNode,
     WorkflowStatus,
+    WorkflowTrigger,
     WorkflowVariable,
 )
 
@@ -116,6 +118,30 @@ class NeurflowStorage:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_custom_node_versions_type "
                 "ON custom_node_versions(node_type)"
+            )
+
+            # 工作流触发器表（P1 Step 2）
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS workflow_triggers (
+                    id TEXT PRIMARY KEY,
+                    workflow_id TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    enabled INTEGER DEFAULT 1,
+                    config_json TEXT DEFAULT '{}',
+                    secret_hash TEXT,
+                    rate_limit_per_minute INTEGER,
+                    created_at REAL DEFAULT 0,
+                    updated_at REAL DEFAULT 0,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+                )
+            """)
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workflow_triggers_wf "
+                "ON workflow_triggers(workflow_id)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workflow_triggers_type "
+                "ON workflow_triggers(type)"
             )
 
             # 执行实例表
@@ -408,6 +434,108 @@ class NeurflowStorage:
 
             rows = cursor.fetchall()
             return [self._row_to_workflow(row) for row in rows]
+
+    # ── 触发器 CRUD（P1 Step 2）─────────────────────────────────
+
+    @staticmethod
+    def hash_trigger_secret(raw_secret: str) -> str:
+        """触发器 secret 的入库 hash（sha256 hex）。绝不明文存储。"""
+        import hashlib
+
+        return hashlib.sha256(raw_secret.encode("utf-8")).hexdigest()
+
+    def save_trigger(self, trigger: WorkflowTrigger) -> bool:
+        """保存/更新触发器。"""
+        import time as _time
+
+        now = _time.time()
+        if not trigger.created_at:
+            trigger.created_at = now
+        trigger.updated_at = now
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO workflow_triggers
+                    (id, workflow_id, type, enabled, config_json, secret_hash,
+                     rate_limit_per_minute, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    workflow_id=excluded.workflow_id,
+                    type=excluded.type,
+                    enabled=excluded.enabled,
+                    config_json=excluded.config_json,
+                    secret_hash=excluded.secret_hash,
+                    rate_limit_per_minute=excluded.rate_limit_per_minute,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    trigger.id,
+                    trigger.workflow_id,
+                    trigger.type.value,
+                    1 if trigger.enabled else 0,
+                    json.dumps(trigger.config, ensure_ascii=False),
+                    trigger.secret_hash,
+                    trigger.rate_limit_per_minute,
+                    trigger.created_at,
+                    trigger.updated_at,
+                ),
+            )
+            self._conn.commit()
+        return True
+
+    def get_trigger(self, trigger_id: str) -> Optional[WorkflowTrigger]:
+        """按 id 取触发器；不存在返回 None。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT * FROM workflow_triggers WHERE id = ?",
+                (trigger_id,),
+            )
+            row = cursor.fetchone()
+        return self._row_to_trigger(row) if row else None
+
+    def list_triggers_by_workflow(self, workflow_id: str) -> list:
+        """列出某工作流的全部触发器。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT * FROM workflow_triggers WHERE workflow_id = ? ORDER BY created_at",
+                (workflow_id,),
+            )
+            rows = cursor.fetchall()
+        return [self._row_to_trigger(r) for r in rows]
+
+    def list_enabled_triggers(self, trigger_type: TriggerType) -> list:
+        """列出某类型的全部启用触发器（TriggerManager 启动恢复用）。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT * FROM workflow_triggers WHERE type = ? AND enabled = 1",
+                (trigger_type.value,),
+            )
+            rows = cursor.fetchall()
+        return [self._row_to_trigger(r) for r in rows]
+
+    def delete_trigger(self, trigger_id: str) -> bool:
+        """删除触发器；存在返回 True，不存在返回 False。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM workflow_triggers WHERE id = ?",
+                (trigger_id,),
+            )
+            self._conn.commit()
+        return cursor.rowcount > 0
+
+    def _row_to_trigger(self, row: sqlite3.Row) -> WorkflowTrigger:
+        """数据库行 → WorkflowTrigger。"""
+        return WorkflowTrigger(
+            id=row["id"],
+            workflow_id=row["workflow_id"],
+            type=TriggerType(row["type"]),
+            enabled=bool(row["enabled"]),
+            config=json.loads(row["config_json"] or "{}"),
+            secret_hash=row["secret_hash"],
+            rate_limit_per_minute=row["rate_limit_per_minute"],
+            created_at=row["created_at"] or 0.0,
+            updated_at=row["updated_at"] or 0.0,
+        )
 
     def _row_to_workflow(self, row: sqlite3.Row) -> WorkflowDefinition:
         """将数据库行转换为 WorkflowDefinition"""
