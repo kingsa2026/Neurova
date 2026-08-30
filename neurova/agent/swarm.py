@@ -79,6 +79,12 @@ class SubAgentRun:
 class SwarmManager:
     """蜂群管理器：派生、执行、事件广播、结果回流"""
 
+    # P2-10 修复: 已完成 run 的保留上限。超出后按完成时间从最旧逐出，
+    # 防止 _runs 随派生次数无界增长导致长期运行内存泄漏。
+    # 运行中（pending/running）的 run 永不逐出；status() 查询已逐出的
+    # 历史记录返回"未找到"（与从未存在等价，可接受）。
+    MAX_FINISHED_RUNS = 500
+
     def __init__(self):
         self._runs: Dict[str, SubAgentRun] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
@@ -132,6 +138,7 @@ class SwarmManager:
         )
         with self._lock:
             self._runs[run.subagent_id] = run
+            self._evict_finished_runs()
 
         if fallback:
             logger.info("Swarm: 请求的 agent_id=%s 不存在，回退到 %s", agent_id, resolved_id)
@@ -139,6 +146,11 @@ class SwarmManager:
         if background:
             asyncio_task = asyncio.create_task(
                 self._execute(run, agent, initiator_agent, stream)
+            )
+            # P2-10 修复: 任务完成后移除引用，否则 _tasks 中的 asyncio.Task
+            # （含协程栈与结果）随后台派生次数无界累积。
+            asyncio_task.add_done_callback(
+                lambda _task, _sid=run.subagent_id: self._forget_task(_sid)
             )
             with self._lock:
                 self._tasks[run.subagent_id] = asyncio_task
@@ -175,6 +187,23 @@ class SwarmManager:
         return [r.to_dict() for r in runs[:limit]]
 
     # ── 内部实现 ──────────────────────────────────────────────
+
+    def _forget_task(self, subagent_id: str) -> None:
+        """移除已完成后台任务的引用（done 回调）"""
+        with self._lock:
+            self._tasks.pop(subagent_id, None)
+
+    def _evict_finished_runs(self) -> None:
+        """逐出超出保留上限的最旧已完成 run（调用方须持有 _lock）"""
+        finished = [
+            r for r in self._runs.values() if r.status in ("completed", "failed")
+        ]
+        overflow = len(finished) - self.MAX_FINISHED_RUNS
+        if overflow <= 0:
+            return
+        finished.sort(key=lambda r: r.finished_at or r.started_at)
+        for run in finished[:overflow]:
+            self._runs.pop(run.subagent_id, None)
 
     def _resolve_agent(self, agent_id: Optional[str]) -> tuple:
         """解析子 Agent 实例；请求的 id 不存在时回退 default。

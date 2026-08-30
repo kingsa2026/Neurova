@@ -63,6 +63,66 @@ MIN_MAX_TOKENS = 256
 MAX_MAX_TOKENS = 200000
 
 
+# 模型 ID → 上下文窗口（输入+输出总 token 容量）
+# 来源: 各服务商官方文档 (2025 Q3)；未知模型返回 None（不设输入预算闸门，fail-open）
+MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    # ── OpenAI ──
+    "gpt-4o": 128_000,
+    "gpt-4o-mini": 128_000,
+    "gpt-4-turbo": 128_000,
+    "gpt-4": 8_192,
+    "gpt-3.5-turbo": 16_385,
+    # ── Anthropic ──
+    "claude-sonnet-4-20250514": 200_000,
+    "claude-3-5-sonnet-20241022": 200_000,
+    "claude-3-5-haiku-20241022": 200_000,
+    "claude-3-opus-20240229": 200_000,
+    "claude-3-haiku-20240307": 200_000,
+    # ── DeepSeek ──
+    "deepseek-chat": 64_000,
+    "deepseek-reasoner": 64_000,
+    # ── Google Gemini ──
+    "gemini-1.5-pro": 1_000_000,
+    "gemini-1.5-flash": 1_000_000,
+    "gemini-2.0-flash": 1_000_000,
+    # ── 通义千问 (Qwen) / ModelScope ──
+    "qwen-max": 32_768,
+    "qwen-plus": 131_072,
+    "qwen-turbo": 131_072,
+    "Qwen/Qwen3-235B-A22B-Thinking-2507": 262_144,
+    "Qwen/Qwen3-235B-A22B-Instruct-2507": 262_144,
+    # ── 智谱 (GLM) ──
+    "glm-4": 128_000,
+    "glm-4-flash": 128_000,
+    "glm-3-turbo": 128_000,
+}
+
+
+def get_model_context_window(model_id: str) -> "int | None":
+    """
+    获取模型的上下文窗口（输入+输出总容量）。
+
+    按优先级查找:
+    1. 精确匹配 MODEL_CONTEXT_WINDOWS
+    2. 前缀匹配（如 "gpt-4o-2024-11-20" → "gpt-4o"）
+    3. 未知模型返回 None —— 调用方不设输入预算闸门（fail-open，避免误杀）
+
+    Args:
+        model_id: 模型 ID
+
+    Returns:
+        上下文窗口 token 数，未知模型返回 None
+    """
+    if not model_id:
+        return None
+    if model_id in MODEL_CONTEXT_WINDOWS:
+        return MODEL_CONTEXT_WINDOWS[model_id]
+    for known, window in MODEL_CONTEXT_WINDOWS.items():
+        if model_id.startswith(known):
+            return window
+    return None
+
+
 def get_model_max_tokens(model_id: str) -> int:
     """
     获取模型的 max_tokens 上限。

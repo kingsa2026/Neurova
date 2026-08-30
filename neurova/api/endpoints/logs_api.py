@@ -16,11 +16,14 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from neurova.api.auth import get_current_user
+
 logger = get_logger(__name__)
-router = APIRouter()
+# P0 安全修复: 工作日志含用户活动数据，读写/导出均必须认证
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 # ---------------------------------------------------------------------------

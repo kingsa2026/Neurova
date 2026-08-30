@@ -23,6 +23,7 @@ pycryptodome>=3.20.0  # AES-GCM for secret_store encryption
 litellm>=1.10.0
 openai>=1.6.0
 anthropic>=0.8.0
+tiktoken>=0.5
 
 # Utilities
 python-dotenv>=1.0.0
@@ -48,12 +49,26 @@ sentence-transformers>=2.2.0
 transformers>=4.20.0
 tokenizers>=0.13.0
 
+# Neural memory / NeRF (optional, auto-fallback)
+# neurova/cognitive_layers/memory_layer/memory_field.py 需要 torch + numpy；
+# 缺席时经 memory_layer/__init__.py 的 try/except 优雅降级，不影响主链路。
+# 注意：torch 体积大，且在 Python 3.15 alpha 上无可用 wheel，
+# 建议在稳定版 Python（3.11–3.13）上按需安装：
+# torch>=2.0.0
+
 # Computer Use（桌面控制 + 浏览器自动化）
 # 安装后需执行 `python scripts/setup_computer_use.py --install`
 # 下载 Playwright 的 Chromium 内核（脚本会自动处理）
 pillow>=10.0.0
 pyautogui>=0.9.54
 playwright>=1.40.0
+
+# MCP（Model Context Protocol）官方 SDK — MCPToolClient 的协议层（运行时可选，
+# 未安装时连接失败并给出安装提示，不影响其余功能）
+mcp>=1.2.0
+
+# QQ 机器人 Webhook 验签（官方 Ed25519 方案；neurova/channels/qq.py）
+ecdsa>=0.17
 
 # Testing (dev)
 pytest>=7.4.0

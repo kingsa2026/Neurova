@@ -25,7 +25,8 @@ except ImportError:
     PYVOIP_AVAILABLE = False
 
 try:
-    pass
+    # 原代码此处误写为 `pass`，requests 从未被导入
+    import requests
 
     REQUESTS_AVAILABLE = True
 except ImportError:

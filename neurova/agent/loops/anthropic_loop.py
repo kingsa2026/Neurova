@@ -7,7 +7,11 @@ Anthropic Loop - Anthropic 模型适配循环
 
 import json
 from neurova.core.logger import get_logger
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+# Agent 仅用于类型注解；运行时导入会与 agent_core 形成循环依赖
+if TYPE_CHECKING:
+    from neurova.agent_core import Agent
 
 from neurova.agent.loops.base import BaseAgentLoop
 from neurova.llm_client import LLMResponse

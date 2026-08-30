@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Any, Dict
 
-from neurova.api.deps import require_admin
+from neurova.api.deps import get_current_user, require_admin
 from neurova.api.endpoints import get_agent_instance
 from neurova.session_repository import get_session_repository
 
@@ -102,6 +102,43 @@ class ChatRequest(BaseModel):
     model: typing.Optional[str] = None
     # 思考程度：light(简单) / standard(标准) / deep(深度)；空串=默认
     thinking_effort: typing.Optional[str] = ""
+    # R-3 修复: 附件文件 ID 列表（前端 /files/upload 后携带）。此前 Pydantic
+    # 静默丢弃该字段，模型完全感知不到上传文件。
+    file_ids: typing.Optional[typing.List[str]] = None
+    # 前端发送时刻（ISO）。随 metadata 持久化到该轮两条消息，作为轮次
+    # 操作（编辑覆写/删除一轮/反馈）的双路定位键之一 — 服务端 add_message
+    # 用自己的 now 落盘，客户端时间戳不落盘会导致实时轮次无法定位。
+    client_timestamp: typing.Optional[str] = None
+
+
+def attach_files(file_ids: typing.Optional[typing.List[str]], user_id: str) -> typing.List[dict]:
+    """解析前端携带的 file_ids 为附件元数据列表（仅属主可见）。
+
+    R-3 修复: 按 id 从 files_api 存储读取元数据；无效/非属主 id 跳过，
+    不中断整轮对话。结果可 JSON 序列化（metadata 落盘经 _json_safe）。
+    """
+    if not file_ids:
+        return []
+    try:
+        from neurova.api.endpoints import files_api
+    except Exception:  # noqa: BLE001 - 依赖缺失时降级为空附件列表
+        return []
+    attachments: typing.List[dict] = []
+    for fid in file_ids:
+        info = files_api.get_attachment_info(fid, user_id)
+        if not info:
+            continue
+        attachments.append(
+            {
+                "file_id": info.get("file_id", ""),
+                "filename": info.get("filename", ""),
+                "file_type": info.get("file_type", "file"),
+                "mime_type": info.get("mime_type", ""),
+                "size": info.get("size", 0),
+                "path": info.get("path", ""),
+            }
+        )
+    return attachments
 
 
 # 真流式：发射器队列的结束哨兵
@@ -125,6 +162,10 @@ def _sse_events_from_emitter_item(
         if kind == "content":
             text = str(data or "")
             return [{"type": "chunk", "content": text}] if text else []
+        if kind == "memory_progress":
+            # 实时检索进度（UI 临时显示，不落盘不记录）
+            payload = data if isinstance(data, dict) else {}
+            return [{"type": "memory_progress", **payload}] if payload else []
         if kind == "reasoning":
             text = str(data or "")
             return [{"type": "reasoning", "content": text}] if text else []
@@ -146,7 +187,12 @@ def _sse_events_from_emitter_item(
             if isinstance(content, dict):
                 content = json.dumps(content, ensure_ascii=False)
             content = str(content)
-            key = str(tm.get("tool_call_id") or f"{name}:{content[:120]}")
+            # 去重 key 必须与收尾 flush（_build_tool_events 路径）共享同一空间：
+            # 两边都以"完整 content 的 hash"为 key —— native tool message 的 content
+            # 与文本模式条目的 result 同源（base.py 完整保留，不再预截断）。
+            # 不用 [:120] 前缀：同一计划 create/mark_step 的渲染文本前缀几乎一致，
+            # 前缀去重会把后者的 result 误判为重复（实测缺陷）；精确 hash 两全
+            key = f"{name}:{_result_key_hash(content)}"
             if key in seen_results:
                 return []
             seen_results.add(key)
@@ -214,6 +260,13 @@ def _extract_approval_payload(result_text, tm: dict) -> dict:
     return {}
 
 
+def _result_key_hash(content: str) -> str:
+    """工具结果去重 key 的内容摘要（完整内容精确去重，避免前缀撞车误杀）"""
+    import hashlib
+
+    return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:32]
+
+
 def _strip_heavy_payload(result_text: str, max_value_len: int = 1000) -> str:
     """替换工具结果中超长的字符串字段值（如截图 base64），避免大对象涌入 SSE。
 
@@ -243,6 +296,13 @@ def _build_tool_events(tm: dict) -> typing.List[dict]:
     if not isinstance(tm, dict):
         return events
     tm_type = tm.get("type", "")
+    # _tool_messages_list 同时存在两种形状：
+    # - 文本模式条目（handle_tool_calls 写入）：{type, tool_name, params/result, ...}
+    # - 原生事件包装（_call_loop_stream C1 写入）：{type, data: {...}}
+    # 包装条目没有 tool_name，且语义与文本模式条目重复（同一次工具调用），
+    # 直接跳过，避免产出空 name 的 SSE 事件
+    if not tm.get("tool_name"):
+        return events
     if tm_type == "tool_call":
         events.append(
             {
@@ -267,9 +327,16 @@ def _build_tool_events(tm: dict) -> typing.List[dict]:
 
 
 @router.post("/chat")
-async def post_console_chat(body: ChatRequest, request: Request):
+async def post_console_chat(
+    body: ChatRequest,
+    request: Request,
+    current_user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
     """流式聊天接口（SSE）"""
-    user_id = _get_user_id(request)
+    # R-3: 附件归属用 JWT 用户身份（与 /files/upload 一致）。
+    # _get_user_id(request) 读 request.state.user_id——中间件从未注入，
+    # 恒为 "anonymous"，导致 attach_files 找不到属主文件。
+    user_id = str(current_user.get("user_id", "")) if isinstance(current_user, dict) else _get_user_id(request)
     repo = get_session_repository()
     agent_id = getattr(body, "agent_id", "") or ""
 
@@ -332,11 +399,22 @@ async def post_console_chat(body: ChatRequest, request: Request):
                 # 开启工具事件实时转发（默认关闭以保持蜂群子 Agent 纯文本流契约）
                 "emit_tool_events": True,
             }
+            # R-3 修复: 附件元数据注入（file_ids → attachments，供 pipeline 附件注入）
+            attachments = attach_files(getattr(body, "file_ids", None), user_id)
+            logger.info("[附件注入] file_ids=%s user_id=%s → attachments=%d",
+                        getattr(body, "file_ids", None), user_id, len(attachments))
+            if attachments:
+                metadata["attachments"] = attachments
+            # 客户端时间戳随 metadata 落盘到该轮两条消息（_json_safe 会剔除
+            # event_emitter 等不可序列化对象，字符串保留），作为轮次定位键
+            if body.client_timestamp:
+                metadata["client_timestamp"] = body.client_timestamp
 
             async def run_chat():
                 try:
                     response = await agent.chat(
                         body.message,
+                        stream=True,
                         session_id=session_id,
                         metadata=metadata,
                         model=getattr(body, "model", None) or None,
@@ -382,7 +460,9 @@ async def post_console_chat(body: ChatRequest, request: Request):
                                 continue
                             seen_calls.add(key)
                         elif etype == "tool_result":
-                            key = str(event.get("name", "")) + ":" + str(event.get("result", ""))[:120]
+                            # key 基于完整原始 result 的 hash（native content 同源，
+                            # 见 live 侧注释）；event.result 是归一化+截断后的展示形式，不可用作 key
+                            key = str(event.get("name", "")) + ":" + _result_key_hash(str(tm.get("result", "")))
                             if key in seen_results:
                                 continue
                             seen_results.add(key)
@@ -478,6 +558,65 @@ async def delete_chat_session(session_id: str, request: Request):
     return {"code": 0, "message": "Session deleted"}
 
 
+# ── 会话存档（删除 → 存档：历史列表隐藏，可随时恢复） ──────────────────
+
+def _check_session_ownership(target: Dict[str, Any], user_id: str) -> None:
+    """user_id 校验与 delete_chat_session 一致：空 user_id 视为共享。"""
+    target_user_id = target.get("user_id") or ""
+    if target_user_id and user_id and target_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def _session_summary(s: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": s.get("session_id") or s.get("id", ""),
+        "title": s.get("title", "新对话"),
+        "agent_id": s.get("agent_id", ""),
+        "created_at": s.get("created_at", ""),
+    }
+
+
+@router.get("/chat/sessions/archived")
+async def get_archived_chat_sessions(request: Request, agent_id: str = Query(default="")):
+    """列出存档会话"""
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    sessions = repo.list_archived_sessions(agent_id=agent_id, user_id=user_id)
+    summaries = [_session_summary(s) for s in sessions]
+    return {"code": 0, "message": "success", "data": {"sessions": summaries, "total": len(summaries)}}
+
+
+@router.post("/chat/sessions/{session_id}/archive")
+async def archive_chat_session(session_id: str, request: Request):
+    """存档会话（历史列表隐藏，数据保留，可恢复）"""
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    target = _find_session_target(repo, session_id, user_id)
+    agent_id = target.get("agent_id", "")
+    if not repo.archive_session(agent_id=agent_id, session_id=session_id):
+        raise HTTPException(status_code=404, detail="Session files not found")
+    return {"code": 0, "message": "Session archived", "data": {"session_id": session_id}}
+
+
+@router.post("/chat/sessions/{session_id}/unarchive")
+async def unarchive_chat_session(session_id: str, request: Request):
+    """恢复存档会话为正常会话"""
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    archived = repo.list_archived_sessions()
+    target = next(
+        (s for s in archived if s.get("session_id") == session_id or s.get("id") == session_id),
+        None,
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="Archived session not found")
+    _check_session_ownership(target, user_id)
+    agent_id = target.get("agent_id", "")
+    if not repo.unarchive_session(agent_id=agent_id, session_id=session_id):
+        raise HTTPException(status_code=404, detail="Archived session files not found")
+    return {"code": 0, "message": "Session restored", "data": {"session_id": session_id}}
+
+
 class RenameSessionRequest(BaseModel):
     title: str
 
@@ -500,6 +639,233 @@ async def rename_chat_session(session_id: str, body: RenameSessionRequest, reque
     new_title = body.title.strip() or target[0].get("title", "新对话")
     repo.rename_session(agent_id=agent_id, session_id=session_id, title=new_title)
     return {"code": 0, "message": "Session renamed", "data": {"id": session_id, "title": new_title}}
+
+
+# ── Round operations（chat 页：编辑最后一条用户消息 / 删除一轮 / 点赞点踩） ──
+
+
+def _find_session_target(repo, session_id: str, user_id: str) -> Dict[str, Any]:
+    """按 session_id 定位会话并校验 user_id 权限。
+
+    与既有 delete/rename 端点的过滤逻辑一致：空 user_id 视为"共享"，
+    允许任何已认证用户操作（避免"看得到删不掉"死锁，P2-#20）。
+    """
+    sessions = repo.list_sessions()
+    target = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
+    if not target:
+        raise HTTPException(status_code=404, detail="Session not found")
+    target_user_id = target[0].get("user_id") or ""
+    if target_user_id and user_id and target_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return target[0]
+
+
+def _sync_agent_history_from_session(agent, agent_id: str, session_id: str, repo) -> None:
+    """把存活 agent 的内存会话历史强制同步为 session 文件现状。
+
+    根因: ChatPipeline._restore_session_history 只在"文件比内存长"时覆盖
+    内存历史。删除/覆写轮次后文件变短 → 内存历史不收缩 → 已删轮会在
+    下一轮 LLM 调用中复活（上下文污染）。此处强制重建内存历史。
+    """
+    if not agent:
+        return
+    try:
+        msgs = repo.get_history(agent_id=agent_id, session_id=session_id)
+        history = [
+            {"role": m.get("role"), "content": m.get("content")}
+            for m in msgs
+            if isinstance(m, dict) and m.get("role") and m.get("content")
+        ]
+        agent.conversation_history = history
+        ctx = getattr(agent, "_conversation_context", None)
+        if ctx is not None and hasattr(ctx, "clear") and hasattr(ctx, "extend"):
+            ctx.clear()
+            ctx.extend(history)
+        logger.info("已同步 agent 内存历史: session=%s, 消息数=%s", session_id, len(history))
+    except Exception as e:
+        logger.warning("同步 agent 内存历史失败 (session=%s): %s", session_id, e)
+
+
+@router.delete("/chat/rounds")
+async def delete_chat_round(session_id: str, timestamp: str, request: Request):
+    """删除一轮对话（user 消息 + 相邻 assistant 回复）。
+
+    同时清除该轮对应的记忆并同步存活 agent 的内存会话历史，
+    否则 agent 仍会"记得"已删除的轮次。前端"编辑最后一条用户消息"
+    也复用本端点（删旧轮 → 走原发送链路重发 → 管线写入新轮记录与记忆）。
+    """
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    target = _find_session_target(repo, session_id, user_id)
+    agent_id = target.get("agent_id", "")
+
+    deleted = repo.delete_round(agent_id=agent_id, session_id=session_id, timestamp=timestamp)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Round not found")
+
+    # 记忆清除 + 内存历史同步（best-effort，不改变 session 删除结果）
+    try:
+        agent = get_agent_instance(agent_id=agent_id or "default")
+    except Exception as e:
+        logger.warning("获取 agent 实例失败 (session=%s): %s", session_id, e)
+        agent = None
+
+    if agent is not None:
+        user_content = next((m.get("content", "") for m in deleted if m.get("role") == "user"), "")
+        assistant_content = next(
+            (m.get("content", "") for m in deleted if m.get("role") == "assistant"), ""
+        )
+        memory_agent = getattr(agent, "memory_agent", None)
+        if memory_agent is not None and hasattr(memory_agent, "delete_round_memories"):
+            try:
+                purged = memory_agent.delete_round_memories(
+                    session_id=session_id,
+                    user_input=user_content,
+                    agent_response=assistant_content,
+                    approx_ts=timestamp,
+                )
+                logger.info("轮次记忆已清除: session=%s, 条数=%s", session_id, purged)
+            except Exception as e:
+                logger.warning("删除轮次记忆失败 (session=%s): %s", session_id, e)
+        _sync_agent_history_from_session(agent, agent_id, session_id, repo)
+
+    return {"code": 0, "message": "Round deleted", "data": {"deleted": len(deleted)}}
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str
+    timestamp: str
+    # None 表示取消已有反馈（清除点赞/点踩）
+    feedback: typing.Optional[typing.Literal["like", "dislike"]] = None
+
+
+def _apply_feedback_to_memory(
+    repo, agent_id: str, session_id: str, timestamp: str, feedback: str
+) -> None:
+    """反馈质量闭环：点赞强化 / 点踩抑制该轮记忆温度（best-effort）。
+
+    点赞的记忆温度 +10（更易被召回），点踩 -15（加速遗忘），
+    由 MemCore.apply_feedback_to_memories 实现。
+    """
+    try:
+        agent = get_agent_instance(agent_id=agent_id or "default")
+    except Exception as e:
+        logger.warning("获取 agent 实例失败 (session=%s): %s", session_id, e)
+        return
+    if agent is None:
+        return
+    memory_agent = getattr(agent, "memory_agent", None)
+    if memory_agent is None or not hasattr(memory_agent, "apply_feedback_to_memories"):
+        return
+    try:
+        round_data = repo.get_round(agent_id=agent_id, session_id=session_id, timestamp=timestamp)
+        if not round_data:
+            return
+
+        def _content(msg) -> str:
+            return msg.get("content", "") if isinstance(msg, dict) else ""
+
+        memory_agent.apply_feedback_to_memories(
+            session_id=session_id,
+            user_input=_content(round_data.get("user")),
+            agent_response=_content(round_data.get("assistant")),
+            feedback=feedback,
+            approx_ts=timestamp,
+        )
+    except Exception as e:
+        logger.warning("反馈记忆温度更新失败 (session=%s): %s", session_id, e)
+
+
+@router.post("/chat/feedback")
+async def post_chat_feedback(body: FeedbackRequest, request: Request):
+    """点赞/点踩 agent 回复。
+
+    持久化到该轮 assistant 消息 metadata（随 session 留存，供质量分析），
+    并作用于该轮记忆温度形成质量闭环：like 强化（+10，更易召回）、
+    dislike 抑制（-15，加速遗忘）。feedback=None 表示取消已有反馈。
+    timestamp 为所在轮次的定位键（与删除轮次同一套双路定位规则）。
+    """
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    target = _find_session_target(repo, body.session_id, user_id)
+    agent_id = target.get("agent_id", "")
+
+    ok = repo.update_message_metadata(
+        agent_id=agent_id,
+        session_id=body.session_id,
+        timestamp=body.timestamp,
+        metadata_patch={"feedback": body.feedback},
+        role="assistant",
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    # 记忆温度反馈（best-effort，不阻断反馈持久化结果；取消反馈不做温度操作）
+    if body.feedback:
+        _apply_feedback_to_memory(repo, agent_id, body.session_id, body.timestamp, body.feedback)
+
+    return {"code": 0, "message": "Feedback saved"}
+
+
+@router.get("/chat/feedback/stats")
+async def get_feedback_stats(
+    request: Request,
+    agent_id: str = Query(default=""),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """点赞/点踩统计（按 agent 聚合，供回复质量分析看板）。
+
+    扫描最近 limit 个会话的 assistant 消息 metadata.feedback 聚合计数，
+    并返回最近 20 条反馈明细（按时间倒序）。
+    """
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    sessions = repo.list_sessions(agent_id=agent_id, user_id=user_id)[:limit]
+
+    like = 0
+    dislike = 0
+    recent: typing.List[dict] = []
+    for s in sessions:
+        sid = s.get("session_id") or s.get("id", "")
+        if not sid:
+            continue
+        try:
+            msgs = repo.get_history(agent_id=agent_id or s.get("agent_id", ""), session_id=sid)
+        except Exception as e:
+            logger.warning("feedback stats 读取历史失败 (session=%s): %s", sid, e)
+            continue
+        for m in msgs:
+            if not isinstance(m, dict) or m.get("role") != "assistant":
+                continue
+            fb = (m.get("metadata") or {}).get("feedback")
+            if fb not in ("like", "dislike"):
+                continue
+            if fb == "like":
+                like += 1
+            else:
+                dislike += 1
+            recent.append(
+                {
+                    "session_id": sid,
+                    "timestamp": m.get("timestamp", ""),
+                    "content": (m.get("content") or "")[:100],
+                    "feedback": fb,
+                }
+            )
+
+    recent.sort(key=lambda r: r["timestamp"], reverse=True)
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "agent_id": agent_id,
+            "sessions_scanned": len(sessions),
+            "total_feedback": like + dislike,
+            "like": like,
+            "dislike": dislike,
+            "recent": recent[:20],
+        },
+    }
 
 
 # ── File endpoints ─────────────────────────────────────

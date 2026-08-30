@@ -16,6 +16,7 @@ import typing
 import uuid
 from dataclasses import dataclass
 from enum import Enum
+from typing import Optional
 
 # cognitive_layers imports
 
@@ -132,9 +133,16 @@ class GrowthLogManager:
         self._logger = get_logger(__name__)
         self._initialized = False
 
+        # 根因修复: 此前恢复仅依赖 on_initialize 生命周期回调，而全仓无任何调用者，
+        # 反思日志跨启动永不恢复。MemoryManager 在构造时已就绪，这里直接加载。
+        try:
+            self._load_existing_logs()
+        except Exception as e:
+            self._logger.error("构造时加载反思日志失败: %s", e)
+
     async def on_initialize(self) -> None:
         """初始化回调"""
-        await self._load_existing_logs()
+        self._load_existing_logs()
         self._initialized = True
         self._logger.info("GrowthLogManager 初始化完成")
 
@@ -144,44 +152,56 @@ class GrowthLogManager:
 
     async def on_stop(self) -> None:
         """停止回调"""
-        await self._save_all_logs()
+        self._save_all_logs()
         self._logger.info("GrowthLogManager 停止")
 
-    async def _load_existing_logs(self) -> None:
-        """加载现有日志"""
+    def _load_existing_logs(self) -> None:
+        """从记忆库加载现有反思日志
+
+        根因修复: 原实现 `await search_memories(memory_type=...)` 有三重错配——
+        search_memories 是同步方法且签名只收 (query, limit)；MemoryType 枚举中
+        根本没有 "reflection"（它是 MemoryCategory 的合法值）。现改用公开的
+        get_memories(category="reflection") 按 分类 维度检索。
+        """
         if not self.memory_manager:
             return
 
         try:
-            # 从记忆管理器加载反思日志
-            memories = await self.memory_manager.search_memories(memory_type="reflection", limit=self.max_logs)
-
-            for memory in memories:
-                entry = self._parse_memory_to_entry(memory)
-                if entry:
-                    self._add_to_cache(entry)
-
-            self._logger.info("加载了 %s 条反思日志", len(self._cache))
+            memories = self.memory_manager.get_memories(category="reflection", limit=self.max_logs)
         except Exception as e:
-            self._logger.error("加载反思日志失败: %s", e)
+            self._logger.error("拉取记忆失败，无法加载反思日志: %s", e)
+            return
+
+        for memory in memories:
+            entry = self._parse_memory_to_entry(memory)
+            if entry:
+                self._add_to_cache(entry)
+
+        if memories:
+            self._logger.info("加载了 %s 条反思日志", len(self._cache))
 
     def _parse_memory_to_entry(self, memory) -> Optional[ReflectionLogEntry]:
         """将记忆转换为反思日志条目
 
         Args:
-            memory: 记忆对象
+            memory: 记忆 dict（get_all_memories 返回）或 Memory 对象
 
         Returns:
             反思日志条目，如果解析失败则返回 None
         """
         try:
-            # 假设记忆有 metadata 字段存储反思日志数据
-            if hasattr(memory, "metadata") and memory.metadata:
-                entry_data = memory.metadata.get("reflection_log")
-                if entry_data:
-                    entry = ReflectionLogEntry.from_dict(entry_data)
-                    entry.memory_id = memory.id
-                    return entry
+            if isinstance(memory, dict):
+                metadata = memory.get("metadata") or {}
+                memory_id = memory.get("id", "")
+            else:
+                metadata = getattr(memory, "metadata", None) or {}
+                memory_id = getattr(memory, "id", "")
+
+            entry_data = metadata.get("reflection_log")
+            if entry_data:
+                entry = ReflectionLogEntry.from_dict(entry_data)
+                entry.memory_id = memory_id
+                return entry
         except Exception as e:
             self._logger.error("解析记忆到反思日志失败: %s", e)
         return None
@@ -199,20 +219,24 @@ class GrowthLogManager:
             oldest_id = min(self._cache.keys(), key=lambda x: self._cache[x].timestamp)
             del self._cache[oldest_id]
 
-    async def _save_all_logs(self) -> None:
+    def _save_all_logs(self) -> None:
         """保存所有日志"""
         if not self.memory_manager:
             return
 
         try:
             for entry in self._cache.values():
-                await self._save_entry(entry)
+                self._save_entry(entry)
             self._logger.info("保存了 %s 条反思日志", len(self._cache))
         except Exception as e:
             self._logger.error("保存反思日志失败: %s", e)
 
-    async def _save_entry(self, entry: ReflectionLogEntry) -> None:
+    def _save_entry(self, entry: ReflectionLogEntry) -> None:
         """保存单个条目
+
+        根因修复: 原实现 `await remember(...)` / `update_memory(id, dict)` 与
+        MemoryManager 的同步签名（remember 返回 str、update_memory 收 **kwargs）错配，
+        每次保存都抛 TypeError 被吞，反思日志从未真正落库。
 
         Args:
             entry: 反思日志条目
@@ -221,20 +245,17 @@ class GrowthLogManager:
             return
 
         try:
-            # 将反思日志存储为记忆
-            memory_data = {
-                "type": "reflection",
-                "content": entry.content,
-                "metadata": {"reflection_log": entry.to_dict()},
-            }
-
             if entry.memory_id:
-                # 更新现有记忆
-                await self.memory_manager.update_memory(entry.memory_id, memory_data)
+                # 更新现有记忆（update_memory 仅支持 content 等字段；metadata 变更
+                # 属于状态流转，当前无生产调用方，暂不落库）
+                self.memory_manager.update_memory(entry.memory_id, content=entry.content)
             else:
-                # 创建新记忆
-                memory_id = await self.memory_manager.remember(
-                    content=entry.content, memory_type="reflection", metadata=memory_data["metadata"]
+                # 创建新记忆（remember 为同步方法，返回 memory_id）。
+                # "reflection" 是 MemoryCategory 的合法值，走分类维度而非 memory_type。
+                memory_id = self.memory_manager.remember(
+                    content=entry.content,
+                    category="reflection",
+                    metadata={"reflection_log": entry.to_dict()},
                 )
                 entry.memory_id = memory_id
         except Exception as e:
@@ -332,7 +353,7 @@ class GrowthLogManager:
         )
 
         self._add_to_cache(entry)
-        await self._save_entry(entry)
+        self._save_entry(entry)
 
         self._logger.info("生成反思日志: %s - %s", entry.id, title)
         return entry
@@ -414,7 +435,7 @@ class GrowthLogManager:
         entry.status = ReflectionLogStatus.APPLIED
         entry.applied_at = time.time()
 
-        await self._save_entry(entry)
+        self._save_entry(entry)
         self._logger.info("标记反思日志为已应用: %s", entry_id)
         return True
 
@@ -436,7 +457,7 @@ class GrowthLogManager:
         entry.validated_at = time.time()
         entry.context["validation_result"] = validation_result
 
-        await self._save_entry(entry)
+        self._save_entry(entry)
         self._logger.info("验证反思日志应用: %s", entry_id)
         return True
 
@@ -455,7 +476,7 @@ class GrowthLogManager:
         for entry in list(self._cache.values()):
             if entry.timestamp < cutoff_time and entry.status != ReflectionLogStatus.ARCHIVED:
                 entry.status = ReflectionLogStatus.ARCHIVED
-                await self._save_entry(entry)
+                self._save_entry(entry)
                 archived_count += 1
 
         if archived_count > 0:

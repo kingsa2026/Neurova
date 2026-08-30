@@ -30,7 +30,8 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 try:
-    pass
+    # 原代码此处误写为 `pass`，httpx 从未被导入
+    import httpx
 
     HTTPX_AVAILABLE = True
 except ImportError:
@@ -38,6 +39,8 @@ except ImportError:
     logging.warning("httpx 库未安装，部分AI生成功能可能不可用")
 
 from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+
+logger = logging.getLogger(__name__)
 
 
 class QQBotAdapter(ChannelAdapter):

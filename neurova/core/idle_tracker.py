@@ -27,6 +27,8 @@ class SleepPhaseThresholds:
     idle_drowsy: float = 600.0  # 10分钟
     idle_light_sleep: float = 1800.0  # 30分钟
     idle_deep_sleep: float = 3600.0  # 60分钟
+    idle_rem: float = 5400.0  # 90分钟
+    idle_hibernate: float = 7200.0  # 120分钟
 
 
 @dataclass
@@ -74,6 +76,15 @@ class IdleTimeTracker(BaseModule):
         "hibernate": "休眠",
     }
 
+    # 根因修复: 阶段 → SleepPhaseThresholds 字段映射。原实现用 f"to_{phase}"
+    # 拼键（如 to_light_sleep），字段根本不存在 → getattr 默认 0 → 阶段迁移错乱。
+    _PHASE_THRESHOLD_KEYS = {
+        "light_sleep": "idle_light_sleep",
+        "deep_sleep": "idle_deep_sleep",
+        "rem": "idle_rem",
+        "hibernate": "idle_hibernate",
+    }
+
     def __init__(self, event_bus=None, state_manager=None, log_manager=None, error_handler=None):
         super().__init__(config={}, event_bus=event_bus)
         self._last_activity_time = time.time()
@@ -92,6 +103,21 @@ class IdleTimeTracker(BaseModule):
         self._callbacks: Dict[str, List[Callable]] = {}
         self._last_consolidation_result: Optional[Dict[str, Any]] = None
         self._memory_manager = None
+        # P2-6: 真实记忆温度来源（由 agent 注入 memory_manager.get_average_temperature）
+        self._temperature_provider: Optional[Callable[[], float]] = None
+
+    def set_temperature_provider(self, provider: Callable[[], float]) -> None:
+        """设置真实记忆温度提供者（无注入时退回 25.0 中性默认值）"""
+        self._temperature_provider = provider
+
+    def _current_memory_temperature(self) -> float:
+        """获取当前真实平均记忆温度"""
+        if self._temperature_provider:
+            try:
+                return float(self._temperature_provider())
+            except Exception as e:
+                self.log_warning(f"获取记忆温度失败，回退默认值: {e}")
+        return 25.0
 
     def on_initialize(self) -> None:
         self.log_info("Initializing Idle Time Tracker")
@@ -107,6 +133,8 @@ class IdleTimeTracker(BaseModule):
             self._phase_config_manager.on_start()
         if self._sleep_consolidation:
             self._sleep_consolidation.set_state_value("started", True)
+        # 根因修复: _on_phase_changed 此前从未注册，阶段迁移永远不触发记忆巩固
+        self.register_callback("phase_changed", self._on_phase_changed)
         self._start_monitoring()
         self.set_state_value("running", True)
 
@@ -225,54 +253,36 @@ class IdleTimeTracker(BaseModule):
             self.log_error(f"Error during consolidation: {e}")
 
     def _write_back_consolidated_memories(self, result: Dict) -> None:
-        """将合并后的记忆写回MemoryManager"""
+        """将合并后的记忆写回MemoryManager
+
+        根因修复: 此前这里维护着一份与 sleep_writeback.write_back_consolidation_result
+        不一致的私有实现——收集了 source_ids 却从不删除 → 每次空闲整理记忆翻倍。
+        现统一委托给共享写回实现（含"仅删除真实合并源记忆"的契约）。
+        """
         if not self._memory_manager:
             return
 
         try:
-            merged_memories = result.get("merged_memories", [])
-            merge_results = result.get("merge_results", [])
+            from neurova.cognitive_layers.memory_layer.sleep_writeback import (
+                write_back_consolidation_result,
+            )
 
-            # 1. 删除原始记忆（被合并的）
-            source_ids = set()
-            for merge_result in merge_results:
-                source_ids.update(merge_result.source_ids)
-
-            # 2. 更新或添加合并后的记忆
-            for memory in merged_memories:
-                if memory.merged_from:
-                    # 这是合并后的新记忆，添加到MemoryManager
-                    content = memory.content
-                    categories = memory.categories[0] if memory.categories else "general"
-                    self._memory_manager.remember(
-                        content=content,
-                        category=categories,
-                        importance=memory.importance,
-                        temperature=memory.temperature,
-                    )
-                    self.log_debug(f"Added merged memory: {memory.id}")
-                else:
-                    # 这是未合并的原始记忆，更新其状态
-                    if memory.is_archived:
-                        # 归档的记忆，更新生命周期阶段
-                        self._memory_manager.update_memory(
-                            memory_id=memory.id,
-                            lifecycle_stage="archived",
-                            temperature=memory.temperature,
-                        )
-                        self.log_debug(f"Archived memory: {memory.id}")
-                    else:
-                        # 活跃的记忆，更新温度
-                        self._memory_manager.update_memory_temperature(
-                            memory_id=memory.id,
-                            interaction_type="consolidation",
-                        )
-                        self.log_debug(f"Updated memory temperature: {memory.id}")
-
-            self.log_info(f"Write-back completed: {len(merged_memories)} memories updated")
-
+            stats = write_back_consolidation_result(self._memory_manager, result)
+            self.log_info(f"Write-back completed: {stats}")
         except Exception as e:
             self.log_error(f"Error during write-back: {e}")
+
+    def trigger_consolidation(self) -> Optional[Dict[str, Any]]:
+        """公开入口: 触发一次记忆巩固（供认知负荷过载后整合等场景调用）
+
+        Returns:
+            最近一次巩固结果；依赖缺失时返回 None
+        """
+        if not self._sleep_consolidation or not self._memory_manager:
+            self.log_warning("Cannot trigger consolidation: missing consolidation or memory manager")
+            return None
+        self._trigger_consolidation()
+        return self._last_consolidation_result
 
     def get_last_consolidation_result(self) -> Optional[Dict[str, Any]]:
         """获取最近一次巩固结果"""
@@ -291,14 +301,19 @@ class IdleTimeTracker(BaseModule):
         return self._phase_config_manager
 
     def record_activity(self) -> None:
-        """记录用户活动（重置空闲时间）"""
-        if self._current_phase != "active":
-            self.log_info(f"Activity recorded, resetting from phase: {self._current_phase}")
+        """记录用户活动（重置空闲时间）
+
+        根因修复: 原实现只在非 active 阶段才重置时间戳，用户持续聊天时
+        _last_activity_time 停留在初始化时刻，空闲时长被虚增。
+        """
+        old_phase = self._current_phase
+        self._last_activity_time = time.time()
+        self._current_idle_time = 0.0
+        if old_phase != "active":
+            self.log_info(f"Activity recorded, resetting from phase: {old_phase}")
             self._current_phase = "active"
-            self._last_activity_time = time.time()
-            self._current_idle_time = 0.0
             self._phase_start_time = time.time()
-            self._emit_phase_changed("active", "active")
+            self._emit_phase_changed(old_phase, "active")
             self.set_state_value("current_phase", "active")
 
     def get_current_idle_time(self) -> int:
@@ -316,6 +331,13 @@ class IdleTimeTracker(BaseModule):
         """获取阶段显示名称"""
         return self.PHASE_DISPLAY_NAMES.get(phase, phase)
 
+    def _idle_threshold_for(self, phase: str) -> float:
+        """获取阶段的空闲秒数阈值（无映射的阶段返回 0）"""
+        key = self._PHASE_THRESHOLD_KEYS.get(phase)
+        if not key:
+            return 0.0
+        return getattr(self._idle_thresholds, key, 0.0)
+
     def should_enter_phase(self, target_phase: str, current_temperature: float) -> bool:
         """检查是否应该进入目标阶段"""
         current_idle = self.get_current_idle_time()
@@ -327,9 +349,7 @@ class IdleTimeTracker(BaseModule):
         elif self._sleep_mode == "time":
             phase_index = self.PHASE_ORDER.index(target_phase) if target_phase in self.PHASE_ORDER else -1
             if phase_index > 0:
-                threshold_key = f"to_{target_phase}"
-                threshold = getattr(self._idle_thresholds, threshold_key, 0)
-                return current_idle >= threshold
+                return current_idle >= self._idle_threshold_for(target_phase)
             return False
         else:  # either
             # 检查温度条件
@@ -339,9 +359,7 @@ class IdleTimeTracker(BaseModule):
             # 检查时间条件
             phase_index = self.PHASE_ORDER.index(target_phase) if target_phase in self.PHASE_ORDER else -1
             if phase_index > 0:
-                threshold_key = f"to_{target_phase}"
-                threshold = getattr(self._idle_thresholds, threshold_key, 0)
-                return current_idle >= threshold
+                return current_idle >= self._idle_threshold_for(target_phase)
             return False
 
     def _get_temperature_threshold(self, phase: str) -> float:
@@ -355,8 +373,11 @@ class IdleTimeTracker(BaseModule):
         }
         return thresholds.get(phase, 30.0)
 
-    def get_next_phase(self, current_temperature: float) -> Optional[str]:
+    def get_next_phase(self, current_temperature: Optional[float] = None) -> Optional[str]:
         """获取下一个应该进入的阶段"""
+        if current_temperature is None:
+            current_temperature = self._current_memory_temperature()
+
         current_index = self.PHASE_ORDER.index(self._current_phase) if self._current_phase in self.PHASE_ORDER else 0
 
         # 检查后续阶段
@@ -366,9 +387,7 @@ class IdleTimeTracker(BaseModule):
                 continue
 
             current_idle = self.get_current_idle_time()
-            self.PHASE_ORDER.index(phase)
-            threshold_key = f"to_{phase}"
-            threshold = getattr(self._idle_thresholds, threshold_key, 0)
+            threshold = self._idle_threshold_for(phase)
 
             if self._sleep_mode == "temperature":
                 temp_threshold = self._get_temperature_threshold(phase)
@@ -383,8 +402,8 @@ class IdleTimeTracker(BaseModule):
 
         return None
 
-    def check_and_update_phase(self, current_temperature: float = 25.0) -> Optional[str]:
-        """检查并更新阶段"""
+    def check_and_update_phase(self, current_temperature: Optional[float] = None) -> Optional[str]:
+        """检查并更新阶段（不传温度时读取真实记忆平均温度）"""
         next_phase = self.get_next_phase(current_temperature)
         if next_phase and next_phase != self._current_phase:
             self._transition_to_phase(next_phase)
@@ -462,8 +481,10 @@ class IdleTimeTracker(BaseModule):
             self._callbacks[event_type] = []
         self._callbacks[event_type].append(callback)
 
-    def get_status_info(self, current_temperature: float = 25.0) -> Dict[str, Any]:
+    def get_status_info(self, current_temperature: Optional[float] = None) -> Dict[str, Any]:
         """获取状态信息"""
+        if current_temperature is None:
+            current_temperature = self._current_memory_temperature()
         current_idle = self.get_current_idle_time()
         next_phase = self.get_next_phase(current_temperature)
 
@@ -488,15 +509,8 @@ class IdleTimeTracker(BaseModule):
             return None
 
         current_idle = self.get_current_idle_time()
-        phase_index = self.PHASE_ORDER.index(next_phase) if next_phase in self.PHASE_ORDER else -1
-
-        if phase_index > 0:
-            threshold_key = f"to_{next_phase}"
-            threshold = getattr(self._idle_thresholds, threshold_key, 0)
-            remaining = threshold - current_idle
-            return max(0, int(remaining))
-
-        return None
+        remaining = self._idle_threshold_for(next_phase) - current_idle
+        return max(0, int(remaining))
 
     def update_config(
         self,

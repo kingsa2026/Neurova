@@ -284,13 +284,16 @@ class WeChatAuthMixin:
             return True
 
         try:
-            url = f"{a.WECHAT_OA_API_BASE}/cgi-bin/token"
-            params = {
+            payload = {
                 "grant_type": "client_credential",
                 "appid": a.official_appid,
                 "secret": a.official_secret,
+                # 强刷 false: 有效期内复用凭证券；true 每日限 20 次
+                "force_refresh": False,
             }
-            resp = requests.get(url, params=params, timeout=10)
+            resp = requests.post(
+                "https://api.weixin.qq.com/cgi-bin/stable_token", json=payload, timeout=10
+            )
             data = resp.json()
 
             if "access_token" in data:

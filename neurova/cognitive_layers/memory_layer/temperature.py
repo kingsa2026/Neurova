@@ -108,6 +108,8 @@ class TemperatureEngine:
         base_decay_rate: float = 0.1,
         emotional_protection_threshold: float = 0.5,
         emotional_protection_factor: float = 0.6,
+        temp_min: float = 0.0,
+        temp_max: float = 100.0,
     ):
         """初始化温度引擎
 
@@ -115,12 +117,21 @@ class TemperatureEngine:
             base_decay_rate: 基础衰减率
             emotional_protection_threshold: 情感保护阈值
             emotional_protection_factor: 情感保护因子
+            temp_min: 温度下限（衰减夹取下界，配置项 temperature.min）
+            temp_max: 温度上限（衰减夹取上界，配置项 temperature.max）
         """
         self.base_decay_rate = base_decay_rate
         self.emotional_protection_threshold = emotional_protection_threshold
         self.emotional_protection_factor = emotional_protection_factor
+        self.temp_min = temp_min
+        self.temp_max = temp_max
 
-        logger.debug("TemperatureEngine 初始化: decay_rate=%s", base_decay_rate)
+        logger.debug(
+            "TemperatureEngine 初始化: decay_rate=%s temp_range=[%s, %s]",
+            base_decay_rate,
+            temp_min,
+            temp_max,
+        )
 
     @_hybrid_method
     def on_access(
@@ -317,8 +328,9 @@ class TemperatureEngine:
         # 应用衰减
         new_temp = current_temp * (1.0 - decay_rate)
 
-        # 限制在有效范围内
-        new_temp = max(0.0, min(100.0, new_temp))
+        # 限制在有效范围内（下界/上界配置化: temperature.min / temperature.max，
+        # 默认 0/100 与历史一致）
+        new_temp = max(self.temp_min, min(self.temp_max, new_temp))
         decay_amount = current_temp - new_temp
 
         # lifecycle_stage 基于原始温度(衰减前)判断

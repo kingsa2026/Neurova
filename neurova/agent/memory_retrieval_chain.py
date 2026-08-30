@@ -23,7 +23,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 logger = get_logger(__name__)
 
@@ -84,6 +84,9 @@ class RetrievalContext:
     min_quality: float = 0.3  # 最低质量要求
     metadata: Optional[Dict[str, Any]] = None
     timeout: float = 15.0  # C-2: 单次检索超时(秒)
+    # 实时检索进度回调（UI 聊天界面显示检索过程用；不落盘不记录）
+    # 回调签名: (event: Dict[str, Any]) -> None，异常由发射方吞掉
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
 
 
 @runtime_checkable
@@ -315,6 +318,14 @@ class MemoryRetrievalChain:
                 logger.debug("Trying retriever: %s", retriever.name)
                 start_time = time.monotonic()
 
+                # 实时进度：检索器开始（UI 聊天界面显示检索过程，不落盘）
+                progress_cb = getattr(context, "progress_callback", None)
+                if progress_cb:
+                    try:
+                        progress_cb({"stage": "retriever_start", "retriever": retriever.name})
+                    except Exception:  # noqa: BLE001 - 进度回调失败不阻断检索
+                        pass
+
                 # C-2: 添加超时控制
                 try:
                     result = await asyncio.wait_for(
@@ -322,10 +333,30 @@ class MemoryRetrievalChain:
                     )
                 except asyncio.TimeoutError:
                     logger.warning("Retriever %s timed out after %.1fs", retriever.name, context.timeout)
+                    if progress_cb:
+                        try:
+                            progress_cb({"stage": "retriever_timeout", "retriever": retriever.name})
+                        except Exception:  # noqa: BLE001
+                            pass
                     continue
 
                 elapsed = time.monotonic() - start_time
                 result.retrieval_time = elapsed
+
+                # 实时进度：检索器完成（命中数/耗时）
+                if progress_cb:
+                    try:
+                        progress_cb(
+                            {
+                                "stage": "retriever_done",
+                                "retriever": retriever.name,
+                                "count": len(result.memories),
+                                "ms": round(elapsed * 1000, 1),
+                                "accepted": bool(result.memories and result.quality >= context.min_quality),
+                            }
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
 
                 if result.memories and result.quality >= context.min_quality:
                     return result
@@ -334,6 +365,11 @@ class MemoryRetrievalChain:
 
             except Exception as e:
                 logger.warning("Retriever %s failed: %s", retriever.name, e)
+                if getattr(context, "progress_callback", None):
+                    try:
+                        context.progress_callback({"stage": "retriever_error", "retriever": retriever.name})
+                    except Exception:  # noqa: BLE001
+                        pass
                 continue
 
         # 所有检索器都失败，返回空结果

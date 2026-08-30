@@ -3,8 +3,8 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from memory.core.manager import MemoryManager
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
 mm = MemoryManager(db_path=str(Path(__file__).parent.parent / "data" / "yi_ling_memory.db"))
 

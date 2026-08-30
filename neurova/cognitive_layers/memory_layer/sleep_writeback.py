@@ -37,9 +37,14 @@ def write_back_consolidation_result(memory_manager, result: Dict[str, Any]) -> D
     merge_results = result.get("merge_results", []) or []
 
     # 收集被合并的源记忆 id
+    # 根因修复: 单例簇（未被合并的记忆）的 source_ids 只含它自己，此前也一并
+    # soft-forget → 每次睡眠整理都会遗忘所有未合并记忆。只有 ≥2 个来源的
+    # 簇才是真实合并，才允许删除源记忆。
     source_ids: set = set()
     for merge_result in merge_results:
-        source_ids.update(getattr(merge_result, "source_ids", []) or [])
+        result_sources = getattr(merge_result, "source_ids", []) or []
+        if len(result_sources) >= 2:
+            source_ids.update(result_sources)
 
     for memory in merged_memories:
         try:

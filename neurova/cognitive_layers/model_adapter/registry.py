@@ -9,7 +9,7 @@ from neurova.core.logger import get_logger
 import re
 import typing
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 
 # llm_client imports
 from neurova.llm_client import LLMClient, LLMConfig
@@ -53,9 +53,9 @@ class GenericAdapter(ModelAdapter):
     priority: int = -100  # 最低优先级
     description: str = "通用 LLM 适配器"
 
-    def __init__(self, **data):
-        super().__init__(**data)
-        self._clients: typing.Dict[str, LLMClient] = {}
+    # pydantic v2: 私有属性必须用 PrivateAttr 声明，
+    # 否则 __init__ 中赋值会抛 "object has no field '_clients'"
+    _clients: typing.Dict[str, LLMClient] = PrivateAttr(default_factory=dict)
 
     def _get_client(self, model_name: str) -> LLMClient:
         """获取或创建 LLM 客户端"""
@@ -87,6 +87,37 @@ class GenericAdapter(ModelAdapter):
         except Exception as e:
             logger.error("GenericAdapter 流式生成失败: %s", e)
             raise
+
+
+class _LazyPatternAdapter(ModelAdapter):
+    """
+    惰性模式适配器
+
+    builtin 适配器（DeepSeekAdapter/ClaudeAdapter 等）继承自
+    ``BaseModelAdapter``，其构造签名是 ``__init__(model_name, config)``。
+    而注册发生在模块导入期，此时还不知道具体模型名。
+
+    因此按 (正则, 适配器类, 优先级) 注册时，先登记本包装器；
+    真正匹配到模型后，再用真实 model_name 实例化目标适配器并缓存。
+    """
+
+    adapter_class: typing.Any = None
+
+    _instances: typing.Dict[str, typing.Any] = PrivateAttr(default_factory=dict)
+
+    def _get_instance(self, model_name: str) -> typing.Any:
+        if model_name not in self._instances:
+            self._instances[model_name] = self.adapter_class(model_name)
+        return self._instances[model_name]
+
+    async def generate(self, prompt: str, **kwargs) -> str:
+        inst = self._get_instance(kwargs.get("model", ""))
+        return await inst.generate(prompt, **kwargs)
+
+    async def stream_generate(self, prompt: str, **kwargs) -> typing.AsyncIterator[str]:
+        inst = self._get_instance(kwargs.get("model", ""))
+        async for chunk in inst.generate_stream(prompt, **kwargs):
+            yield chunk
 
 
 class ModelAdapterRegistry:
@@ -123,6 +154,36 @@ class ModelAdapterRegistry:
         # 按优先级排序（降序）
         self._adapters.sort(key=lambda x: x.priority, reverse=True)
         logger.debug("适配器已注册: %s, 优先级: %s", adapter.name, adapter.priority)
+
+    def register_adapter_pattern(
+        self,
+        pattern: str,
+        adapter_class: typing.Type,
+        priority: int = 0,
+        name: typing.Optional[str] = None,
+    ) -> ModelAdapter:
+        """以 (正则模式, 适配器类, 优先级) 三元组注册适配器
+
+        供 neurova.cognitive_layers.model_adapter.builtin 使用 —— 那里的适配器
+        需要具体 model_name 才能实例化，因此登记为惰性包装器（见 _LazyPatternAdapter）。
+
+        Args:
+            pattern: 模型名匹配的正则表达式
+            adapter_class: BaseModelAdapter 的子类
+            priority: 优先级，越大越优先
+            name: 适配器名称，默认取类名
+
+        Returns:
+            注册成功的包装适配器实例
+        """
+        wrapper = _LazyPatternAdapter(
+            name=name or getattr(adapter_class, "__name__", "adapter"),
+            model_pattern=pattern,
+            priority=priority,
+            adapter_class=adapter_class,
+        )
+        self.register_adapter(wrapper)
+        return wrapper
 
     def unregister_adapter(self, adapter_name: str) -> bool:
         """取消注册适配器"""

@@ -180,6 +180,46 @@ def _get_growth_manager(agent_id: str = "default"):
     return None
 
 
+def _reflection_entry_to_item(entry, agent_id: str) -> Dict[str, Any]:
+    """把 GrowthLogManager 的 ReflectionLogEntry 序列化为 ReflectionLog 兼容 dict
+
+    根因修复: 此前端点调用不存在的 get_recent_logs/add_log（真实 API 是
+    read_logs/generate_log），反思数据永远为空或被 mock 假数据掩盖。
+    """
+    from neurova.cognitive_layers.meta_cognition_layer.growth_log import ReflectionLogStatus
+
+    related = []
+    if getattr(entry, "context", None) and isinstance(entry.context, dict):
+        related = entry.context.get("related_memories", []) or []
+    return {
+        "log_id": entry.id,
+        "agent_id": agent_id,
+        "timestamp": entry.timestamp,
+        "reflection_type": entry.type.value,
+        "content": entry.content,
+        "insights": list(entry.insights or []),
+        "confidence": entry.confidence,
+        "related_memories": related,
+        "status": entry.status.value if hasattr(entry, "status") else ReflectionLogStatus.PENDING.value,
+    }
+
+
+def _question_entry_to_item(entry, agent_id: str) -> Dict[str, Any]:
+    """把 QuestionEntry 序列化为 QuestionItem 兼容 dict"""
+    priority_rank = {"high": 0, "normal": 1, "low": 2}
+    priority_value = entry.priority.value if hasattr(entry.priority, "value") else str(entry.priority)
+    return {
+        "question_id": entry.id,
+        "agent_id": agent_id,
+        "timestamp": entry.created_at,
+        "question_type": (entry.metadata or {}).get("question_type", "curiosity"),
+        "question": entry.content,
+        "status": entry.status.value if hasattr(entry.status, "value") else str(entry.status),
+        "answer": (entry.metadata or {}).get("answer"),
+        "priority": priority_rank.get(priority_value, 1),
+    }
+
+
 @router.get("", response_model=Dict[str, Any])
 async def get_agent_growth(
     request: Request,
@@ -204,19 +244,19 @@ async def get_agent_growth(
         "constitution": [],
     }
 
-    # 获取反思日志
+    # 获取反思日志（根因修复: get_recent_logs 不存在 → read_logs 真实读取）
     if hasattr(agent, "growth_log_manager") and agent.growth_log_manager:
         try:
-            if hasattr(agent.growth_log_manager, "get_recent_logs"):
-                growth_data["reflection_logs"] = agent.growth_log_manager.get_recent_logs(limit=10)
+            entries = agent.growth_log_manager.read_logs(limit=10)
+            growth_data["reflection_logs"] = [_reflection_entry_to_item(e, agent_id) for e in entries]
         except Exception as e:
             logger.warning("Failed to get reflection logs: %s", e)
 
-    # 获取问题队列
+    # 获取问题队列（根因修复: get_pending_questions 无 limit 参数 → 结果切片）
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
-            if hasattr(agent.question_queue_manager, "get_pending_questions"):
-                growth_data["questions"] = agent.question_queue_manager.get_pending_questions(limit=10)
+            pending = agent.question_queue_manager.get_pending_questions()
+            growth_data["questions"] = [_question_entry_to_item(q, agent_id) for q in pending[:10]]
         except Exception as e:
             logger.warning("Failed to get questions: %s", e)
 
@@ -272,13 +312,14 @@ async def get_reflection_logs(
     logs = []
     if hasattr(agent, "growth_log_manager") and agent.growth_log_manager:
         try:
-            if hasattr(agent.growth_log_manager, "get_recent_logs"):
-                logs = agent.growth_log_manager.get_recent_logs(limit=limit, offset=offset)
+            # 根因修复: get_recent_logs 不存在 → read_logs 真实读取（含 offset 切片）
+            entries = agent.growth_log_manager.read_logs(limit=limit + offset)
+            logs = [_reflection_entry_to_item(e, agent_id) for e in entries][offset:offset + limit]
         except Exception as e:
             logger.warning("Failed to get reflection logs: %s", e)
 
-    # 如果没有数据，返回模拟数据
-    if not logs:
+    # 仅在无管理器时回退模拟数据（与 sleep 端点契约一致：有真实数据源时不得造假）
+    if not logs and agent.growth_log_manager is None:
         for i in range(min(limit, 5)):
             logs.append(
                 ReflectionLog(
@@ -309,28 +350,35 @@ async def create_reflection_log(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    # 创建反思日志
-    log_id = str(uuid.uuid4())
-    timestamp = time.time()
-
+    # 创建反思日志（根因修复: add_log 不存在 → generate_log 真实落库）
+    created_entry = None
     if hasattr(agent, "growth_log_manager") and agent.growth_log_manager:
         try:
-            if hasattr(agent.growth_log_manager, "add_log"):
-                agent.growth_log_manager.add_log(
-                    log_id=log_id,
-                    reflection_type=body.reflection_type,
-                    content=body.content,
-                    insights=body.insights,
-                    confidence=body.confidence,
-                    related_memories=body.related_memories,
-                )
+            from neurova.cognitive_layers.meta_cognition_layer.growth_log import ReflectionType
+
+            try:
+                reflection_type = ReflectionType(body.reflection_type)
+            except ValueError:
+                reflection_type = ReflectionType.PERFORMANCE
+            created_entry = await agent.growth_log_manager.generate_log(
+                type=reflection_type,
+                title=f"手动反思 - {body.reflection_type}",
+                content=body.content,
+                insights=list(body.insights or []),
+                action_items=[],
+                confidence=body.confidence,
+            )
         except Exception as e:
             logger.warning("Failed to create reflection log: %s", e)
 
+    if created_entry is not None:
+        return ReflectionLog(**_reflection_entry_to_item(created_entry, agent_id))
+
+    # 管理器缺失时返回请求回显（不落库，诚实响应）
     return ReflectionLog(
-        log_id=log_id,
+        log_id=str(uuid.uuid4()),
         agent_id=agent_id,
-        timestamp=timestamp,
+        timestamp=time.time(),
         reflection_type=body.reflection_type,
         content=body.content,
         insights=body.insights,
@@ -358,8 +406,8 @@ async def get_reflection_stats(
 
     if hasattr(agent, "growth_log_manager") and agent.growth_log_manager:
         try:
-            if hasattr(agent.growth_log_manager, "get_stats"):
-                stats = agent.growth_log_manager.get_stats()
+            # 根因修复: get_stats 不存在 → get_statistics（异步）真实统计
+            stats = await agent.growth_log_manager.get_statistics()
         except Exception as e:
             logger.warning("Failed to get reflection stats: %s", e)
 
@@ -385,16 +433,23 @@ async def get_question_queue(
     questions = []
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
-            if hasattr(agent.question_queue_manager, "get_questions"):
-                questions = agent.question_queue_manager.get_questions(
-                    status=status,
-                    limit=limit,
-                )
+            from neurova.cognitive_layers.meta_cognition_layer.question_queue import QuestionStatus
+
+            # 根因修复: get_questions(status=, limit=) 不存在 → 按状态取真实数据
+            qm = agent.question_queue_manager
+            if status:
+                try:
+                    entries = qm.get_questions_by_status(QuestionStatus(status))
+                except ValueError:
+                    entries = []
+            else:
+                entries = qm.get_pending_questions() + qm.get_questions_by_status(QuestionStatus.COOLDOWN)
+            questions = [_question_entry_to_item(e, agent_id) for e in entries[:limit]]
         except Exception as e:
             logger.warning("Failed to get questions: %s", e)
 
-    # 如果没有数据，返回模拟数据
-    if not questions:
+    # 仅在无管理器时回退模拟数据（与 reflection 端点契约一致）
+    if not questions and getattr(agent, "question_queue_manager", None) is None:
         for i in range(min(limit, 3)):
             questions.append(
                 QuestionItem(
@@ -427,15 +482,20 @@ async def add_question(
     question_id = str(uuid.uuid4())
     timestamp = time.time()
 
+    # 添加新问题（根因修复: add_question 不存在 → generate_question 真实入队）
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
-            if hasattr(agent.question_queue_manager, "add_question"):
-                agent.question_queue_manager.add_question(
-                    question_id=question_id,
-                    question_type=body.question_type,
-                    question=body.question,
-                    priority=body.priority,
-                )
+            from neurova.cognitive_layers.meta_cognition_layer.question_queue import QuestionPriority
+
+            priority_rank = {0: QuestionPriority.HIGH, 1: QuestionPriority.NORMAL, 2: QuestionPriority.LOW}
+            priority = priority_rank.get(int(body.priority), QuestionPriority.NORMAL)
+            created_question = agent.question_queue_manager.generate_question(
+                content=body.question,
+                priority=priority,
+                metadata={"question_type": body.question_type},
+            )
+            question_id = created_question.id
+            timestamp = created_question.created_at
         except Exception as e:
             logger.warning("Failed to add question: %s", e)
 
@@ -462,14 +522,14 @@ async def get_next_question(
 
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
-            if hasattr(agent.question_queue_manager, "get_next_question"):
-                question = agent.question_queue_manager.get_next_question()
-                if question:
-                    return {
-                        "code": 0,
-                        "message": "success",
-                        "data": question,
-                    }
+            # 根因修复: QuestionEntry dataclass 无法被 FastAPI 序列化 → 转 dict
+            question = agent.question_queue_manager.get_next_question()
+            if question:
+                return {
+                    "code": 0,
+                    "message": "success",
+                    "data": _question_entry_to_item(question, agent_id),
+                }
         except Exception as e:
             logger.warning("Failed to get next question: %s", e)
 

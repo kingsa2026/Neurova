@@ -15,6 +15,22 @@ Meta Cognition Layer - 元认知层
 from neurova.core.logger import get_logger
 _logger = get_logger(__name__)
 
+# 根因修复: 此前是 10 个 `try: pass except ImportError` 空块，包的公开类
+# （GrowthLogManager/QuestionQueueManager 等）从未被导出。这些子模块不依赖
+# agent_core，顶层导入不会复现历史循环导入问题，安全导出。
+from neurova.cognitive_layers.meta_cognition_layer.growth_log import (  # noqa: E402,F401
+    GrowthLogManager,
+    ReflectionLogEntry,
+    ReflectionLogStatus,
+    ReflectionType,
+)
+from neurova.cognitive_layers.meta_cognition_layer.question_queue import (  # noqa: E402,F401
+    QuestionEntry,
+    QuestionPriority,
+    QuestionQueueManager,
+    QuestionStatus,
+)
+
 def __getattr__(name: str):
     """PEP 562 惰性导出：延迟导入 agent_core / skills。
 
@@ -32,49 +48,3 @@ def __getattr__(name: str):
         from neurova.skills.models import Skill
         return Skill
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-# cognitive_layers imports
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("autonomy_system 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("constitution 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("growth_log 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("meta_cognition 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("personality 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("question_queue 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("self_optimization 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("self_reflection 模块未可用: %s", _e)
-
-try:
-    pass
-except ImportError as _e:
-    _logger.debug("skills_manager 模块未可用: %s", _e)

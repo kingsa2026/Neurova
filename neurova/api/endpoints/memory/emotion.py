@@ -38,38 +38,9 @@ class EmotionAnalysisResult(BaseModel):
     tags: List[str]
 
 
-@router.get("/emotion/{emotion_type}", summary="按情绪类型查询记忆")
-async def get_memories_by_emotion(
-    emotion_type: str,
-    min_score: float = Query(default=0.0, ge=0.0, le=1.0, description="最小情绪分数"),
-    limit: int = Query(default=20, ge=1, le=100, description="返回条数"),
-    agent_id: Optional[str] = None,
-    user: Dict[str, Any] = Depends(get_current_user_or_default),
-):
-    """
-    按情绪类型查询记忆
-
-    情绪类型可选值: joy, sadness, love, fear, hope, anger, surprise
-    """
-    try:
-        manager = get_memory_manager(agent_id, user)
-        memories = manager.get_memories_by_emotion(emotion=emotion_type, limit=limit)
-
-        return success_response(
-            data={
-                "count": len(memories),
-                "emotion_type": emotion_type,
-                "memories": [memory_to_dict(m) for m in memories],
-            },
-            message="获取成功",
-            request_id=_get_request_id(None),
-        )
-
-    except APIError:
-        raise
-    except Exception as e:
-        logger.exception("按情绪查询记忆失败: %s", e)
-        raise APIError.internal(f"按情绪查询记忆失败: {str(e)}")
+# 注意：/emotion/{emotion_type} 路径参数路由必须在本文件所有
+# /emotion/* 字面路由（summary/distribution/types）之后注册，
+# 否则它们会被吞掉（FastAPI 按注册顺序匹配）。见文件末尾。
 
 
 @router.get("/emotion/summary", summary="获取情绪统计摘要")
@@ -180,12 +151,22 @@ async def get_emotion_types(
     """
     获取支持的情绪类型列表
 
-    返回系统支持的所有情绪类型及其权重
+    返回系统支持的所有情绪类型及其层次、类别、强度范围
     """
     try:
-        from neurova.cognitive_layers.memory_layer.emotion import EMOTION_WEIGHTS
+        from neurova.cognitive_layers.memory_layer.emotion import get_emotion_analyzer_instance
 
-        emotion_types = [{"type": emotion, "weight": weight} for emotion, weight in EMOTION_WEIGHTS.items()]
+        hierarchy = get_emotion_analyzer_instance().get_emotion_hierarchy()
+
+        emotion_types = [
+            {
+                "type": emotion,
+                "layer": info.get("layer"),
+                "category": info.get("category"),
+                "intensity_range": list(info.get("intensity_range", ())),
+            }
+            for emotion, info in hierarchy.items()
+        ]
 
         return success_response(
             data={
@@ -199,3 +180,37 @@ async def get_emotion_types(
     except Exception as e:
         logger.exception("获取情绪类型失败: %s", e)
         raise APIError.internal(f"获取情绪类型失败: {str(e)}")
+
+
+@router.get("/emotion/{emotion_type}", summary="按情绪类型查询记忆")
+async def get_memories_by_emotion(
+    emotion_type: str,
+    min_score: float = Query(default=0.0, ge=0.0, le=1.0, description="最小情绪分数"),
+    limit: int = Query(default=20, ge=1, le=100, description="返回条数"),
+    agent_id: Optional[str] = None,
+    user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """
+    按情绪类型查询记忆
+
+    情绪类型可选值: joy, sadness, love, fear, hope, anger, surprise
+    """
+    try:
+        manager = get_memory_manager(agent_id, user)
+        memories = manager.get_memories_by_emotion(emotion=emotion_type, limit=limit)
+
+        return success_response(
+            data={
+                "count": len(memories),
+                "emotion_type": emotion_type,
+                "memories": [memory_to_dict(m) for m in memories],
+            },
+            message="获取成功",
+            request_id=_get_request_id(None),
+        )
+
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception("按情绪查询记忆失败: %s", e)
+        raise APIError.internal(f"按情绪查询记忆失败: {str(e)}")

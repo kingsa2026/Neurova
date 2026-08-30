@@ -7,7 +7,11 @@ OpenAI Loop - OpenAI 兼容模型适配循环
 import re
 
 from neurova.core.logger import get_logger
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+# Agent 仅用于类型注解；运行时导入会与 agent_core 形成循环依赖
+if TYPE_CHECKING:
+    from neurova.agent_core import Agent
 
 from neurova.agent.loops.base import BaseAgentLoop
 from neurova.agent.loops.registry import register_loop
@@ -60,7 +64,37 @@ class OpenAILoop(BaseAgentLoop):
         super().__init__(agent)
         self._tool_rounds = 0  # 递归深度计数
         self._tools_supported = True  # 初始假设支持，400 后设为 False
+        # 停滞检测闭环（对标 OpenManus is_stuck/handle_stuck_state）：
+        # 记录每轮 assistant 回复与工具调用签名，重复时注入"换策略"提示，
+        # 连续停滞则终止工具循环（激活 agent_loop_detection 死代码的消费方）
+        self._round_replies: List[str] = []
+        self._last_round_calls: List[tuple] = []
+        self._stagnation_count = 0
         logger.info("OpenAILoop initialized for agent: %s", agent.config.name)
+
+    def _assess_stagnation(
+        self, round_reply: str, current_calls: List[tuple], previous_calls: List[tuple]
+    ) -> bool:
+        """判定本轮是否停滞：内容与上一轮高度相似，或工具调用签名完全重复。
+
+        空回复（纯工具轮）不参与内容停滞判定，避免误伤只调工具不说话的正常轮次。
+        """
+        try:
+            from neurova.agent_loop_detection import calculate_similarity
+        except ImportError:  # pragma: no cover - 模块缺失时退化为仅签名判定
+            calculate_similarity = None
+
+        previous_replies = [r for r in self._round_replies[:-1] if r]
+        if round_reply and previous_replies:
+            if calculate_similarity is not None:
+                for prev in previous_replies[-2:]:
+                    if calculate_similarity(round_reply, prev) >= 0.8:
+                        return True
+            elif round_reply in previous_replies:
+                return True
+        if current_calls and current_calls == previous_calls:
+            return True
+        return False
 
     # ══════════════════════════════════════════════════════════════
     # 工具降级健壮性（TOOLROBUST-B）
@@ -112,6 +146,9 @@ class OpenAILoop(BaseAgentLoop):
         """
         # 准备请求参数
         self._tool_rounds = 0  # 重置计数器
+        self._round_replies = []  # 停滞检测：每轮 assistant 回复
+        self._last_round_calls = []  # 停滞检测：上一轮工具调用签名
+        self._stagnation_count = 0
         # Bug B-10 修复:每次 predict_step 重置 _tools_supported = True。
         # 原实现一次性 400 后永久设为 False,后续所有 chat 都不注入 tools,
         # 工具调用静默失效,需重启 agent 才恢复。
@@ -237,75 +274,150 @@ class OpenAILoop(BaseAgentLoop):
         return response
 
     async def _predict_stream(self, request_params: Dict) -> Any:
-        """流式预测 — 实时 yield 结构化事件（content / reasoning / tool_calls / done）"""
-        reply_parts = []
-        reasoning_parts = []
-        pending_tool_calls = None
+        """流式预测 — 实时 yield 结构化事件（content / reasoning / tool_call / tool_result / done）。
 
-        # 传递 temperature/max_tokens 等参数到流式调用
+        底层 chat_stream 逐 chunk 产出 LLMResponse 对象（见 llm_client.chat_stream_async），
+        失败时被 multi_model_client.chat_stream 包装为 {"error": ...} 字典。本方法负责：
+        1. 把 chunk 实时转成 typed 事件（reasoning/content 逐片段转发，思考过程不再整块滞后）；
+        2. 流式 tool_calls 分片按 index 合并为完整调用（OpenAI 兼容流中首片带 id/name，
+           后续片段仅携带 arguments 碎片），流结束后执行并产出 tool_result 事件；
+        3. 工具执行后以流式续写（递归本方法），直到模型不再调用工具；
+        4. 整个生成器恰好 yield 一个 done 事件（携带最终轮正文快照）；
+        5. error 字典抛 RuntimeError 交由管线降级，而不是静默返回空回复。
+        """
+        reply_parts: List[str] = []
+        reasoning_parts: List[str] = []
+        pending_tool_calls: List[Dict] = []
+        finish_reason = ""
+
         stream_kwargs = {k: v for k, v in request_params.items() if k not in ("messages", "stream")}
-        async for event in self.llm_client.chat_stream(request_params["messages"], **stream_kwargs):
-            if not isinstance(event, dict):
-                reply_parts.append(str(event))
-                yield {"type": "content", "data": str(event)}
+        async for chunk in self.llm_client.chat_stream(request_params["messages"], **stream_kwargs):
+            if isinstance(chunk, dict):
+                if chunk.get("error"):
+                    raise self._raise_for_error_dict(chunk)
                 continue
-
-            ev_type = event.get("type")
-            if ev_type == "content":
-                text = event.get("data", "")
-                reply_parts.append(text)
-                yield {"type": "content", "data": text}
-            elif ev_type == "reasoning":
-                rtext = event.get("data", "")
+            content = getattr(chunk, "content", "") or ""
+            if content:
+                reply_parts.append(content)
+                yield {"type": "content", "data": content}
+            rtext = getattr(chunk, "reasoning_content", None)
+            if rtext:
                 reasoning_parts.append(rtext)
                 yield {"type": "reasoning", "data": rtext}
-            elif ev_type == "tool_calls":
-                pending_tool_calls = event.get("data", [])
-                self._tool_rounds += 1
-                logger.info(
-                    f"🔧 流式捕获 {len(pending_tool_calls)} 个 tool_calls: {[tc['function']['name'] for tc in pending_tool_calls]}"
-                )
-                for tc in pending_tool_calls:
-                    yield {"type": "tool_call", "data": tc}
-            elif ev_type == "done":
-                finish_reason = event.get("finish_reason", "")
-                full_reply = "".join(reply_parts)
+            for tc_delta in getattr(chunk, "tool_calls", None) or []:
+                self._merge_tool_call_delta(pending_tool_calls, tc_delta)
+            if getattr(chunk, "finish_reason", None):
+                finish_reason = chunk.finish_reason
 
-                # 保存思考过程到 agent
-                if reasoning_parts and hasattr(self.agent, "_current_reasoning"):
-                    self.agent._current_reasoning = "".join(reasoning_parts)
-                    logger.info("🧠 捕获流式思考过程: %s 字符", len(self.agent._current_reasoning))
+        # 保存思考过程到 agent（供 post-chat 持久化/前端展示）
+        if reasoning_parts and hasattr(self.agent, "_current_reasoning"):
+            self.agent._current_reasoning = "".join(reasoning_parts)
+            logger.info("🧠 捕获流式思考过程: %s 字符", len(self.agent._current_reasoning))
 
-                # 如果有待处理的 tool_calls，执行它们
-                if pending_tool_calls:
-                    # 先 yield 文本部分（如果有）
-                    if full_reply.strip():
-                        logger.info("📝 工具调用前已有文本: %s 字符", len(full_reply))
+        if pending_tool_calls:
+            self._tool_rounds += 1
+            logger.info(
+                "LLM returned %s tool calls (stream round %s)",
+                len(pending_tool_calls), self._tool_rounds,
+            )
+            for tc in pending_tool_calls:
+                yield {"type": "tool_call", "data": tc}
 
-                    # 执行工具
-                    tool_messages = await self.handle_tool_calls(pending_tool_calls, request_params["messages"])
-                    for tm in tool_messages:
-                        yield {"type": "tool_result", "data": tm}
+            tool_messages = await self.handle_tool_calls(pending_tool_calls, request_params["messages"])
+            for tm in tool_messages:
+                yield {"type": "tool_result", "data": tm}
 
-                    if self._tool_rounds <= 10:
-                        # 将工具结果加入消息，递归调用（非流式）
-                        request_params["messages"].extend(tool_messages)
-                        logger.info("🔄 工具执行完成，递归继续对话 (round %s)", self._tool_rounds)
-                        continuation = await self._predict_normal(request_params)
-                        if continuation:
-                            cont_content = getattr(continuation, "content", None)
-                            if cont_content:
-                                yield {"type": "content", "data": cont_content}
-                                full_reply = cont_content  # 使用续写结果作为最终回复
-                            cont_reasoning = getattr(continuation, "reasoning_content", None)
-                            if cont_reasoning:
-                                yield {"type": "reasoning", "data": cont_reasoning}
-                    else:
-                        logger.warning("工具调用轮次超过上限 (%s)，停止递归", self._tool_rounds)
+            # 停滞检测：记录本轮回复与调用签名，重复时注入提示，连续停滞终止
+            round_reply = "".join(reply_parts).strip()
+            current_calls = [
+                ((tc.get("function") or {}).get("name", ""), (tc.get("function") or {}).get("arguments", ""))
+                for tc in pending_tool_calls
+            ]
+            stagnant = self._assess_stagnation(round_reply, current_calls, self._last_round_calls)
+            self._round_replies.append(round_reply)
+            self._last_round_calls = current_calls
 
-                yield {"type": "done", "reply": full_reply, "finish_reason": finish_reason}
+            if stagnant:
+                self._stagnation_count += 1
+                if self._stagnation_count >= 2:
+                    logger.warning(
+                        "连续 %s 轮停滞（重复响应/调用），终止工具循环", self._stagnation_count
+                    )
+                    yield {
+                        "type": "reasoning",
+                        "data": "检测到连续重复的响应，已停止工具循环，避免无效重试。",
+                    }
+                    return
+            else:
+                self._stagnation_count = 0
 
-        logger.debug("Stream completed")
+            if self._tool_rounds <= 10:
+                # 工具结果入历史后流式续写（递归），保持后续轮次同样逐 token 转发
+                request_params["messages"].extend(tool_messages)
+                if stagnant:
+                    stagnation_prompt = (
+                        "检测到重复的响应内容。请更换策略，避免重复已经尝试过的无效路径。"
+                    )
+                    request_params["messages"].append({"role": "user", "content": stagnation_prompt})
+                async for event in self._predict_stream(request_params):
+                    yield event
+                return
+            logger.warning("工具调用轮次超过上限 (%s)，停止递归", self._tool_rounds)
+
+        yield {"type": "done", "reply": "".join(reply_parts), "finish_reason": finish_reason}
+
+    @staticmethod
+    def _raise_for_error_dict(chunk: Dict) -> Exception:
+        """把流式错误 dict 转成分类异常（error_type 优先，缺省保持 RuntimeError 语义）。"""
+        from neurova.llm_client import (
+            LLMConnectionError,
+            LLMAuthError,
+            LLMRateLimitError,
+            TokenLimitExceeded,
+        )
+
+        message = f"LLM 流式调用失败: {chunk.get('error')}"
+        error_type = str(chunk.get("error_type") or "")
+        mapping = {
+            "rate_limit": LLMRateLimitError,
+            "token_limit": TokenLimitExceeded,
+            "auth": LLMAuthError,
+            "connection": LLMConnectionError,
+        }
+        cls = mapping.get(error_type)
+        if cls is not None:
+            return cls(message)
+        return RuntimeError(message)
+
+    @staticmethod
+    def _merge_tool_call_delta(pending: List[Dict], delta: Dict) -> None:
+        """按 index 合并流式 tool_calls 分片。
+
+        OpenAI 兼容流式响应中，一次工具调用被拆到多个 chunk：首片携带 id/name，
+        后续片段 id/name 为 None、仅递增 arguments 文本。chat_stream_async 透传
+        delta 的 index 字段，据此定位合并位置；无 index 时退化为追加新条目。
+        """
+        fn = delta.get("function") or {}
+        index = delta.get("index")
+        if index is None or index >= len(pending):
+            pending.append(
+                {
+                    "id": delta.get("id"),
+                    "type": delta.get("type") or "function",
+                    "function": {
+                        "name": fn.get("name") or "",
+                        "arguments": fn.get("arguments") or "",
+                    },
+                }
+            )
+            return
+        entry = pending[index]
+        if delta.get("id"):
+            entry["id"] = delta["id"]
+        if fn.get("name"):
+            entry["function"]["name"] = (entry["function"].get("name") or "") + fn["name"]
+        if fn.get("arguments"):
+            entry["function"]["arguments"] = (entry["function"].get("arguments") or "") + fn["arguments"]
 
     async def handle_tool_calls(self, tool_calls: List, messages: List[Dict]) -> List[Dict]:
         """

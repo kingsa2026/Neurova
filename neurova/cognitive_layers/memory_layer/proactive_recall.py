@@ -400,7 +400,9 @@ class ProactiveRecall:
             return suggestions
 
         config = trigger.config
-        config.get("emotions", [])
+        # 原代码丢弃了取值结果, 导致下方 target_emotion 未定义 (NameError),
+        # 情感触发回忆整体失效。
+        target_emotion = config.get("emotions", [])
         threshold = config.get("threshold", 0.7)
 
         try:

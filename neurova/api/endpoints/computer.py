@@ -8,11 +8,15 @@ import asyncio
 from neurova.core.logger import get_logger
 import typing
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, TypeAdapter
+
+from neurova.api.auth import get_current_user
 
 logger = get_logger(__name__)
-router = APIRouter()
+# P0 安全修复: /shell、/file/read、/file/write 等端点可执行任意命令/读写任意文件，
+# 必须要求认证（此前完全无鉴权，任何能访问端口的人均可 RCE）。
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 # ── Models ─────────────────────────────────────────────
@@ -109,9 +113,119 @@ class BrowserSnapshotRequest(BaseModel):
     pass
 
 
+class BrowserClickRoleRequest(BaseModel):
+    # 严格 schema（对标 ZCode 命令模式）：未知字段直接拒绝，防幻觉参数
+    model_config = ConfigDict(extra="forbid")
+
+    role: str
+    name: typing.Optional[str] = None
+
+
+class BrowserFillRoleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: str
+    name: typing.Optional[str] = None
+    text: str = ""
+
+
 class BrowserScrapeRequest(BaseModel):
     url: str
     selectors: typing.Optional[dict] = None
+
+
+# ── 浏览器命令总线（对标 ZCode 单入口 + 严格 schema 模式）──
+# 判别联合：command Literal 字段区分命令；extra="forbid" 逐命令拒绝幻觉参数
+class NavigateCmd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: typing.Literal["navigate"] = "navigate"
+    url: str
+    generation: typing.Optional[int] = None
+
+
+class DomSnapshotCmd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: typing.Literal["dom_snapshot"] = "dom_snapshot"
+    generation: typing.Optional[int] = None
+
+
+class ClickRoleCmd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: typing.Literal["click_role"] = "click_role"
+    role: str
+    name: typing.Optional[str] = None
+    generation: typing.Optional[int] = None
+
+
+class FillRoleCmd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: typing.Literal["fill_role"] = "fill_role"
+    role: str
+    name: typing.Optional[str] = None
+    text: str = ""
+    generation: typing.Optional[int] = None
+
+
+class ScreenshotCmd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: typing.Literal["screenshot"] = "screenshot"
+
+
+class ExtractTextCmd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: typing.Literal["extract_text"] = "extract_text"
+
+
+class ListTargetsCmd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: typing.Literal["list_targets"] = "list_targets"
+
+
+class OpenTargetCmd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: typing.Literal["open_target"] = "open_target"
+    url: typing.Optional[str] = None
+
+
+class SwitchTargetCmd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: typing.Literal["switch_target"] = "switch_target"
+    target_id: str
+    generation: typing.Optional[int] = None
+
+
+class CloseTargetCmd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: typing.Literal["close_target"] = "close_target"
+    target_id: str
+    generation: typing.Optional[int] = None
+
+
+BrowserCommand = typing.Union[
+    NavigateCmd,
+    DomSnapshotCmd,
+    ClickRoleCmd,
+    FillRoleCmd,
+    ScreenshotCmd,
+    ExtractTextCmd,
+    ListTargetsCmd,
+    OpenTargetCmd,
+    SwitchTargetCmd,
+    CloseTargetCmd,
+]
+
+# 程序化校验入口（FastAPI 请求体校验与本适配器共享同一份 schema）
+BrowserCommandAdapter: TypeAdapter = TypeAdapter(BrowserCommand)
 
 
 # ── In-memory state ────────────────────────────────────
@@ -415,13 +529,88 @@ async def browser_execute_js(body: BrowserExecuteJsRequest):
 
 @router.post("/browser/snapshot")
 async def browser_snapshot(body: BrowserSnapshotRequest):
-    """浏览器获取 accessibility tree 快照"""
+    """浏览器获取 aria 可访问性树快照（真实实现：PlaywrightBackend.aria_snapshot）"""
     _log_action("browser_snapshot", {})
+    result = _normalize_browser_result(await _get_manager().browser_dom_snapshot())
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail=result.get("error") or "快照失败：无可用浏览器后端")
     return {
         "code": 0,
-        "message": "Snapshot captured (placeholder)",
-        "data": {"tree": {}, "url": _browser_state.get("url")},
+        "message": "Snapshot captured",
+        "data": {"tree": result.get("data", ""), "url": result.get("url"), "title": result.get("title")},
     }
+
+
+@router.post("/browser/click-role")
+async def browser_click_role(body: BrowserClickRoleRequest):
+    """按 ARIA role + accessible name 定位点击（快照事实驱动，严格 schema）"""
+    _log_action("browser_click_role", {"role": body.role, "name": body.name})
+    result = _normalize_browser_result(await _get_manager().browser_click_role(body.role, body.name))
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail=result.get("error") or "role 点击失败")
+    return {"code": 0, "message": f"Clicked {body.role}「{body.name or ''}」", "data": result}
+
+
+@router.post("/browser/fill-role")
+async def browser_fill_role(body: BrowserFillRoleRequest):
+    """按 ARIA role + accessible name 定位输入（text 空串=清空）"""
+    _log_action("browser_fill_role", {"role": body.role, "name": body.name})
+    result = _normalize_browser_result(await _get_manager().browser_fill_role(body.role, body.name, body.text))
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail=result.get("error") or "role 输入失败")
+    return {"code": 0, "message": f"Filled {body.role}「{body.name or ''}」", "data": result}
+
+
+@router.post("/browser/capabilities")
+async def browser_capabilities():
+    """查询当前浏览器后端能力清单（aria 快照 / role 定位 / 像素截图）"""
+    result = await _get_manager().browser_capabilities()
+    if isinstance(result, dict) and result.get("error"):
+        raise HTTPException(status_code=503, detail=result["error"])
+    return {"code": 0, "message": "Capabilities", "data": result}
+
+
+@router.post("/browser/execute")
+async def browser_execute(cmd: BrowserCommand):
+    """浏览器命令总线：单一入口分发全部浏览器命令。
+
+    严格 schema 在解析层生效——未知命令无法构成判别联合、多余字段被
+    extra_forbidden 拒绝；命令失败返回 502 携带后端错误说明。
+    """
+    _log_action("browser_execute", {"command": getattr(cmd, "command", "?")})
+    mgr = _get_manager()
+
+    if isinstance(cmd, NavigateCmd):
+        result = _normalize_browser_result(await mgr.browser_navigate(cmd.url, generation=cmd.generation))
+    elif isinstance(cmd, DomSnapshotCmd):
+        result = _normalize_browser_result(await mgr.browser_dom_snapshot(generation=cmd.generation))
+    elif isinstance(cmd, ClickRoleCmd):
+        result = _normalize_browser_result(
+            await mgr.browser_click_role(cmd.role, cmd.name, generation=cmd.generation)
+        )
+    elif isinstance(cmd, FillRoleCmd):
+        result = _normalize_browser_result(
+            await mgr.browser_fill_role(cmd.role, cmd.name, cmd.text, generation=cmd.generation)
+        )
+    elif isinstance(cmd, ScreenshotCmd):
+        result = _normalize_browser_result(await mgr.browser_screenshot())
+        result.pop("has_screenshot", None)
+    elif isinstance(cmd, ExtractTextCmd):
+        result = _normalize_browser_result(await mgr.browser_extract_text())
+    elif isinstance(cmd, ListTargetsCmd):
+        result = _normalize_browser_result(await mgr.browser_list_targets())
+    elif isinstance(cmd, OpenTargetCmd):
+        result = _normalize_browser_result(await mgr.browser_open_target(cmd.url))
+    elif isinstance(cmd, SwitchTargetCmd):
+        result = _normalize_browser_result(await mgr.browser_switch_target(cmd.target_id, cmd.generation))
+    elif isinstance(cmd, CloseTargetCmd):
+        result = _normalize_browser_result(await mgr.browser_close_target(cmd.target_id, cmd.generation))
+    else:  # pragma: no cover - 判别联合已穷举
+        raise HTTPException(status_code=422, detail="未知命令")
+
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail=result.get("error") or "浏览器命令执行失败")
+    return {"code": 0, "message": f"Command {cmd.command} executed", "data": result}
 
 
 @router.post("/browser/scrape")

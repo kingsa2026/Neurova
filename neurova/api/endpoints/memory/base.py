@@ -99,8 +99,35 @@ class MemoryItem(BaseModel):
 
 
 def memory_to_dict(memory) -> dict:
-    """将 Memory 对象转换为字典（安全序列化，容忍损坏数据）"""
+    """将 Memory 对象或 recall() 返回的 to_dict() 字典转换为 API 响应字典
+
+    （安全序列化，容忍损坏数据。MemoryManager.recall/get_hot_memories 等
+    检索接口返回的是 Memory.to_dict() 字典列表，键为 importance/emotion，
+    需映射到 API 契约的 is_important/emotion_score。）
+    """
     try:
+        if isinstance(memory, dict):
+            metadata = memory.get("metadata") or {}
+            importance = float(memory.get("importance", 0.0) or 0.0)
+            emotion = memory.get("emotion")
+            return {
+                "id": str(memory.get("id", "")),
+                "agent_id": str(memory.get("agent_id", "")),
+                "content": str(memory.get("content", "")),
+                "category": str(memory.get("category", "")),
+                "temperature": float(memory.get("temperature", 100.0) or 0.0),
+                "lifecycle_stage": str(memory.get("lifecycle_stage", "")),
+                "is_important": bool(memory.get("is_important", metadata.get("is_important", importance >= 80.0))),
+                "is_crystallized": bool(
+                    memory.get("is_crystallized", memory.get("lifecycle_stage") == "crystallized")
+                ),
+                "emotion_score": float(
+                    memory.get("emotion_score", 0.0 if emotion in (None, "neutral") else 0.5)
+                ),
+                "access_count": int(memory.get("access_count", 0) or 0),
+                "created_at": str(memory.get("created_at", "") or ""),
+                "last_accessed_at": str(memory.get("last_accessed_at") or ""),
+            }
         return {
             "id": getattr(memory, "id", ""),
             "agent_id": getattr(memory, "agent_id", ""),

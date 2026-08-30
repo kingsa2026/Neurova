@@ -1,0 +1,48 @@
+# Neurova CI 核心依赖（精简版，用于静态门禁 + 审计回归测试）
+#
+# 说明：
+#   - 本文件是 requirements.txt 的"轻量核心子集"，供 GitHub Actions 使用。
+#   - 刻意排除体积大 / 需本地模型 / 需显示器的重依赖（numpy、onnxruntime、
+#     sentence-transformers、transformers、tokenizers、soundfile、huggingface_hub、
+#     sentencepiece、edge-tts、pillow、pyautogui、playwright）。
+#   - 上述被排除依赖在代码中均为"惰性/try 降级"导入，缺席时模块仍可加载；
+#     它们在 scripts/ci_static_gate.py 的 KNOWN_OPTIONAL_DEPS 中登记，
+#     导入巡检会记为 OPTIONAL-SKIP（优雅降级），不算失败。
+#   - 如需完整功能（TTS/ASR/Embedding/NeRF/Computer Use），请改用稳定版 Python
+#     （建议 3.11–3.13）安装完整 requirements.txt。
+
+# Core Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+
+# HTTP & WebSocket
+httpx>=0.25.0
+websockets>=12.0
+aiohttp>=3.9.0
+
+# Database
+aiosqlite>=0.19.0
+
+# Authentication
+PyJWT>=2.8.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+pycryptodome>=3.20.0  # AES-GCM for secret_store encryption
+
+# LLM Providers
+litellm>=1.10.0
+openai>=1.6.0
+anthropic>=0.8.0
+
+# Utilities
+python-dotenv>=1.0.0
+psutil>=5.9.0
+tiktoken>=0.5.0
+
+# Testing & Lint (dev)
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+pyflakes>=3.0.0

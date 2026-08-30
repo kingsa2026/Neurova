@@ -232,7 +232,7 @@ def _get_skill_registry():
 def _get_mcp_client():
     """延迟加载 MCPToolClient"""
     try:
-        from neurova.mcp_client import get_mcp_client
+        from neurova.tool_layers.mcp_client import get_mcp_client
 
         return get_mcp_client()
     except ImportError:

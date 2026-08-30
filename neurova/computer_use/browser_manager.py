@@ -16,6 +16,7 @@ import json
 from neurova.core.logger import get_logger
 import threading
 import time
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -56,9 +57,10 @@ class BrowserResult:
     url: Optional[str] = None
     title: Optional[str] = None
     duration_ms: float = 0.0
+    generation: Optional[int] = None  # 操作时活动 tab 的代数（agent 回传用于新鲜度校验）
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "success": self.success,
             "data": self.data,
             "error": self.error,
@@ -67,6 +69,9 @@ class BrowserResult:
             "title": self.title,
             "duration_ms": self.duration_ms,
         }
+        if self.generation is not None:
+            d["generation"] = self.generation
+        return d
 
 
 class DialogHandler:
@@ -335,6 +340,23 @@ class BrowserBackend(ABC):
     async def close(self) -> None:
         pass
 
+    # ── 可访问性快照 + role 定位（能力裁剪模式）──
+    # 基类默认"不支持"降级：不支持的后端（Scrapling 等）无需改动即自动降级为
+    # 错误结果而非抛异常；能力清单供调用方按后端选路（对标 unsupportedByDefaultIn）
+    @property
+    def capabilities(self) -> Dict[str, bool]:
+        """后端能力清单，子类按实际支持覆盖"""
+        return {"aria_snapshot": False, "role_locator": False, "pixel_screenshot": False}
+
+    async def dom_snapshot(self) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support aria snapshot")
+
+    async def click_role(self, role: str, name: Optional[str] = None) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support role-based click")
+
+    async def fill_role(self, role: str, name: Optional[str] = None, text: str = "") -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support role-based fill")
+
 
 class PlaywrightBackend(BrowserBackend):
     """Playwright 浏览器后端"""
@@ -343,8 +365,193 @@ class PlaywrightBackend(BrowserBackend):
         super().__init__(config)
         self._browser = None
         self._context = None
-        self._page = None
+        self._tabs: Dict[str, Dict[str, Any]] = {}
+        self._active_target_id: Optional[str] = None
         self._headless = config.get("headless", True) if config else True
+
+    @property
+    def capabilities(self) -> Dict[str, bool]:
+        return {"aria_snapshot": True, "role_locator": True, "pixel_screenshot": True}
+
+    # ── Tab 级 target 代际管理（对标 ZCode browserGeneration）──
+    # 每个 tab 持有自己的 generation，navigate 该 tab 时 +1；调用方携带过期
+    # generation 操作会被拒绝（快照事实已失效），不携带则跳过校验（向后兼容）
+
+    @property
+    def _page(self):
+        """活动 tab 的页面（兼容既有单页面方法的读取路径）"""
+        tab = self._tabs.get(self._active_target_id) if self._active_target_id else None
+        return tab["page"] if tab else None
+
+    def _register_tab(self, page) -> Dict[str, Any]:
+        target_id = f"tab_{uuid.uuid4().hex[:8]}"
+        self._tabs[target_id] = {"page": page, "generation": 1}
+        self._active_target_id = target_id
+        return {"target_id": target_id, "generation": 1}
+
+    def _check_active_generation(self, generation: Optional[int]) -> Optional[BrowserResult]:
+        """校验调用方持有的 generation 是否仍是活动 tab 的当前值"""
+        if generation is None:
+            return None
+        tab = self._tabs.get(self._active_target_id) if self._active_target_id else None
+        if not tab:
+            return BrowserResult(success=False, error="无活动浏览器 tab")
+        if tab["generation"] != generation:
+            return BrowserResult(
+                success=False,
+                error=(
+                    f"target generation 过期（当前 {tab['generation']}，传入 {generation}）——"
+                    "页面已变化，快照事实失效，请重新 dom_snapshot"
+                ),
+                data={"stale": True, "current_generation": tab["generation"]},
+            )
+        return None
+
+    def _active_generation(self) -> Optional[int]:
+        tab = self._tabs.get(self._active_target_id) if self._active_target_id else None
+        return tab["generation"] if tab else None
+
+    async def open_target(self, url: Optional[str] = None) -> BrowserResult:
+        """新开 tab 并激活；给 url 时顺带导航"""
+        start_time = time.time()
+        try:
+            if not self._context:
+                raise RuntimeError("Not initialized")
+            page = await self._context.new_page()
+            info = self._register_tab(page)
+            if url:
+                await page.goto(url, wait_until="networkidle")
+            return BrowserResult(
+                success=True,
+                data=info,
+                url=getattr(page, "url", ""),
+                title=await page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=info["generation"],
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def list_targets(self) -> BrowserResult:
+        """列出全部 tab（含 generation 与活动标记）"""
+        start_time = time.time()
+        data = []
+        for tid, tab in self._tabs.items():
+            page = tab["page"]
+            data.append(
+                {
+                    "target_id": tid,
+                    "generation": tab["generation"],
+                    "url": getattr(page, "url", ""),
+                    "active": tid == self._active_target_id,
+                }
+            )
+        return BrowserResult(success=True, data=data, duration_ms=(time.time() - start_time) * 1000)
+
+    async def switch_target(self, target_id: str, generation: Optional[int] = None) -> BrowserResult:
+        """切换活动 tab；携带过期 generation 时拒绝"""
+        tab = self._tabs.get(target_id)
+        if not tab:
+            return BrowserResult(success=False, error=f"target 不存在: {target_id}")
+        if generation is not None and tab["generation"] != generation:
+            return BrowserResult(
+                success=False,
+                error=f"target generation 过期（当前 {tab['generation']}，传入 {generation}）——请重新 list_targets",
+                data={"stale": True, "current_generation": tab["generation"]},
+            )
+        self._active_target_id = target_id
+        return BrowserResult(success=True, url=getattr(tab["page"], "url", ""))
+
+    async def close_target(self, target_id: str, generation: Optional[int] = None) -> BrowserResult:
+        """关闭 tab；活动 tab 被关时回落到剩余第一个 tab"""
+        tab = self._tabs.get(target_id)
+        if not tab:
+            return BrowserResult(success=False, error=f"target 不存在: {target_id}")
+        if generation is not None and tab["generation"] != generation:
+            return BrowserResult(
+                success=False,
+                error=f"target generation 过期（当前 {tab['generation']}，传入 {generation}）",
+                data={"stale": True, "current_generation": tab["generation"]},
+            )
+        try:
+            await tab["page"].close()
+        except Exception as e:  # noqa: BLE001 - 关闭失败不阻碍移除登记
+            logger.debug("关闭 tab 页面失败（忽略）: %s", e)
+        del self._tabs[target_id]
+        if self._active_target_id == target_id:
+            self._active_target_id = next(iter(self._tabs), None)
+        return BrowserResult(success=True)
+
+    async def dom_snapshot(self, generation: Optional[int] = None) -> BrowserResult:
+        """aria 可访问性树快照 —— 结构化观察，代替原始 HTML（省 token、可精确引用）"""
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError("Not initialized")
+            tree = await self._page.locator("html").aria_snapshot()
+            return BrowserResult(
+                success=True,
+                data=tree,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def click_role(self, role: str, name: Optional[str] = None, generation: Optional[int] = None) -> BrowserResult:
+        """按 ARIA role + accessible name 定位点击（快照事实驱动，不猜 CSS 选择器）"""
+        start_time = time.time()
+        if not role or not str(role).strip():
+            return BrowserResult(success=False, error="缺少 ARIA role（如 button/link/textbox）")
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError("Not initialized")
+            locator = self._page.get_by_role(str(role).strip(), **({"name": name} if name is not None else {}))
+            await locator.click(timeout=10000)
+            return BrowserResult(
+                success=True,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def fill_role(
+        self, role: str, name: Optional[str] = None, text: str = "", generation: Optional[int] = None
+    ) -> BrowserResult:
+        """按 ARIA role + accessible name 定位输入框并填写（空串=清空）"""
+        start_time = time.time()
+        if not role or not str(role).strip():
+            return BrowserResult(success=False, error="缺少 ARIA role（如 textbox/searchbox）")
+        if text is None:
+            return BrowserResult(success=False, error="缺少输入文本（空串表示清空）")
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError("Not initialized")
+            locator = self._page.get_by_role(str(role).strip(), **({"name": name} if name is not None else {}))
+            await locator.fill(text, timeout=10000)
+            return BrowserResult(
+                success=True,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
     async def initialize(self) -> bool:
         if not HAS_PLAYWRIGHT:
@@ -356,21 +563,33 @@ class PlaywrightBackend(BrowserBackend):
             self._playwright = await async_playwright().start()
             self._browser = await self._playwright.chromium.launch(headless=self._headless)
             self._context = await self._browser.new_context()
-            self._page = await self._context.new_page()
+            page = await self._context.new_page()
+            self._register_tab(page)
             self._initialized = True
             return True
         except Exception as e:
             logger.error("Failed to initialize Playwright: %s", str(e))
             return False
 
-    async def navigate(self, url: str) -> BrowserResult:
+    async def navigate(self, url: str, generation: Optional[int] = None) -> BrowserResult:
         start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
         try:
             if not self._page:
                 raise RuntimeError("Not initialized")
             await self._page.goto(url, wait_until="networkidle")
+            tab = self._tabs.get(self._active_target_id)
+            if tab:
+                # 导航使该 tab 既有快照事实全部失效 → 递增 generation
+                tab["generation"] += 1
             return BrowserResult(
-                success=True, url=url, title=await self._page.title(), duration_ms=(time.time() - start_time) * 1000
+                success=True,
+                url=url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
             )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
@@ -489,8 +708,13 @@ class PlaywrightBackend(BrowserBackend):
 
     async def close(self) -> None:
         try:
-            if self._page:
-                await self._page.close()
+            for tab in self._tabs.values():
+                try:
+                    await tab["page"].close()
+                except Exception as e:  # noqa: BLE001 - 单 tab 关闭失败不阻碍整体收尾
+                    logger.debug("关闭 tab 失败（忽略）: %s", e)
+            self._tabs.clear()
+            self._active_target_id = None
             if self._context:
                 await self._context.close()
             if self._browser:
@@ -650,10 +874,58 @@ class BrowserManager:
         else:
             return BrowserResult(success=False, error=f"Unknown action: {action}")
 
-    async def navigate(self, url: str, backend: Optional[str] = None) -> BrowserResult:
-        """导航到 URL"""
+    async def navigate(self, url: str, backend: Optional[str] = None, generation: Optional[int] = None) -> BrowserResult:
+        """导航到 URL（导航使活动 tab 快照事实失效 → generation 递增）"""
         b = await self._get_backend(backend)
-        return await b.navigate(url)
+        return await b.navigate(url, generation)
+
+    async def dom_snapshot(self, backend: Optional[str] = None, generation: Optional[int] = None) -> BrowserResult:
+        """获取 aria 可访问性树快照（观察优先）"""
+        b = await self._get_backend(backend)
+        return await b.dom_snapshot(generation)
+
+    async def click_role(
+        self, role: str, name: Optional[str] = None, backend: Optional[str] = None, generation: Optional[int] = None
+    ) -> BrowserResult:
+        """按 ARIA role + name 定位点击"""
+        b = await self._get_backend(backend)
+        return await b.click_role(role, name, generation)
+
+    async def fill_role(
+        self,
+        role: str,
+        name: Optional[str] = None,
+        text: str = "",
+        backend: Optional[str] = None,
+        generation: Optional[int] = None,
+    ) -> BrowserResult:
+        """按 ARIA role + name 定位输入"""
+        b = await self._get_backend(backend)
+        return await b.fill_role(role, name, text, generation)
+
+    async def open_target(self, url: Optional[str] = None, backend: Optional[str] = None) -> BrowserResult:
+        """新开 tab 并激活"""
+        b = await self._get_backend(backend)
+        return await b.open_target(url)
+
+    async def list_targets(self, backend: Optional[str] = None) -> BrowserResult:
+        """列出全部 tab（含 generation 与活动标记）"""
+        b = await self._get_backend(backend)
+        return await b.list_targets()
+
+    async def switch_target(
+        self, target_id: str, generation: Optional[int] = None, backend: Optional[str] = None
+    ) -> BrowserResult:
+        """切换活动 tab"""
+        b = await self._get_backend(backend)
+        return await b.switch_target(target_id, generation)
+
+    async def close_target(
+        self, target_id: str, generation: Optional[int] = None, backend: Optional[str] = None
+    ) -> BrowserResult:
+        """关闭 tab"""
+        b = await self._get_backend(backend)
+        return await b.close_target(target_id, generation)
 
     async def screenshot(self, backend: Optional[str] = None) -> BrowserResult:
         """截图"""
@@ -689,6 +961,11 @@ class BrowserManager:
         """获取快照"""
         b = await self._get_backend(backend)
         return await b.snapshot()
+
+    async def get_capabilities(self, backend: Optional[str] = None) -> Dict[str, Any]:
+        """查询当前后端能力清单（agent 据此选观察/交互方式）"""
+        b = await self._get_backend(backend)
+        return {"backend": b.__class__.__name__, "capabilities": dict(b.capabilities)}
 
     async def scrape(self, urls: List[str]) -> BrowserResult:
         """爬取多个 URL"""

@@ -12,16 +12,29 @@ from typing import Any, Dict, List, Optional
 
 
 class MessageChannel(Enum):
-    """消息渠道"""
+    """消息渠道（统一枚举：含 Web/App 渠道与各第三方平台渠道）"""
 
+    # Web / App / 语音 / CLI
     WEB = "web"
     API = "api"
-    FEISHU = "feishu"
-    DINGTALK = "dingtalk"
-    WECOM = "wecom"
     MOBILE = "mobile"
     VOICE = "voice"
     CLI = "cli"
+    WEBSOCKET = "websocket"
+    # 第三方平台
+    WECHAT = "wechat"
+    FEISHU = "feishu"
+    DINGTALK = "dingtalk"
+    WECOM = "wecom"
+    WEBHOOK = "webhook"
+    TELEGRAM = "telegram"
+    SIP = "sip"
+    QQBOT = "qqbot"
+    QQ = "qq"
+    QCLAW = "qclaw"
+    MQTT = "mqtt"
+    DISCORD = "discord"
+    XIAOYI = "xiaoyi"
 
 
 class ContentType(Enum):

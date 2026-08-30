@@ -1,24 +1,40 @@
 """
 MCP Client — Agent 作为 MCP 消费者
 
-基于 Neurova 三层防火墙（L0入口/L1隔离/L2输出），
-在现有 execution_engine/mcp_manager.py 基础上封装。
+基于官方 mcp Python SDK（运行时可选依赖）：
+- stdio / sse / streamable_http 三种传输
+- initialize 握手由 SDK ClientSession 完成（Windows 兼容，无手写 JSON-RPC）
+- 每 server 一个 AsyncExitStack 持有会话生命周期
+- 连接/调用均受 per-server timeout_ms 约束，失败原因记录在 server["last_error"]
 
-隔离层级: 用户层 (按 user_id 硬隔离)
+隔离层级: 用户层 (按 user_id 硬隔离，经 core.firewall 校验)
 """
 
 import asyncio
+import contextlib
 import datetime
 from neurova.core.logger import get_logger
-import subprocess
+import threading
 import typing
 
+from neurova.tool_layers.mcp_config import validate_mcp_server_config
+
 logger = get_logger(__name__)
+
+# 官方 mcp SDK 为可选依赖；缺失时连接失败并给出安装提示，不崩溃
+try:
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    from mcp.client.sse import sse_client
+    from mcp.client.streamable_http import streamable_http_client
+
+    _SDK_AVAILABLE = True
+except ImportError:  # pragma: no cover - 取决于环境是否安装 mcp
+    _SDK_AVAILABLE = False
 
 
 class ToolNotFoundError(Exception):
     """工具未找到异常"""
-
 
 
 class MCPToolClient:
@@ -26,9 +42,8 @@ class MCPToolClient:
     MCP 工具客户端
 
     作为 MCP 协议的消费者，负责：
-    - 连接和管理 MCP 服务器
+    - 连接和管理 MCP 服务器（stdio/sse/http）
     - 发现和调用 MCP 工具
-    - 处理 MCP 协议通信
     - 实现安全隔离（用户层硬隔离）
     """
 
@@ -41,48 +56,65 @@ class MCPToolClient:
         """
         self._user_id = user_id or "default"
         self._servers: typing.Dict[str, typing.Dict] = {}
-        self._mcp_manager: typing.Optional[typing.Any] = None
+        self._sessions: typing.Dict[str, typing.Any] = {}
+        self._stacks: typing.Dict[str, typing.Any] = {}
         self._firewall: typing.Optional[typing.Any] = None
-        self._tool_cache: typing.Dict[str, typing.List] = {}
+        self._lock = threading.RLock()
 
-    def _get_mcp_manager(self) -> typing.Any:
+    # ── 会话生命周期（SDK 接缝，测试在此边界 mock） ──
+
+    async def _open_session(self, server_id: str, config: typing.Dict[str, typing.Any]) -> typing.Any:
+        """建立传输连接并完成 initialize 握手，返回 ClientSession。
+
+        Raises:
+            RuntimeError: mcp SDK 未安装
+            Exception: 传输/握手失败（由调用方记录为 last_error）
         """
-        获取 MCP 管理器（延迟加载）
+        if not _SDK_AVAILABLE:
+            raise RuntimeError("mcp SDK 未安装，请执行: pip install mcp")
 
-        Returns:
-            MCP 管理器实例
-        """
-        if self._mcp_manager is None:
-            try:
-                from neurova.execution_engine.mcp_manager import MCPManager
+        stack = contextlib.AsyncExitStack()
+        transport = config.get("transport", "stdio")
+        try:
+            if transport == "stdio":
+                server_params = StdioServerParameters(
+                    command=config["command"],
+                    args=list(config.get("args") or []),
+                    env=dict(config["env"]) if config.get("env") else None,
+                    cwd=config.get("cwd"),
+                )
+                read_stream, write_stream = await stack.enter_async_context(stdio_client(server_params))
+            elif transport == "sse":
+                read_stream, write_stream = await stack.enter_async_context(
+                    sse_client(config["url"], headers=config.get("headers") or {})
+                )
+            elif transport == "http":
+                import httpx
 
-                self._mcp_manager = MCPManager()
-            except ImportError:
-                logger.warning("MCPManager not available, using mock")
-                self._mcp_manager = MockMCPManager()
-        return self._mcp_manager
+                http_client = httpx.AsyncClient(headers=config.get("headers") or {})
+                await stack.enter_async_context(http_client)
+                read_stream, write_stream, _ = await stack.enter_async_context(
+                    streamable_http_client(config["url"], http_client)
+                )
+            else:
+                raise ValueError(f"不支持的 transport: {transport}")
 
-    def _get_firewall(self) -> typing.Any:
-        """
-        获取防火墙（延迟加载）
+            session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+            await session.initialize()
+        except BaseException:
+            await stack.aclose()
+            raise
 
-        Returns:
-            防火墙实例
-        """
-        if self._firewall is None:
-            try:
-                from neurova.core.firewall import Firewall
-
-                self._firewall = Firewall()
-            except ImportError:
-                logger.warning("Firewall not available, using mock")
-                self._firewall = MockFirewall()
-        return self._firewall
+        self._stacks[server_id] = stack
+        return session
 
     async def connect_server(self, server_id: str, config: typing.Dict[str, typing.Any]) -> bool:
         """
         连接到 MCP 服务器
 
+        统一返回 bool：失败原因记录到 server["last_error"]（可经 get_server_status 查询），
+        配置非法同样返回 False 并记录原因，不抛异常。
+
         Args:
             server_id: 服务器 ID
             config: 服务器配置
@@ -90,143 +122,51 @@ class MCPToolClient:
         Returns:
             是否连接成功
         """
-        transport = config.get("transport", "stdio")
+        with self._lock:
+            self._servers[server_id] = {
+                "config": {},
+                "connected": False,
+                "tools": [],
+                "last_error": None,
+                "last_connected": None,
+            }
+        server = self._servers[server_id]
 
         try:
-            if transport == "stdio":
-                success = await self._connect_stdio(server_id, config)
-            elif transport == "sse":
-                success = await self._connect_sse(server_id, config)
-            elif transport == "websocket":
-                success = await self._connect_websocket(server_id, config)
-            else:
-                raise ValueError(f"Unsupported transport: {transport}")
+            cfg = validate_mcp_server_config(config)
+        except ValueError as e:
+            server["last_error"] = str(e)
+            logger.error("MCP server %s 配置非法: %s", server_id, e)
+            return False
 
-            if success:
-                self._servers[server_id] = {
-                    "config": config,
-                    "connected": True,
-                    "tools": [],
-                    "last_connected": datetime.datetime.now().isoformat(),
-                }
-                logger.info("Connected to MCP server: %s", server_id)
+        server["config"] = cfg
+        if not _SDK_AVAILABLE:
+            server["last_error"] = "mcp SDK 未安装，请执行: pip install mcp"
+            logger.error("MCP server %s: %s", server_id, server["last_error"])
+            return False
 
-            return success
-
+        try:
+            timeout_s = cfg["timeout_ms"] / 1000
+            session = await asyncio.wait_for(self._open_session(server_id, cfg), timeout=timeout_s)
         except Exception as e:
+            server["last_error"] = f"{type(e).__name__}: {e}"
+            self._stacks.pop(server_id, None)
             logger.error("Failed to connect to MCP server %s: %s", server_id, e)
             return False
 
-    async def _connect_stdio(self, server_id: str, config: typing.Dict[str, typing.Any]) -> bool:
-        """
-        通过 stdio 连接到 MCP 服务器
+        self._sessions[server_id] = session
+        server["connected"] = True
+        server["last_connected"] = datetime.datetime.now().isoformat()
 
-        Args:
-            server_id: 服务器 ID
-            config: 服务器配置
-
-        Returns:
-            是否连接成功
-        """
-        command = config.get("command")
-        args = config.get("args", [])
-
-        if not command:
-            raise ValueError("Command is required for stdio transport")
-
+        # 连接即发现：拉取工具清单并缓存（失败不视为连接失败）
         try:
-            # 启动子进程
-            process = subprocess.Popen(
-                [command] + args,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-
-            # 等待连接建立
-            await asyncio.sleep(0.1)
-
-            if process.poll() is None:
-                # 进程正在运行
-                self._servers[server_id] = {
-                    "config": config,
-                    "process": process,
-                    "connected": True,
-                    "tools": [],
-                }
-                return True
-            else:
-                logger.error("MCP server process exited with code: %s", process.returncode)
-                return False
-
+            server["tools"] = await asyncio.wait_for(self._fetch_tools(server_id), timeout=timeout_s)
         except Exception as e:
-            logger.error("Failed to start MCP server process: %s", e)
-            return False
+            logger.warning("MCP server %s 连接成功但工具发现失败: %s", server_id, e)
 
-    async def _connect_sse(self, server_id: str, config: typing.Dict[str, typing.Any]) -> bool:
-        """
-        通过 SSE 连接到 MCP 服务器
-
-        Args:
-            server_id: 服务器 ID
-            config: 服务器配置
-
-        Returns:
-            是否连接成功
-        """
-        url = config.get("url")
-        if not url:
-            raise ValueError("URL is required for SSE transport")
-
-        try:
-            # 这里应该实现 SSE 连接逻辑
-            # 暂时使用模拟实现
-            logger.info("Connecting to MCP server via SSE: %s", url)
-
-            self._servers[server_id] = {
-                "config": config,
-                "connected": True,
-                "tools": [],
-            }
-
-            return True
-
-        except Exception as e:
-            logger.error("Failed to connect to MCP server via SSE: %s", e)
-            return False
-
-    async def _connect_websocket(self, server_id: str, config: typing.Dict[str, typing.Any]) -> bool:
-        """
-        通过 WebSocket 连接到 MCP 服务器
-
-        Args:
-            server_id: 服务器 ID
-            config: 服务器配置
-
-        Returns:
-            是否连接成功
-        """
-        url = config.get("url")
-        if not url:
-            raise ValueError("URL is required for WebSocket transport")
-
-        try:
-            # 这里应该实现 WebSocket 连接逻辑
-            # 暂时使用模拟实现
-            logger.info("Connecting to MCP server via WebSocket: %s", url)
-
-            self._servers[server_id] = {
-                "config": config,
-                "connected": True,
-                "tools": [],
-            }
-
-            return True
-
-        except Exception as e:
-            logger.error("Failed to connect to MCP server via WebSocket: %s", e)
-            return False
+        self._sync_tools_to_engine(server_id, server["tools"])
+        logger.info("Connected to MCP server: %s (%d tools)", server_id, len(server["tools"]))
+        return True
 
     async def disconnect_server(self, server_id: str) -> bool:
         """
@@ -238,46 +178,61 @@ class MCPToolClient:
         Returns:
             是否断开成功
         """
-        if server_id not in self._servers:
-            logger.warning("Server not found: %s", server_id)
-            return False
+        with self._lock:
+            if server_id not in self._servers:
+                logger.warning("Server not found: %s", server_id)
+                return False
 
-        server = self._servers[server_id]
+        stack = self._stacks.pop(server_id, None)
+        self._sessions.pop(server_id, None)
+        del self._servers[server_id]
 
-        try:
-            # 如果有进程，终止它
-            if "process" in server:
-                process = server["process"]
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
+        if stack is not None:
+            try:
+                await stack.aclose()
+            except Exception as e:
+                logger.warning("Error closing MCP session for %s: %s", server_id, e)
 
-            # 从服务器列表中移除
-            del self._servers[server_id]
-
-            # 清除工具缓存
-            if server_id in self._tool_cache:
-                del self._tool_cache[server_id]
-
-            logger.info("Disconnected from MCP server: %s", server_id)
-            return True
-
-        except Exception as e:
-            logger.error("Failed to disconnect from MCP server %s: %s", server_id, e)
-            return False
+        logger.info("Disconnected from MCP server: %s", server_id)
+        return True
 
     async def disconnect_all(self) -> None:
         """断开所有服务器连接"""
-        server_ids = list(self._servers.keys())
-        for server_id in server_ids:
+        for server_id in list(self._servers.keys()):
             await self.disconnect_server(server_id)
+
+    # ── 工具发现 ──
+
+    @staticmethod
+    def _tool_to_dict(tool: typing.Any) -> typing.Dict[str, typing.Any]:
+        """SDK 工具对象 → 可序列化 dict（inputSchema 映射为 parameters）"""
+        if isinstance(tool, dict):
+            return tool
+        return {
+            "name": getattr(tool, "name", None) or str(tool),
+            "description": getattr(tool, "description", "") or "",
+            "parameters": getattr(tool, "inputSchema", None)
+            or getattr(tool, "parameters", None)
+            or {},
+        }
+
+    async def _fetch_tools(self, server_id: str) -> typing.List[typing.Dict[str, typing.Any]]:
+        """通过已建立的会话拉取工具清单"""
+        session = self._sessions.get(server_id)
+        if session is None:
+            return []
+        result = await session.list_tools()
+        raw = getattr(result, "tools", None)
+        if raw is None:
+            raw = result if isinstance(result, list) else []
+        return [self._tool_to_dict(t) for t in raw]
 
     async def get_available_tools(self, server_id: str) -> typing.List[typing.Dict[str, typing.Any]]:
         """
         获取 MCP 服务器上可用的工具
+
+        缓存优先：server["tools"] 非空时直接返回，不再询问会话；
+        为空且已连接时经会话拉取并入缓存。
 
         Args:
             server_id: 服务器 ID
@@ -285,35 +240,181 @@ class MCPToolClient:
         Returns:
             工具列表
         """
-        if server_id not in self._servers:
+        server = self._servers.get(server_id)
+        if server is None:
             raise ValueError(f"Server not found: {server_id}")
 
-        server = self._servers[server_id]
+        if not server.get("connected"):
+            return []
+
+        if server.get("tools"):
+            return list(server["tools"])
+
+        try:
+            cfg = server.get("config") or {}
+            tools = await asyncio.wait_for(
+                self._fetch_tools(server_id), timeout=cfg.get("timeout_ms", 30000) / 1000
+            )
+        except Exception as e:
+            logger.error("Failed to get tools from server %s: %s", server_id, e)
+            return []
+
+        server["tools"] = tools
+        self._sync_tools_to_engine(server_id, tools)
+        return list(tools)
+
+    async def get_server_tools(self, server_id: str) -> typing.List[typing.Dict[str, typing.Any]]:
+        """获取服务器工具（别名方法）"""
+        return await self.get_available_tools(server_id)
+
+    def list_tools(self) -> typing.List[typing.Dict[str, typing.Any]]:
+        """同步列出所有已缓存工具（附 server_id）。
+
+        ToolRouter 工具发现与 neurflow 适配器的硬需求：调用方为同步上下文。
+        """
+        tools: typing.List[typing.Dict[str, typing.Any]] = []
+        for server_id, server in self._servers.items():
+            for tool in server.get("tools") or []:
+                item = self._tool_to_dict(tool)
+                item.setdefault("server_id", server_id)
+                tools.append(item)
+        return tools
+
+    def list_servers(self) -> typing.Dict[str, typing.Dict]:
+        """
+        列出所有服务器
+
+        Returns:
+            {server_id: server 信息} 字典
+        """
+        return dict(self._servers)
+
+    def get_server_status(self, server_id: str) -> typing.Dict[str, typing.Any]:
+        """查询服务器状态（含失败原因，供 API/诊断使用）"""
+        server = self._servers.get(server_id)
+        if server is None:
+            return {
+                "server_id": server_id,
+                "connected": False,
+                "last_error": "not registered",
+                "tool_count": 0,
+                "transport": None,
+            }
+        config = server.get("config") or {}
+        return {
+            "server_id": server_id,
+            "connected": bool(server.get("connected")),
+            "last_error": server.get("last_error"),
+            "tool_count": len(server.get("tools") or []),
+            "transport": config.get("transport"),
+        }
+
+    # ── 工具执行 ──
+
+    async def call_tool(self, server_id: str, tool_name: str, params: typing.Dict[str, typing.Any]) -> typing.Any:
+        """
+        调用 MCP 工具（主执行入口，无存在性校验）
+
+        Args:
+            server_id: 服务器 ID
+            tool_name: 工具名
+            params: 工具参数
+
+        Returns:
+            执行结果（SDK 结果已序列化；普通值原样透传）
+
+        Raises:
+            ValueError: 服务器未注册或未连接
+            TimeoutError: 超出 timeout_ms
+        """
+        server = self._servers.get(server_id)
+        if server is None or not server.get("connected"):
+            raise ValueError(f"Server not connected: {server_id}")
+
+        session = self._sessions.get(server_id)
+        if session is None:
+            raise ValueError(f"MCP session not available: {server_id}")
+
+        timeout_s = (server.get("config") or {}).get("timeout_ms", 30000) / 1000
+        result = await asyncio.wait_for(session.call_tool(tool_name, params), timeout=timeout_s)
+        serialized = self._serialize_result(result)
+        logger.info("Executed MCP tool: %s/%s", server_id, tool_name)
+        return serialized
+
+    @staticmethod
+    def _serialize_result(result: typing.Any) -> typing.Any:
+        """SDK CallToolResult → 可序列化 dict；普通值原样透传"""
+        content = getattr(result, "content", None)
+        if content is None and not hasattr(result, "isError"):
+            return result
+        items = []
+        for item in content or []:
+            text = getattr(item, "text", None)
+            if text is not None:
+                items.append({"type": getattr(item, "type", "text"), "text": text})
+            else:
+                items.append(str(item))
+        return {"content": items, "isError": bool(getattr(result, "isError", False))}
+
+    async def execute_tool(self, server_id: str, tool_name: str, params: typing.Dict[str, typing.Any]) -> typing.Any:
+        """
+        执行 MCP 工具（校验 + 防火墙 + call_tool）
+
+        校验语义（与既有测试契约一致）：server["tools"] 键存在时校验工具存在性，
+        键缺失时跳过（视为未发现清单，交由服务端裁决）。
+
+        Args:
+            server_id: 服务器 ID
+            tool_name: 工具名
+            params: 工具参数
+
+        Returns:
+            工具执行结果
+
+        Raises:
+            ToolNotFoundError: 工具不存在（仅当 "tools" 键存在时）
+            ValueError: 服务器未注册或未连接
+        """
+        server = self._servers.get(server_id)
+        if server is None:
+            raise ValueError(f"Server not found: {server_id}")
 
         if not server.get("connected"):
             raise ValueError(f"Server not connected: {server_id}")
 
-        # 如果有缓存的工具列表，直接返回
-        if server_id in self._tool_cache:
-            return self._tool_cache[server_id]
+        if "tools" in server:
+            tool_names = {
+                t.get("name") if isinstance(t, dict) else getattr(t, "name", None)
+                for t in server.get("tools") or []
+            }
+            if tool_name not in tool_names:
+                raise ToolNotFoundError(f"Tool '{tool_name}' not found on server '{server_id}'")
 
-        # 否则，获取工具列表
+        await self._check_firewall(tool_name)
+
+        return await self.call_tool(server_id, tool_name, params)
+
+    async def _check_firewall(self, tool_name: str) -> None:
+        """防火墙用户层校验（不可用时跳过，不伪造放行对象）"""
+        if self._firewall is None:
+            try:
+                from neurova.core.firewall import Firewall
+
+                self._firewall = Firewall()
+            except ImportError:
+                logger.debug("Firewall not available, skipping MCP permission check")
+                return
         try:
-            mcp_manager = self._get_mcp_manager()
-            tools = await mcp_manager.list_tools(server_id)
-
-            # 缓存工具列表
-            self._tool_cache[server_id] = tools
-            server["tools"] = tools
-
-            # 同步 MCP 工具到 ToolEngine
-            self._sync_tools_to_engine(server_id, tools)
-
-            return tools
-
+            if not self._firewall.check_permission(self._user_id, "mcp_tool", tool_name):
+                raise PermissionError(
+                    f"User {self._user_id} does not have permission to execute tool {tool_name}"
+                )
+        except PermissionError:
+            raise
         except Exception as e:
-            logger.error("Failed to get tools from server %s: %s", server_id, e)
-            return []
+            logger.warning("Firewall check failed for tool %s: %s", tool_name, e)
+
+    # ── ToolEngine 同步 ──
 
     def _sync_tools_to_engine(
         self,
@@ -322,6 +423,8 @@ class MCPToolClient:
         engine: typing.Optional[typing.Any] = None,
     ) -> None:
         """将 MCP 工具同步注册到 ToolEngine
+
+        命名约定 mcp.{server_id}.{tool_name}（tests/integration/test_tool_engine_integration.py 硬约束）。
 
         Args:
             server_id: MCP 服务器 ID
@@ -361,117 +464,19 @@ class MCPToolClient:
         except Exception as e:
             logger.debug("Failed to sync MCP tools to ToolEngine: %s", e)
 
-    def list_servers(self) -> typing.List[str]:
-        """
-        列出所有服务器
 
-        Returns:
-            服务器 ID 列表
-        """
-        return list(self._servers.keys())
-
-    async def get_server_tools(self, server_id: str) -> typing.List[typing.Dict[str, typing.Any]]:
-        """
-        获取服务器工具（别名方法）
-
-        Args:
-            server_id: 服务器 ID
-
-        Returns:
-            工具列表
-        """
-        return await self.get_available_tools(server_id)
-
-    async def execute_tool(self, server_id: str, tool_name: str, params: typing.Dict[str, typing.Any]) -> typing.Any:
-        """
-        执行 MCP 工具
-
-        Args:
-            server_id: 服务器 ID
-            tool_name: 工具名称
-            params: 工具参数
-
-        Returns:
-            工具执行结果
-
-        Raises:
-            ToolNotFoundError: 工具不存在
-            ValueError: 服务器未连接
-        """
-        if server_id not in self._servers:
-            raise ValueError(f"Server not found: {server_id}")
-
-        server = self._servers[server_id]
-
-        if not server.get("connected"):
-            raise ValueError(f"Server not connected: {server_id}")
-
-        # 检查工具是否存在
-        tools = server.get("tools", [])
-        tool_names = [t.get("name") for t in tools]
-
-        if tool_name not in tool_names:
-            raise ToolNotFoundError(f"Tool '{tool_name}' not found on server '{server_id}'")
-
-        try:
-            # 安全检查
-            firewall = self._get_firewall()
-            if firewall:
-                # 检查用户权限
-                if not firewall.check_permission(self._user_id, "mcp_tool", tool_name):
-                    raise PermissionError(f"User {self._user_id} does not have permission to execute tool {tool_name}")
-
-            # 执行工具
-            mcp_manager = self._get_mcp_manager()
-            result = await mcp_manager.execute_tool(server_id, tool_name, params)
-
-            logger.info("Executed MCP tool: %s/%s", server_id, tool_name)
-            return result
-
-        except Exception as e:
-            logger.error("Failed to execute MCP tool %s/%s: %s", server_id, tool_name, e)
-            raise
-
-    async def _execute_independent(
-        self, server_id: str, tool_name: str, params: typing.Dict[str, typing.Any]
-    ) -> typing.Any:
-        """
-        独立执行 MCP 工具（绕过管理器）
-
-        Args:
-            server_id: 服务器 ID
-            tool_name: 工具名称
-            params: 工具参数
-
-        Returns:
-            工具执行结果
-        """
-        # 根因修复（P2-#14）: 原先直接抛出 NotImplementedError，调用即崩溃。
-        # 复用底层 MCP 管理器执行（功能等价于 execute_tool，且已通过防火墙/权限校验）。
-        mcp_manager = self._get_mcp_manager()
-        if mcp_manager is None:
-            raise RuntimeError("MCP manager unavailable, cannot execute tool independently")
-        return await mcp_manager.execute_tool(server_id, tool_name, params)
+_mcp_client_instance: typing.Optional[MCPToolClient] = None
 
 
-class MockMCPManager:
-    """模拟 MCP 管理器"""
-
-    async def list_tools(self, server_id: str) -> typing.List[typing.Dict[str, typing.Any]]:
-        """模拟列出工具"""
-        return [
-            {"name": "mock_tool_1", "description": "Mock tool 1"},
-            {"name": "mock_tool_2", "description": "Mock tool 2"},
-        ]
-
-    async def execute_tool(self, server_id: str, tool_name: str, params: typing.Dict[str, typing.Any]) -> typing.Any:
-        """模拟执行工具"""
-        return {"result": f"Mock result for {tool_name}", "params": params}
+def get_mcp_client(user_id: typing.Optional[str] = None) -> MCPToolClient:
+    """获取进程级 MCP 客户端单例（neurflow 等模块的统一入口）"""
+    global _mcp_client_instance
+    if _mcp_client_instance is None:
+        _mcp_client_instance = MCPToolClient(user_id=user_id)
+    return _mcp_client_instance
 
 
-class MockFirewall:
-    """模拟防火墙"""
-
-    def check_permission(self, user_id: str, resource_type: str, resource_id: str) -> bool:
-        """模拟检查权限"""
-        return True
+def reset_mcp_client() -> None:
+    """重置单例（测试用）"""
+    global _mcp_client_instance
+    _mcp_client_instance = None

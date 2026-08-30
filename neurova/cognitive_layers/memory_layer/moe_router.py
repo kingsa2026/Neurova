@@ -107,7 +107,13 @@ class ExpertDrilldownRetriever:
       L3: 向量兜底 (100-500ms)
     """
 
-    def __init__(self, expert_def: Dict[str, Any], store: Any, vector_store: Optional[UnifiedVectorStore] = None):
+    def __init__(
+        self,
+        expert_def: Dict[str, Any],
+        store: Any,
+        vector_store: Optional[UnifiedVectorStore] = None,
+        cache_max_size: Optional[int] = None,
+    ):
         """
         初始化下钻检索器
 
@@ -115,11 +121,30 @@ class ExpertDrilldownRetriever:
             expert_def: Expert 定义
             store: 存储层
             vector_store: 向量存储（用于 L3 兜底）
+            cache_max_size: L0 查询缓存上限（None 时读 vector_search.cache_max_size）
         """
         self.expert_def = expert_def
         self.store = store
         self.vector_store = vector_store
         self._l0_cache: Dict[str, List] = {}
+        # L0 查询缓存上限配置化（memory-settings 配置页）:
+        # vector_search.cache_max_size，默认 1000
+        if cache_max_size is None:
+            from neurova.cognitive_layers.memory_layer.settings_config import (
+                get_memory_settings,
+            )
+
+            cache_max_size = int(
+                get_memory_settings().get("vector_search.cache_max_size", 1000)
+            )
+        self._l0_cache_max_size = max(1, int(cache_max_size))
+
+    def _cache_l0(self, key: str, value: List) -> None:
+        """写入 L0 缓存，超过上限时 FIFO 淘汰最旧条目"""
+        if len(self._l0_cache) >= self._l0_cache_max_size:
+            oldest = next(iter(self._l0_cache))
+            self._l0_cache.pop(oldest, None)
+        self._l0_cache[key] = value
 
     async def retrieve(self, query: str, query_vec: List[float], limit: int = 10) -> List[Dict[str, Any]]:
         """
@@ -144,7 +169,7 @@ class ExpertDrilldownRetriever:
 
         if candidates is None:
             candidates = self._layer0_exact_index()
-            self._l0_cache[cache_key] = candidates
+            self._cache_l0(cache_key, candidates)
             if len(candidates) >= limit * 2:
                 return self._rank_and_limit(candidates, query, limit)
 
@@ -162,9 +187,11 @@ class ExpertDrilldownRetriever:
         return await self._layer3_vector_fallback(query_vec, limit)
 
     def _l0_cache_key(self, query_vec: List[float]) -> str:
-        """生成 L0 缓存键"""
+        """生成 L0 缓存键（兼容 list / numpy 数组——onnx encode 返回 list）"""
         # 使用向量前 10 维作为缓存键
-        return str(query_vec[:10].tolist())
+        head = query_vec[:10]
+        tolist = getattr(head, "tolist", None)
+        return str(tolist() if tolist else list(head))
 
     def _layer0_exact_index(self) -> List[Dict]:
         """Layer 0: 利用 SQL 复合索引做精确标签匹配"""
@@ -327,23 +354,34 @@ class MoEMemoryRouter:
 
         logger.info("MoEMemoryRouter 初始化完成，%s 个专家，top_k=%s", len(experts), top_k)
 
-    async def retrieve(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    async def retrieve(self, query: str, limit: int = 5, progress_cb=None) -> List[Dict[str, Any]]:
         """
         完整检索流程
 
         Args:
             query: 查询文本
             limit: 返回数量限制
+            progress_cb: 可选进度回调 (event: Dict) -> None，
+                         用于 UI 实时显示检索过程（不落盘）
 
         Returns:
             排序后的记忆列表
         """
+
+        def _emit(event: Dict[str, Any]) -> None:
+            if progress_cb:
+                try:
+                    progress_cb(event)
+                except Exception:  # noqa: BLE001 - 进度回调失败不阻断检索
+                    pass
+
         # Step 1: 向量编码
         query_vec = self.vector_store.encode(query)
 
         # Step 2: 向量路由
         activated_experts = await self.gating_network.route(query_vec)
         logger.debug("激活专家: %s", activated_experts)
+        _emit({"stage": "moe_gate", "experts": list(activated_experts.keys())})
 
         # Step 3: 专家内部下钻
         all_results = []
@@ -356,6 +394,7 @@ class MoEMemoryRouter:
             )
 
             expert_results = await retriever.retrieve(query, query_vec, limit=limit)
+            _emit({"stage": "moe_expert", "expert": expert_id, "count": len(expert_results)})
 
             # 按激活权重加权
             for r in expert_results:
@@ -368,16 +407,19 @@ class MoEMemoryRouter:
         if not self._should_fallback_to_full_db(all_results):
             # 按分数排序，返回 top-limit
             all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            _emit({"stage": "moe_done", "count": len(all_results[:limit]), "fallback": False})
             return all_results[:limit]
 
         # Step 5: 全数据库兜底
         logger.debug("Expert 内部结果不足，启动全数据库兜底")
         full_db_results = self.vector_store.search(query, limit=limit * 2)
         if full_db_results:
+            _emit({"stage": "moe_done", "count": len(full_db_results[:limit]), "fallback": True})
             return full_db_results[:limit]
 
         # Step 6: 无记忆处理
         logger.debug("全数据库兜底无结果，返回无记忆提示")
+        _emit({"stage": "moe_done", "count": 0, "fallback": True})
         return [self.NO_MEMORY_HINT]
 
     def _should_fallback_to_full_db(self, results: List[Dict]) -> bool:
