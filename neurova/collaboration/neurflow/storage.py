@@ -156,6 +156,23 @@ class NeurflowStorage:
                 "ON workflow_triggers(type)"
             )
 
+            # 工作流版本快照表（P2-4.4）
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS workflow_versions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    workflow_id TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    snapshot_json TEXT NOT NULL,
+                    commit_msg TEXT DEFAULT '',
+                    created_by TEXT,
+                    created_at REAL DEFAULT 0
+                )
+            """)
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workflow_versions_wf "
+                "ON workflow_versions(workflow_id)"
+            )
+
             # Webhook 投递记录表（P1 Step 7）
             self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS webhook_deliveries (
@@ -383,6 +400,17 @@ class NeurflowStorage:
                         json.dumps(workflow.metadata, ensure_ascii=False),
                     ),
                 )
+                # P2-4.4：内容变化才产生新版本（首次保存即 v1 基线，上限 20）
+                self._record_version_if_changed(
+                    workflow.id,
+                    self._workflow_fingerprint(
+                        workflow.name,
+                        workflow.description,
+                        json.dumps([n.__dict__ for n in workflow.nodes], ensure_ascii=False),
+                        json.dumps([e.__dict__ for e in workflow.edges], ensure_ascii=False),
+                        json.dumps([v.__dict__ for v in workflow.variables], ensure_ascii=False),
+                    ),
+                )
                 self._conn.commit()
                 return True
             except Exception as e:
@@ -406,6 +434,119 @@ class NeurflowStorage:
                 return None
 
             return self._row_to_workflow(row)
+
+    # ==================== 工作流版本快照（P2-4.4） ====================
+
+    _VERSION_CAPACITY = 20
+
+    @staticmethod
+    def _workflow_fingerprint(name, description, nodes_json, edges_json, variables_json) -> str:
+        """内容指纹（不含 status/updated_at——状态变化不算新版本）。"""
+        return json.dumps(
+            [name, description, nodes_json, edges_json, variables_json],
+            ensure_ascii=False,
+        )
+
+    def _record_version_if_changed(self, workflow_id: str, fingerprint: str) -> None:
+        """内容指纹与最新版本不同（或无版本）时追加新版本；超限裁剪最老。
+
+        仅在 save_workflow 持锁区间内调用。
+        """
+        import time as _time
+
+        current = self._conn.execute(
+            "SELECT version, snapshot_json FROM workflow_versions "
+            "WHERE workflow_id = ? ORDER BY version DESC LIMIT 1",
+            (workflow_id,),
+        ).fetchone()
+        if current and current["snapshot_json"] == fingerprint:
+            return  # 内容未变
+
+        next_version = (current["version"] + 1) if current else 1
+        self._conn.execute(
+            """
+            INSERT INTO workflow_versions
+                (workflow_id, version, snapshot_json, commit_msg, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (workflow_id, next_version, fingerprint, "auto snapshot", _time.time()),
+        )
+        # 容量裁剪：仅保留最新 N 条
+        self._conn.execute(
+            """
+            DELETE FROM workflow_versions WHERE workflow_id = ? AND version NOT IN (
+                SELECT version FROM workflow_versions WHERE workflow_id = ?
+                ORDER BY version DESC LIMIT ?
+            )
+            """,
+            (workflow_id, workflow_id, self._VERSION_CAPACITY),
+        )
+
+    def list_workflow_versions(self, workflow_id: str) -> list:
+        """版本历史（倒序）：version/snapshot_json/commit_msg/created_at。"""
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT version, snapshot_json, commit_msg, created_at
+                FROM workflow_versions WHERE workflow_id = ?
+                ORDER BY version DESC
+                """,
+                (workflow_id,),
+            ).fetchall()
+        return [
+            {
+                "version": r["version"],
+                "snapshot_json": r["snapshot_json"],
+                "commit_msg": r["commit_msg"],
+                "created_at": r["created_at"],
+            }
+            for r in rows
+        ]
+
+    def rollback_workflow(self, workflow_id: str, version: int) -> bool:
+        """回滚到指定历史版本。
+
+        恢复定义内容（name/description/nodes/edges/variables）；
+        状态保持当前值（避免悄悄下线已发布工作流）。
+        回滚动作本身也会产生新版本（undo-friendly）。
+        """
+        with self._lock:
+            snap = self._conn.execute(
+                "SELECT snapshot_json FROM workflow_versions "
+                "WHERE workflow_id = ? AND version = ?",
+                (workflow_id, version),
+            ).fetchone()
+            current_row = self._conn.execute(
+                "SELECT * FROM workflows WHERE id = ?", (workflow_id,)
+            ).fetchone()
+            if not snap or not current_row:
+                return False
+
+            name, description, nodes_json, edges_json, variables_json = json.loads(
+                snap["snapshot_json"]
+            )
+            import time as _time
+
+            self._conn.execute(
+                """
+                UPDATE workflows SET name = ?, description = ?, nodes_json = ?,
+                       edges_json = ?, variables_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    name, description, nodes_json, edges_json,
+                    variables_json, _time.time(), workflow_id,
+                ),
+            )
+            # 回滚后的当前内容入史（与最新快照不同 → 新版本，undo-friendly）
+            self._record_version_if_changed(
+                workflow_id,
+                self._workflow_fingerprint(
+                    name, description, nodes_json, edges_json, variables_json
+                ),
+            )
+            self._conn.commit()
+        return True
 
     def delete_workflow(self, workflow_id: str) -> bool:
         """
