@@ -311,22 +311,37 @@ class MCPToolClient:
 
     # ── 工具执行 ──
 
-    async def call_tool(self, server_id: str, tool_name: str, params: typing.Dict[str, typing.Any]) -> typing.Any:
+    async def call_tool(
+        self,
+        server_id: str,
+        tool_name: str,
+        params: typing.Dict[str, typing.Any],
+        user_id: typing.Optional[str] = None,
+    ) -> typing.Any:
         """
-        调用 MCP 工具（主执行入口，无存在性校验）
+        调用 MCP 工具（唯一执行入口，无存在性校验）
+
+        P0-2（评测 M3）：防火墙校验收敛在此——ToolRouter 主路径优先走
+        call_tool，检查若只放 execute_tool 会被整体绕过。
+        P0-3（评测 M5）：user_id 是请求级身份（多用户共享同一 client 连接），
+        未传时回退 client 构造身份——调用方应始终显式传递。
 
         Args:
             server_id: 服务器 ID
             tool_name: 工具名
             params: 工具参数
+            user_id: 请求级用户身份（防火墙校验用）
 
         Returns:
             执行结果（SDK 结果已序列化；普通值原样透传）
 
         Raises:
+            PermissionError: 防火墙拒绝
             ValueError: 服务器未注册或未连接
             TimeoutError: 超出 timeout_ms
         """
+        await self._check_firewall(tool_name, user_id=user_id)
+
         server = self._servers.get(server_id)
         if server is None or not server.get("connected"):
             raise ValueError(f"Server not connected: {server_id}")
@@ -356,23 +371,34 @@ class MCPToolClient:
                 items.append(str(item))
         return {"content": items, "isError": bool(getattr(result, "isError", False))}
 
-    async def execute_tool(self, server_id: str, tool_name: str, params: typing.Dict[str, typing.Any]) -> typing.Any:
+    async def execute_tool(
+        self,
+        server_id: str,
+        tool_name: str,
+        params: typing.Dict[str, typing.Any],
+        user_id: typing.Optional[str] = None,
+    ) -> typing.Any:
         """
-        执行 MCP 工具（校验 + 防火墙 + call_tool）
+        执行 MCP 工具（存在性校验 + call_tool）
 
         校验语义（与既有测试契约一致）：server["tools"] 键存在时校验工具存在性，
         键缺失时跳过（视为未发现清单，交由服务端裁决）。
+
+        P0-2（评测 M3）：防火墙检查已收敛到 call_tool，此处经末尾委托
+        恰好触发一次，不再重复检查。
 
         Args:
             server_id: 服务器 ID
             tool_name: 工具名
             params: 工具参数
+            user_id: 请求级用户身份（防火墙校验用，经 call_tool）
 
         Returns:
             工具执行结果
 
         Raises:
             ToolNotFoundError: 工具不存在（仅当 "tools" 键存在时）
+            PermissionError: 防火墙拒绝（经 call_tool）
             ValueError: 服务器未注册或未连接
         """
         server = self._servers.get(server_id)
@@ -390,12 +416,15 @@ class MCPToolClient:
             if tool_name not in tool_names:
                 raise ToolNotFoundError(f"Tool '{tool_name}' not found on server '{server_id}'")
 
-        await self._check_firewall(tool_name)
+        return await self.call_tool(server_id, tool_name, params, user_id=user_id)
 
-        return await self.call_tool(server_id, tool_name, params)
+    async def _check_firewall(self, tool_name: str, user_id: typing.Optional[str] = None) -> None:
+        """防火墙用户层校验（不可用时跳过，不伪造放行对象）
 
-    async def _check_firewall(self, tool_name: str) -> None:
-        """防火墙用户层校验（不可用时跳过，不伪造放行对象）"""
+        P0-3：user_id 为请求级身份，优先于 client 构造身份——多用户共享
+        同一 client 连接，防火墙必须按发起请求的用户裁决。
+        """
+        effective_user = user_id or self._user_id
         if self._firewall is None:
             try:
                 from neurova.core.firewall import Firewall
@@ -405,9 +434,9 @@ class MCPToolClient:
                 logger.debug("Firewall not available, skipping MCP permission check")
                 return
         try:
-            if not self._firewall.check_permission(self._user_id, "mcp_tool", tool_name):
+            if not self._firewall.check_permission(effective_user, "mcp_tool", tool_name):
                 raise PermissionError(
-                    f"User {self._user_id} does not have permission to execute tool {tool_name}"
+                    f"User {effective_user} does not have permission to execute tool {tool_name}"
                 )
         except PermissionError:
             raise
@@ -429,13 +458,19 @@ class MCPToolClient:
         Args:
             server_id: MCP 服务器 ID
             tools: 工具定义列表
-            engine: 可选的 ToolEngine 实例，为 None 时自动创建
+            engine: 可选的 ToolEngine 实例；为 None 时懒获取 API 层单例
+                （get_tool_engine）——P0-5（M8）修复：此前新建 ToolEngine
+                即弃，工具注册后被 GC，API 永远看不到 MCP 工具
         """
         try:
             from neurova.execution_engine.tool_engine import ToolEngine, ToolStatus
 
             if engine is None:
-                engine = ToolEngine()
+                # P0-5（M8）：延迟导入 API 层单例（避免模块级循环依赖），
+                # 使 GET /tool-layers/tools 能列出 MCP 工具
+                from neurova.api.endpoints.tool_layers import get_tool_engine
+
+                engine = get_tool_engine()
             for tool_def in tools:
                 tool_name = f"mcp.{server_id}.{tool_def.get('name', '')}"
                 if not engine.get_tool(tool_name):

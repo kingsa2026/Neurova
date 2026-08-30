@@ -51,8 +51,61 @@ class GovernanceResult:
         }
 
 
+# 参数提取的约定键名（非 scan_all 模式保持既有语义）
+_ADJUDICABLE_COMMAND_KEYS = ("command", "code")
+_ADJUDICABLE_PATH_KEYS = ("file_path", "path")
+# 路径型参数启发式：绝对路径（POSIX/Windows 盘符/UNC），供敏感路径规则用
+_PATH_LIKE = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/]|~[\\/])")
+
+
+def extract_adjudicable_params(params: Any, scan_all: bool = False) -> tuple:
+    """从工具参数中提取可裁决内容 (command 文本, file_paths)。
+
+    scan_all=True（MCP 等动态来源）：全部参数整体序列化进 command，
+    不依赖约定键名——否则动态工具换个参数名即可绕过预检（P0-2 / M4）。
+    scan_all=False：保持既有四键名提取语义。
+    """
+    if not isinstance(params, dict) or not params:
+        return "", None
+
+    if scan_all:
+        try:
+            command = json.dumps(params, ensure_ascii=False, default=str)
+        except Exception:
+            command = str(params)
+        file_paths = next(
+            (
+                v
+                for v in params.values()
+                if isinstance(v, str) and _PATH_LIKE.match(v)
+            ),
+            None,
+        )
+        return command, file_paths
+
+    command = next(
+        (
+            params[k]
+            for k in _ADJUDICABLE_COMMAND_KEYS
+            if isinstance(params.get(k), str) and params[k].strip()
+        ),
+        "",
+    )
+    file_paths = next(
+        (
+            params[k]
+            for k in _ADJUDICABLE_PATH_KEYS
+            if isinstance(params.get(k), str) and params[k]
+        ),
+        None,
+    )
+    return command, file_paths
+
+
 class GovernancePolicy:
     """统一治理策略。"""
+
+
 
     def __init__(
         self,
@@ -118,9 +171,7 @@ class GovernancePolicy:
 
         critical = [f for f in findings if getattr(f, "severity", None) == GuardSeverity.CRITICAL]
         high = [f for f in findings if getattr(f, "severity", None) == GuardSeverity.HIGH]
-        medium = [f for f in findings if getattr(f, "severity", None) == GuardSeverity.MEDIUM]
-
-        # 注意：不使用 guard_result.safe 做裁决 —— 该标志在 AUTO 模式下
+        medium = [f for f in findings if getattr(f, "severity", None) == GuardSeverity.MEDIUM]        # 注意：不使用 guard_result.safe 做裁决 —— 该标志在 AUTO 模式下
         # 对任何 >=HIGH 的发现都为 False，会让 SANDBOX 分支变成死代码。
         if critical:
             reasons = [f"拦截: {getattr(f, 'message', str(f))}" for f in critical]
@@ -152,6 +203,30 @@ class GovernancePolicy:
             )
 
         return GovernanceResult(decision=self.default_action, reasons=[], findings=findings)
+
+    def evaluate_tool_call(
+        self,
+        tool_name: str,
+        params: Any,
+        user_id: Optional[str] = None,
+        scan_all: bool = False,
+    ) -> Optional[GovernanceResult]:
+        """工具调用治理评估入口（P0-2 / 评测 M4）。
+
+        scan_all=True（MCP 等动态来源工具，mcp.* 命名空间）时对全部参数
+        整体序列化扫描——否则动态工具把参数换个键名（不叫 command/path）
+        即可绕过预检。scan_all=False 保持既有四键名提取语义。
+
+        Returns:
+            GovernanceResult: 命中可裁决内容时的裁决
+            None: 无可裁决内容（不触发覆盖/白名单/内容检测）
+        """
+        command, file_paths = extract_adjudicable_params(params, scan_all=scan_all)
+        if not command and file_paths is None:
+            return None
+        return self.evaluate(
+            command=command, tool_name=tool_name, user_id=user_id, file_paths=file_paths
+        )
 
     def execute_if_allowed(
         self,

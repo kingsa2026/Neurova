@@ -370,8 +370,10 @@ class ToolRouter:
                 metadata={"tool_name": tool_name, "agent_id": agent_id, "user_id": user_id},
             )
 
-        # 注入隔离上下文到参数（如果工具支持）
-        if agent_id or user_id:
+        # 注入隔离上下文到参数（builtin/skill/engine 源）。MCP 除外——
+        # _user_id 是内部键，注入会泄漏给外部 server（严格 schema 会拒收）；
+        # MCP 的身份经 _execute_mcp 显式穿透到防火墙（P0-3）
+        if (agent_id or user_id) and getattr(tool, "is_mcp", False) is not True:
             params = params.copy()
             if agent_id:
                 params["_agent_id"] = agent_id
@@ -383,7 +385,7 @@ class ToolRouter:
             # 根因修复: 严格 `is True` 判断。Mock/AsyncMock 的自动属性是 truthy Mock，
             # 旧真值判断会被击穿，把内置工具误路由到 MCP/Skill 分支。
             if getattr(tool, "is_mcp", False) is True:
-                result = await self._execute_mcp(tool, params)
+                result = await self._execute_mcp(tool, params, user_id=user_id)
             elif getattr(tool, "is_skill", False) is True:
                 result = await self._execute_skill(tool, params)
             elif self._execution_engine:
@@ -489,34 +491,68 @@ class ToolRouter:
                     continue
 
                 for t in mcp_tools:
-                    t_name = getattr(t, "name", None) or str(t)
+                    # dict 容错（P0-3）：MCPToolClient.list_tools() 返回
+                    # _tool_to_dict 字典，attribute-only 访问会让 bootstrap
+                    # 注册的客户端在兜底解析中永远失配
+                    if isinstance(t, dict):
+                        t_name = t.get("name") or str(t)
+                        desc = t.get("description", "") or ""
+                        t_params = t.get("parameters", {}) or {}
+                    else:
+                        t_name = getattr(t, "name", None) or str(t)
+                        desc = getattr(t, "description", "") or ""
+                        t_params = getattr(t, "parameters", {}) or {}
                     # 命名空间名（mcp.{server_id}.{t_name}）或裸名均可命中；
                     # proxy.name 保存裸名——它是传给 server 的协议执行名
                     if tool_name not in (t_name, f"mcp.{server_id}.{t_name}"):
                         continue
-                    desc = getattr(t, "description", "") or ""
-                    params = getattr(t, "parameters", {}) or {}
                     return _MCPToolProxy(
                         name=t_name,
                         server_id=server_id,
                         description=desc,
-                        parameters=params,
+                        parameters=t_params,
                     )
             except Exception:
                 logger.exception("Failed to scan MCP tools from %s", server_id)
 
         return None
 
-    async def _execute_mcp(self, tool: typing.Any, params: typing.Dict[str, typing.Any]) -> typing.Any:
+    @staticmethod
+    def _accepts_kwarg(fn: typing.Any, name: str) -> bool:
+        """探测可调用对象是否接受指定关键字参数（P0-3 兼容旧式客户端）。
+
+        AsyncMock/MagicMock 无 spec 时签名为 (*args, **kwargs)——VAR_KEYWORD
+        视为接受；真实旧式 bound method 无该参数则不传，避免 TypeError。
+        """
+        import inspect
+
+        try:
+            parameters = inspect.signature(fn).parameters.values()
+        except (TypeError, ValueError):
+            return False
+        return any(
+            p.name == name or p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in parameters
+        )
+
+    async def _execute_mcp(
+        self,
+        tool: typing.Any,
+        params: typing.Dict[str, typing.Any],
+        user_id: typing.Optional[str] = None,
+    ) -> typing.Any:
         """
         执行 MCP 工具
+
+        P0-3（评测 M5）：user_id 请求级身份穿透到 client 防火墙——多用户
+        共享 client 连接，防火墙必须按发起请求的用户裁决。旧式客户端不接受
+        user_id 参数时按原签名调用（签名探测，不靠 TypeError 重试——那会
+        造成副作用工具双重执行）。
 
         Args:
             tool: MCP 工具实例（需有 server_id 和 name 属性）
             params: 工具参数
-
-        Returns:
-            执行结果
+            user_id: 请求级用户身份（可选）
         """
         # server_id 仅当为已注册的 str 时才采用，否则回退 source
         # 根因修复: Mock 的自动 server_id 属性是 truthy Mock 对象，旧写法直接采用导致查不到客户端
@@ -528,11 +564,20 @@ class ToolRouter:
 
         client = self._mcp_clients[server_id]
         # 优先 call_tool(server_id, tool_name, params)（MCPToolClient 主执行入口），
-        # 旧式客户端仅提供 execute_tool 时回退
+        # 旧式客户端仅提供 execute_tool 时回退。
+        # P0-3：仅当请求级 user_id 存在且客户端签名接受时才附加该参数——
+        # 无条件传会破坏既有客户端的精确参数契约（None 也算传参）
         call_tool_fn = getattr(client, "call_tool", None)
         if callable(call_tool_fn):
+            if user_id is not None and self._accepts_kwarg(call_tool_fn, "user_id"):
+                return await call_tool_fn(server_id, tool.name, params, user_id=user_id)
             return await call_tool_fn(server_id, tool.name, params)
-        return await client.execute_tool(server_id, tool.name, params)
+        execute_tool_fn = getattr(client, "execute_tool", None)
+        if callable(execute_tool_fn):
+            if user_id is not None and self._accepts_kwarg(execute_tool_fn, "user_id"):
+                return await execute_tool_fn(server_id, tool.name, params, user_id=user_id)
+            return await execute_tool_fn(server_id, tool.name, params)
+        raise ValueError(f"MCP client for server '{server_id}' has no callable tool entry")
 
     async def _execute_skill(self, tool: typing.Any, params: typing.Dict[str, typing.Any]) -> typing.Any:
         """
