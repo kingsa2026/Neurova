@@ -4,7 +4,7 @@
     <div class="nr-glass-nav-content">
       <div class="nr-glass-nav-brand" @click="$emit('brand-click')">
         <slot name="brand">
-          <img src="/img/NEUROVA-LOGO350white.png" alt="Neurova" class="nr-glass-nav-logo-img" :class="{ 'is-collapsed': collapsed }" />
+          <img :src="logoSrc" alt="Neurova" class="nr-glass-nav-logo-img" :class="{ 'is-collapsed': collapsed }" />
         </slot>
       </div>
       <div class="nr-glass-nav-items">
@@ -18,11 +18,20 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useAppStore } from '@/stores/app'
+
 withDefaults(defineProps<{
   collapsed?: boolean
 }>(), { collapsed: false })
 
 defineEmits<{ 'brand-click': [] }>()
+
+const appStore = useAppStore()
+// 浅色主题用黑色 logo，深色主题用白色 logo，保证两种主题下品牌可见
+const logoSrc = computed(() =>
+  appStore.isDark ? '/img/NEUROVA-LOGO350white.png' : '/img/NEUROVA-LOGO350black.png',
+)
 </script>
 
 <style scoped>
@@ -35,7 +44,7 @@ defineEmits<{ 'brand-click': [] }>()
 .nr-glass-nav.is-collapsed { width: var(--nr-sidebar-collapsed-w); }
 .nr-glass-nav-backdrop {
   position: absolute; inset: 0; z-index: 0;
-  background: rgba(10, 14, 26, 0.7);
+  background: var(--nr-sidebar-bg);
   backdrop-filter: blur(40px) saturate(180%);
   border-right: 1px solid var(--nr-glass-border);
 }
@@ -48,7 +57,7 @@ defineEmits<{ 'brand-click': [] }>()
   margin-bottom: 16px; cursor: pointer; border-radius: 10px;
   transition: background 0.2s;
 }
-.nr-glass-nav-brand:hover { background: rgba(255,255,255,0.04); }
+.nr-glass-nav-brand:hover { background: var(--nr-glass-bg); }
 .nr-glass-nav-logo-img {
   height: 32px; width: auto; max-width: 140px;
   object-fit: contain; flex-shrink: 0;

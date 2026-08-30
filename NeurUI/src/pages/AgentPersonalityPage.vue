@@ -30,7 +30,7 @@
               :x="150 + 140 * Math.cos((2 * Math.PI * i) / traitList.length - Math.PI / 2)"
               :y="150 + 140 * Math.sin((2 * Math.PI * i) / traitList.length - Math.PI / 2)"
               text-anchor="middle" dominant-baseline="middle" fill="var(--nr-text-secondary)" font-size="10">
-              {{ trait.name }}
+              {{ t('personality.' + trait.key) }}
             </text>
           </svg>
         </div>
@@ -40,7 +40,7 @@
       <GlassCard :title="t('growth.traits')" style="margin-top: 20px">
         <div class="traits-list">
           <div v-for="trait in traitList" :key="trait.key" class="trait-row">
-            <span class="trait-name">{{ trait.name }}</span>
+            <span class="trait-name">{{ t('personality.' + trait.key) }}</span>
             <a-slider v-model:value="trait.percent" :min="0" :max="100" :disabled="!editing" style="flex: 1" />
             <span class="trait-value">{{ trait.percent }}%</span>
           </div>
@@ -74,13 +74,13 @@ const saving = ref(false)
 const evolving = ref(false)
 const editing = ref(false)
 
-const traitList = ref<{ key: string; name: string; value: number; percent: number }[]>([
-  { key: 'openness', name: 'Openness', value: 0.7, percent: 70 },
-  { key: 'conscientiousness', name: 'Conscientiousness', value: 0.6, percent: 60 },
-  { key: 'extraversion', name: 'Extraversion', value: 0.5, percent: 50 },
-  { key: 'agreeableness', name: 'Agreeableness', value: 0.8, percent: 80 },
-  { key: 'neuroticism', name: 'Neuroticism', value: 0.3, percent: 30 },
-  { key: 'creativity', name: 'Creativity', value: 0.65, percent: 65 },
+const traitList = ref<{ key: string; value: number; percent: number }[]>([
+  { key: 'openness', value: 0.7, percent: 70 },
+  { key: 'conscientiousness', value: 0.6, percent: 60 },
+  { key: 'extraversion', value: 0.5, percent: 50 },
+  { key: 'agreeableness', value: 0.8, percent: 80 },
+  { key: 'neuroticism', value: 0.3, percent: 30 },
+  { key: 'creativity', value: 0.65, percent: 65 },
 ])
 
 const polygonPoints = (level: number) => {

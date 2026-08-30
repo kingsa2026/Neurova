@@ -1,10 +1,10 @@
 <template>
   <div class="nr-auth-page">
-    <StarBackground />
+    <StarBackground v-if="appStore.isDark" />
     <div class="nr-auth-container">
       <GlassPanel variant="elevated" :radius="24" padding="40px 36px">
         <div class="nr-auth-header">
-          <img src="/img/NEUROVA-LOGO350white.png" alt="Neurova Logo" class="nr-auth-logo-img" />
+          <img :src="appStore.isDark ? '/img/NEUROVA-LOGO350white.png' : '/img/NEUROVA-LOGO350black.png'" alt="Neurova Logo" class="nr-auth-logo-img" />
         </div>
 
         <a-form
@@ -119,6 +119,7 @@ import { ref, reactive, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 import { authAPI } from '@/api/auth'
 import StarBackground from '@/components/StarBackground.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -128,6 +129,7 @@ import GlassInput from '@/components/GlassInput.vue'
 const { t } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
+const appStore = useAppStore()
 
 const formRef = ref()
 

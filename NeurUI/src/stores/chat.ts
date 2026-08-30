@@ -26,6 +26,7 @@ export const useChatStore = defineStore('chat', () => {
   // ---------------------------------------------------------------------------
 
   const sessions = ref<Session[]>([])
+  const archivedSessions = ref<Session[]>([])
   const currentSessionId = ref<string | null>(null)
   const messages = ref<ChatMessage[]>([])
   const isStreaming = ref<boolean>(false)
@@ -75,6 +76,16 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value = sessions.value.filter((s) => s.id !== sessionId)
   }
 
+  // ── 存档会话（删除 → 存档：历史列表隐藏，存档卡片页可随时恢复） ──────────
+
+  function setArchivedSessions(next: Session[]): void {
+    archivedSessions.value = next
+  }
+
+  function removeArchivedSession(sessionId: string): void {
+    archivedSessions.value = archivedSessions.value.filter((s) => s.id !== sessionId)
+  }
+
   function renameSessionTitle(sessionId: string, title: string): void {
     const session = sessions.value.find((s) => s.id === sessionId)
     if (session) session.title = title
@@ -92,12 +103,41 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = next
   }
 
-  function addMessage(message: ChatMessage): void {
+  /**
+   * 追加消息并返回 store 中持有的引用。
+   *
+   * 契约（R-1 修复）: 调用方（ChatPage 流式写入）必须用返回值继续修改消息，
+   * 不能沿用 push 前的原始对象引用——Vue 对 ref([]) 数组元素做 reactive 包装，
+   * 原始引用写属性绕过了 proxy setter，SSE 事件不触发依赖收集，
+   * 思考/正文只在下次组件重渲染时一次性出现（无法逐字显示）。
+   */
+  function addMessage(message: ChatMessage): ChatMessage {
     messages.value.push(message)
+    return messages.value[messages.value.length - 1]
   }
 
   function clearMessages(): void {
     messages.value = []
+  }
+
+  /**
+   * 删除一轮对话：移除 fromIndex 处的用户消息及其后连续的 assistant 消息。
+   *
+   * add_message 后端成对相邻写入（user+assistant），实时流式中断可能只留下
+   * 孤立的尾 user 消息 — 循环遇下一条 user 消息即停止，两种情况都覆盖。
+   * 供 ChatPage "删除一轮记录" 与 "编辑最后一条用户消息（删旧轮+重发）" 使用。
+   */
+  function removeRoundFrom(fromIndex: number): void {
+    if (fromIndex < 0 || fromIndex >= messages.value.length) return
+    let removedFirst = false
+    let i = fromIndex
+    while (i < messages.value.length) {
+      // 首条（用户消息）必删；其后仅删连续的 assistant，遇下一条 user 停止。
+      // splice 后后继元素前移到 i，故索引不自增，用 removedFirst 标记状态。
+      if (removedFirst && messages.value[i].role !== 'assistant') break
+      messages.value.splice(i, 1)
+      removedFirst = true
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -135,6 +175,7 @@ export const useChatStore = defineStore('chat', () => {
   return {
     // state
     sessions,
+    archivedSessions,
     currentSessionId,
     messages,
     isStreaming,
@@ -148,12 +189,15 @@ export const useChatStore = defineStore('chat', () => {
     setSessions,
     addSession,
     removeSession,
+    setArchivedSessions,
+    removeArchivedSession,
     renameSessionTitle,
     setCurrentSession,
     // message mutations
     setMessages,
     addMessage,
     clearMessages,
+    removeRoundFrom,
     // streaming / composer
     setStreaming,
     setInputText,

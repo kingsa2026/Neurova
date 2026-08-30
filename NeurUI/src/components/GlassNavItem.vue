@@ -41,9 +41,9 @@ const isActive = computed(() => {
   transition: all 0.2s ease; cursor: pointer; position: relative;
   font-size: 13px; font-weight: 450;
 }
-.nr-nav-item:hover { color: var(--nr-text-primary); background: rgba(255,255,255,0.04); }
+.nr-nav-item:hover { color: var(--nr-text-primary); background: var(--nr-glass-bg); }
 .nr-nav-item.is-active {
-  color: var(--nr-primary-light); background: rgba(99,102,241,0.1);
+  color: var(--nr-primary-light); background: var(--nr-primary-soft);
   font-weight: 550;
 }
 .nr-nav-item.is-active::before {

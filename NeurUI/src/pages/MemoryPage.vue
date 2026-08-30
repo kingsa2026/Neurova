@@ -124,7 +124,7 @@
           {{ t('memory.semanticSearch') || 'Semantic Search' }}
         </a-checkbox>
         <a-button class="md-edit-btn" @click="openMarkdownEditor">
-          📝 Markdown 查看/编辑
+          {{ t('ui.mdViewEditShort') }}
         </a-button>
       </div>
     </GlassCard>
@@ -343,30 +343,29 @@
     <!-- Markdown view/edit modal (P1 记忆可解释性) -->
     <a-modal
       v-model:open="mdModal.open"
-      title="📝 记忆 Markdown 查看/编辑"
+      :title="t('ui.mdViewEdit')"
       width="860px"
       :confirm-loading="mdModal.saving"
-      ok-text="保存修改"
-      cancel-text="关闭"
+      :ok-text="t('ui.saveChanges')"
+      :cancel-text="t('common.close')"
       @ok="saveMarkdownEdits"
     >
       <div class="md-toolbar">
         <a-button size="small" :loading="mdModal.loading" @click="openMarkdownEditor">
-          ↻ 重新导出
+          {{ t('ui.reExport') }}
         </a-button>
         <span class="md-hint">
-          可直接编辑正文文本；保存时仅应用文本变更，向量索引不受影响。
+          {{ t('ui.mdEditHint') }}
         </span>
       </div>
       <a-textarea
         v-model:value="mdModal.markdown"
         class="md-editor"
         :rows="22"
-        placeholder="正在加载记忆导出..."
+        :placeholder="t('ui.mdLoadingExport')"
       />
       <div v-if="mdModal.lastStats" class="md-stats">
-        上次保存：更新 {{ mdModal.lastStats.updated }} 条 · 未变更 {{ mdModal.lastStats.unchanged }} 条 ·
-        缺失 {{ mdModal.lastStats.missing }} 条 · 冲突 {{ mdModal.lastStats.conflicts ?? 0 }} 条
+        {{ t('ui.mdLastSave', { updated: mdModal.lastStats.updated, unchanged: mdModal.lastStats.unchanged, missing: mdModal.lastStats.missing, conflicts: mdModal.lastStats.conflicts ?? 0 }) }}
       </div>
     </a-modal>
   </div>
@@ -436,10 +435,10 @@ async function openMarkdownEditor(): Promise<void> {
     const resp: any = await memoryApi.exportMemoryMarkdown(agentId.value || undefined)
     const payload = resp?.data ?? resp
     mdModal.markdown = payload?.data?.markdown ?? ''
-    if (!mdModal.markdown) message.warning('该 Agent 暂无可导出的记忆')
+    if (!mdModal.markdown) message.warning(t('ui.noExportMemory'))
   } catch (e) {
     console.error('[MemoryPage] export markdown failed:', e)
-    message.error('导出失败，请稍后重试')
+    message.error(t('ui.exportFailed'))
   } finally {
     mdModal.loading = false
   }
@@ -458,17 +457,17 @@ async function saveMarkdownEdits(): Promise<void> {
     mdModal.lastStats = payload?.data?.stats ?? null
     const stats = mdModal.lastStats
     if (stats && stats.updated > 0) {
-      message.success(`已更新 ${stats.updated} 条记忆`)
+      message.success(t('ui.updatedMemories', { count: stats.updated }))
       fetchMemories()
       fetchStats()
     } else if (stats && (stats.conflicts ?? 0) > 0) {
-      message.warning(`检测到 ${stats.conflicts} 条并发冲突，未覆盖`)
+      message.warning(t('ui.conflictNotOverwritten', { count: stats.conflicts }))
     } else {
-      message.info('没有需要应用的修改')
+      message.info(t('ui.noChangesToApply'))
     }
   } catch (e) {
     console.error('[MemoryPage] import markdown failed:', e)
-    message.error('保存失败，请稍后重试')
+    message.error(t('ui.saveFailed'))
   } finally {
     mdModal.saving = false
   }
@@ -583,6 +582,8 @@ const performSemanticSearch = async () => {
       limit: 20,
       type: activeTab.value !== 'all' ? activeTab.value : undefined,
     })
+    // 注意：POST /memory/search 当前 405 断链（真端点为 /enhanced-memory-search/search，
+    // 返回 {results: []} 结构），此处维持既有解析，待断链修复时一并调整
     searchResults.value = Array.isArray(res.data) ? res.data : []
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
@@ -605,23 +606,17 @@ const fetchStats = async () => {
 const fetchMemories = async () => {
   loading.value = true
   try {
+    // 后端 GET /memory 实参: query/category/limit（暂无 offset 分页）
     const params: Record<string, any> = {
-      page: page.value,
-      size: size.value,
+      limit: size.value,
     }
-    if (activeTab.value !== 'all') params.type = activeTab.value
     if (categoryFilter.value) params.category = categoryFilter.value
-    if (searchQuery.value && !semanticSearch.value) params.q = searchQuery.value
+    if (searchQuery.value && !semanticSearch.value) params.query = searchQuery.value
 
     const res = await memoryApi.getMemories(agentId.value, params)
-    const data = res.data
-    if (data && typeof data === 'object' && 'items' in data) {
-      memories.value = data.items ?? []
-      total.value = data.total ?? 0
-    } else {
-      memories.value = Array.isArray(data) ? data : []
-      total.value = memories.value.length
-    }
+    const { items, total: t } = memoryApi.extractMemoryList(res?.data)
+    memories.value = items
+    total.value = t
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
@@ -702,9 +697,9 @@ const fetchHotMemories = async () => {
   loading.value = true
   try {
     const res = await memoryApi.getHotMemories(agentId.value, size.value)
-    const data = res.data
-    memories.value = Array.isArray(data) ? data : []
-    total.value = memories.value.length
+    const { items, total: t } = memoryApi.extractMemoryList(res?.data)
+    memories.value = items
+    total.value = t
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
@@ -716,9 +711,9 @@ const fetchCrystallizedMemories = async () => {
   loading.value = true
   try {
     const res = await memoryApi.getCrystallizedMemories(agentId.value, size.value)
-    const data = res.data
-    memories.value = Array.isArray(data) ? data : []
-    total.value = memories.value.length
+    const { items, total: t } = memoryApi.extractMemoryList(res?.data)
+    memories.value = items
+    total.value = t
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {

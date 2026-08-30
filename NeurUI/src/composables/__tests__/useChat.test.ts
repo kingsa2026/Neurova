@@ -15,6 +15,8 @@ vi.mock('@/api', () => {
 
 vi.mock('@/api/modules/console', () => ({
   deleteConsoleSession: vi.fn(),
+  archiveConsoleSession: vi.fn(),
+  unarchiveConsoleSession: vi.fn(),
 }))
 
 vi.mock('@/bus', () => {
@@ -36,7 +38,7 @@ vi.mock('@/bus', () => {
 })
 
 import api from '@/api'
-import { deleteConsoleSession } from '@/api/modules/console'
+import { deleteConsoleSession, archiveConsoleSession, unarchiveConsoleSession } from '@/api/modules/console'
 import bus from '@/bus'
 import { useChat } from '@/composables/useChat'
 import { useChatStore } from '@/stores/chat'
@@ -787,6 +789,224 @@ describe('useChat', () => {
     it('exposes the reactive store instance', () => {
       const { store } = useChat()
       expect(store).toBe(useChatStore())
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // 轮次操作：历史时间戳/反馈透传 + deleteRound + sendFeedback
+  // （chat 页：编辑最后一条用户消息 / 删除一轮 / 点赞点踩）
+  // -------------------------------------------------------------------------
+
+  describe('round operations', () => {
+    describe('switchSession mapping', () => {
+      it('maps backend timestamp and feedback metadata into messages', async () => {
+        vi.mocked(api.get).mockResolvedValueOnce({
+          data: [
+            { role: 'user', content: 'Q', timestamp: '2026-08-29T10:00:00' },
+            {
+              role: 'assistant',
+              content: 'A',
+              timestamp: '2026-08-29T10:00:00',
+              metadata: { feedback: 'like' },
+            },
+          ],
+        } as any)
+
+        const { switchSession, store } = useChat()
+        await switchSession('s1')
+
+        expect(store.messages[0].timestamp).toBe('2026-08-29T10:00:00')
+        expect(store.messages[1].timestamp).toBe('2026-08-29T10:00:00')
+        expect(store.messages[1].feedback).toBe('like')
+      })
+
+      it('falls back to metadata.client_timestamp when timestamp is missing (legacy rounds)', async () => {
+        vi.mocked(api.get).mockResolvedValueOnce({
+          data: [
+            {
+              role: 'user',
+              content: 'Q',
+              metadata: { client_timestamp: '2026-08-29T09:00:00' },
+            },
+          ],
+        } as any)
+
+        const { switchSession, store } = useChat()
+        await switchSession('s1')
+
+        expect(store.messages[0].timestamp).toBe('2026-08-29T09:00:00')
+      })
+    })
+
+    describe('deleteRound', () => {
+      it('DELETEs the round with encoded session/timestamp params', async () => {
+        vi.mocked(api.delete).mockResolvedValueOnce({} as any)
+        const { deleteRound } = useChat()
+
+        const r = await deleteRound('s1', '2026-08-29T10:00:00.123+08:00')
+
+        const ts = encodeURIComponent('2026-08-29T10:00:00.123+08:00')
+        expect(api.delete).toHaveBeenCalledWith(`/console/chat/rounds?session_id=s1&timestamp=${ts}`)
+        expect(r).toEqual({ ok: true })
+      })
+
+      it('treats 404 as idempotent success (round never persisted, e.g. aborted stream)', async () => {
+        const err: any = new Error('Request failed with status code 404')
+        err.response = { status: 404 }
+        vi.mocked(api.delete).mockRejectedValueOnce(err)
+        const { deleteRound } = useChat()
+
+        const r = await deleteRound('s1', 't0')
+
+        expect(r).toEqual({ ok: true })
+      })
+
+      it('returns { ok: false, error } on non-404 failures', async () => {
+        vi.mocked(api.delete).mockRejectedValueOnce(new Error('boom'))
+        const { deleteRound } = useChat()
+
+        const r = await deleteRound('s1', 't0')
+
+        expect(r.ok).toBe(false)
+      })
+    })
+
+    describe('sendFeedback', () => {
+      it('POSTs feedback to the backend', async () => {
+        vi.mocked(api.post).mockResolvedValueOnce({} as any)
+        const { sendFeedback } = useChat()
+
+        const ok = await sendFeedback('s1', 't0', 'like')
+
+        expect(api.post).toHaveBeenCalledWith('/console/chat/feedback', {
+          session_id: 's1',
+          timestamp: 't0',
+          feedback: 'like',
+        })
+        expect(ok).toBe(true)
+      })
+
+      it('sends null feedback to clear an existing rating', async () => {
+        vi.mocked(api.post).mockResolvedValueOnce({} as any)
+        const { sendFeedback } = useChat()
+
+        await sendFeedback('s1', 't0', null)
+
+        expect(api.post).toHaveBeenCalledWith('/console/chat/feedback', {
+          session_id: 's1',
+          timestamp: 't0',
+          feedback: null,
+        })
+      })
+
+      it('returns false and calls onError on failure', async () => {
+        vi.mocked(api.post).mockRejectedValueOnce(new Error('server'))
+        const onError = vi.fn()
+        const errorMessage = vi.fn((k: string, f: string) => f)
+        const { sendFeedback } = useChat({ onError, errorMessage })
+
+        const ok = await sendFeedback('s1', 't0', 'dislike')
+
+        expect(ok).toBe(false)
+        expect(onError).toHaveBeenCalledWith('反馈保存失败')
+        expect(errorMessage).toHaveBeenCalledWith('chat.feedbackFailed', '反馈保存失败')
+      })
+    })
+
+    // -------------------------------------------------------------------------
+    // archive / restore — 删除 → 存档：历史列表隐藏，存档卡片页可随时恢复
+    // -------------------------------------------------------------------------
+
+    describe('archiveSession', () => {
+      it('calls the archive endpoint, removes from list, and switches to next', async () => {
+        vi.mocked(archiveConsoleSession).mockResolvedValueOnce({} as any)
+        // archiveSession 内部自动切换到剩余首个会话（历史加载）
+        vi.mocked(api.get).mockResolvedValueOnce({ data: { messages: [] } } as any)
+
+        const { archiveSession, store } = useChat()
+        store.setSessions([
+          { id: 's1', title: 'One' },
+          { id: 's2', title: 'Two' },
+        ])
+        store.setCurrentSession('s1')
+
+        const result = await archiveSession('s1')
+
+        expect(archiveConsoleSession).toHaveBeenCalledWith('s1')
+        expect(store.sessions.map((s) => s.id)).toEqual(['s2'])
+        expect(result.ok).toBe(true)
+      })
+
+      it('emits chat:session-archived event', async () => {
+        vi.mocked(archiveConsoleSession).mockResolvedValueOnce({} as any)
+        const { archiveSession } = useChat()
+        await archiveSession('s1')
+        expect(bus.emit).toHaveBeenCalledWith('chat:session-archived', { sessionId: 's1' })
+      })
+
+      it('keeps the session in the list and returns ok:false on failure', async () => {
+        vi.mocked(archiveConsoleSession).mockRejectedValueOnce(new Error('server'))
+        const { archiveSession, store } = useChat()
+        store.setSessions([{ id: 's1', title: 'One' }])
+
+        const result = await archiveSession('s1')
+
+        expect(result.ok).toBe(false)
+        expect(store.sessions.map((s) => s.id)).toEqual(['s1'])
+      })
+    })
+
+    describe('loadArchivedSessions', () => {
+      it('loads archived sessions into the store with agent filter', async () => {
+        vi.mocked(api.get).mockResolvedValueOnce({
+          data: {
+            sessions: [{ session_id: 'a1', title: 'Archived', created_at: '2026-01-01' }],
+          },
+        } as any)
+
+        const { loadArchivedSessions, store } = useChat()
+        await loadArchivedSessions('agent-1')
+
+        expect(api.get).toHaveBeenCalledWith('/console/chat/sessions/archived?agent_id=agent-1')
+        expect(store.archivedSessions).toEqual([{ id: 'a1', title: 'Archived', updatedAt: '2026-01-01' }])
+      })
+
+      it('requests without agent param when agentId is empty', async () => {
+        vi.mocked(api.get).mockResolvedValueOnce({ data: { sessions: [] } } as any)
+
+        const { loadArchivedSessions } = useChat()
+        await loadArchivedSessions('')
+
+        expect(api.get).toHaveBeenCalledWith('/console/chat/sessions/archived')
+      })
+    })
+
+    describe('restoreSession', () => {
+      it('calls the unarchive endpoint, moves it back to the normal list', async () => {
+        vi.mocked(unarchiveConsoleSession).mockResolvedValueOnce({} as any)
+        const { restoreSession, store } = useChat()
+        store.setArchivedSessions([{ id: 'a1', title: 'Archived', updatedAt: '2026-01-01' }])
+        store.setSessions([{ id: 's2', title: 'Two' }])
+
+        const result = await restoreSession('a1')
+
+        expect(unarchiveConsoleSession).toHaveBeenCalledWith('a1')
+        expect(store.sessions[0].id).toBe('a1')
+        expect(store.archivedSessions).toEqual([])
+        expect(result.ok).toBe(true)
+      })
+
+      it('keeps it archived and returns ok:false on failure', async () => {
+        vi.mocked(unarchiveConsoleSession).mockRejectedValueOnce(new Error('server'))
+        const { restoreSession, store } = useChat()
+        store.setArchivedSessions([{ id: 'a1', title: 'Archived', updatedAt: '2026-01-01' }])
+
+        const result = await restoreSession('a1')
+
+        expect(result.ok).toBe(false)
+        expect(store.archivedSessions.map((s) => s.id)).toEqual(['a1'])
+        expect(store.sessions).toEqual([])
+      })
     })
   })
 })

@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import i18n from '@/i18n'
 
 /**
  * 电脑操作分屏面板状态机
@@ -48,25 +49,25 @@ export function describeComputerAction(tool: string, params: Record<string, unkn
   const ellipsize = (s: string, max: number) => `${s.slice(0, max)}${s.length > max ? '…' : ''}`
   switch (tool) {
     case 'computer_screenshot':
-      return '截取屏幕'
+      return i18n.global.t('ui.actScreenshot')
     case 'computer_click':
-      return `点击屏幕 (${p.x ?? '?'}, ${p.y ?? '?'})`
+      return i18n.global.t('ui.actClick', { x: p.x ?? '?', y: p.y ?? '?' })
     case 'computer_type':
-      return `键入文本「${ellipsize(String(p.text ?? ''), 30)}」`
+      return i18n.global.t('ui.actType', { text: ellipsize(String(p.text ?? ''), 30) })
     case 'computer_scroll':
-      return '滚动屏幕'
+      return i18n.global.t('ui.actScroll')
     case 'computer_shell':
-      return `执行命令 ${ellipsize(String(p.command ?? ''), 60)}`
+      return i18n.global.t('ui.actShell', { cmd: ellipsize(String(p.command ?? ''), 60) })
     case 'browser_navigate':
-      return `打开网页 ${String(p.url ?? '')}`
+      return i18n.global.t('ui.actNavigate', { url: String(p.url ?? '') })
     case 'browser_click':
-      return `点击页面元素 ${String(p.selector ?? p.text ?? '')}`
+      return i18n.global.t('ui.actBrowserClick', { sel: String(p.selector ?? p.text ?? '') })
     case 'browser_type':
-      return `在 ${String(p.selector ?? '?')} 中输入文本`
+      return i18n.global.t('ui.actBrowserType', { sel: String(p.selector ?? '?') })
     case 'browser_screenshot':
-      return '截取浏览器页面'
+      return i18n.global.t('ui.actBrowserScreenshot')
     case 'browser_extract_text':
-      return '提取页面文本'
+      return i18n.global.t('ui.actExtractText')
     default:
       return tool
   }

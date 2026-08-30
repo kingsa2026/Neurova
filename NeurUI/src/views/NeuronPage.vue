@@ -1,27 +1,27 @@
 <template>
   <div class="neuron-page">
     <div class="page-header">
-      <h1>NEURON 记忆系统</h1>
-      <p class="subtitle">依赖图谱 · 级联推理 · 缺失检测</p>
+<h1>{{ t('neuron.title') }}</h1>
+    <p class="subtitle">{{ t('neuron.subtitle') }}</p>
     </div>
 
     <!-- 统计卡片 -->
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-value">{{ stats.total_entities || 0 }}</div>
-        <div class="stat-label">实体数量</div>
+        <div class="stat-label">{{ t('neuron.entityCount') }}</div>
       </div>
       <div class="stat-card">
         <div class="stat-value">{{ stats.total_edges || 0 }}</div>
-        <div class="stat-label">依赖关系</div>
+        <div class="stat-label">{{ t('neuron.dependencyRelation') }}</div>
       </div>
       <div class="stat-card">
         <div class="stat-value">{{ stats.entity_types || 0 }}</div>
-        <div class="stat-label">实体类型</div>
+        <div class="stat-label">{{ t('neuron.entityType') }}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">{{ healthStatus === 'healthy' ? '正常' : '异常' }}</div>
-        <div class="stat-label">系统状态</div>
+        <div class="stat-value">{{ healthStatus === 'healthy' ? t('neuron.healthy') : t('neuron.unhealthy') }}</div>
+        <div class="stat-label">{{ t('neuron.systemStatus') }}</div>
       </div>
     </div>
 
@@ -40,43 +40,43 @@
     <!-- 依赖图谱 -->
     <div v-show="activeTab === 'graph'" class="tab-content">
       <div class="section">
-        <h3>实体列表</h3>
+        <h3>{{ t('neuron.entityList') }}</h3>
         <div class="entity-list">
           <div v-for="entity in entities" :key="entity.id" class="entity-item">
             <span class="entity-type">{{ entity.entity_type }}</span>
             <span class="entity-name">{{ entity.name }}</span>
-            <button class="btn-sm" @click="showDependencies(entity.id)">查看依赖</button>
+            <button class="btn-sm" @click="showDependencies(entity.id)">{{ t('neuron.viewDependencies') }}</button>
           </div>
           <div v-if="entities.length === 0" class="empty-state">
-            暂无实体数据
+            {{ t('neuron.noEntityData') }}
           </div>
         </div>
       </div>
 
       <div class="section">
-        <h3>依赖关系</h3>
+        <h3>{{ t('neuron.dependencyRelation') }}</h3>
         <div v-if="selectedEntity" class="dependency-view">
-          <p>实体: <strong>{{ selectedEntity }}</strong></p>
+          <p>{{ t('neuron.entity') }}: <strong>{{ selectedEntity }}</strong></p>
           <div class="dep-list">
             <div v-if="dependencies.downstream.length > 0">
-              <h4>下游依赖 ({{ dependencies.downstream.length }})</h4>
+              <h4>{{ t('neuron.downstream') }} ({{ dependencies.downstream.length }})</h4>
               <div v-for="dep in dependencies.downstream" :key="dep" class="dep-item downstream">
                 → {{ dep }}
               </div>
             </div>
             <div v-if="dependencies.upstream.length > 0">
-              <h4>上游依赖 ({{ dependencies.upstream.length }})</h4>
+              <h4>{{ t('neuron.upstream') }} ({{ dependencies.upstream.length }})</h4>
               <div v-for="dep in dependencies.upstream" :key="dep" class="dep-item upstream">
                 ← {{ dep }}
               </div>
             </div>
             <div v-if="dependencies.downstream.length === 0 && dependencies.upstream.length === 0" class="empty-state">
-              无依赖关系
+              {{ t('neuron.noDependency') }}
             </div>
           </div>
         </div>
         <div v-else class="empty-state">
-          请先选择一个实体查看依赖
+          {{ t('neuron.selectEntityFirst') }}
         </div>
       </div>
     </div>
@@ -84,30 +84,30 @@
     <!-- 级联推理 -->
     <div v-show="activeTab === 'cascade'" class="tab-content">
       <div class="section">
-        <h3>级联推理</h3>
+        <h3>{{ t('neuron.cascadeReasoning') }}</h3>
         <div class="form-group">
-          <label>实体ID</label>
-          <input v-model="cascadeForm.entityId" placeholder="输入实体ID" />
+          <label>{{ t('neuron.entityId') }}</label>
+          <input v-model="cascadeForm.entityId" :placeholder="t('neuron.enterEntityId')" />
         </div>
         <div class="form-group">
-          <label>方向</label>
+          <label>{{ t('neuron.direction') }}</label>
           <select v-model="cascadeForm.direction">
-            <option value="forward">正向 (A变化→影响B)</option>
-            <option value="backward">反向 (B变化←受A影响)</option>
+            <option value="forward">{{ t('neuron.forward') }}</option>
+            <option value="backward">{{ t('neuron.backward') }}</option>
           </select>
         </div>
         <div class="form-group">
-          <label>最大深度</label>
+          <label>{{ t('neuron.maxDepth') }}</label>
           <input v-model.number="cascadeForm.maxDepth" type="number" min="1" max="10" />
         </div>
         <button class="btn-primary" @click="runCascade" :disabled="cascadeLoading">
-          {{ cascadeLoading ? '推理中...' : '执行推理' }}
+          {{ cascadeLoading ? t('neuron.reasoning') : t('neuron.executeInference') }}
         </button>
 
         <div v-if="cascadeResult" class="result-panel">
-          <h4>推理结果</h4>
-          <p>影响实体数: <strong>{{ cascadeResult.total_affected }}</strong></p>
-          <p>置信度: <strong>{{ (cascadeResult.confidence * 100).toFixed(1) }}%</strong></p>
+          <h4>{{ t('neuron.inferenceResult') }}</h4>
+          <p>{{ t('neuron.affectedEntities') }}: <strong>{{ cascadeResult.total_affected }}</strong></p>
+          <p>{{ t('neuron.confidence') }}: <strong>{{ (cascadeResult.confidence * 100).toFixed(1) }}%</strong></p>
           <div class="effects-list">
             <div v-for="(effect, idx) in cascadeResult.effects" :key="idx" class="effect-item">
               <span class="effect-type">{{ effect.effect_type }}</span>
@@ -116,7 +116,7 @@
             </div>
           </div>
           <div class="reasoning-chain">
-            <h4>推理链</h4>
+            <h4>{{ t('neuron.inferenceChain') }}</h4>
             <div v-for="(line, idx) in cascadeResult.reasoning_chain" :key="idx" class="chain-line">
               {{ line }}
             </div>
@@ -128,63 +128,63 @@
     <!-- 缺失检测 -->
     <div v-show="activeTab === 'absence'" class="tab-content">
       <div class="section">
-        <h3>缺失检测</h3>
+        <h3>{{ t('neuron.absenceDetection') }}</h3>
         <div class="form-group">
-          <label>期望实体</label>
-          <input v-model="absenceForm.expectedEntity" placeholder="输入期望存在的实体" />
+          <label>{{ t('neuron.expectedEntity') }}</label>
+          <input v-model="absenceForm.expectedEntity" :placeholder="t('neuron.enterExpectedEntity')" />
         </div>
         <div class="form-group">
-          <label>期望关系</label>
+          <label>{{ t('neuron.expectedRelation') }}</label>
           <select v-model="absenceForm.expectedRelation">
-            <option value="causal">因果 (causal)</option>
-            <option value="temporal">时间 (temporal)</option>
-            <option value="conditional">条件 (conditional)</option>
-            <option value="prerequisite">前提 (prerequisite)</option>
-            <option value="support">支持 (support)</option>
-            <option value="hierarchical">层级 (hierarchical)</option>
+            <option value="causal">{{ t('neuron.relCausal') }}</option>
+            <option value="temporal">{{ t('neuron.relTemporal') }}</option>
+            <option value="conditional">{{ t('neuron.relConditional') }}</option>
+            <option value="prerequisite">{{ t('neuron.relPrerequisite') }}</option>
+            <option value="support">{{ t('neuron.relSupport') }}</option>
+            <option value="hierarchical">{{ t('neuron.relHierarchical') }}</option>
           </select>
         </div>
         <div class="form-group">
-          <label>上下文实体 (逗号分隔)</label>
-          <input v-model="absenceForm.contextEntities" placeholder="实体1, 实体2, ..." />
+          <label>{{ t('neuron.contextEntities') }}</label>
+          <input v-model="absenceForm.contextEntities" :placeholder="t('neuron.enterContextEntities')" />
         </div>
         <button class="btn-primary" @click="runAbsenceCheck" :disabled="absenceLoading">
-          {{ absenceLoading ? '检测中...' : '执行检测' }}
+          {{ absenceLoading ? t('neuron.detecting') : t('neuron.executeDetection') }}
         </button>
 
         <div v-if="absenceResult" class="result-panel">
-          <h4>检测结果</h4>
+          <h4>{{ t('neuron.detectionResult') }}</h4>
           <div :class="['status-badge', absenceResult.is_absent ? 'absent' : 'present']">
-            {{ absenceResult.is_absent ? '检测到缺失' : '未检测到缺失' }}
+            {{ absenceResult.is_absent ? t('neuron.absenceDetected') : t('neuron.noAbsenceDetected') }}
           </div>
           <div class="check-results">
             <div class="check-item">
-              <span>实体存在:</span>
+              <span>{{ t('neuron.entityExists') }}</span>
               <span :class="absenceResult.entity_exists ? 'ok' : 'fail'">
                 {{ absenceResult.entity_exists ? '✓' : '✗' }}
               </span>
             </div>
             <div class="check-item">
-              <span>关系存在:</span>
+              <span>{{ t('neuron.relationExists') }}</span>
               <span :class="absenceResult.relation_exists ? 'ok' : 'fail'">
                 {{ absenceResult.relation_exists ? '✓' : '✗' }}
               </span>
             </div>
             <div class="check-item">
-              <span>上下文依赖:</span>
+              <span>{{ t('neuron.contextDependency') }}</span>
               <span :class="absenceResult.context_has_dependency ? 'ok' : 'fail'">
                 {{ absenceResult.context_has_dependency ? '✓' : '✗' }}
               </span>
             </div>
           </div>
           <div v-if="absenceResult.explanation.length > 0" class="explanation">
-            <h4>解释</h4>
+            <h4>{{ t('neuron.explanation') }}</h4>
             <div v-for="(exp, idx) in absenceResult.explanation" :key="idx">
               {{ exp }}
             </div>
           </div>
           <div v-if="absenceResult.suggestions.length > 0" class="suggestions">
-            <h4>建议</h4>
+            <h4>{{ t('neuron.suggestion') }}</h4>
             <div v-for="(sug, idx) in absenceResult.suggestions" :key="idx">
               {{ sug }}
             </div>
@@ -197,6 +197,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   listEntities,
   getEntityDependencies,
@@ -209,6 +210,8 @@ import {
   type AbsenceResult,
   type NeuronStats,
 } from '@/api/neuron'
+
+const { t } = useI18n()
 
 // 状态
 const activeTab = ref('graph')
@@ -225,9 +228,9 @@ const absenceLoading = ref(false)
 const absenceResult = ref<AbsenceResult | null>(null)
 
 const tabs = [
-  { key: 'graph', label: '依赖图谱' },
-  { key: 'cascade', label: '级联推理' },
-  { key: 'absence', label: '缺失检测' },
+  { key: 'graph', label: t('neuron.tabGraph') },
+  { key: 'cascade', label: t('neuron.tabCascade') },
+  { key: 'absence', label: t('neuron.tabAbsence') },
 ]
 
 // 加载数据
@@ -243,7 +246,7 @@ async function loadStats() {
       stats.value = result.data
     }
   } catch (e) {
-    console.error('加载统计失败:', e)
+    console.error('failed to load stats:', e)
   }
 }
 
@@ -254,7 +257,7 @@ async function loadEntities() {
       entities.value = result.data
     }
   } catch (e) {
-    console.error('加载实体失败:', e)
+    console.error('failed to load entities:', e)
   }
 }
 
@@ -266,13 +269,13 @@ async function showDependencies(entityId: string) {
       dependencies.value = result.data
     }
   } catch (e) {
-    console.error('加载依赖失败:', e)
+    console.error('failed to load dependencies:', e)
   }
 }
 
 async function runCascade() {
   if (!cascadeForm.value.entityId) return
-  
+
   cascadeLoading.value = true
   try {
     const result = await cascadeReasoning(
@@ -284,7 +287,7 @@ async function runCascade() {
       cascadeResult.value = result.data
     }
   } catch (e) {
-    console.error('级联推理失败:', e)
+    console.error('cascade reasoning failed:', e)
   } finally {
     cascadeLoading.value = false
   }
@@ -292,14 +295,14 @@ async function runCascade() {
 
 async function runAbsenceCheck() {
   if (!absenceForm.value.expectedEntity) return
-  
+
   absenceLoading.value = true
   try {
     const contextEntities = absenceForm.value.contextEntities
       .split(',')
       .map(s => s.trim())
       .filter(s => s)
-    
+
     const result = await detectAbsence(
       absenceForm.value.expectedEntity,
       absenceForm.value.expectedRelation,
@@ -309,12 +312,13 @@ async function runAbsenceCheck() {
       absenceResult.value = result.data
     }
   } catch (e) {
-    console.error('缺失检测失败:', e)
+    console.error('absence detection failed:', e)
   } finally {
     absenceLoading.value = false
   }
 }
 </script>
+
 
 <style scoped>
 .neuron-page {

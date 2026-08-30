@@ -1,5 +1,5 @@
 <template>
-  <GlassPanel variant="default" :radius="18" padding="20px 24px" :glow="hovering" @mouseenter="hovering = true" @mouseleave="hovering = false">
+  <GlassPanel variant="default" :radius="18" padding="20px 24px">
     <div class="nr-stat-card">
       <div class="nr-stat-header">
         <div class="nr-stat-icon" :style="{ background: iconBg }">
@@ -29,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import GlassPanel from './GlassPanel.vue'
 
 const props = withDefaults(defineProps<{
@@ -44,7 +44,6 @@ const props = withDefaults(defineProps<{
   sparkColor: '#6366f1',
 })
 
-const hovering = ref(false)
 const sparkW = 120
 const sparkH = 32
 const gradId = `spark-${Math.random().toString(36).slice(2, 8)}`

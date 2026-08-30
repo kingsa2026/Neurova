@@ -1,10 +1,10 @@
 <template>
   <div class="nr-auth-page">
-    <StarBackground />
+    <StarBackground v-if="appStore.isDark" />
     <div class="nr-auth-container">
       <GlassPanel variant="elevated" :radius="24" padding="40px 36px">
         <div class="nr-auth-header">
-          <img src="/img/NEUROVA-LOGO350white.png" alt="Neurova Logo" class="nr-auth-logo-img" />
+          <img :src="appStore.isDark ? '/img/NEUROVA-LOGO350white.png' : '/img/NEUROVA-LOGO350black.png'" alt="Neurova Logo" class="nr-auth-logo-img" />
         </div>
 
         <a-form
@@ -84,6 +84,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 import StarBackground from '@/components/StarBackground.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -93,6 +94,7 @@ const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const appStore = useAppStore()
 
 const form = reactive({
   username: '',
@@ -233,7 +235,7 @@ async function handleLogin() {
   font-size: 13px;
   color: var(--nr-text-tertiary);
   padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--nr-glass-border);
 }
 
 .nr-auth-link {
@@ -245,7 +247,7 @@ async function handleLogin() {
 }
 
 .nr-auth-link:hover {
-  color: white;
+  color: var(--nr-primary);
   text-decoration: underline;
 }
 

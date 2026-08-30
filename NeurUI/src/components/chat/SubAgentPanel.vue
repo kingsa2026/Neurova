@@ -6,6 +6,7 @@
  * 恢复、关闭。多个小窗在聊天页右下角堆叠（由父容器 flex 布局管理）。
  */
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 export interface SubAgentWindowState {
   subagentId: string
@@ -19,10 +20,11 @@ export interface SubAgentWindowState {
 
 const props = defineProps<{ state: SubAgentWindowState }>()
 const emit = defineEmits<{ (e: 'close', subagentId: string): void }>()
+const { t } = useI18n()
 
 const minimized = ref(false)
 
-const title = computed(() => `${props.state.agentName || '子 Agent'} · ${props.state.status}`)
+const title = computed(() => `${props.state.agentName || t('ui.subagent')} · ${props.state.status}`)
 
 const bodyText = computed(() => {
   if (props.state.status !== 'running' && props.state.report) return props.state.report
@@ -45,17 +47,17 @@ function toggleMinimize() {
     <div class="panel-header" @click="toggleMinimize">
       <span class="panel-icon">{{ statusIcon }}</span>
       <span class="panel-title" :title="state.task">{{ title }}</span>
-      <button class="panel-btn" :title="minimized ? '展开' : '最小化'" @click.stop="toggleMinimize">
+      <button class="panel-btn" :title="minimized ? t('ui.expand') : t('ui.minimize')" @click.stop="toggleMinimize">
         {{ minimized ? '▢' : '—' }}
       </button>
-      <button class="panel-btn" title="关闭" @click.stop="emit('close', state.subagentId)">✕</button>
+      <button class="panel-btn" :title="t('common.close')" @click.stop="emit('close', state.subagentId)">✕</button>
     </div>
     <div v-if="!minimized" class="panel-body">
       <div class="panel-task" :title="state.task">{{ state.task }}</div>
       <div class="panel-content">
-        <template v-if="state.status === 'failed'">⚠ {{ state.error || '执行失败' }}</template>
+        <template v-if="state.status === 'failed'">⚠ {{ state.error || t('ui.execFailed') }}</template>
         <template v-else-if="bodyText">{{ bodyText }}<span v-if="state.status === 'running'" class="cursor">▌</span></template>
-        <template v-else-if="state.status === 'running'"><span class="cursor">▌</span> 思考中…</template>
+        <template v-else-if="state.status === 'running'"><span class="cursor">▌</span> {{ t('ui.thinking') }}</template>
       </div>
     </div>
   </div>

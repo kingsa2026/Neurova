@@ -123,7 +123,7 @@ async function doRunCommand() {
         <span class="cu-status-dot" />{{ statusText }}
       </span>
       <button class="cu-btn" :title="t('computerPanel.refreshShot')" @click.stop="refreshScreenshot">⟳</button>
-      <button class="cu-btn" :title="state.minimized ? '展开' : '最小化'" @click.stop="state.minimized = !state.minimized">
+      <button class="cu-btn" :title="state.minimized ? t('ui.expand') : t('ui.minimize')" @click.stop="state.minimized = !state.minimized">
         {{ state.minimized ? '▢' : '—' }}
       </button>
       <button class="cu-btn" :title="t('common.close')" @click.stop="emit('close')">✕</button>
