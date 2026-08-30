@@ -16,6 +16,7 @@ NeurFlow P2 Step 1+2 — 工作流→Agent 编译测试（AgentManifest）
 TDD：先红后绿。纯数据契约，不调执行器。
 """
 import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 from neurova.collaboration.neurflow.models import (
     WorkflowDefinition,
@@ -160,3 +161,89 @@ class TestListWorkflowAgents:
         manual_agent = AgentInfo(agent_id="manual_1", name="b", role="chat")
         got = list_workflow_agents([wf_agent, manual_agent])
         assert [a.agent_id for a in got] == ["wf_agent_1"]
+
+
+class TestExecuteWorkflowAgent:
+    """chat 侧派发桥接（P2 Step 4）：deps 注入，不碰 chat_pipeline 主干"""
+
+    @pytest.mark.asyncio
+    async def test_bridge_importable_and_async(self):
+        import inspect
+
+        from neurova.agent.workflow_agent import execute_workflow_agent
+
+        assert inspect.iscoroutinefunction(execute_workflow_agent)
+
+    @pytest.mark.asyncio
+    async def test_bridge_dispatches_workflow_and_returns_outputs(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from neurova.agent.workflow_agent import execute_workflow_agent
+        from neurova.collaboration.neurflow.models import AgentInfo
+
+        agent = AgentInfo(
+            agent_id="wf_agent_wf_1", name="a", role="workflow",
+            metadata={"source_type": "workflow", "workflow_id": "wf_1"},
+        )
+        instance = MagicMock()
+        instance.status.value = "completed"
+        instance.outputs = {"result": "ok"}
+        instance.error = None
+
+        deps = {
+            "load_agent": MagicMock(return_value=agent),
+            "load_published_workflow": MagicMock(return_value=MagicMock()),
+            "run_workflow": AsyncMock(return_value=instance),
+        }
+        result = await execute_workflow_agent("wf_agent_wf_1", {"message": "hi"}, deps=deps)
+
+        assert result["success"] is True
+        assert result["outputs"] == {"result": "ok"}
+        deps["load_published_workflow"].assert_called_once_with("wf_1")
+        deps["run_workflow"].assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_bridge_unknown_agent_returns_error(self):
+        from neurova.agent.workflow_agent import execute_workflow_agent
+
+        deps = {
+            "load_agent": MagicMock(return_value=None),
+            "load_published_workflow": MagicMock(),
+            "run_workflow": AsyncMock(),
+        }
+        result = await execute_workflow_agent("wf_agent_none", {}, deps=deps)
+        assert result["success"] is False
+        assert result["error"] == "AGENT_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_bridge_non_workflow_agent_rejected(self):
+        from neurova.agent.workflow_agent import execute_workflow_agent
+        from neurova.collaboration.neurflow.models import AgentInfo
+
+        manual = AgentInfo(agent_id="manual_1", name="b", role="chat")
+        deps = {
+            "load_agent": MagicMock(return_value=manual),
+            "load_published_workflow": MagicMock(),
+            "run_workflow": AsyncMock(),
+        }
+        result = await execute_workflow_agent("manual_1", {}, deps=deps)
+        assert result["success"] is False
+        assert result["error"] == "NOT_A_WORKFLOW_AGENT"
+
+    @pytest.mark.asyncio
+    async def test_bridge_unpublished_workflow_rejected(self):
+        from neurova.agent.workflow_agent import execute_workflow_agent
+        from neurova.collaboration.neurflow.models import AgentInfo
+
+        agent = AgentInfo(
+            agent_id="wf_agent_wf_1", name="a", role="workflow",
+            metadata={"source_type": "workflow", "workflow_id": "wf_1"},
+        )
+        deps = {
+            "load_agent": MagicMock(return_value=agent),
+            "load_published_workflow": MagicMock(return_value=None),
+            "run_workflow": AsyncMock(),
+        }
+        result = await execute_workflow_agent("wf_agent_wf_1", {}, deps=deps)
+        assert result["success"] is False
+        assert result["error"] == "WORKFLOW_NOT_PUBLISHED"
