@@ -179,6 +179,18 @@ export function runCanvas(canvasId: string, payload?: { session_id?: string; age
   )
 }
 
+/** Natural language → canvas snapshot (R-8 对话式画布设计). */
+export function canvasFromNl(prompt: string, agentId = 'default', model?: string) {
+  return api.post<ApiResponse<{
+    status: 'success' | 'failed'
+    nodes?: CanvasNodeSnapshot[]
+    edges?: CanvasEdgeSnapshot[]
+    name?: string
+    description?: string
+    error?: string
+  }>>(`${BASE}/canvas/from-nl`, { prompt, agent_id: agentId, model: model || undefined })
+}
+
 /** Poll a canvas run's execution status. */
 export function getCanvasRun(canvasId: string, runId: string) {
   return api.get<ApiResponse<CanvasRunStatus>>(`${BASE}/canvas/${canvasId}/runs/${runId}`)
@@ -212,4 +224,117 @@ export function importComfyuiCanvas(payload: {
   workflow: Record<string, unknown>
 }) {
   return api.post<ApiResponse<CanvasSnapshot>>(`${BASE}/comfyui/import-canvas`, payload)
+}
+
+// ---------------------------------------------------------------------------
+// NeurFlow 调试与版本（P0/P2 前端集成）
+// ---------------------------------------------------------------------------
+
+const NF_BASE = '/neurflow'
+
+/** 设置执行断点集合（replace=true 整体替换）。 */
+export function setExecutionBreakpoints(
+  executionId: string,
+  breakpoints: string[],
+  replace = true,
+) {
+  return api.post<ApiResponse<{ execution_id: string; breakpoints: string[]; count: number }>>(
+    `${NF_BASE}/executions/${executionId}/breakpoint`,
+    { breakpoints, replace },
+  )
+}
+
+/** 恢复暂停中的执行（step: in/over/out 或省略）。 */
+export function resumeExecution(executionId: string, step?: 'in' | 'over' | 'out') {
+  return api.post<ApiResponse<{ execution_id: string; resumed: boolean; step_mode: string | null }>>(
+    `${NF_BASE}/executions/${executionId}/resume`,
+    step ? { step } : {},
+  )
+}
+
+/** 获取执行实例当前变量（inputs/variables/node_results）。 */
+export function getExecutionVariables(executionId: string) {
+  return api.get<ApiResponse<Record<string, unknown>>>(
+    `${NF_BASE}/executions/${executionId}/variables`,
+  )
+}
+
+/** 设置节点 mock 输出（mockOutput=null 时清除）。 */
+export function setNodeMock(nodeId: string, mockOutput: unknown) {
+  return api.put<ApiResponse<{ node_id: string; mocked: boolean }>>(
+    `${NF_BASE}/nodes/${nodeId}/mock`,
+    { mock_output: mockOutput },
+  )
+}
+
+/** 工作流版本历史（倒序）。 */
+export function listWorkflowVersions(workflowId: string) {
+  return api.get<ApiResponse<Array<{ version: number; snapshot_json: string; commit_msg: string; created_at: number }>>>(
+    `${NF_BASE}/workflows/${workflowId}/versions`,
+  )
+}
+
+/** 回滚工作流到指定版本。 */
+export function rollbackWorkflowVersion(workflowId: string, version: number) {
+  return api.post<ApiResponse<{ workflow: Record<string, unknown> }>>(
+    `${NF_BASE}/workflows/${workflowId}/versions/${version}/rollback`,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// NeurFlow 触发器（P1 前端集成）
+// ---------------------------------------------------------------------------
+
+export interface WorkflowTriggerSummary {
+  id: string
+  workflow_id: string
+  type: 'webhook' | 'cron' | 'manual'
+  enabled: boolean
+  config: Record<string, unknown>
+  rate_limit_per_minute: number | null
+  created_at: number
+}
+
+export interface CreateTriggerResult {
+  trigger: WorkflowTriggerSummary
+  secret?: string
+}
+
+/** 列出工作流触发器。 */
+export function listWorkflowTriggers(workflowId: string) {
+  return api.get<ApiResponse<WorkflowTriggerSummary[]>>(
+    `${NF_BASE}/workflows/${workflowId}/triggers`,
+  )
+}
+
+/** 创建触发器（webhook 时响应含一次性明文 secret）。 */
+export function createWorkflowTrigger(
+  workflowId: string,
+  payload: { type: string; config?: Record<string, unknown>; rate_limit_per_minute?: number },
+) {
+  return api.post<ApiResponse<CreateTriggerResult>>(
+    `${NF_BASE}/workflows/${workflowId}/triggers`,
+    payload,
+  )
+}
+
+/** 删除触发器。 */
+export function deleteWorkflowTrigger(triggerId: string) {
+  return api.delete<ApiResponse<{ code: number }>>(`${NF_BASE}/triggers/${triggerId}`)
+}
+
+/** 手动触发（测试用）。 */
+export function fireWorkflowTrigger(triggerId: string, inputs: Record<string, unknown> = {}) {
+  return api.post<ApiResponse<Record<string, unknown>>>(
+    `${NF_BASE}/triggers/${triggerId}/fire`,
+    inputs,
+  )
+}
+
+/** webhook 投递记录。 */
+export function listTriggerDeliveries(triggerId: string, limit = 50) {
+  return api.get<ApiResponse<Array<Record<string, unknown>>>>(
+    `${NF_BASE}/triggers/${triggerId}/deliveries`,
+    { params: { limit } },
+  )
 }
