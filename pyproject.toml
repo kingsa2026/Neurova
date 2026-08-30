@@ -97,3 +97,6 @@ python_functions = ["test_*"]
 # 使用 importlib import mode 避免重名测试模块冲突
 # （tests/ 下有 ad-hoc 文件与 unit/ 下的同名文件，prepend 模式会冲突）
 addopts = "-v --tb=short --import-mode=importlib"
+# pytest-timeout 全局挂死保护（Windows 自动用 thread 方法，Linux 用 signal）；
+# 慢测试用 @pytest.mark.timeout(N) 单独放宽，CLI --timeout 可临时覆盖
+timeout = 30
