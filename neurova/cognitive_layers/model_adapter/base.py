@@ -5,6 +5,7 @@ BaseModelAdapter — 模型适配器基类
 """
 
 import logging
+import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -23,7 +24,9 @@ class ToolCallType(str, Enum):
 class ToolCall(BaseModel):
     """工具调用数据结构"""
 
-    id: str = Field(default_factory=lambda: f"call_{id(self)}")
+    # 原写法 f"call_{id(self)}" 中 self 在类体作用域, 而类体作用域不参与闭包,
+    # default_factory 调用时会抛 NameError: name 'self' is not defined。
+    id: str = Field(default_factory=lambda: f"call_{uuid.uuid4().hex[:12]}")
     type: ToolCallType = ToolCallType.FUNCTION
     function_name: str
     arguments: Dict[str, Any] = Field(default_factory=dict)

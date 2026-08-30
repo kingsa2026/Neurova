@@ -11,7 +11,10 @@ import json
 from neurova.core.logger import get_logger
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from .models import SkillChain, SkillChainStep
 
 logger = get_logger(__name__)
 

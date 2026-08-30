@@ -75,7 +75,7 @@ async def add_wm_turn(
         # 从Token中获取用户ID
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         manager.wm_add_turn(request.role, request.content, request.metadata)
 
         return success_response(
@@ -105,7 +105,7 @@ async def get_wm_context(
         # 从Token中获取用户ID
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         context = manager.wm_get_context(max_turns, use_folded)
 
         return success_response(
@@ -134,7 +134,7 @@ async def compress_turn(
         # 从Token中获取用户ID
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         compressed = manager.wm_compress_turn(request.content)
 
         return success_response(
@@ -163,7 +163,7 @@ async def cache_wm_plan(
         # 从Token中获取用户ID
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         plan_id = manager.wm_cache_plan(request.task_description, request.steps, request.task_type, request.context)
 
         return success_response(
@@ -192,7 +192,7 @@ async def retrieve_wm_plan(
         # 从Token中获取用户ID
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         plans = manager.wm_retrieve_plan(request.task_description, request.task_type, request.top_k)
 
         return success_response(
@@ -221,7 +221,7 @@ async def record_plan_result(
         # 从Token中获取用户ID
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         manager.wm_record_plan_result(request.plan_id, request.success)
 
         return success_response(
@@ -249,7 +249,7 @@ async def get_wm_stats(
         # 从Token中获取用户ID
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         stats = manager.wm_get_stats()
 
         return success_response(
@@ -277,7 +277,7 @@ async def clear_wm(
         # 从Token中获取用户ID
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         manager.wm_clear()
 
         return success_response(

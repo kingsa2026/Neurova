@@ -139,6 +139,10 @@ class RecursiveRatchetPruner:
         # 失败方案历史（用于粗筛阶段排除）
         self.failed_candidates_history: List[Candidate] = []
 
+        # 最近一次 recursive_prune 的最终存活候选（按得分降序），
+        # 供 EnhancedRatchetPruner 第一阶段复用剪枝成果（P1 修复配套）。
+        self.final_candidates: List[Candidate] = []
+
         logger.info(
             f"RecursiveRatchetPruner initialized with {rounds} rounds, "
             f"candidates_per_round={self.candidates_per_round}"
@@ -233,6 +237,9 @@ class RecursiveRatchetPruner:
             )
 
         # 返回最终最优方案
+        # P1 修复配套: 暴露最终存活候选列表（已按得分降序），
+        # 让上层复用递归剪枝成果，而不是把全部原始候选重新加回。
+        self.final_candidates = list(current_candidates)
         result = current_candidates[0] if current_candidates else None
 
         # 真棘轮守卫：若最后一个筛选阶段是细筛（完整验证）且最优候选
@@ -588,17 +595,14 @@ class EnhancedRatchetPruner:
             )
 
             if best_candidate:
-                # 保留递归剪枝的最优方案，加上其他候选
-                recursive_result = [best_candidate]
-
-                # 添加其他未被递归剪枝排除的候选
-                for c in candidates:
-                    if c.id != best_candidate.id:
-                        recursive_result.append(c)
-
-                # 限制数量
-                candidates = recursive_result[: self.max_candidates * 3]  # 保留更多候选用于基础剪枝
+                # P1 修复: 原实现在拿到最优候选后把全部原始候选重新加回，
+                # 递归剪枝形同虚设（无效候选全部存活）。
+                # 现直接采用递归剪枝的存活候选（已按得分降序）。
+                survivors = self.recursive_pruner.final_candidates
+                candidates = survivors[: self.max_candidates * 3]
                 logger.info("Recursive pruning reduced to %s candidates", len(candidates))
+            # best_candidate 为 None（细筛判定全部存活者无效）时保留原始候选，
+            # 交由第二阶段完整验证后按分数过滤，避免误伤早轮被启发式淘汰的合法候选。
 
         # 第二阶段：基础剪枝
         logger.info("Phase 2: Basic pruning for dimension '%s'", dimension)
@@ -615,6 +619,11 @@ class EnhancedRatchetPruner:
 
         # 按分数排序
         candidates.sort(key=lambda x: x.validation_score, reverse=True)
+
+        # P1 修复: 提供 validation_fn 时，未通过验证（score<=0）的候选不得进入 top-k，
+        # 否则编排器会收到明确无效的方案（真棘轮语义与 recursive_prune 细筛守卫一致）。
+        if validation_fn:
+            candidates = [c for c in candidates if c.validation_score > 0.0]
 
         # 保留top-k
         result = candidates[: self.max_candidates]

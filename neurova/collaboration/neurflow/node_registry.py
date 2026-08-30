@@ -457,7 +457,7 @@ def _sync_mcp_tools(registry: NodeRegistry) -> int:
         同步的 MCP 工具数量
     """
     try:
-        from neurova.mcp_client import get_mcp_client
+        from neurova.tool_layers.mcp_client import get_mcp_client
 
         mcp_client = get_mcp_client()
 

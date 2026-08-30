@@ -13,7 +13,12 @@ Agent 管理接口 - Agent Endpoint
 7. 获取/更新宪法 (GET/PUT /api/v1/agents/{agent_id}/constitution)
 """
 
+import asyncio
+import inspect
 import json
+import re
+import shutil
+import time
 from neurova.core.logger import get_logger
 import os
 import uuid
@@ -30,6 +35,36 @@ from neurova.api.auth import get_current_user
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# 删除 Agent 时等待 shutdown 完成的超时（与服务端整体关闭共用同一环境变量）
+AGENT_DELETE_SHUTDOWN_TIMEOUT = float(os.getenv("NEUROVA_AGENT_SHUTDOWN_TIMEOUT", "30"))
+
+# agent_id 白名单：文件清理只对安全 ID 生效，防止路径片段（如 ".."）借道删除上级目录
+_SAFE_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+# data/ 下由其他子系统共享、绝不随 agent 删除的目录名（data/agents 是 AgentConfigManager 的持久化根）
+_RESERVED_DATA_DIR_NAMES = frozenset({"agents"})
+
+
+def _remove_tree_with_retry(path: Path, retries: int = 3, delay: float = 0.25) -> bool:
+    """删除目录树，返回是否成功。
+
+    shutdown 刚返回时文件句柄（SQLite/日志）可能尚未完全释放，Windows 上首次
+    rmtree 常见 PermissionError；短暂重试，而不是 ignore_errors=True 静默留残。
+    """
+    for attempt in range(1, retries + 1):
+        try:
+            shutil.rmtree(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError as e:
+            if attempt == retries:
+                logger.error("删除目录彻底失败 %s: %s", path, e)
+                return False
+            logger.warning("删除目录失败(第 %s 次) %s: %s，将重试", attempt, path, e)
+            time.sleep(delay)
+    return False
 
 # 模块级导入（避免重复导入）
 from neurova.api.endpoints import get_app_state
@@ -416,11 +451,20 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...)):
     if agent_id == "default":
         raise HTTPException(status_code=400, detail="Cannot delete default agent")
 
-    # 关闭 Agent
+    # 关闭 Agent：Agent.shutdown 是协程，必须真正 await 执行。
+    # 否则记忆库/引擎句柄不释放，后续文件清理在 Windows 上会因文件被锁而失败。
     agent = agents[agent_id]
     if hasattr(agent, "shutdown"):
         try:
-            agent.shutdown()
+            shutdown_result = agent.shutdown()
+            if inspect.isawaitable(shutdown_result):
+                await asyncio.wait_for(
+                    shutdown_result, timeout=AGENT_DELETE_SHUTDOWN_TIMEOUT
+                )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Agent '%s' shutdown 超时(%.1fs)，继续执行清理", agent_id, AGENT_DELETE_SHUTDOWN_TIMEOUT
+            )
         except Exception as e:
             logger.warning("Agent shutdown error: %s", e)
 
@@ -433,21 +477,46 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...)):
     except Exception as e:
         logger.warning("AgentConfigManager.delete_agent 失败: %s", e)
 
-    # 清理 workspace 目录（防止重启后被重新加载）
-    # 使用 shutil.rmtree 彻底删除整个工作目录，避免残留 memory/attachments 等子目录
-    # 导致重启后出现"有数据但无 agent_config.json"的幽灵 agent
-    try:
-        workspaces_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "agent_workspaces")
-        agent_workspace = os.path.join(workspaces_dir, agent_id)
-        if os.path.isdir(agent_workspace):
-            import shutil
+    # 清理持久化文件（工作目录 + 认知图谱数据目录）。
+    # 残留会让 _load_saved_agents 在重启时自动重建 agent_config.json，幽灵 agent 复活。
+    cleanup_report = {"workspace_removed": True, "agent_data_removed": True}
 
-            shutil.rmtree(agent_workspace, ignore_errors=True)
-            logger.info("Removed workspace for %s: %s", agent_id, agent_workspace)
-    except Exception as e:
-        logger.warning("Failed to clean workspace for %s: %s", agent_id, e)
+    if _SAFE_AGENT_ID_RE.fullmatch(agent_id):
+        # 1) 工作目录：优先 agent 实例自报的 workspace_path（创建/加载时的真实路径），
+        #    再兜底当前代码约定计算的路径，覆盖旧版本把 workspace 建到别处的情况
+        workspace_candidates = []
+        workspace_attr = getattr(getattr(agent, "config", None), "workspace_path", "") or ""
+        if workspace_attr:
+            workspace_candidates.append(Path(workspace_attr))
+        workspace_candidates.append(
+            Path(os.path.dirname(os.path.abspath(__file__))).parent.parent.parent
+            / "agent_workspaces"
+            / agent_id
+        )
+        for workspace in workspace_candidates:
+            if not workspace.is_dir():
+                continue
+            if _remove_tree_with_retry(workspace):
+                logger.info("Removed workspace for %s: %s", agent_id, workspace)
+            else:
+                cleanup_report["workspace_removed"] = False
 
-    return {"code": 0, "message": f"Agent '{agent_id}' deleted"}
+        # 2) 认知图谱数据目录 data/{agent_id}（agent_core._init_cognitive_graph 创建，CWD 相对）
+        if agent_id not in _RESERVED_DATA_DIR_NAMES:
+            agent_data_dir = Path("data") / agent_id
+            if agent_data_dir.is_dir() and not _remove_tree_with_retry(agent_data_dir):
+                cleanup_report["agent_data_removed"] = False
+    else:
+        logger.warning("Agent id '%s' 含不安全字符，跳过文件系统清理", agent_id)
+
+    if not (cleanup_report["workspace_removed"] and cleanup_report["agent_data_removed"]):
+        logger.error("Agent '%s' 删除后仍有文件残留: %s", agent_id, cleanup_report)
+
+    return {
+        "code": 0,
+        "message": f"Agent '{agent_id}' deleted",
+        "data": cleanup_report,
+    }
 
 
 @router.get("/{agent_id}/stats")

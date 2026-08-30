@@ -190,24 +190,35 @@ class ComputerUseManager:
             logger.error("编辑文件失败: %s", e)
             return False
 
-    async def shell(self, command: str, timeout: int = 30) -> typing.Dict[str, typing.Any]:
-        """执行 shell 命令（委托执行层 LocalExecutor，本模块不自行拼装进程）。
+    async def shell(self, command: str, timeout: int = 30, runtime_type: str = "local") -> typing.Dict[str, typing.Any]:
+        """执行 shell 命令（委托执行层，本模块不自行拼装进程）。
 
         能力定位就是执行任意 shell 命令；命令内容是否放行由调用链上游的
-        治理预检（allow/deny/ask/sandbox）裁决。进程生成统一走
-        neurova.execution_layers 的运行时抽象，与 run_code 工具同源。
+        治理预检（allow/deny/ask/sandbox）裁决。
+
+        runtime_type: "local"（默认，本机执行）| "docker"（容器内执行，
+        跨平台隔离；Docker 不可用时返回明确错误）。
         """
         if not command or not command.strip():
             return {"returncode": -1, "error": "缺少命令"}
         try:
             import uuid
 
-            from neurova.execution_layers import LocalExecutor
+            if runtime_type == "docker":
+                from neurova.execution_layers import RuntimeFactory, RuntimeType
 
-            runtime = LocalExecutor(runtime_id=f"cu_shell_{uuid.uuid4().hex[:8]}")
+                # 统一经 RuntimeFactory 创建（默认镜像，可配置扩展），与 skill_system 同源
+                runtime = RuntimeFactory.create(RuntimeType.DOCKER, runtime_id=f"cu_shell_{uuid.uuid4().hex[:8]}")
+            else:
+                from neurova.execution_layers import LocalExecutor
+
+                runtime = LocalExecutor(runtime_id=f"cu_shell_{uuid.uuid4().hex[:8]}")
             await runtime.start()
             try:
-                if os.name == "nt":
+                if runtime_type == "docker":
+                    # 容器内固定 POSIX shell；本机则按平台选择
+                    cmd, args = "sh", ["-c", command]
+                elif os.name == "nt":
                     cmd, args = "cmd.exe", ["/c", command]
                 else:
                     cmd, args = "/bin/sh", ["-c", command]
@@ -216,6 +227,7 @@ class ComputerUseManager:
                     "returncode": exec_result.exit_code,
                     "stdout": exec_result.stdout or "",
                     "stderr": exec_result.stderr or "",
+                    "runtime": runtime_type,
                 }
             finally:
                 await runtime.stop()
@@ -223,11 +235,39 @@ class ComputerUseManager:
             logger.error("Shell 命令执行失败: %s", e)
             return {"returncode": -1, "error": str(e)}
 
-    async def browser_navigate(self, url: str) -> typing.Dict[str, typing.Any]:
-        """浏览器导航"""
+    async def browser_navigate(self, url: str, generation: int = None) -> typing.Dict[str, typing.Any]:
+        """浏览器导航（导航使活动 tab 快照事实失效 → generation 递增）"""
         bm = self._get_browser_manager()
         if bm:
-            return await bm.navigate(url)
+            return await bm.navigate(url, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_list_targets(self) -> typing.Any:
+        """列出全部浏览器 tab（含 generation 与活动标记）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.list_targets()
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_open_target(self, url: str = None) -> typing.Any:
+        """新开 tab 并激活"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.open_target(url)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_switch_target(self, target_id: str, generation: int = None) -> typing.Any:
+        """切换活动 tab"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.switch_target(target_id, generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_close_target(self, target_id: str, generation: int = None) -> typing.Any:
+        """关闭 tab"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.close_target(target_id, generation)
         return {"error": "浏览器管理器不可用"}
 
     async def browser_screenshot(self) -> typing.Optional[bytes]:
@@ -264,6 +304,34 @@ class ComputerUseManager:
         if bm:
             return await bm.snapshot()
         return None
+
+    async def browser_dom_snapshot(self, generation: int = None) -> typing.Any:
+        """aria 可访问性树快照（结构化观察，优先于 HTML/截图）；generation 用于新鲜度校验"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.dom_snapshot(generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_click_role(self, role: str, name: str = None, generation: int = None) -> typing.Any:
+        """按 ARIA role + accessible name 定位点击（快照事实驱动）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.click_role(role, name, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_fill_role(self, role: str, name: str, text: str, generation: int = None) -> typing.Any:
+        """按 ARIA role + accessible name 定位输入"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.fill_role(role, name, text, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_capabilities(self) -> typing.Any:
+        """查询当前后端能力清单"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.get_capabilities()
+        return {"error": "浏览器管理器不可用"}
 
 
 # 工厂函数

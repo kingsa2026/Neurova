@@ -137,27 +137,20 @@ async def classify_and_remember(
     try:
         manager = get_memory_manager(agent_id, user)
 
+        # 分类结果作为 tags 并入记忆（classify_and_remember 内部先分类再 remember）
         memory_id = manager.classify_and_remember(
             content=request.content,
-            context=request.context,
+            metadata={"context": request.context} if request.context else None,
         )
 
-        result = manager.classify_memory(request.content, request.context)
+        result = manager.classify_memory(request.content)
 
         return success_response(
             data={
                 "memory_id": memory_id,
                 "classification": {
-                    "category": result["category"][0],
-                    "category_confidence": result["category"][1],
-                    "type": result["type"][0],
-                    "type_confidence": result["type"][1],
-                    "perspective": result["perspective"][0],
-                    "perspective_confidence": result["perspective"][1],
-                    "is_important": result["is_important"],
-                    "is_crystallized": result["is_crystallized"],
-                    "confidence": result["confidence"],
-                    "reasoning": result["reasoning"],
+                    "categories": result["categories"],
+                    "tags": result["tags"],
                 },
                 "timestamp": datetime.now().isoformat(),
             },

@@ -298,17 +298,22 @@ class ModuleRegistry:
 
             # 初始化
             if not instance.initialize():
+                info.state = ModuleState.ERROR
+                info.error = "Initialization failed"
                 result.modules_failed.append(name)
                 result.errors[name] = f"Initialization failed"
                 continue
 
             # 启动
             if not instance.start():
+                info.state = ModuleState.ERROR
+                info.error = "Start failed"
                 result.modules_failed.append(name)
                 result.errors[name] = f"Start failed"
                 continue
 
             result.modules_started.append(name)
+            info.state = instance.state
             info.started_at = datetime.now(timezone.utc)
 
         if result.modules_failed:
@@ -331,3 +336,7 @@ class ModuleRegistry:
                     instance.stop()
                 except Exception as e:
                     logger.error("Error stopping module '%s': %s", name, e)
+                info = self._resolver.get_module_info(name)
+                if info:
+                    info.state = instance.state
+                    info.stopped_at = datetime.now(timezone.utc)

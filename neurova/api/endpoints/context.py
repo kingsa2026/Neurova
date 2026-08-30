@@ -351,7 +351,10 @@ async def inject_reflection_log(
         # 获取反思日志
         reflection_logs = []
         if hasattr(agent, "growth_log_manager") and agent.growth_log_manager:
-            reflection_logs = agent.growth_log_manager.get_recent_logs(limit=limit)
+            # 根因修复: get_recent_logs 不存在（hasattr 守卫使其静默为空）
+            # → read_logs 真实读取并序列化
+            entries = agent.growth_log_manager.read_logs(limit=limit)
+            reflection_logs = [e.to_dict() for e in entries]
 
         return {
             "code": 0,

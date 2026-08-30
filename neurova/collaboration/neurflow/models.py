@@ -83,11 +83,16 @@ class NodeDefinition:
     sub_blocks: List[SubBlockConfig]
     inputs: List[NodePort]
     outputs: List[NodePort]
-    source: str = "builtin"  # tool|skill|mcp|builtin
+    source: str = "builtin"  # tool|skill|mcp|builtin|custom
     source_id: Optional[str] = None
     version: str = "1.0.0"
     tags: List[str] = field(default_factory=list)
     deprecated: bool = False
+    # ── 自定义节点（source="custom"）扩展字段 ──
+    tier: Optional[str] = None  # declarative(L1) | composite(L2) | code(L3)
+    executor_body: Optional[Dict[str, Any]] = None  # L1: {template,...} L2: {steps}
+    status: str = "active"  # draft|pending|active|rejected（审批流用）
+    created_by: Optional[str] = None
 
 
 @dataclass
@@ -244,6 +249,30 @@ class AgentInfo:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class StoreConnection:
+    """已连接店铺注册表行（不含任何密钥字段 — 密钥仅存 SecretStore）
+
+    时间戳沿用本模块 REAL 时间戳约定；extra 为非敏感扩展参数
+    （如 TikTok shop_cipher），以 JSON 列持久化。
+    """
+
+    store_id: str
+    platform: str
+    store_name: str
+    user_id: str = ""  # 归属用户（多用户隔离；空=历史全局通道）
+    seller_id: str = ""
+    marketplace_id: str = ""
+    region: str = ""
+    status: str = "pending"  # pending|active|expired|error
+    last_error: str = ""
+    token_expires_at: float = 0.0  # epoch 秒；0=长期（如亚马逊自授权 refresh_token）
+    extra: Dict[str, Any] = field(default_factory=dict)
+    created_at: float = 0.0
+    updated_at: float = 0.0
+    last_used_at: float = 0.0
+
+
 # 便捷导出
 __all__ = [
     "WorkflowStatus",
@@ -258,4 +287,5 @@ __all__ = [
     "NodeExecutionResult",
     "ExecutionInstance",
     "AgentInfo",
+    "StoreConnection",
 ]

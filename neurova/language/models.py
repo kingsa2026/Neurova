@@ -305,6 +305,6 @@ class TranslationResponse:
             "translated_text": self.translated_text,
             "confidence": self.confidence,
             "source": self.source,
-            "alternatives": selfalternatives,
+            "alternatives": self.alternatives,
             "metadata": self.metadata,
         }

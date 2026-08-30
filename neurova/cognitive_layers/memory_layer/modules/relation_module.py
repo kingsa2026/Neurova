@@ -160,6 +160,11 @@ class RelationModule:
         incoming = self.get_incoming_relations(memory_id)
         return outgoing + incoming
 
+    def get_all(self) -> List[Relation]:
+        """导出全部关系（供 GraphTraversal 等消费方构建图）"""
+        with self._lock:
+            return list(self._relations.values())
+
     def get_related_memories(
         self,
         memory_id: str,

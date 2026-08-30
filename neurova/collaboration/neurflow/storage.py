@@ -7,7 +7,7 @@ import json
 import sqlite3
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .models import (
     AgentInfo,
@@ -15,6 +15,7 @@ from .models import (
     NodeDefinition,
     NodeExecutionResult,
     NodePort,
+    StoreConnection,
     SubBlockConfig,
     WorkflowDefinition,
     WorkflowEdge,
@@ -89,9 +90,33 @@ class NeurflowStorage:
                     source_id TEXT,
                     version TEXT DEFAULT '1.0.0',
                     tags_json TEXT DEFAULT '[]',
-                    deprecated INTEGER DEFAULT 0
+                    deprecated INTEGER DEFAULT 0,
+                    tier TEXT,
+                    executor_body_json TEXT,
+                    status TEXT DEFAULT 'active',
+                    created_by TEXT
                 )
             """)
+
+            # 旧库迁移：CREATE TABLE IF NOT EXISTS 不会给已存在的表补列，
+            # 逐列检测并用静态 ALTER 语句补齐（列名为代码常量，无外部输入）
+            self._migrate_node_definitions_columns()
+
+            # 自定义节点版本快照表（更新前快照，供回滚/审计）
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS custom_node_versions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_type TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    snapshot_json TEXT NOT NULL,
+                    created_by TEXT,
+                    created_at REAL
+                )
+            """)
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_custom_node_versions_type "
+                "ON custom_node_versions(node_type)"
+            )
 
             # 执行实例表
             self._conn.execute("""
@@ -130,6 +155,34 @@ class NeurflowStorage:
                 )
             """)
 
+            # 已连接店铺注册表（密钥不在此表 — SecretStore 按 STORE_{store_id}_* 命名空间）
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS connected_stores (
+                    store_id TEXT PRIMARY KEY,
+                    platform TEXT NOT NULL,
+                    store_name TEXT NOT NULL,
+                    user_id TEXT DEFAULT '',
+                    seller_id TEXT DEFAULT '',
+                    marketplace_id TEXT DEFAULT '',
+                    region TEXT DEFAULT '',
+                    status TEXT DEFAULT 'pending',
+                    last_error TEXT DEFAULT '',
+                    token_expires_at REAL DEFAULT 0,
+                    extra_json TEXT DEFAULT '{}',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    last_used_at REAL DEFAULT 0
+                )
+            """)
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_connected_stores_platform "
+                "ON connected_stores(platform)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_connected_stores_user "
+                "ON connected_stores(user_id)"
+            )
+
             # 创建索引
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_workflows_category ON workflows(category)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status)")
@@ -141,6 +194,29 @@ class NeurflowStorage:
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status)")
 
             self._conn.commit()
+
+    def _migrate_node_definitions_columns(self):
+        """为旧库的 node_definitions 补齐自定义节点新增列。
+
+        仅在 _create_tables 持锁区间内调用。DDL 无法使用 ? 占位符，
+        因此全部使用静态字面量语句，逐列检测按需执行。
+        """
+        cursor = self._conn.execute("PRAGMA table_info(node_definitions)")
+        existing = {row[1] for row in cursor.fetchall()}
+        if "tier" not in existing:
+            self._conn.execute("ALTER TABLE node_definitions ADD COLUMN tier TEXT")
+        if "executor_body_json" not in existing:
+            self._conn.execute(
+                "ALTER TABLE node_definitions ADD COLUMN executor_body_json TEXT"
+            )
+        if "status" not in existing:
+            self._conn.execute(
+                "ALTER TABLE node_definitions ADD COLUMN status TEXT DEFAULT 'active'"
+            )
+        if "created_by" not in existing:
+            self._conn.execute(
+                "ALTER TABLE node_definitions ADD COLUMN created_by TEXT"
+            )
 
     def close(self):
         """关闭数据库连接"""
@@ -384,8 +460,8 @@ class NeurflowStorage:
                     INSERT OR REPLACE INTO node_definitions 
                     (type, label, icon, category, description, sub_blocks_json,
                      inputs_json, outputs_json, source, source_id, version,
-                     tags_json, deprecated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     tags_json, deprecated, tier, executor_body_json, status, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         node_def.type,
@@ -401,6 +477,12 @@ class NeurflowStorage:
                         node_def.version,
                         json.dumps(node_def.tags, ensure_ascii=False),
                         1 if node_def.deprecated else 0,
+                        node_def.tier,
+                        json.dumps(node_def.executor_body, ensure_ascii=False)
+                        if node_def.executor_body is not None
+                        else None,
+                        node_def.status,
+                        node_def.created_by,
                     ),
                 )
                 self._conn.commit()
@@ -511,6 +593,10 @@ class NeurflowStorage:
         inputs = [NodePort(**i) for i in inputs_data]
         outputs = [NodePort(**o) for o in outputs_data]
 
+        # 自定义节点扩展列（旧库迁移后恒存在，这里仍做防御性读取）
+        columns = set(row.keys())
+        executor_body_raw = row["executor_body_json"] if "executor_body_json" in columns else None
+
         return NodeDefinition(
             type=row["type"],
             label=row["label"],
@@ -525,7 +611,66 @@ class NeurflowStorage:
             version=row["version"] or "1.0.0",
             tags=json.loads(row["tags_json"]) if row["tags_json"] else [],
             deprecated=bool(row["deprecated"]),
+            tier=row["tier"] if "tier" in columns else None,
+            executor_body=json.loads(executor_body_raw) if executor_body_raw else None,
+            status=(row["status"] if "status" in columns else None) or "active",
+            created_by=row["created_by"] if "created_by" in columns else None,
         )
+
+    # ==================== 自定义节点版本快照 ====================
+
+    def save_node_version(
+        self,
+        node_type: str,
+        version: int,
+        snapshot: Dict[str, Any],
+        created_by: Optional[str] = None,
+    ) -> bool:
+        """保存自定义节点的一个历史快照（更新前调用，供回滚/审计）"""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    """
+                    INSERT INTO custom_node_versions
+                    (node_type, version, snapshot_json, created_by, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        node_type,
+                        version,
+                        json.dumps(snapshot, ensure_ascii=False),
+                        created_by,
+                        time.time(),
+                    ),
+                )
+                self._conn.commit()
+                return True
+            except Exception as e:
+                self._conn.rollback()
+                raise e
+
+    def list_node_versions(self, node_type: str) -> List[Dict[str, Any]]:
+        """列出某节点的全部历史快照（新版本在前）"""
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                SELECT version, snapshot_json, created_by, created_at
+                FROM custom_node_versions
+                WHERE node_type = ?
+                ORDER BY version DESC
+                """,
+                (node_type,),
+            )
+            rows = cursor.fetchall()
+            return [
+                {
+                    "version": row["version"],
+                    "snapshot": json.loads(row["snapshot_json"]),
+                    "created_by": row["created_by"],
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]
 
     # ==================== 执行实例 CRUD ====================
 
@@ -812,6 +957,102 @@ class NeurflowStorage:
         )
 
     # ==================== 统计和清理 ====================
+
+    # ==================== 店铺连接 CRUD ====================
+
+    def save_store_connection(self, conn: StoreConnection) -> bool:
+        """保存/覆盖店铺连接行（密钥请另存 SecretStore，本表不含密钥字段）"""
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO connected_stores (
+                    store_id, platform, store_name, user_id, seller_id, marketplace_id, region,
+                    status, last_error, token_expires_at, extra_json,
+                    created_at, updated_at, last_used_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    conn.store_id,
+                    conn.platform,
+                    conn.store_name,
+                    conn.user_id,
+                    conn.seller_id,
+                    conn.marketplace_id,
+                    conn.region,
+                    conn.status,
+                    conn.last_error,
+                    conn.token_expires_at,
+                    json.dumps(conn.extra or {}, ensure_ascii=False),
+                    conn.created_at,
+                    conn.updated_at,
+                    conn.last_used_at,
+                ),
+            )
+            self._conn.commit()
+        return True
+
+    def get_store_connection(self, store_id: str, user_id: str = "") -> Optional[StoreConnection]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM connected_stores WHERE store_id = ? AND user_id = ?",
+                (store_id, user_id),
+            ).fetchone()
+        return self._row_to_store_connection(row) if row else None
+
+    def delete_store_connection(self, store_id: str, user_id: str = "") -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM connected_stores WHERE store_id = ? AND user_id = ?",
+                (store_id, user_id),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def list_store_connections(self, platform: str = "", user_id: str = "") -> List[StoreConnection]:
+        with self._lock:
+            if platform and user_id:
+                cursor = self._conn.execute(
+                    "SELECT * FROM connected_stores WHERE platform = ? AND user_id = ? "
+                    "ORDER BY updated_at DESC",
+                    (platform, user_id),
+                )
+            elif platform:
+                cursor = self._conn.execute(
+                    "SELECT * FROM connected_stores WHERE platform = ? ORDER BY updated_at DESC",
+                    (platform,),
+                )
+            elif user_id:
+                cursor = self._conn.execute(
+                    "SELECT * FROM connected_stores WHERE user_id = ? ORDER BY updated_at DESC",
+                    (user_id,),
+                )
+            else:
+                cursor = self._conn.execute("SELECT * FROM connected_stores ORDER BY updated_at DESC")
+            rows = cursor.fetchall()
+        return [self._row_to_store_connection(r) for r in rows]
+
+    @staticmethod
+    def _row_to_store_connection(row: sqlite3.Row) -> StoreConnection:
+        try:
+            extra = json.loads(row["extra_json"] or "{}")
+        except (TypeError, ValueError):
+            extra = {}
+        return StoreConnection(
+            store_id=row["store_id"],
+            platform=row["platform"],
+            store_name=row["store_name"],
+            user_id=row["user_id"] or "",
+            seller_id=row["seller_id"] or "",
+            marketplace_id=row["marketplace_id"] or "",
+            region=row["region"] or "",
+            status=row["status"] or "pending",
+            last_error=row["last_error"] or "",
+            token_expires_at=row["token_expires_at"] or 0,
+            extra=extra or {},
+            created_at=row["created_at"] or 0,
+            updated_at=row["updated_at"] or 0,
+            last_used_at=row["last_used_at"] or 0,
+        )
 
     def get_statistics(self) -> Dict[str, int]:
         """

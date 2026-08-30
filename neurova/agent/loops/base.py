@@ -9,7 +9,11 @@ import json
 from neurova.core.logger import get_logger
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+# Agent 仅用于类型注解；运行时导入会与 agent_core 形成循环依赖
+if TYPE_CHECKING:
+    from neurova.agent_core import Agent
 
 
 logger = get_logger(__name__)
@@ -201,11 +205,14 @@ class BaseAgentLoop(ABC):
                     )
 
                     # 记录工具执行结果（用于前端展示）
+                    # 完整保留 content（不预截断）：SSE 去重 key 基于完整内容 hash，
+                    # 截断会让"前缀相同正文不同"的结果（如同计划 create/mark_step）
+                    # 被误判为重复；展示层截断由 console._build_tool_events 的 [:500] 处理
                     self.agent._tool_messages_list.append(
                         {
                             "type": "tool_result",
                             "tool_name": _tc_function_name,
-                            "result": content[:500] if content else "执行完成",
+                            "result": content if content else "执行完成",
                             "success": exec_result.success,
                             "timestamp": datetime.now().isoformat(),
                         }

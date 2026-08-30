@@ -463,6 +463,12 @@ def _get_canvas_store():
     return get_canvas_store()
 
 
+def _get_canvas_op_service():
+    from neurova.collaboration.canvas_ops import get_canvas_op_service
+
+    return get_canvas_op_service()
+
+
 @router.post("/canvas")
 async def create_canvas(request: Request, payload: Dict[str, Any] = Body(...)):
     """创建画布快照，返回带 id 的完整记录"""
@@ -496,13 +502,118 @@ async def get_canvas_detail(request: Request, canvas_id: str):
 
 @router.put("/canvas/{canvas_id}")
 async def update_canvas_detail(
-    request: Request, canvas_id: str, payload: Dict[str, Any] = Body(...)
+    request: Request,
+    canvas_id: str,
+    payload: Dict[str, Any] = Body(...),
+    base_version: Optional[int] = Query(None),
 ):
-    """更新画布快照"""
-    record = _get_canvas_store().update(canvas_id, payload)
+    """更新画布快照（全量保存）
+
+    base_version：可选乐观锁。指定时与服务端版本不一致返回 409
+    （detail 含 current_version），不落盘；不指定则后写优先
+    （兼容不带版本号的旧前端），版本仍递增。
+    """
+    from neurova.collaboration.canvas_store import CanvasVersionConflict
+
+    try:
+        record = _get_canvas_store().update(canvas_id, payload, base_version=base_version)
+    except CanvasVersionConflict as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": str(e), "current_version": e.current_version},
+        )
     if record is None:
         raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
     return {"code": 0, "message": "success", "data": record}
+
+
+@router.post("/canvas/{canvas_id}/ops")
+async def apply_canvas_op(request: Request, canvas_id: str, body: Dict[str, Any] = Body(...)):
+    """应用单个画布语义 op（agent 工具与前端共用的写入口）
+
+    Body: {"op": "add_node|connect|set_config|move_node|remove_node|remove_edge|layout",
+           ...op 参数, "base_version"?: int, "session_id"?: str, "actor"?: str}
+
+    语义：未知画布 → 404；op 业务错误 → 400；版本冲突 → 409
+    （detail 含 current_version，调用方重读后重试）。成功时经
+    session_id 广播 canvas_op 事件，画布页实时渲染。
+    """
+    from neurova.collaboration.canvas_ops import CanvasOpError, CanvasVersionConflict
+
+    op = str(body.get("op") or "").strip()
+    common = {
+        "base_version": body.get("base_version"),
+        "session_id": body.get("session_id") or None,
+        "actor": str(body.get("actor") or "user"),
+    }
+    service = _get_canvas_op_service()
+
+    try:
+        if op == "add_node":
+            result = await service.add_node(
+                canvas_id,
+                node_type=str(body.get("node_type") or ""),
+                config=body.get("config"),
+                position=body.get("position"),
+                label=body.get("label"),
+                **common,
+            )
+        elif op == "connect":
+            result = await service.connect(
+                canvas_id,
+                source_node=str(body.get("source_node") or ""),
+                target_node=str(body.get("target_node") or ""),
+                source_port=body.get("source_port"),
+                target_port=body.get("target_port"),
+                **common,
+            )
+        elif op == "set_config":
+            result = await service.set_config(
+                canvas_id,
+                str(body.get("node_id") or ""),
+                body.get("values") or {},
+                **common,
+            )
+        elif op == "move_node":
+            result = await service.move_node(
+                canvas_id,
+                str(body.get("node_id") or ""),
+                float(body.get("x", 0)),
+                float(body.get("y", 0)),
+                **common,
+            )
+        elif op == "remove_node":
+            result = await service.remove_node(
+                canvas_id, str(body.get("node_id") or ""), **common
+            )
+        elif op == "remove_edge":
+            result = await service.remove_edge(
+                canvas_id, str(body.get("edge_id") or ""), **common
+            )
+        elif op == "layout":
+            result = await service.apply_layout(canvas_id, **common)
+        else:
+            raise HTTPException(status_code=400, detail=f"不支持的 op: {op}")
+    except HTTPException:
+        raise
+    except CanvasVersionConflict as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": str(e), "current_version": e.current_version},
+        )
+    except CanvasOpError as e:
+        status = 404 if e.code == "not_found" else 400
+        raise HTTPException(status_code=status, detail=str(e))
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"op 参数无效: {e}")
+
+    record = _get_canvas_store().get(canvas_id)
+    version = int(record.get("version", 0)) if record else 0
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"op": op, "version": version, "result": result},
+    }
 
 
 @router.delete("/canvas/{canvas_id}")

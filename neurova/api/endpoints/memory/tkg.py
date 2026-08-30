@@ -60,7 +60,7 @@ async def add_temporal_fact(
     try:
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         fact_id = manager.tkg_add_fact(
             entity=request.entity,
             attribute=request.attribute,
@@ -99,7 +99,7 @@ async def query_temporal_facts(
     try:
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         facts = manager.tkg_query(
             entity=request.entity,
             relation=request.relation,
@@ -138,7 +138,7 @@ async def get_temporal_history(
     try:
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         history = manager.tkg_get_history(
             entity=entity,
             relation=relation,
@@ -174,7 +174,7 @@ async def get_tkg_stats(
     try:
         neuser_id, user_id = _get_user_ids_from_token(req)
 
-        manager = get_memory_manager(agent_id, neuser_id, user_id)
+        manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         stats = manager.tkg_get_stats()
 
         return success_response(

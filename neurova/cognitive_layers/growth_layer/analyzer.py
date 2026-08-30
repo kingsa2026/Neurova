@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import datetime
 from neurova.core.logger import get_logger
+import os
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
@@ -120,11 +122,14 @@ class GrowthAnalyzer:
         GrowthStatus.EXPERT: (80, 100),
     }
 
-    def __init__(self, agent_id: str = "default"):
+    def __init__(self, agent_id: str = "default", workspace_path: Optional[str] = None):
         """初始化成长分析器
 
         Args:
             agent_id: Agent标识符
+            workspace_path: 可选持久化目录（须为绝对路径）。传入后把记录与能力
+                分数写入 <workspace_path>/growth.json 并在重启后恢复
+                （agent_core 传 workspace/memory/growth 目录）。
         """
         self._agent_id = agent_id
 
@@ -144,7 +149,89 @@ class GrowthAnalyzer:
         # 线程安全
         self._lock = threading.RLock()
 
-        logger.info("GrowthAnalyzer 初始化完成 (agent_id=%s)", agent_id)
+        # P2-A: 恢复原设计意图——成长数据落盘（此前签名与 agent_core 调用双重
+        # 错配，分数只存内存）。I/O 被限制在 workspace_path 这个允许目录内。
+        self._storage_file: Optional[Path] = None
+        if workspace_path:
+            self._storage_file = self._validated_storage_target(workspace_path)
+            self._load_from_storage()
+
+        logger.info(
+            "GrowthAnalyzer 初始化完成 (agent_id=%s, storage=%s)",
+            agent_id,
+            self._storage_file,
+        )
+
+    @staticmethod
+    def _validated_storage_target(workspace_path: str) -> Path:
+        """在允许目录内解析持久化文件路径（防路径穿越）
+
+        仅接受绝对路径目录；拒绝含父目录穿越段；目标文件强制固定为目录下的
+        growth.json，并用 is_relative_to 显式校验包含关系。
+        """
+        import os as _os
+
+        base = Path(str(workspace_path)).expanduser()
+        if not base.is_absolute():
+            raise ValueError(f"workspace_path 必须为绝对路径: {workspace_path}")
+        if _os.pardir in base.parts:
+            raise ValueError(f"workspace_path 非法（含父目录穿越段）: {workspace_path}")
+        allowed_root = base.resolve()
+        target = (allowed_root / "growth.json").resolve()
+        if not target.is_relative_to(allowed_root):
+            raise ValueError(f"持久化目标越出允许目录: {target}")
+        return target
+
+    def _save_to_storage(self) -> None:
+        """把记录与能力分数写盘（JSON，写穿）"""
+        if not self._storage_file:
+            return
+        try:
+            import json
+
+            payload = {
+                "agent_id": self._agent_id,
+                "capability_scores": {dim.value: score for dim, score in self._capability_scores.items()},
+                "records": {
+                    dim.value: [r.to_dict() for r in records[-500:]]
+                    for dim, records in self._records.items()
+                    if records
+                },
+            }
+            self._storage_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp_file = self._storage_file.with_name(self._storage_file.name + ".tmp").resolve()
+            tmp_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp_file, self._storage_file)
+        except Exception as e:
+            logger.debug("成长数据写盘失败: %s", e)
+
+    def _load_from_storage(self) -> None:
+        """从磁盘恢复记录与能力分数"""
+        if not self._storage_file or not self._storage_file.exists():
+            return
+        try:
+            import json
+
+            payload = json.loads(self._storage_file.read_text(encoding="utf-8"))
+            for dim_value, records_data in (payload.get("records") or {}).items():
+                try:
+                    dim = GrowthDimension(dim_value)
+                except ValueError:
+                    continue
+                for rdata in records_data:
+                    try:
+                        self._records[dim].append(GrowthRecord.from_dict(rdata))
+                    except Exception:
+                        continue
+            for dim_value, score in (payload.get("capability_scores") or {}).items():
+                try:
+                    self._capability_scores[GrowthDimension(dim_value)] = float(score)
+                except (ValueError, KeyError):
+                    continue
+            self._stats["total_records"] = sum(len(v) for v in self._records.values())
+            logger.info("成长数据已恢复: %s 条记录", self._stats["total_records"])
+        except Exception as e:
+            logger.debug("成长数据恢复失败: %s", e)
 
     def record_learning(
         self,
@@ -206,6 +293,9 @@ class GrowthAnalyzer:
                 self._stats["total_records"] += 1
                 self._stats["total_learning_sessions"] += 1
                 self._stats["dimension_updates"] += 1
+
+                # P2-A: 配置了持久化目录时写穿
+                self._save_to_storage()
 
                 logger.debug("记录学习: %s, 分数=%.2f, 改进=%s", dimension.value, calculated_score, improvement)
 

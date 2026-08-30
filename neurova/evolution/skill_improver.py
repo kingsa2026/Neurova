@@ -369,6 +369,26 @@ class AutoSkillImprover:
         with self._lock:
             return self._improvements.get(skill_id, [])
 
+    def propose_pending_improvements(self) -> List[SkillImprovement]:
+        """对所有已采集使用数据的技能批量提出改进提案
+
+        根因修复: 此前全仓无任何调用方——record_usage 采集的数据永不分析。
+        propose_improvements 内部有 min_records/failure_threshold 双门槛，
+        未达标的技能自动跳过。
+
+        返回:
+            List[SkillImprovement]: 所有技能的改进提案
+        """
+        proposals: List[SkillImprovement] = []
+        with self._lock:
+            skill_ids = list(self._usage_records.keys())
+        for skill_id in skill_ids:
+            try:
+                proposals.extend(self.propose_improvements(skill_id))
+            except Exception as e:
+                logger.debug("技能 %s 改进提案失败: %s", skill_id, e)
+        return proposals
+
     def get_skill_stats(self, skill_id: str) -> Dict[str, Any]:
         """获取技能统计信息"""
         with self._lock:

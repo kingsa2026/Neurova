@@ -82,46 +82,119 @@ _mcp_servers: Dict[str, Dict[str, Any]] = {}
 _shared_tools: Dict[str, Dict[str, Any]] = {}
 
 
+def _get_client_for(server_id: str):
+    """获取 server 对应的真实客户端（bootstrap 表优先，回退进程级单例）"""
+    from neurova.tool_layers.mcp_bootstrap import get_bootstrapped_clients
+    from neurova.tool_layers.mcp_client import get_mcp_client
+
+    return get_bootstrapped_clients().get(server_id) or get_mcp_client()
+
+
+def _server_info_from_config(entry: Dict[str, Any], status: Dict[str, Any]) -> MCPServerInfo:
+    """SharedConfigManager 配置项 + 客户端实时状态 → MCPServerInfo"""
+    connected = bool(status.get("connected"))
+    return MCPServerInfo(
+        server_id=entry.get("id", ""),
+        name=entry.get("name", entry.get("id", "")),
+        url=entry.get("url", ""),
+        transport=entry.get("transport", "stdio"),
+        status="connected" if connected else ("error" if status.get("last_error") else "disconnected"),
+        tools_count=int(status.get("tool_count", 0)),
+        user_id="default",
+        created_at=0,
+    )
+
+
 @router.get("/mcp-servers", response_model=List[MCPServerInfo])
 async def list_mcp_servers():
-    """列出已连接的 MCP Server"""
-    return [MCPServerInfo(**s) for s in _mcp_servers.values()]
+    """列出 MCP Server（持久化配置 + 实时连接状态）"""
+    from neurova.shared_config import get_shared_config_manager
+
+    entries = get_shared_config_manager().list_mcp_servers() or []
+    infos = []
+    for entry in entries:
+        client = _get_client_for(entry.get("id", ""))
+        status = client.get_server_status(entry.get("id", ""))
+        infos.append(_server_info_from_config(entry, status))
+    return infos
 
 
 @router.post("/mcp-servers", response_model=MCPServerInfo)
 async def connect_mcp_server(body: MCPServerConnectRequest):
-    """连接 MCP Server"""
-    sid = str(uuid.uuid4())
-    now = time.time()
-    server = {
-        "server_id": sid,
+    """注册（持久化）并连接 MCP Server；失败原因可经 GET /mcp-servers 查询"""
+    import re
+
+    from neurova.shared_config import get_shared_config_manager
+    from neurova.tool_layers.mcp_client import get_mcp_client
+
+    sid = re.sub(r"\W+", "_", body.name or "").strip("_") or str(uuid.uuid4())
+    config = {
+        "id": sid,
         "name": body.name,
-        "url": body.url,
         "transport": body.transport,
-        "status": "connected",
-        "tools_count": 0,
-        "user_id": "default",
-        "created_at": now,
+        "url": body.url,
+        "command": body.command or "",
+        "args": body.args,
+        "env": body.env,
+        "enabled": True,
     }
-    _mcp_servers[sid] = server
-    return MCPServerInfo(**server)
+
+    # 持久化（内部做严格 schema 校验，非法返回 False）
+    if not get_shared_config_manager().add_mcp_server(config):
+        if get_shared_config_manager().get_mcp_server(sid) is None:
+            raise HTTPException(status_code=400, detail="MCP Server 配置非法或已存在")
+
+    client = get_mcp_client()
+    ok = await client.connect_server(sid, config)
+    status = client.get_server_status(sid)
+    if not ok:
+        logger.warning("MCP Server %s 连接失败: %s", sid, status.get("last_error"))
+
+    return MCPServerInfo(
+        server_id=sid,
+        name=body.name,
+        url=body.url,
+        transport=config["transport"],
+        status="connected" if ok else "error",
+        tools_count=int(status.get("tool_count", 0)),
+        user_id="default",
+        created_at=time.time(),
+    )
 
 
 @router.delete("/mcp-servers/{server_id}")
 async def disconnect_mcp_server(server_id: str):
-    """断开 MCP Server"""
-    if server_id not in _mcp_servers:
+    """断开 MCP Server 并移除持久化配置"""
+    from neurova.shared_config import get_shared_config_manager
+
+    client = _get_client_for(server_id)
+    removed = await client.disconnect_server(server_id)
+    get_shared_config_manager().remove_mcp_server(server_id)
+    if not removed:
         raise HTTPException(status_code=404, detail="MCP Server not found")
-    del _mcp_servers[server_id]
     return {"code": 0, "message": "MCP Server disconnected"}
 
 
 @router.get("/mcp-servers/{server_id}/tools", response_model=List[ToolInfo])
 async def list_mcp_tools(server_id: str):
-    """查看 MCP Server 提供的工具"""
-    if server_id not in _mcp_servers:
+    """查看 MCP Server 提供的工具（真实工具清单）"""
+    client = _get_client_for(server_id)
+    status = client.get_server_status(server_id)
+    if status.get("last_error") == "not registered":
         raise HTTPException(status_code=404, detail="MCP Server not found")
-    return []  # 实际应调用 MCP Client 获取工具列表
+
+    tools = await client.get_available_tools(server_id)
+    return [
+        ToolInfo(
+            tool_id=f"mcp.{server_id}.{t.get('name', '')}",
+            name=t.get("name", ""),
+            description=t.get("description", ""),
+            source="mcp",
+            parameters=t.get("parameters") or {},
+            server_id=server_id,
+        )
+        for t in tools
+    ]
 
 
 @router.get("/tools", response_model=List[ToolInfo])

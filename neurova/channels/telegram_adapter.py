@@ -52,6 +52,9 @@ class TelegramAdapter(
         self.http_proxy = ""
         self.http_proxy_auth = ""
         self.show_typing = False
+        # Bot API 10.x: MarkdownV2/HTML 为完整支持模式，"Markdown" 为官方
+        # 保留的向后兼容 legacy 模式（解析失败时自动回退纯文本重发）
+        self.parse_mode = "Markdown"
         self.private_chat_strategy = "open"
         self.group_chat_strategy = "open"
         self.require_mention = False
@@ -84,6 +87,7 @@ class TelegramAdapter(
         self.http_proxy = config.get("http_proxy", "")
         self.http_proxy_auth = config.get("http_proxy_auth", "")
         self.show_typing = config.get("show_typing", "false").lower() == "true"
+        self.parse_mode = config.get("parse_mode", self.parse_mode)
         self.private_chat_strategy = config.get("private_chat_strategy", "open")
         self.group_chat_strategy = config.get("group_chat_strategy", "open")
         self.require_mention = config.get("require_mention", "false").lower() == "true"
@@ -175,6 +179,8 @@ class TelegramAdapter(
             self._setup_proxy()
         if "show_typing" in config:
             self.show_typing = config["show_typing"]
+        if "parse_mode" in config:
+            self.parse_mode = config["parse_mode"]
         if "private_chat_strategy" in config:
             self.private_chat_strategy = config["private_chat_strategy"]
         if "group_chat_strategy" in config:

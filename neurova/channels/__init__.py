@@ -20,7 +20,6 @@ try:
         ChannelConfig,
         ChannelEventType,
         ChannelMessage,
-        MessageChannel,
     )
 except ImportError as _e:
     _logger.debug("channels.base 未可用: %s", _e)
@@ -28,13 +27,13 @@ except ImportError as _e:
     ChannelConfig = None
     ChannelMessage = None
     ChannelEventType = None
-    MessageChannel = None
 
 try:
-    from neurova.channels.models import ContentType, UnifiedMessage, UserIdentity
+    from neurova.channels.models import ContentType, MessageChannel, UnifiedMessage, UserIdentity
 except ImportError as _e:
     _logger.debug("channels.models 未可用: %s", _e)
     ContentType = None
+    MessageChannel = None
     UnifiedMessage = None
     UserIdentity = None
 

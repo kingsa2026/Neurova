@@ -123,6 +123,10 @@ class QuestionQueueManager:
         # 内存中的问题队列
         self._questions: Dict[str, QuestionEntry] = {}
 
+        # P0-B 根因修复: question_id -> 记忆 id 映射。此前每次状态流转都 remember
+        # 一条新记忆 → 同一问题在库中随状态变化不断复制。
+        self._memory_ids: Dict[str, str] = {}
+
         # 状态索引
         self._status_index: Dict[QuestionStatus, List[str]] = {status: [] for status in QuestionStatus}
 
@@ -254,8 +258,39 @@ class QuestionQueueManager:
                 self._status_index[old_status].remove(question_id)
             self._status_index[QuestionStatus.ASKED].append(question_id)
 
+            self._save_single_question(entry)
             self._on_question_ask(entry)
             logger.info("Question %s... marked as asked", question_id[:8])
+            return True
+
+    def mark_answered(self, question_id: str, answer: str = "") -> bool:
+        """
+        标记问题已被回答
+
+        Args:
+            question_id: 问题 ID
+            answer: 用户给出的答案（存入 metadata）
+
+        Returns:
+            是否成功标记
+        """
+        with self._lock:
+            entry = self._questions.get(question_id)
+            if entry is None:
+                return False
+
+            old_status = entry.status
+            entry.status = QuestionStatus.ANSWERED
+            entry.answered_at = time.time()
+            if answer:
+                entry.metadata["answer"] = answer
+
+            if question_id in self._status_index.get(old_status, []):
+                self._status_index[old_status].remove(question_id)
+            self._status_index[QuestionStatus.ANSWERED].append(question_id)
+
+            self._save_single_question(entry)
+            logger.info("Question %s... marked as answered", question_id[:8])
             return True
 
     def archive_question(self, question_id: str) -> bool:
@@ -349,27 +384,31 @@ class QuestionQueueManager:
             }
 
     def _load_questions_from_memory(self) -> None:
-        """从记忆系统加载问题"""
+        """从记忆系统加载问题
+
+        根因修复: 原实现调用 memory_manager.search(query=..., category=...)，
+        该方法不存在（真实 API 是 get_memories(category=...)）→ 每次加载都抛
+        异常被吞，问题队列跨重启永不恢复。
+        """
         if self._memory_manager is None:
             return
 
         try:
-            # 尝试从记忆管理器加载问题数据
-            stored = self._memory_manager.search(
-                query="question_queue",
-                category="system",
-                limit=self._max_questions,
-            )
-            if stored:
-                for mem in stored:
-                    try:
-                        data = json.loads(mem.content) if isinstance(mem.content, str) else mem.content
-                        if isinstance(data, dict) and "id" in data:
-                            entry = QuestionEntry.from_dict(data)
+            stored = self._memory_manager.get_memories(category="system", limit=self._max_questions)
+            for mem in stored:
+                try:
+                    content = mem.get("content") if isinstance(mem, dict) else getattr(mem, "content", None)
+                    data = json.loads(content) if isinstance(content, str) else content
+                    if isinstance(data, dict) and "id" in data:
+                        entry = QuestionEntry.from_dict(data)
+                        if entry.id not in self._questions:
                             self._questions[entry.id] = entry
                             self._status_index[entry.status].append(entry.id)
-                    except (json.JSONDecodeError, KeyError, TypeError):
-                        continue
+                            mem_id = mem.get("id") if isinstance(mem, dict) else getattr(mem, "id", None)
+                            if mem_id:
+                                self._memory_ids[entry.id] = mem_id
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    continue
         except Exception as e:
             logger.warning("Failed to load questions from memory: %s", e)
 
@@ -385,17 +424,30 @@ class QuestionQueueManager:
             logger.warning("Failed to save questions to memory: %s", e)
 
     def _save_single_question(self, entry: QuestionEntry) -> None:
-        """保存单个问题到记忆"""
+        """保存单个问题到记忆
+
+        P0-B 根因修复: 已有对应记忆时用 update_memory 原位更新 content（content
+        即问题的完整 JSON），不再重复 remember。
+        """
         if self._memory_manager is None:
             return
 
         try:
-            self._memory_manager.remember(
-                content=json.dumps(entry.to_dict(), ensure_ascii=False),
+            content_json = json.dumps(entry.to_dict(), ensure_ascii=False)
+            memory_id = self._memory_ids.get(entry.id)
+            if memory_id:
+                if self._memory_manager.update_memory(memory_id, content=content_json):
+                    return
+                # 记忆已被删除等场景 → 落空后重建
+                self._memory_ids.pop(entry.id, None)
+
+            new_id = self._memory_manager.remember(
+                content=content_json,
                 category="system",
-                importance=0.3,
+                importance=30.0,
                 metadata={"type": "question_queue", "question_id": entry.id},
             )
+            self._memory_ids[entry.id] = new_id
         except Exception as e:
             logger.debug("Failed to save question %s...: %s", entry.id[:8], e)
 

@@ -20,6 +20,7 @@ import logging
 
 from neurova.core import config
 from neurova.core.logger import get_logger
+import asyncio
 import os
 import threading
 import time
@@ -30,6 +31,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
 logger = get_logger(__name__)
+
+# 关闭超时保护: agent.shutdown() 含睡眠整理/缓冲刷新等可能长时间阻塞的操作，
+# 无超时会令服务器无法退出（测试与生产 Ctrl+C 均会挂起）。
+AGENT_SHUTDOWN_TIMEOUT = float(os.getenv("NEUROVA_AGENT_SHUTDOWN_TIMEOUT", "30"))
 
 
 class AppState:
@@ -231,7 +236,9 @@ def _load_saved_agents(app_state: AppState, default_workspace: str) -> None:
             loaded += 1
             logger.info("Loaded saved agent: %s (%s/%s)", name, provider, model)
         except Exception as e:
-            logger.warning("Failed to load agent from %s: %s", config_path, e)
+            logger.warning(
+                "Failed to load agent from %s: %s", config_path, e, exc_info=True
+            )
 
     if loaded:
         logger.info("Loaded %d saved agents from workspaces", loaded)
@@ -386,11 +393,11 @@ def _register_core_modules(app_state: AppState) -> None:
                 pass
 
             def _on_stop(self):
-                if self._agent:
-                    try:
-                        self._agent.shutdown()
-                    except Exception:
-                        pass
+                # Agent 关闭统一由异步 _on_shutdown() 负责（真正 await shutdown 并带超时），
+                # 且其先于 startup_manager.stop() 执行。本钩子是同步的、运行在事件循环
+                # 线程内，无法 await 协程——在此调用 agent.shutdown() 只会创建出被
+                # 丢弃的协程（资源不释放 + never-awaited 警告），故显式不作为。
+                pass
 
         sm.register_module("agent", AgentModule, dependencies=[])
     except Exception as e:
@@ -407,6 +414,11 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
         router,
         set_app_state,
     )
+
+    # 全局业务异常处理：APIError → 标准 JSON 信封（未注册时会变成纯文本 500）
+    from neurova.api.error_handlers import register_error_handlers
+
+    register_error_handlers(app)
 
     # 设置全局应用状态
     set_app_state(
@@ -620,6 +632,15 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.debug("VoiceAdapter registration skipped: %s", e)
 
+    # MCP bootstrap：按共享配置连接 enabled 的 MCP 服务器（失败仅告警，不阻断启动）
+    try:
+        from neurova.tool_layers.mcp_bootstrap import bootstrap_mcp
+
+        mcp_results = await bootstrap_mcp()
+        logger.info("MCP bootstrap: %s", mcp_results)
+    except Exception as e:
+        logger.warning("MCP bootstrap skipped: %s", e)
+
     # 更新全局应用状态（TTS/Audio/VoiceEngine 已初始化）
     from neurova.api.endpoints import set_app_state as _update_app_state
 
@@ -675,20 +696,24 @@ async def _on_shutdown(app_state: AppState) -> None:
     """
     logger.info("Neurova API Server shutting down...")
 
-    # 停止渠道管理器（stop() 是 async 方法）
+    # 停止渠道管理器（stop() 是 async 方法；加超时防止挂起阻塞关闭流程）
     if app_state.channel_manager:
         try:
-            await app_state.channel_manager.stop()
+            await asyncio.wait_for(app_state.channel_manager.stop(), timeout=AGENT_SHUTDOWN_TIMEOUT)
             logger.info("Channel manager stopped")
+        except asyncio.TimeoutError:
+            logger.warning("Channel manager stop timed out after %.1fs; skipping", AGENT_SHUTDOWN_TIMEOUT)
         except Exception as e:
             logger.warning("Channel manager stop error: %s", e)
 
-    # 关闭所有 Agent
+    # 关闭所有 Agent（加超时：单个 agent 的睡眠整理挂起不能阻塞整个进程退出）
     for agent_id, agent in app_state.agents.items():
         try:
             if hasattr(agent, "shutdown"):
-                await agent.shutdown()
+                await asyncio.wait_for(agent.shutdown(), timeout=AGENT_SHUTDOWN_TIMEOUT)
                 logger.info("Agent '%s' shut down", agent_id)
+        except asyncio.TimeoutError:
+            logger.warning("Agent '%s' shutdown timed out after %.1fs; skipping", agent_id, AGENT_SHUTDOWN_TIMEOUT)
         except Exception as e:
             logger.warning("Agent '%s' shutdown error: %s", agent_id, e)
 

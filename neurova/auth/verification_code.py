@@ -701,6 +701,8 @@ def reset_verification_code_model():
     global _verification_code_model
     if _verification_code_model is not None:
         # 关闭数据库连接
+        # 原代码写成 verification_code_model (缺少下划线前缀), 会抛 NameError,
+        # 导致连接既没关闭、实例也无法置空。
         if _verification_code_model._conn:
-            verification_code_model._conn.close()
+            _verification_code_model._conn.close()
         _verification_code_model = None

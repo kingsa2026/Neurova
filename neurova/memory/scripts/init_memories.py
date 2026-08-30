@@ -7,10 +7,10 @@
 import os
 import sys
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.insert(0, project_root)
 
-from memory.core.manager import MemoryManager
+from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
 
 def import_initial_memories():

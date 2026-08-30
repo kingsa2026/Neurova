@@ -302,6 +302,7 @@ class MemoryCompressor:
         # 合并相似记忆
         compressed_memories = []
         merged_count = 0
+        groups_detail = []
 
         for group in similarity_groups:
             if len(group) == 1:
@@ -312,6 +313,19 @@ class MemoryCompressor:
                 if merged:
                     compressed_memories.append(merged)
                     merged_count += len(group) - 1
+                    # 操作明细：调用方据此安全写回（keep=组内 importance 最高者）
+                    keep = max(
+                        group, key=lambda m: float(m.get("importance", 0.0) or 0.0)
+                    )
+                    groups_detail.append(
+                        {
+                            "keep_id": keep.get("id", ""),
+                            "keep_content": merged.get("content", ""),
+                            "member_ids": [m.get("id", "") for m in group],
+                            "merged_content": merged.get("content", ""),
+                            "group_size": len(group),
+                        }
+                    )
 
         return CompressionResult(
             original_count=original_count,
@@ -322,6 +336,7 @@ class MemoryCompressor:
             details={
                 "similarity_threshold": threshold,
                 "groups_found": len(similarity_groups),
+                "groups": groups_detail,
             },
         )
 

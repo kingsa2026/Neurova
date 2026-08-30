@@ -86,8 +86,11 @@ class BoundingBox:
 class UIElement:
     """UI 元素基类"""
 
-    element_type: str
+    # 注意: bbox 无默认值, 必须排在所有带默认值的字段之前。
+    # 子类覆盖 element_type 默认值时若 bbox 靠后, dataclass 会抛
+    # "non-default argument follows default argument"。
     bbox: BoundingBox
+    element_type: str = ""
     text: str = ""
     confidence: float = 1.0
     attributes: typing.Dict[str, typing.Any] = field(default_factory=dict)

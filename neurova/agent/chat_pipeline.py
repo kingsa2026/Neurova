@@ -18,7 +18,7 @@ ChatPipeline — 对话流程管线
 
 from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from neurova.agent.crystallized_experience_manager import CrystallizedExperienceManager
 from neurova.agent.memory_retrieval_chain import MemoryRetrievalChain, RetrievalContext, RetrievalStrategy
@@ -254,8 +254,14 @@ class ChatPipeline:
         # Step 0.5: Pre-LLM 检查
         await self._step_pre_llm_checks(ctx)
 
+        # Step 0.7 (R-3): 附件注入——在 build_context 之前并入 user_input，
+        # 否则 LLM 拿到的是构建上下文时的旧输入（附件内容永远进不了模型）。
+        await self._step_inject_attachments(ctx)
+
         # Step 1: 检索与上下文构建
         await self._step_retrieve_and_build_context(ctx)
+        # 图像切片在此挂到 context（text 已在注入时并入 user_input）
+        self._flush_vision_attachments(ctx)
 
         # Step 2: Evocate 注入
         self._step_evocate_injection(ctx)
@@ -438,12 +444,10 @@ class ChatPipeline:
         tool_name = ctx.tool_memory_result.get("tool_name")
         confidence = ctx.tool_memory_result.get("confidence", 0)
 
-        if confidence < 0.7:
-            logger.info("工具 %s 置信度 %.2f < 0.7，转为建议模式", tool_name, confidence)
-            ctx.tool_decision = "suggest"
-            return
-
-        # 使用 ToolExecutionManager 执行工具（支持超时策略、优雅取消、状态回调）
+        # P-D 修复（docs/tool-memory-muscle-analysis.md）：移除原 0.7 硬门。
+        # 决策阈值已由 check_tool_memory 的 dynamic_threshold 单源裁定
+        # （RSI 可调）；此处再设 0.7 会形成调参死区（RSI 把阈值调到 0.7
+        # 以下时本门仍然拦截，闭环失效）。
         logger.info("自动执行工具: %s (使用 ToolExecutionManager)", tool_name)
 
         try:
@@ -707,6 +711,120 @@ class ChatPipeline:
             logger.debug("合成工具 %s 已存在，跳过注册", manifest.id)
 
     # ══════════════════════════════════════════════════════════════
+    # Step 1.5 (R-3): 附件注入
+    # ══════════════════════════════════════════════════════════════
+
+    async def _step_inject_attachments(self, ctx: ChatContext):
+        """把附件内容注入对话上下文（R-3 附件多模态）。
+
+        契约:
+        - metadata.attachments（console attach_files 注入）逐项读取磁盘内容
+        - 文本/文档（txt/md/rst/code/docx/xlsx/pptx/pdf/csv）抽取文本并入
+          ctx.user_input（"用户上传了文件 X 内容如下"段落）
+        - 图像 → 转为 OpenAI content list（多模态 LLM 直接接收）
+        - 音频/视频/解析失败 → 降级为文件名提示，不中断对话
+
+        无 attachments 时零副作用；文件读取失败不抛异常（附件问题不拖垮聊天）。
+        """
+        if not isinstance(ctx.metadata, dict):
+            return
+        attachments = ctx.metadata.get("attachments")
+        if not isinstance(attachments, list) or not attachments:
+            return
+
+        enriched, vision_parts = self._inject_attachments_into_input(
+            ctx.user_input or "", attachments
+        )
+        ctx.user_input = enriched
+        # 附件注入在 build_context 之前：文本已进入 user_input，构建上下文时
+        # 会被送入 LLM；图像切片由 build_context 之后的 _apply_vision_attachments
+        # 挂到 context 最后一条 user 消息（此处 ctx.context 尚未构建，推迟处理）。
+        self._pending_vision_parts = vision_parts
+
+        logger.info(
+            "[附件注入] %d 个附件处理完成, vision_parts=%d",
+            len(attachments),
+            len(vision_parts),
+        )
+
+    def _flush_vision_attachments(self, ctx: ChatContext):
+        """build_context 之后调用：把保存的图像切片挂到 context 最后一条 user 消息。"""
+        vision_parts = getattr(self, "_pending_vision_parts", None)
+        if vision_parts:
+            self._apply_vision_attachments(ctx, vision_parts)
+            self._pending_vision_parts = None
+
+    def _read_attachment_bytes(self, file_id: str) -> Optional[bytes]:
+        """按 file_id 读取附件字节（测试可 monkeypatch）"""
+        try:
+            from neurova.api.endpoints import files_api
+
+            return files_api.get_attachment_bytes(file_id)
+        except Exception:
+            return None
+
+    def _inject_attachments_into_input(
+        self, user_input: str, attachments: List[Dict]
+    ) -> Tuple[str, List[Dict]]:
+        """把附件并入用户文本；图像切片单独收集为 vision content parts。"""
+        from neurova.attachment_parser import extract_attachment_text
+
+        parts: List[str] = []
+        if user_input:
+            parts.append(user_input)
+        vision_parts: List[Dict] = []
+
+        for att in attachments:
+            filename = att.get("filename") or "附件"
+            file_type = att.get("file_type") or "file"
+            mime = att.get("mime_type") or "application/octet-stream"
+            file_id = att.get("file_id") or ""
+
+            try:
+                data = self._read_attachment_bytes(file_id)
+            except Exception:
+                data = None
+
+            if file_type == "image" and data:
+                import base64
+
+                b64 = base64.b64encode(data).decode("ascii")
+                vision_parts.append(
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+                )
+                parts.append(f"[用户上传了图片: {filename}, 请结合图片回答]")
+                continue
+
+            text, status = extract_attachment_text(data, filename, file_type)
+            if text:
+                parts.append(
+                    f"[用户上传了文件 {filename}，以下为该文件的完整内容（请直接使用，无需调用工具读取）]\n{text}"
+                )
+            else:
+                parts.append(f"[用户上传了文件 {filename}（{file_type}），无法解析文本内容]")
+                if status not in ("unsupported_format", "empty_file"):
+                    logger.debug("[附件注入] %s 未抽取文本: %s", filename, status)
+
+        return "\n\n".join(parts), vision_parts
+
+    def _apply_vision_attachments(self, ctx: ChatContext, vision_parts: List[Dict]):
+        """把图像切片应用到 ctx.context 最后一条 user 消息（OpenAI 多模态格式）。
+
+        R-3 修复: 全量扫描找最后一条 user 消息（context 末尾可能是 system/记忆
+        等非 user 角色，仅查 [-1] 会漏挂，导致模型收不到图像）。
+        """
+        if not ctx.context:
+            return
+        target = None
+        for msg in reversed(ctx.context):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                target = msg
+                break
+        if target is None:
+            return
+        target["content"] = [{"type": "text", "text": target.get("content", "") or ""}, *vision_parts]
+
+    # ══════════════════════════════════════════════════════════════
     # Step 1: 检索与上下文构建
     # ══════════════════════════════════════════════════════════════
 
@@ -954,12 +1072,17 @@ class ChatPipeline:
             else:
                 return await self._call_loop_normal(ctx, tools_for_llm)
         except Exception as e:
-            # API 配置错误不 fallback
-            if self._is_api_config_error(e):
-                logger.error("Agent Loop API 配置错误: %s", e)
+            # LLM 供应商错误（限流/认证/连接/token 超限）必须直接上抛：
+            # 静默 fallback 到 legacy 会掩盖真实原因（实测缺陷：限流被转译成
+            # 无关的 TypeError，用户拿到空回复）。legacy 仅供 Loop 自身实现
+            # 错误时兜底。
+            from neurova.llm_client import LLMError
+
+            if isinstance(e, LLMError) or self._is_api_config_error(e):
+                logger.error("Agent Loop LLM 供应商错误，不 fallback: %s", e)
                 raise
-            # Loop 特定错误 fallback 到 legacy
-            logger.warning("Agent Loop failed: %s, falling back to legacy", e)
+            # Loop 实现错误 fallback 到 legacy（记录原因，禁止静默）
+            logger.warning("Agent Loop failed (%s: %s), falling back to legacy", type(e).__name__, e)
             return await self._call_legacy(ctx)
 
     async def _call_loop_stream(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
@@ -1185,10 +1308,27 @@ class ChatPipeline:
         return reply
 
     async def _call_legacy_stream(self, ctx: ChatContext) -> str:
-        """流式 fallback"""
+        """流式 fallback
+
+        chat_stream 产出 LLMResponse 对象（与 _predict_stream 同契约）：
+        content 字段进入回复并向 emitter 转发；错误 dict 以原始信息抛
+        RuntimeError——不得把对象当字符串 join 掩盖真实 LLM 错误。
+        """
         reply_parts = []
+        emitter = ctx.event_emitter
         async for chunk in self.llm_client.chat_stream(ctx.context):
-            reply_parts.append(chunk)
+            if isinstance(chunk, dict):
+                if chunk.get("error"):
+                    raise RuntimeError(f"LLM 流式调用失败: {chunk['error']}")
+                continue
+            content = getattr(chunk, "content", "") or ""
+            if content:
+                reply_parts.append(content)
+                if emitter is not None:
+                    try:
+                        emitter("content", content)
+                    except Exception as e:  # noqa: BLE001 - 转发失败不影响主流程
+                        logger.debug("legacy 流式 emitter 转发失败: %s", e)
         return "".join(reply_parts)
 
     @staticmethod

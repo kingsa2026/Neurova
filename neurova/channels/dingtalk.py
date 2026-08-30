@@ -16,6 +16,7 @@ API 参考:
 """
 
 import asyncio
+import hmac
 import json
 from neurova.core.logger import get_logger
 import time
@@ -57,6 +58,10 @@ class DingTalkAdapter(ChannelAdapter):
     - 自建应用 Webhook（需要公网 URL）
     """
 
+    # Stream 模式机器人消息回调 topic（官方 dingtalk-stream SDK
+    # Python/Java/Node 三语言实现一致，见 chatbot.ChatbotMessage.TOPIC）
+    STREAM_BOT_MESSAGE_TOPIC = "/v1.0/im/bot/messages/get"
+
     def __init__(self, config: ChannelConfig):
         super().__init__(config)
         self.config.channel_type = "dingtalk"
@@ -92,9 +97,9 @@ class DingTalkAdapter(ChannelAdapter):
             # 创建流式客户端
             self._stream_client = dingtalk_stream.DingtalkStreamClient(credential)
 
-            # 注册机器人消息回调
+            # 注册机器人消息回调（topic 为官方规范值，见 STREAM_BOT_MESSAGE_TOPIC）
             self._stream_client.register_callback_listener(
-                "/v1.0/im/bot/messages/handle",
+                self.STREAM_BOT_MESSAGE_TOPIC,
                 self._handle_bot_message,
             )
 
@@ -247,8 +252,21 @@ class DingTalkAdapter(ChannelAdapter):
                     logger.error("DingTalk session webhook failed: %s", result)
                     return None
 
+    @staticmethod
+    def _build_msg_param(message_type: str, content: str) -> dict:
+        """按官方规范构造 msgParam。
+
+        sampleText  → {"content": "..."}
+        sampleMarkdown → {"title": "...", "text": "..."}（官方 API 元数据示例，
+        与 sessionWebhook 的 markdown 载荷一致；title 用于会话预览）
+        """
+        if message_type == "markdown":
+            first_line = content.split("\n", 1)[0].strip().lstrip("#").strip()[:32]
+            return {"title": first_line or "回复", "text": content}
+        return {"content": content}
+
     async def _send_via_api(self, chat_id: str, content: str, message_type: str) -> Optional[str]:
-        """通过 DingTalk OpenAPI 发送消息"""
+        """通过 DingTalk OpenAPI 发送单聊消息（官方接口: 机器人发送单聊消息）"""
         import aiohttp
 
         url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
@@ -257,12 +275,11 @@ class DingTalkAdapter(ChannelAdapter):
             "Content-Type": "application/json",
         }
 
-        msg_data = {"content": content}
         payload = {
             "robotCode": self.config.app_id,
             "userIds": [chat_id],
-            "msgKey": f"sampleText" if message_type == "text" else f"sampleMarkdown",
-            "msgParam": json.dumps(msg_data),
+            "msgKey": "sampleText" if message_type == "text" else "sampleMarkdown",
+            "msgParam": json.dumps(self._build_msg_param(message_type, content)),
         }
 
         async with aiohttp.ClientSession() as session:
@@ -276,6 +293,51 @@ class DingTalkAdapter(ChannelAdapter):
                 else:
                     logger.error("DingTalk API failed: %s", result)
                     return None
+
+    async def send_group_message(
+        self,
+        open_conversation_id: str,
+        content: str,
+        message_type: str = "text",
+        **kwargs,
+    ) -> Optional[str]:
+        """通过 DingTalk OpenAPI 发送群聊消息（官方接口: 机器人发送群聊消息）"""
+        import aiohttp
+
+        try:
+            if not self._access_token or time.time() > self._token_expires_at:
+                await self._refresh_access_token()
+            if not self._access_token:
+                logger.error("Failed to get DingTalk access token")
+                return None
+
+            url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
+            headers = {
+                "x-acs-dingtalk-access-token": self._access_token,
+                "Content-Type": "application/json",
+            }
+
+            payload = {
+                "robotCode": self.config.app_id,
+                "openConversationId": open_conversation_id,
+                "msgKey": "sampleText" if message_type == "text" else "sampleMarkdown",
+                "msgParam": json.dumps(self._build_msg_param(message_type, content)),
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    result = await resp.json()
+                    if resp.status == 200:
+                        logger.info("DingTalk group message sent")
+                        return result.get("processQueryKey", "sent")
+                    else:
+                        logger.error("DingTalk group message failed: %s", result)
+                        return None
+        except Exception as e:
+            logger.exception("DingTalk group send error: %s", e)
+            return None
 
     async def _refresh_access_token(self):
         """刷新钉钉 Access Token"""
@@ -338,12 +400,32 @@ class DingTalkWebhookBot:
         self.webhook_url = webhook_url
         self.secret = secret
 
-    async def send_text(self, text: str, at_all: bool = False, at_mobiles: list = None) -> bool:
-        """发送文本消息"""
+    def _build_signed_url(self) -> str:
+        """构建请求 URL；配置了 secret 时附加 timestamp + sign。
+
+        P2-6 修复: 原加签逻辑只内联在 send_text 中，send_markdown 完全不加签
+        → 开启"加签"安全设置的机器人发 markdown 必然被钉钉拒绝（errcode 310000）。
+        现抽取为统一入口，两种消息类型共用。
+        """
+        if not self.secret:
+            return self.webhook_url
+
         import base64
         import hashlib
         import urllib.parse
 
+        timestamp = str(round(time.time() * 1000))
+        sign_str = f"{timestamp}\n{self.secret}"
+        hmac_code = hmac.new(
+            self.secret.encode("utf-8"),
+            sign_str.encode("utf-8"),
+            digestmod=hashlib.sha256,
+        ).digest()
+        sign = urllib.parse.quote_plus(base64.b64encode(hmac_code).decode("utf-8"))
+        return f"{self.webhook_url}&timestamp={timestamp}&sign={sign}"
+
+    async def send_text(self, text: str, at_all: bool = False, at_mobiles: list = None) -> bool:
+        """发送文本消息"""
         import aiohttp
 
         payload = {
@@ -352,17 +434,7 @@ class DingTalkWebhookBot:
             "at": {"isAtAll": at_all, "atMobiles": at_mobiles or []},
         }
 
-        url = self.webhook_url
-        if self.secret:
-            timestamp = str(round(time.time() * 1000))
-            sign_str = f"{timestamp}\n{self.secret}"
-            hmac_code = hmac.new(
-                self.secret.encode("utf-8"),
-                sign_str.encode("utf-8"),
-                digestmod=hashlib.sha256,
-            ).digest()
-            sign = urllib.parse.quote_plus(base64.b64encode(hmac_code).decode("utf-8"))
-            url += f"&timestamp={timestamp}&sign={sign}"
+        url = self._build_signed_url()
 
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
@@ -379,8 +451,10 @@ class DingTalkWebhookBot:
             "at": {"isAtAll": at_all},
         }
 
+        url = self._build_signed_url()
+
         async with aiohttp.ClientSession() as session:
-            async with session.post(self.webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 result = await resp.json()
                 return result.get("errcode") == 0
 

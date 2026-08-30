@@ -17,17 +17,30 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_DIR = Path("data") / "collaboration"
+
+
+class CanvasVersionConflict(Exception):
+    """乐观锁冲突：调用方携带的 base_version 落后于画布当前版本。
+
+    实时抢占语义的地基——用户手动保存与 agent op 并发时，
+    过期写入被拒绝（而非静默覆盖），调用方重读后重试。
+    """
+
+    def __init__(self, message: str, current_version: int = 0):
+        super().__init__(message)
+        self.current_version = current_version
 
 
 class CanvasStore:
@@ -68,6 +81,7 @@ class CanvasStore:
         record = {
             **snapshot,
             "id": f"canvas_{uuid.uuid4().hex[:12]}",
+            "version": 1,
             "created_at": now,
             "updated_at": now,
         }
@@ -84,21 +98,89 @@ class CanvasStore:
                 return None
             return self._read_json(self._canvas_path(canvas_id))
 
-    def update(self, canvas_id: str, snapshot: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def update(
+        self,
+        canvas_id: str,
+        snapshot: Dict[str, Any],
+        base_version: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """全量替换画布快照。
+
+        Args:
+            canvas_id: 画布 ID
+            snapshot: 新快照（整体替换 nodes/edges 等）
+            base_version: 乐观锁基版本；提供且与当前版本不符时抛
+                CanvasVersionConflict，不产生任何写入。
+
+        Returns:
+            更新后的记录（含递增的 version），画布不存在返回 None。
+        """
         if not self._validate_id(canvas_id):
             return None
         with self._lock:
             existing = self.get(canvas_id)
             if existing is None:
                 return None
+            current_version = int(existing.get("version", 1))
+            if base_version is not None and int(base_version) != current_version:
+                raise CanvasVersionConflict(
+                    f"画布版本冲突: base_version={base_version} 落后于当前版本 {current_version}",
+                    current_version=current_version,
+                )
             record = {
                 **snapshot,
                 "id": canvas_id,
+                "version": current_version + 1,
                 "created_at": existing.get("created_at", time.time()),
                 "updated_at": time.time(),
             }
             self._write_json(self._canvas_path(canvas_id), record)
-        logger.info("画布已更新: %s", canvas_id)
+        logger.info("画布已更新: %s (v%s)", canvas_id, record["version"])
+        return record
+
+    def mutate(
+        self,
+        canvas_id: str,
+        fn: Callable[[Dict[str, Any]], Optional[Dict[str, Any]]],
+        base_version: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """原子 read-modify-write：锁内读取、应用 fn、版本递增、落盘。
+
+        op 层（canvas_ops.py）的唯一写入通道，保证并发 op 不丢更新。
+
+        Args:
+            canvas_id: 画布 ID
+            fn: 接收记录深拷贝、返回修改后记录的纯函数；返回 None 表示
+                中止（不写入、版本不变，返回当前记录）
+            base_version: 乐观锁基版本，语义同 update()
+
+        Returns:
+            写入后的新记录（中止时为当前记录），画布不存在返回 None。
+        """
+        if not self._validate_id(canvas_id):
+            return None
+        with self._lock:
+            existing = self.get(canvas_id)
+            if existing is None:
+                return None
+            current_version = int(existing.get("version", 1))
+            if base_version is not None and int(base_version) != current_version:
+                raise CanvasVersionConflict(
+                    f"画布版本冲突: base_version={base_version} 落后于当前版本 {current_version}",
+                    current_version=current_version,
+                )
+            mutated = fn(copy.deepcopy(existing))
+            if mutated is None:
+                return existing
+            record = {
+                **mutated,
+                "id": canvas_id,
+                "version": current_version + 1,
+                "created_at": existing.get("created_at", time.time()),
+                "updated_at": time.time(),
+            }
+            self._write_json(self._canvas_path(canvas_id), record)
+        logger.info("画布已变更: %s (v%s)", canvas_id, record["version"])
         return record
 
     def list(self) -> list[Dict[str, Any]]:
@@ -156,4 +238,4 @@ def reset_canvas_store() -> None:
     _canvas_store_instance = None
 
 
-__all__ = ["CanvasStore", "get_canvas_store", "reset_canvas_store"]
+__all__ = ["CanvasStore", "CanvasVersionConflict", "get_canvas_store", "reset_canvas_store"]

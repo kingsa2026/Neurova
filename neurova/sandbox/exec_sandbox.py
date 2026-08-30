@@ -16,6 +16,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -46,9 +47,15 @@ class ExecSandbox:
     def backend_name(self) -> str:
         return "process"
 
-    def wrap(self, command: str) -> str:
-        """返回包装后的命令；子类重写以注入隔离前缀。"""
-        return command
+    def wrap_argv(self, command: str) -> List[str]:
+        """返回执行用 argv 列表；子类重写以注入隔离前缀。
+
+        默认 shell 语义（管道/重定向由 shell 处理）：POSIX 走 sh -c，
+        Windows 走 cmd /c。argv 传递消除引号转义层（比 shell=True 更安全）。
+        """
+        if sys.platform == "win32":
+            return ["cmd.exe", "/c", command]
+        return ["sh", "-c", command]
 
     def execute(
         self,
@@ -57,11 +64,11 @@ class ExecSandbox:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        wrapped = self.wrap(command)
+        argv = self.wrap_argv(command)
         try:
             result = subprocess.run(
-                wrapped,
-                shell=True,
+                argv,
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -106,11 +113,13 @@ class BubblewrapSandbox(ExecSandbox):
     def backend_name(self) -> str:
         return "bubblewrap"
 
-    def wrap(self, command: str) -> str:
-        base = "bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp"
+    def wrap_argv(self, command: str) -> List[str]:
+        # bwrap 注入隔离前缀；command 作为 sh -c 的单个 argv（无转义层）
+        parts = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]
         if self.severity in (SandboxSeverity.NETWORK_OFF, SandboxSeverity.FULL):
-            base += " --unshare-net"
-        return f'{base} -- sh -c "{_escape(command)}"'
+            parts.append("--unshare-net")
+        parts.extend(["--", "sh", "-c", command])
+        return parts
 
 
 class SeatbeltSandbox(ExecSandbox):
@@ -122,7 +131,7 @@ class SeatbeltSandbox(ExecSandbox):
     def backend_name(self) -> str:
         return "seatbelt"
 
-    def wrap(self, command: str) -> str:
+    def wrap_argv(self, command: str) -> List[str]:
         profile = (
             "(version 1)"
             "(deny default)"
@@ -132,22 +141,18 @@ class SeatbeltSandbox(ExecSandbox):
         )
         if self.severity in (SandboxSeverity.NETWORK_OFF, SandboxSeverity.FULL):
             profile += "(deny network*)"
-        return f"sandbox-exec -p '{profile}' sh -c \"{_escape(command)}\""
+        # profile / command 均作为单个 argv 传递
+        return ["sandbox-exec", "-p", profile, "sh", "-c", command]
 
 
 class AppContainerSandbox(ExecSandbox):
-    """Windows: AppContainer 受限执行（暂降级为常规执行并标注）。"""
+    """Windows: AppContainer 受限执行（暂降级为 shell 语义并标注）。"""
 
     def available(self) -> bool:
         return sys.platform == "win32"
 
     def backend_name(self) -> str:
         return "appcontainer"
-
-
-def _escape(s: str) -> str:
-    """转义双引号，避免注入沙箱命令。"""
-    return s.replace('"', '\\"')
 
 
 def _detect_backend(severity: SandboxSeverity) -> ExecSandbox:
@@ -185,8 +190,80 @@ def execute_in_sandbox(
     env: Optional[Dict[str, str]] = None,
     severity: SandboxSeverity = SandboxSeverity.NONE,
 ) -> Dict[str, Any]:
-    """便捷入口：按 severity 选择沙箱并执行命令。"""
+    """便捷入口：按 severity 选择沙箱并执行命令（同步，平台后端）。"""
     return get_exec_sandbox(severity).execute(command, timeout=timeout, cwd=cwd, env=env)
+
+
+def docker_available() -> bool:
+    """探测 Docker 是否可用（结果缓存，避免反复探测 docker info）"""
+    global _DOCKER_AVAILABLE_CACHE
+    if _DOCKER_AVAILABLE_CACHE is not None:
+        return _DOCKER_AVAILABLE_CACHE
+    try:
+        probe = subprocess.run(["docker", "info"], capture_output=True, timeout=10)
+        _DOCKER_AVAILABLE_CACHE = probe.returncode == 0
+    except Exception:  # noqa: BLE001 - docker 未安装/守护进程未启动
+        _DOCKER_AVAILABLE_CACHE = False
+    return _DOCKER_AVAILABLE_CACHE
+
+
+_DOCKER_AVAILABLE_CACHE: Optional[bool] = None
+
+
+async def execute_in_sandbox_async(
+    command: str,
+    timeout: float = 30.0,
+    cwd: Optional[str] = None,
+    env: Optional[Dict[str, str]] = None,
+    severity: SandboxSeverity = SandboxSeverity.NONE,
+    backend: str = "auto",
+) -> Dict[str, Any]:
+    """异步便捷入口：治理 SANDBOX 判定的执行通道。
+
+    backend 语义：
+    - "docker"：强制容器执行（Docker 不可用时返回明确错误，不静默降级）
+    - "auto"（默认）：需要隔离（severity != NONE）且 Docker 可用 → 容器执行
+      （跨平台真隔离，补齐 Windows AppContainer 占位）；否则回退平台后端
+    - 其他值：按平台后端执行（原 execute_in_sandbox 行为）
+    """
+    use_docker = backend == "docker" or (
+        backend == "auto" and severity != SandboxSeverity.NONE and docker_available()
+    )
+    if not use_docker:
+        result = execute_in_sandbox(command, timeout=timeout, cwd=cwd, env=env, severity=severity)
+        # 统一返回形状：平台后端历史 key 为 return_code/output/error，规范为容器后端同形
+        result.setdefault("returncode", result.get("return_code"))
+        result["stdout"] = result.get("stdout", result.get("output", ""))
+        result["stderr"] = result.get("stderr", result.get("error", ""))
+        result["backend"] = get_exec_sandbox(severity).backend_name()
+        return result
+
+    if not docker_available():
+        return {
+            "success": False,
+            "error": "Docker 后端不可用（docker info 探测失败），无法提供容器隔离",
+            "backend": "docker",
+        }
+
+    from neurova.execution_layers import DockerExecutor
+
+    executor = DockerExecutor(runtime_id=f"sandbox_{int(time.time())}")
+    started = await executor.start()
+    if not started:
+        return {"success": False, "error": "Docker 容器启动失败", "backend": "docker"}
+    try:
+        exec_result = await executor.exec(
+            "sh", args=["-c", command], env=env, cwd=cwd, timeout=timeout
+        )
+        return {
+            "success": getattr(exec_result, "exit_code", 1) == 0,
+            "returncode": getattr(exec_result, "exit_code", 1),
+            "stdout": getattr(exec_result, "stdout", "") or "",
+            "stderr": getattr(exec_result, "stderr", "") or "",
+            "backend": "docker",
+        }
+    finally:
+        await executor.stop()
 
 
 __all__ = [
@@ -199,4 +276,6 @@ __all__ = [
     "get_exec_sandbox",
     "reset_exec_sandbox",
     "execute_in_sandbox",
+    "execute_in_sandbox_async",
+    "docker_available",
 ]

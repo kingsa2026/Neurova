@@ -1,10 +1,26 @@
 """
-QQ频道消息渠道适配器
+QQ机器人消息渠道适配器（QQ开放平台: 频道 / 群聊 / 私聊）
 
-API 文档: https://bot.q.qq.com/wiki/
+API 文档: https://bot.q.qq.com/wiki/develop/api-v2/
+
+鉴权规范（v2）:
+- Bot {appid}.{token} 请求头已被官方废弃
+- 现行为: POST https://bots.qq.com/app/getAppAccessToken（body: appId/clientSecret）
+  获取 access_token，请求头 Authorization: QQBot {access_token}（有效期约 7200 秒）
+
+消息接口:
+- 频道:  POST /channels/{channel_id}/messages
+- 群聊:  POST /v2/groups/{group_openid}/messages
+- 私聊:  POST /v2/users/{openid}/messages
+- 主动推送能力已于 2025-04-21 停止，消息发送以被动回复为主（携带 msg_id）
+
+Webhook 验签规范（官方 sign.md）:
+- Ed25519 签名，请求头 X-Signature-Ed25519 / X-Signature-Timestamp
+- 密钥对由 Bot Secret 倍增至 >=32 字节后截取前 32 字节派生
+- 签名体 = timestamp 原始字符串 + raw body
+- 回调地址验证（op 13）需用派生私钥对 event_ts + plain_token 签名应答
 """
 
-import hashlib
 import json
 import logging
 import threading
@@ -19,22 +35,37 @@ try:
 except ImportError:
     REQUESTS_AVAILABLE = False
 
+try:
+    from ecdsa import SigningKey as _Ed25519SigningKey
+    from ecdsa.curves import Ed25519 as _Ed25519Curve
+
+    ED25519_AVAILABLE = True
+except ImportError:
+    ED25519_AVAILABLE = False
+
 from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+
+# access_token 换取接口（官方规范，Bot {appid}.{token} 头已废弃）
+AUTH_TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
 
 
 class QQAdapter(ChannelAdapter):
     """
-    QQ频道消息渠道适配器
+    QQ机器人消息渠道适配器
 
     支持:
-    - QQ频道消息收发
-    - 子频道消息处理
-    - Webhook 回调处理
+    - QQ频道消息收发（/channels/{id}/messages）
+    - QQ群聊消息（v2: /v2/groups/{group_openid}/messages）
+    - QQ私聊消息（v2: /v2/users/{openid}/messages）
+    - Webhook 回调验签（Ed25519）与 op 13 地址验证
     - 群聊/私聊策略
     """
 
     API_BASE = "https://api.sgroup.qq.com"
     SANDBOX_API_BASE = "https://sandbox.api.sgroup.qq.com"
+
+    # 官方成功状态码: 200 成功、204 成功无包体、202 异步成功（如消息进入审核）
+    _OK_STATUS = (200, 202, 204)
 
     @property
     def channel(self) -> MessageChannel:
@@ -127,35 +158,80 @@ class QQAdapter(ChannelAdapter):
         self.group_share_session = config.get("group_share_session", "true").lower() == "true"
         self.welcome_message = config.get("welcome_message", "")
 
-        if not self.app_id or not self.token or not self.secret:
-            logging.error("QQ频道认证失败: app_id, token, secret 不能为空")
+        if not self.app_id or not self.secret:
+            logging.error("QQ认证失败: app_id, secret 不能为空")
             return False
 
-        return self._refresh_token()
+        if not self._fetch_access_token():
+            return False
 
-    def _refresh_token(self) -> bool:
-        """刷新 access_token"""
+        return self._verify_connection()
+
+    @staticmethod
+    def _validate_resource_id(resource_id: str) -> bool:
+        """校验 openid/channel_id 合法性。
+
+        QQ 开放平台 ID 仅由字母数字与 -_@# 组成；校验同时防止
+        ID 拼入 URL 路径时注入额外路径段或查询串。
+        """
+        if not resource_id or len(resource_id) > 128:
+            return False
+        allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_@#")
+        return all(c in allowed for c in resource_id)
+
+    def _auth_headers(self) -> Dict[str, str]:
+        """构造官方规范请求头: Authorization: QQBot {access_token}"""
+        return {
+            "Authorization": "QQBot " + self.access_token,
+            "User-Agent": "Bot/" + self.app_id + " Neurova-QQ-Adapter/1.0",
+        }
+
+    def _fetch_access_token(self) -> bool:
+        """通过官方 getAppAccessToken 接口换取 access_token（有效期约 7200 秒）"""
         if not REQUESTS_AVAILABLE:
             self._initialized = True
             return True
 
         try:
-            url = f"{self.API_BASE}/gateway/bot"
-            headers = {
-                "Authorization": f"Bot {self.app_id}.{self.token}",
-                "User-Agent": f"Bot/{self.app_id} Neurova-QQ-Adapter/1.0",
-            }
-
-            resp = requests.get(url, headers=headers, timeout=10)
+            resp = requests.post(
+                "https://bots.qq.com/app/getAppAccessToken",
+                json={"appId": self.app_id, "clientSecret": self.secret},
+                timeout=10,
+            )
             data = resp.json()
 
-            if resp.status_code == 200:
+            access_token = data.get("access_token", "")
+            if resp.status_code == 200 and access_token:
+                self.access_token = access_token
+                expires_in = int(data.get("expires_in", 7200))
+                # 官方说明: 过期前 60 秒内可获取新 token，旧 token 在此窗口内仍有效
+                self.token_expire_time = time.time() + max(expires_in - 60, 60)
                 self._initialized = True
+                logging.info("QQ access_token 获取成功")
+                return True
+
+            logging.error("QQ access_token 获取失败: %s", data)
+            return False
+        except Exception as e:
+            logging.error("QQ access_token 请求异常: %s", e)
+            return False
+
+    def _verify_connection(self) -> bool:
+        """通过 GET /gateway/bot 验证凭证与连通性（官方 WebSocket 网关接口）"""
+        if not REQUESTS_AVAILABLE:
+            return True
+
+        try:
+            resp = requests.get(
+                "https://api.sgroup.qq.com/gateway/bot", headers=self._auth_headers(), timeout=10
+            )
+
+            if resp.status_code == 200:
                 logging.info("QQ频道认证成功")
                 return True
-            else:
-                logging.error("QQ频道认证失败: %s", data)
-                return False
+
+            logging.error("QQ频道认证失败: %s", resp.text[:200])
+            return False
         except requests.exceptions.Timeout as e:
             logging.error("QQ频道认证超时: %s", e)
             return False
@@ -167,10 +243,23 @@ class QQAdapter(ChannelAdapter):
             return False
 
     def _ensure_token(self) -> bool:
-        """确保 token 有效"""
-        if not self._initialized:
-            return self._refresh_token()
+        """确保 access_token 有效（官方: token 不自动续期，需自行刷新）"""
+        if not self.access_token or time.time() >= self.token_expire_time:
+            return self._fetch_access_token()
         return True
+
+    async def connect(self) -> bool:
+        """建立连接: 确保凭证有效且网关可达"""
+        if not self._ensure_token():
+            return False
+        return self._verify_connection()
+
+    async def disconnect(self):
+        """断开连接并清理凭证"""
+        self._initialized = False
+        self.access_token = ""
+        self.token_expire_time = 0
+        logging.info("QQ adapter disconnected")
 
     def send_message(self, message: UnifiedMessage) -> bool:
         """发送QQ频道消息"""
@@ -181,29 +270,66 @@ class QQAdapter(ChannelAdapter):
             logging.info("[QQ模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
             return True
 
-        try:
-            # 根据消息类型构建API请求
-            url = f"{self.API_BASE}/channels/{message.chat_id}/messages"
-
-            headers = {"Authorization": f"Bot {self.app_id}.{self.token}", "Content-Type": "application/json"}
-
-            payload = {"content": message.content, "msg_id": message.message_id}  # 回复时可携带原消息ID
-
-            # 如果启用消息合并，添加合并标识
-            if self.message_merge:
-                payload["embed"] = {"title": "系统消息", "description": "此消息为合并发送"}
-
-            resp = requests.post(url, headers=headers, json=payload, timeout=10)
-
-            if resp.status_code in [200, 202]:
-                return True
-            else:
-                data = resp.json()
-                logging.error("QQ频道消息发送失败: %s", data)
-                return False
-        except Exception as e:
-            logging.error("QQ频道消息发送异常: %s", e)
+        if not message.chat_id or not self._validate_resource_id(message.chat_id):
+            logging.error("QQ消息发送失败: chat_id 缺失或含非法字符")
             return False
+
+        try:
+            headers = {**self._auth_headers(), "Content-Type": "application/json"}
+            chat_type = (message.metadata or {}).get("chat_type", "")
+
+            if chat_type == "group":
+                # v2 群聊消息（主动推送已于 2025-04-21 停止，以被动回复为主）
+                payload = self._build_v2_payload(message)
+                resp = requests.post(
+                    "https://api.sgroup.qq.com/v2/groups/" + message.chat_id + "/messages",
+                    headers=headers,
+                    json=payload,
+                    timeout=10,
+                )
+            elif chat_type in ("c2c", "single", "friend"):
+                # v2 私聊（C2C）消息
+                payload = self._build_v2_payload(message)
+                resp = requests.post(
+                    "https://api.sgroup.qq.com/v2/users/" + message.chat_id + "/messages",
+                    headers=headers,
+                    json=payload,
+                    timeout=10,
+                )
+            else:
+                # 频道消息（默认）
+                payload = {"content": message.content}
+                if message.message_id:
+                    payload["msg_id"] = message.message_id  # 回复时可携带原消息ID
+                if self.message_merge:
+                    payload["embed"] = {"title": "系统消息", "description": "此消息为合并发送"}
+                resp = requests.post(
+                    "https://api.sgroup.qq.com/channels/" + message.chat_id + "/messages",
+                    headers=headers,
+                    json=payload,
+                    timeout=10,
+                )
+
+            if resp.status_code in self._OK_STATUS:
+                return True
+
+            logging.error("QQ消息发送失败 (HTTP %s): %s", resp.status_code, resp.text[:200])
+            return False
+        except Exception as e:
+            logging.error("QQ消息发送异常: %s", e)
+            return False
+
+    def _build_v2_payload(self, message: UnifiedMessage) -> Dict[str, Any]:
+        """构造 v2 群聊/私聊消息体（content/msg_type/msg_id/msg_seq）"""
+        metadata = message.metadata or {}
+        payload: Dict[str, Any] = {
+            "content": message.content,
+            "msg_type": int(metadata.get("msg_type", 0)),  # 0 文本, 2 markdown, 3 ark, 4 embed
+        }
+        if message.message_id:
+            payload["msg_id"] = message.message_id  # 被动回复标记（群 5 分钟/C2C 60 分钟有效）
+            payload["msg_seq"] = int(metadata.get("msg_seq", 1))  # 同 msg_id 去重序号
+        return payload
 
     def receive_message(self) -> Optional[UnifiedMessage]:
         """接收消息 (需通过 Webhook 回调)"""
@@ -313,25 +439,72 @@ class QQAdapter(ChannelAdapter):
             },
         )
 
-    def verify_signature(self, timestamp: str, sign: str, body: str) -> bool:
-        """
-        验证回调签名 (QQ频道使用 HMAC-SHA256)
+    # ============================================================
+    # Webhook 验签（官方规范: Ed25519，见 wiki develop/api-v2 sign 页）
+    # ============================================================
 
-        参数:
-        timestamp: 时间戳
-        sign: 签名
-        body: 请求体
+    def _derive_webhook_signing_key(self):
+        """按官方规则派生 Ed25519 密钥对: Secret 倍增至 >=32 字节后截取前 32 字节作为 seed"""
+        if not ED25519_AVAILABLE or not self.secret:
+            return None
+        seed = self.secret
+        while len(seed) < 32:
+            seed = seed * 2
+        seed = seed[:32]
+        return _Ed25519SigningKey.from_string(seed.encode("utf-8"), curve=_Ed25519Curve)
+
+    def verify_webhook_signature(self, headers: Dict[str, str], body: str) -> bool:
+        """验证 QQ 平台 Webhook 推送签名（官方 Ed25519 方案）
+
+        - 签名值: 请求头 X-Signature-Ed25519（hex 编码的 64 字节 Ed25519 签名）
+        - 签名输入: 请求头 X-Signature-Timestamp 原始字符串 + 原始请求体
+        - 验签密钥: 由 Bot Secret 派生的公钥（平台侧持有同一 Secret，可派生相同密钥对）
         """
-        if not self.secret:
+        if not self.secret or not ED25519_AVAILABLE:
+            logging.error("QQ Webhook 验签不可用: 缺少 secret 或 ecdsa 库（pip install ecdsa）")
             return False
 
-        # 构造签名字符串: timestamp + body
-        sign_str = timestamp + body
-        expected_sign = hmac.new(
-            self.secret.encode("utf-8"), sign_str.encode("utf-8"), digestmod=hashlib.sha256
-        ).hexdigest()
+        signature_hex = (headers.get("X-Signature-Ed25519") or "").strip()
+        timestamp = headers.get("X-Signature-Timestamp") or ""
+        if not signature_hex or not timestamp:
+            logging.warning("QQ Webhook 验签失败: 缺少签名请求头")
+            return False
 
-        return hmac.compare_digest(expected_sign, sign)
+        try:
+            signature = bytes.fromhex(signature_hex)
+        except ValueError:
+            logging.warning("QQ Webhook 验签失败: 签名不是合法 hex")
+            return False
+
+        # 官方校验: 64 字节定长且最高 3 bit 必须为 0（Ed25519 编码约束）
+        if len(signature) != 64 or signature[63] & 224 != 0:
+            logging.warning("QQ Webhook 验签失败: 签名长度或格式非法")
+            return False
+
+        signing_key = self._derive_webhook_signing_key()
+        if signing_key is None:
+            return False
+
+        message = timestamp.encode("utf-8") + body.encode("utf-8")
+        try:
+            return signing_key.get_verifying_key().verify(signature, message)
+        except Exception:
+            logging.warning("QQ Webhook 验签失败: 签名不匹配")
+            return False
+
+    def build_webhook_validation_response(self, plain_token: str, event_ts: str) -> Dict[str, str]:
+        """op 13 回调地址验证应答。
+
+        平台配置回调地址时发送 op 13 验证请求（payload 含 plain_token/event_ts），
+        需用 Bot Secret 派生的私钥对 event_ts + plain_token 签名并原样应答。
+        """
+        signing_key = self._derive_webhook_signing_key()
+        if signing_key is None:
+            raise RuntimeError("Ed25519 签名不可用: 缺少 secret 或 ecdsa 库（pip install ecdsa）")
+
+        message = event_ts.encode("utf-8") + plain_token.encode("utf-8")
+        signature = signing_key.sign(message)
+        return {"plain_token": plain_token, "signature": signature.hex()}
 
     def get_channel_config(self) -> Dict[str, Any]:
         return {

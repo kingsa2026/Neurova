@@ -255,8 +255,10 @@ class EvolutionOrchestrator:
         # 更新权重
         self.tool_weights.update_weight(tool_name, success, latency)
 
-        # 更新生命周期（touch 只记录使用，不关心成败）
-        self.tool_lifecycle.touch(tool_name)
+        # 更新生命周期
+        # P1 修复: touch 默认 success=True，漏传会把失败计入 success_calls，
+        # 导致损坏的工具在生命周期评估中被重新激活；必须透传真实成败。
+        self.tool_lifecycle.touch(tool_name, success=success)
 
         # 可能触发生命周期评估
         self._maybe_evaluate_lifecycle()

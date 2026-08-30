@@ -10,9 +10,12 @@ from neurova.core.logger import get_logger
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 from neurova.asr.base import ASRBase
+
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = get_logger(__name__)
 
@@ -192,7 +195,7 @@ class FunASREngine(ASRBase):
             self._logger.error(f"转写失败: {e}", exc_info=True)
             return {"text": "", "error": str(e)}
 
-    def _transcribe_sync(self, audio: np.ndarray, language: str) -> Dict[str, Any]:
+    def _transcribe_sync(self, audio: "np.ndarray", language: str) -> Dict[str, Any]:
         """同步转写"""
         # 模拟转写结果（实际实现需要调用 FunASR API）
         # 这里返回模拟结果

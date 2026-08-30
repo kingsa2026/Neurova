@@ -70,6 +70,10 @@ class ToolMemoryIntegration:
         self.failure_penalty: float = failure_penalty
         self.decay_rate: float = decay_rate
         self.muscle_memory_threshold: float = muscle_memory_threshold
+        # 维护触发（docs/tool-memory-muscle-analysis.md P-A/P-F）：遗忘与生命周期
+        # 清理原为无调用方的死代码，借 record_tool_usage 计数周期性触发
+        self.maintenance_interval: int = 50
+        self._ops_since_maintenance: int = 0
         logger.info("ToolMemoryIntegration initialized")
 
     def record_tool_usage(
@@ -147,7 +151,33 @@ class ToolMemoryIntegration:
             except Exception as e:
                 logger.exception("肌肉记忆记录失败: %s", e)
 
+        # 周期性维护（遗忘 + 下线工具清理），计数在锁内递增
+        with self._lock:
+            self._ops_since_maintenance += 1
+            due = self._ops_since_maintenance >= self.maintenance_interval
+            if due:
+                self._ops_since_maintenance = 0
+        if due:
+            try:
+                self._run_maintenance()
+            except Exception as e:  # noqa: BLE001 - 维护失败不影响主流程
+                logger.warning("工具记忆维护失败: %s", e)
+
         logger.debug("Recorded tool usage: %s, success=%s", tool_name, success)
+
+    def _run_maintenance(self) -> int:
+        """执行一次记忆维护：遗忘检查 + 下线工具条目清理。
+
+        P-A/P-F 修复：两者原先均无调用方（死代码），现由 record_tool_usage
+        按 maintenance_interval 周期触发。返回被遗忘/清理的条目数。
+        """
+        cleaned = 0
+        if self.muscle_memory:
+            cleaned += self.muscle_memory.check_forgotten()
+        cleaned += self._cleanup_deprecated_tools()
+        if cleaned:
+            logger.info("工具记忆维护完成: 处理 %s 个条目", cleaned)
+        return cleaned
 
     def get_tool_stats(self, tool_name: str = None) -> Dict[str, Any]:
         """获取工具统计"""
@@ -226,14 +256,23 @@ class ToolMemoryIntegration:
                         "dynamic_threshold": dynamic_threshold,
                     }
 
-                    # Bug 13: 命中肌肉记忆路径时记录一次使用，使 muscle_memory_hits 计数 > 0
-                    self.record_tool_usage(
-                        tool_name=tool_name,
-                        success=True,
-                        tool_source="muscle_memory",
-                        problem_text=user_input,
-                        tool_params=best_item.parameters,
-                    )
+                    # Bug 13 修正（docs/tool-memory-muscle-analysis.md P-C）：命中
+                    # 肌肉记忆本身不是一次工具执行，原实现记 success=True 会系统性
+                    # 推高条目成功率（回声室）。改为只记 hit 到使用历史（供 RSI 的
+                    # muscle_memory_hits 统计），成功/失败由真实执行结果另行记录
+                    with self._lock:
+                        self.usage_history.append(
+                            ToolUsageRecord(
+                                tool_name=tool_name,
+                                success=True,
+                                context={
+                                    "tool_source": "muscle_memory",
+                                    "hit_only": True,
+                                    "confidence": confidence,
+                                    "problem_text": user_input,
+                                },
+                            )
+                        )
 
                     if confidence >= dynamic_threshold:
                         return result, "auto_execute"

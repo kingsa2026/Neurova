@@ -17,7 +17,7 @@ AgentTeam.orchestrate 的消息式编排由此获得真实执行体。
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
 

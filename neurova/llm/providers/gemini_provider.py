@@ -9,6 +9,7 @@ Gemini Provider
 from neurova.core.logger import get_logger
 import time
 import typing
+from typing import Any, Dict
 
 from neurova.llm.providers.base import BaseProvider
 from neurova.llm.providers.types import ConnectionResult, ModelInfo, ProbeResult, ProviderCapability, ProviderType

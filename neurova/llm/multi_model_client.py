@@ -430,7 +430,9 @@ class MultiModelLLMClient:
 
         try:
             start_time = time.time()
-            async for chunk in client.client.chat_stream(messages, **kwargs):
+            # P1 修复: chat_stream 是同步生成器，无法 `async for`（TypeError）。
+            # 必须调用异步版本 chat_stream_async。
+            async for chunk in client.client.chat_stream_async(messages, **kwargs):
                 yield chunk
             time.time() - start_time
             client.increment_request(success=True)

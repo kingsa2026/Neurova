@@ -97,8 +97,30 @@ async def shutdown_agent(agent) -> None:
     conversation_buffer = getattr(agent, "conversation_buffer", None)
     if conversation_buffer and hasattr(conversation_buffer, "flush"):
         try:
-            await conversation_buffer.flush()
-            logger.debug("对话历史缓冲已刷新")
+            # P2-1 修复: flush() 是同步方法, 返回 List[MemoryItem]。
+            # 原实现 `await conversation_buffer.flush()` 对返回的 list 执行 await 抛
+            # TypeError 被 except 吞掉, 且已刷出的记忆项被直接丢弃 —— 关闭时对话数据丢失。
+            # 现改为同步 flush, 并经记忆写入队列持久化到长期存储。
+            items = conversation_buffer.flush()
+            if items:
+                memory_manager = getattr(agent, "memory_manager", None)
+                write_queue = getattr(memory_manager, "_write_queue", None)
+                if write_queue is not None and hasattr(write_queue, "enqueue_batch"):
+                    write_queue.enqueue_batch(items)
+                    written = (
+                        write_queue.flush_to_storage()
+                        if hasattr(write_queue, "flush_to_storage")
+                        else 0
+                    )
+                    logger.debug(
+                        "对话历史缓冲已刷新: %s 项入队, 写入 %s 条", len(items), written
+                    )
+                else:
+                    logger.warning(
+                        "记忆写入队列不可用, %s 项缓冲记忆无法持久化", len(items)
+                    )
+            else:
+                logger.debug("对话历史缓冲已刷新（无待处理项）")
         except Exception as e:
             logger.warning("对话历史缓冲刷新失败: %s", e)
 
