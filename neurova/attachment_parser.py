@@ -139,6 +139,49 @@ def extract_attachment_text(data: bytes, filename: str, file_type: str) -> Tuple
     if ext == ".csv":
         text = _decode_text(data, filename)
         return (text, "csv") if text else (None, "csv_decode_failed")
+    if ext in (".html", ".htm"):
+        try:
+            return _extract_html(data), "html"
+        except Exception as e:
+            return None, f"html_error:{type(e).__name__}"
 
     # 未支持的文档/二进制（doc/xls/ppt 旧格式）不抽取文本
     return None, "unsupported_format"
+
+
+def _extract_html(data: bytes) -> str:
+    """提取 HTML 正文文本（stdlib HTMLParser：剥离 script/style/标签）。"""
+    from html.parser import HTMLParser
+
+    class _TextExtractor(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self._skip_depth = 0
+            self._parts: list = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ("script", "style"):
+                self._skip_depth += 1
+
+        def handle_endtag(self, tag):
+            if tag in ("script", "style") and self._skip_depth > 0:
+                self._skip_depth -= 1
+
+        def handle_data(self, data):
+            if self._skip_depth == 0:
+                text = data.strip()
+                if text:
+                    self._parts.append(text)
+
+        def get_text(self) -> str:
+            return "\n".join(self._parts)
+
+    raw = _decode_text(data, "page.html") or ""
+    parser = _TextExtractor()
+    try:
+        parser.feed(raw)
+        parser.close()
+    except Exception:
+        pass
+    text = parser.get_text()
+    return text[:MAX_EXTRACT_CHARS] if text else raw[:MAX_EXTRACT_CHARS]
