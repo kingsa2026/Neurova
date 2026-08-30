@@ -296,3 +296,22 @@ secret_*.json
 !Makefile
 !LICENSE
 !docs/**/*.md
+
+# ==================== 会话临时产物（不入库） ====================
+/_em.txt
+/_mp.txt
+/_mp2.txt
+/_r1.txt
+/_r2.txt
+/evil.py
+/weather_xuchang.py
+/pdd_api.js
+/pdd_docjs.js
+/pdd_search.js
+/ai_news_*.html
+/data-flow-diagram.html
+/data-flow-detailed.html
+/_i18n_scan/
+/NeurUI/src/i18n/locales_bak_canvas/
+/.jd_api.json
+/.tmp_kb_import.txt
