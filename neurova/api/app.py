@@ -174,6 +174,27 @@ def _get_default_llm():
     return provider, model
 
 
+def _agent_config_from_saved(cfg: dict, agent_id: str, workspace_path: str):
+    """从 agent_config.json 的 dict 重建 AgentConfig（含归属/描述回填）。
+
+    归属持久化修复：owner_user_id 旧格式缺失 → None（保持历史行为，
+    chat 的 _user_can_access_agent 将拒绝非 admin 访问，属主需重新保存）。
+    """
+    from neurova.agent_core import AgentConfig
+
+    agent_config = AgentConfig(
+        name=cfg.get("name", ""),
+        agent_id=agent_id,
+        workspace_path=workspace_path,
+        llm_model=cfg.get("model", "gpt-4") or "gpt-4",
+        llm_provider=cfg.get("provider", ""),
+        owner_user_id=cfg.get("owner_user_id") or None,
+    )
+    # description 不是 AgentConfig 构造参数，存到 config 属性中
+    agent_config.description = cfg.get("description", "")
+    return agent_config
+
+
 def _load_saved_agents(app_state: AppState, default_workspace: str) -> None:
     """从 workspace 目录加载已持久化的 agent 配置"""
     import json as _json
@@ -222,15 +243,7 @@ def _load_saved_agents(app_state: AppState, default_workspace: str) -> None:
             model = cfg.get("model", "gpt-4")
             provider = cfg.get("provider", "")
 
-            agent_config = AgentConfig(
-                name=name,
-                agent_id=agent_id,
-                workspace_path=workspace,
-                llm_model=model or "gpt-4",
-                llm_provider=provider,
-            )
-            # description 不是 AgentConfig 参数，存到 config 中
-            agent_config.description = cfg.get("description", "")
+            agent_config = _agent_config_from_saved(cfg, agent_id, workspace)
             agent = Agent(config=agent_config)
             app_state.add_agent(agent_id, agent)
             loaded += 1
@@ -665,6 +678,19 @@ async def _on_startup(app_state: AppState) -> None:
     # 注册核心模块
     _register_core_modules(app_state)
 
+    # P1 遗留③：触发器启动装配（cron 恢复 + scheduler 挂载；失败不阻塞启动）
+    try:
+        from neurova.collaboration.neurflow.storage import NeurflowStorage as _NfStorage
+        from neurova.collaboration.neurflow.models import TriggerType as _TriggerType
+        from neurova.collaboration.neurflow.triggers import setup_workflow_triggers
+
+        _nf = _NfStorage()
+        await setup_workflow_triggers(
+            loader=lambda: _nf.list_enabled_triggers(_TriggerType.CRON)
+        )
+    except Exception as e:
+        logger.warning("workflow triggers bootstrap skipped: %s", e)
+
     # 启动管理器
     if app_state.startup_manager:
         result = app_state.startup_manager.start()
@@ -696,6 +722,14 @@ async def _on_shutdown(app_state: AppState) -> None:
     """
     logger.info("Neurova API Server shutting down...")
 
+    # P1 遗留③：停掉触发器调度器
+    try:
+        from neurova.collaboration.neurflow.triggers import shutdown_workflow_triggers
+
+        await shutdown_workflow_triggers()
+    except Exception as e:
+        logger.warning("workflow triggers shutdown error: %s", e)
+
     # 停止渠道管理器（stop() 是 async 方法；加超时防止挂起阻塞关闭流程）
     if app_state.channel_manager:
         try:
@@ -720,6 +754,21 @@ async def _on_shutdown(app_state: AppState) -> None:
     # 停止启动管理器
     if app_state.startup_manager:
         app_state.startup_manager.stop()
+
+    # 关闭 camofox-browser 子进程(supervisor 拉起的)并清理临时痕迹
+    try:
+        from neurova.computer_use.camofox_supervisor import get_camofox_supervisor
+
+        supervisor = get_camofox_supervisor()
+        if supervisor.is_running and getattr(supervisor, "_managed_by_supervisor", False):
+            await asyncio.wait_for(supervisor.stop(), timeout=AGENT_SHUTDOWN_TIMEOUT)
+            logger.info("CamofoxSupervisor stopped")
+    except asyncio.TimeoutError:
+        logger.warning(
+            "CamofoxSupervisor stop timed out after %.1fs; skipping", AGENT_SHUTDOWN_TIMEOUT
+        )
+    except Exception as e:
+        logger.warning("CamofoxSupervisor stop error: %s", e)
 
     logger.info("Neurova API Server shut down complete")
 
