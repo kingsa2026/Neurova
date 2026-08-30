@@ -16,7 +16,7 @@ Neurflow 内置节点定义模块 — 垂直切片 9
 
 import asyncio
 from neurova.core.logger import get_logger
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from .agent_manager import get_agent_manager
 from .models import NodeDefinition
@@ -429,6 +429,20 @@ BUILTIN_NODES: List[Dict[str, Any]] = [
         "outputs": [{"id": "output", "label": "输出"}],
         "source": "builtin",
     },
+    {
+        "type": "builtin:subflow",
+        "label": "子工作流",
+        "icon": "🧩",
+        "category": "flow",
+        "description": "调用另一个已发布的工作流（支持入参映射与嵌套深度/循环守卫）",
+        "sub_blocks": [
+            {"id": "workflow_id", "title": "目标工作流 ID", "type": "text", "required": True},
+            {"id": "input_mapping", "title": "入参映射（JSON）", "type": "code", "language": "json"},
+        ],
+        "inputs": [{"id": "input", "label": "输入"}],
+        "outputs": [{"id": "output", "label": "输出"}],
+        "source": "builtin",
+    },
     # ========== 人工输入节点 ==========
     {
         "type": "builtin:human_input",
@@ -555,15 +569,74 @@ BUILTIN_NODES: List[Dict[str, Any]] = [
                 "default_value": "local",
                 "options": [
                     {"label": "本地记忆库", "value": "local"},
+                    {"label": "心流知识库", "value": "iflow"},
                     {"label": "飞书知识库", "value": "feishu"},
                     {"label": "IMA 知识库", "value": "ima"},
+                    {"label": "自定义 API", "value": "custom"},
                 ],
             },
             {"id": "query", "title": "检索词", "type": "input", "required": True},
             {"id": "limit", "title": "返回条数", "type": "slider", "default_value": 5, "min": 1, "max": 50},
-            {"id": "api_url", "title": "API 地址（远程）", "type": "input"},
-            {"id": "api_key", "title": "API Key（远程）", "type": "input"},
-            {"id": "dataset_id", "title": "数据集 ID（远程）", "type": "input"},
+            # R-9: 配置引用对所有远程类型通用（local 无远端配置）
+            {
+                "id": "kb_config_id",
+                "title": "知识库配置 ID（引用已配置的远程库，无需重复填密钥）",
+                "type": "input",
+                "condition": {"field": "kb_type", "operator": "neq", "value": "local"},
+            },
+            # 自定义 API 专属
+            {
+                "id": "api_url",
+                "title": "API 地址",
+                "type": "input",
+                "condition": {"field": "kb_type", "value": "custom"},
+            },
+            {
+                "id": "api_key",
+                "title": "API Key",
+                "type": "input",
+                "condition": {"field": "kb_type", "value": "custom"},
+            },
+            {
+                "id": "dataset_id",
+                "title": "数据集 ID",
+                "type": "input",
+                "condition": {"field": "kb_type", "value": "custom"},
+            },
+            # 飞书专属
+            {
+                "id": "app_id",
+                "title": "飞书 App ID",
+                "type": "input",
+                "condition": {"field": "kb_type", "value": "feishu"},
+            },
+            {
+                "id": "app_secret",
+                "title": "飞书 App Secret",
+                "type": "input",
+                "condition": {"field": "kb_type", "value": "feishu"},
+            },
+            {
+                "id": "space_id",
+                "title": "飞书知识空间 ID（可选）",
+                "type": "input",
+                "condition": {"field": "kb_type", "value": "feishu"},
+            },
+            # 基础 URL 通用（iflow/ima）
+            {
+                "id": "base_url",
+                "title": "基础 URL（iflow/ima MCP）",
+                "type": "input",
+                "condition": {"field": "kb_type", "operator": "in", "value": ["iflow", "ima"]},
+            },
+            # ima 专属开关
+            {
+                "id": "allow_local",
+                "title": "允许本机服务（ima MCP）",
+                "type": "toggle",
+                "default_value": False,
+                "condition": {"field": "kb_type", "value": "ima"},
+            },
         ],
         "inputs": [],
         "outputs": [{"id": "results", "label": "检索结果"}],
@@ -1693,66 +1766,86 @@ def _safe_request(method: str, url: str, **kwargs) -> "_OutboundResponse":
     return _OutboundResponse(status, body, final_url)
 
 
-async def exec_knowledge_base(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """知识库检索节点执行器
+def _load_kb_config_secret(config_id: str, user_id: str = "") -> Optional[str]:
+    """从用户级知识库配置读取解密后的 API Key（R-7 B: kb_config_id 引用）。
 
-    - kb_type=local：从 memory_manager.search 检索本地记忆库
-    - kb_type=feishu/ima/...：POST 到远程知识库 API（api_url + api_key + dataset_id）
+    配置不存在/无加密/密钥缺失 → 返回 None（节点仍可用手填 api_key 兜底）。
     """
+    if not config_id:
+        return None
+    try:
+        from neurova.knowledge.storage import get_knowledge_storage
+
+        storage = get_knowledge_storage()
+        cfg = storage.get_config_by_id(config_id)
+        if not cfg:
+            return None
+        if user_id and cfg.get("user_id") != user_id:
+            return None
+        return storage.decrypt_api_key(config_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("读取知识库配置失败 config_id=%s: %s", config_id, e)
+        return None
+
+
+async def exec_knowledge_base(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """知识库检索节点执行器（R-5: 统一走 KBAdapter 适配器）
+
+    - kb_type=local：ctx["memory_manager"].search（本地记忆库）
+    - kb_type=iflow：心流知识库（startSearch → pollSearch，api_key 必填）
+    - kb_type=feishu/ima/自定义：GenericREST（POST api_url + Bearer + dataset_id，
+      向后兼容旧节点配置）
+    - kb_config_id（R-7 B）：引用用户级配置（storage.configs），自动注入解密后的
+      api_key/app_secret/base_url；节点手填字段仍可覆盖。
+
+    远程适配器 URL 一律过 SSRF 校验（_validate_outbound_url 同语义）。
+    """
+    from neurova.knowledge.adapters import get_adapter
+
     kb_type = str(config.get("kb_type") or "local")
     query = str(config.get("query", "") or "")
     limit = int(config.get("limit", 5) or 5)
+    user_id = str((ctx or {}).get("user_id", ""))
 
-    if kb_type == "local":
-        memory_manager = ctx.get("memory_manager")
-        if memory_manager is None:
-            return {
-                "status": "failed",
-                "error": "本地知识库不可用：ctx 中缺少 memory_manager",
-                "output": None,
-            }
+    # R-7 B: kb_config_id 引用用户级配置
+    kb_config_id = str(config.get("kb_config_id", "") or "")
+    cfg_secret = _load_kb_config_secret(kb_config_id, user_id)
+    cfg_settings: Dict[str, Any] = {}
+    if kb_config_id:
         try:
-            items = memory_manager.search(query=query, limit=limit)
-            results = [
-                item.to_dict() if hasattr(item, "to_dict") else dict(item)
-                for item in (items or [])
-            ]
-        except Exception as e:  # noqa: BLE001
-            return {"status": "failed", "error": str(e), "output": None}
-        return {
-            "status": "success",
-            "output": {"kb_type": "local", "results": results},
-        }
+            from neurova.knowledge.storage import get_knowledge_storage
 
-    # 远程知识库
-    api_url = str(config.get("api_url", "") or "")
-    if not api_url:
-        return {
-            "status": "failed",
-            "error": f"远程知识库({kb_type})缺少 api_url",
-            "output": None,
-        }
+            cfg = get_knowledge_storage().get_config_by_id(kb_config_id)
+            if cfg and (not user_id or cfg.get("user_id") == user_id):
+                cfg_settings = cfg.get("settings", {}) or {}
+        except Exception:  # noqa: BLE001
+            cfg_settings = {}
 
-    headers: Dict[str, Any] = {}
-    api_key = str(config.get("api_key", "") or "")
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    payload = {
-        "query": query,
-        "dataset_id": config.get("dataset_id"),
-        "top_k": limit,
+    remote_config = {
+        "api_url": config.get("api_url") or cfg_settings.get("api_url"),
+        # 配置引用优先：解密的密钥；节点手填 api_key 优先覆盖
+        "api_key": config.get("api_key") or cfg_secret,
+        "dataset_id": config.get("dataset_id") or cfg_settings.get("dataset_id"),
+        "base_url": config.get("base_url") or cfg_settings.get("base_url"),
+        "timeout": config.get("timeout", 30),
+        # ima MCP 为本机服务：允许显式放行环回/私网地址（默认关闭）
+        "allow_local": config.get("allow_local", False),
+        # 飞书知识库
+        "app_id": config.get("app_id") or cfg_settings.get("app_id"),
+        "app_secret": config.get("app_secret") or cfg_settings.get("app_secret"),
+        "space_id": config.get("space_id") or cfg_settings.get("space_id"),
     }
+    adapter = get_adapter(kb_type, remote_config, ctx)
+    result = await adapter.search(query, limit)
 
-    try:
-        resp = _safe_request("POST", api_url, json=payload, headers=headers, timeout=30)
-        data = resp.json() if getattr(resp, "ok", False) else {}
-        results = data.get("results", [])
-    except Exception as e:  # noqa: BLE001
-        return {"status": "failed", "error": str(e), "output": None}
-
+    # 保持节点契约: 下游变量引用 output.results（执行引擎按 result["output"] 消费）
     return {
-        "status": "success",
-        "output": {"kb_type": kb_type, "results": results},
+        "status": result.get("status", "failed"),
+        "output": {
+            "kb_type": kb_type,
+            "results": result.get("results", []),
+        },
+        **({"error": result["error"]} if result.get("error") else {}),
     }
 
 
@@ -2025,6 +2118,98 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
 
 # ==================== 执行器注册 ====================
 
+
+async def exec_subflow(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """子工作流节点（P2-4.3）：调用另一个已发布工作流。
+
+    安全守卫（subflow.py 纯函数）：嵌套深度 ≤5、祖先链循环检测。
+    workflow 加载器经 ctx["subflow_loader"] 注入（execution_engine 装配）；
+    未注入时返回明确错误信封而非静默失败。
+    """
+    import json as _json
+
+    from .subflow import (
+        SubflowCycleDetected,
+        SubflowDepthExceeded,
+        check_subflow_cycle,
+        check_subflow_depth,
+        resolve_input_mapping,
+        validate_subflow_config,
+    )
+
+    try:
+        workflow_id = validate_subflow_config(config)
+    except ValueError as e:
+        return {"status": "error", "output": None, "error": str(e)}
+
+    try:
+        depth = int(ctx.get("_subflow_depth", 0) or 0)
+        check_subflow_depth(depth)
+        check_subflow_cycle(workflow_id, set(ctx.get("_subflow_chain", []) or []))
+    except (SubflowDepthExceeded, SubflowCycleDetected) as e:
+        return {"status": "error", "output": None, "error": str(e)}
+
+    loader = ctx.get("subflow_loader")
+    if loader is None:
+        return {
+            "status": "error",
+            "output": None,
+            "error": "SUBFLOW_LOADER_NOT_CONFIGURED",
+        }
+
+    workflow = loader(workflow_id)
+    if workflow is None:
+        return {
+            "status": "error",
+            "output": None,
+            "error": "WORKFLOW_NOT_PUBLISHED",
+        }
+
+    mapping_raw = config.get("input_mapping") or {}
+    if isinstance(mapping_raw, str):
+        try:
+            mapping_raw = _json.loads(mapping_raw) if mapping_raw.strip() else {}
+        except Exception:
+            return {"status": "error", "output": None, "error": "INVALID_INPUT_MAPPING_JSON"}
+
+    sub_inputs = resolve_input_mapping(
+        mapping_raw, ctx.get("inputs", {}) or {}, ctx.get("node_results", {}) or {}
+    )
+
+    executor = ctx.get("subflow_executor")
+    if executor is None:
+        return {
+            "status": "error",
+            "output": None,
+            "error": "SUBFLOW_EXECUTOR_NOT_CONFIGURED",
+        }
+
+    try:
+        instance = await executor(
+            workflow,
+            sub_inputs,
+            {
+                "_subflow_depth": depth + 1,
+                "_subflow_chain": list(ctx.get("_subflow_chain", []) or []) + [workflow_id],
+            },
+        )
+    except Exception as e:
+        logger.warning("subflow 执行失败: %s", e)
+        return {"status": "error", "output": None, "error": "SUBFLOW_EXECUTION_FAILED"}
+
+    status_value = getattr(instance, "status", None)
+    ok = getattr(status_value, "value", "") == "completed"
+    return {
+        "status": "success" if ok else "error",
+        "output": {
+            "workflow_id": workflow_id,
+            "execution_id": getattr(instance, "id", None),
+            "outputs": getattr(instance, "outputs", None),
+        },
+        "error": getattr(instance, "error", None),
+    }
+
+
 # 执行器映射表
 BUILTIN_EXECUTORS: Dict[str, Callable] = {
     "builtin:start": exec_start,
@@ -2044,6 +2229,7 @@ BUILTIN_EXECUTORS: Dict[str, Callable] = {
     "builtin:emotion": exec_emotion,
     "builtin:variable": exec_variable,
     "builtin:transform": exec_transform,
+    "builtin:subflow": exec_subflow,
     "builtin:human_input": exec_human_input,
     "builtin:approval": exec_approval,
     "builtin:text_input": exec_text_input,
