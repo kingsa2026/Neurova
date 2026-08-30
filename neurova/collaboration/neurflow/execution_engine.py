@@ -267,6 +267,20 @@ class WorkflowExecutor:
             execution_id="",
         )
 
+    def _default_subflow_loader(self):
+        """默认 subflow 加载器：仅返回 PUBLISHED 工作流（惰性建 storage）。"""
+
+        def _load(ref):
+            from .models import WorkflowStatus
+            from .storage import NeurflowStorage
+
+            wf = NeurflowStorage().get_workflow(ref)
+            if wf is not None and wf.status == WorkflowStatus.PUBLISHED:
+                return wf
+            return None
+
+        return _load
+
     async def execute(
         self,
         workflow: WorkflowDefinition,
@@ -279,6 +293,9 @@ class WorkflowExecutor:
         crystallizer: Optional[Any] = None,
         session_id: Optional[str] = None,
         instance: Optional[ExecutionInstance] = None,
+        subflow_depth: int = 0,
+        subflow_chain: Optional[List[str]] = None,
+        subflow_loader: Optional[Callable] = None,
     ) -> ExecutionInstance:
         """
         执行工作流
@@ -344,6 +361,35 @@ class WorkflowExecutor:
             crystallizer=crystallizer,
         )
 
+        # P2 遗留①：subflow harness 注入（depth/chain/loader/递归 executor）
+        chain = list(subflow_chain or []) + [workflow.id]
+        parent_kwargs = dict(
+            user_id=user_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            memory_manager=memory_manager,
+            context_pool=context_pool,
+            emotion_module=emotion_module,
+            crystallizer=crystallizer,
+            subflow_loader=subflow_loader,
+        )
+
+        async def _subflow_executor(target_wf, sub_inputs, extra):
+            return await self.execute(
+                workflow=target_wf,
+                inputs=sub_inputs,
+                subflow_depth=extra.get("depth", 0),
+                subflow_chain=extra.get("chain"),
+                **parent_kwargs,
+            )
+
+        subflow_harness = {
+            "_subflow_depth": subflow_depth,
+            "_subflow_chain": chain,
+            "subflow_loader": subflow_loader or self._default_subflow_loader(),
+            "subflow_executor": _subflow_executor,
+        }
+
         # 发送工作流开始事件
         self._statuses[execution_id] = ExecutionStatus.RUNNING
         instance.status = WorkflowStatus.RUNNING
@@ -396,6 +442,7 @@ class WorkflowExecutor:
                             instance,
                             workflow.id,
                             execution_id,
+                            subflow_harness=subflow_harness,
                         )
                         for nid in active
                     ]
@@ -452,6 +499,7 @@ class WorkflowExecutor:
                         workflow.id,
                         execution_id,
                         skipped,
+                        subflow_harness=subflow_harness,
                     )
                     loop_driven.update(loop_plans.get(loop_id, {}).get("body", set()))
 
@@ -525,6 +573,7 @@ class WorkflowExecutor:
         instance: ExecutionInstance,
         workflow_id: str,
         execution_id: str,
+        subflow_harness: Optional[Dict[str, Any]] = None,
     ) -> None:
         """执行单个节点并记录结果/事件；失败抛异常由调用方聚合处理"""
         self._emit(
@@ -551,6 +600,7 @@ class WorkflowExecutor:
                     "crystallizer": resolution_context.crystallizer,
                     "variable_resolver": self._variable_resolver,
                     "resolution_context": resolution_context,
+                    **(subflow_harness or {}),
                 },
             )
             finished_at = time.time()
@@ -779,6 +829,7 @@ class WorkflowExecutor:
         workflow_id: str,
         execution_id: str,
         global_skipped: Set[str],
+        subflow_harness: Optional[Dict[str, Any]] = None,
     ) -> None:
         """驱动 loop 节点的循环体迭代（引擎级循环，body 节点由本方法调度）"""
         started_at = time.time()
@@ -857,12 +908,14 @@ class WorkflowExecutor:
                         workflow_id,
                         execution_id,
                         global_skipped,
+                        subflow_harness=subflow_harness,
                     )
                     continue
 
                 if body_node.type == "builtin:condition":
                     await self._execute_single_node(
-                        body_id, body_node, inputs, resolution_context, instance, workflow_id, execution_id
+                        body_id, body_node, inputs, resolution_context, instance, workflow_id, execution_id,
+                        subflow_harness=subflow_harness,
                     )
                     nres = resolution_context.node_results.get(body_id, {})
                     branch = "true"
@@ -877,7 +930,8 @@ class WorkflowExecutor:
                     continue
 
                 await self._execute_single_node(
-                    body_id, body_node, inputs, resolution_context, instance, workflow_id, execution_id
+                    body_id, body_node, inputs, resolution_context, instance, workflow_id, execution_id,
+                    subflow_harness=subflow_harness,
                 )
 
             iterations_done = iteration
