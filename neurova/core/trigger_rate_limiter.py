@@ -72,10 +72,17 @@ class TriggerRateLimiter:
             return int(tokens)
 
     def _maybe_cleanup(self, now: float) -> None:
-        """桶过多时清理长期空闲的（在持锁区间内调用）。"""
+        """桶过多时清理长期空闲的（在持锁区间内调用）。
+
+        P0-7/N5 修复：原实现清理体缩进在 return 之后不可达（桶满后
+        永不清理，慢性内存泄漏）。
+        """
         if len(self._buckets) < _MAX_BUCKETS:
             return
-            # noqa: 防御式清理；正常规模触发器远达不到阈值
-        stale = [k for k, b in self._buckets.items() if now - b["ts"] > _IDLE_SECONDS]
+        stale = [
+            k
+            for k, b in self._buckets.items()
+            if now - b.get("ts", 0.0) > _IDLE_SECONDS
+        ]
         for k in stale:
             del self._buckets[k]

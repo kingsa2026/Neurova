@@ -13,7 +13,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
-from neurova.api.auth import get_current_user_or_default
+from neurova.api.auth import get_current_user, get_current_user_or_default
 from neurova.api.endpoints import get_agent_instance
 from neurova.collaboration.neurflow.dag import get_dag_validator
 from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
@@ -1205,13 +1205,13 @@ async def execute_comfyui_node_endpoint(request: ComfyUIExecuteRequest):
 
 
 from neurova.collaboration.neurflow.execution_engine import DebugSession  # noqa: E402
+from neurova.collaboration.neurflow.execution_engine import get_node_mocks as _get_node_mocks  # noqa: E402
 
 
 # 全局注册表：execution_id → DebugSession（in-memory，仅调试用）
 _DEBUG_SESSIONS: Dict[str, DebugSession] = {}
 
 # 全局注册表：node_id → mock_output（in-memory，调试用）
-_NODE_MOCKS: Dict[str, Any] = {}
 
 
 class BreakpointRequest(BaseModel):
@@ -1288,10 +1288,11 @@ async def get_execution_variables(execution_id: str):
 @router.put("/nodes/{node_id}/mock")
 async def set_node_mock(node_id: str, body: MockNodeRequest):
     """为节点设置 mock 输出；clear=true 时清空（恢复真实执行）。"""
+    mocks = _get_node_mocks()
     if body.clear:
-        _NODE_MOCKS.pop(node_id, None)
+        mocks.pop(node_id, None)
         return {"node_id": node_id, "mocked": False}
-    _NODE_MOCKS[node_id] = body.mock_output
+    mocks[node_id] = body.mock_output
     return {"node_id": node_id, "mocked": True}
 
 
@@ -1349,17 +1350,33 @@ def _webhook_ingress_deps() -> Dict[str, Any]:
 webhook_ingress.set_deps_provider(_webhook_ingress_deps)
 
 
+# P0-7/N4：入站 body 上限（1MB）——限流在验签后，但超大 body 会先于一切
+# 消耗内存与带宽，必须在读 body 前按 Content-Length 硬拒
+_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024
+
+
 @router.post("/triggers/webhook/{trigger_id}/receive")
 async def receive_webhook_trigger(trigger_id: str, request: Request):
-    """外部系统入站触发工作流（HMAC 验签 + 限流 + 派发；逻辑在 webhook_ingress）。
+    """外部系统入站触发工作流（HMAC 验签 + 重放防护 + 限流 + 派发；逻辑在 webhook_ingress）。
 
     投递审计：无论成败均落 webhook_deliveries（P1 Step 7 表）。
     """
+    declared = request.headers.get("content-length")
+    try:
+        if declared and int(declared) > _WEBHOOK_MAX_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="PAYLOAD_TOO_LARGE")
+    except ValueError:
+        pass
+
     payload = await request.body()
+    if len(payload) > _WEBHOOK_MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="PAYLOAD_TOO_LARGE")
+
     header_sig = request.headers.get("X-Hub-Signature-256")
+    header_ts = request.headers.get("X-Neurova-Timestamp")
     try:
         result = await webhook_ingress.handle_webhook_ingress(
-            trigger_id, payload, header_sig
+            trigger_id, payload, header_sig, timestamp_header=header_ts
         )
     except webhook_ingress.IngressRejected as e:
         sig_valid = e.reason not in ("INVALID_SIGNATURE", "TRIGGER_NOT_FOUND")
@@ -1398,7 +1415,10 @@ class TriggerCreateRequest(BaseModel):
 
 
 @router.get("/workflows/{workflow_id}/triggers")
-async def list_workflow_triggers(workflow_id: str):
+async def list_workflow_triggers(
+    workflow_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """列出某工作流的全部触发器（secret 字段不回显）。"""
     storage = _get_storage()
     items = storage.list_triggers_by_workflow(workflow_id)
@@ -1420,7 +1440,11 @@ async def list_workflow_triggers(workflow_id: str):
 
 
 @router.post("/workflows/{workflow_id}/triggers")
-async def create_workflow_trigger(workflow_id: str, body: TriggerCreateRequest):
+async def create_workflow_trigger(
+    workflow_id: str,
+    body: TriggerCreateRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """创建触发器。
 
     webhook：自动生成 secret —— 明文仅本次响应返回一次，
@@ -1505,7 +1529,10 @@ async def create_workflow_trigger(workflow_id: str, body: TriggerCreateRequest):
 
 
 @router.delete("/triggers/{trigger_id}")
-async def delete_workflow_trigger(trigger_id: str):
+async def delete_workflow_trigger(
+    trigger_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """删除触发器；同步移除 cron job。"""
     storage = _get_storage()
     if not storage.get_trigger(trigger_id):
@@ -1521,7 +1548,11 @@ async def delete_workflow_trigger(trigger_id: str):
 
 
 @router.post("/triggers/{trigger_id}/fire")
-async def fire_trigger(trigger_id: str, body: Dict[str, Any] = Body(default={})):
+async def fire_trigger(
+    trigger_id: str,
+    body: Dict[str, Any] = Body(default={}),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """手动触发（manual/测试用）：按触发器绑定的 workflow 直接派发。"""
     storage = _get_storage()
     trigger = storage.get_trigger(trigger_id)
