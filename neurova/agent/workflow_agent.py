@@ -84,3 +84,54 @@ def list_workflow_agents(agents: List[AgentInfo]) -> List[AgentInfo]:
         for a in agents
         if (a.metadata or {}).get("source_type") == _SOURCE_TYPE
     ]
+
+
+# deps 工厂注册表（装配方启动时注入；本模块零存储 import）
+_deps_provider = None
+
+
+def set_workflow_agent_deps(provider) -> None:
+    """注册默认 deps 工厂（应用启动装配时调用一次）。"""
+    global _deps_provider
+    _deps_provider = provider
+
+
+async def execute_workflow_agent(
+    agent_id: str,
+    inputs: Dict[str, Any],
+    deps: Dict[str, Any] = None,
+) -> Dict[str, Any]:
+    """chat 侧派发桥接（P2 Step 4）：按 agent_id 找到绑定的工作流并执行。
+
+    deps 键（可注入；缺省走 set_workflow_agent_deps 注册的工厂）：
+      load_agent(agent_id) → AgentInfo | None
+      load_published_workflow(workflow_id) → WorkflowDefinition | None
+      run_workflow(workflow, inputs) → ExecutionInstance（awaitable）
+
+    返回统一信封：{success, outputs[, error, execution_id]}。
+    本函数不触碰 chat_pipeline 主干——接入点由 tool_executor 层调用。
+    """
+    if deps is None:
+        if _deps_provider is None:
+            return {"success": False, "error": "WORKFLOW_AGENT_DEPS_NOT_CONFIGURED"}
+        deps = _deps_provider()
+
+    agent = deps["load_agent"](agent_id)
+    if agent is None:
+        return {"success": False, "error": "AGENT_NOT_FOUND"}
+    if (agent.metadata or {}).get("source_type") != _SOURCE_TYPE:
+        return {"success": False, "error": "NOT_A_WORKFLOW_AGENT"}
+
+    workflow_id = agent.metadata.get("workflow_id")
+    workflow = deps["load_published_workflow"](workflow_id)
+    if workflow is None:
+        return {"success": False, "error": "WORKFLOW_NOT_PUBLISHED"}
+
+    instance = await deps["run_workflow"](workflow, inputs)
+    status_value = getattr(instance, "status", None)
+    return {
+        "success": getattr(status_value, "value", "") == "completed",
+        "outputs": getattr(instance, "outputs", None),
+        "error": getattr(instance, "error", None),
+        "execution_id": getattr(instance, "id", None),
+    }
