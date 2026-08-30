@@ -148,7 +148,7 @@ async def connect_mcp_server(
     config = {
         "id": sid,
         "name": body.name,
-        "transport": body.transport,
+        "transport": body.transport or "",
         "url": body.url,
         "command": body.command or "",
         "args": body.args,
@@ -156,20 +156,22 @@ async def connect_mcp_server(
         "enabled": True,
     }
 
+    # P0-4 修正：先校验拿归一化 transport，门禁按归一化值裁决——transport
+    # 省略时按 command/url 推断为 stdio，查原始字符串会漏掉推断路径
+    try:
+        config = validate_mcp_server_config(config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     if config["transport"] == "stdio" and role != "admin":
         raise HTTPException(
             status_code=403,
             detail="stdio 传输需要管理员角色（stdio MCP server 由本机派生进程执行）",
         )
 
-    try:
-        cfg = validate_mcp_server_config(config)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    if role != "admin" and cfg.get("transport") in ("http", "sse"):
+    if role != "admin" and config.get("transport") in ("http", "sse"):
         try:
-            assert_public_url(cfg.get("url") or "")
+            assert_public_url(config.get("url") or "")
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"MCP server url 被拒绝: {e}")
 
