@@ -129,12 +129,24 @@ class NeurflowStorage:
                     enabled INTEGER DEFAULT 1,
                     config_json TEXT DEFAULT '{}',
                     secret_hash TEXT,
+                    secret_encrypted TEXT,
                     rate_limit_per_minute INTEGER,
                     created_at REAL DEFAULT 0,
                     updated_at REAL DEFAULT 0,
                     FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
                 )
             """)
+            # 旧库迁移：补 secret_encrypted 列（静态字面量 DDL）
+            trigger_cols = {
+                r[1]
+                for r in self._conn.execute(
+                    "PRAGMA table_info(workflow_triggers)"
+                ).fetchall()
+            }
+            if "secret_encrypted" not in trigger_cols:
+                self._conn.execute(
+                    "ALTER TABLE workflow_triggers ADD COLUMN secret_encrypted TEXT"
+                )
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_workflow_triggers_wf "
                 "ON workflow_triggers(workflow_id)"
@@ -200,6 +212,10 @@ class NeurflowStorage:
                     last_used_at REAL DEFAULT 0
                 )
             """)
+            # 旧库迁移：CREATE TABLE IF NOT EXISTS 不会给已存在的表补列，
+            # 而下方索引硬引用新列——旧库缺列会升级即崩。必须在建索引前执行。
+            self._migrate_legacy_columns()
+
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_connected_stores_platform "
                 "ON connected_stores(platform)"
@@ -220,6 +236,59 @@ class NeurflowStorage:
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status)")
 
             self._conn.commit()
+
+    def _migrate_legacy_columns(self):
+        """为旧库已存在的表补齐后加的列（索引硬引用这些列，缺列升级即崩）。
+
+        仅在 _create_tables 持锁区间内调用。表名/列名为代码常量，
+        DDL 全部使用静态字面量语句（逐表 PRAGMA 检测、按需 ALTER）。
+        """
+        # connected_stores（店铺连接后续新增列）
+        cs_cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(connected_stores)").fetchall()
+        }
+        if cs_cols:
+            if "user_id" not in cs_cols:
+                self._conn.execute("ALTER TABLE connected_stores ADD COLUMN user_id TEXT DEFAULT ''")
+            if "seller_id" not in cs_cols:
+                self._conn.execute("ALTER TABLE connected_stores ADD COLUMN seller_id TEXT DEFAULT ''")
+            if "marketplace_id" not in cs_cols:
+                self._conn.execute("ALTER TABLE connected_stores ADD COLUMN marketplace_id TEXT DEFAULT ''")
+            if "region" not in cs_cols:
+                self._conn.execute("ALTER TABLE connected_stores ADD COLUMN region TEXT DEFAULT ''")
+            if "last_error" not in cs_cols:
+                self._conn.execute("ALTER TABLE connected_stores ADD COLUMN last_error TEXT DEFAULT ''")
+            if "token_expires_at" not in cs_cols:
+                self._conn.execute("ALTER TABLE connected_stores ADD COLUMN token_expires_at REAL DEFAULT 0")
+            if "extra_json" not in cs_cols:
+                self._conn.execute("ALTER TABLE connected_stores ADD COLUMN extra_json TEXT DEFAULT '{}'")
+            if "last_used_at" not in cs_cols:
+                self._conn.execute("ALTER TABLE connected_stores ADD COLUMN last_used_at REAL DEFAULT 0")
+
+        # executions（多用户隔离新增列）
+        ex_cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(executions)").fetchall()
+        }
+        if ex_cols:
+            if "agent_id" not in ex_cols:
+                self._conn.execute("ALTER TABLE executions ADD COLUMN agent_id TEXT")
+            if "user_id" not in ex_cols:
+                self._conn.execute("ALTER TABLE executions ADD COLUMN user_id TEXT")
+
+        # workflows（模板/公开标记新增列）
+        wf_cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(workflows)").fetchall()
+        }
+        if wf_cols:
+            if "template" not in wf_cols:
+                self._conn.execute("ALTER TABLE workflows ADD COLUMN template INTEGER DEFAULT 0")
+            if "public" not in wf_cols:
+                self._conn.execute("ALTER TABLE workflows ADD COLUMN public INTEGER DEFAULT 0")
+            if "metadata_json" not in wf_cols:
+                self._conn.execute("ALTER TABLE workflows ADD COLUMN metadata_json TEXT DEFAULT '{}'")
 
     def _migrate_node_definitions_columns(self):
         """为旧库的 node_definitions 补齐自定义节点新增列。
@@ -457,14 +526,15 @@ class NeurflowStorage:
                 """
                 INSERT INTO workflow_triggers
                     (id, workflow_id, type, enabled, config_json, secret_hash,
-                     rate_limit_per_minute, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     secret_encrypted, rate_limit_per_minute, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     workflow_id=excluded.workflow_id,
                     type=excluded.type,
                     enabled=excluded.enabled,
                     config_json=excluded.config_json,
                     secret_hash=excluded.secret_hash,
+                    secret_encrypted=excluded.secret_encrypted,
                     rate_limit_per_minute=excluded.rate_limit_per_minute,
                     updated_at=excluded.updated_at
                 """,
@@ -475,6 +545,7 @@ class NeurflowStorage:
                     1 if trigger.enabled else 0,
                     json.dumps(trigger.config, ensure_ascii=False),
                     trigger.secret_hash,
+                    trigger.secret_encrypted,
                     trigger.rate_limit_per_minute,
                     trigger.created_at,
                     trigger.updated_at,
@@ -532,6 +603,7 @@ class NeurflowStorage:
             enabled=bool(row["enabled"]),
             config=json.loads(row["config_json"] or "{}"),
             secret_hash=row["secret_hash"],
+            secret_encrypted=row["secret_encrypted"],
             rate_limit_per_minute=row["rate_limit_per_minute"],
             created_at=row["created_at"] or 0.0,
             updated_at=row["updated_at"] or 0.0,
