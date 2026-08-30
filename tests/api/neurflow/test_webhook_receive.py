@@ -190,6 +190,73 @@ class TestIngressHandler:
             webhook_ingress._DEPS_PROVIDER = saved
 
 
+class TestDeliveryRecording:
+    """遗留④：receive 端点把每次投递落入 webhook_deliveries"""
+
+    @pytest.fixture
+    def patched_client(self, tmp_path, monkeypatch):
+        from neurova.api.endpoints import neurflow_api
+        from neurova.collaboration.neurflow.models import (
+            WorkflowDefinition, WorkflowNode, WorkflowEdge,
+            WorkflowStatus, TriggerType, WorkflowTrigger,
+        )
+        from neurova.llm.providers.secret_store import encrypt_api_key
+
+        storage = neurflow_api.NeurflowStorage(db_path=str(tmp_path / "dl_e2e.db"))
+        monkeypatch.setattr(neurflow_api, "_get_storage", lambda: storage)
+
+        storage.save_workflow(WorkflowDefinition(
+            id="wf_dl", name="dl", description="", version="1.0.0",
+            nodes=[
+                WorkflowNode(id="start", type="builtin:start", position={"x": 0, "y": 0}, config={}),
+                WorkflowNode(id="end", type="builtin:end", position={"x": 10, "y": 0}, config={}),
+            ],
+            edges=[WorkflowEdge(id="e", source="start", target="end")],
+            variables=[], tags=[], category="t", author="t",
+            created_at=0, updated_at=0, status=WorkflowStatus.PUBLISHED,
+        ))
+        secret = "delivery-secret"
+        storage.save_trigger(WorkflowTrigger(
+            id="trg_dl", workflow_id="wf_dl", type=TriggerType.WEBHOOK,
+            enabled=True,
+            secret_hash=neurflow_api.NeurflowStorage.hash_trigger_secret(secret),
+            secret_encrypted=encrypt_api_key(secret),
+        ))
+
+        app = FastAPI()
+        app.include_router(neurflow_api.router)
+        return TestClient(app), storage, secret
+
+    def test_success_delivery_recorded(self, patched_client):
+        c, storage, secret = patched_client
+        payload = b'{"payload":{"a":1}}'
+        sig = compute_signature(payload, secret)
+        r = c.post(
+            "/triggers/webhook/trg_dl/receive",
+            content=payload,
+            headers={"Content-Type": "application/json", "X-Hub-Signature-256": sig},
+        )
+        assert r.status_code == 200
+        items = storage.list_deliveries("trg_dl")
+        assert len(items) == 1
+        assert items[0]["signature_valid"] is True
+        assert items[0]["status_code"] == 200
+        assert items[0]["execution_id"]
+
+    def test_invalid_signature_delivery_recorded(self, patched_client):
+        c, storage, _ = patched_client
+        r = c.post(
+            "/triggers/webhook/trg_dl/receive",
+            content=b"{}",
+            headers={"X-Hub-Signature-256": "sha256=" + "0" * 64},
+        )
+        assert r.status_code == 401
+        items = storage.list_deliveries("trg_dl")
+        assert len(items) == 1
+        assert items[0]["signature_valid"] is False
+        assert items[0]["status_code"] == 401
+
+
 class TestWebhookReceiveEndpoint:
     """FastAPI 薄壳端点（经 set_deps_provider 装配）"""
 
