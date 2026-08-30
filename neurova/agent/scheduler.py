@@ -409,44 +409,72 @@ class AgentTaskExecutor(TaskExecutor):
 
 
 class WorkflowTaskExecutor(TaskExecutor):
-    """工作流任务执行器"""
+    """工作流任务执行器（P1 Step 1 双引擎统一）
 
-    def __init__(self, workflow_runner=None):
+    纯派发逻辑：加载与执行通过注入完成（loader/runner 由装配方提供，
+    见 neurflow_api 注册处）。loader 侧负责 PUBLISHED 校验——
+    仅已发布工作流可被调度触发。
+    旧 WorkflowRunner 路径仅保留引用供审计，不再默认使用。
+    """
+
+    def __init__(
+        self,
+        workflow_runner=None,
+        workflow_loader=None,
+        workflow_runner_callable=None,
+    ):
         self.workflow_runner = workflow_runner
+        self._workflow_loader = workflow_loader
+        self._run_callable = workflow_runner_callable
+
+    async def dispatch_neurflow(
+        self, target_key: str, inputs: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """把工作流标识 + inputs 派发到 Neurflow 引擎执行。
+
+        返回统一信封：{success, execution_id, status, outputs[, error]}。
+        """
+        if self._workflow_loader is None or self._run_callable is None:
+            logger.warning("loader or runner not injected; cannot dispatch")
+            return {"success": False, "error": "DISPATCH_NOT_CONFIGURED"}
+
+        try:
+            workflow = self._workflow_loader(target_key)
+            if not workflow:
+                logger.info("dispatch target workflow missing: %s", target_key)
+                return {
+                    "success": False,
+                    "error": "WORKFLOW_NOT_FOUND",
+                    "workflow_id": target_key,
+                }
+
+            instance = await self._run_callable(workflow, inputs)
+            status_value = getattr(instance, "status", None)
+            return {
+                "success": getattr(status_value, "value", "") == "completed",
+                "execution_id": getattr(instance, "id", None),
+                "status": getattr(status_value, "value", None),
+                "outputs": getattr(instance, "outputs", None),
+                "error": getattr(instance, "error", None),
+                "workflow_id": target_key,
+            }
+        except Exception:
+            logger.exception("Neurflow dispatch failed")
+            return {"success": False, "error": "NEURFLOW_DISPATCH_FAILED"}
 
     async def execute(self, task: AutomationTask, execution: TaskExecution) -> Dict[str, Any]:
-        """执行工作流任务"""
+        """执行工作流任务（统一走 Neurflow 引擎）"""
         try:
-            workflow_id = task.request.workflow_id if task.request else None
-            if not workflow_id:
+            request = getattr(task, "request", None)
+            ref = getattr(request, "workflow_id", None) if request is not None else None
+            if not ref:
                 return {"success": False, "error": "Workflow ID is required"}
 
-            # 获取工作流运行器
-            from neurova.api.app import app_state
-
-            workflow_runner = getattr(app_state, "workflow_runner", None)
-
-            if not workflow_runner:
-                # 如果没有工作流运行器，尝试导入
-                try:
-                    from neurova.workflow.runner import WorkflowRunner
-
-                    workflow_runner = WorkflowRunner()
-                except ImportError:
-                    return {"success": False, "error": "Workflow runner not available"}
-
-            # 执行工作流
-            input_data = task.request.input if task.request else {}
-            result = await workflow_runner.run_workflow(workflow_id, context=input_data)
-
-            return {
-                "success": True,
-                "result": result,
-                "workflow_id": workflow_id,
-            }
-        except Exception as e:
-            logger.exception("Workflow task execution failed: %s", e)
-            return {"success": False, "error": str(e)}
+            input_data = getattr(request, "input", None) or {}
+            return await self.dispatch_neurflow(ref, input_data)
+        except Exception:
+            logger.exception("Workflow task execution failed")
+            return {"success": False, "error": "WORKFLOW_TASK_FAILED"}
 
     async def validate(self, task: AutomationTask) -> tuple[bool, Optional[str]]:
         """验证工作流任务"""
