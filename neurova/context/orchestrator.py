@@ -21,6 +21,7 @@ import datetime
 from .builder import ContextBuilder
 from .injector import UnifiedContextInjector
 from .models import TokenBudget
+from .recovery import assign_turn_ids
 
 logger = get_logger(__name__)
 
@@ -378,13 +379,15 @@ class ContextOrchestrator:
             # ════════════════════════════════════════════════════════
 
             # 归档对话轮次（老轮次可被后续语义召回 → 对话永不丢失）
-            for msg in conversation_context:
+            # P1-1①：assign_turn_ids 写入侧打标——user 消息开新轮（turn_N），
+            # 为配对完整性校验（pairing.validate_pairing）提供 pairs_with 锚点
+            for msg, turn_id in assign_turn_ids(conversation_context):
                 self.context_pool.add_context(
                     ContextInput(
                         source=ContextSource.CONVERSATION,
                         content=msg["content"],
                         priority=60,
-                        metadata={"role": msg.get("role", "user")},
+                        metadata={"role": msg.get("role", "user"), "turn_id": turn_id},
                     )
                 )
 
