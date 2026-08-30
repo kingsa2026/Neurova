@@ -406,7 +406,17 @@ class ContextPool:
             # [FIX] draw() 也应用 TTL 过期过滤（之前绕过 get_contexts() 的 TTL 检查）
             all_drops = self._filter_ttl(all_drops)
             deduped = self._deduplicator.dedup(all_drops, stage="output")
-            return self._drawer.draw(deduped, need=need)
+            selected = self._drawer.draw(deduped, need=need)
+            # P1-1①（方案 §4.1）：视图出口配对完整性校验——预算/相关性选取
+            # 可能产生孤儿 TOOL_CALL（其 pairs_with 目标未入选），剔除以避免
+            # LLM 看到"无上下文的工具结果"；孤儿留在池中（归档无损语义不变）
+            report = validate_pairing(selected)
+            if report.orphans:
+                logger.debug(
+                    "ContextPool.draw 剔除 %d 个孤儿 TOOL_CALL（pairs_with 目标不在视图内）",
+                    report.orphan_count,
+                )
+            return report.kept
 
     def dedup(self, stage: str = "input") -> int:
         with self._lock:
@@ -416,6 +426,7 @@ class ContextPool:
             return len(deduped)
 
 
+from neurova.context.pairing import validate_pairing
 from neurova.context.pool_models import ContextSource, ContextInput
 from neurova.context.collector import ContextCollector
 from neurova.context.converter import ContextConverter
