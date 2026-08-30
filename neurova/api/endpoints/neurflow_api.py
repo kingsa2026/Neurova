@@ -851,7 +851,7 @@ async def save_workflow_viewport(workflow_id: str, data: Dict[str, Any] = Body(.
 
 @router.post("/workflows/{workflow_id}/publish")
 async def publish_workflow(workflow_id: str):
-    """发布工作流"""
+    """发布工作流（P2：编译 AgentManifest 并落 agents 记录，chat 页可直接选用）"""
     storage = _get_storage()
     existing = storage.get_workflow(workflow_id)
     if not existing:
@@ -865,13 +865,35 @@ async def publish_workflow(workflow_id: str):
         if not validation_result.is_valid:
             raise HTTPException(status_code=400, detail=f"工作流验证失败: {', '.join(validation_result.errors)}")
 
+        # P2 Step 3 — 编译 AgentManifest 并持久化 agent 记录（幂等 upsert）
+        from neurova.agent.workflow_agent import compile_workflow_agent, manifest_to_agent_info
+
+        manifest = compile_workflow_agent(existing)
+        agent_info = manifest_to_agent_info(manifest)
+        storage.save_agent(agent_info)
+
         # 更新状态为已发布
         existing.status = WorkflowStatus.PUBLISHED
         existing.updated_at = time.time()
         storage.save_workflow(existing)
-        return {"message": "工作流发布成功", "workflow": existing.to_dict()}
+        return {
+            "code": 0,
+            "message": "工作流发布成功",
+            "data": {
+                "workflow": existing.to_dict(),
+                "agent": {
+                    "agent_id": agent_info.agent_id,
+                    "name": agent_info.name,
+                    "role": agent_info.role,
+                    "capabilities": agent_info.capabilities,
+                    "metadata": agent_info.metadata,
+                },
+            },
+        }
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"发布失败: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"发布工作流失败: {str(e)}")
 
