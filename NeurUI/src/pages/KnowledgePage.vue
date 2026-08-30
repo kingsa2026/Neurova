@@ -193,6 +193,8 @@ const form = ref({ title: '', category: '', content: '', tags: [] as string[] })
 const importVisible = ref(false)
 const importing = ref(false)
 const importFiles = ref<UploadFile[]>([])
+const importUrlValue = ref('')
+const importingUrl = ref(false)
 
 const columns = computed(() => [
   { title: t('knowledge.colTitle'), key: 'title', dataIndex: 'title', ellipsis: true },
@@ -369,6 +371,28 @@ async function handleImport() {
     message.error(t('knowledge.importError'))
   } finally {
     importing.value = false
+  }
+}
+
+async function handleImportUrl() {
+  const url = importUrlValue.value.trim()
+  if (!url) {
+    message.error(t('knowledge.importError'))
+    return
+  }
+  importingUrl.value = true
+  try {
+    await request.post('/knowledge/import-url', null, {
+      params: { agent_id: agentId.value, url },
+    })
+    message.success(t('knowledge.importSuccess'))
+    importUrlValue.value = ''
+    fetchKnowledge()
+  } catch (err: any) {
+    const detail = err?.response?.data?.detail
+    message.error(typeof detail === 'string' ? detail : t('knowledge.importError'))
+  } finally {
+    importingUrl.value = false
   }
 }
 
