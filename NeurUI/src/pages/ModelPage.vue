@@ -296,7 +296,7 @@
                   </div>
                 </div>
                 <div class="nr-mm-item-tags">
-                  <span v-if="m.capabilities.includes('text') || m.type === 'text'" class="nr-mm-tag nr-mm-tag-text">文本</span>
+                  <span v-if="m.capabilities.includes('text') || m.type === 'text'" class="nr-mm-tag nr-mm-tag-text">{{ t('ui.text') }}</span>
                   <span v-if="m.tags.includes('user-added')" class="nr-mm-tag nr-mm-tag-user">{{ t('model.userAdded') }}</span>
                   <span v-if="m.tags.includes('free')" class="nr-mm-tag nr-mm-tag-free">{{ t('model.freeModels') }}</span>
                   <span v-if="m.tags.includes('built-in')" class="nr-mm-tag nr-mm-tag-builtin">{{ t('model.builtin') }}</span>
@@ -322,11 +322,11 @@
                 <div class="nr-mm-add-fields">
                   <div class="nr-mm-add-field">
                     <label>Model ID <span class="req">*</span></label>
-                    <input v-model="newModelId" class="nr-input" placeholder="例如 gpt-4o, gemini-2.0-flash" autocomplete="off" />
+                    <input v-model="newModelId" class="nr-input" :placeholder="t('ui.egModelId')" autocomplete="off" />
                   </div>
                   <div class="nr-mm-add-field">
                     <label>{{ t('common.name') }}</label>
-                    <input v-model="newModelName" class="nr-input" placeholder="例如 GPT-4o, Gemini 2.0 Flash" autocomplete="off" />
+                    <input v-model="newModelName" class="nr-input" :placeholder="t('ui.egModelName')" autocomplete="off" />
                   </div>
                 </div>
                 <div class="nr-mm-add-buttons">
@@ -407,15 +407,15 @@ const BUILTIN_PROVIDERS: SeedProvider[] = [
   { id: 'github-models', name: 'GitHub Models', icon: '🐙', iconSrc: 'https://github.githubassets.com/assets/GitHub-Mark-ea2971cee799.png', color: '#1f2937', type: 'builtin', category: 'free', base_url: 'https://models.inference.ai.azure.com', protocol: 'openai', enabled: true },
   // ── Paid ──
   { id: 'google-gemini', name: 'Google Gemini', icon: '◆', iconSrc: 'https://gw.alicdn.com/imgextra/i2/O1CN01pDWy7z25caEvmJ3u1_!!6000000007547-2-tps-400-400.png', color: '#4285f4', type: 'builtin', category: 'paid', base_url: 'https://generativelanguage.googleapis.com', protocol: 'openai', enabled: true },
-  { id: 'zhipu', name: 'Zhipu (BigModel)', icon: '智', iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01TFZcQz23xX7qacIEv_!!6000000007322-2-tps-640-640.png', color: '#4a90d9', type: 'builtin', category: 'paid', base_url: 'https://open.bigmodel.cn/api/paas/v4', protocol: 'openai', enabled: true },
+  { id: 'zhipu', name: 'Zhipu (BigModel)', icon: 'Z', iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01TFZcQz23xX7qacIEv_!!6000000007322-2-tps-640-640.png', color: '#4a90d9', type: 'builtin', category: 'paid', base_url: 'https://open.bigmodel.cn/api/paas/v4', protocol: 'openai', enabled: true },
   { id: 'siliconflow-cn', name: 'SiliconFlow (China)', icon: 'SF', iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01TUkzVC1clAoPa2ix8_!!6000000003640-2-tps-520-520.png', color: '#6366f1', type: 'builtin', category: 'paid', base_url: 'https://api.siliconflow.cn/v1', protocol: 'openai', enabled: true },
   { id: 'siliconflow-intl', name: 'SiliconFlow (International)', icon: 'SF', iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01TUkzVC1clAoPa2ix8_!!6000000003640-2-tps-520-520.png', color: '#818cf8', type: 'builtin', category: 'paid', base_url: 'https://api.siliconflow.com/v1', protocol: 'openai', enabled: true },
   { id: 'ark-coding', name: 'ark-coding', icon: 'AC', color: '#0ea5e9', type: 'builtin', category: 'paid', base_url: 'https://ark.cn-beijing.volces.com/api/coding/v3', protocol: 'openai', enabled: true },
   { id: 'arkcoding-anthropic', name: 'arkcoding-anthropic', icon: 'AA', color: '#0891b2', type: 'builtin', category: 'paid', base_url: 'https://ark.cn-beijing.volces.com/api/coding/v3', protocol: 'anthropic', enabled: true },
   { id: 'sambanova', name: 'sambanova.ai', icon: 'SN', color: '#dc2626', type: 'builtin', category: 'paid', base_url: 'https://api.sambanova.ai/v1', protocol: 'openai', enabled: true },
-  { id: 'nsc', name: '国家超算互联网', icon: '超', color: '#b91c1c', type: 'builtin', category: 'paid', base_url: 'https://api.nsc.org.cn/v1', protocol: 'openai', enabled: true },
-  { id: 'sensetime', name: '商汤科技', icon: '商', color: '#7c3aed', type: 'builtin', category: 'paid', base_url: 'https://api.sensetime.com/v1', protocol: 'openai', enabled: true },
-  { id: 'xiaomi', name: '小米', icon: 'Mi', iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01TSCOAt1XP7fywLDei_!!6000000002915-2-tps-3483-3483.png', color: '#f97316', type: 'builtin', category: 'paid', base_url: 'https://api.xiaomi.com/v1', protocol: 'openai', enabled: true },
+  { id: 'nsc', name: t('ui.providerNsc'), icon: 'N', color: '#b91c1c', type: 'builtin', category: 'paid', base_url: 'https://api.nsc.org.cn/v1', protocol: 'openai', enabled: true },
+  { id: 'sensetime', name: t('ui.providerSensetime'), icon: 'S', color: '#7c3aed', type: 'builtin', category: 'paid', base_url: 'https://api.sensetime.com/v1', protocol: 'openai', enabled: true },
+  { id: 'xiaomi', name: t('ui.providerXiaomi'), icon: 'Mi', iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01TSCOAt1XP7fywLDei_!!6000000002915-2-tps-3483-3483.png', color: '#f97316', type: 'builtin', category: 'paid', base_url: 'https://api.xiaomi.com/v1', protocol: 'openai', enabled: true },
   { id: 'modelscope', name: 'ModelScope', icon: 'MS', iconSrc: 'https://gw.alicdn.com/imgextra/i4/O1CN01exenB61EAwhgY4pmA_!!6000000000312-2-tps-400-400.png', color: '#0d9488', type: 'builtin', category: 'paid', base_url: 'https://api.modelscope.cn/v1', protocol: 'openai', enabled: true },
   { id: 'dashscope', name: 'DashScope', icon: 'DS', iconSrc: 'https://gw.alicdn.com/imgextra/i4/O1CN01aDHDeq1mgj7gbRkhi_!!6000000004984-2-tps-400-400.png', color: '#0284c7', type: 'builtin', category: 'paid', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', protocol: 'openai', enabled: true },
   { id: 'aliyun-coding-cn', name: 'Aliyun Coding Plan (China)', icon: '☁', iconSrc: 'https://gw.alicdn.com/imgextra/i4/O1CN01nEmGhQ1we71GXW6eo_!!6000000006332-2-tps-400-400.png', color: '#f97316', type: 'builtin', category: 'paid', base_url: 'https://coding.dashscope.aliyuncs.com/v1', protocol: 'openai', enabled: true },
@@ -429,7 +429,7 @@ const BUILTIN_PROVIDERS: SeedProvider[] = [
   { id: 'kimi-intl', name: 'Kimi (International)', icon: 'K', iconSrc: 'https://gw.alicdn.com/imgextra/i1/O1CN01xCKAr81Yz8Q9pXh1u_!!6000000003129-2-tps-400-400.png', color: '#312e81', type: 'builtin', category: 'paid', base_url: 'https://api.moonshot.ai/v1', protocol: 'openai', enabled: true },
   { id: 'minimax-cn', name: 'MiniMax (China)', icon: 'MM', iconSrc: 'https://gw.alicdn.com/imgextra/i1/O1CN01B0FaVn1VzBcO4nF1C_!!6000000002723-2-tps-400-400.png', color: '#ef4444', type: 'builtin', category: 'paid', base_url: 'https://api.minimax.chat/v1', protocol: 'openai', enabled: true },
   { id: 'minimax-intl', name: 'MiniMax (International)', icon: 'MM', iconSrc: 'https://gw.alicdn.com/imgextra/i1/O1CN01B0FaVn1VzBcO4nF1C_!!6000000002723-2-tps-400-400.png', color: '#f87171', type: 'builtin', category: 'paid', base_url: 'https://api.minimaxi.chat/v1', protocol: 'openai', enabled: true },
-  { id: 'zhipu-coding', name: 'Zhipu Coding Plan', icon: '智', iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01TFZcQz23xX7qacIEv_!!6000000007322-2-tps-640-640.png', color: '#2563eb', type: 'builtin', category: 'paid', base_url: 'https://open.bigmodel.cn/api/coding/paas/v4', protocol: 'openai', enabled: true },
+  { id: 'zhipu-coding', name: 'Zhipu Coding Plan', icon: 'Z', iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01TFZcQz23xX7qacIEv_!!6000000007322-2-tps-640-640.png', color: '#2563eb', type: 'builtin', category: 'paid', base_url: 'https://open.bigmodel.cn/api/coding/paas/v4', protocol: 'openai', enabled: true },
   { id: 'zhipu-zai', name: 'Zhipu Z.AI', icon: 'Z', iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01TFZcQz23xX7qacIEv_!!6000000007322-2-tps-640-640.png', color: '#059669', type: 'builtin', category: 'paid', base_url: 'https://api.z.ai/api/paas/v4', protocol: 'openai', enabled: true },
   { id: 'zhipu-coding-zai', name: 'Zhipu Coding Z.AI', icon: 'ZC', iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01TFZcQz23xX7qacIEv_!!6000000007322-2-tps-640-640.png', color: '#047857', type: 'builtin', category: 'paid', base_url: 'https://api.z.ai/api/coding/paas/v4', protocol: 'openai', enabled: true },
   { id: 'volcano', name: 'Volcano Engine', icon: '🌋', iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01KusRg42AJPkUV5ken_!!6000000008182-2-tps-1892-1660.png', color: '#dc2626', type: 'builtin', category: 'paid', base_url: 'https://ark.cn-beijing.volces.com/api/v3', protocol: 'openai', enabled: true },

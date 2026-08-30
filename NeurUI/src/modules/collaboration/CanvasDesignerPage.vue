@@ -7,7 +7,7 @@
     当前为骨架版本，后续可集成 Vue Flow / reactflow 风格的节点画布。
     Infinite-Canvas 整合后可复用其画布组件。
   -->
-  <div class="canvas-designer">
+  <div class="canvas-designer" ref="canvasRoot">
     <!-- 顶部工具栏 -->
     <div class="canvas-toolbar">
       <div class="toolbar-left">
@@ -28,7 +28,7 @@
               <a-menu-item v-for="c in savedCanvases" :key="c.id" @click="openSavedCanvas(c.id)">
                 <div class="my-canvas-item">
                   <span class="my-canvas-name">{{ c.name || c.id }}</span>
-                  <span class="my-canvas-meta">{{ c.node_count }} 节点 · {{ formatTime(c.updated_at) }}</span>
+                  <span class="my-canvas-meta">{{ c.node_count }} {{ t('canvas.nodeCount') }} · {{ formatTime(c.updated_at) }}</span>
                 </div>
               </a-menu-item>
               <a-menu-item v-if="savedCanvases.length === 0" disabled key="empty">
@@ -37,6 +37,19 @@
             </a-menu>
           </template>
         </a-dropdown>
+        <GlassButton variant="ghost" size="sm" @click="storeDrawerOpen = true">
+          <ShopOutlined /> {{ t('canvas.tabStores') }}
+        </GlassButton>
+        <GlassButton
+          variant="ghost"
+          size="sm"
+          :disabled="!fullscreenSupported"
+          :title="fullscreenSupported ? (isCanvasFullscreen ? t('canvas.fullscreenExit') : t('canvas.fullscreenEnter')) : t('canvas.fullscreenUnsupported')"
+          @click="toggleFullscreen"
+        >
+          <FullscreenExitOutlined v-if="isCanvasFullscreen" />
+          <FullscreenOutlined v-else />
+        </GlassButton>
         <GlassButton variant="ghost" size="sm" @click="handleSave">{{ t('common.save') }}</GlassButton>
         <GlassButton variant="primary" size="sm" @click="handleRun">{{ t('workflow.execute') }}</GlassButton>
       </div>
@@ -118,7 +131,7 @@
               <span class="graph-node-title">{{ node.label }}</span>
               <button
                 class="node-delete"
-                title="删除节点"
+                :title="t('canvas.deleteNode')"
                 @mousedown.stop
                 @click.stop="removeNode(node.id)"
               >×</button>
@@ -130,7 +143,7 @@
                   data-port-kind="in"
                   :data-node-id="node.id"
                   :data-port-id="input.id"
-                  :title="`接入：${input.label}`"
+                  :title="t('canvas.connectTip') + input.label"
                 />
                 <span class="port-label">{{ input.label }}</span>
               </div>
@@ -141,7 +154,7 @@
                   data-port-kind="out"
                   :data-node-id="node.id"
                   :data-port-id="output.id"
-                  :title="`拖拽连线：${output.label}`"
+                  :title="t('canvas.linkTip') + output.label"
                   @mousedown.stop.prevent="startConnect($event, node.id, output.id)"
                 />
               </div>
@@ -171,19 +184,19 @@
 
           <!-- 缩放控制栏 -->
           <div class="canvas-zoombar">
-            <button class="zoom-btn" title="缩小 (Ctrl+-)" @click="zoomOut">−</button>
+            <button class="zoom-btn" :title="t('canvas.zoomOut')" @click="zoomOut">−</button>
             <span
               class="zoom-value"
-              title="重置视图 (Ctrl+0)"
+              :title="t('canvas.resetView')"
               @click="resetView"
             >{{ Math.round(viewport.zoom * 100) }}%</span>
-            <button class="zoom-btn" title="放大 (Ctrl+=)" @click="zoomIn">＋</button>
+            <button class="zoom-btn" :title="t('canvas.zoomIn')" @click="zoomIn">＋</button>
             <span class="zoom-divider" />
-            <button class="zoom-btn zoom-fit" title="适应内容" @click="fitView">⤢</button>
+            <button class="zoom-btn zoom-fit" :title="t('canvas.fitContent')" @click="fitView">⤢</button>
           </div>
 
           <p v-if="canvasNodes.length > 0" class="connect-hint">
-            从节点右侧 ● 拖到另一节点左侧 ● 完成连线 · 单击选中连线 Delete 删除 · 右键空白/节点/连线有菜单 · Ctrl+滚轮缩放
+            {{ t('canvas.canvasHint') }}
           </p>
         </div>
       </main>
@@ -206,7 +219,7 @@
           <!-- Agent 节点专用表单（蜂群编排：绑定真实子 Agent + 任务） -->
           <template v-if="selectedNode.type === 'builtin:agent'">
             <div class="prop-group">
-              <label>执行 Agent</label>
+              <label>{{ t('canvas.execAgent') }}</label>
               <a-select
                 v-model:value="selectedNode.config.agent_id"
                 :options="agentOptions"
@@ -214,22 +227,23 @@
                 allow-clear
                 show-search
                 option-filter-prop="label"
-                placeholder="选择子 Agent（留空用默认）"
+                :placeholder="t('canvas.selectSubAgent')"
               />
             </div>
             <div class="prop-group">
-              <label>任务描述</label>
+              <label>{{ t('canvas.taskDesc') }}</label>
               <a-textarea
                 v-model:value="selectedNode.config.task"
                 :rows="4"
                 size="small"
-                placeholder="子 Agent 的任务描述（需自包含；可用 ${上游节点ID.output} 引用上游输出）"
+                :placeholder="t('canvas.subAgentTaskDesc')"
               />
             </div>
           </template>
 
           <!-- 通用配置表单：按节点定义 sub_blocks 渲染（textarea/select/model-selector/input） -->
-          <div class="prop-group" v-for="field in configFields" :key="field.key">
+          <!-- key 含索引：平台联动变体共享同一 config 键（如 products），纯键作 key 会冲突 -->
+          <div class="prop-group" v-for="(field, idx) in configFields" :key="idx + ':' + field.key">
             <label>{{ field.title }}</label>
             <a-textarea
               v-if="field.type === 'textarea'"
@@ -245,7 +259,7 @@
                 allow-clear
                 show-search
                 option-filter-prop="label"
-                placeholder="选择可联通模型（留空用默认）"
+                :placeholder="t('canvas.selectModel')"
                 @change="handleModelSelect"
               />
               <a-select
@@ -253,7 +267,7 @@
                 :options="providerOptions"
                 size="small"
                 style="margin-top: 6px"
-                placeholder="Provider（选模型后自动回填）"
+                :placeholder="t('canvas.providerHint')"
               />
             </template>
             <a-select
@@ -262,6 +276,23 @@
               :options="field.options"
               size="small"
             />
+            <template v-else-if="field.type === 'store-select'">
+              <a-select
+                v-model:value="selectedNode.config[field.key]"
+                :options="storeOptions"
+                size="small"
+                allow-clear
+                show-search
+                option-filter-prop="label"
+                :placeholder="t('canvas.storeSelectPh')"
+                :loading="storeOptionsLoading"
+                :disabled="storeServiceUnavailable"
+              />
+              <p v-if="storeServiceUnavailable" class="store-connect-hint">{{ t('canvas.storeServiceUnavailable') }}</p>
+              <p v-else-if="!storeOptionsLoading && storeOptions.length === 0" class="store-connect-hint">
+                {{ t('canvas.noStoresYet') }}<a class="store-connect-link" @click="storeDrawerOpen = true">{{ t('canvas.goConnectStores') }}</a>
+              </p>
+            </template>
             <a-slider
               v-else-if="field.type === 'slider'"
               v-model:value="selectedNode.config[field.key]"
@@ -272,9 +303,28 @@
             <a-input v-else v-model:value="selectedNode.config[field.key]" size="small" />
           </div>
 
+          <!-- 店铺授权节点（店铺为下属对象）：面板即店铺管理页入口 -->
+          <template v-if="selectedNode.type === 'builtin:store-auth'">
+            <div class="prop-group">
+              <label>{{ t('canvas.storeTitle') }}</label>
+              <p v-if="storeAuthInfo" class="store-auth-status">
+                {{ storeAuthInfo.store_name }}（{{ platformDisplayName(storeAuthInfo.platform) }}）·
+                <span class="store-badge" :class="`badge-${storeAuthInfo.status ?? 'pending'}`">{{ storeAuthInfo.status ?? 'pending' }}</span>
+              </p>
+              <p v-else class="store-connect-hint">{{ t('canvas.storeSelectPh') }}</p>
+              <p v-if="storeAuthInfo?.last_error" class="store-auth-error" :title="storeAuthInfo.last_error">{{ t('canvas.storeErrorTag') }}: {{ storeAuthInfo.last_error }}</p>
+            </div>
+            <div class="prop-group store-auth-actions">
+              <a-button size="small" :disabled="!selectedNode.config.store_id" :loading="storeAuthTesting" @click="runStoreAuthTest">
+                {{ t('canvas.storeTest') }}
+              </a-button>
+              <a-button size="small" @click="storeDrawerOpen = true">{{ t('canvas.storeAuthOpen') }}</a-button>
+            </div>
+          </template>
+
           <!-- 执行结果查看 -->
           <div class="prop-group" v-if="runStatus[selectedNode.id]">
-            <label>执行结果（{{ runStatus[selectedNode.id]?.status }}）</label>
+            <label>{{ t('canvas.execResult', { status: runStatus[selectedNode.id]?.status }) }}</label>
             <pre class="node-output-view">{{ formatNodeOutput(runStatus[selectedNode.id]) }}</pre>
           </div>
         </div>
@@ -289,21 +339,24 @@
         :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
       >
         <template v-if="ctxMenu.kind === 'node'">
-          <button class="ctx-item danger" @click="ctxDeleteNode">🗑 删除节点</button>
-          <button class="ctx-item" @click="ctxDuplicateNode">⧉ 复制节点</button>
+          <button class="ctx-item danger" @click="ctxDeleteNode">{{ t('canvas.ctxDeleteNode') }}</button>
+          <button class="ctx-item" @click="ctxDuplicateNode">{{ t('canvas.ctxDuplicateNode') }}</button>
         </template>
         <template v-else-if="ctxMenu.kind === 'edge'">
-          <button class="ctx-item danger" @click="ctxDeleteEdge">✕ 删除连线</button>
+          <button class="ctx-item danger" @click="ctxDeleteEdge">{{ t('canvas.ctxDeleteEdge') }}</button>
         </template>
         <template v-else>
-          <button class="ctx-item" @click="ctxAddNode">＋ 新建 LLM 节点</button>
+          <button class="ctx-item" @click="ctxAddNode">{{ t('canvas.ctxAddNode') }}</button>
         </template>
         <div class="ctx-sep" />
-        <button class="ctx-item" @click="ctxZoomIn">🔍 放大</button>
-        <button class="ctx-item" @click="ctxZoomOut">🔍 缩小</button>
-        <button class="ctx-item" @click="ctxResetView">⌖ 重置视图 (100%)</button>
+        <button class="ctx-item" @click="ctxZoomIn">{{ t('canvas.ctxZoomIn') }}</button>
+        <button class="ctx-item" @click="ctxZoomOut">{{ t('canvas.ctxZoomOut') }}</button>
+        <button class="ctx-item" @click="ctxResetView">{{ t('canvas.ctxResetView') }}</button>
       </div>
     </Teleport>
+
+    <!-- 店铺管理抽屉（§6.2） -->
+    <CanvasStoreDrawer v-model:open="storeDrawerOpen" @changed="reloadStoresForNode" />
   </div>
 </template>
 
@@ -321,21 +374,39 @@
  *
  * 数据流：所有持久化通过 useCollaboration composable → store → api，页面不直接调用后端。
  */
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowLeftOutlined, DownOutlined, BgColorsOutlined,
   ApartmentOutlined, RobotOutlined, BulbOutlined,
   ClockCircleOutlined, DatabaseOutlined, FileOutlined, ShoppingOutlined,
+  FullscreenOutlined, FullscreenExitOutlined,
 } from '@ant-design/icons-vue'
 import GlassButton from '@/components/GlassButton.vue'
-import { useCollaboration } from '@/composables/useCollaboration'
+import { useCollaboration, CanvasVersionConflictError } from '@/composables/useCollaboration'
+import { useSessionSync, type SessionSyncEvent } from '@/composables/useSessionSync'
 import { useAgentStore } from '@/stores/agents'
-import { getNodes } from '@/api/modules/neurflow'
+import { useChatStore } from '@/stores/chat'
+import { uiMessage } from '@/utils/message'
+import { getNodes, listStores, testStoreConnection, type ConnectedStore } from '@/api/modules/neurflow'
+import { buildStoreSelectOptions, platformDisplayName, type StoreItem } from './canvasStores'
+import {
+  canFullscreen,
+  exitFullscreenCompat,
+  isFullscreen as docIsFullscreen,
+  requestFullscreenCompat,
+  type FullscreenDoc,
+  type FullscreenEl,
+} from './canvasFullscreen'
+import CanvasStoreDrawer from './CanvasStoreDrawer.vue'
 import { useReachableModels, buildModelOptions } from '@/composables/useReachableModels'
 import { runCanvas as runCanvasApi, getCanvasRun, type CanvasRunStatus } from '@/api/modules/collaboration'
 import type { CanvasNodeSnapshot, CanvasEdgeSnapshot } from '@/api/modules/collaboration'
+import {
+  filterVisibleSubBlocks,
+  type SubBlockCondition,
+} from './canvasSubBlocks'
 
 const route = useRoute()
 const router = useRouter()
@@ -356,6 +427,8 @@ interface SubBlockDef {
   required?: boolean
   min?: number
   max?: number
+  /** 条件可见（联动下拉）：对齐后端 SubBlockConfig.condition {field, operator, value} */
+  condition?: SubBlockCondition | null
 }
 interface PaletteNode {
   type: string
@@ -392,6 +465,9 @@ const workflowName = ref('')
 const canvasNodes = ref<CanvasNodeSnapshot[]>([])
 const canvasEdges = ref<CanvasEdgeSnapshot[]>([])
 const canvasId = ref<string | null>(null)
+/** 服务端画布版本号（乐观锁）：保存时作为 base_version 回传，
+ *  收到 canvas_op 事件时同步推进；冲突说明被其他编辑者（agent）抢占 */
+const canvasVersion = ref<number | null>(null)
 const selectedNodeId = ref<string | null>(null)
 const nodeSearch = ref('')
 const canvasRef = ref<HTMLElement>()
@@ -580,20 +656,103 @@ function ctxResetView() { resetView(); closeCtxMenu() }
 // 节点库分类
 /** 电商平台选项（与后端 commerce_nodes._COMMERCE_PLATFORM_OPTIONS 对齐） */
 const COMMERCE_PLATFORM_OPTIONS: SubBlockOption[] = [
-  { value: 'amazon', label: '亚马逊 Amazon' },
-  { value: 'taobao', label: '淘宝 Taobao' },
-  { value: 'jd', label: '京东 JD' },
-  { value: 'douyin-ecom', label: '抖音电商 Douyin Ecom' },
+  { value: 'amazon', label: t('canvas.c0015') },
+  { value: 'taobao', label: t('canvas.c0016') },
+  { value: 'jd', label: t('canvas.c0017') },
+  { value: 'douyin-ecom', label: t('canvas.c0018') },
   { value: 'tiktok', label: 'TikTok' },
-  { value: 'pdd', label: '拼多多 PDD' },
+  { value: 'pdd', label: t('canvas.c0019') },
   { value: 'ali1688', label: '1688' },
-  { value: 'xiaohongshu', label: '小红书 Xiaohongshu' },
-  { value: 'xianyu', label: '闲鱼 Xianyu' },
-  { value: 'shein', label: '希音 SHEIN' },
+  { value: 'xiaohongshu', label: t('canvas.c0020') },
+  { value: 'xianyu', label: t('canvas.c0021') },
+  { value: 'shein', label: t('canvas.c0022') },
+]
+
+/** 亚马逊 SP-API 选项（依据官方开发文档 developer-docs.amazon.com/sp-api，与后端 commerce_nodes 对齐） */
+const AMAZON_MARKETPLACE_OPTIONS: SubBlockOption[] = [
+  { value: 'ATVPDKIKX0DER', label: t('canvas.c0023') },
+  { value: 'A2EUQ1WTGCTBG2', label: t('canvas.c0024') },
+  { value: 'A1AM78C64UM0Y8', label: t('canvas.c0025') },
+  { value: 'A2Q3Y263D00KWC', label: t('canvas.c0026') },
+  { value: 'A1F83G8C2ARO7P', label: t('canvas.c0027') },
+  { value: 'A1PA6795UKMFR9', label: t('canvas.c0028') },
+  { value: 'A13V1IB3VIYZZH', label: t('canvas.c0029') },
+  { value: 'APJ6JRA9NG5V4', label: t('canvas.c0030') },
+  { value: 'A1RKKUPIHCS9HS', label: t('canvas.c0031') },
+  { value: 'A1VC38T7YXB528', label: t('canvas.c0032') },
+  { value: 'A19VAU5U5O7RUS', label: t('canvas.c0033') },
+  { value: 'A39IBJ37TRP1C6', label: t('canvas.c0034') },
+]
+
+/** SP-API / Amazon Ads 区域端点（NA / EU / FE） */
+const AMAZON_REGION_OPTIONS: SubBlockOption[] = [
+  { value: 'na', label: t('canvas.c0035') },
+  { value: 'eu', label: t('canvas.c0036') },
+  { value: 'fe', label: t('canvas.c0037') },
+]
+
+/** SP-API Reports API v2021-06-30 常用报表类型 */
+const AMAZON_REPORT_TYPE_OPTIONS: SubBlockOption[] = [
+  { value: 'GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL', label: t('canvas.c0038') },
+  { value: 'GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL', label: t('canvas.c0039') },
+  { value: 'GET_AMAZON_FULFILLED_SHIPMENTS_DATA_GENERAL', label: t('canvas.c0040') },
+  { value: 'GET_FBA_INVENTORY_RECEIPT_SUMMARY', label: t('canvas.c0041') },
+  { value: 'GET_MERCHANT_LISTINGS_ALL_DATA', label: t('canvas.c0042') },
+  { value: 'GET_BRAND_ANALYTICS_SEARCH_TERMS_REPORT', label: t('canvas.c0043') },
+]
+
+/** Listings Items API putListingsItem requirements 参数 */
+const AMAZON_LISTING_REQUIREMENTS_OPTIONS: SubBlockOption[] = [
+  { value: 'LISTING', label: t('canvas.c0044') },
+  { value: 'LISTING_PRODUCT_ONLY', label: t('canvas.c0045') },
+  { value: 'LISTING_OFFER_ONLY', label: t('canvas.c0046') },
 ]
 
 /** 字符串数组 → SubBlockOption[] 转换 */
 const strOpts = (list: string[]): SubBlockOption[] => list.map(v => ({ label: v, value: v }))
+
+/** 带 i18n 的选项转换：value 保留原值，label 用 t() 翻译 */
+const i18nOpts = (pairs: [value: string, key: string][]): SubBlockOption[] =>
+  pairs.map(([value, key]) => ({ label: t(key), value }))
+
+/** 条件可见：仅选择亚马逊时显示（SP-API / Amazon Ads 专属参数） */
+const WHEN_AMAZON: SubBlockCondition = { field: 'platform', operator: 'eq', value: 'amazon' }
+
+/**
+ * 生成同一 config 键的分平台变体块（联动下拉）：
+ * 选择某平台后仅显示该平台的参数块（标题体现平台 API 的 ID 命名），
+ * 各变体绑定同一 config 键且默认值一致，仅 title/condition 不同。
+ *
+ * @param fallbackTitle 提供时为未覆盖的其余平台生成一个通用兜底变体
+ */
+function platformScopedIdBlocks(
+  key: string,
+  type: 'input' | 'textarea',
+  defaultValue: string,
+  labels: Record<string, string>,
+  fallbackTitle?: string,
+): SubBlockDef[] {
+  const blocks: SubBlockDef[] = Object.entries(labels).map(([platform, title]) => ({
+    id: key,
+    title,
+    type,
+    default_value: defaultValue,
+    condition: { field: 'platform', operator: 'eq', value: platform },
+  }))
+  if (fallbackTitle) {
+    const rest = COMMERCE_PLATFORM_OPTIONS.map(o => o.value).filter(v => !(v in labels))
+    if (rest.length > 0) {
+      blocks.push({
+        id: key,
+        title: fallbackTitle,
+        type,
+        default_value: defaultValue,
+        condition: { field: 'platform', operator: 'in', value: rest },
+      })
+    }
+  }
+  return blocks
+}
 
 const paletteCategories = [
   {
@@ -601,18 +760,18 @@ const paletteCategories = [
     labelKey: 'collab.catBuiltin',
     icon: BulbOutlined,
     nodes: [
-      { type: 'builtin:start', label: '开始', icon: '▶', category: 'builtin', inputs: [], outputs: [{ id: 'out', label: '输出' }], defaultConfig: {} },
-      { type: 'builtin:end', label: '结束', icon: '⏹', category: 'builtin', inputs: [{ id: 'in', label: '输入' }], outputs: [], defaultConfig: {} },
-      { type: 'builtin:llm', label: 'LLM 调用', icon: '🤖', category: 'builtin', inputs: [{ id: 'input', label: '输入' }], outputs: [{ id: 'output', label: '输出' }, { id: 'usage', label: 'Token 用量' }], defaultConfig: { prompt: '', model_provider: 'auto', model_name: '', temperature: 0.7, max_tokens: 4096, system_prompt: '' }, subBlocks: [
-        { id: 'prompt', title: '提示词', type: 'textarea' },
-        { id: 'model_provider', title: '模型提供商', type: 'select', default_value: 'auto', options: [{ label: '自动选择', value: 'auto' }] },
-        { id: 'model_name', title: '模型名称', type: 'model-selector' },
-        { id: 'temperature', title: '温度', type: 'slider', default_value: 0.7, min: 0, max: 2 },
-        { id: 'max_tokens', title: '最大 Tokens', type: 'slider', default_value: 4096, min: 100, max: 128000 },
-        { id: 'system_prompt', title: '系统提示', type: 'textarea' },
+      { type: 'builtin:start', label: t('canvas.c0047'), icon: '▶', category: 'builtin', inputs: [], outputs: [{ id: 'out', label: t('canvas.c0048') }], defaultConfig: {} },
+      { type: 'builtin:end', label: t('canvas.c0049'), icon: '⏹', category: 'builtin', inputs: [{ id: 'in', label: t('canvas.c0050') }], outputs: [], defaultConfig: {} },
+      { type: 'builtin:llm', label: t('canvas.c0051'), icon: '🤖', category: 'builtin', inputs: [{ id: 'input', label: t('canvas.c0052') }], outputs: [{ id: 'output', label: t('canvas.c0053') }, { id: 'usage', label: t('canvas.c0054') }], defaultConfig: { prompt: '', model_provider: 'auto', model_name: '', temperature: 0.7, max_tokens: 4096, system_prompt: '' }, subBlocks: [
+        { id: 'prompt', title: t('canvas.c0055'), type: 'textarea' },
+        { id: 'model_provider', title: t('canvas.c0056'), type: 'select', default_value: 'auto', options: [{ label: t('canvas.c0057'), value: 'auto' }] },
+        { id: 'model_name', title: t('canvas.c0058'), type: 'model-selector' },
+        { id: 'temperature', title: t('canvas.c0059'), type: 'slider', default_value: 0.7, min: 0, max: 2 },
+        { id: 'max_tokens', title: t('canvas.c0060'), type: 'slider', default_value: 4096, min: 100, max: 128000 },
+        { id: 'system_prompt', title: t('canvas.c0061'), type: 'textarea' },
       ] },
-      { type: 'builtin:agent', label: 'Agent 调用', icon: '🧠', category: 'builtin', inputs: [{ id: 'task', label: '任务' }], outputs: [{ id: 'result', label: '结果' }], defaultConfig: {} },
-      { type: 'builtin:condition', label: '条件分支', icon: '❓', category: 'builtin', inputs: [{ id: 'in', label: '输入' }], outputs: [{ id: 'true', label: '真' }, { id: 'false', label: '假' }], defaultConfig: {} },
+      { type: 'builtin:agent', label: t('canvas.c0062'), icon: '🧠', category: 'builtin', inputs: [{ id: 'task', label: t('canvas.c0063') }], outputs: [{ id: 'result', label: t('canvas.c0064') }], defaultConfig: {} },
+      { type: 'builtin:condition', label: t('canvas.c0065'), icon: '❓', category: 'builtin', inputs: [{ id: 'in', label: t('canvas.c0066') }], outputs: [{ id: 'true', label: t('canvas.c0067') }, { id: 'false', label: t('canvas.c0068') }], defaultConfig: {} },
     ] as PaletteNode[],
   },
   {
@@ -620,9 +779,9 @@ const paletteCategories = [
     labelKey: 'collab.catComfyui',
     icon: BgColorsOutlined,
     nodes: [
-      { type: 'comfyui:KSampler', label: 'KSampler', icon: '🎨', category: 'comfyui', inputs: [{ id: 'model', label: '模型' }, { id: 'positive', label: '正向' }, { id: 'negative', label: '负向' }], outputs: [{ id: 'latent', label: '潜空间' }], defaultConfig: { seed: 42, steps: 20 } },
-      { type: 'comfyui:VAEDecode', label: 'VAE 解码', icon: '🖼', category: 'comfyui', inputs: [{ id: 'samples', label: '采样' }, { id: 'vae', label: 'VAE' }], outputs: [{ id: 'image', label: '图像' }], defaultConfig: {} },
-      { type: 'comfyui:CheckpointLoaderSimple', label: '模型加载', icon: '📦', category: 'comfyui', inputs: [], outputs: [{ id: 'model', label: '模型' }, { id: 'clip', label: 'CLIP' }, { id: 'vae', label: 'VAE' }], defaultConfig: { ckpt_name: 'model.safetensors' } },
+      { type: 'comfyui:KSampler', label: 'KSampler', icon: '🎨', category: 'comfyui', inputs: [{ id: 'model', label: t('canvas.c0069') }, { id: 'positive', label: t('canvas.c0070') }, { id: 'negative', label: t('canvas.c0071') }], outputs: [{ id: 'latent', label: t('canvas.c0072') }], defaultConfig: { seed: 42, steps: 20 } },
+      { type: 'comfyui:VAEDecode', label: t('canvas.c0073'), icon: '🖼', category: 'comfyui', inputs: [{ id: 'samples', label: t('canvas.c0074') }, { id: 'vae', label: 'VAE' }], outputs: [{ id: 'image', label: t('canvas.c0075') }], defaultConfig: {} },
+      { type: 'comfyui:CheckpointLoaderSimple', label: t('canvas.c0076'), icon: '📦', category: 'comfyui', inputs: [], outputs: [{ id: 'model', label: t('canvas.c0077') }, { id: 'clip', label: 'CLIP' }, { id: 'vae', label: 'VAE' }], defaultConfig: { ckpt_name: 'model.safetensors' } },
     ] as PaletteNode[],
   },
   {
@@ -630,8 +789,8 @@ const paletteCategories = [
     labelKey: 'collab.catData',
     icon: DatabaseOutlined,
     nodes: [
-      { type: 'builtin:memory-load', label: '记忆加载', icon: '💾', category: 'data', inputs: [], outputs: [{ id: 'memory', label: '记忆' }], defaultConfig: {} },
-      { type: 'builtin:memory-save', label: '记忆保存', icon: '📝', category: 'data', inputs: [{ id: 'data', label: '数据' }], outputs: [], defaultConfig: {} },
+      { type: 'builtin:memory-load', label: t('canvas.c0078'), icon: '💾', category: 'data', inputs: [], outputs: [{ id: 'memory', label: t('canvas.c0079') }], defaultConfig: {} },
+      { type: 'builtin:memory-save', label: t('canvas.c0080'), icon: '📝', category: 'data', inputs: [{ id: 'data', label: t('canvas.c0081') }], outputs: [], defaultConfig: {} },
     ] as PaletteNode[],
   },
   {
@@ -641,37 +800,37 @@ const paletteCategories = [
     nodes: [
       {
         type: 'builtin:text_input',
-        label: '文本输入',
+        label: t('canvas.c0001'),
         icon: '📝',
         category: 'input',
         inputs: [],
-        outputs: [{ id: 'text', label: '文本' }],
+        outputs: [{ id: 'text', label: t('canvas.c0082') }],
         defaultConfig: { value: '' },
         subBlocks: [
-          { id: 'value', title: '文本内容（支持 ${上游节点ID.output} 引用）', type: 'textarea' },
+          { id: 'value', title: t('canvas.c0083'), type: 'textarea' },
         ],
       },
       {
         type: 'builtin:media_input',
-        label: '媒体输入',
+        label: t('canvas.c0002'),
         icon: '🖼️',
         category: 'input',
         inputs: [],
-        outputs: [{ id: 'media', label: '媒体' }],
+        outputs: [{ id: 'media', label: t('canvas.c0084') }],
         defaultConfig: { media_type: 'file', source: 'url', value: '' },
         subBlocks: [
-          { id: 'media_type', title: '媒体类型', type: 'select', default_value: 'file', options: [
-            { label: '图片', value: 'image' },
-            { label: '音频', value: 'audio' },
-            { label: '视频', value: 'video' },
-            { label: '文件', value: 'file' },
+          { id: 'media_type', title: t('canvas.c0085'), type: 'select', default_value: 'file', options: [
+            { label: t('canvas.c0086'), value: 'image' },
+            { label: t('canvas.c0087'), value: 'audio' },
+            { label: t('canvas.c0088'), value: 'video' },
+            { label: t('canvas.c0089'), value: 'file' },
           ] },
-          { id: 'source', title: '来源格式', type: 'select', default_value: 'url', options: [
+          { id: 'source', title: t('canvas.c0090'), type: 'select', default_value: 'url', options: [
             { label: 'URL', value: 'url' },
             { label: 'Data URL', value: 'data-url' },
             { label: 'Base64', value: 'base64' },
           ] },
-          { id: 'value', title: '载荷值（URL / data-url / base64，不内联二进制）', type: 'textarea' },
+          { id: 'value', title: t('canvas.c0091'), type: 'textarea' },
         ],
       },
     ] as PaletteNode[],
@@ -686,202 +845,274 @@ const paletteCategories = [
     nodes: [
       {
         type: 'builtin:price-monitor',
-        label: '价格监控',
+        label: t('canvas.c0003'),
         icon: '💰',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '商品输入' }],
+        inputs: [{ id: 'input', label: t('canvas.c0092') }],
         outputs: [
-          { id: 'output', label: '监控结果' },
-          { id: 'alerts', label: '告警列表' },
+          { id: 'output', label: t('canvas.c0093') },
+          { id: 'alerts', label: t('canvas.c0094') },
         ],
-        defaultConfig: { platform: 'amazon', products: 'B0XXXXXX', alert_threshold: '50', check_interval: 6 },
+        defaultConfig: { platform: 'amazon', products: 'B0XXXXXX', marketplace_id: 'ATVPDKIKX0DER', region: 'na', alert_threshold: '50', check_interval: 6 },
         subBlocks: [
-          { id: 'platform', title: '监控平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
-          { id: 'products', title: '商品列表（逗号分隔）', type: 'textarea', default_value: 'B0XXXXXX' },
-          { id: 'alert_threshold', title: '告警阈值（元）', type: 'input', default_value: '50' },
-          { id: 'check_interval', title: '检查间隔（小时）', type: 'slider', default_value: 6, min: 1, max: 168 },
+          { id: 'platform', title: t('canvas.c0095'), type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          ...platformScopedIdBlocks('products', 'textarea', 'B0XXXXXX', {
+            amazon: t('canvas.phAmazon'),
+            taobao: t('canvas.phTaobao'),
+            jd: t('canvas.phJd'),
+            pdd: t('canvas.phPdd'),
+            'douyin-ecom': t('canvas.phDouyin'),
+            tiktok: t('canvas.phTiktok'),
+          }, t('canvas.phFallback')),
+          { id: 'marketplace_id', title: t('canvas.c0096'), type: 'select', default_value: 'ATVPDKIKX0DER', options: AMAZON_MARKETPLACE_OPTIONS, condition: WHEN_AMAZON },
+          { id: 'region', title: t('canvas.c0097'), type: 'select', default_value: 'na', options: AMAZON_REGION_OPTIONS, condition: WHEN_AMAZON },
+          { id: 'alert_threshold', title: t('canvas.c0098'), type: 'input', default_value: '50' },
+          { id: 'check_interval', title: t('canvas.c0099'), type: 'slider', default_value: 6, min: 1, max: 168 },
         ],
       },
       {
         type: 'builtin:ad-copy',
-        label: '广告文案生成',
+        label: t('canvas.c0004'),
         icon: '📢',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '商品信息' }],
-        outputs: [{ id: 'output', label: '广告文案' }],
+        inputs: [{ id: 'input', label: t('canvas.c0100') }],
+        outputs: [{ id: 'output', label: t('canvas.c0101') }],
         defaultConfig: { platform: 'amazon', product: '', style: 'promotion', language: 'zh' },
         subBlocks: [
-          { id: 'platform', title: '投放平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
-          { id: 'product', title: '商品名称', type: 'input', default_value: '' },
-          { id: 'style', title: '文案风格', type: 'select', default_value: 'promotion', options: strOpts(['促销促销', '种草安利', '品牌故事', '痛点营销', '节日借势']) },
-          { id: 'language', title: '目标语言', type: 'input', default_value: 'zh' },
+          { id: 'platform', title: t('canvas.c0102'), type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'product', title: t('canvas.c0103'), type: 'input', default_value: '' },
+          { id: 'style', title: t('canvas.c0104'), type: 'select', default_value: 'promotion', options: i18nOpts([
+            ['promotion', 'canvas.optStylePromotion'],
+            ['seed', 'canvas.optStyleSeed'],
+            ['brand', 'canvas.optStyleBrand'],
+            ['pain', 'canvas.optStylePain'],
+            ['festival', 'canvas.optStyleFestival'],
+          ]) },
+          { id: 'language', title: t('canvas.c0105'), type: 'input', default_value: 'zh' },
         ],
       },
       {
         type: 'builtin:review-respond',
-        label: '评论自动回复',
+        label: t('canvas.c0005'),
         icon: '💬',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '评论输入' }],
+        inputs: [{ id: 'input', label: t('canvas.c0106') }],
         outputs: [
-          { id: 'output', label: '回复结果' },
-          { id: 'sentiment', label: '情感分析' },
+          { id: 'output', label: t('canvas.c0107') },
+          { id: 'sentiment', label: t('canvas.c0108') },
         ],
-        defaultConfig: { platform: 'taobao', reviews: '', tone: 'friendly' },
+        defaultConfig: { platform: 'taobao', asin: '', marketplace_id: 'ATVPDKIKX0DER', reviews: '', tone: 'friendly' },
         subBlocks: [
-          { id: 'platform', title: '平台', type: 'select', default_value: 'taobao', options: COMMERCE_PLATFORM_OPTIONS },
-          { id: 'reviews', title: '评论内容（每行一条）', type: 'textarea', default_value: '' },
-          { id: 'tone', title: '回复语气', type: 'select', default_value: 'friendly', options: strOpts(['友好专业', '轻松活泼', '正式官方', '关怀安抚']) },
+          { id: 'platform', title: t('canvas.c0109'), type: 'select', default_value: 'taobao', options: COMMERCE_PLATFORM_OPTIONS },
+          ...platformScopedIdBlocks('asin', 'input', '', {
+            amazon: t('canvas.phAmazonReview'),
+            taobao: t('canvas.phTaobaoReview'),
+          }),
+          { id: 'marketplace_id', title: t('canvas.c0110'), type: 'select', default_value: 'ATVPDKIKX0DER', options: AMAZON_MARKETPLACE_OPTIONS, condition: WHEN_AMAZON },
+          { id: 'reviews', title: t('canvas.c0111'), type: 'textarea', default_value: '' },
+          { id: 'tone', title: t('canvas.c0112'), type: 'select', default_value: 'friendly', options: i18nOpts([
+            ['friendly', 'canvas.optToneFriendly'],
+            ['casual', 'canvas.optToneCasual'],
+            ['official', 'canvas.optToneOfficial'],
+            ['caring', 'canvas.optToneCaring'],
+          ]) },
         ],
       },
       {
         type: 'builtin:product-listing',
-        label: '商品上架 / Listing 优化',
+        label: t('canvas.c0006'),
         icon: '📦',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '商品数据' }],
+        inputs: [{ id: 'input', label: t('canvas.c0113') }],
         outputs: [
-          { id: 'output', label: 'Listing 结果' },
-          { id: 'title', label: '优化标题' },
+          { id: 'output', label: t('canvas.c0114') },
+          { id: 'title', label: t('canvas.c0115') },
         ],
-        defaultConfig: { platform: 'amazon', product_name: '', features: '', keywords: '' },
+        defaultConfig: { platform: 'amazon', product_name: '', features: '', keywords: '', sku: '', seller_id: '', product_type: 'PRODUCT', requirements: 'LISTING', marketplace_id: 'ATVPDKIKX0DER' },
         subBlocks: [
-          { id: 'platform', title: '平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
-          { id: 'product_name', title: '商品名称', type: 'input', default_value: '' },
-          { id: 'features', title: '商品卖点（逗号分隔）', type: 'textarea', default_value: '' },
-          { id: 'keywords', title: '目标关键词', type: 'input', default_value: '' },
+          { id: 'platform', title: t('canvas.c0116'), type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'product_name', title: t('canvas.c0117'), type: 'input', default_value: '' },
+          { id: 'features', title: t('canvas.c0118'), type: 'textarea', default_value: '' },
+          { id: 'keywords', title: t('canvas.c0119'), type: 'input', default_value: '' },
+          { id: 'sku', title: t('canvas.c0120'), type: 'input', default_value: '', condition: WHEN_AMAZON },
+          { id: 'seller_id', title: t('canvas.c0121'), type: 'input', default_value: '', condition: WHEN_AMAZON },
+          { id: 'product_type', title: t('canvas.c0122'), type: 'input', default_value: 'PRODUCT', condition: WHEN_AMAZON },
+          { id: 'requirements', title: t('canvas.c0123'), type: 'select', default_value: 'LISTING', options: AMAZON_LISTING_REQUIREMENTS_OPTIONS, condition: WHEN_AMAZON },
+          { id: 'marketplace_id', title: t('canvas.c0124'), type: 'select', default_value: 'ATVPDKIKX0DER', options: AMAZON_MARKETPLACE_OPTIONS, condition: WHEN_AMAZON },
         ],
       },
       {
         type: 'builtin:inventory-sync',
-        label: '库存同步',
+        label: t('canvas.c0007'),
         icon: '📊',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '库存数据' }],
+        inputs: [{ id: 'input', label: t('canvas.c0125') }],
         outputs: [
-          { id: 'output', label: '同步结果' },
-          { id: 'alerts', label: '低库存告警' },
+          { id: 'output', label: t('canvas.c0126') },
+          { id: 'alerts', label: t('canvas.c0127') },
         ],
-        defaultConfig: { platform: 'amazon', low_stock_threshold: '10' },
+        defaultConfig: { platform: 'amazon', skus: '', marketplace_id: 'ATVPDKIKX0DER', region: 'na', seller_id: '', low_stock_threshold: '10' },
         subBlocks: [
-          { id: 'platform', title: '同步平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
-          { id: 'low_stock_threshold', title: '低库存阈值', type: 'input', default_value: '10' },
+          { id: 'platform', title: t('canvas.c0128'), type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          ...platformScopedIdBlocks('skus', 'textarea', '', {
+            amazon: t('canvas.phAmazonInv'),
+            taobao: t('canvas.phTaobaoInv'),
+            jd: t('canvas.phJdInv'),
+            pdd: t('canvas.phPddInv'),
+            'douyin-ecom': t('canvas.phDouyinInv'),
+            tiktok: t('canvas.phTiktokInv'),
+          }, t('canvas.phInvFallback')),
+          { id: 'marketplace_id', title: t('canvas.c0129'), type: 'select', default_value: 'ATVPDKIKX0DER', options: AMAZON_MARKETPLACE_OPTIONS, condition: WHEN_AMAZON },
+          { id: 'region', title: t('canvas.c0130'), type: 'select', default_value: 'na', options: AMAZON_REGION_OPTIONS, condition: WHEN_AMAZON },
+          { id: 'seller_id', title: t('canvas.c0131'), type: 'input', default_value: '', condition: WHEN_AMAZON },
+          { id: 'low_stock_threshold', title: t('canvas.c0132'), type: 'input', default_value: '10' },
         ],
       },
       {
         type: 'builtin:competitor-analysis',
-        label: '竞品分析',
+        label: t('canvas.c0008'),
         icon: '🔍',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '竞品数据' }],
-        outputs: [{ id: 'output', label: '分析结果' }],
-        defaultConfig: { platform: 'amazon', competitors: '' },
+        inputs: [{ id: 'input', label: t('canvas.c0133') }],
+        outputs: [{ id: 'output', label: t('canvas.c0134') }],
+        defaultConfig: { platform: 'amazon', competitors: '', marketplace_id: 'ATVPDKIKX0DER', region: 'na' },
         subBlocks: [
-          { id: 'platform', title: '平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
-          { id: 'competitors', title: '竞品列表（ASIN/ID/链接，逗号分隔）', type: 'textarea', default_value: '' },
+          { id: 'platform', title: t('canvas.c0135'), type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          ...platformScopedIdBlocks('competitors', 'textarea', '', {
+            amazon: t('canvas.phAmazonComp'),
+            taobao: t('canvas.phTaobaoComp'),
+            jd: t('canvas.phJdComp'),
+            pdd: t('canvas.phPddComp'),
+            'douyin-ecom': t('canvas.phDouyinComp'),
+            tiktok: t('canvas.phTiktokComp'),
+          }, t('canvas.phCompFallback')),
+          { id: 'marketplace_id', title: t('canvas.c0136'), type: 'select', default_value: 'ATVPDKIKX0DER', options: AMAZON_MARKETPLACE_OPTIONS, condition: WHEN_AMAZON },
+          { id: 'region', title: t('canvas.c0137'), type: 'select', default_value: 'na', options: AMAZON_REGION_OPTIONS, condition: WHEN_AMAZON },
         ],
       },
       {
         type: 'builtin:keyword-research',
-        label: '关键词研究',
+        label: t('canvas.c0009'),
         icon: '🏷️',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '种子词输入' }],
+        inputs: [{ id: 'input', label: t('canvas.c0138') }],
         outputs: [
-          { id: 'output', label: '关键词列表' },
-          { id: 'keywords', label: '关键词数组' },
+          { id: 'output', label: t('canvas.c0139') },
+          { id: 'keywords', label: t('canvas.c0140') },
         ],
         defaultConfig: { platform: 'taobao', seed_keywords: '', language: 'zh' },
         subBlocks: [
-          { id: 'platform', title: '平台', type: 'select', default_value: 'taobao', options: COMMERCE_PLATFORM_OPTIONS },
-          { id: 'seed_keywords', title: '种子关键词', type: 'input', default_value: '' },
-          { id: 'language', title: '语言', type: 'input', default_value: 'zh' },
+          { id: 'platform', title: t('canvas.c0141'), type: 'select', default_value: 'taobao', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'seed_keywords', title: t('canvas.c0142'), type: 'input', default_value: '' },
+          { id: 'language', title: t('canvas.c0143'), type: 'input', default_value: 'zh' },
         ],
       },
       {
         type: 'builtin:sales-report',
-        label: '销售报表',
+        label: t('canvas.c0010'),
         icon: '📈',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '销售数据' }],
-        outputs: [{ id: 'output', label: '报表结果' }],
-        defaultConfig: { platform: 'amazon', period: '2025-01', metrics: 'sales,orders' },
+        inputs: [{ id: 'input', label: t('canvas.c0144') }],
+        outputs: [{ id: 'output', label: t('canvas.c0145') }],
+        defaultConfig: { platform: 'amazon', report_type: 'GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL', period: '2025-01', marketplace_id: 'ATVPDKIKX0DER', region: 'na', metrics: 'sales,orders' },
         subBlocks: [
-          { id: 'platform', title: '平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
-          { id: 'period', title: '统计周期', type: 'input', default_value: '2025-01' },
-          { id: 'metrics', title: '指标（逗号分隔）', type: 'input', default_value: 'sales,orders' },
+          { id: 'platform', title: t('canvas.c0146'), type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'report_type', title: t('canvas.c0147'), type: 'select', default_value: 'GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL', options: AMAZON_REPORT_TYPE_OPTIONS, condition: WHEN_AMAZON },
+          { id: 'period', title: t('canvas.c0148'), type: 'input', default_value: '2025-01' },
+          { id: 'marketplace_id', title: t('canvas.c0149'), type: 'select', default_value: 'ATVPDKIKX0DER', options: AMAZON_MARKETPLACE_OPTIONS, condition: WHEN_AMAZON },
+          { id: 'region', title: t('canvas.c0150'), type: 'select', default_value: 'na', options: AMAZON_REGION_OPTIONS, condition: WHEN_AMAZON },
+          { id: 'metrics', title: t('canvas.c0151'), type: 'input', default_value: 'sales,orders' },
         ],
       },
       {
         type: 'builtin:ad-streaming',
-        label: '广告流投放',
+        label: t('canvas.c0011'),
         icon: '📡',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '活动信息' }],
+        inputs: [{ id: 'input', label: t('canvas.c0152') }],
         outputs: [
-          { id: 'output', label: '投放计划' },
-          { id: 'campaign', label: '活动详情' },
+          { id: 'output', label: t('canvas.c0153') },
+          { id: 'campaign', label: t('canvas.c0154') },
         ],
-        defaultConfig: { platform: 'amazon', budget: '1000', targeting: '自动定向', objective: '转化' },
+        defaultConfig: { platform: 'amazon', budget: '1000', targeting: '自动定向', objective: '转化', profile_id: '', region: 'na' },
         subBlocks: [
-          { id: 'platform', title: '投放平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
-          { id: 'budget', title: '日预算（元）', type: 'input', default_value: '1000' },
-          { id: 'targeting', title: '定向方式', type: 'select', default_value: '自动定向', options: strOpts(['自动定向', '手动定向', '人群定向', '关键词定向']) },
-          { id: 'objective', title: '投放目标', type: 'select', default_value: '转化', options: strOpts(['转化', '点击', '曝光', '加购']) },
+          { id: 'platform', title: t('canvas.c0155'), type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'budget', title: t('canvas.c0156'), type: 'input', default_value: '1000' },
+          { id: 'targeting', title: t('canvas.c0157'), type: 'select', default_value: '自动定向', options: i18nOpts([
+            ['自动定向', 'canvas.optTargetAuto'],
+            ['手动定向', 'canvas.optTargetManual'],
+            ['人群定向', 'canvas.optTargetAudience'],
+            ['关键词定向', 'canvas.optTargetKeyword'],
+          ]) },
+          { id: 'objective', title: t('canvas.c0158'), type: 'select', default_value: '转化', options: i18nOpts([
+            ['转化', 'canvas.optObjectiveConversion'],
+            ['点击', 'canvas.optObjectiveClick'],
+            ['曝光', 'canvas.optObjectiveImpression'],
+            ['加购', 'canvas.optObjectiveAddCart'],
+          ]) },
+          { id: 'profile_id', title: 'Amazon Ads profileId', type: 'input', default_value: '', condition: WHEN_AMAZON },
+          { id: 'region', title: t('canvas.c0159'), type: 'select', default_value: 'na', options: AMAZON_REGION_OPTIONS, condition: WHEN_AMAZON },
         ],
       },
       {
         type: 'builtin:ad-monitor',
-        label: '广告监控',
+        label: t('canvas.c0012'),
         icon: '👁️',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '广告数据' }],
+        inputs: [{ id: 'input', label: t('canvas.c0160') }],
         outputs: [
-          { id: 'output', label: '监控结果' },
-          { id: 'alerts', label: '异常告警' },
+          { id: 'output', label: t('canvas.c0161') },
+          { id: 'alerts', label: t('canvas.c0162') },
         ],
-        defaultConfig: { platform: 'amazon', ad_ids: 'camp_001, camp_002', metrics: 'impressions,clicks,conversions,spend', alert_threshold: '500' },
+        defaultConfig: { platform: 'amazon', ad_ids: 'camp_001, camp_002', metrics: 'impressions,clicks,conversions,spend', alert_threshold: '500', profile_id: '', region: 'na' },
         subBlocks: [
-          { id: 'platform', title: '监控平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
-          { id: 'ad_ids', title: '广告ID列表（逗号分隔）', type: 'textarea', default_value: 'camp_001, camp_002' },
-          { id: 'metrics', title: '监控指标（逗号分隔）', type: 'input', default_value: 'impressions,clicks,conversions,spend' },
-          { id: 'alert_threshold', title: '告警阈值（花费元）', type: 'input', default_value: '500' },
+          { id: 'platform', title: t('canvas.c0163'), type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'ad_ids', title: t('canvas.c0164'), type: 'textarea', default_value: 'camp_001, camp_002' },
+          { id: 'metrics', title: t('canvas.c0165'), type: 'input', default_value: 'impressions,clicks,conversions,spend' },
+          { id: 'alert_threshold', title: t('canvas.c0166'), type: 'input', default_value: '500' },
+          { id: 'profile_id', title: 'Amazon Ads profileId', type: 'input', default_value: '', condition: WHEN_AMAZON },
+          { id: 'region', title: t('canvas.c0167'), type: 'select', default_value: 'na', options: AMAZON_REGION_OPTIONS, condition: WHEN_AMAZON },
         ],
       },
       {
         type: 'builtin:ad-strategy',
-        label: '广告策略',
+        label: t('canvas.c0013'),
         icon: '🧠',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '投放目标' }],
+        inputs: [{ id: 'input', label: t('canvas.c0168') }],
         outputs: [
-          { id: 'output', label: '策略结果' },
-          { id: 'strategy', label: '策略建议' },
+          { id: 'output', label: t('canvas.c0169') },
+          { id: 'strategy', label: t('canvas.c0170') },
         ],
         defaultConfig: { platform: 'amazon', goal: 'increase_sales', budget: '5000', product: '' },
         subBlocks: [
-          { id: 'platform', title: '投放平台', type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
-          { id: 'goal', title: '投放目标', type: 'select', default_value: 'increase_sales', options: strOpts(['increase_sales', 'increase_orders', 'reduce_cpa', 'brand_awareness', 'clearance']) },
-          { id: 'budget', title: '总预算（元）', type: 'input', default_value: '5000' },
-          { id: 'product', title: '投放商品', type: 'input', default_value: '' },
+          { id: 'platform', title: t('canvas.c0171'), type: 'select', default_value: 'amazon', options: COMMERCE_PLATFORM_OPTIONS },
+          { id: 'goal', title: t('canvas.c0172'), type: 'select', default_value: 'increase_sales', options: strOpts(['increase_sales', 'increase_orders', 'reduce_cpa', 'brand_awareness', 'clearance']) },
+          { id: 'budget', title: t('canvas.c0173'), type: 'input', default_value: '5000' },
+          { id: 'product', title: t('canvas.c0174'), type: 'input', default_value: '' },
         ],
       },
       {
         type: 'builtin:ad-cross',
-        label: '跨渠道广告投放',
+        label: t('canvas.c0014'),
         icon: '🔗',
         category: 'commerce',
-        inputs: [{ id: 'input', label: '商品信息' }],
+        inputs: [{ id: 'input', label: t('canvas.c0175') }],
         outputs: [
-          { id: 'output', label: '投放计划' },
-          { id: 'channels', label: '各渠道分配' },
+          { id: 'output', label: t('canvas.c0176') },
+          { id: 'channels', label: t('canvas.c0177') },
         ],
         defaultConfig: { platforms: 'amazon, taobao', total_budget: '10000', product: '', objective: '转化' },
         subBlocks: [
-          { id: 'platforms', title: '投放平台（逗号分隔）', type: 'textarea', default_value: 'amazon, taobao' },
-          { id: 'total_budget', title: '总预算（元）', type: 'input', default_value: '10000' },
-          { id: 'product', title: '投放商品', type: 'input', default_value: '' },
-          { id: 'objective', title: '统一目标', type: 'select', default_value: '转化', options: strOpts(['转化', '点击', '曝光', '加购']) },
+          { id: 'platforms', title: t('canvas.c0178'), type: 'textarea', default_value: 'amazon, taobao' },
+          { id: 'total_budget', title: t('canvas.c0179'), type: 'input', default_value: '10000' },
+          { id: 'product', title: t('canvas.c0180'), type: 'input', default_value: '' },
+          { id: 'objective', title: t('canvas.c0181'), type: 'select', default_value: '转化', options: i18nOpts([
+            ['转化', 'canvas.optObjectiveConversion'],
+            ['点击', 'canvas.optObjectiveClick'],
+            ['曝光', 'canvas.optObjectiveImpression'],
+            ['加购', 'canvas.optObjectiveAddCart'],
+          ]) },
         ],
       },
     ] as PaletteNode[],
@@ -985,6 +1216,9 @@ async function loadDynamicNodes() {
       }
       if (typeof b.min === 'number') sb.min = b.min
       if (typeof b.max === 'number') sb.max = b.max
+      if (b.condition && typeof b.condition === 'object' && (b.condition as Record<string, any>).field) {
+        sb.condition = b.condition as SubBlockCondition
+      }
       return sb
     }
     dynamicNodes.value = items
@@ -1051,7 +1285,7 @@ const { models: reachableModels, load: loadReachableModels } = useReachableModel
 const modelOptions = computed(() => buildModelOptions(reachableModels.value))
 const providerOptions = computed(() => {
   const providers = new Set(reachableModels.value.filter(m => m.enabled !== false).map(m => m.provider_id))
-  return [{ label: '自动选择', value: 'auto' }, ...[...providers].map(p => ({ label: p, value: p }))]
+  return [{ label: t('canvas.c0182'), value: 'auto' }, ...[...providers].map(p => ({ label: p, value: p }))]
 })
 function handleModelSelect(value: unknown) {
   const node = selectedNode.value
@@ -1076,7 +1310,8 @@ const configFields = computed(() => {
     .find(n => n.type === node.type)
   const blocks = def?.subBlocks ?? []
   if (blocks.length > 0) {
-    return blocks.map(b => ({
+    // 联动下拉：按当前 config（如 platform）过滤条件可见的字段；隐藏字段的值保留在 config 中不清除
+    return filterVisibleSubBlocks(blocks, node.config).map(b => ({
       key: b.id,
       title: b.title || b.id,
       type: b.type || 'input',
@@ -1099,9 +1334,9 @@ watch(
 )
 
 function formatNodeOutput(status: { status: string; output?: unknown; error?: string | null }): string {
-  if (status.error) return `错误: ${status.error}`
+  if (status.error) return t('canvas.errorPrefix') + ': ' + status.error
   const out = status.output
-  if (out === null || out === undefined) return '（无输出）'
+  if (out === null || out === undefined) return t('canvas.noOutput')
   return typeof out === 'string' ? out : JSON.stringify(out, null, 2)
 }
 
@@ -1312,20 +1547,36 @@ function onCanvasBlankMousedown() {
 // 工具栏操作 ── 通过 composable 落库，不再 console.log 占位
 async function handleSave() {
   const name = workflowName.value || t('collab.canvasNew')
-  const saved = await saveCanvas({
-    id: canvasId.value ?? undefined,
-    name,
-    nodes: canvasNodes.value,
-    edges: canvasEdges.value,
-  })
-  if (saved?.id) {
-    const isNew = !canvasId.value
-    canvasId.value = saved.id
-    workflowName.value = saved.name
-    // 新画布首次保存后把 id 写进 URL：刷新/重开不丢（路由 :id 分支负责恢复）
-    if (isNew && route.params.id !== saved.id) {
-      router.replace(`/collaboration/canvas/${saved.id}`)
+  try {
+    const saved = await saveCanvas(
+      {
+        id: canvasId.value ?? undefined,
+        name,
+        nodes: canvasNodes.value,
+        edges: canvasEdges.value,
+      },
+      // 乐观锁：已有画布携带本地版本号；期间被其他编辑者（如 agent）
+      // 修改过后端返回 409，composable 抛 CanvasVersionConflictError
+      canvasId.value ? canvasVersion.value ?? undefined : undefined,
+    )
+    if (saved?.id) {
+      const isNew = !canvasId.value
+      canvasId.value = saved.id
+      workflowName.value = saved.name
+      canvasVersion.value = saved.version ?? null
+      // 新画布首次保存后把 id 写进 URL：刷新/重开不丢（路由 :id 分支负责恢复）
+      if (isNew && route.params.id !== saved.id) {
+        router.replace(`/collaboration/canvas/${saved.id}`)
+      }
     }
+  } catch (e) {
+    if (e instanceof CanvasVersionConflictError) {
+      // 被抢占：重载最新版本，用户在最新版本上继续编辑
+      uiMessage.warning(t('canvas.canvasReloadedByOther'))
+      await loadFromRoute(canvasId.value ?? undefined)
+      return
+    }
+    throw e
   }
 }
 
@@ -1374,6 +1625,7 @@ async function handleRun() {
 async function loadFromRoute(workflowId: string | undefined) {
   if (!workflowId) {
     canvasId.value = null
+    canvasVersion.value = null
     workflowName.value = ''
     canvasNodes.value = []
     canvasEdges.value = []
@@ -1383,18 +1635,259 @@ async function loadFromRoute(workflowId: string | undefined) {
   const snapshot = await loadCanvas(workflowId)
   if (snapshot) {
     canvasId.value = snapshot.id ?? workflowId
+    canvasVersion.value = snapshot.version ?? null
     workflowName.value = snapshot.name
     canvasNodes.value = snapshot.nodes ?? []
     canvasEdges.value = snapshot.edges ?? []
     runStatus.value = {}
   } else {
-    workflowName.value = `工作流 ${workflowId}`
+    workflowName.value = t('canvas.workflowNamePrefix') + ' ' + workflowId
+  }
+}
+
+// ── Agent 实时画布操作（canvas_op 事件流） ─────────────────────
+// agent 经 Canvas Op 层修改画布，后端通过会话 WebSocket 广播事件；
+// 此处按 op 增量应用，用户可实时观看 agent 搭建工作流。
+// 实时抢占：用户本地编辑不受阻；保存走 base_version 乐观锁，冲突时
+// 重载最新版本并提示（见 handleSave）。
+const chatStore = useChatStore()
+
+interface CanvasOpPayload {
+  canvas_id: string
+  op: string
+  version?: number
+  actor?: string
+  data?: Record<string, any>
+}
+
+useSessionSync(
+  () => chatStore.currentSessionId,
+  (event: SessionSyncEvent) => {
+    if (event.event_type !== 'canvas_op') return
+    const p = event.payload as unknown as CanvasOpPayload
+    if (!p || !p.canvas_id || p.canvas_id !== canvasId.value) return
+    applyRemoteCanvasOp(p)
+  },
+)
+
+function applyRemoteCanvasOp(p: CanvasOpPayload) {
+  // 版本跳跃（断线重连丢事件）→ 直接重载整份快照保证一致
+  if (
+    typeof p.version === 'number' &&
+    canvasVersion.value != null &&
+    p.version > canvasVersion.value + 1
+  ) {
+    void loadFromRoute(canvasId.value ?? undefined)
+    return
+  }
+  const data = (p.data ?? {}) as Record<string, any>
+  switch (p.op) {
+    case 'add_node': {
+      const node = data.node as CanvasNodeSnapshot | undefined
+      if (node?.id) {
+        const idx = canvasNodes.value.findIndex(n => n.id === node.id)
+        if (idx >= 0) canvasNodes.value[idx] = node
+        else canvasNodes.value.push(node)
+      }
+      break
+    }
+    case 'connect': {
+      const edge = data.edge as CanvasEdgeSnapshot | undefined
+      if (edge?.id && !canvasEdges.value.some(e => e.id === edge.id)) {
+        // 远端边只有语义端点引用，渲染坐标待 DOM 就绪后补齐
+        canvasEdges.value.push({
+          ...edge,
+          x1: typeof edge.x1 === 'number' ? edge.x1 : 0,
+          y1: typeof edge.y1 === 'number' ? edge.y1 : 0,
+          x2: typeof edge.x2 === 'number' ? edge.x2 : 0,
+          y2: typeof edge.y2 === 'number' ? edge.y2 : 0,
+        })
+        void attachEdgeEndpoints(edge.id)
+      }
+      break
+    }
+    case 'set_config': {
+      const node = canvasNodes.value.find(n => n.id === data.node_id)
+      if (node) node.config = { ...(node.config ?? {}), ...(data.config ?? {}) }
+      break
+    }
+    case 'move_node': {
+      const node = canvasNodes.value.find(n => n.id === data.node_id)
+      if (node && data.position) {
+        node.position = { x: data.position.x, y: data.position.y }
+        void refreshEdgesForNode(node.id)
+      }
+      break
+    }
+    case 'remove_node': {
+      canvasNodes.value = canvasNodes.value.filter(n => n.id !== data.node_id)
+      canvasEdges.value = canvasEdges.value.filter(
+        e => e.source?.nodeId !== data.node_id && e.target?.nodeId !== data.node_id,
+      )
+      break
+    }
+    case 'remove_edge': {
+      canvasEdges.value = canvasEdges.value.filter(e => e.id !== data.edge_id)
+      break
+    }
+    case 'layout': {
+      const positions = (data.positions ?? {}) as Record<string, { x: number; y: number }>
+      for (const n of canvasNodes.value) {
+        const pos = positions[n.id]
+        if (pos) n.position = { x: pos.x, y: pos.y }
+      }
+      void refreshAllEdges()
+      break
+    }
+  }
+  if (typeof p.version === 'number') canvasVersion.value = p.version
+}
+
+/** 远端边落画布后按真实端口 DOM 坐标补齐端点（找不到时按节点位置兜底） */
+async function attachEdgeEndpoints(edgeId: string) {
+  await nextTick()
+  const edge = canvasEdges.value.find(e => e.id === edgeId)
+  if (!edge) return
+  const src = edge.source ? getPortCenter(edge.source.nodeId, edge.source.portId) : null
+  const tgt = edge.target ? getPortCenter(edge.target.nodeId, edge.target.portId) : null
+  const srcNode = canvasNodes.value.find(n => n.id === edge.source?.nodeId)
+  const tgtNode = canvasNodes.value.find(n => n.id === edge.target?.nodeId)
+  edge.x1 = src?.x ?? (srcNode ? srcNode.position.x + 140 : 0)
+  edge.y1 = src?.y ?? (srcNode ? srcNode.position.y + 30 : 0)
+  edge.x2 = tgt?.x ?? (tgtNode ? tgtNode.position.x : 0)
+  edge.y2 = tgt?.y ?? (tgtNode ? tgtNode.position.y + 30 : 0)
+}
+
+/** 节点位置变化后重算其相连边的端点坐标 */
+async function refreshEdgesForNode(nodeId: string) {
+  await nextTick()
+  for (const edge of canvasEdges.value) {
+    if (edge.source?.nodeId === nodeId && edge.source.portId) {
+      const p = getPortCenter(nodeId, edge.source.portId)
+      if (p) { edge.x1 = p.x; edge.y1 = p.y }
+    }
+    if (edge.target?.nodeId === nodeId && edge.target.portId) {
+      const p = getPortCenter(nodeId, edge.target.portId)
+      if (p) { edge.x2 = p.x; edge.y2 = p.y }
+    }
+  }
+}
+
+async function refreshAllEdges() {
+  await nextTick()
+  for (const edge of canvasEdges.value) {
+    if (edge.source?.portId) {
+      const p = getPortCenter(edge.source.nodeId, edge.source.portId)
+      if (p) { edge.x1 = p.x; edge.y1 = p.y }
+    }
+    if (edge.target?.portId) {
+      const p = getPortCenter(edge.target.nodeId, edge.target.portId)
+      if (p) { edge.x2 = p.x; edge.y2 = p.y }
+    }
+  }
+}
+
+// ── 店铺联动（store-select，§6.1）：按当前平台拉取已连接店铺 ──
+const canvasRoot = ref<HTMLElement | null>(null)
+const storeList = ref<ConnectedStore[]>([])
+const storeOptionsLoading = ref(false)
+const storeServiceUnavailable = ref(false)
+const storeDrawerOpen = ref(false)
+
+const currentPlatform = computed(() => String(selectedNode.value?.config?.platform ?? ''))
+const storeOptions = computed(() => buildStoreSelectOptions(storeList.value as StoreItem[], currentPlatform.value))
+
+async function reloadStoresForNode(): Promise<void> {
+  const node = selectedNode.value
+  const isStoreAuthNode = node?.type === 'builtin:store-auth'
+  const platform = currentPlatform.value
+  if (!platform && !isStoreAuthNode) {
+    storeList.value = []
+    storeServiceUnavailable.value = false
+    return
+  }
+  storeOptionsLoading.value = true
+  try {
+    // 店铺授权节点以店铺为下属对象，无平台上下文时展示全部店铺
+    storeList.value = await listStores(platform || undefined)
+    storeServiceUnavailable.value = false
+  } catch {
+    // 后端未部署 /stores 时降级：隐藏选项并提示，节点执行走原有降级路径（工作流不中断）
+    storeServiceUnavailable.value = true
+    storeList.value = []
+  } finally {
+    storeOptionsLoading.value = false
+  }
+  // 平台变化后失效的 store_id 显式清空（引用不存在店铺会在执行时报错）
+  if (node) {
+    const sid = String(node.config.store_id ?? '')
+    if (sid && !storeList.value.some(s => s.store_id === sid)) {
+      node.config.store_id = ''
+    }
+  }
+}
+
+// ── 店铺授权节点（builtin:store-auth）：店铺为下属对象，面板即管理页入口 ──
+const storeAuthTesting = ref(false)
+const storeAuthInfo = computed(() => {
+  const node = selectedNode.value
+  if (node?.type !== 'builtin:store-auth') return null
+  const sid = String(node.config.store_id ?? '')
+  return storeList.value.find(s => s.store_id === sid) ?? null
+})
+
+async function runStoreAuthTest(): Promise<void> {
+  const sid = String(selectedNode.value?.config?.store_id ?? '')
+  if (!sid) return
+  storeAuthTesting.value = true
+  try {
+    const result = await testStoreConnection(sid)
+    const status = (result as { status?: string }).status
+    if (status === 'active') uiMessage.success(t('canvas.msgTestPassed'))
+    else uiMessage.warning(t('canvas.msgTestFailed', { reason: (result as { detail?: string }).detail ?? '' }))
+    await reloadStoresForNode()
+  } catch (err) {
+    uiMessage.error(String(err))
+  } finally {
+    storeAuthTesting.value = false
+  }
+}
+
+watch(
+  [selectedNodeId, () => selectedNode.value?.config?.platform],
+  () => {
+    void reloadStoresForNode()
+  },
+  { immediate: false },
+)
+
+// ── 画布全屏（§6.4）：浏览器 Fullscreen API + webkit 前缀兼容 ──
+const isCanvasFullscreen = ref(false)
+const fullscreenSupported = computed(() =>
+  Boolean(canvasRoot.value && canFullscreen(document as unknown as FullscreenDoc, canvasRoot.value as unknown as FullscreenEl)),
+)
+
+function onFullscreenChange(): void {
+  isCanvasFullscreen.value = docIsFullscreen(document as unknown as FullscreenDoc)
+}
+
+function toggleFullscreen(): void {
+  const el = canvasRoot.value
+  if (!el || !canFullscreen(document as unknown as FullscreenDoc, el as unknown as FullscreenEl)) return
+  if (docIsFullscreen(document as unknown as FullscreenDoc)) {
+    exitFullscreenCompat(document as unknown as FullscreenDoc)
+  } else {
+    requestFullscreenCompat(el as unknown as FullscreenEl, document as unknown as FullscreenDoc)
+    // 画布比例变化后聚焦内容
+    nextTick(() => fitView())
   }
 }
 
 onMounted(async () => {
   document.addEventListener('keydown', onKeyDown)
   document.addEventListener('mousedown', onDocMousedownClose)
+  document.addEventListener('fullscreenchange', onFullscreenChange)
+  document.addEventListener('webkitfullscreenchange', onFullscreenChange)
   // 蜂群：agent 选择器数据 + 动态节点库
   agentStore.loadAgents().catch(() => undefined)
   loadDynamicNodes()
@@ -1412,11 +1905,31 @@ watch(
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('mousedown', onDocMousedownClose)
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
+  document.removeEventListener('webkitfullscreenchange', onFullscreenChange)
+  // 组件卸载时若仍处全屏则主动退出
+  if (docIsFullscreen(document as unknown as FullscreenDoc)) {
+    exitFullscreenCompat(document as unknown as FullscreenDoc)
+  }
 })
 </script>
 
 <style scoped>
 .canvas-designer { display: flex; flex-direction: column; height: calc(100vh - 64px); background: var(--nr-bg-primary, #0a0e1a); }
+.canvas-designer:fullscreen { height: 100vh; width: 100vw; }
+
+/* 店铺下拉空态/降级提示（§6.1） */
+.store-connect-hint { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-secondary, rgba(255,255,255,0.55)); }
+.store-connect-link { color: var(--nr-accent, #7c9eff); cursor: pointer; }
+
+/* 店铺授权节点面板（§6.2/节点管理页入口） */
+.store-auth-status { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-secondary, rgba(255,255,255,0.7)); }
+.store-auth-error { margin: 4px 0 0; font-size: 12px; color: #ff4d4f; word-break: break-all; }
+.store-auth-actions { display: flex; gap: 8px; }
+.store-badge { font-size: 12px; padding: 0 6px; border-radius: 8px; }
+.badge-active { background: rgba(82, 196, 26, 0.15); color: #52c41a; }
+.badge-error { background: rgba(255, 77, 79, 0.15); color: #ff4d4f; }
+.badge-expired, .badge-pending { background: rgba(250, 173, 20, 0.15); color: #faad14; }
 
 /* 工具栏 */
 .canvas-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid var(--nr-border, rgba(255, 255, 255, 0.08)); }

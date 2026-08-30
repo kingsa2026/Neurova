@@ -45,6 +45,16 @@ export function deleteConsoleSession(sessionId: string) {
   return api.delete<ApiResponse<null>>(`${BASE}/chat/sessions/${sessionId}`)
 }
 
+/** Archive a console session (hidden from history list, restorable). */
+export function archiveConsoleSession(sessionId: string) {
+  return api.post<ApiResponse<null>>(`${BASE}/chat/sessions/${sessionId}/archive`)
+}
+
+/** Restore an archived console session back to the normal list. */
+export function unarchiveConsoleSession(sessionId: string) {
+  return api.post<ApiResponse<null>>(`${BASE}/chat/sessions/${sessionId}/unarchive`)
+}
+
 /** Send a chat message via REST (non-streaming). Returns the assistant response. */
 export function sendConsoleMessage(agentId: string, message: string, sessionId?: string) {
   return api.post<ApiResponse<{ response: string; session_id: string; tool_calls?: any[] }>>(`${BASE}/chat`, {
@@ -90,4 +100,29 @@ export function getConsoleWSUrl(agentId: string) {
   const base = import.meta.env.VITE_API_BASE_URL || '/api/v1'
   const wsBase = base.replace(/^http/, 'ws')
   return `${wsBase}${BASE}/ws?agent_id=${agentId}`
+}
+
+// ---------------------------------------------------------------------------
+// 反馈质量闭环：点赞/点踩统计（迭代② stats 端点）
+// ---------------------------------------------------------------------------
+
+export interface FeedbackRecentItem {
+  session_id: string
+  timestamp: string
+  content: string
+  feedback: 'like' | 'dislike'
+}
+
+export interface FeedbackStats {
+  agent_id: string
+  sessions_scanned: number
+  total_feedback: number
+  like: number
+  dislike: number
+  recent: FeedbackRecentItem[]
+}
+
+/** Get like/dislike feedback stats aggregated per agent (reply quality). */
+export function getFeedbackStats(params?: { agent_id?: string; limit?: number }) {
+  return api.get<ApiResponse<FeedbackStats>>(`${BASE}/chat/feedback/stats`, { params })
 }

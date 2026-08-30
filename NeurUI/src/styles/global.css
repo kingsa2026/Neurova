@@ -261,7 +261,7 @@ body {
 }
 .ant-select-item-option-selected {
   color: var(--nr-primary-light) !important;
-  background: rgba(99, 102, 241, 0.1) !important;
+  background: var(--nr-primary-soft) !important;
 }
 
 /* Popover / Tooltip */
@@ -289,7 +289,7 @@ body {
   color: var(--nr-text-secondary) !important;
 }
 .ant-radio-button-wrapper-checked {
-  background: rgba(99, 102, 241, 0.15) !important;
+  background: var(--nr-primary-soft) !important;
   border-color: var(--nr-primary) !important;
   color: var(--nr-primary-light) !important;
 }
@@ -341,7 +341,7 @@ input::placeholder {
 .ant-select-focused .ant-picker,
 .ant-select-focused .ant-select-selector {
   border-color: var(--nr-primary) !important;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15) !important;
+  box-shadow: 0 0 0 2px var(--nr-primary-ring) !important;
 }
 .ant-select-selection-item,
 .ant-select-selection-search-input,

@@ -202,6 +202,61 @@ describe('useChatStore', () => {
       store.clearMessages()
       expect(store.messages).toEqual([])
     })
+
+    // ── 轮次删除（chat 页"删除一轮记录"） ──────────────────────────
+    // removeRoundFrom(fromIndex)：移除 fromIndex 处的用户消息及其后
+    // 连续的 assistant 消息（一轮），遇到下一条用户消息即停止。
+    describe('removeRoundFrom', () => {
+      it('removes the user message and its paired assistant reply', () => {
+        const store = useChatStore()
+        store.setMessages([
+          { role: 'user', content: 'q1' },
+          { role: 'assistant', content: 'a1' },
+          { role: 'user', content: 'q2' },
+          { role: 'assistant', content: 'a2' },
+        ])
+
+        store.removeRoundFrom(0)
+
+        expect(store.messages.map((m) => m.content)).toEqual(['q2', 'a2'])
+      })
+
+      it('removes a middle round only (earlier rounds untouched)', () => {
+        const store = useChatStore()
+        store.setMessages([
+          { role: 'user', content: 'q1' },
+          { role: 'assistant', content: 'a1' },
+          { role: 'user', content: 'q2' },
+          { role: 'assistant', content: 'a2' },
+        ])
+
+        store.removeRoundFrom(2)
+
+        expect(store.messages.map((m) => m.content)).toEqual(['q1', 'a1'])
+      })
+
+      it('removes a lone trailing user message (aborted stream, no reply yet)', () => {
+        const store = useChatStore()
+        store.setMessages([
+          { role: 'user', content: 'q1' },
+          { role: 'assistant', content: 'a1' },
+          { role: 'user', content: 'q2-only' },
+        ])
+
+        store.removeRoundFrom(2)
+
+        expect(store.messages.map((m) => m.content)).toEqual(['q1', 'a1'])
+      })
+
+      it('is a no-op for an out-of-range index', () => {
+        const store = useChatStore()
+        store.setMessages([{ role: 'user', content: 'q1' }])
+
+        store.removeRoundFrom(5)
+
+        expect(store.messages).toHaveLength(1)
+      })
+    })
   })
 
   // -------------------------------------------------------------------------

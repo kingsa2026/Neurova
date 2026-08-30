@@ -45,9 +45,9 @@
         <div class="comfyui-status" :class="{ available: comfyuiStatus.available }">
           <span class="status-dot" />
           <span class="status-text">
-            ComfyUI: {{ comfyuiStatus.available ? `已连接 (${comfyuiStatus.host})` : '未连接' }}
+            ComfyUI: {{ comfyuiStatus.available ? t('ui.comfyuiConnected', { host: comfyuiStatus.host }) : t('ui.disconnected') }}
           </span>
-          <GlassButton variant="ghost" size="sm" @click="fetchComfyuiStatus">检测</GlassButton>
+          <GlassButton variant="ghost" size="sm" @click="fetchComfyuiStatus">{{ t('ui.detect') }}</GlassButton>
         </div>
 
         <a-spin :spinning="loading">
@@ -138,26 +138,26 @@
     <!-- ComfyUI 导入 modal（统一落为可编辑画布） -->
     <a-modal
       v-model:open="showComfyuiImportModal"
-      title="导入 ComfyUI 工作流"
-      :ok-text="comfyuiImporting ? '导入中…' : '导入'"
+      :title="t('ui.importComfyuiWorkflow')"
+      :ok-text="comfyuiImporting ? t('ui.importing') : t('ui.import')"
       :confirm-loading="comfyuiImporting"
       @ok="handleComfyuiImportSubmit"
     >
       <a-form layout="vertical">
-        <a-form-item label="工作流名称" required>
-          <a-input v-model:value="comfyuiImportForm.name" placeholder="例如：SDXL 文生图" />
+        <a-form-item :label="t('ui.workflowName')" required>
+          <a-input v-model:value="comfyuiImportForm.name" :placeholder="t('ui.egSdxl')" />
         </a-form-item>
-        <a-form-item label="描述（可选）">
-          <a-input v-model:value="comfyuiImportForm.description" type="textarea" :rows="2" placeholder="工作流描述" />
+        <a-form-item :label="t('ui.descriptionOptional')">
+          <a-input v-model:value="comfyuiImportForm.description" type="textarea" :rows="2" :placeholder="t('ui.workflowDesc')" />
         </a-form-item>
-        <a-form-item label="ComfyUI 工作流 JSON 文件" required>
+        <a-form-item :label="t('ui.comfyuiJsonFile')" required>
           <input
             type="file"
             accept=".json,application/json"
             @change="handleComfyuiFileUpload"
           />
-          <p v-if="comfyuiImportForm.fileName" class="file-name">已选择: {{ comfyuiImportForm.fileName }}</p>
-          <p v-else class="file-hint">选择 ComfyUI API 格式导出的 JSON 文件，导入后生成一张可编辑画布</p>
+          <p v-if="comfyuiImportForm.fileName" class="file-name">{{ t('ui.selected', { name: comfyuiImportForm.fileName }) }}</p>
+          <p v-else class="file-hint">{{ t('ui.selectJsonHint') }}</p>
         </a-form-item>
       </a-form>
     </a-modal>
@@ -399,7 +399,7 @@ function handleComfyuiFileUpload(event: Event) {
       comfyuiImportForm.workflow = JSON.parse(text) as Record<string, unknown>
     } catch {
       comfyuiImportForm.workflow = null
-      alert('JSON 文件解析失败，请检查文件格式')
+      alert(t('ui.jsonParseFailed'))
     }
   }
   reader.readAsText(file)
@@ -407,11 +407,11 @@ function handleComfyuiFileUpload(event: Event) {
 
 async function handleComfyuiImportSubmit() {
   if (!comfyuiImportForm.name) {
-    alert('请输入工作流名称')
+    alert(t('ui.enterWorkflowName'))
     return
   }
   if (!comfyuiImportForm.workflow) {
-    alert('请选择 ComfyUI 工作流 JSON 文件')
+    alert(t('ui.selectComfyuiJson'))
     return
   }
   comfyuiImporting.value = true

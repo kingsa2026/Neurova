@@ -204,7 +204,7 @@ watch(panelOpen, (val) => {
   margin-bottom: 4px;
 }
 .nr-as-trigger:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--nr-glass-bg-hover);
 }
 
 .nr-as-trigger-avatar {
@@ -291,7 +291,7 @@ watch(panelOpen, (val) => {
 .nr-as-panel {
   width: 340px;
   max-height: calc(100vh - 84px);
-  background: rgba(18, 22, 36, 0.95);
+  background: var(--nr-bg-overlay);
   backdrop-filter: blur(40px) saturate(180%);
   border: 1px solid var(--nr-glass-border);
   border-radius: 16px;
@@ -330,7 +330,7 @@ watch(panelOpen, (val) => {
   font-size: 11px;
   font-weight: 600;
   color: var(--nr-text-muted);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--nr-glass-bg-hover);
   padding: 2px 8px;
   border-radius: 10px;
 }
@@ -349,7 +349,7 @@ watch(panelOpen, (val) => {
   transition: all 0.15s;
 }
 .nr-as-close:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--nr-glass-bg-active);
   color: var(--nr-text-primary);
 }
 
@@ -372,7 +372,7 @@ watch(panelOpen, (val) => {
   padding: 8px 12px 8px 32px;
   border: 1px solid var(--nr-glass-border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--nr-glass-bg);
   color: var(--nr-text-primary);
   font-size: 13px;
   outline: none;
@@ -383,7 +383,7 @@ watch(panelOpen, (val) => {
 }
 .nr-as-search-input:focus {
   border-color: var(--nr-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--nr-glass-bg-hover);
 }
 
 /* List */
@@ -403,11 +403,11 @@ watch(panelOpen, (val) => {
   transition: all 0.15s;
 }
 .nr-as-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--nr-glass-bg-hover);
 }
 .nr-as-item.active {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--nr-glass-bg-hover);
+  border: 1px solid var(--nr-glass-border);
 }
 .nr-as-item:not(.active) {
   border: 1px solid transparent;
@@ -465,5 +465,5 @@ watch(panelOpen, (val) => {
 /* Scrollbar */
 .nr-as-list::-webkit-scrollbar { width: 4px; }
 .nr-as-list::-webkit-scrollbar-track { background: transparent; }
-.nr-as-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+.nr-as-list::-webkit-scrollbar-thumb { background: var(--nr-glass-border); border-radius: 2px; }
 </style>

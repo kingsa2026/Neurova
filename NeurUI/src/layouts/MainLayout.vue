@@ -5,7 +5,7 @@
     <!-- Sidebar -->
     <GlassNav :collapsed="appStore.sidebarCollapsed" @brand-click="router.push('/dashboard')">
       <template #brand>
-        <img src="/img/NEUROVA-LOGO350white.png" alt="Neurova" class="nr-logo-img" />
+        <img :src="appStore.isDark ? '/img/NEUROVA-LOGO350white.png' : '/img/NEUROVA-LOGO350black.png'" alt="Neurova" class="nr-logo-img" />
       </template>
 
       <!-- Agent Switcher -->
@@ -144,10 +144,7 @@
         <TopNavMenu />
         <div class="nr-header-right">
           <!-- Theme toggle -->
-          <button class="nr-header-action" @click="appStore.toggleTheme" :title="appStore.isDark ? t('theme.light') : t('theme.dark')">
-            <SkinOutlined v-if="appStore.isDark" />
-            <BgColorsOutlined v-else />
-          </button>
+          <ThemeToggle />
 
           <!-- Language selector -->
           <a-dropdown>
@@ -198,14 +195,15 @@ import GlassNavItem from '@/components/GlassNavItem.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import AgentSwitcher from '@/components/AgentSwitcher.vue'
 import TopNavMenu from '@/components/TopNavMenu.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import {
   DashboardOutlined, RobotOutlined, MessageOutlined, DatabaseOutlined,
   ShareAltOutlined, ExperimentOutlined, BulbOutlined, RiseOutlined,
   HeartOutlined, ThunderboltOutlined, FileOutlined, ApiOutlined,
   ClockCircleOutlined, SafetyOutlined, CodeOutlined,
   DesktopOutlined, PlusOutlined, ControlOutlined, LinkOutlined,
-  SettingOutlined, BellOutlined, GlobalOutlined, SkinOutlined,
-  BgColorsOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
+  SettingOutlined, BellOutlined, GlobalOutlined,
+  LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   CoffeeOutlined, FileTextOutlined, HistoryOutlined,
   UserOutlined, PlayCircleOutlined, SmileOutlined,
 } from '@ant-design/icons-vue'
@@ -264,7 +262,7 @@ const breadcrumbs = computed(() => {
 .nr-header {
   height: var(--nr-header-h); display: flex; align-items: center;
   justify-content: space-between; padding: 0 24px;
-  background: rgba(10, 14, 26, 0.5);
+  background: var(--nr-header-bg);
   backdrop-filter: blur(30px) saturate(180%);
   border-bottom: 1px solid var(--nr-glass-border);
   flex-shrink: 0; z-index: 5;
@@ -275,11 +273,11 @@ const breadcrumbs = computed(() => {
 
 .nr-toggle-btn {
   width: 32px; height: 32px; border: none; border-radius: 8px;
-  background: rgba(255,255,255,0.04); color: var(--nr-text-secondary);
+  background: var(--nr-glass-bg); color: var(--nr-text-secondary);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   font-size: 16px; transition: all 0.2s;
 }
-.nr-toggle-btn:hover { background: rgba(255,255,255,0.08); color: var(--nr-text-primary); }
+.nr-toggle-btn:hover { background: var(--nr-glass-bg-active); color: var(--nr-text-primary); }
 
 .nr-header-action {
   width: 36px; height: 36px; border: none; border-radius: 10px;
@@ -287,7 +285,7 @@ const breadcrumbs = computed(() => {
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   font-size: 18px; transition: all 0.2s; text-decoration: none;
 }
-.nr-header-action:hover { background: rgba(255,255,255,0.06); color: var(--nr-text-primary); }
+.nr-header-action:hover { background: var(--nr-glass-bg-hover); color: var(--nr-text-primary); }
 
 .nr-content {
   flex: 1; overflow-y: auto; overflow-x: hidden;

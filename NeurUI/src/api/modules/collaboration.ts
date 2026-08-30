@@ -78,6 +78,8 @@ export interface CanvasSnapshot {
   name: string
   nodes: CanvasNodeSnapshot[]
   edges: CanvasEdgeSnapshot[]
+  /** 乐观锁版本号（后端 CanvasStore 维护；保存时作为 base_version 回传） */
+  version?: number
 }
 
 export interface SaveCanvasPayload {
@@ -187,9 +189,15 @@ export function getCanvas(canvasId: string) {
   return api.get<ApiResponse<CanvasSnapshot>>(`${BASE}/canvas/${canvasId}`)
 }
 
-/** Update an existing canvas workflow. */
-export function updateCanvas(canvasId: string, payload: SaveCanvasPayload) {
-  return api.put<ApiResponse<CanvasSnapshot>>(`${BASE}/canvas/${canvasId}`, payload)
+/** Update an existing canvas workflow.
+ *
+ * baseVersion：乐观锁。传入时若与服务端版本不一致，后端返回 409
+ * （detail.current_version 为最新版本），调用方应重载后重试。
+ */
+export function updateCanvas(canvasId: string, payload: SaveCanvasPayload, baseVersion?: number) {
+  return api.put<ApiResponse<CanvasSnapshot>>(`${BASE}/canvas/${canvasId}`, payload, {
+    params: baseVersion != null ? { base_version: baseVersion } : undefined,
+  })
 }
 
 /** Delete a canvas workflow. */

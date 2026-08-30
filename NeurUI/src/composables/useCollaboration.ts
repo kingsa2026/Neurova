@@ -19,6 +19,27 @@ import type {
 } from '@/api/modules/collaboration'
 import { listCanvases as listCanvasesApi } from '@/api/modules/collaboration'
 
+/** 画布保存版本冲突（409）：服务端已被其他编辑者（如 agent）更新。
+ *  页面应重载最新快照后让用户重试，而不是静默覆盖。 */
+export class CanvasVersionConflictError extends Error {
+  currentVersion: number | null
+  constructor(currentVersion: number | null, message = 'canvas version conflict') {
+    super(message)
+    this.name = 'CanvasVersionConflictError'
+    this.currentVersion = currentVersion
+  }
+}
+
+/** 判断 axios 错误是否为画布版本冲突 409 */
+function asVersionConflict(e: unknown): CanvasVersionConflictError | null {
+  const resp = (e as any)?.response
+  if (resp?.status !== 409) return null
+  const detail = resp.data?.detail
+  const current =
+    typeof detail?.current_version === 'number' ? detail.current_version : null
+  return new CanvasVersionConflictError(current, typeof detail?.error === 'string' ? detail.error : undefined)
+}
+
 export function useCollaboration() {
   const store = useCollaborationStore()
   const { t } = useI18n()
@@ -77,12 +98,17 @@ export function useCollaboration() {
     }
   }
 
-  async function saveCanvas(payload: SaveCanvasPayload): Promise<CanvasSnapshot | null> {
+  async function saveCanvas(
+    payload: SaveCanvasPayload,
+    baseVersion?: number,
+  ): Promise<CanvasSnapshot | null> {
     try {
-      const saved = await store.saveCanvasAction(payload)
+      const saved = await store.saveCanvasAction(payload, baseVersion)
       uiMessage.success(t('common.success'))
       return saved
-    } catch {
+    } catch (e) {
+      const conflict = asVersionConflict(e)
+      if (conflict) throw conflict // 版本冲突交给页面处理（重载+提示）
       uiMessage.error(t('common.error'))
       return null
     }
