@@ -129,9 +129,16 @@ def reset_image_gen_client(): ...
 | 视频服务地址 | `NEUROVA_VIDEO_API_BASE`（ConfigManager） | 可选 |
 | 抖音发布 | `NEUROVA_DOUYIN_ACCESS_TOKEN` | 抖音开放平台 access_token |
 | 快手发布 | `NEUROVA_KUAISHOU_ACCESS_TOKEN` | 快手开放平台 access_token |
-| 亚马逊电商 | `NEUROVA_AMAZON_SP_API_KEY` | Amazon SP-API |
-| 淘宝电商 | `NEUROVA_TAOBAO_APP_KEY` + `NEUROVA_TAOBAO_APP_SECRET` | 淘宝开放平台 |
+| 亚马逊电商 | `NEUROVA_AMAZON_SP_REFRESH_TOKEN` + `NEUROVA_AMAZON_SP_CLIENT_ID` + `NEUROVA_AMAZON_SP_CLIENT_SECRET` | Amazon SP-API（LWA 授权三件套） |
+| 亚马逊广告 | `NEUROVA_AMAZON_ADS_CLIENT_ID` + `NEUROVA_AMAZON_ADS_CLIENT_SECRET` | Amazon Ads API（独立开放平台，另需 profileId） |
+| 淘宝电商 | `NEUROVA_TAOBAO_APP_KEY` + `NEUROVA_TAOBAO_APP_SECRET` + `NEUROVA_TAOBAO_ACCESS_TOKEN`（或 `NEUROVA_TAOBAO_REFRESH_TOKEN`） | 淘宝开放平台 TOP（eco.taobao.com/router/rest） |
+| 京东电商 | `NEUROVA_JD_APP_KEY` + `NEUROVA_JD_APP_SECRET` + `NEUROVA_JD_ACCESS_TOKEN`（或 `NEUROVA_JD_REFRESH_TOKEN`） | 京东开放平台（api.jd.com/routerjson） |
+| 拼多多电商 | `NEUROVA_PDD_CLIENT_ID` + `NEUROVA_PDD_CLIENT_SECRET` + `NEUROVA_PDD_ACCESS_TOKEN`（或 `NEUROVA_PDD_REFRESH_TOKEN`） | 拼多多开放平台（gw-api.pinduoduo.com/api/router） |
+| 抖店电商 | `NEUROVA_DOUYIN_ECOM_APP_KEY` + `NEUROVA_DOUYIN_ECOM_APP_SECRET` + `NEUROVA_DOUYIN_ECOM_ACCESS_TOKEN`（或 `NEUROVA_DOUYIN_ECOM_REFRESH_TOKEN`） | 抖店开放平台（openapi-fxg.jinritemai.com） |
+| TikTok 电商 | `NEUROVA_TIKTOK_SHOP_APP_KEY` + `NEUROVA_TIKTOK_SHOP_APP_SECRET` + `NEUROVA_TIKTOK_SHOP_ACCESS_TOKEN`（或 `NEUROVA_TIKTOK_SHOP_REFRESH_TOKEN`） | TikTok Shop Partner（open-api.tiktokglobalshop.com） |
 | 主密钥 | `NEUROVA_MASTER_KEY`（已有） | SecretStore 自身加解密主密钥 |
+
+> 平台能力边界（依据各开放平台文档）：京东/拼多多/抖店/TikTok Shop 均不提供商品评论拉取 API（仅淘宝 TOP `taobao.traderates.get`）；五平台开放 API 均仅提供自营数据、不提供竞品数据；五平台广告分别为阿里妈妈/京准通/多多推广/巨量千川/TikTok Ads 独立系统，与电商网关凭据不互通。
 
 ### 3.4 节点层改造
 
