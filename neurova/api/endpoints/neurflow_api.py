@@ -1175,3 +1175,97 @@ async def execute_comfyui_node_endpoint(request: ComfyUIExecuteRequest):
 
     result = await _execute_comfyui_node(f"comfyui:{request.class_type}", request.config, request.inputs)
     return result
+
+
+# ==================== P0 Step 4 — 调试 API ====================
+
+
+from neurova.collaboration.neurflow.execution_engine import DebugSession  # noqa: E402
+
+
+# 全局注册表：execution_id → DebugSession（in-memory，仅调试用）
+_DEBUG_SESSIONS: Dict[str, DebugSession] = {}
+
+# 全局注册表：node_id → mock_output（in-memory，调试用）
+_NODE_MOCKS: Dict[str, Any] = {}
+
+
+class BreakpointRequest(BaseModel):
+    """设置断点请求体"""
+
+    breakpoints: list[str] = []
+    replace: bool = True
+
+
+class ResumeRequest(BaseModel):
+    """恢复执行请求体"""
+
+    step: Optional[str] = None  # None | "in" | "over" | "out"
+
+
+class MockNodeRequest(BaseModel):
+    """设置节点 mock 输出请求体"""
+
+    mock_output: Optional[Any] = None
+    clear: bool = False
+
+
+@router.post("/executions/{execution_id}/breakpoint")
+async def set_breakpoints(execution_id: str, body: BreakpointRequest):
+    """为指定 execution 设置/追加断点集合。"""
+    session = _DEBUG_SESSIONS.setdefault(execution_id, DebugSession())
+    if body.replace:
+        session.breakpoints = set(body.breakpoints)
+    else:
+        session.breakpoints.update(body.breakpoints)
+    return {
+        "execution_id": execution_id,
+        "breakpoints": sorted(session.breakpoints),
+        "count": len(session.breakpoints),
+    }
+
+
+@router.post("/executions/{execution_id}/resume")
+async def resume_execution(execution_id: str, body: ResumeRequest):
+    """恢复暂停中的执行；可选 step 模式（in/over/out）。"""
+    session = _DEBUG_SESSIONS.get(execution_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="未找到该 execution 的调试会话")
+    if body.step is not None and body.step not in ("in", "over", "out"):
+        raise HTTPException(status_code=400, detail="step 必须为 in/over/out 之一")
+    session.step_mode = body.step
+    session.resume()
+    return {"execution_id": execution_id, "resumed": True, "step_mode": session.step_mode}
+
+
+@router.get("/executions/{execution_id}/variables")
+async def get_execution_variables(execution_id: str):
+    """获取当前执行实例的所有变量（含 inputs/variables/node_results）。"""
+    from neurova.collaboration.neurflow.storage import NeurflowStorage as _Storage  # noqa: F401
+
+    storage = NeurflowStorage()
+    execution = storage.get_execution(execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail="执行实例不存在")
+    return {
+        "execution_id": execution_id,
+        "inputs": execution.inputs,
+        "variables": execution.variables,
+        "node_results": {
+            nid: {
+                "status": nr.status,
+                "output": nr.output,
+            }
+            for nid, nr in execution.node_results.items()
+        },
+    }
+
+
+@router.put("/nodes/{node_id}/mock")
+async def set_node_mock(node_id: str, body: MockNodeRequest):
+    """为节点设置 mock 输出；clear=true 时清空（恢复真实执行）。"""
+    if body.clear:
+        _NODE_MOCKS.pop(node_id, None)
+        return {"node_id": node_id, "mocked": False}
+    _NODE_MOCKS[node_id] = body.mock_output
+    return {"node_id": node_id, "mocked": True}

@@ -106,6 +106,9 @@ class WorkflowNode:
     label: Optional[str] = None
     enabled: bool = True
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # P0 Step 3 — 调试 Mock 输出：节点级运行时短路值
+    # 命中条件：mock_output is not None（None/未设=走真实 executor）
+    mock_output: Optional[Any] = None
 
 
 @dataclass
