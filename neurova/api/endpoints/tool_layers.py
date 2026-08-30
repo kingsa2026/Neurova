@@ -18,13 +18,19 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from neurova.api.auth import get_current_user
 from neurova.execution_engine.tool_engine import ToolEngine, ToolStatus
+from neurova.security.url_guard import assert_public_url
+from neurova.tool_layers.mcp_config import validate_mcp_server_config
 
 logger = get_logger(__name__)
-router = APIRouter()
+
+# P0-1：路由级鉴权——本路由可注册 stdio MCP server（本机进程派生面），
+# 未认证访问等于未认证 RCE，必须整体挂 get_current_user
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 # 全局 ToolEngine 实例
 _tool_engine: Optional[ToolEngine] = None
@@ -52,7 +58,7 @@ class MCPServerInfo(BaseModel):
 class MCPServerConnectRequest(BaseModel):
     name: str = Field(..., description="Server 名称")
     url: str = Field(default="", description="Server URL")
-    transport: str = Field(default="stdio", description="传输类型: stdio/sse/streamable_http")
+    transport: str = Field(default="stdio", description="传输类型: stdio/http/sse")
     command: Optional[str] = Field(default=None, description="stdio 模式的命令")
     args: List[str] = Field(default_factory=list, description="stdio 模式的参数")
     env: Dict[str, str] = Field(default_factory=dict, description="环境变量")
@@ -120,13 +126,24 @@ async def list_mcp_servers():
 
 
 @router.post("/mcp-servers", response_model=MCPServerInfo)
-async def connect_mcp_server(body: MCPServerConnectRequest):
-    """注册（持久化）并连接 MCP Server；失败原因可经 GET /mcp-servers 查询"""
+async def connect_mcp_server(
+    body: MCPServerConnectRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """注册（持久化）并连接 MCP Server；失败原因可经 GET /mcp-servers 查询
+
+    P0-1 安全门（按序裁决）：
+    1. stdio 传输 = 本机进程派生面，仅限 admin 角色（403）
+    2. 配置 schema 校验 + shell 拒绝表（400，指名字段）
+    3. 非 admin 的 http/sse 拒绝私网/环回 URL（400）——admin 豁免，
+       保住自托管 localhost MCP server 场景
+    """
     import re
 
     from neurova.shared_config import get_shared_config_manager
     from neurova.tool_layers.mcp_client import get_mcp_client
 
+    role = str(current_user.get("role") or "user")
     sid = re.sub(r"\W+", "_", body.name or "").strip("_") or str(uuid.uuid4())
     config = {
         "id": sid,
@@ -138,6 +155,23 @@ async def connect_mcp_server(body: MCPServerConnectRequest):
         "env": body.env,
         "enabled": True,
     }
+
+    if config["transport"] == "stdio" and role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="stdio 传输需要管理员角色（stdio MCP server 由本机派生进程执行）",
+        )
+
+    try:
+        cfg = validate_mcp_server_config(config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if role != "admin" and cfg.get("transport") in ("http", "sse"):
+        try:
+            assert_public_url(cfg.get("url") or "")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"MCP server url 被拒绝: {e}")
 
     # 持久化（内部做严格 schema 校验，非法返回 False）
     if not get_shared_config_manager().add_mcp_server(config):
