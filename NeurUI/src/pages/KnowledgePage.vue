@@ -117,11 +117,21 @@
         :file-list="importFiles"
         :before-upload="beforeImportUpload"
         :multiple="false"
-        accept=".json,.csv,.txt"
+        accept=".json,.csv,.txt,.md,.html,.htm,.docx,.xlsx,.pptx,.pdf"
       >
         <p class="ant-upload-text">{{ t('knowledge.dragOrClick') }}</p>
         <p class="ant-upload-hint">{{ t('knowledge.importFormats') }}</p>
       </a-upload-dragger>
+
+      <a-divider style="margin: 12px 0" />
+      <a-input
+        v-model:value="importUrlValue"
+        :placeholder="t('knowledge.importUrlPlaceholder')"
+        style="margin-bottom: 8px"
+      />
+      <a-button type="primary" block :loading="importingUrl" @click="handleImportUrl">
+        {{ t('knowledge.importUrl') }}
+      </a-button>
     </a-modal>
   </div>
 </template>
