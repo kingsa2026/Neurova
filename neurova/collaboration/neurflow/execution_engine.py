@@ -32,6 +32,33 @@ class _NodeExecutionError(RuntimeError):
     """节点执行失败（携带首个失败信息，触发工作流级失败处理）"""
 
 
+@dataclass
+class DebugSession:
+    """调试会话：控制工作流执行的暂停/恢复/单步。
+
+    字段：
+      breakpoints: 命中断点的节点 id 集合；为空表示无断点
+      step_mode: None | "in" | "over" | "out"——单步推进模式
+      resume_event: asyncio.Event——wait_resume 阻塞、resume 触发
+    """
+
+    breakpoints: Set[str] = field(default_factory=set)
+    step_mode: Optional[str] = None
+    resume_event: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def resume(self) -> None:
+        """同步触发 resume（不可 await）；解阻塞 wait_resume。"""
+        self.resume_event.set()
+
+    async def wait_resume(self) -> None:
+        """阻塞直到 resume() 被调用。"""
+        await self.resume_event.wait()
+
+    def reset(self) -> None:
+        """重置 resume 事件，让下一次 wait_resume 重新阻塞。"""
+        self.resume_event.clear()
+
+
 class ExecutionStatus(Enum):
     """执行状态"""
 
@@ -56,6 +83,10 @@ class ExecutionEventType(Enum):
     VARIABLE_SET = "variable_set"
     PAUSED = "paused"
     RESUMED = "resumed"
+    # P0 Step 1 — 调试 IDE 化新增
+    BREAKPOINT_HIT = "breakpoint_hit"
+    STEP_ADVANCED = "step_advanced"
+    VARIABLE_SCOPED = "variable_scoped"
 
 
 @dataclass
@@ -159,6 +190,82 @@ class WorkflowExecutor:
     def validate_workflow(self, workflow: WorkflowDefinition):
         """验证工作流"""
         return self._dag_validator.validate(workflow.nodes, workflow.edges)
+
+    async def execute_debug(
+        self,
+        workflow: WorkflowDefinition,
+        inputs: Dict[str, Any],
+        debug_session: DebugSession,
+        **kwargs,
+    ):
+        """流式调试执行入口（async generator）。
+
+        P0 Step 2：最小占位——按拓扑顺序 yield 各节点的 NODE_STARTED/COMPLETED 事件，
+        命中断点时 yield BREAKPOINT_HIT 并 await debug_session.wait_resume()。
+        完整执行逻辑集成在 Step 4 完成。
+        """
+        node_map = {n.id: n for n in workflow.nodes}
+        validation = self._dag_validator.validate(workflow.nodes, workflow.edges)
+        if not validation.is_valid:
+            yield ExecutionEvent(
+                type=ExecutionEventType.WORKFLOW_FAILED,
+                workflow_id=workflow.id,
+                execution_id="",
+                data={"error": "; ".join(validation.errors)},
+            )
+            return
+
+        try:
+            execution_order = self._dag_validator.get_execution_path(
+                workflow.nodes, workflow.edges
+            )
+        except Exception as e:
+            yield ExecutionEvent(
+                type=ExecutionEventType.WORKFLOW_FAILED,
+                workflow_id=workflow.id,
+                execution_id="",
+                data={"error": f"拓扑排序失败: {e}"},
+            )
+            return
+
+        # 按拓扑序逐步推进；命中断点则暂停
+        for node_id in execution_order:
+            # 命中断点检查
+            if node_id in debug_session.breakpoints:
+                yield ExecutionEvent(
+                    type=ExecutionEventType.BREAKPOINT_HIT,
+                    workflow_id=workflow.id,
+                    execution_id="",
+                    node_id=node_id,
+                )
+                await debug_session.wait_resume()
+                debug_session.reset()
+                yield ExecutionEvent(
+                    type=ExecutionEventType.STEP_ADVANCED,
+                    workflow_id=workflow.id,
+                    execution_id="",
+                    node_id=node_id,
+                )
+
+            yield ExecutionEvent(
+                type=ExecutionEventType.NODE_STARTED,
+                workflow_id=workflow.id,
+                execution_id="",
+                node_id=node_id,
+            )
+            yield ExecutionEvent(
+                type=ExecutionEventType.NODE_COMPLETED,
+                workflow_id=workflow.id,
+                execution_id="",
+                node_id=node_id,
+                data={"status": "success"},
+            )
+
+        yield ExecutionEvent(
+            type=ExecutionEventType.WORKFLOW_COMPLETED,
+            workflow_id=workflow.id,
+            execution_id="",
+        )
 
     async def execute(
         self,
