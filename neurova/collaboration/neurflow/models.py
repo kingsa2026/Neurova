@@ -42,6 +42,8 @@ class WorkflowTrigger:
     enabled: bool = True
     config: Dict[str, Any] = field(default_factory=dict)
     secret_hash: Optional[str] = None
+    # P1 Step 4b — webhook 验签需原 secret（hash 不可逆），AES-GCM 可逆加密存储
+    secret_encrypted: Optional[str] = None
     rate_limit_per_minute: Optional[int] = None
     created_at: float = 0.0
     updated_at: float = 0.0
