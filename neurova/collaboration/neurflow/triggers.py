@@ -15,6 +15,22 @@ from .models import TriggerType, WorkflowTrigger
 
 logger = logging.getLogger(__name__)
 
+# 全局单例（应用启动时由装配方 set_scheduler 注入 APScheduler 实例）
+_manager: Optional["TriggerManager"] = None
+
+
+def get_trigger_manager() -> "TriggerManager":
+    """全局 TriggerManager 单例（惰性创建，scheduler 可后置注入）。"""
+    global _manager
+    if _manager is None:
+        _manager = TriggerManager()
+    return _manager
+
+
+def set_trigger_scheduler(scheduler: Any) -> None:
+    """应用启动装配：把 APScheduler 实例挂到全局 TriggerManager。"""
+    get_trigger_manager()._scheduler = scheduler
+
 
 class TriggerManager:
     """Cron 触发器生命周期管理（注入 scheduler 与 dispatch）。"""
