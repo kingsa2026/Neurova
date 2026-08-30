@@ -59,6 +59,16 @@ class DebugSession:
         self.resume_event.clear()
 
 
+# P0-7/N6：节点 mock 输出存储——单一事实源在引擎（execute_debug 消费），
+# API 层的 PUT /nodes/{id}/mock 经 get_node_mocks() 读写
+_NODE_MOCKS: Dict[str, Any] = {}
+
+
+def get_node_mocks() -> Dict[str, Any]:
+    """节点 mock 表（engine 内共享；execute_debug 执行时消费）。"""
+    return _NODE_MOCKS
+
+
 class ExecutionStatus(Enum):
     """执行状态"""
 
@@ -253,13 +263,36 @@ class WorkflowExecutor:
                 execution_id="",
                 node_id=node_id,
             )
+
+            # P0-7/N6：mock 消费——节点级 mock_output 优先，回退全局 _NODE_MOCKS
+            # （此前 _NODE_MOCKS 与 node.mock_output 均无执行路径引用，为死功能）
+            node = node_map.get(node_id)
+            mock_output = getattr(node, "mock_output", None)
+            if mock_output is None:
+                mock_output = _NODE_MOCKS.get(node_id)
+            node_data = (
+                {"status": "success", "output": mock_output}
+                if mock_output is not None
+                else {"status": "success"}
+            )
             yield ExecutionEvent(
                 type=ExecutionEventType.NODE_COMPLETED,
                 workflow_id=workflow.id,
                 execution_id="",
                 node_id=node_id,
-                data={"status": "success"},
+                data=node_data,
             )
+
+            # P0-7/N6：step_mode 单步——每个节点完成后暂停等待 resume
+            if debug_session.step_mode:
+                yield ExecutionEvent(
+                    type=ExecutionEventType.BREAKPOINT_HIT,
+                    workflow_id=workflow.id,
+                    execution_id="",
+                    node_id=node_id,
+                )
+                await debug_session.wait_resume()
+                debug_session.reset()
 
         yield ExecutionEvent(
             type=ExecutionEventType.WORKFLOW_COMPLETED,
