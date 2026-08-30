@@ -274,6 +274,46 @@ class OpenAILoop(BaseAgentLoop):
         return response
 
     async def _predict_stream(self, request_params: Dict) -> Any:
+        """流式预测入口（P1-1① 溢出恢复包装）。
+
+        请求打开即上下文溢出（TokenLimitExceeded，且尚无内容产出）→ 折叠
+        消息后单次重试（对标 QP scroll 恢复语义）；重试仍溢出原样抛出，
+        不做第二次重试（防循环）。流中途溢出（已有内容）原样抛——重试会
+        造成内容重复。
+        """
+        from neurova.context.recovery import (
+            compact_messages_for_overflow,
+            is_context_overflow_error,
+        )
+
+        first_error: Optional[BaseException] = None
+        got_content = False
+        try:
+            async for event in self._predict_stream_once(request_params):
+                if isinstance(event, dict) and event.get("type") == "content":
+                    got_content = True
+                yield event
+            return
+        except BaseException as e:  # noqa: BLE001 - 统一捕获后按类型分流
+            first_error = e
+
+        # 流中途已产出内容 → 重试会造成内容重复，原样抛
+        if got_content or not is_context_overflow_error(first_error):
+            raise first_error
+
+        messages = request_params.get("messages") or []
+        compact, info = compact_messages_for_overflow(messages)
+        if info.get("folded_count", 0) <= 0:
+            raise first_error  # 无可折叠内容，恢复无意义
+        logger.warning(
+            "[CTX_RECOVERY] 上下文溢出，折叠 %d 条消息后单次重试（%d → %d）",
+            info["folded_count"], info["original_count"], info["compact_count"],
+        )
+        retry_params = {**request_params, "messages": compact}
+        async for event in self._predict_stream_once(retry_params):
+            yield event
+
+    async def _predict_stream_once(self, request_params: Dict) -> Any:
         """流式预测 — 实时 yield 结构化事件（content / reasoning / tool_call / tool_result / done）。
 
         底层 chat_stream 逐 chunk 产出 LLMResponse 对象（见 llm_client.chat_stream_async），
