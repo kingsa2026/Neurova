@@ -21,6 +21,32 @@ class WorkflowStatus(Enum):
     CANCELLED = "cancelled"
 
 
+class TriggerType(Enum):
+    """触发器类型枚举（P1 Step 2）"""
+
+    WEBHOOK = "webhook"
+    CRON = "cron"
+    MANUAL = "manual"
+
+
+@dataclass
+class WorkflowTrigger:
+    """工作流触发器（P1 Step 2）
+
+    secret 绝不明文存储——入库前经 storage.hash_trigger_secret() 转 sha256 hex。
+    """
+
+    id: str
+    workflow_id: str
+    type: "TriggerType"
+    enabled: bool = True
+    config: Dict[str, Any] = field(default_factory=dict)
+    secret_hash: Optional[str] = None
+    rate_limit_per_minute: Optional[int] = None
+    created_at: float = 0.0
+    updated_at: float = 0.0
+
+
 class NodeCategory(Enum):
     """节点分类枚举"""
 
