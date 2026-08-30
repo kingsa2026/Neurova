@@ -51,6 +51,12 @@
           <FullscreenOutlined v-else />
         </GlassButton>
         <GlassButton variant="ghost" size="sm" @click="handleSave">{{ t('common.save') }}</GlassButton>
+        <GlassButton variant="ghost" size="sm" :disabled="!canvasId" @click="versionsOpen = true">
+          {{ t('workflowVersion.button') }}
+        </GlassButton>
+        <GlassButton variant="ghost" size="sm" :disabled="!canvasId" @click="triggersOpen = true">
+          {{ t('trigger.button') }}
+        </GlassButton>
         <GlassButton variant="primary" size="sm" @click="handleRun">{{ t('workflow.execute') }}</GlassButton>
       </div>
     </div>
@@ -216,6 +222,17 @@
             <a-input :value="selectedNode.type" size="small" disabled />
           </div>
 
+          <!-- 调试 Mock 编辑（P0 遗留⑤：节点级 mock_output，保存随画布快照） -->
+          <div class="prop-group">
+            <label>{{ t('debug.mocksTitle') }}</label>
+            <MockEditor
+              :node-id="selectedNodeId ?? ''"
+              :model-value="selectedNode.config?.mock_output ?? null"
+              @update:model-value="handleMockUpdate"
+              @clear="handleMockClear"
+            />
+          </div>
+
           <!-- Agent 节点专用表单（蜂群编排：绑定真实子 Agent + 任务） -->
           <template v-if="selectedNode.type === 'builtin:agent'">
             <div class="prop-group">
@@ -300,6 +317,12 @@
               :max="field.max ?? 100"
               style="width: 100%"
             />
+            <!-- R-6: toggle 布尔开关（如 ima allow_local / 节点开关） -->
+            <a-switch
+              v-else-if="field.type === 'toggle'"
+              v-model:checked="selectedNode.config[field.key]"
+              size="small"
+            />
             <a-input v-else v-model:value="selectedNode.config[field.key]" size="small" />
           </div>
 
@@ -331,6 +354,9 @@
       </aside>
     </div>
 
+    <!-- R-8: 对话式画布设计（角落可收缩） -->
+    <CanvasNLDesigner @apply="applyNlDesign" />
+
     <!-- 画布右键菜单 -->
     <Teleport to="body">
       <div
@@ -341,6 +367,9 @@
         <template v-if="ctxMenu.kind === 'node'">
           <button class="ctx-item danger" @click="ctxDeleteNode">{{ t('canvas.ctxDeleteNode') }}</button>
           <button class="ctx-item" @click="ctxDuplicateNode">{{ t('canvas.ctxDuplicateNode') }}</button>
+          <button class="ctx-item" @click="ctxToggleBreakpoint">
+            {{ debugController.breakpoints.value.has(ctxMenu.id ?? '') ? t('debug.removeBreakpoint') : t('debug.addBreakpoint') }}
+          </button>
         </template>
         <template v-else-if="ctxMenu.kind === 'edge'">
           <button class="ctx-item danger" @click="ctxDeleteEdge">{{ t('canvas.ctxDeleteEdge') }}</button>
@@ -357,6 +386,26 @@
 
     <!-- 店铺管理抽屉（§6.2） -->
     <CanvasStoreDrawer v-model:open="storeDrawerOpen" @changed="reloadStoresForNode" />
+
+    <!-- 版本历史抽屉（P2-4.4 前端） -->
+    <WorkflowVersionsDrawer
+      v-model:open="versionsOpen"
+      :workflow-id="canvasId"
+      @refreshed="() => { if (canvasId) loadCanvas(canvasId) }"
+ />
+
+    <!-- 触发器管理抽屉（P1 前端） -->
+    <TriggerManagerDrawer v-model:open="triggersOpen" :workflow-id="canvasId" />
+
+    <!-- 调试面板浮窗（P0 遗留⑤：断点列表 + Mock 列表 + 单步控制） -->
+    <DebugPanel
+      v-if="showDebugPanel"
+      :controller="debugController"
+      :execution-id="lastRunId ?? ''"
+      @toggle-breakpoint="() => {}"
+      @clear-mock="(nodeId: string) => setNodeMock(nodeId, null).catch(() => {})"
+      @resume="handleDebugResume"
+    />
   </div>
 </template>
 
@@ -391,6 +440,7 @@ import { useChatStore } from '@/stores/chat'
 import { uiMessage } from '@/utils/message'
 import { getNodes, listStores, testStoreConnection, type ConnectedStore } from '@/api/modules/neurflow'
 import { buildStoreSelectOptions, platformDisplayName, type StoreItem } from './canvasStores'
+import CanvasNLDesigner from './CanvasNLDesigner.vue'
 import {
   canFullscreen,
   exitFullscreenCompat,
@@ -400,8 +450,18 @@ import {
   type FullscreenEl,
 } from './canvasFullscreen'
 import CanvasStoreDrawer from './CanvasStoreDrawer.vue'
+import WorkflowVersionsDrawer from './WorkflowVersionsDrawer.vue'
+import TriggerManagerDrawer from './TriggerManagerDrawer.vue'
+import DebugPanel from './DebugPanel.vue'
+import MockEditor from './MockEditor.vue'
+import { createDebugController, type DebugController } from './DebugPanel'
 import { useReachableModels, buildModelOptions } from '@/composables/useReachableModels'
-import { runCanvas as runCanvasApi, getCanvasRun, type CanvasRunStatus } from '@/api/modules/collaboration'
+import {
+  runCanvas as runCanvasApi,
+  getCanvasRun,
+  setNodeMock,
+  type CanvasRunStatus,
+} from '@/api/modules/collaboration'
 import type { CanvasNodeSnapshot, CanvasEdgeSnapshot } from '@/api/modules/collaboration'
 import {
   filterVisibleSubBlocks,
@@ -478,6 +538,8 @@ const agentOptions = computed(() => agentStore.agentOptions)
 /** 节点执行状态（nodeId → 状态+输出），来自画布运行轮询 */
 const runStatus = ref<Record<string, { status: string; output?: unknown; error?: string | null }>>({})
 const runState = ref<'idle' | 'running' | 'completed' | 'failed'>('idle')
+/** 最近一次画布运行的 runId（调试 resume 用） */
+const lastRunId = ref<string | null>(null)
 /** 动态节点库（/neurflow/nodes 拉取，含 tool/skill/mcp/comfyui 全量注册类型） */
 const dynamicNodes = ref<PaletteNode[]>([])
 
@@ -583,6 +645,56 @@ const previewPath = computed(() =>
     ? bezierD(connecting.value.x1, connecting.value.y1, connecting.value.x2, connecting.value.y2)
     : ''
 )
+
+// ── 右键菜单 ──
+// ── 调试集成（P0 遗留⑤）──
+const debugController: DebugController = createDebugController('')
+const showDebugPanel = ref(false)
+const selectedMockDraft = ref<unknown>(null)
+const versionsOpen = ref(false)
+const triggersOpen = ref(false)
+
+function ctxToggleBreakpoint() {
+  const nodeId = ctxMenu.id
+  if (!nodeId) return
+  debugController.toggleBreakpoint(nodeId)
+  if (debugController.breakpoints.value.size > 0) showDebugPanel.value = true
+  closeCtxMenu()
+}
+
+async function handleMockUpdate(value: unknown) {
+  const nodeId = selectedNodeId.value
+  if (!nodeId) return
+  debugController.setMockOutput(nodeId, value)
+  try {
+    await setNodeMock(nodeId, value)
+    uiMessage.success(t('common.save'))
+  } catch {
+    uiMessage.error(t('debug.mockSaveFailed'))
+  }
+}
+
+async function handleMockClear() {
+  const nodeId = selectedNodeId.value
+  if (!nodeId) return
+  debugController.clearMock(nodeId)
+  try {
+    await setNodeMock(nodeId, null)
+  } catch {
+    /* 后端清理失败不阻塞本地状态 */
+  }
+}
+
+function handleDebugResume(payload: Record<string, unknown>) {
+  const executionId = lastRunId.value
+  if (!executionId) {
+    uiMessage.info(t('debug.needRunningExecution'))
+    return
+  }
+  import('@/api/modules/collaboration')
+    .then(m => m.resumeExecution(executionId, (payload.step as 'in' | 'over' | 'out') ?? undefined))
+    .catch(() => uiMessage.error(t('debug.resumeFailed')))
+}
 
 // ── 右键菜单 ──
 const ctxMenu = reactive({
@@ -772,6 +884,7 @@ const paletteCategories = [
       ] },
       { type: 'builtin:agent', label: t('canvas.c0062'), icon: '🧠', category: 'builtin', inputs: [{ id: 'task', label: t('canvas.c0063') }], outputs: [{ id: 'result', label: t('canvas.c0064') }], defaultConfig: {} },
       { type: 'builtin:condition', label: t('canvas.c0065'), icon: '❓', category: 'builtin', inputs: [{ id: 'in', label: t('canvas.c0066') }], outputs: [{ id: 'true', label: t('canvas.c0067') }, { id: 'false', label: t('canvas.c0068') }], defaultConfig: {} },
+      { type: 'builtin:subflow', label: t('canvas.subflowNode'), icon: '🧩', category: 'builtin', inputs: [{ id: 'in', label: t('canvas.c0066') }], outputs: [{ id: 'output', label: t('canvas.c0053') }], defaultConfig: { workflow_id: '', input_mapping: {} } },
     ] as PaletteNode[],
   },
   {
@@ -1261,6 +1374,26 @@ function addNodeToCanvas(node: PaletteNode) {
   addNodeAt(node, 100 + Math.random() * 200, 100 + Math.random() * 100)
 }
 
+/** R-8: 应用 AI 生成的画布快照（替换现有画布，供用户细化/保存/执行） */
+function applyNlDesign(payload: { nodes: CanvasNodeSnapshot[]; edges: CanvasEdgeSnapshot[]; name: string; description: string }) {
+  canvasNodes.value = payload.nodes.map((n, i) => ({
+    ...n,
+    // 重命名 id 避免冲突（AI 生成 n1/n2… 可能与已有节点冲突）
+    id: `nl-${Date.now()}-${i}`,
+    config: n.config || {},
+  }))
+  const idMap = new Map<string, string>()
+  payload.nodes.forEach((n, i) => idMap.set(n.id, `nl-${Date.now()}-${i}`))
+  canvasEdges.value = (payload.edges || []).map((e, i) => ({
+    ...e,
+    id: `nle-${Date.now()}-${i}`,
+    source: e.source?.nodeId ? { nodeId: idMap.get(e.source.nodeId) || e.source.nodeId, portId: e.source.portId } : e.source,
+    target: e.target?.nodeId ? { nodeId: idMap.get(e.target.nodeId) || e.target.nodeId, portId: e.target.portId } : e.target,
+  }))
+  if (payload.name) workflowName.value = payload.name
+  selectedNodeId.value = null
+}
+
 function addNodeAt(paletteNode: PaletteNode, x: number, y: number) {
   dragCounter += 1
   const canvasNode: CanvasNodeSnapshot = {
@@ -1596,6 +1729,8 @@ async function handleRun() {
       runState.value = 'failed'
       return
     }
+    lastRunId.value = runId
+    if (debugController.breakpoints.value.size > 0) showDebugPanel.value = true
     // 轮询执行状态（1s 间隔，终态停止）
     for (;;) {
       await new Promise(r => setTimeout(r, 1000))
