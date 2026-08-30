@@ -156,6 +156,23 @@ class NeurflowStorage:
                 "ON workflow_triggers(type)"
             )
 
+            # Webhook 投递记录表（P1 Step 7）
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS webhook_deliveries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trigger_id TEXT NOT NULL,
+                    signature_valid INTEGER DEFAULT 0,
+                    execution_id TEXT,
+                    status_code INTEGER DEFAULT 0,
+                    latency_ms REAL DEFAULT 0,
+                    created_at REAL DEFAULT 0
+                )
+            """)
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_trigger "
+                "ON webhook_deliveries(trigger_id)"
+            )
+
             # 执行实例表
             self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS executions (
@@ -593,6 +610,63 @@ class NeurflowStorage:
             )
             self._conn.commit()
         return cursor.rowcount > 0
+
+    # ── Webhook 投递记录（P1 Step 7）────────────────────────────
+
+    def save_delivery(
+        self,
+        trigger_id: str,
+        signature_valid: bool,
+        execution_id: Optional[str],
+        status_code: int,
+        latency_ms: float = 0.0,
+    ) -> None:
+        """记录一次 webhook 入站投递。"""
+        import time as _time
+
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO webhook_deliveries
+                    (trigger_id, signature_valid, execution_id, status_code,
+                     latency_ms, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    trigger_id,
+                    1 if signature_valid else 0,
+                    execution_id,
+                    status_code,
+                    latency_ms,
+                    _time.time(),
+                ),
+            )
+            self._conn.commit()
+
+    def list_deliveries(self, trigger_id: str, limit: int = 50) -> list:
+        """按时间倒序列出某 trigger 的投递记录。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                SELECT trigger_id, signature_valid, execution_id, status_code,
+                       latency_ms, created_at
+                FROM webhook_deliveries WHERE trigger_id = ?
+                ORDER BY created_at DESC, id DESC LIMIT ?
+                """,
+                (trigger_id, limit),
+            )
+            rows = cursor.fetchall()
+        return [
+            {
+                "trigger_id": r["trigger_id"],
+                "signature_valid": bool(r["signature_valid"]),
+                "execution_id": r["execution_id"],
+                "status_code": r["status_code"],
+                "latency_ms": r["latency_ms"],
+                "created_at": r["created_at"],
+            }
+            for r in rows
+        ]
 
     def _row_to_trigger(self, row: sqlite3.Row) -> WorkflowTrigger:
         """数据库行 → WorkflowTrigger。"""

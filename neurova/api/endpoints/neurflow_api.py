@@ -18,10 +18,12 @@ from neurova.api.endpoints import get_agent_instance
 from neurova.collaboration.neurflow.dag import get_dag_validator
 from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
 from neurova.collaboration.neurflow.models import (
+    TriggerType,
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowNode,
     WorkflowStatus,
+    WorkflowTrigger,
     WorkflowVariable,
 )
 from neurova.collaboration.neurflow.node_registry import get_node_registry
@@ -1332,3 +1334,174 @@ async def receive_webhook_trigger(trigger_id: str, request: Request):
         )
     except webhook_ingress.IngressRejected as e:
         raise HTTPException(status_code=e.status_code, detail=e.reason)
+
+
+# ==================== P1 Step 6 — 触发器 CRUD API ====================
+
+
+class TriggerCreateRequest(BaseModel):
+    """创建触发器请求体"""
+
+    type: str  # "webhook" | "cron" | "manual"
+    config: Dict[str, Any] = {}
+    rate_limit_per_minute: Optional[int] = None
+
+
+@router.get("/workflows/{workflow_id}/triggers")
+async def list_workflow_triggers(workflow_id: str):
+    """列出某工作流的全部触发器（secret 字段不回显）。"""
+    storage = _get_storage()
+    items = storage.list_triggers_by_workflow(workflow_id)
+    return {
+        "code": 0,
+        "data": [
+            {
+                "id": t.id,
+                "workflow_id": t.workflow_id,
+                "type": t.type.value,
+                "enabled": t.enabled,
+                "config": t.config,
+                "rate_limit_per_minute": t.rate_limit_per_minute,
+                "created_at": t.created_at,
+            }
+            for t in items
+        ],
+    }
+
+
+@router.post("/workflows/{workflow_id}/triggers")
+async def create_workflow_trigger(workflow_id: str, body: TriggerCreateRequest):
+    """创建触发器。
+
+    webhook：自动生成 secret —— 明文仅本次响应返回一次，
+    库中存 AES-GCM 密文（验签用）+ sha256 hash（审计用）。
+    cron：校验 cron 表达式可解析。
+    """
+    import secrets as _secrets
+
+    from neurova.llm.providers.secret_store import encrypt_api_key
+
+    storage = _get_storage()
+    if not storage.get_workflow(workflow_id):
+        raise HTTPException(status_code=404, detail="工作流不存在")
+
+    try:
+        trigger_type = TriggerType(body.type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="type 必须为 webhook/cron/manual")
+
+    trigger_id = f"trg_{uuid.uuid4().hex[:12]}"
+    now = time.time()
+    secret_plain = None
+    secret_encrypted = None
+    secret_hash = None
+
+    if trigger_type == TriggerType.WEBHOOK:
+        secret_plain = _secrets.token_urlsafe(32)
+        secret_encrypted = encrypt_api_key(secret_plain)
+        secret_hash = NeurflowStorage.hash_trigger_secret(secret_plain)
+    elif trigger_type == TriggerType.CRON:
+        cron_expr = (body.config or {}).get("cron")
+        if not cron_expr:
+            raise HTTPException(status_code=400, detail="cron 触发器需要 config.cron 表达式")
+        try:
+            from apscheduler.triggers.cron import CronTrigger
+
+            CronTrigger.from_crontab(cron_expr)
+        except Exception:
+            raise HTTPException(status_code=400, detail="cron 表达式无法解析")
+
+    trigger = WorkflowTrigger(
+        id=trigger_id,
+        workflow_id=workflow_id,
+        type=trigger_type,
+        enabled=True,
+        config=body.config or {},
+        secret_hash=secret_hash,
+        secret_encrypted=secret_encrypted,
+        rate_limit_per_minute=body.rate_limit_per_minute,
+        created_at=now,
+        updated_at=now,
+    )
+    storage.save_trigger(trigger)
+
+    # cron 触发器尝试即时注册（scheduler 未配置则跳过，启动恢复时补齐）
+    if trigger_type == TriggerType.CRON:
+        try:
+            from neurova.collaboration.neurflow.triggers import get_trigger_manager
+
+            await get_trigger_manager().register_cron(trigger)
+        except Exception as e:
+            logger.warning("cron trigger register deferred: %s", e)
+
+    resp: Dict[str, Any] = {
+        "code": 0,
+        "data": {
+            "trigger": {
+                "id": trigger.id,
+                "workflow_id": trigger.workflow_id,
+                "type": trigger.type.value,
+                "enabled": trigger.enabled,
+                "config": trigger.config,
+                "rate_limit_per_minute": trigger.rate_limit_per_minute,
+                "secret_encrypted": None,
+                "created_at": trigger.created_at,
+            }
+        },
+    }
+    if secret_plain is not None:
+        resp["data"]["secret"] = secret_plain
+    return resp
+
+
+@router.delete("/triggers/{trigger_id}")
+async def delete_workflow_trigger(trigger_id: str):
+    """删除触发器；同步移除 cron job。"""
+    storage = _get_storage()
+    if not storage.get_trigger(trigger_id):
+        raise HTTPException(status_code=404, detail="触发器不存在")
+    storage.delete_trigger(trigger_id)
+    try:
+        from neurova.collaboration.neurflow.triggers import get_trigger_manager
+
+        await get_trigger_manager().unregister(trigger_id)
+    except Exception:
+        pass
+    return {"code": 0, "message": "deleted"}
+
+
+@router.post("/triggers/{trigger_id}/fire")
+async def fire_trigger(trigger_id: str, body: Dict[str, Any] = Body(default={})):
+    """手动触发（manual/测试用）：按触发器绑定的 workflow 直接派发。"""
+    storage = _get_storage()
+    trigger = storage.get_trigger(trigger_id)
+    if not trigger:
+        raise HTTPException(status_code=404, detail="触发器不存在")
+
+    from neurova.collaboration.neurflow.models import WorkflowStatus
+
+    wf = storage.get_workflow(trigger.workflow_id)
+    if wf is None or wf.status != WorkflowStatus.PUBLISHED:
+        raise HTTPException(status_code=404, detail="工作流未发布")
+
+    async def _run(workflow, inputs):
+        return await get_workflow_executor().execute(workflow=workflow, inputs=inputs)
+
+    from neurova.agent.scheduler import WorkflowTaskExecutor
+
+    executor = WorkflowTaskExecutor(
+        workflow_loader=lambda ref: wf if ref == trigger.workflow_id else None,
+        workflow_runner_callable=_run,
+    )
+    result = await executor.dispatch_neurflow(trigger.workflow_id, body or {})
+    return {"code": 0, "data": result}
+
+
+# ==================== P1 Step 7 — 投递记录查询 ====================
+
+
+@router.get("/triggers/{trigger_id}/deliveries")
+async def list_trigger_deliveries(trigger_id: str, limit: int = 50):
+    """查询 webhook 入站投递记录（调试面板用）。"""
+    storage = _get_storage()
+    return {"code": 0, "data": storage.list_deliveries(trigger_id, limit=limit)}
