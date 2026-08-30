@@ -27,6 +27,10 @@ _ALLOWED_KEYS = {
 
 _VALID_TRANSPORTS = {"stdio", "http", "sse"}
 
+# M12：社区文档/前端常用 streamable_http 指代 streamable HTTP 传输，
+# 归一化为 http 后进校验与存储
+_TRANSPORT_ALIASES = {"streamable_http": "http"}
+
 _DEFAULT_TIMEOUT_MS = 30000
 
 # shell 拒绝表（P0-1）：stdio MCP server 的 command 是 argv[0]（无 shell
@@ -94,14 +98,17 @@ def _validate_types(server: typing.Dict[str, typing.Any]) -> None:
             _reject("timeout_ms 必须为正数")
 
     transport = server.get("transport")
-    if transport is not None and transport not in _VALID_TRANSPORTS:
-        _reject(f"transport 必须为 {'/'.join(sorted(_VALID_TRANSPORTS))} 之一，收到 {transport!r}")
+    if transport:
+        # 空字符串视为未指定（交由 _infer_transport 按 command/url 推断）
+        normalized = _TRANSPORT_ALIASES.get(transport, transport)
+        if normalized not in _VALID_TRANSPORTS:
+            _reject(f"transport 必须为 {'/'.join(sorted(_VALID_TRANSPORTS))} 之一，收到 {transport!r}")
 
 
 def _infer_transport(server: typing.Dict[str, typing.Any]) -> str:
     transport = server.get("transport")
     if transport:
-        return transport
+        return _TRANSPORT_ALIASES.get(transport, transport)
     if server.get("command"):
         return "stdio"
     if server.get("url"):

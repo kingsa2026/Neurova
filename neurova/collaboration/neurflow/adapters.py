@@ -309,8 +309,11 @@ def sync_mcp(registry) -> int:
     try:
         count = 0
         for tool in mcp_client.list_tools():
-            # MCP 工具需要服务器名称
-            server = tool.get("server", "default")
+            # MCP 工具需要服务器名称。
+            # P0-5（M9）修复：mcp_client.list_tools() 写入的键是 server_id，
+            # 旧读法 tool.get("server") 恒取 "default"，导致所有 MCP 节点
+            # 的 server 名失真；保留旧键回退兼容其他生产者
+            server = tool.get("server_id") or tool.get("server", "default")
             node_def = mcp_tool_to_node(server, tool)
             registry.register(node_def)
             count += 1
