@@ -1,0 +1,111 @@
+"""
+Cron 触发绑定管理（P1 Step 5）
+
+TriggerManager：apscheduler-like scheduler 的注入式薄管理器。
+- register_cron：把 WorkflowTrigger(cron) 注册为 scheduler job
+- unregister：移除 job
+- restore_enabled：应用启动时从 loader 恢复全部启用的 cron 触发器
+- fire：经注入的 dispatch 回调派发（本类不直接依赖存储/引擎）
+"""
+
+import logging
+from typing import Any, Awaitable, Callable, Dict, Optional
+
+from .models import TriggerType, WorkflowTrigger
+
+logger = logging.getLogger(__name__)
+
+
+class TriggerManager:
+    """Cron 触发器生命周期管理（注入 scheduler 与 dispatch）。"""
+
+    def __init__(
+        self,
+        scheduler: Optional[Any] = None,
+        dispatch: Optional[Callable[[str, Dict[str, Any]], Awaitable[Dict[str, Any]]]] = None,
+    ):
+        self._scheduler = scheduler
+        self._dispatch = dispatch
+        self._jobs: Dict[str, Any] = {}
+
+    async def register_cron(self, trigger: WorkflowTrigger) -> Optional[str]:
+        """把 cron 触发器注册为 scheduler job；返回 job id。
+
+        校验：type 必须为 cron；config 必须含 cron 表达式。
+        """
+        if trigger.type != TriggerType.CRON:
+            raise ValueError("only cron triggers can be registered as cron jobs")
+        cron_expr = (trigger.config or {}).get("cron")
+        if not cron_expr:
+            raise ValueError("cron trigger requires config['cron'] expression")
+
+        job_id = trigger.id
+        if self._scheduler is None:
+            logger.warning("TriggerManager scheduler not configured; job %s skipped", job_id)
+            self._jobs[job_id] = None
+            return job_id
+
+        from apscheduler.triggers.cron import CronTrigger
+
+        job = self._scheduler.add_job(
+            self._scheduled_fire,
+            trigger=CronTrigger.from_crontab(cron_expr),
+            id=job_id,
+            args=[job_id],
+        )
+        self._jobs[job_id] = job
+        logger.info("cron trigger registered: %s -> workflow %s", job_id, trigger.workflow_id)
+        return job_id
+
+    async def unregister(self, trigger_id: str) -> None:
+        """移除 job；未注册时静默。"""
+        if trigger_id not in self._jobs:
+            return
+        if self._scheduler is not None:
+            try:
+                self._scheduler.remove_job(trigger_id)
+            except Exception:
+                logger.info("job %s already gone from scheduler", trigger_id)
+        del self._jobs[trigger_id]
+
+    async def restore_enabled(self, loader: Optional[Callable[[], list]]) -> int:
+        """从 loader 恢复全部启用的 cron 触发器；返回恢复数量。"""
+        if loader is None:
+            return 0
+        triggers = loader() or []
+        restored = 0
+        for tr in triggers:
+            if tr.type != TriggerType.CRON or not tr.enabled:
+                continue
+            try:
+                await self.register_cron(tr)
+                restored += 1
+            except Exception:
+                logger.exception("restore cron trigger failed: %s", tr.id)
+        return restored
+
+    async def fire(
+        self, trigger: WorkflowTrigger, inputs: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """手动/定时触发：经注入的 dispatch 派发。"""
+        if self._dispatch is None:
+            logger.warning("TriggerManager dispatch not configured; fire skipped")
+            return None
+        return await self._dispatch(trigger.workflow_id, inputs or {})
+
+    def _scheduled_fire(self, trigger_id: str) -> None:
+        """scheduler 到期回调入口（同步壳，内部起 task 驱动 fire）。
+
+        job 注册时以 args=[trigger_id] 绑定；触发时经 trigger_loader
+        取回 WorkflowDefinition 所需上下文由 dispatch 闭包持有。
+        """
+        import asyncio
+
+        loader = getattr(self, "_trigger_loader", None)
+        if loader is None or self._dispatch is None:
+            logger.warning("scheduled fire without loader/dispatch: %s", trigger_id)
+            return
+        tr = loader(trigger_id)
+        if tr is None or not tr.enabled:
+            return
+        asyncio.get_event_loop().create_task(self.fire(tr))
