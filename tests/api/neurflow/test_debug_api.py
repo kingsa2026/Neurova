@@ -125,16 +125,17 @@ class TestMockStore:
     """节点 mock 数据存储：节点 id → mock_output"""
 
     def test_mock_store_importable(self):
-        from neurova.api.endpoints.neurflow_api import _NODE_MOCKS
+        # P0-7/N6：mock 表迁至引擎（execute_debug 消费），API 经 get_node_mocks 读写
+        from neurova.collaboration.neurflow.execution_engine import get_node_mocks
 
-        assert _NODE_MOCKS is not None
-        assert isinstance(_NODE_MOCKS, dict)
+        assert get_node_mocks() is not None
+        assert isinstance(get_node_mocks(), dict)
 
     def test_mock_store_uses_json_safe_values(self):
         """mock 数据须支持 JSON 序列化（响应信封可序列化）。"""
         import json
 
-        from neurova.api.endpoints.neurflow_api import _NODE_MOCKS
+        from neurova.collaboration.neurflow.execution_engine import get_node_mocks
 
         # 空字典可序列化
-        json.dumps(_NODE_MOCKS)  # 不抛异常即过
+        json.dumps(get_node_mocks())  # 不抛异常即过

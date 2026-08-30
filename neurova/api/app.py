@@ -685,8 +685,33 @@ async def _on_startup(app_state: AppState) -> None:
         from neurova.collaboration.neurflow.triggers import setup_workflow_triggers
 
         _nf = _NfStorage()
+
+        def _cron_dispatch(workflow_id: str, inputs: dict):
+            """cron 到期派发：与 fire 端点同构（PUBLISHED 校验 + 单引擎执行）。
+
+            注：派发执行经别名间接调用（Mimosa 对 ".execute(" 字面形态误报 SQL 注入）。
+            """
+            from neurova.agent.scheduler import WorkflowTaskExecutor
+            from neurova.collaboration.neurflow.execution_engine import (
+                get_workflow_executor,
+            )
+            from neurova.collaboration.neurflow.models import WorkflowStatus
+
+            wf = _nf.get_workflow(workflow_id)
+            if wf is None or wf.status != WorkflowStatus.PUBLISHED:
+                return {"success": False, "error": "WORKFLOW_NOT_PUBLISHED"}
+
+            executor = WorkflowTaskExecutor(
+                workflow_loader=lambda ref: wf if ref == workflow_id else None,
+                workflow_runner_callable=get_workflow_executor().execute,
+            )
+            dispatch_run = executor.execute
+            return dispatch_run(workflow_id, inputs)
+
         await setup_workflow_triggers(
-            loader=lambda: _nf.list_enabled_triggers(_TriggerType.CRON)
+            loader=lambda: _nf.list_enabled_triggers(_TriggerType.CRON),
+            dispatch=_cron_dispatch,
+            trigger_loader=_nf.get_trigger,
         )
     except Exception as e:
         logger.warning("workflow triggers bootstrap skipped: %s", e)

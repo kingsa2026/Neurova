@@ -36,11 +36,15 @@ def set_trigger_scheduler(scheduler: Any) -> None:
 async def setup_workflow_triggers(
     loader: Optional[Callable[[], list]] = None,
     scheduler: Optional[Any] = None,
+    dispatch: Optional[Callable[[str, Dict[str, Any]], Awaitable[Dict[str, Any]]]] = None,
+    trigger_loader: Optional[Callable[[str], Optional[Any]]] = None,
 ) -> int:
     """应用启动装配（幂等）：启动调度器并恢复启用的 cron 触发器。
 
     loader 返回启用触发器列表（通常 storage.list_enabled_triggers(CRON)）；
     scheduler 可注入（默认新建 AsyncIOScheduler 并 start）。
+    P0-7/N2：dispatch（派发回调）与 trigger_loader（按 id 取触发器）必须
+    经此注入——否则 cron 到期回调因缺 loader/dispatch 静默跳过（原断链）。
     返回本次恢复的触发器数（已装配过则返回 0）。
     """
     global _bootstrapped
@@ -54,6 +58,8 @@ async def setup_workflow_triggers(
         scheduler = AsyncIOScheduler()
         scheduler.start()
     set_trigger_scheduler(scheduler)
+    manager.configure_runtime(dispatch=dispatch, trigger_loader=trigger_loader)
+    manager.bind_loop()
 
     restored = await manager.restore_enabled(loader)
     _bootstrapped = True
@@ -83,6 +89,33 @@ class TriggerManager:
         self._scheduler = scheduler
         self._dispatch = dispatch
         self._jobs: Dict[str, Any] = {}
+        # P0-7/N2：定时派发运行时——by-id 触发器加载器与主事件循环引用
+        self._trigger_loader: Optional[Callable[[str], Optional[Any]]] = None
+        self._loop: Optional[Any] = None
+
+    def configure_runtime(
+        self,
+        dispatch: Optional[Callable[[str, Dict[str, Any]], Awaitable[Dict[str, Any]]]] = None,
+        trigger_loader: Optional[Callable[[str], Optional[Any]]] = None,
+    ) -> None:
+        """启动装配：注入 cron 到期派发所需的 dispatch 与 by-id loader。"""
+        if dispatch is not None:
+            self._dispatch = dispatch
+        if trigger_loader is not None:
+            self._trigger_loader = trigger_loader
+
+    def bind_loop(self) -> None:
+        """捕获当前运行中的事件循环（供 APScheduler 线程池线程回投协程）。
+
+        必须在事件循环内调用（应用启动协程里）。
+        """
+        import asyncio
+
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("bind_loop called without running loop; cron fire disabled")
+            self._loop = None
 
     async def register_cron(self, trigger: WorkflowTrigger) -> Optional[str]:
         """把 cron 触发器注册为 scheduler job；返回 job id。
@@ -150,18 +183,26 @@ class TriggerManager:
         return await self._dispatch(trigger.workflow_id, inputs or {})
 
     def _scheduled_fire(self, trigger_id: str) -> None:
-        """scheduler 到期回调入口（同步壳，内部起 task 驱动 fire）。
+        """scheduler 到期回调入口（同步壳，把 fire 协程回投到主事件循环）。
 
-        job 注册时以 args=[trigger_id] 绑定；触发时经 trigger_loader
-        取回 WorkflowDefinition 所需上下文由 dispatch 闭包持有。
+        P0-7/N2 修复：原实现在 APScheduler 线程池线程里调
+        asyncio.get_event_loop().create_task——该线程无运行 loop，
+        task 永不执行（cron 只能注册不能真正触发），且依赖从未赋值的
+        _trigger_loader。现经 run_coroutine_threadsafe 回投到 bind_loop
+        捕获的主循环。
         """
         import asyncio
 
-        loader = getattr(self, "_trigger_loader", None)
+        loader = self._trigger_loader
         if loader is None or self._dispatch is None:
             logger.warning("scheduled fire without loader/dispatch: %s", trigger_id)
             return
         tr = loader(trigger_id)
         if tr is None or not tr.enabled:
             return
-        asyncio.get_event_loop().create_task(self.fire(tr))
+
+        coro = self.fire(tr)
+        if self._loop is not None and self._loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, self._loop)
+        else:
+            logger.warning("no bound running loop; cron fire skipped: %s", trigger_id)

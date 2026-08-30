@@ -11,7 +11,7 @@ import logging
 from typing import Any, Callable, Dict, Optional
 
 from neurova.core.trigger_rate_limiter import TriggerRateLimiter
-from neurova.core.webhook_security import verify_signature
+from neurova.core.webhook_security import verify_request, verify_signature
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ async def handle_webhook_ingress(
     payload: bytes,
     signature_header: Optional[str],
     deps: Optional[Dict[str, Callable]] = None,
+    timestamp_header: Optional[str] = None,
 ) -> Dict[str, Any]:
     """处理一次 webhook 入站触发；被拒抛 IngressRejected，成功返回派发信封。
 
@@ -49,6 +50,10 @@ async def handle_webhook_ingress(
              run_workflow / rate_limiter_for
     （rate_limiter_for(trigger) 须返回按 trigger 缓存的 limiter 实例，
       否则限流形同虚设——每请求新建桶永远全满。）
+
+    P0-7/N3 重放防护：配置了 secret 的 trigger 走 verify_request——签名覆盖
+    "<timestamp>." 前缀 + payload，且时间戳时效 300s；携带 X-Neurova-Timestamp
+    的请求一律按新约定验签。未配置 secret（宽松模式）仍只拒伪造签名头。
     """
     d = deps or (_DEPS_PROVIDER() if _DEPS_PROVIDER else None)
     if d is None:
@@ -67,12 +72,19 @@ async def handle_webhook_ingress(
             secret = d["decrypt_secret"](encrypted)
         except Exception:
             logger.warning("trigger secret decrypt failed: %s", trigger_id)
-        # 配置了 secret 的 trigger：必须验签（严格模式）
-        if not verify_signature(payload, secret, signature_header):
+        # 配置了 secret 的 trigger：必须验签（严格模式 + 重放防护）
+        if timestamp_header:
+            ok, reason = verify_request(payload, secret, signature_header, timestamp_header)
+        else:
+            ok = verify_signature(payload, secret, signature_header)
+            reason = "OK" if ok else "INVALID_SIGNATURE"
+        if not ok:
+            # 统一 401/INVALID_SIGNATURE（细节进日志），交付审计侧视同签名无效
+            logger.info("webhook signature rejected: %s %s", trigger_id, reason)
             raise IngressRejected(401, "INVALID_SIGNATURE")
     else:
         # 未配置 secret：开放 webhook（宽松模式），仅要求不携带伪造签名头
-        if signature_header:
+        if signature_header or timestamp_header:
             raise IngressRejected(401, "INVALID_SIGNATURE")
 
     limiter = d["rate_limiter_for"](trigger)

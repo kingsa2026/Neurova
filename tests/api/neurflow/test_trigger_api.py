@@ -45,6 +45,13 @@ def app(tmp_path):
     ))
     app = FastAPI()
     app.include_router(neurflow_api.router)
+    # P0-7/N1：触发器端点现已挂严格鉴权——测试显式注入认证身份
+    # （契约更新：未认证访问从 404 语义变为 401）
+    from neurova.api.auth import get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
     yield app
     neurflow_api._get_storage = orig
 
