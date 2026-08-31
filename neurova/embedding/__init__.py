@@ -15,7 +15,7 @@ except ImportError as _e:
     ONNXEmbeddingEngine = None
     EmbeddingResult = None
 
-__all__ = ["ONNXEmbeddingEngine", "EmbeddingResult", "get_embedding_engine", "_reset_embedding_engine"]
+__all__ = ["ONNXEmbeddingEngine", "EmbeddingResult", "get_embedding_engine", "_reset_embedding_engine", "reset_embedding_engine"]
 
 # 全局单例（懒加载）
 _embedding_engine = None
@@ -55,3 +55,8 @@ def _reset_embedding_engine():
     """
     global _embedding_engine
     _embedding_engine = None
+
+
+def reset_embedding_engine():
+    """公有重置入口（P3-e）：与 _reset_embedding_engine 等价，供测试隔离与运维重建。"""
+    _reset_embedding_engine()

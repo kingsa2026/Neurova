@@ -291,13 +291,17 @@ class InfrastructureManager:
 
 # 工厂函数
 _infrastructure_manager: typing.Optional[InfrastructureManager] = None
+_infrastructure_manager_lock = __import__('threading').Lock()
 
 
 def get_infrastructure_manager(config: InfrastructureConfig = None) -> InfrastructureManager:
     """获取基础设施管理器单例"""
     global _infrastructure_manager
     if _infrastructure_manager is None:
-        _infrastructure_manager = InfrastructureManager(config)
+        # P3-e：DCL——InfrastructureManager 持后台资源，不可双创建
+        with _infrastructure_manager_lock:
+            if _infrastructure_manager is None:
+                _infrastructure_manager = InfrastructureManager(config)
     return _infrastructure_manager
 
 

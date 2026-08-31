@@ -627,6 +627,7 @@ class MultiModelLLMClient:
 _multi_model_client: Optional[MultiModelLLMClient] = None
 # scope → 实例 隔离注册表
 _multi_model_clients: Dict[str, MultiModelLLMClient] = {}
+_multi_model_clients_lock = threading.Lock()
 
 
 def get_multi_model_client(scope: Optional[str] = None) -> MultiModelLLMClient:
@@ -641,10 +642,14 @@ def get_multi_model_client(scope: Optional[str] = None) -> MultiModelLLMClient:
             # 无参/默认走类级 _instance 槽(存量单例语义,既有重置链路兼容)
             _multi_model_client = MultiModelLLMClient(scope=None)
         return _multi_model_client
+    # P3-e：键控 scope 首访 DCL——慢构造（建 provider manager/读盘）不可双创建
     client = _multi_model_clients.get(scope)
     if client is None:
-        client = MultiModelLLMClient(scope=scope)
-        _multi_model_clients[scope] = client
+        with _multi_model_clients_lock:
+            client = _multi_model_clients.get(scope)
+            if client is None:
+                client = MultiModelLLMClient(scope=scope)
+                _multi_model_clients[scope] = client
     return client
 
 

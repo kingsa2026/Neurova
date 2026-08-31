@@ -537,13 +537,17 @@ class NEUTokenManager:
 
 # 全局单例
 _neu_token_manager: Optional[NEUTokenManager] = None
+_neu_token_manager_lock = __import__('threading').Lock()
 
 
 def get_neu_token_manager() -> NEUTokenManager:
     """获取全局 NEU Token Manager 单例"""
     global _neu_token_manager
     if _neu_token_manager is None:
-        _neu_token_manager = NEUTokenManager()
+        # P3-e：DCL——TokenManager 构造含加密材料初始化，不可双创建
+        with _neu_token_manager_lock:
+            if _neu_token_manager is None:
+                _neu_token_manager = NEUTokenManager()
     return _neu_token_manager
 
 
