@@ -34,6 +34,13 @@ vi.mock('ant-design-vue', () => ({
   message: { success: vi.fn(), error: vi.fn() },
 }))
 
+// 页面为全局设置, 仅管理员可操作 —— mock 认证为 admin (2026-08-31)
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    user: { id: 'u-admin', username: 'adminuser', role: 'admin' },
+  }),
+}))
+
 import { request } from '@/api'
 import { getNerfSettings, getChannelWeights } from '@/api/modules/memory'
 import type { ApiResponse } from '@/types/response'
@@ -42,6 +49,8 @@ import type { NerfSettings, ChannelWeights } from '@/api/modules/memory'
 const messages = {
   common: {
     refresh: '刷新', save: '保存', reset: '重置', success: '操作成功', error: '操作失败', noData: '暂无数据', loading: '加载中...',
+    globalSettingHint: '本页面为全局系统配置/数据，对所有用户生效',
+    adminOnlyHint: '仅管理员可访问与操作，当前账号无权限',
   },
   memory: { decay: '记忆衰减', enhance: '记忆增强' },
   memorySearch: {

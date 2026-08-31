@@ -1,10 +1,18 @@
 <template>
   <div class="group-page">
     <div class="page-header">
-      <h2 class="page-title">{{ t('system.groups') }}</h2>
-      <GlassButton variant="primary" size="sm" @click="openCreate">{{ t('common.create') }}</GlassButton>
+      <div>
+        <h2 class="page-title">{{ t('system.groups') }}</h2>
+        <p class="page-global-hint">{{ t('common.globalSettingHint') }}</p>
+      </div>
+      <GlassButton v-if="isAdmin" variant="primary" size="sm" @click="openCreate">{{ t('common.create') }}</GlassButton>
     </div>
 
+    <!-- 非管理员:仅提示 -->
+    <template v-if="!isAdmin">
+      <div class="admin-gate">{{ t('common.adminOnlyHint') }}</div>
+    </template>
+    <template v-else>
     <!-- Group list -->
     <a-spin :spinning="loading">
       <div class="groups-grid">
@@ -62,6 +70,7 @@
         <template #empty><a-empty :description="t('common.noData')" /></template>
       </a-list>
     </a-modal>
+    </template>
   </div>
 </template>
 
@@ -72,8 +81,12 @@ import { listGroups, updateGroup, createGroup, deleteGroup as deleteGroupApi, li
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
+/** 分组为全局管理数据; 仅管理员可访问与操作 */
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 const loading = ref(false)
 const saving = ref(false)
@@ -191,6 +204,9 @@ onMounted(fetchGroups)
 
 <style scoped>
 .group-page { display: flex; flex-direction: column; gap: 20px; }
+/* 全局说明与权限提示 */
+.page-global-hint { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-secondary, #8a8a92); }
+.admin-gate { margin: 24px auto; max-width: 480px; padding: 16px; border: 1px dashed var(--nr-border, rgba(255, 255, 255, 0.12)); border-radius: 10px; text-align: center; font-size: 13px; color: var(--nr-text-secondary, #8a8a92); }
 .page-title { font-family: var(--nr-font-display); font-size: 22px; font-weight: 700; color: var(--nr-text-primary); margin: 0; }
 .page-header { display: flex; justify-content: space-between; align-items: center; }
 .groups-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
