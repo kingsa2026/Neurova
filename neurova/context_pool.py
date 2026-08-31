@@ -345,6 +345,51 @@ class ContextPool:
             )
         )
 
+    def mark_turn_seen(self, turn_id: str) -> int:
+        """P1-1④ ack 集：标记指定轮次的全部 chunk 为已读（模型请求成功后）。
+
+        Returns:
+            标记数量
+        """
+        with self._lock:
+            count = 0
+            for chunk in self._collector._contexts:
+                if (chunk.metadata or {}).get("turn_id") == turn_id and not chunk.seen_confirmed:
+                    chunk.seen_confirmed = True
+                    count += 1
+            return count
+
+    def mark_hashes_seen(self, hashes) -> int:
+        """ack 集：按内容 hash 标记已读（视图捕获路径）。"""
+        wanted = {h for h in (hashes or []) if h}
+        if not wanted:
+            return 0
+        with self._lock:
+            count = 0
+            for chunk in self._collector._contexts:
+                if chunk.hash in wanted and not chunk.seen_confirmed:
+                    chunk.seen_confirmed = True
+                    count += 1
+            return count
+
+    def select_fold_candidates(self, max_count: int = 50) -> List:
+        """P1-1④ 分层剪枝：折叠候选 = 已确认读过（seen_confirmed）的 TOOL_CALL，
+        最老优先（created_at 升序）。未读的工具结果绝不进入折叠候选——
+        模型尚未看过，折叠会导致幻觉。
+
+        消费方：溢出恢复/摘要压缩（compact 前 prior 调取）。
+        """
+        with self._lock:
+            candidates = [
+                c
+                for c in self._collector._contexts
+                if c.source == ContextSource.TOOL_CALL
+                and c.seen_confirmed
+                and (c.metadata or {}).get("turn_id") is not None
+            ]
+            candidates.sort(key=lambda c: c.created_at or datetime.datetime.min)
+            return candidates[:max(0, int(max_count))]
+
     def get_eviction_stats(self) -> Dict[str, Any]:
         """驱逐台账统计。"""
         with self._lock:

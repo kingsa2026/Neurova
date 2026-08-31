@@ -52,6 +52,8 @@ class ContextOrchestrator:
         self.auto_tag = auto_tag
         # 根因 C 修复: 持有 session_id 标识, 让 session 隔离在 pool/chunk 级别都生效
         self._session_id = session_id
+        # P1-1④ ack 集：最近一次 build_context 视图内的池 chunk hash
+        self._last_view_hashes: set = set()
 
         # 初始化 ContextPool（如果启用）
         if use_pool:
@@ -486,6 +488,11 @@ class ContextOrchestrator:
                     # 兜底：其他归档来源保持 system 角色
                     context.append({"role": "system", "content": ctx.content})
 
+            # P1-1④：记录本视图覆盖的池 chunk hash（模型请求成功后 ack 确认已读）
+            self._last_view_hashes = {
+                c.hash for c in drawn_contexts if getattr(c, "hash", None)
+            }
+
             # 4. 本轮瞬态上下文（不入池归档，紧贴当前输入）
             # Bug C-3 修复：工具执行状态注入（仅当有实际工具结果时）
             if tool_memory_result or auto_execute_result:
@@ -728,6 +735,21 @@ class ContextOrchestrator:
     # ══════════════════════════════════════════════════════════════
     # 系统提示构建
     # ══════════════════════════════════════════════════════════════
+
+    def mark_last_view_seen(self) -> int:
+        """P1-1④ ack 集：确认最近一次视图内的池 chunk 已被模型成功读过。
+
+        由 chat_pipeline 在 LLM 请求成功后调用；pool 侧据此做分层剪枝
+        （未读 TOOL_CALL 优先入视图，已读的作为折叠候选）。
+        """
+        try:
+            pool = getattr(self, "context_pool", None)
+            if pool is None or not self._last_view_hashes:
+                return 0
+            return pool.mark_hashes_seen(self._last_view_hashes)
+        except Exception:
+            logger.debug("视图已读确认失败（忽略）", exc_info=True)
+            return 0
 
     def build_system_prompt(self, tools_desc: str = "") -> str:
         """构建系统提示（Phase 6.5: 统一行为规则配置）。

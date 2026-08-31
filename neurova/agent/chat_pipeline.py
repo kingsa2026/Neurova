@@ -49,6 +49,43 @@ def _thinking_directive(effort: Optional[str]) -> str:
     return _THINKING_DIRECTIVES.get((effort or "").lower(), "")
 
 
+def _adaptive_retrieval_enabled(agent: Any, ctx: "ChatContext") -> bool:
+    """Adaptive Retrieval 开关（批次 4）：默认关闭。
+
+    开启途径：ctx.metadata["adaptive_retrieval_enabled"]=True（请求级），
+    或环境变量 NEUROVA_ADAPTIVE_RETRIEVAL=1/true/yes（进程级）。
+    """
+    import os
+
+    env = (os.environ.get("NEUROVA_ADAPTIVE_RETRIEVAL") or "").strip().lower()
+    if env in ("1", "true", "yes"):
+        return True
+    meta = ctx.metadata if isinstance(ctx.metadata, dict) else {}
+    return bool(meta.get("adaptive_retrieval_enabled"))
+
+
+def _parse_sub_queries(text: str) -> List[str]:
+    """从 LLM 输出解析子问题 JSON 数组（容忍代码围栏）；畸形输出返回 []。"""
+    import json as _json
+    import re as _re
+
+    if not text:
+        return []
+    fence = _re.search(r"```(?:json)?\s*(.*?)\s*```", text, _re.S)
+    raw = fence.group(1) if fence else text
+    start = raw.find("[")
+    end = raw.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        return []
+    try:
+        data = _json.loads(raw[start : end + 1])
+    except Exception:  # noqa: BLE001 - LLM 输出不可信
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(item).strip() for item in data if str(item).strip()][:5]
+
+
 @dataclass
 class ChatContext:
     """对话上下文，贯穿整个管线"""
@@ -339,6 +376,9 @@ class ChatPipeline:
         self._agent._current_user_input = ctx.user_input
         # session_id 透传给工具层（蜂群工具派生子 Agent 时广播事件用）
         self._agent._current_session_id = ctx.session_id
+        # JWT 登录用户透传给工具层（三层隔离：planning 归属/治理/审计用）。
+        # console /chat 的 metadata 已携带 JWT user_id（=sub，与 neuser_id 同源）
+        self._agent._current_user_id = (ctx.metadata or {}).get("user_id") or "default"
         # [蜂群流式] event_emitter 允许经 metadata 透传（Agent.chat 未显式
         # 传参时）， SwarmManager 以 metadata 携带发射器，此处提取到 ctx
         if ctx.event_emitter is None and isinstance(ctx.metadata, dict):
@@ -894,6 +934,12 @@ class ChatPipeline:
         # 使用 MemoryRetrievalChain 执行检索
         result = await self.memory_retrieval_chain.retrieve(retrieval_context)
 
+        # 批次 4（RAG 演进 B5）：Adaptive Retrieval——首查低质时改写 query 二次检索
+        # 开关默认关闭（ctx.metadata["adaptive_retrieval_enabled"] 或
+        # 环境变量 NEUROVA_ADAPTIVE_RETRIEVAL）；任何异常保留首查结果
+        if _adaptive_retrieval_enabled(self._agent, ctx):
+            result = await self._adaptive_second_retrieval(ctx, result, user_id)
+
         # 提取记忆内容
         ctx.relevant_memories = result.memories
 
@@ -910,6 +956,113 @@ class ChatPipeline:
                 ctx.user_input,
                 f"找到 {len(ctx.relevant_memories)} 条记忆 (质量: {result.quality_level.value})",
             )
+
+    async def _adaptive_second_retrieval(self, ctx: ChatContext, first_result, user_id: str):
+        """Adaptive Retrieval 二次检索（批次 4 + 遗留修复 ③ Query Planning）。
+
+        首查低质（should_need_more_context）→ LLM 拆解 2-3 个子问题 →
+        逐个检索 → 合并去重；拆解失败退化为单查询改写（原批次 4 行为）。
+        任何异常返回首查结果，不阻断主流程。
+        """
+        from dataclasses import replace
+
+        from neurova.agent.memory_retrieval_chain import should_need_more_context
+
+        try:
+            if not should_need_more_context(first_result):
+                return first_result
+
+            # Query Planning：优先拆解子问题；失败退化单查询改写
+            sub_queries = await self._decompose_query(ctx.user_input)
+            if not sub_queries:
+                rewritten = await self._rewrite_query(ctx.user_input)
+                if not rewritten or rewritten.strip() == ctx.user_input.strip():
+                    return first_result
+                sub_queries = [rewritten]
+            sub_queries = sub_queries[:3]
+
+            merged = list(first_result.memories)
+            seen = {self._memory_key(m) for m in merged}
+            best_quality = first_result.quality
+            best_level = first_result.quality_level
+            for sq in sub_queries:
+                second = await self.memory_retrieval_chain.retrieve(
+                    RetrievalContext(
+                        query=sq,
+                        limit=10,
+                        user_id=user_id,
+                        session_id=ctx.session_id,
+                        strategy=RetrievalStrategy.CHAIN,
+                        min_quality=0.3,
+                        metadata={
+                            "session_id": ctx.session_id,
+                            "trace_id": ctx.trace_id,
+                            "adaptive": True,
+                        },
+                    )
+                )
+                for m in second.memories:
+                    key = self._memory_key(m)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(m)
+                if second.quality >= best_quality:
+                    best_quality = second.quality
+                    best_level = second.quality_level
+
+            logger.info(
+                "[ADAPTIVE_RAG] 子问题 %s 合并 %d 条 (best quality=%.2f)",
+                sub_queries, len(merged), best_quality,
+            )
+            return replace(
+                first_result,
+                memories=merged,
+                source=first_result.source + "+adaptive",
+                quality=best_quality,
+                quality_level=best_level,
+                metadata={"adaptive_sub_queries": sub_queries},
+            )
+        except Exception as exc:  # noqa: BLE001 - 自适应失败不阻断主流程
+            logger.warning("[ADAPTIVE_RAG] 二次检索失败，保留首查结果: %s", exc)
+            return first_result
+
+    @staticmethod
+    def _memory_key(m: Any) -> str:
+        """记忆去重键：memory_id > id > content 前 200 字符。"""
+        if isinstance(m, dict):
+            return str(m.get("memory_id") or m.get("id") or m.get("content", ""))[:200]
+        return str(m)[:200]
+
+    async def _decompose_query(self, query: str) -> List[str]:
+        """Query Planning：LLM 把复杂问题拆成 2-3 个可检索子问题；失败返回 []。"""
+        llm = getattr(self._agent, "llm_client", None)
+        if llm is None:
+            return []
+        prompt = (
+            "把下面的用户问题拆解成 2-3 个可独立检索的子问题（保留关键实体与时间限定）。"
+            '输出严格的 JSON 数组，仅含子问题字符串，不要解释。例如：["子问题一", "子问题二"]\n'
+            "问题：" + query
+        )
+        try:
+            resp = llm.chat([{"role": "user", "content": prompt}])
+            text = getattr(resp, "content", "") or ""
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[ADAPTIVE_RAG] 子问题拆解失败: %s", exc)
+            return []
+        return _parse_sub_queries(text)
+
+    async def _rewrite_query(self, query: str) -> str:
+        """用 LLM 把原查询改写成更利于检索的形式；失败返回原查询。"""
+        llm = getattr(self._agent, "llm_client", None)
+        if llm is None:
+            return query
+        prompt = (
+            "把下面的用户问题改写成一句适合向量/关键词检索的查询（只输出改写后的查询本身，"
+            "不要解释、不要引号）。保留关键实体与时间限定。\n问题：" + query
+        )
+        resp = llm.chat([{"role": "user", "content": prompt}])
+        return (getattr(resp, "content", "") or "").strip().strip('"').strip("'")
 
     async def _retrieve_crystallized_patterns(self, ctx: ChatContext):
         """结晶经验检索（使用 CrystallizedExperienceManager 深度模块）"""
@@ -1063,6 +1216,13 @@ class ChatPipeline:
                 )
             except ImportError:
                 logger.debug("EventType 导入失败，跳过事件广播")
+
+        # P1-1④ ack 集：本轮 LLM 请求成功 → 上次视图内 chunk 确认已读
+        # （供 pool 分层剪枝：未读 TOOL_CALL 优先入视图，已读的作折叠候选）
+        try:
+            self.context_orchestrator.mark_last_view_seen()
+        except Exception:
+            logger.debug("视图已读确认跳过", exc_info=True)
 
     async def _call_agent_loop(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
         """通过 Agent Loop 调用 LLM"""
