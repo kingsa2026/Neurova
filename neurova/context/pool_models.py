@@ -43,6 +43,7 @@ class ContextInput:
     hash: str = None  # 内容哈希（用于精确去重）
     created_at: datetime = None  # 创建时间
     updated_at: datetime = None  # 更新时间
+    seen_confirmed: bool = False  # P1-1④ ack 集：已被成功模型请求读过
 
     def __post_init__(self):
         """初始化后处理"""
