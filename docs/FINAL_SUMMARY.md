@@ -95,7 +95,7 @@ curl http://localhost:9527/health
 1. **`RESTART_README.md`** - 重启脚本使用说明
 2. **`FIX_SUMMARY.md`** - 修复总结文档
 3. **`FINAL_SUMMARY.md`** - 最终总结文档
-4. **`verify_fixes.py`** - 修复验证脚本
+4. **`tests/verify_fixes.py`** - 修复验证脚本
 
 ## 使用建议
 
@@ -111,7 +111,7 @@ restart_neurova.bat --check
 
 ### 验证修复
 ```batch
-python verify_fixes.py
+python tests/verify_fixes.py
 ```
 
 ## 浏览器控制台错误验证

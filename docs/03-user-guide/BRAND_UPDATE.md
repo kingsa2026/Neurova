@@ -14,7 +14,7 @@
 | 文件 | 状态 | 更新内容 |
 |------|------|----------|
 | [README.md](../README.md) | ✅ 已更新 | 项目名称、品牌口号、GitHub 链接 |
-| [docs/architecture/01-core-architecture.md](architecture/01-core-architecture.md) | ✅ 已更新 | 项目名称 |
+| [docs/../01-architecture/01-core-architecture.md](../01-architecture/01-core-architecture.md) | ✅ 已更新 | 项目名称 |
 | 其他架构文档 | 🔄 待更新 | 代码示例中的类名等 |
 
 ### 2. 新增品牌文档

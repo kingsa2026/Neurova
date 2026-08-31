@@ -520,7 +520,7 @@ class ToolGeneticEngine:
             skill = Skill(
                 id=skill_id,
                 name=skill_id,
-                version="0.1.0",
+                version="1.0.0",
                 description=(
                     f"遗传进化工具组合（适应度 {genotype.fitness:.2f}）: "
                     f"{' → '.join(tool_sequence)}"

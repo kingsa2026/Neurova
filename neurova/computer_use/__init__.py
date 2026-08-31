@@ -1,5 +1,5 @@
 """
-Computer Use 能力 v2.1.0 - 浏览器自动化增强版（集成 browser-skill）
+Computer Use 能力 v1.0.0-beta1 - 浏览器自动化增强版（集成 browser-skill）
 
 隔离层级: 全局共享 + L1/L2 防火墙
 

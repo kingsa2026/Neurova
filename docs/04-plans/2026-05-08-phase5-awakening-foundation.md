@@ -1249,7 +1249,7 @@ static/js/plugin-loader.js
 **优先级:** P1
 **预计时间:** 45分钟
 
-**目标:** 实现忆灵的自我监控、自我反思、自我优化能力
+**目标:** 实现智星的自我监控、自我反思、自我优化能力
 
 **Files:**
 - Create: `neurova/memory/core/meta_cognition.py` - 元认知系统
@@ -1283,8 +1283,8 @@ neurova/memory/core/meta_cognition.py
 # neurova/memory/core/meta_cognition.py
 """元认知系统
 
-忆灵的自我监控、自我反思、自我优化能力
-让忆灵能够"思考自己的思考"
+智星的自我监控、自我反思、自我优化能力
+让智星能够"思考自己的思考"
 """
 
 from typing import Dict, List, Optional
@@ -1898,7 +1898,7 @@ def test_should_monitor():
 **优先级:** P1
 **预计时间:** 35分钟
 
-**目标:** 实现实时记忆流可视化，让冯先生能看见忆灵的记忆过程
+**目标:** 实现实时记忆流可视化，让冯先生能看见智星的记忆过程
 
 **Files:**
 - Create: `neurova/memory/core/memory_stream.py` - 实时记忆流引擎
@@ -2387,7 +2387,7 @@ def recall(self, query, **kwargs):
     <!-- 页面头部 -->
     <div class="page-header">
         <h2 class="page-title">实时记忆流</h2>
-        <p class="page-subtitle">查看忆灵的记忆过程：记住、回忆、升温、遗忘...</p>
+        <p class="page-subtitle">查看智星的记忆过程：记住、回忆、升温、遗忘...</p>
     </div>
 
     <!-- 统计卡片 -->

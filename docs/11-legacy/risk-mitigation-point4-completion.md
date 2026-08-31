@@ -218,7 +218,7 @@ async def _retrieve_crystallized_patterns(self, ctx: ChatContext):
 
 ### 修改文件
 1. `neurova/agent/chat_pipeline.py` (集成 CrystallizedExperienceManager)
-2. `risk-mitigation-plan.html` (更新风险点4状态)
+2. `docs/risk-mitigation-plan.html` (更新风险点4状态)
 
 ## 后续建议
 

@@ -1,5 +1,5 @@
 """
-Computer Use 轻量级视觉理解模块 v1.0
+Computer Use 轻量级视觉理解模块 v1.0.0-beta1
 
 不依赖 torch/ultralytics 的轻量级实现：
 - 使用 Pillow 进行基础图像处理

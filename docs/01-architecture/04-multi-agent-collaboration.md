@@ -1,5 +1,9 @@
 # 多 Agent 协作机制设计
 
+> **状态**: 已实现（对照代码核实） · 版本: v1.0.0-beta1
+> **说明**: 本文档描述的功能已在 `neurova/` 对应模块实现，详见 [功能模块矩阵](../0-index/README.md)
+
+
 ## 1. 概述
 
 ### 1.1 设计目标
@@ -57,7 +61,7 @@ class AgentConfig:
     """Agent 配置 - 当前实现 (neurova/agent_core.py)"""
     def __init__(
         self,
-        name: str = "忆灵",
+        name: str = "智星",
         agent_id: str = "yi_ling",
         workspace_path: str = "",
         db_path: str = "",

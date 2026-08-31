@@ -278,7 +278,7 @@ API 模块: ████████░░░░░░░░░░ 40% (10/25)
 
 **参考文档**：
 
-- [frontend_development_plan.md](docs/dev_progress/frontend_development_plan.md)
-- [backend_api_issues.md](docs/dev_progress/backend_api_issues.md)
+- [frontend_development_plan.md](./frontend_development_plan.md)
+- [backend_api_issues.md](./backend_api_issues.md)
 - [HomePage.tsx](../neurova-ui/src/pages/Home/HomePage.tsx)
 - [App.tsx](../neurova-ui/src/App.tsx)

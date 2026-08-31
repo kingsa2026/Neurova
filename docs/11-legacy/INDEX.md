@@ -125,17 +125,6 @@
 
 > 规则：新修复追加新 `bugfix-*.md`，不得改写历史文件。
 
-### 2.4 竞品 / 外部对标（研究参考，不可作为事实源）
-
-`bailongma_vs_neurova_comparison.md`、`comparison-openmythos-vs-neurova.md`、
-`mflow_vs_neurova_memory_comparison.md`、`sirchmunk_vs_neurova_comparison.md`、
-`supermemory-vs-neurova_comparison.md`、`tencentdb_vs_neurova_comparison.md`、
-`QwenPaw_Neurova_Comparison_Analysis.md`、`QwenPaw_Integration_Summary.md`、
-`sim-studio-analysis-for-neurova.md`、`sim-studio-frontend-analysis.md`、
-`CODE_BASED_COMPARISON_ANALYSIS.md`、`CODE_BASED_COMPREHENSIVE_COMPARISON.md`、
-`agent-memory-cutting-edge-research-2026.md`、`funasr-vs-moss-audio-comparison.md`、
-`moss-audio-completeness-check.md`、`neurova_skill_vs_meta_skill_comparison.md`
-
 ### 2.5 审计报告 / 验证（历史留痕）
 
 `code-review-report.md`、`navigation-audit-report.md`、`navigation-fix-summary.md`、
@@ -177,7 +166,6 @@
 | `cognitive_graph_storage_architecture.md`（一步到位方案）↔ `cognitive-graph-storage-architecture.md`（分层设计 v1.0） | ⚠ 文件名仅连字符差异，但**内容不同**：前者为单步替换方案，后者为分层深度设计（基于 unified-storage-format-discussion） | **两篇均保留**，不可合并/删除 |
 | 记忆升级 6 篇（`memory-system-upgrade-*` / `neurova-memory-system-upgrade-*` / `memory-nerf-*` / `nerf-memory-*`） | 以 `memory-system-upgrade-plan-final.md` 为 [权威] | 其余标注"已被 final 取代" |
 | `thought-memory-upgrade-dev-doc.md` 与 Evocate 集群 | 归入记忆领域参考 | 链接到 2.1 |
-| `QwenPaw_Integration_Summary.md` 与 `QwenPaw_Neurova_Comparison_Analysis.md` | 一篇集成、一篇对比，保留两者 | 已分类 |
 
 ## 4. 文档管理规则（保持单一事实源）
 

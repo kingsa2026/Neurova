@@ -1,6 +1,6 @@
 # 智能体代理框架 - 核心架构设计
 
-> **版本**: v4.0 (CogArch 2.0)  
+> **版本**: v1.0.0-beta1 (CogArch 2.0)  
 > **最后更新**: 2026-06-07  
 > **状态**: 生产就绪
 
@@ -79,7 +79,7 @@
 
 #### Application Layer (应用层)
 - **CLI**: 命令行接口，支持交互式对话
-- **REST API**: 77+ 端点，FastAPI 框架
+- **REST API**: 82 端点模块，FastAPI 框架
 - **WebSocket**: 实时通信，支持流式响应
 - **通信渠道**: 飞书/钉钉/企业微信/Telegram/Discord/QQ/MQTT/SIP 等
 
@@ -371,7 +371,7 @@ class WeComAdapter(ChannelAdapter):
 # config.yaml - 多提供商配置示例
 framework:
   name: "Neurova"
-  version: "v4.0"
+  version: "v1.0.0-beta1"
   
 llm:
   providers:
@@ -584,14 +584,14 @@ services:
 - **自定义进化策略**: 实现 EvolutionStrategy 接口
 
 ### 11.2 API 扩展
-- **RESTful API**: 77+ 端点，FastAPI 框架
+- **RESTful API**: 82 端点模块，FastAPI 框架
 - **WebSocket API**: 实时通信，流式响应
 - **gRPC API**: 高性能 RPC (未来)
 - **GraphQL API**: 灵活查询 (未来)
 
 ## 12. 版本历史
 
-### v4.0 (CogArch 2.0) - 当前版本
+### v1.0.0-beta1 (CogArch 2.0) - 当前版本
 - 深度模块化重构 (Agent 2180→1621 行)
 - 17 维记忆系统
 - 多模态 LLM 路由 (6+ 提供商)
