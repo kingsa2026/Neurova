@@ -576,6 +576,7 @@ class SecretStore:
 
 # 全局实例
 _secret_store: Optional[SecretStore] = None
+_secret_store_lock = __import__('threading').Lock()
 
 
 def get_secret_store() -> SecretStore:
@@ -587,7 +588,10 @@ def get_secret_store() -> SecretStore:
     """
     global _secret_store
     if _secret_store is None:
-        _secret_store = SecretStore()
+        # P3-e：DCL——SecretStore 构造含加密初始化（密钥派生），不可双创建
+        with _secret_store_lock:
+            if _secret_store is None:
+                _secret_store = SecretStore()
     return _secret_store
 
 

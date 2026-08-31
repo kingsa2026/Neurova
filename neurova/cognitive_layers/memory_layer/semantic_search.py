@@ -11,6 +11,7 @@
 import hashlib
 from neurova.core.logger import get_logger
 import re
+import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = get_logger(__name__)
@@ -234,6 +235,7 @@ class SemanticSearch:
 
 # 全局实例
 _semantic_search: Optional[SemanticSearch] = None
+_semantic_search_lock = threading.Lock()
 
 
 def get_semantic_search(embedding_model=None, use_embedding: bool = True) -> SemanticSearch:
@@ -251,19 +253,22 @@ def get_semantic_search(embedding_model=None, use_embedding: bool = True) -> Sem
     """
     global _semantic_search
     if _semantic_search is None:
-        # 若调用方未提供 embedding_model，尝试从全局工厂懒加载
-        if embedding_model is None and use_embedding:
-            try:
-                from neurova.embedding import get_embedding_engine
+        # P3-e：DCL——构造含 ONNX 引擎懒加载（重副作用），并发首访不可双创建
+        with _semantic_search_lock:
+            if _semantic_search is None:
+                # 若调用方未提供 embedding_model，尝试从全局工厂懒加载
+                if embedding_model is None and use_embedding:
+                    try:
+                        from neurova.embedding import get_embedding_engine
 
-                embedding_model = get_embedding_engine()
-            except Exception as e:
-                logger.warning("全局 embedding 引擎不可用，降级为关键词模式: %s", e)
-                embedding_model = None
-        _semantic_search = SemanticSearch(
-            embedding_model=embedding_model,
-            use_embedding=use_embedding,
-        )
+                        embedding_model = get_embedding_engine()
+                    except Exception as e:
+                        logger.warning("全局 embedding 引擎不可用，降级为关键词模式: %s", e)
+                        embedding_model = None
+                _semantic_search = SemanticSearch(
+                    embedding_model=embedding_model,
+                    use_embedding=use_embedding,
+                )
     return _semantic_search
 
 
@@ -273,4 +278,10 @@ def _reset_semantic_search():
     生产代码不应调用此函数。
     """
     global _semantic_search
-    _semantic_search = None
+    with _semantic_search_lock:
+        _semantic_search = None
+
+
+def reset_semantic_search():
+    """公有重置入口（P3-e）：与 _reset_semantic_search 等价，供测试隔离与运维重建。"""
+    _reset_semantic_search()

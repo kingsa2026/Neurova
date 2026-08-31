@@ -367,13 +367,17 @@ class ExecutionEngine:
 
 # 工厂函数
 _execution_engine: typing.Optional[ExecutionEngine] = None
+_execution_engine_lock = __import__('threading').Lock()
 
 
 def get_execution_engine() -> ExecutionEngine:
     """获取执行引擎单例"""
     global _execution_engine
     if _execution_engine is None:
-        _execution_engine = ExecutionEngine()
+        # P3-e：DCL——ExecutionEngine 装配 ToolEngine/WorkflowEngine/monitor，不可双创建
+        with _execution_engine_lock:
+            if _execution_engine is None:
+                _execution_engine = ExecutionEngine()
     return _execution_engine
 
 
