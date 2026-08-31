@@ -19,6 +19,7 @@ from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
 from neurova.api.endpoints import get_app_state
+from neurova.api.deps import get_current_user, require_admin
 
 logger = get_logger(__name__)
 
@@ -30,7 +31,7 @@ class SystemStatus(BaseModel):
 
     status: str = "running"
     uptime: float = 0
-    version: str = "5.0.0"
+    version: str = "1.0.0-beta1"
     python_version: str = ""
     start_time: float = 0
 
@@ -78,8 +79,8 @@ def _get_app_state():
 
 
 @router.get("/status", response_model=SystemStatus)
-async def get_system_status(request: Request):
-    """获取系统状态"""
+async def get_system_status(request: Request, current_user: dict = Depends(get_current_user)):
+    """获取系统状态 — 登录用户可读"""
     _get_request_id(request)
 
     import sys
@@ -90,15 +91,15 @@ async def get_system_status(request: Request):
     return SystemStatus(
         status="running",
         uptime=time.time() - start_time,
-        version="5.0.0",
+        version="1.0.0-beta1",
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         start_time=start_time,
     )
 
 
 @router.get("/resources", response_model=ResourceUsage)
-async def get_resource_usage(request: Request):
-    """获取资源使用"""
+async def get_resource_usage(request: Request, current_user: dict = Depends(get_current_user)):
+    """获取资源使用 — 登录用户可读"""
     _get_request_id(request)
 
     usage = ResourceUsage()
@@ -128,8 +129,8 @@ async def get_resource_usage(request: Request):
 
 
 @router.get("/connections", response_model=ConnectionStatus)
-async def get_connection_status(request: Request):
-    """获取连接状态"""
+async def get_connections(request: Request, current_user: dict = Depends(get_current_user)):
+    """获取连接状态 — 登录用户可读"""
     _get_request_id(request)
 
     return ConnectionStatus(
@@ -143,11 +144,12 @@ async def get_connection_status(request: Request):
 @router.get("/alerts", response_model=List[Alert])
 async def get_alerts(
     request: Request,
+    current_user: dict = Depends(get_current_user),
     level: Optional[str] = Query(default=None),
     resolved: Optional[bool] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ):
-    """获取告警信息"""
+    """获取告警信息 — 登录用户可读"""
     _get_request_id(request)
 
     # TODO: 从告警存储获取告警
@@ -157,8 +159,8 @@ async def get_alerts(
 
 
 @router.post("/alerts/{alert_id}/resolve")
-async def resolve_alert(request: Request, alert_id: str):
-    """解决告警"""
+async def resolve_alert(request: Request, alert_id: str, admin: dict = Depends(require_admin())):
+    """解决告警 — 仅管理员"""
     _get_request_id(request)
 
     # TODO: 标记告警为已解决

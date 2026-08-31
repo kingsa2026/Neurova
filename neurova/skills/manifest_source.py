@@ -57,7 +57,7 @@ class LocalBuiltinSource(ManifestSource):
     def _build_entry(self, sub: Path) -> SkillManifestEntry:
         skill_id = sub.name
         name = skill_id
-        version = "0.1.0"
+        version = "1.0.0"
         # 尝试从 skill 模块中提取 name / version
         for fname in ("skill.py", "__init__.py"):
             fpath = sub / fname
@@ -103,7 +103,7 @@ class RemoteHubSource(ManifestSource):
                 SkillManifestEntry(
                     id=getattr(s, "name", ""),
                     name=getattr(s, "name", ""),
-                    version=getattr(s, "version", "0.1.0"),
+                    version=getattr(s, "version", "1.0.0"),
                     source="remote",
                     description=getattr(s, "description", ""),
                     author=getattr(s, "author", ""),

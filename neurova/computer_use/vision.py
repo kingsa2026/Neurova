@@ -1,5 +1,5 @@
 """
-Computer Use 视觉理解模块 v1.0
+Computer Use 视觉理解模块 v1.0.0-beta1
 
 集成 OmniParser 实现视觉智能：
 - YOLOv8 图标检测

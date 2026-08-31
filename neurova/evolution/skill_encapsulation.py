@@ -467,7 +467,7 @@ class AutoSkillBuilder:
                 skill = Skill(
                     id=template_id,
                     name=template.name,
-                    version="0.1.0",
+                    version="1.0.0",
                     description=template.description,
                     author="auto_skill_builder",
                     source=SkillSource.LOCAL,
@@ -496,7 +496,7 @@ class AutoSkillBuilder:
                             skill_id=template_id,
                             name=template.name,
                             description=template.description,
-                            version="0.1.0",
+                            version="1.0.0",
                             config={
                                 "tool_sequence": template.tool_sequence,
                                 "context_template": template.context_template,

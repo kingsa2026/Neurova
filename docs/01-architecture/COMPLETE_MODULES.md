@@ -656,7 +656,7 @@ ErrorCode (neurova/core/error_handler.py)
 
 | 文件 | 路径 | 框架 | 说明 |
 |------|------|------|------|
-| `webui.py` | `neurova/` | Streamlit | 忆灵控制台（Agent管理/记忆查看/对话测试/配置管理） |
+| `webui.py` | `neurova/` | Streamlit | 智星控制台（Agent管理/记忆查看/对话测试/配置管理） |
 | `neurova-ui.html` | 根目录 | 原生HTML/CSS/JS | 现代化 WebUI 面板（左侧导航/悬浮Agent切换/响应式布局） |
 
 ### 13.4 Streamlit 页面功能

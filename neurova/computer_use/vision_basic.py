@@ -1,5 +1,5 @@
 """
-Computer Use 基础视觉理解模块 v1.0
+Computer Use 基础视觉理解模块 v1.0.0-beta1
 
 不依赖任何外部库的纯 Python 实现：
 - 使用内置库进行基础图像处理

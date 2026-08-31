@@ -109,6 +109,6 @@ class SessionRepository(ABC):
 
 ## References
 
-- 改造报告：[docs/bugfix-history-load-bugs.md](../bugfix-history-load-bugs.md) §7 架构观察
+- 改造报告：[docs/bugfix-history-load-bugs.md](../../06-bugfix/bugfix-history-load-bugs.md) §7 架构观察
 - 测试文件：[tests/unit/test_session_repository.py](file:///e:/项目/Neurova/tests/unit/test_session_repository.py)
 - 上游 ADR：[ADR 0003](./0003-memory-system-architecture.md) 分层架构 + 深度模块模式

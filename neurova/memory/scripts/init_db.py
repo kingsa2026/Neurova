@@ -486,7 +486,7 @@ def init_db(db_path: str = None):
 
 
 if __name__ == "__main__":
-    print("忆灵，正在初始化数据库...\n")
+    print("智星，正在初始化数据库...\n")
     print(f"{'='*50}")
     db_path = init_db()
     print(f"{'='*50}")

@@ -44,7 +44,7 @@
 | 文档 | 内容 | 状态 |
 |------|------|------|
 | [README.md](../README.md) | 项目概述和快速开始 | ✅ 完成 |
-| [.trae/project_rules.md](../.trae/project_rules.md) | 项目规则和开发规范 | ✅ 完成 |
+| [.trae/project_rules.md]() | 项目规则和开发规范 | ✅ 完成 |
 
 ## 🎯 核心设计亮点
 
@@ -495,6 +495,6 @@ Phase 3: 进阶增强 (意图图谱/反馈闭环/个性化/梦境整理/情感�
 **状态**: 设计完成，等待实现
 
 **项目链接**: [GitHub](https://github.com/neurova/neurova) (待创建)
-**文档索引**: [docs/architecture/](./architecture/)
+**文档索引**: [docs/architecture/](./)
 
 **维护者**: Neurova Team

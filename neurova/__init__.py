@@ -9,5 +9,5 @@ Neurova - 神经感知记忆系统
 - 图遍历检索
 """
 
-__version__ = "0.2.2"  # s9: 小版本 +0.1 (0.1.2 → 0.2.2) — pydantic v1 兼容批量修复 + RLock 保护
+__version__ = "1.0.0-beta1"
 __author__ = "Neurova Team"

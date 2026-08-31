@@ -563,7 +563,7 @@ def _add_health_routes(app: FastAPI, app_state: AppState) -> None:
             "status": "running",
             "uptime": app_state.get_uptime(),
             "agents": len(app_state.agents),
-            "version": "5.0.0",
+            "version": "1.0.0-beta1",
             "timestamp": time.time(),
         }
 
@@ -836,7 +836,7 @@ def create_app(
         app = FastAPI(
             title="Neurova API",
             description="Neurova - 智能 Agent 系统 API",
-            version="5.0.0",
+            version="1.0.0-beta1",
             docs_url="/docs",
             redoc_url="/redoc",
             openapi_url="/openapi.json",
