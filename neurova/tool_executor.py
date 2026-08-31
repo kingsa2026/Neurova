@@ -280,7 +280,7 @@ class ToolExecutor:
         身份——config 是共享单例的静态配置，请求级登录用户才是归属主体。
         """
         agent = self._agent
-        request_user = getattr(agent, "_current_user_id", None)
+        request_user = getattr(agent, "current_user_id", None) or getattr(agent, "_current_user_id", None)
         config = getattr(agent, "config", None)
         user_id = (
             request_user
@@ -1018,7 +1018,7 @@ class ToolExecutor:
         return await swarm.spawn(
             task=str(task),
             agent_id=params.get("agent_id") or None,
-            session_id=getattr(self._agent, "_current_session_id", None),
+            session_id=getattr(self._agent, "current_session_id", None),
             background=bool(params.get("background", False)),
             origin="chat",
             stream=True,
@@ -1142,7 +1142,7 @@ class ToolExecutor:
     #   unknown_node_type → canvas_list_nodes 查询可用节点类型
 
     def _canvas_session_id(self) -> Optional[str]:
-        return getattr(self._agent, "_current_session_id", None)
+        return getattr(self._agent, "current_session_id", None)
 
     @staticmethod
     def _canvas_error_result(e: Exception) -> Dict:
@@ -2126,7 +2126,7 @@ class ToolExecutor:
         """
         if tool_name not in COMPUTER_USE_TOOLS:
             return
-        session_id = getattr(self._agent, "_current_session_id", None)
+        session_id = getattr(self._agent, "current_session_id", None)
         if not session_id:
             return
         try:
@@ -2399,7 +2399,7 @@ class ToolExecutor:
                 if not platform or not query:
                     return {"error": "缺少 platform 或 query 参数"}
                 # 三层隔离：请求级登录用户（_current_user_id）作为凭据分桶主体
-                user_id = getattr(self._agent, "_current_user_id", None) or "default"
+                user_id = getattr(self._agent, "current_user_id", None) or "default"
                 return await _asyncio.to_thread(
                     social_search, platform, query, user_id=user_id
                 )
