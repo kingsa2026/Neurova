@@ -41,11 +41,19 @@ def _make_router(delays=None):
 
 
 def _make_loop(router):
+    # P3-c 收窄：base.handle_tool_calls 经显式 API 回装展示记录；
+    # 共享同一列表对象，既有 _tool_messages_list 相邻配对断言继续成立
+    tool_messages = []
+
+    def _append_tool_messages(records):
+        tool_messages.extend(records or [])
+
     agent = SimpleNamespace(
         llm_client=SimpleNamespace(),
         config=SimpleNamespace(name="t", user_id="u1", agent_id="a1"),
         _current_user_id="u1",
-        _tool_messages_list=[],
+        _tool_messages_list=tool_messages,
+        append_tool_messages=_append_tool_messages,
         skill_registry=None,
         tool_router=router,
     )

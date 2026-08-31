@@ -326,7 +326,7 @@ class ChatPipeline:
             _ET.AGENT_REPLY,
             {
                 "content": ctx.reply,
-                "reasoning": getattr(self._agent, "_current_reasoning", None),
+                "reasoning": self._agent.current_reasoning,
                 "tool_messages": self._collect_tool_messages(),
                 "metadata": ctx.metadata,
             },
@@ -370,15 +370,18 @@ class ChatPipeline:
     # ══════════════════════════════════════════════════════════════
 
     def _init_agent_state(self, ctx: ChatContext):
-        """初始化 Agent 的临时状态"""
-        self._agent._current_reasoning = None
-        self._agent._tool_messages_list = []
-        self._agent._current_user_input = ctx.user_input
+        """初始化 Agent 的临时状态（经 Agent 轮次级显式 API，P3-c 收窄）"""
+        self._agent.set_current_reasoning(None)
+        self._agent.reset_tool_messages()
         # session_id 透传给工具层（蜂群工具派生子 Agent 时广播事件用）
-        self._agent._current_session_id = ctx.session_id
         # JWT 登录用户透传给工具层（三层隔离：planning 归属/治理/审计用）。
-        # console /chat 的 metadata 已携带 JWT user_id（=sub，与 neuser_id 同源）
-        self._agent._current_user_id = (ctx.metadata or {}).get("user_id") or "default"
+        # console /chat 的 metadata 已携带 JWT user_id（=sub，与 neuser_id 同源）；
+        # 未携带时由 Agent.set_request_identity 落 "default"
+        self._agent.set_request_identity(
+            user_input=ctx.user_input,
+            session_id=ctx.session_id,
+            user_id=(ctx.metadata or {}).get("user_id"),
+        )
         # [蜂群流式] event_emitter 允许经 metadata 透传（Agent.chat 未显式
         # 传参时）， SwarmManager 以 metadata 携带发射器，此处提取到 ctx
         if ctx.event_emitter is None and isinstance(ctx.metadata, dict):
@@ -392,10 +395,8 @@ class ChatPipeline:
 
     async def _step_activity_tracking(self, ctx: ChatContext):
         """记录活动、会话恢复、轨迹启动"""
-        # 递增对话轮次
-        if not hasattr(self._agent, "_turn_count"):
-            self._agent._turn_count = 0
-        self._agent._turn_count += 1
+        # 递增对话轮次（经 Agent 显式 API）
+        self._agent.increment_turn_count()
 
         # 会话历史恢复
         # 当调用方通过 metadata.history 提供了对话历史时，跳过 session_manager 恢复
@@ -552,8 +553,7 @@ class ChatPipeline:
     async def _record_tool_failure(self, tool_name: str, user_input: str, error_msg: str):
         """记录工具失败教训"""
         try:
-            if hasattr(self._agent, "_record_tool_failure_lesson"):
-                await self._agent._record_tool_failure_lesson(tool_name, user_input, error_msg)
+            await self._agent.record_tool_failure_lesson(tool_name, user_input, error_msg)
         except Exception as e:
             logger.warning(f"记录工具失败教训时出错: {tool_name}, 错误: {e}", exc_info=True)
 
@@ -1366,11 +1366,7 @@ class ChatPipeline:
             # reasoning 等其他元数据事件不入回复
         # C1: 合并原生工具事件到 _tool_messages_list，供 _collect_tool_messages() 读取
         if native_tool_events:
-            tool_list = getattr(self._agent, "_tool_messages_list", None)
-            if tool_list is None:
-                tool_list = []
-                self._agent._tool_messages_list = tool_list
-            tool_list.extend(native_tool_events)
+            self._agent.append_tool_messages(native_tool_events)
             logger.debug("原生模式捕获 %d 个工具事件", len(native_tool_events))
         return "".join(reply_parts)
 
@@ -1381,7 +1377,7 @@ class ChatPipeline:
 
         # 捕获思考过程
         if response and hasattr(response, "reasoning_content") and response.reasoning_content:
-            self._agent._current_reasoning = response.reasoning_content
+            self._agent.set_current_reasoning(response.reasoning_content)
 
         # 自动续写
         reply = await self._auto_continue(ctx, response, reply, tools_for_llm)
@@ -1455,7 +1451,7 @@ class ChatPipeline:
             if len(recent_contents) > SIMILARITY_WINDOW:
                 recent_contents.pop(0)
             if len(recent_contents) >= SIMILARITY_WINDOW:
-                if self._agent._detect_content_loop(recent_contents, SIMILARITY_THRESHOLD):
+                if self._agent.detect_content_loop(recent_contents, SIMILARITY_THRESHOLD):
                     break
 
             # Bug A-5 修复: 删除死代码——while 条件 (line 938) 已保证
@@ -1623,7 +1619,7 @@ class ChatPipeline:
             "experience_used": len(ctx.experience_items) > 0,
             "experience_count": len(ctx.experience_items),
             "session_id": post_result.get("actual_session_id"),
-            "reasoning": getattr(self._agent, "_current_reasoning", None),
+            "reasoning": self._agent.current_reasoning,
             "tool_messages": self._collect_tool_messages(),
             "proactive_question": post_result.get("proactive_question"),
         }

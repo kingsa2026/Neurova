@@ -499,7 +499,7 @@ class PostChatPipeline:
         try:
             _tool_msgs = self._agt._collect_tool_messages()
             assistant_meta = {
-                "reasoning_content": getattr(self._agt, "_current_reasoning", None),
+                "reasoning_content": getattr(self._agt, "current_reasoning", None),
                 "tool_calls": _tool_msgs or None,
             }
             # 过滤 None 值
@@ -998,7 +998,7 @@ class PostChatPipeline:
             return True
 
         # 周期性反思
-        turn_count = getattr(self._agt, "_turn_count", 0)
+        turn_count = getattr(self._agt, "turn_count", 0)
         if turn_count > 0 and turn_count % self.REFLECTION_TURN_INTERVAL == 0:
             return True
 
@@ -1043,7 +1043,7 @@ class PostChatPipeline:
             if kw in reply_lower:
                 return f"Agent 不确定性关键词: {kw}"
 
-        turn_count = getattr(self._agt, "_turn_count", 0)
+        turn_count = getattr(self._agt, "turn_count", 0)
         if turn_count > 0 and turn_count % self.REFLECTION_TURN_INTERVAL == 0:
             return f"周期性反思 (turn={turn_count})"
 
@@ -1896,7 +1896,7 @@ class PostChatPipeline:
                 metadata={"turn_steps": total_steps},
             )
 
-            turn_count = int(getattr(self._agent, "_turn_count", 0) or 0)
+            turn_count = int(getattr(self._agent, "turn_count", 0) or 0)
             if turn_count > 0 and turn_count % 10 == 0 and meta.should_consolidate():
                 idle_tracker = getattr(self._agent, "idle_tracker", None)
                 trigger = getattr(idle_tracker, "trigger_consolidation", None)
