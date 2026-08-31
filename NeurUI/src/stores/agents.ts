@@ -88,12 +88,45 @@ export const useAgentStore = defineStore('agents', () => {
     agents.value.find((a) => a.id === currentAgentId.value),
   )
 
-  const agentOptions = computed(() =>
-    agents.value.map((a) => ({
+  const agentOptions = computed(() => [
+    ...agents.value.map((a) => ({
       label: a.name,
       value: a.id,
+      isWorkflow: false as const,
     })),
-  )
+    ...workflowAgents.value,
+  ])
+
+  // ---------------------------------------------------------------------------
+  // Workflow agents（遗留③b：Neurflow 已发布工作流编译出的 Agent）
+  // ---------------------------------------------------------------------------
+  interface WorkflowAgentOption {
+    label: string
+    value: string
+    isWorkflow: true
+  }
+  const workflowAgents = ref<WorkflowAgentOption[]>([])
+
+  /**
+   * 拉取 Neurflow 工作流 Agent（metadata.source_type=workflow），
+   * 合并进 agentOptions 供 chat 页/画布选择器区分展示。失败静默。
+   */
+  async function loadWorkflowAgents(): Promise<void> {
+    try {
+      const res: any = await api.get('/neurflow/agents')
+      const data = res?.data ?? res
+      const list: any[] = Array.isArray(data) ? data : data?.agents ?? []
+      workflowAgents.value = list
+        .filter((a) => (a.metadata ?? {}).source_type === 'workflow')
+        .map((a) => ({
+          label: a.name ?? a.agent_id,
+          value: a.agent_id,
+          isWorkflow: true as const,
+        }))
+    } catch (err) {
+      console.warn('[AgentStore] loadWorkflowAgents skipped:', err)
+    }
+  }
 
   /**
    * Returns the agent_id portion of the three-level isolation key.
@@ -284,9 +317,11 @@ export const useAgentStore = defineStore('agents', () => {
     // computed
     currentAgent,
     agentOptions,
+    workflowAgents,
     currentIsolationKey,
     // actions
     loadAgents,
+    loadWorkflowAgents,
     createAgent,
     updateAgent,
     deleteAgent,
