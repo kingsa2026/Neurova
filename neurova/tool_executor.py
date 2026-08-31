@@ -130,6 +130,7 @@ class ToolExecutor:
     # 注意：search/execute_code 是历史兼容别名，不可删除。
     _builtin_dispatch: Dict[str, str] = {
         "memory_search": "_execute_memory_search",
+        "recall_history": "_execute_recall_history",
         "search": "_execute_web_search",
         "web_search": "_execute_web_search",
         "weather": "_execute_weather",
@@ -1593,6 +1594,44 @@ class ToolExecutor:
             "timezone": str(dt.tzinfo),
             "timestamp": int(base_dt.timestamp()),
         }
+
+    async def _execute_recall_history(self, params: Dict) -> Dict:
+        """召回被折叠/驱逐的历史上下文（P1-1③）。
+
+        经 agent.context_orchestrator.context_pool.recall_evicted：
+        内存台账（本进程驱逐）+ 持久台账（SQLite FTS，覆盖重启前历史）双源召回。
+        """
+        try:
+            query = (params.get("query") or "").strip() or None
+            try:
+                limit = int(params.get("limit", 10))
+            except (TypeError, ValueError):
+                limit = 10
+            limit = max(1, min(limit, 50))
+
+            orchestrator = getattr(self._agent, "context_orchestrator", None)
+            pool = getattr(orchestrator, "context_pool", None) if orchestrator else None
+            if pool is None:
+                return {"error": "上下文池不可用，无法召回历史"}
+
+            recalled = pool.recall_evicted(query=query, limit=limit)
+            return {
+                "success": True,
+                "count": len(recalled),
+                "recalled": [
+                    {
+                        "content": getattr(c, "content", ""),
+                        "turn_id": (getattr(c, "metadata", None) or {}).get("turn_id"),
+                        "recalled_from": (getattr(c, "metadata", None) or {}).get(
+                            "recalled_from", "memory_ledger"
+                        ),
+                    }
+                    for c in recalled
+                ],
+            }
+        except Exception as e:
+            logger.warning("recall_history 执行失败: %s", e)
+            return {"error": f"召回失败: {e}"}
 
     async def _execute_memory_search(self, params: Dict) -> Dict:
         """执行记忆搜索"""
