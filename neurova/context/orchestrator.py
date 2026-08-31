@@ -379,17 +379,8 @@ class ContextOrchestrator:
             # ════════════════════════════════════════════════════════
 
             # 归档对话轮次（老轮次可被后续语义召回 → 对话永不丢失）
-            # P1-1①：assign_turn_ids 写入侧打标——user 消息开新轮（turn_N），
-            # 为配对完整性校验（pairing.validate_pairing）提供 pairs_with 锚点
-            for msg, turn_id in assign_turn_ids(conversation_context):
-                self.context_pool.add_context(
-                    ContextInput(
-                        source=ContextSource.CONVERSATION,
-                        content=msg["content"],
-                        priority=60,
-                        metadata={"role": msg.get("role", "user"), "turn_id": turn_id},
-                    )
-                )
+            # P1-1①：写入侧打标 + tool 结果以 TOOL_CALL 源归档（带 pairs_with）
+            self._archive_conversation_to_pool(conversation_context)
 
             # 归档记忆
             for memory in relevant_memories or []:
@@ -696,6 +687,43 @@ class ContextOrchestrator:
         context = self.context_builder.compress_if_needed(context)
 
         return context
+
+    def _archive_conversation_to_pool(self, conversation_context: List[Dict[str, Any]]) -> None:
+        """P1-1① 写入侧归档：对话轮次打标 + tool 结果以 TOOL_CALL 源入池。
+
+        - user 消息开新轮（assign_turn_ids → turn_N）
+        - role=tool 的消息以 TOOL_CALL 源归档并写 pairs_with=当前轮——
+          配对完整性校验（pool.draw 出口 validate_pairing）的锚点；
+          视图选取产生的孤儿会在出口被剔除，池内归档不受影响
+        """
+        # 局部导入（与 build_context 同模式，避免模块级循环依赖）
+        from neurova.context_pool import ContextInput, ContextSource
+
+        for msg, turn_id in assign_turn_ids(conversation_context):
+            role = (msg or {}).get("role", "user")
+            if role == "tool":
+                self.context_pool.add_context(
+                    ContextInput(
+                        source=ContextSource.TOOL_CALL,
+                        content=msg.get("content", ""),
+                        priority=60,
+                        metadata={
+                            "role": "tool",
+                            "turn_id": turn_id,
+                            "pairs_with": turn_id,
+                            "tool_call_id": msg.get("tool_call_id"),
+                        },
+                    )
+                )
+            else:
+                self.context_pool.add_context(
+                    ContextInput(
+                        source=ContextSource.CONVERSATION,
+                        content=msg.get("content", ""),
+                        priority=60,
+                        metadata={"role": role, "turn_id": turn_id},
+                    )
+                )
 
     # ══════════════════════════════════════════════════════════════
     # 系统提示构建
