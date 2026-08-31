@@ -1325,6 +1325,22 @@ class ChatPipeline:
                 # done 事件携带完整回复快照，仅在未累积到 content 时兜底
                 if not reply_parts and event.get("reply"):
                     reply_parts.append(event["reply"])
+                # P2-4d：流式 usage 入账（loop 逐轮聚合，最后 chunk 携带全量）
+                if event.get("usage"):
+                    try:
+                        from neurova.core.usage_accounting import get_usage_accounting
+
+                        _u = event["usage"]
+                        get_usage_accounting().record(
+                            model=getattr(self.config, "llm_config", None) and
+                            (self.config.llm_config.model or "unknown")
+                            or "unknown",
+                            provider="stream",
+                            prompt_tokens=_u.get("prompt_tokens", 0),
+                            completion_tokens=_u.get("completion_tokens", 0),
+                        )
+                    except Exception:
+                        logger.debug("流式 usage 入账跳过", exc_info=True)
             elif etype == "reasoning":
                 # [蜂群流式] reasoning chunk 同样转发
                 if emitter is not None:
