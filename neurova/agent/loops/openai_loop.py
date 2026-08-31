@@ -242,9 +242,7 @@ class OpenAILoop(BaseAgentLoop):
                 self._tools_supported = False
                 # 标记降级事件，供可观测（agent.ui / 监控可读）
                 try:
-                    if not hasattr(self.agent, "_tool_events"):
-                        self.agent._tool_events = []
-                    self.agent._tool_events.append({"type": "tools_degraded", "reason": err_str[:200]})
+                    self.agent.append_tool_event({"type": "tools_degraded", "reason": err_str[:200]})
                 except Exception:
                     pass
                 request_params.pop("tools", None)
@@ -274,9 +272,7 @@ class OpenAILoop(BaseAgentLoop):
                 )
                 self._tools_supported = False
                 try:
-                    if not hasattr(self.agent, "_tool_events"):
-                        self.agent._tool_events = []
-                    self.agent._tool_events.append({"type": "tools_degraded", "reason": err_str[:200]})
+                    self.agent.append_tool_event({"type": "tools_degraded", "reason": err_str[:200]})
                 except Exception:
                     pass
                 request_params.pop("tools", None)
@@ -291,8 +287,7 @@ class OpenAILoop(BaseAgentLoop):
         reasoning_content = getattr(response, "reasoning_content", None)
         if reasoning_content:
             # 将思考过程存储到 agent 上，供 chat() 方法读取
-            if hasattr(self.agent, "_current_reasoning"):
-                self.agent._current_reasoning = reasoning_content
+            self.agent.set_current_reasoning(reasoning_content)
             logger.info("🧠 捕获思考过程: %s 字符", len(reasoning_content))
 
         # 处理 tool_calls（部分 provider 响应无 tool_calls 字段，需容错）
@@ -421,9 +416,10 @@ class OpenAILoop(BaseAgentLoop):
                 finish_reason = chunk.finish_reason
 
         # 保存思考过程到 agent（供 post-chat 持久化/前端展示）
-        if reasoning_parts and hasattr(self.agent, "_current_reasoning"):
-            self.agent._current_reasoning = "".join(reasoning_parts)
-            logger.info("🧠 捕获流式思考过程: %s 字符", len(self.agent._current_reasoning))
+        if reasoning_parts:
+            reasoning_text = "".join(reasoning_parts)
+            self.agent.set_current_reasoning(reasoning_text)
+            logger.info("🧠 捕获流式思考过程: %s 字符", len(reasoning_text))
 
         if pending_tool_calls:
             self._tool_rounds += 1

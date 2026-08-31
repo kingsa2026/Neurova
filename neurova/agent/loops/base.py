@@ -82,10 +82,6 @@ class BaseAgentLoop(ABC):
         """
         new_messages = []
 
-        # 初始化工具消息列表（如果不存在）
-        if not hasattr(self.agent, "_tool_messages_list"):
-            self.agent._tool_messages_list = []
-
         # P1-2 切片 3：声明制并行——同轮全部调用均声明并行安全才 gather，
         # 任一未声明（含未知工具）→ 整轮保守串行（混合批次的排序/共享状态
         # 复杂度不进热路径）。结果按原 tool_call 顺序回装（id 一一对应）。
@@ -106,7 +102,7 @@ class BaseAgentLoop(ABC):
         # 回装（原序）：tool 消息 + call/result 展示记录（保持相邻配对契约）
         for msg, records in outcomes:
             new_messages.append(msg)
-            self.agent._tool_messages_list.extend(records)
+            self.agent.append_tool_messages(records)
 
         return new_messages
 

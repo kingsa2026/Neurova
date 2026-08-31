@@ -1641,6 +1641,86 @@ class Agent:
             return list(self._tool_messages_list)
         return []
 
+    # ══════════════════════════════════════════════════════════════
+    # 轮次级请求状态显式 API（P3-c agent_ref 代理收窄）
+    # chat_pipeline / loops / tool_executor 等深度模块经此读写轮次级
+    # 状态，不再直改 _current_* / _tool_messages_list / _turn_count /
+    # _tool_events 私有属性。存储位置不变：旧 getattr 读取路径保留为
+    # 过渡兼容（渐进收窄，不做一次性翻转）。
+    # ══════════════════════════════════════════════════════════════
+
+    def set_request_identity(
+        self,
+        user_input: str,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """记录本轮请求级身份（工具层三层隔离/蜂群事件广播依赖）。
+
+        user_id 缺省落 "default"（与原 chat_pipeline 写入语义一致：
+        metadata 未携带 JWT user_id 时工具层凭据分桶主体仍可用）。
+        """
+        self._current_user_input = user_input
+        self._current_session_id = session_id
+        self._current_user_id = user_id or "default"
+
+    @property
+    def current_user_input(self) -> Optional[str]:
+        return getattr(self, "_current_user_input", None)
+
+    @property
+    def current_session_id(self) -> Optional[str]:
+        return getattr(self, "_current_session_id", None)
+
+    @property
+    def current_user_id(self) -> Optional[str]:
+        return getattr(self, "_current_user_id", None)
+
+    @property
+    def current_reasoning(self) -> Optional[str]:
+        return getattr(self, "_current_reasoning", None)
+
+    def set_current_reasoning(self, reasoning: Optional[str]) -> None:
+        """记录本轮思考过程（流式聚合 / 非流式单值共用）"""
+        self._current_reasoning = reasoning
+
+    def reset_tool_messages(self) -> None:
+        """清空本轮工具展示记录（轮次开始时调用）"""
+        self._tool_messages_list = []
+
+    def append_tool_messages(self, records: List[Dict[str, Any]]) -> None:
+        """追加工具调用/结果展示记录（原生事件合并 + 并行回装共用入口）"""
+        if getattr(self, "_tool_messages_list", None) is None:
+            self._tool_messages_list = []
+        self._tool_messages_list.extend(records or [])
+
+    def get_tool_messages_snapshot(self) -> List[Dict[str, Any]]:
+        """工具展示记录快照（副本，外部改动不回写）——公有形态"""
+        return self._collect_tool_messages()
+
+    def append_tool_event(self, event: Dict[str, Any]) -> None:
+        """追加工具降级/异常事件（openai_loop 降级路径）；损坏态自愈为列表"""
+        events = getattr(self, "_tool_events", None)
+        if not isinstance(events, list):
+            events = []
+            self._tool_events = events
+        events.append(event)
+
+    def increment_turn_count(self) -> int:
+        """轮次计数 +1，返回新值"""
+        self._turn_count = getattr(self, "_turn_count", 0) + 1
+        return self._turn_count
+
+    async def record_tool_failure_lesson(
+        self, tool_name: str, user_input: str, error_msg: str
+    ) -> None:
+        """公有别名：工具失败 → 肌肉记忆负样本（原私有名保留兼容）"""
+        await self._record_tool_failure_lesson(tool_name, user_input, error_msg)
+
+    def detect_content_loop(self, contents: List[str], threshold: float = 0.8) -> bool:
+        """公有别名：回复内容循环检测（原私有名保留兼容）"""
+        return self._detect_content_loop(contents, threshold)
+
     async def _build_tools_for_llm(self) -> Optional[List[Dict]]:
         """聚合所有工具（委托给 ContextOrchestrator）"""
         return await self.context_orchestrator.build_tools_for_llm()
