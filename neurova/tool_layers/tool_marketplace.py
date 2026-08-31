@@ -196,8 +196,14 @@ class MarketplaceTool:
         return data
 
     def to_published_dict(self) -> typing.Dict[str, typing.Any]:
-        """转换为发布字典（包含评分详情）"""
+        """转换为发布字典（包含评分详情）
+
+        发布契约: rating 字段恒存在（无评论时为 None），保证市场卡片
+        渲染端不需要判空缺键。
+        """
         data = self.to_dict()
+        if "rating" not in data:
+            data["rating"] = None
 
         # 添加评分详情
         if self.rating and self.reviews:

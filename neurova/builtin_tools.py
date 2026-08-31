@@ -248,6 +248,17 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["url"],
         },
     },
+    "browser_read": {
+        "description": "【浏览器读取】通过 Playwright 驱动真实浏览器，渲染 JavaScript 密集型网页（SPA / 客户端渲染 / 反爬轻量页面）并提取为干净 Markdown 文本。与 web_read（Jina Reader）互补：web_read 适合静态页，browser_read 处理 JS 渲染页。注意：首次使用需安装浏览器（playwright install chromium）。返回文本上限 60,000 字符。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "要读取的网页 URL（http/https）"},
+                "timeout": {"type": "number", "description": "超时秒数（默认 30，单次读取建议 ≤60）"},
+            },
+            "required": ["url"],
+        },
+    },
     "bilibili_search": {
         "description": "【B站搜索】搜索 B 站视频，返回标题与链接。用于查找中文视频教程、评测、讲解等内容。",
         "parameters": {

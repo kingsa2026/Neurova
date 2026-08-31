@@ -43,6 +43,7 @@ class MarketSkill:
     rating: float = 0.0
     downloads: int = 0
     updated_at: Optional[str] = None
+    source: str = "local"  # 条目来源: local / aliyun / xfyun
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -107,48 +108,68 @@ class MarketImporter:
         query: str = "",
         category: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        source: Optional[str] = None,
     ) -> List[MarketSkill]:
         """
         搜索市场技能
+
+        数据源: 市场 Catalog(market_store) —— 管理端上架/更新/下架同源,
+        首次访问以默认清单初始化(种子: web-search / code-analysis)。
 
         Args:
             query: 搜索关键词
             category: 分类过滤
             tags: 标签过滤
+            source: 来源过滤 (local / aliyun / xfyun); None 不过滤
 
         Returns:
             匹配的技能列表
         """
-        # 模拟搜索结果（实际实现应调用市场API）
-        logger.info("Searching skills: query='%s', category=%s, tags=%s", query, category, tags)
+        logger.info("Searching skills: query='%s', category=%s, tags=%s, source=%s", query, category, tags, source)
 
-        # 返回示例数据
-        return [
-            MarketSkill(
-                skill_id="web-search",
-                name="Web Search",
-                version="1.2.0",
-                description="搜索互联网获取实时信息",
-                author="Neurova Team",
-                download_url=f"{self._market_url}/web-search/download",
-                category="utility",
-                tags=["search", "web", "information"],
-                rating=4.5,
-                downloads=1000,
-            ),
-            MarketSkill(
-                skill_id="code-analysis",
-                name="Code Analysis",
-                version="2.0.1",
-                description="分析和审查代码质量",
-                author="Neurova Team",
-                download_url=f"{self._market_url}/code-analysis/download",
-                category="development",
-                tags=["code", "analysis", "review"],
-                rating=4.8,
-                downloads=500,
-            ),
-        ]
+        try:
+            from neurova.skills.market_store import get_market_store
+
+            items = get_market_store().list_all()
+        except Exception as e:  # noqa: BLE001 — catalog 不可用时降级空列表
+            logger.warning("market catalog unavailable: %s", e)
+            return []
+
+        q = (query or "").strip().lower()
+        result: List[MarketSkill] = []
+        for item in items:
+            if source:
+                item_source = item.get("source") or "local"
+                if item_source != source:
+                    continue
+            if q and q not in (item.get("name", "") + " " + item.get("description", "")).lower():
+                continue
+            if category and item.get("category") != category:
+                continue
+            if tags:
+                item_tags = set(item.get("tags") or [])
+                if not set(tags).issubset(item_tags):
+                    continue
+            result.append(
+                MarketSkill(
+                    skill_id=item.get("skill_id", ""),
+                    name=item.get("name", item.get("skill_id", "")),
+                    version=item.get("version", "1.0.0"),
+                    description=item.get("description", ""),
+                    author=item.get("author", ""),
+                    download_url=(
+                        item.get("download_url")
+                        or f"{self._market_url}/{item.get('skill_id', '')}/download"
+                    ),
+                    category=item.get("category", "general"),
+                    tags=list(item.get("tags") or []),
+                    rating=float(item.get("rating", 0.0)),
+                    downloads=int(item.get("downloads", 0)),
+                    updated_at=item.get("updated_at"),
+                    source=item.get("source", "local"),
+                )
+            )
+        return result
 
     def import_skill(
         self,
@@ -182,23 +203,44 @@ class MarketImporter:
             )
             self._import_tasks[skill_id] = task
 
-            # 模拟导入过程（实际实现应下载和安装）
             try:
                 task.status = ImportStatus.DOWNLOADING
                 task.progress = 0.3
 
-                # 模拟下载完成
+                # 远端市场源条目: 真实下载 zip 并安全解压到 skills_dir/{skill_id}
+                # （SKILL.md 格式技能包；本地种子条目仍走原模拟链路）
+                downloaded = False
+                entry = self._lookup_catalog_entry(skill_id)
+                download_url = (entry or {}).get("download_url") or ""
+                if download_url:
+                    from neurova.skills import market_sources
+
+                    if market_sources.is_remote_market_url(download_url):
+                        task.status = ImportStatus.INSTALLING
+                        task.progress = 0.7
+                        dest = self._skills_dir / skill_id
+                        if dest.exists():
+                            import shutil
+
+                            shutil.rmtree(dest, ignore_errors=True)
+                        downloaded = market_sources.download_and_extract(skill_id, download_url, dest)
+                        if not downloaded:
+                            task.status = ImportStatus.FAILED
+                            task.error_message = f"download/extract skill from {download_url} failed"
+                            logger.error("Failed to import skill '%s': remote download failed", skill_id)
+                            return task
+
                 task.status = ImportStatus.INSTALLING
                 task.progress = 0.7
 
-                # 模拟安装完成
                 skill_dir = self._skills_dir / skill_id
                 skill_dir.mkdir(parents=True, exist_ok=True)
 
-                # 写入简单的 skill.json
+                # 写入安装元数据（远端技能 zip 内文件已就位，再补 skill.json）
+                installed_version = version or (entry or {}).get("version") or "1.0.0"
                 skill_meta = {
                     "skill_id": skill_id,
-                    "version": version or "1.0.0",
+                    "version": installed_version,
                     "installed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 }
                 (skill_dir / "skill.json").write_text(
@@ -209,7 +251,7 @@ class MarketImporter:
                 task.status = ImportStatus.COMPLETED
                 task.progress = 1.0
                 task.completed_at = datetime.datetime.now(datetime.timezone.utc)
-                self._installed[skill_id] = version or "1.0.0"
+                self._installed[skill_id] = installed_version
 
                 logger.info("Successfully imported skill '%s'", skill_id)
 
@@ -219,6 +261,16 @@ class MarketImporter:
                 logger.error("Failed to import skill '%s': %s", skill_id, e)
 
             return task
+
+    def _lookup_catalog_entry(self, skill_id: str) -> Optional[Dict[str, Any]]:
+        """从市场 catalog 精确查找条目（拿 download_url/version）"""
+        try:
+            from neurova.skills.market_store import get_market_store
+
+            return get_market_store().get(skill_id)
+        except Exception as e:  # noqa: BLE001 — catalog 不可用仍可走旧模拟链路
+            logger.warning("market catalog lookup failed for %s: %s", skill_id, e)
+            return None
 
     def get_import_status(self, skill_id: str) -> Optional[ImportTask]:
         """获取导入状态"""

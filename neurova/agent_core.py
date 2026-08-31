@@ -709,8 +709,27 @@ class SubSystemContainer:
             if a._builtin_tools:
                 tools_dict = {t.name: t for t in a._builtin_tools.list_tools()}
                 a.tool_router.register_builtin_batch(tools_dict)
+            # 注册表绑定工具路由器: 合成/自动技能(ToolSequenceSkill)恢复与
+            # 注册时需路由器执行步骤, 未绑定则"能看见不能调"
+            if a._skill_registry is not None and hasattr(a._skill_registry, "set_tool_router"):
+                a._skill_registry.set_tool_router(a.tool_router)
         except Exception as e:
             logger.warning("ToolRouter 初始化失败: %s", e)
+
+        # 持久化技能恢复: 市场安装(source=marketplace)与 agent 自主分装
+        # (source=synthesized, config.tool_sequence) 持久于 agent 技能 manifest,
+        # 冷启动后按清单恢复注册, 保证重启后 LLM 仍可感知与调用。
+        # 必须在 tool_router 绑定之后执行(合成技能恢复为可执行 ToolSequenceSkill)。
+        try:
+            from neurova.skills.market_registry import restore_market_skills_from_service
+            from neurova.skills.skill_service import SkillService
+
+            if a._skill_registry is not None:
+                restore_market_skills_from_service(
+                    SkillService(agent_id=a.config.agent_id), a._skill_registry
+                )
+        except Exception as _re:
+            logger.warning("Agent %s: 恢复持久化技能失败: %s", a.config.name, _re)
 
         a.model_adapter = None
         try:

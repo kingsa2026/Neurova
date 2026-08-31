@@ -2,6 +2,7 @@
 
 路由选型对齐 Panniantong/Agent-Reach 的零配置路径：
 - 网页阅读: Jina Reader（r.jina.ai 前缀，免费无 Key）
+- 浏览器渲染页读取: browser_read（Playwright headless，JS 页 → Markdown 文本）
 - V2EX: 官方公开 API
 - RSS/Atom: feedparser
 - YouTube 字幕: yt-dlp（仅限 youtube 域名）
@@ -20,9 +21,11 @@ from neurova.web_reach.reach import (
     web_read,
     youtube_transcript,
 )
+from neurova.web_reach.browser_read import browser_read
 
 __all__ = [
     "bilibili_search",
+    "browser_read",
     "social_search",
     "rss_read",
     "v2ex_hot",

@@ -190,4 +190,8 @@ is_concurrency_safe 才 gather，任一未声明整轮保守串行；结果按�
 
 **P2-2 ☑（已提交 81e2e1c）**：retry/circuit 装配——multi_model_client._chat_with_retry（per-provider guard：可重试=RateLimit/Connection/Timeout，Auth 不重试；熔断 5 次开/30s 半开，CircuitBreakerOpen 单独信封）+ provider_manager 两处被遮蔽死方法删除 + secret_store 双份标注（签名不兼容，待统一抽象）。
 **P2-4 首刀 ☑（同 commit）**：core/metrics.py（prometheus_client 指标集单一事实源：tool/llm/circuit counter+histogram+gauges）+ /metrics 端点替换手拼 + tool_executor/llm.chat 全量埋点。
-待做：structlog、per-turn token 对账+成本核算；agent_ref 代理收窄+单例收敛（渐进）；goal/mission 循环模式；MCP OAuth（凭据每次调用时解析）；未跟踪脚本式测试统一处置（execution_engine 47F 陈旧 API）。
+**P2-4c ☑（82c64a7）**：chat_pipeline trace total_tokens 切换——usage_accounting.last_call() 真实值优先，无则回退字符估算；last_call() API 新增。4 用例。**P2-4d ☑（已提交 1eb1316）**：openai_loop 流式 chunk usage 逐轮聚合进 done 事件 + chat_pipeline 消费入账——**usage 对账三路齐备**（非流式 chat/流式 done/后续多模型）。
+**P2-7 测试处置批（☑ 53b3ca9）**：tool_engine_v2 修复全绿（守卫 mock should_block 契约 + 3 类 setUp 补 mock_security_system）；closed_loop 修复（模块路径 + skill_packer.observe 闭环补线 + duration 修复）12/12；monitor_v2 删除（断言的富 API 已移除）。剩余 7F 定性预存（plan_orchestrator 签名漂移 + async 缺 marker）。
+**待做（按计划推进中）**：structlog 迁移（降级可选——logger.py 已结构化）；agent_ref 收窄+单例收敛（渐进）；**P2-6 MCP OAuth ☑（已提交 9a82b38）**：tool_layers/mcp_oauth.py（PKCE + client_credentials 带 60s 提前刷新/force_refresh、resolve_mcp_token per-call 解析——QP 烘焙坑规避）+ call_tool 401→刷新→重试一次。10 用例。授权码流浏览器跳转留调用方。
+待做：**P2-5 循环门控+goal 模式 ☑（f11e162）**：gates.py（StopAction 三态+DoomLoop/Iteration/TokenBudget/Goal 四 gate+Runner 故障隔离）+ openai_loop 双路径接入（懒初始化；INTERRUPT=提示注入消息序列；TERMINATE yield gate_terminate）+ set_goal_gate。21 用例。
+待做（渐进）：agent_ref 收窄+单例收敛；MCP OAuth 授权码浏览器跳转；脚本式测试统一处置。

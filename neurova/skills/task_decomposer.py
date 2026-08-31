@@ -23,16 +23,29 @@ logger = get_logger(__name__)
 class SubTask:
     """
     子任务数据类
+
+    task_id/name 为 v2 别名字段（skill_need_analyzer v2 测试契约）；
+    id/description 为主字段，__post_init__ 双向回填（显式传入者为准）。
     """
 
-    id: str
-    description: str
+    id: str = ""
+    description: str = ""
     task_type: str = "general"
     required_skills: List[str] = field(default_factory=list)
     dependencies: List[str] = field(default_factory=list)
     priority: int = 0
     estimated_time: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
+    task_id: str = ""
+    name: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            self.id = self.task_id
+        elif not self.task_id:
+            self.task_id = self.id
+        if not self.name and self.description:
+            self.name = self.description
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -66,14 +79,35 @@ class SubTask:
 class TaskDecompositionResult:
     """
     任务拆解结果数据类
+
+    original_task/missing_skills/can_execute 为 v2 别名字段；
+    original_request/required_skills 为主字段（__post_init__ 单向回填，
+    required_skills 缺省时从 subtasks 聚合）。
     """
 
-    original_request: str
+    original_request: str = ""
     subtasks: List[SubTask] = field(default_factory=list)
     required_skills: List[str] = field(default_factory=list)
     decomposition_strategy: str = "rules"
     confidence: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
+    original_task: str = ""
+    missing_skills: List[str] = field(default_factory=list)
+    can_execute: Optional[bool] = None
+
+    def __post_init__(self) -> None:
+        if not self.original_request:
+            self.original_request = self.original_task
+        elif not self.original_task:
+            self.original_task = self.original_request
+        # v2: required_skills 缺省时从 subtasks 聚合（去重保序）
+        if not self.required_skills:
+            seen: List[str] = []
+            for st in self.subtasks:
+                for sk in getattr(st, "required_skills", []) or []:
+                    if sk not in seen:
+                        seen.append(sk)
+            self.required_skills = seen
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
