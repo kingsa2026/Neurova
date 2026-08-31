@@ -40,6 +40,8 @@ import os
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
 from neurova.cognitive_layers.memory_layer.bus_event import (
@@ -56,6 +58,13 @@ from neurova.cognitive_layers.memory_layer.models import (
 )
 
 logger = get_logger(__name__)
+
+# 审计修复 (three-tier-isolation-audit.md P0-1): 请求级隔离作用域。
+# 原方案由 API 层直接给共享单例的 neuser_id/user_id 只读 property 赋值:
+# 赋值要么静默失效要么抛 AttributeError, 且并发请求互相覆盖隔离上下文。
+# ContextVar 按请求任务/线程上下文隔离, 值随请求上下文销毁, 并发安全。
+# 作用域只覆盖第 2/3 层 (neuser_id/user_id); agent_id 始终取实例自身的。
+_scope_var: ContextVar = ContextVar("memory_isolation_scope", default=None)
 
 # 全局单例
 _default_manager: Optional["MemoryManager"] = None
@@ -277,6 +286,10 @@ class MemoryManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_agent ON memories(agent_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_category ON memories(category)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_type ON memories(memory_type)")
+            # 审计修复 (P2-11): 三层复合索引, 隔离查询不再全表扫
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mem_3tier ON memories(agent_id, neuser_id, user_id)"
+            )
             conn.commit()
             conn.close()
             logger.debug("Persistence DB initialized: %s", self._persist_db_path)
@@ -300,7 +313,6 @@ class MemoryManager:
                 "ORDER BY created_at DESC",
                 (self._agent_id, self._neuser_id, self._user_id),
             ).fetchall()
-            conn.close()
 
             from datetime import datetime
 
@@ -333,6 +345,20 @@ class MemoryManager:
                     )
                 except Exception as e:
                     logger.debug("Skip invalid memory row %s: %s", row['id'], e)
+
+            # 审计修复 (P1-7): 计数器跨作用域取全局最大 id。
+            # 原实现只按本作用域已加载行回填 _counter, 新作用域实例会重新从
+            # mem_000001 生成 id, 与其他作用域同 id 行 INSERT OR REPLACE 互踩。
+            try:
+                row = conn.execute(
+                    "SELECT MAX(CAST(SUBSTR(id, 5) AS INTEGER)) FROM memories WHERE id LIKE 'mem\\_%' ESCAPE '\\'"
+                ).fetchone()
+                if row and row[0]:
+                    self._counter = max(self._counter, int(row[0]))
+            except Exception as e:
+                logger.debug("Seed counter from persist DB failed: %s", e)
+
+            conn.close()
 
             logger.info("Loaded %s memories from persistence DB", len(self._memories))
         except Exception as e:
@@ -377,12 +403,19 @@ class MemoryManager:
             logger.debug("Persist memory failed: %s", e)
 
     def _delete_persisted_memory(self, memory_id: str):
-        """从 SQLite 删除持久化记忆"""
+        """从 SQLite 删除持久化记忆
+
+        审计修复 (P1-6): 原 DELETE 仅按 id, 知道对方 memory_id 即可越权删除
+        任何作用域的持久化行。现强制附带生效三元组, 跨作用域删不掉。
+        """
         if not getattr(self, "_persist_db_path", None):
             return
         try:
             conn = sqlite3.connect(self._persist_db_path)
-            conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            conn.execute(
+                "DELETE FROM memories WHERE id = ? AND agent_id = ? AND neuser_id = ? AND user_id = ?",
+                (memory_id, self._agent_id, self._eff_neuser_id(), self._eff_user_id()),
+            )
             conn.commit()
             conn.close()
         except Exception as e:
@@ -409,6 +442,45 @@ class MemoryManager:
     @property
     def user_id(self) -> str:
         return self._user_id
+
+    # ────── 请求级隔离作用域 (审计 P0-1 根因修复) ──────
+
+    def set_request_scope(self, neuser_id: Optional[str] = None, user_id: Optional[str] = None) -> None:
+        """为当前请求上下文设置隔离作用域 (neuser_id, user_id)。
+
+        通过 ContextVar 实现: 值绑定在当前请求的任务/线程上下文中,
+        不修改本共享单例的任何状态, 并发请求互不污染。
+        每次调用都完整重设两层 —— 缺省层回到实例默认值, 不继承
+        上下文中的旧值 (每个请求应显式声明完整作用域)。
+        """
+        _scope_var.set((neuser_id or self._neuser_id, user_id or self._user_id))
+
+    @contextmanager
+    def request_scope(self, neuser_id: Optional[str] = None, user_id: Optional[str] = None):
+        """with 块内以指定作用域操作记忆, 退出后恢复原作用域。"""
+        token = _scope_var.set((neuser_id or self._neuser_id, user_id or self._user_id))
+        try:
+            yield self
+        finally:
+            _scope_var.reset(token)
+
+    def _eff_neuser_id(self) -> str:
+        scope = _scope_var.get()
+        return scope[0] if scope else self._neuser_id
+
+    def _eff_user_id(self) -> str:
+        scope = _scope_var.get()
+        return scope[1] if scope else self._user_id
+
+    def _scoped_memories(self) -> List[Any]:
+        """按生效三元组过滤的内存记忆视图 (agent 恒取实例自身)"""
+        ne = self._eff_neuser_id()
+        uid = self._eff_user_id()
+        return [
+            m
+            for m in self._memories.values()
+            if m.agent_id == self._agent_id and m.neuser_id == ne and m.user_id == uid
+        ]
 
     @property
     def emotion_module(self):
@@ -521,8 +593,8 @@ class MemoryManager:
                 metadata=final_metadata,
                 perspective=parsed_perspective,
                 agent_id=self._agent_id,
-                neuser_id=self._neuser_id,
-                user_id=self._user_id,
+                neuser_id=self._eff_neuser_id(),
+                user_id=self._eff_user_id(),
             )
             self._memories[mem_id] = mem
             self._stats["remember_count"] += 1
@@ -608,7 +680,9 @@ class MemoryManager:
         """
         with self._lock:
             self._stats["recall_count"] += 1
-            results = list(self._memories.values())
+            # 审计修复: 所有检索路径统一按生效三元组过滤 (原 use_semantic=False
+            # 的关键词路径完全不过滤, 存在跨用户泄漏)
+            results = self._scoped_memories()
 
             # P-3 修复: 排除已遗忘记忆（forget soft-delete 后不应被 recall 返回）
             results = [m for m in results if m.lifecycle_stage != LifecycleStage.FORGOTTEN]
@@ -653,50 +727,93 @@ class MemoryManager:
 
             return [m.to_dict() for m in results[:limit]]
     
-    def _semantic_recall(self, query: str, memories: list, limit: int) -> list:
-        """语义搜索检索
+    def _get_vector_store(self):
+        """P2-1 真向量召回：按隔离键缓存的 UnifiedVectorStore（faiss/fastembed/ONNX/TF-IDF 链）。
 
-        BUG-2 修复: 原实现 `if not search._keyword_index:` 只首次构建索引,
-        新记忆永不进入；不同 agent_id 互相覆盖。
-        现每次调用都重建索引（传入当前 agent 的 memories），保证：
-        (a) 新增记忆立即可被检索
-        (b) 不同 agent_id 互不干扰（每次用自己的 memories 重建）
-
-        Bug 8 修复: 入口加用户过滤, 防止跨 agent_id/user_id 检索到其他用户记忆。
+        每个隔离三元组独立分库——增量索引只含本作用域记忆，天然满足
+        跨用户隔离（search 只见本 store 内容）。
         """
-        # Bug 8 修复: 只搜索当前用户(agent_id+user_id)的记忆
+        key = (self._agent_id, self._eff_neuser_id(), self._eff_user_id())
+        if not hasattr(self, "_vector_stores"):
+            self._vector_stores = {}
+        store = self._vector_stores.get(key)
+        if store is None:
+            from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
+
+            store = UnifiedVectorStore(backend="auto")
+            self._vector_stores[key] = store
+        return store
+
+    def _semantic_recall(self, query: str, memories: list, limit: int) -> list:
+        """语义搜索检索（P2-1 真向量混合召回）。
+
+        历史：
+        - BUG-2 修复: 关键词索引每次重建（O(n) per query）
+        - Bug 8/审计修复: 入口三元组过滤防跨用户泄漏
+
+        P2-1 语义升级（评测"假向量"清零）：
+        1. 向量路径：UnifiedVectorStore 增量索引（同 id 去重，仅新记忆编码）
+           + 向量相似度搜索——真语义召回，非子串匹配
+        2. 关键词路径：保留原 semantic_search 链路兜底
+        3. RRF 融合两路结果（向量权重 0.7 / 关键词 0.3）
+        4. 向量库不可用 → 整体降级关键词路径（行为与历史一致）
+
+        隔离：每隔离三元组独立分库 + 入口三元组过滤双保险。
+        """
+        # 隔离过滤（保留：双保险的第 2 层）
         memories = [
             m for m in memories
-            if m.agent_id == self._agent_id and m.user_id == self._user_id
+            if m.agent_id == self._agent_id
+            and m.neuser_id == self._eff_neuser_id()
+            and m.user_id == self._eff_user_id()
         ]
+        if not memories:
+            return []
+
+        memory_dicts = [m.to_dict() for m in memories]
+        id_to_memory = {m.id: m for m in memories}
+
+        # 1) 向量路径：增量索引（O(新增)）+ 向量搜索
+        vector_hits: List[tuple] = []  # [(memory_id, rank)]
+        try:
+            store = self._get_vector_store()
+            store.index_memories(memory_dicts, incremental=True)
+            hits = store.search(query, limit=limit * 2)
+            vector_hits = [
+                (rank, h.get("id")) for rank, h in enumerate(hits) if h.get("id")
+            ]
+        except Exception as e:
+            logger.warning("向量召回失败，降级关键词路径: %s", e)
+            vector_hits = []
+
+        # 2) 关键词路径（保留原链路兜底）
+        keyword_hits: List[tuple] = []
         try:
             from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
 
             search = get_semantic_search()
-
-            # 构建记忆字典列表
-            memory_dicts = [m.to_dict() for m in memories]
-
-            # BUG-2 修复: 每次调用都重建索引，确保新记忆进入且 agent_id 隔离
             search.build_keyword_index(memory_dicts)
-
-            # 使用关键词搜索
-            matching_ids = search.search_by_keywords(query, limit=limit * 2)
-
-            # 按匹配顺序排序记忆
-            id_to_memory = {m.id: m for m in memories}
-            sorted_memories = []
-            for mid in matching_ids:
-                if mid in id_to_memory:
-                    sorted_memories.append(id_to_memory[mid])
-
-            return sorted_memories[:limit]
-
+            # search_by_keywords 返回 List[str]（memory id 列表），非元组
+            _kw_ids = search.search_by_keywords(query, limit=limit * 2)
+            keyword_hits = list(enumerate(_kw_ids))  # (rank, memory_id)
         except Exception as e:
-            logger.warning("语义搜索失败，降级到关键词匹配: %s", e)
-            # 降级到简单关键词匹配
+            logger.debug("关键词搜索模块不可用，退化为子串匹配: %s", e)
             query_lower = query.lower()
-            return [m for m in memories if query_lower in m.content.lower()][:limit]
+            keyword_hits = [
+                (m.id, rank)
+                for rank, m in enumerate(memories)
+                if query_lower in m.content.lower()
+            ]
+
+        # 3) RRF 融合（向量 0.7 / 关键词 0.3）
+        fused: Dict[str, float] = {}
+        for rank, mid in vector_hits:
+            fused[mid] = fused.get(mid, 0.0) + 0.7 / (60 + rank + 1)
+        for rank, mid in keyword_hits:
+            fused[mid] = fused.get(mid, 0.0) + 0.3 / (60 + rank + 1)
+
+        ordered_ids = [mid for mid, _ in sorted(fused.items(), key=lambda kv: -kv[1])]
+        return [id_to_memory[mid] for mid in ordered_ids if mid in id_to_memory][:limit]
 
     def get_memory(self, memory_id: str) -> Optional[Dict[str, Any]]:
         """获取单条记忆
@@ -705,6 +822,13 @@ class MemoryManager:
         """
         with self._lock:
             mem = self._memories.get(memory_id)
+            # 审计修复 (P1-6): 与 forget 同规则 —— 不属于当前作用域的记忆视同不存在
+            if mem and (
+                mem.agent_id != self._agent_id
+                or mem.neuser_id != self._eff_neuser_id()
+                or mem.user_id != self._eff_user_id()
+            ):
+                mem = None
             if mem:
                 mem.touch()
                 self._bus.emit(
@@ -758,6 +882,19 @@ class MemoryManager:
         with self._lock:
             if memory_id not in self._memories:
                 return False
+            mem = self._memories[memory_id]
+            # 审计修复 (P1-6): 校验记忆归属 —— 知道对方 memory_id 不能越权删除
+            if (
+                mem.agent_id != self._agent_id
+                or mem.neuser_id != self._eff_neuser_id()
+                or mem.user_id != self._eff_user_id()
+            ):
+                logger.warning(
+                    "拒绝越权删除记忆: id=%s 归属(%s,%s,%s) 请求作用域(%s,%s,%s)",
+                    memory_id, mem.agent_id, mem.neuser_id, mem.user_id,
+                    self._agent_id, self._eff_neuser_id(), self._eff_user_id(),
+                )
+                return False
             if soft:
                 self._memories[memory_id].lifecycle_stage = LifecycleStage.FORGOTTEN
                 self._persist_memory(self._memories[memory_id])  # 更新持久化
@@ -795,7 +932,8 @@ class MemoryManager:
             offset: 偏移量
         """
         with self._lock:
-            mems = list(self._memories.values())
+            # 审计修复: 读路径统一按生效三元组过滤
+            mems = self._scoped_memories()
 
             # 排除已遗忘记忆（forget 后不应被 get_memories 返回）
             mems = [m for m in mems if m.lifecycle_stage != LifecycleStage.FORGOTTEN]
@@ -881,7 +1019,8 @@ class MemoryManager:
         """获取统计信息"""
         with self._lock:
             return {
-                "total_memories": len(self._memories),
+                # 审计修复: 统计按生效作用域计数, 不泄漏其他用户的数据量
+                "total_memories": len(self._scoped_memories()),
                 "remember_count": self._stats["remember_count"],
                 "recall_count": self._stats["recall_count"],
                 "bus_events": self._bus.emit_count,
@@ -1229,9 +1368,11 @@ class MemoryManager:
         BUG-7 修复: 加 self._lock 保护读路径。
         """
         with self._lock:
-            return [m.to_dict() for m in self._memories.values() if m.lifecycle_stage == LifecycleStage.CRYSTALLIZED][
-                :limit
-            ]
+            return [
+                m.to_dict()
+                for m in self._scoped_memories()
+                if m.lifecycle_stage == LifecycleStage.CRYSTALLIZED
+            ][:limit]
 
     def get_hot_memories(
         self, limit: int = 10, min_temperature: Optional[float] = None
