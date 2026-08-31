@@ -329,6 +329,7 @@ class WorkflowExecutor:
         subflow_depth: int = 0,
         subflow_chain: Optional[List[str]] = None,
         subflow_loader: Optional[Callable] = None,
+        debug_session: Optional["DebugSession"] = None,
     ) -> ExecutionInstance:
         """
         执行工作流
@@ -476,6 +477,7 @@ class WorkflowExecutor:
                             workflow.id,
                             execution_id,
                             subflow_harness=subflow_harness,
+                            debug_session=debug_session,
                         )
                         for nid in active
                     ]
@@ -533,6 +535,7 @@ class WorkflowExecutor:
                         execution_id,
                         skipped,
                         subflow_harness=subflow_harness,
+                            debug_session=debug_session,
                     )
                     loop_driven.update(loop_plans.get(loop_id, {}).get("body", set()))
 
@@ -607,8 +610,23 @@ class WorkflowExecutor:
         workflow_id: str,
         execution_id: str,
         subflow_harness: Optional[Dict[str, Any]] = None,
+        debug_session: Optional[DebugSession] = None,
     ) -> None:
         """执行单个节点并记录结果/事件；失败抛异常由调用方聚合处理"""
+        # 修复① — 调试钩子：断点（执行前阻塞）+ step_mode（执行后阻塞）。
+        # debug_session 为 None 时零开销直通。
+        if debug_session is not None:
+            if node_id in debug_session.breakpoints:
+                self._emit(
+                    ExecutionEvent(
+                        type=ExecutionEventType.BREAKPOINT_HIT,
+                        workflow_id=workflow_id,
+                        execution_id=execution_id,
+                        node_id=node_id,
+                    )
+                )
+                await debug_session.wait_resume()
+                debug_session.reset()
         self._emit(
             ExecutionEvent(
                 type=ExecutionEventType.NODE_STARTED,
@@ -694,6 +712,21 @@ class WorkflowExecutor:
                     data={"result": result},
                 )
             )
+
+            # 修复① — step_mode：每节点完成后暂停等待 resume（断点命中除外）
+            if debug_session is not None and debug_session.step_mode:
+                if node_id not in debug_session.breakpoints:
+                    self._emit(
+                        ExecutionEvent(
+                            type=ExecutionEventType.BREAKPOINT_HIT,
+                            workflow_id=workflow_id,
+                            execution_id=execution_id,
+                            node_id=node_id,
+                            data={"step": debug_session.step_mode},
+                        )
+                    )
+                await debug_session.wait_resume()
+                debug_session.reset()
         except Exception as e:
             finished_at = time.time()
             instance.node_results[node_id] = NodeExecutionResult(
@@ -973,6 +1006,7 @@ class WorkflowExecutor:
                         execution_id,
                         global_skipped,
                         subflow_harness=subflow_harness,
+                            debug_session=debug_session,
                     )
                     continue
 
@@ -980,6 +1014,7 @@ class WorkflowExecutor:
                     await self._execute_single_node(
                         body_id, body_node, inputs, resolution_context, instance, workflow_id, execution_id,
                         subflow_harness=subflow_harness,
+                            debug_session=debug_session,
                     )
                     nres = resolution_context.node_results.get(body_id, {})
                     branch = "true"
@@ -996,6 +1031,7 @@ class WorkflowExecutor:
                 await self._execute_single_node(
                     body_id, body_node, inputs, resolution_context, instance, workflow_id, execution_id,
                     subflow_harness=subflow_harness,
+                            debug_session=debug_session,
                 )
 
             iterations_done = iteration

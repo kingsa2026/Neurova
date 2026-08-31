@@ -15,8 +15,10 @@ from neurova.core.logger import get_logger
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
+
+from neurova.api.auth import get_current_user
 
 logger = get_logger(__name__)
 
@@ -527,6 +529,47 @@ async def update_canvas_detail(
     return {"code": 0, "message": "success", "data": record}
 
 
+@router.post("/canvas/from-nl")
+async def canvas_from_nl(
+    request: Request,
+    body: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """自然语言 → 画布快照（R-8 对话式画布设计，不落库，由前端应用）。
+
+    Body: {"prompt": "帮我设计一个……", "agent_id": "default"}
+    Returns: {"code":0, "data": {"nodes":[...], "edges":[...], "name":..., "description":...}}
+    节点类型白名单校验（仅注册表已知类型）；LLM/解析失败返回 failed 结构。
+    隔离：JWT 身份 + 指定 agent 的访问权限校验（owner/admin），越权返回 403。
+    """
+    from neurova.api.endpoints.chat import _user_can_access_agent
+    from neurova.collaboration.neurflow.nl_designer import generate_canvas_from_nl
+
+    prompt = str((body or {}).get("prompt", "") or "")
+    agent_id = str((body or {}).get("agent_id", "") or "default")
+    model = (body or {}).get("model")
+    if not prompt.strip():
+        raise HTTPException(status_code=400, detail="prompt 不能为空")
+
+    # 三层隔离：JWT 用户只能访问自己有权限的 Agent（越权 403）
+    user_id = str(current_user.get("user_id", ""))
+    role = str(current_user.get("role", "user"))
+    if not _user_can_access_agent(user_id, agent_id, role):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Permission denied: you don't have access to Agent '{agent_id}'",
+        )
+
+    result = await generate_canvas_from_nl(prompt, agent_id=agent_id, model=model)
+    if result.get("status") != "success":
+        return {
+            "code": 0,
+            "message": "failed",
+            "data": {"status": "failed", "error": result.get("error", "生成失败")},
+        }
+    return {"code": 0, "message": "success", "data": result["data"]}
+
+
 @router.post("/canvas/{canvas_id}/ops")
 async def apply_canvas_op(request: Request, canvas_id: str, body: Dict[str, Any] = Body(...)):
     """应用单个画布语义 op（agent 工具与前端共用的写入口）
@@ -684,6 +727,8 @@ async def run_canvas_workflow(request: Request, canvas_id: str, body: Dict[str, 
 
     body = body or {}
     session_id = body.get("session_id")
+    debug = bool(body.get("debug"))
+    breakpoints = body.get("breakpoints") or []
 
     try:
         from neurova.collaboration.canvas_bridge import canvas_to_workflow
@@ -698,6 +743,20 @@ async def run_canvas_workflow(request: Request, canvas_id: str, body: Dict[str, 
     executor = get_workflow_executor()
     execution = executor.create_instance(workflow, inputs={}, user_id="canvas")
 
+    # 修复① — 调试运行：debug=true 时创建 DebugSession 并注册到
+    # _DEBUG_SESSIONS（resume/variables 端点按 execution_id 查找），
+    # 断点集合随请求体直达，无需预注册。
+    debug_session = None
+    if debug:
+        try:
+            from neurova.collaboration.neurflow.execution_engine import DebugSession
+            from neurova.api.endpoints.neurflow_api import _DEBUG_SESSIONS
+
+            debug_session = DebugSession(breakpoints=set(breakpoints))
+            _DEBUG_SESSIONS[execution.id] = debug_session
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"调试会话创建失败: {str(e)}")
+
     # 后台执行（立即返回 execution_id 供前端轮询；session_id 透传给蜂群事件）
     import asyncio
 
@@ -709,6 +768,7 @@ async def run_canvas_workflow(request: Request, canvas_id: str, body: Dict[str, 
             agent_id=body.get("agent_id"),
             session_id=session_id,
             instance=execution,
+            debug_session=debug_session,
         )
     )
 
@@ -719,6 +779,7 @@ async def run_canvas_workflow(request: Request, canvas_id: str, body: Dict[str, 
             "runId": execution.id,
             "status": "running",
             "workflow_id": workflow.id,
+            "debug": debug,
         },
     }
 
