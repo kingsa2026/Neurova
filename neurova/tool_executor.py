@@ -1105,6 +1105,24 @@ class ToolExecutor:
             return {"error": "当前 Agent 尚未初始化 SkillRegistry"}
         if not registry.register_skill(manifest):
             return {"error": f"注册技能 {name} 失败"}
+        # 持久化到 agent 技能页 manifest(source=synthesized):
+        # /agent/{id}/skills 可见 + 冷启动 restore 恢复为可执行
+        try:
+            from neurova.skills.market_registry import persist_synthesized_skill
+            from neurova.skills.skill_service import SkillService
+
+            persist_synthesized_skill(
+                skill_id=name,
+                name=name,
+                description=description,
+                version="1.0.0",
+                tool_sequence=tool_sequence,
+                service=SkillService(
+                    agent_id=getattr(self._agent.config, "agent_id", "") or "default"
+                ),
+            )
+        except Exception:
+            logger.warning("create_skill 持久化失败: %s", name, exc_info=True)
         return {
             "success": True,
             "skill_name": name,
@@ -2783,11 +2801,27 @@ class ToolExecutor:
                 logger.exception("工具记忆记录失败: %s", tool_name)
 
         # 更新工具生命周期 (真实方法是 touch, 不是 update_usage)
+        # 更新工具生命周期 (真实方法是 touch, 不是 update_usage)
         if self.tool_lifecycle:
             try:
                 self.tool_lifecycle.touch(tool_name, success)
             except Exception:
                 logger.exception("工具生命周期更新失败: %s", tool_name)
+
+        # P2-1③ 增强①（闭环补线）：skill_packer.observe 观察工具序列——
+        # 历史版本（391420c 时代）在旧路径存在，模块迁移后调用点丢失。
+        # 打包器自身有降噪逻辑，此处只透传本轮工具名序列。
+        skill_packer = self.skill_packer
+        if skill_packer is not None and hasattr(skill_packer, "observe"):
+            try:
+                skill_packer.observe(
+                    tool_sequence=[tool_name],
+                    context="tool_executor",
+                    success=success,
+                    duration=execution_time or 0.0,
+                )
+            except Exception:
+                logger.debug("skill_packer.observe 失败（忽略）", exc_info=True)
 
     def _get_builtin_tool_params(self, tool_name: str) -> Optional[Dict]:
         """
