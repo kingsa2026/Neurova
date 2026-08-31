@@ -1742,6 +1742,9 @@ export default {
     instruction: 'Instrucción',
     instructionPlaceholder: 'Diga al agente qué hacer con esta habilidad',
     runCount: 'Ejecuciones',
+    execAgent: 'Agente ejecutor',
+    execAgentPlaceholder: 'Seleccione el agente que ejecuta la tarea',
+    execAgentHint: 'La tarea la ejecuta el agente seleccionado (por defecto el agente de la página actual, cambiable)',
   },
   rule: {
     title: 'Reglas',

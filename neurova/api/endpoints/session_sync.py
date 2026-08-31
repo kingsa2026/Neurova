@@ -110,7 +110,7 @@ _ws_connections: Dict[str, List[WebSocketConnection]] = {}
 
 
 @router.websocket("/ws/{session_id}")
-async def websocket_sync(websocket: WebSocket, session_id: str, channel_type: str = "web"):
+async def websocket_sync(websocket: WebSocket, session_id: str, channel_type: str = "web", user_id: str = "anonymous"):
     """
     WebSocket 实时同步连接
 
@@ -120,15 +120,19 @@ async def websocket_sync(websocket: WebSocket, session_id: str, channel_type: st
     消息格式：
     - 发送：{"type": "user_message", "content": "..."}
     - 接收：SessionEvent JSON
+
+    session_id 不存在时自动注册（upsert 语义），与 chat_pipeline 的
+    register_or_create_session 设计一致。user_id 用于隔离，默认 "anonymous"。
     """
     await websocket.accept()
 
     manager = get_session_sync_manager()
-    session = manager.get_session(session_id)
-
-    if not session:
-        await websocket.close(code=4004, reason="Session not found")
-        return
+    session = manager.register_or_create_session(
+        session_id=session_id,
+        user_id=user_id,
+        agent_id="default",
+        metadata={"source": "ws_sync"},
+    )
 
     # 创建连接包装器
     ws_conn = WebSocketConnection(websocket, session_id, channel_type)

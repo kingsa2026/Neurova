@@ -1742,6 +1742,9 @@ export default {
     instruction: '指示',
     instructionPlaceholder: 'このスキルで何をするかをエージェントに指示',
     runCount: '実行回数',
+    execAgent: '実行エージェント',
+    execAgentPlaceholder: 'タスクを実行するエージェントを選択',
+    execAgentHint: 'タスクは選択したエージェントが実行します（既定: 現在ページのエージェント、変更可）',
   },
   rule: {
     title: 'ルール',
