@@ -120,7 +120,12 @@ def compact_messages_for_overflow(
     # 4) 中段是否为空（无折叠必要）
     middle_idx = [i for i in range(original_count) if i not in keep_all]
     if not middle_idx:
-        return list(messages), {"folded_count": 0, "original_count": original_count, "compact_count": len(messages)}
+        return list(messages), {
+            "folded_count": 0,
+            "original_count": original_count,
+            "compact_count": len(messages),
+            "folded_messages": [],
+        }
 
     # 5) 装配：system… → 锚点 → 恢复桩 → 近期区
     compact: List[Dict[str, Any]] = []
@@ -142,5 +147,7 @@ def compact_messages_for_overflow(
         "folded_count": len(middle_idx),
         "original_count": original_count,
         "compact_count": len(compact),
+        # 增强①：暴露被折叠消息（溢出恢复路径据此生成摘要回写池）
+        "folded_messages": [messages[i] for i in middle_idx],
     }
     return compact, info

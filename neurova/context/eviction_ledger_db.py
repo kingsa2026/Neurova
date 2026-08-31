@@ -51,12 +51,20 @@ class EvictionLedgerDB:
         db_path: Path | str,
         user_id: str,
         agent_id: str,
+        keep_count: int = 5000,
+        keep_days: int = 30,
     ):
         self.db_path = str(Path(db_path))
         self.user_id = user_id
         self.agent_id = agent_id
+        self.keep_count = keep_count
+        self.keep_days = keep_days
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
+
+    def gc_stale(self) -> int:
+        """按实例保留策略（keep_count/keep_days）清理；供定期触发调用。"""
+        return self.gc(keep_count=self.keep_count, keep_days=self.keep_days)
 
     def _init_schema(self) -> None:
         """建表 + WAL：幂等（IF NOT EXISTS），WAL 提升并发读写。"""
