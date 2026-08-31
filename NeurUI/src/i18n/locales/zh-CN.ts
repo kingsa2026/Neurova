@@ -778,6 +778,7 @@ export default {
     formats: '支持格式',
     serverUrl: '服务器地址',
     authToken: '认证令牌',
+    oauthAuthorize: 'OAuth 授权',
     parameters: '参数 (JSON)',
   },
   channel: {

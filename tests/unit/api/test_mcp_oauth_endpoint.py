@@ -124,6 +124,23 @@ def _idp_opener(code="code-1"):
     return opener
 
 
+class TestServerInfoOAuthGrantExposure:
+    def test_list_exposes_oauth_grant(self, app, isolated_env):
+        client = _authed_client(app)
+        isolated_env([_oauth_server_entry()])
+        resp = client.get(f"{BASE}/mcp-servers")
+        assert resp.status_code == 200
+        entry = next(s for s in resp.json() if s["server_id"] == "remote-ac")
+        assert entry["oauth_grant"] == "authorization_code"
+
+    def test_list_without_oauth_grant_is_none(self, app, isolated_env):
+        client = _authed_client(app)
+        isolated_env([_oauth_server_entry(oauth=None)])
+        resp = client.get(f"{BASE}/mcp-servers")
+        entry = next(s for s in resp.json() if s["server_id"] == "remote-ac")
+        assert entry["oauth_grant"] is None
+
+
 class TestOAuthAuthorizeEndpoint:
     def test_unauthenticated_401(self, app, isolated_env):
         with TestClient(app) as client:  # 不覆盖鉴权依赖

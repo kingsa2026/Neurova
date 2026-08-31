@@ -768,6 +768,7 @@ export default {
     formats: '지원 형식',
     serverUrl: '서버 주소',
     authToken: '인증 토큰',
+    oauthAuthorize: 'OAuth 인증',
     parameters: '매개변수 (JSON)',
   },
   channel: {

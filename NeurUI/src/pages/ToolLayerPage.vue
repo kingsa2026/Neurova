@@ -28,6 +28,14 @@
               </div>
               <template #footer>
                 <div class="server-actions">
+                  <GlassButton
+                    v-if="server.oauth_grant === 'authorization_code'"
+                    variant="ghost" size="sm"
+                    :loading="authorizingId === server.id"
+                    @click="authorizeServer(server.id)"
+                  >
+                    {{ t('tool.oauthAuthorize') }}
+                  </GlassButton>
                   <GlassButton variant="ghost" size="sm" @click="testServer(server.id)">
                     {{ t('common.refresh') }}
                   </GlassButton>
@@ -114,7 +122,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 import {
-  listMCPServers, listTools, registerMCPServer, unregisterMCPServer, testMCPServer, installTool as installToolApi, executeTool as executeToolApi,
+  listMCPServers, listTools, registerMCPServer, unregisterMCPServer, testMCPServer, authorizeMCPOAuth, installTool as installToolApi, executeTool as executeToolApi,
   type MCPServer, type Tool,
 } from '@/api/modules/tool-layers'
 
@@ -197,6 +205,26 @@ const unregisterServer = async (id: string) => {
     await fetchServers()
   } catch {
     message.error(t('common.error'))
+  }
+}
+
+const authorizingId = ref<string | null>(null)
+
+const authorizeServer = async (id: string) => {
+  const key = `oauth-${id}`
+  authorizingId.value = id
+  message.loading({ content: t('tool.oauthAuthorize'), key, duration: 0 })
+  try {
+    await authorizeMCPOAuth(id)
+    message.success({ content: t('common.success'), key })
+  } catch (e: any) {
+    message.error({
+      content: e?.response?.data?.detail || e?.message || t('common.error'),
+      key,
+      duration: 6,
+    })
+  } finally {
+    authorizingId.value = null
   }
 }
 
