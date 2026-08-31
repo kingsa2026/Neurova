@@ -205,6 +205,11 @@ class ToolExecutor:
         self._agent = agent_ref
         self._messages_list: List[Dict] = []
         self._tool_engine = None  # ToolEngine 实例（延迟初始化）
+        # P1-2：工具执行协调器（per-tool 超时 + 超时转后台 + pending hints）
+        # 懒加载（AGENTS.md 纪律）：neurova.agent 包 __init__ 链回本模块，模块级导入会循环
+        from neurova.agent.tool_coordinator import ToolCoordinator
+
+        self.tool_coordinator = ToolCoordinator()
 
     @property
     def tool_engine(self):
@@ -658,73 +663,22 @@ class ToolExecutor:
                 result = precheck
                 return result
 
-            # 遗留③a：工作流 Agent 派发（P2-4.2 闭环——chat 工具调用直达已发布工作流）
-            if tool_name == "run_workflow_agent":
-                tool_source = "workflow_agent"
-                result = await self._execute_workflow_agent_tool(params)
-                success = self._result_is_success(result)
+            # P1-2：per-tool 超时 + 超时转后台（单一咽喉点覆盖全部执行路径——
+            # loop 原生/文本兜底/肌肉记忆自动执行最终都汇到这里）
+            from neurova.agent.tool_coordinator import get_tool_timeout
+
+            core_out = await self.tool_coordinator.run_with_timeout(
+                tool_name,
+                self._execute_tool_core(tool_name, params),
+                timeout=get_tool_timeout(tool_name),
+            )
+            if isinstance(core_out, dict) and core_out.get("status") == "background":
+                result = core_out
+                success = False  # 未完成（后台继续）；结果经 pending hints 注入下一轮
+                tool_source = "background"
                 return result
-
-            # 优先使用 ToolEngine（如果可用）
-            if self.tool_engine:
-                try:
-                    # 获取 user_id 和 agent_id（如果可用）
-                    user_id, agent_id = self._agent_identity()
-
-                    result = await self.tool_engine.execute_with_safeguards(
-                        tool_name=tool_name, parameters=params, user_id=user_id, agent_id=agent_id
-                    )
-                    logger.debug("ToolEngine 执行成功: %s", tool_name)
-                    # P1 修复: 工具函数可能返回 {"error": ...} 而不抛异常，
-                    # 成败必须依据结果内容判定，不能无条件记为成功。
-                    success = self._result_is_success(result)
-                    tool_source = "mcp"
-                    return result
-                except ValueError as e:
-                    # 工具未注册或不可用，回退到其他方式
-                    logger.debug("ToolEngine 工具 %s 未注册或不可用: %s", tool_name, e)
-                except Exception as e:
-                    logger.warning("ToolEngine 执行失败: %s, %s", tool_name, e)
-
-            # 回退到原有逻辑
-            # 内置工具：以 builtin_tools.py 的注册表为单一事实源动态判断，
-            # 避免硬编码白名单与 ToolRouter/实际注册不一致（P2-#13）。
-            if get_builtin_tool_params(tool_name) is not None:
-                tool_source = "builtin"
-                result = await self._execute_builtin_tool(tool_name, params)
-                success = self._result_is_success(result)
-                return result
-
-            # Skill 工具
-            if self._skill_registry and self._skill_registry.has_skill(tool_name):
-                tool_source = "skill_system"
-                # 隔离注入：身份并入 params（服务端赋值优先，防 LLM 参数伪造）
-                _caller_id = str(self._agent_identity()[0] or "")
-                result = await self.execute_skill_tool(
-                    tool_name,
-                    {**(params or {}), "_caller_user_id": _caller_id},
-                    {"user_id": _caller_id},
-                )
-                success = self._result_is_success(result)
-                return result
-
-            # 通过工具路由器
-            if self.tool_router:
-                try:
-                    tool_source = "tool_router"
-                    # P0-3：请求级身份穿透到 MCP 防火墙（多用户共享连接，
-                    # 裁决必须按发起请求的用户）
-                    result = await self.tool_router.route(
-                        tool_name,
-                        params,
-                        user_id=self._agent_identity()[0] or None,
-                    )
-                    success = self._result_is_success(result)
-                    return result
-                except Exception as e:
-                    logger.debug("工具路由器执行失败: %s", e)
-
-            return {"error": f"未知工具: {tool_name}"}
+            result, success, tool_source = core_out
+            return result
         finally:
             # H5: 所有路径统一触发 on_tool_executed（成功/失败均触发）
             elapsed = time.time() - start
@@ -741,6 +695,81 @@ class ToolExecutor:
             except Exception:
                 # 不让钩子异常吞掉工具执行结果，但必须记录堆栈
                 logger.exception("on_tool_executed 钩子失败: %s", tool_name)
+
+    async def _execute_tool_core(self, tool_name: str, params: Dict) -> tuple:
+        """执行核心链（P1-2 抽取）：workflow_agent → ToolEngine → builtin →
+        skill → router → unknown。返回 (result, success, tool_source)。"""
+        success = False
+        result = None
+        tool_source = "unknown"
+
+        # 遗留③a：工作流 Agent 派发（P2-4.2 闭环——chat 工具调用直达已发布工作流）
+        if tool_name == "run_workflow_agent":
+            tool_source = "workflow_agent"
+            result = await self._execute_workflow_agent_tool(params)
+            success = self._result_is_success(result)
+            return result, success, tool_source
+
+        # 优先使用 ToolEngine（如果可用）
+        if self.tool_engine:
+            try:
+                # 获取 user_id 和 agent_id（如果可用）
+                user_id, agent_id = self._agent_identity()
+
+                result = await self.tool_engine.execute_with_safeguards(
+                    tool_name=tool_name, parameters=params, user_id=user_id, agent_id=agent_id
+                )
+                logger.debug("ToolEngine 执行成功: %s", tool_name)
+                # P1 修复: 工具函数可能返回 {"error": ...} 而不抛异常，
+                # 成败必须依据结果内容判定，不能无条件记为成功。
+                success = self._result_is_success(result)
+                tool_source = "mcp"
+                return result, success, tool_source
+            except ValueError as e:
+                # 工具未注册或不可用，回退到其他方式
+                logger.debug("ToolEngine 工具 %s 未注册或不可用: %s", tool_name, e)
+            except Exception as e:
+                logger.warning("ToolEngine 执行失败: %s, %s", tool_name, e)
+
+        # 回退到原有逻辑
+        # 内置工具：以 builtin_tools.py 的注册表为单一事实源动态判断，
+        # 避免硬编码白名单与 ToolRouter/实际注册不一致（P2-#13）。
+        if get_builtin_tool_params(tool_name) is not None:
+            tool_source = "builtin"
+            result = await self._execute_builtin_tool(tool_name, params)
+            success = self._result_is_success(result)
+            return result, success, tool_source
+
+        # Skill 工具
+        if self._skill_registry and self._skill_registry.has_skill(tool_name):
+            tool_source = "skill_system"
+            # 隔离注入：身份并入 params（服务端赋值优先，防 LLM 参数伪造）
+            _caller_id = str(self._agent_identity()[0] or "")
+            result = await self.execute_skill_tool(
+                tool_name,
+                {**(params or {}), "_caller_user_id": _caller_id},
+                {"user_id": _caller_id},
+            )
+            success = self._result_is_success(result)
+            return result, success, tool_source
+
+        # 通过工具路由器
+        if self.tool_router:
+            try:
+                tool_source = "tool_router"
+                # P0-3：请求级身份穿透到 MCP 防火墙（多用户共享连接，
+                # 裁决必须按发起请求的用户）
+                result = await self.tool_router.route(
+                    tool_name,
+                    params,
+                    user_id=self._agent_identity()[0] or None,
+                )
+                success = self._result_is_success(result)
+                return result, success, tool_source
+            except Exception as e:
+                logger.debug("工具路由器执行失败: %s", e)
+
+        return {"error": f"未知工具: {tool_name}"}, success, tool_source
 
     async def _governance_precheck(self, tool_name: str, params: Dict) -> Optional[Dict]:
         """执行前统一治理预检（方案 P0-1.5 集成点，async：SANDBOX 的 Docker
