@@ -450,6 +450,13 @@ class SkillRegistry:
         self._event_handlers: List[Callable] = []
         self._event_callbacks: Dict[str, List[Callable]] = {}
         self._runtime_manager = runtime_manager
+        # 工具路由器注入: 恢复/注册 ToolSequenceSkill(自动技能)时需要
+        # 执行体依靠此路由逐步骤执行工具; 未注入时合成技能"能看见不能调"
+        self.tool_router: Any = None
+
+    def set_tool_router(self, tool_router: Any) -> None:
+        """绑定工具路由器（agent_core.init_tools 在创建 ToolRouter 后调用）"""
+        self.tool_router = tool_router
 
     def register(self, skill: Skill):
         """注册 Skill"""

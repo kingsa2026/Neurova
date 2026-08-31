@@ -122,11 +122,14 @@ class AgentSkillManager:
                 "skills_needed": [],
             }
 
-        # P0-B2 修复：SkillNeedAnalyzer.analyze_and_acquire 是同步函数
-        # 原签名：def analyze_and_acquire(self, request: str) -> List[SkillAcquisitionResult]
-        # 适配为 AgentSkillManager 期望的 dict 格式
+        # analyze_and_acquire v2 返回 dict（含 results: List[SkillAcquisitionResult]）；
+        # 兼容旧 list 返回形态
         try:
-            acquisition_results = self.analyzer.analyze_and_acquire(request=task)
+            acquisition = self.analyzer.analyze_and_acquire(request=task)
+            if isinstance(acquisition, dict):
+                acquisition_results = acquisition.get("results", [])
+            else:
+                acquisition_results = acquisition
             skills_needed = [
                 {
                     "skill_name": r.skill_name,

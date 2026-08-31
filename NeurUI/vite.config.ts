@@ -21,6 +21,9 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:9527',
         changeOrigin: true,
+        // 后端 WebSocket 端点挂在 /api/v1/sync/ws/... 下，
+        // 必须允许 /api 前缀的请求升级为 WebSocket，否则连接被 HTTP 代理吞掉
+        ws: true,
         headers: {
           'Cache-Control': 'no-cache',
           'X-Accel-Buffering': 'no',

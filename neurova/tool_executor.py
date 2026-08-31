@@ -159,6 +159,7 @@ class ToolExecutor:
         "browser_fill_role": "_execute_browser_fill_role",
         "planning": "_execute_planning",
         "youtube_transcript": "_execute_youtube_transcript",
+        "browser_read": "_execute_browser_read",
         "bilibili_search": "_execute_bilibili_search",
         "rss_read": "_execute_rss_read",
         "v2ex_hot": "_execute_v2ex_hot",
@@ -2361,6 +2362,7 @@ class ToolExecutor:
         try:
             from neurova.web_reach import (
                 bilibili_search,
+                browser_read,
                 rss_read,
                 social_search,
                 v2ex_hot,
@@ -2373,6 +2375,12 @@ class ToolExecutor:
                 if not url:
                     return {"error": "缺少 url 参数"}
                 return await _asyncio.to_thread(youtube_transcript, url)
+            if tool_name == "browser_read":
+                url = str(params.get("url") or "").strip()
+                if not url:
+                    return {"error": "缺少 url 参数"}
+                timeout = float(params.get("timeout", 30))
+                return await _asyncio.to_thread(browser_read, url, timeout)
             if tool_name == "bilibili_search":
                 query = str(params.get("query") or "").strip()
                 if not query:
@@ -2402,6 +2410,9 @@ class ToolExecutor:
 
     async def _execute_youtube_transcript(self, params: Dict) -> Dict:
         return await self._web_reach_call("youtube_transcript", params)
+
+    async def _execute_browser_read(self, params: Dict) -> Dict:
+        return await self._web_reach_call("browser_read", params)
 
     async def _execute_bilibili_search(self, params: Dict) -> Dict:
         return await self._web_reach_call("bilibili_search", params)

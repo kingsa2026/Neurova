@@ -26,6 +26,13 @@ _BUILTIN_SKILL_FIELDS: typing.Dict[str, typing.List[typing.Tuple[str, str, bool,
         ("max_results", "integer", False, "返回结果数上限"),
         ("backend", "string", False, "搜索后端（默认 bing，可选 duckduckgo 或已注册的自定义后端名）"),
     ],
+    # 市场技能别名（id 带连字符，与 web_search 同参数字段）——市场安装的
+    # web-search 注册名与原内置名不同，缺此条目时模型看不到参数 schema
+    "web-search": [
+        ("query", "string", True, "检索词"),
+        ("max_results", "integer", False, "返回结果数上限"),
+        ("backend", "string", False, "搜索后端（默认 bing，可选 duckduckgo 或已注册的自定义后端名）"),
+    ],
     "file_operation": [
         ("operation", "string", True, "文件操作类型：read/write/list/delete"),
         ("file_path", "string", True, "目标文件路径"),
