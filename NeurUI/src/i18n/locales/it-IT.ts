@@ -768,6 +768,7 @@ export default {
     formats: 'Formati supportati',
     serverUrl: 'URL server',
     authToken: 'Token di autenticazione',
+    oauthAuthorize: 'Autorizza OAuth',
     parameters: 'Parametri (JSON)',
   },
   channel: {

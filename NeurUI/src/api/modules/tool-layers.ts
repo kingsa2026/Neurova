@@ -11,6 +11,7 @@ export interface MCPServer {
   status: string
   tool_count?: number
   auth_token?: string
+  oauth_grant?: string | null
 }
 
 export interface Tool {
@@ -46,6 +47,16 @@ export function registerMCPServer(data: { name: string; url: string; auth_token?
 /** Unregister an MCP server. */
 export function unregisterMCPServer(id: string) {
   return api.delete<null>(`${BASE}/mcp-servers/${id}`)
+}
+
+/** Run the OAuth2 authorization-code flow for an MCP server (opens the browser, waits for loopback callback). */
+export function authorizeMCPOAuth(id: string) {
+  // 授权等待用户在浏览器完成操作，可能远超全局 apiTimeout（300s）
+  return api.post<{ status: string; server_id: string; token_hint?: string }>(
+    `${BASE}/mcp-servers/${id}/oauth/authorize`,
+    {},
+    { timeout: 370000 },
+  )
 }
 
 /** Test an MCP server connection. */
