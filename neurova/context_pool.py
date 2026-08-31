@@ -118,6 +118,7 @@ class ContextPool:
         # P1-1③：驱逐台账持久层 + 摘要压缩器（可选注入；None=保持内存行为）
         self._ledger_db = ledger_db
         self._summarizer = summarizer
+        self._ledger_gc_counter = 0
 
     @property
     def isolation_key(self) -> str:
@@ -269,15 +270,13 @@ class ContextPool:
                     source=getattr(item.source, "value", None),
                     metadata=getattr(item, "metadata", None),
                 )
+                # P1-1③ 增强②：GC piggyback（每 _LEDGER_GC_EVERY 次驱逐触发，
+                # 按保留天数清理过期台账；异常不破坏归档主流程）
+                self._ledger_gc_counter += 1
+                if self._ledger_gc_counter % _LEDGER_GC_EVERY == 0:
+                    self._ledger_db.gc_stale()
             except Exception:
                 logger.warning("驱逐台账持久化失败（不影响内存归档）", exc_info=True)
-            # 增强②：节流触发台账 GC（异常不破坏归档主流程）
-            self._ledger_gc_counter += 1
-            if self._ledger_gc_counter % _LEDGER_GC_EVERY == 0:
-                try:
-                    self._ledger_db.gc_stale()
-                except Exception:
-                    logger.warning("台账 GC 触发失败（忽略）", exc_info=True)
 
     def recall_evicted(self, query: str = None, limit: int = 20) -> List:
         """
