@@ -746,7 +746,25 @@ class ChatPipeline:
         # 合成工具无文件路径，用哨兵路径标记
         sentinel_path = Path("<synthesized>") / manifest.id
         if skill_registry.register_skill(manifest, sentinel_path):
-            logger.info("已注册合成工具到 skill_registry: %s", manifest.id)
+            logger.info(
+                "已注册合成工具到 skill_registry: %s", manifest.id
+            )
+            # 持久化到 agent 技能页 manifest(source=synthesized):
+            # /agent/{id}/skills 可见 + 冷启动 restore 恢复为可执行
+            try:
+                from neurova.skills.market_registry import persist_synthesized_skill
+                from neurova.skills.skill_service import SkillService
+
+                persist_synthesized_skill(
+                    skill_id=manifest.id,
+                    name=manifest.name,
+                    description=manifest.description,
+                    version="1.0.0",
+                    tool_sequence=synthesized_tool.tool_sequence,
+                    service=SkillService(agent_id=self.config.agent_id),
+                )
+            except Exception:
+                logger.warning("合成技能持久化失败: %s", manifest.id, exc_info=True)
         else:
             logger.debug("合成工具 %s 已存在，跳过注册", manifest.id)
 
@@ -1548,7 +1566,19 @@ class ChatPipeline:
         # 推理链记录
         if ctx.trace_id and self.trace_manager:
             try:
-                total_tokens = len(ctx.user_input) + len(ctx.reply) if ctx.reply else len(ctx.user_input)
+                # P2 剩余清单：优先真实 usage（usage_accounting.last_call，multi_model_client
+                # 已入账）；无真实值时回退字符长度估算（向后兼容）
+                total_tokens = None
+                try:
+                    from neurova.core.usage_accounting import get_usage_accounting
+
+                    last = get_usage_accounting().last_call()
+                    if last:
+                        total_tokens = last["total_tokens"]
+                except Exception:
+                    pass
+                if total_tokens is None:
+                    total_tokens = len(ctx.user_input) + len(ctx.reply) if ctx.reply else len(ctx.user_input)
                 self.trace_manager.finish_trace(ctx.trace_id, ctx.reply or "", total_tokens=total_tokens)
             except Exception as e:
                 logger.warning("推理链记录失败: %s", e)

@@ -36,6 +36,7 @@ class TokenUsageAccounting:
         # {model: {"calls", "prompt_tokens", "completion_tokens", "total_tokens",
         #          "by_provider": {provider: {...}}}}
         self._by_model: Dict[str, Dict[str, Any]] = {}
+        self._last_call: Optional[Dict[str, Any]] = None
 
     def record(
         self,
@@ -74,6 +75,20 @@ class TokenUsageAccounting:
             p_entry["prompt_tokens"] += prompt_tokens
             p_entry["completion_tokens"] += completion_tokens
             p_entry["total_tokens"] += total
+
+            self._last_call = {
+                "model": model,
+                "provider": provider,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total,
+            }
+
+    def last_call(self) -> Optional[Dict[str, Any]]:
+        """最近一次调用的真实 usage（trace 对账用）；无记录返回 None。"""
+        with self._lock:
+            last = getattr(self, "_last_call", None)
+        return dict(last) if last else None
 
     def snapshot(self) -> Dict[str, Any]:
         """当前累计快照：by_model（含 per-provider 拆分）+ total + total_cost。"""
