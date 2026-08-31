@@ -657,6 +657,13 @@ class ToolExecutor:
                 result = precheck
                 return result
 
+            # 遗留③a：工作流 Agent 派发（P2-4.2 闭环——chat 工具调用直达已发布工作流）
+            if tool_name == "run_workflow_agent":
+                tool_source = "workflow_agent"
+                result = await self._execute_workflow_agent_tool(params)
+                success = self._result_is_success(result)
+                return result
+
             # 优先使用 ToolEngine（如果可用）
             if self.tool_engine:
                 try:
@@ -906,6 +913,32 @@ class ToolExecutor:
             )
         except Exception:
             logger.debug("治理审计日志写入失败: %s", tool_name, exc_info=True)
+
+    async def _execute_workflow_agent_tool(self, params: Dict) -> Dict:
+        """遗留③a：run_workflow_agent 工具实现（P2-4.2 chat→工作流闭环）。
+
+        deps 经 neurflow_api 装配（set_workflow_agent_deps），本方法只做
+        参数校验 + 信封转换。桥接失败信封（AGENT_NOT_FOUND 等）转为
+        {"error": ...} 以兼容四级回退链的成败判定约定。
+        """
+        agent_id = (params or {}).get("agent_id")
+        if not agent_id:
+            return {"error": "run_workflow_agent requires params.agent_id"}
+
+        from neurova.agent.workflow_agent import execute_workflow_agent
+
+        inputs = (params or {}).get("inputs")
+        if not isinstance(inputs, dict):
+            inputs = {"message": (params or {}).get("message", "")}
+
+        outcome = await execute_workflow_agent(agent_id, inputs)
+        if outcome.get("success"):
+            return {
+                "success": True,
+                "result": outcome.get("outputs"),
+                "execution_id": outcome.get("execution_id"),
+            }
+        return {"error": outcome.get("error") or "WORKFLOW_AGENT_EXECUTION_FAILED"}
 
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
         """执行内置工具(分派表驱动,见 _builtin_dispatch 注释)"""

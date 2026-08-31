@@ -50,6 +50,7 @@ onMounted(() => {
   appStore.init()
   document.documentElement.setAttribute('data-theme', appStore.theme)
   agentStore.loadAgents()
+  agentStore.loadWorkflowAgents() // 遗留③b：合并 Neurflow 工作流 Agent（静默失败）
   if (authStore.isAuthenticated) {
     authStore.fetchCurrentUser()
   }

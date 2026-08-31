@@ -620,6 +620,37 @@ class WorkflowExecutor:
         started_at = time.time()
         try:
             resolved_config = self._variable_resolver.resolve_config(node.config, resolution_context)
+
+            # 遗留② — Mock 短路：节点级 mock_output 优先，config.mock_output 兜底
+            # （is not None 判定——0/""/False/{} 均为合法 mock 值；命中即不调真实 executor）
+            mock_value = getattr(node, "mock_output", None)
+            if mock_value is None and isinstance(resolved_config, dict):
+                mock_value = resolved_config.get("mock_output")
+            if mock_value is not None:
+                finished_at = time.time()
+                instance.node_results[node_id] = NodeExecutionResult(
+                    node_id=node_id,
+                    status="success",
+                    output=mock_value,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    duration=finished_at - started_at,
+                )
+                resolution_context.node_results[node_id] = {
+                    "status": "success",
+                    "output": mock_value,
+                }
+                self._emit(
+                    ExecutionEvent(
+                        type=ExecutionEventType.NODE_COMPLETED,
+                        workflow_id=workflow_id,
+                        execution_id=execution_id,
+                        node_id=node_id,
+                        data={"result": {"status": "success", "output": mock_value}, "mocked": True},
+                    )
+                )
+                return
+
             result = await self._execute_node(
                 node,
                 resolved_config,

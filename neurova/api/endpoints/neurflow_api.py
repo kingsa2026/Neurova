@@ -1350,6 +1350,41 @@ def _webhook_ingress_deps() -> Dict[str, Any]:
 webhook_ingress.set_deps_provider(_webhook_ingress_deps)
 
 
+def get_workflow_agent_deps() -> Dict[str, Any]:
+    """遗留③a：workflow_agent 桥接 deps 工厂（tool_executor 首次调用时装配）。
+
+    load_agent / load_published_workflow 走 Neurflow storage；
+    run_workflow 走 WorkflowExecutor（单租户默认——chat 请求级用户隔离
+    在 memory 层 ContextVar，工作流执行链路后续按需透传）。
+    """
+    from neurova.collaboration.neurflow.models import WorkflowStatus
+
+    def load_agent(aid: str):
+        return _get_storage().get_agent(aid)
+
+    def load_published_workflow(ref: str):
+        storage = _get_storage()
+        wf = storage.get_workflow(ref)
+        if wf is not None and wf.status == WorkflowStatus.PUBLISHED:
+            return wf
+        return None
+
+    async def run_workflow(workflow, inputs):
+        return await get_workflow_executor().execute(workflow=workflow, inputs=inputs)
+
+    return {
+        "load_agent": load_agent,
+        "load_published_workflow": load_published_workflow,
+        "run_workflow": run_workflow,
+    }
+
+
+# 遗留③a：模块导入时一次性装配（tool_executor 的 run_workflow_agent 分支消费）
+from neurova.agent.workflow_agent import set_workflow_agent_deps as _set_wa_deps  # noqa: E402
+
+_set_wa_deps(get_workflow_agent_deps)
+
+
 # P0-7/N4：入站 body 上限（1MB）——限流在验签后，但超大 body 会先于一切
 # 消耗内存与带宽，必须在读 body 前按 Content-Length 硬拒
 _WEBHOOK_MAX_BODY_BYTES = 1024 * 1024
