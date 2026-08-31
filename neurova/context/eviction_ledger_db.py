@@ -57,6 +57,9 @@ class EvictionLedgerDB:
         self.db_path = str(Path(db_path))
         self.user_id = user_id
         self.agent_id = agent_id
+        # P1-1③ 增强②：实例级保留参数（gc_stale 语义化封装用）
+        self.keep_count = 5000
+        self.keep_days = 30
         self.keep_count = keep_count
         self.keep_days = keep_days
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -187,6 +190,10 @@ class EvictionLedgerDB:
             {"user_id": self.user_id, "agent_id": self.agent_id},
         ).fetchone()
         return int(row["c"]) if row else 0
+
+    def gc_stale(self) -> int:
+        """语义化 GC：按实例保留参数（keep_count/keep_days，默认 5000 条/30 天）。"""
+        return self.gc(keep_count=self.keep_count, keep_days=self.keep_days)
 
     def gc(self, keep_count: Optional[int] = None, keep_days: Optional[int] = None) -> int:
         """按保留条数/天数清理本用户的过期台账；返回清理数量。"""
