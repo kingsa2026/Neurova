@@ -2,7 +2,7 @@
 
 <div align="center">
   <img src="NEUROVA-ICO.png" alt="Neurova Logo" width="120" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
-  <h1 style="margin-top: 16px;"> 有温度的智能体 </h1>
+  <h1 style="margin-top: 16px;">有温度的智能体</h1>
   <p><i>每一个 Agent 都是一颗善良的星星，而你就是守星人</i></p>
 </div>
 
@@ -453,7 +453,7 @@ neurova agent show <agent_id>  # 查看详情
 neurova agent delete <agent_id>
 ```
 
-**认知调试**（v4.0 新增）：
+**认知调试**（v1.0.0-beta1 新增）：
 ```bash
 neurova memory   # 记忆管理（搜索、添加、删除、统计）
 neurova emotion  # 情感调试（查看状态、设置情感、测试传导）
@@ -1399,7 +1399,7 @@ class RSIDeploymentController:
   - [工作编排](#工作编排--复杂任务的自动化指挥)
 - [安全守护](#安全守护)
 - [多平台连接](#多平台连接)
-- [v4.0 升级功能（历史）](#v40-升级功能历史)
+- [v1.0.0 bata1 升级功能（历史）](#v100-bata1-升级功能历史)
 - [技术架构](#技术架构)
 - [快速开始](#快速开始)
 - [技术栈](#技术栈)
