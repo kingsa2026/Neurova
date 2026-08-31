@@ -115,13 +115,30 @@
           class="canvas-graph"
           :style="graphStyle"
           @mousedown.self="onCanvasBlankMousedown"
+          @mousedown="onCanvasMarqueeStart($event)"
+          @mousemove="onCanvasMarqueeMove($event)"
+          @mouseup="onCanvasMarqueeEnd($event)"
+          @mouseleave="onCanvasMarqueeEnd($event)"
         >
+          <!-- 框选矩形（遗留 F） -->
+          <div
+            v-if="marquee.active"
+            class="canvas-marquee"
+            :style="{
+              left: marquee.rect.x + 'px',
+              top: marquee.rect.y + 'px',
+              width: marquee.rect.w + 'px',
+              height: marquee.rect.h + 'px',
+            }"
+          />
+
           <div
             v-for="node in canvasNodes"
             :key="node.id"
             class="graph-node"
             :class="{
               selected: selectedNodeId === node.id,
+              'multi-selected': multiSelectedIds.has(node.id),
               'run-success': runStatus[node.id]?.status === 'success',
               'run-failed': runStatus[node.id]?.status === 'failed',
               'run-skipped': runStatus[node.id]?.status === 'skipped',
@@ -129,7 +146,7 @@
             }"
             :style="{ left: node.position.x + 'px', top: node.position.y + 'px' }"
             :data-node-id="node.id"
-            @mousedown="startDrag($event, node)"
+            @mousedown="onNodeMousedown($event, node)"
             @click.stop="selectNode(node.id)"
           >
             <div class="graph-node-header">
@@ -204,6 +221,14 @@
           <p v-if="canvasNodes.length > 0" class="connect-hint">
             {{ t('canvas.canvasHint') }}
           </p>
+
+          <!-- 小地图（遗留 F） -->
+          <MiniMap
+            :nodes="canvasNodes"
+            :viewport="viewport"
+            :container="graphContainerSize"
+            @pan-to="handleMiniPan"
+          />
         </div>
       </main>
 
@@ -468,6 +493,8 @@ import DebugPanel from './DebugPanel.vue'
 import MockEditor from './MockEditor.vue'
 import { createDebugController, type DebugController } from './DebugPanel'
 import { duplicateNodesForPaste } from './canvasClipboard'
+import { normalizeRect, nodesInRect } from './canvasSelection'
+import MiniMap from './MiniMap.vue'
 import { useReachableModels, buildModelOptions } from '@/composables/useReachableModels'
 import {
   runCanvas as runCanvasApi,
@@ -705,6 +732,71 @@ async function handleMockClear() {
   } catch {
     /* 后端清理失败不阻塞本地状态 */
   }
+}
+
+// ── 遗留 F — 框选多选 + 小地图 ──
+const multiSelectedIds = reactive(new Set<string>())
+const marquee = reactive({ active: false, startX: 0, startY: 0, rect: { x: 0, y: 0, w: 0, h: 0 } })
+const graphContainerSize = ref({ w: 1200, h: 800 })
+
+function onCanvasMarqueeStart(e: MouseEvent) {
+  // 仅空白区左键触发（self 由 @mousedown.self 已过滤节点；此处再保险）
+  if (e.target !== e.currentTarget) return
+  marquee.active = true
+  marquee.startX = e.clientX
+  marquee.startY = e.clientY
+  marquee.rect = { x: e.clientX, y: e.clientY, w: 0, h: 0 }
+  multiSelectedIds.clear()
+}
+
+function onCanvasMarqueeMove(e: MouseEvent) {
+  if (!marquee.active) return
+  marquee.rect = normalizeRect(marquee.startX, marquee.startY, e.clientX, e.clientY)
+}
+
+function onCanvasMarqueeEnd(e: MouseEvent) {
+  if (!marquee.active) return
+  marquee.active = false
+  const rect = normalizeRect(marquee.startX, marquee.startY, e.clientX, e.clientY)
+  if (rect.w < 4 && rect.h < 4) return // 点击而非框选
+  // 屏幕矩形 → 画布矩形（screenToCanvas 换算两个角）
+  const tl = screenToCanvas(rect.x, rect.y)
+  const br = screenToCanvas(rect.x + rect.w, rect.y + rect.h)
+  const hit = nodesInRect(canvasNodes.value, {
+    x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y,
+  })
+  multiSelectedIds.clear()
+  for (const id of hit) multiSelectedIds.add(id)
+  if (multiSelectedIds.size > 0) {
+    selectedNodeId.value = null
+    selectedEdgeId.value = null
+  }
+}
+
+/** Shift+click 节点：加入/移出多选（节点 @mousedown 处调用） */
+function onNodeMousedown(e: MouseEvent, node: CanvasNodeSnapshot) {
+  if (e.shiftKey) {
+    e.stopPropagation()
+    toggleMultiSelect(node.id)
+    return
+  }
+  startDrag(e, node)
+}
+
+/** Shift+click 节点：加入/移出多选（节点 @mousedown 处调用） */
+function toggleMultiSelect(nodeId: string) {
+  if (multiSelectedIds.has(nodeId)) multiSelectedIds.delete(nodeId)
+  else multiSelectedIds.add(nodeId)
+}
+
+function deleteMultiSelected() {
+  for (const id of Array.from(multiSelectedIds)) removeNode(id)
+  multiSelectedIds.clear()
+}
+
+function handleMiniPan(pan: { panX: number; panY: number }) {
+  viewport.panX = pan.panX
+  viewport.panY = pan.panY
 }
 
 function handleDebugResume(payload: Record<string, unknown>) {
@@ -1723,7 +1815,9 @@ function onKeyDown(e: KeyboardEvent) {
   }
 
   if (e.key === 'Delete' || e.key === 'Backspace') {
-    if (selectedEdgeId.value) {
+    if (multiSelectedIds.size > 0) {
+      deleteMultiSelected()
+    } else if (selectedEdgeId.value) {
       removeEdge(selectedEdgeId.value)
     } else if (selectedNodeId.value) {
       removeNode(selectedNodeId.value)
@@ -1739,8 +1833,8 @@ let clipboardEdges: CanvasEdgeSnapshot[] = []
 let clipboardAnchor: { x: number; y: number } | null = null
 
 function copySelectedNodes() {
-  const ids = multiSelectedNodeIds.value.length
-    ? multiSelectedNodeIds.value
+  const ids = multiSelectedIds.size
+    ? Array.from(multiSelectedIds)
     : selectedNodeId.value
       ? [selectedNodeId.value]
       : []
@@ -2135,8 +2229,14 @@ onMounted(async () => {
   document.addEventListener('mousedown', onDocMousedownClose)
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('webkitfullscreenchange', onFullscreenChange)
+  // 遗留 F：小地图容器尺寸（测量画布实际渲染区）
+  const graphEl = document.querySelector('.canvas-graph') as HTMLElement | null
+  if (graphEl) {
+    graphContainerSize.value = { w: graphEl.clientWidth, h: graphEl.clientHeight }
+  }
   // 蜂群：agent 选择器数据 + 动态节点库
   agentStore.loadAgents().catch(() => undefined)
+  agentStore.loadWorkflowAgents().catch(() => undefined)
   loadDynamicNodes()
   await loadFromRoute(route.params.id as string | undefined)
 })
@@ -2223,6 +2323,8 @@ onBeforeUnmount(() => {
 
 /* 画布节点 */
 .graph-node { position: absolute; min-width: 140px; background: rgba(20, 25, 40, 0.95); border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.1)); border-radius: 10px; cursor: move; user-select: none; transition: border-color 0.15s; }
+.graph-node.multi-selected { border-color: var(--nr-primary-light, #818cf8); box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.35); }
+.canvas-marquee { position: absolute; border: 1px dashed var(--nr-primary-light, #818cf8); background: rgba(129, 140, 248, 0.08); pointer-events: none; z-index: 40; }
 .graph-node:hover { border-color: rgba(99, 102, 241, 0.3); }
 .graph-node.selected { border-color: var(--nr-primary-light, #818cf8); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
 /* 执行状态着色（蜂群编排可视化） */

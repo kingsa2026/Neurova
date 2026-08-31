@@ -1193,6 +1193,27 @@ class ChatPipeline:
         except ImportError:
             logger.debug("EventType 导入失败，跳过事件广播")
 
+        # P1-2：上一轮转后台的工具完成后，把结果提示注入本轮 LLM 上下文
+        # （QP offload 语义的闭环：超时转后台 → 完成落 pending hints → 此处消费）
+        try:
+            _coordinator = getattr(self.tool_executor, "tool_coordinator", None)
+            if _coordinator:
+                for _hint in _coordinator.pop_pending_hints():
+                    _outcome = (
+                        str(_hint.get("result"))[:800]
+                        if _hint.get("success")
+                        else f"失败: {_hint.get('error')}"
+                    )
+                    ctx.context.append({
+                        "role": "system",
+                        "content": (
+                            f"[后台工具完成] {_hint.get('tool_name')}"
+                            f"（task_id={_hint.get('task_id')}）：{_outcome}"
+                        ),
+                    })
+        except Exception:
+            logger.debug("后台工具提示注入跳过", exc_info=True)
+
         if self.loop:
             ctx.reply = await self._call_agent_loop(ctx, tools_for_llm)
         else:
