@@ -1,212 +1,232 @@
 # -*- coding: utf-8 -*-
 """
-Integration tests for Execution Engine modules.
+Integration tests for Execution Engine modules（对齐现行 API）
 
-Test cases:
-- Test PlanOrchestrator + CognitionOrchestrator integration
-- Test ToolEngine + WorkflowEngine integration
-- Test MCPManager + ToolEngine integration
-- Test complete execution flow
+历史说明：原版按臆想契约编写——await 同步 create_plan、WorkflowEngine(tool_engine=)
+构造、reset_mcp_manager 引用已删除模块、plan.plan_id/plan.context 字段——
+统一修复为现行真实契约：
+- create_plan(name, description, steps, priority, metadata) 为同步 API
+- WorkflowEngine(config) + register_action + execute(workflow_id)
+- 共享状态经 execute_plan(plan_id, context) 流入步骤执行器
 """
 
-import sys
-import os
-
-# Add the project root to the Python path
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
+import asyncio
 
 import pytest
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from neurova.execution_engine.plan_orchestrator import (
-    PlanOrchestrator,
-    ExecutionPlan,
-    ExecutionStep,
+    PlanStatus,
+    StepStatus,
     get_plan_orchestrator,
     reset_plan_orchestrator,
 )
 from neurova.execution_engine.tool_engine import ToolEngine
-from neurova.execution_engine.workflow_engine import WorkflowEngine
+from neurova.execution_engine.workflow_engine import (
+    NodeType,
+    WorkflowDefinition,
+    WorkflowEngine,
+    WorkflowNode,
+)
+
+
 class TestPlanOrchestratorCognitionIntegration:
-    """Test PlanOrchestrator integration with CognitionOrchestrator."""
-    
+    """PlanOrchestrator 认知上下文集成"""
+
     @pytest.fixture(autouse=True)
     def setup_and_teardown(self):
         """Reset singleton before and after each test."""
         reset_plan_orchestrator()
         yield
         reset_plan_orchestrator()
-    
-    @pytest.mark.asyncio
-    async def test_create_plan_for_cognition(self):
-        """Test creating plan from cognition context."""
+
+    def test_create_plan_for_cognition(self):
+        """认知上下文经 metadata 携带，步骤显式传入（旧契约 task=/context=/自动生步 已废弃）"""
         plan_orch = get_plan_orchestrator()
-        
-        # Simulate cognition context
+
         cognition_context = {
             "user_input": "开发一个用户登录功能",
             "attention_level": "high",
             "memory_context": {"previous_tasks": ["task1", "task2"]},
         }
-        
-        plan = await plan_orch.create_plan(
-            task=cognition_context["user_input"],
-            context=cognition_context,
+
+        plan = plan_orch.create_plan(
+            name=cognition_context["user_input"],
+            metadata=cognition_context,
+            steps=[
+                {"name": "解析需求", "step_type": "task"},
+                {"name": "生成方案", "step_type": "task"},
+            ],
         )
-        
-        assert plan is not None
-        assert plan.context == cognition_context
-        assert len(plan.steps) > 0
-    
-    @pytest.mark.asyncio
-    async def test_plan_includes_cognitive_state(self):
-        """Test that plan includes cognitive state information."""
+
+        assert plan.name == cognition_context["user_input"]
+        assert plan.metadata == cognition_context
+        assert [s.name for s in plan.steps] == ["解析需求", "生成方案"]
+
+    def test_plan_includes_cognitive_state(self):
+        """create_plan 为同步 API（旧版 await 同步返回值必崩）"""
         plan_orch = get_plan_orchestrator()
-        
+
         context = {
             "cognitive_state": {
                 "attention": "high",
                 "memory_load": 0.8,
             }
         }
-        
-        plan = await plan_orch.create_plan("Test task", context)
-        
-        assert "cognitive_state" in plan.context
-        assert plan.context["cognitive_state"]["attention"] == "high"
+
+        plan = plan_orch.create_plan("Test task", metadata=context)
+
+        assert plan.metadata["cognitive_state"]["attention"] == "high"
 
 
 class TestToolEngineWorkflowIntegration:
-    """Test ToolEngine integration with WorkflowEngine."""
-    
+    """ToolEngine 与 WorkflowEngine 协作"""
+
     @pytest.mark.asyncio
     async def test_workflow_uses_tool_engine(self):
-        """Test that workflow execution uses ToolEngine."""
+        """工作流动作处理器委托 ToolEngine 执行已注册工具（旧契约 WorkflowEngine(tool_engine=) 已废弃）"""
         tool_engine = ToolEngine()
-        workflow_engine = WorkflowEngine(tool_engine=tool_engine)
-        
-        # Create a simple workflow
-        workflow_def = {
-            "name": "Test Workflow",
-            "steps": [
-                {
-                    "step_id": "step1",
-                    "name": "Tool Step",
-                    "action": "execute_tool",
-                    "tool_name": "test_tool",
-                    "inputs": {},
-                }
-            ]
-        }
-        
-        # Mock tool execution
-        with patch.object(tool_engine, 'execute_tool', new_callable=AsyncMock) as mock_exec:
-            mock_exec.return_value = {"result": "success"}
-            
-            result = await workflow_engine.execute_workflow(workflow_def)
-            
-            assert result is not None
-            mock_exec.assert_called_once()
 
+        async def test_tool():
+            return {"result": "success"}
+
+        tool_engine.register_tool("test_tool", test_tool)
+
+        workflow_engine = WorkflowEngine()
+
+        async def execute_tool_handler(tool_name=None, parameters=None, **_):
+            return await tool_engine.execute(tool_name, parameters or {})
+
+        workflow_engine.register_action("execute_tool", execute_tool_handler)
+
+        definition = WorkflowDefinition(
+            name="Test Workflow",
+            nodes={
+                "step1": WorkflowNode(
+                    node_id="step1",
+                    name="Tool Step",
+                    node_type=NodeType.TASK,
+                    action="execute_tool",
+                    parameters={"tool_name": "test_tool"},
+                )
+            },
+            start_node="step1",
+        )
+        workflow_engine.register_workflow(definition)
+
+        result = await workflow_engine.execute(definition.workflow_id)
+
+        assert result == {"result": "success"}
 
 
 class TestCompleteExecutionFlow:
-    """Test complete execution flow across modules."""
-    
+    """Plan → ToolEngine 完整执行流（mcp_manager 已随 MCP 重构删除，fixture 不再引用）"""
+
     @pytest.fixture(autouse=True)
     def setup_and_teardown(self):
-        """Reset singletons before and after each test."""
+        """Reset singleton before and after each test."""
         reset_plan_orchestrator()
-        reset_mcp_manager()
         yield
         reset_plan_orchestrator()
-        reset_mcp_manager()
-    
+
     @pytest.mark.asyncio
     async def test_full_execution_pipeline(self):
-        """Test full pipeline: Plan → Tools → Workflow → Execution."""
-        # 1. Create plan
+        """计划步骤经 step_type 执行器委托 ToolEngine，结果落回 step.result"""
         plan_orch = get_plan_orchestrator()
-        plan = await plan_orch.create_plan("Complete test task")
-        
-        assert plan is not None
-        assert len(plan.steps) > 0
-        
-        # 2. Setup ToolEngine
+
         tool_engine = ToolEngine()
-        
-        # 3. Register tools (mocked)
-        for step in plan.steps:
-            step.action = "execute_tool"
-            step.inputs = {"tool_name": "test_tool", "params": {}}
-        
-        # 4. Mock tool execution
-        with patch.object(tool_engine, 'execute_tool', new_callable=AsyncMock) as mock_exec:
-            mock_exec.return_value = {"result": "step_completed"}
-            
-            # 5. Execute plan
-            with patch.object(plan_orch, 'tool_engine', tool_engine):
-                result = await plan_orch.execute_plan(plan.plan_id)
-                
-                assert result is not None
-                assert "step_results" in result
-    
+
+        async def test_tool():
+            return {"status": "step_completed"}
+
+        tool_engine.register_tool("test_tool", test_tool)
+
+        async def tool_executor(step, context, parameters):
+            return await tool_engine.execute(parameters["tool_name"], {})
+
+        plan_orch.register_step_executor("tool", tool_executor)
+
+        plan = plan_orch.create_plan(
+            "Complete test task",
+            steps=[{"name": "调用工具", "step_type": "tool", "parameters": {"tool_name": "test_tool"}}],
+        )
+        assert len(plan.steps) == 1
+
+        result = await plan_orch.execute_plan(plan.id)
+
+        assert result.status == PlanStatus.COMPLETED
+        assert result.steps[0].result == {"status": "step_completed"}
+
     @pytest.mark.asyncio
     async def test_error_handling_across_modules(self):
-        """Test error handling propagates correctly."""
+        """步骤失败向上汇总：plan FAILED + step.error 保留（旧断言 dict step_results 已废弃）"""
         plan_orch = get_plan_orchestrator()
-        plan = await plan_orch.create_plan("Error test task")
-        
-        # Make first step fail
-        if len(plan.steps) > 0:
-            plan.steps[0].max_retries = 0
-            
-            with patch.object(plan_orch, '_execute_step', new_callable=AsyncMock) as mock_exec:
-                mock_exec.return_value = {"status": "failed", "error": "Test error"}
-                
-                result = await plan_orch.execute_plan(plan.plan_id)
-                
-                assert result is not None
-                assert result["step_results"][0]["status"] == "failed"
+
+        async def boom_executor(step, context, parameters):
+            raise RuntimeError("Test error")
+
+        plan_orch.register_step_executor("boom", boom_executor)
+
+        plan = plan_orch.create_plan(
+            "Error test task",
+            steps=[{"name": "bad", "step_type": "boom", "max_retries": 0}],
+        )
+
+        result = await plan_orch.execute_plan(plan.id)
+
+        assert result.status == PlanStatus.FAILED
+        assert result.steps[0].status == StepStatus.FAILED
+        assert "Test error" in result.steps[0].error
 
 
 class TestExecutionEngineIntegration:
-    """Test ExecutionEngine components work together."""
-    
+    """ExecutionEngine 组件协作"""
+
+    @pytest.fixture(autouse=True)
+    def setup_and_teardown(self):
+        reset_plan_orchestrator()
+        yield
+        reset_plan_orchestrator()
+
     @pytest.mark.asyncio
     async def test_components_share_state(self):
-        """Test that components can share state via context."""
-        # This test verifies that plan orchestrator, tool engine, and workflow engine
-        # can share state through the execution context
-        
+        """共享状态经 execute_plan(context) 流入步骤执行器（旧断言 plan.context 字段已不存在）"""
         plan_orch = get_plan_orchestrator()
-        
-        # Create a plan with context
-        context = {"shared_state": {"key": "value"}}
-        plan = await plan_orch.create_plan("Shared state test", context)
-        
-        assert "shared_state" in plan.context
-        assert plan.context["shared_state"]["key"] == "value"
-    
+
+        received = {}
+
+        async def capture_executor(step, context, parameters):
+            received.update(context)
+            return "ok"
+
+        plan_orch.register_step_executor("task", capture_executor)
+
+        plan = plan_orch.create_plan(
+            "Shared state test",
+            steps=[{"name": "s1", "step_type": "task"}],
+        )
+
+        await plan_orch.execute_plan(plan.id, {"shared_state": {"key": "value"}})
+
+        assert received["shared_state"]["key"] == "value"
+        assert plan.steps[0].status == StepStatus.COMPLETED
+
     @pytest.mark.asyncio
     async def test_concurrent_execution(self):
-        """Test concurrent execution of multiple plans."""
+        """多计划并发执行：gather 协程而非同步返回值（旧代码 gather 同步结果必崩）"""
         plan_orch = get_plan_orchestrator()
-        
-        # Create multiple plans
-        tasks = []
-        for i in range(3):
-            task = plan_orch.create_plan(f"Concurrent task {i}")
-            tasks.append(task)
-        
-        plans = await asyncio.gather(*tasks)
-        
-        assert len(plans) == 3
-        assert all(p is not None for p in plans)
-        assert len(set(p.plan_id for p in plans)) == 3  # All unique IDs
 
+        async def ok_executor(step, context, parameters):
+            return "done"
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        plan_orch.register_step_executor("task", ok_executor)
+
+        plans = [
+            plan_orch.create_plan(f"Concurrent task {i}", steps=[{"name": "s", "step_type": "task"}])
+            for i in range(3)
+        ]
+        assert len({p.id for p in plans}) == 3  # All unique IDs
+
+        results = await asyncio.gather(*(plan_orch.execute_plan(p.id) for p in plans))
+
+        assert all(r.status == PlanStatus.COMPLETED for r in results)
+        assert all(r.steps[0].result == "done" for r in results)
