@@ -135,6 +135,8 @@ async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any]
         # 且强制空历史导致 LLM 缺对话上下文,工具参数指代不清("搜一下他"不知道"他"是谁)。
         # 现在不强制注入,让 chat_pipeline 自行从 session 恢复历史。
         call_metadata = body.metadata or {}
+        # 隔离注入：服务端身份覆盖客户端自报（kb_builder 等技能据此归属知识条目）
+        call_metadata["user_id"] = user_id
 
         # 调用 Agent 的 chat 方法
         response = await agent.chat(

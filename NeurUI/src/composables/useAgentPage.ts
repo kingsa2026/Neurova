@@ -18,13 +18,39 @@ import type { Agent } from '@/types/agent'
  * </script>
  * ```
  */
+
+/**
+ * agentId 来源解析优先级：params.agentId > query.agentId > store 兜底。
+ *
+ * 背景：/agent/:agentId/chat 在 router 中 redirect 到 /chat 且把 agentId
+ * 转入 query（?agentId=x），使 AgentList 点"对话"能进入对应智能体会话；
+ * 普通 /chat 入口无 params/query，回落 agentStore.currentAgentId。
+ * 空串/缺失按下一级回退。
+ */
+export function resolveAgentId(
+  params: { agentId?: unknown } | undefined,
+  query: { agentId?: unknown } | undefined,
+  fallback: string,
+): string {
+  const p = params?.agentId
+  if (typeof p === 'string' && p) return p
+  const q = query?.agentId
+  if (typeof q === 'string' && q) return q
+  if (Array.isArray(q) && typeof q[0] === 'string' && q[0]) return q[0]
+  return fallback
+}
+
 export function useAgentPage(options?: { onAgentChange?: (newAgentId: string) => void }) {
   const route = useRoute()
   const agentStore = useAgentStore()
 
-  // Resolve agentId from route params or fall back to the store's current agent
+  // Resolve agentId from route params/query or fall back to the store's current agent
   const agentId = ref<string>(
-    (route.params.agentId as string) || agentStore.currentAgentId || '',
+    resolveAgentId(
+      route.params as Record<string, unknown>,
+      route.query as Record<string, unknown>,
+      agentStore.currentAgentId || '',
+    ),
   )
 
   // The full Agent object from the store (reactive)
@@ -37,7 +63,19 @@ export function useAgentPage(options?: { onAgentChange?: (newAgentId: string) =>
   // Whether the agent data is still loading
   const agentLoading = computed(() => agentStore.loading)
 
-  // Keep agentId in sync when route params change (e.g. navigating between agents)
+  // Keep agentId in sync when route params/query change (e.g. navigating between agents)
+  watch(
+    () => route.query.agentId,
+    (newId) => {
+      if (route.params.agentId) return // params 优先, query 不覆盖
+      const next = resolveAgentId(undefined, { agentId: newId }, agentId.value)
+      if (next && next !== agentId.value) {
+        agentId.value = next
+        agentStore.setCurrentAgent(next)
+      }
+    },
+  )
+
   watch(
     () => route.params.agentId,
     (newId) => {

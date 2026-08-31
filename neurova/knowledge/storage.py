@@ -7,6 +7,7 @@
 import datetime
 import hashlib
 import json
+import os
 from neurova.core.logger import get_logger
 import threading
 import uuid
@@ -22,6 +23,35 @@ def _new_id(prefix: str = "") -> str:
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _encrypt_secret(plain: str) -> Optional[str]:
+    """Fernet 对称加密（密钥取自环境变量 NEUROVA_KB_SECRET）。无密钥则返回 None。"""
+    secret: str = os.environ.get("NEUROVA_KB_SECRET", "")
+    if not secret:
+        return None
+    try:
+        from cryptography.fernet import Fernet
+
+        fernet = Fernet(secret.encode())
+        return fernet.encrypt(plain.encode("utf-8")).decode("utf-8")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("API Key 加密失败（配置将不可用于自动注入）: %s", e)
+        return None
+
+
+def _decrypt_secret(token: str) -> Optional[str]:
+    secret: str = os.environ.get("NEUROVA_KB_SECRET", "")
+    if not secret:
+        return None
+    try:
+        from cryptography.fernet import Fernet
+
+        fernet = Fernet(secret.encode())
+        return fernet.decrypt(token.encode("utf-8")).decode("utf-8")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("API Key 解密失败: %s", e)
+        return None
 
 
 class KnowledgeStorage:
@@ -100,6 +130,8 @@ class KnowledgeStorage:
                 "is_default": bool(is_default),
                 "is_active": bool(is_active),
                 "api_key_hash": self._hash_api_key(api_key) if api_key else None,
+                # R-7(A+B): 可逆加密供画布 kb_config_id 引用自动注入
+                "api_key_encrypted": _encrypt_secret(api_key) if api_key else None,
                 "settings": dict(settings) if settings else {},
                 "created_at": _now_iso(),
                 "updated_at": _now_iso(),
@@ -111,6 +143,17 @@ class KnowledgeStorage:
             self._configs[cid] = entry
             self._save_configs()
             return cid
+
+    def decrypt_api_key(self, config_id: str) -> Optional[str]:
+        """解密配置中的 API Key（供 kb_config_id 引用）。无加密/密钥缺失返回 None。"""
+        with self._lock:
+            cfg = self._configs.get(config_id)
+            if not cfg:
+                return None
+            encrypted = cfg.get("api_key_encrypted")
+            if not encrypted:
+                return None
+            return _decrypt_secret(str(encrypted))
 
     def _clear_default(self, user_id: str) -> None:
         for cfg in self._configs.values():
@@ -155,6 +198,7 @@ class KnowledgeStorage:
             if "api_key" in fields:
                 api_key = fields.pop("api_key")
                 cfg["api_key_hash"] = self._hash_api_key(api_key) if api_key else None
+                cfg["api_key_encrypted"] = _encrypt_secret(api_key) if api_key else None
             for k, v in fields.items():
                 cfg[k] = v
             cfg["updated_at"] = _now_iso()

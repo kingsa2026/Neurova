@@ -13,10 +13,12 @@ from __future__ import annotations
 
 from neurova.core.logger import get_logger
 import uuid
-from typing import List
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
+
+from neurova.api.auth import get_optional_user
 
 logger = get_logger(__name__)
 
@@ -53,8 +55,16 @@ def _get_request_id(request: Request) -> str:
     return getattr(request.state, "request_id", str(uuid.uuid4()))
 
 
-def _get_provider_manager():
-    """获取 Provider 管理器"""
+def _get_provider_manager(current_user: Optional[Dict[str, Any]] = None):
+    """获取(按用户隔离的)Provider 管理器。
+
+    - 有用户身份:admin → 全局;普通用户 → 自己的 scope
+    - 无身份(直接调用/未认证):app_state 全局实例(存量兼容)
+    """
+    if isinstance(current_user, dict):
+        from neurova.llm.provider_manager import get_provider_manager_for_user
+
+        return get_provider_manager_for_user(current_user)
     from neurova.api.endpoints import get_provider_manager
 
     return get_provider_manager()
@@ -68,12 +78,16 @@ def _get_agent(agent_id: str = "default"):
 
 
 @router.get("", response_model=List[ModelInfo])
-async def list_models(request: Request):
+async def list_models(
+    request: Request,
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+):
+    """列出可用模型(按用户 scope 隔离;未认证 → 全局)"""
     """列出可用模型"""
     _get_request_id(request)
 
     models = []
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
 
     if provider_manager:
         try:
@@ -111,11 +125,15 @@ async def list_models(request: Request):
 
 
 @router.delete("/{model_id}")
-async def delete_model(request: Request, model_id: str = Path(...)):
+async def delete_model(
+    request: Request,
+    model_id: str = Path(...),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+):
     """删除模型（从所属服务商的模型列表中移除）"""
     _get_request_id(request)
 
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
     if not provider_manager:
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
@@ -206,18 +224,22 @@ async def switch_model(request: Request, body: SwitchModelRequest):
 
 
 @router.post("/probe-multimodal")
-async def probe_multimodal(request: Request, body: ProbeRequest):
+async def probe_multimodal(
+    request: Request,
+    body: ProbeRequest,
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+):
     """模型多模态探测"""
     _get_request_id(request)
 
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
     if not provider_manager:
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
     try:
         result = {}
         if hasattr(provider_manager, "probe_model_multimodal"):
-            result = provider_manager.probe_model_multimodal(body.model_id)
+            result = await provider_manager.probe_model_multimodal(body.model_id)
 
         return {
             "code": 0,
@@ -233,11 +255,15 @@ async def probe_multimodal(request: Request, body: ProbeRequest):
 
 
 @router.post("/check-connection")
-async def check_connection(request: Request, model_id: str = Query(...)):
+async def check_connection(
+    request: Request,
+    model_id: str = Query(...),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+):
     """检查模型连接"""
     _get_request_id(request)
 
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
     if not provider_manager:
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
@@ -246,9 +272,10 @@ async def check_connection(request: Request, model_id: str = Query(...)):
         message = ""
 
         if hasattr(provider_manager, "check_model_connection"):
-            result = provider_manager.check_model_connection(model_id)
-            connected = result.get("connected", False)
-            message = result.get("message", "")
+            result = await provider_manager.check_model_connection(model_id)
+            # manager 层返回 ConnectionResult(异步链路),兼容旧 dict 形状
+            connected = getattr(result, "success", False)
+            message = getattr(result, "error", "") or getattr(result, "message", "")
 
         return {
             "code": 0,

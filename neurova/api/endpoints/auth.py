@@ -168,10 +168,19 @@ async def login(request: Request, body: LoginRequest):
             raise HTTPException(status_code=403, detail="Account is locked due to too many failed attempts")
 
         # 生成 token
+        # 审计修复 (P0-2): JWT 必须携带 neuser_id/user_id 身份声明,
+        # 否则三层隔离第 2 层永远回退 "default", 事实上从未生效。
+        # 语义: neuser_id = 账号 id (JWT sub); user_id = 对话身份, HTTP 路径同为账号 id。
+        identity_claims = {
+            "sub": str(user["id"]),
+            "username": user["username"],
+            "neuser_id": str(user["id"]),
+            "user_id": str(user["id"]),
+        }
         access_token = create_access_token(
-            data={"sub": str(user["id"]), "username": user["username"], "role": user.get("role", "user")}
+            data={**identity_claims, "role": user.get("role", "user")}
         )
-        refresh_token = create_refresh_token(data={"sub": str(user["id"]), "username": user["username"]})
+        refresh_token = create_refresh_token(data=identity_claims)
 
         # 记录登录日志
         user_model.log_login(
@@ -231,9 +240,15 @@ async def refresh_token(request: Request, body: RefreshRequest):
         if user.status != "active":
             raise HTTPException(status_code=403, detail="Account is inactive")
 
-        # 生成新 token
-        access_token = create_access_token(data={"sub": user_id, "username": username, "role": user.role})
-        refresh_token = create_refresh_token(data={"sub": user_id, "username": username})
+        # 生成新 token (审计修复 P0-2: 补齐身份声明)
+        identity_claims = {
+            "sub": user_id,
+            "username": username,
+            "neuser_id": str(user.id),
+            "user_id": str(user.id),
+        }
+        access_token = create_access_token(data={**identity_claims, "role": user.role})
+        refresh_token = create_refresh_token(data=identity_claims)
 
         return TokenResponse(
             access_token=access_token,
@@ -337,9 +352,15 @@ async def register(request: Request, body: RegisterRequest):
             username=body.username, password_hash=password_hash, email=body.email, role="user"
         )
 
-        # 5. 生成 token
-        access_token = create_access_token(data={"sub": str(user.id), "username": user.username, "role": user.role})
-        refresh_token = create_refresh_token(data={"sub": str(user.id), "username": user.username})
+        # 5. 生成 token (审计修复 P0-2: 补齐身份声明)
+        identity_claims = {
+            "sub": str(user.id),
+            "username": user.username,
+            "neuser_id": str(user.id),
+            "user_id": str(user.id),
+        }
+        access_token = create_access_token(data={**identity_claims, "role": user.role})
+        refresh_token = create_refresh_token(data=identity_claims)
 
         # 记录成功的注册尝试
         verification_model.record_register_attempt(ip_address, success=True)

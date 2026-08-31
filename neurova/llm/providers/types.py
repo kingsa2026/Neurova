@@ -21,6 +21,7 @@ class ProviderType(str, Enum):
     GEMINI = "gemini"
     OLLAMA = "ollama"
     OPENROUTER = "openrouter"
+    OPENCODE = "opencode"
     CUSTOM = "custom"
 
 
@@ -51,11 +52,13 @@ class ModelInfo(BaseModel):
     context_window: int = 4096
     pricing: Dict[str, float] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # 归属服务商 id(_get_all_models 聚合视图用;model.py 端点按此映射 provider)
+    owned_by: str = ""
+    is_free: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
-        # s9: pydantic v1 兼容 — v1 只有 .dict(), v2 中 .dict() 是 deprecated alias 但仍可用.
-        # 原代码 self.model_dump() 在 v1.10 下会 AttributeError.
-        return self.dict()
+        # requirements: pydantic>=2.5;model_dump 为 v2 原生 API
+        return self.model_dump()
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ModelInfo":
@@ -76,8 +79,8 @@ class ProviderInfo(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        # s9: pydantic v1 兼容 — 同 ModelInfo.to_dict
-        return self.dict()
+        # requirements: pydantic>=2.5;model_dump 为 v2 原生 API
+        return self.model_dump()
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ProviderInfo":

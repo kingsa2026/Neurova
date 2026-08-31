@@ -8,8 +8,10 @@ import datetime
 from neurova.core.logger import get_logger
 import typing
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+
+from neurova.api.deps import get_current_user, require_admin
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -137,8 +139,8 @@ async def get_retrieval_stats():
 
 
 @router.get("/settings")
-async def get_memory_search_settings():
-    """获取记忆搜索设置"""
+async def get_memory_search_settings(current_user: dict = Depends(get_current_user)):
+    """获取记忆搜索设置 — 登录用户可读"""
     from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
     cfg = _get()
     return {
@@ -159,8 +161,8 @@ async def get_memory_search_settings():
 
 
 @router.put("/settings")
-async def update_memory_search_settings(body: dict):
-    """更新记忆搜索设置"""
+async def update_memory_search_settings(body: dict, admin: dict = Depends(require_admin())):
+    """更新记忆搜索设置 — 仅管理员"""
     from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
     cfg = _get()
     updates = {}
@@ -177,8 +179,11 @@ async def update_memory_search_settings(body: dict):
 
 
 @router.get("/nerf-settings")
-async def get_nerf_settings(request: Request):
-    """获取 NeRF 体渲染融合设置
+async def get_nerf_settings(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """获取 NeRF 体渲染融合设置 — 登录用户可读
 
     优先从活跃 Agent 的 recall_engine 获取实时设置，
     如果没有活跃 Agent 则返回全局默认设置。
@@ -223,8 +228,10 @@ async def get_nerf_settings(request: Request):
 
 
 @router.put("/nerf-settings")
-async def update_nerf_settings(body: dict, request: Request):
-    """更新 NeRF 体渲染融合设置
+async def update_nerf_settings(
+    body: dict, request: Request, admin: dict = Depends(require_admin())
+):
+    """更新 NeRF 体渲染融合设置 — 仅管理员
 
     body:
         fusion_mode: "legacy" | "nerf"
@@ -287,8 +294,8 @@ async def update_nerf_settings(body: dict, request: Request):
 
 
 @router.post("/nerf-settings/reset")
-async def reset_nerf_settings(request: Request):
-    """重置 NeRF 设置为默认值
+async def reset_nerf_settings(request: Request, admin: dict = Depends(require_admin())):
+    """重置 NeRF 设置为默认值 — 仅管理员
 
     重置会同步到所有活跃 Agent 的 recall_engine。
     """
@@ -338,8 +345,11 @@ async def reset_nerf_settings(request: Request):
 
 
 @router.get("/channel-weights")
-async def get_channel_weights(intent: str = Query(default="exploratory")):
-    """获取指定意图的通道权重（用于前端可视化）"""
+async def get_channel_weights(
+    intent: str = Query(default="exploratory"),
+    current_user: dict = Depends(get_current_user),
+):
+    """获取指定意图的通道权重（用于前端可视化）— 登录用户可读"""
     # 意图 → 通道权重映射
     intent_weights = {
         "factual": {"text": 0.40, "temperature": 0.20, "category": 0.20, "graph": 0.10, "emotion": 0.05, "voice": 0.05},

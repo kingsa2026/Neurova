@@ -8,49 +8,49 @@
     </div>
 
     <a-spin :spinning="loading">
-      <!-- Core settings -->
-      <GlassCard :title="t('sleep.status')" style="margin-top: 8px">
+      <!-- Core settings（与后端 SleepSettings 键位严格对齐） -->
+      <GlassCard :title="t('sleep.settings')" style="margin-top: 8px">
         <a-form layout="vertical" :model="settingsForm">
           <a-form-item :label="t('sleep.enableAutoSleep')">
-            <a-switch v-model:checked="settingsForm.auto_sleep" />
+            <a-switch v-model:checked="settingsForm.auto_sleep_enabled" />
           </a-form-item>
-          <a-form-item :label="t('sleep.enabled')">
-            <a-switch v-model:checked="settingsForm.enabled" />
-          </a-form-item>
-          <a-row :gutter="16">
-            <a-col :span="12">
-              <a-form-item :label="t('sleep.scheduleStart')" :rules="[{ required: true }]">
-                <a-time-picker
-                  v-model:value="settingsForm.schedule_start"
-                  format="HH:mm"
-                  style="width: 100%"
-                  :placeholder="t('sleep.scheduleStartPlaceholder')"
-                />
-              </a-form-item>
-            </a-col>
-            <a-col :span="12">
-              <a-form-item :label="t('sleep.scheduleEnd')" :rules="[{ required: true }]">
-                <a-time-picker
-                  v-model:value="settingsForm.schedule_end"
-                  format="HH:mm"
-                  style="width: 100%"
-                  :placeholder="t('sleep.scheduleEndPlaceholder')"
-                />
-              </a-form-item>
-            </a-col>
-          </a-row>
-          <a-form-item :label="t('sleep.minInterval')">
+          <a-form-item :label="t('sleep.sleepThresholdMinutes')">
             <a-input-number
-              v-model:value="settingsForm.min_interval_hours"
+              v-model:value="settingsForm.sleep_threshold_minutes"
               :min="1"
-              :max="168"
+              :max="1440"
               :precision="0"
               style="width: 100%"
-              :addon-after="t('sleep.hours')"
+              :addon-after="t('sleep.minutes')"
             />
           </a-form-item>
-          <a-form-item :label="t('sleep.enableDreaming')">
-            <a-switch v-model:checked="settingsForm.dream_enabled" />
+          <!-- 以下两项仅作用于手动"进入睡眠"：开启自动休眠时隐藏（值仍随表单保存，不丢失） -->
+          <a-form-item
+            v-if="!settingsForm.auto_sleep_enabled"
+            :label="t('sleep.sleepDurationMinutes')"
+            :extra="t('sleep.manualOnlyHint')"
+          >
+            <a-input-number
+              v-model:value="settingsForm.sleep_duration_minutes"
+              :min="1"
+              :max="1440"
+              :precision="0"
+              style="width: 100%"
+              :addon-after="t('sleep.minutes')"
+            />
+          </a-form-item>
+          <a-form-item
+            v-if="!settingsForm.auto_sleep_enabled"
+            :label="t('sleep.enableDreaming')"
+            :extra="t('sleep.manualOnlyHint')"
+          >
+            <a-switch v-model:checked="settingsForm.dream_replay_enabled" />
+          </a-form-item>
+          <a-form-item :label="t('sleep.enableMemoryMerge')">
+            <a-switch v-model:checked="settingsForm.memory_consolidation_enabled" />
+          </a-form-item>
+          <a-form-item :label="t('sleep.enableConflictResolution')">
+            <a-switch v-model:checked="settingsForm.conflict_resolution_enabled" />
           </a-form-item>
         </a-form>
         <template #footer>
@@ -70,83 +70,114 @@
         </template>
       </GlassCard>
 
-      <!-- Legacy schedule section (preserved from original) -->
-      <GlassCard :title="t('sleep.sleepTime')" style="margin-top: 16px">
-        <a-form layout="vertical" :model="schedule">
-          <a-form-item :label="t('sleep.enableAutoSleep')">
-            <a-switch v-model:checked="schedule.enabled" />
+      <!-- Sleep rhythm: 阶段推进参数（判定模式 / 各阶段阈值 / 监控间隔） -->
+      <GlassCard :title="t('sleep.phaseParams')" style="margin-top: 16px">
+        <a-form layout="vertical" :model="settingsForm">
+          <a-form-item :label="t('sleep.sleepMode')">
+            <a-select v-model:value="settingsForm.sleep_mode" style="width: 100%">
+              <a-select-option value="temperature">{{ t('sleep.modeTemperature') }}</a-select-option>
+              <a-select-option value="time">{{ t('sleep.modeTime') }}</a-select-option>
+              <a-select-option value="either">{{ t('sleep.modeEither') }}</a-select-option>
+            </a-select>
           </a-form-item>
-          <a-form-item :label="t('sleep.sleepTime')">
-            <a-time-picker v-model:value="schedule.sleep_time" format="HH:mm" style="width: 100%" />
-          </a-form-item>
-          <a-form-item :label="t('sleep.wakeTime')">
-            <a-time-picker v-model:value="schedule.wake_time" format="HH:mm" style="width: 100%" />
-          </a-form-item>
-          <a-form-item :label="t('sleep.maxDuration')">
-            <a-input-number v-model:value="schedule.max_duration_hours" :min="1" :max="24" style="width: 100%" />
+          <template v-if="settingsForm.sleep_mode === 'temperature'">
+            <a-form-item :label="`${t('sleep.lightPhase')} · ${t('sleep.threshold')}`">
+              <a-input-number
+                v-model:value="settingsForm.temp_threshold_light_sleep"
+                :min="0"
+                :max="100"
+                :step="0.5"
+                style="width: 100%"
+              />
+            </a-form-item>
+            <a-form-item :label="`${t('sleep.deepPhase')} · ${t('sleep.threshold')}`">
+              <a-input-number
+                v-model:value="settingsForm.temp_threshold_deep_sleep"
+                :min="0"
+                :max="100"
+                :step="0.5"
+                style="width: 100%"
+              />
+            </a-form-item>
+            <a-form-item :label="`${t('sleep.remPhase')} · ${t('sleep.threshold')}`">
+              <a-input-number
+                v-model:value="settingsForm.temp_threshold_rem"
+                :min="0"
+                :max="100"
+                :step="0.5"
+                style="width: 100%"
+              />
+            </a-form-item>
+            <a-form-item :label="`${t('sleep.hibernatePhase')} · ${t('sleep.threshold')}`">
+              <a-input-number
+                v-model:value="settingsForm.temp_threshold_hibernate"
+                :min="0"
+                :max="100"
+                :step="0.5"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </template>
+          <template v-else>
+            <a-form-item :label="`${t('sleep.lightPhase')} · ${t('sleep.threshold')}`">
+              <a-input-number
+                v-model:value="settingsForm.idle_threshold_light_sleep"
+                :min="1"
+                :max="1440"
+                :precision="0"
+                style="width: 100%"
+                :addon-after="t('sleep.minutes')"
+              />
+            </a-form-item>
+            <a-form-item :label="`${t('sleep.deepPhase')} · ${t('sleep.threshold')}`">
+              <a-input-number
+                v-model:value="settingsForm.idle_threshold_deep_sleep"
+                :min="1"
+                :max="1440"
+                :precision="0"
+                style="width: 100%"
+                :addon-after="t('sleep.minutes')"
+              />
+            </a-form-item>
+            <a-form-item :label="`${t('sleep.remPhase')} · ${t('sleep.threshold')}`">
+              <a-input-number
+                v-model:value="settingsForm.idle_threshold_rem"
+                :min="1"
+                :max="1440"
+                :precision="0"
+                style="width: 100%"
+                :addon-after="t('sleep.minutes')"
+              />
+            </a-form-item>
+            <a-form-item :label="`${t('sleep.hibernatePhase')} · ${t('sleep.threshold')}`">
+              <a-input-number
+                v-model:value="settingsForm.idle_threshold_hibernate"
+                :min="1"
+                :max="1440"
+                :precision="0"
+                style="width: 100%"
+                :addon-after="t('sleep.minutes')"
+              />
+            </a-form-item>
+          </template>
+          <a-form-item :label="t('sleep.monitorIntervalSeconds')">
+            <a-input-number
+              v-model:value="settingsForm.monitor_interval_seconds"
+              :min="10"
+              :max="3600"
+              :precision="0"
+              style="width: 100%"
+              :addon-after="t('sleep.seconds')"
+            />
           </a-form-item>
         </a-form>
         <template #footer>
-          <GlassButton variant="primary" size="sm" :loading="saveMutation.loading.value" @click="handleSave">
-            {{ t('common.save') }}
-          </GlassButton>
-        </template>
-      </GlassCard>
-
-      <!-- Dream parameters -->
-      <GlassCard :title="t('sleep.dreams')" style="margin-top: 16px">
-        <a-form layout="vertical" :model="dreams">
-          <a-form-item :label="t('sleep.enableDreaming')">
-            <a-switch v-model:checked="dreams.enabled" />
-          </a-form-item>
-          <a-form-item :label="t('sleep.dreamFrequency')">
-            <a-select v-model:value="dreams.frequency" style="width: 100%">
-              <a-select-option value="every_sleep">{{ t('sleep.everySleep') }}</a-select-option>
-              <a-select-option value="random">{{ t('sleep.random') }}</a-select-option>
-              <a-select-option value="never">{{ t('sleep.never') }}</a-select-option>
-            </a-select>
-          </a-form-item>
-          <a-form-item :label="t('sleep.dreamDepth')">
-            <a-slider v-model:value="dreams.depth" :min="1" :max="10" />
-          </a-form-item>
-          <a-form-item :label="t('sleep.maxDreamTopics')">
-            <a-input-number v-model:value="dreams.max_topics" :min="1" :max="20" style="width: 100%" />
-          </a-form-item>
-        </a-form>
-        <template #footer>
-          <GlassButton variant="primary" size="sm" :loading="saveMutation.loading.value" @click="handleSave">
-            {{ t('common.save') }}
-          </GlassButton>
-        </template>
-      </GlassCard>
-
-      <!-- Memory merge settings -->
-      <GlassCard :title="t('sleep.merges')" style="margin-top: 16px">
-        <a-form layout="vertical" :model="memoryMerge">
-          <a-form-item :label="t('sleep.enableMemoryMerge')">
-            <a-switch v-model:checked="memoryMerge.enabled" />
-          </a-form-item>
-          <a-form-item :label="t('sleep.mergeStrategy')">
-            <a-select v-model:value="memoryMerge.strategy" style="width: 100%">
-              <a-select-option value="conservative">{{ t('sleep.conservative') }}</a-select-option>
-              <a-select-option value="balanced">{{ t('sleep.balanced') }}</a-select-option>
-              <a-select-option value="aggressive">{{ t('sleep.aggressive') }}</a-select-option>
-            </a-select>
-          </a-form-item>
-          <a-form-item :label="t('sleep.conflictResolution')">
-            <a-select v-model:value="memoryMerge.conflict_resolution" style="width: 100%">
-              <a-select-option value="keep_newest">{{ t('sleep.keepNewest') }}</a-select-option>
-              <a-select-option value="keep_strongest">{{ t('sleep.keepStrongest') }}</a-select-option>
-              <a-select-option value="merge">{{ t('sleep.mergeOption') }}</a-select-option>
-              <a-select-option value="flag">{{ t('sleep.flagForReview') }}</a-select-option>
-            </a-select>
-          </a-form-item>
-          <a-form-item :label="t('sleep.similarityThreshold')">
-            <a-slider v-model:value="memoryMerge.similarity_threshold" :min="0" :max="100" />
-          </a-form-item>
-        </a-form>
-        <template #footer>
-          <GlassButton variant="primary" size="sm" :loading="saveMutation.loading.value" @click="handleSave">
+          <GlassButton
+            variant="primary"
+            size="sm"
+            :loading="saveMutation.loading.value"
+            @click="handleSave"
+          >
             {{ t('common.save') }}
           </GlassButton>
         </template>
@@ -263,27 +294,42 @@ const conflictsLoading = ref(false)
 const resolvingId = ref<string | null>(null)
 const conflicts = ref<MergeConflict[]>([])
 
-// --- API-backed settings form ---
+// --- API-backed settings form（键位与后端 sleep.py::SleepSettings 一致） ---
 const settingsForm = reactive<{
-  enabled: boolean
-  schedule_start: string
-  schedule_end: string
-  min_interval_hours: number
-  auto_sleep: boolean
-  dream_enabled: boolean
+  auto_sleep_enabled: boolean
+  sleep_threshold_minutes: number
+  sleep_duration_minutes: number
+  dream_replay_enabled: boolean
+  memory_consolidation_enabled: boolean
+  conflict_resolution_enabled: boolean
+  sleep_mode: 'temperature' | 'time' | 'either'
+  temp_threshold_light_sleep: number
+  temp_threshold_deep_sleep: number
+  temp_threshold_rem: number
+  temp_threshold_hibernate: number
+  idle_threshold_light_sleep: number
+  idle_threshold_deep_sleep: number
+  idle_threshold_rem: number
+  idle_threshold_hibernate: number
+  monitor_interval_seconds: number
 }>({
-  enabled: true,
-  schedule_start: '',
-  schedule_end: '',
-  min_interval_hours: 6,
-  auto_sleep: false,
-  dream_enabled: true,
+  auto_sleep_enabled: true,
+  sleep_threshold_minutes: 30,
+  sleep_duration_minutes: 60,
+  dream_replay_enabled: true,
+  memory_consolidation_enabled: true,
+  conflict_resolution_enabled: true,
+  sleep_mode: 'temperature',
+  temp_threshold_light_sleep: 30,
+  temp_threshold_deep_sleep: 25,
+  temp_threshold_rem: 20,
+  temp_threshold_hibernate: 15,
+  idle_threshold_light_sleep: 30,
+  idle_threshold_deep_sleep: 60,
+  idle_threshold_rem: 90,
+  idle_threshold_hibernate: 120,
+  monitor_interval_seconds: 60,
 })
-
-// --- Legacy form models (preserved) ---
-const schedule = ref({ enabled: true, sleep_time: null as any, wake_time: null as any, max_duration_hours: 8 })
-const dreams = ref({ enabled: true, frequency: 'random', depth: 5, max_topics: 5 })
-const memoryMerge = ref({ enabled: true, strategy: 'balanced', conflict_resolution: 'keep_newest', similarity_threshold: 70 })
 
 // --- Custom resolve modal ---
 const showResolveModal = ref(false)
@@ -303,25 +349,33 @@ const fetchSettings = async () => {
   loading.value = true
   try {
     const res = await sleepApi.getSleepSettings(agentId.value)
-    const data = res?.data
-    if (data && typeof data === 'object') {
-      const settings = data as SleepSettings
-      settingsForm.enabled = settings.enabled ?? settingsForm.enabled
-      settingsForm.schedule_start = settings.schedule_start ?? settingsForm.schedule_start
-      settingsForm.schedule_end = settings.schedule_end ?? settingsForm.schedule_end
-      settingsForm.min_interval_hours = settings.min_interval_hours ?? settingsForm.min_interval_hours
-      settingsForm.auto_sleep = settings.auto_sleep ?? settingsForm.auto_sleep
-      settingsForm.dream_enabled = settings.dream_enabled ?? settingsForm.dream_enabled
-
-      // Also populate legacy forms if available
-      if (settings.schedule_start) {
-        schedule.value.sleep_time = settings.schedule_start as any
-      }
-      if (settings.schedule_end) {
-        schedule.value.wake_time = settings.schedule_end as any
-      }
-      schedule.value.enabled = settings.auto_sleep ?? schedule.value.enabled
-      dreams.value.enabled = settings.dream_enabled ?? dreams.value.enabled
+    const settings = sleepApi.unwrapSleep<SleepSettings>(res)
+    if (settings && typeof settings === 'object') {
+      settingsForm.auto_sleep_enabled = settings.auto_sleep_enabled ?? settingsForm.auto_sleep_enabled
+      settingsForm.sleep_threshold_minutes = settings.sleep_threshold_minutes ?? settingsForm.sleep_threshold_minutes
+      settingsForm.sleep_duration_minutes = settings.sleep_duration_minutes ?? settingsForm.sleep_duration_minutes
+      settingsForm.dream_replay_enabled = settings.dream_replay_enabled ?? settingsForm.dream_replay_enabled
+      settingsForm.memory_consolidation_enabled =
+        settings.memory_consolidation_enabled ?? settingsForm.memory_consolidation_enabled
+      settingsForm.conflict_resolution_enabled =
+        settings.conflict_resolution_enabled ?? settingsForm.conflict_resolution_enabled
+      settingsForm.sleep_mode = settings.sleep_mode ?? settingsForm.sleep_mode
+      settingsForm.temp_threshold_light_sleep =
+        settings.temp_threshold_light_sleep ?? settingsForm.temp_threshold_light_sleep
+      settingsForm.temp_threshold_deep_sleep =
+        settings.temp_threshold_deep_sleep ?? settingsForm.temp_threshold_deep_sleep
+      settingsForm.temp_threshold_rem = settings.temp_threshold_rem ?? settingsForm.temp_threshold_rem
+      settingsForm.temp_threshold_hibernate =
+        settings.temp_threshold_hibernate ?? settingsForm.temp_threshold_hibernate
+      settingsForm.idle_threshold_light_sleep =
+        settings.idle_threshold_light_sleep ?? settingsForm.idle_threshold_light_sleep
+      settingsForm.idle_threshold_deep_sleep =
+        settings.idle_threshold_deep_sleep ?? settingsForm.idle_threshold_deep_sleep
+      settingsForm.idle_threshold_rem = settings.idle_threshold_rem ?? settingsForm.idle_threshold_rem
+      settingsForm.idle_threshold_hibernate =
+        settings.idle_threshold_hibernate ?? settingsForm.idle_threshold_hibernate
+      settingsForm.monitor_interval_seconds =
+        settings.monitor_interval_seconds ?? settingsForm.monitor_interval_seconds
     }
   } catch (e: any) {
     message.error(e?.message || t('common.error'))
@@ -346,18 +400,33 @@ const fetchConflicts = async () => {
 // --- Actions ---
 const handleSave = async () => {
   // Validation
-  if (settingsForm.min_interval_hours < 1 || settingsForm.min_interval_hours > 168) {
+  if (
+    settingsForm.sleep_threshold_minutes < 1 ||
+    settingsForm.sleep_threshold_minutes > 1440 ||
+    settingsForm.sleep_duration_minutes < 1 ||
+    settingsForm.sleep_duration_minutes > 1440
+  ) {
     message.warning(t('sleep.minIntervalValidation'))
     return
   }
 
   const payload: Partial<SleepSettings> = {
-    enabled: settingsForm.enabled,
-    schedule_start: settingsForm.schedule_start,
-    schedule_end: settingsForm.schedule_end,
-    min_interval_hours: settingsForm.min_interval_hours,
-    auto_sleep: settingsForm.auto_sleep,
-    dream_enabled: settingsForm.dream_enabled,
+    auto_sleep_enabled: settingsForm.auto_sleep_enabled,
+    sleep_threshold_minutes: settingsForm.sleep_threshold_minutes,
+    sleep_duration_minutes: settingsForm.sleep_duration_minutes,
+    dream_replay_enabled: settingsForm.dream_replay_enabled,
+    memory_consolidation_enabled: settingsForm.memory_consolidation_enabled,
+    conflict_resolution_enabled: settingsForm.conflict_resolution_enabled,
+    sleep_mode: settingsForm.sleep_mode,
+    temp_threshold_light_sleep: settingsForm.temp_threshold_light_sleep,
+    temp_threshold_deep_sleep: settingsForm.temp_threshold_deep_sleep,
+    temp_threshold_rem: settingsForm.temp_threshold_rem,
+    temp_threshold_hibernate: settingsForm.temp_threshold_hibernate,
+    idle_threshold_light_sleep: settingsForm.idle_threshold_light_sleep,
+    idle_threshold_deep_sleep: settingsForm.idle_threshold_deep_sleep,
+    idle_threshold_rem: settingsForm.idle_threshold_rem,
+    idle_threshold_hibernate: settingsForm.idle_threshold_hibernate,
+    monitor_interval_seconds: settingsForm.monitor_interval_seconds,
   }
 
   const result = await saveMutation.execute(payload)

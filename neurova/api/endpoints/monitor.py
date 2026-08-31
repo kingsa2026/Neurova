@@ -15,7 +15,7 @@ import time
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from neurova.api.endpoints import get_app_state

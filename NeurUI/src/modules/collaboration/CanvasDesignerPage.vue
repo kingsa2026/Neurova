@@ -95,6 +95,7 @@
       <!-- 中间：画布区域 -->
       <main
         class="canvas-main"
+        :class="{ 'space-down': spaceDown, 'space-panning': spacePanning }"
         ref="canvasRef"
         :style="gridStyle"
         @dragover.prevent
@@ -466,7 +467,7 @@ import { useI18n } from 'vue-i18n'
 import {
   ArrowLeftOutlined, DownOutlined, BgColorsOutlined,
   ApartmentOutlined, RobotOutlined, BulbOutlined,
-  ClockCircleOutlined, DatabaseOutlined, FileOutlined, ShoppingOutlined,
+  ClockCircleOutlined, DatabaseOutlined, FileOutlined, ShopOutlined, ShoppingOutlined,
   FullscreenOutlined, FullscreenExitOutlined,
 } from '@ant-design/icons-vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -494,6 +495,7 @@ import MockEditor from './MockEditor.vue'
 import { createDebugController, type DebugController } from './DebugPanel'
 import { duplicateNodesForPaste } from './canvasClipboard'
 import { normalizeRect, nodesInRect } from './canvasSelection'
+import { panByDrag, dropNodePosition, shouldPanOnSpace } from './canvasPan'
 import MiniMap from './MiniMap.vue'
 import { useReachableModels, buildModelOptions } from '@/composables/useReachableModels'
 import {
@@ -653,6 +655,52 @@ function onWheel(e: WheelEvent) {
     viewport.panX -= dx
     viewport.panY -= dy
   }
+}
+
+// ── 空格+左键拖动画布（视口平移，Figma 式抓取）──
+const spaceDown = ref(false)
+const spacePanning = ref(false)
+let spacePanBase: { sx: number; sy: number; panX: number; panY: number } | null = null
+
+/** document capture 监听：空格+左键按下时接管平移，抑制框选/节点拖拽/连线 */
+function onSpacePanCapture(e: MouseEvent) {
+  if (!shouldPanOnSpace(spaceDown.value, e.button, Boolean(canvasRoot.value?.contains(e.target as Node)))) {
+    return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  spacePanning.value = true
+  spacePanBase = { sx: e.clientX, sy: e.clientY, panX: viewport.panX, panY: viewport.panY }
+
+  const onMove = (ev: MouseEvent) => {
+    if (!spacePanBase) return
+    const next = panByDrag(
+      { panX: spacePanBase.panX, panY: spacePanBase.panY },
+      { x: spacePanBase.sx, y: spacePanBase.sy },
+      { x: ev.clientX, y: ev.clientY },
+    )
+    viewport.panX = next.panX
+    viewport.panY = next.panY
+  }
+  const onUp = () => {
+    spacePanBase = null
+    spacePanning.value = false
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
+}
+
+function onKeyUp(e: KeyboardEvent) {
+  if (e.key === ' ') spaceDown.value = false
+}
+
+/** 窗口失焦：防止空格状态残留（拖拽中切走应用） */
+function onCanvasWindowBlur() {
+  spaceDown.value = false
+  spacePanning.value = false
+  spacePanBase = null
 }
 
 const graphStyle = computed(() => ({
@@ -1550,7 +1598,7 @@ function addNodeAt(paletteNode: PaletteNode, x: number, y: number) {
     type: paletteNode.type,
     label: paletteNode.label,
     icon: paletteNode.icon,
-    position: { x: Math.max(0, x - 60), y: Math.max(0, y - 20) },
+    position: dropNodePosition(x, y),
     inputs: paletteNode.inputs,
     outputs: paletteNode.outputs,
     config: { ...paletteNode.defaultConfig },
@@ -1675,8 +1723,9 @@ function startDrag(event: MouseEvent, node: CanvasNodeSnapshot) {
     // 屏幕位移除以缩放 = 画布坐标位移
     const dx = (e.clientX - dragBase.sx) / viewport.zoom
     const dy = (e.clientY - dragBase.sy) / viewport.zoom
-    draggingNode.position.x = Math.max(0, dragBase.nx + dx)
-    draggingNode.position.y = Math.max(0, dragBase.ny + dy)
+    // 无限画布：允许负坐标（无原点硬边界），负值经视口平移可正常显示
+    draggingNode.position.x = dragBase.nx + dx
+    draggingNode.position.y = dragBase.ny + dy
     for (const base of dragBase.edges) {
       const edge = canvasEdges.value.find(ed => ed.id === base.id)
       if (!edge) continue
@@ -1795,6 +1844,13 @@ function removeEdge(id: string) {
 function onKeyDown(e: KeyboardEvent) {
   const tag = (e.target as HTMLElement)?.tagName
   if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+  // 空格：抓取画布（+左键拖拽平移）；preventDefault 防页面滚动/聚焦按钮误触发
+  if (e.key === ' ') {
+    e.preventDefault()
+    spaceDown.value = true
+    return
+  }
 
   // Esc：关闭菜单/清除选中
   if (e.key === 'Escape') {
@@ -2226,6 +2282,9 @@ function toggleFullscreen(): void {
 
 onMounted(async () => {
   document.addEventListener('keydown', onKeyDown)
+  document.addEventListener('keyup', onKeyUp)
+  document.addEventListener('mousedown', onSpacePanCapture, true)
+  window.addEventListener('blur', onCanvasWindowBlur)
   document.addEventListener('mousedown', onDocMousedownClose)
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('webkitfullscreenchange', onFullscreenChange)
@@ -2256,6 +2315,9 @@ watch(
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeyDown)
+  document.removeEventListener('keyup', onKeyUp)
+  document.removeEventListener('mousedown', onSpacePanCapture, true)
+  window.removeEventListener('blur', onCanvasWindowBlur)
   document.removeEventListener('mousedown', onDocMousedownClose)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   document.removeEventListener('webkitfullscreenchange', onFullscreenChange)
@@ -2318,6 +2380,11 @@ onBeforeUnmount(() => {
 
 /* 画布主区域 */
 .canvas-main { flex: 1; position: relative; overflow: hidden; background-image: radial-gradient(circle, rgba(255, 255, 255, 0.04) 1px, transparent 1px); background-size: 20px 20px; }
+/* 空格+左键平移（Figma 式抓取）：空格按下→抓手，拖动中→抓取 */
+.canvas-main.space-down { cursor: grab; }
+.canvas-main.space-panning { cursor: grabbing; }
+.canvas-main.space-down .graph-node,
+.canvas-main.space-panning .graph-node { cursor: inherit; }
 .canvas-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--nr-text-tertiary); gap: 8px; }
 .empty-icon { font-size: 48px; opacity: 0.3; }
 .canvas-empty p { margin: 0; font-size: 14px; }

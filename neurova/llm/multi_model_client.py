@@ -79,20 +79,30 @@ class MultiModelLLMClient:
     """
 
     _instance = None
+    # scope → 实例 隔离注册表(admin 走 _instance 槽,保持存量兼容)
+    _instances: Dict[str, "MultiModelLLMClient"] = {}
     # 使用 RLock（可重入锁）：__new__ 持锁后 __init__ 重入调用，Lock 会永久阻塞
     # 修复 P0-3 (C6): 原 threading.Lock() 不可重入，__init__ 内重入会死锁
     _lock = threading.RLock()
 
     def __new__(cls, *args, **kwargs):
+        scope = kwargs.get("scope")
         with cls._lock:
-            if cls._instance is None:
-                cls._instance = super().__new__(cls)
-            return cls._instance
+            if scope is None:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                return cls._instance
+            inst = cls._instances.get(scope)
+            if inst is None:
+                inst = super().__new__(cls)
+                cls._instances[scope] = inst
+            return inst
 
     def __init__(
         self,
         provider_manager: Optional[LLMProviderManager] = None,
         strategy: LoadBalancingStrategy = LoadBalancingStrategy.PRIORITY_FIRST,
+        scope: Optional[str] = None,
     ):
         # 修复 P0-3 (C6): __init__ 的 _initialized 检查必须在锁内，
         # 否则两线程可同时通过 hasattr 检查（TOCTOU）
@@ -101,7 +111,11 @@ class MultiModelLLMClient:
             if hasattr(self, "_initialized") and self._initialized:
                 return
 
-            self._provider_manager = provider_manager or get_provider_manager()
+            self._scope = scope
+            # 无参构造(scope=None)维持旧单例行为;显式 scope 走对应隔离配置
+            self._provider_manager = provider_manager or get_provider_manager(
+                scope=scope or "admin",
+            )
             self._clients: Dict[str, ModelClient] = {}  # key: provider_id/model
             self._current_provider_id: Optional[str] = None
             self._current_model: Optional[str] = None
@@ -137,15 +151,20 @@ class MultiModelLLMClient:
         （已缓存了空 api_key 的 providers），reset 链路在 provider_manager 处断裂。
         """
         with cls._lock:
-            # 清除实例级 _initialized 标志（防止已存在的实例阻止重新初始化）
+            # 清除所有 scope 实例的 _initialized 标志（防止已存在的实例阻止重新初始化）
+            for inst in list(cls._instances.values()):
+                if hasattr(inst, "_initialized"):
+                    inst._initialized = False
+            cls._instances.clear()
             instance = cls._instance
             if instance is not None and hasattr(instance, "_initialized"):
                 instance._initialized = False
             # 清除类级单例
             cls._instance = None
         # 清除模块级单例（在锁外，因为 get_multi_model_client 自己会加锁）
-        global _multi_model_client
+        global _multi_model_client, _multi_model_clients
         _multi_model_client = None
+        _multi_model_clients.clear()
 
         # 清除 provider_manager 单例，确保 reset 链路穿透到 provider_manager 层
         # 延迟导入避免循环依赖（multi_model_client 顶部已 import provider_manager，
@@ -534,17 +553,44 @@ class MultiModelLLMClient:
 
 
 _multi_model_client: Optional[MultiModelLLMClient] = None
+# scope → 实例 隔离注册表
+_multi_model_clients: Dict[str, MultiModelLLMClient] = {}
 
 
-def get_multi_model_client() -> MultiModelLLMClient:
-    """获取 MultiModelLLMClient 单例"""
+def get_multi_model_client(scope: Optional[str] = None) -> MultiModelLLMClient:
+    """获取 MultiModelLLMClient 单例(按 scope 隔离)
+
+    - scope None/"admin":全局单例(存量行为)
+    - scope "user:<user_id>":该用户独立实例(独立 provider manager)
+    """
     global _multi_model_client
-    if _multi_model_client is None:
-        _multi_model_client = MultiModelLLMClient()
-    return _multi_model_client
+    if scope in (None, "admin"):
+        if _multi_model_client is None:
+            # 无参/默认走类级 _instance 槽(存量单例语义,既有重置链路兼容)
+            _multi_model_client = MultiModelLLMClient(scope=None)
+        return _multi_model_client
+    client = _multi_model_clients.get(scope)
+    if client is None:
+        client = MultiModelLLMClient(scope=scope)
+        _multi_model_clients[scope] = client
+    return client
+
+
+def reset_multi_model_client() -> None:
+    """重置全部 MultiModelLLMClient 单例(按 scope)并穿透 provider_manager 层。"""
+    MultiModelLLMClient.reset()
+
+
+def scope_for_owner(owner_user_id: Optional[str]) -> Optional[str]:
+    """Agent owner_user_id → LLM 配置 scope;无 owner 返回 None(走全局 admin)。"""
+    if not owner_user_id:
+        return None
+    return f"user:{owner_user_id}"
 
 
 __all__ = [
     "MultiModelLLMClient",
     "get_multi_model_client",
+    "reset_multi_model_client",
+    "scope_for_owner",
 ]

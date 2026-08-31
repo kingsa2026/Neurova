@@ -102,6 +102,9 @@ class IdleTimeTracker(BaseModule):
         self._monitor_thread: Optional[threading.Thread] = None
         self._callbacks: Dict[str, List[Callable]] = {}
         self._last_consolidation_result: Optional[Dict[str, Any]] = None
+        # 阶段推进参数快照: check_and_update_phase 每轮从 SleepConsolidation
+        # 设置刷新; 未读快照时阈值 getter 回退内置默认值
+        self._active_sleep_settings: Optional[Dict[str, Any]] = None
         self._memory_manager = None
         # P2-6: 真实记忆温度来源（由 agent 注入 memory_manager.get_average_temperature）
         self._temperature_provider: Optional[Callable[[], float]] = None
@@ -229,6 +232,19 @@ class IdleTimeTracker(BaseModule):
             self.log_warning("Cannot trigger consolidation: missing consolidation or memory manager")
             return
 
+        # 设置通路修复: memory_consolidation_enabled 此前仅在手动 start_sleep
+        # 生效, 睡眠阶段触发的巩固从不检查。phase 非空 = 睡眠阶段触发;
+        # phase=None = 手动/过载触发, 不受此开关限制。
+        if phase is not None:
+            try:
+                settings = self._sleep_consolidation.get_settings()
+            except Exception as e:
+                self.log_warning(f"Failed to read sleep settings: {e}")
+                settings = {}
+            if not settings.get("memory_consolidation_enabled", True):
+                self.log_debug("memory_consolidation_enabled=False, 跳过睡眠巩固")
+                return
+
         try:
             memories = self._memory_manager.get_all_memories()
             if memories:
@@ -332,7 +348,15 @@ class IdleTimeTracker(BaseModule):
         return self.PHASE_DISPLAY_NAMES.get(phase, phase)
 
     def _idle_threshold_for(self, phase: str) -> float:
-        """获取阶段的空闲秒数阈值（无映射的阶段返回 0）"""
+        """获取阶段的空闲阈值（秒）。
+
+        设置快照的 idle_threshold_{phase} 以分钟存储, 乘 60 转秒;
+        快照缺省时回退 SleepPhaseThresholds 内置秒值。
+        """
+        settings = self._active_sleep_settings or {}
+        minutes = settings.get(f"idle_threshold_{phase}")
+        if isinstance(minutes, (int, float)) and minutes > 0:
+            return float(minutes) * 60.0
         key = self._PHASE_THRESHOLD_KEYS.get(phase)
         if not key:
             return 0.0
@@ -362,16 +386,21 @@ class IdleTimeTracker(BaseModule):
                 return current_idle >= self._idle_threshold_for(target_phase)
             return False
 
+    # 各阶段温度阈值内置默认（设置快照缺省时回退）
+    _DEFAULT_TEMP_THRESHOLDS = {
+        "light_sleep": 30.0,
+        "deep_sleep": 25.0,
+        "rem": 20.0,
+        "hibernate": 15.0,
+    }
+
     def _get_temperature_threshold(self, phase: str) -> float:
-        """获取阶段的温度阈值"""
-        # 简化实现：使用默认阈值
-        thresholds = {
-            "light_sleep": 30.0,
-            "deep_sleep": 25.0,
-            "rem": 20.0,
-            "hibernate": 15.0,
-        }
-        return thresholds.get(phase, 30.0)
+        """获取阶段的温度阈值（设置快照优先, 缺省回退内置值）"""
+        settings = self._active_sleep_settings or {}
+        value = settings.get(f"temp_threshold_{phase}")
+        if isinstance(value, (int, float)):
+            return float(value)
+        return self._DEFAULT_TEMP_THRESHOLDS.get(phase, 30.0)
 
     def get_next_phase(self, current_temperature: Optional[float] = None) -> Optional[str]:
         """获取下一个应该进入的阶段"""
@@ -397,13 +426,57 @@ class IdleTimeTracker(BaseModule):
                 if current_idle >= threshold:
                     return phase
             else:  # either
+                # 文档语义: 温度或时间任一满足即可（原实现只查时间）
+                temp_threshold = self._get_temperature_threshold(phase)
+                if current_temperature is not None and current_temperature <= temp_threshold:
+                    return phase
                 if current_idle >= threshold:
                     return phase
 
         return None
 
     def check_and_update_phase(self, current_temperature: Optional[float] = None) -> Optional[str]:
-        """检查并更新阶段（不传温度时读取真实记忆平均温度）"""
+        """检查并更新阶段（不传温度时读取真实记忆平均温度）
+
+        设置通路: 每轮先读取 SleepConsolidation 设置快照并应用
+        （判定模式 / 各阶段温度阈值 / 空闲阈值 / 监控间隔），再做阶段判定。
+        未挂接管理器时快照为空, 全部回退内置默认值。
+        """
+        settings: Dict[str, Any] = {}
+        if self._sleep_consolidation is not None:
+            try:
+                settings = self._sleep_consolidation.get_settings()
+            except Exception as e:
+                self.log_warning(f"Failed to read sleep settings: {e}")
+                settings = {}
+
+            # 应用设置快照: 阈值 getter (_get_temperature_threshold /
+            # _idle_threshold_for) 与判定模式都从快照取值
+            self._active_sleep_settings = settings
+            mode = settings.get("sleep_mode")
+            if mode in ("temperature", "time", "either"):
+                self._sleep_mode = mode
+            interval = settings.get("monitor_interval_seconds")
+            if isinstance(interval, (int, float)) and interval >= 10:
+                self._monitor_interval = int(interval)
+
+            # 设置通路修复: auto_sleep_enabled 此前全库无消费方（开关形同摆设）
+            if not settings.get("auto_sleep_enabled", True):
+                self.log_debug("auto_sleep_enabled=False, 跳过自动阶段迁移")
+                return None
+
+            # sleep_threshold_minutes 通路修复: 活跃使用中不自动入睡 ——
+            # 仅拦截从 active 的首次迁移（深层迁移走各阶段自身阈值）。
+            # 空闲 0/缺省表示不启用该门, 保持旧行为。
+            if self._current_phase == "active":
+                threshold_minutes = float(settings.get("sleep_threshold_minutes", 0) or 0)
+                if threshold_minutes > 0 and self.get_current_idle_time() < threshold_minutes * 60:
+                    self.log_debug(
+                        f"空闲 {self.get_current_idle_time()}s 未达休眠阈值 "
+                        f"{threshold_minutes}min, 跳过自动阶段迁移"
+                    )
+                    return None
+
         next_phase = self.get_next_phase(current_temperature)
         if next_phase and next_phase != self._current_phase:
             self._transition_to_phase(next_phase)

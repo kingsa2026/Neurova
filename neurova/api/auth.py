@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = get_logger(__name__)
@@ -344,11 +344,38 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return {
-        "user_id": payload.get("sub", "unknown"),
-        "username": payload.get("username", "unknown"),
-        "role": payload.get("role", "user"),
-    }
+    return _user_identity(payload)
+
+
+_SERVICE_TOKEN_HEADER = "X-Service-Token"
+
+
+async def get_current_user_or_service(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Dict[str, Any]:
+    """FastAPI 依赖：JWT 优先，无 JWT 时接受服务令牌（遗留修复 ④）。
+
+    面向无 JWT 的机器调用方（渠道后端、n8n、运维脚本等）访问知识条目 API：
+    - 仅当环境变量 NEUROVA_SERVICE_TOKEN 已配置时启用（未配置=功能关闭，无后门）
+    - 头 X-Service-Token 与配置值做常量时间比较（hmac.compare_digest）
+    - 匹配 → role="admin" 的受信机器身份（user_id="system"）
+    - 服务令牌不匹配时回落 JWT 校验，两者都失败 → 401
+    """
+    import hmac as _hmac
+    import os as _os
+
+    expected = (_os.environ.get("NEUROVA_SERVICE_TOKEN") or "").strip()
+    provided = str(getattr(request, "headers", {}).get(_SERVICE_TOKEN_HEADER, "") or "").strip()
+    if expected and provided and _hmac.compare_digest(provided, expected):
+        return {
+            "user_id": "system",
+            "username": "service",
+            "role": "admin",
+            "neuser_id": "system",
+            "auth_source": "service_token",
+        }
+    return await get_current_user(credentials)
 
 
 async def get_optional_user(
@@ -372,14 +399,26 @@ async def get_optional_user(
     if not payload:
         return None
 
+    return _user_identity(payload)
+
+
+_DEFAULT_USER = {"user_id": "default", "username": "default", "role": "user", "neuser_id": "default"}
+
+
+def _user_identity(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """从 JWT payload 提取用户身份字典 (含 neuser_id)。
+
+    审计修复 (P0-2): get_current_user 系列必须暴露 neuser_id,
+    否则三层隔离第 2 层永远回退 "default"。存量 Token 无声明时
+    回退 sub (即账号 id), 与新签发的 Token 语义一致。
+    """
+    sub = payload.get("sub", "unknown")
     return {
-        "user_id": payload.get("sub", "unknown"),
+        "user_id": sub,
         "username": payload.get("username", "unknown"),
         "role": payload.get("role", "user"),
+        "neuser_id": payload.get("neuser_id") or sub,
     }
-
-
-_DEFAULT_USER = {"user_id": "default", "username": "default", "role": "user"}
 
 
 async def get_current_user_or_default(
@@ -399,8 +438,4 @@ async def get_current_user_or_default(
     if not payload:
         return _DEFAULT_USER.copy()
 
-    return {
-        "user_id": payload.get("sub", "default"),
-        "username": payload.get("username", "default"),
-        "role": payload.get("role", "user"),
-    }
+    return _user_identity(payload)

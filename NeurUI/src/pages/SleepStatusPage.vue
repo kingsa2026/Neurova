@@ -241,7 +241,7 @@ const {
   poll: pollStatus,
 } = usePolling(async () => {
   const res = await sleepApi.getSleepStatus(agentId.value)
-  const data = res?.data
+  const data = sleepApi.unwrapSleep<SleepStatus>(res)
   if (data) {
     sleepStatus.value = data as SleepStatus
   }
@@ -303,7 +303,7 @@ const fetchAll = async () => {
 const fetchStatus = async () => {
   try {
     const res = await sleepApi.getSleepStatus(agentId.value)
-    const data = res?.data
+    const data = sleepApi.unwrapSleep<SleepStatus>(res)
     if (data) sleepStatus.value = data as SleepStatus
   } catch (e: any) {
     message.error(e?.message || t('common.error'))
@@ -316,8 +316,8 @@ const fetchDreams = async () => {
     const params: { page?: number; size?: number; type?: string } = { page: 1, size: 20 }
     if (dreamTypeFilter.value) params.type = dreamTypeFilter.value
     const res = await sleepApi.getDreams(agentId.value, params)
-    const data = res?.data
-    if (data && typeof data === 'object' && 'items' in data) {
+    const data = sleepApi.unwrapSleep<Dream[] | { items: Dream[] }>(res)
+    if (data && typeof data === 'object' && 'items' in (data as object)) {
       dreams.value = (data as any).items || []
     } else if (Array.isArray(data)) {
       dreams.value = data
@@ -335,8 +335,8 @@ const fetchInsights = async () => {
   insightsLoading.value = true
   try {
     const res = await sleepApi.getSleepInsights(agentId.value, { limit: 20, offset: 0 })
-    const data = res?.data
-    if (data && typeof data === 'object' && 'items' in data) {
+    const data = sleepApi.unwrapSleep<SleepInsight[] | { items: SleepInsight[] }>(res)
+    if (data && typeof data === 'object' && 'items' in (data as object)) {
       insights.value = (data as any).items || []
     } else if (Array.isArray(data)) {
       insights.value = data
@@ -354,7 +354,7 @@ const fetchConflicts = async () => {
   conflictsLoading.value = true
   try {
     const res = await sleepApi.getMergeConflicts(agentId.value)
-    const data = res?.data
+    const data = sleepApi.unwrapSleep<MergeConflict[]>(res)
     conflicts.value = Array.isArray(data) ? data : []
   } catch {
     conflicts.value = []
