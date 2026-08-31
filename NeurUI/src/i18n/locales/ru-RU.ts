@@ -1953,6 +1953,8 @@ export default {
   },
   canvas: {
     subflowNode: 'Подпроцесс',
+    copiedCount: 'Скопировано узлов: {n}',
+    pastedCount: 'Вставлено узлов: {n}',
     ...STORE_CANVAS,
     c0001: 'Текстовый ввод',
     c0002: 'Медиаввод',

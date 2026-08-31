@@ -741,6 +741,11 @@ async def run_canvas_workflow(request: Request, canvas_id: str, body: Dict[str, 
         raise HTTPException(status_code=500, detail=f"画布转换失败: {str(e)}")
 
     executor = get_workflow_executor()
+    # 遗留 B：运行语义=用户在自己的画布上试跑——内存中置 PUBLISHED，
+    # 让 subflow 默认 loader（仅认 PUBLISHED）能引用本画布；不落库。
+    from neurova.collaboration.neurflow.models import WorkflowStatus
+
+    workflow.status = WorkflowStatus.PUBLISHED
     execution = executor.create_instance(workflow, inputs={}, user_id="canvas")
 
     # 修复① — 调试运行：debug=true 时创建 DebugSession 并注册到

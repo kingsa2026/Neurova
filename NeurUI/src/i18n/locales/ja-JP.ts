@@ -1953,6 +1953,8 @@ export default {
   },
   canvas: {
     subflowNode: 'サブワークフロー',
+    copiedCount: '{n} 個のノードをコピーしました',
+    pastedCount: '{n} 個のノードを貼り付けました',
     ...STORE_CANVAS,
     c0001: 'テキスト入力',
     c0002: 'メディア入力',

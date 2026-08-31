@@ -1953,6 +1953,8 @@ export default {
   },
   canvas: {
     subflowNode: 'سير فرعي',
+    copiedCount: 'تم نسخ {n} عقدة',
+    pastedCount: 'تم لصق {n} عقدة',
     ...STORE_CANVAS,
     c0001: 'إدخال نصي',
     c0002: 'إدخال وسائط',

@@ -1953,6 +1953,8 @@ export default {
   },
   canvas: {
     subflowNode: 'Unterworkflow',
+    copiedCount: '{n} Knoten kopiert',
+    pastedCount: '{n} Knoten eingefügt',
     ...STORE_CANVAS,
     c0001: 'Texteingabe',
     c0002: 'Medien-Eingabe',

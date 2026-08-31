@@ -872,31 +872,52 @@ async def exec_loop(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, An
 
 
 async def exec_parallel(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """并行执行节点执行器"""
+    """并行执行节点执行器（标记性节点——真实并发由引擎拓扑分层 gather 承担）"""
     branches_count = config.get("branches_count", 2)
+    node_results = ctx.get("node_results", {})
+    expected = ctx.get("expected_upstream") or []
+    # 汇总上游分支产出（并行层内 gather 已完成，此处只做收集）
+    branches = {
+        uid: node_results[uid].get("output")
+        for uid in expected
+        if isinstance(node_results.get(uid), dict) and node_results[uid].get("output") is not None
+    }
 
     return {
         "status": "success",
         "output": {
             "branches_count": branches_count,
-            "status": "ready",
+            "branches": branches,
         },
     }
 
 
 async def exec_merge(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """合并节点执行器"""
-    config.get("strategy", "all")
-    node_results = ctx.get("node_results", {})
+    """合并节点执行器（遗留 C：strategy all/any 语义生效）
 
-    # 根据策略合并结果
+    strategy="all"（默认）：**期望上游全集**都产出非空 output 才 success；
+    strategy="any"：任一上游产出即 success。
+    未满足时返回 status="waiting"（执行引擎视作成功——
+    该节点不阻塞工作流，下游拿到部分合并结果）。
+    期望上游全集由引擎经 ctx["expected_upstream"] 注入。
+    """
+    strategy = config.get("strategy", "all")
+    node_results = ctx.get("node_results", {})
+    expected = ctx.get("expected_upstream") or []
+
+    # 收集有 output 的上游
     merged = {}
     for node_id, result in node_results.items():
         if isinstance(result, dict) and "output" in result:
             merged[node_id] = result["output"]
 
+    if strategy == "any":
+        ok = any(bool(merged.get(uid)) for uid in expected) if expected else bool(merged)
+    else:  # all（默认）：期望上游全部到齐且真值
+        ok = all(bool(merged.get(uid)) for uid in expected) if expected else False
+
     return {
-        "status": "success",
+        "status": "success" if ok else "waiting",
         "output": merged,
     }
 
