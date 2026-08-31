@@ -89,3 +89,5 @@ describe('locale value sanity', () => {
     expect(bad).toEqual([])
   })
 })
+
+// 消息可编译性守卫见 message-compile.test.ts（vue-i18n runtime 翻译路径 + 渲染契约）
