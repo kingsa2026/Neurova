@@ -21,6 +21,7 @@ class EstimationStrategy(Enum):
     BALANCED = "balanced"  # 平衡策略（推荐）
     CONSERVATIVE = "conservative"  # 保守策略（高估）
     AGGRESSIVE = "aggressive"  # 激进策略（低估）
+    EXACT = "exact"  # 精确策略（P1-1②）：tiktoken o200k 计数，失败回退 BALANCED
     LEGACY_INJECTOR = "legacy_injector"  # 兼容 injector.py
     LEGACY_POOL = "legacy_pool"  # 兼容 context_pool.py
     LEGACY_COMPRESSOR = "legacy_compressor"  # 兼容 context_compressor.py
@@ -42,12 +43,24 @@ class TokenEstimator:
             strategy: 估算策略
         """
         self.strategy = strategy
+        self._tiktoken_encoder = None
+        self._tiktoken_failed = False
         self._load_strategy(strategy)
 
     def _load_strategy(self, strategy: EstimationStrategy):
         """加载策略配置"""
         if strategy == EstimationStrategy.BALANCED:
             # 平衡策略：兼顾精度和性能
+            self.chinese_ratio = 1.5
+            self.english_word_ratio = 0.25
+            self.other_char_ratio = 0.1
+            self.min_tokens = 1
+            self.use_word_splitting = True
+            self.use_regex_splitting = False
+
+        elif strategy == EstimationStrategy.EXACT:
+            # 精确策略（P1-1②）：主路径走 tiktoken（estimate 顶部处理）；
+            # 回退时使用 BALANCED 参数
             self.chinese_ratio = 1.5
             self.english_word_ratio = 0.25
             self.other_char_ratio = 0.1
@@ -109,6 +122,20 @@ class TokenEstimator:
             self.use_word_splitting = False
             self.use_regex_splitting = False
 
+    def _get_tiktoken_encoder(self):
+        """懒加载 tiktoken o200k 编码器；失败标记 _tiktoken_failed 并回退比例估算。"""
+        if self._tiktoken_failed:
+            return None
+        if self._tiktoken_encoder is None:
+            try:
+                import tiktoken
+
+                self._tiktoken_encoder = tiktoken.get_encoding("o200k_base")
+            except Exception:
+                self._tiktoken_failed = True
+                self._tiktoken_encoder = None
+        return self._tiktoken_encoder
+
     def estimate(self, text: str) -> int:
         """
         估算文本的 token 数量
@@ -121,6 +148,13 @@ class TokenEstimator:
         """
         if not text:
             return 0
+
+        # P1-1② EXACT：tiktoken o200k 精确计数；失败回退 BALANCED 语义
+        if self.strategy == EstimationStrategy.EXACT:
+            encoder = self._get_tiktoken_encoder()
+            if encoder is not None:
+                return len(encoder.encode(text))
+            # 落入下方 BALANCED 逻辑（_load_strategy 已为其装载参数）
 
         # 中文字符计数
         chinese_chars = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
