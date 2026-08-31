@@ -195,6 +195,47 @@ class FlowContext:
         }
 
 
+def compute_next_run(
+    cron_expression: Optional[str] = None,
+    interval_seconds: Optional[int] = None,
+    after: Optional[float] = None,
+) -> Optional[float]:
+    """计算下一次触发时间戳。
+
+    - interval: after + interval_seconds;
+    - cron(5 段 分 时 日 月 周): APScheduler CronTrigger 语义
+      (day_of_week 数字 0=周一..6=周日, 与前端可视化构建器一致), 忽略 after 的秒数;
+    - 两者皆无 → None(单次任务, 不排程)。
+
+    返回 None 时任务不循环(单次触发或表达式不可解析)。
+    """
+    import time
+    from datetime import datetime
+
+    try:
+        if interval_seconds and interval_seconds > 0:
+            base = after if after is not None else time.time()
+            return base + interval_seconds
+        if cron_expression:
+            from apscheduler.triggers.cron import CronTrigger
+            import zoneinfo
+
+            parts = cron_expression.split()
+            if len(parts) < 5:
+                return None
+            tz = zoneinfo.ZoneInfo("Asia/Shanghai")
+            base = after if after is not None else time.time()
+            trigger = CronTrigger(
+                minute=parts[0], hour=parts[1], day=parts[2],
+                month=parts[3], day_of_week=parts[4], timezone=tz,
+            )
+            nxt = trigger.get_next_fire_time(None, datetime.fromtimestamp(base, tz=tz))
+            return nxt.timestamp() if nxt is not None else None
+    except Exception:
+        return None
+    return None
+
+
 @dataclass
 class ScheduledTask:
     """计划任务"""
@@ -254,11 +295,13 @@ class ScheduledTask:
 
         # 计算下次运行时间
         if self.interval_seconds:
-            self.next_run_at = time.time() + self.interval_seconds
+            self.next_run_at = compute_next_run(interval_seconds=self.interval_seconds)
             self.status = "pending"
         elif self.cron_expression:
-            # TODO: 实现 cron 表达式解析
-            pass
+            # cron 循环: 计算下一次触发; 表达式不可解析时保持 completed(不再触发)
+            self.next_run_at = compute_next_run(cron_expression=self.cron_expression)
+            if self.next_run_at is not None:
+                self.status = "pending"
 
     def mark_failed(self, error: str = None) -> None:
         """标记为失败"""

@@ -31,7 +31,7 @@ class AgentScheduler:
                     cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self):
+    def __init__(self, storage_path: str = None):
         if hasattr(self, "_initialized"):
             return
 
@@ -40,10 +40,58 @@ class AgentScheduler:
         self._task_handlers: Dict[str, Callable] = {}  # action -> handler
         self._running = False
         self._scheduler_thread: Optional[threading.Thread] = None
-        self._task_lock = threading.Lock()
+        # RLock: persist 在持锁路径(add_task/remove_task/_execute_task)内可安全调用
+        self._task_lock = threading.RLock()
         self._event_handlers: List[Callable] = []
+        # 任务持久化: 重启不丢(内存态是遗留缺陷)
+        import os
+        self.storage_path = str(
+            storage_path or os.environ.get("NEUROVA_SCHEDULER_STORE") or "data/scheduler_tasks.json"
+        )
+        self._load_from_storage()
 
-        logger.info("AgentScheduler initialized")
+        logger.info("AgentScheduler initialized (storage=%s)", self.storage_path)
+
+    # ── 任务持久化 ──
+    def _load_from_storage(self) -> None:
+        """启动加载: 从 JSON 重建任务(内存态 → 持久化修复)"""
+        try:
+            import json
+            from pathlib import Path as _P
+
+            p = _P(self.storage_path)
+            if not p.exists():
+                return
+            with open(p, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if not isinstance(raw, list):
+                return
+            for item in raw:
+                try:
+                    task = ScheduledTask(**item)
+                    if task.task_id:
+                        self._tasks[task.task_id] = task
+                except Exception:  # noqa: BLE001 — 单条损坏不阻断整体加载
+                    logger.warning("skip corrupted schedule entry: %s", str(item)[:80])
+            logger.info("loaded %d scheduled task(s) from storage", len(self._tasks))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("load scheduler storage failed: %s", e)
+
+    def _persist(self) -> None:
+        """快照落盘(RLock 允许多次进入)"""
+        try:
+            import json
+            from dataclasses import asdict
+            from pathlib import Path as _P
+
+            with self._task_lock:
+                snapshot = [asdict(t) for t in self._tasks.values()]
+            p = _P(self.storage_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(snapshot, f, ensure_ascii=False, indent=2, default=str)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("persist scheduler storage failed: %s", e)
 
     def register_handler(self, action: str, handler: Callable) -> None:
         """注册任务处理器
@@ -72,6 +120,7 @@ class AgentScheduler:
             self._tasks[task.task_id] = task
             logger.info("Task added: %s (%s)", task.task_id, task.name)
             self._emit_event("task_added", task)
+            self._persist()
             return True
 
     def remove_task(self, task_id: str) -> bool:
@@ -90,6 +139,7 @@ class AgentScheduler:
             task = self._tasks.pop(task_id)
             logger.info("Task removed: %s (%s)", task_id, task.name)
             self._emit_event("task_removed", task)
+            self._persist()
             return True
 
     def get_task(self, task_id: str) -> Optional[ScheduledTask]:
@@ -118,6 +168,7 @@ class AgentScheduler:
         scheduled_at: float = None,
         interval_seconds: int = None,
         parameters: Dict[str, Any] = None,
+        cron_expression: str = None,
     ) -> ScheduledTask:
         """创建并添加任务
 
@@ -128,6 +179,7 @@ class AgentScheduler:
             scheduled_at: 计划执行时间
             interval_seconds: 重复间隔（秒）
             parameters: 动作参数
+            cron_expression: Cron 表达式(5 段 分时日月周)
 
         Returns:
             创建的任务
@@ -138,8 +190,17 @@ class AgentScheduler:
             agent_id=agent_id,
             scheduled_at=scheduled_at,
             interval_seconds=interval_seconds,
+            cron_expression=cron_expression,
             parameters=parameters or {},
         )
+        # 初始排程: interval/cron 预置 next_run_at, 否则首轮 is_due 恒 False 永不触发
+        from .models import compute_next_run
+
+        if task.cron_expression or interval_seconds:
+            task.next_run_at = compute_next_run(
+                cron_expression=task.cron_expression,
+                interval_seconds=interval_seconds,
+            )
         self.add_task(task)
         return task
 
@@ -189,6 +250,7 @@ class AgentScheduler:
             return
 
         task.mark_running()
+        self._persist()
         self._emit_event("task_started", task)
 
         try:
@@ -199,11 +261,13 @@ class AgentScheduler:
             result = handler(task, context)
 
             task.mark_completed(result)
+            self._persist()
             self._emit_event("task_completed", task)
             logger.info("Task completed: %s (%s)", task.task_id, task.name)
 
         except Exception as e:
             task.mark_failed(str(e))
+            self._persist()
             self._emit_event("task_failed", task, {"error": str(e)})
             logger.exception("Task failed: %s (%s): %s", task.task_id, task.name, e)
 
@@ -251,3 +315,68 @@ def get_scheduler() -> AgentScheduler:
     if _global_scheduler is None:
         _global_scheduler = AgentScheduler()
     return _global_scheduler
+
+
+def register_action_handlers(scheduler: "AgentScheduler", agent_resolver=None) -> None:
+    """注册调度动作处理器(断点修复: 此前全仓零注册, 任务触发即失败)。
+
+    handler 签名: (task: ScheduledTask, context: FlowContext) -> Any
+    同步执行; agent 交互(chat/execute_skill/run_workflow 均 async)经
+    asyncio.run 桥接(调度线程无运行中事件循环)。
+
+    agent_resolver(task) -> agent 对象; 缺省从 app state.agents 按
+    task.agent_id(兜底 default)解析。
+    """
+
+    def _resolve(task):
+        if agent_resolver is not None:
+            return agent_resolver(task)
+        try:
+            from neurova.api.endpoints import get_app_state
+
+            state = get_app_state() or {}
+            agents = (state.get("agents") or {}) or {}
+        except Exception:
+            agents = {}
+        return agents.get(task.agent_id or "default") or agents.get("default")
+
+    def _send_message(task, ctx):
+        agent = _resolve(task)
+        if agent is None:
+            raise RuntimeError(f"agent not found: {task.agent_id or 'default'}")
+        message = (task.parameters or {}).get("message", "")
+        import asyncio
+
+        return asyncio.run(agent.chat(message))
+
+    def _execute_skill(task, ctx):
+        agent = _resolve(task)
+        skill_id = (task.parameters or {}).get("skill_id", "") or ""
+        if not skill_id:
+            raise RuntimeError("execute_skill requires parameters.skill_id")
+        registry = getattr(agent, "_skill_registry", None)
+        if registry is None:
+            raise RuntimeError("agent skill registry not available")
+        import asyncio
+
+        return asyncio.run(registry.execute_skill(skill_id, dict(task.parameters or {})))
+
+    def _run_workflow(task, ctx):
+        workflow_id = (task.parameters or {}).get("workflow_id", "") or ""
+        if not workflow_id:
+            raise RuntimeError("run_workflow requires parameters.workflow_id")
+        from neurova.api.endpoints.neurflow_api import get_workflow_agent_deps
+
+        deps = get_workflow_agent_deps()
+        workflow = deps["load_published_workflow"](workflow_id)
+        if workflow is None:
+            raise RuntimeError(f"workflow not found or not published: {workflow_id}")
+        inputs = (task.parameters or {}).get("inputs") or {}
+        import asyncio
+
+        return asyncio.run(deps["run_workflow"](workflow, inputs))
+
+    scheduler.register_handler("send_message", _send_message)
+    scheduler.register_handler("execute_skill", _execute_skill)
+    scheduler.register_handler("run_workflow", _run_workflow)
+    logger.info("registered scheduler action handlers: send_message / execute_skill / run_workflow")
