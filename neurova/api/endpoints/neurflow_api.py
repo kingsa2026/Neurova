@@ -850,7 +850,10 @@ async def save_workflow_viewport(workflow_id: str, data: Dict[str, Any] = Body(.
 
 
 @router.post("/workflows/{workflow_id}/publish")
-async def publish_workflow(workflow_id: str):
+async def publish_workflow(
+    workflow_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """发布工作流（P2：编译 AgentManifest 并落 agents 记录，chat 页可直接选用）"""
     storage = _get_storage()
     existing = storage.get_workflow(workflow_id)
@@ -928,7 +931,10 @@ async def cancel_execution(execution_id: str):
 
 
 @router.post("/executions/{execution_id}/resume")
-async def resume_execution(execution_id: str):
+async def resume_execution(
+    execution_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """恢复执行（人工审批后）"""
     storage = _get_storage()
     execution = storage.get_execution(execution_id)
@@ -1235,7 +1241,11 @@ class MockNodeRequest(BaseModel):
 
 
 @router.post("/executions/{execution_id}/breakpoint")
-async def set_breakpoints(execution_id: str, body: BreakpointRequest):
+async def set_breakpoints(
+    execution_id: str,
+    body: BreakpointRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """为指定 execution 设置/追加断点集合。"""
     session = _DEBUG_SESSIONS.setdefault(execution_id, DebugSession())
     if body.replace:
@@ -1249,9 +1259,17 @@ async def set_breakpoints(execution_id: str, body: BreakpointRequest):
     }
 
 
-@router.post("/executions/{execution_id}/resume")
-async def resume_execution(execution_id: str, body: ResumeRequest):
-    """恢复暂停中的执行；可选 step 模式（in/over/out）。"""
+@router.post("/executions/{execution_id}/debug/resume")
+async def resume_debug_execution(
+    execution_id: str,
+    body: ResumeRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """恢复调试暂停中的执行；可选 step 模式（in/over/out）。
+
+    路径区分于 /executions/{id}/resume（人工审批恢复）——两者同名会导致
+    FastAPI 路由遮蔽（先注册者独占，调试恢复成死代码）。
+    """
     session = _DEBUG_SESSIONS.get(execution_id)
     if not session:
         raise HTTPException(status_code=404, detail="未找到该 execution 的调试会话")
@@ -1263,11 +1281,12 @@ async def resume_execution(execution_id: str, body: ResumeRequest):
 
 
 @router.get("/executions/{execution_id}/variables")
-async def get_execution_variables(execution_id: str):
+async def get_execution_variables(
+    execution_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取当前执行实例的所有变量（含 inputs/variables/node_results）。"""
-    from neurova.collaboration.neurflow.storage import NeurflowStorage as _Storage  # noqa: F401
-
-    storage = NeurflowStorage()
+    storage = _get_storage()
     execution = storage.get_execution(execution_id)
     if not execution:
         raise HTTPException(status_code=404, detail="执行实例不存在")
@@ -1286,7 +1305,11 @@ async def get_execution_variables(execution_id: str):
 
 
 @router.put("/nodes/{node_id}/mock")
-async def set_node_mock(node_id: str, body: MockNodeRequest):
+async def set_node_mock(
+    node_id: str,
+    body: MockNodeRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """为节点设置 mock 输出；clear=true 时清空（恢复真实执行）。"""
     mocks = _get_node_mocks()
     if body.clear:
@@ -1617,7 +1640,11 @@ async def fire_trigger(
 
 
 @router.get("/triggers/{trigger_id}/deliveries")
-async def list_trigger_deliveries(trigger_id: str, limit: int = 50):
+async def list_trigger_deliveries(
+    trigger_id: str,
+    limit: int = 50,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """查询 webhook 入站投递记录（调试面板用）。"""
     storage = _get_storage()
     return {"code": 0, "data": storage.list_deliveries(trigger_id, limit=limit)}
@@ -1627,7 +1654,10 @@ async def list_trigger_deliveries(trigger_id: str, limit: int = 50):
 
 
 @router.get("/workflows/{workflow_id}/versions")
-async def list_workflow_versions_api(workflow_id: str):
+async def list_workflow_versions_api(
+    workflow_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """工作流版本历史（倒序；内容指纹快照）。"""
     storage = _get_storage()
     if not storage.get_workflow(workflow_id):
@@ -1636,7 +1666,11 @@ async def list_workflow_versions_api(workflow_id: str):
 
 
 @router.post("/workflows/{workflow_id}/versions/{version}/rollback")
-async def rollback_workflow_api(workflow_id: str, version: int):
+async def rollback_workflow_api(
+    workflow_id: str,
+    version: int,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """回滚到指定版本（状态保持当前值；回滚本身产生新版本）。"""
     storage = _get_storage()
     if not storage.get_workflow(workflow_id):

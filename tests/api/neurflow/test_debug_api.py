@@ -21,9 +21,14 @@ from fastapi.testclient import TestClient
 def app():
     """构造独立 FastAPI app 挂载 neurflow_api router。"""
     from neurova.api.endpoints.neurflow_api import router
+    from neurova.api.auth import get_current_user
 
     app = FastAPI()
     app.include_router(router)
+    # 审计修复：调试端点已挂严格鉴权——测试显式注入认证身份
+    app.dependency_overrides[get_current_user] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
     return app
 
 
