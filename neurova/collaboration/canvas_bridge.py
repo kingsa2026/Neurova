@@ -40,9 +40,17 @@ logger = get_logger(__name__)
 
 
 def _known_node_types() -> set:
-    """注册表中已知的节点类型集合（含 builtin/tool/skill/mcp/comfyui）"""
+    """注册表中已知的节点类型集合（含 builtin/tool/skill/mcp/comfyui/custom）"""
     registry = get_node_registry()
     registry.ensure_builtin()
+    # 遗留 A：恢复自定义节点（load_into_registry 幂等——画布运行校验
+    # 必须能认出 custom:*，否则重启后含自定义节点的画布 400 未注册）
+    try:
+        from neurova.collaboration.neurflow.custom_nodes import get_custom_node_service
+
+        get_custom_node_service().load_into_registry()
+    except Exception:  # noqa: BLE001 - custom 恢复失败不阻塞 builtin 校验
+        pass
     known = set()
     try:
         for d in registry.list_all():
@@ -169,8 +177,15 @@ def definition_to_canvas(workflow: WorkflowDefinition, name: str = "") -> Dict[s
         node_id = str(wn.id)
         node_type = str(wn.type)
         definition = registry.get(node_type)
-        inputs = [{"id": p.id, "label": p.label} for p in (definition.inputs if definition else [])]
-        outputs = [{"id": p.id, "label": p.label} for p in (definition.outputs if definition else [])]
+
+        def _port(pid, plabel):
+            # NodeDefinition 端口可能是对象（.id/.label）或 dict（"id"/"label"）
+            if isinstance(pid, dict):
+                return {"id": str(pid.get("id") or ""), "label": str(pid.get("label") or "")}
+            return {"id": str(getattr(pid, "id", "")), "label": str(getattr(pid, "label", plabel or ""))}
+
+        inputs = [_port(p, p.get("label") if isinstance(p, dict) else getattr(p, "label", "")) for p in (definition.inputs if definition else [])]
+        outputs = [_port(p, p.get("label") if isinstance(p, dict) else getattr(p, "label", "")) for p in (definition.outputs if definition else [])]
         node_ports[node_id] = (inputs, outputs)
         canvas_nodes.append(
             {

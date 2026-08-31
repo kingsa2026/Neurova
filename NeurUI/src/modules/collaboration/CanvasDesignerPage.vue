@@ -467,6 +467,7 @@ import TriggerManagerDrawer from './TriggerManagerDrawer.vue'
 import DebugPanel from './DebugPanel.vue'
 import MockEditor from './MockEditor.vue'
 import { createDebugController, type DebugController } from './DebugPanel'
+import { duplicateNodesForPaste } from './canvasClipboard'
 import { useReachableModels, buildModelOptions } from '@/composables/useReachableModels'
 import {
   runCanvas as runCanvasApi,
@@ -1716,6 +1717,9 @@ function onKeyDown(e: KeyboardEvent) {
     if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomIn(); return }
     if (e.key === '-') { e.preventDefault(); zoomOut(); return }
     if (e.key === '0') { e.preventDefault(); resetView(); return }
+    // 遗留 D — 复制/粘贴选中节点
+    if (e.key === 'c' || e.key === 'C') { e.preventDefault(); copySelectedNodes(); return }
+    if (e.key === 'v' || e.key === 'V') { e.preventDefault(); pasteClipboardNodes(); return }
   }
 
   if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -1725,6 +1729,55 @@ function onKeyDown(e: KeyboardEvent) {
       removeNode(selectedNodeId.value)
     }
   }
+}
+
+// ── 遗留 D — 剪贴板（Ctrl+C/V 复制粘贴节点）──
+/** 多选暂以「单选 + 上一批粘贴集」近似；框选为后续 Vue Flow 升级项 */
+const multiSelectedNodeIds = ref<string[]>([])
+let clipboardNodes: CanvasNodeSnapshot[] = []
+let clipboardEdges: CanvasEdgeSnapshot[] = []
+let clipboardAnchor: { x: number; y: number } | null = null
+
+function copySelectedNodes() {
+  const ids = multiSelectedNodeIds.value.length
+    ? multiSelectedNodeIds.value
+    : selectedNodeId.value
+      ? [selectedNodeId.value]
+      : []
+  if (ids.length === 0) return
+  clipboardNodes = canvasNodes.value.filter(n => ids.includes(n.id))
+  clipboardEdges = canvasEdges.value.filter(
+    e => ids.includes(e.source?.nodeId ?? '') && ids.includes(e.target?.nodeId ?? ''),
+  )
+  clipboardAnchor = clipboardNodes.length
+    ? { ...clipboardNodes[0].position }
+    : null
+  if (clipboardNodes.length) uiMessage.info(t('canvas.copiedCount', { n: clipboardNodes.length }))
+}
+
+function pasteClipboardNodes() {
+  if (clipboardNodes.length === 0) return
+  const anchor = clipboardAnchor ?? { x: 0, y: 0 }
+  const offset = { x: 30, y: 30 }
+  const result = duplicateNodesForPaste(
+    [...canvasNodes.value, ...clipboardNodes],
+    [...canvasEdges.value, ...clipboardEdges],
+    clipboardNodes.map(n => n.id),
+    offset.x,
+    offset.y,
+  )
+  // 平移量按粘贴锚点差值（多次粘贴阶梯排布）
+  for (const n of result.nodes) {
+    n.position = {
+      x: (n.position?.x ?? 0) - anchor.x + offset.x + canvasNodes.value.length * 0,
+      y: (n.position?.y ?? 0) - anchor.y + offset.y,
+    }
+  }
+  for (const n of result.nodes) canvasNodes.value.push(n)
+  for (const e of result.edges) canvasEdges.value.push(e)
+  // 选中新粘贴的第一个节点
+  if (result.nodes.length > 0) selectNode(result.nodes[0].id)
+  uiMessage.info(t('canvas.pastedCount', { n: result.nodes.length }))
 }
 
 function onCanvasBlankMousedown() {

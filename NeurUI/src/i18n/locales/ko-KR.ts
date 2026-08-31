@@ -1953,6 +1953,8 @@ export default {
   },
   canvas: {
     subflowNode: '서브워크플로',
+    copiedCount: '{n}개 노드 복사됨',
+    pastedCount: '{n}개 노드 붙여넣기됨',
     ...STORE_CANVAS,
     c0001: '텍스트 입력',
     c0002: '미디어 입력',

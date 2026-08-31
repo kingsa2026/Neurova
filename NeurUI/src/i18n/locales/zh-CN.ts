@@ -1967,6 +1967,8 @@ export default {
   },
   canvas: {
     subflowNode: '子工作流',
+    copiedCount: '已复制 {n} 个节点',
+    pastedCount: '已粘贴 {n} 个节点',
     c0001: '文本输入',
     c0002: '媒体输入',
     c0003: '价格监控',
