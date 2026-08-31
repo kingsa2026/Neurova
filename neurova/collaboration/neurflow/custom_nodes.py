@@ -216,13 +216,18 @@ class CustomNodeService:
         """历史快照（新版本在前）"""
         return self._storage.list_node_versions(node_type)
 
-    def load_into_registry(self) -> int:
-        """进程启动后把库内 active 自定义节点批量注册回内存注册表"""
+    def load_into_registry(self, registry=None) -> int:
+        """把库内 active 自定义节点批量注册回内存注册表（幂等）。
+
+        registry 缺省注册到 service 自身绑定的实例；
+        sync_all 等批量同步方传入目标 registry 以保持单一事实源。
+        """
+        target = registry or self._registry
         count = 0
         for node_def in self.list_nodes():
             if node_def.status != "active":
                 continue
-            self._registry.register(node_def, executor=self.build_executor(node_def))
+            target.register(node_def, executor=self.build_executor(node_def))
             count += 1
         if count:
             logger.info("自定义节点已载入注册表: %d 个", count)

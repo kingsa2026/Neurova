@@ -1953,6 +1953,8 @@ export default {
   },
   canvas: {
     subflowNode: 'सबफ़्लो',
+    copiedCount: '{n} नोड कॉपी किए',
+    pastedCount: '{n} नोड पेस्ट किए',
     ...STORE_CANVAS,
     c0001: 'टेक्स्ट इनपुट',
     c0002: 'मीडिया इनपुट',

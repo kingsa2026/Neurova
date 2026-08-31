@@ -1955,6 +1955,8 @@ export default {
   },
   canvas: {
     subflowNode: 'Subflow',
+    copiedCount: 'Copied {n} nodes',
+    pastedCount: 'Pasted {n} nodes',
     ...STORE_CANVAS,
     c0001: 'Text Input',
     c0002: 'Media Input',

@@ -363,6 +363,17 @@ def sync_all(registry) -> Dict[str, int]:
 
         logging.getLogger(__name__).warning("短剧视频节点同步失败: %s", e)
 
+    # 遗留 A：自定义节点（custom:*）恢复进 registry（/nodes 通道）
+    custom_count = 0
+    try:
+        from .custom_nodes import get_custom_node_service
+
+        custom_count = get_custom_node_service().load_into_registry(registry)
+    except Exception as e:  # noqa: BLE001 - custom 加载失败不阻断其他同步
+        import logging
+
+        logging.getLogger(__name__).warning("自定义节点同步失败: %s", e)
+
     return {
         "tools": sync_tools(registry),
         "skills": sync_skills(registry),
@@ -370,6 +381,7 @@ def sync_all(registry) -> Dict[str, int]:
         "comfyui": comfyui_count,
         "commerce": commerce_count,
         "drama": drama_count,
+        "custom": custom_count,
     }
 
 

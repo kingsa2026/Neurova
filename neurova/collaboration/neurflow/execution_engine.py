@@ -417,6 +417,11 @@ class WorkflowExecutor:
                 **parent_kwargs,
             )
 
+        def _expected_upstream(nid: str) -> List[str]:
+            return sorted(
+                e.source for e in in_edges.get(nid, []) if not is_loop_back_edge(e)
+            )
+
         subflow_harness = {
             "_subflow_depth": subflow_depth,
             "_subflow_chain": chain,
@@ -478,6 +483,7 @@ class WorkflowExecutor:
                             execution_id,
                             subflow_harness=subflow_harness,
                             debug_session=debug_session,
+                            expected_upstream=_expected_upstream(nid),
                         )
                         for nid in active
                     ]
@@ -535,7 +541,7 @@ class WorkflowExecutor:
                         execution_id,
                         skipped,
                         subflow_harness=subflow_harness,
-                            debug_session=debug_session,
+                        debug_session=debug_session,
                     )
                     loop_driven.update(loop_plans.get(loop_id, {}).get("body", set()))
 
@@ -611,6 +617,7 @@ class WorkflowExecutor:
         execution_id: str,
         subflow_harness: Optional[Dict[str, Any]] = None,
         debug_session: Optional[DebugSession] = None,
+        expected_upstream: Optional[List[str]] = None,
     ) -> None:
         """执行单个节点并记录结果/事件；失败抛异常由调用方聚合处理"""
         # 修复① — 调试钩子：断点（执行前阻塞）+ step_mode（执行后阻塞）。
@@ -682,6 +689,8 @@ class WorkflowExecutor:
                     "crystallizer": resolution_context.crystallizer,
                     "variable_resolver": self._variable_resolver,
                     "resolution_context": resolution_context,
+                    # 遗留 C：merge all 策略需要知道期望上游全集
+                    "expected_upstream": list(expected_upstream or []),
                     **(subflow_harness or {}),
                 },
             )
@@ -927,6 +936,7 @@ class WorkflowExecutor:
         execution_id: str,
         global_skipped: Set[str],
         subflow_harness: Optional[Dict[str, Any]] = None,
+        debug_session: Optional[DebugSession] = None,
     ) -> None:
         """驱动 loop 节点的循环体迭代（引擎级循环，body 节点由本方法调度）"""
         started_at = time.time()
@@ -1006,7 +1016,7 @@ class WorkflowExecutor:
                         execution_id,
                         global_skipped,
                         subflow_harness=subflow_harness,
-                            debug_session=debug_session,
+                        debug_session=debug_session,
                     )
                     continue
 
@@ -1014,7 +1024,10 @@ class WorkflowExecutor:
                     await self._execute_single_node(
                         body_id, body_node, inputs, resolution_context, instance, workflow_id, execution_id,
                         subflow_harness=subflow_harness,
-                            debug_session=debug_session,
+                        debug_session=debug_session,
+                        expected_upstream=sorted(
+                            e.source for e in in_edges.get(body_id, []) if not is_loop_back_edge(e)
+                        ),
                     )
                     nres = resolution_context.node_results.get(body_id, {})
                     branch = "true"
@@ -1031,7 +1044,10 @@ class WorkflowExecutor:
                 await self._execute_single_node(
                     body_id, body_node, inputs, resolution_context, instance, workflow_id, execution_id,
                     subflow_harness=subflow_harness,
-                            debug_session=debug_session,
+                    debug_session=debug_session,
+                    expected_upstream=sorted(
+                        e.source for e in in_edges.get(body_id, []) if not is_loop_back_edge(e)
+                    ),
                 )
 
             iterations_done = iteration

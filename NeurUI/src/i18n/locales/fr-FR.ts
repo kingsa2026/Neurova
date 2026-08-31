@@ -1953,6 +1953,8 @@ export default {
   },
   canvas: {
     subflowNode: 'Sous-workflow',
+    copiedCount: '{n} nœuds copiés',
+    pastedCount: '{n} nœuds collés',
     ...STORE_CANVAS,
     c0001: 'Saisie de texte',
     c0002: 'Entrée de média',

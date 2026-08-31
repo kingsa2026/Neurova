@@ -1953,6 +1953,8 @@ export default {
   },
   canvas: {
     subflowNode: 'Sottoflusso',
+    copiedCount: '{n} nodi copiati',
+    pastedCount: '{n} nodi incollati',
     ...STORE_CANVAS,
     c0001: 'Inserimento testo',
     c0002: 'Input multimediale',
