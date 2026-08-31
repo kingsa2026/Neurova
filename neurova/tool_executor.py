@@ -2753,6 +2753,19 @@ class ToolExecutor:
             execution_time: 执行耗时 (秒)
             result: 工具执行结果 dict (H3，可 None)
         """
+        # P2-4：Prometheus 仪表（失败不影响钩子主流程）
+        try:
+            from neurova.core.metrics import get_metrics
+
+            get_metrics().record_tool_execution(
+                tool_name=tool_name,
+                source=tool_source or "unknown",
+                success=success,
+                duration_s=execution_time or 0.0,
+            )
+        except Exception:
+            logger.debug("tool metrics 埋点跳过", exc_info=True)
+
         # 记录工具使用统计 → 传播到肌肉记忆 L1/L2/L3
         if self.tool_memory:
             try:

@@ -1,4 +1,9 @@
 """
+⚠️ 与 secret_store.py 是两套独立实现（P2-2 审计发现）：
+- 本模块 SecretStore(storage_path=, encryption_key=) —— web_reach/credentials 依赖此签名
+- secret_store.py SecretStore(master_key=, storage_path=) —— provider_manager 使用
+构造签名不兼容，硬合并会破坏 web_reach；待统一密钥抽象后合并。
+
 密钥安全存储
 
 实现密钥的加密存储、轮换和访问控制

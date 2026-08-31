@@ -83,3 +83,6 @@ pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
 pytest-timeout>=2.3
+
+# P2-4 观测性：/metrics 指标（Counter/Histogram 埋点 + prometheus 格式输出）
+prometheus_client>=0.20

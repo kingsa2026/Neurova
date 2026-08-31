@@ -639,29 +639,6 @@ class LLMProviderManager(Module):
             "config_path": str(self._config_path),
         }
 
-    def health_check_provider(self, provider_id: str) -> bool:
-        """健康检查服务商"""
-        if provider_id not in self._providers:
-            logger.warning("Provider %s not found", provider_id)
-            return False
-
-        provider = self._providers[provider_id]
-        if not provider.health_check_enabled:
-            return True
-
-        logger.debug("Health checking provider: %s", provider.name)
-
-        # 简单健康检查：尝试获取模型列表
-        try:
-            # 这里应该调用实际的健康检查 API
-            provider.last_health_check = datetime.now().isoformat()
-            provider.health_status = "healthy"
-            return True
-        except Exception as e:
-            logger.error("Health check failed for %s: %s", provider.name, e)
-            provider.health_status = "unhealthy"
-            return False
-
     def mark_provider_success(self, provider_id: str, response_time: float = 0.0) -> None:
         """标记服务商成功"""
         if provider_id not in self._providers:
@@ -757,25 +734,6 @@ class LLMProviderManager(Module):
         # 选择下一个服务商
         strategy = LoadBalancingStrategy.PRIORITY_FIRST
         return self.select_provider(current_provider.default_model, strategy)
-
-    def detect_model_capabilities(self, provider_id: str, model: str, use_cache: bool = True) -> Dict[str, Any]:
-        """检测模型能力"""
-        provider = self.get_provider(provider_id)
-        if not provider:
-            logger.warning("Provider %s not found", provider_id)
-            return {}
-
-        try:
-            # 这里应该调用实际的能力检测
-            return {
-                "vision": "vision" in model.lower() or "vl" in model.lower(),
-                "audio": "audio" in model.lower(),
-                "video": "video" in model.lower(),
-                "tool_use": True,
-            }
-        except Exception as e:
-            logger.error("Failed to detect capabilities: %s", e)
-            return {}
 
     def _generate_provider_id(self, name: str) -> str:
         """生成服务商 ID"""
