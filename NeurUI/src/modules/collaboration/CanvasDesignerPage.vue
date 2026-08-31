@@ -2229,10 +2229,15 @@ onMounted(async () => {
   document.addEventListener('mousedown', onDocMousedownClose)
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('webkitfullscreenchange', onFullscreenChange)
-  // 遗留 F：小地图容器尺寸（测量画布实际渲染区）
+  // 遗留 F：小地图容器尺寸（测量画布实际渲染区 + resize 跟踪——审计修复③）
   const graphEl = document.querySelector('.canvas-graph') as HTMLElement | null
   if (graphEl) {
     graphContainerSize.value = { w: graphEl.clientWidth, h: graphEl.clientHeight }
+    const ro = new ResizeObserver(() => {
+      graphContainerSize.value = { w: graphEl.clientWidth, h: graphEl.clientHeight }
+    })
+    ro.observe(graphEl)
+    onBeforeUnmount(() => ro.disconnect())
   }
   // 蜂群：agent 选择器数据 + 动态节点库
   agentStore.loadAgents().catch(() => undefined)

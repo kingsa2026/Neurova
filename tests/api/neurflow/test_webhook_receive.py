@@ -28,6 +28,11 @@ def app():
 
     app = FastAPI()
     app.include_router(router)
+    from neurova.api.auth import get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
     return app
 
 
@@ -225,6 +230,11 @@ class TestDeliveryRecording:
 
         app = FastAPI()
         app.include_router(neurflow_api.router)
+        from neurova.api.auth import get_current_user
+
+        app.dependency_overrides[get_current_user] = lambda: {
+                "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+        }
         return TestClient(app), storage, secret
 
     def test_success_delivery_recorded(self, patched_client):

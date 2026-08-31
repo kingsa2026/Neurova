@@ -40,6 +40,11 @@ class DebugSession:
       breakpoints: 命中断点的节点 id 集合；为空表示无断点
       step_mode: None | "in" | "over" | "out"——单步推进模式
       resume_event: asyncio.Event——wait_resume 阻塞、resume 触发
+
+    并发语义（审计记录）：引擎拓扑分层 gather 内多节点**同时**命中断点时，
+    各任务等待同一个 resume_event——resume 一次会放行全部命中节点
+    （"节点级软暂停"）。串行单断点调试不受影响；如需严格逐节点暂停，
+    须引入断点队列（暂缓，见画布调试指南已知限制）。
     """
 
     breakpoints: Set[str] = field(default_factory=set)

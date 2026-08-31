@@ -49,6 +49,12 @@ def client(tmp_path):
 
     app = FastAPI()
     app.include_router(neurflow_api.router)
+    # 审计修复：版本端点已挂严格鉴权——测试显式注入认证身份
+    from neurova.api.auth import get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
     yield TestClient(app), storage
     neurflow_api._get_storage = orig
 
