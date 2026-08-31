@@ -309,6 +309,18 @@ class OpenAILoop(BaseAgentLoop):
             "[CTX_RECOVERY] 上下文溢出，折叠 %d 条消息后单次重试（%d → %d）",
             info["folded_count"], info["original_count"], info["compact_count"],
         )
+        # 增强①：被折叠消息生成摘要回写池（fire-and-forget，不阻塞重试；
+        # 无池/无摘要器 no-op——rollup 内部自兜底）
+        try:
+            pool = getattr(
+                getattr(self.agent, "context_orchestrator", None), "context_pool", None
+            )
+            if pool is not None:
+                asyncio.ensure_future(
+                    pool.rollup_overflow_digest(info.get("folded_messages") or [])
+                )
+        except Exception:
+            logger.debug("溢出摘要回写跳过", exc_info=True)
         retry_params = {**request_params, "messages": compact}
         async for event in self._predict_stream_once(retry_params):
             yield event

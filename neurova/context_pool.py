@@ -107,6 +107,8 @@ class ContextPool:
         self._eviction_ledger: List[Any] = []
         self._evicted_total = 0
         self._max_eviction_ledger = 500
+        # 增强②：台账 GC 节流计数（每 _LEDGER_GC_EVERY 次驱逐触发一次 gc_stale）
+        self._ledger_gc_counter = 0
 
         # 并发保护：保护 _cache / _cache_version / _collector._contexts 等共享状态
         # 使用 RLock 因为 merge_with 等方法会重入调用 add_context
@@ -269,6 +271,13 @@ class ContextPool:
                 )
             except Exception:
                 logger.warning("驱逐台账持久化失败（不影响内存归档）", exc_info=True)
+            # 增强②：节流触发台账 GC（异常不破坏归档主流程）
+            self._ledger_gc_counter += 1
+            if self._ledger_gc_counter % _LEDGER_GC_EVERY == 0:
+                try:
+                    self._ledger_db.gc_stale()
+                except Exception:
+                    logger.warning("台账 GC 触发失败（忽略）", exc_info=True)
 
     def recall_evicted(self, query: str = None, limit: int = 20) -> List:
         """
@@ -332,11 +341,27 @@ class ContextPool:
     async def rollup_overflow_digest(self, folded_chunks, previous_summary: str = "") -> None:
         """P1-1③：对被折叠 chunk 生成/增量更新摘要并回写池（SUMMARY 源）。
 
+        兼容两类条目：ContextInput（池归档）与原始 dict 消息（overflow 恢复
+        路径传入的 folded_messages）——后者按 role+content 归一化。
         无摘要器（未注入/初始化失败）为 no-op——摘要停用不影响归档无损语义。
         """
         summarizer = getattr(self, "_summarizer", None)
         if summarizer is None or not folded_chunks:
             return
+        normalized = []
+        for item in folded_chunks:
+            if isinstance(item, dict):
+                role = item.get("role", "user")
+                normalized.append(
+                    ContextInput(
+                        source=ContextSource.CONVERSATION,
+                        content=item.get("content", ""),
+                        metadata={"role": role},
+                    )
+                )
+            else:
+                normalized.append(item)
+        folded_chunks = normalized
         try:
             summary = await summarizer.summarize(list(folded_chunks), previous_summary=previous_summary)
             if summary:
@@ -607,6 +632,9 @@ class ContextPool:
 
 
 from neurova.context.pairing import validate_pairing
+
+# 增强②：台账 GC 节流——每 N 次驱逐归档触发一次 gc_stale
+_LEDGER_GC_EVERY = 20
 from neurova.context.pool_models import ContextSource, ContextInput
 from neurova.context.collector import ContextCollector
 from neurova.context.converter import ContextConverter

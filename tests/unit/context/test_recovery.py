@@ -124,6 +124,22 @@ class TestCompactMessagesForOverflow:
         compact, info = compact_messages_for_overflow(msgs, recent_keep=6)
         assert compact == msgs and info["folded_count"] == 0
 
+    def test_info_includes_folded_messages(self):
+        """增强①：info 暴露被折叠消息（供溢出恢复路径生成摘要回写池）"""
+        msgs = [_sys()] + _turn(1) + _turn(2) + _turn(3) + _turn(4)
+        compact, info = compact_messages_for_overflow(msgs, recent_keep=6)
+        folded = info.get("folded_messages") or []
+        assert folded, "folded_messages 缺失"
+        # 折叠的是中段轮次（question 1/2 或 2/3），且不含 system/锚点
+        contents = [m.get("content", "") for m in folded]
+        assert any("question" in c for c in contents)
+        assert all(not c.startswith("you are") for c in contents)
+
+    def test_no_fold_means_no_folded_messages(self):
+        msgs = [_sys(), _user("q"), _assistant("a")]
+        compact, info = compact_messages_for_overflow(msgs, recent_keep=6)
+        assert info.get("folded_messages") == []
+
     def test_recovery_info_structure(self):
         msgs = [_sys()] + _turn(1) + _turn(2) + _turn(3) + _turn(4)
         compact, info = compact_messages_for_overflow(msgs, recent_keep=6)
