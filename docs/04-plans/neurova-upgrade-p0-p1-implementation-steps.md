@@ -188,4 +188,6 @@ is_concurrency_safe 才 gather，任一未声明整轮保守串行；结果按�
 
 **P2-1 记忆检索真实性 ☑（已提交 b6095b6，2026-08-31）**：`_semantic_recall` 重写——UnifiedVectorStore 增量索引（同 id 去重仅编码新记忆，消灭 O(n)/query 重建）+ 向量相似度搜索（faiss/fastembed/ONNX/TF-IDF 链接入主链路）+ RRF 融合（向量 0.7/关键词 0.3）+ 按隔离三元组分库 + 向量异常降级关键词。test_forget 契约更新（语义召回 intent-true：被遗忘记忆按 id 断言）。6 用例；记忆全套 924 绿（2 预存 tie 断言）。
 
-待做：LLM 双抽象合一 + Retry-Fallback-RateLimit 三层（rate_limiter.py 构件已齐零装配，砌进 BaseProvider 即得分）；agent_ref 代理收窄 + 275 单例收敛（渐进）；structlog + prometheus_client + per-turn token 对账 + 成本核算；goal/mission 循环模式；MCP OAuth（凭据**每次调用时解析**，避开 QP 烘焙坑）。
+**P2-2 ☑（已提交 81e2e1c）**：retry/circuit 装配——multi_model_client._chat_with_retry（per-provider guard：可重试=RateLimit/Connection/Timeout，Auth 不重试；熔断 5 次开/30s 半开，CircuitBreakerOpen 单独信封）+ provider_manager 两处被遮蔽死方法删除 + secret_store 双份标注（签名不兼容，待统一抽象）。
+**P2-4 首刀 ☑（同 commit）**：core/metrics.py（prometheus_client 指标集单一事实源：tool/llm/circuit counter+histogram+gauges）+ /metrics 端点替换手拼 + tool_executor/llm.chat 全量埋点。
+待做：structlog、per-turn token 对账+成本核算；agent_ref 代理收窄+单例收敛（渐进）；goal/mission 循环模式；MCP OAuth（凭据每次调用时解析）；未跟踪脚本式测试统一处置（execution_engine 47F 陈旧 API）。
