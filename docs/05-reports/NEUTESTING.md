@@ -131,7 +131,7 @@ pytest tests/unit/ -v
 
 ## 📚 文档
 
-- [README.md](README.md) - 详细使用文档
+- [README.md](../README.md) - 详细使用文档
 - [NEUTESTING.md](NEUTESTING.md) - 本文档
 
 ## 📄 许可证

@@ -26,7 +26,7 @@ class SkillMetadata:
     """技能元数据"""
 
     name: str = ""
-    version: str = "0.1.0"
+    version: str = "1.0.0"
     description: str = ""
     author: str = ""
     tags: List[str] = field(default_factory=list)
@@ -39,7 +39,7 @@ class Skill:
 
     id: str = ""
     name: str = ""
-    version: str = "0.1.0"
+    version: str = "1.0.0"
     description: str = ""
     author: str = ""
     source: SkillSource = SkillSource.LOCAL

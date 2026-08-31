@@ -123,9 +123,10 @@ class AgentLLMClient:
     指定模型 ID 或 'auto' 让路由器自动选择。
     """
 
-    def __init__(self, model: str = "auto", provider_id: str = "", llm_config=None):
+    def __init__(self, model: str = "auto", provider_id: str = "", llm_config=None, scope: Optional[str] = None):
         self.model = model
         self.provider_id = provider_id
+        self._scope = scope
         # 使用真实的 LLMConfig，而非硬编码值
         # OpenAILoop 通过 hasattr 检查 temperature/max_tokens 等
         if llm_config is not None:
@@ -138,7 +139,7 @@ class AgentLLMClient:
     def _get_client(self):
         from neurova.llm.multi_model_client import get_multi_model_client
 
-        return get_multi_model_client()
+        return get_multi_model_client(self._scope)
 
     async def chat(self, messages, **kwargs):
         result = await self._get_client().chat(
@@ -181,7 +182,7 @@ class AgentConfig:
 
     def __init__(
         self,
-        name: str = "忆灵",
+        name: str = "智星",
         agent_id: str = "yi_ling",
         workspace_path: str = "",
         db_path: str = "",
@@ -486,10 +487,14 @@ class SubSystemContainer:
         c = self.config
 
         a.context_orchestrator.init_context_system()
+        # 普通用户 Agent 按 owner 使用自己的 LLM 配置;无 owner(default/admin)走全局
+        from neurova.llm.multi_model_client import scope_for_owner
+
         a.llm_client = AgentLLMClient(
             model=c.llm_config.model if hasattr(c, "llm_config") and c.llm_config else "auto",
             provider_id=getattr(c, "llm_provider", "") or "",
             llm_config=c.llm_config if hasattr(c, "llm_config") else None,
+            scope=scope_for_owner(getattr(c, "owner_user_id", None) or None),
         )
 
     def init_conversation(self):
@@ -1136,10 +1141,20 @@ class Agent:
         # Phase 10: 初始化睡眠整理引擎 + 启动空闲触发链
         try:
             from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
+            from neurova.core.sleep_settings_store import SleepSettingsStore
+
+            # 设置持久化: data/sleep_settings/{agent_id}.json（agent 重启后保留）。
+            # agent_id 不合法时降级为内存设置, 不影响睡眠引擎本身。
+            settings_store = None
+            try:
+                settings_store = SleepSettingsStore(self.config.agent_id)
+            except ValueError as e:
+                logger.warning("睡眠设置持久化不可用: %s", e)
 
             self.sleep_consolidation = SleepConsolidation(
                 memory_manager=self.memory_manager,
                 storage=self.storage,
+                settings_store=settings_store,
             )
             # 连接 IdleTimeTracker 和 SleepConsolidation
             if hasattr(self, "idle_tracker") and self.idle_tracker:

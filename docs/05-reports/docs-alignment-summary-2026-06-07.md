@@ -120,4 +120,4 @@
 
 **生成时间**：2026-06-07 21:51  
 **生成工具**：improve-codebase-architecture + zoom-out 技能  
-**项目版本**：Neurova v4.0 (CogArch 2.0)
+**项目版本**：Neurova v1.0.0-beta1 (CogArch 2.0)

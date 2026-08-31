@@ -29,7 +29,7 @@
 - **覆盖率**: 94.7% (71/75)
 - **缺失模块**: 4个 (健康检查等内部API)
 
-详细信息请参考: [API架构修复总结](../api_architecture_fix_summary.md)
+详细信息请参考: [API架构修复总结](../06-bugfix/api_architecture_fix_summary.md)
 
 ---
 

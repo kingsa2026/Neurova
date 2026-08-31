@@ -1,6 +1,6 @@
 # Neurova 前端 API 调用规范
 
-> **版本**: v1.0.0 | **日期**: 2026-05-13 | **适用**: Neurova 2.0+
+> **版本**: v1.0.0 | **日期**: 2026-05-13 | **适用**: Neurova 1.0.0-beta1
 
 ---
 
@@ -257,7 +257,7 @@ async function example() {
 
 - [后端 API 文档](../neurova/api/README.md)
 - [前端开发指南](../neurova-ui/README.md)
-- [架构设计文档](./NEUROVA_CogArch_2.0.md)
+- [架构设计文档](../01-architecture/NEUROVA_CogArch_2.0.md)
 
 ---
 

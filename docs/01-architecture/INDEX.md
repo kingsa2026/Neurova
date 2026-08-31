@@ -10,8 +10,8 @@
 |------|------|----------|
 | [README.md](../README.md) | 项目概述、快速开始、核心特性 | 所有人 |
 | [CONTEXT.md](../CONTEXT.md) | 项目上下文、架构概览、技术栈 | 所有人 |
-| [API_REFERENCE.md](../API_REFERENCE.md) | API 端点参考、请求/响应格式 | 开发者 |
-| [PRODUCT_GUIDE.md](../PRODUCT_GUIDE.md) | 产品指南、使用场景、最佳实践 | 用户/开发者 |
+| [API_REFERENCE.md](../02-api/API_REFERENCE.md) | API 端点参考、请求/响应格式 | 开发者 |
+| [PRODUCT_GUIDE.md](../03-user-guide/PRODUCT_GUIDE.md) | 产品指南、使用场景、最佳实践 | 用户/开发者 |
 
 ### 架构设计文档 (按阅读顺序)
 
@@ -46,7 +46,7 @@
 | 文档 | 内容 | 必读 |
 |------|------|------|
 | [../CONTEXT.md](../CONTEXT.md) | 项目上下文、架构概览、技术栈 | ✅ 开发者必读 |
-| [DOCS_ALIGNMENT_PLAN.md](../DOCS_ALIGNMENT_PLAN.md) | 文档对齐计划、更新策略 | 开发者参考 |
+| [DOCS_ALIGNMENT_PLAN.md](../04-plans/DOCS_ALIGNMENT_PLAN.md) | 文档对齐计划、更新策略 | 开发者参考 |
 
 ## 🎯 按角色推荐阅读
 
@@ -65,7 +65,7 @@
 1. [01-core-architecture.md](01-core-architecture.md) - 核心架构
 2. [02-memory-system.md](02-memory-system.md) - 数据模型
 3. [04-multi-agent-collaboration.md](04-multi-agent-collaboration.md) - 业务逻辑
-4. [API_REFERENCE.md](../API_REFERENCE.md) - API 规范
+4. [API_REFERENCE.md](../02-api/API_REFERENCE.md) - API 规范
 5. [CONTEXT.md](../CONTEXT.md) - 开发规范
 
 ### 测试工程师
@@ -76,7 +76,7 @@
 ### 插件/Skill 开发者
 1. [05-skill-system.md](05-skill-system.md) - Skill 开发指南
 2. [06-plugin-cli-system.md](06-plugin-cli-system.md) - 插件开发指南
-3. [API_REFERENCE.md](../API_REFERENCE.md) - API 规范
+3. [API_REFERENCE.md](../02-api/API_REFERENCE.md) - API 规范
 
 ### 运维工程师
 1. [07-implementation-plan.md](07-implementation-plan.md) - 部署方案
@@ -118,8 +118,8 @@
 ### 规范指南
 - [../README.md](../README.md) - 项目概述
 - [../CONTEXT.md](../CONTEXT.md) - 项目上下文
-- [../API_REFERENCE.md](../API_REFERENCE.md) - API 参考
-- [../PRODUCT_GUIDE.md](../PRODUCT_GUIDE.md) - 产品指南
+- [../02-api/API_REFERENCE.md](../02-api/API_REFERENCE.md) - API 参考
+- [../03-user-guide/PRODUCT_GUIDE.md](../03-user-guide/PRODUCT_GUIDE.md) - 产品指南
 
 ## 🔍 快速查找
 

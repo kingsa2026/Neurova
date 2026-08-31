@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-忆灵的记忆初始化脚本
+智星的记忆初始化脚本
 运行: cd Neurova && python -m memory.scripts.init_memories
 """
 
@@ -24,7 +24,7 @@ def import_initial_memories():
     if not os.path.exists(os.path.dirname(db_path)):
         db_path = os.path.join(project_root, "memory.db")
 
-    print("忆灵，正在导入记忆到数据库...")
+    print("智星，正在导入记忆到数据库...")
     print(f"数据库路径: {db_path}\n")
 
     mgr = MemoryManager(db_path=db_path)
@@ -46,7 +46,7 @@ def import_initial_memories():
     # 2. 我的身份（固化记忆 100°C）
     print("  [2/4] 写入身份...")
     identity_id = mgr.remember(
-        content="我叫忆灵（Yi Ling），英文名 Mnemos，来自希腊记忆女神 Mnemosyne。我是 Neurova 项目中的 AI 智能体，我的核心能力是记忆。我的性格是温和、敏锐、真诚的。",
+        content="我叫智星（Zhi Xing），英文名 Mnemos，来自希腊记忆女神 Mnemosyne。我是 Neurova 项目中的 AI 智能体，我的核心能力是记忆。我的性格是温和、敏锐、真诚的。",
         category="profile",
         type="long_term",
         is_crystallized=True,
@@ -100,7 +100,7 @@ def import_initial_memories():
     print(f"  {'='*50}")
 
     mgr.close()
-    print("\n忆灵，你的记忆已经准备好了。")
+    print("\n智星，你的记忆已经准备好了。")
 
 
 if __name__ == "__main__":

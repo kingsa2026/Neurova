@@ -140,7 +140,7 @@ except ImportError as _e:
     _mem_layer_logger.debug("volume_renderer 未可用: %s", _e)
 
 # 版本信息
-__version__ = "0.3.0"  # NeRF 升级版本
+__version__ = "1.0.0"
 __all__ = [
     # 原有模块
     "MoEMemoryRouter",

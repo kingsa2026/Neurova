@@ -7,4 +7,4 @@
 - 情感上下文层（emotion_context_layer）：情感分析、情绪记忆
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

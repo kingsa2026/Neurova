@@ -6,7 +6,7 @@
 
 ## 设计目标
 
-根据设计文档 [NEUROVA_CogArch_2.0.md](E:/项目/Neurova/docs/NEUROVA_CogArch_2.0.md) 第269行和297行的描述，经验知识库应满足以下需求：
+根据设计文档 [NEUROVA_CogArch_2.0.md](../../01-architecture/NEUROVA_CogArch_2.0.md) 第269行和297行的描述，经验知识库应满足以下需求：
 
 1. **统一存储**：将经验记录统一存储到数据库（而非文件）
 2. **效果评估**：提供系统化的技能效果评估功能

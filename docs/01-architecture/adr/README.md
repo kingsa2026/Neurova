@@ -61,7 +61,7 @@
 - **记录"为什么"**：决策理由比决策本身更重要
 - **接地源码**：所有代码引用含 `file:///` 链接 + 行号
 - **不重新诉讼**：Accepted 状态的 ADR 不因后续讨论而修改，需变更时新建 ADR 标记 `Superseded by`
-- **领域词汇一致**：使用 [CONTEXT.md](../CONTEXT.md) 定义的领域术语，不引入临时命名
+- **领域词汇一致**：使用 [CONTEXT.md](../../CONTEXT.md) 定义的领域术语，不引入临时命名
 
 ### 与 CONTEXT.md 的关系
 - **ADR** 记录单点决策（为什么选 A 而非 B）
@@ -73,5 +73,5 @@
 1. 新建 ADR 文件，Status=`Proposed`
 2. 团队评审，通过后 Status=`Accepted`
 3. 在本 README 索引表追加条目
-4. 若涉及全局架构，同步更新 [CONTEXT.md](../CONTEXT.md)
+4. 若涉及全局架构，同步更新 [CONTEXT.md](../../CONTEXT.md)
 5. 若推翻既有 ADR，旧 ADR 改 Status=`Superseded by ADR-XXXX`，新 ADR 在 References 指向旧 ADR

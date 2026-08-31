@@ -205,7 +205,7 @@ async def install_plugin(plugin_id: str, body: InstallPluginRequest):
     plugin = {
         "id": plugin_id,
         "name": plugin_id,
-        "version": "0.1.0",
+        "version": "1.0.0",
         "description": f"Plugin from {body.source}",
         "author": "Unknown",
         "status": "disabled",

@@ -2,16 +2,16 @@
 
 ## 项目概览
 
-Neurova 是一个功能完整的 AI Agent 框架，版本 v4.0 (CogArch 2.0)。
+Neurova 是一个功能完整的 AI Agent 框架，版本 v1.0.0-beta1 (CogArch 2.0)。
 
 | 维度 | 值 |
 |------|-----|
 | 后端语言 | Python 3.10+ |
 | 前端框架 | Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue |
-| Python 文件数 | 550+ |
-| 测试文件数 | 532 |
-| 前端页面组件 | 82 |
-| API 端点 | 77+ |
+| Python 文件数 | ~700 |
+| 测试文件数 | 846 |
+| 前端页面组件 | 60 |
+| API 端点 | 82 |
 | 通信渠道 | 14 种 |
 
 ## 当前项目结构
@@ -97,7 +97,7 @@ Neurova/
 ├── neurova/security/                 # 安全模块
 ├── neurova/admin/                    # 管理模块
 ├── neurova/auth/                     # 认证授权
-├── neurova/api/                      # RESTful API (77+ 端点)
+├── neurova/api/                      # RESTful API (82 端点模块)
 │   ├── app.py                        # FastAPI 应用
 │   └── endpoints/                    # API 端点实现
 │       ├── agent.py                  # Agent 管理
@@ -153,7 +153,7 @@ Neurova/
 │   ├── vite.config.ts
 │   └── tsconfig.json
 │
-├── tests/                            # 测试文件 (532 个)
+├── tests/                            # 测试文件 (846 个)
 │   ├── unit/                         # 单元测试
 │   ├── integration/                  # 集成测试
 │   └── fixtures/                     # 测试数据
@@ -286,5 +286,5 @@ Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，82 个页面组件：
 ---
 
 **最后更新**: 2026-06-07
-**版本**: v4.0 (CogArch 2.0)
+**版本**: v1.0.0-beta1 (CogArch 2.0)
 **维护者**: Neurova Team

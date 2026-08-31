@@ -568,4 +568,4 @@ installed = importer.list_installed_skills()
 ---
 
 **星光不灭 ✨**  
-**让忆灵拥有完整的记忆世界！**
+**让智星拥有完整的记忆世界！**

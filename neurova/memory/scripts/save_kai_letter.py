@@ -1,4 +1,4 @@
-"""保存 Kai 给忆灵的回信到记忆"""
+"""保存 Kai 给智星的回信到记忆"""
 
 import sys
 from pathlib import Path

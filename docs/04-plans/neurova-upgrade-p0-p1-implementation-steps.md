@@ -1,6 +1,5 @@
 # Neurova 升级实施步骤（P0 + P1）
 
-> 依据：[Neurova_升级计划_QwenPaw代码级评测_2026-08-30.md](../Neurova_升级计划_QwenPaw代码级评测_2026-08-30.md)（评测证据与 M1-M12 缺口清单在该文档）
 > 本文是执行层：每步含 TDD 红测定义、改动文件、验证命令、回滚方式。
 > 状态标记：☐ 未开始 / ◐ 进行中 / ☑ 完成。
 
@@ -28,53 +27,69 @@
 | 验证 | `pytest tests/unit/api/test_tool_layers_auth.py tests/unit/tools/ tests/unit/web_reach/ -v` 全绿；重启后端 curl 无 token → 401 |
 | 回滚 | revert 单 commit；url_guard 为新增文件无侵入 |
 
-### P0-2 治理穿透修复 ☐
-
-**问题**：M3 `call_tool`（`mcp_client.py:314`）无防火墙而 router 优先走它（`tool_router.py:530-535`）；M4 `_governance_precheck`（`tool_executor.py:745-755`）只认 command/code/file_path/path 四键名；治理缺失 fail-open（`:739-740`）。
+### P0-2 治理穿透修复 ☑（2026-08-31 实现，待随 tool_executor.py 用户并行改动一并提交）
 
 | 步骤 | 内容 |
 |---|---|
-| 红测 | `tests/unit/security/test_governance_mcp.py`：① MCP 工具参数键名 `exec`（非四键名）仍被治理评估；② 治理模块故障时 MCP 来源工具返回 deny（fail-closed）；③ ToolRouter 走 call_tool 路径防火墙被调用（mock 断言）；④ 内置白名单工具治理故障仍放行（不误杀） |
-| 实现 | ① `mcp_client.call_tool` 入口加 `_check_firewall`（execute_tool 保留，二者不重复调用——firewall 加已检标志或只在 call_tool 检查、execute_tool 委托 call_tool）；② `tool_executor._governance_precheck` 增加全参数模式：MCP 来源工具把全部 string 参数值拼接交 `governance.evaluate(command=...)`，并在 `security/governance.py` 增加 `evaluate_tool_call(tool_name, params, scan_all=True)` 入口；③ fail-open 改分级 fail-closed：来源为 MCP/未知 → deny+audit，内置白名单 → 放行 |
-| 验证 | 红测文件 + `pytest tests/unit/test_audit_regressions.py tests/unit/tools/ -q` 无回归 |
-| 回滚 | revert；governance.evaluate 签名向后兼容（新增可选参数） |
+| 红测 | `tests/unit/security/test_governance_mcp.py`（13 用例全绿）：① MCP 工具参数键名 `exec`（非四键名）仍被治理评估 ✓；② 治理模块故障时 MCP/未知来源返回 deny ✓；③ call_tool 路径防火墙被调用且拒绝时不触达服务端 ✓；④ 内置白名单工具治理故障仍放行 ✓；⑤ execute_tool 恰好校验一次不重复 ✓；⑥ 非 MCP 四键名提取语义不变 ✓ |
+| 实现 | ① `mcp_client.call_tool` 入口加 `_check_firewall`（execute_tool 末尾委托 call_tool，消除重复检查）——router 主路径（`tool_router.py:532-534` 优先 call_tool）不再绕过防火墙；② `security/governance.py` 新增 `evaluate_tool_call(tool_name, params, user_id, scan_all)` 入口 + 模块级 `extract_adjudicable_params`（scan_all=True 时全参数 json 序列化进裁决文本 + 路径型参数单独提取供敏感路径规则）；③ `_governance_precheck` 重写：MCP（mcp.* 前缀）恒走 scan_all；治理不可用时 `_governance_fail_closed` 分级——MCP/未知来源 deny，内置白名单（`_builtin_dispatch`）放行；MCP 命中 SANDBOX 裁决显式阻断（JSON 参数无沙箱执行语义）；④ **顺手修复预存 bug**：`_audit_governance` 缺 `AuditSeverity` 必填参数导致全部治理审计静默失败——按裁决级别映射（deny→HIGH/sandbox·ask→MEDIUM/allow→LOW） |
+| 验证 | 新测试 13/13 绿；audit 写盘恢复（"治理审计日志写入失败" 0 次）；test_audit_regressions / governance_endpoints / tool_engine_integration / url_guard 全绿；tools 套件与基线完全一致（61F 预存）；test_governance_integration 仅剩 Windows AppContainer 真实 curl spawn 的环境性预存失败 |
+| 待办 | **提交**：tool_executor.py 混有用户未提交改动（diff 188+/37- 中约一半非本任务），无法干净切分——P0-2 四文件暂留工作区，待用户处理 tool_executor.py 后统一提交 |
+| 回滚 | revert 对应 commit；evaluate_tool_call 为新增入口向后兼容 |
 
-### P0-3 MCP 用户隔离 ☐
-
-**问题**：`get_mcp_client(user_id)`（`mcp_client.py:471-476`）单例只记首个 user_id，跨用户共享会话与防火墙身份。
-
-| 步骤 | 内容 |
-|---|---|
-| 红测 | ① A 建连后 B 调用，`_check_firewall` 收到 B；② `get_mcp_client()` 无参仍返回 default（bootstrap/测试兼容）；③ 不同 user 的 client 不共享 `_servers` |
-| 实现 | 单例 → `Dict[user_id, MCPToolClient]` client 池 + RLock；`mcp_bootstrap.py` 显式 user_id="system"；chat 请求链路传当前用户：`api/deps.py` 当前用户 → tool_router 执行上下文 → `_execute_mcp` 取请求级 user_id 建/取 client。注意 tool_router 是长生命周期对象，user_id 必须按请求传参而非构造时固化 |
-| 验证 | 红测 + 双账号手工：A 配置的 server B 不可见（或按产品语义共享但防火墙身份正确——实施时与现有 shared_config 语义对齐） |
-| 回滚 | revert（client 池对外接口不变） |
-
-### P0-4 配置收敛 + 掩码 ☐
+### P0-3 MCP 用户隔离 ☑（2026-08-31 实现，与 P0-2 同批待提交）
 
 | 步骤 | 内容 |
 |---|---|
-| 红测 | ① shared_config 端点 POST 非法配置（未知键/缺 transport 输入）→ 400；② 读接口 headers 中 `Authorization`/`*token*`/`*secret*` 打码（现状只掩 env，`shared_config.py:33-40`）；③ `transport=streamable_http` 归一化为 http 被接受 |
-| 实现 | ① `mcp_config.py` `_VALID_TRANSPORTS` 加 `streamable_http` 别名→归一化 `http`（M12）；② `shared_config.py` POST/PUT 前置 `validate_mcp_server_config`；③ 掩码函数抽公共 `_mask_secrets(mapping)` 覆盖 env+headers；④ 两套 CRUD 统一为 SharedConfigManager 薄壳（内存 dict 分叉删除） |
-| 验证 | 红测 + 前端 `NeurUI/src/api/modules/` 相关类型对照（MCPServerInfo 形状不变） |
-| 回滚 | revert；归一化仅放宽不收紧，无兼容风险 |
+| 红测 | `tests/unit/tools/test_mcp_user_isolation.py`（7 用例全绿）：① call_tool/execute_tool 接受请求级 user_id 且防火墙按其裁决 ✓；② 无请求上下文回退 client 构造身份 ✓；③ router 把 user_id 穿到防火墙 ✓；④ `_user_id` 内部键不注入 MCP params（不泄漏给外部 server）✓；⑤ 命名空间/裸名双解析保持 ✓；⑥ executor 把 `_agent_identity()` 传给 route ✓ |
+| 实现 | **对计划"per-user client 池"方案的修正**：MCP server 连接是系统共享资源，per-user 池=N 倍 stdio spawn 且破坏 bootstrap 语义；隔离点改为**防火墙身份按请求穿透**——`mcp_client.call_tool/_check_firewall/execute_tool` 接受 `user_id`（None 回退构造身份）；`tool_router._execute_mcp` 显式穿透（`_accepts_kwarg` 签名探测兼容旧式客户端，**不靠 TypeError 重试**——副作用工具会双重执行）；`user_id=None` 时不附加参数（保住既有精确参数契约）；MCP 源排除 params 注入；executor 调 route 传 `_agent_identity()[0]`。**顺手修复潜伏缺口**：`_resolve_mcp_tool` 只认属性访问不认 dict，而 `MCPToolClient.list_tools()` 返回 dict——bootstrap 注册的客户端在兜底解析中永远失配，已补 dict 容错 |
+| 验证 | 新测试 7/7 绿；mcp_client/router/config/governance/tool_engine 集成 132 全绿；tools+audit 回归与基线一致（61F+28E 预存）；`test_tool_success_flag_p1_fixes` 桩签名随 route 契约更新（user_id 可选形参） |
+| 待办 | **提交**：与 P0-2 同批——governance.py / mcp_client.py / tool_router.py / 两个测试文件可干净提交，tool_executor.py 混用户并行改动需用户处理 |
+| 回滚 | revert；call_tool 的 user_id 为可选参数，向后兼容 |
 
-### P0-5 死路与键名 bug ☐
-
-| 步骤 | 内容 |
-|---|---|
-| 红测 | ① M9 回归：`list_tools()` 返回 `server_id` → neurflow node server 名正确（`adapters.py` `tool.get("server")` 键名错）；② M8：API `GET /tool-layers/tools` 能列出已连 MCP 工具（engine=None 懒获取真实单例）；③ 删除 `execution_engine/mcp_client_manager.py` 后全量导入巡检通过 |
-| 实现 | ① 键名改 `server_id`；② `mcp_client.py:437-438` engine=None → 延迟 import `get_tool_engine()` 懒获取（签名不动，test_tool_engine_integration.py 硬约束）；③ 删死文件（先 grep 确认零消费方+测试引用） |
-| 验证 | `pytest tests/unit/tools tests/integration/test_tool_engine_integration.py tests/unit/neurflow -q` |
-| 回滚 | revert |
-
-### P0-6 CI 底座 ☐
+### P0-4 配置收敛 + 掩码 ☑（2026-08-31 实现，与 P0-2/P0-3 同批待提交）
 
 | 步骤 | 内容 |
 |---|---|
-| 变更 | ① `ci.yml` 加 lint（ruff E9/F 宽松起步）、unit-tests（py3.11/3.12 matrix，跑健康子集：tools/api/memory/security + MCP 全量；预存失败模块不进 CI）、frontend（npm ci && vue-tsc && vitest run && eslint）；② `uv pip compile` 生成 `requirements.lock`，CI 用 lock；pip-audit job（allow-list 已知项）；③ 新 `codeql.yml`（python，非阻塞）；④ pytest-cov 对 tool_layers/context/security `fail_under=30` |
-| 验证 | 推分支 CI 全绿；本地先跑 `ruff check` + 子集 pytest 预演 |
-| 回滚 | workflow 文件独立 commit，revert 即可 |
+| 红测 | `tests/unit/api/test_shared_config_mcp_convergence.py`（16 用例全绿）：① shared-config POST schema 校验前置（缺 url/非法 transport/shell command → 400 指名）✓；② MCP CRUD 收敛 SharedConfigManager（持久化 + GET/export 同源 + DELETE 透传 + 重复 409）✓；③ env 全掩（既有）+ headers 敏感键掩码（authorization/token/secret/key/password/cookie，非敏感头不掩保回显）✓；④ 掩码回写保护扩展到 headers ✓；⑤ `streamable_http` 别名归一化 http（mcp_config 单元 + 两端点集成）✓；⑥ 角色门对齐 tool-layers（stdio 仅 admin、非 admin 拒私网）✓ |
+| 实现 | ① `mcp_config.py`：`_TRANSPORT_ALIASES = {"streamable_http": "http"}`，`_validate_types`/`_infer_transport` 归一化（**空串视为未指定**交给推断——`is not None` 判空会挡住推断路径）；② `shared_config.py` MCP CRUD 重写为 Manager 薄壳（`_mcp_config_from_body` + `_validate_and_gate_mcp_config` 返回归一化配置）；GET `/`、`/export` 的 mcp_servers 改 Manager 同源（保持 dict 键形前端兼容）；`/import` mcp_servers best-effort 逐条入 Manager；③ 掩码：`_mask_sensitive_headers` + `_masked_mcp_server` 扩展；④ `MCPServerRequest` 扩展完整字段集（url/transport/headers/cwd/timeout_ms，command 放宽可选）；⑤ **门禁时序修正（两端点）**：先校验拿归一化 transport 再做角色门/URL 门——shared-config 的 transport 可省略、stdio 靠推断，查原始字符串会漏掉推断路径（红测抓到的真洞） |
+| 验证 | 新测试 16/16 绿；P0-1/2/3 全部测试 + mcp 全套 + audit_regressions + api_router 共 213 绿；security 目录回归逐组与基线一致；前端 `MCPServer.created_at?` 本就可选（响应去掉该字段类型兼容） |
+| 发现（未修） | 前端调用 `POST /shared-config/mcp-servers/{id}/test`（shared-config.ts:121）但后端无此路由——预存缺口，建议后续补"测试连接"端点或前端改走 tool-layers |
+| 待办 | **提交**：与 P0-2/P0-3 同批（tool_executor.py 待用户处理） |
+| 回滚 | revert；归一化仅放宽不收紧 |
+
+### P0-5 死路与键名 bug ☑（2026-08-31 实现，与 P0-2/3/4 同批待提交）
+
+| 步骤 | 内容 |
+|---|---|
+| 红测 | `tests/unit/tools/test_p0_5_dead_paths.py`（6 用例全绿）：① sync_mcp 按 `server_id` 键取名（节点 type `mcp:s1:t1` 非 `mcp:default:t1`）✓；② 旧式 `server` 键回退兼容 ✓；③ `_sync_tools_to_engine(engine=None)` 落到 API 层单例引擎（GET /tool-layers/tools 可见）✓；④ 显式 engine 硬约束不变（集成测试签名契约）✓；⑤⑥ mcp_client_manager.py 已删且不可导入 ✓ |
+| 实现 | ① `adapters.py` sync_mcp：`tool.get("server_id") or tool.get("server", "default")`（新键优先，旧键回退）；② `mcp_client._sync_tools_to_engine` engine=None → 延迟 import `get_tool_engine()` 懒获取 API 单例（签名不动）；③ 删除 `execution_engine/mcp_client_manager.py`（git rm，零生产消费方）+ 其未跟踪测试文件 |
+| 验证 | 新测试 6/6 绿；tool_engine 集成硬约束 + tools 套件 + audit 回归与基线一致。**基线外 2 个失败为环境敏感预存**：`test_sync_skills`/`test_adapters_skill_to_node` 用真实 SkillRegistry 硬编码断言 3 个 skill，用户的并行工作已注册第 4 个（kb_builder_executor，untracked）——与 P0-5 无关，测试需随技能增长改参数化 |
+| 回滚 | revert；M9 修复保留旧键回退，无兼容风险 |
+
+### P0-7 工作流子系统安全快修 ☑（2026-08-31，对比 v2 §3 N1-N6，commit 70f40df）
+
+| 项 | 修复 |
+|---|---|
+| N1 | 触发器 CRUD/fire 挂严格 `get_current_user`（此前零鉴权，fire 可无鉴权派发任意已发布工作流） |
+| N2 | cron 断链：`TriggerManager.configure_runtime/bind_loop` + app 启动注入 dispatch（与 fire 端点同构）与 by-id loader；`_scheduled_fire` 经 `run_coroutine_threadsafe` 回投主循环（原线程池线程内 create_task 永不执行） |
+| N3 | webhook 重放防护：`verify_request`（签名覆盖 `<ts>.` 前缀 + 300s 时效）；ingress 携 timestamp 头走新约定，旧约定保留兼容 |
+| N4 | receive 端点 body 1MB 上限（Content-Length 预检+实读复检，413） |
+| N5 | 限流器清理分支缩进修复（原 return 后不可达，桶满永不清理） |
+| N6 | 调试引擎消费 mock（node.mock_output/_NODE_MOCKS 迁引擎单一事实源）+ step_mode 每节点暂停；触发器测试注入认证身份（404→401 契约更新） |
+
+验证：test_p0_7_workflow_hardening 16 用例全绿；webhook/triggers/debug 既有套件随契约更新后全绿。
+预存备注：`test_approval_reply_mechanism.py` 存在挂死用例（HEAD 同挂，审批域，与 P0-7 无关）。
+
+### P0-6 CI 底座 ☑（2026-08-31 实现并本地验证，随 P0-2~P0-5 同批提交）
+
+| 步骤 | 内容 |
+|---|---|
+| 实现 | ① `ci.yml` 六 job：static-gate（既有）+ **lint**（ruff E9+F821，规则/豁免在 pyproject）+ import-and-regression（既有，cache 改指 lock）+ **unit-tests**（py3.11/3.12 matrix，`scripts/ci/protected_tests.txt` 子集 + `--cov-fail-under=60`，uv 装锁定依赖）+ **frontend**（npm ci → vue-tsc → vitest，node 20）+ **dependency-audit**（pip-audit 对 lock，非阻塞）；② `codeql.yml`：python 周扫描 + PR，非阻塞；③ `uv pip compile --universal` 生成 `requirements-ci.lock`（98 锁定版本）；④ pyproject：`[tool.ruff.lint] select=[E9,F821]` + per-file-ignores（F821 存量逐个销账）+ `[tool.coverage.run] include` 受保护模块集；⑤ requirements-ci.txt 补 `mcp>=1.2.0`（MCP 子集进 CI 的前提） |
+| 实测 | ruff 全库绿（修 `exec_sandbox.py` 缺 List 导入真问题；F821 存量 30 处分诊：用户并行文件 2 处/星号导入误报 13 处/缺导入 7 处进豁免清单逐销账）；coverage TOTAL 66.64% ≥ 60（url_guard 100%/mcp_config 92%/mcp_client 82%/bootstrap 89%）；vitest 614 绿 + vue-tsc 干净；YAML 双文件解析通过；protected 子集 211 用例 7.9s |
+| 要点 | protected_tests.txt 是 CI 与本地唯一事实源（grep -v 过注释）；coverage include 与 source 并用会被忽略（coverage 限制）；F821 全量扫描暴露 pyflakes 门禁漏掉的 5+25 个未定义名——static gate 的 pyflakes 未启用 undefined-name 检查，ruff 门禁实际补上了这个洞 |
+| 待办 | 推送后观察首次 CI 运行（Ubuntu 环境 unpinned 依赖可能有平台差异）；`NeurUI` 的 npm cache 依赖 package-lock.json（已存在） |
+| 回滚 | workflow 文件独立 commit |
 
 **Phase 0 出口**：RCE/防火墙/隔离/配置四洞清零；CI 五类门禁生效；测试绿。
 
@@ -82,7 +97,23 @@
 
 ## Phase 1：核心能力建设（第 2-8 周）
 
-### P1-1 上下文管线四期 ☐（详设见评测文档 §4.1）
+### P1-1 上下文管线四期 ◐（切片 1 已提交 6950418；详设见评测文档 §4.1）
+
+**切片 1（☑）**：`neurova/context/pairing.py` 视图配对完整性校验 + `ContextPool.draw()` 出口接入——
+孤儿 TOOL_CALL（pairs_with 目标未入选）不再泄入 LLM 视图；`ContextInput.metadata` 增
+turn_id/pairs_with 约定。9 用例锁定；pool 既有套件 36 绿。
+**切片 2（☑ 已提交 7c31458）**：`neurova/context/recovery.py` 三件套
+（assign_turn_ids / is_context_overflow_error / compact_messages_for_overflow——
+system 全留+首 user 锚点+末尾 recent_keep 原样，中段折叠恢复桩，切割点对齐轮次边界
+不留孤儿 tool 消息）；`openai_loop._predict_stream` 拆 once+恢复包装（打开即溢出→折叠
+单次重试；重试仍溢出抛；流中已产出内容抛；非 overflow 不触发）；orchestrator 对话归档
+写入 turn_id。17 用例锁定。
+**期① 收尾（☑ e6c0318）**：orchestrator 归档循环抽取为 `_archive_conversation_to_pool`
+可测单元——role=tool 消息以 TOOL_CALL 源入池并写 pairs_with=当前轮，配对锚点在真实
+数据流闭合。**期② slice A（☑ 同 commit）**：TokenEstimator EXACT 策略（tiktoken
+o200k_base，失败回退 BALANCED）。**期② 余项**：动态预算接 provider_manager 元数据
+（该文件有用户未提交改动，只读接入待其提交后做）；pool-settings 端点扩
+trigger_ratio/output_reserve。
 
 | 期 | 步骤 | 红测要点 |
 |---|---|---|
@@ -91,9 +122,32 @@
 | ③（第 3-4 周）真摘要+台账持久化 | 新 `context/summarizing_compressor.py`（LLM 增量摘要、60s 超时、失败保留旧摘要、脱敏）→ 摘要回写池新枚举 `ContextSource.SUMMARY`（归档无损语义不破坏）→ 新 `context/eviction_ledger_db.py`（SQLite WAL+FTS5，三元组隔离列，强制 WHERE 沿 `_PersistDbStore` 模式）→ `recall_evicted` 接口不变换实现 → `recall_history` 注册 agent 工具 | 摘要失败保留旧摘要；台账重启后 FTS 可召回；跨用户 WHERE 隔离；`recall_history` 工具端到端 |
 | ④（第 4-5 周）ack 集+分层剪枝 | `ContextInput.seen_confirmed` → `loops/base.py` 模型请求成功后确认本轮 tool result → 折叠候选只取已确认 → 剪枝顺序：旧轮 tool result→老记忆→低分经验 | 未读 tool result 不被折叠；超预算剪枝顺序断言 |
 
+**实施状态（2026-08-31）**：期① ☑（6950418 配对校验 + 7c31458 溢出恢复/打标 + e6c0318 TOOL_CALL 入池）；期② ◐（EXACT ☑ e6c0318；动态预算待 provider_manager 用户提交后接入）；期③ ☑（0ff5585 台账+摘要+池集成；2fbc8d4 recall_history 工具三件套）；期④ ◐（db05fba ack 基础+折叠候选；**余项**：drawer 预算遍历按位置序回投，pre-sort 分层无效——预算遍历重设计另行切片）。
+
+**收尾批次（☑ 已提交 0c13f0c）**：期② 动态预算 ☑（get_token_budget_for_model 接 provider_manager 元数据 context_window×0.6 钳位，只读接入不改其文件）→ **期② 全部 ☑**；期③ 接线 ☑（orchestrator 懒建 EvictionLedgerDB 按 agent 分库 + SummarizingCompressor 接真 LLM 桥 + pool.rollup_overflow_digest 摘要回写 + get_ledger_db 暴露）→ **期③ 全部 ☑**；期④ drawer 分层预算回投 ☑（第 1 层未读 TOOL_CALL 必入视野、第 2 层其余；created_at 稳定排序保前缀缓存）→ **期④ 全部 ☑**。P1-1 四期全部完成。
+**增强② 收尾（☑ 0a18124）**：recovery.info 增 folded_messages（溢出恢复→rollup_overflow_digest→SUMMARY 回写链路闭合，此前 rollup 恒空转）+ EvictionLedgerDB.gc_stale() 语义化封装（keep_count=5000/keep_days=30，与 test_ledger_gc_trigger 契约对齐）+ ContextPool piggyback 统一。5 用例；P1 全套 386 绿。**P1 主线收尾。**
+**可选增强（☑ 已提交 83a6161）**：① compact info 暴露 folded_messages + openai_loop 恢复时 fire-and-forget 调 rollup_overflow_digest（兼容 dict 消息，不阻塞重试）；② EvictionLedgerDB 增 keep_count/keep_days 与 gc_stale() + pool 节流触发（每 20 次驱逐一次，异常不破坏归档）。
+
 验收：100+ 轮压测不溢出或恢复 100%；token 偏差 ≤5%；重启后可召回；现有 pool 测试与 pool-settings 契约零破坏。
 
-### P1-2 工具执行协调器 ☐（第 2-3 周，与 P1-1①② 并行）
+### P1-2 工具执行协调器 ◐（切片 1/2 已提交 fd7ea92；与 P1-1①② 并行）
+
+**切片 1（☑）**：`neurova/agent/tool_coordinator.py`——per-tool 超时注册表
+（calculator 5s/memory_search 10s/web_search 30s/browser_* 60-90s，未知回落 60s）+
+ToolCoordinator（run_with_timeout 超时**转后台不取消**——同一任务继续持有引用防 GC，
+观察者协程投递 pending hints；pop_pending_hints 取走即清）+ is_concurrency_safe
+声明制（只读清单，未知保守 False）。11 用例。
+**切片 2（☑ fd7ea92）**：`_execute_single_tool` 执行链抽取为 `_execute_tool_core`
+（返回三元组）+ run_with_timeout 单一咽喉点覆盖全部执行路径（治理预检后、H5 钩子前）；
+chat_pipeline step3 pending hints 以 [后台工具完成] system 消息注入。4 用例。
+**教训**：neurova.agent 包 __init__ 链回 tool_executor——模块级导入循环，
+协调器导入必须懒加载（AGENTS.md 纪律再次验证）。
+**切片 3（☑ 已提交 b49dbda）**：循环体抽取 `_execute_tool_call_worker`
+（顺序无关纯执行单元，返回 (tool_message, records)）+ 声明制并行——全部
+is_concurrency_safe 才 gather，任一未声明整轮保守串行；结果按原 tool_call
+顺序回装，call/result 记录保持相邻配对契约；全部修复注释语义原样保留。
+9 用例（并行时序/混合降级/结果对应/解析隔离/未知工具/user_id 穿透）。
+**P1-2 状态：三切片全部 ☑**。余项=文本正则兜底收窄（原计划第 6 步，随 P2 清理）。
 
 1. 红测：三通道（loop 原生/文本兜底/肌肉记忆）同入口；独立工具并行结果完整；超时转后台语义；hint 注入下一轮
 2. 统一入口 `execute(tool_name, params, source, context)`（`tool_executor.py` 收敛；肌肉记忆自动执行=白名单+高置信直通）
@@ -130,6 +184,8 @@
 
 ---
 
-## P2 概要（随迭代，不在本批）
+## P2 概要（随迭代）
 
-记忆检索接真向量（UnifiedVectorStore 已在，消灭假向量）；LLM 双抽象合一 + Retry-Fallback-RateLimit 三层；agent_ref 代理收窄 + 275 单例收敛（渐进）；structlog + prometheus_client + per-turn token 对账 + 成本核算；goal/mission 循环模式；MCP OAuth（凭据**每次调用时解析**，避开 QP 烘焙坑）。
+**P2-1 记忆检索真实性 ☑（已提交 b6095b6，2026-08-31）**：`_semantic_recall` 重写——UnifiedVectorStore 增量索引（同 id 去重仅编码新记忆，消灭 O(n)/query 重建）+ 向量相似度搜索（faiss/fastembed/ONNX/TF-IDF 链接入主链路）+ RRF 融合（向量 0.7/关键词 0.3）+ 按隔离三元组分库 + 向量异常降级关键词。test_forget 契约更新（语义召回 intent-true：被遗忘记忆按 id 断言）。6 用例；记忆全套 924 绿（2 预存 tie 断言）。
+
+待做：LLM 双抽象合一 + Retry-Fallback-RateLimit 三层（rate_limiter.py 构件已齐零装配，砌进 BaseProvider 即得分）；agent_ref 代理收窄 + 275 单例收敛（渐进）；structlog + prometheus_client + per-turn token 对账 + 成本核算；goal/mission 循环模式；MCP OAuth（凭据**每次调用时解析**，避开 QP 烘焙坑）。

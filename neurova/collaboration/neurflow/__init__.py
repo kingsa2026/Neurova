@@ -100,7 +100,7 @@ try:
 except ImportError as _e:
     _logger.debug("neurflow.drama_nodes 未可用: %s", _e)
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 __all__ = [
     # 数据模型

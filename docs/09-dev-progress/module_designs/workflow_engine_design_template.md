@@ -421,7 +421,7 @@ for retry in range(step.retry_count + 1):
 ## 9. 附录
 
 ### 9.1 参考资料
-- [Neurova CogArch 2.0 设计文档](../../NEUROVA_CogArch_2.0.md)
+- [Neurova CogArch 2.0 设计文档](../../../01-architecture/NEUROVA_CogArch_2.0.md)
 - [ExecutionMonitor 设计](../execution_engine/execution_monitor.py)
 
 ### 9.2 变更日志

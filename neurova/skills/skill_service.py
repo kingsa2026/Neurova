@@ -147,7 +147,7 @@ class SkillService:
                 self._skills[skill_id] = {
                     "id": skill_id,
                     "name": manifest.get("name", skill_id),
-                    "version": manifest.get("version", "0.1.0"),
+                    "version": manifest.get("version", "1.0.0"),
                     "description": manifest.get("description", ""),
                     "enabled": True,
                     "installed_at": datetime.datetime.now().isoformat(),
@@ -310,7 +310,7 @@ class SkillService:
         skill_id: str,
         name: str,
         description: str = "",
-        version: str = "0.1.0",
+        version: str = "1.0.0",
         config: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
@@ -377,7 +377,7 @@ class SkillService:
                         {
                             "id": skill_id,
                             "name": skill_info.get("name", skill_id),
-                            "version": skill_info.get("version", "0.1.0"),
+                            "version": skill_info.get("version", "1.0.0"),
                             "description": skill_info.get("description", ""),
                             "enabled": skill_info.get("enabled", True),
                             "installed_at": skill_info.get("installed_at", ""),
@@ -409,7 +409,7 @@ class SkillService:
                 return {
                     "id": skill_id,
                     "name": skill_info.get("name", skill_id),
-                    "version": skill_info.get("version", "0.1.0"),
+                    "version": skill_info.get("version", "1.0.0"),
                     "description": skill_info.get("description", ""),
                     "enabled": skill_info.get("enabled", True),
                     "installed_at": skill_info.get("installed_at", ""),

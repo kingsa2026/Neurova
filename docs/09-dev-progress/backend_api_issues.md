@@ -293,6 +293,6 @@
 
 **参考文档**：
 
-- [frontend_development_plan.md](docs/dev_progress/frontend_development_plan.md)
-- [NEUROVA_CogArch_2.0.md](docs/NEUROVA_CogArch_2.0.md)
+- [frontend_development_plan.md](./frontend_development_plan.md)
+- [NEUROVA_CogArch_2.0.md](../01-architecture/NEUROVA_CogArch_2.0.md)
 - [app.py](../neurova/api/app.py)

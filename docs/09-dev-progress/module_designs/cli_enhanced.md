@@ -192,7 +192,7 @@ def complete_session(self, text, line, begidx, endidx):
 ```python
 class NeurovaCLI(cmd.Cmd):
     """
-    忆灵命令行交互界面（增强版）
+    智星命令行交互界面（增强版）
     
     新增功能：
     - 流式输出
@@ -203,7 +203,7 @@ class NeurovaCLI(cmd.Cmd):
     
     # 现有属性
     intro = "..."  # 更新欢迎信息
-    prompt = "忆灵> "
+    prompt = "智星> "
     
     # 新增属性
     current_session_id: str = None
