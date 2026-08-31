@@ -18,9 +18,10 @@ import hmac
 import json
 from neurova.core import config
 from neurova.core.logger import get_logger
+import secrets
 import time
 import uuid
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -102,6 +103,15 @@ _user_devices: Dict[str, Set[str]] = {}  # user_id -> set of pairing_ids
 # WebSocket 连接管理
 _ws_connections: Dict[str, WebSocket] = {}  # user_id -> WebSocket
 
+# 审计修复 (P1-8): confirm_pairing 每 IP 速率限制 —— 6 位配对码 300s TTL
+# 无限流时可在窗口内枚举 (10^6/300s)。滑窗: 同 IP 5 分钟内最多 5 次尝试。
+_CONFIRM_RATE_LIMIT = 5
+_CONFIRM_RATE_WINDOW_SECONDS = 300
+_confirm_attempts: Dict[str, List[float]] = {}  # ip -> [timestamp, ...]
+
+# 审计修复 (P2-12): 单用户 WS 连接上限, 防止单用户/单客户端耗尽连接资源
+MAX_CONNECTIONS_PER_USER = 5
+
 # HMAC 密钥（用于生成 WS Token）
 _DEFAULT_WS_SECRET = "neurova-ws-secret-key-2026"
 
@@ -151,10 +161,26 @@ def _build_ws_url(request, code=None, token=None) -> str:
 
 
 def _generate_pairing_code() -> str:
-    """生成 6 位数字配对码"""
-    import random
+    """生成 6 位数字配对码
 
-    return "".join([str(random.randint(0, 9)) for _ in range(6)])
+    审计修复 (P3-18): random.randint 是梅森旋转算法, 可预测;
+    配对码是唯一的认证凭据, 必须使用 CSPRNG。
+    """
+    return "".join(str(secrets.randbelow(10)) for _ in range(6))
+
+
+def _check_confirm_rate_limit(ip: str) -> None:
+    """confirm_pairing 每 IP 滑动窗口限流, 超限抛 429"""
+    now = time.time()
+    attempts = _confirm_attempts.setdefault(ip, [])
+    # 剔除窗口外记录
+    attempts[:] = [t for t in attempts if now - t < _CONFIRM_RATE_WINDOW_SECONDS]
+    if len(attempts) >= _CONFIRM_RATE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many pairing attempts. Please try again later.",
+        )
+    attempts.append(now)
 
 
 def _generate_ws_token(user_id: str, pairing_id: str) -> str:
@@ -232,8 +258,16 @@ class MobileConnectionManager:
             cls._instance = cls()
         return cls._instance
 
-    async def connect(self, websocket: WebSocket, user_id: str, connection_id: str):
-        """建立连接"""
+    async def connect(self, websocket: WebSocket, user_id: str, connection_id: str) -> bool:
+        """建立连接
+
+        审计修复 (P2-12): 单用户连接数超 MAX_CONNECTIONS_PER_USER 时拒绝
+        （不 accept），返回 False 由调用方关闭, 防止单用户耗尽连接资源。
+        """
+        if len(self._user_connections.get(user_id, set())) >= MAX_CONNECTIONS_PER_USER:
+            logger.warning("用户 %s 连接数已达上限 %s, 拒绝新连接", user_id, MAX_CONNECTIONS_PER_USER)
+            return False
+
         await websocket.accept()
         self._connections[connection_id] = websocket
 
@@ -242,6 +276,7 @@ class MobileConnectionManager:
         self._user_connections[user_id].add(connection_id)
 
         logger.info("Mobile WebSocket connected: %s for user %s", connection_id, user_id)
+        return True
 
     def disconnect(self, connection_id: str, user_id: str):
         """断开连接"""
@@ -364,27 +399,35 @@ async def _handle_agent_switch(ws, data: dict):
     })
 
 
-async def _handle_session_list(ws, data: dict):
-    """处理 session:list -- 列出会话"""
+async def _handle_session_list(ws, data: dict, user_id: str):
+    """处理 session:list -- 列出会话
+
+    审计修复 (P0-4): 原实现调 get_sessions(agent_id) 返回该 agent 下
+    所有用户的完整会话（含全部消息），任何已配对手机可拉取全员对话。
+    现按 WS 身份的 user_id 过滤, 且只返回摘要而非全文。
+    """
     agent_id = data.get("agent_id", "default")
     try:
         from neurova.session_manager import get_session_manager
 
         sm = get_session_manager()
-        sessions = sm.get_sessions(agent_id)
+        sessions = sm.list_sessions(agent_id=agent_id, user_id=user_id)
         await ws.send_json({"type": "session:list", "sessions": sessions})
     except Exception as e:
         await ws.send_json({"type": "error", "code": "session_list_failed", "message": str(e)})
 
 
-async def _handle_session_create(ws, data: dict):
-    """处理 session:create -- 创建新会话"""
+async def _handle_session_create(ws, data: dict, user_id: str):
+    """处理 session:create -- 创建新会话
+
+    审计修复 (P0-4): 会话必须绑定创建者 user_id, 否则无归属。
+    """
     agent_id = data.get("agent_id", "default")
     try:
         from neurova.session_manager import get_session_manager
 
         sm = get_session_manager()
-        session_id = sm.create_session(agent_id)
+        session_id = sm.create_session(agent_id, user_id=user_id)
         await ws.send_json({"type": "session:created", "session": {"session_id": session_id, "agent_id": agent_id}})
     except Exception as e:
         await ws.send_json({"type": "error", "code": "session_create_failed", "message": str(e)})
@@ -397,8 +440,8 @@ async def _handle_ws_message(ws, data: dict, user_id: str, pairing_id: str):
         "chat:send": lambda: _handle_chat_send(ws, data, user_id),
         "chat:cancel": lambda: _handle_chat_cancel(ws, data),
         "agent:switch": lambda: _handle_agent_switch(ws, data),
-        "session:list": lambda: _handle_session_list(ws, data),
-        "session:create": lambda: _handle_session_create(ws, data),
+        "session:list": lambda: _handle_session_list(ws, data, user_id),
+        "session:create": lambda: _handle_session_create(ws, data, user_id),
     }
     handler = handlers.get(msg_type)
     if handler is None:
@@ -509,6 +552,9 @@ def _generate_svg_qrcode(code: str):
 @router.post("/pairing/confirm", response_model=ConfirmPairingResponse)
 async def confirm_pairing(request: Request, body: ConfirmPairingRequest):
     """确认配对（手机端调用，无需 JWT）"""
+    # 审计修复 (P1-8): 每 IP 限流, 防止 6 位配对码被暴力枚举
+    _check_confirm_rate_limit(request.client.host if request.client else "unknown")
+
     pairing = _pairing_codes.get(body.code)
     if not pairing:
         raise HTTPException(status_code=404, detail="Invalid pairing code")
@@ -665,7 +711,10 @@ async def mobile_websocket(websocket: WebSocket):
     connection_id = f"ws-{uuid.uuid4().hex[:12]}"
     manager = MobileConnectionManager.get_instance()
 
-    await manager.connect(websocket, user_id, connection_id)
+    if not await manager.connect(websocket, user_id, connection_id):
+        await websocket.close(code=4008, reason="Too many connections for this user")
+        return
+
     _ws_connections[pairing_id] = websocket
 
     # 更新设备在线状态

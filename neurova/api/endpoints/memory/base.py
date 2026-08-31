@@ -176,17 +176,14 @@ def get_memory_manager(agent_id: Optional[str] = None, user: Optional[Dict[str, 
     if not agent.memory_manager:
         raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, "记忆系统未启用") from None
 
-    # 设置多用户隔离参数(安全设置，跳过只读属性)
-    if user:
-        if hasattr(agent.memory_manager, 'neuser_id'):
-            try:
-                agent.memory_manager.neuser_id = user.get("neuser_id", "default")
-            except (AttributeError, AttributeError):
-                pass
-        if hasattr(agent.memory_manager, 'user_id'):
-            try:
-                agent.memory_manager.user_id = user.get("user_id", "default")
-            except (AttributeError, AttributeError):
-                pass
+    # 审计修复 (P0-1): 原实现对共享单例的只读 property 赋值 —— AttributeError
+    # 被 except 静默吞掉, 隔离注入从未生效; 且并发请求互相覆盖上下文。
+    # 现通过 ContextVar 请求作用域注入, 不修改单例状态。
+    neuser = (user or {}).get("neuser_id") or "default"
+    uid = (user or {}).get("user_id") or "default"
+    if hasattr(agent.memory_manager, "set_request_scope"):
+        agent.memory_manager.set_request_scope(neuser_id=neuser, user_id=uid)
+    else:
+        logger.debug("memory_manager 不支持 set_request_scope, 跳过隔离注入")
 
     return agent.memory_manager

@@ -17,8 +17,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
+
+from neurova.api.deps import get_current_user
 
 logger = get_logger(__name__)
 
@@ -269,8 +271,9 @@ async def get_usage_stats(
     request: Request,
     start_time: Optional[float] = Query(default=None, description="开始时间"),
     end_time: Optional[float] = Query(default=None, description="结束时间"),
+    current_user: dict = Depends(get_current_user),
 ):
-    """获取使用统计"""
+    """获取使用统计 — 登录用户可读"""
     try:
         # 获取分析管理器
         manager = get_analytics_manager()
@@ -290,8 +293,9 @@ async def get_performance_stats(
     request: Request,
     start_time: Optional[float] = Query(default=None, description="开始时间"),
     end_time: Optional[float] = Query(default=None, description="结束时间"),
+    current_user: dict = Depends(get_current_user),
 ):
-    """获取性能统计"""
+    """获取性能统计 — 登录用户可读"""
     try:
         # 获取分析管理器
         manager = get_analytics_manager()
@@ -311,8 +315,9 @@ async def get_behavior_stats(
     request: Request,
     start_time: Optional[float] = Query(default=None, description="开始时间"),
     end_time: Optional[float] = Query(default=None, description="结束时间"),
+    current_user: dict = Depends(get_current_user),
 ):
-    """获取用户行为统计"""
+    """获取用户行为统计 — 登录用户可读"""
     try:
         # 获取分析管理器
         manager = get_analytics_manager()
@@ -332,8 +337,9 @@ async def get_error_stats(
     request: Request,
     start_time: Optional[float] = Query(default=None, description="开始时间"),
     end_time: Optional[float] = Query(default=None, description="结束时间"),
+    current_user: dict = Depends(get_current_user),
 ):
-    """获取错误统计"""
+    """获取错误统计 — 登录用户可读"""
     try:
         # 获取分析管理器
         manager = get_analytics_manager()

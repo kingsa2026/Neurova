@@ -19,10 +19,13 @@ R-4 修复: CRUD 接入 KnowledgeRepository（JSON 持久化），删除 memory_
 from neurova.core.logger import get_logger
 import time
 import urllib.parse
+from typing import Dict, Any
+
+from neurova.api.auth import get_current_user_or_service
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
@@ -42,6 +45,11 @@ class KnowledgeItem(BaseModel):
     confidence: float = 0.5
     created_at: float = 0
     updated_at: float = 0
+    visibility: str = "private"
+    owner_user_id: str = ""
+    shared_with: List[str] = []
+    submission: Optional[Dict[str, Any]] = None
+    graph_node_ids: List[str] = []
 
 
 class KnowledgeCreate(BaseModel):
@@ -53,6 +61,7 @@ class KnowledgeCreate(BaseModel):
     tags: List[str] = Field(default_factory=list, description="标签")
     source: str = Field(default="", description="来源")
     confidence: float = Field(default=0.5, ge=0, le=1, description="置信度")
+    visibility: str = Field(default="private", description="可见性：private（默认）/ public（仅管理员）")
 
 
 class KnowledgeUpdate(BaseModel):
@@ -72,6 +81,19 @@ class KnowledgeSearchRequest(BaseModel):
     category: Optional[str] = None
     tags: List[str] = []
     limit: int = Field(default=10, ge=1, le=100)
+
+
+class KnowledgeShareRequest(BaseModel):
+    """共享请求（按用户名）"""
+
+    usernames: List[str] = Field(..., description="目标用户名列表")
+
+
+class KnowledgeReviewRequest(BaseModel):
+    """公共库审批请求（仅管理员）"""
+
+    approve: bool = Field(..., description="true=通过（转公开），false=拒绝（维持私有）")
+    note: str = Field(default="", description="审批备注")
 
 
 def _get_request_id(request: Request) -> str:
@@ -101,110 +123,8 @@ def _get_repository(agent_id: str = "default"):
     return get_knowledge_repository()
 
 
-@router.get("", response_model=List[KnowledgeItem])
-async def get_knowledge(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-    category: Optional[str] = Query(default=None, description="分类筛选"),
-    limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
-    offset: int = Query(default=0, ge=0, description="偏移量"),
-):
-    """获取知识库（r-repo 持久化；无数据返回空列表，不返回模拟数据）"""
-    repo = _get_repository(agent_id)
-    items = repo.list_knowledge(agent_id, category=category, limit=limit, offset=offset)
-
-    return [
-        KnowledgeItem(
-            knowledge_id=item["knowledge_id"],
-            title=item["title"],
-            content=item["content"],
-            category=item.get("category", "general"),
-            tags=item.get("tags") or [],
-            source=item.get("source", ""),
-            confidence=item.get("confidence", 0.5),
-            created_at=item.get("created_at", 0),
-            updated_at=item.get("updated_at", 0),
-        )
-        for item in items
-    ]
-
-
-@router.post("/search", response_model=List[KnowledgeItem])
-async def search_knowledge(
-    request: Request,
-    body: KnowledgeSearchRequest,
-    agent_id: str = Query(default="default", description="Agent ID"),
-):
-    """搜索知识（标题+内容包含匹配）"""
-    repo = _get_repository(agent_id)
-    results = repo.search_knowledge(
-        agent_id=agent_id,
-        query=body.query,
-        category=body.category,
-        tags=body.tags,
-        limit=body.limit,
-    )
-    return [
-        KnowledgeItem(
-            knowledge_id=item["knowledge_id"],
-            title=item["title"],
-            content=item["content"],
-            category=item.get("category", "general"),
-            tags=item.get("tags") or [],
-            source=item.get("source", ""),
-            confidence=item.get("confidence", 0.5),
-            created_at=item.get("created_at", 0),
-            updated_at=item.get("updated_at", 0),
-        )
-        for item in results
-    ]
-
-
-@router.post("", response_model=KnowledgeItem)
-async def create_knowledge(
-    request: Request,
-    body: KnowledgeCreate,
-    agent_id: str = Query(default="default", description="Agent ID"),
-):
-    """添加知识"""
-    _get_request_id(request)
-
-    repo = _get_repository(agent_id)
-    item = repo.create_knowledge(
-        agent_id=agent_id,
-        title=body.title,
-        content=body.content,
-        category=body.category,
-        tags=body.tags,
-        source=body.source,
-        confidence=body.confidence,
-    )
-
-    return KnowledgeItem(
-        knowledge_id=item["knowledge_id"],
-        title=item["title"],
-        content=item["content"],
-        category=item["category"],
-        tags=item["tags"],
-        source=item["source"],
-        confidence=item["confidence"],
-        created_at=item["created_at"],
-        updated_at=item["updated_at"],
-    )
-
-
-@router.get("/{knowledge_id}", response_model=KnowledgeItem)
-async def get_knowledge_item(
-    request: Request,
-    knowledge_id: str = Path(..., description="知识ID"),
-    agent_id: str = Query(default="default", description="Agent ID"),
-):
-    """获取单个知识详情"""
-    repo = _get_repository(agent_id)
-    item = repo.get_item(agent_id, knowledge_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail=f"Knowledge '{knowledge_id}' not found")
-
+def _item_response(item: Dict[str, Any]) -> KnowledgeItem:
+    """条目 dict → 响应模型（统一投影，避免四处重复构造）。"""
     return KnowledgeItem(
         knowledge_id=item["knowledge_id"],
         title=item["title"],
@@ -215,7 +135,370 @@ async def get_knowledge_item(
         confidence=item.get("confidence", 0.5),
         created_at=item.get("created_at", 0),
         updated_at=item.get("updated_at", 0),
+        visibility=item.get("visibility", "private"),
+        owner_user_id=item.get("owner_user_id", ""),
+        shared_with=item.get("shared_with") or [],
+        submission=item.get("submission"),
+        graph_node_ids=item.get("graph_node_ids") or [],
     )
+
+
+def _resolve_usernames(usernames: List[str]) -> Dict[str, str]:
+    """用户名 → user_id 映射；任一用户名不存在抛 ValueError（API 层转 400）。"""
+    from neurova.auth.user_model import UserModel
+
+    mapping: Dict[str, str] = {}
+    for name in usernames:
+        name = (name or "").strip()
+        if not name:
+            continue
+        u = UserModel().get_user_by_username(name)
+        if u is None:
+            raise ValueError("unknown user: %s" % name)
+        mapping[name] = str(getattr(u, "id", "") or "")
+    return mapping
+
+
+def _entry_or_404(repo, knowledge_id: str, current_user: Dict[str, Any]):
+    """取条目并做可见性校验；不可见一律 404（不泄露存在性）。"""
+    found = repo.find_item(knowledge_id)
+    if found is None or not repo.can_view(current_user, found[1]):
+        raise HTTPException(status_code=404, detail="Knowledge '%s' not found" % knowledge_id)
+    return found
+
+
+def _entry_or_403(repo, knowledge_id: str, current_user: Dict[str, Any]):
+    """取条目并做归属校验（owner/admin），不可见 404、无权 403。"""
+    agent_id, item = _entry_or_404(repo, knowledge_id, current_user)
+    if not repo.can_modify(current_user, item):
+        raise HTTPException(status_code=403, detail="仅条目属主或管理员可执行此操作")
+    return agent_id, item
+
+
+def _guard(exc: Exception) -> HTTPException:
+    """仓库层领域异常 → HTTP 语义。"""
+    if isinstance(exc, PermissionError):
+        return HTTPException(status_code=403, detail=str(exc))
+    if isinstance(exc, LookupError):
+        return HTTPException(status_code=404, detail=str(exc))
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("", response_model=List[KnowledgeItem])
+async def get_knowledge(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+    agent_id: Optional[str] = Query(default=None, description="来源 agent 过滤（不再构成安全边界）"),
+    category: Optional[str] = Query(default=None, description="分类筛选"),
+    scope: str = Query(default="all", description="范围：all/public/private/shared"),
+    limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
+    offset: int = Query(default=0, ge=0, description="偏移量"),
+):
+    """获取当前用户可见的知识条目（public + 我的私有 + 共享给我；admin 全量）"""
+    repo = _get_repository()
+    items = repo.visible_items(current_user, scope=scope, category=category, agent_id=agent_id)
+    return [_item_response(i) for i in items[offset : offset + limit]]
+
+
+@router.post("/search", response_model=List[KnowledgeItem])
+async def search_knowledge(
+    request: Request,
+    body: KnowledgeSearchRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+    agent_id: Optional[str] = Query(default=None, description="来源 agent 过滤"),
+    scope: str = Query(default="all", description="范围：all/public/private/shared"),
+):
+    """在当前用户可见范围内搜索知识（标题+内容包含匹配）"""
+    repo = _get_repository()
+    results = repo.search_visible_items(
+        current_user,
+        body.query,
+        scope=scope,
+        category=body.category,
+        agent_id=agent_id,
+        limit=body.limit,
+    )
+    return [_item_response(i) for i in results]
+
+
+@router.post("", response_model=KnowledgeItem)
+async def create_knowledge(
+    request: Request,
+    body: KnowledgeCreate,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+    agent_id: str = Query(default="default", description="Agent ID"),
+):
+    """添加知识（visibility=public 仅管理员）"""
+    _get_request_id(request)
+
+    visibility = (body.visibility or "private").lower()
+    if visibility not in ("private", "public"):
+        raise HTTPException(status_code=400, detail="visibility 仅支持 private/public")
+    if visibility == "public" and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可直接创建公开知识")
+
+    repo = _get_repository()
+    item = repo.create_knowledge(
+        agent_id=agent_id,
+        title=body.title,
+        content=body.content,
+        category=body.category,
+        tags=body.tags,
+        source=body.source,
+        confidence=body.confidence,
+        visibility=visibility,
+        owner_user_id=str(current_user.get("user_id", "")),
+    )
+    return _item_response(item)
+
+
+# ══════════════════════════════════════════════════════════════
+# 共享 / 公共库审批（字面路由，必须注册在 /{knowledge_id} 之前防遮蔽）
+# ══════════════════════════════════════════════════════════════
+
+@router.get("/public-submissions")
+async def list_public_submissions(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """待审批的公共库提交清单（仅管理员）"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可查看公共库审批队列")
+    repo = _get_repository()
+    return [_item_response(i) for i in repo.pending_submissions()]
+
+
+@router.post("/{knowledge_id}/share", response_model=KnowledgeItem)
+async def share_knowledge(
+    request: Request,
+    body: KnowledgeShareRequest,
+    knowledge_id: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """把私有条目共享给指定用户（只读；属主/管理员）"""
+    repo = _get_repository()
+    _entry_or_403(repo, knowledge_id, current_user)
+    try:
+        mapping = _resolve_usernames(body.usernames)
+        item = repo.share_entry(current_user, knowledge_id, list(mapping.values()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except (PermissionError, LookupError) as exc:
+        raise _guard(exc)
+    return _item_response(item)
+
+
+@router.post("/{knowledge_id}/unshare", response_model=KnowledgeItem)
+async def unshare_knowledge(
+    request: Request,
+    body: KnowledgeShareRequest,
+    knowledge_id: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """取消对指定用户的共享（属主/管理员）"""
+    repo = _get_repository()
+    _entry_or_403(repo, knowledge_id, current_user)
+    try:
+        mapping = _resolve_usernames(body.usernames)
+        item = repo.unshare_entry(current_user, knowledge_id, list(mapping.values()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except (PermissionError, LookupError) as exc:
+        raise _guard(exc)
+    return _item_response(item)
+
+
+@router.post("/{knowledge_id}/submit-public", response_model=KnowledgeItem)
+async def submit_knowledge_to_public(
+    request: Request,
+    knowledge_id: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """把私有条目提交公共库（进入待审批；属主）"""
+    repo = _get_repository()
+    _entry_or_403(repo, knowledge_id, current_user)
+    try:
+        item = repo.submit_to_public(current_user, knowledge_id)
+    except (PermissionError, LookupError, ValueError) as exc:
+        raise _guard(exc)
+    return _item_response(item)
+
+
+@router.post("/{knowledge_id}/review-public", response_model=KnowledgeItem)
+async def review_knowledge_public(
+    request: Request,
+    body: KnowledgeReviewRequest,
+    knowledge_id: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """审批公共库提交（仅管理员）：通过→public，拒绝→维持 private"""
+    repo = _get_repository()
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可审批公共库提交")
+    _entry_or_404(repo, knowledge_id, current_user)
+    try:
+        item = repo.review_public_submission(
+            current_user,
+            knowledge_id,
+            approve=bool(body.approve),
+            reviewed_by=str(current_user.get("user_id", "")),
+            note=body.note,
+        )
+    except (PermissionError, LookupError, ValueError) as exc:
+        raise _guard(exc)
+    return _item_response(item)
+
+
+# ══════════════════════════════════════════════════════════════
+# R-7(A): 远程知识库配置托管（configs / collections）
+# ══════════════════════════════════════════════════════════════
+
+def _get_kb_storage():
+    """用户级远程知识库配置存储（configs/collections）。"""
+    from neurova.knowledge.storage import get_knowledge_storage
+
+    return get_knowledge_storage()
+
+
+@router.get("/configs")
+async def list_kb_configs(request: Request, current_user: Dict[str, Any] = Depends(get_current_user_or_service)):
+    """列出当前用户全部远程知识库配置（不回显密钥）。"""
+    user_id = str(current_user.get("user_id", ""))
+    storage = _get_kb_storage()
+    return {
+        "code": 0,
+        "data": {
+            "configs": [
+                {
+                    "id": c.get("id"),
+                    "name": c.get("name"),
+                    "source_type": c.get("source_type"),
+                    "is_default": c.get("is_default"),
+                    "is_active": c.get("is_active"),
+                    "settings": c.get("settings", {}),
+                    "has_api_key": bool(c.get("api_key_hash")),
+                    "created_at": c.get("created_at"),
+                    "updated_at": c.get("updated_at"),
+                }
+                for c in storage.get_configs_by_user(user_id)
+            ]
+        },
+    }
+
+
+@router.post("/configs")
+async def create_kb_config(request: Request, body: dict, current_user: Dict[str, Any] = Depends(get_current_user_or_service)):
+    """创建远程知识库配置（API Key 加密存储，不回显）。"""
+    user_id = str(current_user.get("user_id", ""))
+    storage = _get_kb_storage()
+    cid = storage.create_config(
+        user_id=user_id,
+        name=str(body.get("name", "") or ""),
+        source_type=str(body.get("source_type", "") or "custom"),
+        is_default=bool(body.get("is_default", False)),
+        is_active=bool(body.get("is_active", False)),
+        api_key=str(body.get("api_key", "") or "") or None,
+        settings=body.get("settings"),
+    )
+    return {"code": 0, "data": {"id": cid}}
+
+
+@router.get("/configs/{config_id}")
+async def get_kb_config(request: Request, config_id: str = Path(...), current_user: Dict[str, Any] = Depends(get_current_user_or_service)):
+    """获取单个配置（属主；回显元数据不含密钥）。"""
+    user_id = str(current_user.get("user_id", ""))
+    storage = _get_kb_storage()
+    cfg = storage.get_config_by_id(config_id)
+    if not cfg or cfg.get("user_id") != user_id:
+        raise HTTPException(status_code=404, detail=f"Config '{config_id}' not found")
+    return {
+        "code": 0,
+        "data": {
+            "id": cfg.get("id"),
+            "name": cfg.get("name"),
+            "source_type": cfg.get("source_type"),
+            "settings": cfg.get("settings", {}),
+            "has_api_key": bool(cfg.get("api_key_hash")),
+            "is_default": cfg.get("is_default"),
+            "is_active": cfg.get("is_active"),
+        },
+    }
+
+
+@router.put("/configs/{config_id}")
+async def update_kb_config(request: Request, config_id: str = Path(...), body: dict = None, current_user: Dict[str, Any] = Depends(get_current_user_or_service)):
+    """更新配置（api_key 传新值则重加密）。"""
+    user_id = str(current_user.get("user_id", ""))
+    storage = _get_kb_storage()
+    cfg = storage.get_config_by_id(config_id)
+    if not cfg or cfg.get("user_id") != user_id:
+        raise HTTPException(status_code=404, detail=f"Config '{config_id}' not found")
+    fields: Dict[str, Any] = {}
+    for k in ("name", "source_type", "settings"):
+        if body and k in body:
+            fields[k] = body[k]
+    if body is not None and body.get("api_key") is not None:
+        fields["api_key"] = body["api_key"]
+    storage.update_config(config_id, **fields)
+    return {"code": 0, "message": "updated"}
+
+
+@router.delete("/configs/{config_id}")
+async def delete_kb_config(request: Request, config_id: str = Path(...), current_user: Dict[str, Any] = Depends(get_current_user_or_service)):
+    """删除配置（属主）。"""
+    user_id = str(current_user.get("user_id", ""))
+    storage = _get_kb_storage()
+    cfg = storage.get_config_by_id(config_id)
+    if not cfg or cfg.get("user_id") != user_id:
+        raise HTTPException(status_code=404, detail=f"Config '{config_id}' not found")
+    storage.delete_config(config_id)
+    return {"code": 0, "message": "deleted"}
+
+
+@router.get("/collections")
+async def list_kb_collections(request: Request, current_user: Dict[str, Any] = Depends(get_current_user_or_service)):
+    """列出当前用户的集合映射。"""
+    user_id = str(current_user.get("user_id", ""))
+    storage = _get_kb_storage()
+    return {"code": 0, "data": {"collections": storage.get_user_collections(user_id)}}
+
+
+@router.post("/collections")
+async def create_kb_collection(request: Request, body: dict, current_user: Dict[str, Any] = Depends(get_current_user_or_service)):
+    """创建集合映射（config_id + collection_name + vector_store）。"""
+    user_id = str(current_user.get("user_id", ""))
+    storage = _get_kb_storage()
+    mid = storage.create_collection_mapping(
+        user_id,
+        str(body.get("config_id", "") or ""),
+        str(body.get("collection_name", "") or ""),
+        vector_store=str(body.get("vector_store", "qdrant") or "qdrant"),
+    )
+    return {"code": 0, "data": {"id": mid}}
+
+
+@router.delete("/collections/{mapping_id}")
+async def delete_kb_collection(request: Request, mapping_id: str = Path(...), current_user: Dict[str, Any] = Depends(get_current_user_or_service)):
+    """删除集合映射（属主）。"""
+    user_id = str(current_user.get("user_id", ""))
+    storage = _get_kb_storage()
+    items = storage.get_user_collections(user_id)
+    if not any(i.get("id") == mapping_id for i in items):
+        raise HTTPException(status_code=404, detail=f"Collection '{mapping_id}' not found")
+    storage.delete_collection_mapping(mapping_id)
+    return {"code": 0, "message": "deleted"}
+
+
+@router.get("/{knowledge_id}", response_model=KnowledgeItem)
+async def get_knowledge_item(
+    request: Request,
+    knowledge_id: str = Path(..., description="知识ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """获取单个知识详情（仅可见条目；不可见 404 不泄露存在性）"""
+    repo = _get_repository()
+    _agent_id, item = _entry_or_404(repo, knowledge_id, current_user)
+    return _item_response(item)
 
 
 @router.put("/{knowledge_id}", response_model=KnowledgeItem)
@@ -223,35 +506,35 @@ async def update_knowledge(
     request: Request,
     knowledge_id: str = Path(..., description="知识ID"),
     body: KnowledgeUpdate = KnowledgeUpdate(),
-    agent_id: str = Query(default="default", description="Agent ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """更新知识"""
+    """更新知识（属主/管理员；被共享者只读）"""
     _get_request_id(request)
 
-    repo = _get_repository(agent_id)
+    repo = _get_repository()
+    agent_id, _item = _entry_or_403(repo, knowledge_id, current_user)
     if not repo.update_knowledge(agent_id, knowledge_id, body.dict(exclude_unset=True)):
-        raise HTTPException(status_code=404, detail=f"Knowledge '{knowledge_id}' not found")
+        raise HTTPException(status_code=404, detail="Knowledge '%s' not found" % knowledge_id)
 
-    # 返回更新后的知识
-    return await get_knowledge_item(request, knowledge_id, agent_id)
+    return _item_response(repo.get_item(agent_id, knowledge_id))
 
 
 @router.delete("/{knowledge_id}")
 async def delete_knowledge(
     request: Request,
     knowledge_id: str = Path(..., description="知识ID"),
-    agent_id: str = Query(default="default", description="Agent ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """删除知识"""
+    """删除知识（属主/管理员）"""
     request_id = _get_request_id(request)
 
-    repo = _get_repository(agent_id)
-    if not repo.delete_knowledge(agent_id, knowledge_id):
-        raise HTTPException(status_code=404, detail=f"Knowledge '{knowledge_id}' not found")
+    repo = _get_repository()
+    agent_id, _item = _entry_or_403(repo, knowledge_id, current_user)
+    repo.delete_knowledge(agent_id, knowledge_id)
 
     return {
         "code": 0,
-        "message": f"Knowledge '{knowledge_id}' deleted",
+        "message": "Knowledge '%s' deleted" % knowledge_id,
         "data": {"knowledge_id": knowledge_id},
         "request_id": request_id,
     }
@@ -265,22 +548,68 @@ def _build_item_dict(item: Dict[str, Any]) -> Dict[str, Any]:
     return dict(item)
 
 
+def _default_llm_call(request: Request):
+    """从运行时 Agent 解析 LLM 调用器（prompt→文本）；不可用返回 None（跳过抽取）。"""
+    try:
+        agents = getattr(request.app.state, "agents", {}) or {}
+        for agent in agents.values():
+            client = getattr(agent, "llm_client", None)
+            if client is None:
+                continue
+
+            def _call(prompt: str, _client=client):
+                resp = _client.chat([{"role": "user", "content": prompt}])
+                return getattr(resp, "content", "") or ""
+
+            return _call
+    except Exception as e:  # noqa: BLE001
+        logger.debug("graph_bridge LLM 解析失败: %s", e)
+    return None
+
+
+def _try_extract_to_graph(items: List[Dict[str, Any]], request: Request) -> None:
+    """导入后触发"知识条目→图谱节点"抽取（批次 3）。失败逐条吞掉，不阻断导入。"""
+    from neurova.cognitive_layers.knowledge_graph.manager import (
+        get_knowledge_graph_manager,
+    )
+    from neurova.knowledge.graph_bridge import extract_knowledge_to_graph
+    from neurova.knowledge.repository import get_knowledge_repository
+
+    llm_call = _default_llm_call(request)
+    if llm_call is None:
+        logger.info("[知识导入] 未解析到可用 LLM，跳过 %s 条的图谱抽取", len(items))
+        return
+    repo = get_knowledge_repository()
+    graph = get_knowledge_graph_manager()
+    for entry in items:
+        try:
+            extract_knowledge_to_graph(entry, repo=repo, llm_call=llm_call, graph_manager=graph)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[知识导入] 图谱抽取失败（已跳过）: %s", e)
+
+
 @router.post("/import")
 async def import_knowledge_file(
     file: UploadFile,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
     agent_id: str = Query(default="default", description="Agent ID"),
 ):
     """导入知识文件（txt/md/docx/xlsx/pptx/pdf/html/csv）。
 
-    R-4: 复用 attachment_parser 抽取文本，抽取成功则创建知识条目。
+    R-4: 复用 attachment_parser 抽取文本，抽取成功则创建知识条目
+    （归属当前用户、默认私有）。批次 3：导入后触发图谱抽取。
     """
     filename = file.filename or "imported"
     data = await file.read()
-    items = _import_file_data(data, filename, agent_id)
+    items = _import_file_data(data, filename, agent_id, current_user)
+    _try_extract_to_graph(items, request)
     return {"code": 0, "message": "Import completed", "data": {"items": items}}
 
 
-def _import_file_data(data: bytes, filename: str, agent_id: str) -> List[Dict[str, Any]]:
+def _import_file_data(
+    data: bytes, filename: str, agent_id: str, user: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     from neurova.attachment_parser import extract_attachment_text
 
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -290,7 +619,7 @@ def _import_file_data(data: bytes, filename: str, agent_id: str) -> List[Dict[st
         logger.info("[知识导入] %s 未抽取文本 (%s)", filename, status)
         return []
 
-    repo = _get_repository(agent_id)
+    repo = _get_repository()
     title = _title_from_filename(filename)
     item = repo.create_knowledge(
         agent_id=agent_id,
@@ -298,8 +627,10 @@ def _import_file_data(data: bytes, filename: str, agent_id: str) -> List[Dict[st
         content=text,
         category="import",
         tags=[],
-        source=f"import:{filename}",
+        source="import:" + filename,
         confidence=0.7,
+        visibility="private",
+        owner_user_id=str((user or {}).get("user_id", "") or "default"),
     )
     return [_build_item_dict(item)]
 
@@ -380,19 +711,21 @@ def _fetch_url(url: str) -> bytes:
 @router.post("/import-url")
 async def import_knowledge_url(
     request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
     agent_id: str = Query(default="default", description="Agent ID"),
     url: str = Query(..., description="远程网页 URL"),
 ):
-    """导入远程网页（抽取正文存为知识条目）"""
+    """导入远程网页（抽取正文存为知识条目，归属当前用户、默认私有）"""
     if not _validate_import_url(url):
         raise HTTPException(status_code=400, detail="Invalid URL: only public http(s) allowed")
 
     try:
         data = _fetch_url(url)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Fetch failed: {e}")
+        raise HTTPException(status_code=502, detail="Fetch failed: %s" % e)
 
-    items = _import_file_data(data, _title_from_url(url), agent_id)
+    items = _import_file_data(data, _title_from_url(url), agent_id, current_user)
+    _try_extract_to_graph(items, request)
     return {"code": 0, "message": "URL import completed", "data": {"items": items}}
 
 

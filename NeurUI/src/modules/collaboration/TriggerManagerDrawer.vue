@@ -168,8 +168,8 @@ function typeLabel(type: string): string {
         <div class="form-row">
           <label>{{ t('trigger.typeLabel') }}</label>
           <a-select v-model:value="newType" style="flex: 1">
-            <a-select-option value="webhook">{{ t('trigger.type_webhook') }}</a-select-option>
-            <a-select-option value="cron">{{ t('trigger.type_cron') }}</a-select-option>
+            <a-select-option value="webhook">{{ t('trigger.typeWebhook') }}</a-select-option>
+            <a-select-option value="cron">{{ t('trigger.typeCron') }}</a-select-option>
           </a-select>
         </div>
         <div v-if="newType === 'cron'" class="form-row">

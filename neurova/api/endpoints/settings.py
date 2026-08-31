@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 
-from neurova.api.auth import get_current_user
+from neurova.api.deps import get_current_user, require_admin
 
 logger = get_logger(__name__)
 
@@ -75,8 +75,11 @@ def _get_request_id(request: Request) -> str:
 
 
 @router.get("", response_model=SettingsResponse)
-async def get_settings(request: Request):
-    """获取全局设置"""
+async def get_settings(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取全局设置 — 登录用户可读"""
     _get_request_id(request)
 
     # TODO: 从数据库或文件加载设置
@@ -92,9 +95,9 @@ async def get_settings(request: Request):
 async def update_settings(
     request: Request,
     body: UpdateSettingsRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    admin: Dict[str, Any] = Depends(require_admin()),
 ):
-    """更新全局设置（需认证）"""
+    """更新全局设置（仅管理员）"""
     _get_request_id(request)
 
     # TODO: 保存设置到数据库或文件
@@ -157,8 +160,11 @@ def _save_cors_config(config: Dict[str, Any]) -> bool:
 
 
 @router.get("/cors", response_model=CorsConfigResponse)
-async def get_cors_config(request: Request):
-    """获取 CORS 配置"""
+async def get_cors_config(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取 CORS 配置 — 登录用户可读"""
     _get_request_id(request)
     config = _load_cors_config()
 
@@ -175,9 +181,9 @@ async def get_cors_config(request: Request):
 async def update_cors_config(
     request: Request,
     body: UpdateCorsConfigRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    admin: Dict[str, Any] = Depends(require_admin()),
 ):
-    """更新 CORS 配置（需认证；未认证篡改 CORS 白名单可绕过浏览器同源保护）"""
+    """更新 CORS 配置（仅管理员；未授权篡改 CORS 白名单可绕过浏览器同源保护）"""
     _get_request_id(request)
 
     # 验证 origins 格式
@@ -224,8 +230,12 @@ async def update_cors_config(
 
 
 @router.get("/{key}")
-async def get_setting(request: Request, key: str = Path(...)):
-    """获取特定设置"""
+async def get_setting(
+    request: Request,
+    key: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取特定设置 — 登录用户可读"""
     _get_request_id(request)
 
     if key not in _default_settings:
@@ -245,9 +255,9 @@ async def update_setting(
     request: Request,
     key: str = Path(...),
     value: Any = Body(...),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    admin: Dict[str, Any] = Depends(require_admin()),
 ):
-    """更新特定设置（需认证）"""
+    """更新特定设置（仅管理员）"""
     _get_request_id(request)
 
     _default_settings[key] = value

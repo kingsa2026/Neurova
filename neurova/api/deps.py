@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 security = HTTPBearer(auto_error=False)
 
 # 模块级导入（避免重复导入）
-from neurova.api.auth import verify_access_token
+from neurova.api.auth import verify_access_token, _user_identity
 from neurova.api.endpoints import get_app_state
 
 
@@ -56,11 +56,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return {
-        "user_id": payload.get("sub", "unknown"),
-        "username": payload.get("username", "unknown"),
-        "role": payload.get("role", "user"),
-    }
+    return _user_identity(payload)
 
 
 async def get_optional_user(
@@ -87,11 +83,7 @@ async def get_optional_user(
     if not payload:
         return None
 
-    return {
-        "user_id": payload.get("sub", "unknown"),
-        "username": payload.get("username", "unknown"),
-        "role": payload.get("role", "user"),
-    }
+    return _user_identity(payload)
 
 
 def get_agent_instance(agent_id: str = "default"):
@@ -161,13 +153,17 @@ def get_memory_manager(
                 detail="Memory system not enabled",
             )
 
-        # 设置多用户隔离参数
+        # 审计修复 (P0-1): 原实现对共享单例的只读 property 赋值 —— 直接抛
+        # AttributeError → 500, 且并发请求互相覆盖隔离上下文。现通过
+        # ContextVar 请求作用域注入, 不修改单例状态。
         if user:
-            agent.memory_manager.neuser_id = user.get("neuser_id", "default")
-            agent.memory_manager.user_id = user.get("user_id", "default")
+            neuser = user.get("neuser_id") or "default"
+            uid = user.get("user_id") or "default"
         else:
-            agent.memory_manager.neuser_id = "default"
-            agent.memory_manager.user_id = "default"
+            neuser = "default"
+            uid = "default"
+        if hasattr(agent.memory_manager, "set_request_scope"):
+            agent.memory_manager.set_request_scope(neuser_id=neuser, user_id=uid)
 
         return agent.memory_manager
 

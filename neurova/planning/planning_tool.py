@@ -1,10 +1,10 @@
-"""PlanningTool —— 计划即工具（对比文档 P5）
+"""PlanningTool —— 计划即工具（对比文档 P5 + 三层隔离 §3.3）
 
 对标 OpenManus PlanningTool 的 7 命令语义（create/update/list/get/set_active/
-mark_step/delete），关键差异：计划持久化到 SQLite（OpenManus 是进程内 dict，
-重启即失），跨会话/重启后计划与活跃指针自动还原。
+mark_step/delete），关键差异：计划持久化到 SQLite 并带 (agent_id, user_id)
+归属隔离——plan_id 在归属内唯一，活跃指针按归属隔离，跨用户互不可见。
 
-安全：SQL 以字面量内联在 execute 调用处，数据全部走参数绑定（?）。
+安全：SQL 以三引号字面量直接内联在 execute 调用处，数据全部走参数绑定（?）。
 """
 
 from __future__ import annotations
@@ -42,9 +42,12 @@ STATUS_MARKS = {
 
 _VALID_COMMANDS = ("create", "update", "list", "get", "set_active", "mark_step", "delete")
 
+_DEFAULT_AGENT = "default"
+_DEFAULT_USER = "default"
+
 
 class PlanStore:
-    """计划 SQLite 存储层（SQL 内联 execute 调用 + 参数绑定；RLock 保护跨线程访问）"""
+    """计划 SQLite 存储层（归属 = (agent_id, user_id) 二维；SQL 内联 + 参数绑定；RLock）"""
 
     def __init__(self, db_path: str = "data/plans.db"):
         self.db_path = db_path
@@ -62,22 +65,74 @@ class PlanStore:
 
     def _init_db(self) -> None:
         with self._lock, self._get_conn() as conn:
+            self._migrate_legacy(conn)
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS plans (
-                    plan_id TEXT PRIMARY KEY,
+                    plan_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL DEFAULT 'default',
+                    user_id TEXT NOT NULL DEFAULT 'default',
                     title TEXT NOT NULL,
                     steps TEXT NOT NULL,
                     step_statuses TEXT NOT NULL,
                     step_notes TEXT NOT NULL,
                     is_active INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (plan_id, agent_id, user_id)
                 )"""
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_plans_owner "
+                "ON plans (agent_id, user_id, is_active)"
+            )
+
+    @staticmethod
+    def _has_owner_columns(conn: sqlite3.Connection) -> bool:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(plans)").fetchall()}
+        return "agent_id" in cols and "user_id" in cols
+
+    def _migrate_legacy(self, conn: sqlite3.Connection) -> None:
+        """旧 schema（plan_id 单列主键、无归属列）→ 新 schema，存量行补 default 归属。"""
+        has_plans = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'plans'"
+        ).fetchone()
+        if not has_plans or self._has_owner_columns(conn):
+            return
+        rows = conn.execute("SELECT * FROM plans").fetchall()
+        conn.execute("ALTER TABLE plans RENAME TO plans_legacy")
+        conn.execute(
+            """CREATE TABLE plans (
+                plan_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL DEFAULT 'default',
+                user_id TEXT NOT NULL DEFAULT 'default',
+                title TEXT NOT NULL,
+                steps TEXT NOT NULL,
+                step_statuses TEXT NOT NULL,
+                step_notes TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (plan_id, agent_id, user_id)
+            )"""
+        )
+        for r in rows:
+            conn.execute(
+                """INSERT INTO plans (plan_id, agent_id, user_id, title, steps,
+                     step_statuses, step_notes, is_active, created_at, updated_at)
+                   VALUES (?, 'default', 'default', ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    r["plan_id"], r["title"], r["steps"], r["step_statuses"],
+                    r["step_notes"], r["is_active"], r["created_at"], r["updated_at"],
+                ),
+            )
+        conn.execute("DROP TABLE plans_legacy")
+        logger.info("plans 表迁移完成: 存量 %s 行补 default 归属", len(rows))
 
     def upsert(
         self,
         plan_id: str,
+        agent_id: str,
+        user_id: str,
         title: str,
         steps: List[str],
         step_statuses: List[str],
@@ -86,44 +141,70 @@ class PlanStore:
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
         with self._lock, self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO plans (plan_id, title, steps, step_statuses, step_notes, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(plan_id) DO UPDATE SET
+                """INSERT INTO plans (plan_id, agent_id, user_id, title, steps, step_statuses,
+                     step_notes, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(plan_id, agent_id, user_id) DO UPDATE SET
                         title = excluded.title,
                         steps = excluded.steps,
                         step_statuses = excluded.step_statuses,
                         step_notes = excluded.step_notes,
                         updated_at = excluded.updated_at""",
-                (plan_id, title, json.dumps(steps), json.dumps(step_statuses), json.dumps(step_notes), now, now),
+                (
+                    plan_id, agent_id, user_id, title, json.dumps(steps),
+                    json.dumps(step_statuses), json.dumps(step_notes), now, now,
+                ),
             )
 
-    def delete(self, plan_id: str) -> None:
+    def delete(self, plan_id: str, agent_id: str, user_id: str) -> None:
         with self._lock, self._get_conn() as conn:
-            conn.execute("DELETE FROM plans WHERE plan_id = ?", (plan_id,))
+            conn.execute(
+                "DELETE FROM plans WHERE plan_id = ? AND agent_id = ? AND user_id = ?",
+                (plan_id, agent_id, user_id),
+            )
 
-    def clear_active(self) -> None:
+    def clear_active(self, agent_id: str, user_id: str) -> None:
         with self._lock, self._get_conn() as conn:
-            conn.execute("UPDATE plans SET is_active = 0 WHERE is_active = 1")
+            conn.execute(
+                "UPDATE plans SET is_active = 0 WHERE agent_id = ? AND user_id = ?",
+                (agent_id, user_id),
+            )
 
-    def set_active(self, plan_id: str) -> None:
+    def set_active(self, plan_id: str, agent_id: str, user_id: str) -> None:
         with self._lock, self._get_conn() as conn:
-            conn.execute("UPDATE plans SET is_active = 0 WHERE is_active = 1")
-            conn.execute("UPDATE plans SET is_active = 1 WHERE plan_id = ?", (plan_id,))
+            conn.execute(
+                "UPDATE plans SET is_active = 0 WHERE agent_id = ? AND user_id = ?",
+                (agent_id, user_id),
+            )
+            conn.execute(
+                "UPDATE plans SET is_active = 1 "
+                "WHERE plan_id = ? AND agent_id = ? AND user_id = ?",
+                (plan_id, agent_id, user_id),
+            )
 
-    def get(self, plan_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, plan_id: str, agent_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         with self._lock, self._get_conn() as conn:
-            row = conn.execute("SELECT * FROM plans WHERE plan_id = ?", (plan_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM plans WHERE plan_id = ? AND agent_id = ? AND user_id = ?",
+                (plan_id, agent_id, user_id),
+            ).fetchone()
         return self._row_to_dict(row) if row else None
 
-    def get_active(self) -> Optional[Dict[str, Any]]:
+    def get_active(self, agent_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         with self._lock, self._get_conn() as conn:
-            rows = conn.execute("SELECT * FROM plans WHERE is_active = ?", (1,)).fetchall()
-        # 活跃计划至多一条（set_active 先清后设）；防御性取首条
+            rows = conn.execute(
+                "SELECT * FROM plans WHERE agent_id = ? AND user_id = ? AND is_active = ?",
+                (agent_id, user_id, 1),
+            ).fetchall()
+        # 每归属至多一条活跃（set_active 先清后设）；防御性取首条
         return self._row_to_dict(rows[0]) if rows else None
 
-    def list_all(self) -> List[Dict[str, Any]]:
+    def list_all(self, agent_id: str, user_id: str) -> List[Dict[str, Any]]:
         with self._lock, self._get_conn() as conn:
-            rows = conn.execute("SELECT * FROM plans").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM plans WHERE agent_id = ? AND user_id = ?",
+                (agent_id, user_id),
+            ).fetchall()
         plans = [self._row_to_dict(r) for r in rows]
         # 最近更新优先（排序在应用层完成）
         plans.sort(key=lambda p: p["updated_at"], reverse=True)
@@ -144,50 +225,62 @@ class PlanStore:
 
 
 class PlanningTool:
-    """计划即工具：LLM 通过 7 个子命令创建、推进、查询结构化计划"""
+    """计划即工具：LLM 通过 7 个子命令创建、推进、查询结构化计划（归属隔离）"""
 
     name = "planning"
 
     def __init__(self, db_path: str = "data/plans.db", store: Optional[PlanStore] = None):
         self._store = store or PlanStore(db_path)
 
-    async def run_command(self, *, command: str, plan_id: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
+    async def run_command(
+        self,
+        *,
+        command: str,
+        plan_id: Optional[str] = None,
+        owner_agent_id: str = _DEFAULT_AGENT,
+        owner_user_id: str = _DEFAULT_USER,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
         if command not in _VALID_COMMANDS:
             return {"success": False, "error": "未知命令，可用命令: create / update / list / get / set_active / mark_step / delete"}
 
+        owner = (
+            owner_agent_id or _DEFAULT_AGENT,
+            owner_user_id or _DEFAULT_USER,
+        )
         try:
             if command == "create":
-                return self._create(plan_id, kwargs.get("title"), kwargs.get("steps"))
+                return self._create(owner, plan_id, kwargs.get("title"), kwargs.get("steps"))
             if command == "update":
-                return self._update(plan_id, kwargs.get("title"), kwargs.get("steps"))
+                return self._update(owner, plan_id, kwargs.get("title"), kwargs.get("steps"))
             if command == "list":
-                return self._list()
+                return self._list(owner)
             if command == "get":
-                return self._get(plan_id)
+                return self._get(owner, plan_id)
             if command == "set_active":
-                return self._set_active(plan_id)
+                return self._set_active(owner, plan_id)
             if command == "mark_step":
-                return self._mark_step(plan_id, kwargs.get("step_index"), kwargs.get("step_status"), kwargs.get("step_notes"))
+                return self._mark_step(owner, plan_id, kwargs.get("step_index"), kwargs.get("step_status"), kwargs.get("step_notes"))
             if command == "delete":
-                return self._delete(plan_id)
+                return self._delete(owner, plan_id)
             return {"success": False, "error": "未知命令，可用命令: create / update / list / get / set_active / mark_step / delete"}  # pragma: no cover
         except Exception as e:  # noqa: BLE001 - 工具层兜底：错误以结果返回而非中断对话
             logger.error("planning 命令 %s 执行失败: %s", command, e)
             return {"success": False, "error": f"计划命令执行失败: {e}"}
 
-    # ── 命令实现 ──
+    # ── 命令实现（owner = (agent_id, user_id)）──
 
-    def _create(self, plan_id: Optional[str], title: Optional[str], steps: Optional[List[str]]) -> Dict[str, Any]:
+    def _create(self, owner, plan_id: Optional[str], title: Optional[str], steps: Optional[List[str]]) -> Dict[str, Any]:
         if not plan_id or not title or not steps:
             return {"success": False, "error": "create 需要 plan_id、title、steps（非空）"}
-        if self._store.get(plan_id):
+        if self._store.get(plan_id, owner[0], owner[1]):
             return {"success": False, "error": f"计划已存在: {plan_id}（用 update 修改或换 plan_id）"}
         statuses = [STEP_STATUS_NOT_STARTED] * len(steps)
-        self._store.upsert(plan_id, title, list(steps), statuses, [""] * len(steps))
-        return {"success": True, "data": {"plan_id": plan_id, "text": self._render(self._store.get(plan_id))}}
+        self._store.upsert(plan_id, owner[0], owner[1], title, list(steps), statuses, [""] * len(steps))
+        return {"success": True, "data": {"plan_id": plan_id, "text": self._render(self._store.get(plan_id, owner[0], owner[1]))}}
 
-    def _update(self, plan_id: Optional[str], title: Optional[str], steps: Optional[List[str]]) -> Dict[str, Any]:
-        plan = self._require(plan_id)
+    def _update(self, owner, plan_id: Optional[str], title: Optional[str], steps: Optional[List[str]]) -> Dict[str, Any]:
+        plan = self._require(owner, plan_id)
         if isinstance(plan, dict) and plan.get("success") is False:
             return plan
         new_steps = list(steps) if steps else plan["steps"]
@@ -196,11 +289,11 @@ class PlanningTool:
             for i in range(len(new_steps))
         ]
         new_notes = [plan["step_notes"][i] if i < len(plan["step_notes"]) else "" for i in range(len(new_steps))]
-        self._store.upsert(plan_id, title or plan["title"], new_steps, new_statuses, new_notes)
-        return {"success": True, "data": {"plan_id": plan_id, "text": self._render(self._store.get(plan_id))}}
+        self._store.upsert(plan["plan_id"], owner[0], owner[1], title or plan["title"], new_steps, new_statuses, new_notes)
+        return {"success": True, "data": {"plan_id": plan["plan_id"], "text": self._render(self._store.get(plan["plan_id"], owner[0], owner[1]))}}
 
-    def _list(self) -> Dict[str, Any]:
-        plans = self._store.list_all()
+    def _list(self, owner) -> Dict[str, Any]:
+        plans = self._store.list_all(owner[0], owner[1])
         data = [
             {
                 "plan_id": p["plan_id"],
@@ -213,26 +306,27 @@ class PlanningTool:
         ]
         return {"success": True, "data": data}
 
-    def _get(self, plan_id: Optional[str]) -> Dict[str, Any]:
-        plan = self._store.get(plan_id) if plan_id else self._store.get_active()
+    def _get(self, owner, plan_id: Optional[str]) -> Dict[str, Any]:
+        plan = self._store.get(plan_id, owner[0], owner[1]) if plan_id else self._store.get_active(owner[0], owner[1])
         if not plan:
             return {"success": False, "error": f"计划不存在: {plan_id or '<无活跃计划>'}"}
         return {"success": True, "data": {"plan_id": plan["plan_id"], "text": self._render(plan)}}
 
-    def _set_active(self, plan_id: Optional[str]) -> Dict[str, Any]:
-        if not plan_id or not self._store.get(plan_id):
+    def _set_active(self, owner, plan_id: Optional[str]) -> Dict[str, Any]:
+        if not plan_id or not self._store.get(plan_id, owner[0], owner[1]):
             return {"success": False, "error": f"计划不存在: {plan_id}"}
-        self._store.set_active(plan_id)
+        self._store.set_active(plan_id, owner[0], owner[1])
         return {"success": True, "data": {"active_plan_id": plan_id}}
 
     def _mark_step(
         self,
+        owner,
         plan_id: Optional[str],
         step_index: Optional[int],
         step_status: Optional[str],
         step_notes: Optional[str],
     ) -> Dict[str, Any]:
-        plan = self._require(plan_id)
+        plan = self._require(owner, plan_id)
         if isinstance(plan, dict) and plan.get("success") is False:
             return plan
         if step_index is None or not (0 <= step_index < len(plan["steps"])):
@@ -242,23 +336,20 @@ class PlanningTool:
         plan["step_statuses"][step_index] = step_status
         if step_notes is not None:
             plan["step_notes"][step_index] = str(step_notes)
-        self._store.upsert(plan["plan_id"], plan["title"], plan["steps"], plan["step_statuses"], plan["step_notes"])
+        self._store.upsert(plan["plan_id"], owner[0], owner[1], plan["title"], plan["steps"], plan["step_statuses"], plan["step_notes"])
         return {"success": True, "data": {"plan_id": plan["plan_id"], "text": self._render(plan)}}
 
-    def _delete(self, plan_id: Optional[str]) -> Dict[str, Any]:
-        if not plan_id or not self._store.get(plan_id):
+    def _delete(self, owner, plan_id: Optional[str]) -> Dict[str, Any]:
+        if not plan_id or not self._store.get(plan_id, owner[0], owner[1]):
             return {"success": False, "error": f"计划不存在: {plan_id}"}
-        was_active = bool(self._store.get(plan_id).get("is_active"))
-        self._store.delete(plan_id)
-        if was_active:
-            self._store.clear_active()
+        self._store.delete(plan_id, owner[0], owner[1])
         return {"success": True, "data": {"deleted": plan_id}}
 
     # ── 辅助 ──
 
-    def _require(self, plan_id: Optional[str]) -> Any:
-        """取计划或返回错误 dict（调用方检查 success 字段）"""
-        plan = self._store.get(plan_id) if plan_id else self._store.get_active()
+    def _require(self, owner, plan_id: Optional[str]) -> Any:
+        """取计划或返回错误 dict（调用方检查 success 字段）；plan_id 缺省取本归属活跃计划"""
+        plan = self._store.get(plan_id, owner[0], owner[1]) if plan_id else self._store.get_active(owner[0], owner[1])
         if not plan:
             return {"success": False, "error": f"计划不存在: {plan_id or '<无活跃计划>'}"}
         return plan

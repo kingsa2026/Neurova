@@ -44,6 +44,12 @@ except ImportError as _e:
     OpenAIProvider = None
 
 try:
+    from neurova.llm.providers.opencode_provider import OpenCodeProvider
+except ImportError as _e:
+    _logger.debug("OpenCodeProvider 未可用: %s", _e)
+    OpenCodeProvider = None
+
+try:
     from neurova.llm.providers.openrouter_provider import OpenRouterProvider
 except ImportError as _e:
     _logger.debug("OpenRouterProvider 未可用: %s", _e)

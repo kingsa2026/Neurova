@@ -87,6 +87,8 @@ def _save_agent_config(agent) -> None:
         "provider": getattr(cfg, "llm_provider", ""),
         "personality": getattr(cfg, "personality", ""),
         "constitution": getattr(cfg, "constitution", ""),
+        # 归属持久化：重启后 _user_can_access_agent 依赖此字段判定属主
+        "owner_user_id": str(getattr(cfg, "owner_user_id", "") or ""),
     }
     config_path = os.path.join(workspace, "agent_config.json")
     os.makedirs(workspace, exist_ok=True)
@@ -395,12 +397,15 @@ async def update_agent(
     if (body.model is not None or body.provider is not None) and hasattr(agent, "llm_client"):
         try:
             from neurova.agent_core import AgentLLMClient
+            from neurova.llm.multi_model_client import scope_for_owner
+
             new_model = body.model or getattr(agent.config.llm_config, "model", "auto") if hasattr(agent.config, "llm_config") else "auto"
             new_provider = body.provider or getattr(agent.config, "llm_provider", "") or ""
             agent.llm_client = AgentLLMClient(
                 model=new_model,
                 provider_id=new_provider,
                 llm_config=agent.config.llm_config if hasattr(agent.config, "llm_config") else None,
+                scope=scope_for_owner(getattr(agent.config, "owner_user_id", None) or None),
             )
             logger.info("Rebuilt AgentLLMClient: model=%s, provider=%s", new_model, new_provider)
         except Exception as e:

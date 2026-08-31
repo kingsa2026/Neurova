@@ -174,17 +174,15 @@ class OpenRouterProvider(BaseProvider):
     async def get_available_models(self) -> typing.List[ModelInfo]:
         """获取可用的模型列表
 
-        Returns:
-            模型信息列表
+        API 失败(无 key/超时)时返回空列表 —— 不回落静态默认模型:
+        默认清单已陈旧(如 gemini-1.5-pro / mixtral-8x7b),落到用户列表
+        只会催生"发现成功但无法调用"的误导(对齐 QwenPaw 设计)。
         """
-        # 尝试从 API 获取模型列表
         api_models = await self._fetch_models_from_api()
         if api_models:
             return api_models
-
-        # 如果 API 获取失败，返回默认模型列表
-        self.logger.info("使用默认模型列表")
-        return self._get_default_models()
+        self.logger.warning("OpenRouter model discovery returned no models (likely missing/invalid API key)")
+        return []
 
     async def _fetch_models_from_api(self) -> typing.List[ModelInfo]:
         """从 API 获取模型列表
@@ -223,17 +221,40 @@ class OpenRouterProvider(BaseProvider):
             self.logger.warning("从 API 获取模型列表失败: %s", e)
             return []
 
+    # OpenRouter architecture.input_modalities → ProviderCapability 映射
+    _MODALITY_TO_CAPABILITY = {
+        "text": ProviderCapability.TEXT,
+        "image": ProviderCapability.VISION,
+        "audio": ProviderCapability.AUDIO,
+        "video": ProviderCapability.VIDEO,
+    }
+
     def _parse_api_model(self, model_data: Dict[str, Any]) -> ModelInfo:
         """解析 API 返回的模型数据
 
-        Args:
-            model_data: API 返回的模型数据
-
-        Returns:
-            ModelInfo 实例
+        能力判定:优先使用 OpenRouter /models 的 architecture.input_modalities
+        (平台级权威元数据),缺失时回退名称启发式 — 参照 QwenPaw 的做法。
+        None 字段必须回退默认值,否则单个模型的 null 值会让整批发现
+        在校验层抛错并被吞掉。
         """
         model_id = model_data.get("id", "")
-        capabilities = self._detect_capabilities(model_id)
+
+        # 上下文窗口:null/非法值回退 4096
+        context_length = model_data.get("context_length")
+        if not isinstance(context_length, int) or context_length <= 0:
+            context_length = 4096
+
+        # 输出上限:top_provider 存在但字段为 null 时回退默认
+        top_provider = model_data.get("top_provider") or {}
+        max_completion_tokens = top_provider.get("max_completion_tokens")
+        if (
+            not isinstance(max_completion_tokens, int)
+            or max_completion_tokens <= 0
+        ):
+            max_completion_tokens = 4096
+
+        # 能力:元数据优先,名称启发式兜底
+        capabilities = self._resolve_capabilities(model_data, model_id)
 
         # 提取定价信息
         pricing = {}
@@ -250,18 +271,16 @@ class OpenRouterProvider(BaseProvider):
             except (ValueError, TypeError):
                 pricing = {}
 
-        # 获取上下文窗口
-        context_length = model_data.get("context_length", 4096)
-
         return ModelInfo(
             id=model_id,
             name=model_data.get("name", model_id),
             provider=self.provider_id,
             provider_type=ProviderType.OPENROUTER,
             capabilities=capabilities,
-            max_tokens=model_data.get("top_provider", {}).get("max_completion_tokens", 4096),
+            max_tokens=max_completion_tokens,
             context_window=context_length,
             pricing=pricing,
+            is_free=self._is_free_model(pricing),
             metadata={
                 "description": model_data.get("description", ""),
                 "architecture": model_data.get("architecture", {}),
@@ -269,6 +288,117 @@ class OpenRouterProvider(BaseProvider):
                 "per_request_limits": model_data.get("per_request_limits"),
             },
         )
+
+    @staticmethod
+    def _is_free_model(pricing: Dict[str, float]) -> bool:
+        """免费判定:所有有效 price 字段均为 0(与 QwenPaw 语义一致)。"""
+        if not pricing:
+            return False
+        values = [v for v in pricing.values() if v is not None]
+        return bool(values) and all(v == 0 for v in values)
+
+    @staticmethod
+    def _extract_provider(model_id: str) -> str:
+        """从 model_id 提取系列前缀:'openai/gpt-4o' -> 'openai';无前缀 -> ''。"""
+        if "/" in model_id:
+            return model_id.split("/", 1)[0]
+        return ""
+
+    # modality 名称 -> ProviderCapability(与 _MODALITY_TO_CAPABILITY 同映射)
+    _MODALITY_CAPABILITY_INDEX = {
+        "text": ProviderCapability.TEXT,
+        "image": ProviderCapability.VISION,
+        "audio": ProviderCapability.AUDIO,
+        "video": ProviderCapability.VIDEO,
+    }
+
+    def filter_models(
+        self,
+        models: typing.List[ModelInfo],
+        providers: typing.Optional[typing.List[str]] = None,
+        input_modalities: typing.Optional[typing.List[str]] = None,
+        output_modalities: typing.Optional[typing.List[str]] = None,
+        max_prompt_price: typing.Optional[float] = None,
+        is_free: typing.Optional[bool] = None,
+    ) -> typing.List[ModelInfo]:
+        """按 QwenPaw 四维语义过滤模型:系列 / 输入 modality / 价格 / 仅免费。
+
+        - 系列取自 model_id 前缀('openai/gpt-4o' -> 'openai');
+          无前缀 id 回退 model.provider 字段。
+        - modality 过滤为 OR 语义(任一命中即保留)。
+        - max_prompt_price 为每 1M tokens 的 prompt 价格上限。
+        """
+        result = list(models)
+
+        if providers:
+            providers_lower = [p.lower() for p in providers]
+            result = [
+                m
+                for m in result
+                if (
+                    self._extract_provider(m.id).lower() in providers_lower
+                    or (not self._extract_provider(m.id) and (m.provider or "").lower() in providers_lower)
+                )
+            ]
+
+        if input_modalities:
+            wanted = [
+                self._MODALITY_CAPABILITY_INDEX.get(mod)
+                for mod in input_modalities
+                if self._MODALITY_CAPABILITY_INDEX.get(mod) is not None
+            ]
+            if wanted:
+                result = [
+                    m for m in result if any(cap in m.capabilities for cap in wanted)
+                ]
+
+        if max_prompt_price is not None:
+            result = [
+                m
+                for m in result
+                if m.pricing.get("input") is not None
+                and m.pricing.get("input") <= max_prompt_price
+            ]
+
+        if is_free is True:
+            result = [m for m in result if m.is_free]
+
+        return result
+
+    async def get_available_providers(self) -> typing.List[str]:
+        """获取可用系列列表(从 model_id 前缀提取,去重排序)。"""
+        models = await self.fetch_models()
+        series: typing.Set[str] = set()
+        for model in models:
+            provider = self._extract_provider(model.id)
+            if provider:
+                series.add(provider)
+        return sorted(series)
+
+    def _resolve_capabilities(
+        self,
+        model_data: Dict[str, Any],
+        model_id: str,
+    ) -> typing.List[ProviderCapability]:
+        """能力判定:architecture.input_modalities 优先,名称启发式兜底。"""
+        architecture = model_data.get("architecture") or {}
+        modalities = list(architecture.get("input_modalities") or [])
+        capabilities: typing.List[ProviderCapability] = []
+        if modalities:
+            for modality in modalities:
+                capability = self._MODALITY_TO_CAPABILITY.get(str(modality))
+                if capability is not None and capability not in capabilities:
+                    capabilities.append(capability)
+            if ProviderCapability.TEXT not in capabilities:
+                capabilities.insert(0, ProviderCapability.TEXT)
+        else:
+            capabilities = list(self._detect_capabilities(model_id))
+            if ProviderCapability.TEXT not in capabilities:
+                capabilities.insert(0, ProviderCapability.TEXT)
+        # OpenRouter 平台绝大部分模型都支持 tool use,恒注入(去重)
+        if ProviderCapability.TOOL_USE not in capabilities:
+            capabilities.append(ProviderCapability.TOOL_USE)
+        return capabilities
 
     def _detect_capabilities(self, model_id: str) -> typing.List[ProviderCapability]:
         """检测模型能力
@@ -323,11 +453,13 @@ class OpenRouterProvider(BaseProvider):
     def _make_headers(self) -> typing.Dict[str, str]:
         """构建请求头
 
-        Returns:
-            请求头字典
+        OpenRouter 强制要求 HTTP-Referer 与 X-OpenRouter-Title 头部,
+        缺失时请求会被拒绝/限流(对照 QwenPaw 的 _DEFAULT_HEADERS)。
         """
         headers = {
             "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/kingsa2026/Neurova",
+            "X-OpenRouter-Title": "Neurova",
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"

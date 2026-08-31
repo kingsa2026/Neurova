@@ -57,10 +57,12 @@ reset 链路(与 MultiModelLLMClient 协同)
 - `tests/unit/llm/test_multi_model_client_reinit.py`: MultiModelLLMClient reset 测试
 """
 
+import inspect
 import json
 import logging
 import os
 import random
+import re
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -68,7 +70,6 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 # 导入依赖
 try:
     from neurova.core.module_system import Module
@@ -130,7 +131,13 @@ except ImportError:
 
 
 try:
-    from neurova.llm.providers.types import ConnectionResult, ProbeResult, PydanticModelInfo
+    from neurova.llm.providers.types import (
+        ConnectionResult,
+        ModelInfo as PydanticModelInfo,
+        ProbeResult,
+        ProviderCapability,
+        ProviderType,
+    )
 except ImportError:
     # 占位符
     @dataclass
@@ -152,8 +159,43 @@ except ImportError:
         name: str = ""
         owned_by: str = ""
 
+    class ProviderCapability:
+        pass
+
 
 logger = get_logger(__name__)
+
+# 免 API Key 的服务商(免费网关内置定义):无 key 时发现/筛选仍须放行
+KEYLESS_PROVIDER_IDS: frozenset = frozenset({"opencode", "kilo-code"})
+
+# 内置服务商定义(与前端 ModelPage 种子卡片对齐;缺失时才补入,绝不覆盖用户配置)
+_BUILTIN_PROVIDER_DEFS: tuple[dict, ...] = (
+    {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "provider": "openrouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key_prefix": "sk-or-v1-",
+    },
+    {
+        "id": "opencode",
+        "name": "OpenCode",
+        "provider": "opencode",
+        "base_url": "https://opencode.ai/zen/v1",
+    },
+    {
+        "id": "kilo-code",
+        "name": "Kilo Code",
+        "provider": "kilo",
+        "base_url": "https://api.kilo.ai/api/gateway",
+    },
+    {
+        "id": "github-models",
+        "name": "GitHub Models",
+        "provider": "openai",
+        "base_url": "https://models.github.ai/inference",
+    },
+)
 
 
 class LoadBalancingStrategy(Enum):
@@ -176,8 +218,14 @@ class ProviderConfig:
     base_url: str
     api_key: Optional[str] = None
     encrypted_api_key: Optional[str] = None
+    api_key_prefix: str = ""
     default_model: Optional[str] = None
     models: List[str] = field(default_factory=list)
+    # 发现候选(与 models 分离):fetch 写入、merge 显式并入,持久化
+    discovered_models: List[str] = field(default_factory=list)
+    # 模型元数据:model_id -> 模型档案(dict,含 capabilities/context_window/pricing 等)。
+    # models 保持字符串列表契约以兼容存量消费者;元数据仅承载增强信息。
+    model_metadata: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     enabled: bool = True
     priority: int = 0
     is_builtin: bool = False
@@ -235,7 +283,6 @@ class ProviderConfig:
         ]:
             data.pop(key, None)
         return data
-
     @property
     def masked_api_key(self) -> str:
         """掩码 API Key"""
@@ -277,7 +324,12 @@ class LLMProviderManager(Module):
         super().__init__(config=config, event_bus=event_bus)
         self._preset_registry = get_preset_registry()
         self._config = config or {}
-        self._config_path = self._get_default_config_path()
+        # config_path 显式传入时优先(scope 化配置路径由此派发)
+        explicit_path = self._config.get("config_path")
+        if explicit_path:
+            self._config_path = Path(str(explicit_path))
+        else:
+            self._config_path = self._get_default_config_path()
         self._providers: Dict[str, ProviderConfig] = {}
         self._default_provider_id: Optional[str] = None
         self._config_lock = threading.RLock()
@@ -316,6 +368,8 @@ class LLMProviderManager(Module):
 
             self._default_provider_id = data.get("default_provider_id")
             logger.info("Loaded %s providers from %s", len(self._providers), self._config_path)
+            # 存量配置补内置定义(仅缺失 id;覆盖在用户保存时持久化)
+            self._merge_builtin_providers_if_missing()
         except Exception as e:
             logger.error("Failed to load config: %s", e)
             self._load_builtin_providers()
@@ -349,25 +403,37 @@ class LLMProviderManager(Module):
             logger.info("Saved config to %s", self._config_path)
 
     def _load_builtin_providers(self) -> None:
-        """加载内置服务商"""
-        if not self._preset_registry:
-            return
+        """内置服务商种子:只补缺失 id,绝不覆盖用户已配置项。
 
-        for preset in self._preset_registry.list_presets():
-            if preset.is_builtin:
-                provider = ProviderConfig(
-                    id=preset.id,
-                    name=preset.display_name or preset.name,
-                    provider=preset.provider,
-                    base_url=preset.base_url,
-                    api_key=preset.api_key,
-                    default_model=preset.default_model,
-                    models=preset.models or [],
-                    is_builtin=True,
-                    icon=preset.icon,
-                    description=preset.description,
-                )
-                self._providers[provider.id] = provider
+        前端 ModelPage 的 BUILTIN_PROVIDERS 卡片(30+)本质是展示层;
+        后端必须有对应实体才能让「配置/发现/筛选」工作 —— 这里提供与
+        前端种子对齐的核心定义(openrouter/opencode/kilo/github-models)。
+        无默认可配模型(models=[]):真实清单由发现流程填充。
+        """
+        for definition in _BUILTIN_PROVIDER_DEFS:
+            if definition["id"] in self._providers:
+                continue
+            self._providers[definition["id"]] = ProviderConfig(
+                id=definition["id"],
+                name=definition["name"],
+                provider=definition["provider"],
+                base_url=definition["base_url"],
+                api_key_prefix=definition.get("api_key_prefix", ""),
+                models=[],
+                is_builtin=True,
+            )
+        logger.info(
+            "Merged built-in provider seeds: %s",
+            ", ".join(
+                d["id"]
+                for d in _BUILTIN_PROVIDER_DEFS
+                if d["id"] in self._providers
+            ),
+        )
+
+    def _merge_builtin_providers_if_missing(self) -> None:
+        """既有配置加载后补内置定义(内存层;下次保存时随配置持久化)。"""
+        self._load_builtin_providers()
 
     def add_provider(
         self,
@@ -424,6 +490,16 @@ class LLMProviderManager(Module):
             provider.default_model = default_model
         if models is not None:
             provider.models = models
+            # 同步清理已删除模型的元数据残留(defensive)
+            metadata = dict(provider.model_metadata or {})
+            remaining = set(models)
+            pruned = {
+                model_id: meta
+                for model_id, meta in metadata.items()
+                if model_id in remaining
+            }
+            if pruned != metadata:
+                provider.model_metadata = pruned
         if enabled is not None:
             provider.enabled = enabled
         if priority is not None:
@@ -786,186 +862,578 @@ class LLMProviderManager(Module):
             "base_url": provider.base_url,
         }
 
+    @staticmethod
+    def _generic_filter_models(
+        models: List[PydanticModelInfo],
+        providers: Optional[List[str]] = None,
+        input_modalities: Optional[List[str]] = None,
+        output_modalities: Optional[List[str]] = None,
+        max_prompt_price: Optional[float] = None,
+        is_free: Optional[bool] = None,
+    ) -> List[PydanticModelInfo]:
+        """通用四维过滤(不依赖 provider 特化 filter_models)。
+
+        系列取自 model_id 前缀(openai/gpt-4o → openai),无前缀回退 provider 字段;
+        modality 按 ProviderCapability 值匹配(OR 语义);价格为每 1M tokens 的 prompt 上限。
+        """
+        capability_index = {
+            "text": "text",
+            "image": "vision",
+            "audio": "audio",
+            "video": "video",
+        }
+        result = list(models)
+
+        if providers:
+            providers_lower = [p.lower() for p in providers]
+            result = [
+                m
+                for m in result
+                if (
+                    (m.id.split("/", 1)[0].lower() in providers_lower
+                     if "/" in m.id
+                     else False)
+                    or (not m.id.split("/", 1)[0] and (m.provider or "").lower() in providers_lower)
+                )
+            ]
+
+        if input_modalities:
+            wanted = {
+                capability_index[mod]
+                for mod in input_modalities
+                if mod in capability_index
+            }
+            if wanted:
+                result = [
+                    m
+                    for m in result
+                    if any(
+                        (getattr(cap, "value", cap) in wanted)
+                        for cap in (m.capabilities or [])
+                    )
+                ]
+
+        if max_prompt_price is not None:
+            result = [
+                m
+                for m in result
+                if (m.pricing or {}).get("input") is not None
+                and (m.pricing or {}).get("input") <= max_prompt_price
+            ]
+
+        if is_free is True:
+            result = [m for m in result if m.is_free]
+        return result
+
+    async def filter_provider_models(
+        self,
+        provider_id: str,
+        providers: Optional[List[str]] = None,
+        input_modalities: Optional[List[str]] = None,
+        output_modalities: Optional[List[str]] = None,
+        max_prompt_price: Optional[float] = None,
+        is_free: Optional[bool] = None,
+    ) -> List[PydanticModelInfo]:
+        """按 QwenPaw 四维语义筛选服务商模型列表。
+
+        优先复用 provider 特化的 filter_models(如 OpenRouter 的系列多态);
+        无特化实现的实例(OpenCode/OpenAI 兼容等)走通用过滤。
+        """
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return []
+        instance = self._get_provider_instance(provider_id)
+        if instance is None:
+            return []
+        models = await instance.fetch_models()
+        filter_models = getattr(instance, "filter_models", None)
+        if filter_models is not None:
+            return filter_models(
+                models,
+                providers=providers,
+                input_modalities=input_modalities,
+                output_modalities=output_modalities,
+                max_prompt_price=max_prompt_price,
+                is_free=is_free,
+            )
+        return self._generic_filter_models(
+            models,
+            providers=providers,
+            input_modalities=input_modalities,
+            output_modalities=output_modalities,
+            max_prompt_price=max_prompt_price,
+            is_free=is_free,
+        )
+
     def get_all_models(self) -> List[PydanticModelInfo]:
-        """获取所有服务商的模型列表（聚合）"""
+        """获取所有服务商的模型列表(聚合,携带模型元数据)"""
         all_models: List[PydanticModelInfo] = []
         for provider in self.list_providers():
-            for model_id in provider.models:
-                all_models.append(
-                    PydanticModelInfo(
-                        id=model_id,
-                        name=model_id,
-                        owned_by=provider.id,
-                    )
-                )
+            model_ids = list(getattr(provider, "models", None) or [])
+            if provider.default_model and provider.default_model not in model_ids:
+                model_ids.append(provider.default_model)
+            for model_id in model_ids:
+                all_models.append(self._build_model_view(provider, model_id))
         return all_models
 
-    def fetch_provider_models(self, provider_id: str) -> List[PydanticModelInfo]:
-        """获取服务商模型列表"""
+    @staticmethod
+    def _build_model_view(
+        provider: ProviderConfig,
+        model_id: str,
+    ) -> PydanticModelInfo:
+        """构建 ModelInfo 视图:元数据优先,缺失时退回 id-as-name。"""
+        meta = (provider.model_metadata or {}).get(model_id, {}) or {}
+        try:
+            provider_type = ProviderType(provider.provider)
+        except ValueError:
+            provider_type = ProviderType.OPENAI
+        capabilities = meta.get("capabilities") or []
+        return PydanticModelInfo(
+            id=model_id,
+            name=meta.get("name") or model_id,
+            provider=provider.provider,
+            provider_type=provider_type,
+            capabilities=capabilities,
+            max_tokens=int(meta.get("max_tokens", 4096) or 4096),
+            context_window=int(meta.get("context_window", 4096) or 4096),
+            pricing=dict(meta.get("pricing") or {}),
+            metadata=dict(meta.get("metadata") or {}),
+            owned_by=provider.id,
+            is_free=bool(meta.get("is_free", False)),
+        )
+
+    def _resolve_provider(
+        self,
+        model_id: str,
+        provider_id: Optional[str] = None,
+    ) -> Optional[ProviderConfig]:
+        """按 model_id 定位服务商;显式 provider_id 优先但需归属一致。"""
+        model_id = model_id.strip()
+        if provider_id:
+            provider = self.get_provider(provider_id)
+            if provider is not None:
+                if (
+                    model_id in (provider.models or [])
+                    or model_id == provider.default_model
+                    or provider_id == provider.id
+                ):
+                    return provider
+        for provider in self.list_providers():
+            if model_id in (provider.models or []) or model_id == provider.default_model:
+                return provider
+        return None
+
+    async def fetch_provider_models(
+        self,
+        provider_id: str,
+        merge: bool = True,
+    ) -> List[PydanticModelInfo]:
+        """真实现:调用 provider 实例的 fetch_models,并将元数据写回配置。
+
+        - ``merge=True``(默认):发现结果并入配置列表 —— 兼容前端
+          "发现模型即全部加入"的现有交互。
+        - ``merge=False``:发现结果只写入候选(discovered_models)并持久化,
+          由 :meth:`merge_discovered_models` 显式并入 —— 对齐 QwenPaw 的
+          discovered/configured 分离语义。
+
+        失败时保留已有配置(与 QwenPaw 语义一致:失败的刷新不破坏上次成功状态)。
+        """
         provider = self.get_provider(provider_id)
         if not provider:
             logger.error("Provider %s not found", provider_id)
             return []
 
+        instance = self._get_provider_instance(provider_id)
+        if instance is None:
+            return [
+                self._build_model_view(provider, model_id)
+                for model_id in getattr(provider, "models", [])
+            ]
+
         try:
-            # 这里应该调用实际的 API 获取模型列表
-            # 返回占位符数据
-            models = []
-            for model_id in provider.models:
-                models.append(
-                    PydanticModelInfo(
-                        id=model_id,
-                        name=model_id,
-                        owned_by=provider.name,
-                    )
-                )
-            return models
+            models = await instance.fetch_models()
         except Exception as e:
-            logger.error("Failed to fetch models: %s", e)
+            logger.error("Failed to fetch models from %s: %s", provider_id, e)
             return []
 
-    def probe_model_multimodal(self, provider_id: str, model_id: str) -> ProbeResult:
-        """探测模型多模态能力"""
-        provider = self.get_provider(provider_id)
-        if not provider:
-            logger.error("Provider %s not found", provider_id)
-            return ProbeResult()
+        if models:
+            with self._config_lock:
+                metadata = dict(provider.model_metadata or {})
+                for model in models:
+                    entry = model.to_dict()
+                    entry["owned_by"] = provider_id
+                    metadata[model.id] = entry
+                current_ids = set(provider.models or [])
+                if merge:
+                    # 发现结果持久化:新模型追加进配置列表(前端"发现模型"刷新不丢失);
+                    # 已配置模型保持原有顺序,不重复追加。
+                    added_ids = [
+                        model.id for model in models if model.id not in current_ids
+                    ]
+                    if added_ids:
+                        provider.models = [*(provider.models or []), *added_ids]
+                    provider.discovered_models = []
+                else:
+                    provider.discovered_models = [
+                        model.id for model in models if model.id not in current_ids
+                    ]
+                provider.model_metadata = metadata
+                self._save_config()
+        return list(models)
 
-        try:
-            # 这里应该调用实际的探测 API
+    def merge_discovered_models(
+        self,
+        provider_id: str,
+        model_ids: Optional[List[str]] = None,
+    ) -> int:
+        """把发现候选并入配置列表(幂等),返回实际并入数量。
+
+        - ``model_ids=None``:并入全部候选;否则仅并入选中 id。
+        - 已在配置中的 id、不在候选中的 id 均被忽略。
+        - 已选中的候选从 discovered_models 移除,未选中的保留。
+        """
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return 0
+        configured = set(provider.models or [])
+        candidates = [
+            model_id
+            for model_id in (provider.discovered_models or [])
+            if model_id not in configured
+        ]
+        if model_ids is not None:
+            chosen = [model_id for model_id in model_ids if model_id in candidates]
+        else:
+            chosen = candidates
+        if not chosen:
+            return 0
+        with self._config_lock:
+            provider.models = [*(provider.models or []), *chosen]
+            chosen_set = set(chosen)
+            configured = set(provider.models or [])
+            provider.discovered_models = [
+                model_id
+                for model_id in (provider.discovered_models or [])
+                if model_id not in chosen_set and model_id not in configured
+            ]
+            self._save_config()
+        logger.info(
+            "Merged %s discovered models into provider %s",
+            len(chosen),
+            provider.name,
+        )
+        return len(chosen)
+
+    async def probe_model_multimodal(
+        self,
+        model_id: str,
+        provider_id: Optional[str] = None,
+    ) -> ProbeResult:
+        """探测模型多模态能力:元数据优先,其次 provider 实例,名称启发式兜底。"""
+        provider = self._resolve_provider(model_id, provider_id)
+        if provider is None:
             return ProbeResult(
-                vision="vision" in model_id.lower() or "vl" in model_id.lower(),
-                audio="audio" in model_id.lower(),
-                video="video" in model_id.lower(),
-                image_generation="image" in model_id.lower(),
+                model_id=model_id,
+                supported=False,
+                capabilities=[],
+                metadata={"detection_method": "none"},
             )
-        except Exception as e:
-            logger.error("Failed to probe model: %s", e)
-            return ProbeResult()
 
-    def check_provider_connection(self, provider_id: str) -> ConnectionResult:
-        """检查服务商连接"""
+        meta = (provider.model_metadata or {}).get(model_id, {}) or {}
+        metadata_caps = meta.get("capabilities") or []
+        if metadata_caps:
+            return ProbeResult(
+                model_id=model_id,
+                supported=bool(metadata_caps),
+                capabilities=list(metadata_caps),
+                metadata={
+                    "detection_method": "metadata",
+                    "provider_id": provider.id,
+                },
+            )
+
+        instance = self._get_provider_instance(provider.id)
+        if instance is not None:
+            try:
+                return await instance.probe_model_multimodal(model_id)
+            except Exception as e:
+                logger.warning(
+                    "Probe failed for %s/%s: %s", provider.id, model_id, e,
+                )
+        return ProbeResult(
+            model_id=model_id,
+            supported=False,
+            capabilities=[],
+            metadata={
+                "detection_method": "name_heuristic",
+                "provider_id": provider.id,
+            },
+        )
+
+    async def check_model_connection(
+        self,
+        model_id: str,
+        provider_id: Optional[str] = None,
+    ) -> ConnectionResult:
+        """检查模型连接:按 model_id 定位服务商并调用实例检查。"""
+        provider = self._resolve_provider(model_id, provider_id)
+        if provider is None:
+            return ConnectionResult(success=False, error="Model not found")
+
+        instance = self._get_provider_instance(provider.id)
+        if instance is None:
+            return ConnectionResult(success=False, error="Provider instance unavailable")
+        try:
+            return await instance.check_model_connection(model_id)
+        except Exception as e:
+            return ConnectionResult(success=False, error=str(e))
+
+    async def check_provider_connection(self, provider_id: str) -> ConnectionResult:
+        """真实现:调用 provider 实例的 check_connection,并如实更新健康状态。"""
         provider = self.get_provider(provider_id)
         if not provider:
             logger.error("Provider %s not found", provider_id)
-            return ConnectionResult(success=False, message="Provider not found")
+            return ConnectionResult(success=False, error="Provider not found")
 
-        try:
-            # 这里应该调用实际的连接检查
-            start_time = time.time()
-            # 模拟连接检查
-            latency = (time.time() - start_time) * 1000
-
-            provider.health_status = "healthy"
-            return ConnectionResult(
-                success=True,
-                message=f"Connected to {provider.name}",
-                latency_ms=latency,
-            )
-        except Exception as e:
-            logger.error("Connection check failed: %s", e)
+        instance = self._get_provider_instance(provider_id)
+        if instance is None:
             provider.health_status = "unhealthy"
-            return ConnectionResult(
-                success=False,
-                message=str(e),
-            )
+            return ConnectionResult(success=False, error="Provider instance unavailable")
+        try:
+            result = await instance.check_connection()
+            provider.health_status = "healthy" if result.success else "unhealthy"
+            provider.last_health_check = datetime.now().isoformat()
+            return result
+        except Exception as e:
+            provider.health_status = "unhealthy"
+            provider.last_health_check = datetime.now().isoformat()
+            logger.error("Connection check failed for %s: %s", provider.name, e)
+            return ConnectionResult(success=False, error=str(e))
 
-    def check_model_connection(self, provider_id: str, model_id: str) -> ConnectionResult:
-        """检查模型连接"""
+    async def health_check_provider(self, provider_id: str) -> bool:
+        """健康检查:委托给真连接检查,失败置 unhealthy(不再恒 healthy)。"""
+        result = await self.check_provider_connection(provider_id)
+        return result.success
+
+    def detect_model_capabilities(self, provider_id: str, model: str, use_cache: bool = True) -> Dict[str, Any]:
+        """检测模型能力:元数据优先,缺失时使用名称启发式兜底。"""
         provider = self.get_provider(provider_id)
         if not provider:
-            return ConnectionResult(success=False, message="Provider not found")
+            logger.warning("Provider %s not found", provider_id)
+            return {}
 
-        if model_id not in provider.models and model_id != provider.default_model:
-            return ConnectionResult(success=False, message="Model not found")
+        meta = (provider.model_metadata or {}).get(model, {}) or {}
+        caps = [str(c) for c in meta.get("capabilities", [])]
+        if caps:
+            return {
+                "vision": "vision" in caps,
+                "audio": "audio" in caps,
+                "video": "video" in caps,
+                "tool_use": "tool_use" in caps,
+            }
 
         try:
-            # 这里应该调用实际的模型连接检查
-            return ConnectionResult(
-                success=True,
-                message=f"Model {model_id} is available",
-            )
+            # 这里应该调用实际的能力检测
+            return {
+                "vision": "vision" in model.lower() or "vl" in model.lower(),
+                "audio": "audio" in model.lower(),
+                "video": "video" in model.lower(),
+                "tool_use": True,
+            }
         except Exception as e:
-            return ConnectionResult(success=False, message=str(e))
+            logger.error("Failed to detect capabilities: %s", e)
+            return {}
 
     def _get_provider_instance(self, provider_id: str):
-        """获取服务商实例（用于实际 API 调用）"""
+        """获取服务商实例(用于实际 API 调用),按 provider_id 缓存。
+
+        注意:ProviderConfig 需拆解为实例构造参数 — 早期实现把配置对象
+        直接作为位置参数传入,导致实例拿不到 api_key/base_url。
+        """
         provider = self.get_provider(provider_id)
         if not provider:
             return None
 
-        # 这里应该根据 provider.provider 类型返回对应的实例
-        # 由于依赖复杂，返回占位符
+        cache = getattr(self, "_provider_instances", None)
+        if cache is None:
+            cache = self._provider_instances = {}
+        if provider_id in cache:
+            return cache[provider_id]
+
+        def _build(cls):
+            try:
+                provider_type = ProviderType(provider.provider)
+            except ValueError:
+                provider_type = ProviderType.OPENAI
+            # 各具体 Provider 的 __init__ 签名为硬编码 provider_type
+            # (OpenAI/OpenRouter 等不接收该 kwarg,传入会落入 **kwargs 与
+            # super() 调用重复,抛 "multiple values for provider_type")。
+            # 因此按类签名决定是否传,不靠异常吞掉(防掩盖真实参数错误)。
+            if "provider_type" in inspect.signature(cls).parameters:
+                return cls(
+                    provider_id=provider.id,
+                    provider_type=provider_type,
+                    api_key=provider.api_key or "",
+                    base_url=provider.base_url or "",
+                )
+            return cls(
+                provider_id=provider.id,
+                api_key=provider.api_key or "",
+                base_url=provider.base_url or "",
+            )
+
         try:
-            if provider.provider == "openai":
-                from neurova.llm.providers import OpenAIProvider
+            from neurova.llm.providers import (
+                AnthropicProvider,
+                GeminiProvider,
+                OllamaProvider,
+                OpenAIProvider,
+                OpenCodeProvider,
+                OpenRouterProvider,
+            )
 
-                return OpenAIProvider(provider)
-            elif provider.provider == "anthropic":
-                from neurova.llm.providers import AnthropicProvider
-
-                return AnthropicProvider(provider)
-            elif provider.provider == "gemini":
-                from neurova.llm.providers import GeminiProvider
-
-                return GeminiProvider(provider)
-            elif provider.provider == "ollama":
-                from neurova.llm.providers import OllamaProvider
-
-                return OllamaProvider(provider)
-            else:
-                # 默认使用 OpenAI 兼容
-                from neurova.llm.providers import OpenAIProvider
-
-                return OpenAIProvider(provider)
+            type_map = {
+                "openai": OpenAIProvider,
+                "anthropic": AnthropicProvider,
+                "gemini": GeminiProvider,
+                "ollama": OllamaProvider,
+                "openrouter": OpenRouterProvider,
+                "opencode": OpenCodeProvider,
+            }
+            cls = type_map.get(provider.provider, OpenAIProvider)
+            instance = _build(cls)
         except ImportError as e:
             logger.warning("Could not import provider %s: %s", provider.provider, e)
             return None
 
+        cache[provider_id] = instance
+        return instance
+
 
 _provider_manager: Optional[LLMProviderManager] = None
+# scope → 实例 的隔离注册表(admin 走 _provider_manager,保持存量引用兼容)
+_provider_managers: Dict[str, LLMProviderManager] = {}
 _provider_manager_lock = threading.Lock()
 
+_SCOPE_PART_RE = re.compile(r"[^A-Za-z0-9_-]")
 
-def get_provider_manager(config_path: Optional[str] = None) -> LLMProviderManager:
+
+def _sanitize_scope_part(value: str) -> str:
+    """把 user_id 净化成安全的文件名片段(防路径穿越/特殊字符)。"""
+    return _SCOPE_PART_RE.sub("-", value)
+
+
+def _default_config_dir() -> Path:
+    home = Path.home()
+    config_dir = home / ".neurova" / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir
+
+
+def _config_path_for_scope(scope: str) -> Path:
+    """scope → 配置文件路径。
+
+    - scope=="admin":沿用存量全局 providers.json(升级不丢配置)
+    - 其它 scope(如 "user:alice"):providers.user-alice.json
+      (整个 scope 净化后作文件名,保留前缀信息,防不同 scope 撞出同路径)
+    """
+    if scope == "admin":
+        return _default_config_dir() / "providers.json"
+    scope_part = scope.split(":", 1)[-1] if ":" in scope else scope
+    prefix = scope.split(":", 1)[0] if ":" in scope else "scope"
+    return _default_config_dir() / f"providers.{prefix}-{_sanitize_scope_part(scope_part)}.json"
+
+
+def list_available_scopes(config_dir: Optional[Path] = None) -> List[str]:
+    """列出所有非 admin 的已配置 scope(用于 admin 查看用户配置入口)。
+
+    通过扫描 providers.<prefix>-<part>.json 反解 scope 字符串。
+    全局 providers.json、临时文件(.bak/.tmp 等)一律排除。
+    """
+    directory = Path(config_dir) if config_dir is not None else _default_config_dir()
+    if not directory.is_dir():
+        return []
+    scopes: List[str] = []
+    for path in sorted(directory.glob("providers.*.json")):
+        name = path.name[len("providers."):-len(".json")]
+        if not name or name == "json":
+            continue
+        if "-" in name:
+            prefix, part = name.split("-", 1)
+            if prefix and part:
+                scopes.append(f"{prefix}:{part}")
+    return scopes
+
+
+def get_provider_manager_for_user(current_user: Dict[str, Any]) -> LLMProviderManager:
+    """按用户身份选择 scope 的 provider manager(端点统一入口)。
+
+    - admin 角色 → 全局 admin scope(最高权限)
+    - 普通用户 → user:<user_id> scope(仅自己的配置)
+    - 无 user_id(异常状态)→ 全局(不会把配置误挂到空用户)
+    """
+    role = (current_user.get("role") or "user").lower()
+    user_id = (current_user.get("user_id") or "").strip()
+    if role == "admin" or not user_id:
+        return get_provider_manager(scope="admin")
+    return get_provider_manager(scope=f"user:{user_id}")
+
+
+def get_provider_manager(config_path: Optional[str] = None, scope: Optional[str] = None) -> LLMProviderManager:
     """获取 LLMProviderManager 单例(线程安全,双重检查锁定)
 
-    实现:参照 `neurova.llm.providers.secret_store.get_secret_store()` 的模式,
-    使用模块级 `_provider_manager_lock` + 双重检查锁定,确保并发首次调用
-    只创建一个实例。
+    隔离模型:
+    - 无参调用(或 scope=="admin"):返回全局 admin 单例(存量行为,向后兼容)
+    - scope=="user:<user_id>":返回该用户独立单例(独立配置文件、独立内存状态)
 
     参数:
-        config_path: 可选的配置文件路径(仅在首次创建实例时生效)
+        config_path: 可选的配置文件路径(显式给定时优先于 scope 派发)
+        scope: 可选作用域("admin" 或 "user:<user_id>")
 
     返回:
-        LLMProviderManager 单例
+        LLMProviderManager 单例(按 scope 隔离)
     """
+    # 默认作用域 = admin(向后兼容无参调用)
+    if scope is None and config_path is None:
+        scope = "admin"
+    if config_path is None:
+        config_path = str(_config_path_for_scope(scope or "admin"))
+
     global _provider_manager
     # 第一次检查(无锁,快速路径)
-    if _provider_manager is None:
+    if scope == "admin":
+        if _provider_manager is None:
+            with _provider_manager_lock:
+                if _provider_manager is None:
+                    _provider_manager = LLMProviderManager(
+                        config={"config_path": config_path},
+                    )
+        return _provider_manager
+
+    key = f"scope:{scope}"
+    cached = _provider_managers.get(key)
+    if cached is None:
         with _provider_manager_lock:
-            # 第二次检查(持锁,防止并发重复创建)
-            if _provider_manager is None:
-                _provider_manager = LLMProviderManager(config={"config_path": config_path})
-    return _provider_manager
+            cached = _provider_managers.get(key)
+            if cached is None:
+                cached = LLMProviderManager(config={"config_path": config_path})
+                _provider_managers[key] = cached
+    return cached
 
 
 def reset_provider_manager() -> None:
-    """重置 LLMProviderManager 单例(线程安全)
+    """重置全部 LLMProviderManager 单例(线程安全)
 
-    清除模块级 `_provider_manager`,使下次 `get_provider_manager()` 重新创建实例。
-    用于与 `MultiModelLLMClient.reset()` 协同,确保 reset 链路穿透到 provider_manager 层。
-
-    场景:
-    - 首次初始化时 api_key 解密失败(pycryptodome 缺失等),providers 缓存了空 api_key
-    - 配置修复后,需 reset 才能让下次 get_provider_manager() 重新加载 providers
+    清除全局 admin 单例与所有 scope 单例,使下次 get_provider_manager()
+    重新加载配置。用于与 MultiModelLLMClient.reset() 协同。
 
     线程安全:
-    - 在 `_provider_manager_lock` 保护下清除,避免与并发 get_provider_manager() 竞态
+    - 在 _provider_manager_lock 保护下清除,避免与并发 get_provider_manager() 竞态
     """
     global _provider_manager
     with _provider_manager_lock:
         _provider_manager = None
+        _provider_managers.clear()
 
 
 __all__ = [

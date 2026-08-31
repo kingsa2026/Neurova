@@ -1,7 +1,12 @@
 <template>
   <div class="setting-page">
     <h2 class="page-title">{{ t('system.settings') }}</h2>
+    <p class="page-global-hint">{{ t('common.globalSettingHint') }}</p>
 
+    <template v-if="!isAdmin">
+      <div class="admin-gate">{{ t('common.adminOnlyHint') }}</div>
+    </template>
+    <template v-else>
     <a-tabs v-model:activeKey="activeTab" tab-position="left" class="settings-tabs">
       <!-- General -->
       <a-tab-pane key="general" :tab="t('settings.general')">
@@ -128,14 +133,16 @@
         <NegativeScreenSettings />
       </a-tab-pane>
     </a-tabs>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getSettings, updateSettings, clearCache as clearCacheApi } from '@/api/modules/settings'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { supportedLocales } from '@/i18n'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -143,6 +150,9 @@ import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
 import { message } from 'ant-design-vue'
 
 const { t, locale } = useI18n()
+const authStore = useAuthStore()
+/** 全局系统设置仅管理员可操作; 非管理员不渲染设置表单 */
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 const appStore = useAppStore()
 
 const activeTab = ref('general')
@@ -212,6 +222,24 @@ onMounted(fetchSettings)
 </script>
 
 <style scoped>
+/* 全局设置说明 */
+.page-global-hint {
+  margin: -12px 0 0;
+  font-size: 12px;
+  color: var(--nr-text-secondary, #8a8a92);
+}
+
+/* 非管理员提示 */
+.admin-gate {
+  margin: 24px auto;
+  max-width: 480px;
+  padding: 16px;
+  border: 1px dashed var(--nr-border, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--nr-text-secondary, #8a8a92);
+}
 .setting-page { display: flex; flex-direction: column; gap: 20px; }
 .page-title { font-family: var(--nr-font-display); font-size: 22px; font-weight: 700; color: var(--nr-text-primary); margin: 0; }
 .settings-tabs { min-height: 400px; }

@@ -430,10 +430,15 @@ const routes: RouteRecordRaw[] = [
 
   // ---------------------------------------------------------------------------
   // Legacy chat route → redirect to unified MainLayout chat
+  // 保留 agentId 到 query: 从智能体管理点"对话"进入对应智能体会话
+  // (useAgentPage 按 params > query > store 优先级解析)
   // ---------------------------------------------------------------------------
   {
     path: '/agent/:agentId/chat',
-    redirect: '/chat',
+    redirect: (to) => ({
+      path: '/chat',
+      query: to.params.agentId ? { agentId: to.params.agentId } : {},
+    }),
   },
 
   // ---------------------------------------------------------------------------
