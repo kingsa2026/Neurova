@@ -38,8 +38,8 @@ describe('useAgentStore — agentOptions（画布 Agent 下拉数据源）', () 
     expect(mockedGet).toHaveBeenCalledWith('/agents')
     expect(store.agents).toHaveLength(2)
     expect(store.agentOptions).toEqual([
-      { label: '研究员', value: 'agent-1' },
-      { label: '写作者', value: 'agent-2' },
+      { label: '研究员', value: 'agent-1', isWorkflow: false },
+      { label: '写作者', value: 'agent-2', isWorkflow: false },
     ])
   })
 
@@ -47,11 +47,11 @@ describe('useAgentStore — agentOptions（画布 Agent 下拉数据源）', () 
     mockedGet.mockResolvedValueOnce({ items: [{ id: 'a', name: 'A' }] })
     const store = useAgentStore()
     await store.loadAgents()
-    expect(store.agentOptions).toEqual([{ label: 'A', value: 'a' }])
+    expect(store.agentOptions).toEqual([{ label: 'A', value: 'a', isWorkflow: false }])
 
     mockedGet.mockResolvedValueOnce([{ id: 'b', name: 'B' }])
     await store.loadAgents()
-    expect(store.agentOptions).toEqual([{ label: 'B', value: 'b' }])
+    expect(store.agentOptions).toEqual([{ label: 'B', value: 'b', isWorkflow: false }])
   })
 
   it('加载失败时 agentOptions 为空数组且不抛异常', async () => {
@@ -60,5 +60,76 @@ describe('useAgentStore — agentOptions（画布 Agent 下拉数据源）', () 
     await expect(store.loadAgents()).resolves.toBeUndefined()
     expect(store.agentOptions).toEqual([])
     expect(store.error).toContain('network down')
+  })
+})
+
+describe('useAgentStore — workflow agents 合并（遗留③b）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('loadWorkflowAgents 从 /neurflow/agents 拉取并合并进 agentOptions（isWorkflow 标记）', async () => {
+    mockedGet.mockImplementation((url: string) => {
+      if (url === '/agents') {
+        return Promise.resolve({ data: [{ id: 'agent-1', name: '研究员', status: 'active' }] })
+      }
+      if (url === '/neurflow/agents') {
+        return Promise.resolve({
+          data: {
+            agents: [
+              {
+                agent_id: 'wf_agent_wf_pub',
+                name: '发布测试',
+                role: 'workflow-triggered agent',
+                capabilities: ['workflow'],
+                metadata: { source_type: 'workflow', workflow_id: 'wf_pub' },
+                status: 'active',
+              },
+            ],
+            total: 1,
+          },
+        })
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`))
+    })
+
+    const store = useAgentStore()
+    await store.loadAgents()
+    await store.loadWorkflowAgents()
+
+    expect(store.agentOptions).toEqual([
+      { label: '研究员', value: 'agent-1', isWorkflow: false },
+      { label: '发布测试', value: 'wf_agent_wf_pub', isWorkflow: true },
+    ])
+  })
+
+  it('loadWorkflowAgents 过滤非 workflow source 的记录且失败静默', async () => {
+    mockedGet.mockImplementation((url: string) => {
+      if (url === '/agents') return Promise.resolve({ data: [] })
+      if (url === '/neurflow/agents') {
+        return Promise.resolve({
+          data: {
+            agents: [
+              { agent_id: 'manual1', name: '普通', metadata: {}, status: 'active' },
+              { agent_id: 'wf_agent_w1', name: '工作流A', metadata: { source_type: 'workflow', workflow_id: 'w1' }, status: 'active' },
+            ],
+            total: 2,
+          },
+        })
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`))
+    })
+
+    const store = useAgentStore()
+    await store.loadAgents()
+    await store.loadWorkflowAgents()
+    expect(store.agentOptions).toEqual([
+      { label: '工作流A', value: 'wf_agent_w1', isWorkflow: true },
+    ])
+
+    // 失败静默
+    mockedGet.mockRejectedValueOnce(new Error('down'))
+    await expect(store.loadWorkflowAgents()).resolves.toBeUndefined()
   })
 })
