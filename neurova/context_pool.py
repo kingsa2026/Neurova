@@ -329,6 +329,24 @@ class ContextPool:
                     break
             return results[:limit]
 
+    async def rollup_overflow_digest(self, folded_chunks, previous_summary: str = "") -> None:
+        """P1-1③：对被折叠 chunk 生成/增量更新摘要并回写池（SUMMARY 源）。
+
+        无摘要器（未注入/初始化失败）为 no-op——摘要停用不影响归档无损语义。
+        """
+        summarizer = getattr(self, "_summarizer", None)
+        if summarizer is None or not folded_chunks:
+            return
+        try:
+            summary = await summarizer.summarize(list(folded_chunks), previous_summary=previous_summary)
+            if summary:
+                self.archive_summary(
+                    summary,
+                    source_summary=previous_summary,
+                )
+        except Exception:
+            logger.warning("溢出摘要回写失败（忽略）", exc_info=True)
+
     def archive_summary(self, summary: str, source_summary: str = "") -> None:
         """P1-1③：把折叠摘要以 SUMMARY 源回写池（高优先级，视图可调取）。
 
@@ -439,25 +457,65 @@ class ContextPool:
 
             return removed_count
 
+    # P1-1②：静态表降级用（provider 元数据不可用时的保守已知型号）
+    _STATIC_MODEL_BUDGETS = {
+        "gpt-4": 32000,
+        "gpt-4-turbo": 32000,
+        "gpt-4o": 32000,
+        "gpt-3.5-turbo": 16000,
+        "claude-3-opus": 200000,
+        "claude-3-sonnet": 200000,
+        "claude-3-haiku": 200000,
+        "claude-2": 100000,
+        "deepseek-chat": 32000,
+        "deepseek-coder": 32000,
+        "qwen-max": 32000,
+        "qwen-turbo": 16000,
+    }
+    # 视图预算 = context_window × 视图安全系数（预留输出/系统提示/工具结果）
+    _BUDGET_WINDOW_FACTOR = 0.6
+    _BUDGET_MIN = 4000
+    _BUDGET_MAX = 400000
+
     @staticmethod
     def get_token_budget_for_model(model_name: str, default_budget: int = 16000) -> int:
-        model_budgets = {
-            "gpt-4": 32000,
-            "gpt-4-turbo": 32000,
-            "gpt-4o": 32000,
-            "gpt-3.5-turbo": 16000,
-            "claude-3-opus": 200000,
-            "claude-3-sonnet": 200000,
-            "claude-3-haiku": 200000,
-            "claude-2": 100000,
-            "deepseek-chat": 32000,
-            "deepseek-coder": 32000,
-            "qwen-max": 32000,
-            "qwen-turbo": 16000,
-        }
+        """动态 Token 预算（P1-1②）：provider_manager 模型元数据优先。
 
-        for model_pattern, budget in model_budgets.items():
-            if model_pattern in model_name.lower():
+        优先级：模型 context_window（×0.6 视图安全系数，钳位 [4000, 400000]）
+        → 静态已知型号表（provider 元数据不可用时）→ default_budget。
+        只读接入 provider_manager（懒加载 + 全程异常保护，不因预算查询崩溃）。
+        """
+        needle = (model_name or "").strip().lower()
+
+        # 1) provider 元数据（只读接入，不修改其文件）
+        try:
+            from neurova.llm.provider_manager import get_provider_manager
+
+            pm = get_provider_manager()
+            providers = getattr(pm, "providers", None) or {}
+            for cfg in providers.values():
+                entries = (getattr(cfg, "discovered_models", None) or []) + (
+                    getattr(cfg, "models", None) or []
+                )
+                for model in entries:
+                    if isinstance(model, str):
+                        mid, mname, window = model, model, 0
+                    else:
+                        mid = str(getattr(model, "id", "") or "")
+                        mname = str(getattr(model, "name", "") or "")
+                        window = int(getattr(model, "context_window", 0) or 0)
+                    hit = needle and needle in (mid.lower(), mname.lower())
+                    if not hit:
+                        continue
+                    if window > 0:
+                        budget = int(window * ContextPool._BUDGET_WINDOW_FACTOR)
+                        return max(ContextPool._BUDGET_MIN, min(ContextPool._BUDGET_MAX, budget))
+        except Exception:
+            pass  # 元数据不可用 → 静态表回退
+
+        # 2) 静态已知型号表
+        for model_pattern, budget in ContextPool._STATIC_MODEL_BUDGETS.items():
+            if model_pattern in needle:
                 return budget
 
         return default_budget

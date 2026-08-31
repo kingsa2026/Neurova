@@ -93,7 +93,7 @@ class SemanticMatchDrawer:
         for drop in non_conv_items:
             score = self._calculate_score(drop, need)
             scored_non_conv.append((score, drop))
-        scored_non_conv.sort(key=lambda x: -x[0])
+
 
         result_by_pos = {}
         for idx, (orig_pos, item) in enumerate(conv_items):
@@ -110,11 +110,29 @@ class SemanticMatchDrawer:
 
         # [按需调取] 整条选取：分数只决定"取不取"，绝不切片截断内容
         #（归档无损，视图层超预算的条目整条跳过，留在池中等待后续调取）
+        #
+        # P1-1④ 分层预算回投：不再按位置序遍历，改按分层优先级——
+        #   第 1 层：未读 TOOL_CALL（模型尚未读过，必须在视野内，绝不折叠）
+        #   第 2 层：其余条目（conversation/memory/experience/已读 TOOL_CALL）
+        # 各层内保持原相对顺序；选中后仍按 created_at 稳定排序（前缀缓存契约）
         selected = []
         total_tokens = 0
-        for pos in range(len(drops)):
-            if pos not in result_by_pos:
-                continue
+        layered_positions = [
+            pos
+            for pos in sorted(result_by_pos)
+            if not (
+                result_by_pos[pos].source == ContextSource.TOOL_CALL
+                and result_by_pos[pos].seen_confirmed
+            )
+        ] + [
+            pos
+            for pos in sorted(result_by_pos)
+            if (
+                result_by_pos[pos].source == ContextSource.TOOL_CALL
+                and result_by_pos[pos].seen_confirmed
+            )
+        ]
+        for pos in layered_positions:
             drop = result_by_pos[pos]
             drop_tokens = drop.tokens if drop.tokens > 0 else self._estimate_tokens(drop.content)
 

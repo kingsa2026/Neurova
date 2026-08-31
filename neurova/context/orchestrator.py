@@ -63,10 +63,45 @@ class ContextOrchestrator:
             model_name = getattr(agent_ref.config, "llm_model", "gpt-4")
             max_tokens = ContextPool.get_token_budget_for_model(model_name)
 
+            # P1-1③ 接线：驱逐台账持久层（WAL+FTS5，按 agent 分库）+
+            # 摘要压缩器（经 agent.llm_client.chat 桥接真 LLM）
+            _ledger_db = None
+            _summarizer = None
+            try:
+                from neurova.context.eviction_ledger_db import EvictionLedgerDB
+
+                _agent_id = getattr(agent_ref, "agent_id", "default")
+                _ledger_db = EvictionLedgerDB(
+                    db_path=f"data/context_ledger/{_agent_id}.db",
+                    user_id=getattr(agent_ref, "user_id", "default"),
+                    agent_id=_agent_id,
+                )
+            except Exception as e:
+                logger.warning("驱逐台账初始化失败（回退内存台账）: %s", e)
+
+            try:
+                from neurova.context.summarizing_compressor import SummarizingCompressor
+
+                async def _llm_digest_call(prompt: str) -> str:
+                    """摘要 LLM 桥：MultiModelLLMClient.chat 的 dict 契约提取 content"""
+                    response = await agent_ref.llm_client.chat(
+                        [{"role": "user", "content": prompt}],
+                        model=getattr(agent_ref.config, "llm_model", None),
+                    )
+                    if isinstance(response, dict):
+                        return str(response.get("content") or "")
+                    return str(getattr(response, "content", "") or "")
+
+                _summarizer = SummarizingCompressor(llm_call=_llm_digest_call, timeout_s=60)
+            except Exception as e:
+                logger.warning("摘要压缩器初始化失败（摘要回写停用）: %s", e)
+
             self.context_pool = ContextPool(
                 user_id=getattr(agent_ref, "user_id", "default"),
                 agent_id=getattr(agent_ref, "agent_id", "default"),
                 session_id=session_id,
+                ledger_db=_ledger_db,
+                summarizer=_summarizer,
                 max_tokens=max_tokens,
                 auto_tag=auto_tag,
                 ttl_seconds=0,  # [无损归档] 池是永久归档，TTL 不门禁调取（永不丢失）
@@ -750,6 +785,11 @@ class ContextOrchestrator:
         except Exception:
             logger.debug("视图已读确认失败（忽略）", exc_info=True)
             return 0
+
+    def get_ledger_db(self):
+        """P1-1③：暴露驱逐台账持久层（GC 定时任务/诊断用）；未启用返回 None。"""
+        pool = getattr(self, "context_pool", None)
+        return getattr(pool, "_ledger_db", None) if pool else None
 
     def build_system_prompt(self, tools_desc: str = "") -> str:
         """构建系统提示（Phase 6.5: 统一行为规则配置）。
