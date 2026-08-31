@@ -70,7 +70,50 @@ class OpenAILoop(BaseAgentLoop):
         self._round_replies: List[str] = []
         self._last_round_calls: List[tuple] = []
         self._stagnation_count = 0
+        # P2-5：循环门控（对标 QP loop/gates）——DoomLoop/Iteration/TokenBudget 默认装配，
+        # goal 模式由调用方经 set_goal_gate 注入 GoalGate
+        from neurova.agent.gates import (
+            DoomLoopGate,
+            GateRunner,
+            IterationGate,
+            TokenBudgetGate,
+        )
+
+        self._gate_runner = GateRunner([
+            DoomLoopGate(),
+            IterationGate(max_rounds=20),
+            TokenBudgetGate(max_tokens=100000),
+        ])
         logger.info("OpenAILoop initialized for agent: %s", agent.config.name)
+
+    def _ensure_gate_runner(self) -> None:
+        """懒初始化门控执行器（__new__ 绕过 __init__ 的测试构造兼容）。"""
+        if getattr(self, "_gate_runner", None) is None:
+            from neurova.agent.gates import (
+                DoomLoopGate,
+                GateRunner,
+                IterationGate,
+                TokenBudgetGate,
+            )
+
+            self._gate_runner = GateRunner([
+                DoomLoopGate(),
+                IterationGate(max_rounds=20),
+                TokenBudgetGate(max_tokens=100000),
+            ])
+
+    def set_goal_gate(self, goal: Dict[str, Any], completion_check=None, max_rounds: int = 15) -> None:
+        """goal 模式：注入 GoalGate（目标达成判定 + 轮次预算）。
+
+        completion_check(goal, ctx) -> (achieved, summary) 由调用方提供
+        （LLM rubric 或显式条件）。
+        """
+        from neurova.agent.gates import GoalGate
+
+        self._ensure_gate_runner()
+        self._gate_runner.add_gate(
+            GoalGate(goal=goal, completion_check=completion_check, max_rounds=max_rounds)
+        )
 
     def _assess_stagnation(
         self, round_reply: str, current_calls: List[tuple], previous_calls: List[tuple]
@@ -258,6 +301,13 @@ class OpenAILoop(BaseAgentLoop):
             self._tool_rounds += 1
             if self._tool_rounds > 10:
                 logger.warning("工具调用轮次超过上限 (%s)，停止递归", self._tool_rounds)
+            # P2-5：非流式路径同样过门控（TERMINATE 即终止递归）
+            from neurova.agent.gates import StopAction as _SA
+
+            self._ensure_gate_runner()
+            _gd = self._gate_runner.on_round_end({"tool_rounds": self._tool_rounds})
+            if _gd is not None and _gd.action == _SA.TERMINATE:
+                logger.warning("门控 %s 终止非流式循环: %s", _gd.gate_name, _gd.reason)
                 return response
 
             logger.info("LLM returned %s tool calls (round %s)", len(tool_calls), self._tool_rounds)
@@ -397,6 +447,35 @@ class OpenAILoop(BaseAgentLoop):
             stagnant = self._assess_stagnation(round_reply, current_calls, self._last_round_calls)
             self._round_replies.append(round_reply)
             self._last_round_calls = current_calls
+
+            # P2-5：门控检查（TERMINATE → gate_terminate 事件由 chat_pipeline 终止循环；
+            # INTERRUPT → 注入提示后继续）。_gate_runner 懒初始化——兼容
+            # 测试里 __new__ 绕过 __init__ 的构造方式
+            self._ensure_gate_runner()
+            round_signature = "|".join(f"{n}:{a[:64]}" for n, a in current_calls) or round_reply[:128]
+            gate_decision = self._gate_runner.on_round_end({
+                "tool_rounds": self._tool_rounds,
+                "round_reply": round_reply,
+                "round_signature": round_signature,
+                "round_usage": getattr(self.agent, "_round_usage", None) or {},
+                "goal": getattr(self.agent, "_goal", None) or {},
+            })
+            if gate_decision.action.value == "terminate":
+                logger.warning("门控 %s 终止循环: %s", gate_decision.gate_name, gate_decision.reason)
+                yield {
+                    "type": "gate_terminate",
+                    "reason": gate_decision.reason,
+                    "gate": gate_decision.gate_name,
+                }
+                return
+            if gate_decision.action.value == "interrupt_and_continue":
+                # QP INTERRUPT_AND_CONTINUE 语义：注入提示进消息序列后继续
+                # （round_reply/签名仅 yield reasoning 供前端展示，LLM 看到的是消息）
+                request_params["messages"].append(
+                    {"role": "user", "content": gate_decision.continuation_prompt}
+                )
+                logger.info("门控 %s 软干预（提示已注入消息序列）: %s", gate_decision.gate_name, gate_decision.reason)
+                yield {"type": "reasoning", "data": gate_decision.continuation_prompt}
 
             if stagnant:
                 self._stagnation_count += 1
