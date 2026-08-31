@@ -13,6 +13,12 @@
             @search="handleSearch"
           />
           <a-checkbox v-model:checked="semanticSearch">{{ t('knowledge.semanticSearch') }}</a-checkbox>
+          <a-radio-group v-model:value="activeScope" button-style="solid" size="small" @change="onScopeChange">
+            <a-radio-button value="all">{{ t('knowledge.scopeAll') }}</a-radio-button>
+            <a-radio-button value="public">{{ t('knowledge.scopePublic') }}</a-radio-button>
+            <a-radio-button value="private">{{ t('knowledge.scopePrivate') }}</a-radio-button>
+            <a-radio-button value="shared">{{ t('knowledge.scopeShared') }}</a-radio-button>
+          </a-radio-group>
         </div>
         <div class="header-actions">
           <a-select
@@ -28,6 +34,9 @@
           </GlassButton>
           <GlassButton variant="secondary" size="sm" @click="importVisible = true">
             {{ t('knowledge.import') }}
+          </GlassButton>
+          <GlassButton variant="ghost" size="sm" @click="configVisible = true; fetchKbConfigs()">
+            {{ t('knowledge.remoteConfig') }}
           </GlassButton>
           <GlassButton variant="primary" size="sm" @click="openCreateModal">
             {{ t('knowledge.create') }}
@@ -50,9 +59,21 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'title'">
             <span class="kb-title-cell">{{ record.title }}</span>
+            <a-tag v-if="confidenceMap[record.id] !== undefined" color="purple" class="kb-conf-tag">
+              {{ Math.round(confidenceMap[record.id] * 1000) / 10 }}%
+            </a-tag>
           </template>
           <template v-if="column.key === 'category'">
             <a-tag color="blue">{{ record.category }}</a-tag>
+          </template>
+          <template v-if="column.key === 'visibility'">
+            <a-space :size="4">
+              <a-tag v-if="record.visibility === 'public'" color="green">{{ t('knowledge.visPublic') }}</a-tag>
+              <a-tag v-else-if="isSharedToMe(record)" color="cyan">{{ t('knowledge.visShared') }}</a-tag>
+              <a-tag v-else color="blue">{{ t('knowledge.visPrivate') }}</a-tag>
+              <a-tag v-if="record.submission?.status === 'pending'" color="orange">{{ t('knowledge.pendingReview') }}</a-tag>
+              <a-tag v-else-if="record.submission?.status === 'rejected'" color="red">{{ t('knowledge.visRejected') }}</a-tag>
+            </a-space>
           </template>
           <template v-if="column.key === 'content'">
             <span class="kb-preview">{{ truncate(record.content, 80) }}</span>
@@ -62,6 +83,22 @@
           </template>
           <template v-if="column.key === 'actions'">
             <a-space>
+              <GlassButton
+                v-if="canManage(record) && record.visibility === 'private'"
+                variant="ghost"
+                size="sm"
+                @click="openShareModal(record)"
+              >
+                {{ t('knowledge.share') }}
+              </GlassButton>
+              <GlassButton
+                v-if="canManage(record) && record.visibility === 'private' && record.submission?.status !== 'pending'"
+                variant="ghost"
+                size="sm"
+                @click="handleSubmitPublic(record)"
+              >
+                {{ t('knowledge.submitPublic') }}
+              </GlassButton>
               <GlassButton variant="ghost" size="sm" @click="editItem(record)">
                 {{ t('common.edit') }}
               </GlassButton>
@@ -75,6 +112,44 @@
     </GlassPanel>
     <GlassPanel v-else>
       <a-empty :description="t('common.noData')" />
+    </GlassPanel>
+
+    <!-- Share Modal -->
+    <a-modal
+      v-model:open="shareVisible"
+      :title="t('knowledge.shareTitle')"
+      :confirm-loading="sharing"
+      @ok="handleShare"
+      @cancel="shareVisible = false"
+    >
+      <p class="kb-share-target">{{ shareTarget?.title }}</p>
+      <a-input
+        v-model:value="shareUsernames"
+        :placeholder="t('knowledge.shareUsernamesPlaceholder')"
+      />
+    </a-modal>
+
+    <!-- Admin: Public Submissions Review -->
+    <GlassPanel v-if="isAdmin" class="kb-review">
+      <div class="kb-review-header">
+        <h3 class="kb-review-title">{{ t('knowledge.adminReview') }}</h3>
+      </div>
+      <a-empty v-if="!publicSubmissions.length" :description="t('knowledge.reviewEmpty')" />
+      <a-list v-else :data-source="publicSubmissions" row-key="knowledge_id">
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-list-item-meta :title="item.title" :description="truncate(item.content, 60)" />
+            <template #actions>
+              <a-button type="primary" size="small" @click="handleReview(item, true)">
+                {{ t('knowledge.reviewApprove') }}
+              </a-button>
+              <a-button danger size="small" @click="handleReview(item, false)">
+                {{ t('knowledge.reviewReject') }}
+              </a-button>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
     </GlassPanel>
 
     <!-- Create / Edit Modal -->
@@ -133,6 +208,78 @@
         {{ t('knowledge.importUrl') }}
       </a-button>
     </a-modal>
+
+    <!-- Remote KB Configs (R-7 A) -->
+    <a-modal
+      v-model:open="configVisible"
+      :title="t('knowledge.remoteConfig')"
+      :footer="null"
+      width="640px"
+    >
+      <div class="kb-config-create">
+        <a-input v-model:value="configForm.name" :placeholder="t('knowledge.configNamePlaceholder')" style="width: 180px" />
+        <a-select
+          v-model:value="configForm.source_type"
+          :options="configSourceOptions"
+          style="width: 140px"
+        />
+        <a-input-password
+          v-model:value="configForm.api_key"
+          :placeholder="t('knowledge.configApiKeyPlaceholder')"
+          style="width: 220px"
+        />
+        <GlassButton variant="primary" size="sm" :loading="configSaving" @click="handleCreateConfig">
+          {{ t('knowledge.configCreate') }}
+        </GlassButton>
+      </div>
+      <a-table
+        :data-source="kbConfigs"
+        :columns="configColumns"
+        :pagination="false"
+        row-key="id"
+        size="small"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'actions'">
+            <a-button type="link" size="small" @click="copyConfigId(record)">
+              {{ t('knowledge.configCopyId') }}
+            </a-button>
+            <a-button type="link" danger size="small" @click="handleDeleteConfig(record)">
+              {{ t('knowledge.configDelete') }}
+            </a-button>
+          </template>
+        </template>
+      </a-table>
+
+      <a-divider style="margin: 12px 0" />
+      <div class="kb-config-create">
+        <a-select
+          v-model:value="collectionForm.config_id"
+          :options="kbConfigs.map(c => ({ label: c.name, value: c.id }))"
+          :placeholder="t('knowledge.collectionConfigPh')"
+          style="width: 180px"
+        />
+        <a-input v-model:value="collectionForm.collection_name" :placeholder="t('knowledge.collectionNamePlaceholder')" style="width: 180px" />
+        <GlassButton variant="primary" size="sm" :loading="collectionSaving" @click="handleCreateCollection">
+          {{ t('knowledge.collectionCreate') }}
+        </GlassButton>
+      </div>
+      <a-table
+        :data-source="kbCollections"
+        :columns="collectionColumns"
+        :pagination="false"
+        row-key="id"
+        size="small"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'actions'">
+            <a-button type="link" danger size="small" @click="handleDeleteCollection(record)">
+              {{ t('knowledge.configDelete') }}
+            </a-button>
+          </template>
+        </template>
+      </a-table>
+    </a-modal>
   </div>
 </template>
 
@@ -147,20 +294,38 @@ import {
   createKnowledgeNode,
   updateKnowledgeNode,
   deleteKnowledgeNode,
+  hybridKnowledgeSearch,
+  shareKnowledgeNode,
+  submitKnowledgeToPublic,
+  listPublicSubmissions,
+  reviewKnowledgePublic,
+  listKbConfigs,
+  createKbConfig,
+  deleteKbConfig,
+  listKbCollections,
+  createKbCollection,
+  deleteKbCollection,
 } from '@/api/modules/knowledge'
+import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope } from '@/api/modules/knowledge'
 import { request } from '@/api'
+import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 
 interface KnowledgeItem {
   id: string
+  knowledge_id?: string
   title: string
   category: string
   content: string
   tags?: string[]
   created_at?: string
   updated_at?: string
+  visibility?: 'public' | 'private'
+  owner_user_id?: string
+  shared_with?: string[]
+  submission?: { status?: string } | null
 }
 
 const { t } = useI18n()
@@ -176,10 +341,47 @@ const knowledgeItems = ref<KnowledgeItem[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
 const semanticSearch = ref(false)
+const activeScope = ref<KnowledgeScope>('all')
 const activeCategory = ref<string | undefined>(undefined)
 const totalItems = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
+
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
+const currentUserId = computed(() => String(authStore.user?.id ?? ''))
+
+// 共享 / 提交 / 审批
+const shareVisible = ref(false)
+const sharing = ref(false)
+const shareTarget = ref<KnowledgeItem | null>(null)
+const shareUsernames = ref('')
+const publicSubmissions = ref<KnowledgeItem[]>([])
+// 语义检索的可信度映射（id → rrf 归一化分）
+const confidenceMap = ref<Record<string, number>>({})
+
+function normalizeItem(raw: KnowledgeNode): KnowledgeItem {
+  return {
+    ...raw,
+    id: raw.id || raw.knowledge_id || '',
+  } as KnowledgeItem
+}
+
+function isSharedToMe(record: KnowledgeItem): boolean {
+  return (
+    record.visibility === 'private' &&
+    (record.shared_with ?? []).includes(currentUserId.value)
+  )
+}
+
+function canManage(record: KnowledgeItem): boolean {
+  return isAdmin.value || record.owner_user_id === currentUserId.value
+}
+
+function onScopeChange() {
+  currentPage.value = 1
+  fetchKnowledge()
+}
 
 const categoryOptions = ref<{ label: string; value: string }[]>([])
 
@@ -196,12 +398,47 @@ const importFiles = ref<UploadFile[]>([])
 const importUrlValue = ref('')
 const importingUrl = ref(false)
 
+// R-7 A: 远程知识库配置管理
+const configVisible = ref(false)
+const configSaving = ref(false)
+const kbConfigs = ref<KbConfig[]>([])
+const configForm = ref<{ name: string; source_type: string; api_key: string }>({
+  name: '',
+  source_type: 'iflow',
+  api_key: '',
+})
+const configSourceOptions = [
+  { label: 'iflow', value: 'iflow' },
+  { label: 'feishu', value: 'feishu' },
+  { label: 'ima', value: 'ima' },
+  { label: 'custom', value: 'custom' },
+]
+const configColumns = [
+  { title: t('knowledge.configName'), key: 'name', dataIndex: 'name' },
+  { title: t('knowledge.configSource'), key: 'source_type', dataIndex: 'source_type' },
+  { title: t('knowledge.configHasKey'), key: 'has_api_key', dataIndex: 'has_api_key', width: 90 },
+  { title: t('knowledge.configId'), key: 'id', dataIndex: 'id', ellipsis: true },
+  { title: '', key: 'actions', width: 130 },
+]
+const kbCollections = ref<KbCollection[]>([])
+const collectionSaving = ref(false)
+const collectionForm = ref<{ config_id: string; collection_name: string }>({
+  config_id: '',
+  collection_name: '',
+})
+const collectionColumns = [
+  { title: t('knowledge.configName'), key: 'collection_name', dataIndex: 'collection_name' },
+  { title: t('knowledge.configSource'), key: 'vector_store', dataIndex: 'vector_store' },
+  { title: '', key: 'actions', width: 80 },
+]
+
 const columns = computed(() => [
   { title: t('knowledge.colTitle'), key: 'title', dataIndex: 'title', ellipsis: true },
   { title: t('knowledge.colCategory'), key: 'category', dataIndex: 'category', width: 140 },
+  { title: t('knowledge.colVisibility'), key: 'visibility', width: 170 },
   { title: t('knowledge.colContent'), key: 'content', dataIndex: 'content', ellipsis: true },
   { title: t('knowledge.colCreated'), key: 'created_at', dataIndex: 'created_at', width: 160 },
-  { title: t('knowledge.colActions'), key: 'actions', width: 180 },
+  { title: t('knowledge.colActions'), key: 'actions', width: 260 },
 ])
 
 const pagination = computed(() => ({
@@ -238,9 +475,11 @@ async function handleSearch() {
 
 async function fetchKnowledge() {
   loading.value = true
+  confidenceMap.value = {}
   try {
     const params: Record<string, any> = {
       agent_id: agentId.value,
+      scope: activeScope.value,
       page: currentPage.value,
       page_size: pageSize.value,
     }
@@ -249,7 +488,8 @@ async function fetchKnowledge() {
 
     const res: any = await getKnowledgeNodes(params)
     const data = res?.data ?? res
-    knowledgeItems.value = Array.isArray(data) ? data : data?.items ?? []
+    const rawItems: KnowledgeNode[] = Array.isArray(data) ? data : data?.items ?? []
+    knowledgeItems.value = rawItems.map(normalizeItem)
     totalItems.value = data?.total ?? knowledgeItems.value.length
 
     // Extract categories from results
@@ -267,14 +507,23 @@ async function fetchKnowledge() {
 async function semanticSearchFn() {
   loading.value = true
   try {
-    const res: any = await searchKnowledge(searchQuery.value, {
-      agent_id: agentId.value,
-      page: currentPage.value,
-      page_size: pageSize.value,
-    })
+    // 批次 2：语义搜索开关首次真正生效——走 hybrid（BM25+向量+RRF）
+    const res: any = await hybridKnowledgeSearch(searchQuery.value, { top_k: pageSize.value })
     const data = res?.data ?? res
-    knowledgeItems.value = Array.isArray(data) ? data : data?.items ?? data?.results ?? []
-    totalItems.value = data?.total ?? knowledgeItems.value.length
+    const results: any[] = data?.results ?? []
+    knowledgeItems.value = results.map((r) =>
+      normalizeItem({
+        ...(r as any),
+        id: r.id,
+        title: r.title || truncate(r.content, 40),
+        category: 'semantic',
+      }),
+    )
+    confidenceMap.value = Object.fromEntries(
+      results.map((r) => [r.id, r.confidence_breakdown?.rrf ?? r.rrf_score ?? 0]),
+    )
+    totalItems.value = results.length
+    if (!results.length) message.info(t('knowledge.searchError'))
   } catch {
     message.error(t('knowledge.searchError'))
   } finally {
@@ -286,6 +535,81 @@ function openCreateModal() {
   editingItem.value = null
   form.value = { title: '', category: '', content: '', tags: [] }
   modalVisible.value = true
+}
+
+// ── 共享 / 提交公共库 / 管理员审批 ──────────────────────────
+
+function openShareModal(record: KnowledgeItem) {
+  shareTarget.value = record
+  shareUsernames.value = ''
+  shareVisible.value = true
+}
+
+async function handleShare() {
+  if (!shareTarget.value) return
+  const names = shareUsernames.value
+    .split(/[,，;；\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (!names.length) {
+    message.error(t('knowledge.shareUsernamesPlaceholder'))
+    return
+  }
+  sharing.value = true
+  try {
+    await shareKnowledgeNode(shareTarget.value.id, names)
+    message.success(t('knowledge.shareSuccess'))
+    shareVisible.value = false
+    fetchKnowledge()
+  } catch (err: any) {
+    const detail = err?.response?.data?.detail
+    message.error(typeof detail === 'string' ? detail : t('knowledge.shareError'))
+  } finally {
+    sharing.value = false
+  }
+}
+
+function handleSubmitPublic(record: KnowledgeItem) {
+  Modal.confirm({
+    title: t('knowledge.submitPublic'),
+    content: t('knowledge.submitConfirm'),
+    okText: t('common.confirm'),
+    cancelText: t('common.cancel'),
+    onOk: async () => {
+      try {
+        await submitKnowledgeToPublic(record.id)
+        message.success(t('knowledge.submitSuccess'))
+        fetchKnowledge()
+      } catch (err: any) {
+        const detail = err?.response?.data?.detail
+        message.error(typeof detail === 'string' ? detail : t('knowledge.submitError'))
+      }
+    },
+  })
+}
+
+async function fetchSubmissions() {
+  if (!isAdmin.value) return
+  try {
+    const res: any = await listPublicSubmissions()
+    const data = res?.data ?? res
+    const rawItems: any[] = Array.isArray(data) ? data : data?.items ?? []
+    publicSubmissions.value = rawItems.map(normalizeItem)
+  } catch {
+    message.error(t('knowledge.loadSubmissionsError'))
+  }
+}
+
+async function handleReview(item: KnowledgeItem, approve: boolean) {
+  try {
+    await reviewKnowledgePublic(item.id, approve)
+    message.success(t('knowledge.reviewSuccess'))
+    await fetchSubmissions()
+    fetchKnowledge()
+  } catch (err: any) {
+    const detail = err?.response?.data?.detail
+    message.error(typeof detail === 'string' ? detail : t('knowledge.reviewError'))
+  }
 }
 
 function editItem(item: KnowledgeItem) {
@@ -396,7 +720,98 @@ async function handleImportUrl() {
   }
 }
 
-onMounted(fetchKnowledge)
+// R-7 A: 远程配置管理
+async function fetchKbConfigs() {
+  try {
+    const res: any = await listKbConfigs()
+    const data = res?.data ?? {}
+    kbConfigs.value = data?.configs ?? []
+  } catch {
+    message.error(t('knowledge.importError'))
+  }
+}
+
+async function handleCreateConfig() {
+  if (!configForm.value.name || !configForm.value.api_key) {
+    message.error(t('knowledge.configFormIncomplete'))
+    return
+  }
+  configSaving.value = true
+  try {
+    await createKbConfig({ ...configForm.value })
+    message.success(t('knowledge.importSuccess'))
+    configForm.value = { name: '', source_type: 'iflow', api_key: '' }
+    await fetchKbConfigs()
+  } catch {
+    message.error(t('knowledge.importError'))
+  } finally {
+    configSaving.value = false
+  }
+}
+
+async function handleDeleteConfig(record: KbConfig) {
+  try {
+    await deleteKbConfig(record.id)
+    message.success(t('knowledge.importSuccess'))
+    await fetchKbConfigs()
+  } catch {
+    message.error(t('knowledge.importError'))
+  }
+}
+
+function copyConfigId(record: KbConfig) {
+  try {
+    navigator.clipboard.writeText(record.id)
+    message.success(t('knowledge.configIdCopied'))
+  } catch {
+    message.error(t('knowledge.importError'))
+  }
+}
+
+async function fetchKbCollections() {
+  try {
+    const res: any = await listKbCollections()
+    const data = res?.data ?? {}
+    kbCollections.value = data?.collections ?? []
+  } catch {
+    message.error(t('knowledge.importError'))
+  }
+}
+
+async function handleCreateCollection() {
+  if (!collectionForm.value.config_id || !collectionForm.value.collection_name) {
+    message.error(t('knowledge.configFormIncomplete'))
+    return
+  }
+  collectionSaving.value = true
+  try {
+    await createKbCollection({ ...collectionForm.value, vector_store: 'qdrant' })
+    message.success(t('knowledge.importSuccess'))
+    collectionForm.value = { config_id: '', collection_name: '' }
+    await fetchKbCollections()
+  } catch {
+    message.error(t('knowledge.importError'))
+  } finally {
+    collectionSaving.value = false
+  }
+}
+
+async function handleDeleteCollection(record: KbCollection) {
+  try {
+    await deleteKbCollection(record.id)
+    message.success(t('knowledge.importSuccess'))
+    await fetchKbCollections()
+  } catch {
+    message.error(t('knowledge.importError'))
+  }
+}
+
+onMounted(() => {
+  fetchKnowledge()
+  fetchKbConfigs()
+  fetchKbCollections()
+  fetchSubmissions()
+})
 </script>
 
 <style scoped>
@@ -440,8 +855,29 @@ onMounted(fetchKnowledge)
   color: var(--nr-text-primary);
 }
 
+.kb-conf-tag {
+  margin-left: 6px;
+}
+
 .kb-preview {
   font-size: 13px;
   color: var(--nr-text-secondary);
+}
+
+.kb-share-target {
+  margin: 0 0 12px;
+  font-weight: 500;
+  color: var(--nr-text-primary);
+}
+
+.kb-review-header {
+  margin-bottom: 12px;
+}
+
+.kb-review-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
 }
 </style>

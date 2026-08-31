@@ -1,5 +1,10 @@
 <template>
   <div class="nr-model-page">
+    <!-- 非管理员:个人配置范围提示 -->
+    <div v-if="!isAdmin" class="nr-scope-hint">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      {{ t('model.personalScopeHint') }}
+    </div>
     <!-- ===================== Header: Default LLM ===================== -->
     <GlassCard variant="default" padding="16px 20px">
       <div class="nr-header-row">
@@ -281,6 +286,62 @@
               </GlassButton>
             </div>
 
+            <!-- OpenRouter 模型筛选 -->
+            <div v-if="isOpenRouterTarget" class="nr-mm-filter">
+              <button class="nr-mm-filter-toggle" @click="filterExpanded = !filterExpanded">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 6 7 7v7l4-2v-5l7-7V4H3z"/></svg>
+                {{ t('model.filterModels') }}
+              </button>
+              <div v-if="filterExpanded" class="nr-mm-filter-panel">
+                <div class="nr-mm-filter-row">
+                  <span class="nr-mm-filter-label">{{ t('model.filterByProvider') }}</span>
+                  <div class="nr-mm-series-list">
+                    <button v-for="s in providerSeries" :key="s" class="nr-mm-series-pill" :class="{ active: selectedSeries.includes(s) }" @click="toggleSeries(s)">{{ s }}</button>
+                    <span v-if="providerSeries.length === 0" class="nr-mm-filter-hint">—</span>
+                  </div>
+                </div>
+                <div class="nr-mm-filter-row">
+                  <span class="nr-mm-filter-label">{{ t('model.filterByModality') }}</span>
+                  <div class="nr-mm-series-list">
+                    <button v-for="opt in MODALITY_OPTIONS" :key="opt.key" class="nr-mm-series-pill" :class="{ active: selectedModalities.includes(opt.key) }" @click="toggleModality(opt.key)">{{ t(`model.${opt.label}`) }}</button>
+                  </div>
+                </div>
+                <div class="nr-mm-filter-row">
+                  <label class="nr-mm-filter-free">
+                    <input type="checkbox" v-model="filterFreeOnly" />
+                    <span>{{ t('model.filterFreeOnly') }}</span>
+                  </label>
+                </div>
+                <div class="nr-mm-filter-actions">
+                  <GlassButton variant="primary" size="sm" :loading="filteringModels" @click="applyProviderFilter">
+                    {{ t('model.applyFilter') }}
+                  </GlassButton>
+                </div>
+                <div v-if="filterApplied" class="nr-mm-filter-results">
+                  <div class="nr-mm-filter-results-title">{{ t('model.filterResults') }} ({{ filteredResultModels.length }})</div>
+                  <div v-if="filteredResultModels.length === 0" class="nr-mm-empty">{{ t('model.noFilteredModels') }}</div>
+                  <div v-for="m in filteredResultModels" :key="m.id" class="nr-mm-item">
+                    <div class="nr-mm-item-info">
+                      <div class="nr-mm-item-name-row">
+                        <span class="nr-mm-item-name">{{ m.name }}</span>
+                      </div>
+                      <span class="nr-mm-item-id">{{ m.id }}</span>
+                      <div v-if="m.capabilities && m.capabilities.length > 0" class="nr-mm-item-caps">
+                        <span v-for="cap in m.capabilities" :key="cap" class="nr-mm-cap">{{ cap }}</span>
+                      </div>
+                    </div>
+                    <div class="nr-mm-item-tags">
+                      <span v-if="m.is_free" class="nr-mm-tag nr-mm-tag-free">{{ t('model.freeModels') }}</span>
+                      <span v-if="m.pricing && m.pricing.input != null" class="nr-mm-tag">${{ Number(m.pricing.input) * 1_000_000 }}</span>
+                    </div>
+                    <div class="nr-mm-item-actions">
+                      <button class="nr-mm-btn-submit" @click="addFilteredModel(m)">{{ t('model.addFiltered') }}</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Model list -->
             <div class="nr-mm-list">
               <div v-if="filteredModels.length === 0" class="nr-mm-empty">{{ t('model.noModels') }}</div>
@@ -350,15 +411,19 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
-import { listProviders, getActiveModel, activateModel as apiActivateModel, updateProvider, createProvider as apiCreateProvider, deleteProvider as apiDeleteProvider, discoverModels as apiDiscoverModels, testConnection } from '@/api/modules/providers'
+import { listProviders, getActiveModel, activateModel as apiActivateModel, updateProvider, createProvider as apiCreateProvider, deleteProvider as apiDeleteProvider, discoverModels as apiDiscoverModels, filterProviderModels, getProviderSeries, testConnection } from '@/api/modules/providers'
+import type { FilteredProviderModel } from '@/api/modules/providers'
 import { listModels, deleteModel as apiDeleteModel } from '@/api/modules/models'
 import { getSettings, updateSettings } from '@/api/modules/settings'
+import { useAuthStore } from '@/stores/auth'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 import type { Provider, ModelItem, DefaultLLMConfig, GenerationParams } from '@/types/model'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -480,6 +545,21 @@ const configForm = reactive({
 // Model management modal
 const showModelManagement = ref(false)
 const modelTarget = ref<Provider | null>(null)
+// 模型筛选状态(OpenRouter)
+const filterExpanded = ref(false)
+const providerSeries = ref<string[]>([])
+const selectedSeries = ref<string[]>([])
+const selectedModalities = ref<string[]>([])
+const filterFreeOnly = ref(false)
+const filteringModels = ref(false)
+const filterApplied = ref(false)
+const filteredResultModels = ref<FilteredProviderModel[]>([])
+const MODALITY_OPTIONS = [
+  { key: 'image', label: 'modalityImage' },
+  { key: 'audio', label: 'modalityAudio' },
+  { key: 'video', label: 'modalityVideo' },
+] as const
+const isOpenRouterTarget = computed(() => modelTarget.value?.id === 'openrouter')
 const newModelId = ref('')
 const newModelName = ref('')
 const addModelExpanded = ref(false)
@@ -826,7 +906,8 @@ async function discoverModels(providerId: string) {
     const data: any = await apiDiscoverModels(providerId) as any
     const discovered: any[] = data.models ?? []
     if (discovered.length === 0) {
-      message.info(t('model.noNewModels'))
+      // 后端 message(如"请先配置 API Key")优先;无可行动脚本时回到通用文案
+      message.info(data.message || t('model.noNewModels'))
       return
     }
     const provider = providers.value.find((p) => p.id === providerId)
@@ -949,7 +1030,108 @@ function openModelManagement(p: Provider) {
   newModelId.value = ''
   newModelName.value = ''
   addModelExpanded.value = false
+  // 重置筛选状态;OpenRouter 展开时预载系列列表
+  filterExpanded.value = false
+  providerSeries.value = []
+  selectedSeries.value = []
+  selectedModalities.value = []
+  filterFreeOnly.value = false
+  filterApplied.value = false
+  filteredResultModels.value = []
   showModelManagement.value = true
+  if (p.id === 'openrouter') {
+    void loadProviderSeries(p)
+  }
+}
+
+function toggleSeries(series: string) {
+  selectedSeries.value = selectedSeries.value.includes(series)
+    ? selectedSeries.value.filter((s) => s !== series)
+    : [...selectedSeries.value, series]
+}
+
+function toggleModality(modality: string) {
+  selectedModalities.value = selectedModalities.value.includes(modality)
+    ? selectedModalities.value.filter((m) => m !== modality)
+    : [...selectedModalities.value, modality]
+}
+
+async function loadProviderSeries(p: Provider) {
+  try {
+    const res: any = await getProviderSeries(p.id)
+    providerSeries.value = res?.data?.series ?? res?.series ?? []
+  } catch {
+    providerSeries.value = []
+  }
+}
+
+async function applyProviderFilter() {
+  if (!modelTarget.value) return
+  filteringModels.value = true
+  try {
+    const body: Record<string, unknown> = {}
+    if (selectedSeries.value.length > 0) {
+      body.providers = selectedSeries.value
+    }
+    if (selectedModalities.value.length > 0) {
+      body.input_modalities = selectedModalities.value
+    }
+    if (filterFreeOnly.value) {
+      body.is_free = true
+    }
+    const res: any = await filterProviderModels(modelTarget.value.id, body as any)
+    filteredResultModels.value = res?.data?.models ?? res?.models ?? []
+    filterApplied.value = true
+    if (filteredResultModels.value.length === 0 && res?.data?.message) {
+      message.info(res.data.message)
+    }
+  } catch {
+    filteredResultModels.value = []
+    filterApplied.value = true
+    message.error(t('model.discoverFailed'))
+  } finally {
+    filteringModels.value = false
+  }
+}
+
+async function addFilteredModel(m: FilteredProviderModel) {
+  if (!modelTarget.value) return
+  try {
+    await ensureProvider(modelTarget.value)
+    await updateProvider(modelTarget.value.id, {
+      config: { add_model: m.id, add_model_name: m.name },
+    })
+    message.success(t('common.success'))
+    filteredResultModels.value = filteredResultModels.value.filter((x) => x.id !== m.id)
+    const mapped = mapModel(
+      {
+        id: m.id,
+        name: m.name,
+        provider_id: modelTarget.value.id,
+        capabilities: m.capabilities,
+        is_free: m.is_free,
+        pricing: m.pricing,
+        context_window: m.context_window,
+        max_tokens: m.max_tokens,
+        tags: ['user-added'],
+      },
+      modelTarget.value.id,
+    )
+    const exists = allModels.value.some(
+      (x) => x.id === m.id && x.provider_id === modelTarget.value!.id,
+    )
+    if (!exists) {
+      allModels.value.push(mapped)
+    }
+    const live = providers.value.find((p) => p.id === modelTarget.value!.id)
+    if (live) {
+      live.models = live.models.filter((mm) => mm.id !== m.id)
+      live.models.push(mapped)
+      live.model_count = live.models.length
+    }
+  } catch {
+    message.error(t('common.error'))
+  }
 }
 
 async function deleteModel(m: ModelItem) {
@@ -1743,7 +1925,135 @@ watch(() => defaultConfig.provider_id, () => {
   color: var(--nr-text-muted); font-size: 18px; line-height: 1;
   padding: 0 2px; transition: color 0.2s;
 }
+/* 个人配置范围提示(非管理员) */
+.nr-scope-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px 4px;
+  font-size: 12px;
+  color: var(--nr-text-secondary, #8a8a92);
+}
+
 .nr-mm-search-clear:hover { color: var(--nr-text-primary); }
+
+/* 模型筛选面板(OpenRouter) */
+.nr-mm-filter {
+  padding: 0 12px 4px;
+}
+
+.nr-mm-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--nr-text-secondary, #8a8a92);
+  background: transparent;
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.nr-mm-filter-toggle:hover {
+  color: var(--nr-accent, #5b8def);
+  border-color: var(--nr-accent, #5b8def);
+}
+
+.nr-mm-filter-panel {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: rgba(127, 127, 127, 0.06);
+  border: 1px solid rgba(127, 127, 127, 0.15);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nr-mm-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nr-mm-filter-label {
+  font-size: 12px;
+  color: var(--nr-text-secondary, #8a8a92);
+  white-space: nowrap;
+  min-width: 88px;
+}
+
+.nr-mm-series-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.nr-mm-series-pill {
+  padding: 2px 9px;
+  font-size: 11px;
+  color: var(--nr-text-primary, #d6d6de);
+  background: transparent;
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.nr-mm-series-pill.active {
+  color: #fff;
+  background: var(--nr-accent, #5b8def);
+  border-color: var(--nr-accent, #5b8def);
+}
+
+.nr-mm-filter-hint {
+  font-size: 11px;
+  color: rgba(127, 127, 127, 0.7);
+}
+
+.nr-mm-filter-free {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--nr-text-primary, #d6d6de);
+  cursor: pointer;
+}
+
+.nr-mm-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.nr-mm-filter-results {
+  border-top: 1px solid rgba(127, 127, 127, 0.15);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nr-mm-filter-results-title {
+  font-size: 12px;
+  color: var(--nr-text-secondary, #8a8a92);
+}
+
+.nr-mm-btn-submit {
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #fff;
+  background: var(--nr-accent, #5b8def);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.nr-mm-btn-submit:hover {
+  opacity: 0.88;
+}
 
 .nr-mm-list {
   display: flex;

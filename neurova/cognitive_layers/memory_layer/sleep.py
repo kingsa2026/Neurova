@@ -9,7 +9,10 @@
 """
 
 from neurova.core.logger import get_logger
+from neurova.core.sleep_settings_store import SleepSettingsStore
+import json
 import math
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -141,6 +144,7 @@ class SleepConsolidation:
         decay_rate: float = 0.1,
         memory_manager=None,
         storage=None,
+        settings_store: Optional["SleepSettingsStore"] = None,
     ):
         """初始化睡眠整合引擎
 
@@ -150,6 +154,8 @@ class SleepConsolidation:
             decay_rate: 睡眠期间的温度衰减率
             memory_manager: 记忆管理器实例（可选）
             storage: 存储实例（可选）
+            settings_store: 设置持久化存储（可选）。提供时 update_settings
+                落盘、初始化时加载 —— 此前设置仅存内存，agent 重启即丢
         """
         self.similarity_threshold = similarity_threshold
         self.archive_threshold = archive_threshold
@@ -159,6 +165,10 @@ class SleepConsolidation:
         self.memory_manager = memory_manager
         self.storage = storage
         self._state: Dict[str, Any] = {}
+        self._settings_lock = threading.RLock()
+        # 设置持久化: 由 SleepSettingsStore 承担（agent_id 白名单净化 +
+        # 固定目录, 文件 IO 不在本模块）—— 此前设置仅存内存, agent 重启即丢
+        self._settings_store = settings_store
         # RSI 反馈统计
         self._consolidation_count: int = 0
         self._total_memories_processed: int = 0
@@ -175,6 +185,8 @@ class SleepConsolidation:
         self._sleep_cycles: int = 0
         self._dream_logs: List[Dict[str, Any]] = []
         self._merge_history: List[Dict[str, Any]] = []
+        # 冲突解决审计记录（多成员簇合并时产生, /conflicts 端点数据源）
+        self._conflict_resolutions: List[Dict[str, Any]] = []
         self._settings: Dict[str, Any] = {
             "auto_sleep_enabled": True,
             "sleep_threshold_minutes": 30,
@@ -182,7 +194,20 @@ class SleepConsolidation:
             "dream_replay_enabled": True,
             "memory_consolidation_enabled": True,
             "conflict_resolution_enabled": True,
+            # ── 阶段推进参数（默认值 = 原 idle_tracker 硬编码, 行为零漂移）──
+            "sleep_mode": "temperature",  # temperature | time | either
+            "temp_threshold_light_sleep": 30.0,
+            "temp_threshold_deep_sleep": 25.0,
+            "temp_threshold_rem": 20.0,
+            "temp_threshold_hibernate": 15.0,
+            "idle_threshold_light_sleep": 30,  # 分钟
+            "idle_threshold_deep_sleep": 60,
+            "idle_threshold_rem": 90,
+            "idle_threshold_hibernate": 120,
+            "monitor_interval_seconds": 60,
         }
+        if self._settings_store is not None:
+            self._load_settings()
 
         logger.debug(
             f"SleepConsolidation 初始化: " f"similarity={similarity_threshold}, " f"archive={archive_threshold}"
@@ -292,6 +317,34 @@ class SleepConsolidation:
             avg_importance=avg_importance,
             combined_categories=all_categories,
         )
+
+        # 冲突解决审计: 多成员簇且内容有差异时记录"保留了什么、合并了什么"。
+        # 相同内容的重复记忆是普通去重, 不算冲突。conflict_resolution_enabled
+        # 关闭时不记录。此前该设置键无消费方, /conflicts 端点恒为空。
+        contents = [m.content for m in cluster]
+        if (
+            self._settings.get("conflict_resolution_enabled", True)
+            and len(set(contents)) > 1
+        ):
+            kept = longest.content
+            dropped = [c for c in contents if c != kept]
+            self._conflict_resolutions.insert(
+                0,
+                {
+                    "id": f"cr_{int(time.time() * 1000)}_{cluster[0].id}",
+                    "agent_id": cluster[0].agent_id,
+                    "field": "content",
+                    "local_value": kept[:200],
+                    "remote_value": " | ".join(c[:200] for c in dropped),
+                    "resolved": True,
+                    "resolution": "keep_longest",
+                    "resolution_strategy": "keep_longest",
+                    "conflict_type": "memory_merge",
+                    "source_memories": source_ids,
+                    "success": True,
+                    "created_at": datetime.now().isoformat(),
+                },
+            )
 
         logger.debug("合并簇: %s 条记忆 → %s", len(cluster), merged_id)
         return result
@@ -474,17 +527,22 @@ class SleepConsolidation:
         """累计睡眠周期数"""
         return self._sleep_cycles
 
-    def start_sleep(self, duration_minutes: int = 60) -> Dict[str, Any]:
+    def start_sleep(self, duration_minutes: Optional[int] = None) -> Dict[str, Any]:
         """主动进入睡眠：立即执行一轮真实的记忆整理并写回
 
         Args:
-            duration_minutes: 名义睡眠时长（分钟），整理本身同步完成
+            duration_minutes: 名义睡眠时长（分钟），整理本身同步完成；
+                不传时回退设置 sleep_duration_minutes（设置通路修复：此前该
+                设置键无消费方）
 
         Returns:
             整理统计 dict
         """
         if self._is_sleeping:
             return {"message": "already_sleeping", "sleep_cycles": self._sleep_cycles}
+
+        if duration_minutes is None:
+            duration_minutes = int(self._settings.get("sleep_duration_minutes", 60))
 
         now = time.time()
         self._is_sleeping = True
@@ -494,6 +552,7 @@ class SleepConsolidation:
         self._sleep_cycles += 1
 
         result: Dict[str, Any] = {
+            "duration_minutes": duration_minutes,
             "total_processed": 0,
             "merged_count": 0,
             "archived_count": 0,
@@ -522,22 +581,25 @@ class SleepConsolidation:
 
                     agent_id = records[0].agent_id if records else "default"
                     involved = [m.id for m in records]
-                    self._dream_logs.insert(
-                        0,
-                        {
-                            "dream_id": f"dream_{int(now * 1000)}_{self._sleep_cycles}",
-                            "agent_id": agent_id,
-                            "timestamp": now,
-                            "dream_type": "replay",
-                            "content": (
-                                f"整理 {cycle['total_processed']} 条记忆，"
-                                f"合并 {cycle['merged_count']} 组，归档 {cycle['archived_count']} 条"
-                            ),
-                            "memories_involved": involved,
-                            "insights_generated": cycle["merged_count"],
-                            "duration": time.time() - now,
-                        },
-                    )
+                    # 梦境回放开关: dream_replay_enabled=False 时不记录梦境,
+                    # 但整合与合并历史照常（此前该设置键无消费方）
+                    if self._settings.get("dream_replay_enabled", True):
+                        self._dream_logs.insert(
+                            0,
+                            {
+                                "dream_id": f"dream_{int(now * 1000)}_{self._sleep_cycles}",
+                                "agent_id": agent_id,
+                                "timestamp": now,
+                                "dream_type": "replay",
+                                "content": (
+                                    f"整理 {cycle['total_processed']} 条记忆，"
+                                    f"合并 {cycle['merged_count']} 组，归档 {cycle['archived_count']} 条"
+                                ),
+                                "memories_involved": involved,
+                                "insights_generated": cycle["merged_count"],
+                                "duration": time.time() - now,
+                            },
+                        )
                     for merge_result in cycle["merge_results"]:
                         if len(merge_result.source_ids) < 2:
                             continue  # 单例簇不是真实合并
@@ -586,17 +648,46 @@ class SleepConsolidation:
         return self._merge_history[offset : offset + limit]
 
     def get_conflict_resolutions(self, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
-        """获取冲突解决历史（当前整理流程不产生冲突记录）"""
-        return []
+        """获取冲突解决审计记录，最新在前（此前恒返回空列表）"""
+        return self._conflict_resolutions[offset : offset + limit]
+
+    def resolve_conflict(self, resolution_id: str, resolution: str) -> Optional[Dict[str, Any]]:
+        """更新一条冲突记录的解决方式（前端 /conflicts/{id}/resolve 的后端）
+
+        Returns:
+            更新后的记录 dict；未知 id 返回 None
+        """
+        for rec in self._conflict_resolutions:
+            if rec.get("id") == resolution_id:
+                rec["resolution"] = resolution
+                rec["resolution_strategy"] = resolution
+                rec["resolved"] = True
+                return rec
+        return None
 
     def get_settings(self) -> Dict[str, Any]:
         """获取睡眠设置"""
-        return dict(self._settings)
+        with self._settings_lock:
+            return dict(self._settings)
 
     def update_settings(self, updates: Dict[str, Any]) -> None:
-        """更新睡眠设置（未知键忽略）"""
+        """更新睡眠设置（未知键忽略），提供 settings_store 时持久化"""
         if not isinstance(updates, dict):
             return
-        for key, value in updates.items():
-            if key in self._settings:
-                self._settings[key] = value
+        with self._settings_lock:
+            for key, value in updates.items():
+                if key in self._settings:
+                    self._settings[key] = value
+            if self._settings_store is not None:
+                self._settings_store.save(dict(self._settings))
+
+    def _load_settings(self) -> None:
+        """从持久化存储加载设置（未知键忽略, 缺失/损坏降级为默认）"""
+        if self._settings_store is None:
+            return
+        data = self._settings_store.load()
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if key in self._settings:
+                    self._settings[key] = value
+        logger.debug("睡眠设置已从持久化存储加载")

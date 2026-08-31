@@ -1,5 +1,5 @@
 """
-Computer Use API 端点 v2.0.0 - 浏览器自动化增强版
+Computer Use API 端点 v1.0.0-beta1 - 浏览器自动化增强版
 
 隔离层级: 全局共享 + L1/L2 防火墙
 """
@@ -7,6 +7,7 @@ Computer Use API 端点 v2.0.0 - 浏览器自动化增强版
 import asyncio
 from neurova.core.logger import get_logger
 import typing
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, TypeAdapter
@@ -441,9 +442,33 @@ async def get_status():
 # ── Browser endpoints ──────────────────────────────────
 
 
+def _with_browser_identity(current_user: typing.Dict[str, typing.Any]) -> str:
+    """三层隔离:从 Depends(get_current_user) 取 userId,推送到 ContextVar + supervisor。
+    让 BrowserManager 单例能按 user 池化 camofox 后端。
+    """
+    user_id = (current_user or {}).get("user_id") or "default"
+    try:
+        from neurova.core.identity_context import set_request_user_id
+
+        set_request_user_id(user_id)
+    except ImportError:
+        pass
+    try:
+        from neurova.computer_use.camofox_supervisor import get_camofox_supervisor
+
+        get_camofox_supervisor().track_user_id(user_id)
+    except Exception:
+        pass
+    return user_id
+
+
 @router.post("/browser/navigate")
-async def browser_navigate(body: BrowserNavigateRequest):
+async def browser_navigate(
+    body: BrowserNavigateRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """浏览器导航（真实实现：BrowserManager 多后端）"""
+    _with_browser_identity(current_user)
     result = await _get_manager().browser_navigate(body.url)
     normalized = _normalize_browser_result(result)
     if not normalized.get("success"):
@@ -455,8 +480,12 @@ async def browser_navigate(body: BrowserNavigateRequest):
 
 
 @router.post("/browser/screenshot")
-async def browser_screenshot(body: BrowserScreenshotRequest):
+async def browser_screenshot(
+    body: BrowserScreenshotRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """浏览器截图（真实实现）"""
+    _with_browser_identity(current_user)
     _log_action("browser_screenshot", {"full_page": body.full_page})
     raw = await _get_manager().browser_screenshot()
     shot = getattr(raw, "screenshot", None)  # BrowserResult 携带 base64
@@ -470,8 +499,12 @@ async def browser_screenshot(body: BrowserScreenshotRequest):
 
 
 @router.post("/browser/click")
-async def browser_click(body: BrowserClickRequest):
+async def browser_click(
+    body: BrowserClickRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """浏览器点击（selector 或可见文本）"""
+    _with_browser_identity(current_user)
     target = body.selector or (f"text={body.text}" if body.text else "")
     if not target:
         raise HTTPException(status_code=422, detail="缺少 selector 或 text 参数")
@@ -482,8 +515,12 @@ async def browser_click(body: BrowserClickRequest):
 
 
 @router.post("/browser/type")
-async def browser_type(body: BrowserTypeRequest):
+async def browser_type(
+    body: BrowserTypeRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """浏览器输入（真实实现）"""
+    _with_browser_identity(current_user)
     raw = await _get_manager().browser_type(body.selector, body.text)
     normalized = _normalize_browser_result(raw)
     _log_action("browser_type", {"selector": body.selector})
@@ -491,8 +528,12 @@ async def browser_type(body: BrowserTypeRequest):
 
 
 @router.post("/browser/extract-text")
-async def browser_extract_text(body: BrowserExtractTextRequest):
+async def browser_extract_text(
+    body: BrowserExtractTextRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """浏览器提取文本（真实实现）"""
+    _with_browser_identity(current_user)
     raw = await _get_manager().browser_extract_text()
     normalized = _normalize_browser_result(raw)
     data = normalized.get("data")
@@ -504,21 +545,33 @@ async def browser_extract_text(body: BrowserExtractTextRequest):
 
 
 @router.post("/browser/extract")
-async def browser_extract_alias(body: BrowserExtractTextRequest):
+async def browser_extract_alias(
+    body: BrowserExtractTextRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """浏览器提取内容（/browser/extract-text 的别名，兼容前端 extractPage 调用）"""
-    return await browser_extract_text(body)
+    _with_browser_identity(current_user)
+    return await browser_extract_text(body, current_user)
 
 
 @router.post("/browser/extract-links")
-async def browser_extract_links(body: BrowserExtractLinksRequest):
+async def browser_extract_links(
+    body: BrowserExtractLinksRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """浏览器提取链接"""
+    _with_browser_identity(current_user)
     _log_action("browser_extract_links", {"selector": body.selector})
     return {"code": 0, "message": "Links extracted (placeholder)", "data": {"links": [], "selector": body.selector}}
 
 
 @router.post("/browser/execute-js")
-async def browser_execute_js(body: BrowserExecuteJsRequest):
+async def browser_execute_js(
+    body: BrowserExecuteJsRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """浏览器执行 JavaScript"""
+    _with_browser_identity(current_user)
     _log_action("browser_execute_js", {"script_len": len(body.script)})
     return {
         "code": 0,
@@ -528,8 +581,12 @@ async def browser_execute_js(body: BrowserExecuteJsRequest):
 
 
 @router.post("/browser/snapshot")
-async def browser_snapshot(body: BrowserSnapshotRequest):
+async def browser_snapshot(
+    body: BrowserSnapshotRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """浏览器获取 aria 可访问性树快照（真实实现：PlaywrightBackend.aria_snapshot）"""
+    _with_browser_identity(current_user)
     _log_action("browser_snapshot", {})
     result = _normalize_browser_result(await _get_manager().browser_dom_snapshot())
     if not result.get("success"):
@@ -542,8 +599,12 @@ async def browser_snapshot(body: BrowserSnapshotRequest):
 
 
 @router.post("/browser/click-role")
-async def browser_click_role(body: BrowserClickRoleRequest):
+async def browser_click_role(
+    body: BrowserClickRoleRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """按 ARIA role + accessible name 定位点击（快照事实驱动，严格 schema）"""
+    _with_browser_identity(current_user)
     _log_action("browser_click_role", {"role": body.role, "name": body.name})
     result = _normalize_browser_result(await _get_manager().browser_click_role(body.role, body.name))
     if not result.get("success"):
@@ -552,8 +613,12 @@ async def browser_click_role(body: BrowserClickRoleRequest):
 
 
 @router.post("/browser/fill-role")
-async def browser_fill_role(body: BrowserFillRoleRequest):
+async def browser_fill_role(
+    body: BrowserFillRoleRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """按 ARIA role + accessible name 定位输入（text 空串=清空）"""
+    _with_browser_identity(current_user)
     _log_action("browser_fill_role", {"role": body.role, "name": body.name})
     result = _normalize_browser_result(await _get_manager().browser_fill_role(body.role, body.name, body.text))
     if not result.get("success"):
@@ -562,8 +627,11 @@ async def browser_fill_role(body: BrowserFillRoleRequest):
 
 
 @router.post("/browser/capabilities")
-async def browser_capabilities():
+async def browser_capabilities(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """查询当前浏览器后端能力清单（aria 快照 / role 定位 / 像素截图）"""
+    _with_browser_identity(current_user)
     result = await _get_manager().browser_capabilities()
     if isinstance(result, dict) and result.get("error"):
         raise HTTPException(status_code=503, detail=result["error"])
@@ -571,12 +639,16 @@ async def browser_capabilities():
 
 
 @router.post("/browser/execute")
-async def browser_execute(cmd: BrowserCommand):
+async def browser_execute(
+    cmd: BrowserCommand,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """浏览器命令总线：单一入口分发全部浏览器命令。
 
     严格 schema 在解析层生效——未知命令无法构成判别联合、多余字段被
     extra_forbidden 拒绝；命令失败返回 502 携带后端错误说明。
     """
+    _with_browser_identity(current_user)
     _log_action("browser_execute", {"command": getattr(cmd, "command", "?")})
     mgr = _get_manager()
 
@@ -614,7 +686,11 @@ async def browser_execute(cmd: BrowserCommand):
 
 
 @router.post("/browser/scrape")
-async def browser_scrape(body: BrowserScrapeRequest):
+async def browser_scrape(
+    body: BrowserScrapeRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """浏览器抓取（支持自适应解析）"""
+    _with_browser_identity(current_user)
     _log_action("browser_scrape", {"url": body.url})
     return {"code": 0, "message": "Scrape complete (placeholder)", "data": {"url": body.url, "data": {}}}

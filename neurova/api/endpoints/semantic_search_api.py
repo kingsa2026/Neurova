@@ -2,6 +2,14 @@
 Semantic Search API - 语义搜索API端点
 
 支持：hybrid, bm25, vector, compare, analyze
+
+批次 2（RAG 演进）：
+- body.source 支持 "memory"（默认，行为不变）与 "knowledge"：
+  knowledge 语料 = 当前用户可见的知识条目（标题+正文），
+  经 KnowledgeRepository.visible_items 做可见性过滤
+- /hybrid 每条结果附带 confidence_breakdown（bm25/vector/fts/rrf 归一化分），
+  供前端展示召回可信度（fts 当前为占位实现恒 0，如实标注）
+- 检索端点接入 JWT 鉴权（知识语料依赖用户身份；前端此前无调用方）
 """
 
 from neurova.core.logger import get_logger
@@ -10,9 +18,10 @@ import re
 import typing
 from typing import Any, Dict, List, Tuple
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
+from neurova.api.auth import get_current_user_or_service
 from neurova.cognitive_layers.memory_layer.manager import get_memory_manager
 from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
 
@@ -44,6 +53,38 @@ class HybridSearchRequest(BaseModel):
     vector_weight: float = Field(default=0.4, ge=0, le=1)
     fts_weight: float = Field(default=0.2, ge=0, le=1)
     filters: typing.Optional[dict] = None
+    source: str = Field(default="memory", description="语料来源：memory（默认）/ knowledge")
+
+
+def _load_corpus(body: "HybridSearchRequest", request: Request, current_user: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """按 body.source 取检索语料。
+
+    - memory（默认）：运行时 Agent 的全部记忆（原行为）
+    - knowledge：当前用户可见的知识条目（public + 本人私有 + 共享给我），
+      文档内容为 标题\\n正文，id=knowledge_id，并带 title 供前端展示
+    """
+    if (getattr(body, "source", "memory") or "memory") == "knowledge":
+        from neurova.knowledge.repository import get_knowledge_repository
+
+        entries = get_knowledge_repository().visible_items(current_user)
+        corpus: List[Dict[str, Any]] = []
+        for e in entries:
+            title = str(e.get("title", ""))
+            content = str(e.get("content", ""))
+            corpus.append(
+                {
+                    "id": str(e.get("knowledge_id", "")),
+                    "content": (title + "\n" + content) if title else content,
+                    "title": title,
+                }
+            )
+        return corpus
+    try:
+        mgr = _get_runtime_memory_manager(request)
+        return mgr.get_all_memories() or []
+    except Exception as e:
+        logger.warning("hybrid_search: 获取记忆语料失败: %s", e)
+        return []
 
 
 class CompareRequest(BaseModel):
@@ -237,21 +278,37 @@ def _mem_id_to_content_map(all_memories: List[Dict[str, Any]]) -> Dict[str, str]
     return {str(m.get("id", "")): str(m.get("content", "")) for m in all_memories}
 
 
+def _vector_search_knowledge(query: str, current_user: Dict[str, Any], top_k: int) -> List[Tuple[str, float]]:
+    """知识语料的向量路：持久化索引（遗留修复 ②）。
+
+    ensure_indexed 增量同步当前用户可见条目（重启零重算），
+    余弦检索返回 (knowledge_id, score)。
+    """
+    from neurova.knowledge.repository import get_knowledge_repository
+    from neurova.knowledge.vector_index import get_knowledge_vector_index
+
+    idx = get_knowledge_vector_index()
+    hits = idx.search(query, current_user, top_k=top_k, repo=get_knowledge_repository())
+    return [(str(h["id"]), float(h["score"])) for h in hits]
+
+
 @router.post("/hybrid")
-async def hybrid_search(body: HybridSearchRequest, request: Request):
-    """混合搜索 - BM25 + 向量 + FTS5 三层融合 (RRF算法)"""
+async def hybrid_search(
+    body: HybridSearchRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """混合搜索 - BM25 + 向量 + FTS5 三层融合 (RRF算法)，支持 memory/knowledge 语料"""
     features = _analyze_query_features(body.query)
-    try:
-        mgr = _get_runtime_memory_manager(request)
-        all_memories = mgr.get_all_memories() or []
-    except Exception as e:
-        logger.warning("hybrid_search: 获取记忆失败: %s", e)
-        all_memories = []
+    corpus = _load_corpus(body, request, current_user)
 
     try:
-        bm25_res = _bm25_search(body.query, all_memories, top_k=body.top_k * 2)
-        vector_res = _vector_search_impl(body.query, all_memories, top_k=body.top_k * 2)
-        fts_res = _fts_search_impl(body.query, all_memories, top_k=body.top_k * 2)
+        bm25_res = _bm25_search(body.query, corpus, top_k=body.top_k * 2)
+        if (getattr(body, "source", "memory") or "memory") == "knowledge":
+            vector_res = _vector_search_knowledge(body.query, current_user, top_k=body.top_k * 2)
+        else:
+            vector_res = _vector_search_impl(body.query, corpus, top_k=body.top_k * 2)
+        fts_res = _fts_search_impl(body.query, corpus, top_k=body.top_k * 2)
         fused = _rrf_fusion(
             bm25_res,
             vector_res,
@@ -260,15 +317,26 @@ async def hybrid_search(body: HybridSearchRequest, request: Request):
             vector_weight=body.vector_weight,
             fts_weight=body.fts_weight,
         )
-        id_to_content = _mem_id_to_content_map(all_memories)
+        id_to_content = _mem_id_to_content_map(corpus)
+        id_to_title = {str(m.get("id", "")): str(m.get("title", "")) for m in corpus if m.get("title")}
+        bm25_map = {mid: s for mid, s in bm25_res}
+        vector_map = {mid: s for mid, s in vector_res}
+        fts_map = {mid: s for mid, s in fts_res}
         results = []
         for mid, rrf_score in fused[: body.top_k]:
             results.append(
                 {
                     "id": mid,
+                    "title": id_to_title.get(mid, ""),
                     "content": id_to_content.get(mid, ""),
                     "rrf_score": rrf_score,
                     "score": rrf_score,
+                    "confidence_breakdown": {
+                        "bm25": round(float(bm25_map.get(mid, 0.0)), 4),
+                        "vector": round(float(vector_map.get(mid, 0.0)), 4),
+                        "fts": round(float(fts_map.get(mid, 0.0)), 4),
+                        "rrf": round(float(rrf_score), 6),
+                    },
                 }
             )
     except Exception as e:
@@ -280,6 +348,7 @@ async def hybrid_search(body: HybridSearchRequest, request: Request):
         "message": "success",
         "data": {
             "query": body.query,
+            "source": getattr(body, "source", "memory"),
             "results": results,
             "total": len(results),
             "weights": {"bm25": body.bm25_weight, "vector": body.vector_weight, "fts": body.fts_weight},
@@ -289,18 +358,17 @@ async def hybrid_search(body: HybridSearchRequest, request: Request):
 
 
 @router.post("/bm25")
-async def bm25_search(body: HybridSearchRequest, request: Request):
+async def bm25_search(
+    body: HybridSearchRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
     """纯 BM25 搜索"""
-    try:
-        mgr = _get_runtime_memory_manager(request)
-        all_memories = mgr.get_all_memories() or []
-    except Exception as e:
-        logger.warning("bm25_search: 获取记忆失败: %s", e)
-        all_memories = []
+    corpus = _load_corpus(body, request, current_user)
 
     try:
-        scored = _bm25_search(body.query, all_memories, top_k=body.top_k)
-        id_to_content = _mem_id_to_content_map(all_memories)
+        scored = _bm25_search(body.query, corpus, top_k=body.top_k)
+        id_to_content = _mem_id_to_content_map(corpus)
         results = [
             {"id": mid, "content": id_to_content.get(mid, ""), "score": score}
             for mid, score in scored
@@ -317,18 +385,17 @@ async def bm25_search(body: HybridSearchRequest, request: Request):
 
 
 @router.post("/vector")
-async def vector_search(body: HybridSearchRequest, request: Request):
+async def vector_search(
+    body: HybridSearchRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
     """纯向量搜索"""
-    try:
-        mgr = _get_runtime_memory_manager(request)
-        all_memories = mgr.get_all_memories() or []
-    except Exception as e:
-        logger.warning("vector_search: 获取记忆失败: %s", e)
-        all_memories = []
+    corpus = _load_corpus(body, request, current_user)
 
     try:
-        scored = _vector_search_impl(body.query, all_memories, top_k=body.top_k)
-        id_to_content = _mem_id_to_content_map(all_memories)
+        scored = _vector_search_impl(body.query, corpus, top_k=body.top_k)
+        id_to_content = _mem_id_to_content_map(corpus)
         results = [
             {"id": mid, "content": id_to_content.get(mid, ""), "score": score}
             for mid, score in scored
@@ -345,7 +412,11 @@ async def vector_search(body: HybridSearchRequest, request: Request):
 
 
 @router.post("/compare")
-async def compare_search(body: CompareRequest, request: Request):
+async def compare_search(
+    body: CompareRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
     """对比三种搜索方式的结果"""
     try:
         mgr = _get_runtime_memory_manager(request)

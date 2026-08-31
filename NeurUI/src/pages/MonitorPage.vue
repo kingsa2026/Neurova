@@ -1,13 +1,21 @@
 <template>
   <div class="monitor-page">
     <div class="page-header">
-      <h2 class="page-title">{{ t('system.monitor') }}</h2>
+      <div>
+        <h2 class="page-title">{{ t('system.monitor') }}</h2>
+        <p class="page-global-hint">{{ t('common.globalSettingHint') }}</p>
+      </div>
       <div class="header-actions">
         <a-switch v-model:checked="autoRefresh" :checked-children="t('common.refresh')" :un-checked-children="'Off'" @change="toggleAutoRefresh" />
         <GlassButton variant="ghost" size="sm" :loading="loading" @click="fetchAll">{{ t('common.refresh') }}</GlassButton>
       </div>
     </div>
 
+    <!-- 非管理员:仅提示 -->
+    <template v-if="!isAdmin">
+      <div class="admin-gate">{{ t('common.adminOnlyHint') }}</div>
+    </template>
+    <template v-else>
     <!-- Resource usage cards -->
     <div class="stats-grid">
       <GlassStatCard :label="t('system.cpu')" :value="`${resources.cpu?.usage ?? 0}%`" emoji="🖥️" :trend="resources.cpu?.trend" :spark-data="resources.cpu?.history" />
@@ -67,19 +75,24 @@
         </a-list>
       </GlassCard>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
+import { useAuthStore } from '@/stores/auth'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
+/** 系统监控数据全局可见性受控; 仅管理员可访问 */
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 const loading = ref(false)
 const autoRefresh = ref(false)
@@ -137,6 +150,9 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 
 <style scoped>
 .monitor-page { display: flex; flex-direction: column; gap: 20px; }
+/* 全局说明与权限提示 */
+.page-global-hint { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-secondary, #8a8a92); }
+.admin-gate { margin: 24px auto; max-width: 480px; padding: 16px; border: 1px dashed var(--nr-border, rgba(255, 255, 255, 0.12)); border-radius: 10px; text-align: center; font-size: 13px; color: var(--nr-text-secondary, #8a8a92); }
 .page-title { font-family: var(--nr-font-display); font-size: 22px; font-weight: 700; color: var(--nr-text-primary); margin: 0; }
 .page-header { display: flex; justify-content: space-between; align-items: center; }
 .header-actions { display: flex; align-items: center; gap: 12px; }

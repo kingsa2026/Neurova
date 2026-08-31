@@ -13,8 +13,10 @@ PUT    /settings/import       导入配置 JSON
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+
+from neurova.api.deps import get_current_user, require_admin
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -51,8 +53,10 @@ class SettingsImportRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/settings")
-async def get_memory_settings():
-    """获取所有记忆系统参数（当前值 + 默认值）"""
+async def get_memory_settings(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取所有记忆系统参数（当前值 + 默认值）— 登录用户可读"""
     from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
     cfg = _get()
     return {
@@ -63,8 +67,10 @@ async def get_memory_settings():
 
 
 @router.get("/settings/schema")
-async def get_settings_schema():
-    """获取参数 schema（含类型、范围、描述、当前值）"""
+async def get_settings_schema(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取参数 schema（含类型、范围、描述、当前值）— 登录用户可读"""
     from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
     cfg = _get()
     return {
@@ -75,7 +81,10 @@ async def get_settings_schema():
 
 
 @router.get("/settings/{section}")
-async def get_settings_section(section: str):
+async def get_settings_section(
+    section: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取某个分组的参数，如 /settings/temperature"""
     from neurova.cognitive_layers.memory_layer.settings_config import (
         get_memory_settings as _get,
@@ -97,8 +106,11 @@ async def get_settings_section(section: str):
 
 
 @router.put("/settings")
-async def update_memory_settings(body: SettingsUpdateRequest):
-    """批量更新参数并持久化"""
+async def update_memory_settings(
+    body: SettingsUpdateRequest,
+    admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """批量更新参数并持久化 — 仅管理员（全局配置）"""
     from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
     cfg = _get()
     updated = cfg.update_and_save(body.settings)
@@ -116,8 +128,11 @@ async def update_memory_settings(body: SettingsUpdateRequest):
 
 
 @router.put("/settings/reset")
-async def reset_memory_settings(body: SettingsResetRequest = SettingsResetRequest()):
-    """重置参数（全部或指定 key）"""
+async def reset_memory_settings(
+    body: SettingsResetRequest = SettingsResetRequest(),
+    admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """重置参数（全部或指定 key）— 仅管理员（全局配置）"""
     from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
     cfg = _get()
     cfg.reset_and_save(body.keys)
@@ -129,8 +144,10 @@ async def reset_memory_settings(body: SettingsResetRequest = SettingsResetReques
 
 
 @router.get("/settings/export")
-async def export_memory_settings():
-    """导出当前配置为 JSON"""
+async def export_memory_settings(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """导出当前配置为 JSON — 登录用户可读"""
     from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
     cfg = _get()
     return {
@@ -141,8 +158,11 @@ async def export_memory_settings():
 
 
 @router.put("/settings/import")
-async def import_memory_settings(body: SettingsImportRequest):
-    """导入配置"""
+async def import_memory_settings(
+    body: SettingsImportRequest,
+    admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """导入配置 — 仅管理员（全局配置）"""
     from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
     cfg = _get()
     updated = cfg.update_and_save(body.settings)

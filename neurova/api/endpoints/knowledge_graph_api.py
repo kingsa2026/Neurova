@@ -5,8 +5,9 @@
 manager.py）。此前端点只读内存 _GRAPH_STORE（且无任何写入端点），
 空图时永远兜底硬编码 Demo 数据——真实图谱实现完全闲置。
 
-空图谱仍返回 Demo 兜底（避免前端页面空白），但响应显式携带
-`is_demo: true` 供前端辨识。
+批次 2（RAG 演进）：Demo 兜底已移除——空图/读取异常一律返回空数组 +
+is_demo:false + 引导提示（hint），图谱 manager 是唯一数据源。
+（"知识条目→图谱节点"的写入链路见 neurova/knowledge/graph_bridge.py，批次 3）
 """
 
 from neurova.core.logger import get_logger
@@ -16,59 +17,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 logger = get_logger(__name__)
 router = APIRouter()
-
-
-# ── Demo graph data ────────────────────────────────────
-
-_DEMO_NODES = [
-    {
-        "id": "n1",
-        "label": "Machine Learning",
-        "type": "concept",
-        "description": "Field of AI that learns from data",
-        "weight": 0.9,
-        "created_at": "2026-01-01T00:00:00",
-    },
-    {
-        "id": "n2",
-        "label": "Neural Networks",
-        "type": "concept",
-        "description": "Computational models inspired by brain",
-        "weight": 0.85,
-        "created_at": "2026-01-01T00:00:00",
-    },
-    {
-        "id": "n3",
-        "label": "Python",
-        "type": "tool",
-        "description": "Programming language",
-        "weight": 0.8,
-        "created_at": "2026-01-02T00:00:00",
-    },
-    {
-        "id": "n4",
-        "label": "Transformer",
-        "type": "architecture",
-        "description": "Attention-based neural network",
-        "weight": 0.95,
-        "created_at": "2026-01-03T00:00:00",
-    },
-    {
-        "id": "n5",
-        "label": "Fine-tuning",
-        "type": "technique",
-        "description": "Adapting pre-trained models",
-        "weight": 0.7,
-        "created_at": "2026-01-04T00:00:00",
-    },
-]
-_DEMO_EDGES = [
-    {"source": "n1", "target": "n2", "relation": "includes", "weight": 0.9},
-    {"source": "n2", "target": "n4", "relation": "implements", "weight": 0.85},
-    {"source": "n3", "target": "n1", "relation": "used_for", "weight": 0.8},
-    {"source": "n4", "target": "n5", "relation": "supports", "weight": 0.7},
-    {"source": "n1", "target": "n5", "relation": "technique", "weight": 0.75},
-]
 
 
 def _get_request_id(request) -> str:
@@ -135,27 +83,17 @@ def _graph_payload(manager, limit: int) -> dict:
 
 @router.get("/{agent_id}/knowledge-graph")
 async def get_knowledge_graph(agent_id: str, request: Request, limit: int = Query(100, ge=1, le=500)):
-    """获取 Agent 的知识图谱数据（真实 KnowledgeGraphManager；空图兜底 Demo 并标记）"""
+    """获取 Agent 的知识图谱数据（真实 KnowledgeGraphManager 唯一数据源；空图返回空数组+引导）"""
     _get_request_id(request)
-    is_demo = False
     try:
         manager = _get_kg_manager(agent_id)
         data = _graph_payload(manager, limit) if manager else {}
     except Exception as e:  # noqa: BLE001
-        logger.warning("读取知识图谱失败，降级 Demo: %s", e)
+        logger.warning("读取知识图谱失败，返回空图谱: %s", e)
         data = {}
 
-    if not data.get("nodes"):
-        nodes = _DEMO_NODES[:limit]
-        edges = [
-            e
-            for e in _DEMO_EDGES
-            if e["source"] in [n["id"] for n in nodes] and e["target"] in [n["id"] for n in nodes]
-        ]
-        is_demo = True
-    else:
-        nodes = data["nodes"]
-        edges = data["edges"]
+    nodes = data.get("nodes") or []
+    edges = data.get("edges") or []
 
     return {
         "code": 0,
@@ -165,7 +103,8 @@ async def get_knowledge_graph(agent_id: str, request: Request, limit: int = Quer
             "edges": edges,
             "total_nodes": len(nodes),
             "total_edges": len(edges),
-            "is_demo": is_demo,
+            "is_demo": False,
+            "hint": "" if nodes else "图谱为空：导入知识或通过知识条目抽取生成图谱节点（见 graph_bridge）",
         },
     }
 

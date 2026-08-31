@@ -112,6 +112,34 @@ class Retriever(Protocol):
         ...
 
 
+def should_need_more_context(
+    result: Optional["RetrievalResult"],
+    min_quality: float = 0.5,
+) -> bool:
+    """判断检索结果是否不足以支撑回答（批次 4 / Adaptive Retrieval）。
+
+    判定为"需要更多上下文"：
+    - result 为 None，或
+    - memories 为空，或
+    - quality_level 为 POOR / FAILED，或
+    - quality 分数低于 min_quality 阈值
+
+    任何属性缺失按"需要"处理（宁可多查一次，不做静默假设）。
+    """
+    if result is None:
+        return True
+    memories = getattr(result, "memories", None) or []
+    if not memories:
+        return True
+    level = str(getattr(result, "quality_level", ""))
+    if level in (RetrievalQuality.POOR.value, RetrievalQuality.FAILED.value):
+        return True
+    quality = getattr(result, "quality", None)
+    if not isinstance(quality, (int, float)):
+        return True
+    return float(quality) < min_quality
+
+
 class MemoryRetrievalChain:
     """
     记忆检索责任链

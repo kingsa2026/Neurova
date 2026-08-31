@@ -25,6 +25,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
+from neurova.llm.provider_manager import KEYLESS_PROVIDER_IDS
 
 logger = get_logger(__name__)
 
@@ -70,16 +71,96 @@ class ActivateModelRequest(BaseModel):
     model_id: str = Field(..., description="模型 ID")
 
 
+class FilterModelsRequest(BaseModel):
+    """筛选模型请求(对齐 QwenPaw filter_models 四维)"""
+
+    providers: List[str] = Field(default_factory=list, description="系列前缀,如 ['openai']")
+    input_modalities: List[str] = Field(default_factory=list, description="必需输入模态,如 ['image']")
+    output_modalities: List[str] = Field(default_factory=list, description="必需输出模态")
+    max_prompt_price: Optional[float] = Field(
+        default=None,
+        description="prompt 价格上限(每 1M tokens)",
+    )
+    is_free: Optional[bool] = Field(default=None, description="仅免费模型")
+
+
+class MergeDiscoveredRequest(BaseModel):
+    """并入发现候选请求"""
+
+    model_ids: Optional[List[str]] = Field(
+        default=None,
+        description="要并入的候选模型 id;None 表示并入全部候选",
+    )
+
+
+def _model_to_json(model) -> Dict[str, Any]:
+    """ModelInfo → JSON 安全 dict(capabilities/provider_type 转字符串)。"""
+    data = model.to_dict()
+    data["capabilities"] = [
+        c.value if hasattr(c, "value") else str(c)
+        for c in (data.get("capabilities") or [])
+    ]
+    provider_type = data.get("provider_type")
+    if hasattr(provider_type, "value"):
+        data["provider_type"] = provider_type.value
+    return data
+
+
 def _get_request_id(request: Request) -> str:
     """安全获取 request_id"""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
 
 
-def _get_provider_manager():
-    """获取 Provider 管理器"""
+def _get_provider_manager(current_user: Optional[Dict[str, Any]] = None):
+    """获取(按用户隔离的)Provider 管理器。
+
+    隔离模型:
+    - admin 角色 → 全局 admin scope(最高权限)
+    - 普通用户 → user:<user_id> scope(仅自己的配置)
+    - 未认证/无用户上下文 → app_state 注入的全局实例(存量行为,兼容测试与启动链路)
+    """
+    if isinstance(current_user, dict):
+        from neurova.llm.provider_manager import get_provider_manager_for_user
+
+        return get_provider_manager_for_user(current_user)
+    return _get_app_state_manager()
+
+
+def _get_app_state_manager():
+    """获取 app_state 注入的全局实例(启动链路/测试环境)。"""
     from neurova.api.endpoints import get_provider_manager
 
     return get_provider_manager()
+
+
+@router.get("/scopes")
+async def list_provider_scopes(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """管理员查看所有用户 LLM 配置的 scope 清单(普通用户 403)。"""
+    _get_request_id(request)
+
+    role = (current_user or {}).get("role", "user")
+    if role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin role required",
+        )
+
+    try:
+        from neurova.llm.provider_manager import list_available_scopes
+
+        scopes = list_available_scopes()
+        return {
+            "code": 0,
+            "data": {
+                "scopes": scopes,
+            },
+        }
+    except Exception as e:
+        logger.error(f"List provider scopes error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to list scopes: {str(e)}")
 
 
 @router.get("", response_model=List[ProviderInfo])
@@ -88,7 +169,7 @@ async def list_providers(request: Request, current_user: Dict[str, Any] = Depend
     _get_request_id(request)
 
     providers = []
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
 
     if provider_manager:
         try:
@@ -124,7 +205,7 @@ async def activate_model(
     """激活模型"""
     _get_request_id(request)
 
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
     if not provider_manager:
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
@@ -152,7 +233,7 @@ async def get_active_model(request: Request, current_user: Dict[str, Any] = Depe
     """获取当前活跃模型"""
     _get_request_id(request)
 
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
     if not provider_manager:
         return {"code": 0, "data": {"model": None, "provider": None}}
 
@@ -175,7 +256,7 @@ async def get_provider(
     """获取服务商详情"""
     _get_request_id(request)
 
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
     if not provider_manager:
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
@@ -207,7 +288,7 @@ async def create_provider(
     """添加服务商"""
     _get_request_id(request)
 
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
     if not provider_manager:
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
@@ -252,7 +333,7 @@ async def update_provider(
     """更新服务商"""
     _get_request_id(request)
 
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
     if not provider_manager:
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
@@ -316,7 +397,7 @@ async def delete_provider(
     """删除服务商"""
     _get_request_id(request)
 
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
     if not provider_manager:
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
@@ -341,18 +422,32 @@ async def discover_models(
     """发现模型"""
     _get_request_id(request)
 
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
     if not provider_manager:
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
     try:
         if hasattr(provider_manager, "fetch_provider_models"):
-            models = provider_manager.fetch_provider_models(provider_id)
+            provider = (
+                provider_manager.get_provider(provider_id)
+                if hasattr(provider_manager, "get_provider")
+                else None
+            )
+            models = await provider_manager.fetch_provider_models(provider_id)
+            message = ""
+            if (
+                not models
+                and provider is not None
+                and not provider.api_key
+                and provider.id not in KEYLESS_PROVIDER_IDS
+            ):
+                message = "该服务商尚未配置 API Key,请先配置后再发现"
             return {
                 "code": 0,
                 "data": {
                     "provider_id": provider_id,
                     "models": models,
+                    "message": message,
                 },
             }
     except Exception as e:
@@ -360,6 +455,127 @@ async def discover_models(
         raise HTTPException(status_code=500, detail=f"Failed to discover models: {str(e)}")
 
     return {"code": 0, "data": {"provider_id": provider_id, "models": []}}
+
+
+@router.get("/{provider_id}/models/series")
+async def get_provider_series(
+    request: Request,
+    provider_id: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取 provider 可用的系列/服务商列表(如 OpenRouter 的 ['openai', ...])。"""
+    _get_request_id(request)
+
+    provider_manager = _get_provider_manager(current_user)
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+
+    try:
+        instance = getattr(provider_manager, "_get_provider_instance", lambda _: None)(
+            provider_id,
+        )
+        if instance is not None and hasattr(instance, "get_available_providers"):
+            series = await instance.get_available_providers()
+            return {"code": 0, "data": {"provider_id": provider_id, "series": series}}
+    except Exception as e:
+        logger.error(f"Get series error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get series: {str(e)}")
+
+    return {"code": 0, "data": {"provider_id": provider_id, "series": []}}
+
+
+@router.post("/{provider_id}/models/filter")
+async def filter_provider_models(
+    request: Request,
+    provider_id: str = Path(...),
+    body: FilterModelsRequest = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """按系列/模态/价格/免费四维筛选 provider 发现的模型。"""
+    _get_request_id(request)
+
+    provider_manager = _get_provider_manager(current_user)
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+
+    try:
+        provider = (
+            provider_manager.get_provider(provider_id)
+            if hasattr(provider_manager, "get_provider")
+            else None
+        )
+        if provider is None:
+            return {"code": 0, "data": {"provider_id": provider_id, "models": [], "total_count": 0}}
+        if not provider.api_key and provider.id not in KEYLESS_PROVIDER_IDS:
+            # 与 discover 一致:未配置 key 时给可行动提示,而非静默空结果
+            # (opencode/kilo-code 等免 key 网关不受此限)
+            return {
+                "code": 0,
+                "data": {
+                    "provider_id": provider_id,
+                    "models": [],
+                    "total_count": 0,
+                    "message": "该服务商尚未配置 API Key,请先配置后再筛选",
+                },
+            }
+
+        if hasattr(provider_manager, "filter_provider_models"):
+            models = await provider_manager.filter_provider_models(
+                provider_id,
+                providers=body.providers or None,
+                input_modalities=body.input_modalities or None,
+                output_modalities=body.output_modalities or None,
+                max_prompt_price=body.max_prompt_price,
+                is_free=body.is_free,
+            )
+            payload = [_model_to_json(m) for m in models]
+            return {
+                "code": 0,
+                "data": {
+                    "provider_id": provider_id,
+                    "models": payload,
+                    "total_count": len(payload),
+                },
+            }
+    except Exception as e:
+        logger.error(f"Filter models error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to filter models: {str(e)}")
+
+    return {"code": 0, "data": {"provider_id": provider_id, "models": [], "total_count": 0}}
+
+
+@router.post("/{provider_id}/models/discover/merge")
+async def merge_discovered_models_endpoint(
+    request: Request,
+    provider_id: str = Path(...),
+    body: MergeDiscoveredRequest = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """把发现候选并入配置列表(选择式合并;None = 并入全部候选)。"""
+    _get_request_id(request)
+
+    provider_manager = _get_provider_manager(current_user)
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+
+    try:
+        if hasattr(provider_manager, "merge_discovered_models"):
+            merged_count = provider_manager.merge_discovered_models(
+                provider_id,
+                model_ids=body.model_ids,
+            )
+            return {
+                "code": 0,
+                "data": {
+                    "provider_id": provider_id,
+                    "merged_count": merged_count,
+                },
+            }
+    except Exception as e:
+        logger.error(f"Merge discovered models error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to merge: {str(e)}")
+
+    return {"code": 0, "data": {"provider_id": provider_id, "merged_count": 0}}
 
 
 @router.post("/{provider_id}/check-connection")
@@ -371,13 +587,13 @@ async def check_provider_connection(
     """检查服务商连接"""
     _get_request_id(request)
 
-    provider_manager = _get_provider_manager()
+    provider_manager = _get_provider_manager(current_user)
     if not provider_manager:
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
     try:
         if hasattr(provider_manager, "check_provider_connection"):
-            result = provider_manager.check_provider_connection(provider_id)
+            result = await provider_manager.check_provider_connection(provider_id)
             return {"code": 0, "data": result}
     except Exception as e:
         logger.error(f"Check connection error: {e}", exc_info=True)

@@ -18,8 +18,10 @@ import time
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
+
+from neurova.api.deps import get_current_user, require_admin
 
 logger = get_logger(__name__)
 
@@ -72,8 +74,9 @@ async def get_groups(
     request: Request,
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
+    current_user: dict = Depends(get_current_user),
 ):
-    """获取群组列表"""
+    """获取群组列表 — 登录用户可读"""
     if get_user_group_manager is None:
         raise HTTPException(status_code=503, detail="User group service not available")
 
@@ -106,8 +109,9 @@ async def get_groups(
 async def create_group(
     request: Request,
     body: GroupCreate,
+    admin: dict = Depends(require_admin()),
 ):
-    """创建群组"""
+    """创建群组 — 仅管理员"""
     _get_request_id(request)
 
     if get_user_group_manager is None:
@@ -150,8 +154,9 @@ async def create_group(
 async def get_group(
     request: Request,
     group_id: str = Path(..., description="群组ID"),
+    current_user: dict = Depends(get_current_user),
 ):
-    """获取群组详情"""
+    """获取群组详情 — 登录用户可读"""
     if get_user_group_manager is None:
         raise HTTPException(status_code=503, detail="User group service not available")
 
@@ -186,8 +191,9 @@ async def update_group(
     request: Request,
     group_id: str = Path(..., description="群组ID"),
     body: GroupUpdate = GroupUpdate(),
+    admin: dict = Depends(require_admin()),
 ):
-    """更新群组"""
+    """更新群组 — 仅管理员"""
     _get_request_id(request)
 
     if get_user_group_manager is None:
@@ -232,8 +238,9 @@ async def update_group(
 async def delete_group(
     request: Request,
     group_id: str = Path(..., description="群组ID"),
+    admin: dict = Depends(require_admin()),
 ):
-    """删除群组"""
+    """删除群组 — 仅管理员"""
     request_id = _get_request_id(request)
 
     if get_user_group_manager is None:
@@ -264,8 +271,9 @@ async def add_group_member(
     request: Request,
     group_id: str = Path(..., description="群组ID"),
     user_id: str = Query(..., description="用户ID"),
+    admin: dict = Depends(require_admin()),
 ):
-    """添加群组成员"""
+    """添加群组成员 — 仅管理员"""
     request_id = _get_request_id(request)
 
     if get_user_group_manager is None:
@@ -303,8 +311,9 @@ async def remove_group_member(
     request: Request,
     group_id: str = Path(..., description="群组ID"),
     user_id: str = Path(..., description="用户ID"),
+    admin: dict = Depends(require_admin()),
 ):
-    """移除群组成员"""
+    """移除群组成员 — 仅管理员"""
     request_id = _get_request_id(request)
 
     if get_user_group_manager is None:

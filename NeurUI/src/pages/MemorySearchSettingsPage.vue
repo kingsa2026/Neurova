@@ -2,10 +2,20 @@
   <div class="memory-search-settings-page">
     <div class="page-header">
       <h2 class="page-title">{{ t('memorySearch.title') }}</h2>
+      <p class="page-global-hint">{{ t('common.globalSettingHint') }}</p>
       <GlassButton variant="ghost" size="sm" :loading="loading" @click="fetchSettings">{{ t('common.refresh') }}</GlassButton>
     </div>
 
     <a-spin :spinning="loading">
+      <!-- 非管理员:仅提示, 不渲染任何设置操作 -->
+      <template v-if="!isAdmin">
+        <div class="admin-gate">{{ t('common.adminOnlyHint') }}</div>
+      </template>
+      <template v-else>
+      <!-- 数据未就绪前仅渲染轻量占位, 避免"默认值表单 → 真值表单"两轮全页 patch
+           (该双帧载荷恰落在 a-spin 遮罩过渡的兜底 setTimeout 回调整链上,
+           在慢环境/DevTools 下被记 [Violation] 'setTimeout' handler took >50ms) -->
+      <template v-if="initialized">
       <!-- Search method -->
       <GlassCard :title="t('memorySearch.searchMethod')" style="margin-top: 8px">
         <a-form layout="vertical" :model="searchConfig">
@@ -153,6 +163,9 @@
           <a-empty v-if="!testResults.length && testExecuted" :description="t('common.noData')" />
         </div>
       </GlassCard>
+      </template>
+      <a-empty v-else :description="t('common.loading')" />
+      </template>
     </a-spin>
   </div>
 </template>
@@ -165,11 +178,16 @@ import { getNerfSettings, updateNerfSettings, resetNerfSettings, getChannelWeigh
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
+/** 全局记忆检索设置仅管理员可操作; 非管理员不渲染设置区 */
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 const loading = ref(false)
 const saving = ref(false)
+const initialized = ref(false)
 const testExecuted = ref(false)
 const testQuery = ref('')
 const testResults = ref<any[]>([])
@@ -232,6 +250,7 @@ const fetchSettings = async () => {
   } catch {
     message.error(t('common.error'))
   } finally {
+    initialized.value = true // 成败都放行: 失败时以默认配置可编辑, 不永久留白
     loading.value = false
   }
 }
@@ -345,6 +364,24 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 全局设置说明（标题下方） */
+.page-global-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--nr-text-secondary, #8a8a92);
+}
+
+/* 非管理员提示 */
+.admin-gate {
+  margin: 24px auto;
+  max-width: 480px;
+  padding: 16px;
+  border: 1px dashed var(--nr-border, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--nr-text-secondary, #8a8a92);
+}
 .memory-search-settings-page { display: flex; flex-direction: column; gap: 16px; }
 .page-title { font-family: var(--nr-font-display); font-size: 22px; font-weight: 700; color: var(--nr-text-primary); margin: 0; }
 .page-header { display: flex; justify-content: space-between; align-items: center; }

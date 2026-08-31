@@ -97,6 +97,51 @@ def c(text: str, color: str) -> str:
     return f"{color}{text}{Colors.RESET}"
 
 
+def _display_width(text: str) -> int:
+    """估算字符串在终端中的显示宽度（CJK/全角按 2 列，其余按 1 列）。
+
+    `str.format("{:^51}")` 按码点计数，中文小标题每个字占 2 列，
+    按码点填充会与全单宽的边框行错位，因此 LOGO 小标题必须按显示宽度居中。
+    """
+    width = 0
+    for ch in text:
+        cp = ord(ch)
+        if (
+            0x1100 <= cp <= 0x115F
+            or 0x2E80 <= cp <= 0x303E
+            or 0x3041 <= cp <= 0x33FF
+            or 0x3400 <= cp <= 0x4DBF
+            or 0x4E00 <= cp <= 0x9FFF
+            or 0xA000 <= cp <= 0xA4CF
+            or 0xAC00 <= cp <= 0xD7A3
+            or 0xF900 <= cp <= 0xFAFF
+            or 0xFE30 <= cp <= 0xFE4F
+            or 0xFF00 <= cp <= 0xFF60
+            or 0xFFE0 <= cp <= 0xFFE6
+            or 0x20000 <= cp <= 0x2FFFD
+            or 0x30000 <= cp <= 0x3FFFD
+        ):
+            width += 2
+        else:
+            width += 1
+    return width
+
+
+def _center_to_width(text: str, width: int) -> str:
+    """按显示宽度把 text 居中到 width 列（宽字符计 2 列）。"""
+    pad = max(width - _display_width(text), 0)
+    left = pad // 2
+    return " " * left + text + " " * (pad - left)
+
+
+def _logo_subtitle_line(subtitle: str) -> str:
+    """构造 LOGO 中的小标题行，使整行视觉宽度恒等于边框行（73 列）。
+
+    边框行内部宽度为 67 列 = 7 空格 + 58 列标题区 + 2 空格。
+    """
+    return "    ║       " + _center_to_width(subtitle, 58) + "  ║"
+
+
 def print_logo(subtitle: Optional[str] = None, double_subtitle: Optional[str] = None) -> None:
     """
     以天蓝色打印 NEUROVA logo
@@ -105,16 +150,16 @@ def print_logo(subtitle: Optional[str] = None, double_subtitle: Optional[str] = 
         subtitle: 可选的第一行小标题（如 "智能无限，协作无间"）
         double_subtitle: 可选的第二行小标题（如 "一键安装脚本"）
     """
-    if subtitle is None and double_subtitle is None:
-        out = LOGO_ART.format(subtitle=" ")
-    elif double_subtitle is None:
-        out = LOGO_ART.format(subtitle=subtitle)
+    subtitle_line = "    ║       {subtitle:^51}  ║"
+    if subtitle is None:
+        subtitle = " "
+    if double_subtitle is None:
+        out = LOGO_ART.replace(subtitle_line, _logo_subtitle_line(subtitle))
     else:
         # 双行小标题
-        logo = LOGO_ART
-        out = logo.replace(
-            "║       {subtitle:^51}  ║",
-            f"║       {subtitle:^51}  ║\n    ║       {double_subtitle:^51}  ║",
+        out = LOGO_ART.replace(
+            subtitle_line,
+            _logo_subtitle_line(subtitle) + "\n" + _logo_subtitle_line(double_subtitle),
         )
     print(c(out, Colors.SKY_BLUE_BRIGHT))
 

@@ -14,14 +14,28 @@ export interface SleepStatus {
   next_wake?: string
 }
 
+// 与后端 neurova/api/endpoints/sleep.py::SleepSettings 严格对齐。
+// 此前前端使用 enabled/auto_sleep/dream_enabled 等自造键，后端 Pydantic
+// 静默丢弃未知键，设置页读写全部空转。
 export interface SleepSettings {
   agent_id: string
-  enabled: boolean
-  schedule_start: string
-  schedule_end: string
-  min_interval_hours: number
-  auto_sleep: boolean
-  dream_enabled: boolean
+  auto_sleep_enabled: boolean
+  sleep_threshold_minutes: number
+  sleep_duration_minutes: number
+  dream_replay_enabled: boolean
+  memory_consolidation_enabled: boolean
+  conflict_resolution_enabled: boolean
+  // 阶段推进参数（"睡多深的节奏"）
+  sleep_mode: 'temperature' | 'time' | 'either'
+  temp_threshold_light_sleep: number
+  temp_threshold_deep_sleep: number
+  temp_threshold_rem: number
+  temp_threshold_hibernate: number
+  idle_threshold_light_sleep: number // 分钟
+  idle_threshold_deep_sleep: number
+  idle_threshold_rem: number
+  idle_threshold_hibernate: number
+  monitor_interval_seconds: number
 }
 
 export interface Dream {
@@ -58,6 +72,20 @@ export interface MergeConflict {
 // ---------------------------------------------------------------------------
 
 const BASE = '/sleep'
+
+/**
+ * 睡眠端点解包：/sleep 系列端点返回裸模型/裸数组（无 {code,data} 信封），
+ * 而 axios 拦截器已返回响应体本身。此前页面统一按 res?.data 取值导致
+ * 读取空转。此 helper 兼容两种形态。
+ */
+export function unwrapSleep<T = unknown>(res: unknown): T | undefined {
+  if (res == null) return undefined
+  if (Array.isArray(res)) return res as T
+  if (typeof res === 'object' && 'data' in (res as Record<string, unknown>)) {
+    return (res as Record<string, unknown>).data as T
+  }
+  return res as T
+}
 
 /** Get sleep status for an agent. */
 export function getSleepStatus(agentId: string) {

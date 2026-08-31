@@ -18,11 +18,14 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from neurova.api.deps import require_admin
+
 logger = get_logger(__name__)
-router = APIRouter()
+# 用户管理整路由仅管理员（列表/详情/配额同样属管理数据）
+router = APIRouter(dependencies=[Depends(require_admin())])
 
 
 class UserInfo(BaseModel):

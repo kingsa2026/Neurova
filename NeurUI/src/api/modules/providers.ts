@@ -86,3 +86,56 @@ export function testConnection(providerId: string) {
 export function discoverModels(providerId: string) {
   return api.get<{ models: Record<string, unknown>[] }>(`${BASE}/${providerId}/models/discover`)
 }
+
+// ---------------------------------------------------------------------------
+// Filter / merge (对齐 QwenPaw 的服务商模型筛选与选择式合并)
+// ---------------------------------------------------------------------------
+
+export interface FilterModelsBody {
+  providers?: string[]
+  input_modalities?: string[]
+  output_modalities?: string[]
+  max_prompt_price?: number
+  is_free?: boolean
+}
+
+export interface FilteredProviderModel {
+  id: string
+  name: string
+  provider?: string
+  provider_type?: string
+  capabilities?: string[]
+  max_tokens?: number
+  context_window?: number
+  pricing?: Record<string, number>
+  is_free?: boolean
+}
+
+/** Filter provider models by series/modality/price/free. */
+export function filterProviderModels(
+  providerId: string,
+  body: FilterModelsBody = {},
+) {
+  return api.post<{
+    code: number
+    data: { provider_id: string; models: FilteredProviderModel[]; total_count: number }
+  }>(`${BASE}/${providerId}/models/filter`, body)
+}
+
+/** Get the series list for a provider (e.g. OpenRouter providers). */
+export function getProviderSeries(providerId: string) {
+  return api.get<{ code: number; data: { provider_id: string; series: string[] } }>(
+    `${BASE}/${providerId}/models/series`,
+  )
+}
+
+/** Merge discovered model candidates into the configured list (null = all). */
+export function mergeDiscoveredModels(
+  providerId: string,
+  modelIds: string[] | null = null,
+) {
+  return api.post<{ code: number; data: { provider_id: string; merged_count: number } }>(
+    `${BASE}/${providerId}/models/discover/merge`,
+    { model_ids: modelIds },
+  )
+}

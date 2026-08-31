@@ -1,7 +1,10 @@
 <template>
   <div class="stats-page">
     <div class="page-header">
-      <h2 class="page-title">{{ t('stats.title') }}</h2>
+      <div>
+        <h2 class="page-title">{{ t('stats.title') }}</h2>
+        <p class="page-global-hint">{{ t('common.globalSettingHint') }}</p>
+      </div>
       <div class="header-actions">
         <a-radio-group v-model:value="timeRange" button-style="solid" size="small" @change="fetchAll">
           <a-radio-button value="day">{{ t('analytics.day') }}</a-radio-button>
@@ -12,6 +15,10 @@
       </div>
     </div>
 
+    <template v-if="!isAdmin">
+      <div class="admin-gate">{{ t('common.adminOnlyHint') }}</div>
+    </template>
+    <template v-else>
     <a-tabs v-model:activeKey="activeTab" @change="fetchAll">
       <!-- Overview tab -->
       <a-tab-pane key="overview" :tab="t('system.overview')">
@@ -120,6 +127,7 @@
         </a-spin>
       </a-tab-pane>
     </a-tabs>
+    </template>
   </div>
 </template>
 
@@ -132,8 +140,12 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
+/** 系统统计为全局数据; 仅管理员可访问 */
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 const activeTab = ref('overview')
 const timeRange = ref('week')
@@ -235,6 +247,9 @@ onMounted(fetchAll)
 
 <style scoped>
 .stats-page { display: flex; flex-direction: column; gap: 20px; }
+/* 全局说明与权限提示 */
+.page-global-hint { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-secondary, #8a8a92); }
+.admin-gate { margin: 24px auto; max-width: 480px; padding: 16px; border: 1px dashed var(--nr-border, rgba(255, 255, 255, 0.12)); border-radius: 10px; text-align: center; font-size: 13px; color: var(--nr-text-secondary, #8a8a92); }
 .page-title { font-family: var(--nr-font-display); font-size: 22px; font-weight: 700; color: var(--nr-text-primary); margin: 0; }
 .page-header { display: flex; justify-content: space-between; align-items: center; }
 .header-actions { display: flex; gap: 12px; align-items: center; }

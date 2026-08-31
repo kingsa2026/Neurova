@@ -24,11 +24,20 @@ _BUILTIN_SKILL_FIELDS: typing.Dict[str, typing.List[typing.Tuple[str, str, bool,
     "web_search": [
         ("query", "string", True, "检索词"),
         ("max_results", "integer", False, "返回结果数上限"),
+        ("backend", "string", False, "搜索后端（默认 bing，可选 duckduckgo 或已注册的自定义后端名）"),
     ],
     "file_operation": [
         ("operation", "string", True, "文件操作类型：read/write/list/delete"),
         ("file_path", "string", True, "目标文件路径"),
         ("content", "string", False, "operation=write 时写入的内容"),
+    ],
+    "kb_builder": [
+        ("action", "string", False, "操作：build 构建知识库（默认）/ record_summary 沉淀心智模型综述"),
+        ("topic", "string", True, "知识库主题"),
+        ("urls", "array", False, "种子 URL 列表（build 可选；缺省时用搜索发现来源）"),
+        ("max_sources", "integer", False, "最多抓取的来源数（默认 5）"),
+        ("content", "string", False, "action=record_summary 时要沉淀的综述正文"),
+        ("agent_id", "string", False, "来源 agent 标注（可选；条目属主由服务端身份决定）"),
     ],
 }
 
@@ -44,6 +53,9 @@ def get_builtin_skill_parameters(skill_id: str) -> typing.Dict[str, typing.Dict[
         if name == "operation":
             entry["enum"] = ["read", "write", "list", "delete"]
         if name == "action":
-            entry["enum"] = ["search", "store"]
+            if skill_id == "kb_builder":
+                entry["enum"] = ["build", "record_summary"]
+            else:
+                entry["enum"] = ["search", "store"]
         result[name] = entry
     return result

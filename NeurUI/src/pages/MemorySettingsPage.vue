@@ -4,8 +4,9 @@
       <div>
         <h2 class="page-title">{{ t('memorySettings.title') }}</h2>
         <p class="page-subtitle">{{ t('memorySettings.subtitle') }}</p>
+        <p class="page-global-hint">{{ t('memorySettings.globalHint') }}</p>
       </div>
-      <div class="header-actions">
+      <div v-if="isAdmin" class="header-actions">
         <GlassButton variant="ghost" size="sm" :loading="loading" @click="fetchSchema">
           {{ t('common.refresh') }}
         </GlassButton>
@@ -33,6 +34,12 @@
           </GlassButton>
         </a-upload>
       </div>
+    </div>
+
+    <!-- 仅管理员可操作全局配置 -->
+    <div v-if="!isAdmin" class="admin-only-hint">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      {{ t('memorySettings.adminOnlyHint') }}
     </div>
 
     <a-spin :spinning="loading">
@@ -66,6 +73,7 @@
                 <div class="param-select">
                   <a-checkbox
                     :checked="selectedKeys.includes(param.key)"
+                    :disabled="!isAdmin"
                     @change="(e: any) => toggleSelect(param.key, e.target.checked)"
                   />
                 </div>
@@ -93,6 +101,7 @@
                         :min="param.min ?? 0"
                         :max="param.max ?? 1"
                         :step="sliderStep(param)"
+                        :disabled="!isAdmin"
                         style="flex: 1"
                         @change="(v: number) => setValue(param.key, v)"
                       />
@@ -101,6 +110,7 @@
                         :min="param.min ?? 0"
                         :max="param.max ?? 1"
                         :step="sliderStep(param)"
+                        :disabled="!isAdmin"
                         size="small"
                         style="width: 90px; margin-left: 8px"
                         @change="(v: number | null) => setValue(param.key, v ?? param.default)"
@@ -115,6 +125,7 @@
                       :min="param.min ?? undefined"
                       :max="param.max ?? undefined"
                       :step="1"
+                      :disabled="!isAdmin"
                       style="width: 160px"
                       @change="(v: number | null) => setValue(param.key, v ?? param.default)"
                     />
@@ -124,6 +135,7 @@
                   <template v-else-if="param.type === 'bool'">
                     <a-switch
                       :checked="!!currentValues[param.key]"
+                      :disabled="!isAdmin"
                       @change="(v: boolean) => setValue(param.key, v)"
                     />
                   </template>
@@ -132,6 +144,7 @@
                   <template v-else>
                     <a-input
                       :value="String(currentValues[param.key] ?? '')"
+                      :disabled="!isAdmin"
                       style="width: 200px"
                       @change="(e: any) => setValue(param.key, e.target.value)"
                     />
@@ -152,7 +165,7 @@
     </a-spin>
 
     <!-- Save bar -->
-    <div v-if="hasChanges" class="save-bar">
+    <div v-if="isAdmin && hasChanges" class="save-bar">
       <div class="save-info">
         {{ changedKeys.length }} {{ t('memorySettings.paramKey') }} changed
       </div>
@@ -174,8 +187,12 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import * as memSettingsApi from '@/api/modules/memory-settings'
 import type { ParamSchema } from '@/api/modules/memory-settings'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
+/** 全局配置仅管理员可操作；普通用户只读查看 */
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 const loading = ref(false)
 const saving = ref(false)
@@ -411,6 +428,23 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 全局设置说明（副标题下方） */
+.page-global-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--nr-text-secondary, #8a8a92);
+}
+
+/* 非管理员提示 */
+.admin-only-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px 4px;
+  font-size: 12px;
+  color: var(--nr-text-secondary, #8a8a92);
+}
+
 .memory-settings-page {
   display: flex;
   flex-direction: column;

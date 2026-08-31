@@ -16,6 +16,7 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 import time
 import uuid
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
@@ -52,6 +53,17 @@ class SleepSettings(BaseModel):
     dream_replay_enabled: bool = True
     memory_consolidation_enabled: bool = True
     conflict_resolution_enabled: bool = True
+    # ── 阶段推进参数（默认值 = tracker 内置默认, 行为零漂移）──
+    sleep_mode: str = "temperature"
+    temp_threshold_light_sleep: float = 30.0
+    temp_threshold_deep_sleep: float = 25.0
+    temp_threshold_rem: float = 20.0
+    temp_threshold_hibernate: float = 15.0
+    idle_threshold_light_sleep: int = 30  # 分钟
+    idle_threshold_deep_sleep: int = 60
+    idle_threshold_rem: int = 90
+    idle_threshold_hibernate: int = 120
+    monitor_interval_seconds: int = 60
 
 
 class SleepSettingsRequest(BaseModel):
@@ -63,6 +75,16 @@ class SleepSettingsRequest(BaseModel):
     dream_replay_enabled: Optional[bool] = None
     memory_consolidation_enabled: Optional[bool] = None
     conflict_resolution_enabled: Optional[bool] = None
+    sleep_mode: Optional[str] = None
+    temp_threshold_light_sleep: Optional[float] = None
+    temp_threshold_deep_sleep: Optional[float] = None
+    temp_threshold_rem: Optional[float] = None
+    temp_threshold_hibernate: Optional[float] = None
+    idle_threshold_light_sleep: Optional[int] = None
+    idle_threshold_deep_sleep: Optional[int] = None
+    idle_threshold_rem: Optional[int] = None
+    idle_threshold_hibernate: Optional[int] = None
+    monitor_interval_seconds: Optional[int] = None
 
 
 class DreamLogItem(BaseModel):
@@ -104,17 +126,28 @@ class MemoryMergeItem(BaseModel):
     conflicts_resolved: int = 0
 
 
-class ConflictResolutionItem(BaseModel):
-    """冲突解决条目"""
+class MergeConflictItem(BaseModel):
+    """冲突解决记录 —— 与前端 MergeConflict 类型 (sleep.ts) 严格对齐。
 
-    resolution_id: str
+    前端冲突列表依赖 id/field/local_value/remote_value/resolved/resolution/
+    created_at; 此前该端点使用自造的 ConflictResolutionItem 形状,
+    Pydantic 把前端所需字段全部剥掉, 列表永远空白。
+    """
+
+    id: str
     agent_id: str
-    timestamp: float
-    conflict_type: str = "memory"
-    source_memories: List[str] = []
-    resolution_strategy: str = "merge"
-    resolution_result: str = ""
-    success: bool = True
+    field: str = "content"
+    local_value: str = ""
+    remote_value: str = ""
+    resolved: bool = True
+    resolution: Optional[str] = None
+    created_at: str = ""
+
+
+class ResolveConflictRequest(BaseModel):
+    """冲突解决请求"""
+
+    resolution: str = "keep_longest"
 
 
 def _get_request_id(request: Request) -> str:
@@ -201,20 +234,20 @@ def _generate_mock_merges(agent_id: str, limit: int = 10) -> List[MemoryMergeIte
     return merges
 
 
-def _generate_mock_conflicts(agent_id: str, limit: int = 10) -> List[ConflictResolutionItem]:
-    """生成模拟冲突解决数据"""
+def _generate_mock_conflicts(agent_id: str, limit: int = 10) -> List[MergeConflictItem]:
+    """生成模拟冲突数据（仅无睡眠管理器的 agent 回退用）"""
     conflicts = []
     for i in range(min(limit, 2)):
         conflicts.append(
-            ConflictResolutionItem(
-                resolution_id=str(uuid.uuid4()),
+            MergeConflictItem(
+                id=f"mock-cr-{i}",
                 agent_id=agent_id,
-                timestamp=time.time() - (i * 3600),
-                conflict_type="memory",
-                source_memories=[f"memory_{j}" for j in range(2)],
-                resolution_strategy="merge",
-                resolution_result="Successfully merged conflicting memories",
-                success=True,
+                field="content",
+                local_value=f"kept memory content {i}",
+                remote_value=f"merged memory content {i}",
+                resolved=True,
+                resolution="keep_longest",
+                created_at=datetime.now().isoformat(),
             )
         )
     return conflicts
@@ -493,21 +526,21 @@ async def get_memory_merge(
     raise HTTPException(status_code=404, detail=f"Merge '{merge_id}' not found")
 
 
-@router.get("/{agent_id}/conflicts", response_model=List[ConflictResolutionItem])
+@router.get("/{agent_id}/conflicts", response_model=List[MergeConflictItem])
 async def get_conflict_resolutions(
     request: Request,
     agent_id: str = Path(..., description="Agent ID"),
     limit: int = Query(default=10, ge=1, le=100, description="数量限制"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
 ):
-    """获取冲突解决历史"""
+    """获取冲突解决记录（形状与前端 MergeConflict 对齐）"""
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     sleep_manager = _get_sleep_manager(agent_id)
 
-    # 获取冲突解决历史
+    # 获取冲突解决记录（多成员簇合并时由 merge_cluster 产生）
     conflicts = []
     if sleep_manager and hasattr(sleep_manager, "get_conflict_resolutions"):
         try:
@@ -522,18 +555,17 @@ async def get_conflict_resolutions(
     return conflicts
 
 
-@router.get("/{agent_id}/conflicts/{resolution_id}", response_model=ConflictResolutionItem)
+@router.get("/{agent_id}/conflicts/{resolution_id}", response_model=MergeConflictItem)
 async def get_conflict_resolution(
     request: Request,
     agent_id: str = Path(..., description="Agent ID"),
-    resolution_id: str = Path(..., description="解决ID"),
+    resolution_id: str = Path(..., description="冲突记录ID"),
 ):
     """获取单个冲突解决详情"""
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    # 获取冲突详情（优先真实数据，无管理器时才回退模拟数据）
     sleep_manager = _get_sleep_manager(agent_id)
     conflicts = []
     if sleep_manager and hasattr(sleep_manager, "get_conflict_resolutions"):
@@ -542,15 +574,43 @@ async def get_conflict_resolution(
         except Exception as e:
             logger.warning("Failed to get conflict resolutions: %s", e)
     if not conflicts and sleep_manager is None:
-        conflicts = _generate_mock_conflicts(agent_id, 100)
+        conflicts = [c.model_dump() for c in _generate_mock_conflicts(agent_id, 100)]
     for conflict in conflicts:
-        resolution_id_value = (
-            conflict.resolution_id if hasattr(conflict, "resolution_id") else conflict.get("resolution_id")
-        )
-        if resolution_id_value == resolution_id:
+        cid = conflict.get("id") if isinstance(conflict, dict) else getattr(conflict, "id", None)
+        if cid == resolution_id:
             return conflict
 
     raise HTTPException(status_code=404, detail=f"Conflict resolution '{resolution_id}' not found")
+
+
+@router.post("/{agent_id}/conflicts/{resolution_id}/resolve")
+async def resolve_conflict(
+    request: Request,
+    agent_id: str = Path(..., description="Agent ID"),
+    resolution_id: str = Path(..., description="冲突记录ID"),
+    body: ResolveConflictRequest = ResolveConflictRequest(),
+):
+    """更新冲突解决方式（前端冲突列表的 保留/自定义解决 按钮）"""
+    request_id = _get_request_id(request)
+
+    agent = _get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    sleep_manager = _get_sleep_manager(agent_id)
+    if not sleep_manager or not hasattr(sleep_manager, "resolve_conflict"):
+        raise HTTPException(status_code=503, detail="Sleep manager not available")
+
+    updated = sleep_manager.resolve_conflict(resolution_id, body.resolution)
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Conflict resolution '{resolution_id}' not found")
+
+    return {
+        "code": 0,
+        "message": "Conflict resolved",
+        "data": updated,
+        "request_id": request_id,
+    }
 
 
 @router.post("/{agent_id}/wake")
@@ -586,7 +646,7 @@ async def wake_agent(
 async def start_sleep(
     request: Request,
     agent_id: str = Path(..., description="Agent ID"),
-    duration_minutes: int = Query(default=60, ge=1, le=1440, description="睡眠时长(分钟)"),
+    duration_minutes: Optional[int] = Query(default=None, ge=1, le=1440, description="睡眠时长(分钟)，缺省用设置值"),
 ):
     """启动 Agent 睡眠"""
     request_id = _get_request_id(request)
@@ -596,11 +656,14 @@ async def start_sleep(
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     sleep_manager = _get_sleep_manager(agent_id)
+    effective_duration = duration_minutes
 
     # 启动睡眠
     if sleep_manager and hasattr(sleep_manager, "start_sleep"):
         try:
-            sleep_manager.start_sleep(duration_minutes=duration_minutes)
+            result = sleep_manager.start_sleep(duration_minutes=duration_minutes)
+            if isinstance(result, dict) and result.get("duration_minutes") is not None:
+                effective_duration = result.get("duration_minutes")
         except Exception as e:
             logger.warning("Failed to start sleep: %s", e)
 
@@ -610,7 +673,7 @@ async def start_sleep(
         "data": {
             "agent_id": agent_id,
             "status": "sleeping",
-            "duration_minutes": duration_minutes,
+            "duration_minutes": effective_duration,
         },
         "request_id": request_id,
     }

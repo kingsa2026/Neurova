@@ -2,10 +2,10 @@
 Browser Manager - 浏览器自动化管理器
 
 整合 Hermes Browser 的多后端浏览器自动化能力：
-- 多后端支持（Playwright, Scrapling, Camofox）
+- 多后端支持（Playwright, Scrapling, camofox-browser）
 - 混合路由（自动选择云端/本地）
 - CDP WebSocket 监控
-- 反检测浏览
+- 反检测浏览（camofox-browser 后端）
 - 对话框自动处理
 - 快照压缩
 """
@@ -13,6 +13,7 @@ Browser Manager - 浏览器自动化管理器
 import asyncio
 import base64
 import json
+import os
 from neurova.core.logger import get_logger
 import threading
 import time
@@ -44,6 +45,13 @@ try:
     HAS_WEBSOCKETS = True
 except ImportError:
     HAS_WEBSOCKETS = False
+
+try:
+    import httpx  # noqa: F401 - 仅探测可用性
+
+    HAS_HTTPX = True
+except ImportError:
+    HAS_HTTPX = False
 
 
 @dataclass
@@ -178,68 +186,6 @@ class BrowserSupervisor:
         if self._ws:
             await self._ws.close()
             self._ws = None
-
-
-class CamofoxAdapter:
-    """Camofox 反检测浏览器适配器"""
-
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        self._config = config or {}
-        self._port = self._config.get("port", 9222)
-
-    async def navigate(self, url: str) -> BrowserResult:
-        start_time = time.time()
-        try:
-            # Camofox 通过 CDP 连接
-            supervisor = BrowserSupervisor(f"ws://localhost:{self._port}")
-            if await supervisor.connect():
-                await supervisor.send("Page.navigate", {"url": url})
-                await supervisor.disconnect()
-                return BrowserResult(success=True, url=url, duration_ms=(time.time() - start_time) * 1000)
-            return BrowserResult(
-                success=False, error="Failed to connect to Camofox", duration_ms=(time.time() - start_time) * 1000
-            )
-        except Exception as e:
-            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
-
-    async def screenshot(self) -> BrowserResult:
-        start_time = time.time()
-        try:
-            supervisor = BrowserSupervisor(f"ws://localhost:{self._port}")
-            if await supervisor.connect():
-                result = await supervisor.send("Page.captureScreenshot", {"format": "png"})
-                await supervisor.disconnect()
-                return BrowserResult(
-                    success=True,
-                    screenshot=result.get("data") if result else None,
-                    duration_ms=(time.time() - start_time) * 1000,
-                )
-            return BrowserResult(
-                success=False, error="Failed to connect", duration_ms=(time.time() - start_time) * 1000
-            )
-        except Exception as e:
-            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
-
-    async def extract_text(self) -> BrowserResult:
-        start_time = time.time()
-        try:
-            supervisor = BrowserSupervisor(f"ws://localhost:{self._port}")
-            if await supervisor.connect():
-                result = await supervisor.send("Runtime.evaluate", {"expression": "document.body.innerText"})
-                await supervisor.disconnect()
-                return BrowserResult(
-                    success=True,
-                    data=result.get("result", {}).get("value") if result else None,
-                    duration_ms=(time.time() - start_time) * 1000,
-                )
-            return BrowserResult(
-                success=False, error="Failed to connect", duration_ms=(time.time() - start_time) * 1000
-            )
-        except Exception as e:
-            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
-
-    async def close(self) -> None:
-        pass
 
 
 class ScraplingSpiderTool:
@@ -812,10 +758,12 @@ class BrowserManager:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self._config = config or {}
         self._backends: Dict[str, BrowserBackend] = {}
+        self._user_camofox_backends: Dict[str, BrowserBackend] = {}  # 三层隔离:按 userId 池化
+        self._camofox_enabled: bool = False  # 由 _load_config 设置
         self._active_backend: Optional[BrowserBackend] = None
         self._spider_tool = ScraplingSpiderTool(config)
         self._dialog_handler = DialogHandler()
-        self._lock = threading.RLock()
+        self._lock = threading.RLock()  # 池化场景下必须——保护 _user_camofox_backends
         self._load_config()
         logger.info("BrowserManager initialized")
 
@@ -826,22 +774,37 @@ class BrowserManager:
             self._backends["playwright"] = PlaywrightBackend(self._config)
         if HAS_SCRAPLING:
             self._backends["scrapling"] = ScraplingBackend(self._config)
+        # camofox-browser 反检测后端:三层隔离——按 userId 池化,延迟到首次 get 时创建。
+        # 不再直接注册到 _backends(否则所有 user 共享同一后端,_tabs 跨用户污染)。
+        if HAS_HTTPX and (
+            os.environ.get("NEUROVA_CAMOFOX_URL")
+            or (self._config or {}).get("camofox", {}).get("enabled")
+        ):
+            self._camofox_enabled = True
 
     def _resolve_backend(self, preferred: Optional[str] = None) -> str:
         """解析要使用的后端"""
         if preferred and preferred in self._backends:
             return preferred
-        # 默认优先级: playwright > scrapling
+        # 默认优先级: playwright(通用) > camofox(反检测,按 user 池化) > scrapling(静态爬取)
         if "playwright" in self._backends:
             return "playwright"
+        if self._camofox_enabled:
+            return "camofox"
         if "scrapling" in self._backends:
             return "scrapling"
         raise RuntimeError("No browser backend available")
 
     async def _get_backend(self, backend_name: Optional[str] = None) -> BrowserBackend:
-        """获取并初始化后端"""
+        """获取并初始化后端(camofox 按 user 池化,其它共享)"""
         name = self._resolve_backend(backend_name)
-        backend = self._backends[name]
+        with self._lock:
+            if name == "camofox" and self._camofox_enabled:
+                backend = self._get_or_create_user_camofox_backend()
+            else:
+                backend = self._backends.get(name)
+                if backend is None:
+                    raise RuntimeError(f"Browser backend not available: {name}")
 
         if not backend._initialized:
             success = await backend.initialize()
@@ -850,6 +813,26 @@ class BrowserManager:
 
         self._active_backend = backend
         return backend
+
+    def _get_or_create_user_camofox_backend(self) -> BrowserBackend:
+        """按当前请求 userId 池化 camofox 后端(必须持 _lock 调用)
+
+        - 同 user:返回同一实例(_tabs / _active_target_id 共享)
+        - 不同 user:返回不同实例(隔离 cookie / tab)
+        - 无 userId 注入:回退到 "default" 实例
+        """
+        try:
+            from neurova.core.identity_context import get_request_user_id
+
+            user_id = get_request_user_id() or "default"
+        except ImportError:
+            user_id = "default"
+        if user_id not in self._user_camofox_backends:
+            from neurova.computer_use.camofox_server_backend import CamofoxServerBackend
+
+            cfg = (self._config or {}).get("camofox") or {}
+            self._user_camofox_backends[user_id] = CamofoxServerBackend(cfg, user_id=user_id)
+        return self._user_camofox_backends[user_id]
 
     async def execute(self, action: str, **kwargs) -> BrowserResult:
         """执行浏览器动作"""
@@ -985,12 +968,18 @@ class BrowserManager:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
     async def close_all(self) -> None:
-        """关闭所有后端"""
+        """关闭所有后端(共享后端 + 池化的 camofox 后端)"""
         for backend in self._backends.values():
             try:
                 await backend.close()
             except Exception as e:
                 logger.error("Error closing backend: %s", str(e))
+        for backend in self._user_camofox_backends.values():
+            try:
+                await backend.close()
+            except Exception as e:
+                logger.error("Error closing user camofox backend: %s", str(e))
+        self._user_camofox_backends.clear()
         self._active_backend = None
 
     def get_status(self) -> Dict[str, Any]:
@@ -1001,6 +990,8 @@ class BrowserManager:
             "has_playwright": HAS_PLAYWRIGHT,
             "has_scrapling": HAS_SCRAPLING,
             "has_websockets": HAS_WEBSOCKETS,
+            "has_camofox_server": "camofox" in self._backends,
+            "camofox_url": os.environ.get("NEUROVA_CAMOFOX_URL", ""),
         }
 
 

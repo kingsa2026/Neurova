@@ -177,6 +177,12 @@ class LLMClient:
         """
         self._check_input_budget(messages, tools=kwargs.get("tools"))
         if not self.client:
+            # 兜底模拟响应(离线测试/空 key)。静默假回复会污染生产对话,必须显式告警
+            self.logger.warning(
+                "LLMClient 未初始化(缺 key/配置失败),返回模拟响应: base_url=%s model=%s",
+                getattr(self.config, "base_url", "?"),
+                getattr(self.config, "model", "?"),
+            )
             return self._mock_response(messages)
 
         start_time = time.time()
