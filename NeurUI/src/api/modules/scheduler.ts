@@ -1,34 +1,37 @@
 import api from '@/api'
-import type { ApiResponse, PaginatedData, PageParams } from '@/types/response'
+import type { ApiResponse, PageParams } from '@/types/response'
 
 // ---------------------------------------------------------------------------
-// Types
+// Types — 与后端 /v1/scheduler 契约对齐:
+//   cron_expression / interval_seconds / parameters / agent_id / task_id
 // ---------------------------------------------------------------------------
 
 export interface ScheduledTask {
-  id: string
+  task_id: string
   name: string
   description?: string
-  cron_expr: string
+  cron_expression?: string
+  interval_seconds?: number
+  scheduled_at?: number
   agent_id?: string
   action: string
-  payload?: Record<string, unknown>
-  enabled: boolean
-  last_run?: string
-  next_run?: string
-  status: 'idle' | 'running' | 'error'
-  created_at: string
-  updated_at?: string
+  parameters?: Record<string, unknown>
+  status: string
+  created_at?: number
+  updated_at?: number
+  last_run_at?: number
+  next_run_at?: number
+  run_count?: number
 }
 
 export interface TaskCreatePayload {
   name: string
   description?: string
-  cron_expr: string
+  cron_expression?: string
+  interval_seconds?: number
   agent_id?: string
   action: string
-  payload?: Record<string, unknown>
-  enabled?: boolean
+  parameters?: Record<string, unknown>
 }
 
 export interface SchedulerStatus {
@@ -50,8 +53,8 @@ export function getSchedulerStatus() {
 }
 
 /** List scheduled tasks. */
-export function getScheduledTasks(params?: PageParams & { agent_id?: string; enabled?: boolean }) {
-  return api.get<ApiResponse<PaginatedData<ScheduledTask>>>(`${BASE}/tasks`, { params })
+export function getScheduledTasks(params?: PageParams & { agent_id?: string; status?: string }) {
+  return api.get<ApiResponse<ScheduledTask[]>>(`${BASE}/tasks`, { params })
 }
 
 /** Get a single scheduled task. */
@@ -72,4 +75,9 @@ export function updateScheduledTask(id: string, data: Partial<TaskCreatePayload>
 /** Delete a scheduled task. */
 export function deleteScheduledTask(id: string) {
   return api.delete<ApiResponse<null>>(`${BASE}/tasks/${id}`)
+}
+
+/** Run a task immediately (遗留修复: 前端"立即运行"此前为空操作). */
+export function runScheduledTask(id: string) {
+  return api.post<ApiResponse<Record<string, unknown>>>(`${BASE}/tasks/${id}/run`)
 }
