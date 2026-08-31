@@ -434,23 +434,12 @@ class MultiModelLLMClient:
         provider_id: Optional[str] = None,
         **kwargs,
     ) -> Dict[str, Any]:
-        """发送聊天请求"""
-        # [METRICS] 结构化日志：记录 LLM 调用的消息结构和模型信息
-        # _get_client_for_request 内部已处理冷启动自愈与"指定 provider/model 无 key"
-        # 时的兜底，chat() 无需再自行 refresh_all_providers()（避免重复刷新）。
-        client = self._get_client_for_request(model, provider_id)
+        """发送聊天请求
 
-        _role_counts: Dict[str, int] = {}
-        for m in messages:
-            _r = m.get("role", "unknown")
-            _role_counts[_r] = _role_counts.get(_r, 0) + 1
-        _sys_count = _role_counts.get("system", 0)
-        _total_msgs = len(messages)
-        _model_name = model or (client.model if client else "unknown")
-        logger.info(
-            "[LLM-REQ] model=%s, messages=%s, system=%s, roles=%s",
-            _model_name, _total_msgs, _sys_count, _role_counts,
-        )
+        P2-2：底层调用经 per-provider retry/circuit 装配；
+        P2-4：真实 usage 记入 TokenUsageAccounting（对账+成本）。
+        """
+        client = self._get_client_for_request(model, provider_id)
         if not client:
             logger.warning("No client available for chat")
             return {
@@ -465,6 +454,27 @@ class MultiModelLLMClient:
             duration = time.time() - start_time
 
             client.increment_request(success=True)
+            try:
+                from neurova.core.usage_accounting import get_usage_accounting
+
+                # P2-4：真实 token 对账（response.usage 为 OpenAI 返回值；
+                # 缺失时静默跳过，绝不做字符长度伪造）
+                _usage = getattr(result, "usage", None)
+                if _usage:
+                    def _uval(key):
+                        v = getattr(_usage, key, None)
+                        if v is None and isinstance(_usage, dict):
+                            v = _usage.get(key)
+                        return int(v or 0)
+
+                    get_usage_accounting().record(
+                        model=client.model,
+                        provider=client.provider.id,
+                        prompt_tokens=_uval("prompt_tokens"),
+                        completion_tokens=_uval("completion_tokens"),
+                    )
+            except Exception:
+                pass
             return {
                 "success": True,
                 "response": result,
@@ -474,6 +484,12 @@ class MultiModelLLMClient:
             }
         except CircuitBreakerOpen as e:
             client.increment_request(success=False)
+            try:
+                from neurova.core.metrics import get_metrics
+
+                get_metrics().record_circuit_rejection(client.provider.id)
+            except Exception:
+                pass
             return {
                 "success": False,
                 "error": f"熔断打开（连续失败暂停请求）: {e}",
@@ -482,61 +498,6 @@ class MultiModelLLMClient:
             }
         except Exception as e:
             client.increment_request(success=False)
-            return {
-                "success": False,
-                "error": str(e),
-                "model": client.model,
-                "provider": client.provider.id,
-            }
-        # [METRICS] 结构化日志：记录 LLM 调用的消息结构和模型信息
-        # _get_client_for_request 内部已处理冷启动自愈与"指定 provider/model 无 key"
-        # 时的兜底，chat() 无需再自行 refresh_all_providers()（避免重复刷新）。
-        client = self._get_client_for_request(model, provider_id)
-
-        _role_counts: Dict[str, int] = {}
-        for m in messages:
-            _r = m.get("role", "unknown")
-            _role_counts[_r] = _role_counts.get(_r, 0) + 1
-        _sys_count = _role_counts.get("system", 0)
-        _total_msgs = len(messages)
-        _model_name = model or (client.model if client else "unknown")
-        logger.info(
-            "[LLM-REQ] model=%s, messages=%s, system=%s, roles=%s",
-            _model_name, _total_msgs, _sys_count, _role_counts,
-        )
-        if not client:
-            logger.warning("No client available for chat")
-            return {
-                "success": False,
-                "error": "No client available",
-            }
-
-        try:
-            start_time = time.time()
-            result = await asyncio.to_thread(client.client.chat, messages, **kwargs)
-            duration = time.time() - start_time
-
-            client.increment_request(success=True)
-            return {
-                "success": True,
-                "response": result,
-                "duration": duration,
-                "model": client.model,
-                "provider": client.provider.id,
-            }
-        except Exception as e:
-            client.increment_request(success=False)
-            try:
-                from neurova.core.metrics import get_metrics
-
-                get_metrics().record_llm_call(
-                    provider=client.provider.id,
-                    model=client.model,
-                    success=False,
-                    duration_s=time.time() - start_time,
-                )
-            except Exception:
-                pass
             return {
                 "success": False,
                 "error": str(e),
