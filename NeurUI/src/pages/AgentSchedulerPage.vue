@@ -26,6 +26,7 @@
         >
           <div class="task-meta">
             <a-tag color="blue">{{ taskScheduleLabel(task) }}</a-tag>
+            <a-tag color="default" v-if="task.agent_id">{{ task.agent_id }}</a-tag>
             <a-tag :color="task.status === 'completed' ? 'green' : task.status === 'failed' ? 'red' : 'blue'">{{ task.status }}</a-tag>
             <span class="meta-text" v-if="task.next_run_at">{{ t('nav.scheduler') }}: {{ formatTs(task.next_run_at) }}</span>
             <span class="meta-text" v-if="task.last_run_at">{{ t('scheduler.lastRun') }}{{ formatTs(task.last_run_at) }}</span>
@@ -48,6 +49,14 @@
       <a-form layout="vertical" :rules="{ name: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('common.name')">
           <a-input v-model:value="form.name" :placeholder="t('common.name')" />
+        </a-form-item>
+        <a-form-item :label="t('scheduler.execAgent')">
+          <a-select v-model:value="form.agentSel" :placeholder="t('scheduler.execAgentPlaceholder')">
+            <a-select-option v-for="opt in agentStore.agentOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}{{ opt.isWorkflow ? ' (Workflow)' : '' }}
+            </a-select-option>
+          </a-select>
+          <span class="form-hint">{{ t('scheduler.execAgentHint') }}</span>
         </a-form-item>
         <a-form-item :label="t('scheduler.scheduleType')">
           <a-select v-model:value="form.scheduleType">
@@ -186,6 +195,8 @@ const form = reactive({
   weekdays: [1, 2, 3, 4, 5] as number[],
   dayOfMonth: 1,
   advanced: false,
+  // 执行 Agent: 调度任务由用户显式指定(工作流无归属, 不绑定页面路由 agent)
+  agentSel: '',
   // 动作参数
   actionParams: {
     message: '',
@@ -259,6 +270,7 @@ function resetForm() {
   form.weekdays = [1, 2, 3, 4, 5]
   form.dayOfMonth = 1
   form.advanced = false
+  form.agentSel = agentId.value || ''
   form.actionParams = { message: '', workflow_id: '', workflowInput: '', skill_id: '', instruction: '' }
   editingId.value = null
 }
@@ -278,6 +290,7 @@ function openEdit(task: schedulerApi.ScheduledTask) {
   form.interval = task.interval_seconds?.toString() ?? ''
   form.action = task.action ?? ''
   form.description = task.description ?? ''
+  form.agentSel = task.agent_id || agentId.value || ''
   applyActionParams(task.parameters)
   showModal.value = true
 }
@@ -285,7 +298,8 @@ function openEdit(task: schedulerApi.ScheduledTask) {
 async function fetchTasks() {
   loading.value = true
   try {
-    const res = await schedulerApi.getScheduledTasks({ agent_id: agentId.value })
+    // 调度任务为全局列表: 不按页面路由 agent 过滤(任务由用户指定执行 agent)
+    const res = await schedulerApi.getScheduledTasks({})
     const data = res?.data
     tasks.value = (Array.isArray(data) ? data : []) as schedulerApi.ScheduledTask[]
   } catch { message.error(t('common.error')) } finally { loading.value = false }
@@ -298,7 +312,7 @@ async function handleSave() {
       name: form.name,
       action: form.action,
       description: form.description,
-      agent_id: agentId.value,
+      agent_id: form.agentSel || agentId.value || '',
       parameters: buildActionParams(),
     }
     if (form.scheduleType === 'cron') {
@@ -337,6 +351,7 @@ onMounted(() => {
   void fetchTasks()
   void loadWorkflows()
   void loadSkills()
+  void agentStore.loadAgents()
 })
 </script>
 
@@ -346,6 +361,7 @@ onMounted(() => {
 .cron-advanced-toggle { font-size: 12px; color: var(--nr-accent, #7c9eff); cursor: pointer; }
 .cron-advanced-input { width: 100%; }
 .cron-preview { margin-top: 6px; font-size: 12px; font-family: monospace; color: var(--nr-text-secondary, #8a8a92); }
+.form-hint { display: block; margin-top: 4px; font-size: 12px; color: var(--nr-text-tertiary, #666); }
 .scheduler-page { display: flex; flex-direction: column; gap: 24px; padding: 24px; }
 .page-header { display: flex; justify-content: space-between; align-items: center; }
 .page-header h2 { color: var(--nr-text-primary); font-family: var(--nr-font-display); font-weight: 700; margin: 0; }

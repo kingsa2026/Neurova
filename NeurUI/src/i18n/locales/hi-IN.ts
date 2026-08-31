@@ -1742,6 +1742,9 @@ export default {
     instruction: 'निर्देश',
     instructionPlaceholder: 'एजेंट को बताएं कि इस कौशल से क्या करना है',
     runCount: 'निष्पादन संख्या',
+    execAgent: 'निष्पादित करने वाला एजेंट',
+    execAgentPlaceholder: 'कार्य चलाने के लिए एजेंट चुनें',
+    execAgentHint: 'कार्य चयनित एजेंट द्वारा निष्पादित होता है (डिफ़ॉल्ट: वर्तमान पृष्ठ एजेंट, बदला जा सकता है)',
   },
   rule: {
     title: 'नियम',

@@ -1742,6 +1742,9 @@ export default {
     instruction: 'Instruction',
     instructionPlaceholder: 'Dites à l\'agent ce qu\'il doit faire avec cette compétence',
     runCount: 'Exécutions',
+    execAgent: 'Agent exécutant',
+    execAgentPlaceholder: 'Sélectionner l\'agent qui exécute la tâche',
+    execAgentHint: 'La tâche est exécutée par l\'agent sélectionné (par défaut l\'agent de la page, modifiable)',
   },
   rule: {
     title: 'Règles',

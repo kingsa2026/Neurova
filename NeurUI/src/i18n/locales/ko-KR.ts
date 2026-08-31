@@ -1742,6 +1742,9 @@ export default {
     instruction: '지시',
     instructionPlaceholder: '에이전트에게 이 스킬로 무엇을 할지 지시',
     runCount: '실행 횟수',
+    execAgent: '실행 에이전트',
+    execAgentPlaceholder: '작업을 실행할 에이전트 선택',
+    execAgentHint: '작업은 선택한 에이전트가 실행합니다(기본: 현재 페이지 에이전트, 변경 가능)',
   },
   rule: {
     title: '규칙',
