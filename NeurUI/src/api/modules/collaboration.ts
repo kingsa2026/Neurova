@@ -172,8 +172,11 @@ export interface CanvasRunStatus {
 }
 
 /** Run a canvas workflow（session_id 可选：子 Agent 事件广播到该聊天会话）. */
-export function runCanvas(canvasId: string, payload?: { session_id?: string; agent_id?: string }) {
-  return api.post<ApiResponse<{ runId: string; status: string; workflow_id: string }>>(
+export function runCanvas(
+  canvasId: string,
+  payload?: { session_id?: string; agent_id?: string; debug?: boolean; breakpoints?: string[] },
+) {
+  return api.post<ApiResponse<{ runId: string; status: string; workflow_id: string; debug?: boolean }>>(
     `${BASE}/canvas/${canvasId}/run`,
     payload ?? {},
   )
