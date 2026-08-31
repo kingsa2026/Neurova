@@ -5,6 +5,7 @@ MCP Client、Tool Router 管理接口:
 - GET    /v1/tool-layers/mcp-servers              列出 MCP Server
 - POST   /v1/tool-layers/mcp-servers              连接 MCP Server
 - DELETE /v1/tool-layers/mcp-servers/{server_id}  断开 MCP Server
+- POST   /v1/tool-layers/mcp-servers/{server_id}/oauth/authorize  OAuth2 授权码流（P3-d）
 - GET    /v1/tool-layers/mcp-servers/{server_id}/tools  MCP 工具清单
 - GET    /v1/tool-layers/tools                     所有可用工具
 - POST   /v1/tool-layers/tools/execute             执行工具调用
@@ -62,6 +63,10 @@ class MCPServerConnectRequest(BaseModel):
     command: Optional[str] = Field(default=None, description="stdio 模式的命令")
     args: List[str] = Field(default_factory=list, description="stdio 模式的参数")
     env: Dict[str, str] = Field(default_factory=dict, description="环境变量")
+
+
+class MCPOAuthAuthorizeRequest(BaseModel):
+    timeout_s: float = Field(default=300.0, gt=0, le=3600, description="等待用户完成浏览器授权的超时（秒）")
 
 
 class ToolInfo(BaseModel):
@@ -196,6 +201,47 @@ async def connect_mcp_server(
         user_id="default",
         created_at=time.time(),
     )
+
+
+@router.post("/mcp-servers/{server_id}/oauth/authorize")
+async def authorize_mcp_oauth(server_id: str, body: Optional[MCPOAuthAuthorizeRequest] = None):
+    """MCP OAuth2 授权码流：打开浏览器完成授权 → 环回回调换 token → 入缓存。
+
+    仅支持 config.oauth.grant_type=authorization_code 的 server；
+    client_credentials 流无需浏览器（call_tool 时自动按需取 token）。
+    """
+    from neurova.shared_config import get_shared_config_manager
+    from neurova.tool_layers.mcp_oauth import (
+        OAuthTokenError,
+        run_authorization_code_flow,
+    )
+
+    entry = get_shared_config_manager().get_mcp_server(server_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="MCP Server not found")
+
+    oauth_config = (entry.get("config") or {}).get("oauth") or {}
+    if not oauth_config:
+        raise HTTPException(
+            status_code=400,
+            detail="该 server 未配置 OAuth（config.oauth 缺失）；仅 authorization_code 流需要浏览器授权",
+        )
+    if (oauth_config.get("grant_type") or "client_credentials") != "authorization_code":
+        raise HTTPException(
+            status_code=400,
+            detail="仅 grant_type=authorization_code 需要浏览器授权；client_credentials 由工具调用时自动获取",
+        )
+
+    timeout_s = body.timeout_s if body else 300.0
+    try:
+        token = await run_authorization_code_flow(server_id, oauth_config, timeout_s=timeout_s)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except OAuthTokenError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    logger.info("MCP OAuth 授权完成: server=%s", server_id)
+    return {"status": "authorized", "server_id": server_id, "token_hint": (token[:6] + "...") if token else ""}
 
 
 @router.delete("/mcp-servers/{server_id}")
