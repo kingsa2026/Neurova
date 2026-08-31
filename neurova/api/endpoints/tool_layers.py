@@ -54,6 +54,7 @@ class MCPServerInfo(BaseModel):
     tools_count: int = 0
     user_id: str = ""
     created_at: float = 0
+    oauth_grant: Optional[str] = None  # config.oauth.grant_type 暴露（前端条件渲染"OAuth 授权"按钮）
 
 
 class MCPServerConnectRequest(BaseModel):
@@ -113,6 +114,7 @@ def _server_info_from_config(entry: Dict[str, Any], status: Dict[str, Any]) -> M
         tools_count=int(status.get("tool_count", 0)),
         user_id="default",
         created_at=0,
+        oauth_grant=((entry.get("config") or {}).get("oauth") or {}).get("grant_type"),
     )
 
 

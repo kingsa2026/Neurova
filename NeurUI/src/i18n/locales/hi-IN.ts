@@ -768,6 +768,7 @@ export default {
     formats: 'समर्थित प्रारूप',
     serverUrl: 'सर्वर पता',
     authToken: 'प्रमाणीकरण टोकन',
+    oauthAuthorize: 'OAuth प्राधिकरण',
     parameters: 'पैरामीटर (JSON)',
   },
   channel: {

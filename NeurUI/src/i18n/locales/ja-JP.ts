@@ -768,6 +768,7 @@ export default {
     formats: '対応フォーマット',
     serverUrl: 'サーバーURL',
     authToken: '認証トークン',
+    oauthAuthorize: 'OAuth 認証',
     parameters: 'パラメータ (JSON)',
   },
   channel: {

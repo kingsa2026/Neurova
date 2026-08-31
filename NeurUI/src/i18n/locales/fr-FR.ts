@@ -768,6 +768,7 @@ export default {
     formats: 'Formats pris en charge',
     serverUrl: 'URL du serveur',
     authToken: 'Jeton d\'authentification',
+    oauthAuthorize: 'Autorisation OAuth',
     parameters: 'Paramètres (JSON)',
   },
   channel: {

@@ -768,6 +768,7 @@ export default {
     formats: 'الصيغ المدعومة',
     serverUrl: 'عنوان URL للخادم',
     authToken: 'رمز المصادقة',
+    oauthAuthorize: 'ترخيص OAuth',
     parameters: 'المعاملات (JSON)',
   },
   channel: {

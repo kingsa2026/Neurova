@@ -770,6 +770,7 @@ export default {
     formats: 'Supported Formats',
     serverUrl: 'Server URL',
     authToken: 'Auth Token',
+    oauthAuthorize: 'OAuth Authorize',
     parameters: 'Parameters (JSON)',
   },
   channel: {
