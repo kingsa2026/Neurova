@@ -341,6 +341,8 @@ class OpenAILoop(BaseAgentLoop):
         reasoning_parts: List[str] = []
         pending_tool_calls: List[Dict] = []
         finish_reason = ""
+        # P2-4d：流式 usage 聚合（OpenAI 流式 usage 在最后一 chunk 携带全量）
+        round_usage = None
 
         stream_kwargs = {k: v for k, v in request_params.items() if k not in ("messages", "stream")}
         async for chunk in self.llm_client.chat_stream(request_params["messages"], **stream_kwargs):
@@ -352,6 +354,13 @@ class OpenAILoop(BaseAgentLoop):
             if content:
                 reply_parts.append(content)
                 yield {"type": "content", "data": content}
+            if getattr(chunk, "usage", None):
+                u = chunk.usage
+                round_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                    "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
+                    "total_tokens": getattr(u, "total_tokens", 0) or 0,
+                }
             rtext = getattr(chunk, "reasoning_content", None)
             if rtext:
                 reasoning_parts.append(rtext)
@@ -416,7 +425,12 @@ class OpenAILoop(BaseAgentLoop):
                 return
             logger.warning("工具调用轮次超过上限 (%s)，停止递归", self._tool_rounds)
 
-        yield {"type": "done", "reply": "".join(reply_parts), "finish_reason": finish_reason}
+        yield {
+            "type": "done",
+            "reply": "".join(reply_parts),
+            "finish_reason": finish_reason,
+            "usage": round_usage,
+        }
 
     @staticmethod
     def _raise_for_error_dict(chunk: Dict) -> Exception:
