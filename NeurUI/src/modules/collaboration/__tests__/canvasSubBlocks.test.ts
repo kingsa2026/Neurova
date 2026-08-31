@@ -107,3 +107,61 @@ describe('平台参数联动场景（同键多变体）', () => {
     expect(filterVisibleSubBlocks(variants, { platform: 'jd' })).toHaveLength(0)
   })
 })
+
+describe('知识库节点 kb_type 联动（R-9）', () => {
+  // 镜像后端 builtin.py knowledge_base sub_blocks 的 condition
+  const kbBlocks: SubBlockLike[] = [
+    { id: 'query', condition: null },
+    { id: 'limit', condition: null },
+    { id: 'kb_config_id', condition: { field: 'kb_type', operator: 'neq', value: 'local' } },
+    { id: 'api_url', condition: { field: 'kb_type', operator: 'eq', value: 'custom' } },
+    { id: 'api_key', condition: { field: 'kb_type', operator: 'eq', value: 'custom' } },
+    { id: 'dataset_id', condition: { field: 'kb_type', operator: 'eq', value: 'custom' } },
+    { id: 'app_id', condition: { field: 'kb_type', operator: 'eq', value: 'feishu' } },
+    { id: 'app_secret', condition: { field: 'kb_type', operator: 'eq', value: 'feishu' } },
+    { id: 'space_id', condition: { field: 'kb_type', operator: 'eq', value: 'feishu' } },
+    { id: 'base_url', condition: { field: 'kb_type', operator: 'in', value: ['iflow', 'ima'] } },
+    { id: 'allow_local', condition: { field: 'kb_type', operator: 'eq', value: 'ima' } },
+  ]
+
+  const visibleIds = (kbType: string) =>
+    filterVisibleSubBlocks(kbBlocks, { kb_type: kbType }).map((b) => b.id)
+
+  it('local 只显示通用字段（无远程配置）', () => {
+    expect(visibleIds('local')).toEqual(['query', 'limit'])
+  })
+
+  it('iflow 显示 query/limit/config/base_url（无 custom/feishu/ima 专属）', () => {
+    const ids = visibleIds('iflow')
+    expect(ids).toContain('kb_config_id')
+    expect(ids).toContain('base_url')
+    expect(ids).not.toContain('api_url')
+    expect(ids).not.toContain('app_id')
+    expect(ids).not.toContain('allow_local')
+  })
+
+  it('feishu 显示 app_id/app_secret/space_id 专属', () => {
+    const ids = visibleIds('feishu')
+    expect(ids).toContain('app_id')
+    expect(ids).toContain('app_secret')
+    expect(ids).toContain('space_id')
+    expect(ids).not.toContain('api_url')
+    expect(ids).not.toContain('allow_local')
+  })
+
+  it('ima 显示 base_url + allow_local', () => {
+    const ids = visibleIds('ima')
+    expect(ids).toContain('base_url')
+    expect(ids).toContain('allow_local')
+    expect(ids).not.toContain('app_secret')
+  })
+
+  it('custom 显示 api_url/api_key/dataset_id 专属', () => {
+    const ids = visibleIds('custom')
+    expect(ids).toContain('api_url')
+    expect(ids).toContain('api_key')
+    expect(ids).toContain('dataset_id')
+    expect(ids).not.toContain('app_id')
+    expect(ids).not.toContain('base_url')
+  })
+})
