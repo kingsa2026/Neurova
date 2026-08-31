@@ -235,6 +235,7 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.benchmark", "/v1/benchmark", "Benchmark API"),
         ("neurova.api.endpoints.console", "/v1/console", "Console API"),
         ("neurova.api.endpoints.plugin", "/v1/plugins", "Plugin API"),
+        ("neurova.api.endpoints.marketplace", "/v1/marketplace", "Marketplace API"),
         ("neurova.api.endpoints.sandbox", "/v1/sandbox", "Sandbox API"),
         ("neurova.api.endpoints.builder", "/v1/builder", "Builder API"),
         ("neurova.api.endpoints.computer", "/v1/computer", "Computer API"),
