@@ -319,10 +319,22 @@
             />
             <!-- R-6: toggle 布尔开关（如 ima allow_local / 节点开关） -->
             <a-switch
-              v-else-if="field.type === 'toggle'"
+              v-else-if="field.type === 'toggle' || field.type === 'switch'"
               v-model:checked="selectedNode.config[field.key]"
               size="small"
             />
+            <!-- 修复⑤ — json/code 控件：a-textarea + JSON 实时校验（adapters/comfyui
+                 布尔参数被序列化为 switch，动态工具/技能布尔参数同享 toggle 分支） -->
+            <template v-else-if="field.type === 'json' || field.type === 'code'">
+              <a-textarea
+                :value="jsonFieldText(selectedNode.config[field.key])"
+                :rows="4"
+                size="small"
+                class="mono-input"
+                @update:value="(v: string) => handleJsonFieldInput(field.key, v)"
+              />
+              <p v-if="jsonFieldError[field.key]" class="json-field-error">{{ jsonFieldError[field.key] }}</p>
+            </template>
             <a-input v-else v-model:value="selectedNode.config[field.key]" size="small" />
           </div>
 
@@ -666,6 +678,9 @@ async function handleMockUpdate(value: unknown) {
   const nodeId = selectedNodeId.value
   if (!nodeId) return
   debugController.setMockOutput(nodeId, value)
+  // 修复② — mock 随画布快照持久化（execute() 引擎读 config.mock_output 短路）
+  const node = canvasNodes.value.find(n => n.id === nodeId)
+  if (node) node.config = { ...node.config, mock_output: value }
   try {
     await setNodeMock(nodeId, value)
     uiMessage.success(t('common.save'))
@@ -678,6 +693,12 @@ async function handleMockClear() {
   const nodeId = selectedNodeId.value
   if (!nodeId) return
   debugController.clearMock(nodeId)
+  // 修复② — 同步清除画布快照内的 mock（引擎判定 is not None）
+  const node = canvasNodes.value.find(n => n.id === nodeId)
+  if (node) {
+    const { mock_output: _removed, ...rest } = node.config
+    node.config = rest
+  }
   try {
     await setNodeMock(nodeId, null)
   } catch {
@@ -694,6 +715,36 @@ function handleDebugResume(payload: Record<string, unknown>) {
   import('@/api/modules/collaboration')
     .then(m => m.resumeExecution(executionId, (payload.step as 'in' | 'over' | 'out') ?? undefined))
     .catch(() => uiMessage.error(t('debug.resumeFailed')))
+}
+
+// ── 修复⑤ — json/code 字段编辑（对象↔文本双向 + 校验）──
+const jsonFieldError = reactive<Record<string, string>>({})
+
+function jsonFieldText(value: unknown): string {
+  if (value === null || value === undefined || value === '') return ''
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function handleJsonFieldInput(key: string, text: string) {
+  const trimmed = text.trim()
+  if (!trimmed) {
+    delete jsonFieldError[key]
+    selectedNode.value!.config[key] = ''
+    return
+  }
+  try {
+    selectedNode.value!.config[key] = JSON.parse(text)
+    delete jsonFieldError[key]
+  } catch (e) {
+    // 输入中途（半成品 JSON）保留原值不覆盖，仅提示；回显用原文
+    jsonFieldError[key] = (e as Error).message
+    selectedNode.value!.config[key] = text
+  }
 }
 
 // ── 右键菜单 ──
@@ -884,7 +935,10 @@ const paletteCategories = [
       ] },
       { type: 'builtin:agent', label: t('canvas.c0062'), icon: '🧠', category: 'builtin', inputs: [{ id: 'task', label: t('canvas.c0063') }], outputs: [{ id: 'result', label: t('canvas.c0064') }], defaultConfig: {} },
       { type: 'builtin:condition', label: t('canvas.c0065'), icon: '❓', category: 'builtin', inputs: [{ id: 'in', label: t('canvas.c0066') }], outputs: [{ id: 'true', label: t('canvas.c0067') }, { id: 'false', label: t('canvas.c0068') }], defaultConfig: {} },
-      { type: 'builtin:subflow', label: t('canvas.subflowNode'), icon: '🧩', category: 'builtin', inputs: [{ id: 'in', label: t('canvas.c0066') }], outputs: [{ id: 'output', label: t('canvas.c0053') }], defaultConfig: { workflow_id: '', input_mapping: {} } },
+      { type: 'builtin:subflow', label: t('canvas.subflowNode'), icon: '🧩', category: 'builtin', inputs: [{ id: 'in', label: t('canvas.c0066') }], outputs: [{ id: 'output', label: t('canvas.c0053') }], defaultConfig: { workflow_id: '', input_mapping: '{}' }, subBlocks: [
+        { id: 'workflow_id', title: '目标工作流 ID', type: 'input' },
+        { id: 'input_mapping', title: '入参映射（JSON）', type: 'json' },
+      ] as SubBlockDef[] },
     ] as PaletteNode[],
   },
   {
@@ -1322,7 +1376,9 @@ async function loadDynamicNodes() {
       )
       const sb: SubBlockDef = {
         id: String(b.id),
-        title: (b.label as string) ?? (b.name as string) ?? String(b.id),
+        // 修复③ — 后端 _sub_block_to_dict 序列化键是 title（无 label/name），
+        // title 必须在读链最前，否则动态节点面板标题退化为字段 id
+        title: (b.title as string) ?? (b.label as string) ?? (b.name as string) ?? String(b.id),
         type: (b.type as string) || 'input',
         options,
         default_value: b.default ?? b.default_value,
@@ -1723,7 +1779,10 @@ async function handleRun() {
   runState.value = 'running'
   runStatus.value = {}
   try {
-    const res = await runCanvasApi(canvasId.value)
+    const res = await runCanvasApi(canvasId.value, {
+      debug: debugController.breakpoints.value.size > 0,
+      breakpoints: Array.from(debugController.breakpoints.value),
+    })
     const runId = res?.data?.runId
     if (!runId) {
       runState.value = 'failed'
@@ -2055,6 +2114,8 @@ onBeforeUnmount(() => {
 
 /* 店铺下拉空态/降级提示（§6.1） */
 .store-connect-hint { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-secondary, rgba(255,255,255,0.55)); }
+.json-field-error { margin: 4px 0 0; font-size: 11px; color: var(--nr-error, #ef4444); word-break: break-all; }
+.mono-input :deep(textarea) { font-family: monospace; }
 .store-connect-link { color: var(--nr-accent, #7c9eff); cursor: pointer; }
 
 /* 店铺授权节点面板（§6.2/节点管理页入口） */
