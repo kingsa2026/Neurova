@@ -351,10 +351,50 @@ class MCPToolClient:
             raise ValueError(f"MCP session not available: {server_id}")
 
         timeout_s = (server.get("config") or {}).get("timeout_ms", 30000) / 1000
-        result = await asyncio.wait_for(session.call_tool(tool_name, params), timeout=timeout_s)
+
+        # P2-6：OAuth 凭据每次调用时解析（QP 烘焙坑规避——缓存命中直接返回，
+        # 过期刷新；token 经 headers 通道进 transport，会话重建时生效）
+        oauth_config = (server.get("config") or {}).get("oauth")
+        if oauth_config:
+            try:
+                from neurova.tool_layers.mcp_oauth import resolve_mcp_token
+
+                await resolve_mcp_token(server_id, oauth_config)
+            except Exception as e:
+                raise ValueError(f"OAuth token 获取失败: {e}") from e
+
+        try:
+            result = await asyncio.wait_for(session.call_tool(tool_name, params), timeout=timeout_s)
+        except Exception as e:
+            # P2-6：401 → 强制刷新 token → 重试一次（同一调用语义，不重复副作用——
+            # 失败发生在鉴权层，未触达工具）
+            if self._is_auth_error(e) and oauth_config:
+                logger.warning("MCP %s 鉴权失败，刷新 token 后重试一次", server_id)
+                try:
+                    await resolve_mcp_token(server_id, oauth_config, force_refresh=True)
+                except Exception as refresh_err:
+                    raise ValueError(f"OAuth 刷新失败: {refresh_err}") from e
+                result = await asyncio.wait_for(
+                    session.call_tool(tool_name, params), timeout=timeout_s
+                )
+            else:
+                raise
+
         serialized = self._serialize_result(result)
         logger.info("Executed MCP tool: %s/%s", server_id, tool_name)
         return serialized
+
+    @staticmethod
+    def _is_auth_error(e: BaseException) -> bool:
+        """识别鉴权类错误（401/unauthorized/token 过期，覆盖常见 SDK 措辞）。"""
+        text = str(e).lower()
+        return (
+            "401" in text
+            or "unauthorized" in text
+            or "invalid_token" in text
+            or "token expired" in text
+            or "authentication" in text
+        )
 
     @staticmethod
     def _serialize_result(result: typing.Any) -> typing.Any:
