@@ -1744,6 +1744,9 @@ export default {
     instruction: 'Instruction',
     instructionPlaceholder: 'Tell the agent what to do with this skill',
     runCount: 'Run count',
+    execAgent: 'Executing Agent',
+    execAgentPlaceholder: 'Select agent to run the task',
+    execAgentHint: 'The task is executed by the selected agent (defaults to current page agent, changeable)',
   },
   rule: {
     title: 'Rules',

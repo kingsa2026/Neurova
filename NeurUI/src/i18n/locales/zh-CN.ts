@@ -1756,6 +1756,9 @@ export default {
     instruction: '指令',
     instructionPlaceholder: '告诉 agent 用这个技能做什么',
     runCount: '执行次数',
+    execAgent: '执行 Agent',
+    execAgentPlaceholder: '选择执行调度任务的 agent',
+    execAgentHint: '调度任务由所选 agent 执行（默认当前页面 agent，可更换）',
   },
   rule: {
     title: '规则',

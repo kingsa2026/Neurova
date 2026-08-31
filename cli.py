@@ -283,12 +283,13 @@ def render_turn_frame_top(user_text: str, limit: int, color: bool = True) -> str
     for raw_line in rendered.split("\n"):
         if first:
             title = raw_line.strip()
-            fill = max(limit - _display_width(title) - 2, 1)
+            fill = max(limit - _display_width(title) - 1, 1)
             lines.append("╔═ " + ansi(title, "primary", color) + " " + "═" * fill + "╗")
             first = False
         else:
             for wl in _wrap_by_width(raw_line, limit):
-                lines.append("║ " + wl.ljust(limit) + " ║")
+                pad = max(limit - _display_width(wl), 0)
+                lines.append("║ " + wl + " " * pad + " ║")
     return "\n".join(lines)
 
 
@@ -1834,7 +1835,7 @@ class NeurovaCLI:
         self._frame_col = 0
 
     def _write_frame_stream(self, text: str) -> None:
-        """流式/整行写入帧内: 行首补 ║, 换行与满宽自动折行补竖线。
+        """流式/整行写入帧内: 行首补 ║, 换行与满宽自动折行, 右竖线固定在框边。
 
         ANSI SGR 转义按 0 宽度透传（不参与列计数）。
         """
@@ -1849,6 +1850,10 @@ class NeurovaCLI:
                 if j == -1:
                     file.write(text[i:])
                     break
+                # 行首先落 ║ 前缀, 再透传色码（避免左竖线被染色）
+                if self._frame_col == 0:
+                    file.write("║ ")
+                    self._frame_col = 2
                 file.write(text[i : j + 1])
                 i = j + 1
                 continue
@@ -1856,8 +1861,7 @@ class NeurovaCLI:
                 file.write("║ ")
                 self._frame_col = 2
             if ch == "\n":
-                file.write(" ║\n")
-                self._frame_col = 0
+                self._frame_close_line()
                 i += 1
                 continue
             file.write(ch)
@@ -1868,11 +1872,20 @@ class NeurovaCLI:
             i += 1
         file.flush()
 
+    def _frame_close_line(self) -> None:
+        """闭合当前帧内行: 补齐空格让右竖线落在固定列。"""
+        limit = self._frame_limit
+        pad = limit - (self._frame_col - 2)
+        if pad > 0:
+            self.console.file.write(" " * pad)
+        self.console.file.write(" ║\n")
+        self._frame_col = 0
+
     def _end_turn(self) -> None:
-        """闭合回合帧: 补尾部竖线 + 底框。"""
+        """闭合回合帧: 补齐尾部竖线 + 底框。"""
         file = self.console.file
         if self._frame_col != 0:
-            file.write(" ║\n")
+            self._frame_close_line()
         file.write(render_turn_frame_bottom(self._frame_limit) + "\n")
         file.flush()
         self._frame_col = 0

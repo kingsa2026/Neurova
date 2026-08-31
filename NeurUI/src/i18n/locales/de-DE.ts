@@ -1742,6 +1742,9 @@ export default {
     instruction: 'Anweisung',
     instructionPlaceholder: 'Sagen Sie dem Agenten, was er mit diesem Skill tun soll',
     runCount: 'Ausführungen',
+    execAgent: 'Ausführender Agent',
+    execAgentPlaceholder: 'Agent für die Ausführung wählen',
+    execAgentHint: 'Die Aufgabe wird vom gewählten Agenten ausgeführt (Standard: aktueller Seiten-Agent, änderbar)',
   },
   rule: {
     title: 'Regeln',

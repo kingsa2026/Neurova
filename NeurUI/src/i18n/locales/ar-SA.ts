@@ -1742,6 +1742,9 @@ export default {
     instruction: 'تعليمات',
     instructionPlaceholder: 'أخبر الوكيل بما يجب فعله بهذه المهارة',
     runCount: 'مرات التنفيذ',
+    execAgent: 'الوكيل المنفذ',
+    execAgentPlaceholder: 'اختر الوكيل لتنفيذ المهمة',
+    execAgentHint: 'تُنفَّذ المهمة بواسطة الوكيل المحدد (الافتراضي: وكيل الصفحة الحالية، قابل للتغيير)',
   },
   rule: {
     title: 'القواعد',

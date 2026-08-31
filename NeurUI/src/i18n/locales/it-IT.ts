@@ -1742,6 +1742,9 @@ export default {
     instruction: 'Istruzione',
     instructionPlaceholder: 'Di\' all\'agente cosa fare con questa skill',
     runCount: 'Esecuzioni',
+    execAgent: 'Agente esecutore',
+    execAgentPlaceholder: 'Seleziona l\'agente che esegue il task',
+    execAgentHint: 'Il task viene eseguito dall\'agente selezionato (predefinito: agente della pagina, modificabile)',
   },
   rule: {
     title: 'Regole',
