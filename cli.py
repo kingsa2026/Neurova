@@ -14,15 +14,23 @@
 """
 
 import argparse
+import io
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import httpx
+from rich import box
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
+from rich.theme import Theme
+
+from scripts.common import _display_width
 
 # 默认配置
 DEFAULT_BASE_URL = "http://localhost:9527"
@@ -63,6 +71,230 @@ HISTORY_MAX = 500
 
 
 # ==================== 模块级纯函数（可单测） ====================
+
+# ---- REPL 界面主题 · Hermes 对齐 · 蓝色系 ----
+# Rich 主题名 -> 颜色（消息流/面板/欢迎屏统一走这组 token）
+REPL_THEME = {
+    "nr.primary": "#5b9bff",
+    "nr.accent": "#38bdf8",
+    "nr.border": "#2a4a7f",
+    "nr.text": "#e8eef7",
+    "nr.muted": "#7d8fa8",
+    "nr.dim": "#5a6b85",
+    "nr.ok": "#4ade80",
+    "nr.warn": "#fbbf24",
+    "nr.err": "#f87171",
+    # 组合样式键（rich Theme 需显式注册才能按名解析）
+    "bold nr.accent": "bold #38bdf8",
+    "bold nr.primary": "bold #5b9bff",
+    "bold nr.text": "bold #e8eef7",
+    "bold nr.ok": "bold #4ade80",
+    "bold nr.err": "bold #f87171",
+}
+
+# 非 rich 通道（流式 raw file.write）用的 ANSI 序列
+_ANSI_SEQ = {
+    "primary": "\033[38;2;91;155;255m",
+    "accent": "\033[38;2;56;189;248m",
+    "muted": "\033[38;2;125;143;168m",
+    "dim": "\033[38;2;90;107;133m",
+    "ok": "\033[38;2;74;222;128m",
+    "warn": "\033[38;2;251;191;36m",
+    "error": "\033[38;2;248;113;113m",
+    "reset": "\033[0m",
+}
+
+# 界面符号（Hermes messageLine 范式）
+SYM_BULLET = "●"       # 助手回复/工具 marker
+SYM_USER = "❯"         # 用户标签侧翼/prompt
+SYM_THINK = "▸"        # 推理折叠箭头
+SYM_OK = "✓"
+SYM_WARN = "!"
+SYM_ERR = "✕"
+SYM_INFO = "○"
+SYM_HINT = "›"
+
+AI_NAME = "智星"        # Neurova 助手显示名
+
+# 渲染函数一律返回 rich Text（样式名走 REPL_THEME），由 Console 统一
+# 渲染——宽度/折行/导出快照（export_html）均正确；避免手搓 ANSI 字符串
+# 被 rich 当字符计算宽度造成错位。
+
+
+def ansi(text: str, style: str, enabled: bool = True) -> str:
+    """给文本套单色 ANSI（仅流式 raw 输出用；非启用态/不支持时原样返回）。"""
+    if not enabled:
+        return text
+    return f"{_ANSI_SEQ.get(style, '')}{text}{_ANSI_SEQ['reset']}"
+
+
+def use_tty_color() -> bool:
+    """默认着色开关：TTY 且未设 NO_COLOR。"""
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _style_name(style: str) -> str:
+    """把 nr.ok/nr.warn/nr.err 缩写语义面扩展为完整 rich 样式名。"""
+    return f"nr.{style}" if style in ("ok", "warn", "err", "primary", "accent", "muted", "dim") else style
+
+
+def render_user_message(text: str) -> "Text":
+    """用户消息回显: 蓝标签行 + 缩进正文（Hermes `❯ You` 范式）。"""
+    out = Text()
+    out.append(f"{SYM_USER} 你", style=_style_name("primary"))
+    out.append("\n")
+    for line in text.splitlines() or [""]:
+        out.append(f"    {line}", style=_style_name("text"))
+        out.append("\n")
+    return out
+
+
+def render_assistant_marker() -> "Text":
+    """助手回复流式前缀（accent 天蓝 + 空格）。"""
+    return Text(f"{SYM_BULLET} ", style=_style_name("accent"))
+
+
+def render_tool_call(name: str, args_preview: str = "") -> "Text":
+    """工具调用行: `● [工具] 名称 · 参数摘要`。"""
+    out = Text(f"{SYM_BULLET} [工具] {name}", style=_style_name("accent"))
+    if args_preview:
+        short = args_preview[:80].replace("\n", " ")
+        out.append(f" · {short}", style=_style_name("muted"))
+    return out
+
+
+def render_tool_result(preview: str) -> "Text":
+    """工具结果行: `↳ 摘要`（dim 缩进）。"""
+    short = preview[:200].replace("\n", " ")
+    return Text(f"  ↳ {short}", style=_style_name("dim"))
+
+
+def render_reasoning(text: str, limit: int = 200) -> "Text":
+    """推理聚合单行: `▸ 思考 · 摘要[…]`。"""
+    short = text[:limit]
+    suffix = "…" if len(text) > limit else ""
+    return Text(f"{SYM_THINK} 思考 · {short}{suffix}", style=_style_name("muted"))
+
+
+def render_approval(tool_name: str, approval_id: str) -> "Text":
+    """审批警示行（语义黄保留）。"""
+    out = Text(f"{SYM_WARN} [待审批] {tool_name}", style=_style_name("warn"))
+    out.append(f" ID: {approval_id}（/approval {approval_id} 批准，/reject {approval_id} 拒绝）", style=_style_name("muted"))
+    return out
+
+
+def render_welcome_icon_line(icon: str, text: str, style: str = "ok") -> "Text":
+    """欢迎屏状态行: `✓ 文本`（图标按语义着色）。"""
+    return Text(f"{icon} {text}", style=_style_name(style))
+
+
+def render_status_bar(model: str = "-", session: str = "-", turn: int = 0, elapsed: float = 0.0) -> "Text":
+    """回合收尾状态栏（Hermes 底栏范式）: `⚑ 模型 | 第 N 轮 · 会话 | 用时`。"""
+    out = Text()
+    out.append("⚑ ", style="bold nr.accent")
+    out.append(model or "-", style="bold nr.text")
+    out.append("  |  ", style="nr.dim")
+    out.append(f"第 {turn} 轮", style="nr.muted")
+    if session:
+        out.append(f" · 会话 {session}", style="nr.muted")
+    out.append("  |  ", style="nr.dim")
+    out.append(f"{elapsed:.1f}s", style="nr.muted")
+    return out
+
+
+def render_welcome_panel(header_lines: List["Text"], footer: Optional["Text"] = None) -> Panel:
+    """欢迎屏主面板（Hermes 窗口范式）: 圆角蓝框 + 左上标题。"""
+    body = Text()
+    for line in header_lines:
+        if isinstance(line, str):
+            line = Text(line)
+        body.append_text(line)
+        body.append("\n")
+    if footer is not None:
+        if isinstance(footer, str):
+            footer = Text(footer)
+        body.append("\n")
+        body.append_text(footer)
+    return Panel(
+        body,
+        title=Text(f"{SYM_BULLET} 智星 · Neurova REPL", style="bold nr.accent"),
+        title_align="left",
+        border_style="nr.primary",
+        box=box.DOUBLE,  # 与 print_logo 同款双线框
+        padding=(0, 1),
+    )
+
+
+def render_help_hint() -> "Text":
+    """欢迎屏帮助提示（dim）。"""
+    return Text(f"{SYM_HINT} 输入 /help 查看命令 · 直接输入文字开始聊天 · 按 Ctrl+C 退出", style=_style_name("dim"))
+
+
+def prompt_text(enabled: bool = True) -> str:
+    """输入提示符: `❯ `（raw 字符串 fed 给 input()；TTY 时带 accent 色）。"""
+    return ansi(f"{SYM_USER} ", "accent", enabled)
+
+
+def render_completion_hint(candidates: List[str]) -> "Text":
+    """tab 补全候选提示（accent 点分）。"""
+    return Text(f"{SYM_HINT} 候选: {' · '.join(candidates)}", style=_style_name("accent"))
+
+
+def _text_to_ansi(renderable: "Text", color: bool = True) -> str:
+    """把 rich Text 渲染成带 ANSI 的字符串（供 raw file.write 流式通道复用）。"""
+    if not color:
+        return renderable.plain
+    buf = io.StringIO()
+    Console(file=buf, force_terminal=True, color_system="truecolor", theme=Theme(REPL_THEME)).print(renderable)
+    return buf.getvalue().rstrip("\n")
+
+
+# ---- 回合帧（对话内容双线框, 与 print_logo 同款 ╔═╗║╚═╝） ----
+
+
+def _wrap_by_width(text: str, limit: int) -> List[str]:
+    """按显示宽度折行（CJK 计 2 列），返回不超 limit 的行。"""
+    if not text:
+        return [""]
+    lines: List[str] = []
+    cur = ""
+    w = 0
+    for ch in text:
+        cw = _display_width(ch)
+        if w + cw > limit:
+            lines.append(cur)
+            cur = ch
+            w = cw
+        else:
+            cur += ch
+            w += cw
+    lines.append(cur)
+    return lines
+
+
+def render_turn_frame_top(user_text: str, limit: int, color: bool = True) -> str:
+    """回合顶框（开放帧）: ╔═ ❯ 你 ═══╗ + 用户消息行。
+
+    limit = 内容显示宽（框总宽 = limit + 4: ║ 2 列 + ║ 2 列）。
+    """
+    rendered = render_user_message(user_text).plain  # "❯ 你\n    你好"
+    lines = []
+    first = True
+    for raw_line in rendered.split("\n"):
+        if first:
+            title = raw_line.strip()
+            fill = max(limit - _display_width(title) - 2, 1)
+            lines.append("╔═ " + ansi(title, "primary", color) + " " + "═" * fill + "╗")
+            first = False
+        else:
+            for wl in _wrap_by_width(raw_line, limit):
+                lines.append("║ " + wl.ljust(limit) + " ║")
+    return "\n".join(lines)
+
+
+def render_turn_frame_bottom(limit: int) -> str:
+    """回合底框: ╚═════╝（宽度与顶框一致）。"""
+    return "╚" + "═" * (limit + 2) + "╝"
 
 
 def parse_ansi_input(raw: str) -> Tuple[str, Optional[str]]:
@@ -207,10 +439,14 @@ class NeurovaCLI:
         self.streaming: bool = True
         self.attachments: List[str] = []
         self.running = True
-        self.console = console or Console()
+        self.console = console or Console(theme=Theme(REPL_THEME))
         self._history: List[str] = []
         self._history_cache: List[str] = []
         self._reasoning_buf: List[str] = []
+        self._reply_marker: bool = False  # 助手流式 ● 前缀是否已打（每回合复位）
+        self._turn_count: int = 0
+        self._frame_col: int = 0          # 回合帧当前列（0=行首; 含 ║ 前缀 2 列）
+        self._draw_color = self.console.is_terminal and os.environ.get("NO_COLOR") is None
 
     # ---------- HTTP 原语 ----------
 
@@ -539,13 +775,13 @@ class NeurovaCLI:
     # ==================== 渲染 ====================
 
     def _ok(self, msg: str) -> None:
-        self.console.print(f"[green][✓][/green] {msg}")
+        self.console.print(f"[bold nr.ok]{SYM_OK}[/bold nr.ok] {msg}")
 
     def _warn(self, msg: str) -> None:
-        self.console.print(f"[yellow][提示][/yellow] {msg}")
+        self.console.print(f"[bold nr.warn]{SYM_WARN}[/bold nr.warn] {msg}")
 
     def _err(self, msg: str) -> None:
-        self.console.print(f"[red][错误][/red] {msg}")
+        self.console.print(f"[bold nr.err]{SYM_ERR}[/bold nr.err] {msg}")
 
     @staticmethod
     def _short_id(sid: str, n: int = 8) -> str:
@@ -1549,6 +1785,9 @@ class NeurovaCLI:
         if not self.current_agent_id:
             self._warn("未选择 Agent（/agent switch <序号> 选择后再聊）")
             return
+        self.console.print("")
+        self._begin_turn(message)
+        started = time.monotonic()
         try:
             result = self.send_chat(
                 message,
@@ -1558,21 +1797,95 @@ class NeurovaCLI:
             self.attachments = []
             self._flush_reasoning()
             reply = result.get("reply", "") if isinstance(result, dict) else result
-            if reply:
-                self.console.print("")
         except CliError as e:
-            self._err(str(e))
+            self._flush_reasoning()
+            self._write_frame_stream(ansi(f"{SYM_ERR} {e}", "error", self._draw_color) + "\n")
         except KeyboardInterrupt:
             self._flush_reasoning()
-            self.console.print("\n[red][已中断][/red] 生成已停止")
+            self._write_frame_stream(ansi(f"{SYM_ERR} 生成已中断", "error", self._draw_color) + "\n")
+        finally:
+            self._end_turn()
+            # 回合收尾: Hermes 状态栏（模型/轮次/会话/用时）——流被中断也保留会话粘性
+            elapsed = time.monotonic() - started
+            self._turn_count += 1
+            self.console.print(
+                render_status_bar(
+                    self.current_model or "-",
+                    self._short_id(self.current_session_id) if self.current_session_id else "",
+                    turn=self._turn_count,
+                    elapsed=elapsed,
+                )
+            )
+            self._reply_marker = False
+
+    # ---------- 回合帧（对话内容双线框） ----------
+
+    @property
+    def _frame_limit(self) -> int:
+        """帧内容显示宽（框总宽 = console 宽）。"""
+        return max(int(getattr(self.console, "width", 80)) - 4, 20)
+
+    def _begin_turn(self, message: str) -> None:
+        """开回合帧: 顶框（含用户消息）后进入流式状态。"""
+        self._reply_marker = False
+        file = self.console.file
+        file.write(render_turn_frame_top(message, self._frame_limit, self._draw_color) + "\n")
+        file.flush()
+        self._frame_col = 0
+
+    def _write_frame_stream(self, text: str) -> None:
+        """流式/整行写入帧内: 行首补 ║, 换行与满宽自动折行补竖线。
+
+        ANSI SGR 转义按 0 宽度透传（不参与列计数）。
+        """
+        file = self.console.file
+        limit = self._frame_limit
+        i = 0
+        n = len(text)
+        while i < n:
+            ch = text[i]
+            if ch == "\x1b":
+                j = text.find("m", i)
+                if j == -1:
+                    file.write(text[i:])
+                    break
+                file.write(text[i : j + 1])
+                i = j + 1
+                continue
+            if self._frame_col == 0:
+                file.write("║ ")
+                self._frame_col = 2
+            if ch == "\n":
+                file.write(" ║\n")
+                self._frame_col = 0
+                i += 1
+                continue
+            file.write(ch)
+            self._frame_col += _display_width(ch)
+            if self._frame_col >= limit + 2:
+                file.write(" ║\n")
+                self._frame_col = 0
+            i += 1
+        file.flush()
+
+    def _end_turn(self) -> None:
+        """闭合回合帧: 补尾部竖线 + 底框。"""
+        file = self.console.file
+        if self._frame_col != 0:
+            file.write(" ║\n")
+        file.write(render_turn_frame_bottom(self._frame_limit) + "\n")
+        file.flush()
+        self._frame_col = 0
 
     def _flush_reasoning(self) -> None:
-        """把聚合的思考段落一次性输出（避免逐 token 刷屏）。"""
+        """把聚合的思考段落一次性输出（避免逐 token 刷屏）。
+
+        Hermes 对齐: `▸ 思考 · 摘要` 单行（muted 蓝），在回合帧内输出。
+        """
         if not self._reasoning_buf:
             return
         text = "".join(self._reasoning_buf)
-        self.console.file.write(f"\n[dim][思考: {text[:200]}{'...' if len(text) > 200 else ''}][/dim]\n")
-        self.console.file.flush()
+        self._write_frame_stream(_text_to_ansi(render_reasoning(text), self._draw_color) + "\n")
         self._reasoning_buf = []
 
     def _render_stream_event(self, kind: str, data: Any) -> None:
@@ -1580,7 +1893,7 @@ class NeurovaCLI:
 
         回调 data 语义：chunk/reasoning 为内容字符串；tool_*/approval 为事件 dict。
         """
-        file = self.console.file
+        color = self._draw_color
         if kind == "reasoning":
             text = data if isinstance(data, str) else (data or {}).get("content", "")
             if text:
@@ -1589,22 +1902,25 @@ class NeurovaCLI:
             self._flush_reasoning()
             text = data if isinstance(data, str) else (data or {}).get("content", "")
             if text:
-                file.write(text)
-                file.flush()
-        elif kind in ("tool_call", "tool_result"):
+                if not self._reply_marker:
+                    self._write_frame_stream(_text_to_ansi(render_assistant_marker(), color))
+                    self._reply_marker = True
+                self._write_frame_stream(text)
+        elif kind == "tool_call":
             self._flush_reasoning()
             name = (data or {}).get("name", "-")
-            file.write(f"\n[dim][工具] {name}[/dim]\n")
-            file.flush()
+            args = (data or {}).get("arguments", "")
+            self._write_frame_stream(_text_to_ansi(render_tool_call(name, str(args)), self._draw_color) + "\n")
+        elif kind == "tool_result":
+            self._flush_reasoning()
+            content = (data or {}).get("content", "")
+            text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+            self._write_frame_stream(_text_to_ansi(render_tool_result(text), self._draw_color) + "\n")
         elif kind == "approval_required":
             self._flush_reasoning()
             aid = (data or {}).get("approval_id", "-")
             tool = (data or {}).get("tool_name", "-")
-            file.write(
-                f"\n[yellow][待审批] {tool} 需要确认，ID: {aid}"
-                f"（/approval {aid} 批准，/reject {aid} 拒绝）[/yellow]\n"
-            )
-            file.flush()
+            self._write_frame_stream(_text_to_ansi(render_approval(tool, aid), self._draw_color) + "\n")
 
     def _load_history(self) -> None:
         try:
@@ -1650,8 +1966,8 @@ class NeurovaCLI:
         if "\t" in line:
             completed, candidates = complete_line(line.replace("\t", " "))
             if candidates:
-                sys.stdout.write("\r" + " " * 80 + "\r" + prompt + f"{line}  (候选: {', '.join(candidates)})")
-                sys.stdout.write("\r" + prompt + line)
+                hint = render_completion_hint(candidates).plain
+                sys.stdout.write("\r" + " " * 80 + "\r" + hint + "\n" + prompt + line)
                 sys.stdout.flush()
                 return self._read_input(prompt)
             line = completed
@@ -1662,31 +1978,36 @@ class NeurovaCLI:
 
         self._load_history()
         print_logo("Neurova REPL 聊天客户端")
-        self.console.print(f"服务器: [cyan]{self.base_url}[/cyan]")
+        # 欢迎屏（Hermes welcome 范式: 品牌 → 圆角面板状态行 → 帮助提示）
+        welcome_lines: List[Text] = [
+            render_welcome_icon_line(SYM_INFO, f"服务器  {self.base_url}", style="accent"),
+        ]
         if not self.check_health():
             self._err(f"无法连接到后端 {self.base_url}——请先启动 (python start_server.py)")
             return
-        self._ok("后端连接成功")
+        welcome_lines.append(render_welcome_icon_line(SYM_OK, "后端连接成功"))
         try:
             if not self.login():
-                self._err("自动登录失败，输入 /login 手动登录；或 /status 查看状态")
+                welcome_lines.append(render_welcome_icon_line(SYM_ERR, "自动登录失败，输入 /login 手动登录；或 /status 查看状态"))
             else:
-                self._ok(f"登录成功: {self.username}")
+                welcome_lines.append(render_welcome_icon_line(SYM_OK, f"登录成功: {self.username}"))
         except CliError as e:
-            self._err(str(e))
+            welcome_lines.append(render_welcome_icon_line(SYM_ERR, str(e)))
         try:
             agents = self.list_agents()
             if agents:
                 self.current_agent_id = agents[0].get("agent_id")
-                self._ok(f"已选择 Agent: {agents[0].get('name')} (ID: {self.current_agent_id})")
+                self.current_model = agents[0].get("model") or self.current_model
+                welcome_lines.append(
+                    render_welcome_icon_line(SYM_INFO, f"Agent {agents[0].get('name')} · {agents[0].get('model', '-')}", style="accent")
+                )
         except CliError:
             pass
-        self.console.print("[dim]输入 /help 查看命令，直接输入文字开始聊天，Ctrl+C 退出[/dim]")
+        self.console.print(render_welcome_panel(welcome_lines, render_help_hint()))
+        self.console.print("")
         while self.running:
             try:
-                agent_name = self.current_agent_id or "未选择"
-                session_tail = self._short_id(self.current_session_id) if self.current_session_id else "-"
-                prompt = f"[{self.username or '?'}@{agent_name}/{session_tail}]> "
+                prompt = prompt_text(self._draw_color)
                 raw = self._read_input(prompt)
                 if raw is None:
                     continue
