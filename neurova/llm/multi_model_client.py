@@ -36,7 +36,13 @@ from neurova.llm.provider_manager import (
     ProviderConfig,
     get_provider_manager,
 )
-from neurova.llm_client import LLMClient, LLMConfig
+from neurova.llm_client import LLMClient, LLMConfig, LLMConnectionError, LLMRateLimitError
+from neurova.llm.providers.rate_limiter import (
+    CircuitBreaker,
+    ExponentialBackoff,
+    CircuitBreakerOpen,
+    with_retry_and_circuit_breaker,
+)
 
 logger = get_logger(__name__)
 
@@ -380,6 +386,47 @@ class MultiModelLLMClient:
         for provider in providers:
             self.refresh_provider(provider.id)
 
+    # P2-2：retry/熔断装配（评测指出 rate_limiter.py 构件齐备但零装配）
+    # per-provider 熔断器缓存：{provider_id: CircuitBreaker}
+    _retry_guards: Dict[str, Any] = {}
+
+    # 可重试集合：限流/连接/超时；认证错误不重试（换 key 才有意义）
+    _RETRYABLE = (LLMRateLimitError, LLMConnectionError, ConnectionError, TimeoutError)
+
+    @staticmethod
+    def _get_retry_guard(client) -> tuple:
+        """按 provider 取 (RetryConfig, CircuitBreaker)——跨调用共享熔断状态。"""
+        pid = getattr(getattr(client, "provider", None), "id", None) or id(client)
+        guard = MultiModelLLMClient._retry_guards.get(pid)
+        if guard is None:
+            guard = (
+                __import__("neurova.llm.providers.rate_limiter", fromlist=["RetryConfig"]).RetryConfig(
+                    max_attempts=3, initial_delay=0.05, max_delay=1.0,
+                    retryable_exceptions=MultiModelLLMClient._RETRYABLE,
+                ),
+                CircuitBreaker(failure_threshold=5, recovery_timeout=30.0, name=f"llm:{pid}"),
+            )
+            MultiModelLLMClient._retry_guards[pid] = guard
+        return guard
+
+    @staticmethod
+    async def _chat_with_retry(client, messages: List[Dict[str, str]], **kwargs) -> Any:
+        """per-provider retry/circuit 装配的单次底层调用。
+
+        重试集合内的异常（限流/连接/超时）指数退避重试；认证错误与其余异常
+        立即上抛（由 chat() 转 error 信封）。同 provider 连续失败触发熔断
+        （拒绝请求不触达底层），recovery_timeout 后半开恢复。
+        """
+        from neurova.llm.providers.rate_limiter import RetryConfig
+
+        rc, cb = MultiModelLLMClient._get_retry_guard(client)
+
+        async def _attempt():
+            return await asyncio.to_thread(client.client.chat, messages, **kwargs)
+
+        wrapped = with_retry_and_circuit_breaker(retry_config=rc, circuit_breaker=cb)(_attempt)
+        return await wrapped()
+
     async def chat(
         self,
         messages: List[Dict[str, str]],
@@ -388,6 +435,59 @@ class MultiModelLLMClient:
         **kwargs,
     ) -> Dict[str, Any]:
         """发送聊天请求"""
+        # [METRICS] 结构化日志：记录 LLM 调用的消息结构和模型信息
+        # _get_client_for_request 内部已处理冷启动自愈与"指定 provider/model 无 key"
+        # 时的兜底，chat() 无需再自行 refresh_all_providers()（避免重复刷新）。
+        client = self._get_client_for_request(model, provider_id)
+
+        _role_counts: Dict[str, int] = {}
+        for m in messages:
+            _r = m.get("role", "unknown")
+            _role_counts[_r] = _role_counts.get(_r, 0) + 1
+        _sys_count = _role_counts.get("system", 0)
+        _total_msgs = len(messages)
+        _model_name = model or (client.model if client else "unknown")
+        logger.info(
+            "[LLM-REQ] model=%s, messages=%s, system=%s, roles=%s",
+            _model_name, _total_msgs, _sys_count, _role_counts,
+        )
+        if not client:
+            logger.warning("No client available for chat")
+            return {
+                "success": False,
+                "error": "No client available",
+            }
+
+        try:
+            start_time = time.time()
+            # P2-2：底层调用经 per-provider retry/circuit 装配
+            result = await self._chat_with_retry(client, messages, **kwargs)
+            duration = time.time() - start_time
+
+            client.increment_request(success=True)
+            return {
+                "success": True,
+                "response": result,
+                "duration": duration,
+                "model": client.model,
+                "provider": client.provider.id,
+            }
+        except CircuitBreakerOpen as e:
+            client.increment_request(success=False)
+            return {
+                "success": False,
+                "error": f"熔断打开（连续失败暂停请求）: {e}",
+                "model": client.model,
+                "provider": client.provider.id,
+            }
+        except Exception as e:
+            client.increment_request(success=False)
+            return {
+                "success": False,
+                "error": str(e),
+                "model": client.model,
+                "provider": client.provider.id,
+            }
         # [METRICS] 结构化日志：记录 LLM 调用的消息结构和模型信息
         # _get_client_for_request 内部已处理冷启动自愈与"指定 provider/model 无 key"
         # 时的兜底，chat() 无需再自行 refresh_all_providers()（避免重复刷新）。
@@ -426,6 +526,17 @@ class MultiModelLLMClient:
             }
         except Exception as e:
             client.increment_request(success=False)
+            try:
+                from neurova.core.metrics import get_metrics
+
+                get_metrics().record_llm_call(
+                    provider=client.provider.id,
+                    model=client.model,
+                    success=False,
+                    duration_s=time.time() - start_time,
+                )
+            except Exception:
+                pass
             return {
                 "success": False,
                 "error": str(e),

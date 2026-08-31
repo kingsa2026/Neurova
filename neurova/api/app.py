@@ -487,10 +487,19 @@ def _register_frontend_error_log(app: FastAPI) -> None:
 
 
 def _register_metrics_endpoint(app: FastAPI) -> None:
-    """注册 Prometheus 指标端点"""
+    """注册 Prometheus 指标端点
+
+    P2-4：指标定义收口到 neurova/core/metrics.py（Counter/Histogram 全量
+    埋点），此处做运行态 gauge 快照 + generate_latest 输出。
+    """
+    from neurova.core.metrics import get_metrics as _get_prom_metrics
+    from neurova.core.metrics import generate_metrics_text as _generate_metrics_text
+
+    _prom = _get_prom_metrics()
 
     @app.get("/metrics")
     async def get_metrics():
+        _prom.observe_state(_app_state)
         metrics = []
         # 基础指标
         metrics.append(f"# HELP neurova_uptime_seconds Neurova uptime in seconds")
@@ -537,7 +546,7 @@ def _register_metrics_endpoint(app: FastAPI) -> None:
             channel_count = len(_app_state.channel_manager._adapters)
         metrics.append(f"neurova_channels_total {channel_count}")
 
-        return PlainTextResponse("\n".join(metrics), media_type="text/plain")
+        return PlainTextResponse(_generate_metrics_text(), media_type="text/plain")
 
 
 def _add_health_routes(app: FastAPI, app_state: AppState) -> None:
