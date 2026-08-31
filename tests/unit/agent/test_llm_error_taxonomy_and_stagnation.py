@@ -225,15 +225,20 @@ class TestStagnationDetection:
             collect(loop._predict_stream({"messages": [{"role": "user", "content": "hi"}], "stream": True}))
         )
 
-        assert len(llm.calls) == 3, f"停滞#2 应终止，第 4 轮不发生: {len(llm.calls)} 轮"
+        # P2-5 DoomLoopGate 新契约：比旧停滞机制更快反应——
+        # round2 请求即含注入提示（第 1 次重复 → INTERRUPT），
+        # round3 终止（第 2 次重复 → count>=max_interrupts=2 → TERMINATE）
+        assert len(llm.calls) == 3, f"round3 应终止: {len(llm.calls)} 轮"
         injected = lambda msgs: [  # noqa: E731
             m for m in msgs if m.get("role") == "user" and "策略" in str(m.get("content", ""))
         ]
-        assert injected(llm.calls[1]["messages"]) == [], "round2 请求不应含注入（round1 非停滞）"
-        assert injected(llm.calls[2]["messages"]), "round3 请求应含停滞#1 注入的换策略提示"
+        assert injected(llm.calls[0]["messages"]) == [], "round1 请求不应含注入（首次通过）"
+        assert injected(llm.calls[1]["messages"]) == [], "round2 请求不含注入（gate 在轮末触发，注入落 round3）"
+        assert injected(llm.calls[2]["messages"]), "round3 请求应含 round2 末注入的换策略提示"
         # 终止以可见 reasoning 事件告知用户
         assert any(
-            e.get("type") == "reasoning" and "停止工具循环" in str(e.get("data", "")) for e in events
+            e.get("type") == "reasoning" and ("换策略" in str(e.get("data", "")) or "停止工具循环" in str(e.get("data", "")))
+            for e in events
         )
 
 
