@@ -19,6 +19,16 @@ logger = get_logger(__name__)
 # ═══════════════════════════════════════════════════════════════
 
 _BUILTIN_SCHEMAS: Dict[str, Dict] = {
+    "recall_history": {
+        "description": "【历史召回】召回本会话被折叠/驱逐出当前上下文窗口的早期对话内容（P1-1③）。当用户提到“之前讨论过”“刚才说的”而当前上下文里找不到时，用本工具按关键词召回被压缩归档的历史轮次。与 memory_search 的区别：memory_search 查长期记忆库（跨会话持久），本工具查当前会话的上下文台账（本会话内被折叠的内容）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "召回关键词（在折叠台账中匹配，留空返回最近折叠的内容）"},
+                "limit": {"type": "integer", "description": "返回数量上限", "default": 10},
+            },
+        },
+    },
     "memory_search": {
         "description": "【内部记忆检索】仅搜索本Agent自身存储的历史对话和记忆条目。不能搜索互联网、不能查天气、不能查新闻、不能获取任何外部实时信息。仅用于回忆用户之前说过的话或Agent之前记录的内容。",
         "parameters": {
@@ -142,7 +152,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # ── 浏览器操作工具（BrowserManager 多后端：Playwright/Scrapling）──
     # 执行过程的页面截图会实时推送到聊天页的电脑操作分屏面板
     "browser_navigate": {
-        "description": "【浏览器导航】在内置自动化浏览器中打开指定 URL。适合访问网页、查看在线内容、登录网站等。打开后可用 browser_extract_text 提取正文、browser_click/browser_type 交互、browser_screenshot 截图。",
+        "description": "【浏览器导航】在内置自动化浏览器中打开指定 URL。这是工具阶梯中最重的一档：仅当 web_search/web_fetch 无法完成任务（需要页面交互、登录或 JS 动态渲染）时才使用；纯读取内容一律先用 web_search 搜索、web_fetch 抓取。打开后可用 browser_extract_text 提取正文、browser_click/browser_type 交互、browser_screenshot 截图。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -227,7 +237,60 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["role", "text"],
         },
     },
-    # ── 任务计划（计划即工具，SQLite 持久化，跨会话还原）──
+    # ── 互联网平台直达（Web Reach，对标 Agent-Reach 零配置路径）──
+    "youtube_transcript": {
+        "description": "【YouTube 字幕】提取 YouTube 视频的字幕/自动字幕文本，用于总结视频内容、翻译、要点提取。仅支持 youtube.com/watch 或 youtu.be 链接。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "YouTube 视频链接"},
+            },
+            "required": ["url"],
+        },
+    },
+    "bilibili_search": {
+        "description": "【B站搜索】搜索 B 站视频，返回标题与链接。用于查找中文视频教程、评测、讲解等内容。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "搜索关键词"},
+                "limit": {"type": "integer", "description": "返回条数（默认 5）"},
+            },
+            "required": ["query"],
+        },
+    },
+    "rss_read": {
+        "description": "【RSS 阅读】读取 RSS/Atom 订阅源的最新条目（标题/链接/摘要）。用于追踪博客、播客、新闻源更新。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "RSS/Atom 源地址"},
+                "limit": {"type": "integer", "description": "返回条数（默认 10）"},
+            },
+            "required": ["url"],
+        },
+    },
+    "v2ex_hot": {
+        "description": "【V2EX 热门】获取 V2EX 社区当前热门帖子（标题/链接/回复数/作者）。用于了解开发者社区热议话题。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "返回条数（默认 10）"},
+            },
+            "required": [],
+        },
+    },
+    "social_search": {
+        "description": "【社交平台搜索】查询社交平台（twitter/reddit/xiaohongshu/facebook/instagram/linkedin）的搜索接入状态。已配置登录态后端时返回后端与命令信息；未配置时返回配置引导。不自动登录。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "platform": {"type": "string", "description": "平台名（twitter/reddit/xiaohongshu/facebook/instagram/linkedin）"},
+                "query": {"type": "string", "description": "搜索关键词"},
+            },
+            "required": ["platform", "query"],
+        },
+    },
     "planning": {
         "description": "【任务计划】创建和管理结构化任务计划，适合多步骤长任务：先 create 建立步骤清单，执行过程中用 mark_step 标记各步状态（completed/in_progress/blocked），让用户和后续轮次都能看到全局进度。计划持久化存储，重启后仍可 get 查询继续推进。对于需要多轮才能完成的任务，开工前先建计划。",
         "parameters": {
@@ -332,7 +395,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "web_search": {
-        "description": "【实时网络搜索】通过搜索引擎查询互联网上的实时信息（新闻、股价、百科、技术文档等）。当用户需要 memory_search 无法提供的实时或外部信息时调用此工具。返回搜索结果摘要文本。",
+        "description": "【实时网络搜索】通过搜索引擎查询互联网上的实时信息（新闻、股价、百科、技术文档等）。当用户需要 memory_search 无法提供的实时或外部信息时调用此工具。返回搜索结果摘要文本。工具选择阶梯（最轻优先）：不知道网址先用本工具搜索 → 拿到具体网址后用 web_fetch 读取 → 仅当页面需要交互/登录/动态渲染才升级 browser_* 工具，不要直接开浏览器做纯检索。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -452,7 +515,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "web_fetch": {
-        "description": "【网页抓取】抓取指定 URL 的内容并转为纯文本（阅读文章、文档、API 响应等）。已知网址要读取其内容时用此工具；不知道网址先用 web_search 搜索。仅支持 http/https 协议。",
+        "description": "【网页抓取】抓取指定 URL 的内容并转为纯文本（阅读文章、文档、API 响应等）。已知网址要读取其内容时用此工具；不知道网址先用 web_search 搜索。仅支持 http/https 协议。若本工具返回空或内容不完整（JS 动态页），再升级 browser_* 工具处理，不要跳过本工具直接用浏览器。",
         "parameters": {
             "type": "object",
             "properties": {
