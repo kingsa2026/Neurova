@@ -249,8 +249,9 @@ export function setExecutionBreakpoints(
 
 /** 恢复暂停中的执行（step: in/over/out 或省略）。 */
 export function resumeExecution(executionId: string, step?: 'in' | 'over' | 'out') {
+  // 路径区分于 /executions/{id}/resume（人工审批恢复）——路由遮蔽修正
   return api.post<ApiResponse<{ execution_id: string; resumed: boolean; step_mode: string | null }>>(
-    `${NF_BASE}/executions/${executionId}/resume`,
+    `${NF_BASE}/executions/${executionId}/debug/resume`,
     step ? { step } : {},
   )
 }

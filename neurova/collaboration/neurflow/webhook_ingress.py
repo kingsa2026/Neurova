@@ -59,6 +59,14 @@ async def handle_webhook_ingress(
     if d is None:
         raise IngressRejected(500, "INGRESS_NOT_CONFIGURED")
 
+    # 审计修复：deps 键缺失降级为 500 原因码（而非 KeyError 裸 500）
+    _required = ("load_trigger", "load_published_workflow", "decrypt_secret",
+                 "run_workflow", "rate_limiter_for")
+    missing = [k for k in _required if k not in d or not callable(d[k])]
+    if missing:
+        logger.error("webhook_ingress deps missing keys: %s", missing)
+        raise IngressRejected(500, "INGRESS_DEPS_INVALID")
+
     trigger = d["load_trigger"](trigger_id)
     if trigger is None or not getattr(trigger, "enabled", False):
         raise IngressRejected(404, "TRIGGER_NOT_FOUND")
