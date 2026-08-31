@@ -44,6 +44,8 @@ class ContextPool:
         auto_tag: bool = False,
         max_size: int = 100,
         ttl_seconds: int = 3600,
+        ledger_db=None,
+        summarizer=None,
     ):
         """
         初始化上下文池
@@ -110,6 +112,10 @@ class ContextPool:
         # 使用 RLock 因为 merge_with 等方法会重入调用 add_context
         # 遵循 AGENTS.md "Thread safety: use threading.RLock for shared state"
         self._lock = threading.RLock()
+
+        # P1-1③：驱逐台账持久层 + 摘要压缩器（可选注入；None=保持内存行为）
+        self._ledger_db = ledger_db
+        self._summarizer = summarizer
 
     @property
     def isolation_key(self) -> str:
@@ -242,16 +248,34 @@ class ContextPool:
     # ── Scroll Context: 被驱逐轮次台账与召回（方案 P1-2.2） ──────
 
     def _archive_evicted(self, item) -> None:
-        """把被驱逐条目归档进有界台账；台账满时淘汰最旧记录。"""
+        """把被驱逐条目归档进有界台账；台账满时淘汰最旧记录。
+
+        P1-1③：同时写穿持久化台账（SQLite WAL+FTS5）——重启后经
+        recall_evicted 仍可召回（内存台账重启即丢）。
+        """
         self._eviction_ledger.append(item)
         self._evicted_total += 1
         overflow = len(self._eviction_ledger) - max(0, int(self._max_eviction_ledger))
         if overflow > 0:
             del self._eviction_ledger[:overflow]
+        if self._ledger_db is not None:
+            try:
+                self._ledger_db.record(
+                    content=str(getattr(item, "content", "")),
+                    turn_id=(item.metadata or {}).get("turn_id"),
+                    session_id=self.session_id,
+                    source=getattr(item.source, "value", None),
+                    metadata=getattr(item, "metadata", None),
+                )
+            except Exception:
+                logger.warning("驱逐台账持久化失败（不影响内存归档）", exc_info=True)
 
     def recall_evicted(self, query: str = None, limit: int = 20) -> List:
         """
         按需召回被驱逐的上下文轮次。
+
+        P1-1③：内存台账（重启即丢）+ 持久台账（SQLite FTS，重启后可召回）
+        双源合并去重（按内容 hash），持久源覆盖重启前历史。
 
         Args:
             query: 内容子串过滤（不区分大小写）；None 返回最近驱逐的条目
@@ -262,11 +286,64 @@ class ContextPool:
             只读操作，不影响活动池。
         """
         with self._lock:
+            results: List = []
+            seen_hashes = set()
+
+            # 持久源优先（覆盖重启前历史），行 → ContextInput
+            if self._ledger_db is not None:
+                try:
+                    for row in self._ledger_db.search(query, session_id=self.session_id, limit=limit):
+                        row = dict(row)  # sqlite3.Row 无 .get
+                        h = ContextInput.compute_hash(ContextSource.CONVERSATION, row["content"])
+                        if h in seen_hashes:
+                            continue
+                        seen_hashes.add(h)
+                        results.append(
+                            ContextInput(
+                                source=ContextSource.CONVERSATION,
+                                content=row["content"],
+                                metadata={
+                                    "turn_id": row.get("turn_id"),
+                                    "session_id": row.get("session_id"),
+                                    "evicted_at": row.get("evicted_at"),
+                                    "recalled_from": "ledger_db",
+                                },
+                            )
+                        )
+                except Exception:
+                    logger.warning("持久台账召回失败（回退内存台账）", exc_info=True)
+
+            # 内存台账兜底
             snapshot = list(reversed(self._eviction_ledger))
             if query:
                 needle = query.lower()
                 snapshot = [c for c in snapshot if needle in str(c.content).lower()]
-            return snapshot[:limit]
+            for c in snapshot:
+                h = getattr(c, "hash", None)
+                if h and h in seen_hashes:
+                    continue
+                if h:
+                    seen_hashes.add(h)
+                results.append(c)
+                if len(results) >= limit:
+                    break
+            return results[:limit]
+
+    def archive_summary(self, summary: str, source_summary: str = "") -> None:
+        """P1-1③：把折叠摘要以 SUMMARY 源回写池（高优先级，视图可调取）。
+
+        归档无损语义不破坏——被折叠 chunk 仍保留，摘要只是压缩视图的入口。
+        """
+        if not (summary or "").strip():
+            return
+        self.add_context(
+            ContextInput(
+                source=ContextSource.SUMMARY,
+                content=summary.strip(),
+                priority=90,
+                metadata={"source_summary": source_summary},
+            )
+        )
 
     def get_eviction_stats(self) -> Dict[str, Any]:
         """驱逐台账统计。"""

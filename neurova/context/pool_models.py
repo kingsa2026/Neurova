@@ -27,6 +27,7 @@ class ContextSource(Enum):
     TOOL_CALL = "tool_call"  # 工具调用
     MULTIMODAL = "multimodal"  # 多模态内容
     USER_INPUT = "user_input"  # 用户输入
+    SUMMARY = "summary"  # 溢出折叠摘要（P1-1③：压缩视图而非丢内容）
 
 
 @dataclass

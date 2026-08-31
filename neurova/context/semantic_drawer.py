@@ -23,6 +23,7 @@ class SemanticMatchDrawer:
 
     SOURCE_MULTIPLIERS = {
         ContextSource.USER_INPUT: 1.0,
+        ContextSource.SUMMARY: 0.9,  # P1-1③：折叠摘要高价值
         ContextSource.CONVERSATION: 0.8,
         ContextSource.MEMORY: 0.3,
         ContextSource.EMOTION: 0.5,
