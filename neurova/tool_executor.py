@@ -1101,6 +1101,32 @@ class ToolExecutor:
                 }
             tool_sequence.append({"tool": step_name, "params": step_params})
 
+        # 注入扫描（补课 5.4，抄 QP materialize_skill 安全闸）：name/description/
+        # 步骤参数拼成受检文本过 PromptInjectionAnalyzer（中英双语 11 签名）。
+        # fail-closed：扫描器异常视为发现风险（拒绝优于静默放行）
+        scanned_text = "\n".join(
+            [name, description]
+            + [f"{s.get('tool', '')} {json.dumps(s.get('params') or {}, ensure_ascii=False)}" for s in tool_sequence]
+        )
+        try:
+            from neurova.security.skill_scanner import PromptInjectionAnalyzer, SkillFile
+
+            findings = PromptInjectionAnalyzer().analyze(
+                SkillFile(path=f"create_skill/{name}", content=scanned_text, file_type="prompt")
+            )
+            if findings:
+                top = findings[0]
+                return {
+                    "error": (
+                        f"create_skill 拒绝：检测到提示注入风险 "
+                        f"[{top.rule_id}] {top.message}（证据: {top.evidence[:80]}）"
+                    )
+                }
+        except Exception as scan_error:
+            if type(scan_error).__name__ == "ImportError":
+                raise  # 扫描器缺失是部署错误，不静默
+            return {"error": f"create_skill 拒绝：注入扫描器异常（fail-closed）: {scan_error}"}
+
         manifest = SimpleNamespace(
             name=name,
             id=name,
