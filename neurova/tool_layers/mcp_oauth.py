@@ -193,8 +193,14 @@ class OAuthTokenProvider:
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
-            "Authorization": _basic_auth_header(self.client_id, self.client_secret),
         }
+        # P3-b：DCR 产物的 registration_access_token → Bearer 保护 token 端点；
+        # 无则回退 Basic（confidential client）/ 无头（public client）
+        extra_auth = getattr(self, "_extra_auth_header", None)
+        if extra_auth:
+            headers.update(extra_auth)
+        elif self.client_secret:
+            headers["Authorization"] = _basic_auth_header(self.client_id, self.client_secret)
 
         transport = self._transport
         if transport is not None:
@@ -364,6 +370,64 @@ def _is_loopback_redirect_uri(redirect_uri: str) -> bool:
     return parsed.hostname in _LOOPBACK_HOSTS
 
 
+async def _register_client_dynamically(
+    registration_endpoint: str,
+    redirect_uri: str,
+    scope: str,
+    client_name: str,
+    transport: Optional[Any] = None,
+) -> tuple:
+    """RFC 7591 动态客户端注册（P3-b）。
+
+    POST registration_endpoint：
+    - client_name = neurova-mcp-<server_id>
+    - grant_types = ["authorization_code", "refresh_token"]
+    - token_endpoint_auth_method = "none"（public client，PKCE 保护）
+    - redirect_uris = [环回回调地址]
+
+    Returns:
+        (client_id, client_secret 或 "", registration_access_token 或 "")
+
+    Raises:
+        OAuthTokenError: 注册端点非 200 / 响应缺 client_id
+    """
+    import httpx
+
+    payload = {
+        "client_name": client_name,
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        "redirect_uris": [redirect_uri],
+    }
+    if scope:
+        payload["scope"] = scope
+
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+
+    if transport is not None:
+        resp = await transport.post(registration_endpoint, data=payload, headers=headers)
+    else:
+        async with httpx.AsyncClient(timeout=10.0) as hc:
+            resp = await hc.post(registration_endpoint, json=payload, headers=headers)
+
+    if resp.status_code != 201 and resp.status_code != 200:
+        raise OAuthTokenError(
+            f"动态客户端注册失败（RFC 7591）：{registration_endpoint} 返回 "
+            f"{resp.status_code}: {str(resp.text)[:200]}"
+        )
+    body = resp.json()
+    if not body.get("client_id"):
+        raise OAuthTokenError(
+            f"动态客户端注册响应缺少 client_id: {str(body)[:200]}"
+        )
+    return (
+        body["client_id"],
+        body.get("client_secret") or "",
+        body.get("registration_access_token") or "",
+    )
+
+
 async def run_authorization_code_flow(
     server_id: str,
     oauth_config: Dict[str, Any],
@@ -397,10 +461,16 @@ async def run_authorization_code_flow(
 
     authorization_url = oauth_config.get("authorization_url")
     token_url = oauth_config.get("token_url")
+    registration_endpoint = oauth_config.get("registration_endpoint")
     client_id = oauth_config.get("client_id")
-    if not authorization_url or not token_url or not client_id:
+    if not authorization_url or not token_url:
         raise ValueError(
-            "authorization_code 流需要 authorization_url / token_url / client_id 配置"
+            "authorization_code 流需要 authorization_url / token_url 配置"
+        )
+    if not client_id and not registration_endpoint:
+        raise ValueError(
+            "authorization_code 流需要 client_id 配置；无预配置 client_id 时 "
+            "必须提供 registration_endpoint 以走 RFC 7591 动态客户端注册（DCR）"
         )
 
     explicit_redirect = oauth_config.get("redirect_uri") or ""
@@ -418,6 +488,26 @@ async def run_authorization_code_flow(
     callback.start()
     try:
         redirect_uri = explicit_redirect or callback.redirect_uri
+
+        # P3-b：DCR（RFC 7591）——无预配置 client_id 时在回调端口确定后
+        # 动态注册 public client，注册产物回填（redirect_uri 需在注册时已知）
+        registration_access_token: Optional[str] = None
+        _dcr_client_secret: Optional[str] = None
+        if not client_id:
+            client_id, _dcr_client_secret, registration_access_token = (
+                await _register_client_dynamically(
+                    registration_endpoint, redirect_uri, scope,
+                    client_name=f"neurova-mcp-{server_id}",
+                    transport=transport,
+                )
+            )
+            logger.info("MCP DCR 完成 (server=%s): client_id=%s", server_id, client_id)
+        _dcr_outcome = {
+            "client_id": client_id,
+            "client_secret": _dcr_client_secret,
+            "registration_access_token": registration_access_token,
+        }
+
         auth_url = build_authorization_url(
             authorization_url,
             client_id=client_id,
@@ -448,8 +538,18 @@ async def run_authorization_code_flow(
         if not code:
             raise OAuthTokenError(f"授权回调缺少 code: {list(callback.params)}")
 
+        # DCR 产物回填进 oauth_config（get_or_create 以此构造 provider）
+        oauth_config["client_id"] = _dcr_outcome["client_id"]
+        if _dcr_outcome.get("client_secret"):
+            oauth_config["client_secret"] = _dcr_outcome["client_secret"]
+
         provider = get_token_cache(server_id).get_or_create(server_id, oauth_config)
         provider._transport = transport  # 测试注入通道；生产走 httpx
+        # registration_access_token 下发时 token 端点以 Bearer 保护
+        if _dcr_outcome.get("registration_access_token"):
+            provider._extra_auth_header = {
+                "Authorization": f"Bearer {_dcr_outcome['registration_access_token']}"
+            }
         return await provider.fetch_token_by_code(code, verifier, redirect_uri)
     finally:
         callback.stop()
