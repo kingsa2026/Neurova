@@ -2391,7 +2391,10 @@ onBeforeUnmount(() => {
 .empty-hint { font-size: 12px !important; opacity: 0.6; }
 
 .canvas-graph { position: relative; width: 100%; height: 100%; }
-.canvas-edges { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; filter: none; }
+/* 连线层：SVG 默认 overflow:hidden 会把画布坐标超出容器尺寸的线段裁掉
+   （节点拖出首屏后连线在屏边界截断的根因）——必须 visible 让线段
+   随 viewport transform 在整个视口内渲染 */
+.canvas-edges { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; filter: none; overflow: visible; }
 
 /* 画布节点 */
 .graph-node { position: absolute; min-width: 140px; background: rgba(20, 25, 40, 0.95); border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.1)); border-radius: 10px; cursor: move; user-select: none; transition: border-color 0.15s; }
