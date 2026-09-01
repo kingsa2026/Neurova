@@ -467,6 +467,14 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
     # 注册所有端点路由
     register_endpoint_routers(app)
 
+    # 遗留①：bootstrap 用户引导（NEUROVA_BOOTSTRAP_USER 配置时；fail-open）
+    try:
+        from neurova.api.bootstrap_user import ensure_bootstrap_user
+
+        ensure_bootstrap_user()
+    except Exception as _boot_err:  # noqa: BLE001 - 引导失败不阻断启动
+        logger.warning("bootstrap user 引导异常（忽略）: %s", _boot_err)
+
     logger.info("Routes registered")
 
 
