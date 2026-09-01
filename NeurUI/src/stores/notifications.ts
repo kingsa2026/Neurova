@@ -53,6 +53,11 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
   }
 
+  /** SSE 推送的未读数直写（只更新 total，分类数留给下次全量拉取） */
+  function setUnreadTotal(total: number) {
+    unreadCounts.value = { ...unreadCounts.value, total }
+  }
+
   /** Mark a single notification as read. */
   async function markAsRead(id: string) {
     try {
@@ -98,6 +103,7 @@ export const useNotificationStore = defineStore('notifications', () => {
     hasUnread,
     fetchNotifications,
     fetchUnreadCount,
+    setUnreadTotal,
     markAsRead,
     markAllAsRead,
     remove,

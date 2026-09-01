@@ -162,7 +162,7 @@
 
           <!-- Notifications -->
           <a-badge :count="unreadCount" :offset="[-4, 4]">
-            <router-link to="/notifications" class="nr-header-action">
+            <router-link to="/notifications" class="nr-header-action" @click="notifStore.fetchUnreadCount">
               <BellOutlined />
             </router-link>
           </a-badge>
@@ -182,12 +182,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useAgentStore } from '@/stores/agents'
+import { useNotificationStore } from '@/stores/notifications'
+import { subscribeUnreadStream } from '@/api/modules/notifications'
 import { supportedLocales } from '@/i18n'
 import StarBackground from '@/components/StarBackground.vue'
 import GlassNav from '@/components/GlassNav.vue'
@@ -214,8 +216,40 @@ const { t, te, locale } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const agentStore = useAgentStore()
+const notifStore = useNotificationStore()
 
-const unreadCount = ref(0)
+// 铃铛未读数：SSE 流优先（补课 2.2），断流降级 60s 轮询
+const unreadCount = computed(() => notifStore.unreadTotal)
+let unreadTimer: ReturnType<typeof setInterval> | null = null
+let closeUnreadStream: (() => void) | null = null
+
+const startUnreadStream = () => {
+  closeUnreadStream = subscribeUnreadStream((count) => {
+    notifStore.setUnreadTotal(count)
+  })
+  // 3s 宽限：若 SSE 首帧/连接未建立（404/断网），降级轮询
+  setTimeout(() => {
+    if (notifStore.unreadTotal === 0 && !closeUnreadStream) startPolling()
+  }, 3000)
+}
+
+const startPolling = () => {
+  if (unreadTimer) return
+  notifStore.fetchUnreadCount()
+  unreadTimer = setInterval(() => notifStore.fetchUnreadCount(), 60_000)
+}
+
+onMounted(() => {
+  if (authStore.user) {
+    notifStore.fetchUnreadCount()
+    startUnreadStream()
+  }
+})
+
+onUnmounted(() => {
+  if (unreadTimer) clearInterval(unreadTimer)
+  if (closeUnreadStream) closeUnreadStream()
+})
 
 const changeLocale = (code: string) => {
   locale.value = code
