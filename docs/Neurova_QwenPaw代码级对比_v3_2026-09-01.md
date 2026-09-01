@@ -101,7 +101,7 @@
 
 1. **mock LLM chat e2e 端到端 ☑（c9a46f1）**：NEUROVA_BOOTSTRAP_USER 引导（无用户才建 admin；幂等/fail-open）+ 真实后端登录 → /console/chat SSE mock 回显 2 用例（无后端/无账号诚实 skip）。
 2. **backup 编排层 ☑（bdacaef）**：BackupOrchestrator——create（打包→签名）/restore（信任门：TRUSTED 交付、LEGACY 显式 trust、**FOREIGN 无条件拒绝**）/import（他实例 FOREIGN 可显式 trust 后本地重签——QP trust_mode=foreign 语义）。7 用例。
-3. **AppContainer 实证（维持诚实降级，探针结论归档）**：ctypes 全链路（CreateAppContainerProfile 幂等 → DeriveAppContainerSidFromAppContainerName 返回 **PSID**（非字符串）→ Initialize/UpdateProcThreadAttribute(0x00020009) 全成功）可创建进程，但 **SECURITY_CAPABILITIES 静默未生效**（子进程仍 Medium S-1-16-8192，无 S-1-15 容器标记）——windll 无 argtypes 的 64 位指针传参为主要嫌疑，需 argtypes 级调试（估 2-4h）。受限令牌（SAFER）主通道不受影响；Windows 高风险 DENY 判定维持。
+3. **AppContainer 真实现 ☑（e72a810，argtypes 探针突破后生产化）**：上一轮"SECURITY_CAPABILITIES 静默未生效"根因=windll 裸传（无 argtypes）+ Derive 旧 profile 不可靠 + cwd 未授权。三修后实证通过——子进程 Low integrity（S-1-16-4096）+ Administrators deny-only + 默认断网（ping 报"无法联系 IP 驱动程序"）。工厂三级优先 appcontainer > restricted_token > process；governance HIGH 在 Windows 可升 SANDBOX。7 用例。
 
 ## 6. v4 实施进度（2026-09-01 当日落地）
 
@@ -117,7 +117,7 @@
 | P3-b OAuth DCR（RFC 7591 动态客户端注册） | ☑ | 9a0d54d | 5 |
 | P3-c backup 信任模型核心（HMAC/trust 三态/重签） | ☑ | 3923ce3 | 9 |
 
-P1+P2+P3 全部落地后 NV 估算 **≈8.2（差距 0.3）**——v4 全清单 9/9 当日完成。
+P1+P2+P3+遗留三项全部落地后 NV 估算 **≈8.4（差距 0.1）**——v4 全清单 9/9 当日完成，Windows 沙箱从诚实降级升级为真隔离（AppContainer Low integrity）。
 
 ## 7. 结论
 
