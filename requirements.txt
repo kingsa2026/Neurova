@@ -47,10 +47,12 @@ sentencepiece>=0.2.0
 
 # ASR (optional, auto-fallback)
 # funasr>=1.0.0  # FunASR 语音识别引擎 (可选)
-# openai-whisper>=20231117  # Whisper 语音识别引擎 (可选)
+openai-whisper>=20231117  # Whisper 语音识别引擎（补课 4.2 本地真模型；torch CPU 版约 200MB）
 
 # Edge TTS (online fallback)
 edge-tts>=6.1.0
+# Windows SAPI5 离线 TTS (comtypes 缺失会禁用 sapi5 fallback 链)
+comtypes; sys_platform == "win32"
 
 # Embedding (ONNX-based local inference)
 sentence-transformers>=2.2.0
