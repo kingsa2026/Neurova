@@ -41,6 +41,8 @@ export interface Session {
   id: string
   title: string
   updatedAt?: string
+  /** 置顶标记（补课 2.3；后端 session 文件 pinned 字段） */
+  pinned?: boolean
 }
 
 export interface PendingFile {
