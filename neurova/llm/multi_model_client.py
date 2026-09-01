@@ -467,6 +467,20 @@ class MultiModelLLMClient:
                 "error": "No client available",
             }
 
+        # P2-a：每模型限流（QPM+并发+429 暂停），acquire 在 retry 之前
+        from neurova.llm.model_rate_limiter import (
+            RateLimitExceeded,
+            get_shared_limiter,
+        )
+
+        limiter = get_shared_limiter()
+        model_key = client.model or "unknown"
+        try:
+            limiter.acquire(model_key, blocking=False)
+        except RateLimitExceeded as e:
+            client.increment_request(success=False)
+            return {"success": False, "error": f"模型限流: {e}", "model": model_key, "provider": client.provider.id}
+
         try:
             start_time = time.time()
             # P2-2：底层调用经 per-provider retry/circuit 装配
@@ -474,6 +488,7 @@ class MultiModelLLMClient:
             duration = time.time() - start_time
 
             client.increment_request(success=True)
+            limiter.report_success(model_key)
             try:
                 # P2-4 补刀：llm prometheus 埋点（此前 record_llm_call 零调用点）
                 from neurova.core.metrics import get_metrics
@@ -502,6 +517,8 @@ class MultiModelLLMClient:
                     )
             except Exception:
                 pass
+            finally:
+                limiter.release(model_key)
             return {
                 "success": True,
                 "response": result,
@@ -520,6 +537,8 @@ class MultiModelLLMClient:
                 )
             except Exception:
                 pass
+            finally:
+                limiter.release(model_key)
             return {
                 "success": False,
                 "error": f"熔断打开（连续失败暂停请求）: {e}",
@@ -528,6 +547,9 @@ class MultiModelLLMClient:
             }
         except Exception as e:
             client.increment_request(success=False)
+            # P2-a：429 类错误反馈成该模型全局暂停（防继续撞限流）
+            if "429" in str(e) or "rate limit" in str(e).lower():
+                limiter.report_429(model_key, pause_seconds=30.0)
             try:
                 from neurova.core.metrics import get_metrics
 
@@ -536,6 +558,8 @@ class MultiModelLLMClient:
                 )
             except Exception:
                 pass
+            finally:
+                limiter.release(model_key)
             return {
                 "success": False,
                 "error": str(e),
