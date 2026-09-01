@@ -183,6 +183,11 @@ class SleepConsolidation:
         self._sleep_started_at: Optional[float] = None
         self._total_sleep_duration: float = 0.0
         self._sleep_cycles: int = 0
+        # 资源修复: _dream_logs/_merge_history 曾只增不减/全量 id 内嵌,
+        # 静态期睡眠整理每轮把整库 id 列表永久留存 → 现在有界+截断内嵌
+        self._MAX_DREAM_LOGS = 200
+        self._MAX_MERGE_HISTORY = 500
+        self._MAX_INVOLVED_IDS = 100
         self._dream_logs: List[Dict[str, Any]] = []
         self._merge_history: List[Dict[str, Any]] = []
         # 冲突解决审计记录（多成员簇合并时产生, /conflicts 端点数据源）
@@ -595,11 +600,15 @@ class SleepConsolidation:
                                     f"整理 {cycle['total_processed']} 条记忆，"
                                     f"合并 {cycle['merged_count']} 组，归档 {cycle['archived_count']} 条"
                                 ),
-                                "memories_involved": involved,
+                                # 资源修复: 原样嵌入整库 id 列表 → 截断到前 100
+                                "memories_involved": involved[: self._MAX_INVOLVED_IDS],
+                                "involved_total": len(involved),
                                 "insights_generated": cycle["merged_count"],
                                 "duration": time.time() - now,
                             },
                         )
+                        if len(self._dream_logs) > self._MAX_DREAM_LOGS:
+                            self._dream_logs = self._dream_logs[: self._MAX_DREAM_LOGS]
                     for merge_result in cycle["merge_results"]:
                         if len(merge_result.source_ids) < 2:
                             continue  # 单例簇不是真实合并
@@ -608,13 +617,17 @@ class SleepConsolidation:
                                 "merge_id": merge_result.merged_id,
                                 "agent_id": agent_id,
                                 "timestamp": now,
-                                "source_memories": merge_result.source_ids,
+                                # 资源修复: source_ids 原样嵌入可到整库规模 → 截断
+                                "source_memories": merge_result.source_ids[: self._MAX_INVOLVED_IDS],
+                                "source_total": len(merge_result.source_ids),
                                 "target_memory": merge_result.merged_id,
                                 "merge_type": "consolidation",
                                 "success": True,
                                 "conflicts_resolved": 0,
                             }
                         )
+                        if len(self._merge_history) > self._MAX_MERGE_HISTORY:
+                            self._merge_history = self._merge_history[-self._MAX_MERGE_HISTORY:]
             except Exception as e:
                 logger.warning("主动睡眠整理失败: %s", e)
 
@@ -651,19 +664,75 @@ class SleepConsolidation:
         """获取冲突解决审计记录，最新在前（此前恒返回空列表）"""
         return self._conflict_resolutions[offset : offset + limit]
 
-    def resolve_conflict(self, resolution_id: str, resolution: str) -> Optional[Dict[str, Any]]:
-        """更新一条冲突记录的解决方式（前端 /conflicts/{id}/resolve 的后端）
+    def resolve_conflict(
+        self,
+        resolution_id: str,
+        resolution: str,
+        apply_to_store: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """更新一条冲突记录的解决方式（前端 /conflicts/{id}/resolve 的后端）。
+
+        补课 5.1：apply_to_store=True 时按 resolution 真写回记忆库——
+        keep_longest/keep_newest 保留胜者、软删落选者；merge 重写胜者
+        内容为"落选者要点 + 胜者原文"。memory_manager 缺失或操作失败
+        时仅更新审计记录（诚实边界：不假装已改库）。
 
         Returns:
-            更新后的记录 dict；未知 id 返回 None
+            更新后的记录 dict；未知 id 或非法 resolution 返回 None
         """
+        if resolution not in ("keep_longest", "keep_newest", "merge"):
+            return None
         for rec in self._conflict_resolutions:
             if rec.get("id") == resolution_id:
                 rec["resolution"] = resolution
                 rec["resolution_strategy"] = resolution
                 rec["resolved"] = True
+                if apply_to_store and self.memory_manager is not None:
+                    applied = self._apply_conflict_resolution_to_store(rec, resolution)
+                    rec["applied_to_store"] = applied
+                    rec["applied_at"] = datetime.now().isoformat()
                 return rec
         return None
+
+    def _apply_conflict_resolution_to_store(self, rec: Dict[str, Any], resolution: str) -> bool:
+        """把冲突解决写回记忆库（keep_* 软删落选者；merge 重写胜者）。
+
+        Returns:
+            True=至少执行了一次写操作；False=无法执行（缺 API/无来源）
+        """
+        source_ids: List[str] = rec.get("source_memories") or []
+        if not source_ids or self.memory_manager is None:
+            return False
+        try:
+            records = []
+            for mid in source_ids:
+                m = self.memory_manager.get_memory(mid) if hasattr(self.memory_manager, "get_memory") else None
+                if m is not None:
+                    records.append(m)
+            if len(records) < 2:
+                return False
+
+            if resolution == "keep_newest":
+                records.sort(key=lambda m: m.created_at, reverse=True)
+            else:
+                # keep_longest / merge 均以最长内容为胜者
+                records.sort(key=lambda m: len(m.content), reverse=True)
+            winner, losers = records[0], records[1:]
+
+            ok = True
+            if resolution == "merge":
+                merged_content = "\n\n".join(m.content for m in reversed(records))
+                ok = self.memory_manager.update_memory(winner.id, content=merged_content)
+            for l in losers:
+                # 软删优先（保留审计痕迹）；无 soft-delete 时跳过删除
+                if hasattr(self.memory_manager, "delete_memory_soft"):
+                    ok = self.memory_manager.delete_memory_soft(l.id) and ok
+            return bool(ok)
+        except Exception as e:
+            from neurova.core.logger import get_logger as _gl
+
+            _gl(__name__).warning("冲突解决写回失败（保留审计记录）: %s", e)
+            return False
 
     def get_settings(self) -> Dict[str, Any]:
         """获取睡眠设置"""
