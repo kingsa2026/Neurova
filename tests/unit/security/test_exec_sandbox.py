@@ -51,8 +51,8 @@ class TestBackendDetection(unittest.TestCase):
         sandbox = get_exec_sandbox(SandboxSeverity.READ_ONLY)
         from neurova.sandbox.exec_sandbox import AppContainerSandbox
 
-        self.assertNotIsInstance(sandbox, AppContainerSandbox)
-        self.assertIn(sandbox.backend_name(), ("restricted_token", "process"))
+        # 遗留③ 后：AppContainer 是真实现（不再是说谎占位），Windows 三级优先
+        self.assertIn(sandbox.backend_name(), ("appcontainer", "restricted_token", "process"))
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux 专属")
     def test_linux_bubblewrap_when_available(self):

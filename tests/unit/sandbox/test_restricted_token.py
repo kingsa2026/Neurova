@@ -57,18 +57,19 @@ class TestRestrictedTokenSandbox:
         assert result["success"] is False
         assert "timed out" in result["error"]
 
-    def test_sandbox_factory_returns_restricted_on_windows(self):
-        """工厂接入：exec_sandbox 平台探测含受限令牌后端"""
+    def test_sandbox_factory_prefers_appcontainer_restricted_fallback(self):
+        """工厂优先级：appcontainer > restricted_token > process（遗留③ 后）"""
         from neurova.sandbox.exec_sandbox import SandboxSeverity, _detect_backend
+        from neurova.sandbox.appcontainer import AppContainerSandbox
+        from neurova.sandbox.restricted_token import RestrictedTokenSandbox
 
         backend = _detect_backend(SandboxSeverity.NETWORK_OFF)
-        # 无 docker/bwrap/seatbelt 时应选 restricted_token（而非裸 process）
-        if backend.backend_name() == "process":
-            from neurova.sandbox.restricted_token import RestrictedTokenSandbox as R
-
-            assert not R().available() or True  # process 仅在 SAFER 不可达时兜底
-        else:
+        if AppContainerSandbox().available():
+            assert backend.backend_name() == "appcontainer"
+        elif RestrictedTokenSandbox().available():
             assert backend.backend_name() == "restricted_token"
+        else:
+            assert backend.backend_name() == "process"
 
 
 if __name__ == "__main__":
