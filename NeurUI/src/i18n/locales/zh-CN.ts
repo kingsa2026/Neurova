@@ -1987,6 +1987,9 @@ export default {
     unknown: '未知',
     reason: '原因',
     addToWhitelistAndApprove: '批准并加入白名单（相同命令不再需要确认）',
+    rememberNone: '仅本次',
+    rememberExact: '记住精确命令',
+    rememberSimilar: '记住同类命令',
     approvalHint: '该操作已被安全策略标记为需要人工确认',
   },
   neuron: {

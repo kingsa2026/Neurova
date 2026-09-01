@@ -575,6 +575,11 @@
         <a-checkbox v-model:checked="approvalAddWhitelist">
           {{ t('ui.addToWhitelistAndApprove') }}
         </a-checkbox>
+        <a-radio-group v-model:value="approvalRemember" class="approval-remember" size="small">
+          <a-radio value="">{{ t('ui.rememberNone') }}</a-radio>
+          <a-radio value="exact">{{ t('ui.rememberExact') }}</a-radio>
+          <a-radio value="similar">{{ t('ui.rememberSimilar') }}</a-radio>
+        </a-radio-group>
         <p class="approval-hint">{{ t('ui.approvalHint') }}</p>
       </div>
     </a-modal>
@@ -774,6 +779,8 @@ const approvalModal = reactive({
   reason: '',
 })
 const approvalAddWhitelist = ref(false)
+/** 审批记忆档位：'' = 仅本次 / exact / similar（补课 3.2，后端 approval_manager 记忆规则） */
+const approvalRemember = ref<'' | 'exact' | 'similar'>('')
 
 // ---------------------------------------------------------------------------
 // 手动模型切换（聊天页右上角）
@@ -911,8 +918,13 @@ async function confirmApproval(): Promise<void> {
         })
       }
     }
-    const resp = await apiApproveRequest(approvalModal.approvalId, t('ui.userConfirmed'))
+    const resp = await apiApproveRequest(
+      approvalModal.approvalId,
+      t('ui.userConfirmed'),
+      approvalRemember.value || undefined,
+    )
     approvalModal.open = false
+    approvalRemember.value = ''
     const data = (resp as any)?.data?.data ?? (resp as any)?.data
     if (data?.executed && data?.result) {
       uiMessage.success(t('ui.approvedExecuted'))
@@ -934,6 +946,7 @@ async function rejectApproval(): Promise<void> {
   try {
     await apiRejectRequest(approvalModal.approvalId, t('ui.userRejected'))
     approvalModal.open = false
+    approvalRemember.value = ''
     uiMessage.info(t('ui.rejectedOperation'))
   } catch (e) {
     console.error('[Approval] reject failed:', e)

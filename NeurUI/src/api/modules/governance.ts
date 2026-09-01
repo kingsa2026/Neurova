@@ -79,11 +79,14 @@ export function getApprovalDetail(requestId: string) {
   )
 }
 
-/** 批准并重放执行 */
-export function approveRequest(requestId: string, note = '') {
+/** 审批记忆档位（补课 3.2；后端 Literal["exact","similar"]） */
+export type ApprovalRemember = 'exact' | 'similar'
+
+/** 批准并重放执行（remember: 缺省仅本次 / exact 记住精确命令 / similar 记住同类） */
+export function approveRequest(requestId: string, note = '', remember?: ApprovalRemember) {
   return api.post<ApiResponse<ApproveResult>>(
     `${BASE}/approvals/${requestId}/approve`,
-    { note, approved_by: 'user' }
+    { note, approved_by: 'user', ...(remember ? { remember } : {}) }
   )
 }
 

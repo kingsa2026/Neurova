@@ -1973,6 +1973,9 @@ export default {
     content: '内容',
     reason: '原因',
     addToWhitelistAndApprove: '批准并加入白名单（此后同类命令免确认）',
+    rememberNone: 'Solo esta vez',
+    rememberExact: 'Recordar comando exacto',
+    rememberSimilar: 'Recordar comandos similares',
     approvalHint: '该操作被安全策略标记为需人工确认，请核实后再放行。',
   },
   neuron: {
