@@ -1397,6 +1397,13 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'done':
     case 'complete':
       msg.streaming = false
+      // 补课 4.4 兜底：后端把 audio_url 附在 done 事件上（而非独立 audio 帧）
+      if (event.audio_url && !msg.audioUrl) {
+        msg.audioUrl = event.audio_url
+        msg.audioProgress = 0
+        msg.audioCurrentTime = 0
+        msg.audioSpeed = 1
+      }
       // Auto-create session if this is the first exchange
       if (!currentSessionId.value && event.session_id) {
         chatStore.setCurrentSession(event.session_id)
@@ -1578,7 +1585,7 @@ async function synthesizeTTS(msg: ChatMessage) {
   try {
     const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
     const token = secureStorage.get('auth_token')
-    const response = await fetch(`${baseUrl}/audio/synthesize`, {
+    const response = await fetch(`${baseUrl}/audio/synthesize-stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1593,6 +1600,9 @@ async function synthesizeTTS(msg: ChatMessage) {
 
     if (!response.ok) throw new Error(`TTS failed: ${response.status}`)
 
+    // 补课 4.3：流式端点按引擎返回 audio/mpeg 或 audio/wav——blob type
+    // 交给 <audio> 自动嗅探，长文本首字节到达即开始下载（整段合成时间
+    // 不再阻塞在服务端全量编码完成后）
     const blob = await response.blob()
     const url = URL.createObjectURL(blob)
     msg.audioUrl = url
