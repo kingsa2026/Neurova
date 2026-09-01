@@ -330,3 +330,11 @@ secret_*.json
 # 临时 token 文件
 /.tmp_token.txt
 /weather_xuchang.py
+
+# 根目录运行残片（2026-09 清理后防再生）
+*_sse.txt
+_r*.txt
+_em.txt
+_mp*.txt
+_cfg.json
+test_api_output.wav
