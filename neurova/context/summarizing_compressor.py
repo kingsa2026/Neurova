@@ -60,7 +60,7 @@ _REPAIR_PROMPT_TEMPLATE = """你上一版摘要包含以下**在原始对话中�
 
 # 高风险标识符提取：URL / 绝对路径 / 版本号 / hex-hash
 _IDENTIFIER_PATTERNS = (
-    re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE),
+    re.compile(r"https?://[^\s<>\"')\]\uFF0C\u3002\uFF1B\uFF01\uFF1F\uFF08\uFF09\u3010\u3011\u300A\u300B]+", re.IGNORECASE),
     re.compile(r"(?<![\w\-/])(/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+)"),  # 多段路径
     re.compile(r"\b\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.\-]+)?\b"),  # semver 形
     re.compile(r"\b[0-9a-f]{12,64}\b", re.IGNORECASE),  # hex hash/sha 片段
@@ -190,4 +190,23 @@ class SummarizingCompressor:
             logger.info("summarize failed (%s); keep previous summary", e)
             return previous_summary or None
 
-        return summary.strip() if summary else (previous_summary or None)
+        if not (summary or "").strip():
+            return previous_summary or None
+
+        # P3-a factsheet：从证据全集确定性提取精确值，以原生文本带附在摘要
+        # 尾部——模型引用精确值时可逐字复制，不依赖从摘要转写（反幻觉第 2 层）。
+        # 提取自脱敏前证据、输出经脱敏（密钥形态不进 factsheet）。
+        factsheet = self._build_factsheet(evidence_text)
+        final = summary.strip()
+        if factsheet:
+            final = f"{final}\n\n{factsheet}"
+        return _redact(final)
+
+    @staticmethod
+    def _build_factsheet(evidence_text: str) -> str:
+        """构建 [关键精确值] 文本带；无标识符返回空串。"""
+        identifiers = extract_identifiers(evidence_text)
+        if not identifiers:
+            return ""
+        lines = "\n".join(f"- {ident}" for ident in identifiers)
+        return f"[关键精确值——引用时逐字使用]\n{lines}"
