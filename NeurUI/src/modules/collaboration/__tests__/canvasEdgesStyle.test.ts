@@ -42,4 +42,18 @@ describe('canvas-edges overflow contract', () => {
     expect(dotBlock).toContain('height: 10px')
     expect(vueSrc).toMatch(/\.port-dot::before[^{]*\{[^}]*inset: -3px[^}]*\}/)
   })
+
+  it('悬浮层（提示行/缩放栏/小地图）位于 transform 容器之外', () => {
+    // canvas-graph 关闭后（</div>）紧跟 zoombar/connect-hint/MiniMap——
+    // 它们不得嵌入 :style="graphStyle" 的容器（否则跟随平移缩放）
+    const graphClose = vueSrc.indexOf('</div>\n\n        <!-- 缩放控制栏')
+    expect(graphClose, '悬浮层应处于 canvas-graph 收尾之后').toBeGreaterThan(-1)
+    const zoombarIdx = vueSrc.indexOf('class="canvas-zoombar"')
+    const minimapIdx = vueSrc.indexOf('<MiniMap')
+    expect(zoombarIdx).toBeGreaterThan(graphClose)
+    expect(minimapIdx).toBeGreaterThan(graphClose)
+    // 缩放栏让位小地图：bottom 需 >= 130px（mini 120 + 间隔）
+    const zoombarCss = vueSrc.match(/\.canvas-zoombar\s*\{[^}]*\}/)![0]
+    expect(zoombarCss).toMatch(/bottom:\s*(1[3-9]\d|\d{3,})px/)
+  })
 })
