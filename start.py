@@ -69,6 +69,23 @@ def _get_backend_python() -> list:
     return [sys.executable]
 
 
+def _rotate_log_file(path: Path, max_bytes: int = 20 * 1024 * 1024, backups: int = 3) -> None:
+    """资源修复: 日志单文件只增不减, 长跑后磁盘无界增长。
+    启动时若超出阈值则轮转: server.log → .1 → .2 → .3, 最旧丢弃。"""
+    try:
+        if not path.exists() or path.stat().st_size < max_bytes:
+            return
+        oldest = path.with_name(f"{path.name}.{backups}")
+        oldest.unlink(missing_ok=True)
+        for i in range(backups - 1, 1, -1):
+            src = path.with_name(f"{path.name}.{i - 1}")
+            if src.exists():
+                src.rename(path.with_name(f"{path.name}.{i}"))
+        path.rename(path.with_name(f"{path.name}.1"))
+    except Exception:
+        pass  # 轮转失败不阻塞启动
+
+
 def start_backend(port: int = BACKEND_PORT, log_file: str = None) -> tuple:
     """
     启动后端服务器
@@ -94,6 +111,7 @@ def start_backend(port: int = BACKEND_PORT, log_file: str = None) -> tuple:
     if log_file:
         log_dir = ROOT_DIR / "logs"
         log_dir.mkdir(exist_ok=True)
+        _rotate_log_file(log_dir / log_file)
         stdout_target = open(log_dir / log_file, "w", encoding="utf-8")
 
     cmd = _get_backend_python() + [str(get_backend_script())]

@@ -8,7 +8,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from neurova.collaboration.neurflow.models import AgentInfo, WorkflowDefinition
 
@@ -100,13 +100,17 @@ async def execute_workflow_agent(
     agent_id: str,
     inputs: Dict[str, Any],
     deps: Dict[str, Any] = None,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """chat 侧派发桥接（P2 Step 4）：按 agent_id 找到绑定的工作流并执行。
 
     deps 键（可注入；缺省走 set_workflow_agent_deps 注册的工厂）：
       load_agent(agent_id) → AgentInfo | None
       load_published_workflow(workflow_id) → WorkflowDefinition | None
-      run_workflow(workflow, inputs) → ExecutionInstance（awaitable）
+      run_workflow(workflow, inputs, user_id=None) → ExecutionInstance（awaitable）
+
+    user_id 透传执行引擎（用户隔离：工作流内知识库节点引用用户级
+    远程配置时按属主校验）。
 
     返回统一信封：{success, outputs[, error, execution_id]}。
     本函数不触碰 chat_pipeline 主干——接入点由 tool_executor 层调用。
@@ -127,7 +131,7 @@ async def execute_workflow_agent(
     if workflow is None:
         return {"success": False, "error": "WORKFLOW_NOT_PUBLISHED"}
 
-    instance = await deps["run_workflow"](workflow, inputs)
+    instance = await deps["run_workflow"](workflow, inputs, user_id=user_id)
     status_value = getattr(instance, "status", None)
     return {
         "success": getattr(status_value, "value", "") == "completed",

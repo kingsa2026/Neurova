@@ -225,6 +225,16 @@ class ONNXEmbeddingEngine:
             return False
 
         try:
+            # 限核保护: torch CPU 默认线程 = 全部核心, 后台索引会烧满整机。
+            # 与 onnxruntime 后端 intra_op_num_threads=4 对齐。
+            try:
+                import os as _os
+                import torch as _torch
+
+                _torch.set_num_threads(int(_os.environ.get("NEUROVA_TORCH_THREADS", "4")))
+            except Exception:
+                pass
+
             self._st_model = SentenceTransformer(str(self._model_dir))
             if hasattr(self._st_model, "get_embedding_dimension"):
                 self._dimension = self._st_model.get_embedding_dimension()

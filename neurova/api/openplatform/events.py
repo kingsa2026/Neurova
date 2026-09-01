@@ -235,8 +235,8 @@ class EventSystem:
     def __init__(self):
         """初始化事件系统"""
         self._endpoints: Dict[str, WebhookEndpoint] = {}
-        self._event_queue: asyncio.Queue[Event] = asyncio.Queue()
-        self._delivery_queue: asyncio.Queue[WebhookDeliveryJob] = asyncio.Queue()
+        self._event_queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=2000)
+        self._delivery_queue: asyncio.Queue[WebhookDeliveryJob] = asyncio.Queue(maxsize=1000)
         self._deliveries: Dict[str, WebhookDelivery] = {}
         self._handlers: Dict[EventTypes, List[Callable[[Event], Awaitable[None]]]] = {}
         self._worker_task: Optional[asyncio.Task] = None
@@ -329,6 +329,10 @@ class EventSystem:
 
                 # 存储投递记录
                 self._deliveries[job.delivery_id] = job.delivery
+                # 资源修复: 投递记录此前只增不减(含全量 payload);
+                # 上限 1000 条投递审计, 超出按插入序淘汰最老
+                while len(self._deliveries) > 1000:
+                    self._deliveries.pop(next(iter(self._deliveries)), None)
 
                 # 更新统计
                 self._stats["deliveries_attempted"] += 1

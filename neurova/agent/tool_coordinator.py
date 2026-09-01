@@ -66,6 +66,10 @@ class ToolCoordinator:
     def __init__(self):
         # task_id → {"task", "tool_name", "result", "error", "success"}
         self._background: Dict[str, Dict[str, Any]] = {}
+        # 资源修复: 观察完成后的终态结果移入有界留存(插入序淘汰),
+        # 活动字典只保留运行中任务——此前超时任务条目只增不减
+        self._completed: Dict[str, Dict[str, Any]] = {}
+        self._MAX_COMPLETED = 200
         self._pending_hints: List[Dict[str, Any]] = []
 
     async def run_with_timeout(
@@ -147,6 +151,11 @@ class ToolCoordinator:
             logger.warning("后台工具 %s (%s) 失败: %s", tool_name, task_id, e)
         finally:
             entry["task"] = None
+            # 资源修复: 移入有界留存(供 get_background_status 查询近 200 条终态)
+            self._background.pop(task_id, None)
+            self._completed[task_id] = entry
+            while len(self._completed) > self._MAX_COMPLETED:
+                self._completed.pop(next(iter(self._completed)), None)
 
     def pop_pending_hints(self) -> List[Dict[str, Any]]:
         """取走全部已完成的后台提示（清空）——注入下一轮 LLM 上下文。"""
@@ -156,7 +165,7 @@ class ToolCoordinator:
 
     def get_background_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """查询后台任务状态（运行中/已完成/未知）。"""
-        entry = self._background.get(task_id)
+        entry = self._background.get(task_id) or self._completed.get(task_id)
         if entry is None:
             return None
         return {
