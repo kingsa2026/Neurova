@@ -57,6 +57,34 @@ class ExecSandbox:
             return ["cmd.exe", "/c", command]
         return ["sh", "-c", command]
 
+    def enforced(self) -> bool:
+        """该后端是否真实落实了声明的隔离（P1-7 诚实化：占位实现返回 False）。
+
+        子类按平台能力重写；False 时调用方结果将携带 sandbox_enforced=False
+        与 warning 自报，治理层据此升级裁决（拒绝优于静默放行）。
+        """
+        return False
+
+    def _base_result(self) -> Dict[str, Any]:
+        enforced = self.enforced()
+        result: Dict[str, Any] = {
+            "sandbox": self.backend_name(),
+            # P1-7：隔离真实性自报——占位后端必须承认未隔离
+            "sandbox_enforced": enforced,
+            "isolated": enforced,
+        }
+        if self.severity != SandboxSeverity.NONE and not enforced:
+            result["warning"] = (
+                f"沙箱后端 {self.backend_name()} 未强制 severity="
+                f"{self.severity.value}（无内核隔离），请求被降级执行"
+            )
+            logger.warning(
+                "沙箱未强制: backend=%s severity=%s（配置了隔离但平台不支持）",
+                self.backend_name(),
+                self.severity.value,
+            )
+        return result
+
     def execute(
         self,
         command: str,
@@ -65,6 +93,7 @@ class ExecSandbox:
         env: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         argv = self.wrap_argv(command)
+        base = self._base_result()
         try:
             result = subprocess.run(
                 argv,
@@ -76,27 +105,27 @@ class ExecSandbox:
                 env=env,
             )
             return {
+                **base,
                 "success": result.returncode == 0,
                 "output": result.stdout or "",
                 "error": result.stderr or "",
                 "return_code": result.returncode,
-                "sandbox": self.backend_name(),
             }
         except subprocess.TimeoutExpired:
             return {
+                **base,
                 "success": False,
                 "output": "",
                 "error": f"Command timed out after {timeout} seconds",
                 "return_code": -1,
-                "sandbox": self.backend_name(),
             }
         except Exception as e:  # noqa: BLE001 - 沙箱执行需捕获一切异常以保证可用
             return {
+                **base,
                 "success": False,
                 "output": "",
                 "error": str(e),
                 "return_code": -1,
-                "sandbox": self.backend_name(),
             }
 
 
@@ -112,6 +141,9 @@ class BubblewrapSandbox(ExecSandbox):
 
     def backend_name(self) -> str:
         return "bubblewrap"
+
+    def enforced(self) -> bool:
+        return True
 
     def wrap_argv(self, command: str) -> List[str]:
         # bwrap 注入隔离前缀；command 作为 sh -c 的单个 argv（无转义层）
@@ -131,6 +163,9 @@ class SeatbeltSandbox(ExecSandbox):
     def backend_name(self) -> str:
         return "seatbelt"
 
+    def enforced(self) -> bool:
+        return True
+
     def wrap_argv(self, command: str) -> List[str]:
         profile = (
             "(version 1)"
@@ -146,10 +181,15 @@ class SeatbeltSandbox(ExecSandbox):
 
 
 class AppContainerSandbox(ExecSandbox):
-    """Windows: AppContainer 受限执行（暂降级为 shell 语义并标注）。"""
+    """Windows: AppContainer 受限执行。
+
+    P1-7 诚实化：真实现（COM 派生受限 token / packaged app 语义）尚未落地，
+    available() 必须返回 False——原占位在 win32 返回 True 但执行走普通 shell，
+    让治理层误以为隔离生效（安全谎言）。真实现推后。
+    """
 
     def available(self) -> bool:
-        return sys.platform == "win32"
+        return False
 
     def backend_name(self) -> str:
         return "appcontainer"
@@ -163,8 +203,7 @@ def _detect_backend(severity: SandboxSeverity) -> ExecSandbox:
         return BubblewrapSandbox(severity)
     if platform.system() == "Darwin" and SeatbeltSandbox().available():
         return SeatbeltSandbox(severity)
-    if platform.system() == "Windows":
-        return AppContainerSandbox(severity)
+    # P1-7：AppContainer 未实现（available=False），Windows 诚实降级
     return ProcessSandbox(severity)
 
 

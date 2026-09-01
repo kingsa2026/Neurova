@@ -25,6 +25,33 @@ from neurova.core.logger import get_logger
 from neurova.sandbox.exec_sandbox import SandboxSeverity, execute_in_sandbox
 from neurova.security.tool_guard import ApprovalMode, GuardSeverity, ToolGuardEngine
 
+# P1-7：平台真隔离后端探测表（bwrap/seatbelt/docker；Windows AppContainer 未实现不入列）
+_ENFORCED_SANDBOX_BACKENDS = {}
+
+
+def _platform_has_enforced_sandbox() -> bool:
+    """当前平台是否存在任一可用真隔离后端（诚实化：占位后端不算数）。"""
+    for name, backend in _ENFORCED_SANDBOX_BACKENDS.items():
+        try:
+            if backend.available():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def check_outbound_url(url: str, *, allow_private: bool = False) -> bool:
+    """全局出网校验层（P1-7：url_guard P0-1 产物统一暴露）。
+
+    治理/工具层出网前统一经此校验；私网/保留段拒绝（SSRF 防护）。
+    Raises:
+        ValueError: URL 被拒
+    """
+    from neurova.security.url_guard import assert_public_url
+
+    assert_public_url(url, allow_private=allow_private)
+    return True
+
 logger = get_logger(__name__)
 
 
@@ -186,6 +213,16 @@ class GovernancePolicy:
                 return GovernanceResult(
                     decision=GovernanceDecision.ASK,
                     reasons=[f"需确认: {getattr(f, 'message', str(f))}" for f in high],
+                    findings=findings,
+                )
+            # P1-7 诚实化：平台上无真隔离后端时，SANDBOX 判定是谎言（实际裸跑），
+            # 升级为 DENY——拒绝优于静默放行
+            if not _platform_has_enforced_sandbox():
+                return GovernanceResult(
+                    decision=GovernanceDecision.DENY,
+                    reasons=[f"高风险且当前平台无可用沙箱隔离，拒绝执行: "
+                             + "; ".join(getattr(f, "message", str(f)) for f in high)],
+                    severity=SandboxSeverity.NONE,
                     findings=findings,
                 )
             return GovernanceResult(
