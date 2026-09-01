@@ -169,6 +169,87 @@ class CheckpointService:
         )
         return out
 
+    # ── 事务化恢复（P2-c） ──
+
+    def restore_with_rollback(self, ref: str, apply_fn: Any) -> Dict[str, Any]:
+        """事务化恢复：apply_fn 失败 → 自动用 pre-restore 内容重放（回滚）。
+
+        语义：
+        1. restore_snapshot(ref) 取目标内容并自动留档 pre-restore
+        2. apply_fn(payload) 执行写回（会话/文件恢复动作由调用方注入）
+        3. apply_fn 抛异常 → 用 pre-restore 快照内容再次调用 apply_fn 回滚；
+           回滚仍失败则抛 RuntimeError（提示手工介入，携带两个错误）
+
+        Args:
+            ref: 目标快照 ref
+            apply_fn: callable(payload)——payload 形如 restore_snapshot 返回值
+
+        Returns:
+            成功时返回目标内容 payload
+        """
+        payload = self.restore_snapshot(ref)
+        try:
+            apply_fn(payload)
+            return payload
+        except Exception as apply_err:
+            pre_ref = payload.get("pre_restore_ref")
+            if not pre_ref:
+                logger.error("恢复失败且无 pre-restore 留档，无法回滚: %s", apply_err)
+                raise RuntimeError(
+                    f"恢复失败且无回滚点: {apply_err}"
+                ) from apply_err
+            try:
+                rollback_payload = self._read_ref_payload(pre_ref)
+                apply_fn(rollback_payload)
+                logger.warning(
+                    "恢复失败已回滚到 pre-restore（ref=%s）: %s", pre_ref, apply_err
+                )
+                raise RuntimeError(
+                    f"恢复失败（已回滚到恢复前状态）: {apply_err}"
+                ) from apply_err
+            except RuntimeError:
+                raise
+            except Exception as rollback_err:
+                raise RuntimeError(
+                    f"恢复失败且回滚也失败——需手工介入: "
+                    f"apply_err={apply_err}; rollback_err={rollback_err}"
+                ) from rollback_err
+
+    def _read_ref_payload(self, ref: str) -> Dict[str, Any]:
+        """读取 ref 内容为 restore_snapshot 同形 payload（不触发留档）。"""
+        content = self._read_ref(ref)
+        index = json.loads(content.get("_index.json", "{}"))
+        kb_files = {
+            item["path"]: content.get(item["key"], "")
+            for item in index.get("kb", [])
+        }
+        return {
+            "session_json": content.get(_SESSION_ENTRY, "{}"),
+            "kb_files": kb_files,
+            "pre_restore_ref": None,
+        }
+
+    def diff_snapshots(self, ref_a: str, ref_b: str) -> Dict[str, Any]:
+        """差异化对比：两个快照间的文件变化（P2-c 只写 delta 的依据）。
+
+        Returns:
+            {"changed": [path...], "unchanged": [path...], "added": [...], "removed": [...]}
+        """
+        a = self._read_ref_payload(ref_a)
+        b = self._read_ref_payload(ref_b)
+        a_files = a["kb_files"]
+        b_files = b["kb_files"]
+        changed, unchanged = [], []
+        for path in sorted(set(a_files) | set(b_files)):
+            if path not in b_files:
+                continue  # removed
+            if path not in a_files:
+                continue  # added
+            (unchanged if a_files[path] == b_files[path] else changed).append(path)
+        added = sorted(set(b_files) - set(a_files))
+        removed = sorted(set(a_files) - set(b_files))
+        return {"changed": changed, "unchanged": unchanged, "added": added, "removed": removed}
+
     # ── GC ──
 
     def gc(self, keep_count: int = 10, keep_days: int = 30) -> int:
