@@ -171,9 +171,9 @@
             <template v-if="msg.toolCalls && msg.toolCalls.length > 0">
               <div v-for="(tc, tcIdx) in msg.toolCalls" :key="tcIdx" class="nr-msg-tool-call">
                 <div class="nr-tool-header" @click="msg.toolOpen = !msg.toolOpen">
-                  <span class="nr-tool-icon">🔧</span>
+                  <span class="nr-tool-icon">{{ variantIcon(toolCardVariant(tc.name)) }}</span>
                   <span class="nr-tool-name">{{ tc.name }}</span>
-                  <a-tag :color="tc.result ? 'success' : 'processing'">
+                  <a-tag :color="tc.result ? 'success' : variantColor(toolCardVariant(tc.name))">
                     {{ tc.result ? t('chat.toolDone') : t('chat.toolCalling') }}
                   </a-tag>
                   <span class="nr-tool-toggle">{{ msg.toolOpen ? '▾' : '▸' }}</span>
@@ -190,9 +190,9 @@
             <!-- Legacy single tool call (backward compat) -->
             <div v-else-if="msg.toolCall" class="nr-msg-tool-call">
               <div class="nr-tool-header" @click="msg.toolOpen = !msg.toolOpen">
-                <span class="nr-tool-icon">🔧</span>
+                <span class="nr-tool-icon">{{ variantIcon(toolCardVariant(msg.toolCall.name)) }}</span>
                 <span class="nr-tool-name">{{ msg.toolCall.name }}</span>
-                <a-tag :color="msg.toolResult ? 'success' : 'processing'">
+                <a-tag :color="msg.toolResult ? 'success' : variantColor(toolCardVariant(msg.toolCall.name))">
                   {{ msg.toolResult ? t('chat.toolDone') : t('chat.toolCalling') }}
                 </a-tag>
                 <span class="nr-tool-toggle">{{ msg.toolOpen ? '▾' : '▸' }}</span>
@@ -605,7 +605,8 @@ import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
 import SubAgentPanel, { type SubAgentWindowState } from '@/components/chat/SubAgentPanel.vue'
 import ComputerUsePanel from '@/components/chat/ComputerUsePanel.vue'
-import { useComputerPanel, isComputerTool } from '@/composables/useComputerPanel'
+import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
+import { toolCardVariant, variantIcon, variantColor } from '@/utils/toolCardVariant'
 import { useThinkingEffort } from '@/composables/useThinkingEffort'
 import type { ThinkingEffort } from '@/composables/useThinkingEffort'
 import { useSessionSync } from '@/composables/useSessionSync'
