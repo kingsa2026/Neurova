@@ -1975,6 +1975,9 @@ export default {
     content: 'Content',
     reason: 'Reason',
     addToWhitelistAndApprove: 'Approve and add to whitelist (same commands won\'t need confirmation)',
+    rememberNone: 'Just once',
+    rememberExact: 'Remember exact command',
+    rememberSimilar: 'Remember similar commands',
     approvalHint: 'This action is flagged by the security policy as requiring human confirmation. Please verify before allowing it.',
   },
   neuron: {
