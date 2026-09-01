@@ -87,10 +87,11 @@ class FunASREngine(ASRBase):
 
                 self._funasr = funasr
             except ImportError:
+                # 诚实降级（补课 4.1）：未安装≠初始化成功——假成功会让
+                # manager 选中本引擎后返回"模拟识别结果"污染上层
                 self._logger.warning("FunASR 未安装，请运行: pip install funasr")
-                # 对于测试，使用模拟模式
-                self._initialized = True
-                return True
+                self._initialized = False
+                return False
 
             # 检查设备
             if self._device == "auto":
@@ -111,12 +112,12 @@ class FunASREngine(ASRBase):
             try:
                 self._logger.info("加载 FunASR 模型: %s", self._model_dir)
 
-                # FunASR 模型加载（示例）
-                # 实际实现需要根据 FunASR 文档调整
-                self._model = None  # 占位符
-                self._initialized = True
-                self._logger.info("FunASR 初始化完成 | " f"模型=%s | " f"设备=%s", self._model_name, self._device)
-                return True
+                # 诚实降级（补课 4.1）：FunASR 集成本实现（模型加载未落地），
+                # 不得以占位模型冒充就绪——交给 manager 走下一引擎
+                self._logger.warning("FunASR 引擎未完整集成（模型加载缺失），跳过")
+                self._model = None
+                self._initialized = False
+                return False
 
             except Exception as e:
                 self._logger.error("FunASR 模型加载失败: %s", e)
@@ -196,14 +197,13 @@ class FunASREngine(ASRBase):
             return {"text": "", "error": str(e)}
 
     def _transcribe_sync(self, audio: "np.ndarray", language: str) -> Dict[str, Any]:
-        """同步转写"""
-        # 模拟转写结果（实际实现需要调用 FunASR API）
-        # 这里返回模拟结果
-        return {
-            "text": "模拟FunASR识别结果",
-            "language": language,
-            "duration_sec": round(len(audio) / 16000, 2),
-        }
+        """同步转写。
+
+        补课 4.1：原实现返回"模拟FunASR识别结果"假文本。引擎未完整
+        集成时 transcribe 的前置检查（_model is None）已拦截，此路径
+        仅在真加载后可达——直接抛错防止假文本回流。
+        """
+        raise RuntimeError("FunASR 引擎未完整集成（无真实推理实现）")
 
     async def shutdown(self) -> None:
         """关闭引擎，释放资源"""
