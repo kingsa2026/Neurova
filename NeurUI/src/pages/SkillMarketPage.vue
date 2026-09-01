@@ -23,6 +23,9 @@
           <GlassButton variant="secondary" size="sm" @click="triggerZipUpload">
             {{ t('market.importZip') }}
           </GlassButton>
+          <GlassButton variant="secondary" size="sm" @click="openSubmitModal">
+            {{ t('market.submitSkill') }}
+          </GlassButton>
         </div>
       </div>
     </GlassPanel>
@@ -109,6 +112,65 @@
       </div>
     </div>
 
+    <!-- Skill Submit Modal -->
+    <a-modal
+      v-model:open="showSubmitModal"
+      :title="t('market.submitSkill')"
+      :ok-text="t('market.submitConfirm')"
+      :confirm-loading="submitting"
+      @ok="handleSubmitSkill"
+    >
+      <a-form layout="vertical">
+        <a-form-item :label="t('market.submitSkillId')">
+          <a-input v-model:value="submitForm.skill_id" :placeholder="t('market.submitSkillIdPh')" />
+        </a-form-item>
+        <a-form-item :label="t('market.submitName')">
+          <a-input v-model:value="submitForm.name" :placeholder="t('market.submitNamePh')" />
+        </a-form-item>
+        <a-form-item :label="t('market.submitVersion')">
+          <a-input v-model:value="submitForm.version" placeholder="1.0.0" />
+        </a-form-item>
+        <a-form-item :label="t('market.submitDesc')">
+          <a-textarea v-model:value="submitForm.description" :rows="3" :placeholder="t('market.submitDescPh')" />
+        </a-form-item>
+        <a-form-item :label="t('market.submitCategory')">
+          <a-input v-model:value="submitForm.category" placeholder="general" />
+        </a-form-item>
+        <a-form-item :label="t('market.submitUrl')">
+          <a-input v-model:value="submitForm.download_url" :placeholder="t('market.submitUrlPh')" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <!-- Admin: Skill Submissions Review -->
+    <GlassPanel v-if="isAdmin" class="market-review" variant="subtle">
+      <div class="review-header">
+        <h3 class="section-title">{{ t('market.adminReview') }}</h3>
+        <GlassButton variant="ghost" size="sm" :loading="submissionsLoading" @click="fetchSubmissions">
+          {{ t('common.refresh') }}
+        </GlassButton>
+      </div>
+      <a-empty v-if="!submissions.length" :description="t('market.reviewEmpty')" />
+      <a-list v-else :data-source="submissions" row-key="id">
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-list-item-meta
+              :title="`${item.name} (v${item.version ?? '1.0.0'})`"
+              :description="`${item.skill_id} · ${t('market.reviewBy')} ${item.submitted_by_name ?? item.submitted_by ?? '—'}${item.description ? ' · ' + item.description : ''}`"
+            />
+            <template #actions>
+              <a-button type="primary" size="small" @click="handleReviewSubmission(item, true)">
+                {{ t('market.reviewApprove') }}
+              </a-button>
+              <a-button danger size="small" @click="handleReviewSubmission(item, false)">
+                {{ t('market.reviewReject') }}
+              </a-button>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
+    </GlassPanel>
+
     <!-- URL Install Modal -->
     <a-modal
       v-model:open="showUrlModal"
@@ -144,6 +206,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import * as skillPoolApi from '@/api/modules/skill-pool'
+import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -311,8 +374,91 @@ async function toggleInstall(skill: MarketSkill) {
   }
 }
 
+// --- 技能提交与审核（2026-09-01 闭环） ---
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
+
+const showSubmitModal = ref(false)
+const submitting = ref(false)
+const submitForm = ref({
+  skill_id: '',
+  name: '',
+  version: '1.0.0',
+  description: '',
+  category: 'general',
+  download_url: '',
+})
+
+function openSubmitModal() {
+  submitForm.value = {
+    skill_id: '',
+    name: '',
+    version: '1.0.0',
+    description: '',
+    category: 'general',
+    download_url: '',
+  }
+  showSubmitModal.value = true
+}
+
+async function handleSubmitSkill() {
+  const f = submitForm.value
+  if (!f.skill_id.trim() || !f.name.trim()) {
+    message.error(t('market.submitMissingRequired'))
+    return
+  }
+  submitting.value = true
+  try {
+    await skillPoolApi.submitSkillForReview({
+      skill_id: f.skill_id.trim(),
+      name: f.name.trim(),
+      version: f.version.trim() || '1.0.0',
+      description: f.description.trim(),
+      category: f.category.trim() || 'general',
+      download_url: f.download_url.trim(),
+    })
+    message.success(t('market.submitSuccess'))
+    showSubmitModal.value = false
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.message || t('market.submitError')
+    message.error(msg)
+  } finally {
+    submitting.value = false
+  }
+}
+
+const submissions = ref<skillPoolApi.SkillSubmission[]>([])
+const submissionsLoading = ref(false)
+
+async function fetchSubmissions() {
+  if (!isAdmin.value) return
+  submissionsLoading.value = true
+  try {
+    const res: any = await skillPoolApi.listSkillSubmissions('pending')
+    const data = res?.data ?? res
+    submissions.value = data?.items ?? []
+  } catch {
+    message.error(t('market.reviewLoadError'))
+  } finally {
+    submissionsLoading.value = false
+  }
+}
+
+async function handleReviewSubmission(item: skillPoolApi.SkillSubmission, approve: boolean) {
+  try {
+    await skillPoolApi.reviewSkillSubmission(item.id, approve)
+    message.success(t('market.reviewSuccess'))
+    await fetchSubmissions()
+    fetchSkills()
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.message || t('market.reviewError')
+    message.error(msg)
+  }
+}
+
 onMounted(() => {
   fetchSkills()
+  fetchSubmissions()
 })
 </script>
 
@@ -321,6 +467,14 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+/* 技能审核面板 */
+.market-review .review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .market-header .header-row {
