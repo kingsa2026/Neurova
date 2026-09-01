@@ -156,7 +156,9 @@ is_concurrency_safe 才 gather，任一未声明整轮保守串行；结果按�
 5. 超时**转后台不取消**：返回 `{"status":"background","task_id":...}`，完成经 pending_hints 注入（QP `_coordinator.py` offload 语义）
 6. 文本正则兜底收窄到 openai 兼容层 tools-400 降级路径
 
-### P1-3 MCP 可靠性 ☐（第 4 周，依赖 P0-1/P0-3）
+### P1-3 MCP 可靠性 ☑（a7e1e98，2026-09-01）
+
+交付与原设计的差异说明：状态机/熔断/退避/TTL 收敛为单文件深度模块 `tool_layers/mcp_resilience.py`（纯逻辑+时钟注入，替代原计划内嵌 mcp_client 的分散实现）；"stdio 子进程退出监听"以**会话操作失败即断连信号**等价实现（mcp SDK stdio_client 进程死→流关→call_tool 抛连接类错误→_mark_disconnected+调度重连），不穿透 SDK 内部。call_tool 401 刷新重试保留（P2-6，鉴权层未触达工具、无副作用）；其余失败绝不自动重试（锁定测试）。16 用例（test_mcp_resilience.py）；test_schemas 4F 为预存。
 
 红测：子进程崩溃自动重连（退避 1→60s+jitter）；5 次连续失败熔断 OPEN、300s 半开探测；断连窗口 `get_available_tools` 降级返回缓存；call_tool 无同会话自动重试（副作用安全，锁定测试）。实现：`mcp_client.py` per-server 状态机（CONNECTED/DISCONNECTED/OPEN）+ 重连后台 task + stdio 子进程退出监听；tools 缓存 TTL 默认 300s；`last_error`/status 契约不变。
 
