@@ -1972,7 +1972,10 @@ export default {
     unknown: '未知',
     content: '内容',
     reason: '原因',
-    addToWhitelistAndApprove: '批准并加入白名单（此后同类命令免确认）',
+    addToWhitelistAndApprove: 'स्वीकृत करें और श्वेतसूची में जोड़ें (इसके बाद समान कमांड को पुष्टि की आवश्यकता नहीं)',
+    rememberNone: 'इस बार केवल',
+    rememberExact: 'सटीक कमांड याद रखें',
+    rememberSimilar: 'समान कमांड याद रखें',
     approvalHint: '该操作被安全策略标记为需人工确认，请核实后再放行。',
   },
   neuron: {

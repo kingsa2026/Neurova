@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -68,6 +68,10 @@ class ApprovalActionRequest(BaseModel):
 
     note: str = ""
     approved_by: str = "user"
+    # 审批记忆（补课 3.2）：None=仅本次 / "exact"=记住精确命令 / "similar"=记住同类
+    remember: Optional[Literal["exact", "similar"]] = Field(
+        None, description="None/exact/similar"
+    )
 
 
 # ── 白名单 ──────────────────────────────────────────────────────
@@ -147,7 +151,9 @@ async def approve_and_execute(request: Request, request_id: str,
     tool_name = metadata.get("tool_name")
     params = metadata.get("params") or {}
 
-    if not am.approve_request(request_id, approved_by=body.approved_by, note=body.note):
+    if not am.approve_request(
+        request_id, approved_by=body.approved_by, note=body.note, remember=body.remember
+    ):
         raise HTTPException(status_code=500, detail="批准操作失败")
 
     # 无可重放内容（纯记录型请求）→ 仅返回批准结果
