@@ -223,9 +223,9 @@ export function sanitizeHtmlStrict(html: string): string {
   if (!html || typeof html !== 'string') return ''
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
-      'p', 'br', 'strong', 'em', 'a', 'code', 'pre', 'div', 'span',
+      'p', 'br', 'strong', 'em', 'del', 'a', 'code', 'pre', 'div', 'span',
       'img', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-      'table', 'thead', 'tbody', 'tr', 'th', 'td', 'button',
+      'table', 'thead', 'tbody', 'tr', 'th', 'td', 'button', 'hr',
     ],
     ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'target', 'rel', 'loading'],
     ALLOW_DATA_ATTR: false,

@@ -90,6 +90,60 @@ export function pushSkill(skillId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Marketplace skill submission & admin review (2026-09-01)
+// ---------------------------------------------------------------------------
+
+export interface SkillSubmission {
+  id: string
+  skill_id: string
+  name: string
+  description?: string
+  version?: string
+  category?: string
+  tags?: string[]
+  download_url?: string
+  author?: string
+  submitted_by?: string
+  submitted_by_name?: string
+  status: 'pending' | 'approved' | 'rejected'
+  review_note?: string | null
+  created_at?: number
+  decided_at?: number | null
+}
+
+export interface SkillSubmitPayload {
+  skill_id: string
+  name: string
+  description?: string
+  version?: string
+  category?: string
+  tags?: string[]
+  download_url?: string
+  author?: string
+}
+
+/** Submit a skill for marketplace review (pending until admin approves). */
+export function submitSkillForReview(data: SkillSubmitPayload) {
+  return api.post<ApiResponse<SkillSubmission>>(`${BASE}/skills/submit`, data)
+}
+
+/** Admin: list marketplace skill submissions (default: pending). */
+export function listSkillSubmissions(reviewStatus: string = 'pending') {
+  return api.get<ApiResponse<{ items: SkillSubmission[]; total: number }>>(
+    `${BASE}/skill-submissions`,
+    { params: { review_status: reviewStatus } },
+  )
+}
+
+/** Admin: approve or reject a skill submission. */
+export function reviewSkillSubmission(id: string, approve: boolean, note = '') {
+  return api.post<ApiResponse<SkillSubmission>>(`${BASE}/skill-submissions/${id}/review`, {
+    approve,
+    note,
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Skill Market (ZIP / Remote Install)
 // ---------------------------------------------------------------------------
 
