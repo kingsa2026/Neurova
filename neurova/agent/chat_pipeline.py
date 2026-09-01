@@ -654,6 +654,21 @@ class ChatPipeline:
                 if synth_result and synth_result.success and synth_result.synthesized_tool:
                     tool = synth_result.synthesized_tool
                     if tool.stage.value == "completed":
+                        # P1-6：合成产物注册前过提示注入扫描（用户输入即描述，
+                        # 注入内容可借 NL 合成进入工具清单——fail-closed）
+                        from neurova.skills.skill_install_gate import scan_text_for_injection
+
+                        _scan = scan_text_for_injection(
+                            f"{getattr(tool, 'name', '')} {getattr(tool, 'description', '')}",
+                            source=f"nl_synthesis:{getattr(tool, 'name', '')}",
+                        )
+                        if _scan["blocked"]:
+                            logger.warning(
+                                "NL工具合成被注入扫描拦截: %s (%s)",
+                                getattr(tool, 'name', ''),
+                                "; ".join(f.get("rule_id", "") for f in _scan["findings"][:3]),
+                            )
+                            return
                         logger.info(
                             "NL工具合成: %s (置信度=%.2f)",
                             tool.name,

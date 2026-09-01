@@ -473,6 +473,29 @@ class SkillHubClient:
             logger.error("LobeHub search failed: %s", e)
             return []
 
+    def _gate_check_and_rollback(self, skill_dir: Path, skill_name: str) -> bool:
+        """P1-6 安装安全门：落盘后扫描，不通过则回滚删除并拒绝。
+
+        fail-closed：门自身异常视为不通过（安全默认值优先于可用性）。
+        """
+        import shutil
+
+        try:
+            from neurova.skills.skill_install_gate import scan_skill_for_install
+
+            verdict = scan_skill_for_install(skill_name, str(skill_dir))
+        except Exception as e:
+            logger.error("Skill install gate failed for %s: %s", skill_name, e)
+            shutil.rmtree(skill_dir, ignore_errors=True)
+            return False
+        if verdict.get("blocked"):
+            shutil.rmtree(skill_dir, ignore_errors=True)
+            logger.warning(
+                "Skill %s blocked by install gate: %s", skill_name, verdict.get("error")
+            )
+            return False
+        return True
+
     def install_skill(self, skill: RemoteSkill) -> bool:
         """
         安装技能
@@ -512,6 +535,10 @@ class SkillHubClient:
             # 解析技能配置
             self._parse_skill_md(skill_dir)
 
+            # P1-6：安装安全门（落盘后扫描，不通过回滚）
+            if not self._gate_check_and_rollback(skill_dir, skill.name):
+                return False
+
             logger.info("Installed skill %s from GitHub", skill.name)
             return True
 
@@ -529,7 +556,11 @@ class SkillHubClient:
                 return False
 
             # 下载并解压
-            self._download_and_extract_skill(download_url, skill.name)
+            skill_dir = self._download_and_extract_skill(download_url, skill.name)
+
+            # P1-6：安装安全门（落盘后扫描，不通过回滚）
+            if not self._gate_check_and_rollback(skill_dir, skill.name):
+                return False
 
             logger.info("Installed skill %s from ClawHub", skill.name)
             return True
@@ -548,7 +579,11 @@ class SkillHubClient:
                 return False
 
             # 下载并解压
-            self._download_and_extract_skill(download_url, skill.name)
+            skill_dir = self._download_and_extract_skill(download_url, skill.name)
+
+            # P1-6：安装安全门（落盘后扫描，不通过回滚）
+            if not self._gate_check_and_rollback(skill_dir, skill.name):
+                return False
 
             logger.info("Installed skill %s from LobeHub", skill.name)
             return True
