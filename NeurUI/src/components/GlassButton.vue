@@ -92,30 +92,37 @@ const btnRef = ref<HTMLElement | null>(null)
 
 .nr-glass-btn.is-loading { opacity: 0.8; pointer-events: none; }
 .nr-glass-btn.is-disabled { opacity: 0.4; pointer-events: none; cursor: not-allowed; }
+</style>
 
-/* ─── 浅色主题覆盖：secondary / ghost 改为白底描边的简洁样式（DeepSeek 风） ─── */
-:global([data-theme='light']) .nr-glass-btn--secondary .nr-glass-btn-bg {
+<!-- ─── 浅色主题覆盖 ───
+  注意：不能写进 scoped 样式块再包 :global()。@vue/compiler-sfc 3.5.x 会把
+  `:global([data-theme='light']) .nr-glass-btn--ghost ...` 编译成只有
+  `[data-theme='light'] ` 的退化选择器（括号外的类选择器被丢弃），浅色样式会
+  打到 html[data-theme=light] 上，按钮本体仍是深蓝玻璃底。
+  必须放在普通 style 块里写完整选择器（GlassButtonLightTheme.test.ts 钉住编译产物）。 -->
+<style>
+[data-theme='light'] .nr-glass-btn--secondary .nr-glass-btn-bg {
   background: var(--nr-bg-surface);
   border: 1px solid var(--nr-glass-border-hover);
 }
-:global([data-theme='light']) .nr-glass-btn--secondary {
+[data-theme='light'] .nr-glass-btn--secondary {
   color: var(--nr-text-secondary);
   box-shadow: var(--nr-shadow-sm);
 }
-:global([data-theme='light']) .nr-glass-btn--secondary:hover .nr-glass-btn-bg {
+[data-theme='light'] .nr-glass-btn--secondary:hover .nr-glass-btn-bg {
   background: var(--nr-bg-elevated);
   border-color: var(--nr-primary-soft-border);
 }
-:global([data-theme='light']) .nr-glass-btn--secondary:hover { color: var(--nr-text-primary); }
+[data-theme='light'] .nr-glass-btn--secondary:hover { color: var(--nr-text-primary); }
 
-:global([data-theme='light']) .nr-glass-btn--ghost .nr-glass-btn-bg {
+[data-theme='light'] .nr-glass-btn--ghost .nr-glass-btn-bg {
   background: transparent;
   border: 1px solid var(--nr-glass-border);
 }
-:global([data-theme='light']) .nr-glass-btn--ghost { color: var(--nr-text-secondary); box-shadow: none; }
-:global([data-theme='light']) .nr-glass-btn--ghost:hover .nr-glass-btn-bg {
+[data-theme='light'] .nr-glass-btn--ghost { color: var(--nr-text-secondary); box-shadow: none; }
+[data-theme='light'] .nr-glass-btn--ghost:hover .nr-glass-btn-bg {
   background: var(--nr-glass-bg);
   border-color: var(--nr-glass-border-hover);
 }
-:global([data-theme='light']) .nr-glass-btn--ghost:hover { color: var(--nr-text-primary); }
+[data-theme='light'] .nr-glass-btn--ghost:hover { color: var(--nr-text-primary); }
 </style>

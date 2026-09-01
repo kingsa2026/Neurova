@@ -6,7 +6,7 @@
           <component :is="icon" v-if="icon" />
           <span v-else>{{ emoji }}</span>
         </div>
-        <span v-if="trend !== undefined" class="nr-stat-trend" :class="trendClass">
+        <span v-if="trend !== undefined && trend !== 0" class="nr-stat-trend" :class="trendClass">
           {{ trend > 0 ? '+' : '' }}{{ trend }}%
         </span>
       </div>
@@ -51,19 +51,27 @@ const gradId = `spark-${Math.random().toString(36).slice(2, 8)}`
 const displayValue = computed(() => typeof props.value === 'number' ? props.value.toLocaleString() : props.value)
 
 const iconBg = computed(() => {
-  if (props.trend !== undefined) {
-    return props.trend >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'
+  if (props.trend !== undefined && props.trend !== 0) {
+    return props.trend > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'
   }
   return 'rgba(99,102,241,0.12)'
 })
 
-const trendClass = computed(() => props.trend !== undefined ? (props.trend >= 0 ? 'trend-up' : 'trend-down') : '')
+const trendClass = computed(() => {
+  if (props.trend === undefined || props.trend === 0) return ''
+  return props.trend > 0 ? 'trend-up' : 'trend-down'
+})
 
 const linePath = computed(() => {
   if (!props.sparkData?.length) return ''
   const max = Math.max(...props.sparkData)
   const min = Math.min(...props.sparkData)
   const range = max - min || 1
+  // 单点序列无相邻点（length-1=0 会除零 → Infinity 路径），仅画居中单点
+  if (props.sparkData.length === 1) {
+    const y = sparkH - ((props.sparkData[0]! - min) / range) * (sparkH - 4) - 2
+    return `M${(sparkW / 2).toFixed(1)},${y.toFixed(1)}`
+  }
   const step = sparkW / (props.sparkData.length - 1)
   return props.sparkData.map((v, i) => {
     const x = i * step

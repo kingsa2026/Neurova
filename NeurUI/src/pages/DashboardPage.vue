@@ -8,54 +8,60 @@
         </h1>
         <p class="nr-dashboard-date">{{ currentDate }}</p>
       </div>
-      <div class="nr-dashboard-status-badges">
-        <a-badge :status="systemHealth.api ? 'success' : 'error'" :text="`${t('dashboard.api')}: ${systemHealth.api ? t('dashboard.ok') : t('dashboard.down')}`" />
-        <a-badge :status="systemHealth.db ? 'success' : 'error'" :text="`${t('dashboard.db')}: ${systemHealth.db ? t('dashboard.ok') : t('dashboard.down')}`" />
-        <a-badge :status="systemHealth.redis ? 'success' : 'error'" :text="`${t('dashboard.cache')}: ${systemHealth.redis ? t('dashboard.ok') : t('dashboard.down')}`" />
-        <a-badge :status="systemHealth.queue ? 'success' : 'error'" :text="`${t('dashboard.queue')}: ${systemHealth.queue ? t('dashboard.ok') : t('dashboard.down')}`" />
+      <div class="nr-dashboard-toolbar">
+        <a-badge
+          v-if="health.overall"
+          :status="healthStatus"
+          :text="t('dashboard.statusHealthy')"
+        />
+        <GlassButton size="sm" variant="ghost" @click="refreshAll">
+          🔄 {{ t('dashboard.refresh') }}
+        </GlassButton>
       </div>
     </div>
 
-    <!-- Stat Cards Grid -->
-    <a-spin :spinning="dashboardLoading">
-    <div class="nr-dashboard-stats">
-      <GlassStatCard
-        :label="t('dashboard.totalAgents')"
-        :value="stats.totalAgents"
-        :trend="stats.agentTrend"
-        :spark-data="stats.agentSpark"
-        spark-color="#6366f1"
-        emoji="🤖"
-      />
-      <GlassStatCard
-        :label="t('dashboard.totalConversations')"
-        :value="stats.totalConversations"
-        :trend="stats.conversationTrend"
-        :spark-data="stats.conversationSpark"
-        spark-color="#22d3ee"
-        emoji="💬"
-      />
-      <GlassStatCard
-        :label="t('dashboard.totalTokens')"
-        :value="formatTokens(stats.totalTokens)"
-        :trend="stats.tokenTrend"
-        :spark-data="stats.tokenSpark"
-        spark-color="#a78bfa"
-        emoji="📊"
-      />
-      <GlassStatCard
-        :label="t('dashboard.totalCalls')"
-        :value="stats.totalCalls"
-        :trend="stats.callTrend"
-        :spark-data="stats.callSpark"
-        spark-color="#10b981"
-        emoji="⚡"
-      />
+    <!-- Core Import Failure Bar -->
+    <div v-if="error" class="nr-dashboard-error">
+      <span>⚠️ {{ t('dashboard.loadError') }}</span>
+      <GlassButton size="sm" variant="ghost" @click="refreshAll">
+        {{ t('dashboard.retry') }}
+      </GlassButton>
     </div>
+
+    <!-- Stat Cards Grid（6 张真实 KPI 卡） -->
+    <a-spin :spinning="loading">
+      <div class="nr-dashboard-stats">
+        <GlassStatCard
+          v-for="card in cards"
+          :key="card.key"
+          :label="t(CARD_META[card.key].labelKey)"
+          :value="formatCardValue(card)"
+          :emoji="CARD_META[card.key].emoji"
+          :spark-color="CARD_META[card.key].color"
+          :trend="card.trend"
+          :spark-data="card.spark"
+        />
+      </div>
     </a-spin>
 
     <!-- Main Content Grid -->
     <div class="nr-dashboard-grid">
+      <!-- 7 天活跃趋势（echarts，会话/消息真实聚合） -->
+      <GlassCard :title="t('dashboard.trends7d')" variant="default" :radius="20">
+        <div class="nr-chart-wrap">
+          <VChart v-if="trendChartOption" :option="trendChartOption" autoresize />
+          <a-empty v-else :description="t('dashboard.noTrendData')" />
+        </div>
+      </GlassCard>
+
+      <!-- 模型 Token 分布（echarts 环形，服务启动后真实累计） -->
+      <GlassCard :title="t('dashboard.tokenDistribution')" variant="default" :radius="20">
+        <div class="nr-chart-wrap">
+          <VChart v-if="tokenPieOption" :option="tokenPieOption" autoresize />
+          <a-empty v-else :description="t('dashboard.noTokenData')" />
+        </div>
+      </GlassCard>
+
       <!-- Quick Actions -->
       <GlassCard :title="t('dashboard.quickActions')" variant="default" :radius="20">
         <div class="nr-quick-actions">
@@ -75,47 +81,6 @@
             <span class="nr-qa-icon" style="background: rgba(16,185,129,0.15); color: #10b981;">📈</span>
             <span class="nr-qa-label">{{ t('dashboard.viewAnalytics') }}</span>
           </button>
-        </div>
-      </GlassCard>
-
-      <!-- Token Usage Chart Area -->
-      <GlassCard :title="t('dashboard.usage7d')" variant="default" :radius="20">
-        <div class="nr-chart-placeholder" ref="chartRef">
-          <div class="nr-chart-bars">
-            <div
-              v-for="(bar, i) in chartBars"
-              :key="i"
-              class="nr-chart-bar"
-              :style="{ height: bar.height + '%', animationDelay: i * 0.08 + 's' }"
-            >
-              <span class="nr-chart-bar-label">{{ bar.label }}</span>
-              <a-tooltip :title="bar.value + 'K tokens'">
-                <div class="nr-chart-bar-fill" />
-              </a-tooltip>
-            </div>
-          </div>
-        </div>
-      </GlassCard>
-
-      <!-- Recent Activity -->
-      <GlassCard :title="t('dashboard.recentActivity')" variant="default" :radius="20">
-        <div class="nr-activity-list">
-          <div v-if="activities.length === 0" class="nr-activity-empty">
-            {{ t('common.noData') }}
-          </div>
-          <div
-            v-for="(activity, i) in activities"
-            :key="i"
-            class="nr-activity-item"
-          >
-            <span class="nr-activity-icon" :style="{ background: activity.color }">
-              {{ activity.icon }}
-            </span>
-            <div class="nr-activity-content">
-              <span class="nr-activity-text">{{ activity.text }}</span>
-              <span class="nr-activity-time">{{ activity.time }}</span>
-            </div>
-          </div>
         </div>
       </GlassCard>
 
@@ -147,20 +112,70 @@
           </div>
         </template>
       </GlassCard>
+
+      <!-- System Health（真实: health checks + 调度器 + 系统资源） -->
+      <GlassCard :title="t('dashboard.systemHealth')" variant="default" :radius="20" class="nr-health-card">
+        <div class="nr-health-resources">
+          <div class="nr-health-res-item">
+            <a-progress
+              type="circle"
+              :percent="health.system?.cpu ?? 0"
+              :size="76"
+              :status="(health.system?.cpu ?? 0) > 80 ? 'exception' : 'normal'"
+            />
+            <span class="nr-health-res-label">{{ t('dashboard.healthCpu') }}</span>
+          </div>
+          <div class="nr-health-res-item">
+            <a-progress
+              type="circle"
+              :percent="health.system?.memory ?? 0"
+              :size="76"
+              :status="(health.system?.memory ?? 0) > 85 ? 'exception' : 'normal'"
+            />
+            <span class="nr-health-res-label">{{ t('dashboard.healthMemory') }}</span>
+          </div>
+          <div class="nr-health-res-item">
+            <a-progress
+              type="circle"
+              :percent="health.system?.disk ?? 0"
+              :size="76"
+              :status="(health.system?.disk ?? 0) > 90 ? 'exception' : 'normal'"
+            />
+            <span class="nr-health-res-label">{{ t('dashboard.healthDisk') }}</span>
+          </div>
+        </div>
+        <div class="nr-health-meta">
+          <a-tag :color="scheduler.running ? 'green' : 'orange'">
+            {{ scheduler.running ? t('dashboard.schedulerRunning') : t('dashboard.schedulerIdle') }}
+          </a-tag>
+          <span class="nr-health-meta-text">
+            {{ t('dashboard.schedulerTasks', { total: scheduler.total_tasks ?? 0 }) }}
+          </span>
+        </div>
+        <div class="nr-health-checks">
+          <div v-for="check in health.checks" :key="check.name" class="nr-health-check">
+            <a-badge
+              :status="check.status === 'pass' ? 'success' : (check.status === 'warn' ? 'warning' : 'error')"
+            />
+            <span class="nr-health-check-name">{{ check.name }}</span>
+          </div>
+          <div v-if="health.checks.length === 0" class="nr-health-check--none">
+            {{ t('common.noData') }}
+          </div>
+        </div>
+      </GlassCard>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAgentStore } from '@/stores/agents'
-import { getHomeData, getHomeTrends } from '@/api/modules/home'
-import { statsApi } from '@/api/modules'
-import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
+import { useDashboardStats, type DashboardStatCard } from '@/composables/useDashboardStats'
 import { useFeedbackStats } from '@/composables/useFeedbackStats'
 
 const { t } = useI18n()
@@ -168,69 +183,94 @@ const router = useRouter()
 const authStore = useAuthStore()
 const agentStore = useAgentStore()
 
-/** Current date formatted for display. */
-const currentDate = computed(() => {
-  const now = new Date()
-  return now.toLocaleDateString(undefined, {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
+const currentDate = new Date().toLocaleDateString()
+
+const {
+  cards,
+  trends,
+  tokenByModel,
+  health,
+  scheduler,
+  loading,
+  error,
+  refresh: refreshStats,
+} = useDashboardStats({
+  agentId: () => agentStore.agents[0]?.id ?? '',
 })
 
-/** Dashboard statistics. */
-const stats = reactive({
-  totalAgents: 0,
-  totalConversations: 0,
-  totalTokens: 0,
-  totalCalls: 0,
-  agentTrend: 0,
-  conversationTrend: 0,
-  tokenTrend: 0,
-  callTrend: 0,
-  agentSpark: [] as number[],
-  conversationSpark: [] as number[],
-  tokenSpark: [] as number[],
-  callSpark: [] as number[],
-})
-
-/** System health indicators. */
-const systemHealth = reactive({
-  api: true,
-  db: true,
-  redis: true,
-  queue: true,
-})
-
-/** Recent activity entries. */
-const activities = ref<Array<{
-  icon: string
-  text: string
-  time: string
-  color: string
-}>>([])
-
-/** Chart bar data for 7-day usage. */
-const chartBars = ref<Array<{ label: string; height: number; value: number }>>([])
-
-/** Loading state. */
-const dashboardLoading = ref(false)
-
-// ---------------------------------------------------------------------------
-// 反馈质量卡片（点赞/点踩统计 → 满意度派生；失败保持零状态不拖垮仪表盘）
-// ---------------------------------------------------------------------------
 const {
   summary: feedbackSummary,
   satisfactionText,
   refresh: refreshFeedbackStats,
 } = useFeedbackStats()
 
+/** 统计卡展示元数据（emoji/色彩/label i18n 键/数值格式化） */
+const CARD_META: Record<
+  DashboardStatCard['key'],
+  { emoji: string; color: string; labelKey: string; format?: (n: number) => string }
+> = {
+  agents: { emoji: '🤖', color: '#6366f1', labelKey: 'dashboard.totalAgents' },
+  conversations: { emoji: '💬', color: '#22d3ee', labelKey: 'dashboard.totalConversations' },
+  tokens: { emoji: '📊', color: '#a78bfa', labelKey: 'dashboard.totalTokens', format: formatTokens },
+  calls: { emoji: '⚡', color: '#10b981', labelKey: 'dashboard.totalCalls' },
+  memories: { emoji: '🧠', color: '#f472b6', labelKey: 'dashboard.totalMemories' },
+  knowledge: { emoji: '📚', color: '#fbbf24', labelKey: 'dashboard.totalKnowledge' },
+}
+
+const healthStatus = computed(() => {
+  const o = health.value.overall
+  return o === 'healthy' ? 'success' : o === 'degraded' ? 'warning' : 'error'
+})
+
+/** 7 天活跃趋势：会话柱状 + 消息折线（双轴） */
+const trendChartOption = computed(() => {
+  const tr = trends.value
+  if (!tr.labels.length) return null
+  return {
+    tooltip: { trigger: 'axis' },
+    legend: { textStyle: { color: '#94a3b8' } },
+    grid: { left: 44, right: 48, top: 36, bottom: 28 },
+    xAxis: { type: 'category', data: tr.labels },
+    yAxis: [
+      { type: 'value', name: t('dashboard.trendSession'), nameTextStyle: { color: '#94a3b8' } },
+      { type: 'value', name: t('dashboard.trendMessage'), nameTextStyle: { color: '#94a3b8' } },
+    ],
+    series: [
+      { name: t('dashboard.trendSession'), type: 'bar', data: tr.conversation, barWidth: '44%', itemStyle: { color: '#22d3ee' } },
+      { name: t('dashboard.trendMessage'), type: 'line', yAxisIndex: 1, smooth: true, data: tr.message, itemStyle: { color: '#a78bfa' } },
+    ],
+  }
+})
+
+/** 模型 Token 分布（进程内真实记账，无记录时空态） */
+const tokenPieOption = computed(() => {
+  if (!tokenByModel.value.length) return null
+  return {
+    tooltip: { trigger: 'item' },
+    legend: { bottom: 0, textStyle: { color: '#94a3b8' } },
+    series: [
+      {
+        type: 'pie',
+        radius: ['42%', '68%'],
+        center: ['50%', '44%'],
+        data: tokenByModel.value.map((m) => ({ name: m.model, value: m.total_tokens })),
+        label: { color: '#94a3b8', fontSize: 11 },
+      },
+    ],
+  }
+})
+
 /** Format large token counts for display. */
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
   if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
   return String(n)
+}
+
+/** 取卡片数值（有格式化函数则应用，无则原样）。模板内二次索引会丢失 TS 收窄，故收敛到函数。 */
+function formatCardValue(card: DashboardStatCard): number | string {
+  const f = CARD_META[card.key].format
+  return f ? f(card.value) : card.value
 }
 
 /** Navigate to chat with the first available agent. */
@@ -243,123 +283,12 @@ function navigateToChat() {
   }
 }
 
-/** Fetch dashboard data from the API. */
-async function fetchDashboardData() {
-  try {
-    const [homeRes, trendsRes] = await Promise.allSettled([
-      getHomeData(),
-      getHomeTrends(7),
-    ])
-
-    // --- Home data ---
-    if (homeRes.status === 'fulfilled') {
-      const raw: any = homeRes.value
-      const data = raw?.data ?? raw
-      if (data) {
-        const s = data.stats ?? {}
-        const t = data.trends ?? {}
-
-        stats.totalAgents = s.agent_count ?? agentStore.agents.length
-        stats.totalConversations = s.conversation_count ?? 0
-        stats.totalTokens = s.token_consumption ?? 0
-        stats.totalCalls = s.llm_call_count ?? 0
-
-        stats.agentTrend = t.agent_trend ?? 0
-        stats.conversationTrend = t.conversation_trend ?? 0
-        stats.tokenTrend = t.token_trend ?? 0
-        stats.callTrend = t.plugin_trend ?? 0
-
-        if (data.recent_activities && Array.isArray(data.recent_activities)) {
-          activities.value = data.recent_activities.slice(0, 5).map((a: any) => ({
-            icon: a.icon || '📌',
-            text: a.text || a.message || a.title || 'Activity',
-            time: formatTimeAgo(a.created_at || a.timestamp),
-            color: a.color || 'rgba(99,102,241,0.15)',
-          }))
-        }
-      }
-    }
-
-    // --- Trends (sparklines + chart) ---
-    if (trendsRes.status === 'fulfilled') {
-      const raw: any = trendsRes.value
-      const data = raw?.data ?? raw
-      if (data) {
-        const agentT = data.agent_trend?.data
-        const convT = data.conversation_trend?.data
-        const tokenT = data.token_trend?.data
-        const llmT = data.llm_trend?.data
-        const labels = data.agent_trend?.labels ?? []
-
-        if (agentT) stats.agentSpark = agentT
-        if (convT) stats.conversationSpark = convT
-        if (tokenT) stats.tokenSpark = tokenT
-        if (llmT) stats.callSpark = llmT
-
-        if (tokenT && labels.length) {
-          buildChartBars(labels.map((l: string, i: number) => ({ day: l, value: tokenT[i] ?? 0 })))
-        }
-      }
-    }
-  } catch {
-    // API unreachable — show zeros instead of demo data
-    stats.totalAgents = agentStore.agents.length
-  }
+async function refreshAll() {
+  await Promise.allSettled([refreshStats(), refreshFeedbackStats()])
 }
 
-/** Fetch system health status. */
-async function fetchSystemHealth() {
-  try {
-    const data = await statsApi.getSystemInfo()
-
-    if (data) {
-      // Backend returns { status, cpu, memory, disk } — all present means healthy
-      systemHealth.api = data.status === 'running'
-      systemHealth.db = true // DB check is internal; assume healthy if API responds
-      systemHealth.redis = (data.memory?.percent ?? 0) < 90
-      systemHealth.queue = true
-    }
-  } catch {
-    systemHealth.api = false
-  }
-}
-
-/** Build chart bars from usage data. */
-function buildChartBars(usageData: Array<{ day?: string; label?: string; value: number }>) {
-  const maxVal = Math.max(...usageData.map((d) => d.value), 1)
-  chartBars.value = usageData.map((d) => ({
-    label: d.day || d.label || '',
-    height: Math.max(8, (d.value / maxVal) * 100),
-    value: Math.round(d.value),
-  }))
-}
-
-/** Format a timestamp to relative time string. */
-function formatTimeAgo(timestamp: string | number): string {
-  const date = new Date(timestamp)
-  const now = Date.now()
-  const diffMs = now - date.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-  const diffDay = Math.floor(diffHr / 24)
-  if (diffDay < 7) return `${diffDay}d ago`
-  return date.toLocaleDateString()
-}
-
-onMounted(async () => {
-  dashboardLoading.value = true
-  // Load agents in parallel with dashboard data
-  await Promise.allSettled([
-    agentStore.loadAgents(),
-    fetchDashboardData(),
-    fetchSystemHealth(),
-    refreshFeedbackStats(),
-  ])
-  dashboardLoading.value = false
+onMounted(() => {
+  void Promise.allSettled([agentStore.loadAgents(), refreshAll()])
 })
 </script>
 
@@ -401,8 +330,9 @@ onMounted(async () => {
   margin: 4px 0 0;
 }
 
-.nr-dashboard-status-badges {
+.nr-dashboard-toolbar {
   display: flex;
+  align-items: center;
   gap: 16px;
   flex-wrap: wrap;
 }
@@ -412,10 +342,25 @@ onMounted(async () => {
   font-size: 12px;
 }
 
+/* Import failure bar */
+.nr-dashboard-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+  font-size: 13px;
+  font-weight: 500;
+}
+
 /* Stats Grid */
 .nr-dashboard-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
 
@@ -430,16 +375,22 @@ onMounted(async () => {
 /* Content Grid */
 .nr-dashboard-grid {
   display: grid;
-  grid-template-columns: 1fr 1.5fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
 
 @media (max-width: 1200px) {
-  .nr-dashboard-grid { grid-template-columns: 1fr 1fr; }
+  .nr-dashboard-grid { grid-template-columns: 1fr; }
 }
 
-@media (max-width: 768px) {
-  .nr-dashboard-grid { grid-template-columns: 1fr; }
+/* Charts */
+.nr-chart-wrap {
+  height: 260px;
+}
+
+.nr-chart-wrap .vchart-stub {
+  width: 100%;
+  height: 100%;
 }
 
 /* Quick Actions */
@@ -483,114 +434,6 @@ onMounted(async () => {
 .nr-qa-label {
   font-size: 14px;
   font-weight: 500;
-}
-
-/* Chart Placeholder */
-.nr-chart-placeholder {
-  height: 200px;
-  padding: 8px 4px;
-}
-
-.nr-chart-bars {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-around;
-  height: 100%;
-  gap: 8px;
-}
-
-.nr-chart-bar {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  height: 100%;
-  gap: 6px;
-}
-
-.nr-chart-bar-fill {
-  width: 100%;
-  height: 100%;
-  border-radius: 6px 6px 2px 2px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--nr-primary) 60%, transparent) 0%, color-mix(in srgb, var(--nr-primary) 20%, transparent) 100%);
-  transition: background 0.3s;
-  animation: bar-grow 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.nr-chart-bar:hover .nr-chart-bar-fill {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--nr-primary) 80%, transparent) 0%, color-mix(in srgb, var(--nr-primary) 35%, transparent) 100%);
-}
-
-@keyframes bar-grow {
-  from { transform: scaleY(0); transform-origin: bottom; }
-  to { transform: scaleY(1); transform-origin: bottom; }
-}
-
-.nr-chart-bar-label {
-  font-size: 10px;
-  color: var(--nr-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-/* Activity List */
-.nr-activity-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.nr-activity-empty {
-  text-align: center;
-  color: var(--nr-text-muted);
-  padding: 32px 0;
-  font-size: 13px;
-}
-
-.nr-activity-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 8px;
-  border-radius: 10px;
-  transition: background 0.2s;
-}
-
-.nr-activity-item:hover {
-  background: var(--nr-glass-bg);
-}
-
-.nr-activity-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
-.nr-activity-content {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.nr-activity-text {
-  font-size: 13px;
-  color: var(--nr-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.nr-activity-time {
-  font-size: 11px;
-  color: var(--nr-text-muted);
-  font-family: var(--nr-font-mono);
 }
 
 /* ── Feedback Quality card ─────────────────────────────── */
@@ -679,5 +522,66 @@ onMounted(async () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── System Health card ────────────────────────────────── */
+
+.nr-health-resources {
+  display: flex;
+  gap: 24px;
+  justify-content: space-around;
+  margin-bottom: 14px;
+}
+
+.nr-health-res-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.nr-health-res-label {
+  font-size: 12px;
+  color: var(--nr-text-tertiary);
+}
+
+.nr-health-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.nr-health-meta-text {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+}
+
+.nr-health-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nr-health-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+}
+
+.nr-health-check-name {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+}
+
+.nr-health-check--none {
+  font-size: 12px;
+  color: var(--nr-text-muted);
+  text-align: center;
+  padding: 12px 0;
 }
 </style>
