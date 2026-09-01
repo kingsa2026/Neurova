@@ -40,7 +40,8 @@ class TestAppContainerHonesty:
         if sys.platform != "win32":
             pytest.skip("仅 Windows 语义")
         backend = _detect_backend(SandboxSeverity.NETWORK_OFF)
-        assert backend.backend_name() in ("restricted_token", "process")
+        # 遗留③ 后：AppContainer 真实现优先；SAFER 兜底；裸 process 最后
+        assert backend.backend_name() in ("appcontainer", "restricted_token", "process")
 
     def test_execute_reports_enforcement_truth(self):
         """执行结果必须自报隔离是否真实生效"""

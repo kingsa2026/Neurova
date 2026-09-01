@@ -203,10 +203,14 @@ def _detect_backend(severity: SandboxSeverity) -> ExecSandbox:
         return BubblewrapSandbox(severity)
     if platform.system() == "Darwin" and SeatbeltSandbox().available():
         return SeatbeltSandbox(severity)
-    # P1-7：AppContainer 未实现（available=False）。
-    # P2 可选项③：Windows 有 SAFER 受限令牌时用它（特权剥离真隔离），
-    # 仍无任何隔离能力才降级裸 ProcessSandbox
+    # 遗留③：AppContainer 真实现落地（Low integrity + 默认断网）——
+    # Windows 优先 AppContainer，受限令牌（SAFER）兜底，裸 process 最后
     if platform.system() == "Windows":
+        from neurova.sandbox.appcontainer import AppContainerSandbox
+
+        ac = AppContainerSandbox(severity)
+        if ac.available():
+            return ac
         from neurova.sandbox.restricted_token import RestrictedTokenSandbox
 
         rt = RestrictedTokenSandbox(severity)
