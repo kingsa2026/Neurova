@@ -4,6 +4,7 @@ OpenAI Loop - OpenAI 兼容模型适配循环
 支持: GPT-4, GPT-3.5-turbo, GPT-4V, 以及所有 OpenAI 兼容 API
 """
 
+import asyncio
 import re
 
 from neurova.core.logger import get_logger
