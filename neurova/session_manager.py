@@ -10,6 +10,7 @@ import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+import os
 from pathlib import Path
 from threading import Lock, RLock
 from typing import Any, Dict, List, Optional
@@ -113,11 +114,15 @@ class SessionManager(SessionRepository):
                     cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self):
+    def __init__(self, sessions_dir: Optional[str] = None):
         if not hasattr(self, "_initialized"):
             self._initialized = True
-            self._sessions_dir = Path("sessions")
-            self._sessions_dir.mkdir(exist_ok=True)
+            # NEUROVA_SESSIONS_DIR 环境变量供测试隔离（单例 __new__ 下
+            # 构造参数只在首次生效，env 是唯一可靠覆盖通道）
+            self._sessions_dir = Path(
+                sessions_dir or os.environ.get("NEUROVA_SESSIONS_DIR") or "sessions"
+            )
+            self._sessions_dir.mkdir(parents=True, exist_ok=True)
             self._file_locks: Dict[str, Lock] = {}
             # S3 修复 (Critical #4 TOCTOU): 保护 _file_locks dict 的独立 RLock.
             # RLock 允许 _get_file_lock 在持锁时被同线程重入调用 (如 __init__ 内部).
@@ -759,12 +764,32 @@ class SessionManager(SessionRepository):
                         "created_at": created_at,
                         "updated_at": session_data.get("updated_at", ""),
                         "total_messages": session_data.get("total_messages", 0),
+                        "pinned": bool(session_data.get("pinned", False)),
                     }
                     seen_session_ids[sid] = summary
 
         summaries = list(seen_session_ids.values())
         summaries.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return summaries
+
+    def set_session_pinned(self, agent_id: str, session_id: str, pinned: bool) -> bool:
+        """置顶/取消置顶 session（写入所有日期文件的 pinned 字段）。"""
+        agent_dir = self._get_session_dir(agent_id)
+        file_paths = list(agent_dir.glob(f"session_{session_id}_*.json"))
+        if not file_paths:
+            logger.warning("set_session_pinned: 未找到 session_id=%s 的文件", session_id)
+            return False
+
+        ok = True
+        for file_path in file_paths:
+            session_data = self._read_session_file(file_path)
+            if not session_data:
+                ok = False
+                continue
+            session_data["pinned"] = bool(pinned)
+            if not self._write_session_file(file_path, session_data):
+                ok = False
+        return ok
 
     def rename_session(self, agent_id: str, session_id: str, title: str) -> bool:
         """重命名 session（写入所有日期文件的 title 字段）。"""
