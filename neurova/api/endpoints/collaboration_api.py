@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
-from neurova.api.auth import get_current_user
+from neurova.api.auth import get_current_user, get_current_user_or_default
 
 logger = get_logger(__name__)
 
@@ -712,11 +712,19 @@ async def import_comfyui_as_canvas(request: Request, payload: Dict[str, Any] = B
 
 
 @router.post("/canvas/{canvas_id}/run")
-async def run_canvas_workflow(request: Request, canvas_id: str, body: Dict[str, Any] = None):
+async def run_canvas_workflow(
+    request: Request,
+    canvas_id: str,
+    body: Dict[str, Any] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
     """执行画布工作流（画布快照 → neurflow WorkflowDefinition → 执行引擎）
 
     Body（可选）: {"session_id": "聊天会话ID"} —— 工作流内 agent 节点派生的
     子 Agent 事件将广播到该会话（聊天页子 Agent 小窗的数据源）。
+
+    用户隔离：user_id 取 JWT 实名（未认证回退 default），透传执行引擎——
+    画布内知识库节点引用用户级远程配置（默认私有）时做属主校验。
 
     返回: {runId: neurflow execution_id, status}，用
     GET /canvas/{canvas_id}/runs/{run_id} 轮询执行状态。
@@ -729,6 +737,7 @@ async def run_canvas_workflow(request: Request, canvas_id: str, body: Dict[str, 
     session_id = body.get("session_id")
     debug = bool(body.get("debug"))
     breakpoints = body.get("breakpoints") or []
+    user_id = str(current_user.get("user_id") or "default")
 
     try:
         from neurova.collaboration.canvas_bridge import canvas_to_workflow
@@ -740,13 +749,29 @@ async def run_canvas_workflow(request: Request, canvas_id: str, body: Dict[str, 
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"画布转换失败: {str(e)}")
 
+    # 执行前节点配置校验：全图缺失收集 → 400 带字段级清单（前端弹窗），
+    # 不进后台任务 = 停止工作流执行
+    try:
+        from neurova.collaboration.neurflow.validation import (
+            issues_to_payload,
+            validate_node_configs,
+        )
+
+        issues = validate_node_configs(workflow)
+        if issues:
+            raise HTTPException(status_code=400, detail=issues_to_payload(issues))
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"节点校验失败: {str(e)}")
+
     executor = get_workflow_executor()
     # 遗留 B：运行语义=用户在自己的画布上试跑——内存中置 PUBLISHED，
     # 让 subflow 默认 loader（仅认 PUBLISHED）能引用本画布；不落库。
     from neurova.collaboration.neurflow.models import WorkflowStatus
 
     workflow.status = WorkflowStatus.PUBLISHED
-    execution = executor.create_instance(workflow, inputs={}, user_id="canvas")
+    execution = executor.create_instance(workflow, inputs={}, user_id=user_id)
 
     # 修复① — 调试运行：debug=true 时创建 DebugSession 并注册到
     # _DEBUG_SESSIONS（resume/variables 端点按 execution_id 查找），
@@ -769,7 +794,7 @@ async def run_canvas_workflow(request: Request, canvas_id: str, body: Dict[str, 
         executor.execute(
             workflow,
             inputs={},
-            user_id="canvas",
+            user_id=user_id,
             agent_id=body.get("agent_id"),
             session_id=session_id,
             instance=execution,

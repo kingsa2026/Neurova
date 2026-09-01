@@ -29,6 +29,23 @@ class _FakeStore:
         self._storage = storage
 
     def get(self, canvas_id):
+        if canvas_id == "cv_bad":
+            return {
+                "id": "cv_bad",
+                "name": "bad-canvas",
+                "nodes": [
+                    {"id": "start", "type": "builtin:start", "label": "S",
+                     "position": {"x": 0, "y": 0}, "config": {}},
+                    {"id": "llm1", "type": "builtin:llm", "label": "LLM1",
+                     "position": {"x": 50, "y": 0}, "config": {}},
+                    {"id": "end", "type": "builtin:end", "label": "E",
+                     "position": {"x": 10, "y": 0}, "config": {}},
+                ],
+                "edges": [
+                    {"id": "e1", "source": "start", "target": "llm1"},
+                    {"id": "e2", "source": "llm1", "target": "end"},
+                ],
+            }
         if canvas_id != "cv_1":
             return None
         return {
@@ -117,3 +134,50 @@ class TestCanvasRunPublishesInMemory:
         assert captured["status_at_execute"] == WorkflowStatus.PUBLISHED
         # 不落库：DB 中该 id 无工作流记录
         assert run_env.get_workflow("cv_1-draft-canvas") is None
+
+    @pytest.mark.asyncio
+    async def test_run_endpoint_rejects_bad_node_configs(self, run_env):
+        """节点配置异常：400 + 字段级清单 + executor 不被调用（停止执行）"""
+        from neurova.api.endpoints import collaboration_api
+        import neurova.collaboration.neurflow.execution_engine as ee
+
+        called = {"execute": 0}
+
+        class _SpyExecutor:
+            def create_instance(self, workflow, inputs, user_id=None):
+                from neurova.collaboration.neurflow.models import ExecutionInstance, WorkflowStatus
+
+                return ExecutionInstance(
+                    id="exec_should_not_happen",
+                    workflow_id=workflow.id,
+                    status=WorkflowStatus.RUNNING,
+                    inputs={},
+                )
+
+            async def execute(self, workflow, **kwargs):
+                called["execute"] += 1
+                return kwargs.get("instance")
+
+        orig_get = ee.get_workflow_executor
+        ee.get_workflow_executor = lambda: _SpyExecutor()
+
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.include_router(collaboration_api.router)
+        client = TestClient(app)
+        try:
+            r = client.post("/canvas/cv_bad/run", json={})
+        finally:
+            ee.get_workflow_executor = orig_get
+
+        assert r.status_code == 400
+        detail = r.json()["detail"]
+        assert detail["code"] == 1
+        assert "停止执行" in detail["message"]
+        errors = detail["errors"]
+        assert len(errors) == 1
+        assert errors[0]["node_id"] == "llm1"
+        assert "prompt" in errors[0]["missing"][0]
+        assert called["execute"] == 0  # 后台任务未创建=停止执行
