@@ -305,6 +305,11 @@ class LLMClient:
             if "tools" in kwargs:
                 params["tools"] = kwargs["tools"]
 
+            # 根因修复 (2026-09-02): OpenAI 协议流式默认不回传 usage，
+            # 必须显式请求 include_usage——否则 chunk.usage 恒 None，
+            # 上层 token 记账/成本统计永远 0（dashboard Token/调用为 0 的根因）。
+            params["stream_options"] = {"include_usage": True}
+
             # 调用流式 API
             stream = self.client.chat.completions.create(**params)
 
@@ -414,6 +419,9 @@ class LLMClient:
             # 如果有 tools 参数
             if "tools" in kwargs:
                 params["tools"] = kwargs["tools"]
+
+            # 根因修复 (2026-09-02): 流式 usage 回传必须显式请求（见同步流式处注释）。
+            params["stream_options"] = {"include_usage": True}
 
             # 调用流式 API
             # P1 修复: 原实现误用同步 self.client，返回的同步 Stream 无法 `async for`，

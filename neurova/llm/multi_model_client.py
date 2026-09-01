@@ -499,9 +499,11 @@ class MultiModelLLMClient:
             try:
                 from neurova.core.usage_accounting import get_usage_accounting
 
-                # P2-4：真实 token 对账（response.usage 为 OpenAI 返回值；
-                # 缺失时静默跳过，绝不做字符长度伪造）
+                # P2-4：真实 token 对账（response.usage 为 OpenAI 返回值）；
+                # 网关缺失 usage 时（与流式同源问题：部分兼容网关不回传）
+                # 用 tiktoken 估值并标记 estimated，绝不做字符长度裸白造假。
                 _usage = getattr(result, "usage", None)
+                _prompt, _completion, _estimated = None, None, False
                 if _usage:
                     def _uval(key):
                         v = getattr(_usage, key, None)
@@ -509,12 +511,24 @@ class MultiModelLLMClient:
                             v = _usage.get(key)
                         return int(v or 0)
 
-                    get_usage_accounting().record(
-                        model=client.model,
-                        provider=client.provider.id,
-                        prompt_tokens=_uval("prompt_tokens"),
-                        completion_tokens=_uval("completion_tokens"),
-                    )
+                    _prompt, _completion = _uval("prompt_tokens"), _uval("completion_tokens")
+                else:
+                    _est_client = getattr(client.client, "count_tokens", None)
+                    if _est_client:
+                        try:
+                            _prompt = client.client.count_message_tokens(messages, tools=kwargs.get("tools"))
+                        except Exception:  # noqa: BLE001
+                            _prompt = 0
+                        _completion = _est_client(getattr(result, "content", "") or "")
+                        _estimated = True
+
+                get_usage_accounting().record(
+                    model=client.model,
+                    provider=client.provider.id,
+                    prompt_tokens=_prompt or 0,
+                    completion_tokens=_completion or 0,
+                    estimated=_estimated,
+                )
             except Exception:
                 pass
             finally:
@@ -607,7 +621,21 @@ class MultiModelLLMClient:
             start_time = time.time()
             # P1 修复: chat_stream 是同步生成器，无法 `async for`（TypeError）。
             # 必须调用异步版本 chat_stream_async。
+            stream_usage: Dict[str, int] = {}
+            reply_text = ""
             async for chunk in client.client.chat_stream_async(messages, **kwargs):
+                # 根因修复 (2026-09-02): 流式 usage 在最后一个 chunk 携带全量
+                # （LLMClient 已请求 stream_options.include_usage）——
+                # 取最后一次非空值，逐 chunk 累加会把 token 双计。
+                _u = getattr(chunk, "usage", None)
+                if _u:
+                    stream_usage = {
+                        "prompt_tokens": getattr(_u, "prompt_tokens", None) if not isinstance(_u, dict) else _u.get("prompt_tokens"),
+                        "completion_tokens": getattr(_u, "completion_tokens", None) if not isinstance(_u, dict) else _u.get("completion_tokens"),
+                    }
+                    stream_usage = {k: int(v or 0) for k, v in stream_usage.items()}
+                reply_text += getattr(chunk, "content", "") or ""
+                reply_text += getattr(chunk, "reasoning_content", "") or ""
                 yield chunk
             duration = time.time() - start_time  # P2-4 补刀：原为丢弃结果的死语句
             client.increment_request(success=True)
@@ -617,6 +645,37 @@ class MultiModelLLMClient:
                 get_metrics().record_llm_call(client.provider.id, client.model, True, duration)
             except Exception:
                 pass
+            # 根因修复 (2026-09-02): 流式调用此前只透传 chunk、从不 record——
+            # 无 usage 也记 1 次调用（calls 恒 0 的根因），有 usage 记真实 token。
+            # 网关不回传 usage 时（实测 sensetime 流式恒空）用 tiktoken 估值并
+            # 显式标记 estimated=True，供对账区分真值/估计值。
+            try:
+                from neurova.core.usage_accounting import get_usage_accounting
+
+                _prompt = stream_usage.get("prompt_tokens")
+                _completion = stream_usage.get("completion_tokens")
+                _estimated = False
+                if _prompt is None or _completion is None:
+                    _est_client = getattr(client.client, "count_tokens", None)
+                    if _est_client:
+                        try:
+                            _prompt = client.client.count_message_tokens(messages, tools=kwargs.get("tools"))
+                        except Exception:  # noqa: BLE001 - 估值失败退 0，不阻断主流程
+                            _prompt = 0
+                        _completion = _est_client(reply_text)
+                        _estimated = True
+                    else:
+                        _prompt = _prompt or 0
+                        _completion = _completion or 0
+                get_usage_accounting().record(
+                    model=client.model or "unknown",
+                    provider=client.provider.id,
+                    prompt_tokens=_prompt or 0,
+                    completion_tokens=_completion or 0,
+                    estimated=_estimated,
+                )
+            except Exception:
+                logger.debug("流式 usage 入账跳过", exc_info=True)
         except Exception as e:
             client.increment_request(success=False)
             try:

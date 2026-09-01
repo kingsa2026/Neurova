@@ -45,8 +45,13 @@ class TokenUsageAccounting:
         provider: str,
         prompt_tokens: int,
         completion_tokens: int,
+        estimated: bool = False,
     ) -> None:
-        """记一次 LLM 调用的真实 token 用量。"""
+        """记一次 LLM 调用的真实 token 用量。
+
+        estimated=True：provider 网关不回传 usage（实测 sensetime 流式恒空）
+        时由 tiktoken 估值入账，供对账区分真值/估计值。
+        """
         prompt_tokens = int(prompt_tokens or 0)
         completion_tokens = int(completion_tokens or 0)
         total = prompt_tokens + completion_tokens
@@ -59,6 +64,7 @@ class TokenUsageAccounting:
                     "prompt_tokens": 0,
                     "completion_tokens": 0,
                     "total_tokens": 0,
+                    "estimated_calls": 0,
                     "by_provider": {},
                 },
             )
@@ -66,6 +72,8 @@ class TokenUsageAccounting:
             entry["prompt_tokens"] += prompt_tokens
             entry["completion_tokens"] += completion_tokens
             entry["total_tokens"] += total
+            if estimated:
+                entry["estimated_calls"] = entry.get("estimated_calls", 0) + 1
 
             p_entry = entry["by_provider"].setdefault(
                 provider,
@@ -82,6 +90,7 @@ class TokenUsageAccounting:
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": total,
+                "estimated": estimated,
             }
 
     def last_call(self) -> Optional[Dict[str, Any]]:
@@ -102,6 +111,7 @@ class TokenUsageAccounting:
             "prompt_tokens": sum(e["prompt_tokens"] for e in by_model.values()),
             "completion_tokens": sum(e["completion_tokens"] for e in by_model.values()),
             "total_tokens": sum(e["total_tokens"] for e in by_model.values()),
+            "estimated_calls": sum(e.get("estimated_calls", 0) for e in by_model.values()),
         }
         return {
             "by_model": by_model,
