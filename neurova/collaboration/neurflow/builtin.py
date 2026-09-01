@@ -1790,18 +1790,18 @@ def _safe_request(method: str, url: str, **kwargs) -> "_OutboundResponse":
 def _load_kb_config_secret(config_id: str, user_id: str = "") -> Optional[str]:
     """从用户级知识库配置读取解密后的 API Key（R-7 B: kb_config_id 引用）。
 
-    配置不存在/无加密/密钥缺失 → 返回 None（节点仍可用手填 api_key 兜底）。
+    默认私有、按用户隔离（fail-closed）：
+    - 无 user_id 上下文 → 一律拒绝（不再跳过属主检查）
+    - 配置不存在 / 属主不匹配 → None
     """
-    if not config_id:
+    if not config_id or not user_id:
         return None
     try:
         from neurova.knowledge.storage import get_knowledge_storage
 
         storage = get_knowledge_storage()
         cfg = storage.get_config_by_id(config_id)
-        if not cfg:
-            return None
-        if user_id and cfg.get("user_id") != user_id:
+        if not cfg or cfg.get("user_id") != user_id:
             return None
         return storage.decrypt_api_key(config_id)
     except Exception as e:  # noqa: BLE001
@@ -1816,8 +1816,12 @@ async def exec_knowledge_base(config: Dict[str, Any], ctx: Dict[str, Any]) -> Di
     - kb_type=iflow：心流知识库（startSearch → pollSearch，api_key 必填）
     - kb_type=feishu/ima/自定义：GenericREST（POST api_url + Bearer + dataset_id，
       向后兼容旧节点配置）
-    - kb_config_id（R-7 B）：引用用户级配置（storage.configs），自动注入解密后的
-      api_key/app_secret/base_url；节点手填字段仍可覆盖。
+    - kb_config_id（R-7 B）：引用用户级配置（storage.configs）。配置默认私有、
+      按用户隔离：ctx 无 user_id 或属主不匹配 → 一律拒绝（fail-closed）。
+      引用后节点 kb_type 未显式选择（空/画布默认 local）时跟随配置 source_type。
+
+    主凭据注入（按 source_type）：配置 api_key 通道解密后的凭据注入
+    ima.token / feishu.app_secret / iflow·custom.api_key；节点手填字段优先。
 
     远程适配器 URL 一律过 SSRF 校验（_validate_outbound_url 同语义）。
     """
@@ -1826,21 +1830,33 @@ async def exec_knowledge_base(config: Dict[str, Any], ctx: Dict[str, Any]) -> Di
     kb_type = str(config.get("kb_type") or "local")
     query = str(config.get("query", "") or "")
     limit = int(config.get("limit", 5) or 5)
-    user_id = str((ctx or {}).get("user_id", ""))
+    user_id = str((ctx or {}).get("user_id", "") or "")
 
-    # R-7 B: kb_config_id 引用用户级配置
+    # R-7 B: kb_config_id 引用用户级配置（默认私有，fail-closed 校验属主）
     kb_config_id = str(config.get("kb_config_id", "") or "")
-    cfg_secret = _load_kb_config_secret(kb_config_id, user_id)
+    cfg_secret: Optional[str] = None
     cfg_settings: Dict[str, Any] = {}
     if kb_config_id:
-        try:
-            from neurova.knowledge.storage import get_knowledge_storage
+        if not user_id:
+            return {
+                "status": "failed",
+                "error": "远程知识库配置按用户私有：当前执行缺少用户上下文（user_id），已拒绝引用配置",
+                "output": {"kb_type": kb_type, "results": []},
+            }
+        from neurova.knowledge.storage import get_knowledge_storage
 
-            cfg = get_knowledge_storage().get_config_by_id(kb_config_id)
-            if cfg and (not user_id or cfg.get("user_id") == user_id):
-                cfg_settings = cfg.get("settings", {}) or {}
-        except Exception:  # noqa: BLE001
-            cfg_settings = {}
+        cfg = get_knowledge_storage().get_config_by_id(kb_config_id)
+        if not cfg or cfg.get("user_id") != user_id:
+            return {
+                "status": "failed",
+                "error": f"远程知识库配置 '{kb_config_id}' 不存在或不属于当前用户",
+                "output": {"kb_type": kb_type, "results": []},
+            }
+        cfg_secret = _load_kb_config_secret(kb_config_id, user_id)
+        cfg_settings = cfg.get("settings", {}) or {}
+        # 节点 kb_type 未显式选择（空/画布默认 local）时跟随配置的 source_type
+        if kb_type in ("", "local"):
+            kb_type = str(cfg.get("source_type") or "") or "local"
 
     remote_config = {
         "api_url": config.get("api_url") or cfg_settings.get("api_url"),
@@ -1849,13 +1865,26 @@ async def exec_knowledge_base(config: Dict[str, Any], ctx: Dict[str, Any]) -> Di
         "dataset_id": config.get("dataset_id") or cfg_settings.get("dataset_id"),
         "base_url": config.get("base_url") or cfg_settings.get("base_url"),
         "timeout": config.get("timeout", 30),
-        # ima MCP 为本机服务：允许显式放行环回/私网地址（默认关闭）
-        "allow_local": config.get("allow_local", False),
+        # ima MCP 为本机服务：允许显式放行环回/私网地址（默认关闭；
+        # 属主配置中显式开启的 allow_local 同样生效）
+        "allow_local": bool(config.get("allow_local", False))
+        or bool(cfg_settings.get("allow_local", False)),
         # 飞书知识库
         "app_id": config.get("app_id") or cfg_settings.get("app_id"),
-        "app_secret": config.get("app_secret") or cfg_settings.get("app_secret"),
+        "app_secret": config.get("app_secret") or cfg_secret,
         "space_id": config.get("space_id") or cfg_settings.get("space_id"),
+        # ima 知识库（token 此前未注入——settings 里存了也到不了适配器）
+        "token": config.get("token") or cfg_secret,
+        "knowledge_base_id": config.get("knowledge_base_id")
+        or cfg_settings.get("knowledge_base_id"),
+        # iflow 检索可选参数（补齐适配器契约）
+        "search_type": config.get("search_type") or cfg_settings.get("search_type"),
+        "source": config.get("source") or cfg_settings.get("source"),
+        "poll_interval": config.get("poll_interval") or cfg_settings.get("poll_interval"),
+        "poll_max": config.get("poll_max") or cfg_settings.get("poll_max"),
     }
+    # 无值字段不传（None 会击穿适配器的 float()/bool() 默认值处理）
+    remote_config = {k: v for k, v in remote_config.items() if v is not None}
     adapter = get_adapter(kb_type, remote_config, ctx)
     result = await adapter.search(query, limit)
 

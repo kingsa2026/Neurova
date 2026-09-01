@@ -169,6 +169,44 @@ async def get_agents_stats(request: Request):
     return agents_stats
 
 
+@router.get("/token-usage")
+async def get_token_usage(request: Request):
+    """获取进程级 Token 用量（真实记账器快照，服务启动起累计）
+
+    数据源: neurova.core.usage_accounting.TokenUsageAccounting 单例
+    （multi_model_client.chat 每轮按 response.usage 真实记录）。
+    进程重启归零是诚实语义（无持久化历史）。
+    """
+    _get_request_id(request)
+
+    from neurova.core.usage_accounting import get_usage_accounting
+
+    accounting = get_usage_accounting()
+    snapshot = accounting.snapshot()
+
+    by_model = [
+        {
+            "model": name,
+            "calls": int(e.get("calls", 0)),
+            "prompt_tokens": int(e.get("prompt_tokens", 0)),
+            "completion_tokens": int(e.get("completion_tokens", 0)),
+            "total_tokens": int(e.get("total_tokens", 0)),
+        }
+        for name, e in snapshot.get("by_model", {}).items()
+    ]
+    by_model.sort(key=lambda m: m["total_tokens"], reverse=True)
+
+    return {
+        "total": snapshot.get(
+            "total",
+            {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        ),
+        "total_cost": snapshot.get("total_cost", 0.0),
+        "by_model": by_model,
+        "last_call": accounting.last_call(),
+    }
+
+
 @router.get("/usage", response_model=UsageStats)
 async def get_usage_stats(request: Request):
     """获取使用统计"""

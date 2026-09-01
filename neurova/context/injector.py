@@ -696,7 +696,7 @@ class UnifiedContextInjector(BaseModule):
                     "hope": "🌟",
                 }
                 emoji = emojis.get(emotion_type, "")
-                emotions.append(f"{emoji} {emotion_type}: {intensity * 100:.0f}%%")
+                emotions.append(f"{emoji} {emotion_type}: {intensity * 100:.0f}%")
 
         return " | ".join(emotions) if emotions else "😐 neutral"
 

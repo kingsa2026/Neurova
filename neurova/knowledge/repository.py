@@ -45,7 +45,96 @@ class KnowledgeRepository:
         self._path = self._dir / "knowledge.json"
         self._lock = threading.RLock()
         self._items: Dict[str, List[Dict[str, Any]]] = {}  # agent_id -> items
+        # 分片索引：public（公库无隔离）/ user:<uid>（按属主私库）/ shared（共享集）
+        self._indexes: Dict[str, Any] = {}
+        self._index_dirty = True   # 索引脏标记（写入后置位，检索时按需重建）
         self._load()
+
+    # ── TF-IDF 分片索引（复用 UnifiedVectorStore tfidf 后端）─────────────────
+
+    @staticmethod
+    def _shard_key(scope: str, user_id: str = "") -> str:
+        """分片键：public / user:<uid> / shared"""
+        if scope == "public":
+            return "public"
+        if scope == "shared":
+            return "shared"
+        return f"user:{user_id}"
+
+    def _get_shard_scope(self, item: Dict[str, Any]) -> str:
+        """条目所属分片：public 条目 → public；shared_with 非空 → shared；否则 → 属主私库"""
+        if item.get("visibility") == VISIBILITY_PUBLIC:
+            return "public"
+        if item.get("shared_with"):
+            return "shared"
+        return "private"
+
+    def _get_vector_store(self, scope: str = "public", user_id: str = "") -> Any:
+        """按分片懒加载 TF-IDF 向量索引（失败返回 None，检索回退 substring）。"""
+        key = self._shard_key(scope, user_id)
+        return self._get_vector_store_by_shard_key(key)
+
+    def _get_vector_store_by_shard_key(self, key: str) -> Any:
+        """按完整分片键懒加载（public / user:<uid> / shared）。"""
+        if key in self._indexes:
+            return self._indexes[key]
+        try:
+            from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
+
+            self._indexes[key] = UnifiedVectorStore(backend="tfidf")
+        except Exception as e:
+            logger.warning("知识库 TF-IDF 索引(%s)初始化失败（回退 substring 检索）: %s", key, e)
+            self._indexes[key] = None
+        return self._indexes[key]
+
+    def _rebuild_indexes(self, agent_id: str) -> None:
+        """重建全部相关分片（懒重建，按脏标记触发）。仅在 dirty 时全量；否则增量由各分片维护。"""
+        # 收集当前 agent 的条目 → 分组到分片
+        items = self._items.get(agent_id, [])
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for it in items:
+            scope = self._get_shard_scope(it)
+            if scope == "private":
+                grouped.setdefault(f"user:{it.get('owner_user_id', 'default')}", []).append(it)
+            else:
+                grouped.setdefault(scope, []).append(it)
+
+        # 重建全部分片（每个分片小、non-incremental 重建成本可控）
+        for key, shard_items in grouped.items():
+            # key 已是完整分片键（user:<uid> / public / shared）
+            store = self._get_vector_store_by_shard_key(key)
+            if store is None:
+                continue
+            docs = [
+                {"id": it.get("knowledge_id"), "content": f"{it.get('title', '')} {it.get('content', '')}"}
+                for it in shard_items if it.get("knowledge_id")
+            ]
+            try:
+                if docs:
+                    store.index_memories(docs, incremental=False)
+                else:
+                    store.memory_vectors = []
+                    store.memory_ids = []
+                    store.memory_metadata = []
+                    store._np_matrix = None
+            except Exception as e:
+                logger.warning("知识库 TF-IDF 分片 %s 重建失败: %s", key, e)
+
+        self._index_dirty = False
+        logger.debug("知识库 TF-IDF 分片索引重建完成: agent=%s, shards=%d", agent_id, len(grouped))
+
+    def _ensure_indexes(self, agent_id: str) -> None:
+        """检索前按脏标记重建索引（幂等）。"""
+        with self._lock:
+            if self._index_dirty:
+                self._rebuild_indexes(agent_id)
+
+    # 兼容：旧方法名包装（分片架构下返回 public 分片）
+    def _rebuild_vector_index_for_agent(self, agent_id: str, user: Optional[Dict] = None) -> None:
+        self._rebuild_indexes(agent_id)
+
+    def _ensure_index(self, agent_id: str) -> None:
+        self._ensure_indexes(agent_id)
 
     def _load(self) -> None:
         if self._path.exists():
@@ -117,6 +206,7 @@ class KnowledgeRepository:
         with self._lock:
             self._items.setdefault(agent_id, []).append(item)
             self._save()
+            self._index_dirty = True
         return item
 
     def get_item(self, agent_id: str, knowledge_id: str) -> Optional[Dict[str, Any]]:
@@ -211,6 +301,7 @@ class KnowledgeRepository:
                     item["updated_at"] = datetime.datetime.now(datetime.timezone.utc).timestamp()
                     items[idx] = item
                     self._save()
+                    self._index_dirty = True
                     return dict(item)
         raise LookupError("知识条目不存在: %s" % item.get("knowledge_id"))
 
@@ -261,6 +352,30 @@ class KnowledgeRepository:
             "decided_at": None,
         }
         return self._set_entry(agent_id, item)
+
+    def unpublish(self, knowledge_id: str, reviewed_by: str = "", note: str = "") -> Optional[Dict[str, Any]]:
+        """管理员下架公共条目：保留数据，visibility 回 private，submission 置 rejected。
+
+        与 delete_knowledge（物理删除）相对——公共库与私人库是同一份物理
+        数据，管理员在公共库视角删除他人提交时必须走下架，否则会连坐删除
+        属主的私人原始数据。
+
+        非 public 条目返回 None（调用方自行决定是否物理删除）。
+        """
+        with self._lock:
+            agent_id, item = self._find_or_raise(knowledge_id)
+            if item.get("visibility") != VISIBILITY_PUBLIC:
+                return None
+            item["visibility"] = VISIBILITY_PRIVATE
+            item["submission"] = {
+                "status": _SUBMISSION_REJECTED,
+                "submitted_at": (item.get("submission") or {}).get("submitted_at"),
+                "submitted_by": (item.get("submission") or {}).get("submitted_by"),
+                "reviewed_by": str(reviewed_by or ""),
+                "note": note or "管理员下架",
+                "decided_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+            return self._set_entry(agent_id, item)
 
     def review_public_submission(
         self,
@@ -343,16 +458,90 @@ class KnowledgeRepository:
         agent_id: Optional[str] = None,
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
-        """在当前用户可见视图内做标题+内容包含匹配（不区分大小写）。"""
+        """在当前用户可见视图内检索知识。
+
+        优先走 TF-IDF 索引（按相关性 score 降序 top-k）；索引不可用/覆盖不足时
+        回退标题+内容包含匹配（不区分大小写）。可见性过滤先于索引检索（隔离优先）。
+        """
         q = (query or "").lower()
+
+        # 可见性过滤（隔离优先，索引只做相似度排序）
+        visible = self.visible_items(user, scope=scope, category=category, agent_id=agent_id)
+        if not visible:
+            return []
+
+        # TF-IDF 索引路径：按脏标记重建后检索（相似度 top-k）
+        idx_results = self._search_by_index(query, limit, agent_id, visible, user, scope, category)
+        if idx_results is not None:
+            return idx_results
+
+        # Substring 兜底（索引不可用）
         results: List[Dict[str, Any]] = []
-        for item in self.visible_items(user, scope=scope, category=category, agent_id=agent_id):
+        for item in visible:
             if q and q not in (item.get("title") or "").lower() and q not in (item.get("content") or "").lower():
                 continue
             results.append(item)
             if len(results) >= limit:
                 break
         return results
+
+    def _search_by_index(self, query, limit, agent_id, visible, user, scope, category):
+        """分片索引检索；索引不可用返回 None（触发 substring 兜底）。
+
+        检索分片：用户私库（user:<uid>）+ 公库（public）+ 共享集（shared），
+        合并按 score 排序，再回映可见集过滤（隔离双保险）。
+        """
+        try:
+            with self._lock:
+                if self._index_dirty:
+                    self._rebuild_indexes(agent_id or "default")
+        except Exception as e:
+            logger.warning("知识库索引重建失败（回退 substring）: %s", e)
+            return None
+
+        uid = self._user_id(user) or ""
+        # 候选分片：公库 + 用户私库 + 共享集（无隔离需求的公库；有共享语义的共享集）
+        shard_scopes = []
+        public_store = self._get_vector_store("public")
+        if public_store is not None and getattr(public_store, "memory_vectors", None):
+            shard_scopes.append(public_store)
+        if uid:
+            user_store = self._get_vector_store("private", uid)
+            if user_store is not None and getattr(user_store, "memory_vectors", None):
+                shard_scopes.append(user_store)
+        shared_store = self._get_vector_store("shared")
+        if shared_store is not None and getattr(shared_store, "memory_vectors", None):
+            shard_scopes.append(shared_store)
+
+        if not shard_scopes:
+            return None
+
+        # 回映可见条目（按 knowledge_id 匹配，隔离兜底）
+        visible_by_id = {it.get("knowledge_id"): it for it in visible if it.get("knowledge_id")}
+        results: List[Dict[str, Any]] = []
+        seen_id = set()
+
+        for store in shard_scopes:
+            try:
+                raw = store.search(query, limit=limit * 2)
+            except Exception as e:
+                logger.debug("知识库分片检索失败: %s", e)
+                continue
+            for hit in raw:
+                hid = hit.get("id") or hit.get("memory_id") or ""
+                if hid in seen_id:
+                    continue
+                item = visible_by_id.get(hid)
+                if item is None:
+                    continue
+                merged = dict(item)
+                merged["score"] = float(hit.get("score", 0.0))
+                results.append(merged)
+                seen_id.add(hid)
+
+        # 按 score 降序，取 top-limit
+        results.sort(key=lambda r: r.get("score", 0.0), reverse=True)
+        return results[:limit]
 
     def update_knowledge(self, agent_id: str, knowledge_id: str, fields: Dict[str, Any]) -> bool:
         with self._lock:
@@ -365,6 +554,7 @@ class KnowledgeRepository:
                             item[k] = v
                     item["updated_at"] = datetime.datetime.now(datetime.timezone.utc).timestamp()
                     self._save()
+                    self._index_dirty = True
                     return True
         return False
 
@@ -375,6 +565,7 @@ class KnowledgeRepository:
                 if item.get("knowledge_id") == knowledge_id:
                     del items[idx]
                     self._save()
+                    self._index_dirty = True
                     return True
         return False
 

@@ -696,6 +696,9 @@ class WorkflowExecutor:
                     "resolution_context": resolution_context,
                     # 遗留 C：merge all 策略需要知道期望上游全集
                     "expected_upstream": list(expected_upstream or []),
+                    # 用户隔离：配置引用（kb_config_id 等）的属主检查数据源。
+                    # 空值时消费端必须 fail-closed（远程配置默认私有）
+                    "user_id": instance.user_id or "",
                     **(subflow_harness or {}),
                 },
             )
