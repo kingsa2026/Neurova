@@ -60,6 +60,16 @@ class _JsonLogFormatter(logging.Formatter):
         # exc_info 附加（结构化 traceback）
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
+        # trace_id 关联（补课 1.1）：ContextVar 由 log/trace_context 维护，
+        # 本模块只读不反向 import trace_recorder（防循环依赖）
+        try:
+            from neurova.core.trace_context import get_trace_id
+
+            tid = get_trace_id()
+            if tid:
+                payload["trace_id"] = tid
+        except Exception:
+            pass  # trace 上下文不可用不阻塞日志
         try:
             import json
 
@@ -85,6 +95,12 @@ def get_logger(name: str = "neurova", level: int = logging.DEBUG) -> logging.Log
         logger = logging.getLogger(name)
         if not logger.handlers:
             logger.setLevel(level)
+            # 双写修复: start_server.py 的 basicConfig 会给 root 挂 StreamHandler,
+            # 子 logger 再挂一个 handler 会让每条日志输出两遍。若 root 已有输出
+            # handler（生产按 start_server 启动），子 logger 直接依赖传播即可；
+            # 此时 root 级别过滤 DEBUG，也顺带压掉开发期 DEBUG 洪流。
+            if any(isinstance(h, logging.StreamHandler) for h in logging.root.handlers):
+                return logger
             # 控制台 handler
             handler = logging.StreamHandler()
             handler.setLevel(level)
