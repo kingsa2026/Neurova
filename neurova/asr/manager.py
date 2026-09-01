@@ -7,6 +7,8 @@ ASR Manager - ASR引擎管理器
 3. mock: MockASR（测试用）
 """
 
+import os
+
 from neurova.core.logger import get_logger
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
@@ -21,7 +23,9 @@ logger = get_logger(__name__)
 _ROOT_DIR = Path(__file__).parent.parent.parent.resolve()
 
 # Fallback 引擎优先级
-FALLBACK_CHAIN = ["funasr", "whisper", "mock"]
+# 生产默认链不含 mock（补课 4.1：mock 引擎返回假识别会污染上层）——
+# mock 仅在显式 engine="mock" 或 NEUROVA_ENV=test 时追加
+FALLBACK_CHAIN = ["funasr", "whisper"]
 
 
 class ASRConfig(BaseModel):
@@ -80,6 +84,9 @@ class ASRManager:
         3. 失败时自动 fallback
         """
         if self._config.engine == "auto":
+            # 补课 4.1：测试态追加 mock 到链尾——生产 mock 返回假识别会污染上层
+            if os.environ.get("NEUROVA_ENV") == "test" and "mock" not in FALLBACK_CHAIN:
+                FALLBACK_CHAIN.append("mock")
             return await self._initialize_with_fallback()
         else:
             return await self._initialize_engine(self._config.engine)
