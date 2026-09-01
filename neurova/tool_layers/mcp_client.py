@@ -11,6 +11,7 @@ MCP Client — Agent 作为 MCP 消费者
 """
 
 import asyncio
+import time
 import contextlib
 import datetime
 from neurova.core.logger import get_logger
@@ -47,12 +48,17 @@ class MCPToolClient:
     - 实现安全隔离（用户层硬隔离）
     """
 
-    def __init__(self, user_id: typing.Optional[str] = None):
+    def __init__(
+        self,
+        user_id: typing.Optional[str] = None,
+        clock: typing.Optional[typing.Callable[[], float]] = None,
+    ):
         """
         初始化 MCP 工具客户端
 
         Args:
             user_id: 用户 ID，用于安全隔离
+            clock: 可靠性状态机时钟（测试注入用，缺省 time.monotonic）
         """
         self._user_id = user_id or "default"
         self._servers: typing.Dict[str, typing.Dict] = {}
@@ -60,6 +66,12 @@ class MCPToolClient:
         self._stacks: typing.Dict[str, typing.Any] = {}
         self._firewall: typing.Optional[typing.Any] = None
         self._lock = threading.RLock()
+        # P1-3：per-server 可靠性状态机 + 重连后台任务
+        from neurova.tool_layers.mcp_resilience import ServerResilience as _SR
+
+        self._resilience: typing.Dict[str, _SR] = {}
+        self._reconnect_tasks: typing.Dict[str, asyncio.Task] = {}
+        self._resilience_clock = clock or time.monotonic
 
     # ── 会话生命周期（SDK 接缝，测试在此边界 mock） ──
 
@@ -123,6 +135,7 @@ class MCPToolClient:
             是否连接成功
         """
         with self._lock:
+            is_reconnect = server_id in self._servers
             self._servers[server_id] = {
                 "config": {},
                 "connected": False,
@@ -132,16 +145,25 @@ class MCPToolClient:
             }
         server = self._servers[server_id]
 
+        # P1-3：resilience 条目复用（重连时保留降级工具缓存），仅首次创建
+        if server_id not in self._resilience:
+            from neurova.tool_layers.mcp_resilience import ServerResilience
+
+            self._resilience[server_id] = ServerResilience(clock=self._resilience_clock)
+        res = self._resilience[server_id]
+
         try:
             cfg = validate_mcp_server_config(config)
         except ValueError as e:
             server["last_error"] = str(e)
+            self._on_connect_failed(server_id, res, str(e))
             logger.error("MCP server %s 配置非法: %s", server_id, e)
             return False
 
         server["config"] = cfg
         if not _SDK_AVAILABLE:
             server["last_error"] = "mcp SDK 未安装，请执行: pip install mcp"
+            self._on_connect_failed(server_id, res, server["last_error"])
             logger.error("MCP server %s: %s", server_id, server["last_error"])
             return False
 
@@ -151,12 +173,14 @@ class MCPToolClient:
         except Exception as e:
             server["last_error"] = f"{type(e).__name__}: {e}"
             self._stacks.pop(server_id, None)
+            self._on_connect_failed(server_id, res, server["last_error"])
             logger.error("Failed to connect to MCP server %s: %s", server_id, e)
             return False
 
         self._sessions[server_id] = session
         server["connected"] = True
         server["last_connected"] = datetime.datetime.now().isoformat()
+        res.on_connect_success()
 
         # 连接即发现：拉取工具清单并缓存（失败不视为连接失败）
         try:
@@ -164,9 +188,20 @@ class MCPToolClient:
         except Exception as e:
             logger.warning("MCP server %s 连接成功但工具发现失败: %s", server_id, e)
 
+        res.set_tools_cache(server["tools"])
+        if is_reconnect:
+            logger.info("MCP server %s 重连成功", server_id)
         self._sync_tools_to_engine(server_id, server["tools"])
         logger.info("Connected to MCP server: %s (%d tools)", server_id, len(server["tools"]))
         return True
+
+    def _on_connect_failed(self, server_id: str, res, error: str) -> None:
+        """连接失败回投状态机并调度重连（重连循环内复用 connect 时幂等跳过）。"""
+        res.on_connect_failure(error)
+        server = self._servers.get(server_id) or {}
+        cfg = server.get("config")
+        if cfg:
+            self._schedule_reconnect(server_id, cfg)
 
     async def disconnect_server(self, server_id: str) -> bool:
         """
@@ -182,6 +217,12 @@ class MCPToolClient:
             if server_id not in self._servers:
                 logger.warning("Server not found: %s", server_id)
                 return False
+
+        # P1-3：显式断开 = 用户意图，取消自动重连并清理状态机条目
+        self._resilience.pop(server_id, None)
+        task = self._reconnect_tasks.pop(server_id, None)
+        if task is not None and not task.done():
+            task.cancel()
 
         stack = self._stacks.pop(server_id, None)
         self._sessions.pop(server_id, None)
@@ -244,10 +285,17 @@ class MCPToolClient:
         if server is None:
             raise ValueError(f"Server not found: {server_id}")
 
+        # P1-3：断连窗口降级——返回最后已知工具清单（可能过期）而非空表，
+        # 让调用方在重连期仍能发现/展示工具
+        res = self._resilience.get(server_id)
         if not server.get("connected"):
-            return []
+            return res.get_stale_tools() if res is not None else []
 
-        if server.get("tools"):
+        # P1-3：TTL 内直接用缓存，过期重拉（server["tools"] 仍是权威展示源）
+        if res is not None and res.tools_cache_fresh() and server.get("tools"):
+            return list(server["tools"])
+
+        if server.get("tools") and res is None:
             return list(server["tools"])
 
         try:
@@ -257,9 +305,11 @@ class MCPToolClient:
             )
         except Exception as e:
             logger.error("Failed to get tools from server %s: %s", server_id, e)
-            return []
+            return res.get_stale_tools() if res is not None else []
 
         server["tools"] = tools
+        if res is not None:
+            res.set_tools_cache(tools)
         self._sync_tools_to_engine(server_id, tools)
         return list(tools)
 
@@ -301,12 +351,15 @@ class MCPToolClient:
                 "transport": None,
             }
         config = server.get("config") or {}
+        res = self._resilience.get(server_id)
         return {
             "server_id": server_id,
             "connected": bool(server.get("connected")),
             "last_error": server.get("last_error"),
             "tool_count": len(server.get("tools") or []),
             "transport": config.get("transport"),
+            # P1-3 新增：细粒度状态（connected 的上游真值；既有消费者不受影响）
+            "state": res.effective_state.value if res is not None else None,
         }
 
     # ── 工具执行 ──
@@ -346,6 +399,13 @@ class MCPToolClient:
         if server is None or not server.get("connected"):
             raise ValueError(f"Server not connected: {server_id}")
 
+        # P1-3：熔断/断连门控（OPEN 拒绝快速失败；HALF_OPEN 放行探测）
+        res = self._resilience.get(server_id)
+        if res is not None:
+            allowed, reason = res.can_attempt_call()
+            if not allowed:
+                raise ValueError(f"Server not connected: {server_id} ({reason})")
+
         session = self._sessions.get(server_id)
         if session is None:
             raise ValueError(f"MCP session not available: {server_id}")
@@ -378,8 +438,17 @@ class MCPToolClient:
                     session.call_tool(tool_name, params), timeout=timeout_s
                 )
             else:
+                # P1-3：失败回投（计数累积→熔断）；连接类错误额外标记断连并调度重连。
+                # 注意：此处绝不自动重试——工具可能已产生副作用（副作用安全锁定测试）。
+                if res is not None:
+                    res.on_call_failure(f"{type(e).__name__}: {e}")
+                    server["last_error"] = f"{type(e).__name__}: {e}"
+                    if self._is_connection_error(e):
+                        self._mark_disconnected(server_id, f"{type(e).__name__}: {e}", reschedule=True)
                 raise
 
+        if res is not None:
+            res.on_call_success()
         serialized = self._serialize_result(result)
         logger.info("Executed MCP tool: %s/%s", server_id, tool_name)
         return serialized
@@ -538,6 +607,80 @@ class MCPToolClient:
                     logger.debug("Synced MCP tool to ToolEngine: %s", tool_name)
         except Exception as e:
             logger.debug("Failed to sync MCP tools to ToolEngine: %s", e)
+
+
+    # ── P1-3 可靠性辅助 ──
+
+    @staticmethod
+    def _is_connection_error(e: BaseException) -> bool:
+        """识别连接类错误（会话死亡/传输断开，覆盖常见 SDK 措辞）。"""
+        text = str(e).lower()
+        return (
+            "closedresource" in text
+            or "closed resource" in text
+            or "connection" in text
+            or "broken pipe" in text
+            or "not connected" in text
+            or "session" in text and "closed" in text
+        )
+
+    def _mark_disconnected(self, server_id: str, error: str, reschedule: bool = False) -> None:
+        """会话死亡标记：状态机 DISCONNECTED + server.last_error 同步 + 可选重连调度。"""
+        res = self._resilience.get(server_id)
+        if res is None:
+            return
+        res.mark_disconnected(error)
+        server = self._servers.get(server_id)
+        if server is not None:
+            server["last_error"] = error
+            server["connected"] = False
+            self._sessions.pop(server_id, None)
+        logger.warning("MCP server %s 断连: %s", server_id, error)
+        if reschedule:
+            cfg = (server or {}).get("config")
+            if cfg:
+                self._schedule_reconnect(server_id, cfg)
+
+    def _schedule_reconnect(self, server_id: str, cfg: typing.Dict[str, typing.Any]) -> None:
+        """调度后台重连（指数退避 1→60s+jitter）；已有任务幂等跳过；显式断开自动失效。"""
+        existing = self._reconnect_tasks.get(server_id)
+        if existing is not None and not existing.done():
+            return
+
+        from neurova.tool_layers.mcp_resilience import backoff_delay
+
+        async def _reconnect_loop() -> None:
+            attempt = 0
+            while True:
+                res = self._resilience.get(server_id)
+                if res is None:  # 显式断开（用户意图）→ 退出
+                    return
+                delay = backoff_delay(attempt)
+                logger.info(
+                    "MCP server %s 将在 %.1fs 后重连（第 %d 次）", server_id, delay, attempt + 1
+                )
+                await asyncio.sleep(delay)
+                if self._resilience.get(server_id) is None:
+                    return
+                try:
+                    ok = await self.connect_server(server_id, cfg)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning("MCP server %s 重连异常: %s", server_id, e)
+                    ok = False
+                if ok:
+                    self._reconnect_tasks.pop(server_id, None)
+                    return
+                attempt += 1
+
+        try:
+            self._reconnect_tasks[server_id] = asyncio.get_running_loop().create_task(
+                _reconnect_loop()
+            )
+        except RuntimeError as e:
+            # 无运行中事件循环（同步上下文）→ 记录，退化为不自动重连
+            logger.debug("MCP server %s 重连调度失败（无事件循环）: %s", server_id, e)
 
 
 _mcp_client_instance: typing.Optional[MCPToolClient] = None
