@@ -28,6 +28,8 @@ from neurova.agent.retriever_adapters import (
     MoERetrieverAdapter,
     UnifiedRetrieverAdapter,
 )
+from neurova.agent.knowledge_retriever_adapter import KnowledgeRetrieverAdapter
+from neurova.agent.tkg_retriever_adapter import TKGRetrieverAdapter
 from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
 
 logger = get_logger(__name__)
@@ -168,12 +170,45 @@ class ChatPipeline:
                 self._memory_retrieval_chain.add_retriever(adapter)
                 logger.debug("Added MoERetrieverAdapter to retrieval chain")
 
-        # 3. CacheRetriever（低优先级）
+        # 3. KnowledgeRetriever（知识库，中低优先级：记忆/MoE 之后、Cache 之前）
+        try:
+            from neurova.knowledge.repository import get_knowledge_repository
+
+            knowledge_repo = get_knowledge_repository()
+            if knowledge_repo is not None:
+                knowledge_adapter = KnowledgeRetrieverAdapter(knowledge_repo)
+                self._memory_retrieval_chain.add_retriever(knowledge_adapter)
+                logger.debug("Added KnowledgeRetrieverAdapter to retrieval chain")
+        except Exception as e:
+            logger.warning("KnowledgeRetrieverAdapter 接入失败（知识库检索降级跳过）: %s", e)
+
+        # 3.5 TKGRetriever（时效知识图谱事实，priority 26——补课 5.2 接线）
+        # TKG 构造失败/为空时跳过（可选增强，不阻断链装配）
+        try:
+            from neurova.cognitive_layers.memory_layer.temporal_knowledge_graph import (
+                TemporalKnowledgeGraph,
+            )
+
+            tkg = getattr(self._agent, "_tkg_instance", None)
+            if tkg is None:
+                tkg = TemporalKnowledgeGraph()
+                try:
+                    self._agent._tkg_instance = tkg
+                except Exception:
+                    pass
+            if tkg is not None:
+                tkg_adapter = TKGRetrieverAdapter(tkg)
+                self._memory_retrieval_chain.add_retriever(tkg_adapter)
+                logger.debug("Added TKGRetrieverAdapter to retrieval chain")
+        except Exception as e:
+            logger.warning("TKGRetrieverAdapter 接入失败（TKG 检索降级跳过）: %s", e)
+
+        # 4. CacheRetriever（低优先级）
         cache_adapter = CacheRetrieverAdapter()
         self._memory_retrieval_chain.add_retriever(cache_adapter)
         logger.debug("Added CacheRetrieverAdapter to retrieval chain")
 
-        # 4. FallbackRetriever（最低优先级）
+        # 5. FallbackRetriever（最低优先级）
         if hasattr(self._agent, "memory_agent") and self._agent.memory_agent:
             adapter = FallbackRetrieverAdapter(self._agent.memory_agent)
             self._memory_retrieval_chain.add_retriever(adapter)
@@ -961,6 +996,8 @@ class ChatPipeline:
             metadata={
                 "session_id": ctx.session_id,
                 "trace_id": ctx.trace_id,
+                # 角色透传：知识库检索的 admin 全可见依赖 role（隔离语义与 API 层一致）
+                "role": (ctx.metadata or {}).get("role", "user"),
             },
         )
 
@@ -1340,22 +1377,8 @@ class ChatPipeline:
                 # done 事件携带完整回复快照，仅在未累积到 content 时兜底
                 if not reply_parts and event.get("reply"):
                     reply_parts.append(event["reply"])
-                # P2-4d：流式 usage 入账（loop 逐轮聚合，最后 chunk 携带全量）
-                if event.get("usage"):
-                    try:
-                        from neurova.core.usage_accounting import get_usage_accounting
-
-                        _u = event["usage"]
-                        get_usage_accounting().record(
-                            model=getattr(self.config, "llm_config", None) and
-                            (self.config.llm_config.model or "unknown")
-                            or "unknown",
-                            provider="stream",
-                            prompt_tokens=_u.get("prompt_tokens", 0),
-                            completion_tokens=_u.get("completion_tokens", 0),
-                        )
-                    except Exception:
-                        logger.debug("流式 usage 入账跳过", exc_info=True)
+                # 流式 usage 入账已于 2026-09-02 下沉到 MultiModelLLMClient.chat_stream
+                # （统一记录 model/provider/调用次数，此处再记会与调用层双计）。
             elif etype == "reasoning":
                 # [蜂群流式] reasoning chunk 同样转发
                 if emitter is not None:
