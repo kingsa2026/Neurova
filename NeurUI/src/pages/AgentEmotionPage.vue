@@ -11,11 +11,13 @@
     <!-- Current emotion state -->
     <GlassPanel variant="prominent" :glow="true">
       <div class="current-state">
-        <div class="emotion-icon">{{ emotionEmoji(currentEmotion.dominant) }}</div>
+        <div class="emotion-icon">{{ emotionEmoji(currentEmotion.dominant || '') }}</div>
         <div class="emotion-info">
           <h3 class="emotion-label">{{ t('emotion.analysis') }}</h3>
-          <p class="emotion-dominant">{{ currentEmotion.dominant || t('emotion.neutral') }}</p>
-          <p class="emotion-intensity">{{ t('emotion.intensity') }} {{ Math.round((currentEmotion.intensity ?? 0) * 100) }}%</p>
+          <p class="emotion-dominant">{{ emotionLabel(currentEmotion.dominant) || t('emotion.neutral') }}</p>
+          <p class="emotion-intensity">
+            {{ t('emotion.share') }}{{ Math.round((currentEmotion.shared ?? 0) * 100) }}% · {{ totalAnnotated }} {{ t('emotion.entries') }}
+          </p>
         </div>
       </div>
     </GlassPanel>
@@ -26,11 +28,12 @@
         <GlassStatCard
           v-for="cat in categories"
           :key="cat.name"
-          :label="cat.name"
+          :label="emotionLabel(cat.name)"
           :value="`${Math.round((cat.value ?? 0) * 100)}%`"
           :emoji="emotionEmoji(cat.name)"
         />
       </div>
+      <a-empty v-if="!categories.length && !loading" :description="t('common.noData')" style="margin-top: 20px" />
     </a-spin>
 
     <!-- Motivation State (NEW - from growth API) -->
@@ -100,24 +103,7 @@
       </a-spin>
     </GlassCard>
 
-    <!-- Emotion history timeline -->
-    <GlassCard :title="t('memory.timeline')" style="margin-top: 20px">
-      <a-spin :spinning="loading">
-        <a-timeline>
-          <a-timeline-item v-for="entry in history" :key="entry.id" :color="timelineColor(entry.emotion)">
-            <div class="timeline-entry">
-              <div class="timeline-header">
-                <span class="timeline-emotion">{{ emotionEmoji(entry.emotion) }} {{ entry.emotion }}</span>
-                <span class="timeline-time">{{ formatTime(entry.timestamp) }}</span>
-              </div>
-              <p v-if="entry.context" class="timeline-context">{{ entry.context }}</p>
-              <a-progress :percent="Math.round((entry.intensity ?? 0) * 100)" size="small" :stroke-color="timelineColor(entry.emotion)" />
-            </div>
-          </a-timeline-item>
-        </a-timeline>
-        <a-empty v-if="!history.length && !loading" :description="t('common.noData')" />
-      </a-spin>
-    </GlassCard>
+    <!-- Emotion history timeline（后端 summary 契约无 history 字段，已移除恒空时间线） -->
   </div>
 </template>
 
@@ -132,7 +118,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import * as growthApi from '@/api/modules/growth'
 import type { MotivationState, PersonalityProfile } from '@/api/modules/growth'
-import { request } from '@/api'
+import { getEmotionSummary } from '@/api/modules/memory'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage()
@@ -141,10 +127,10 @@ const loading = ref(false)
 const loadingMotivation = ref(false)
 const loadingPersonality = ref(false)
 
-// Emotion state (from memory/emotion endpoint)
-const currentEmotion = ref<Record<string, any>>({})
-const categories = ref<any[]>([])
-const history = ref<any[]>([])
+// Emotion stats (from /memory/emotion/summary -> { total_annotated, emotion_distribution, emotion_weight })
+const currentEmotion = ref<{ dominant?: string; shared?: number }>({})
+const categories = ref<{ name: string; count: number; value: number }[]>([])
+const totalAnnotated = ref(0)
 
 // Motivation state (from growth API)
 const motivationData = ref<MotivationState | null>(null)
@@ -153,22 +139,23 @@ const motivationData = ref<MotivationState | null>(null)
 const personalityProfile = ref<PersonalityProfile | null>(null)
 const personalityTraits = ref<{ name: string; value: number }[]>([])
 
-const emotionEmoji = (emotion: string) => {
+// 类型映射对齐后端 EmotionType 枚举（17 类：8 核心 + 9 扩展）
+const emotionEmoji = (emotion?: string) => {
   const map: Record<string, string> = {
-    happy: '\u{1F60A}', sad: '\u{1F622}', angry: '\u{1F620}', fearful: '\u{1F628}',
-    surprised: '\u{1F632}', disgusted: '\u{1F922}', neutral: '\u{1F610}',
-    excited: '\u{1F929}', anxious: '\u{1F630}', content: '\u{1F60C}',
-    frustrated: '\u{1F624}', curious: '\u{1F914}',
+    joy: '\u{1F60A}', sadness: '\u{1F622}', anger: '\u{1F620}', fear: '\u{1F628}',
+    surprise: '\u{1F632}', disgust: '\u{1F922}', trust: '\u{1F91D}', anticipation: '\u{1F929}',
+    neutral: '\u{1F610}',
+    confusion: '\u{1F635}', frustration: '\u{1F624}', love: '\u{1F970}', gratitude: '\u{1F979}',
+    nostalgia: '\u{1F97A}', anxiety: '\u{1F630}', pride: '\u{1F60E}', shame: '\u{1F633}',
+    empathy: '\u{1F917}',
   }
-  return map[emotion?.toLowerCase()] || '\u{1F610}'
+  return map[emotion?.toLowerCase() ?? ''] || '\u{1F610}'
 }
 
-const timelineColor = (emotion: string) => {
-  const map: Record<string, string> = {
-    happy: 'green', sad: 'blue', angry: 'red', fearful: 'orange',
-    surprised: 'purple', neutral: 'gray', excited: 'green',
-  }
-  return map[emotion?.toLowerCase()] || 'gray'
+const emotionLabel = (emotion?: string) => {
+  if (!emotion) return ''
+  const key = `emotion.type.${emotion.toLowerCase()}`
+  return t(key) !== key ? t(key) : emotion
 }
 
 const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
@@ -185,11 +172,22 @@ const traitColor = (val: number) => {
 const fetchEmotion = async () => {
   loading.value = true
   try {
-    const res: any = await request.get(`/memory/emotion/summary?agent_id=${agentId.value}`)
-    const data = res?.data ?? res ?? {}
-    currentEmotion.value = data.current ?? data.state ?? {}
-    categories.value = data.categories ?? data.emotions ?? Object.entries(currentEmotion.value.scores ?? {}).map(([name, value]) => ({ name, value }))
-    history.value = data.history ?? data.timeline ?? []
+    const env: any = await getEmotionSummary(agentId.value)
+    const data = (env?.data ?? {}) as {
+      total_annotated?: number
+      emotion_distribution?: Record<string, number>
+      emotion_weight?: number
+    }
+    totalAnnotated.value = data.total_annotated ?? 0
+    const distribution = Object.entries(data.emotion_distribution ?? {}).sort((a, b) => b[1] - a[1])
+    categories.value = distribution.map(([name, count]) => ({
+      name,
+      count,
+      value: totalAnnotated.value > 0 ? count / totalAnnotated.value : 0,
+    }))
+    currentEmotion.value = distribution.length
+      ? { dominant: distribution[0][0], shared: distribution[0][1] / (totalAnnotated.value || 1) }
+      : {}
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -246,11 +244,6 @@ onMounted(fetchAll)
 .emotion-dominant { font-family: var(--nr-font-display); font-size: 24px; font-weight: 700; color: var(--nr-text-primary); margin: 0; text-transform: capitalize; }
 .emotion-intensity { font-size: 13px; color: var(--nr-text-secondary); margin: 0; }
 .categories-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-.timeline-entry { display: flex; flex-direction: column; gap: 4px; }
-.timeline-header { display: flex; justify-content: space-between; align-items: center; }
-.timeline-emotion { font-weight: 500; color: var(--nr-text-primary); text-transform: capitalize; }
-.timeline-time { font-size: 11px; color: var(--nr-text-muted); font-family: var(--nr-font-mono); }
-.timeline-context { font-size: 12px; color: var(--nr-text-tertiary); margin: 0; }
 
 /* Motivation section */
 .motivation-section { display: flex; flex-direction: column; gap: 16px; }

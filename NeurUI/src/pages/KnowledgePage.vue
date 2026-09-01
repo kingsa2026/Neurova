@@ -216,22 +216,80 @@
       :footer="null"
       width="640px"
     >
-      <div class="kb-config-create">
-        <a-input v-model:value="configForm.name" :placeholder="t('knowledge.configNamePlaceholder')" style="width: 180px" />
-        <a-select
-          v-model:value="configForm.source_type"
-          :options="configSourceOptions"
-          style="width: 140px"
-        />
-        <a-input-password
-          v-model:value="configForm.api_key"
-          :placeholder="t('knowledge.configApiKeyPlaceholder')"
-          style="width: 220px"
-        />
+      <!-- 分类型创建表单：字段与后端适配器契约一一对应 -->
+      <a-form layout="vertical" style="margin-bottom: 8px">
+        <div class="kb-config-create" style="margin-bottom: 8px">
+          <a-form-item :label="t('knowledge.configName')" style="flex: 1; margin-bottom: 0">
+            <a-input v-model:value="configForm.name" :placeholder="t('knowledge.configNamePlaceholder')" />
+          </a-form-item>
+          <a-form-item :label="t('knowledge.configSource')" style="width: 150px; margin-bottom: 0">
+            <a-select v-model:value="configForm.source_type" :options="configSourceOptions" @change="onConfigTypeChange" />
+          </a-form-item>
+        </div>
+
+        <!-- iflow：API Key + base_url + dataset_id -->
+        <template v-if="configForm.source_type === 'iflow'">
+          <a-form-item :label="t('knowledge.configApiKey')">
+            <a-input-password v-model:value="configForm.credential" :placeholder="t('knowledge.configApiKeyPlaceholder')" />
+          </a-form-item>
+          <a-form-item :label="t('knowledge.configBaseUrl')">
+            <a-input v-model:value="configForm.base_url" :placeholder="t('knowledge.configBaseUrlIflowPh')" />
+          </a-form-item>
+          <a-form-item :label="t('knowledge.configDatasetId')">
+            <a-input v-model:value="configForm.dataset_id" :placeholder="t('knowledge.configDatasetIdPh')" />
+          </a-form-item>
+        </template>
+
+        <!-- feishu：App ID + App Secret（加密通道）+ base_url + space_id -->
+        <template v-else-if="configForm.source_type === 'feishu'">
+          <a-form-item :label="t('knowledge.configAppId')">
+            <a-input v-model:value="configForm.app_id" :placeholder="t('knowledge.configAppIdPh')" />
+          </a-form-item>
+          <a-form-item :label="t('knowledge.configAppSecret')">
+            <a-input-password v-model:value="configForm.credential" :placeholder="t('knowledge.configAppSecretPh')" />
+          </a-form-item>
+          <a-form-item :label="t('knowledge.configBaseUrl')">
+            <a-input v-model:value="configForm.base_url" :placeholder="t('knowledge.configBaseUrlFeishuPh')" />
+          </a-form-item>
+          <a-form-item :label="t('knowledge.configSpaceId')">
+            <a-input v-model:value="configForm.space_id" :placeholder="t('knowledge.configSpaceIdPh')" />
+          </a-form-item>
+        </template>
+
+        <!-- ima：base_url（本机 MCP）+ Token（加密通道）+ knowledge_base_id + allow_local -->
+        <template v-else-if="configForm.source_type === 'ima'">
+          <a-form-item :label="t('knowledge.configBaseUrl')">
+            <a-input v-model:value="configForm.base_url" :placeholder="t('knowledge.configBaseUrlImaPh')" />
+          </a-form-item>
+          <a-form-item :label="t('knowledge.configToken')">
+            <a-input-password v-model:value="configForm.credential" :placeholder="t('knowledge.configTokenPh')" />
+          </a-form-item>
+          <a-form-item :label="t('knowledge.configKbId')">
+            <a-input v-model:value="configForm.knowledge_base_id" :placeholder="t('knowledge.configKbIdPh')" />
+          </a-form-item>
+          <a-form-item :label="t('knowledge.configAllowLocal')">
+            <a-switch v-model:checked="configForm.allow_local" />
+            <span class="kb-config-hint">{{ t('knowledge.configAllowLocalHint') }}</span>
+          </a-form-item>
+        </template>
+
+        <!-- custom：API URL + API Key（可选）+ dataset_id -->
+        <template v-else>
+          <a-form-item :label="t('knowledge.configApiUrl')">
+            <a-input v-model:value="configForm.api_url" :placeholder="t('knowledge.configApiUrlPh')" />
+          </a-form-item>
+          <a-form-item :label="t('knowledge.configApiKey')">
+            <a-input-password v-model:value="configForm.credential" :placeholder="t('knowledge.configApiKeyPlaceholder')" />
+          </a-form-item>
+          <a-form-item :label="t('knowledge.configDatasetId')">
+            <a-input v-model:value="configForm.dataset_id" :placeholder="t('knowledge.configDatasetIdPh')" />
+          </a-form-item>
+        </template>
+
         <GlassButton variant="primary" size="sm" :loading="configSaving" @click="handleCreateConfig">
           {{ t('knowledge.configCreate') }}
         </GlassButton>
-      </div>
+      </a-form>
       <a-table
         :data-source="kbConfigs"
         :columns="configColumns"
@@ -399,13 +457,40 @@ const importUrlValue = ref('')
 const importingUrl = ref(false)
 
 // R-7 A: 远程知识库配置管理
+// 表单字段与后端适配器契约对齐（adapters.py）：
+//   iflow: api_key(必填) + base_url/dataset_id
+//   feishu: app_id + app_secret(必填) + base_url/space_id —— app_secret 走顶层
+//           api_key 加密通道；其余进 settings
+//   ima: base_url(必填) + token(必填) + knowledge_base_id/allow_local —— token
+//        走顶层 api_key 加密通道
+//   custom: api_url(必填) + api_key(可选) + dataset_id
 const configVisible = ref(false)
 const configSaving = ref(false)
 const kbConfigs = ref<KbConfig[]>([])
-const configForm = ref<{ name: string; source_type: string; api_key: string }>({
+interface ConfigFormState {
+  name: string
+  source_type: string
+  /** 主凭据：iflow/custom=API Key；feishu=App Secret；ima=Token（后端加密存储） */
+  credential: string
+  base_url: string
+  dataset_id: string
+  app_id: string
+  space_id: string
+  api_url: string
+  knowledge_base_id: string
+  allow_local: boolean
+}
+const configForm = ref<ConfigFormState>({
   name: '',
   source_type: 'iflow',
-  api_key: '',
+  credential: '',
+  base_url: '',
+  dataset_id: '',
+  app_id: '',
+  space_id: '',
+  api_url: '',
+  knowledge_base_id: '',
+  allow_local: false,
 })
 const configSourceOptions = [
   { label: 'iflow', value: 'iflow' },
@@ -420,6 +505,45 @@ const configColumns = [
   { title: t('knowledge.configId'), key: 'id', dataIndex: 'id', ellipsis: true },
   { title: '', key: 'actions', width: 130 },
 ]
+
+function resetConfigForm(keepName = true) {
+  const name = configForm.value.name
+  configForm.value = {
+    name: keepName ? name : '',
+    source_type: configForm.value.source_type,
+    credential: '',
+    base_url: '',
+    dataset_id: '',
+    app_id: '',
+    space_id: '',
+    api_url: '',
+    knowledge_base_id: '',
+    allow_local: false,
+  }
+}
+
+/** 切换远程库类型：清空上一类型的字段残留，避免错误值混入下一类型的 payload */
+function onConfigTypeChange() {
+  resetConfigForm()
+}
+
+/** 各类型必填校验（与后端适配器失败条件一致） */
+function validateConfigForm(): boolean {
+  const f = configForm.value
+  if (!f.name.trim()) return false
+  switch (f.source_type) {
+    case 'iflow':
+      return !!f.credential.trim()
+    case 'feishu':
+      return !!f.app_id.trim() && !!f.credential.trim()
+    case 'ima':
+      return !!f.base_url.trim() && !!f.credential.trim()
+    case 'custom':
+      return !!f.api_url.trim()
+    default:
+      return false
+  }
+}
 const kbCollections = ref<KbCollection[]>([])
 const collectionSaving = ref(false)
 const collectionForm = ref<{ config_id: string; collection_name: string }>({
@@ -732,15 +856,32 @@ async function fetchKbConfigs() {
 }
 
 async function handleCreateConfig() {
-  if (!configForm.value.name || !configForm.value.api_key) {
-    message.error(t('knowledge.configFormIncomplete'))
+  if (!validateConfigForm()) {
+    message.error(t('knowledge.configMissingRequired'))
     return
   }
   configSaving.value = true
   try {
-    await createKbConfig({ ...configForm.value })
+    const f = configForm.value
+    const settings: Record<string, unknown> = {}
+    if (f.base_url.trim()) settings.base_url = f.base_url.trim()
+    if (f.dataset_id.trim()) settings.dataset_id = f.dataset_id.trim()
+    if (f.app_id.trim()) settings.app_id = f.app_id.trim()
+    if (f.space_id.trim()) settings.space_id = f.space_id.trim()
+    if (f.api_url.trim()) settings.api_url = f.api_url.trim()
+    if (f.knowledge_base_id.trim()) settings.knowledge_base_id = f.knowledge_base_id.trim()
+    if (f.source_type === 'ima') settings.allow_local = f.allow_local
+
+    await createKbConfig({
+      name: f.name.trim(),
+      source_type: f.source_type,
+      // 主凭据走顶层 api_key（后端 Fernet 加密存储）：
+      // iflow/custom=API Key、feishu=App Secret、ima=Token
+      api_key: f.credential.trim() || undefined,
+      settings,
+    })
     message.success(t('knowledge.importSuccess'))
-    configForm.value = { name: '', source_type: 'iflow', api_key: '' }
+    resetConfigForm(false)
     await fetchKbConfigs()
   } catch {
     message.error(t('knowledge.importError'))
@@ -820,6 +961,20 @@ onMounted(() => {
   flex-direction: column;
   gap: 20px;
 }
+
+/* 远程配置创建表单：名称 + 类型 一行 */
+.kb-config-create {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.kb-config-hint {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--nr-text-tertiary, #999);
+}
+
 
 .kb-header .header-row {
   display: flex;

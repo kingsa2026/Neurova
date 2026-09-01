@@ -84,19 +84,18 @@ export interface ChannelWeights {
 // ---------------------------------------------------------------------------
 
 export interface EmotionSummary {
-  total_analyzed: number
-  by_emotion: Record<string, { count: number; avg_score: number }>
-  dominant_emotion: string
+  total_annotated: number
+  emotion_distribution: Record<string, number>
+  emotion_weight?: number
 }
 
 export interface EmotionDistribution {
-  emotions: { type: string; count: number; percentage: number }[]
+  [emotion: string]: number
 }
 
 export interface EmotionAnalysisResult {
-  emotion_type: string
   score: number
-  details: Record<string, number>
+  tags: string[]
 }
 
 export interface EmotionTypeInfo {
