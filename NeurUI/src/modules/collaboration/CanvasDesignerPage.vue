@@ -227,35 +227,38 @@
                 :d="edgePath(edge)"
               />
             </g>
-            <!-- 拖拽中的预览曲线 -->
-            <path v-if="connecting" class="edge-preview" :d="previewPath" />
+          <!-- 拖拽中的预览曲线 -->
+          <path v-if="connecting" class="edge-preview" :d="previewPath" />
           </svg>
 
-          <!-- 缩放控制栏 -->
-          <div class="canvas-zoombar">
-            <button class="zoom-btn" :title="t('canvas.zoomOut')" @click="zoomOut">−</button>
-            <span
-              class="zoom-value"
-              :title="t('canvas.resetView')"
-              @click="resetView"
-            >{{ Math.round(viewport.zoom * 100) }}%</span>
-            <button class="zoom-btn" :title="t('canvas.zoomIn')" @click="zoomIn">＋</button>
-            <span class="zoom-divider" />
-            <button class="zoom-btn zoom-fit" :title="t('canvas.fitContent')" @click="fitView">⤢</button>
-          </div>
-
-          <p v-if="canvasNodes.length > 0" class="connect-hint">
-            {{ t('canvas.canvasHint') }}
-          </p>
-
-          <!-- 小地图（遗留 F） -->
-          <MiniMap
-            :nodes="canvasNodes"
-            :viewport="viewport"
-            :container="graphContainerSize"
-            @pan-to="handleMiniPan"
-          />
+          <!-- 框选矩形层结束：以下悬浮层不受 canvas-graph 的
+               translate/scale transform 影响（跟随缩放 bug 根因修复） -->
         </div>
+
+        <!-- 缩放控制栏：固定屏幕位置/大小（在 transform 容器外） -->
+        <div class="canvas-zoombar">
+          <button class="zoom-btn" :title="t('canvas.zoomOut')" @click="zoomOut">−</button>
+          <span
+            class="zoom-value"
+            :title="t('canvas.resetView')"
+            @click="resetView"
+          >{{ Math.round(viewport.zoom * 100) }}%</span>
+          <button class="zoom-btn" :title="t('canvas.zoomIn')" @click="zoomIn">＋</button>
+          <span class="zoom-divider" />
+          <button class="zoom-btn zoom-fit" :title="t('canvas.fitContent')" @click="fitView">⤢</button>
+        </div>
+
+        <p v-if="canvasNodes.length > 0" class="connect-hint">
+          {{ t('canvas.canvasHint') }}
+        </p>
+
+        <!-- 小地图（遗留 F）：固定右下角，不随画布平移缩放 -->
+        <MiniMap
+          :nodes="canvasNodes"
+          :viewport="viewport"
+          :container="graphContainerSize"
+          @pan-to="handleMiniPan"
+        />
       </main>
 
       <!-- 右侧：属性面板 -->
@@ -2498,7 +2501,7 @@ onBeforeUnmount(() => {
 .canvas-zoombar {
   position: absolute;
   right: 14px;
-  bottom: 12px;
+  bottom: 144px; /* mini 地图上方（mini 120px + 12px 间隔），避免右下角重叠 */
   display: flex;
   align-items: center;
   gap: 4px;
