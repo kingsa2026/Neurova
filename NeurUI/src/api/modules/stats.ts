@@ -32,6 +32,34 @@ export interface SystemInfo {
   disk?: Record<string, unknown>
 }
 
+/** Per-model token usage entry (from usage accounting). */
+export interface TokenUsageByModel {
+  model: string
+  calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+/** Process-level token usage snapshot (since server start). */
+export interface TokenUsage {
+  total: {
+    calls: number
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+  }
+  total_cost: number
+  by_model: TokenUsageByModel[]
+  last_call?: {
+    model: string
+    provider: string
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+  } | null
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -56,4 +84,9 @@ export function exportStats() {
 /** Get system health info (CPU, memory, disk). */
 export function getSystemInfo() {
   return api.get<SystemInfo>(`${BASE}/system`)
+}
+
+/** Get process-level token usage (real accounting snapshot, since server start). */
+export function getTokenUsage() {
+  return api.get<TokenUsage>(`${BASE}/token-usage`)
 }

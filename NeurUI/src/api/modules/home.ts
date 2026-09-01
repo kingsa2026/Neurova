@@ -45,6 +45,7 @@ export interface TrendSeries {
 export interface HomeTrendResponse {
   agent_trend: TrendSeries
   conversation_trend: TrendSeries
+  message_trend: TrendSeries
   token_trend: TrendSeries
   llm_trend: TrendSeries
 }
