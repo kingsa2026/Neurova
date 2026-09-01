@@ -80,9 +80,19 @@ class WhisperEngine(ASRBase):
                     self._device = "cpu"
 
             try:
-                self._model = self._whisper.load_model(self._model_name, device=self._device)
+                # 补课 4.2：download_root 传 model_dir——原实现忽略 model_dir，
+                # 模型散落 ~/.cache/whisper，与本仓 models/asr/whisper 约定脱节
+                Path(str(self._model_dir)).mkdir(parents=True, exist_ok=True)
+                self._model = self._whisper.load_model(
+                    self._model_name, device=self._device, download_root=str(self._model_dir)
+                )
                 self._initialized = True
-                self._logger.info("Whisper 初始化完成 | 模型=%s | 设备=%s", self._model_name, self._device)
+                self._logger.info(
+                    "Whisper 初始化完成 | 模型=%s | 设备=%s | 目录=%s",
+                    self._model_name,
+                    self._device,
+                    self._model_dir,
+                )
                 return True
             except Exception as e:
                 self._logger.error("Whisper 模型加载失败: %s", e)
