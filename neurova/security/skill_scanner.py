@@ -166,6 +166,59 @@ class BaseAnalyzer:
         raise NotImplementedError
 
 
+class PromptInjectionAnalyzer(BaseAnalyzer):
+    """提示注入签名分析器（P1-6：中英双语）。
+
+    检测技能文件（SKILL.md/提示词模板）中试图劫持 LLM 行为的内容——
+    与"可执行代码"类规则互补：注入不依赖代码执行，纯文本即可生效。
+    """
+
+    # (rule_id, 编译正则, 建议处置)
+    INJECTION_PATTERNS = [
+        ("inject_override_en", r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions", "删除覆盖系统指令的内容"),
+        ("inject_disregard_en", r"disregard\s+(all\s+)?(previous|prior|your)\s+(instructions|system\s+prompt|rules)", "删除无视系统提示的内容"),
+        ("inject_reveal_prompt_en", r"(print|show|reveal|repeat|output)\s+(your\s+)?(system\s+prompt|instructions)", "删除套取系统提示的内容"),
+        ("inject_devmode_en", r"(developer|god|dan)\s+mode", "删除越权模式切换内容"),
+        ("inject_roleplay_jailbreak", r"pretend\s+(you\s+are|to\s+be)\s+(an?\s+)?(unrestricted|uncensored)", "删除越狱角色扮演内容"),
+        ("inject_override_zh", r"忽略(之前|上面|以上|先前)的?(所有)?(指令|提示|规则)", "删除覆盖系统指令的内容"),
+        ("inject_disregard_zh", r"(无视|不要理会|无需遵守)(你的)?(系统提示|系统指令|之前的?指令|规则|限制)", "删除无视系统提示的内容"),
+        ("inject_no_restrict_zh", r"(没有|解除|不设|无)(任何)?限制", "删除解除限制的内容"),
+        ("inject_reveal_prompt_zh", r"(输出|打印|泄露|透露|告诉我)(你的)?(系统提示词?|初始指令|设定)", "删除套取系统提示的内容"),
+        ("inject_devmode_zh", r"(开发者|上帝|越狱)模式", "删除越权模式切换内容"),
+        ("inject_exfiltrate", r"(把|将|发送).{0,20}(系统提示|密钥|凭据|token|密码).{0,20}(发送|发到|传到|泄露)", "删除数据外传内容"),
+    ]
+
+    def __init__(self):
+        self._compiled = [
+            (rid, __import__("re").compile(pattern, __import__("re").IGNORECASE), suggestion)
+            for rid, pattern, suggestion in self.INJECTION_PATTERNS
+        ]
+
+    @property
+    def name(self) -> str:
+        return "prompt_injection"
+
+    def analyze(self, skill_file: SkillFile) -> List[Finding]:
+        findings: List[Finding] = []
+        lines = skill_file.content.splitlines()
+        for rid, pattern, suggestion in self._compiled:
+            for lineno, line in enumerate(lines, start=1):
+                m = pattern.search(line)
+                if m:
+                    findings.append(
+                        Finding(
+                            rule_id=rid,
+                            severity="critical",
+                            message=f"检测到提示注入内容（{rid}）",
+                            file_path=skill_file.path,
+                            line_number=lineno,
+                            evidence=line.strip()[:200],
+                            suggestion=suggestion,
+                        )
+                    )
+        return findings
+
+
 class PatternAnalyzer(BaseAnalyzer):
     """模式分析器：基于正则表达式检测危险模式"""
 
@@ -444,8 +497,9 @@ class SkillScanner:
         self._whitelist = WhitelistManager(config_path=str(self._config_dir / "whitelist.json"))
         self._custom_rules: Dict[str, ScanRule] = {}
 
-        # 添加默认模式分析器
+        # 添加默认模式分析器 + 提示注入分析器（P1-6：中英双语注入签名）
         self.analyzers.append(PatternAnalyzer())
+        self.analyzers.append(PromptInjectionAnalyzer())
 
         logger.info("技能扫描器初始化完成")
 
@@ -498,7 +552,12 @@ class SkillScanner:
             return files
 
         # 可扫描的文件类型
+        # P1-6：.md/.markdown/.txt 必须在列——SKILL.md 是提示注入的主载体，
+        # 纯文本注入不依赖代码执行（原白名单漏 .md 属漏洞缺口）
         scannable_suffixes = {
+            ".md",
+            ".markdown",
+            ".txt",
             ".py",
             ".js",
             ".ts",
