@@ -314,13 +314,34 @@ async def submit_knowledge_to_public(
     knowledge_id: str = Path(...),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """把私有条目提交公共库（进入待审批；属主）"""
+    """把私有条目提交公共库（进入待审批；属主）并通知管理员审核"""
     repo = _get_repository()
     _entry_or_403(repo, knowledge_id, current_user)
     try:
         item = repo.submit_to_public(current_user, knowledge_id)
     except (PermissionError, LookupError, ValueError) as exc:
         raise _guard(exc)
+
+    # 通知管理员审核（异常只记日志，不阻断提交）
+    try:
+        from neurova.api.endpoints.notifications import notify_admins
+
+        submission = item.get("submission") or {}
+        submitter_id = str(submission.get("submitted_by") or current_user.get("user_id") or "")
+        submitter_name = str(current_user.get("username") or submitter_id)
+        notify_admins(
+            title="知识库提交待审核",
+            message=f"用户 {submitter_name} 提交「{item.get('title', '')}」到公共库，等待审核",
+            notification_type="kb_review",
+            data={
+                "knowledge_id": knowledge_id,
+                "title": item.get("title", ""),
+                "submitter": submitter_id,
+                "submitter_name": submitter_name,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("submit-public 通知管理员失败")
     return _item_response(item)
 
 
@@ -331,7 +352,7 @@ async def review_knowledge_public(
     knowledge_id: str = Path(...),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """审批公共库提交（仅管理员）：通过→public，拒绝→维持 private"""
+    """审批公共库提交（仅管理员）：通过→public，拒绝→维持 private；结果回执提交者"""
     repo = _get_repository()
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="仅管理员可审批公共库提交")
@@ -346,6 +367,28 @@ async def review_knowledge_public(
         )
     except (PermissionError, LookupError, ValueError) as exc:
         raise _guard(exc)
+
+    # 回执提交者（异常只记日志，不阻断审批）
+    try:
+        from neurova.api.endpoints.notifications import notify_user
+
+        submission = item.get("submission") or {}
+        submitter = str(submission.get("submitted_by") or "")
+        if submitter:
+            title = item.get("title", "")
+            if body.approve:
+                msg = f"你提交的「{title}」已通过审核，进入公共库"
+            else:
+                msg = f"你提交的「{title}」未通过审核" + (f"：{body.note}" if body.note else "")
+            notify_user(
+                submitter,
+                title="知识库审核结果",
+                message=msg,
+                notification_type="kb_review_result",
+                data={"knowledge_id": knowledge_id, "approve": bool(body.approve)},
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("review-public 通知提交者失败")
     return _item_response(item)
 
 
@@ -523,19 +566,49 @@ async def update_knowledge(
 async def delete_knowledge(
     request: Request,
     knowledge_id: str = Path(..., description="知识ID"),
+    purge: bool = Query(default=False, description="物理删除。管理员删除他人提交的公共条目时默认为下架（保留属主私人数据），purge=true 才整条删除"),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """删除知识（属主/管理员）"""
+    """删除知识（属主/管理员）
+
+    语义分流（2026-09-01 修复连坐删除 bug）：
+    - 公共库与私人库是同一份物理数据（submit-public 仅改可见性）。
+    - 管理员删除「他人提交的公共条目」→ 默认下架：条目保留、回私有、
+      submission 置 rejected——公共库消失，属主私人库保住。
+    - ?purge=true → 物理删除整条（清除违规内容的显式通道）。
+    - 删除自己的条目（属主或管理员自建）→ 物理删除，语义不变。
+    """
     request_id = _get_request_id(request)
 
     repo = _get_repository()
-    agent_id, _item = _entry_or_403(repo, knowledge_id, current_user)
-    repo.delete_knowledge(agent_id, knowledge_id)
+    _agent_id, item = _entry_or_403(repo, knowledge_id, current_user)
+    is_owner = str(item.get("owner_user_id") or "") == str(current_user.get("user_id") or "")
+
+    if (
+        not purge
+        and current_user.get("role") == "admin"
+        and not is_owner
+        and item.get("visibility") == "public"
+    ):
+        unpublished = repo.unpublish(
+            knowledge_id,
+            reviewed_by=str(current_user.get("user_id", "")),
+            note="管理员下架",
+        )
+        if unpublished is not None:
+            return {
+                "code": 0,
+                "message": "Knowledge '%s' unpublished (owner data kept)" % knowledge_id,
+                "data": {"knowledge_id": knowledge_id, "action": "unpublished"},
+                "request_id": request_id,
+            }
+
+    repo.delete_knowledge(_agent_id, knowledge_id)
 
     return {
         "code": 0,
         "message": "Knowledge '%s' deleted" % knowledge_id,
-        "data": {"knowledge_id": knowledge_id},
+        "data": {"knowledge_id": knowledge_id, "action": "deleted"},
         "request_id": request_id,
     }
 

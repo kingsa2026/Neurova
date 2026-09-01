@@ -93,6 +93,8 @@ class ToolExecutionManager:
         self._running_tasks: Dict[str, asyncio.Task] = {}
         # Bug 9 修复: 添加 _lock 保护 _contexts 的并发访问(cleanup/遍历/删除)
         self._lock = threading.RLock()
+        # 资源修复: 终态上下文保留硬上限(超出按完成时间淘汰最老)
+        self._MAX_CONTEXTS = 500
 
         logger.debug("ToolExecutionManager initialized")
 
@@ -221,6 +223,8 @@ class ToolExecutionManager:
             context.completed_at = datetime.now(timezone.utc)
             # 清理任务引用
             self._running_tasks.pop(context_id, None)
+            # 资源修复: 终态上下文只增不减曾是无界泄漏, 每次执行结束后触发淘汰
+            self._evict_over_capacity()
 
         return context
 
@@ -307,6 +311,31 @@ class ToolExecutionManager:
                             cleaned += 1
 
         return cleaned
+
+    def _evict_over_capacity(self) -> None:
+        """资源修复: 终态上下文只增不减曾是无界泄漏。
+        先淘汰超过 5 分钟的终态上下文, 仍超出硬上限时按完成时间淘汰最老终态。"""
+        try:
+            self.cleanup_completed_contexts(max_age_seconds=300)
+            if len(self._contexts) > self._MAX_CONTEXTS:
+                with self._lock:
+                    terminal = [
+                        (c.completed_at, cid)
+                        for cid, c in self._contexts.items()
+                        if c.status
+                        in [
+                            ExecutionStatus.COMPLETED,
+                            ExecutionStatus.FAILED,
+                            ExecutionStatus.TIMEOUT,
+                            ExecutionStatus.CANCELLED,
+                        ]
+                        and c.completed_at is not None
+                    ]
+                    terminal.sort()
+                    for _, cid in terminal[: len(self._contexts) - self._MAX_CONTEXTS]:
+                        self._contexts.pop(cid, None)
+        except Exception as e:
+            logger.debug("Context eviction failed: %s", e)
 
     # ================================================================
     # 内部方法

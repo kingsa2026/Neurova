@@ -49,6 +49,11 @@ class MetricsCollector:
             max_history: 最大历史记录数
         """
         self.max_history = max_history
+        # 资源修复: 键空间此前只增不减(按 agent/task/realtime 名拼接的动态键),
+        # 现引入上限+插入序淘汰
+        self._MAX_SERIES = 2000
+        self._MAX_TASK_METRICS = 5000
+        self._MAX_CACHE = 500
         self._lock = asyncio.Lock()
 
         # 存储指标数据
@@ -289,6 +294,9 @@ class MetricsCollector:
 
                 # 存储指标
                 self._task_metrics[task_id] = metrics
+                # 资源修复: 任务指标键空间上限(插入序淘汰最老)
+                while len(self._task_metrics) > self._MAX_TASK_METRICS:
+                    self._task_metrics.pop(next(iter(self._task_metrics)), None)
 
                 logger.info("Collected task metrics for task %s", task_id)
                 return metrics
@@ -422,6 +430,9 @@ class MetricsCollector:
         # 限制历史记录数
         if len(series) > self.max_history:
             self._time_series[key] = series[-self.max_history :]
+        # 资源修复: 序列键数量上限, 超出按插入序淘汰最老
+        while len(self._time_series) > self._MAX_SERIES:
+            self._time_series.pop(next(iter(self._time_series)), None)
 
     async def get_time_series(
         self, key: str, start_time: Optional[float] = None, end_time: Optional[float] = None
@@ -607,6 +618,8 @@ class MetricsCollector:
                 )
 
             self._trend_cache[cache_key] = trend
+            while len(self._trend_cache) > self._MAX_CACHE:
+                self._trend_cache.pop(next(iter(self._trend_cache)), None)
             self._last_trend_update = current_time
             return trend
 
@@ -708,6 +721,8 @@ class MetricsCollector:
                 )
 
             self._distribution_cache[metric_name] = distribution
+            while len(self._distribution_cache) > self._MAX_CACHE:
+                self._distribution_cache.pop(next(iter(self._distribution_cache)), None)
             self._last_distribution_update = current_time
             return distribution
 

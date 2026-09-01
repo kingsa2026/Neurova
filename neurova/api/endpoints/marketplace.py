@@ -81,7 +81,6 @@ class MarketplaceSkillCreate(BaseModel):
 
 class MarketplaceSkillUpdate(BaseModel):
     """更新技能请求(仅管理员); version 变化触发站内通知"""
-
     name: Optional[str] = None
     description: Optional[str] = None
     author: Optional[str] = None
@@ -89,6 +88,26 @@ class MarketplaceSkillUpdate(BaseModel):
     category: Optional[str] = None
     tags: Optional[List[str]] = None
     download_url: Optional[str] = None
+
+
+class MarketplaceSkillSubmit(BaseModel):
+    """用户提交技能上架申请（进入待审，管理员审批后上架）"""
+
+    skill_id: str = Field(..., description="市场技能 ID（与目录内已有技能不可冲突）")
+    name: str = Field(..., description="技能名称")
+    description: str = ""
+    version: str = "1.0.0"
+    category: str = "general"
+    tags: List[str] = []
+    download_url: str = ""
+    author: str = ""
+
+
+class SkillSubmissionReview(BaseModel):
+    """技能提交审批请求（仅管理员）"""
+
+    approve: bool
+    note: str = ""
 
 
 def _get_request_id(request: Request) -> str:
@@ -551,35 +570,21 @@ def _notify_market_update(entry: Dict[str, Any], old_version: str) -> int:
     通知类型 market_update; data 携带 skill_id/latest_version 供前端
     "市场界面更新提示"读取。
     """
-    from neurova.api.endpoints.notifications import get_notification_manager
+    from neurova.api.endpoints.notifications import notify_all_users
 
-    manager = get_notification_manager()
     name = entry.get("name") or entry.get("skill_id", "")
-    target_ids: List[str] = []
-    try:
-        from neurova.api.endpoints.enhanced_users_api import _users_store
-
-        target_ids = [str(uid) for uid in (_users_store or {}).keys()]
-    except Exception as e:  # noqa: BLE001
-        logger.warning("enumerate users for market notify failed: %s", e)
-    if not target_ids:
-        target_ids = ["default"]
-    title = f"市场技能更新: {name}"
-    message = f"「{name}」已更新到 v{entry.get('version')} (v{old_version} → v{entry.get('version')})"
-    for uid in target_ids:
-        manager.add_notification(
-            user_id=uid,
-            title=title,
-            message=message,
-            notification_type="market_update",
-            data={
-                "skill_id": entry.get("skill_id", ""),
-                "latest_version": entry.get("version"),
-                "name": name,
-            },
-        )
-    logger.info("market skill %s update notified to %d user(s)", entry.get("skill_id"), len(target_ids))
-    return len(target_ids)
+    count = notify_all_users(
+        title=f"市场技能更新: {name}",
+        message=f"「{name}」已更新到 v{entry.get('version')} (v{old_version} → v{entry.get('version')})",
+        notification_type="market_update",
+        data={
+            "skill_id": entry.get("skill_id", ""),
+            "latest_version": entry.get("version"),
+            "name": name,
+        },
+    )
+    logger.info("market skill %s update notified to %d user(s)", entry.get("skill_id"), count)
+    return count
 
 
 @router.post("/skills")
@@ -607,6 +612,180 @@ async def create_market_skill(
         logger.exception("Failed to create market skill: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to publish skill: {str(e)}"
+        )
+
+
+@router.post("/skills/submit")
+async def submit_market_skill(
+    body: MarketplaceSkillSubmit,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """用户提交技能上架申请（登录用户）：进入待审批并通知管理员审核
+
+    提交存独立存储（submissions.json），审批通过才写入市场目录。
+    """
+    try:
+        from neurova.api.endpoints.notifications import notify_admins
+        from neurova.skills.market_store import get_market_store
+        from neurova.skills.market_submissions import get_market_submission_store
+
+        store = get_market_store()
+        if store.get(body.skill_id) is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Skill '{body.skill_id}' already exists in marketplace",
+            )
+        submissions = get_market_submission_store()
+        if any(
+            s.get("skill_id") == body.skill_id and s.get("status") == "pending"
+            for s in submissions.list_all("pending")
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Skill '{body.skill_id}' already has a pending submission",
+            )
+
+        entry = submissions.create(
+            {
+                "skill_id": body.skill_id,
+                "name": body.name,
+                "description": body.description,
+                "version": body.version,
+                "category": body.category,
+                "tags": body.tags,
+                "download_url": body.download_url,
+                "author": body.author or str(current_user.get("username", "")),
+                "submitted_by": str(current_user.get("user_id", "")),
+                "submitted_by_name": str(current_user.get("username", "")),
+            }
+        )
+
+        notify_admins(
+            title="技能提交待审核",
+            message=(
+                f"用户 {current_user.get('username', '')} 提交技能「{body.name}」"
+                f"(v{body.version}) 申请上架，等待审核"
+            ),
+            notification_type="skill_review",
+            data={"skill_id": body.skill_id, "submission_id": entry["id"], "name": body.name},
+        )
+        return {
+            "code": 0,
+            "message": f"Skill '{body.skill_id}' submitted for review",
+            "data": entry,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to submit market skill: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to submit skill: {str(e)}"
+        )
+
+
+@router.get("/skill-submissions")
+async def list_skill_submissions(
+    review_status: str = Query(default="pending", description="筛选状态: pending/approved/rejected/all"),
+    admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """提交审批列表（仅管理员）"""
+    try:
+        from neurova.skills.market_submissions import get_market_submission_store
+
+        status_filter = None if review_status == "all" else review_status
+        items = get_market_submission_store().list_all(status_filter)
+        return {"code": 0, "message": "success", "data": {"items": items, "total": len(items)}}
+    except Exception as e:
+        logger.exception("Failed to list skill submissions: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list skill submissions: {str(e)}",
+        )
+
+
+@router.post("/skill-submissions/{submission_id}/review")
+async def review_skill_submission(
+    submission_id: str,
+    body: SkillSubmissionReview,
+    admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """审批技能提交（仅管理员）：approve→写入市场目录；reject→不上架。
+
+    审批结果回执提交者。
+    """
+    try:
+        from neurova.api.endpoints.notifications import notify_user
+        from neurova.skills.market_submissions import get_market_submission_store
+        from neurova.skills.market_store import get_market_store
+
+        submissions = get_market_submission_store()
+        submission = submissions.get(submission_id)
+        if not submission:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Submission '{submission_id}' not found",
+            )
+        if submission.get("status") != "pending":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Submission '{submission_id}' already reviewed",
+            )
+
+        reviewed_by = str(admin.get("user_id", ""))
+        if body.approve:
+            market = get_market_store()
+            if market.get(submission["skill_id"]) is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Skill '{submission['skill_id']}' already exists in marketplace",
+                )
+            market.create(
+                {
+                    "skill_id": submission["skill_id"],
+                    "name": submission.get("name", ""),
+                    "description": submission.get("description", ""),
+                    "version": submission.get("version", "1.0.0"),
+                    "category": submission.get("category", "general"),
+                    "tags": submission.get("tags", []),
+                    "download_url": submission.get("download_url", ""),
+                    "author": submission.get("author", ""),
+                    "source": "community",
+                }
+            )
+
+        result = submissions.set_status(
+            submission_id,
+            "approved" if body.approve else "rejected",
+            reviewed_by=reviewed_by,
+            note=body.note,
+        )
+
+        submitter = str(submission.get("submitted_by") or "")
+        if submitter:
+            name = submission.get("name", "")
+            if body.approve:
+                msg = f"你提交的技能「{name}」已通过审核并上架市场"
+            else:
+                msg = f"你提交的技能「{name}」未通过审核" + (f"：{body.note}" if body.note else "")
+            notify_user(
+                submitter,
+                title="技能审核结果",
+                message=msg,
+                notification_type="skill_review_result",
+                data={
+                    "skill_id": submission.get("skill_id", ""),
+                    "submission_id": submission_id,
+                    "approve": bool(body.approve),
+                },
+            )
+        return {"code": 0, "message": "reviewed", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to review skill submission: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to review skill submission: {str(e)}",
         )
 
 

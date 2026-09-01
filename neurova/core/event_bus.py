@@ -70,6 +70,9 @@ class EventBus:
         self._async_task: Optional[asyncio.Task] = None
         self._lock = threading.RLock()
         self._registered_events: Set[str] = set()
+        # 资源修复: 异步事件队列有界(默认 4096), 满时丢弃并告警而非无界堆积
+        self._async_queue_max = 4096
+        self._async_queue_full_dropped = 0
         logger.info("EventBus initialized")
 
     def start(self) -> None:
@@ -81,7 +84,7 @@ class EventBus:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                self._async_queue = asyncio.Queue()
+                self._async_queue = asyncio.Queue(maxsize=self._async_queue_max)
                 self._async_task = asyncio.ensure_future(self._process_async_queue())
         except RuntimeError:
             pass  # 没有事件循环，异步功能不可用
@@ -125,6 +128,13 @@ class EventBus:
             once=once,
         )
         with self._lock:
+            # 资源修复: 同 handler 重复订阅只保留最新订阅(动态订阅随会话重复注册会累积)
+            existing = [
+                s for s in self._subscribers.get(event_name, [])
+                if s.handler == handler and s.module_name == module_name
+            ]
+            for dup in existing:
+                self._subscribers[event_name].remove(dup)
             self._subscribers[event_name].append(sub)
             # 按优先级排序（高优先级先执行）
             self._subscribers[event_name].sort(key=lambda s: s.priority, reverse=True)
@@ -177,9 +187,17 @@ class EventBus:
         to_remove = []
         for sub in subs:
             if sub.is_async:
-                # 异步处理器放入队列
+                # 异步处理器放入队列(有界: 满时丢弃并计告警, 防无界堆积)
                 if self._async_queue:
-                    self._async_queue.put_nowait((sub, event))
+                    try:
+                        self._async_queue.put_nowait((sub, event))
+                    except asyncio.QueueFull:
+                        self._async_queue_full_dropped += 1
+                        if self._async_queue_full_dropped in (1, 100, 1000, 10000):
+                            logger.warning(
+                                "EventBus 异步队列已满, 已丢弃 %s 个事件(生产慢于消费)",
+                                self._async_queue_full_dropped,
+                            )
                 continue
             try:
                 result = sub.handler(event)

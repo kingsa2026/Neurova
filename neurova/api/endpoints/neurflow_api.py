@@ -484,12 +484,20 @@ async def execute_workflow(
     inputs: Dict[str, Any] = Body(default={}),
     user_id: Optional[str] = Body(default=None),
     agent_id: Optional[str] = Body(default=None),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
-    """执行工作流"""
+    """执行工作流
+
+    用户隔离：执行实例的 user_id 取 JWT 实名（未认证回退 default），
+    不再信任请求体——知识库节点引用用户级远程配置（默认私有）时按此校验属主。
+    """
     storage = _get_storage()
     workflow = storage.get_workflow(workflow_id)
     if not workflow:
         raise HTTPException(status_code=404, detail="工作流不存在")
+
+    # JWT 实名优先；已认证用户不可冒用他人身份
+    user_id = str(current_user.get("user_id") or "") or None
 
     # 获取外部系统引用（从 Agent 实例）
     memory_manager = None
@@ -1349,8 +1357,10 @@ def _webhook_ingress_deps() -> Dict[str, Any]:
             return wf
         return None
 
-    async def run_workflow(workflow, inputs):
-        return await get_workflow_executor().execute(workflow=workflow, inputs=inputs)
+    async def run_workflow(workflow, inputs, user_id=None):
+        return await get_workflow_executor().execute(
+            workflow=workflow, inputs=inputs, user_id=user_id
+        )
 
     def rate_limiter_for(trigger):
         """按 trigger_id 缓存 limiter（跨请求共享桶，限流才生效）。"""
@@ -1377,8 +1387,8 @@ def get_workflow_agent_deps() -> Dict[str, Any]:
     """遗留③a：workflow_agent 桥接 deps 工厂（tool_executor 首次调用时装配）。
 
     load_agent / load_published_workflow 走 Neurflow storage；
-    run_workflow 走 WorkflowExecutor（单租户默认——chat 请求级用户隔离
-    在 memory 层 ContextVar，工作流执行链路后续按需透传）。
+    run_workflow 走 WorkflowExecutor（user_id 由 tool_executor 从请求级
+    身份透传——工作流内配置引用按属主隔离校验）。
     """
     from neurova.collaboration.neurflow.models import WorkflowStatus
 
@@ -1392,8 +1402,10 @@ def get_workflow_agent_deps() -> Dict[str, Any]:
             return wf
         return None
 
-    async def run_workflow(workflow, inputs):
-        return await get_workflow_executor().execute(workflow=workflow, inputs=inputs)
+    async def run_workflow(workflow, inputs, user_id=None):
+        return await get_workflow_executor().execute(
+            workflow=workflow, inputs=inputs, user_id=user_id
+        )
 
     return {
         "load_agent": load_agent,

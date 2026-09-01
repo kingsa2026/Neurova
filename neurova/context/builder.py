@@ -426,21 +426,25 @@ class ContextBuilder:
             return []
 
     def _analyze_emotion(self, user_input: str, metadata: Dict) -> Optional[Dict]:
-        """分析用户情感"""
-        # 简单的情感分析逻辑
-        # 实际实现可以使用更复杂的情感分析模型
+        """分析用户情感（多字词表，无单字"好/棒/烦"误标）"""
+        # 与 emotion_hub_engine._EMOTION_KEYWORDS 同族的多字词表：
+        # 单字"好"会让"你好/检查…功能"被标成 joy（好字效应），禁用。
+        # 否定守卫：消极短语优先判负。
+        text = user_input.lower()
+        if any(kw in text for kw in ("不好", "不开心", "不高兴", "不喜欢", "糟透")):
+            return {"sadness": 0.7}
+
         emotion_keywords = {
-            "joy": ["开心", "高兴", "快乐", "喜欢", "好"],
-            "sadness": ["难过", "伤心", "失望", "不好"],
-            "anger": ["生气", "愤怒", "讨厌", "烦"],
+            "joy": ["开心", "高兴", "快乐", "喜悦", "喜欢", "幸福", "愉快", "兴奋",
+                    "太好了", "真好", "很好", "棒极了"],
+            "sadness": ["难过", "伤心", "悲伤", "沮丧", "失落", "失望", "痛苦"],
+            "anger": ["生气", "愤怒", "恼火", "讨厌", "气愤", "可恶"],
             "neutral": ["你好", "请问", "怎么", "什么"],
         }
 
-        user_input_lower = user_input.lower()
-
         for emotion_type, keywords in emotion_keywords.items():
             for keyword in keywords:
-                if keyword in user_input_lower:
+                if keyword in text:
                     # 返回符合 _format_emotion 期望的格式
                     return {emotion_type: 0.7}
 
