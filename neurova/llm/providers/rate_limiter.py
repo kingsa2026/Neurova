@@ -189,7 +189,9 @@ class RateLimiter:
                     return False
                 wait = min(wait, remaining) if wait > 0 else remaining
             if wait <= 0:
-                await asyncio.sleep(0.001)
+                # 资源修复: 原 0.001s 忙等, 队列满边角路径会以千Hz空转;
+                # 退避 50ms 足够响应, 又不会持续占 CPU
+                await asyncio.sleep(0.05)
                 continue
             await asyncio.sleep(wait)
 

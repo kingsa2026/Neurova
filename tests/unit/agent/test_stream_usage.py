@@ -80,8 +80,15 @@ class TestStreamUsageAggregation:
 
 class TestPipelineRecords:
     @pytest.mark.asyncio
-    async def test_done_usage_recorded_to_accounting(self):
-        """chat_pipeline 消费 done.usage → usage_accounting.record"""
+    async def test_pipeline_does_not_double_record(self):
+        """入账已下沉到 MultiModelLLMClient.chat_stream（根因修复 2026-09-02）。
+
+        原实现由 chat_pipeline 消费 done.usage 入账，但 model/provider 为
+        config 值 + "stream"，且与调用层计数不一致；且 done 携带 usage 依赖
+        流式回传（从未请求 include_usage，恒 None）。
+        新契约：调用层单点 record（calls 每次调用 +1、usage 末 chunk 全量），
+        pipeline 只透传 done 事件，绝不重复入账——防双计（1 次调用记 2 次）。
+        """
         from neurova.agent.chat_pipeline import ChatPipeline
 
         reset_usage_accounting()
@@ -109,9 +116,10 @@ class TestPipelineRecords:
         await pipeline._call_loop_stream(ctx, None)
 
         snap = get_usage_accounting().snapshot()
-        assert snap["total"]["calls"] == 1
-        assert snap["total"]["prompt_tokens"] == 50
-        assert snap["total"]["completion_tokens"] == 20
+        # done.usage 可在事件流中使用，但 pipeline 层不得入账（防双计）
+        assert snap["total"]["calls"] == 0
+        assert snap["total"]["prompt_tokens"] == 0
+        assert snap["total"]["completion_tokens"] == 0
 
 
 if __name__ == "__main__":
