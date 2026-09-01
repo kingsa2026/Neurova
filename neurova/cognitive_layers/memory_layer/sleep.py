@@ -355,10 +355,11 @@ class SleepConsolidation:
         return result
 
     def apply_sleep_decay(self, memories: List[MemoryRecord]) -> List[MemoryRecord]:
-        """应用睡眠期间的温度衰减
+        """应用睡眠期间的温度衰减（补课 5.3 收敛：委托 TemperatureEngine.on_decay）
 
-        睡眠期间，所有记忆的温度都会降低。
-        低温度的记忆会被标记为归档。
+        遗忘曲线唯一实现在 temperature.py（消费方 5:1）——本方法收敛为
+        批量包装，不再自持第二套衰减公式。TemperatureEngine 不可用时
+        回退原内联公式（保留归档阈值语义）。
 
         Args:
             memories: 记忆列表
@@ -366,22 +367,51 @@ class SleepConsolidation:
         Returns:
             List[MemoryRecord]: 更新后的记忆列表
         """
+        engine = None
+        try:
+            from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
+
+            engine = getattr(self, "_temperature_engine", None)
+            if engine is None:
+                engine = TemperatureEngine()
+                self._temperature_engine = engine
+        except Exception as e:
+            logger.debug("TemperatureEngine 不可用，回退内联衰减: %s", e)
+
+        if engine is not None:
+            # on_decay(current_temp: float, ...) → {"new_temp": ...}
+            for memory in memories:
+                try:
+                    outcome = engine.on_decay(
+                        memory.temperature,
+                        last_accessed=memory.created_at.isoformat() if hasattr(memory.created_at, "isoformat") else str(memory.created_at),
+                        importance=memory.importance,
+                        emotion_score=memory.emotion_score,
+                        recall_count=memory.recall_count,
+                    )
+                    new_temp = outcome.get("new_temp") if isinstance(outcome, dict) else outcome
+                    if isinstance(new_temp, (int, float)):
+                        memory.temperature = max(0.0, min(float(memory.temperature), float(new_temp)))
+                except Exception as e:
+                    logger.debug("on_decay 单条失败（保留原温度）: %s", e)
+            if engine is not None:
+                # 归档阈值语义保留（TemperatureEngine 不管归档）
+                for memory in memories:
+                    if memory.temperature < self.archive_threshold and not memory.is_archived:
+                        memory.is_archived = True
+                        logger.debug("记忆 %s 已归档 (温度: %.1f)", memory.id, memory.temperature)
+                return memories
+            # 引擎签名不兼容 → 走回退
+
+        # 回退：原内联公式
         for memory in memories:
-            # 基础衰减
             decay = self.decay_rate * memory.temperature
-
-            # 重要性保护
             importance_protection = 1.0 - 0.5 * memory.importance
-
-            # 最终衰减
             actual_decay = decay * importance_protection
             memory.temperature = max(0.0, memory.temperature - actual_decay)
-
-            # 归档检查
             if memory.temperature < self.archive_threshold:
                 memory.is_archived = True
                 logger.debug("记忆 %s 已归档 (温度: %.1f)", memory.id, memory.temperature)
-
         return memories
 
     def consolidate(

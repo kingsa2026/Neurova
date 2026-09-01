@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .base import ChannelResult
-from .conflict import ConflictDetector
+from .conflict import ConflictDetector as ChannelConflictDetector
 from .temporal import TemporalDecay
 
 logger = get_logger(__name__)
@@ -34,10 +34,10 @@ class UnifiedResultProcessor:
 
     def __init__(
         self,
-        conflict_detector: Optional[ConflictDetector] = None,
+        conflict_detector: Optional["ChannelConflictDetector"] = None,
         temporal_decay: Optional[TemporalDecay] = None,
     ):
-        self.conflict_detector = conflict_detector or ConflictDetector()
+        self.conflict_detector = conflict_detector or ChannelConflictDetector()
         self.temporal_decay = temporal_decay or TemporalDecay()
 
     def deduplicate(self, results: List[ChannelResult]) -> List[ChannelResult]:
