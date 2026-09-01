@@ -264,6 +264,14 @@ class CognitiveStorageEngine:
                     conn.execute(trigger_sql)
             except sqlite3.OperationalError:
                 logger.warning("FTS5 not available")
+            # 版本化迁移（补课 1.2）：v1 基线登记 user_version；失败软降级——
+            # schema 仍由上方 IF NOT EXISTS 兜底，不阻断启动
+            try:
+                from neurova.core.db_migration import migrate
+
+                migrate(conn, "memory")
+            except Exception as e:
+                logger.warning("记忆库迁移失败（IF NOT EXISTS 兜底继续）: %s", e)
             conn.commit()
         return conn
 
