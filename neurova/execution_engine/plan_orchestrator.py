@@ -614,13 +614,16 @@ class PlanOrchestrator:
 
 # 全局实例
 _plan_orchestrator: Optional[PlanOrchestrator] = None
+_plan_orchestrator_lock = __import__('threading').Lock()
 
 
 def get_plan_orchestrator() -> PlanOrchestrator:
     """获取 PlanOrchestrator 全局唯一实例"""
     global _plan_orchestrator
     if _plan_orchestrator is None:
-        _plan_orchestrator = PlanOrchestrator()
+        with _plan_orchestrator_lock:
+            if _plan_orchestrator is None:
+                _plan_orchestrator = PlanOrchestrator()
     return _plan_orchestrator
 
 

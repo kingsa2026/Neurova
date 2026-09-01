@@ -679,6 +679,7 @@ class VerificationCodeModel:
 
 # 全局实例
 _verification_code_model: Optional[VerificationCodeModel] = None
+_verification_code_model_lock = __import__('threading').Lock()
 
 
 def get_verification_code_model() -> VerificationCodeModel:
@@ -690,7 +691,9 @@ def get_verification_code_model() -> VerificationCodeModel:
     """
     global _verification_code_model
     if _verification_code_model is None:
-        _verification_code_model = VerificationCodeModel()
+        with _verification_code_model_lock:
+            if _verification_code_model is None:
+                _verification_code_model = VerificationCodeModel()
     return _verification_code_model
 
 

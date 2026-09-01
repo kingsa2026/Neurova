@@ -716,6 +716,7 @@ class UserGroupManager:
 
 # 全局实例
 _user_group_manager: Optional[UserGroupManager] = None
+_user_group_manager_lock = __import__('threading').Lock()
 
 
 def get_user_group_manager() -> UserGroupManager:
@@ -727,7 +728,9 @@ def get_user_group_manager() -> UserGroupManager:
     """
     global _user_group_manager
     if _user_group_manager is None:
-        _user_group_manager = UserGroupManager()
+        with _user_group_manager_lock:
+            if _user_group_manager is None:
+                _user_group_manager = UserGroupManager()
     return _user_group_manager
 
 

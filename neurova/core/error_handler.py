@@ -514,6 +514,7 @@ class ErrorHandler:
 """
 # 全局错误处理器实例
 _error_handler: Optional[ErrorHandler] = None
+_error_handler_lock = threading.Lock()
 
 
 def get_error_handler(max_records: int = 10000) -> ErrorHandler:
@@ -527,7 +528,9 @@ def get_error_handler(max_records: int = 10000) -> ErrorHandler:
     """
     global _error_handler
     if _error_handler is None:
-        _error_handler = ErrorHandler(max_records=max_records)
+        with _error_handler_lock:
+            if _error_handler is None:
+                _error_handler = ErrorHandler(max_records=max_records)
     return _error_handler
 
 

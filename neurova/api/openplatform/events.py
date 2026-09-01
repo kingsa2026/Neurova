@@ -642,6 +642,7 @@ class EventSystem:
 
 # 全局实例
 _event_system: Optional[EventSystem] = None
+_event_system_lock = __import__('threading').Lock()
 
 
 def get_event_system() -> EventSystem:
@@ -653,7 +654,10 @@ def get_event_system() -> EventSystem:
     """
     global _event_system
     if _event_system is None:
-        _event_system = EventSystem.get_instance()
+        # P3-e：DCL 统一收敛
+        with _event_system_lock:
+            if _event_system is None:
+                _event_system = EventSystem.get_instance()
     return _event_system
 
 

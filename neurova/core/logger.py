@@ -352,6 +352,7 @@ class LogManager:
 """
 # 全局日志管理器实例
 _log_manager: Optional[LogManager] = None
+_log_manager_lock = threading.Lock()
 
 
 def get_log_manager(max_entries: int = 10000, default_level: LogLevel = LogLevel.INFO) -> LogManager:
@@ -366,7 +367,9 @@ def get_log_manager(max_entries: int = 10000, default_level: LogLevel = LogLevel
     """
     global _log_manager
     if _log_manager is None:
-        _log_manager = LogManager(max_entries=max_entries, default_level=default_level)
+        with _log_manager_lock:
+            if _log_manager is None:
+                _log_manager = LogManager(max_entries=max_entries, default_level=default_level)
     return _log_manager
 
 
