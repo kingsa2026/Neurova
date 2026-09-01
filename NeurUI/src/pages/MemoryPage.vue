@@ -578,13 +578,22 @@ const performSemanticSearch = async () => {
     return
   }
   try {
-    const res = await memoryApi.searchMemories(agentId.value, searchQuery.value, {
-      limit: 20,
-      type: activeTab.value !== 'all' ? activeTab.value : undefined,
-    })
-    // 注意：POST /memory/search 当前 405 断链（真端点为 /enhanced-memory-search/search，
-    // 返回 {results: []} 结构），此处维持既有解析，待断链修复时一并调整
-    searchResults.value = Array.isArray(res.data) ? res.data : []
+    // 真端点 /enhanced-memory-search/search（原 /memory/search 405 断链已修）：
+    // data.results 元素形如 {memory_id|id, content, score, channel, metadata, created_at}
+    const res = await memoryApi.enhancedSearch(searchQuery.value, { top_k: 20 })
+    const raw: any[] = Array.isArray(res.data) ? (res.data as any) : ((res.data as any)?.results ?? [])
+    // 后端无 type 参数，type 过滤在前端做
+    const wanted = activeTab.value !== 'all' ? activeTab.value : undefined
+    searchResults.value = raw
+      .filter((r: any) => !wanted || (r.type ?? r.channel ?? 'general') === wanted)
+      .map((r: any) => ({
+        id: r.id ?? r.memory_id ?? '',
+        content: r.content ?? '',
+        score: r.score ?? 0,
+        type: r.type ?? r.channel ?? 'general',
+        created_at: r.created_at ?? r.recalled_at ?? '',
+        channel_scores: r.channel_scores ?? r.metadata?.channel_scores,
+      }))
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
     searchResults.value = []
