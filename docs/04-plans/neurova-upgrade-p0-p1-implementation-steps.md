@@ -162,7 +162,7 @@ is_concurrency_safe 才 gather，任一未声明整轮保守串行；结果按�
 
 红测：子进程崩溃自动重连（退避 1→60s+jitter）；5 次连续失败熔断 OPEN、300s 半开探测；断连窗口 `get_available_tools` 降级返回缓存；call_tool 无同会话自动重试（副作用安全，锁定测试）。实现：`mcp_client.py` per-server 状态机（CONNECTED/DISCONNECTED/OPEN）+ 重连后台 task + stdio 子进程退出监听；tools 缓存 TTL 默认 300s；`last_error`/status 契约不变。
 
-### P1-4 停止门控 ☐（第 4-5 周，依赖 P1-2 挂点）
+### P1-4 停止门控 ☑（由 P2-5 交付，f11e162——单文件 gates.py 替代原分文件设计；后续 P2-b GateCatalog 补配置层 d330087）
 
 新 `neurova/agent/gates/{base,doom_loop,token_budget,iteration,runner}.py`：StopAction 三态（BYPASS/INTERRUPT_AND_CONTINUE/TERMINATE）+ StopGate ABC + runner（优先级排序、异常隔离、reset_turn/reset_session）。DoomLoopGate 从 `chat_pipeline._auto_continue:1176-1253` 的 0.8 相似度检测迁移升级（+args hash 维度）。挂点 `loops/base.py` 每轮工具调用后。红测：死循环序列终止、预算超限终止、gate 异常不影响主循环。
 
