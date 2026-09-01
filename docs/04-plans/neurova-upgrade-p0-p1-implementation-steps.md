@@ -217,4 +217,9 @@ e2e boot 冒烟（纯 subprocess——in-process create_app 实测卡死故弃�
 - **P2-4 观测补刀 ☑（58901f3）**：record_llm_call 零调用缺口——chat() 成功/失败/熔断 + chat_stream 四分支接线（stream 死语句 time.time() 顺手修复）。/metrics 的 neurova_llm_calls_total 恢复真实计数。
 
 **P1 状态修订（2026-09-01 终版）：P1-1~P1-8 全部 ☑。**mock LLM chat/登录 e2e 依赖后端环境级注入点（未做，见 P1-8 诚实标注）；AppContainer 真实现推后（P1-7 诚实降级）。
-**剩余可选项**：structlog 迁移（降级可选——logger.py 已结构化，生产 0 处 print）；AppContainer 真实现（P2）；mock LLM 注入点（e2e 完整化前置）。**QwenPaw 升级计划 P0/P1/P2/P3 全部收官。**
+**剩余可选项 ☑（2026-09-01 全部落地，52aae6e + 9e41f80）**：
+- **mock LLM 注入点**：NEUROVA_LLM_MOCK=1 → chat/chat_stream 在 provider 解析前返回 canned（回显用户消息）；信封/流式契约与真实路径同形，无 Key 全链路贯通。
+- **JSON 结构化日志**：NEUROVA_LOG_JSON=1 → 单行 JSON（json.dumps 引号安全、exc 结构化）——structlog 核心价值落地，零新依赖。
+- **Windows 受限令牌沙箱（真隔离）**：SAFER/SRP NormalUser 令牌 → CreateProcessAsUserW，特权剥离（Administrators→deny-only，自证 S-1-5-114）；诚实边界 enforced_severities=∅（SRP 无网络/FS 语义，governance DENY 不受影响）；_detect_backend Windows 无 docker/bwrap/seatbelt 时优先 restricted_token。**AppContainer（COM/SECURITY_CAPABILITIES 语义）仍留待真需求出现**——受限令牌已覆盖特权剥离安全增益。
+
+**QwenPaw 升级计划 P0/P1/P2/P3 + 可选项全部收官。**
