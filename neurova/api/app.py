@@ -93,16 +93,39 @@ _app_instance: Optional[FastAPI] = None
 _state_lock = threading.Lock()
 
 
+def _make_database_health_check(db_path: str = "neurova_memory.db"):
+    """构造 database 健康检查闭包（可注入 db_path 供测试）。
+
+    刻意不走业务连接池：池 get_connection 空池时阻塞等待 30s，
+    健康探测需要轻量独立、不与业务争连接。
+    """
+
+    def check_database():
+        try:
+            import sqlite3
+
+            conn = sqlite3.connect(db_path, timeout=3)
+            try:
+                conn.execute("SELECT 1").fetchone()
+            finally:
+                conn.close()
+            return True, "database reachable (SELECT 1 ok)"
+        except Exception as exc:
+            return False, f"database check failed: {exc}"
+
+    return check_database
+
+
 def _register_default_health_checks(health_checker) -> None:
     """
     注册默认的系统健康检查
     """
     from neurova.core.health_checker import CheckType
 
-    # 数据库检查
+    # 数据库检查（真连库：SELECT 1 探测 + 失败上报，替代原硬编码假检查）
     health_checker.register(
         name="database",
-        check_func=lambda: (True, "SQLite OK"),
+        check_func=_make_database_health_check(),
         check_type=CheckType.READINESS,
         description="Database connectivity check",
         critical=True,
