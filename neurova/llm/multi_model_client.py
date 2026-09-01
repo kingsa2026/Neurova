@@ -36,7 +36,13 @@ from neurova.llm.provider_manager import (
     ProviderConfig,
     get_provider_manager,
 )
-from neurova.llm_client import LLMClient, LLMConfig, LLMConnectionError, LLMRateLimitError
+from neurova.llm_client import (
+    LLMClient,
+    LLMConfig,
+    LLMConnectionError,
+    LLMRateLimitError,
+    LLMResponse,
+)
 from neurova.llm.providers.rate_limiter import (
     CircuitBreaker,
     ExponentialBackoff,
@@ -439,6 +445,20 @@ class MultiModelLLMClient:
         P2-2：底层调用经 per-provider retry/circuit 装配；
         P2-4：真实 usage 记入 TokenUsageAccounting（对账+成本）。
         """
+        # P2 可选项：mock 注入点最前置（provider 解析之前，无 Key 可用）
+        if _mock_enabled():
+            import time as _time
+
+            _t0 = _time.time()
+            resp = _build_mock_response(messages)
+            return {
+                "success": True,
+                "response": resp,
+                "duration": _time.time() - _t0,
+                "model": resp.model,
+                "provider": "mock",
+            }
+
         client = self._get_client_for_request(model, provider_id)
         if not client:
             logger.warning("No client available for chat")
@@ -531,6 +551,28 @@ class MultiModelLLMClient:
         **kwargs,
     ):
         """发送流式聊天请求"""
+        # P2 可选项：mock 流式（content chunk + done/usage，与真实契约同形）
+        if _mock_enabled():
+            import time as _time
+
+            _t0 = _time.time()
+            resp = _build_mock_response(messages)
+            text = resp.content
+            step = max(1, len(text) // 4)
+            for i in range(0, len(text), step):
+                yield {"type": "content", "content": text[i : i + step]}
+            yield {
+                "type": "done",
+                "content": "",
+                "usage": {
+                    "prompt_tokens": resp.usage.get("prompt_tokens", 0),
+                    "completion_tokens": resp.usage.get("completion_tokens", 0),
+                    "total_tokens": resp.usage.get("total_tokens", 0),
+                    "duration": _time.time() - _t0,
+                },
+            }
+            return
+
         client = self._get_client_for_request(model, provider_id)
         if not client:
             logger.warning("No client available for stream chat")
@@ -658,6 +700,33 @@ class MultiModelLLMClient:
 
 _multi_model_client: Optional[MultiModelLLMClient] = None
 # scope → 实例 隔离注册表
+# ── P2 可选项：LLM mock 环境注入点 ──
+# NEUROVA_LLM_MOCK=1 时 chat/chat_stream 在 provider 解析之前返回 canned
+# 响应（无 Key/无网络可跑通全链路：e2e/CI/本地演示）。信封与真实路径同形。
+MOCK_ENV_FLAG = "NEUROVA_LLM_MOCK"
+
+
+def _mock_enabled() -> bool:
+    import os as _os
+
+    return _os.environ.get(MOCK_ENV_FLAG, "").strip() == "1"
+
+
+def _build_mock_response(messages: List[Dict[str, str]]) -> LLMResponse:
+    """canned LLMResponse：回显最后一条用户消息（e2e 可断言贯通性）。"""
+    last_user = ""
+    for m in reversed(messages or []):
+        if (m.get("role") or "").lower() == "user":
+            last_user = str(m.get("content") or "")
+            break
+    return LLMResponse(
+        content=f"[mock-llm] echo: {last_user}",
+        model="mock-model",
+        usage={"prompt_tokens": len(last_user), "completion_tokens": 8, "total_tokens": len(last_user) + 8},
+        finish_reason="stop",
+    )
+
+
 _multi_model_clients: Dict[str, MultiModelLLMClient] = {}
 _multi_model_clients_lock = threading.Lock()
 
