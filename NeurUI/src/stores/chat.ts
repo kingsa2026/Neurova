@@ -45,12 +45,15 @@ export const useChatStore = defineStore('chat', () => {
   /** Sessions filtered by the sidebar search keyword. */
   const filteredSessions = computed<Session[]>(() => {
     const q = searchQuery.value.trim().toLowerCase()
-    if (!q) return sessions.value
-    return sessions.value.filter(
-      (s) =>
-        s.title.toLowerCase().includes(q) ||
-        (s.updatedAt ?? '').toLowerCase().includes(q),
-    )
+    const base = q
+      ? sessions.value.filter(
+          (s) =>
+            s.title.toLowerCase().includes(q) ||
+            (s.updatedAt ?? '').toLowerCase().includes(q),
+        )
+      : sessions.value
+    // 置顶优先（补课 2.3），其余保持原有顺序
+    return [...base].sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false))
   })
 
   /** Title of the active session, or a default placeholder. */
@@ -84,6 +87,11 @@ export const useChatStore = defineStore('chat', () => {
 
   function removeArchivedSession(sessionId: string): void {
     archivedSessions.value = archivedSessions.value.filter((s) => s.id !== sessionId)
+  }
+
+  function setSessionPinned(sessionId: string, pinned: boolean): void {
+    const s = sessions.value.find((x) => x.id === sessionId)
+    if (s) s.pinned = pinned
   }
 
   function renameSessionTitle(sessionId: string, title: string): void {
@@ -191,6 +199,7 @@ export const useChatStore = defineStore('chat', () => {
     removeSession,
     setArchivedSessions,
     removeArchivedSession,
+    setSessionPinned,
     renameSessionTitle,
     setCurrentSession,
     // message mutations

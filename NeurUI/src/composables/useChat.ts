@@ -89,6 +89,7 @@ export function useChat(options: UseChatOptions = {}) {
           id: s.session_id || s.id,
           title: s.title || s.name || i18n.global.t('ui.newConversation'),
           updatedAt: s.created_at || s.updated_at,
+          pinned: !!s.pinned,
         }),
       )
       store.setSessions(mapped)
@@ -425,6 +426,20 @@ export function useChat(options: UseChatOptions = {}) {
     }
   }
 
+  /**
+   * 置顶/取消置顶会话：POST pin 到后端，再本地更新 store。
+   */
+  async function pinSession(sessionId: string, pinned: boolean): Promise<boolean> {
+    try {
+      await api.post(`/console/chat/sessions/${sessionId}/pin`, { pinned })
+      store.setSessionPinned(sessionId, pinned)
+      return true
+    } catch (err) {
+      console.error('[Chat] Pin failed:', err)
+      return false
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Round operations（编辑最后一条用户消息 / 删除一轮 / 点赞点踩）
   // ---------------------------------------------------------------------------
@@ -491,6 +506,7 @@ export function useChat(options: UseChatOptions = {}) {
     switchSession,
     deleteSession,
     renameSession,
+    pinSession,
     // archive actions — 删除 → 存档：历史列表隐藏，存档卡片页可随时恢复
     archiveSession,
     loadArchivedSessions,

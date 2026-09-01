@@ -42,13 +42,16 @@
           @click="switchSession(session.id)"
         >
           <span class="nr-session-icon">💬</span>
-          <span class="nr-session-name">{{ session.title }}</span>
+          <span class="nr-session-name">{{ session.pinned ? '📌 ' : '' }}{{ session.title }}</span>
           <a-dropdown :trigger="['click']" @click.stop>
             <span class="nr-session-menu-btn" @click.stop>⋯</span>
             <template #overlay>
               <a-menu>
                 <a-menu-item @click="renameSession(session.id)">
                   {{ t('chat.rename') }}
+                </a-menu-item>
+                <a-menu-item @click="togglePin(session)">
+                  {{ session.pinned ? t('chat.unpin') : t('chat.pin') }}
                 </a-menu-item>
                 <a-menu-item @click="archiveSession(session.id)">
                   {{ t('chat.archive') }}
@@ -594,7 +597,8 @@ import {
   rejectRequest as apiRejectRequest,
   addWhitelistEntry,
 } from '@/api/modules/governance'
-import { secureStorage, escapeHtml, sanitizeUrl, sanitizeHtmlStrict } from '@/utils/security'
+import { secureStorage } from '@/utils/security'
+import { renderMarkdown } from '@/utils/markdown'
 import { uiMessage } from '@/utils/message'
 import { resolveI18nMessage } from '@/utils/i18n'
 import GlassButton from '@/components/GlassButton.vue'
@@ -819,6 +823,7 @@ const {
   switchSession: _switchSession,
   deleteSession: _deleteSession,
   renameSession: _renameSession,
+  pinSession: _pinSession,
   // 存档操作：删除 → 存档（历史列表隐藏，存档卡片页可随时恢复）
   archiveSession: _archiveSession,
   loadArchivedSessions: _loadArchivedSessions,
@@ -956,6 +961,14 @@ async function deleteSession(sessionId: string): Promise<void> {
 // 会话存档（删除 → 存档：历史列表隐藏，存档卡片页可随时恢复）
 // ---------------------------------------------------------------------------
 const archivedPanelOpen = ref(false)
+
+/** 置顶/取消置顶（模板菜单无参调用；静默失败不打断列表交互）。 */
+async function togglePin(session: Session): Promise<void> {
+  const ok = await _pinSession(session.id, !session.pinned)
+  if (!ok) {
+    uiMessage.error(resolveI18nMessage(t, 'chat.pinFailed', t('chat.pinFailed')))
+  }
+}
 
 /** 存档会话（模板菜单无参调用），失败弹 toast（错误策略与 deleteSession wrapper 一致）。 */
 async function archiveSession(sessionId: string): Promise<void> {
@@ -1768,74 +1781,28 @@ function formatFileSize(bytes: number): string {
 // ---------------------------------------------------------------------------
 // Rich Content Rendering
 // ---------------------------------------------------------------------------
+/**
+ * 消息内容 Markdown 渲染。
+ *
+ * 旧实现是手写正则伪 MD: 标题/列表/引用/表格/删除线全部退化纯文本,
+ * 且正则顺序会二次污染代码块 (** 变 <strong>、\n 变 <br/>、<div> 当标签)。
+ * 现统一走 src/utils/markdown.ts 的 marked (GFM+breaks) + 语法高亮 +
+ * DOMPurify 白名单兜底 (渲染与安全细节见该模块, 纯函数便于测试)。
+ */
 function renderRichContent(text: string): string {
-  let html = escapeHtml(text)
-
-  // Code blocks with language label and copy button
-  // 修复 P0-7: 移除 inline onclick，改用 data-code 属性 + 事件委托
-  // （DOMPurify 会剥离 inline 事件处理器，inline onclick 无效且不安全）
-  html = html.replace(
-    /```(\w*)\n([\s\S]*?)```/g,
-    (_, lang, code) =>
-      `<div class="nr-code-wrap">` +
-      `<div class="nr-code-header">` +
-      `<span class="nr-code-lang">${lang || 'code'}</span>` +
-      `<button class="nr-code-copy-btn" data-code="${encodeURIComponent(code.trim())}">${t('common.copy')}</button>` +
-      `</div>` +
-      `<pre class="nr-code-block"><code>${code.trim()}</code></pre>` +
-      `</div>`,
-  )
-
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code class="nr-code-inline">$1</code>')
-
-  // Bold
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-
-  // Italic
-  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>')
-
-  // Images (inline markdown images → clickable lightbox)
-  // 修复 P0-7: 用 sanitizeUrl 校验 URL，拒绝 javascript: 等危险协议
-  html = html.replace(
-    /!\[([^\]]*)\]\(([^)]+)\)/g,
-    (_, alt, url) => {
-      const safeUrl = sanitizeUrl(url)
-      if (!safeUrl) return '' // 危险 URL 直接丢弃图片
-      return `<div class="nr-inline-image">` +
-        `<img src="${safeUrl}" alt="${escapeHtml(alt)}" loading="lazy" />` +
-        `<span class="nr-img-caption">${escapeHtml(alt)}</span>` +
-        `</div>`
-    },
-  )
-
-  // Links
-  // 修复 P0-7: 用 sanitizeUrl 校验 URL，拒绝 javascript: 等危险协议
-  html = html.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    (_, linkText, url) => {
-      const safeUrl = sanitizeUrl(url)
-      if (!safeUrl) return escapeHtml(linkText) // 危险 URL 退化为纯文本
-      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="nr-msg-link">${escapeHtml(linkText)}</a>`
-    },
-  )
-
-  // Line breaks
-  html = html.replace(/\n/g, '<br/>')
-
-  // 修复 P0-7 层 3: DOMPurify 兜底，剥离任何遗漏的危险标签/属性
-  return sanitizeHtmlStrict(html)
+  return renderMarkdown(text, t('common.copy'))
 }
 
 /** Handle clicks within rendered content (image lightbox + code copy). */
 function handleContentClick(e: MouseEvent) {
   const target = e.target as HTMLElement
 
-  // 修复 P0-7: 事件委托处理代码块复制按钮
+  // 事件委托处理代码块复制按钮; 代码内容直接从 DOM textContent 读取,
+  // 不依赖 data-code 属性 (旧链路 encodeURIComponent+decodeURIComponent 脆弱)
   const copyBtn = target.closest('.nr-code-copy-btn') as HTMLButtonElement | null
   if (copyBtn) {
-    const rawCode = copyBtn.getAttribute('data-code') || ''
-    const code = decodeURIComponent(rawCode)
+    const codeEl = copyBtn.closest('.nr-code-wrap')?.querySelector('code')
+    const code = codeEl ? codeEl.textContent || '' : ''
     navigator.clipboard.writeText(code).then(() => {
       copyBtn.textContent = '✓'
       setTimeout(() => {
@@ -3051,6 +3018,168 @@ onBeforeUnmount(() => {
 
 :deep(.nr-msg-link:hover) {
   color: var(--nr-accent);
+}
+
+/* Rich Content: Markdown 块级元素 (标题/列表/引用/表格) */
+:deep(.nr-msg-content) {
+  line-height: 1.65;
+}
+
+:deep(.nr-msg-content h1),
+:deep(.nr-msg-content h2),
+:deep(.nr-msg-content h3),
+:deep(.nr-msg-content h4),
+:deep(.nr-msg-content h5),
+:deep(.nr-msg-content h6) {
+  margin: 0.9em 0 0.45em;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+  line-height: 1.35;
+}
+
+:deep(.nr-msg-content h1) {
+  font-size: 1.35em;
+  border-bottom: 1px solid var(--nr-glass-border);
+  padding-bottom: 0.25em;
+}
+
+:deep(.nr-msg-content h2) {
+  font-size: 1.2em;
+}
+
+:deep(.nr-msg-content h3) {
+  font-size: 1.1em;
+}
+
+:deep(.nr-msg-content h4),
+:deep(.nr-msg-content h5),
+:deep(.nr-msg-content h6) {
+  font-size: 1em;
+}
+
+:deep(.nr-msg-content ul),
+:deep(.nr-msg-content ol) {
+  margin: 0.4em 0 0.8em;
+  padding-left: 1.5em;
+}
+
+:deep(.nr-msg-content ul) {
+  list-style: disc;
+}
+
+:deep(.nr-msg-content ol) {
+  list-style: decimal;
+}
+
+:deep(.nr-msg-content li) {
+  margin: 0.2em 0;
+}
+
+:deep(.nr-msg-content blockquote) {
+  margin: 0.6em 0;
+  padding: 0.3em 0.9em;
+  border-left: 3px solid var(--nr-primary);
+  background: var(--nr-bg-inset);
+  border-radius: 0 6px 6px 0;
+  color: var(--nr-text-secondary);
+}
+
+:deep(.nr-msg-content table) {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+  font-size: 0.92em;
+}
+
+:deep(.nr-msg-content th),
+:deep(.nr-msg-content td) {
+  border: 1px solid var(--nr-glass-border);
+  padding: 5px 10px;
+}
+
+:deep(.nr-msg-content th) {
+  background: var(--nr-glass-bg);
+  font-weight: 600;
+}
+
+:deep(.nr-msg-content p) {
+  margin: 0.35em 0;
+}
+
+:deep(.nr-msg-content :not(pre) > code) {
+  background: var(--nr-bg-inset);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: var(--nr-font-mono);
+  font-size: 0.9em;
+  color: var(--nr-accent-secondary);
+}
+
+:deep(.nr-msg-content hr) {
+  border: none;
+  border-top: 1px solid var(--nr-glass-border);
+  margin: 0.9em 0;
+}
+
+/* Rich Content: highlight.js token 配色 (玻璃暗色系) */
+:deep(.nr-code-block .hljs-comment),
+:deep(.nr-code-block .hljs-quote) {
+  color: #6b7280;
+  font-style: italic;
+}
+
+:deep(.nr-code-block .hljs-keyword),
+:deep(.nr-code-block .hljs-selector-tag),
+:deep(.nr-code-block .hljs-meta) {
+  color: #c792ea;
+}
+
+:deep(.nr-code-block .hljs-string),
+:deep(.nr-code-block .hljs-regexp),
+:deep(.nr-code-block .hljs-symbol) {
+  color: #7ec699;
+}
+
+:deep(.nr-code-block .hljs-number),
+:deep(.nr-code-block .hljs-literal) {
+  color: #f78c6c;
+}
+
+:deep(.nr-code-block .hljs-title),
+:deep(.nr-code-block .hljs-title.class_),
+:deep(.nr-code-block .hljs-title.function_),
+:deep(.nr-code-block .hljs-section) {
+  color: #82aaff;
+}
+
+:deep(.nr-code-block .hljs-built_in),
+:deep(.nr-code-block .hljs-attr),
+:deep(.nr-code-block .hljs-attribute),
+:deep(.nr-code-block .hljs-variable),
+:deep(.nr-code-block .hljs-template-variable) {
+  color: #ffcb6b;
+}
+
+:deep(.nr-code-block .hljs-tag),
+:deep(.nr-code-block .hljs-name),
+:deep(.nr-code-block .hljs-selector-tag) {
+  color: #f07178;
+}
+
+:deep(.nr-code-block .hljs-params),
+:deep(.nr-code-block .hljs-type) {
+  color: #eeffff;
+}
+
+:deep(.nr-code-block .hljs-function) {
+  color: #82aaff;
+}
+
+:deep(.nr-code-block .hljs-punctuation),
+:deep(.nr-code-block .hljs-operator) {
+  color: #89ddff;
 }
 
 /* Lightbox */
