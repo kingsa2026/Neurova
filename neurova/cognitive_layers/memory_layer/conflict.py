@@ -15,9 +15,9 @@ from .models import Memory
 logger = get_logger(__name__)
 
 
-class ConflictDetector:
+class LegacyConflictDetector:
     """
-    冲突检测引擎
+    冲突检测引擎（Legacy；Memory 对象入参，仅历史调用方使用）
 
     检测新记忆与已有记忆的冲突。
     """
@@ -192,3 +192,8 @@ class ConflictDetector:
     def clear_history(self) -> None:
         """清空冲突历史"""
         self._conflict_history.clear()
+
+
+# 向后兼容别名（补课 5.3：包级 ConflictDetector 已由 v2 占用；
+# 本模块的旧名字保留导出，新代码请用 v2 或 Legacy 名）
+ConflictDetector = LegacyConflictDetector
