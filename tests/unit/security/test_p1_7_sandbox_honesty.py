@@ -33,13 +33,14 @@ class TestAppContainerHonesty:
         assert AppContainerSandbox().available() is False
 
     def test_detect_backend_never_returns_appcontainer(self):
-        """后端探测在 Windows 上降级到 ProcessSandbox，而非说谎的 AppContainer"""
+        """后端探测在 Windows 上给 restricted_token（特权剥离）或裸 process，
+        绝不说谎的 AppContainer"""
         from neurova.sandbox.exec_sandbox import _detect_backend
 
         if sys.platform != "win32":
             pytest.skip("仅 Windows 语义")
         backend = _detect_backend(SandboxSeverity.NETWORK_OFF)
-        assert backend.backend_name() == "process"
+        assert backend.backend_name() in ("restricted_token", "process")
 
     def test_execute_reports_enforcement_truth(self):
         """执行结果必须自报隔离是否真实生效"""

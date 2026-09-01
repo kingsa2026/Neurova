@@ -45,10 +45,14 @@ class TestBackendDetection(unittest.TestCase):
         self.assertIsInstance(sandbox, ProcessSandbox)
 
     @unittest.skipUnless(sys.platform == "win32", "Windows 专属")
-    def test_windows_degrades_to_process_honestly(self):
-        """P1-7 诚实化：AppContainer 未实现，Windows 降级 ProcessSandbox"""
+    def test_windows_uses_restricted_token_or_process_honestly(self):
+        """P1-7+P2：AppContainer 未实现；Windows 给 SAFER 受限令牌（特权剥离）
+        或裸 ProcessSandbox（SAFER 不可达兜底），绝不返回说谎的 AppContainer"""
         sandbox = get_exec_sandbox(SandboxSeverity.READ_ONLY)
-        self.assertIsInstance(sandbox, ProcessSandbox)
+        from neurova.sandbox.exec_sandbox import AppContainerSandbox
+
+        self.assertNotIsInstance(sandbox, AppContainerSandbox)
+        self.assertIn(sandbox.backend_name(), ("restricted_token", "process"))
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux 专属")
     def test_linux_bubblewrap_when_available(self):
