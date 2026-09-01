@@ -10,6 +10,9 @@ from neurova.tts.base import TTSBase
 
 
 class EdgeTTS(TTSBase):
+
+    # edge-tts Communicate.stream() 的 audio chunk 是 MP3 裸字节
+    audio_media_type = "audio/mpeg"
     """
     微软 Edge TTS 引擎
 
@@ -66,6 +69,7 @@ class EdgeTTS(TTSBase):
 
         if not self.validate_text(text):
             return b""
+        text = self.sanitize_text(text)
 
         try:
             # 创建 Communicate 对象
@@ -105,6 +109,7 @@ class EdgeTTS(TTSBase):
 
         if not self.validate_text(text):
             return
+        text = self.sanitize_text(text)
 
         try:
             # 创建 Communicate 对象

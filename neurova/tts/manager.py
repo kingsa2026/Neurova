@@ -222,5 +222,9 @@ class TTSManager:
         self._engine_name = None
         logger.info("TTSManager 已关闭")
 
+    def get_audio_media_type(self) -> str:
+        """当前引擎流式输出的 MIME 类型（补课 4.3）。"""
+        return getattr(self._engine, "audio_media_type", "audio/wav")
+
     def get_engine_name(self) -> str:
         return self._engine_name or "none"

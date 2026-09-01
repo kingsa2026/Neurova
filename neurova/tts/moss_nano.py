@@ -361,6 +361,7 @@ class MOSSNanTTS(TTSBase):
         if not self.validate_text(text):
             return b""
 
+        text = self.sanitize_text(text)
         text = self._normalize_text(text)
         if not text:
             return b""
