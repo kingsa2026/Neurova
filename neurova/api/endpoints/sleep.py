@@ -177,80 +177,12 @@ def _get_sleep_manager(agent_id: str = "default"):
     return None
 
 
-def _generate_mock_dreams(agent_id: str, limit: int = 10) -> List[DreamLogItem]:
-    """生成模拟梦境数据"""
-    dreams = []
-    for i in range(min(limit, 5)):
-        dreams.append(
-            DreamLogItem(
-                dream_id=str(uuid.uuid4()),
-                agent_id=agent_id,
-                timestamp=time.time() - (i * 3600),
-                dream_type="replay",
-                content=f"Dream replay of conversation about topic {i+1}",
-                memories_involved=[f"memory_{j}" for j in range(3)],
-                insights_generated=i % 3,
-                duration=60.0 + i * 10,
-            )
-        )
-    return dreams
 
 
-def _generate_mock_insights(agent_id: str, limit: int = 10) -> List[DreamInsightItem]:
-    """生成模拟梦境洞察数据"""
-    insights = []
-    for i in range(min(limit, 3)):
-        insights.append(
-            DreamInsightItem(
-                insight_id=str(uuid.uuid4()),
-                dream_id=str(uuid.uuid4()),
-                agent_id=agent_id,
-                timestamp=time.time() - (i * 7200),
-                insight_type="pattern",
-                content=f"Discovered pattern in user preferences: pattern_{i+1}",
-                confidence=0.8 - i * 0.1,
-                related_memories=[f"memory_{j}" for j in range(2)],
-            )
-        )
-    return insights
 
 
-def _generate_mock_merges(agent_id: str, limit: int = 10) -> List[MemoryMergeItem]:
-    """生成模拟记忆合并数据"""
-    merges = []
-    for i in range(min(limit, 4)):
-        merges.append(
-            MemoryMergeItem(
-                merge_id=str(uuid.uuid4()),
-                agent_id=agent_id,
-                timestamp=time.time() - (i * 1800),
-                source_memories=[f"memory_{j}" for j in range(2, 4)],
-                target_memory=f"consolidated_memory_{i}",
-                merge_type="consolidation",
-                success=True,
-                conflicts_resolved=i % 2,
-            )
-        )
-    return merges
 
 
-def _generate_mock_conflicts(agent_id: str, limit: int = 10) -> List[MergeConflictItem]:
-    """生成模拟冲突数据（仅无睡眠管理器的 agent 回退用）"""
-    conflicts = []
-    for i in range(min(limit, 2)):
-        conflicts.append(
-            MergeConflictItem(
-                id=f"mock-cr-{i}",
-                agent_id=agent_id,
-                field="content",
-                local_value=f"kept memory content {i}",
-                remote_value=f"merged memory content {i}",
-                resolved=True,
-                resolution="keep_longest",
-                created_at=datetime.now().isoformat(),
-            )
-        )
-    return conflicts
 
 
 @router.get("/{agent_id}/status", response_model=SleepStatusResponse)
@@ -376,7 +308,8 @@ async def get_dream_logs(
     # 根因修复: 仅在完全没有睡眠管理器时才回退模拟数据；
     # 管理器存在但无数据时应返回空列表（此前真实数据被 mock 假数据掩盖）
     if not dreams and sleep_manager is None:
-        dreams = _generate_mock_dreams(agent_id, limit)
+        # 补课 5.1：无睡眠管理器时返空列表（mock 假数据会误导用户）
+        dreams = []
 
     return dreams
 
@@ -401,7 +334,7 @@ async def get_dream_log(
         except Exception as e:
             logger.warning("Failed to get dream logs: %s", e)
     if not dreams and sleep_manager is None:
-        dreams = _generate_mock_dreams(agent_id, 100)
+        dreams = []
     for dream in dreams:
         dream_id_value = dream.dream_id if hasattr(dream, "dream_id") else dream.get("dream_id")
         if dream_id_value == dream_id:
@@ -434,7 +367,7 @@ async def get_dream_insights(
 
     # 仅在无管理器时回退模拟数据（与 dreams 端点契约一致）
     if not insights and sleep_manager is None:
-        insights = _generate_mock_insights(agent_id, limit)
+        insights = []
 
     return insights
 
@@ -459,7 +392,7 @@ async def get_dream_insight(
         except Exception as e:
             logger.warning("Failed to get dream insights: %s", e)
     if not insights and sleep_manager is None:
-        insights = _generate_mock_insights(agent_id, 100)
+        insights = []
     for insight in insights:
         insight_id_value = insight.insight_id if hasattr(insight, "insight_id") else insight.get("insight_id")
         if insight_id_value == insight_id:
@@ -492,7 +425,7 @@ async def get_memory_merges(
 
     # 仅在无管理器时回退模拟数据（与 dreams 端点契约一致）
     if not merges and sleep_manager is None:
-        merges = _generate_mock_merges(agent_id, limit)
+        merges = []
 
     return merges
 
@@ -517,7 +450,7 @@ async def get_memory_merge(
         except Exception as e:
             logger.warning("Failed to get memory merges: %s", e)
     if not merges and sleep_manager is None:
-        merges = _generate_mock_merges(agent_id, 100)
+        merges = []
     for merge in merges:
         merge_id_value = merge.merge_id if hasattr(merge, "merge_id") else merge.get("merge_id")
         if merge_id_value == merge_id:
@@ -550,7 +483,8 @@ async def get_conflict_resolutions(
 
     # 仅在无管理器时回退模拟数据（与 dreams 端点契约一致）
     if not conflicts and sleep_manager is None:
-        conflicts = _generate_mock_conflicts(agent_id, limit)
+        # 补课 5.1：无睡眠管理器时返空列表（mock 假数据会误导用户）
+        conflicts = []
 
     return conflicts
 
@@ -574,7 +508,7 @@ async def get_conflict_resolution(
         except Exception as e:
             logger.warning("Failed to get conflict resolutions: %s", e)
     if not conflicts and sleep_manager is None:
-        conflicts = [c.model_dump() for c in _generate_mock_conflicts(agent_id, 100)]
+        conflicts = []
     for conflict in conflicts:
         cid = conflict.get("id") if isinstance(conflict, dict) else getattr(conflict, "id", None)
         if cid == resolution_id:
