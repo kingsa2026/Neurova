@@ -6,6 +6,7 @@
 
 import json
 from neurova.core.logger import get_logger
+from neurova.core.trace_context import clear_trace_id, set_trace_id
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -106,6 +107,8 @@ class TrajectoryRecorder:
         self._active_traces_by_user[user_id].append(trace.trace_id)
 
         logger.info("Started trace %s for session %s", trace.trace_id, session_id)
+        # 当前上下文绑定 trace_id（logger 的 JSON 输出自动携带，补课 1.1）
+        set_trace_id(trace.trace_id)
         return trace.trace_id
 
     def end_trace(self, trace_id: str) -> None:
@@ -127,6 +130,20 @@ class TrajectoryRecorder:
         # 自动保存
         if self._auto_save:
             self.save_trace(trace_id)
+
+        # 资源修复: end_trace 后立即从活动注册表移除。
+        # 原实现只删文件不删内存, 每轮对话泄漏一个完整轨迹对象
+        # (active_traces/active_spans/active_traces_by_user 三处都只增不减)。
+        for span_id in list(trace.spans.keys()):
+            self._active_spans.pop(span_id, None)
+        self._active_traces.pop(trace_id, None)
+        if hasattr(self, "_active_traces_by_user"):
+            by_user = self._active_traces_by_user.get(trace.user_id)
+            if by_user and trace_id in by_user:
+                by_user.remove(trace_id)
+                if not by_user:
+                    self._active_traces_by_user.pop(trace.user_id, None)
+        clear_trace_id()
 
     def start_span(
         self,
@@ -292,6 +309,10 @@ class TrajectoryRecorder:
                     "created_at": trace.start_time,
                 }
             )
+            # 资源修复: _max_traces_in_memory 此前定义却无人消费,
+            # 索引无限增长并每次全量重写 index.json。超限丢最老条目。
+            if len(self._saved_traces) > self._max_traces_in_memory:
+                self._saved_traces = self._saved_traces[-self._max_traces_in_memory:]
             self._save_traces_index()
 
             logger.info("Saved trace %s to %s", trace_id, save_path)
