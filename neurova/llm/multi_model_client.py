@@ -455,6 +455,13 @@ class MultiModelLLMClient:
 
             client.increment_request(success=True)
             try:
+                # P2-4 补刀：llm prometheus 埋点（此前 record_llm_call 零调用点）
+                from neurova.core.metrics import get_metrics
+
+                get_metrics().record_llm_call(client.provider.id, client.model, True, duration)
+            except Exception:
+                pass
+            try:
                 from neurova.core.usage_accounting import get_usage_accounting
 
                 # P2-4：真实 token 对账（response.usage 为 OpenAI 返回值；
@@ -488,6 +495,9 @@ class MultiModelLLMClient:
                 from neurova.core.metrics import get_metrics
 
                 get_metrics().record_circuit_rejection(client.provider.id)
+                get_metrics().record_llm_call(
+                    client.provider.id, client.model, False, time.time() - start_time
+                )
             except Exception:
                 pass
             return {
@@ -498,6 +508,14 @@ class MultiModelLLMClient:
             }
         except Exception as e:
             client.increment_request(success=False)
+            try:
+                from neurova.core.metrics import get_metrics
+
+                get_metrics().record_llm_call(
+                    client.provider.id, client.model, False, time.time() - start_time
+                )
+            except Exception:
+                pass
             return {
                 "success": False,
                 "error": str(e),
@@ -525,10 +543,24 @@ class MultiModelLLMClient:
             # 必须调用异步版本 chat_stream_async。
             async for chunk in client.client.chat_stream_async(messages, **kwargs):
                 yield chunk
-            time.time() - start_time
+            duration = time.time() - start_time  # P2-4 补刀：原为丢弃结果的死语句
             client.increment_request(success=True)
+            try:
+                from neurova.core.metrics import get_metrics
+
+                get_metrics().record_llm_call(client.provider.id, client.model, True, duration)
+            except Exception:
+                pass
         except Exception as e:
             client.increment_request(success=False)
+            try:
+                from neurova.core.metrics import get_metrics
+
+                get_metrics().record_llm_call(
+                    client.provider.id, client.model, False, time.time() - start_time
+                )
+            except Exception:
+                pass
             yield {"error": str(e)}
 
     def _resolve_available_fallback(self) -> Optional[ModelClient]:
