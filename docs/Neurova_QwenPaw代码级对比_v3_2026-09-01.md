@@ -97,6 +97,12 @@
 | P3-b | MCP 2026-07-28 协议跟进 + DCR | 大 | 协议现代性 |
 | P3-c | backup 信任模型子系统 | 大 | 全新能力 |
 
+### 6.1 遗留三项处置（同日完成）
+
+1. **mock LLM chat e2e 端到端 ☑（c9a46f1）**：NEUROVA_BOOTSTRAP_USER 引导（无用户才建 admin；幂等/fail-open）+ 真实后端登录 → /console/chat SSE mock 回显 2 用例（无后端/无账号诚实 skip）。
+2. **backup 编排层 ☑（bdacaef）**：BackupOrchestrator——create（打包→签名）/restore（信任门：TRUSTED 交付、LEGACY 显式 trust、**FOREIGN 无条件拒绝**）/import（他实例 FOREIGN 可显式 trust 后本地重签——QP trust_mode=foreign 语义）。7 用例。
+3. **AppContainer 实证（维持诚实降级，探针结论归档）**：ctypes 全链路（CreateAppContainerProfile 幂等 → DeriveAppContainerSidFromAppContainerName 返回 **PSID**（非字符串）→ Initialize/UpdateProcThreadAttribute(0x00020009) 全成功）可创建进程，但 **SECURITY_CAPABILITIES 静默未生效**（子进程仍 Medium S-1-16-8192，无 S-1-15 容器标记）——windll 无 argtypes 的 64 位指针传参为主要嫌疑，需 argtypes 级调试（估 2-4h）。受限令牌（SAFER）主通道不受影响；Windows 高风险 DENY 判定维持。
+
 ## 6. v4 实施进度（2026-09-01 当日落地）
 
 | 项 | 状态 | commit | 用例 |
