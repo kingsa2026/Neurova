@@ -138,3 +138,64 @@ class TestDebounce:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestTransactionalRestore:
+    """P2-c 事务化恢复：apply_fn 失败 → 自动回滚到 pre-restore 内容"""
+
+    def _svc(self, tmp_path):
+        from neurova.checkpoints.service import CheckpointService
+
+        return CheckpointService(
+            agent_id="agt-tx", base_dir=str(tmp_path / "cp"), debounce_seconds=0
+        )
+
+    def test_apply_failure_rolls_back(self, tmp_path):
+        import json
+
+        svc = self._svc(tmp_path)
+        v1 = {"messages": [{"role": "user", "content": "v1"}]}
+        v2 = {"messages": [{"role": "user", "content": "v2"}]}
+        ref1 = svc.snapshot_auto("sess-T", v1, {})
+        svc.snapshot_auto("sess-T", v2, {})
+
+        applied = []
+
+        def failing_apply(payload):
+            applied.append(payload["session_json"])
+            raise RuntimeError("写回失败（模拟会话管理器异常）")
+
+        with pytest.raises(RuntimeError):
+            svc.restore_with_rollback(ref1, apply_fn=failing_apply)
+
+        # 回滚：把 pre-restore 内容（v2）重新 apply
+        assert len(applied) == 2
+        assert json.loads(applied[-1]) == v2
+
+    def test_apply_success_no_rollback(self, tmp_path):
+        import json
+
+        svc = self._svc(tmp_path)
+        v1 = {"messages": []}
+        v2 = {"messages": [{"role": "user", "content": "v2"}]}
+        ref1 = svc.snapshot_auto("sess-U", v1, {})
+        svc.snapshot_auto("sess-U", v2, {})
+
+        def apply(payload):
+            applied.append(json.loads(payload["session_json"]))
+            return "ok"
+
+        applied = []
+        result = svc.restore_with_rollback(ref1, apply_fn=apply)
+        assert json.loads(result["session_json"]) == v1
+        assert len(applied) == 1  # 只 apply 一次（无回滚）
+
+    def test_diff_files_only_delta(self, tmp_path):
+        """差异化还原：diff 只报变化的文件"""
+        svc = self._svc(tmp_path)
+        ref1 = svc.snapshot_auto("sess-V", {"t": 1}, {"kb/a.txt": "A", "kb/b.txt": "B"})
+        ref2 = svc.snapshot_auto("sess-V", {"t": 2}, {"kb/a.txt": "A2", "kb/b.txt": "B"})
+
+        diff = svc.diff_snapshots(ref1, ref2)
+        assert diff["changed"] == ["kb/a.txt"]
+        assert diff["unchanged"] == ["kb/b.txt"]
