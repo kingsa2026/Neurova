@@ -192,6 +192,19 @@ is_concurrency_safe 才 gather，任一未声明整轮保守串行；结果按�
 **P2-4 首刀 ☑（同 commit）**：core/metrics.py（prometheus_client 指标集单一事实源：tool/llm/circuit counter+histogram+gauges）+ /metrics 端点替换手拼 + tool_executor/llm.chat 全量埋点。
 **P2-4c ☑（82c64a7）**：chat_pipeline trace total_tokens 切换——usage_accounting.last_call() 真实值优先，无则回退字符估算；last_call() API 新增。4 用例。**P2-4d ☑（已提交 1eb1316）**：openai_loop 流式 chunk usage 逐轮聚合进 done 事件 + chat_pipeline 消费入账——**usage 对账三路齐备**（非流式 chat/流式 done/后续多模型）。
 **P2-7 测试处置批（☑ 53b3ca9）**：tool_engine_v2 修复全绿（守卫 mock should_block 契约 + 3 类 setUp 补 mock_security_system）；closed_loop 修复（模块路径 + skill_packer.observe 闭环补线 + duration 修复）12/12；monitor_v2 删除（断言的富 API 已移除）。剩余 7F 定性预存（plan_orchestrator 签名漂移 + async 缺 marker）。
-**待做（按计划推进中）**：structlog 迁移（降级可选——logger.py 已结构化）；agent_ref 收窄+单例收敛（渐进）；**P2-6 MCP OAuth ☑（已提交 9a82b38）**：tool_layers/mcp_oauth.py（PKCE + client_credentials 带 60s 提前刷新/force_refresh、resolve_mcp_token per-call 解析——QP 烘焙坑规避）+ call_tool 401→刷新→重试一次。10 用例。授权码流浏览器跳转留调用方。
-待做：**P2-5 循环门控+goal 模式 ☑（f11e162）**：gates.py（StopAction 三态+DoomLoop/Iteration/TokenBudget/Goal 四 gate+Runner 故障隔离）+ openai_loop 双路径接入（懒初始化；INTERRUPT=提示注入消息序列；TERMINATE yield gate_terminate）+ set_goal_gate。21 用例。
-待做（渐进）：agent_ref 收窄+单例收敛；MCP OAuth 授权码浏览器跳转；脚本式测试统一处置。
+**P2-6 MCP OAuth ☑（已提交 9a82b38）**：tool_layers/mcp_oauth.py（PKCE + client_credentials 带 60s 提前刷新/force_refresh、resolve_mcp_token per-call 解析——QP 烘焙坑规避）+ call_tool 401→刷新→重试一次。10 用例。
+**P2-5 循环门控+goal 模式 ☑（f11e162）**：gates.py（StopAction 三态+DoomLoop/Iteration/TokenBudget/Goal 四 gate+Runner 故障隔离）+ openai_loop 双路径接入（懒初始化；INTERRUPT=提示注入消息序列；TERMINATE yield gate_terminate）+ set_goal_gate。21 用例。
+
+---
+
+## P3 渐进项 ☑（2026-09-01，全部落地）
+
+- **P3-a 脚本式测试处置 ☑（dc368c6；前置 53c01f1/a07e474 为重写内容落库）**：execution_engine 7F+2E 清零（110 全绿）——根因三类（已删 mcp_manager 残留引用 / try-except 吞异常+缺 asyncio marker 的脚本式空转 / create_plan(task=,context=) 等臆想契约漂移），重写测试锁定现行契约 + 目录 5 个未跟踪测试入版。
+- **P3-b OAuth 授权码流浏览器跳转 ☑（fa09573）**：build_authorization_url（RFC 6749+7636 S256）+ OAuthCallbackServer（RFC 8252 环回一次性回调）+ run_authorization_code_flow（state CSRF 不匹配绝不换 token、非环回 redirect_uri 拒绝、超时中止）+ fetch_token_by_code 入 per-call 缓存 + resolve_mcp_token grant_type 感知。28 用例。
+- **P3-c agent_ref 收窄第一批 ☑（89ddbca）**：agent_core 轮次级状态显式 API（set_request_identity + current_* property、set_current_reasoning、reset/append_tool_messages、append_tool_event、increment_turn_count、公有别名）——深度模块不再直掏 _current_*/_tool_messages_list/_turn_count/_tool_events 私有属性；存储不变+旧 getattr 保留（渐进非翻转）。agent 全套回 47F 预存基线（passed 589→599）。
+- **P3-d OAuth 全栈接线 ☑（931453e + 247ecbb）**：POST /mcp-servers/{id}/oauth/authorize（仅 authorization_code；client_credentials 明确 400）+ MCPServerInfo.oauth_grant + 前端 ToolLayerPage 条件按钮（370s 独立超时）+ 11 语言 i18n。**MCP OAuth 端到端闭环**。
+- **P3-e 单例收敛 ☑（ba81f96 + 3fc2b2f）**：AST 审计（287 工厂/55 惰性创建/17 无锁）→ 6 高危 DCL → 11 良性 DCL，**55/55 全带锁**；reset_semantic_search/reset_embedding_engine 公有化；防回归网 tests/unit/core/test_singleton_convergence.py 20 用例。顺手修 CI 门禁 2 个预存 F821（openai_loop 缺 import asyncio——P1-1 溢出 rollup 实为静默 no-op，本修恢复功能）。
+- **P2-4 观测补刀 ☑（58901f3）**：record_llm_call 零调用缺口——chat() 成功/失败/熔断 + chat_stream 四分支接线（stream 死语句 time.time() 顺手修复）。/metrics 的 neurova_llm_calls_total 恢复真实计数。
+
+**P1 状态修订**：P1-4 停止门控 ☑（由 P2-5 交付，单文件 gates.py 替代原分文件设计）；P1-1/P1-2 ☑；**P1-3 MCP 可靠性 / P1-5 检查点 / P1-6 Tool Guard+技能扫描 / P1-7 沙箱诚实化 / P1-8 测试去水分仍为 ☐**（未实施，原计划保留）。
+**剩余可选项**：structlog 迁移（降级可选——logger.py 已结构化，生产 0 处 print）；P1-3/5/6/7/8 按原计划排期。
