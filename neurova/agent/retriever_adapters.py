@@ -184,8 +184,24 @@ class MoERetrieverAdapter:
         # 路由分数：MoE 路由质量(使用类常量,便于统一调参与回归)
         routing_score = self.DEFAULT_ROUTING_SCORE
 
-        # 综合分数
-        quality = 0.7 * count_score + 0.3 * routing_score
+        # 相关性分数：查询关键词与记忆内容重叠（防止"数量多但不相关"误判高质量）
+        query_keywords = set((query or "").lower().split())
+        relevance_score = 0.0
+        if query_keywords:
+            total = 0.0
+            n = 0
+            for memory in memories:
+                content = (memory.get("content") or "").lower()
+                title = (memory.get("title") or "").lower()
+                combined = set(content.split()) | set(title.split())
+                if combined:
+                    total += len(query_keywords.intersection(combined)) / len(query_keywords)
+                    n += 1
+            relevance_score = total / n if n else 0.0
+
+        # 综合分数：数量 50% + 路由 20% + 相关性 30%
+        # 相关性权重保证不相关记忆库命中不会被高估（知识库检索得以继续）
+        quality = 0.5 * count_score + 0.2 * routing_score + 0.3 * relevance_score
         return min(max(quality, 0.0), 1.0)
 
     def _quality_from_score(self, score: float) -> Any:
