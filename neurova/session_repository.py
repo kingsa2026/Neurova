@@ -112,6 +112,13 @@ class SessionRepository(ABC):
         供反馈质量闭环读取该轮内容（定位对应记忆）使用。未找到返回 None。
         """
 
+    def set_session_pinned(self, agent_id: str, session_id: str, pinned: bool) -> bool:
+        """置顶/取消置顶会话（非抽象默认实现：返回 False 表示不支持）。
+
+        允许传 pinned=True/False 的调用方在老实现上优雅降级。
+        """
+        return False
+
 
 # ── 工厂函数（单例） ──────────────────────────────────────
 

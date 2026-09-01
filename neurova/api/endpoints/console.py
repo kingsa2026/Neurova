@@ -529,6 +529,8 @@ async def get_chat_sessions(request: Request, agent_id: str = Query(default=""))
             "title": s.get("title", "新对话"),
             "agent_id": s.get("agent_id", ""),
             "created_at": s.get("created_at", ""),
+            "updated_at": s.get("updated_at", ""),
+            "pinned": bool(s.get("pinned", False)),
         }
         for s in sessions
     ]
@@ -584,6 +586,22 @@ async def get_archived_chat_sessions(request: Request, agent_id: str = Query(def
     sessions = repo.list_archived_sessions(agent_id=agent_id, user_id=user_id)
     summaries = [_session_summary(s) for s in sessions]
     return {"code": 0, "message": "success", "data": {"sessions": summaries, "total": len(summaries)}}
+
+
+class PinSessionRequest(BaseModel):
+    pinned: bool
+
+
+@router.post("/chat/sessions/{session_id}/pin")
+async def pin_chat_session(session_id: str, body: PinSessionRequest, request: Request):
+    """置顶/取消置顶会话（补课 2.3）"""
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    target = _find_session_target(repo, session_id, user_id)
+    agent_id = target.get("agent_id", "")
+    if not repo.set_session_pinned(agent_id=agent_id, session_id=session_id, pinned=body.pinned):
+        raise HTTPException(status_code=404, detail="Session files not found")
+    return {"code": 0, "message": "ok", "data": {"session_id": session_id, "pinned": body.pinned}}
 
 
 @router.post("/chat/sessions/{session_id}/archive")
