@@ -137,6 +137,8 @@ async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any]
         call_metadata = body.metadata or {}
         # 隔离注入：服务端身份覆盖客户端自报（kb_builder 等技能据此归属知识条目）
         call_metadata["user_id"] = user_id
+        # 角色透传：知识库检索链的 admin 全可见依赖 role（隔离语义与 API 层一致）
+        call_metadata["role"] = role
 
         # 调用 Agent 的 chat 方法
         response = await agent.chat(
@@ -223,6 +225,7 @@ async def chat_stream(
 
     async def event_generator():
         """SSE 事件生成器"""
+        audio_url = None
         try:
             # 发送开始事件
             yield f"event: start\ndata: {json.dumps({'request_id': request_id})}\n\n"
@@ -239,16 +242,32 @@ async def chat_stream(
                 ):
                     yield f"event: message\ndata: {json.dumps({'content': chunk})}\n\n"
             else:
-                # 降级到非流式
+                # 降级到非流式（Agent 类现无 chat_stream 方法——恒走此分支）
                 response = await agent.chat(
                     user_input=body.message,
                     session_id=body.session_id,
                     metadata=call_metadata,
                 )
-                yield f"event: message\ndata: {json.dumps({'content': response})}\n\n"
+                reply_text = ""
+                if isinstance(response, dict):
+                    reply_text = response.get("text", "")
+                    # 补课 4.4：post_chat TTS 产物透出为 audio 事件——
+                    # 前端 case 'audio' 此前是死代码（流式路径从不发该事件）
+                    audio_url = response.get("audio_path")
+                    if audio_url:
+                        yield (
+                            "event: audio\n"
+                            f"data: {json.dumps({'type': 'audio', 'url': audio_url})}\n\n"
+                        )
+                else:
+                    reply_text = str(response)
+                yield f"event: message\ndata: {json.dumps({'content': reply_text})}\n\n"
 
-            # 发送完成事件
-            yield f"event: done\ndata: {json.dumps({'request_id': request_id})}\n\n"
+            # 发送完成事件（含 audio_url 兜底——前端 done case 消费）
+            done_payload = {'request_id': request_id}
+            if audio_url:
+                done_payload['audio_url'] = audio_url
+            yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
 
         except Exception as e:
             logger.error(f"Stream error: {e}", exc_info=True)
