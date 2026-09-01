@@ -1574,10 +1574,41 @@ class ChatPipeline:
     # Step 4: 后处理
     # ══════════════════════════════════════════════════════════════
 
+    async def _auto_checkpoint(self, ctx: ChatContext):
+        """P1-5 自动检查点：会话 JSON → git 裸仓库（auto ref，防抖内建）。
+
+        service 惰性建（agent_id 维度）并缓存到 agent；知识库文件快照
+        （kb_files 参数）由知识库子系统注入后启用。任何异常只 debug
+        日志，绝不阻断主对话流程。
+        """
+        try:
+            if not getattr(self._agent, "checkpoints_enabled", True):
+                return
+            from neurova.checkpoints.service import CheckpointService
+
+            service = getattr(self._agent, "_checkpoint_service", None)
+            if service is None:
+                service = CheckpointService(agent_id=self.config.agent_id)
+                self._agent._checkpoint_service = service
+
+            session_key = ctx.session_id or "default"
+            session_data = {
+                "user_input": ctx.user_input,
+                "reply": ctx.reply,
+                "trace_id": ctx.trace_id,
+                "turn": getattr(self._agent, "turn_count", 0),
+            }
+            service.snapshot_auto(session_key, session_data, kb_files={})
+        except Exception as e:
+            logger.debug("自动检查点跳过: %s", e)
+
     async def _step_post_processing(self, ctx: ChatContext):
         """对话历史更新、轨迹记录、PostChatPipeline"""
         if not ctx.caller_provided_history:
             self.memory_agent.update_history(ctx.user_input, ctx.reply)
+
+        # P1-5：会话自动快照（检查点子系统，防抖内建；异常吞掉不阻断主流程）
+        await self._auto_checkpoint(ctx)
 
         # 记录 LLM 调用事件
         if self._trajectory_recorder and ctx.trace_id:
