@@ -54,6 +54,7 @@ class MockTTSSimple(TTSBase):
         """
         if not self.validate_text(text):
             return b""
+        text = self.sanitize_text(text)
 
         # 计算持续时间
         duration = len(text) * self._duration_per_char
@@ -94,6 +95,7 @@ class MockTTSSimple(TTSBase):
         """
         if not self.validate_text(text):
             return
+        text = self.sanitize_text(text)
 
         # 分块生成音频
         chunk_size = 1024  # 每个 chunk 的采样数

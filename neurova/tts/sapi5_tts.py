@@ -72,6 +72,7 @@ class SAPI5TTS(TTSBase):
     async def synthesize(self, text: str, **kwargs) -> bytes:
         if not self.validate_text(text):
             return b""
+        text = self.sanitize_text(text)
         if not self._engine:
             return b""
 

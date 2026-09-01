@@ -232,9 +232,11 @@ async def synthesize_speech_stream(request: Request, body: SynthesizeRequest):
         async for chunk in tts.synthesize_stream(body.text):
             yield chunk
 
+    # 补课 4.3：按引擎动态声明 MIME（edge=audio/mpeg，moss/sapi5=audio/wav）——
+    # 原实现恒 audio/wav 而 edge-tts 产 MP3 裸字节，前端解码必然失败
     return StreamingResponse(
         audio_generator(),
-        media_type="audio/wav",
+        media_type=tts.get_audio_media_type(),
         headers={
             "X-TTS-Engine": tts.get_engine_name() or "unknown",
             "Transfer-Encoding": "chunked",
