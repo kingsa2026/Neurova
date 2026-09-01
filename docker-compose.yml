@@ -36,7 +36,7 @@ services:
     container_name: neurova-frontend
     working_dir: /app
     volumes:
-      - ./neuUI:/app
+      - ./NeurUI:/app
     ports:
       - "8100:8100"
     command: ["npm", "run", "dev", "--", "--port", "8100", "--host"]
