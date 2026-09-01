@@ -31,6 +31,22 @@ HIGH_RISK_SINGLETONS = [
     ("neurova/shared_core/infrastructure.py", "get_infrastructure_manager"),
 ]
 
+# 良性批（P3-e 收尾）：无状态/幂等构造，但统一收敛到 DCL 模式，
+# 防止未来构造获得副作用后竞态复活
+BENIGN_SINGLETONS = [
+    ("neurova/api/openplatform/events.py", "get_event_system"),
+    ("neurova/auth/invitation_code.py", "get_invitation_code_model"),
+    ("neurova/auth/password_hasher.py", "get_password_hasher"),
+    ("neurova/auth/user_group_model.py", "get_user_group_manager"),
+    ("neurova/auth/verification_code.py", "get_verification_code_model"),
+    ("neurova/cognitive_layers/memory_layer/memory_field.py", "get_memory_field"),
+    ("neurova/collaboration/collaboration_isolation.py", "get_collaboration_manager"),
+    ("neurova/core/error_handler.py", "get_error_handler"),
+    ("neurova/core/logger.py", "get_log_manager"),
+    ("neurova/execution_engine/plan_orchestrator.py", "get_plan_orchestrator"),
+    ("neurova/security/constitution.py", "get_constitution_engine"),
+]
+
 
 def _get_function_source(rel_path: str, func_name: str) -> str:
     src = (NEUROVA_ROOT.parent / rel_path).read_text(encoding="utf-8")
@@ -52,6 +68,19 @@ class TestHighRiskSingletonsLockGuarded:
         assert re.search(r"with [\w\.]*[Ll]ock", seg), (
             f"{func_name} 创建段无锁守卫：并发首次访问可双创建。"
             f"参照 provider_manager 的双重检查锁定模式修复。"
+        )
+
+
+class TestBenignSingletonsLockGuarded:
+    """结构断言：良性批同样收敛 DCL（统一模式，防构造日后获得副作用）"""
+
+    @pytest.mark.parametrize("rel_path,func_name", BENIGN_SINGLETONS)
+    def test_creation_guarded_by_lock(self, rel_path, func_name):
+        import re
+
+        seg = _get_function_source(rel_path, func_name)
+        assert re.search(r"with [\w\.]*[Ll]ock", seg), (
+            f"{func_name} 创建段无锁守卫：应与全量惰性单例统一 DCL 模式。"
         )
 
 

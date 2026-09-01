@@ -198,6 +198,7 @@ class PasswordHasher:
 
 # 全局实例
 _password_hasher: typing.Optional[PasswordHasher] = None
+_password_hasher_lock = __import__('threading').Lock()
 
 
 def get_password_hasher() -> PasswordHasher:
@@ -209,7 +210,9 @@ def get_password_hasher() -> PasswordHasher:
     """
     global _password_hasher
     if _password_hasher is None:
-        _password_hasher = PasswordHasher()
+        with _password_hasher_lock:
+            if _password_hasher is None:
+                _password_hasher = PasswordHasher()
     return _password_hasher
 
 

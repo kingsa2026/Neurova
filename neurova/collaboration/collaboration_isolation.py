@@ -1206,13 +1206,16 @@ class CollaborationIsolationManager:
 
 # 全局实例
 _collaboration_manager: Optional[CollaborationIsolationManager] = None
+_collaboration_manager_lock = threading.Lock()
 
 
 def get_collaboration_manager() -> CollaborationIsolationManager:
     """获取全局协作管理器实例"""
     global _collaboration_manager
     if _collaboration_manager is None:
-        _collaboration_manager = CollaborationIsolationManager()
+        with _collaboration_manager_lock:
+            if _collaboration_manager is None:
+                _collaboration_manager = CollaborationIsolationManager()
     return _collaboration_manager
 
 

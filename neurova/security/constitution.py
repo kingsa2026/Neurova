@@ -390,6 +390,7 @@ class ConstitutionEvaluationEngine:
 
 # 全局实例
 _constitution_engine: Optional[ConstitutionEvaluationEngine] = None
+_constitution_engine_lock = __import__('threading').Lock()
 
 
 def get_constitution_engine() -> ConstitutionEvaluationEngine:
@@ -401,7 +402,9 @@ def get_constitution_engine() -> ConstitutionEvaluationEngine:
     """
     global _constitution_engine
     if _constitution_engine is None:
-        _constitution_engine = ConstitutionEvaluationEngine()
+        with _constitution_engine_lock:
+            if _constitution_engine is None:
+                _constitution_engine = ConstitutionEvaluationEngine()
     return _constitution_engine
 
 

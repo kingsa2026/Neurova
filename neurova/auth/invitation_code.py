@@ -668,6 +668,7 @@ class InvitationCodeModel:
 
 # 全局实例
 _invitation_code_model: Optional[InvitationCodeModel] = None
+_invitation_code_model_lock = __import__('threading').Lock()
 
 
 def get_invitation_code_model() -> InvitationCodeModel:
@@ -679,7 +680,9 @@ def get_invitation_code_model() -> InvitationCodeModel:
     """
     global _invitation_code_model
     if _invitation_code_model is None:
-        _invitation_code_model = InvitationCodeModel()
+        with _invitation_code_model_lock:
+            if _invitation_code_model is None:
+                _invitation_code_model = InvitationCodeModel()
     return _invitation_code_model
 
 

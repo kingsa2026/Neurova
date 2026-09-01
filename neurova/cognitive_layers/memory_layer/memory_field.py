@@ -291,12 +291,15 @@ class MemoryFieldTrainer:
 # ────── 单例管理 ──────
 
 _memory_field: Optional[MemoryFieldTrainer] = None
+_memory_field_lock = threading.Lock()
 
 
 def get_memory_field(config: Optional[MemoryFieldConfig] = None) -> MemoryFieldTrainer:
     global _memory_field
     if _memory_field is None:
-        _memory_field = MemoryFieldTrainer(config)
+        with _memory_field_lock:
+            if _memory_field is None:
+                _memory_field = MemoryFieldTrainer(config)
     return _memory_field
 
 
