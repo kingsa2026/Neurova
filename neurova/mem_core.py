@@ -25,8 +25,10 @@ MemCore — 神经感知记忆核心模块
 
 import asyncio
 import concurrent.futures
-from neurova.core.logger import get_logger
+import hashlib
+import json
 import time
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -221,6 +223,63 @@ class Conversation:
             updated_at=data.get("updated_at", time.time()),
             metadata=data.get("metadata"),
         )
+
+
+def _moe_scope_key(mem_system) -> str:
+    """索引状态的作用域键：记忆系统当前持久库路径"""
+    try:
+        return str(getattr(mem_system.memory_manager, "_persist_db_path", ""))
+    except Exception:
+        return ""
+
+
+def _init_encoder_sync(engine) -> None:
+    """在独立线程同步初始化嵌入引擎
+
+    init_moe_router 运行在 uvicorn 事件循环线程：encode() 的懒初始化路径
+    看到"循环运行中"会直接降级到 TF-IDF（维度漂移，语义效果≈0）。
+    这里给异步初始化另起事件循环，就绪后 encode 才能走真模型。
+    """
+    import asyncio
+
+    try:
+        asyncio.run(engine.initialize())
+    except Exception as e:
+        logger.warning("嵌入引擎同步初始化失败（降级 TF-IDF）: %s", e)
+
+
+def _moe_index_state_path(scope_key: str) -> Path:
+    """MoE 索引完成状态文件（按持久库路径哈希分文件，多 agent 各管各的）"""
+    hashed = hashlib.md5(scope_key.encode("utf-8")).hexdigest()[:16]
+    return Path(__file__).resolve().parent.parent / "data" / f"moe_index_state_{hashed}.json"
+
+
+def _moe_index_completed(index_limit: int, scope_key: str) -> bool:
+    """上次索引已达上限时返回 True（新增记忆由 recall 增量路径兜底）"""
+    try:
+        path = _moe_index_state_path(scope_key)
+        if not path.exists():
+            return False
+        prev = json.loads(path.read_text(encoding="utf-8"))
+        return prev.get("limit") == index_limit and int(prev.get("indexed_count", 0)) >= index_limit
+    except Exception:
+        return False
+
+
+def _save_moe_index_state(index_limit: int, vector_store, scope_key: str) -> None:
+    """索引线程收尾时落盘状态（成功/失败/部分完成均记录，已记录条数）"""
+    try:
+        path = _moe_index_state_path(scope_key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "limit": index_limit,
+            "indexed_count": len(vector_store.memory_ids),
+            "finished_at": datetime.now(UTC).isoformat(),
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("MoE 索引状态已保存: %s", payload)
+    except Exception as e:
+        logger.warning("MoE 索引状态保存失败: %s", e)
 
 
 def _background_index_memories(
@@ -592,6 +651,17 @@ class MemCore:
 
             vector_store = UnifiedVectorStore()
 
+            # 嵌入引擎同步预热：异步初始化在事件循环线程内会被 encode 的
+            # 懒加载分支绕过（降级 TF-IDF），先就绪才能走真模型语义向量。
+            encoder_engine = getattr(vector_store, "_encoder", None)
+            if encoder_engine is not None and not encoder_engine.is_initialized:
+                asyncio_thread = threading.Thread(
+                    target=_init_encoder_sync, args=(encoder_engine,), daemon=True,
+                    name="embedding-engine-warmup",
+                )
+                asyncio_thread.start()
+                asyncio_thread.join(timeout=90)
+
             # 专家定义对齐 memories 表真实 schema（此前 is_crystallized 列不存在，
             # L0 SQL 必然异常返回空）。category 取值来自 MemoryCategory 枚举。
             experts = {
@@ -681,16 +751,48 @@ class MemCore:
                             {"limit": size, "offset": offset},
                         ).fetchall()
 
-                    indexer = threading.Thread(
-                        target=_background_index_memories,
-                        args=(vector_store, _fetch_page, index_limit),
-                        daemon=True,
-                        name="moe-semantic-indexer",
-                    )
-                    indexer.start()
-                    logger.info("MoE 后台语义索引线程已启动（上限 %s 条）", index_limit)
+                    if _moe_index_completed(index_limit, _moe_scope_key(self)):
+                        logger.info("MoE 后台语义索引已完成（上限 %s 条），跳过本次重扫", index_limit)
+                    else:
+
+                        def _index_and_save_state():
+                            try:
+                                _background_index_memories(vector_store, _fetch_page, index_limit)
+                            finally:
+                                _save_moe_index_state(index_limit, vector_store, _moe_scope_key(self))
+
+                        indexer = threading.Thread(
+                            target=_index_and_save_state,
+                            daemon=True,
+                            name="moe-semantic-indexer",
+                        )
+                        indexer.start()
+                        logger.info("MoE 后台语义索引线程已启动（上限 %s 条）", index_limit)
             except Exception as e:
                 logger.warning("MoE 后台索引线程启动失败: %s", e)
+
+            # 情感语义标注接线：复用 MoE 编码器做 zero-shot 原型分类（不可用时规则兜底）
+            try:
+                from neurova.cognitive_layers.memory_layer.semantic_emotion import (
+                    SemanticEmotionClassifier,
+                )
+
+                em_mod = getattr(self.memory_manager, "_emotion_module", None)
+                if em_mod is not None and hasattr(em_mod, "set_semantic_classifier"):
+                    # 仅当预训练后端接线；tfidf 词表会增长导致原型/查询向量维度漂移，
+                    # 分类器内部会拒绝（返回 None）并降级规则引擎
+                    if getattr(vector_store, "backend", "") in ("onnx", "fastembed", "faiss"):
+                        classifier = SemanticEmotionClassifier(encoder=vector_store.encode)
+                        # 预热：同步编码原型句（顺带触发嵌入引擎惰性初始化），
+                        # 避免首个情感标注请求卡在模型加载上
+                        classifier.analyze("今天是普通的一天，没有特别的事情发生")
+                        em_mod.set_semantic_classifier(classifier)
+                        logger.info(
+                            "EmotionModule 语义情感分类器已接入（backend=%s）",
+                            vector_store.backend,
+                        )
+            except Exception as e:
+                logger.warning("语义情感分类器接入失败（规则引擎兜底）: %s", e)
 
             self._agent._moe_router = moe_router
             logger.info("MoE 路由器初始化成功")

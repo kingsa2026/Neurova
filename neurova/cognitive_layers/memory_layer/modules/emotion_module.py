@@ -7,9 +7,10 @@ EmotionModule — 情感模块
 from __future__ import annotations
 
 import json
-from neurova.core.logger import get_logger
+import re
 import sqlite3
 import threading
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -72,17 +73,24 @@ class EmotionModule:
     - SQLite 持久化
     """
 
-    def __init__(self, emotion_weight: float = 0.3, db_path: Optional[str] = None):
+    def __init__(
+        self,
+        emotion_weight: float = 0.3,
+        db_path: Optional[str] = None,
+        semantic_classifier: Optional[Any] = None,
+    ):
         """
         Args:
             emotion_weight: 情感对记忆温度的影响权重
             db_path: SQLite 数据库路径（None 则仅内存）
+            semantic_classifier: 语义情感分类器（嵌入 zero-shot），None 时纯规则引擎
         """
         self._emotion_weight = emotion_weight
         self._memory_emotions: Dict[str, EmotionState] = {}
         self._lock = threading.RLock()
         self._initialized = False
         self._db_path = db_path
+        self._semantic_classifier = semantic_classifier
         self._conn: Optional[sqlite3.Connection] = None
         # 情感保护计数器（高强度情感触发保护机制时递增）
         self._protection_triggered: int = 0
@@ -199,35 +207,83 @@ class EmotionModule:
         with self._lock:
             return self._memory_emotions.get(memory_id)
 
+    def set_semantic_classifier(self, classifier: Optional[Any]) -> None:
+        """注入语义情感分类器（嵌入原型句 zero-shot）；不可用时自动降级规则引擎"""
+        self._semantic_classifier = classifier
+
     def analyze_text_emotion(self, text: str) -> EmotionState:
         """
-        分析文本情感（简单规则实现）
+        分析文本情感（语义分类器优先，规则引擎兜底）
 
-        Args:
-            text: 文本内容
+        语义路径：文本嵌入与 8 条情感原型句求余弦，取 argmax + 阈值，
+        按语义判定而非词面命中，消除"好"字效应（如 "你好" 被标 joy）。
+        规则路径：修正版关键词表（多字词 + 否定守卫 + ASCII 词边界）。
+        """
+        if self._semantic_classifier is not None:
+            try:
+                res = self._semantic_classifier.analyze(text)
+                if res is not None:
+                    primary, intensity = res
+                    return EmotionState(
+                        primary_emotion=EmotionType(primary),
+                        intensity=round(float(intensity), 4),
+                        valence=self._VALENCE_MAP.get(primary, 0.0),
+                        arousal=self._AROUSAL_MAP.get(primary, 0.3),
+                    )
+            except Exception as e:
+                logger.warning("语义情感分类失败，降级规则引擎: %s", e)
+        return self._analyze_text_emotion_rules(text)
 
-        Returns:
-            情感状态
+    # 效价/唤醒度表（语义与规则共用，中性不参与标注写入）
+    _VALENCE_MAP = {
+        "joy": 0.8, "sadness": -0.6, "anger": -0.7, "fear": -0.5,
+        "surprise": 0.3, "disgust": -0.9, "neutral": 0.0,
+    }
+    _AROUSAL_MAP = {
+        "joy": 0.6, "sadness": 0.3, "anger": 0.8, "fear": 0.7,
+        "surprise": 0.9, "disgust": 0.8, "neutral": 0.2,
+    }
+
+    def _analyze_text_emotion_rules(self, text: str) -> EmotionState:
+        """规则兜底：多字词词表 + 否定守卫 + ASCII 词边界
+
+        刻意排除单字"好/棒/烦/怕"：关键词命中按整词（\b）扫描，
+        "你好"/"检查网页搜索功能"/"麻烦你了"不再产生 joy/anger 误标。
         """
         text_lower = text.lower()
 
-        # 简单的情感关键词匹配
-        joy_words = ["高兴", "开心", "快乐", "喜欢", "好", "棒", "优秀", "happy", "joy", "good"]
-        sadness_words = ["伤心", "难过", "失望", "遗憾", "sad", "sorry", "disappoint"]
-        anger_words = ["生气", "愤怒", "讨厌", "烦", "angry", "hate", "annoying"]
-        fear_words = ["害怕", "恐惧", "担心", "怕", "fear", "afraid", "worry"]
-        surprise_words = ["惊讶", "意外", "没想到", "surprise", "unexpected", "wow"]
+        # 否定守卫：消极短语直接判负，防 "不好/不开心/不高兴" 被 joy 词表击中
+        if any(kw in text_lower for kw in ("不好", "不开心", "不高兴", "不喜欢", "糟透", "太难过了")):
+            return EmotionState(
+                primary_emotion=EmotionType.SADNESS,
+                intensity=0.5,
+                valence=self._VALENCE_MAP["sadness"],
+                arousal=self._AROUSAL_MAP["sadness"],
+            )
 
-        # 计算各情感得分
-        scores = {
-            EmotionType.JOY: sum(1 for w in joy_words if w in text_lower),
-            EmotionType.SADNESS: sum(1 for w in sadness_words if w in text_lower),
-            EmotionType.ANGER: sum(1 for w in anger_words if w in text_lower),
-            EmotionType.FEAR: sum(1 for w in fear_words if w in text_lower),
-            EmotionType.SURPRISE: sum(1 for w in surprise_words if w in text_lower),
+        # 多字词为主；ASCII 词走整词匹配
+        _WORD_TABLES = {
+            "joy": (["开心", "高兴", "快乐", "喜悦", "兴奋", "太好了", "真好", "很好",
+                     "优秀", "喜欢", "棒极了", "欢乐", "愉快", "幸福", "幸运", "期待"],
+                    ["happy", "joy", "excited", "great", "glad", "cheerful", "love"]),
+            "sadness": (["难过", "伤心", "悲伤", "沮丧", "忧郁", "失落", "痛苦", "遗憾", "失望", "想哭"],
+                        ["sad", "sorry", "disappointed", "depressed", "unhappy", "sorrow"]),
+            "anger": (["生气", "愤怒", "恼怒", "气愤", "暴怒", "讨厌", "可恶", "火大", "发脾气", "气死"],
+                      ["angry", "hate", "mad", "furious", "annoyed"]),
+            "fear": (["害怕", "恐惧", "担心", "焦虑", "紧张", "惊慌", "吓人", "可怕", "不安"],
+                     ["afraid", "fear", "worry", "anxious", "panic", "scared"]),
+            "surprise": (["惊讶", "震惊", "吃惊", "意外", "没想到", "惊呆了", "惊喜"],
+                         ["surprise", "unexpected", "amazed", "shock", "wow"]),
+            "disgust": (["恶心", "反感", "厌恶", "嫌弃", "呕吐"],
+                        ["disgust", "repulse", "yuck", "gross"]),
         }
 
-        # 找到主要情感
+        scores = {}
+        for emotion, (cn_words, en_words) in _WORD_TABLES.items():
+            score = sum(1 for w in cn_words if w in text_lower)
+            score += sum(1 for w in en_words if re.search(r"\b" + re.escape(w) + r"\b", text_lower))
+            scores[emotion] = score
+
         max_score = max(scores.values()) if scores else 0
 
         if max_score == 0:
@@ -239,31 +295,11 @@ class EmotionModule:
             )
 
         primary = max(scores, key=scores.get)
-
-        # 计算效价和唤醒度
-        valence_map = {
-            EmotionType.JOY: 0.8,
-            EmotionType.SADNESS: -0.6,
-            EmotionType.ANGER: -0.7,
-            EmotionType.FEAR: -0.5,
-            EmotionType.SURPRISE: 0.3,
-            EmotionType.NEUTRAL: 0.0,
-        }
-
-        arousal_map = {
-            EmotionType.JOY: 0.6,
-            EmotionType.SADNESS: 0.3,
-            EmotionType.ANGER: 0.8,
-            EmotionType.FEAR: 0.7,
-            EmotionType.SURPRISE: 0.9,
-            EmotionType.NEUTRAL: 0.2,
-        }
-
         return EmotionState(
-            primary_emotion=primary,
+            primary_emotion=EmotionType(primary),
             intensity=min(1.0, max_score / 3),
-            valence=valence_map.get(primary, 0.0),
-            arousal=arousal_map.get(primary, 0.5),
+            valence=self._VALENCE_MAP.get(primary, 0.0),
+            arousal=self._AROUSAL_MAP.get(primary, 0.5),
         )
 
     def get_emotional_memories(

@@ -333,14 +333,13 @@ class MemoryRetrievalChain:
 
     async def _retrieve_chain(self, context: RetrievalContext) -> RetrievalResult:
         """
-        责任链检索：按优先级尝试，第一个成功即返回
+        责任链检索：按优先级尝试，第一个成功即返回。
 
-        参数:
-            context: 检索上下文
-
-        返回:
-            RetrievalResult 实例
+        补充检索器（KnowledgeRetriever）：即使主检索命中，也会执行知识库检索，
+        将与 query 相关的知识条目合并追加到结果（保证知识库内容可用）。
         """
+        primary_result: Optional[RetrievalResult] = None
+        supplement_result: Optional[RetrievalResult] = None
         for retriever in self._retrievers:
             try:
                 logger.debug("Trying retriever: %s", retriever.name)
@@ -387,7 +386,16 @@ class MemoryRetrievalChain:
                         pass
 
                 if result.memories and result.quality >= context.min_quality:
-                    return result
+                    # 知识库检索器作为补充源：即使主检索命中，也保留知识结果
+                    # 并继续执行（不提前返回），最终合并知识条目到主结果
+                    if retriever.name == "KnowledgeRetriever":
+                        supplement_result = result
+                    else:
+                        primary_result = result
+                        # 非知识检索器命中即视为主源完成，但让知识检索器仍有机会执行
+                        # 知识检索器优先级 25，位于 Cache(30) 之前
+                        if not any(r.name == "KnowledgeRetriever" for r in self._retrievers):
+                            return result
                 else:
                     logger.debug("Retriever %s returned insufficient results", retriever.name)
 
@@ -399,6 +407,37 @@ class MemoryRetrievalChain:
                     except Exception:  # noqa: BLE001
                         pass
                 continue
+
+        # 合并：主检索结果 + 知识库补充结果（知识命中时追加，保证知识可用）
+        if primary_result is not None and supplement_result is not None:
+            merged_memories = list(primary_result.memories)
+            # 去重（按 memory_id/knowledge_id/content）
+            seen = {m.get("memory_id") or m.get("content") for m in merged_memories}
+            for k in supplement_result.memories:
+                key = k.get("memory_id") or k.get("knowledge_id") or k.get("content")
+                if key not in seen:
+                    merged_memories.append(k)
+                    seen.add(key)
+            # 知识并入后质量略升（不虚高，取主结果质量）
+            return RetrievalResult(
+                memories=merged_memories,
+                source=f"{primary_result.source}+KnowledgeRetriever",
+                quality=primary_result.quality,
+                quality_level=primary_result.quality_level,
+                retrieval_time=primary_result.retrieval_time,
+                metadata={
+                    ** (primary_result.metadata or {}),
+                    "knowledge_supplement": len(supplement_result.memories),
+                },
+            )
+
+        # 知识独立命中（主源未命中）
+        if supplement_result is not None:
+            return supplement_result
+
+        # 主源命中（无知识补充）
+        if primary_result is not None:
+            return primary_result
 
         # 所有检索器都失败，返回空结果
         return RetrievalResult(

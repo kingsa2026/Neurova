@@ -245,7 +245,13 @@ class TemporalKnowledgeGraph:
             self._predicate_index.clear()
             self._time_index.clear()
             conn = self._get_connection()
-            for row in conn.execute("SELECT * FROM temporal_facts"):
+            # 资源修复: 全表无上限 → 整库物化 + 逐行重建索引;
+            # 截断加载, 超限告警(影响聚类/推断质量但避免 OOM/CPU 尖峰)
+            facts = conn.execute("SELECT * FROM temporal_facts LIMIT 50000").fetchall()
+            total = conn.execute("SELECT COUNT(*) FROM temporal_facts").fetchone()[0]
+            if total > len(facts):
+                logger.warning("时序知识图加载截断: %s/%s", len(facts), total)
+            for row in facts:
                 fact = self._row_to_fact(row)
                 self._facts_cache[fact.id] = fact
                 self._subject_index.setdefault(fact.subject, []).append(fact.id)

@@ -346,19 +346,24 @@ class UnifiedVectorStore:
             incremental: True 时追加到已有索引（后台渐进索引用），
                          默认 False 保持原语义（清空重建）
         """
-        documents = [m.get("content", "") for m in memories]
+        # 增量去重：同 id 不重复索引
+        existing_ids = set(self.memory_ids)
 
-        # 更新 IDF
-        self._update_idf(documents)
-
-        if not incremental:
+        if incremental:
+            # 资源修复: 原实现每次调用都对全批文档重新分词统计 IDF,
+            # _semantic_recall 每轮召回都传入全量记忆列表 → 纯 Python
+            # 全库分词一次。现在只对新文档更新 IDF(编码前的词表/IDF 一致)。
+            new_docs = [
+                m.get("content", "") for m in memories if m.get("id", "") not in existing_ids
+            ]
+            if new_docs:
+                self._update_idf(new_docs)
+        else:
+            self._update_idf([m.get("content", "") for m in memories])
             self.memory_vectors = []
             self.memory_ids = []
             self.memory_metadata = []
             self._np_matrix = None
-
-        # 增量去重：同 id 不重复索引
-        existing_ids = set(self.memory_ids)
 
         added = 0
         for mem in memories:
@@ -381,7 +386,9 @@ class UnifiedVectorStore:
                 existing_ids.add(mem_id)
             added += 1
 
-        self._refresh_numpy_matrix()
+        # 无所加时跳过整矩阵重建(20k 条向量 copy 无谓开销)
+        if added > 0 or self._np_matrix is None:
+            self._refresh_numpy_matrix()
 
         logger.info("索引 %s 条记忆（新增 %s，总索引 %s）", len(memories), added, len(self.memory_ids))
 

@@ -140,11 +140,21 @@ class DependencyGraph:
         conn.close()
 
     def _load_from_db(self) -> None:
-        """从 SQLite 加载到内存"""
+        """从 SQLite 加载到内存（资源修复: 全表无上限, 大库时整库物化;
+        现按实体/边分别截断, 超限告警, 保证图查询可用而非最坏场景无界）"""
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
         try:
-            for row in conn.execute("SELECT * FROM entities"):
+            entities = conn.execute("SELECT * FROM entities LIMIT 50000").fetchall()
+            edges = conn.execute("SELECT * FROM edges LIMIT 200000").fetchall()
+            total_e = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            total_g = conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+            if total_e > len(entities) or total_g > len(edges):
+                logger.warning(
+                    "依赖图加载截断: entities %s/%s, edges %s/%s",
+                    len(entities), total_e, len(edges), total_g,
+                )
+            for row in entities:
                 self.entities[row["id"]] = EntityNode(
                     id=row["id"],
                     name=row["name"],

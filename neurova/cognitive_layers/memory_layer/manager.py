@@ -37,12 +37,13 @@ Stub 方法 (返回空值, 未实现):
 import json
 from neurova.core.logger import get_logger
 import os
+from pathlib import Path
 import sqlite3
 import threading
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.cognitive_layers.memory_layer.bus_event import (
     EventBus,
@@ -68,6 +69,9 @@ _scope_var: ContextVar = ContextVar("memory_isolation_scope", default=None)
 
 # 全局单例
 _default_manager: Optional["MemoryManager"] = None
+# 根因修复 (2026-09-02): 按 (agent_id, neuser_id, user_id, db_path) 作用域注册表，
+# 替代进程级单例——否则所有 agent/用户的记忆统计永远命中首个调用者的作用域。
+_managers: Dict[Tuple[str, str, str, str], "MemoryManager"] = {}
 _manager_lock = threading.Lock()
 
 
@@ -289,6 +293,11 @@ class MemoryManager:
             # 审计修复 (P2-11): 三层复合索引, 隔离查询不再全表扫
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_mem_3tier ON memories(agent_id, neuser_id, user_id)"
+            )
+            # 性能修复: MoE 后台索引按 temperature DESC 分页全库排序,
+            # 无此索引时每页都触发表扫描+排序（实测 232 万行库烧满 12 核 2 分钟）
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mem_temperature ON memories(temperature)"
             )
             conn.commit()
             conn.close()
@@ -540,6 +549,9 @@ class MemoryManager:
                 except (ValueError, KeyError):
                     logger.warning("Invalid memory_type '%s', falling back to SEMANTIC", memory_type)
                     parsed_memory_type = MemoryType.SEMANTIC
+            elif memory_type is None:
+                # None 直通会导致 _persist_memory 的 .value 炸掉（API 传 null 时触发）
+                parsed_memory_type = MemoryType.SEMANTIC
             else:
                 parsed_memory_type = memory_type
 
@@ -552,6 +564,9 @@ class MemoryManager:
                 except (ValueError, KeyError):
                     logger.warning("Invalid category '%s', falling back to GENERAL", category)
                     parsed_category = MemoryCategory.GENERAL
+            elif category is None:
+                # None 直通会导致 _persist_memory 的 .value 炸掉（API 传 null 时触发）
+                parsed_category = MemoryCategory.GENERAL
             else:
                 parsed_category = category
 
@@ -742,6 +757,10 @@ class MemoryManager:
 
             store = UnifiedVectorStore(backend="auto")
             self._vector_stores[key] = store
+            # 资源修复: 每隔离三元组一个全量向量库, 此前只增不减;
+            # 超过 20 个作用域时按插入序淘汰最老(下次访问重建)
+            while len(self._vector_stores) > 20:
+                self._vector_stores.pop(next(iter(self._vector_stores)), None)
         return store
 
     def _semantic_recall(self, query: str, memories: list, limit: int) -> list:
@@ -2594,23 +2613,54 @@ class MemoryManager:
         return f"MemoryManager(agent_id={self._agent_id!r}, memories={len(self._memories)})"
 
 
+def _default_db_path_for(agent_id: str) -> str:
+    """agent 工作区标准记忆库路径（与 AgentConfig 一致：workspace/memory/memory.db）。
+
+    原默认值 "neurova_memory.db" 是相对路径——持久化文件随进程 cwd 散落
+    （项目根 / data / neurova/memory/data 各一份且互不一致）。
+    """
+    base_dir = Path(__file__).resolve().parents[3]  # neurova/cognitive_layers/memory_layer → 项目根
+    path = base_dir / "agent_workspaces" / (agent_id or "default") / "memory" / "memory.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
 def get_memory_manager(
     agent_id: str = "default",
     user_id: str = "default",
-    db_path: str = "neurova_memory.db",
+    db_path: str = "",
     neuser_id: str = "default",
 ) -> MemoryManager:
-    """获取/创建默认 MemoryManager 单例
+    """按作用域获取/创建 MemoryManager（同作用域复用实例）。
 
-    P-4 修复: 增加 neuser_id 参数, 与 MemoryManager.__init__ 契约对齐
+    根因修复 (2026-09-02)：
+    1. 原实现是进程级单例——首个调用者的 agent/db_path/scope 定终身，后续
+       agent/用户参数全部被忽略；API 统计由此永远读不到 Agent 实例写入
+       agent_workspaces 的真实记忆（Dashboard 记忆恒 0）。
+    2. 原默认 db_path 为相对路径，持久化文件随 cwd 散落；现按 agent 工作区
+       标准路径解析（与 AgentConfig 同源）。
+    3. user_id 兼容端点传入的身份字典（get_current_user 结果），按
+       user_id/neuser_id 提取，杜绝 dict 冒充 user_id 破坏三层隔离。
     """
     global _default_manager
+    if isinstance(user_id, dict):
+        neuser_id = user_id.get("neuser_id") or neuser_id
+        user_id = user_id.get("user_id") or user_id.get("id") or "default"
+    if not db_path:
+        db_path = _default_db_path_for(agent_id)
+
+    key = (agent_id, neuser_id, user_id, db_path)
     with _manager_lock:
-        if _default_manager is None:
-            _default_manager = MemoryManager(
+        mgr = _managers.get(key)
+        if mgr is None:
+            mgr = MemoryManager(
                 db_path=db_path,
                 agent_id=agent_id,
                 neuser_id=neuser_id,
                 user_id=user_id,
             )
-        return _default_manager
+            _managers[key] = mgr
+        # 兼容旧引用：首实例同时写入 _default_manager 槽，避免历史调用方拿到 None
+        if _default_manager is None:
+            _default_manager = mgr
+        return mgr
