@@ -187,6 +187,31 @@
 
           <!-- 连线层：语义边（source/target 端口引用）+ 拖拽预览，贝塞尔曲线自适应 -->
           <svg class="canvas-edges">
+            <!-- 方向箭头 marker：orient=auto 沿路径末端方向 -->
+            <defs>
+              <marker
+                id="edge-arrow"
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto"
+              >
+                <path d="M 0 1 L 8 5 L 0 9 z" class="edge-arrow-fill" />
+              </marker>
+              <marker
+                id="edge-arrow-selected"
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto"
+              >
+                <path d="M 0 1 L 8 5 L 0 9 z" class="edge-arrow-fill-selected" />
+              </marker>
+            </defs>
             <g v-for="edge in canvasEdges" :key="edge.id" class="edge-group">
               <!-- 加粗透明命中路径：便于点选/右键 -->
               <path
@@ -2419,14 +2444,16 @@ onBeforeUnmount(() => {
 .port { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--nr-text-tertiary); }
 .port-in { justify-content: flex-start; }
 .port-out { justify-content: flex-end; }
-.port-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--nr-primary-light, #818cf8); }
+/* 端口连接点：10px 可视 + 伪元素 16px 命中热区（对齐困难反馈） */
+.port-dot { position: relative; width: 10px; height: 10px; border-radius: 50%; background: var(--nr-primary-light, #818cf8); }
+.port-dot::before { content: ''; position: absolute; inset: -3px; border-radius: 50%; }
 /* 输出端口：拖出连线；扩大热区便于命中 */
 .port-dot-out {
   cursor: crosshair;
   box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.15);
   transition: transform 0.1s, box-shadow 0.1s;
 }
-.port-dot-out:hover { transform: scale(1.4); box-shadow: 0 0 0 5px rgba(129, 140, 248, 0.25); }
+.port-dot-out:hover { transform: scale(1.25); box-shadow: 0 0 0 5px rgba(129, 140, 248, 0.25); }
 /* 输入端口：松手落点 */
 .port-dot-in { cursor: pointer; }
 
@@ -2435,8 +2462,10 @@ onBeforeUnmount(() => {
    <path> 默认 fill 为黑色，必须显式 fill: none，否则贝塞尔曲线会以黑色填充
    曲线与首尾点连线围成的区域，看起来像曲线下有阴影；
    描边颜色必须完全不透明——半透明描边叠在网格底上会晕出暗色虚影，同样像阴影 */
-.edge-line { fill: none; filter: none; stroke: #6366f1; stroke-width: 2; }
-.edge-line.selected { stroke: #f59e0b; stroke-width: 3; }
+.edge-line { fill: none; filter: none; stroke: #6366f1; stroke-width: 2; marker-end: url(#edge-arrow); }
+.edge-line.selected { stroke: #f59e0b; stroke-width: 3; marker-end: url(#edge-arrow-selected); }
+.edge-arrow-fill { fill: #6366f1; }
+.edge-arrow-fill-selected { fill: #f59e0b; }
 .edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
 .edge-preview { fill: none; filter: none; stroke: #818cf8; stroke-width: 2; stroke-dasharray: 6 4; }
 

@@ -26,4 +26,20 @@ describe('canvas-edges overflow contract', () => {
     const block = vueSrc.match(/\.canvas-edges\s*\{[^}]*\}/)![0]
     expect(block).toContain('pointer-events: none')
   })
+
+  it('方向箭头：defs 存在两个 marker 且边线引用 arrow（选中态换色）', () => {
+    expect(vueSrc).toContain('<marker')
+    expect(vueSrc).toContain('id="edge-arrow"')
+    expect(vueSrc).toContain('id="edge-arrow-selected"')
+    expect(vueSrc).toContain('orient="auto"')
+    expect(vueSrc).toMatch(/marker-end: url\(#edge-arrow\)/)
+    expect(vueSrc).toMatch(/marker-end: url\(#edge-arrow-selected\)/)
+  })
+
+  it('端口连接点扩大：10px 可视 + 伪元素命中热区', () => {
+    const dotBlock = vueSrc.match(/\.port-dot \{[^}]*\}/)![0]
+    expect(dotBlock).toContain('width: 10px')
+    expect(dotBlock).toContain('height: 10px')
+    expect(vueSrc).toMatch(/\.port-dot::before[^{]*\{[^}]*inset: -3px[^}]*\}/)
+  })
 })
