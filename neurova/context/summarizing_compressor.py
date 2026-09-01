@@ -43,6 +43,52 @@ _DEFAULT_PROMPT_TEMPLATE = """你是对话摘要器。请把以下被折叠的�
 
 [输出新摘要]"""
 
+# repair prompt：把违规标识符回喂，要求逐字修正
+_REPAIR_PROMPT_TEMPLATE = """你上一版摘要包含以下**在原始对话中不存在**的标识符（疑似幻觉）：
+{violations}
+
+请重新生成摘要：引用标识符（URL/路径/版本号等）时**必须逐字复制**自下方原始材料，\
+不得改写、拼接或臆造；不确定的内容直接省略。
+
+[已有摘要]
+{previous_summary}
+
+[待合并的早期轮次]
+{chunks}
+
+[输出修正后的摘要]"""
+
+# 高风险标识符提取：URL / 绝对路径 / 版本号 / hex-hash
+_IDENTIFIER_PATTERNS = (
+    re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE),
+    re.compile(r"(?<![\w\-/])(/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+)"),  # 多段路径
+    re.compile(r"\b\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.\-]+)?\b"),  # semver 形
+    re.compile(r"\b[0-9a-f]{12,64}\b", re.IGNORECASE),  # hex hash/sha 片段
+)
+
+
+def extract_identifiers(text: str) -> List[str]:
+    """从文本提取高风险精确标识符（URL/路径/版本号/hash）——反幻觉校验域。"""
+    found: List[str] = []
+    seen = set()
+    for pattern in _IDENTIFIER_PATTERNS:
+        for m in pattern.finditer(text or ""):
+            value = m.group(0).rstrip(".,;:，。；）)…")
+            if value and value.lower() not in seen and len(value) >= 5:
+                seen.add(value.lower())
+                found.append(value)
+    return found
+
+
+def find_violations(summary: str, evidence: str) -> List[str]:
+    """摘要中存在但证据（chunks+previous）中逐字缺失的标识符。"""
+    evidence_lower = evidence or ""
+    return [
+        ident
+        for ident in extract_identifiers(summary)
+        if ident.lower() not in evidence_lower
+    ]
+
 
 def _redact(text: str) -> str:
     """摘要出口脱敏：带捕获组的模式保留键名只脱敏值，其余整段替换。"""
@@ -91,13 +137,52 @@ class SummarizingCompressor:
             role = (c.metadata or {}).get("role", "")
             prefix = f"[{turn_id}{'/' + role if role else ''}] " if turn_id else ""
             lines.append(f"{prefix}{c.content}")
+        evidence_text = "\n".join(lines) + "\n" + (previous_summary or "")
+
         prompt = self._prompt_template.format(
             previous_summary=previous_summary or "（无）",
             chunks="\n".join(lines),
         )
 
+        async def _call_llm(p: str) -> Optional[str]:
+            raw = await asyncio.wait_for(self._llm_call(p), timeout=self._timeout_s)
+            return (raw or "").strip() or None
+
+        # P1-b：生成 → 脱敏 → identifier 逐字闸（脱敏后校验：密钥值已变
+        # [REDACTED]，不会误触 hex 指纹闸）→ repair 单次重试 → fail-closed 旧摘要
+        summary: Optional[str] = None
         try:
-            raw = await asyncio.wait_for(self._llm_call(prompt), timeout=self._timeout_s)
+            raw = await _call_llm(prompt)
+            if raw is None:
+                return previous_summary or None
+
+            candidate = _redact(raw.strip())
+            violations = find_violations(candidate, evidence_text)
+            if not violations:
+                summary = candidate
+            else:
+                logger.info(
+                    "摘要含 %d 个幻觉标识符，触发 repair 重试: %s",
+                    len(violations), violations[:3],
+                )
+                repair_prompt = _REPAIR_PROMPT_TEMPLATE.format(
+                    violations="\n".join(f"- {v}" for v in violations),
+                    previous_summary=previous_summary or "（无）",
+                    chunks="\n".join(lines),
+                )
+                raw2 = await _call_llm(repair_prompt)
+                if raw2 is None:
+                    return previous_summary or None
+                candidate2 = _redact(raw2.strip())
+                violations2 = find_violations(candidate2, evidence_text)
+                if not violations2:
+                    summary = candidate2
+                else:
+                    logger.warning(
+                        "摘要 repair 后仍含 %d 个幻觉标识符，保留旧摘要: %s",
+                        len(violations2), violations2[:3],
+                    )
+                    return previous_summary or None
         except asyncio.TimeoutError:
             logger.info("summarize timeout (%.0fs); keep previous summary", self._timeout_s)
             return previous_summary or None
@@ -105,6 +190,4 @@ class SummarizingCompressor:
             logger.info("summarize failed (%s); keep previous summary", e)
             return previous_summary or None
 
-        if not (raw or "").strip():
-            return previous_summary or None
-        return _redact(raw.strip())
+        return summary.strip() if summary else (previous_summary or None)
