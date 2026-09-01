@@ -17,6 +17,12 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
+      // P1-8：coverage 阈值起步线（lines 30，随测试补齐逐步上调）
+      thresholds: {
+        lines: 30,
+        functions: 25,
+        statements: 30,
+      },
     },
   },
 })
