@@ -962,7 +962,13 @@ class ToolExecutor:
         if not isinstance(inputs, dict):
             inputs = {"message": (params or {}).get("message", "")}
 
-        outcome = await execute_workflow_agent(agent_id, inputs)
+        # 请求级身份透传：工作流内知识库节点引用用户级远程配置时按属主校验
+        try:
+            request_user_id = str(self._agent_identity()[0] or "") or None
+        except Exception:  # noqa: BLE001 - 身份解析失败不阻断工具调用
+            request_user_id = None
+
+        outcome = await execute_workflow_agent(agent_id, inputs, user_id=request_user_id)
         if outcome.get("success"):
             return {
                 "success": True,
@@ -1385,12 +1391,18 @@ class ToolExecutor:
 
         inputs = params.get("inputs") or {}
         executor = get_workflow_executor()
+        # 请求级身份替代硬编码 "agent"：画布内知识库节点引用用户级远程配置
+        # （默认私有）时按属主校验；无身份回退 "agent"（隔离校验将如实拒绝）
         try:
-            instance = executor.create_instance(workflow, inputs=inputs, user_id="agent")
+            canvas_user_id = str(self._agent_identity()[0] or "") or "agent"
+        except Exception:  # noqa: BLE001 - 身份解析失败不阻断画布执行
+            canvas_user_id = "agent"
+        try:
+            instance = executor.create_instance(workflow, inputs=inputs, user_id=canvas_user_id)
             instance = await executor.execute(
                 workflow,
                 inputs=inputs,
-                user_id="agent",
+                user_id=canvas_user_id,
                 session_id=self._canvas_session_id(),
                 instance=instance,
             )
@@ -1663,6 +1675,33 @@ class ToolExecutor:
                 return {"error": "上下文池不可用，无法召回历史"}
 
             recalled = pool.recall_evicted(query=query, limit=limit)
+
+            # P1-a：召回循环防护——同轮同查询同结果拒绝（防模型死循环重试）
+            from neurova.agent.recall_loop_guard import RecallLoopGuard, compute_digest
+
+            guard = getattr(self._agent, "_recall_loop_guard", None)
+            if guard is None:
+                guard = RecallLoopGuard()
+                self._agent._recall_loop_guard = guard
+            # 轮次感知：turn_count 变化 = 新对话轮 → 重置指纹（自包含，不依赖管线显式调用）
+            current_turn = getattr(self._agent, "turn_count", 0) or 0
+            if getattr(guard, "_last_turn", None) not in (None, current_turn):
+                guard.reset()
+            guard._last_turn = current_turn
+            digest = compute_digest(
+                [
+                    {
+                        "turn_id": (getattr(c, "metadata", None) or {}).get("turn_id"),
+                        "content": getattr(c, "content", ""),
+                    }
+                    for c in recalled
+                ]
+            )
+            allowed, deny_reason = guard.record_and_check(query, limit, digest)
+            if not allowed:
+                logger.info("recall_history 被循环防护拦截: query=%r", query)
+                return {"success": False, "error": deny_reason}
+
             return {
                 "success": True,
                 "count": len(recalled),

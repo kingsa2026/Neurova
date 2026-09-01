@@ -11,6 +11,7 @@ Agent 执行危险命令审批机制
 from __future__ import annotations
 
 import datetime
+import fnmatch
 import json
 from neurova.core.logger import get_logger
 import re
@@ -206,6 +207,10 @@ class ApprovalManager:
         # 历史批准记录（用于智能模式）
         self._approved_history: Dict[str, datetime.datetime] = {}
 
+        # P1-c 审批记忆（EXACT/SIMILAR）：用户显式同意沉淀的持久规则
+        self._approval_memory: List[Dict[str, Any]] = []
+        self._APPROVAL_MEMORY_MAX = 200
+
         # 通知回调
         self._notification_callbacks: List[Callable] = []
 
@@ -240,6 +245,15 @@ class ApprovalManager:
         # 检查白名单
         if self._is_in_whitelist(command):
             return {"needs_approval": False, "reason": "命令在白名单中", "request_id": None}
+
+        # P1-c 审批记忆：用户显式批准过的命令模式优先于危险检测
+        mem_hit = self._match_approval_memory(command)
+        if mem_hit is not None:
+            return {
+                "needs_approval": False,
+                "reason": f"命中审批记忆({mem_hit['kind']})",
+                "request_id": None,
+            }
 
         # 检查历史批准
         if self._approval_level == ApprovalLevel.SMART:
@@ -316,7 +330,13 @@ class ApprovalManager:
         request_id: str,
         approved_by: str,
         note: str = "",
+        remember: Optional[str] = None,
     ) -> bool:
+        """批准审批请求。
+
+        remember: None（不记忆，走既有 24h 精确历史）/"exact"（整条命令
+        持久记忆）/"similar"（结构泛化记忆——参数值通配，危险命令自动跳过泛化）。
+        """
         """批准审批请求"""
         with self._lock:
             request = self._requests.get(request_id)
@@ -343,6 +363,9 @@ class ApprovalManager:
 
             # 记录到历史（用于智能模式）
             self._approved_history[request.command] = datetime.datetime.now(datetime.timezone.utc)
+
+            # P1-c：审批记忆沉淀
+            self._remember_approval(request.command, approved_by, remember)
 
             self._save_requests()
 
@@ -401,6 +424,93 @@ class ApprovalManager:
         """按 ID 获取审批请求（任意状态）"""
         with self._lock:
             return self._requests.get(request_id)
+
+    # ── P1-c 审批记忆（EXACT/SIMILAR） ──
+
+    @staticmethod
+    def _generalize_command(command: str) -> str:
+        """结构泛化：保留命令名与 flag，参数值通配为 *。
+
+        git push origin feature-x → git push * *
+        pytest -q tests/unit       → pytest -q *
+        """
+        tokens = (command or "").strip().split()
+        if not tokens:
+            return command
+        out = [tokens[0]]
+        for t in tokens[1:]:
+            out.append(t if t.startswith("-") else "*")
+        return " ".join(out)
+
+    def _remember_approval(self, command: str, approved_by: str, remember: Optional[str]) -> None:
+        """审批通过后沉淀持久记忆（EXACT/SIMILAR）；None 不记忆。"""
+        if remember not in ("exact", "similar"):
+            return
+        try:
+            if remember == "exact":
+                pattern = (command or "").strip()
+                kind = "exact"
+            else:
+                pattern = self._generalize_command(command)
+                kind = "similar"
+
+            # 同 pattern 同 kind 去重（刷新时间戳即可）
+            for rule in self._approval_memory:
+                if rule["pattern"] == pattern and rule["kind"] == kind:
+                    rule["created_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    return
+
+            self._approval_memory.append(
+                {
+                    "id": f"mem-{uuid.uuid4().hex[:8]}",
+                    "pattern": pattern,
+                    "kind": kind,
+                    "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "approved_by": approved_by,
+                    "hits": 0,
+                }
+            )
+            # GC：超上限淘汰最旧
+            if len(self._approval_memory) > self._APPROVAL_MEMORY_MAX:
+                self._approval_memory.sort(key=lambda r: r["created_at"])
+                self._approval_memory = self._approval_memory[-self._APPROVAL_MEMORY_MAX:]
+            logger.info("审批记忆沉淀: kind=%s pattern=%r", kind, pattern)
+        except Exception as e:
+            logger.warning("审批记忆沉淀失败: %s", e)
+
+    def _match_approval_memory(self, command: str) -> Optional[Dict[str, Any]]:
+        """决策端匹配：EXACT 全等；SIMILAR 通配。
+
+        危险命令豁免 SIMILAR——用户只泛化批准过一条结构，
+        不代表所有同构危险命令（rm -rf *）都自动放行。
+        """
+        cmd = (command or "").strip()
+        if not cmd:
+            return None
+        is_dangerous = self._detector.is_dangerous(cmd)
+        hit = None
+        for rule in self._approval_memory:
+            if rule["kind"] == "exact":
+                if rule["pattern"] == cmd:
+                    hit = rule
+                    break
+            else:  # similar
+                if is_dangerous:
+                    continue
+                try:
+                    if fnmatch.fnmatch(cmd, rule["pattern"]):
+                        hit = rule
+                        break
+                except Exception:
+                    continue
+        if hit is not None:
+            hit["hits"] = hit.get("hits", 0) + 1
+        return hit
+
+    def list_approval_memory(self) -> List[Dict[str, Any]]:
+        """审批记忆清单（只读副本）。"""
+        with self._lock:
+            return [dict(r) for r in self._approval_memory]
 
     def _is_in_whitelist(self, command: str) -> bool:
         """检查命令是否在白名单中"""
@@ -495,6 +605,11 @@ class ApprovalManager:
                     for cmd, ts_str in data.get("approved_history", {}).items():
                         self._approved_history[cmd] = datetime.datetime.fromisoformat(ts_str)
 
+                    # P1-c：加载审批记忆
+                    mem = data.get("approval_memory", [])
+                    if isinstance(mem, list):
+                        self._approval_memory = [m for m in mem if isinstance(m, dict) and m.get("pattern")]
+
                 logger.info("加载了 %s 个审批请求", len(self._requests))
         except Exception as e:
             logger.error("加载审批请求失败: %s", e)
@@ -506,6 +621,7 @@ class ApprovalManager:
                 "requests": [r.to_dict() for r in self._requests.values()],
                 "whitelist": list(self._whitelist),
                 "approved_history": {cmd: ts.isoformat() for cmd, ts in self._approved_history.items()},
+                "approval_memory": list(self._approval_memory),
             }
 
             with open(self._storage_path, "w", encoding="utf-8") as f:
