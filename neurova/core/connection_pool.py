@@ -75,8 +75,10 @@ class SQLiteConnectionPool:
             sqlite3.Connection: 数据库连接
         """
         try:
-            # 尝试从池中获取连接
-            conn = self._pool.get(timeout=self.timeout)
+            # 非阻塞取空闲连接：空池立即走创建分支。
+            # 原实现的阻塞 get(timeout) 会让"空池首次调用"白等一个
+            # timeout 才落到下面的创建分支（健康检查曾因此卡 30s）。
+            conn = self._pool.get_nowait()
             # 验证连接是否有效
             try:
                 conn.execute("SELECT 1")
