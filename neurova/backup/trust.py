@@ -99,7 +99,7 @@ def _compute_backup_digest(zp: Path) -> bytes:
     帧格式与 QP 对齐语义：ENTRY\\0name\\0bytes\\0size(8B)\\0
     """
     h = hashlib.sha256()
-    h.update(_META_FRAME_SEPARATOR := b"META\x00")
+    h.update(b"META\x00")
     with zipfile.ZipFile(zp, "r") as zf:
         meta = json.loads(zf.read(_META_ENTRY))
         h.update(_canonical_meta_bytes(meta))
@@ -113,7 +113,6 @@ def _compute_backup_digest(zp: Path) -> bytes:
             h.update(str(len(payload)).encode("ascii"))
             h.update(b"\x00")
             h.update(payload)
-    del _META_FRAME_SEPARATOR
     return h.digest()
 
 
