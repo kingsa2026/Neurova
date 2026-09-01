@@ -15,10 +15,17 @@ class TTSBase(ABC):
     所有 TTS 引擎必须继承此类并实现抽象方法。
     """
 
+    # 流式输出的 MIME 类型（补课 4.3：edge-tts 产 MP3 裸字节，
+    # moss/sapi5 产 wav——端点按引擎动态声明，原实现恒 audio/wav 是 bug）
+    audio_media_type: str = "audio/wav"
+
     def __init__(self):
         """初始化 TTS 引擎"""
         self._initialized = False
         self._logger = logging.getLogger(self.__class__.__name__)
+        # 单次合成文本上限(edge-tts 可处理 ~3000 字; 原 1000 过保守,
+        # 且超限会被 validate_text 整体拒绝而非截断 → 长回复 TTS 500 根因)
+        self.max_text_length = 2000
 
     @property
     def is_initialized(self) -> bool:
@@ -68,6 +75,18 @@ class TTSBase(ABC):
         """
         ...
 
+    def sanitize_text(self, text: str) -> str:
+        """清洗/截断文本: 超限**真正截断**(整体拒绝曾导致长回复 TTS 500),
+        并剥离控制字符(换行保留)。"""
+        text = (text or "").replace("\r", "\n")
+        text = "".join(ch for ch in text if ch == "\n" or ch == "\t" or not (ord(ch) < 32 or ord(ch) == 127))
+        if len(text) > self.max_text_length:
+            self._logger.warning(
+                "文本过长: %s 字符，截断到 %s", len(text), self.max_text_length
+            )
+            return text[: self.max_text_length]
+        return text
+
     def validate_text(self, text: str) -> bool:
         """
         验证文本是否有效
@@ -80,12 +99,6 @@ class TTSBase(ABC):
         """
         if not text or not text.strip():
             return False
-
-        # 检查文本长度（最大 1000 字符）
-        if len(text) > 1000:
-            self._logger.warning("文本过长: %s 字符，将被截断", len(text))
-            return False
-
         return True
 
     async def save_audio(self, audio_data: bytes, output_path: Path) -> bool:
