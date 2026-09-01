@@ -37,10 +37,9 @@ class TestCurrentStateDocumentation:
         if platform.system() != "Windows":
             pytest.skip("仅 Windows 环境")
         backend = AppContainerSandbox(SandboxSeverity.NETWORK_OFF)
-        assert backend.available() is True
-        argv = backend.wrap_argv("echo hi")
-        assert argv == ["cmd.exe", "/c", "echo hi"]  # 占位：无任何隔离前缀
-        assert backend.backend_name() == "appcontainer"
+        # P1-7+P2：占位谎言已清——available 诚实 False；Windows 平台
+        # 隔离由 restricted_token（SAFER 特权剥离）承接
+        assert backend.available() is False
 
 
 def _mock_docker_executor(exit_code=0, stdout="ok", stderr=""):

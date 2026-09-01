@@ -36,6 +36,38 @@ _logger_cache: Dict[str, logging.Logger] = {}
 _logger_lock = threading.Lock()
 
 
+def _json_log_enabled() -> bool:
+    """P2 可选项②：JSON 结构化日志开关（NEUROVA_LOG_JSON=1）。
+
+    生产采集（Loki/ELK/CloudWatch）直接解析 JSON 行免正则；本地开发
+    默认文本格式。开关在 get_logger 首次建 handler 时读取（进程级）。
+    """
+    import os
+
+    return os.environ.get("NEUROVA_LOG_JSON", "").strip() == "1"
+
+
+class _JsonLogFormatter(logging.Formatter):
+    """单行 JSON 日志格式器：msg/context 全经 json.dumps（引号安全）。"""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
+            "logger": record.name,
+            "level": record.levelname,
+            "msg": record.getMessage(),
+        }
+        # exc_info 附加（结构化 traceback）
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        try:
+            import json
+
+            return json.dumps(payload, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            return f'{payload["ts"]} {payload["level"]} {payload["msg"]}'
+
+
 def get_logger(name: str = "neurova", level: int = logging.DEBUG) -> logging.Logger:
     """
     获取指定模块的记录器（带单例缓存，线程安全）
@@ -56,8 +88,11 @@ def get_logger(name: str = "neurova", level: int = logging.DEBUG) -> logging.Log
             # 控制台 handler
             handler = logging.StreamHandler()
             handler.setLevel(level)
-            formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-            handler.setFormatter(formatter)
+            if _json_log_enabled():
+                handler.setFormatter(_JsonLogFormatter())
+            else:
+                formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+                handler.setFormatter(formatter)
             logger.addHandler(handler)
         _logger_cache[name] = logger
         return logger
