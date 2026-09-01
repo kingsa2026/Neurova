@@ -63,9 +63,10 @@ class WhisperEngine(ASRBase):
 
                 self._whisper = whisper
             except ImportError:
+                # 诚实降级（补课 4.1）：未安装≠初始化成功
                 self._logger.warning("whisper 未安装，请运行: pip install openai-whisper")
-                self._initialized = True
-                return True
+                self._initialized = False
+                return False
 
             if self._device == "auto":
                 try:
