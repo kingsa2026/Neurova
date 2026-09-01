@@ -170,7 +170,9 @@ is_concurrency_safe 才 gather，任一未声明整轮保守串行；结果按�
 
 新 `neurova/checkpoints/{repository,service}.py`：`git init --bare` at `data/checkpoints/{agent_id}.git`（零新依赖）；范围=会话 JSON+知识库文件；refs `{auto,snap,pre-restore}/{session_key}/{ts}`；恢复先做对话档+文件档，恢复前自动 pre-restore 留档；GC keep_count/keep_days；自动快照挂 chat_pipeline Step4 防抖。红测：快照→修改→恢复→还原；pre-restore 存在性；GC 保留策略。
 
-### P1-6 Tool Guard + 技能扫描 ☐（第 6-7 周）
+### P1-6 Tool Guard + 技能扫描 ☑（5eaa1a9，2026-09-01）
+
+交付差异说明：ToolGuard 危险命令规则（12 条含 mkfs/dd/fork bomb）+ Shell 逃逸 + FilePathGuardian + governance 接线（_governance_precheck 四级裁决）已由 P0-2 批次交付，未重复造规则文件外置层。本批补齐技能侧三缺口：①PromptInjectionAnalyzer（11 条中英双语注入签名，critical）；②**真漏洞修复**——_discover_files 白名单漏 .md，SKILL.md 注入主载体从未被扫描；③零消费方接线——hub_client 三安装分支落盘扫描（不通过回滚）+ NL 合成产物注册前注入扫描 + skill_install_gate（DENY fail-closed）。13 用例（test_p1_6_skill_guard.py）。
 
 新 `neurova/security/tool_guard/`：`rules/dangerous_shell_commands.yaml`（首批 CRITICAL：mkfs/dd of=/dev//fork bomb）、file_guardian（ntpath/POSIX 双规范化+默认 deny 目录）、shell 逃逸解析首批模式表（`$()`/反引号/引号状态机）。接入 `_governance_precheck` 深度检查阶段。`neurova/security/skill_scanner.py` + 中英双语 prompt-injection 签名 → 挂 NL 工具合成（`chat_pipeline._check_nl_synthesis`）与技能加载点。红测：恶意 SKILL.md 被拦、危险命令命中、正常操作不误杀。
 
@@ -208,5 +210,5 @@ is_concurrency_safe 才 gather，任一未声明整轮保守串行；结果按�
 - **P3-e 单例收敛 ☑（ba81f96 + 3fc2b2f）**：AST 审计（287 工厂/55 惰性创建/17 无锁）→ 6 高危 DCL → 11 良性 DCL，**55/55 全带锁**；reset_semantic_search/reset_embedding_engine 公有化；防回归网 tests/unit/core/test_singleton_convergence.py 20 用例。顺手修 CI 门禁 2 个预存 F821（openai_loop 缺 import asyncio——P1-1 溢出 rollup 实为静默 no-op，本修恢复功能）。
 - **P2-4 观测补刀 ☑（58901f3）**：record_llm_call 零调用缺口——chat() 成功/失败/熔断 + chat_stream 四分支接线（stream 死语句 time.time() 顺手修复）。/metrics 的 neurova_llm_calls_total 恢复真实计数。
 
-**P1 状态修订**：P1-4 停止门控 ☑（由 P2-5 交付，单文件 gates.py 替代原分文件设计）；P1-1/P1-2 ☑；**P1-3 MCP 可靠性 / P1-5 检查点 / P1-6 Tool Guard+技能扫描 / P1-7 沙箱诚实化 / P1-8 测试去水分仍为 ☐**（未实施，原计划保留）。
+**P1 状态修订**：P1-1/P1-2/P1-3/P1-4/P1-6 ☑（P1-4 由 P2-5 交付）；**P1-5 检查点 / P1-7 沙箱诚实化 / P1-8 测试去水分仍为 ☐**（未实施，原计划保留）。
 **剩余可选项**：structlog 迁移（降级可选——logger.py 已结构化，生产 0 处 print）；P1-3/5/6/7/8 按原计划排期。
