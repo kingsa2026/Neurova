@@ -489,7 +489,7 @@
  *
  * 数据流：所有持久化通过 useCollaboration composable → store → api，页面不直接调用后端。
  */
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -523,6 +523,7 @@ import MockEditor from './MockEditor.vue'
 import { createDebugController, type DebugController } from './DebugPanel'
 import { duplicateNodesForPaste } from './canvasClipboard'
 import { normalizeRect, nodesInRect } from './canvasSelection'
+import { extractRunBlockDetail, collectFailedNodes } from './canvasRunErrors'
 import { panByDrag, dropNodePosition, shouldPanOnSpace } from './canvasPan'
 import MiniMap from './MiniMap.vue'
 import { useReachableModels, buildModelOptions } from '@/composables/useReachableModels'
@@ -2035,15 +2036,61 @@ async function handleRun() {
         }
         if (data.status === 'failed' || data.status === 'cancelled') {
           runState.value = 'failed'
+          showNodeConfigIssues({
+            message: data.error ?? t('canvas.runFailed'),
+            failedNodes: collectFailedNodes(data.node_results ?? {}),
+          })
           break
         }
       } catch {
         // 单次轮询失败忽略，继续下一轮
       }
     }
-  } catch {
+  } catch (err: any) {
     runState.value = 'failed'
+    // 节点配置校验失败：后端 400 detail={code:1, errors:[{node_id,label,type,missing,message}]}
+    const blockDetail = extractRunBlockDetail(err)
+    if (blockDetail) {
+      showNodeConfigIssues({ message: blockDetail.message, issues: blockDetail.issues })
+    } else {
+      uiMessage.error(t('canvas.runFailed'))
+    }
   }
+}
+
+/** 执行前/执行中节点异常弹窗：详细逐条展示缺失字段或失败节点 */
+function showNodeConfigIssues(opts: {
+  message: string
+  issues?: Array<{ label: string; message: string; missing?: string[] }>
+  failedNodes?: Array<{ nodeId: string; error?: string | null }>
+}) {
+  import('ant-design-vue').then(({ Modal }) => {
+    const issueList = opts.issues ?? []
+    const failedList = opts.failedNodes ?? []
+    Modal.error({
+      title: t('canvas.runBlocked'),
+      width: 560,
+      content: h(
+        'div',
+        { class: 'node-issue-modal' },
+        [
+          h('p', { class: 'node-issue-title' }, opts.message),
+          ...issueList.map(iss =>
+            h('div', { class: 'node-issue-item' }, [
+              h('strong', iss.label ?? ''),
+              h('span', '：' + (iss.message ?? '')),
+            ]),
+          ),
+          ...failedList.map(f =>
+            h('div', { class: 'node-issue-item' }, [
+              h('strong', f.nodeId),
+              h('span', '：' + (f.error ?? '执行失败')),
+            ]),
+          ),
+        ],
+      ),
+    })
+  })
 }
 
 // 初始化：如果 URL 有 :id 参数，加载已有工作流
