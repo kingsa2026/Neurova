@@ -40,7 +40,6 @@
           :placeholder="t('knowledge.search')"
           style="max-width: 360px"
           allow-clear
-          @search="filterNodes"
         />
         <div class="category-filters">
           <a-tag
@@ -60,21 +59,8 @@
           <div v-if="filteredNodes.length === 0 && !loading" class="graph-empty">
             <a-empty :description="t('common.noData')" />
           </div>
-          <div v-else class="node-grid">
-            <div
-              v-for="node in filteredNodes"
-              :key="node.id"
-              class="graph-node"
-              :class="{ 'is-selected': selectedNode?.id === node.id }"
-              @click="selectNode(node)"
-            >
-              <div class="node-label">{{ node.label || node.name }}</div>
-              <a-tag size="small">{{ node.category || 'default' }}</a-tag>
-              <div v-if="node.connections" class="node-connections">
-                {{ node.connections }} connections
-              </div>
-            </div>
-          </div>
+          <!-- ECharts force 图（补课 2.4：替换 node-grid 卡片假图） -->
+          <VChart v-else class="graph-chart" :option="chartOption" autoresize />
         </div>
       </a-spin>
     </GlassCard>
@@ -100,7 +86,7 @@
         </div>
         <div v-if="nodeEdges.length > 0" class="detail-section">
           <h4>Connections ({{ nodeEdges.length }})</h4>
-          <div v-for="edge in nodeEdges" :key="edge.id" class="edge-item">
+          <div v-for="(edge, i) in nodeEdges" :key="i" class="edge-item">
             <span class="mono">{{ edge.source }}</span>
             <span class="edge-arrow">&rarr;</span>
             <span class="mono">{{ edge.target }}</span>
@@ -120,6 +106,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { request } from '@/api'
+import VChart from 'vue-echarts'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage()
@@ -130,16 +117,24 @@ const selectedCategory = ref<string | null>(null)
 const selectedNode = ref<any>(null)
 const graphData = ref<{ nodes: any[]; edges: any[] }>({ nodes: [], edges: [] })
 
+// 归一化：后端节点 {id,label,type,description,weight} / 边 {source,target,relation,weight}
+const normalizeNode = (n: any) => ({
+  ...n,
+  category: n.category ?? n.type ?? 'default',
+  name: n.label ?? n.name ?? n.id,
+})
+
 const uniqueCategories = computed(() => {
   const cats = new Set<string>()
-  graphData.value.nodes?.forEach((n) => {
+  graphData.value.nodes?.forEach((raw) => {
+    const n = normalizeNode(raw)
     if (n.category) cats.add(n.category)
   })
   return Array.from(cats)
 })
 
 const filteredNodes = computed(() => {
-  let nodes = graphData.value.nodes || []
+  let nodes = (graphData.value.nodes || []).map(normalizeNode)
   if (searchQuery.value) {
     const q = searchQuery.value.toLowerCase()
     nodes = nodes.filter(
@@ -162,16 +157,59 @@ const nodeEdges = computed(() => {
   )
 })
 
+const categoryColorMap: Record<string, string> = {
+  default: '#6366f1',
+  concept: '#8b5cf6',
+  entity: '#06b6d4',
+  memory: '#22c55e',
+  knowledge: '#f59e0b',
+}
+
+const chartOption = computed(() => {
+  const nodes = filteredNodes.value.map((n: any) => ({
+    id: n.id,
+    name: n.label || n.name,
+    category: n.category,
+    value: n.weight ?? 1,
+    description: n.description,
+    itemStyle: { color: categoryColorMap[n.category] ?? categoryColorMap.default },
+    symbolSize: 18 + Math.min(30, (n.connections ?? 0) * 3 + (n.weight ?? 0) * 6),
+  }))
+  const ids = new Set(nodes.map((n: any) => n.id))
+  const links = (graphData.value.edges || [])
+    .filter((e: any) => ids.has(e.source) && ids.has(e.target))
+    .map((e: any) => ({
+      source: e.source,
+      target: e.target,
+      relation: e.relation,
+      lineStyle: { width: Math.max(1, Math.min(4, e.weight ?? 1)) },
+    }))
+  return {
+    tooltip: {
+      formatter: (p: any) =>
+        p.dataType === 'node'
+          ? `<b>${p.name}</b><br/>${p.data.category ?? ''}${p.data.description ? '<br/>' + p.data.description : ''}`
+          : `${p.data.source} → ${p.data.target}${p.data.relation ? ' (' + p.data.relation + ')' : ''}`,
+    },
+    series: [
+      {
+        type: 'graph',
+        layout: 'force',
+        roam: true,
+        draggable: true,
+        data: nodes,
+        links,
+        force: { repulsion: 160, edgeLength: [60, 140], gravity: 0.08 },
+        label: { show: true, fontSize: 11, color: 'inherit' },
+        emphasis: { focus: 'adjacency', lineStyle: { width: 4 } },
+        lineStyle: { color: 'source', curveness: 0.15, opacity: 0.7 },
+      },
+    ],
+  }
+})
+
 const toggleCategory = (cat: string) => {
   selectedCategory.value = selectedCategory.value === cat ? null : cat
-}
-
-const selectNode = (node: any) => {
-  selectedNode.value = selectedNode.value?.id === node.id ? null : node
-}
-
-const filterNodes = () => {
-  // Filtering is reactive via computed, this is just a trigger for the search input
 }
 
 const fetchGraph = async () => {
@@ -268,7 +306,12 @@ onMounted(() => {
 }
 
 .graph-container {
-  min-height: 300px;
+  min-height: 420px;
+}
+
+.graph-chart {
+  width: 100%;
+  height: 420px;
 }
 
 .graph-empty {
@@ -276,44 +319,6 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   min-height: 300px;
-}
-
-.node-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
-}
-
-.graph-node {
-  padding: 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.graph-node:hover {
-  border-color: rgba(99, 102, 241, 0.4);
-  background: rgba(99, 102, 241, 0.06);
-}
-
-.graph-node.is-selected {
-  border-color: rgba(99, 102, 241, 0.6);
-  background: rgba(99, 102, 241, 0.1);
-}
-
-.node-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--nr-text-primary);
-  margin-bottom: 6px;
-}
-
-.node-connections {
-  font-size: 11px;
-  color: var(--nr-text-tertiary);
-  margin-top: 6px;
 }
 
 .node-detail {
