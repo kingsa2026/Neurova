@@ -144,6 +144,7 @@ async def synthesize_speech(request: Request, body: SynthesizeRequest):
             # 使用 VoiceEngine 统一接口
             result = await voice_engine.process(input_data=body.text, operation="synthesize", **kwargs)
 
+
             if result.error:
                 raise HTTPException(status_code=500, detail=result.error)
 
@@ -266,11 +267,13 @@ async def transcribe_audio(
     """
     # 优先使用 VoiceEngine 统一接口
     voice_engine = _get_voice_engine("asr")
+
     if voice_engine and voice_engine.is_available():
         try:
             audio_bytes = await audio_file.read()
 
             # 使用 VoiceEngine 统一接口
+
             result = await voice_engine.process(input_data=audio_bytes, operation="transcribe", language=language)
 
             if result.error:
