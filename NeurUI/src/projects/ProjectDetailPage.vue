@@ -140,7 +140,7 @@
       <!-- 工作流 -->
       <a-tab-pane key="workflows" :tab="t('project.tabWorkflows')">
         <div class="tab-actions">
-          <GlassButton variant="primary" size="sm" @click="router.push('/collaboration/workflows')">{{ t('project.newWorkflow') }}</GlassButton>
+          <GlassButton variant="primary" size="sm" @click="router.push({ path: '/collaboration/workflows', query: { project: projectId } })">{{ t('project.newWorkflow') }}</GlassButton>
         </div>
         <div v-if="projectCanvases.length === 0" class="empty-state"><a-empty :description="t('common.noData')" /></div>
         <div v-else class="workflow-grid">
