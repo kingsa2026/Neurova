@@ -199,6 +199,8 @@ logs/
 # 根目录临时md文件（排除README.md）
 /*.md
 !README.md
+!CONTRIBUTING.md
+!SECURITY.md
 
 # 敏感信息
 .neurova_token.json
