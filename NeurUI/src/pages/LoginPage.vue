@@ -7,7 +7,82 @@
           <img :src="appStore.isDark ? '/img/NEUROVA-LOGO350white.png' : '/img/NEUROVA-LOGO350black.png'" alt="Neurova Logo" class="nr-auth-logo-img" />
         </div>
 
+        <!-- 首启向导：系统中无任何用户时（桌面版首次安装） -->
         <a-form
+          v-if="needsSetup"
+          :model="setupForm"
+          layout="vertical"
+          class="nr-auth-form"
+        >
+          <div class="nr-setup-intro">
+            <h2 class="nr-auth-title">{{ t('auth.setupTitle') }}</h2>
+            <p class="nr-auth-subtitle">{{ t('auth.setupHint') }}</p>
+          </div>
+
+          <a-form-item
+            :label="t('auth.username')"
+            name="username"
+            :rules="[{ required: true, message: t('validation.required') }]"
+          >
+            <GlassInput
+              v-model:model-value="setupForm.username"
+              :placeholder="t('auth.username')"
+              autocomplete="username"
+              @update:model-value="setupForm.username = $event"
+            />
+          </a-form-item>
+
+          <a-form-item
+            :label="t('auth.password')"
+            name="password"
+            :rules="[{ required: true, message: t('validation.required') }]"
+          >
+            <GlassInput
+              v-model:model-value="setupForm.password"
+              type="password"
+              :placeholder="t('auth.password')"
+              autocomplete="new-password"
+              @update:model-value="setupForm.password = $event"
+            />
+          </a-form-item>
+
+          <a-form-item
+            :label="t('auth.confirmPassword')"
+            name="confirmPassword"
+            :rules="[{ required: true, message: t('validation.required') }]"
+          >
+            <GlassInput
+              v-model:model-value="setupForm.confirmPassword"
+              type="password"
+              :placeholder="t('auth.confirmPassword')"
+              autocomplete="new-password"
+              @update:model-value="setupForm.confirmPassword = $event"
+            />
+          </a-form-item>
+
+          <a-alert
+            v-if="error"
+            :message="error"
+            type="error"
+            show-icon
+            closable
+            style="margin-bottom: 16px"
+            @close="error = null"
+          />
+
+          <GlassButton
+            variant="primary"
+            size="lg"
+            :loading="loading"
+            style="width: 100%"
+            @click="handleSetup"
+          >
+            {{ t('auth.setupSubmit') }}
+          </GlassButton>
+        </a-form>
+
+        <a-form
+          v-else
           :model="form"
           @finish="handleLogin"
           layout="vertical"
@@ -68,7 +143,7 @@
           </GlassButton>
         </a-form>
 
-        <div class="nr-auth-footer">
+        <div v-if="!needsSetup" class="nr-auth-footer">
           {{ t('auth.noAccount') }}
           <router-link to="/register" class="nr-auth-link">
             {{ t('auth.register') }}
@@ -85,6 +160,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
+import { authAPI } from '@/api/auth'
 import StarBackground from '@/components/StarBackground.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -102,17 +178,69 @@ const form = reactive({
   remember: false,
 })
 
+// 首启向导状态：needsSetup=true 表示系统中还没有任何用户
+const needsSetup = ref(false)
+const setupForm = reactive({
+  username: '',
+  password: '',
+  confirmPassword: '',
+})
+
 const loading = ref(false)
 const error = ref<string | null>(null)
 
 /** Restore remembered username on mount. */
-onMounted(() => {
+onMounted(async () => {
   const saved = localStorage.getItem('nr_remembered_user')
   if (saved) {
     form.username = saved
     form.remember = true
   }
+
+  // 首启检测：无任何用户 → 展示创建管理员向导（失败时静默回退登录表单）
+  try {
+    const res = (await authAPI.setupStatus()) as any
+    const data = res?.data ?? res
+    needsSetup.value = !!data?.needs_setup
+  } catch {
+    needsSetup.value = false
+  }
 })
+
+/** 首启向导提交：注册首个用户（后端赋予管理员角色）并直接登录 */
+async function handleSetup() {
+  if (!setupForm.username.trim() || !setupForm.password || !setupForm.confirmPassword) return
+
+  error.value = null
+  if (setupForm.password !== setupForm.confirmPassword) {
+    error.value = t('validation.passwordMismatch')
+    return
+  }
+
+  loading.value = true
+  try {
+    const res = (await authAPI.setupRegister({
+      username: setupForm.username.trim(),
+      password: setupForm.password,
+    })) as any
+    const data = res?.data ?? res
+    if (data?.access_token) {
+      // 注册响应自带 token，持久化后拉取用户资料再进入主界面
+      await authStore.setTokensFromRegistration({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+      })
+      await authStore.fetchCurrentUser()
+      router.push('/dashboard')
+    } else {
+      error.value = (res as any)?.message || t('auth.registerFailed')
+    }
+  } catch (err: any) {
+    error.value = err?.response?.data?.message || err?.message || t('auth.registerFailed')
+  } finally {
+    loading.value = false
+  }
+}
 
 async function handleLogin() {
   if (!form.username.trim() || !form.password) return
@@ -190,6 +318,10 @@ async function handleLogin() {
   height: auto;
   margin: 0 auto 24px;
   display: block;
+}
+
+.nr-setup-intro {
+  margin-bottom: 24px;
 }
 
 .nr-auth-title {

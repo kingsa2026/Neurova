@@ -260,6 +260,10 @@ export default {
     editor: 'エディター',
     admin: '管理者',
     quota: 'クォータ',
+    setupTitle: '管理者アカウントの初期設定',
+    setupHint: 'システムの最初のアカウントで、管理者権限が付与されます',
+    setupSubmit: '管理者アカウントを作成',
+    registerFailed: '登録に失敗しました',
   },
   dashboard: {
     welcome: 'おかえりなさい',

@@ -260,6 +260,10 @@ export default {
     editor: '편집자',
     admin: '관리자',
     quota: '할당량',
+    setupTitle: '관리자 계정 초기 설정',
+    setupHint: '시스템의 첫 번째 계정이며 관리자 권한이 부여됩니다',
+    setupSubmit: '관리자 계정 만들기',
+    registerFailed: '등록 실패',
   },
   dashboard: {
     welcome: '다시 오신 것을 환영합니다',

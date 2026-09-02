@@ -260,6 +260,10 @@ export default {
     editor: 'Redattore',
     admin: 'Amministratore',
     quota: 'Quota',
+    setupTitle: 'Configura account amministratore',
+    setupHint: 'Questo è il primo account e avrà privilegi di amministratore',
+    setupSubmit: 'Crea account amministratore',
+    registerFailed: 'Registrazione non riuscita',
   },
   dashboard: {
     welcome: 'Bentornato',
