@@ -73,11 +73,13 @@ describe('useChat', () => {
         id: 's1',
         title: 'Alpha',
         updatedAt: '2026-01-01',
+        pinned: false,
       })
       expect(store.sessions[1]).toEqual({
         id: 's2',
         title: 'Beta',
         updatedAt: '2026-02-01',
+        pinned: false,
       })
     })
 
