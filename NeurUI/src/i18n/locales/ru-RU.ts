@@ -264,6 +264,8 @@ export default {
     setupHint: 'Это первая учётная запись с правами администратора',
     setupSubmit: 'Создать учётную запись администратора',
     registerFailed: 'Ошибка регистрации',
+    backendStarting: 'Бэкенд запускается — подождите несколько секунд и повторите попытку',
+    backendFailed: 'Не удалось запустить бэкенд. Проверьте backendackend.log в папке установки или обратитесь в поддержку',
   },
   dashboard: {
     welcome: 'С возвращением',
@@ -378,6 +380,8 @@ export default {
     viewTable: 'Таблица',
   },
   chat: {
+    searchInSession: 'Поиск в сессии',
+    searchMatches: 'Совпадений: {n}',
     title: 'Чат',
     newChat: 'Новый диалог',
     history: 'История',

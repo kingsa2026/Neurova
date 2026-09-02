@@ -264,6 +264,8 @@ export default {
     setupHint: 'यह पहला खाता है और इसे व्यवस्थापक अधिकार मिलेंगे',
     setupSubmit: 'व्यवस्थापक खाता बनाएं',
     registerFailed: 'पंजीकरण विफल',
+    backendStarting: 'बैकएंड प्रारंभ हो रहा है — कृपया कुछ सेकंड प्रतीक्षा करें और पुनः प्रयास करें',
+    backendFailed: 'बैकएंड प्रारंभ विफल रहा। इंस्टॉल फ़ोल्डर में backendackend.log देखें या सहायता से संपर्क करें',
   },
   dashboard: {
     welcome: 'वापसी पर स्वागत',
@@ -378,6 +380,8 @@ export default {
     viewTable: 'तालिका',
   },
   chat: {
+    searchInSession: 'सत्र में खोजें',
+    searchMatches: '{n} मैच',
     title: 'चैट',
     newChat: 'नई चैट',
     history: 'इतिहास',
