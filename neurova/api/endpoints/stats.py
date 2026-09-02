@@ -1,62 +1,38 @@
 from __future__ import annotations
 
 """
-统计接口 - Stats Endpoint
+统计接口 - Stats Endpoint（真实统计）
 
 功能:
-1. 获取系统统计 (GET /api/v1/stats)
-2. 获取 Agent 统计 (GET /api/v1/stats/agents)
-3. 获取使用统计 (GET /api/v1/stats/usage)
-4. 获取性能统计 (GET /api/v1/stats/performance)
+1. 获取系统统计 (GET /api/v1/stats) — overview + 7 天趋势（全部真实）
+2. 获取 Agent 统计 (GET /api/v1/stats/agents) — 每 agent 会话/消息真实，
+   tokens/api_calls/errors 无 agent 粒度源 → 诚实 0
+3. 导出统计 (GET /api/v1/stats/export) — 真实汇总 JSON blob
+4. 获取使用统计 (GET /api/v1/stats/usage) — 真实（会话按天 + prometheus 错误/延迟）
+5. 系统资源 (GET /api/v1/stats/system / performance) — psutil
+6. Token 用量 (GET /api/v1/stats/token-usage) — usage_accounting 快照
+
+数据源约定（延续 home.py 的"诚实统计"契约）：
+- agent 数/状态: app_state["agents"]
+- 会话/消息/按天: SessionRepository（home._aggregate_daily）
+- token/调用: home._real_token_stats（usage_accounting 单例）
+- 记忆: home._real_memory_count（多 agent persist DB 聚合）
+- 错误/延迟: analytics._read_llm_metrics（prometheus 埋点）
+- 全部数据源异常回退 0/空，不伪造
 """
 
-from neurova.core.logger import get_logger
 import time
 import uuid
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
 
 from neurova.api.endpoints import get_app_state
+from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter()
-
-
-class SystemStats(BaseModel):
-    """系统统计"""
-
-    uptime: float = 0
-    agents_count: int = 0
-    total_conversations: int = 0
-    total_messages: int = 0
-    total_memories: int = 0
-    total_tools_used: int = 0
-    cpu_usage: float = 0
-    memory_usage: float = 0
-
-
-class AgentStats(BaseModel):
-    """Agent 统计"""
-
-    agent_id: str
-    name: str
-    conversations: int = 0
-    messages: int = 0
-    memories: int = 0
-    tools_used: int = 0
-    uptime: float = 0
-
-
-class UsageStats(BaseModel):
-    """使用统计"""
-
-    daily_requests: Dict[str, int] = {}
-    total_requests: int = 0
-    avg_response_time: float = 0
-    error_rate: float = 0
 
 
 def _get_request_id(request: Request) -> str:
@@ -64,41 +40,97 @@ def _get_request_id(request: Request) -> str:
     return getattr(request.state, "request_id", str(uuid.uuid4()))
 
 
-def _get_app_state():
-    """获取应用状态"""
-    return get_app_state()
+def _agent_status(agent: Any) -> str:
+    status = getattr(agent, "status", None)
+    if isinstance(status, str) and status:
+        return status
+    state = getattr(agent, "state", None)
+    if isinstance(state, str) and state:
+        return state
+    # 与 /agents 列表端点口径一致（agent 实例无独立状态属性 → 运行中）
+    return "running"
 
 
-@router.get("", response_model=SystemStats)
-async def get_system_stats(request: Request):
-    """获取系统统计"""
-    _get_request_id(request)
-
-    state = _get_app_state()
-    stats = SystemStats()
-
-    if state:
-        stats.agents_count = len(state.get("agents", {}))
-
-        # 获取运行时间
-        start_time = state.get("start_time", time.time())
-        stats.uptime = time.time() - start_time
-
-    # 获取系统资源使用情况
+def _system_uptime() -> float:
+    """进程运行时长：优先 app.py AppState.get_uptime()，回退 endpoints app_state。"""
     try:
-        import psutil
+        from neurova.api.app import get_app_state as _get_app
 
-        stats.cpu_usage = psutil.cpu_percent()
-        stats.memory_usage = psutil.virtual_memory().percent
-    except ImportError:
+        st = _get_app()
+        if st is not None and hasattr(st, "get_uptime"):
+            return float(st.get_uptime() or 0.0)
+    except Exception:
         pass
+    try:
+        state = get_app_state() or {}
+        start_time = state.get("start_time", time.time())
+        return max(0.0, time.time() - start_time)
+    except Exception:
+        return 0.0
 
-    return stats
+
+def _build_overview() -> Dict[str, Any]:
+    """系统级 overview（全部真实源，异常回退 0）。"""
+    from neurova.api.endpoints import analytics, home
+
+    try:
+        state = get_app_state() or {}
+        agents = state.get("agents") or {}
+        agents_count = len(agents) if isinstance(agents, dict) else 0
+    except Exception:
+        agents_count = 0
+
+    token_stats = home._real_token_stats()
+    errors = 0
+    try:
+        errors = int(analytics._read_llm_metrics().get("failed_calls", 0) or 0)
+    except Exception:
+        errors = 0
+
+    return {
+        "agents": agents_count,
+        "conversations": home._real_conversation_count(),
+        "memories": home._real_memory_count(),
+        "tokens": token_stats["tokens"],
+        "api_calls": token_stats["calls"],
+        "errors": errors,
+        "uptime": _system_uptime(),
+    }
+
+
+def _build_trends(days: int = 7) -> List[Dict[str, Any]]:
+    """会话/消息按天趋势（真实聚合，确定性）。"""
+    from neurova.api.endpoints import home
+
+    try:
+        agg = home._aggregate_daily(days)
+        return [{"label": l, "value": v} for l, v in zip(agg["labels"], agg["conv_data"])]
+    except Exception:
+        return []
+
+
+@router.get("")
+async def get_system_stats(request: Request):
+    """获取系统统计（overview + 趋势，全部真实）"""
+    _get_request_id(request)
+    try:
+        overview = _build_overview()
+        trends = _build_trends()
+        return {"overview": overview, "trends": trends}
+    except Exception as e:
+        logger.error(f"获取系统统计失败: {e}", exc_info=True)
+        return {
+            "overview": {
+                "agents": 0, "conversations": 0, "memories": 0,
+                "tokens": 0, "api_calls": 0, "errors": 0, "uptime": 0,
+            },
+            "trends": [],
+        }
 
 
 @router.get("/system")
 async def get_system_info(request: Request):
-    """获取系统信息（前端 Dashboard 用）"""
+    """获取系统信息（psutil 真实资源）"""
     try:
         import psutil
 
@@ -137,36 +169,51 @@ async def get_system_info(request: Request):
         return {"error": str(e)}
 
 
-@router.get("/agents", response_model=List[AgentStats])
+@router.get("/agents")
 async def get_agents_stats(request: Request):
-    """获取 Agent 统计"""
+    """获取 Agent 统计（每 agent 会话/消息真实，无粒度源字段诚实 0）"""
     _get_request_id(request)
 
-    state = _get_app_state()
-    agents_stats = []
+    from neurova.session_repository import get_session_repository
 
-    if state:
-        agents = state.get("agents", {})
-        for agent_id, agent in agents.items():
-            stat = AgentStats(
-                agent_id=agent_id,
-                name=getattr(agent, "name", "Unknown"),
-            )
+    try:
+        state = get_app_state() or {}
+        agents = state.get("agents") or {}
+    except Exception:
+        agents = {}
 
-            # 获取 Agent 统计
-            if hasattr(agent, "get_stats"):
-                try:
-                    agent_stats = agent.get_stats()
-                    stat.conversations = agent_stats.get("conversations", 0)
-                    stat.messages = agent_stats.get("messages", 0)
-                    stat.memories = agent_stats.get("memories", 0)
-                    stat.tools_used = agent_stats.get("tools_used", 0)
-                except Exception:
-                    pass
+    # 会话一次性扫描并按 agent 分组（真实摘要含 agent_id/total_messages）
+    per_agent: Dict[str, Dict[str, int]] = {}
+    try:
+        sessions = get_session_repository().list_sessions()
+        for s in sessions:
+            aid = str(s.get("agent_id") or "default")
+            bucket = per_agent.setdefault(aid, {"conversations": 0, "messages": 0})
+            bucket["conversations"] += 1
+            bucket["messages"] += int(s.get("total_messages", 0) or 0)
+    except Exception:
+        per_agent = {}
 
-            agents_stats.append(stat)
+    names = {}
+    for aid, agent in (agents or {}).items():
+        names[aid] = getattr(agent, "name", str(aid))
 
-    return agents_stats
+    results = []
+    for aid in sorted(set(list((agents or {}).keys()) + list(per_agent.keys()))):
+        bucket = per_agent.get(aid, {"conversations": 0, "messages": 0})
+        results.append(
+            {
+                "id": aid,
+                "name": names.get(aid, str(aid)),
+                "status": _agent_status(agents.get(aid)) if isinstance(agents, dict) and aid in (agents or {}) else "unknown",
+                "conversations": bucket["conversations"],
+                "messages": bucket["messages"],
+                "tokens": 0,  # 记账器无 agent 粒度，诚实 0
+                "api_calls": 0,
+                "errors": 0,
+            }
+        )
+    return results
 
 
 @router.get("/token-usage")
@@ -207,23 +254,60 @@ async def get_token_usage(request: Request):
     }
 
 
-@router.get("/usage", response_model=UsageStats)
-async def get_usage_stats(request: Request):
-    """获取使用统计"""
+@router.get("/export")
+async def export_stats(request: Request):
+    """导出统计汇总（JSON blob，供前端导出按钮下载）"""
     _get_request_id(request)
 
-    # TODO: 从数据库或缓存加载使用统计
-    return UsageStats(
-        daily_requests={},
-        total_requests=0,
-        avg_response_time=0,
-        error_rate=0,
-    )
+    from neurova.core.usage_accounting import get_usage_accounting
+
+    try:
+        overview = _build_overview()
+        trends = _build_trends()
+        agents = await get_agents_stats(request)
+        accounting = get_usage_accounting().snapshot()
+        return {
+            "exported_at": time.time(),
+            "overview": overview,
+            "trends": trends,
+            "agents": agents,
+            "token_usage": accounting,
+        }
+    except Exception as e:
+        logger.error(f"导出统计失败: {e}", exc_info=True)
+        return {"exported_at": time.time(), "overview": {}, "trends": [], "agents": [], "token_usage": {}}
+
+
+@router.get("/usage")
+async def get_usage_stats(request: Request):
+    """获取使用统计（真实：会话按天 + prometheus 调用/失败/延迟）"""
+    _get_request_id(request)
+
+    from neurova.api.endpoints import analytics, home
+
+    metrics = analytics._read_llm_metrics()
+    total = int(metrics.get("total_calls", 0) or 0)
+    failed = int(metrics.get("failed_calls", 0) or 0)
+    error_rate = round((failed / total) * 100, 2) if total else 0.0
+
+    daily_requests: Dict[str, int] = {}
+    try:
+        agg = home._aggregate_daily(7)
+        daily_requests = {l: v for l, v in zip(agg["labels"], agg["conv_data"])}
+    except Exception:
+        daily_requests = {}
+
+    return {
+        "daily_requests": daily_requests,
+        "total_requests": total,
+        "avg_response_time": metrics.get("avg_latency_ms", 0.0),
+        "error_rate": error_rate,
+    }
 
 
 @router.get("/performance")
 async def get_performance_stats(request: Request):
-    """获取性能统计"""
+    """获取性能统计（psutil 系统资源真实）"""
     _get_request_id(request)
 
     stats = {
