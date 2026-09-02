@@ -12,18 +12,29 @@
     <a-tabs v-model:activeKey="activeTab">
       <a-tab-pane key="canvases" :tab="t('workflow.tabCanvases')">
         <a-spin :spinning="loadingCanvases">
-          <div v-if="!loadingCanvases && canvases.length === 0" class="empty-state">
+          <div v-if="!loadingCanvases && visibleCanvases.length === 0" class="empty-state">
             <a-empty :description="t('common.noData')" />
           </div>
           <div v-else class="workflow-grid">
+            <div class="canvas-filter">
+              <span class="filter-label">{{ t('workflow.project') }}:</span>
+              <a-select
+                v-model:value="projectFilter"
+                size="small"
+                style="width: 200px"
+                :options="filterOptions"
+              />
+            </div>
             <GlassCard
-              v-for="cv in canvases"
+              v-for="cv in visibleCanvases"
               :key="cv.id"
               :title="cv.name"
               variant="default"
               padding="18px 22px"
             >
               <div class="wf-meta">
+                <a-tag v-if="cv.project_id" color="blue">{{ projectNameOf(cv.project_id) }}</a-tag>
+                <a-tag v-else>{{ t('workflow.noProject') }}</a-tag>
                 <span class="meta-text">{{ t('workflow.nodes') }}: {{ cv.node_count ?? 0 }}</span>
                 <span class="meta-text">{{ t('workflow.edges') }}: {{ cv.edge_count ?? 0 }}</span>
                 <span v-if="cv.updated_at" class="meta-text">{{ t('workflow.updatedAt') }}: {{ formatTime(cv.updated_at) }}</span>
@@ -167,7 +178,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import {
   getWorkflows,
   executeWorkflow,
@@ -196,8 +207,25 @@ import GlassButton from '@/components/GlassButton.vue'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 
 const activeTab = ref<'canvases' | 'definitions'>('canvases')
+
+/** 项目归属筛选：'' = 全部, 'none' = 未归属, project_id = 指定项目 */
+const projectFilter = ref('')
+const filterOptions = computed(() => [
+  { label: t('common.all'), value: '' },
+  { label: t('workflow.noProject'), value: 'none' },
+  ...projects.value.map((p) => ({ label: p.name, value: p.project_id })),
+])
+const visibleCanvases = computed(() => {
+  if (projectFilter.value === 'none') return canvases.value.filter((c) => !c.project_id)
+  if (projectFilter.value) return canvases.value.filter((c) => c.project_id === projectFilter.value)
+  return canvases.value
+})
+function projectNameOf(projectId: string): string {
+  return projects.value.find((p) => p.project_id === projectId)?.name ?? projectId
+}
 
 interface WorkflowNodeRow {
   id: string
@@ -471,6 +499,9 @@ function formatTime(ts: number): string {
 }
 
 onMounted(() => {
+  // 项目详情页"新建工作流"跳转携带 ?project=<id>：创建表单预填，保证归属
+  const qp = route.query.project
+  if (typeof qp === 'string' && qp) createForm.projectId = qp
   fetchCanvases()
   fetchWorkflows()
   fetchComfyuiStatus()
@@ -521,4 +552,7 @@ onMounted(() => {
 }
 .file-name { color: var(--nr-text-primary); font-size: 13px; margin-top: 6px; }
 .file-hint { color: var(--nr-text-tertiary); font-size: 12px; margin-top: 6px; }
+/* 项目归属筛选 */
+.canvas-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.canvas-filter .filter-label { font-size: 12px; color: var(--nr-text-secondary); }
 </style>
