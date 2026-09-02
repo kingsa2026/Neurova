@@ -203,7 +203,7 @@ QP 有两个罕见机制值得记录：**real_behavior_proof_check**（CI 门禁
 
 ## 19. 合并补课清单（工程面 + 前端功能面，按性价比）
 
-> **✅ 执行完毕（2026-09-02 自动长任务，21 commits）**：下表除"明确排除"项外全部落地——工程 P1 全部+P2 全部（P3-a Tauri 另立项）、前端 P1/P2 全部、语音 4 项、记忆认知 4 项。执行明细见 `docs/04-plans/2026-09-02-noncore-upgrade-autorun-plan.md` 执行结果节。
+> **✅ 执行完毕（2026-09-02 自动长任务 21 commits + 第二轮补课 5 commits）**：除"明确排除"外全部落地——含第二轮补齐的 CONTRIBUTING/SECURITY（48f48ab）、telegram inline_keyboard（62a7aa9）、情感分析入口收敛（4e3d9d5）、**断线重连+replay 快进（d66c28d）**。仅剩 P3-a Tauri 桌面与 P3-b 消息队列两个大工程。执行明细见 `docs/04-plans/2026-09-02-noncore-upgrade-autorun-plan.md` 执行结果节。
 
 > 工程面 9 项已细化为可执行计划：`docs/04-plans/2026-09-02-noncore-cleanup-plan.md`（含 MoE 索引勘误 Task——勘误注记已于本次合并写入 §5/§11）。Tauri 桌面（工程 P3-a）需独立立项，不入细化计划。
 
