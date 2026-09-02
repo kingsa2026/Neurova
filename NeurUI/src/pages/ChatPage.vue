@@ -1214,65 +1214,94 @@ async function sendMessage() {
   abortController = new AbortController()
   const token = secureStorage.get('auth_token')
 
-  try {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-    const response = await fetch(`${baseUrl}/console/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        agent_id: agentId.value,
-        session_id: currentSessionId.value,
-        message: text,
-        file_ids: fileIds.length > 0 ? fileIds : undefined,
-        // 轮次定位键：随 metadata 持久化，供编辑/删除/反馈定位实时轮次
-        client_timestamp: roundTimestamp,
-        // 手动模型切换：携带用户选择的模型。
-        // 含富媒体文件时不携带（置空），交由后端自动路由至多模态能力 LLM。
-        model: fileIds.length > 0 ? undefined : (selectedModel.value || undefined),
-        // 思考程度：light/standard/deep，后端注入对应回答深度指令
-        thinking_effort: thinkingEffort.value,
-      }),
-      signal: abortController.signal,
-    })
+  // 补课 8（断线重连+replay 快进）：读流网络中断（非用户中止/非 HTTP 错）
+  // 时自动带 replay_from=<已消费事件数> 重连一次——服务端快进重放缓冲尾段，
+  // 只补发未确认增量，不重放已渲染内容。
+  const buildBody = (replayFrom?: number) => ({
+    agent_id: agentId.value,
+    session_id: currentSessionId.value,
+    message: text,
+    file_ids: fileIds.length > 0 ? fileIds : undefined,
+    // 轮次定位键：随 metadata 持久化，供编辑/删除/反馈定位实时轮次
+    client_timestamp: roundTimestamp,
+    // 手动模型切换：携带用户选择的模型。
+    // 含富媒体文件时不携带（置空），交由后端自动路由至多模态能力 LLM。
+    model: fileIds.length > 0 ? undefined : (selectedModel.value || undefined),
+    // 思考程度：light/standard/deep，后端注入对应回答深度指令
+    thinking_effort: thinkingEffort.value,
+    ...(replayFrom !== undefined ? { replay_from: replayFrom } : {}),
+  })
 
-    if (!response.ok) {
-      const errBody = await response.text()
-      throw new Error(errBody || `HTTP ${response.status}`)
+  const receivedSeq: number[] = [0]
+
+  const readStream = async (replayFrom?: number): Promise<void> => {
+    abortController = new AbortController()
+    try {
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+      const response = await fetch(`${baseUrl}/console/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(buildBody(replayFrom)),
+        signal: abortController.signal,
+      })
+
+      if (!response.ok) {
+        const errBody = await response.text()
+        throw new Error(errBody || `HTTP ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No response body')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (!data || data === '[DONE]') continue
+
+          try {
+            const event = JSON.parse(data)
+            receivedSeq[0] += 1
+            processSSEEvent(event, streamingMsg)
+          } catch {
+            // Non-JSON line, skip
+          }
+        }
+        scrollToBottom()
+      }
+    } finally {
+      abortController = null
     }
+  }
 
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('No response body')
-
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const data = line.slice(6).trim()
-        if (!data || data === '[DONE]') continue
-
-        try {
-          const event = JSON.parse(data)
-          processSSEEvent(event, streamingMsg)
-        } catch {
-          // Non-JSON line, skip
+  try {
+    await readStream()
+  } catch (err: any) {
+    // 网络层中断且已收到至少一个事件 → 重连快进一次（HTTP 错误/中止不重连）
+    const networkDrop =
+      err.name !== 'AbortError' && receivedSeq[0] > 0 && (err instanceof TypeError || /network|failed|fetch/i.test(String(err.message || '')))
+    if (networkDrop) {
+      try {
+        await readStream(receivedSeq[0])
+      } catch (retryErr: any) {
+        if (retryErr.name !== 'AbortError') {
+          streamingMsg.content += `\n\n**Error:** ${retryErr.message || 'Stream failed.'}`
         }
       }
-      scrollToBottom()
-    }
-  } catch (err: any) {
-    if (err.name !== 'AbortError') {
+    } else if (err.name !== 'AbortError') {
       streamingMsg.content += `\n\n**Error:** ${err.message || 'Stream failed.'}`
     }
   } finally {

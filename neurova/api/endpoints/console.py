@@ -109,6 +109,9 @@ class ChatRequest(BaseModel):
     # 操作（编辑覆写/删除一轮/反馈）的双路定位键之一 — 服务端 add_message
     # 用自己的 now 落盘，客户端时间戳不落盘会导致实时轮次无法定位。
     client_timestamp: typing.Optional[str] = None
+    # 补课 8（断线重连+replay 快进）：从该缓冲序号起重放事件（客户端已
+    # 消费的最后序号）；None=全新请求（不重放）。配合会话级事件缓冲使用。
+    replay_from: typing.Optional[int] = None
 
 
 def attach_files(file_ids: typing.Optional[typing.List[str]], user_id: str) -> typing.List[dict]:
@@ -143,6 +146,56 @@ def attach_files(file_ids: typing.Optional[typing.List[str]], user_id: str) -> t
 
 # 真流式：发射器队列的结束哨兵
 _EMIT_DONE = object()
+
+# ── 断线重连事件缓冲（补课 8）──────────────────────────────
+# 每 session 保留最近一轮 SSE 事件的有序缓冲：客户端断线后带
+# replay_from=<已消费序号> 重连，服务端快进重放尾部（不重放已确认段）。
+# 内存有界：每 session 上限 MAX_BUFFERED_EVENTS，session 数上限
+# MAX_REPLAY_SESSIONS（LRU 淘汰），空闲 TTL 清理——防长会话内存膨胀。
+_REPLAY_BUFFER_TTL_SECONDS = 600.0
+MAX_BUFFERED_EVENTS = 500
+MAX_REPLAY_SESSIONS = 50
+_replay_buffers: Dict[str, Dict[str, Any]] = {}
+_replay_buffers_lock = asyncio.Lock()
+
+
+def _buffer_replay_events(session_id: str, events: typing.List[Dict[str, Any]]) -> None:
+    """把一轮事件追加进会话缓冲（有界，超限丢最旧）。"""
+    buf = _replay_buffers.get(session_id)
+    if buf is None:
+        if len(_replay_buffers) >= MAX_REPLAY_SESSIONS:
+            # LRU：淘汰最旧 last_active
+            oldest = min(_replay_buffers.items(), key=lambda kv: kv[1]["last_active"])
+            _replay_buffers.pop(oldest[0], None)
+        buf = {"events": [], "next_seq": 0, "last_active": time.time()}
+        _replay_buffers[session_id] = buf
+    buf["last_active"] = time.time()
+    for event in events:
+        seq = buf["next_seq"]
+        buf["next_seq"] += 1
+        buf["events"].append((seq, event))
+    if len(buf["events"]) > MAX_BUFFERED_EVENTS:
+        buf["events"] = buf["events"][-MAX_BUFFERED_EVENTS:]
+
+
+def _get_replay_tail(session_id: str, replay_from: int) -> typing.List[Dict[str, Any]]:
+    """取 seq > replay_from 的待重放事件；缓冲不存在/过期返回空。"""
+    buf = _replay_buffers.get(session_id)
+    if buf is None:
+        return []
+    buf["last_active"] = time.time()
+    if time.time() - buf["last_active"] > _REPLAY_BUFFER_TTL_SECONDS:
+        return []
+    return [event for seq, event in buf["events"] if seq > replay_from]
+
+
+async def _gc_replay_buffers() -> None:
+    """TTL 清理过期缓冲（每轮请求顺带触发，无独立任务）。"""
+    async with _replay_buffers_lock:
+        now = time.time()
+        expired = [sid for sid, b in _replay_buffers.items() if now - b["last_active"] > _REPLAY_BUFFER_TTL_SECONDS]
+        for sid in expired:
+            _replay_buffers.pop(sid, None)
 
 
 def _sse_events_from_emitter_item(
@@ -346,6 +399,39 @@ async def post_console_chat(
     else:
         session_id = repo.create_session(agent_id=agent_id, user_id=user_id, title="新对话")
 
+    await _gc_replay_buffers()
+
+    # 断线重连分支（补课 8）：带 replay_from 的请求不启动新 run——
+    # 快进重放该 session 缓冲中 seq > replay_from 的事件，至 done 为止。
+    # 无缓冲（服务重启/超时/全新会话）→ 落回正常新请求（客户端视为失败重发）。
+    if body.replay_from is not None:
+        tail = _get_replay_tail(session_id, int(body.replay_from))
+        if tail or _replay_buffers.get(session_id):
+
+            async def replay_stream():
+                replayed = 0
+                # 已缓冲段立即快进
+                for event in tail:
+                    replayed += 1
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                # run 未结束则持续跟踪缓冲尾部
+                while True:
+                    buf = _replay_buffers.get(session_id)
+                    if not buf:
+                        break
+                    events = buf["events"]
+                    fresh = [e for s, e in events if s > body.replay_from + replayed]
+                    if fresh:
+                        for event in fresh:
+                            replayed += 1
+                            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    if buf.get("done"):
+                        break
+                    await asyncio.sleep(0.05)
+
+            return StreamingResponse(replay_stream(), media_type="text/event-stream")
+        # 无缓冲：继续走正常新请求（客户端重试语义由前端决定）
+
     # S1 修复 (Critical #1 双写冲突): console 不再调 repo.save_message.
     # 持久化完全委托给 ChatPipeline._step_save_session → _save_to_session →
     # sm.add_message (成对原子写入 user+assistant).
@@ -371,8 +457,16 @@ async def post_console_chat(
 
     if body.stream and not agent:
         async def echo_stream():
-            yield f"data: {json.dumps({'type': 'chunk', 'content': reply})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+            events = [
+                {"type": "chunk", "content": reply},
+                {"type": "done", "session_id": session_id},
+            ]
+            _buffer_replay_events(session_id, events)
+            for event in events:
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            buf = _replay_buffers.get(session_id)
+            if buf:
+                buf["done"] = True
 
         return StreamingResponse(echo_stream(), media_type="text/event-stream")
 
@@ -438,18 +532,22 @@ async def post_console_chat(
             seen_results: set = set()
 
             try:
+                live_events: typing.List[Dict[str, Any]] = []
                 while True:
                     item = await queue.get()
                     if item is _EMIT_DONE:
                         break
                     for event in _sse_events_from_emitter_item(item, seen_calls, seen_results):
+                        live_events.append(event)  # 补课 8：断线重连缓冲
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             finally:
+                _buffer_replay_events(session_id, live_events)
                 result = await task
                 reply = result["text"]
                 reasoning = result["reasoning"]
                 tool_messages = result["tool_messages"]
 
+                flush_events: typing.List[Dict[str, Any]] = []
                 # 收尾 flush：文本模式等未经发射器的工具消息（去重后）
                 for tm in tool_messages:
                     for event in _build_tool_events(tm):
@@ -466,9 +564,15 @@ async def post_console_chat(
                             if key in seen_results:
                                 continue
                             seen_results.add(key)
+                        flush_events.append(event)
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
+                flush_events.append({"type": "done", "session_id": session_id})
+                _buffer_replay_events(session_id, flush_events)
                 yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+                buf = _replay_buffers.get(session_id)
+                if buf:
+                    buf["done"] = True
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
