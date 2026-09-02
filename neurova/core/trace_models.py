@@ -246,6 +246,9 @@ class Trajectory:
             "trace_id": self.trace_id,
             "session_id": self.session_id,
             "agent_id": self.agent_id,
+            # user_id 补录（预存失败修复 2026-09-02）：原 to_dict 漏该字段——
+            # 保存的轨迹 JSON 无 user_id，load/list 按用户过滤永远失配
+            "user_id": self.user_id,
             "start_time": self.start_time,
             "end_time": self.end_time,
             "total_duration_ms": self.total_duration_ms,

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List
 
@@ -78,7 +80,9 @@ class UnifiedRetriever:
         # 方案B：兼容旧检索器（迁移期间）
         if self._moe:
             try:
-                moe_results = await self._moe.retrieve(query, limit=limit)
+                moe_results = self._moe.retrieve(query, limit=limit)
+                if asyncio.iscoroutine(moe_results):
+                    moe_results = await moe_results
                 results.extend(moe_results)
             except Exception as e:
                 logger.warning("MoE 检索失败: %s", e)

@@ -24,6 +24,7 @@ from neurova.collaboration.canvas_ops import (
 )
 from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
 from neurova.core.logger import get_logger
+import re
 import shlex
 import time
 from datetime import datetime
@@ -2898,6 +2899,49 @@ class ToolExecutor:
                 )
             except Exception:
                 logger.debug("skill_packer.observe 失败（忽略）", exc_info=True)
+
+    @staticmethod
+    def _parse_params(params_str: str) -> Dict[str, Any]:
+        """解析工具参数字符串（P0 契约恢复）。
+
+        优先级：JSON 对象 > key=value 逐段解析（bool/int/float/带引号字符串）。
+        空串返回空 dict。
+        """
+        text = (params_str or "").strip()
+        if not text:
+            return {}
+        # 1) JSON 对象
+        if text.startswith("{"):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+        # 2) key=value 逗号分段（值可为 "..." / '...' / bool / 数字 / 裸词）
+        result: Dict[str, Any] = {}
+        for part in re.split(r",(?=(?:[^\"]*\"[^\"]*\")*(?:[^\"]*)$)", text):
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            key, _, value = part.partition("=")
+            key = key.strip().strip('"').strip("'")
+            value = value.strip()
+            if not key:
+                continue
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                result[key] = value[1:-1]
+            elif value.lower() == "true":
+                result[key] = True
+            elif value.lower() == "false":
+                result[key] = False
+            elif re.fullmatch(r"-?\d+", value):
+                result[key] = int(value)
+            elif re.fullmatch(r"-?\d+\.\d+", value):
+                result[key] = float(value)
+            else:
+                result[key] = value
+        return result
 
     def _get_builtin_tool_params(self, tool_name: str) -> Optional[Dict]:
         """
