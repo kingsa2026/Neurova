@@ -45,7 +45,7 @@ _default_settings = {
 # CORS 配置文件路径
 _CORS_CONFIG_FILE = FilePath(__file__).parent.parent.parent.parent / "config" / "cors.json"
 
-# 默认 CORS origins
+# 默认 CORS origins（开发端口 + Tauri v2 桌面壳 WebView origin）
 _DEFAULT_CORS_ORIGINS = [
     "http://localhost:8100",
     "http://localhost:5173",
@@ -53,6 +53,8 @@ _DEFAULT_CORS_ORIGINS = [
     "http://127.0.0.1:8100",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
 ]
 
 

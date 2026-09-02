@@ -143,7 +143,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             del self._requests[ip]
 
 
-def _load_cors_origins_from_config() -> list:
+# 兜底默认值：开发端口 + Tauri v2 桌面壳 WebView origin
+# （Windows 打包态为 http://tauri.localhost；https 变体覆盖 useHttpsScheme 场景）
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:8100",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:8100",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+]
+
+
+def _load_cors_origins_from_config(config_file=None) -> list:
     """
     从配置文件加载 CORS origins
 
@@ -151,6 +165,9 @@ def _load_cors_origins_from_config() -> list:
     1. 环境变量 NEUROVA_CORS_ORIGINS
     2. 配置文件 config/cors.json
     3. 默认值
+
+    Args:
+        config_file: 配置文件路径；None 时使用仓库 config/cors.json（测试可注入临时路径）
     """
     import json as _json
     from pathlib import Path
@@ -161,8 +178,9 @@ def _load_cors_origins_from_config() -> list:
         return [o.strip() for o in cors_origins_env.split(",") if o.strip()]
 
     # 2. 检查配置文件
-    config_file = Path(__file__).parent.parent.parent / "config" / "cors.json"
-    if config_file.exists():
+    if config_file is None:
+        config_file = Path(__file__).parent.parent.parent / "config" / "cors.json"
+    if Path(config_file).exists():
         try:
             with open(config_file, "r", encoding="utf-8") as f:
                 # 注意：变量名用 cors_config，避免遮蔽模块级 config
@@ -172,15 +190,8 @@ def _load_cors_origins_from_config() -> list:
         except Exception as e:
             logger.warning("Failed to load CORS config from file: %s", e)
 
-    # 3. 默认值（包含前端 dev server 端口 8100）
-    return [
-        "http://localhost:8100",
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:8100",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ]
+    # 3. 默认值
+    return list(DEFAULT_CORS_ORIGINS)
 
 
 def setup_middleware(app: FastAPI) -> None:
