@@ -999,6 +999,9 @@ class PostChatPipeline:
 
         # 周期性反思
         turn_count = getattr(self._agt, "turn_count", 0)
+        # Mock/异常类型防御：非 int 视为 0
+        if not isinstance(turn_count, int):
+            turn_count = 0
         if turn_count > 0 and turn_count % self.REFLECTION_TURN_INTERVAL == 0:
             return True
 
@@ -1044,6 +1047,9 @@ class PostChatPipeline:
                 return f"Agent 不确定性关键词: {kw}"
 
         turn_count = getattr(self._agt, "turn_count", 0)
+        # Mock/异常类型防御：非 int 视为 0
+        if not isinstance(turn_count, int):
+            turn_count = 0
         if turn_count > 0 and turn_count % self.REFLECTION_TURN_INTERVAL == 0:
             return f"周期性反思 (turn={turn_count})"
 

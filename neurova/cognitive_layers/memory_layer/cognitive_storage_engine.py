@@ -440,6 +440,14 @@ class CognitiveStorageEngine:
                     continue
                 results.append(node)
 
+        # L0 缓冲扫描（预存失败修复 2026-09-02）：flush 阈值(100)前的节点
+        # 只在 _l0_buffer，此前 retrieve 不扫描 L0 → store 后立查拿不到结果
+        for node in self._l0_buffer:
+            if self._apply_filters(node, filters):
+                continue
+            if query.lower() in node.content.lower():
+                results.append(node)
+
         # S-4: 去重(按 id), 保留温度更高的那份
         seen: Dict[str, UnifiedMemoryNode] = {}
         for node in results:
