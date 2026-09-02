@@ -8,6 +8,8 @@ vi.mock('@/api/auth', () => ({
     register: vi.fn(),
     logout: vi.fn(),
     getCurrentUser: vi.fn(),
+    setupStatus: vi.fn(),
+    setupRegister: vi.fn(),
   },
 }))
 
@@ -122,6 +124,53 @@ describe('useAuthStore', () => {
     })
 
     expect(result).toBe(true)
+    expect(store.isAuthenticated).toBe(true)
+  })
+
+  it('register without email succeeds (email optional)', async () => {
+    vi.mocked(authAPI.register).mockResolvedValue({
+      tokens: { access_token: 'token', refresh_token: 'refresh' },
+      user: { id: '1', username: 'noemail' },
+    } as any)
+
+    const store = useAuthStore()
+    const result = await store.register({
+      username: 'noemail',
+      password: 'Str0ng!Pass',
+      confirmPassword: 'Str0ng!Pass',
+    })
+
+    expect(result).toBe(true)
+    expect(store.isAuthenticated).toBe(true)
+  })
+
+  it('register accepts flat backend contract (access_token at data top level)', async () => {
+    // 后端 POST /auth/register 实际返回 {code,message,data:{user_id,username,access_token,refresh_token}}
+    vi.mocked(authAPI.register).mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: {
+        user_id: '1',
+        username: 'flatuser',
+        access_token: 'flat-token',
+        refresh_token: 'flat-refresh',
+      },
+    } as any)
+    vi.mocked(authAPI.getCurrentUser).mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: { user_id: '1', username: 'flatuser', role: 'admin' },
+    } as any)
+
+    const store = useAuthStore()
+    const result = await store.register({
+      username: 'flatuser',
+      password: 'Str0ng!Pass',
+      confirmPassword: 'Str0ng!Pass',
+    })
+
+    expect(result).toBe(true)
+    expect(store.token).toBe('flat-token')
     expect(store.isAuthenticated).toBe(true)
   })
 

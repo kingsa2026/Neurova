@@ -107,7 +107,8 @@ export const useAuthStore = defineStore('auth', () => {
       error.value = 'Username must be 3-20 characters (letters, numbers, underscores).'
       return false
     }
-    if (!validateEmail(form.email)) {
+    // email 已改为可选（2026-09-02 注册页移除邮箱/验证码）；填写时才校验格式
+    if (form.email && !validateEmail(form.email)) {
       error.value = 'Please enter a valid email address.'
       return false
     }
@@ -130,8 +131,12 @@ export const useAuthStore = defineStore('auth', () => {
         register_source: form.register_source ?? 'web',
       })
       const data = (res as any)?.data ?? res
-      if (data?.tokens) {
-        persistTokens(data.tokens)
+      // 兼容两种契约：包装 {tokens, user} 或后端扁平 {user_id, username, access_token, refresh_token}
+      const tokens = data?.tokens ?? (data?.access_token
+        ? { access_token: data.access_token, refresh_token: data.refresh_token }
+        : null)
+      if (tokens) {
+        persistTokens(tokens)
         if (data.user) persistUser(data.user)
         return true
       }

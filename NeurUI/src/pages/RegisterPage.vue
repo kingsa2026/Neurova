@@ -23,37 +23,6 @@
             />
           </a-form-item>
 
-          <a-form-item :label="t('auth.email')" name="email">
-            <GlassInput
-              v-model:model-value="form.email"
-              type="email"
-              :placeholder="t('auth.email')"
-              @update:model-value="form.email = $event"
-            />
-          </a-form-item>
-
-          <!-- Verification code row -->
-          <a-form-item :label="t('auth.verifyCode')" name="code" class="nr-code-field">
-            <div class="nr-code-row">
-              <div class="nr-code-input">
-                <GlassInput
-                  v-model:model-value="form.code"
-                  :placeholder="t('auth.verifyCode')"
-                  @update:model-value="form.code = $event"
-                />
-              </div>
-              <GlassButton
-                variant="secondary"
-                size="md"
-                :loading="codeSending"
-                :disabled="!form.email || codeCooldown > 0"
-                @click="handleSendCode"
-              >
-                {{ codeCooldown > 0 ? `${codeCooldown}s` : t('auth.sendCode') }}
-              </GlassButton>
-            </div>
-          </a-form-item>
-
           <a-form-item :label="t('auth.password')" name="password">
             <GlassInput
               v-model:model-value="form.password"
@@ -115,12 +84,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onBeforeUnmount } from 'vue'
+import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
-import { authAPI } from '@/api/auth'
 import StarBackground from '@/components/StarBackground.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -135,8 +103,6 @@ const formRef = ref()
 
 const form = reactive({
   username: '',
-  email: '',
-  code: '',
   password: '',
   confirmPassword: '',
   agreedTerms: false,
@@ -144,10 +110,6 @@ const form = reactive({
 
 const loading = ref(false)
 const error = ref<string | null>(null)
-const codeSending = ref(false)
-const codeCooldown = ref(0)
-
-let cooldownTimer: ReturnType<typeof setInterval> | null = null
 
 /** Ant Design form validation rules. */
 const rules = {
@@ -158,10 +120,6 @@ const rules = {
       pattern: /^[a-zA-Z0-9_]+$/,
       message: t('validation.username'),
     },
-  ],
-  email: [
-    { required: true, message: t('validation.required') },
-    { type: 'email' as const, message: t('validation.email') },
   ],
   password: [
     { required: true, message: t('validation.required') },
@@ -178,32 +136,6 @@ const rules = {
       },
     },
   ],
-}
-
-/** Send a verification code to the user's email. */
-async function handleSendCode() {
-  if (!form.email || codeCooldown.value > 0) return
-
-  codeSending.value = true
-  error.value = null
-
-  try {
-    await authAPI.sendCode(form.email)
-
-    // Start cooldown timer (60 seconds)
-    codeCooldown.value = 60
-    cooldownTimer = setInterval(() => {
-      codeCooldown.value -= 1
-      if (codeCooldown.value <= 0 && cooldownTimer) {
-        clearInterval(cooldownTimer)
-        cooldownTimer = null
-      }
-    }, 1000)
-  } catch (err: any) {
-    error.value = err?.response?.data?.message || err?.message || 'Failed to send verification code.'
-  } finally {
-    codeSending.value = false
-  }
 }
 
 /** Submit the registration form. */
@@ -226,10 +158,8 @@ async function handleRegister() {
   try {
     const success = await authStore.register({
       username: form.username,
-      email: form.email,
       password: form.password,
       confirmPassword: form.confirmPassword,
-      code: form.code || undefined,
       agreed_terms: form.agreedTerms,
       agreed_privacy: form.agreedTerms,
       register_source: 'web',
@@ -240,16 +170,12 @@ async function handleRegister() {
     } else {
       error.value = authStore.error || t('auth.loginFailed')
     }
-  } catch (err: any) {
-    error.value = err?.message || 'Registration failed. Please try again.'
-  } finally {
-    loading.value = false
+    } catch (err: any) {
+      error.value = err?.message || 'Registration failed. Please try again.'
+    } finally {
+      loading.value = false
+    }
   }
-}
-
-onBeforeUnmount(() => {
-  if (cooldownTimer) clearInterval(cooldownTimer)
-})
 </script>
 
 <style scoped>

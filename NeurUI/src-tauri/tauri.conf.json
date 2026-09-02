@@ -46,7 +46,9 @@
         ],
         "displayLanguageSelector": false,
         "installMode": "perMachine",
-        "template": "./nsis/installer.nsi"
+        "template": "./nsis/installer.nsi",
+        "sidebarImage": "./nsis/sidebar.bmp",
+        "headerImage": "./nsis/header.bmp"
       }
     },
     "resources": {
