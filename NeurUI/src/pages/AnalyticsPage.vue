@@ -131,38 +131,39 @@ const fetchAll = async () => {
     const params = { period: timeRange.value }
     if (activeTab.value === 'usage') {
       const res = await analyticsApi.getUsageAnalytics(params)
-      const d = res?.data ?? {} as any
+      const d = res?.data ?? res ?? {} as any
+      const byAgents = d.by_agent ?? []
       usageData.value = {
-        conversations: d.total_requests ?? 0,
+        conversations: byAgents.reduce((sum: number, a: any) => sum + (a.requests ?? 0), 0),
         tokens: d.total_tokens ?? 0,
         api_calls: d.total_requests ?? 0,
-        agents: d.by_agent?.length ?? 0,
+        agents: byAgents.length,
         timeline: (d.daily_trend ?? []).map((p: any) => ({ label: p.date, value: p.requests })),
         max_value: Math.max(...(d.daily_trend ?? []).map((p: any) => p.requests), 1),
       }
     } else if (activeTab.value === 'performance') {
       const res = await analyticsApi.getPerformanceAnalytics(params)
-      const d = res?.data ?? {} as any
+      const d = res?.data ?? res ?? {} as any
       perfData.value = {
         avg_response_ms: Math.round(d.avg_latency_ms ?? 0),
         p95_ms: Math.round(d.p95_latency_ms ?? 0),
         throughput: d.throughput_rps ?? 0,
-        error_rate: Math.round((d.error_rate ?? 0) * 100),
+        error_rate: d.error_rate ?? 0,
         endpoints: (d.by_endpoint ?? []).map((e: any) => ({ path: e.endpoint, avg_ms: e.avg_ms, count: e.count })),
       }
     } else if (activeTab.value === 'behavior') {
       const res = await analyticsApi.getBehaviorAnalytics(params)
-      const d = res?.data ?? {} as any
+      const d = res?.data ?? res ?? {} as any
       behaviorData.value = {
         popular_features: (d.top_tools ?? []).map((t: any) => ({ name: t.name, count: t.usage_count })),
         user_paths: (d.conversation_patterns ?? []).map((p: any) => ({ path: p.pattern, count: p.count })),
       }
     } else if (activeTab.value === 'errors') {
       const res = await analyticsApi.getErrorAnalytics(params)
-      const d = res?.data ?? {} as any
+      const d = res?.data ?? res ?? {} as any
       errorData.value = {
         total: d.total_errors ?? 0,
-        rate: Math.round(((d.total_errors ?? 0) / 100) * 100),
+        rate: d.error_rate ?? 0,
         top_errors: (d.by_type ?? []).map((e: any) => ({ code: e.type, message: e.type, count: e.count })),
       }
     }

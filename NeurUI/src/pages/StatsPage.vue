@@ -215,9 +215,9 @@ const fetchAnalytics = async () => {
       analyticsApi.getBehaviorAnalytics({ period: range }),
       analyticsApi.getErrorAnalytics({ period: range }),
     ])
-    perfData.value = (perfRes?.data ?? {}) as Record<string, any>
-    behaviorData.value = (behaviorRes?.data ?? {}) as Record<string, any>
-    errorData.value = (errorRes?.data ?? {}) as Record<string, any>
+    perfData.value = (perfRes?.data ?? perfRes ?? {}) as Record<string, any>
+    behaviorData.value = (behaviorRes?.data ?? behaviorRes ?? {}) as Record<string, any>
+    errorData.value = (errorRes?.data ?? errorRes ?? {}) as Record<string, any>
   } catch {
     // silent
   }
