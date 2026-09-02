@@ -462,16 +462,39 @@
         <span class="nr-msg-queue-count">
           {{ t('chat.queued', { n: messageQueue.pendingCount }) }}
         </span>
-        <button
+        <span
           v-for="qi in messageQueue.items"
           :key="qi.id"
           class="nr-msg-queue-item"
           :title="qi.status === 'failed' ? qi.error : qi.text"
-          @click="messageQueue.retry(qi.id) && drainMessageQueue()"
         >
           <span class="nr-msg-queue-text">{{ qi.text.slice(0, 40) }}</span>
           <span class="nr-msg-queue-status" :class="qi.status">{{ qi.status }}</span>
-        </button>
+          <button
+            v-if="qi.status === 'pending' && messageQueue.items[0]?.id !== qi.id"
+            class="nr-msg-queue-act"
+            :title="t('chat.queueTop')"
+            @click="messageQueue.moveToTop(qi.id)"
+          >↑</button>
+          <button
+            v-if="qi.status === 'pending'"
+            class="nr-msg-queue-act"
+            :title="t('common.edit')"
+            @click="editQueuedItem(qi)"
+          >✎</button>
+          <button
+            v-if="qi.status === 'failed'"
+            class="nr-msg-queue-act"
+            :title="t('chat.retry')"
+            @click="messageQueue.retry(qi.id) && drainMessageQueue()"
+          >↻</button>
+          <button
+            v-if="qi.status !== 'sending'"
+            class="nr-msg-queue-act"
+            :title="t('common.delete')"
+            @click="messageQueue.remove(qi.id)"
+          >✕</button>
+        </span>
         <button class="nr-msg-queue-clear" @click="messageQueue.clear()">
           {{ t('common.clear') }}
         </button>
@@ -1225,6 +1248,12 @@ async function deleteRoundAt(idx: number): Promise<void> {
 // ---------------------------------------------------------------------------
 // Message Sending with SSE Streaming
 // ---------------------------------------------------------------------------
+/** 队列项就地编辑（补课 A3；prompt 简化——QP 用内联输入，语义一致）。 */
+function editQueuedItem(qi: { id: string; text: string }): void {
+  const next = window.prompt(t('chat.queueEdit'), qi.text)
+  if (next !== null && next.trim()) messageQueue.updateText(qi.id, next)
+}
+
 /**
  * 429 限流识别与横幅（补课 A1）：错误文本含 429/rate limit 措辞时，
  * 从已启用模型列表（排除当前选中）生成备选候选，弹出横幅一键切换。
@@ -3679,6 +3708,19 @@ onBeforeUnmount(() => {
 
 .nr-msg-queue-count {
   color: var(--nr-text-secondary);
+}
+
+.nr-msg-queue-act {
+  border: none;
+  background: none;
+  color: var(--nr-text-tertiary);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 11px;
+}
+
+.nr-msg-queue-act:hover {
+  color: var(--nr-text-primary);
 }
 
 .nr-msg-queue-item {

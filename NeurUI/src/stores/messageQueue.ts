@@ -86,6 +86,32 @@ export const useMessageQueueStore = defineStore('messageQueue', () => {
     return true
   }
 
+  /** 重排 pending 项（补课 A3：QP reorder 语义；非 pending 位置不动）。 */
+  function reorder(orderedIds: string[]): void {
+    const byId = new Map(items.value.map((i) => [i.id, i]))
+    const pendingOrdered = orderedIds
+      .map((id) => byId.get(id))
+      .filter((i): i is QueuedMessage => !!i && i.status === 'pending')
+    const pendingIds = new Set(pendingOrdered.map((i) => i.id))
+    // 未出现在 orderedIds 中的 pending 保持相对顺序追加在后
+    const rest = items.value.filter(
+      (i) => i.status === 'pending' && !pendingIds.has(i.id),
+    )
+    const nonPending = items.value.filter((i) => i.status !== 'pending')
+    items.value = [...nonPending, ...pendingOrdered, ...rest]
+  }
+
+  /** 插队：把指定 pending 项移到队首（下一个被续发的就是它）。 */
+  function moveToTop(id: string): boolean {
+    const item = items.value.find((i) => i.id === id)
+    if (!item || item.status !== 'pending') return false
+    const rest = items.value.filter((i) => i.id !== id)
+    const nonPending = rest.filter((i) => i.status !== 'pending')
+    const pendings = rest.filter((i) => i.status === 'pending')
+    items.value = [...nonPending, item, ...pendings]
+    return true
+  }
+
   /** 移除单条（pending/failed 均可；sending 不可移除）。 */
   function remove(id: string): boolean {
     const item = items.value.find((i) => i.id === id)
@@ -115,6 +141,8 @@ export const useMessageQueueStore = defineStore('messageQueue', () => {
     markFailed,
     retry,
     updateText,
+    reorder,
+    moveToTop,
     remove,
     clear,
     setPaused,
