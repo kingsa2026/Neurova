@@ -11,6 +11,8 @@ export interface ParamSchema {
   min: number | null
   max: number | null
   description: string
+  /** 前端 i18n 语言包键（memorySettings.param<CamelKey>，与后端 desc_key 规则一致），缺省时回退 description */
+  desc_key?: string
   current: any
 }
 
