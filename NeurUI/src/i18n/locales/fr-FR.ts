@@ -1183,6 +1183,7 @@ export default {
     updatedAt: 'Mis à jour le',
     project: 'Projet',
     projectOptional: 'Facultatif : affecter à un projet',
+    noProject: "Non attribué",
   },
   project: {
     title: 'Gestion des projets',

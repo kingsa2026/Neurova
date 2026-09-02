@@ -1183,6 +1183,7 @@ export default {
     updatedAt: 'अपडेट किया गया',
     project: 'परियोजना',
     projectOptional: 'वैकल्पिक: किसी परियोजना को असाइन करें',
+    noProject: "असाइन नहीं",
   },
   project: {
     title: 'परियोजना प्रबंधन',

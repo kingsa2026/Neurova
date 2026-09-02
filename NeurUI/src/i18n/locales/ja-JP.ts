@@ -1183,6 +1183,7 @@ export default {
     updatedAt: '更新日時',
     project: 'プロジェクト',
     projectOptional: 'オプション: プロジェクトに所属させる',
+    noProject: "未割り当て",
   },
   project: {
     title: 'プロジェクト管理',

@@ -1183,6 +1183,7 @@ export default {
     updatedAt: 'Actualizado el',
     project: 'Proyecto',
     projectOptional: 'Opcional: asignar a un proyecto',
+    noProject: "Sin asignar",
   },
   project: {
     title: 'Gestión de proyectos',
