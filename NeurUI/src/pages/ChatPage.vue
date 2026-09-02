@@ -654,6 +654,7 @@ import ComputerUsePanel from '@/components/chat/ComputerUsePanel.vue'
 import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
 import { toolCardVariant, variantIcon, variantColor } from '@/utils/toolCardVariant'
 import { useThinkingEffort } from '@/composables/useThinkingEffort'
+import { useMermaidRenderer } from '@/composables/useMermaidRenderer'
 import { useChatDraft } from '@/composables/useChatDraft'
 import { useInputHistory } from '@/composables/useInputHistory'
 import { useIMEComposition } from '@/composables/useIMEComposition'
@@ -2004,6 +2005,10 @@ function jumpToMatch(dir: 1 | -1): void {
 // ── 输入历史回溯（补课 C）─────────────────────────────
 const chatDraft = useChatDraft()
 
+// ── mermaid 渲染（补课 E）─────────────────────────────
+const { renderIn: renderMermaid, scheduleRender: scheduleMermaidRender, dispose: disposeMermaid } =
+  useMermaidRenderer(() => !appStore.isDark)
+
 const { record: recordInputHistory, up: historyUp, down: historyDown } = useInputHistory()
 
 const { onCompositionStart, onCompositionEnd, shouldBlockSend } = useIMEComposition()
@@ -2046,6 +2051,13 @@ function scrollToBottom() {
     }
   })
 }
+
+// 补课 E：消息内容变更 → 防抖渲染 mermaid 占位
+watch(
+  () => messages.value.map((m) => m.content.length).reduce((a, b) => a + b, 0),
+  () => scheduleMermaidRender(messagesRef.value),
+)
+onMounted(() => void nextTick().then(() => renderMermaid(messagesRef.value)))
 
 function formatJSON(str: string): string {
   try {
@@ -2093,6 +2105,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   // 补课 D：离开页面保存当前会话草稿
   if (currentSessionId.value) chatDraft.save(currentSessionId.value, inputText.value)
+  disposeMermaid()
   abortController?.abort()
   stopRecording()
   for (const pf of pendingFiles.value) {
