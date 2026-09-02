@@ -408,6 +408,8 @@ export default {
     pin: 'Épingler',
     unpin: 'Détacher',
     queued: 'En file d\'attente (n° {n}) — envoi après la réponse en cours',
+    toolBackground: 'En cours en arrière-plan',
+    toolBackgroundHint: 'Déplacé en arrière-plan — le résultat sera injecté au prochain tour',
     pinFailed: 'Échec de l\'épinglage',
     archivedSessions: 'Sessions archivées',
     restore: 'Restaurer',

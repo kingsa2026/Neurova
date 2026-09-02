@@ -408,6 +408,8 @@ export default {
     pin: 'تثبيت',
     unpin: 'إلغاء التثبيت',
     queued: 'في قائمة الانتظار (#{n}) — سيُرسل بعد الرد الحالي',
+    toolBackground: 'يعمل في الخلفية',
+    toolBackgroundHint: 'تم نقله إلى الخلفية — سيُحقن النتيجة في الجولة القادمة',
     pinFailed: 'فشل التثبيت',
     archivedSessions: 'الجلسات المؤرشفة',
     restore: 'استعادة',

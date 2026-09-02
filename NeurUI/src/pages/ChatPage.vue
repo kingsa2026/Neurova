@@ -191,13 +191,16 @@
                 <div class="nr-tool-header" @click="msg.toolOpen = !msg.toolOpen">
                   <span class="nr-tool-icon">{{ variantIcon(toolCardVariant(tc.name)) }}</span>
                   <span class="nr-tool-name">{{ tc.name }}</span>
-                  <a-tag :color="tc.result ? 'success' : variantColor(toolCardVariant(tc.name))">
-                    {{ tc.result ? t('chat.toolDone') : t('chat.toolCalling') }}
+                  <a-tag :color="isBackgroundResult(tc.result) ? 'warning' : tc.result ? 'success' : 'processing'">
+                    {{ isBackgroundResult(tc.result) ? t('chat.toolBackground') : tc.result ? t('chat.toolDone') : t('chat.toolCalling') }}
                   </a-tag>
                   <span class="nr-tool-toggle">{{ msg.toolOpen ? '▾' : '▸' }}</span>
                 </div>
                 <div v-show="msg.toolOpen">
                   <pre class="nr-tool-args">{{ formatJSON(tc.arguments) }}</pre>
+                  <div v-if="isBackgroundResult(tc.result)" class="nr-tool-background">
+                    {{ t('chat.toolBackgroundHint') }}
+                  </div>
                   <div v-if="tc.result" class="nr-tool-result">
                     <div class="nr-tool-result-header">{{ t('chat.toolResult') }}</div>
                     <pre class="nr-tool-result-content">{{ tc.result }}</pre>
@@ -658,6 +661,7 @@ import { useMermaidRenderer } from '@/composables/useMermaidRenderer'
 import { useChatDraft } from '@/composables/useChatDraft'
 import { useInputHistory } from '@/composables/useInputHistory'
 import { useIMEComposition } from '@/composables/useIMEComposition'
+import { isBackgroundResult } from '@/utils/toolCallStatus'
 import { findMessageMatches } from '@/utils/messageSearch'
 import type { ThinkingEffort } from '@/composables/useThinkingEffort'
 import { useSessionSync } from '@/composables/useSessionSync'
@@ -3644,5 +3648,15 @@ onBeforeUnmount(() => {
   background: none;
   cursor: pointer;
   font-size: 14px;
+}
+
+.nr-tool-background {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.08);
+  color: #b45309;
+  font-size: 12px;
 }
 </style>

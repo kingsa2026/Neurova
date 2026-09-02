@@ -408,6 +408,8 @@ export default {
     pin: 'Fissa in alto',
     unpin: 'Sblocca',
     queued: 'In coda (#{n}) — invio dopo la risposta corrente',
+    toolBackground: 'In esecuzione in background',
+    toolBackgroundHint: 'Spostato in background — il risultato sarà iniettato al prossimo turno',
     pinFailed: 'Errore durante il blocco',
     archivedSessions: 'Sessioni archiviate',
     restore: 'Ripristina',
