@@ -2,6 +2,7 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    clear: "Limpiar",
     confirm: 'Confirmar',
     cancel: 'Cancelar',
     save: 'Guardar',
@@ -398,6 +399,7 @@ export default {
     archive: 'Archivar',
     pin: 'Fijar',
     unpin: 'Dejar de fijar',
+    queued: 'En cola (#{n}) — se enviará tras la respuesta actual',
     pinFailed: 'Error al fijar',
     archivedSessions: 'Sesiones archivadas',
     restore: 'Restaurar',
@@ -1890,6 +1892,26 @@ export default {
     deleteSuccess: 'Eliminación exitosa',
     deleteError: 'Error al eliminar',
   },
+
+  voiceTranscription: {
+    title: 'Transcripción de voz',
+    subtitle: 'ASR de doble modo: FunASR local (chino) / Whisper (multilingüe)',
+    currentEngine: 'Motor activo',
+    chain: 'Cadena de respaldo',
+    noEngine: 'Sin motor disponible',
+    dualMode: 'Configuración de doble modo',
+    remoteDesc: 'API de transcripción compatible con OpenAI. Multilingüe, de pago por uso, sin modelo local',
+    keyPlaceholder: 'Vacío para usar OPENAI_API_KEY',
+    ready: 'Listo',
+    notDownloaded: 'No descargado',
+    localDesc: 'Whisper base local (~140MB + torch). Funciona sin conexión; para chino prefiera FunASR',
+    consentTitle: 'Se requiere consentimiento de administrador',
+    consentDesc: 'Descarga ~140MB y usa cómputo local (torch CPU). El consentimiento descarga y habilita como respaldo sin conexión',
+    consentButton: 'Consentir y descargar (~140MB)',
+    consentGranted: 'Whisper local habilitado',
+    consentGrantedDesc: 'Whisper local participa en la cadena de respaldo',
+  },
+
   ui: {
     subagent: 'Subagente',
     expand: 'Expandir',
@@ -1977,25 +1999,6 @@ export default {
     rememberNone: 'Solo esta vez',
     rememberExact: 'Recordar comando exacto',
     rememberSimilar: 'Recordar comandos similares',
-
-    voiceTranscription: {
-      title: 'Transcripción de voz',
-      subtitle: 'ASR de doble modo: FunASR local (chino) / Whisper (multilingüe)',
-      currentEngine: 'Motor activo',
-      chain: 'Cadena de respaldo',
-      noEngine: 'Sin motor disponible',
-      dualMode: 'Configuración de doble modo',
-      remoteDesc: 'API de transcripción compatible con OpenAI. Multilingüe, de pago por uso, sin modelo local',
-      keyPlaceholder: 'Vacío para usar OPENAI_API_KEY',
-      ready: 'Listo',
-      notDownloaded: 'No descargado',
-      localDesc: 'Whisper base local (~140MB + torch). Funciona sin conexión; para chino prefiera FunASR',
-      consentTitle: 'Se requiere consentimiento de administrador',
-      consentDesc: 'Descarga ~140MB y usa cómputo local (torch CPU). El consentimiento descarga y habilita como respaldo sin conexión',
-      consentButton: 'Consentir y descargar (~140MB)',
-      consentGranted: 'Whisper local habilitado',
-      consentGrantedDesc: 'Whisper local participa en la cadena de respaldo',
-    },
     approvalHint: '该操作被安全策略标记为需人工确认，请核实后再放行。',
   },
   neuron: {

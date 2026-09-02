@@ -2,6 +2,7 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    clear: "Cancella",
     confirm: 'Conferma',
     cancel: 'Annulla',
     save: 'Salva',
@@ -398,6 +399,7 @@ export default {
     archive: 'Archivia',
     pin: 'Fissa in alto',
     unpin: 'Sblocca',
+    queued: 'In coda (#{n}) — invio dopo la risposta corrente',
     pinFailed: 'Errore durante il blocco',
     archivedSessions: 'Sessioni archiviate',
     restore: 'Ripristina',
@@ -1890,6 +1892,26 @@ export default {
     deleteSuccess: 'Eliminazione riuscita',
     deleteError: 'Eliminazione fallita',
   },
+
+  voiceTranscription: {
+    title: 'Trascrizione vocale',
+    subtitle: 'ASR dual-mode: FunASR locale (cinese) / Whisper (multilingue)',
+    currentEngine: 'Motore attivo',
+    chain: 'Catena di fallback',
+    noEngine: 'Nessun motore disponibile',
+    dualMode: 'Configurazione dual-mode',
+    remoteDesc: 'API di trascrizione compatibile OpenAI. Multilingue, a consumo, senza modello locale',
+    keyPlaceholder: 'Vuoto per usare OPENAI_API_KEY',
+    ready: 'Pronto',
+    notDownloaded: 'Non scaricato',
+    localDesc: 'Whisper base locale (~140MB + torch). Offline; per il cinese preferire FunASR',
+    consentTitle: 'Richiesto consenso amministratore',
+    consentDesc: 'Scarica ~140MB e usa calcolo locale (torch CPU). Il consenso scarica e abilita subito come fallback offline',
+    consentButton: 'Acconsenti e scarica (~140MB)',
+    consentGranted: 'Whisper locale abilitato',
+    consentGrantedDesc: 'Whisper locale partecipa alla catena di fallback',
+  },
+
   ui: {
     subagent: 'Sottoagente',
     expand: 'Espandi',
@@ -1977,25 +1999,6 @@ export default {
     rememberNone: 'Solo questa volta',
     rememberExact: 'Ricorda comando esatto',
     rememberSimilar: 'Ricorda comandi simili',
-
-    voiceTranscription: {
-      title: 'Trascrizione vocale',
-      subtitle: 'ASR dual-mode: FunASR locale (cinese) / Whisper (multilingue)',
-      currentEngine: 'Motore attivo',
-      chain: 'Catena di fallback',
-      noEngine: 'Nessun motore disponibile',
-      dualMode: 'Configurazione dual-mode',
-      remoteDesc: 'API di trascrizione compatibile OpenAI. Multilingue, a consumo, senza modello locale',
-      keyPlaceholder: 'Vuoto per usare OPENAI_API_KEY',
-      ready: 'Pronto',
-      notDownloaded: 'Non scaricato',
-      localDesc: 'Whisper base locale (~140MB + torch). Offline; per il cinese preferire FunASR',
-      consentTitle: 'Richiesto consenso amministratore',
-      consentDesc: 'Scarica ~140MB e usa calcolo locale (torch CPU). Il consenso scarica e abilita subito come fallback offline',
-      consentButton: 'Acconsenti e scarica (~140MB)',
-      consentGranted: 'Whisper locale abilitato',
-      consentGrantedDesc: 'Whisper locale partecipa alla catena di fallback',
-    },
     approvalHint: '该操作被安全策略标记为需人工确认，请核实后再放行。',
   },
   neuron: {

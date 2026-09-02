@@ -2,6 +2,7 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    clear: "Effacer",
     confirm: 'Confirmer',
     cancel: 'Annuler',
     save: 'Enregistrer',
@@ -398,6 +399,7 @@ export default {
     archive: 'Archiver',
     pin: 'Épingler',
     unpin: 'Détacher',
+    queued: 'En file d\'attente (n° {n}) — envoi après la réponse en cours',
     pinFailed: 'Échec de l\'épinglage',
     archivedSessions: 'Sessions archivées',
     restore: 'Restaurer',
@@ -1890,6 +1892,26 @@ export default {
     deleteSuccess: 'Suppression réussie',
     deleteError: 'Échec de la suppression',
   },
+
+  voiceTranscription: {
+    title: 'Transcription vocale',
+    subtitle: 'ASR double mode : FunASR local (chinois) / Whisper (multilingue)',
+    currentEngine: 'Moteur actif',
+    chain: 'Chaîne de repli',
+    noEngine: 'Aucun moteur disponible',
+    dualMode: 'Configuration double mode',
+    remoteDesc: 'API de transcription compatible OpenAI. Multilingue, payante, sans modèle local',
+    keyPlaceholder: 'Vide pour utiliser OPENAI_API_KEY',
+    ready: 'Prêt',
+    notDownloaded: 'Non téléchargé',
+    localDesc: 'Whisper base local (~140Mo + torch). Hors ligne ; FunASR recommandé pour le chinois',
+    consentTitle: 'Consentement admin requis',
+    consentDesc: 'Télécharge ~140Mo et utilise le calcul local (torch CPU). Consentir télécharge et active immédiatement en repli hors ligne',
+    consentButton: 'Consentir et télécharger (~140Mo)',
+    consentGranted: 'Whisper local activé',
+    consentGrantedDesc: 'Whisper local participe à la chaîne de repli',
+  },
+
   ui: {
     subagent: 'Sous-agent',
     expand: 'Déployer',
@@ -1977,25 +1999,6 @@ export default {
     rememberNone: 'Cette fois seulement',
     rememberExact: 'Mémoriser la commande exacte',
     rememberSimilar: 'Mémoriser les commandes similaires',
-
-    voiceTranscription: {
-      title: 'Transcription vocale',
-      subtitle: 'ASR double mode : FunASR local (chinois) / Whisper (multilingue)',
-      currentEngine: 'Moteur actif',
-      chain: 'Chaîne de repli',
-      noEngine: 'Aucun moteur disponible',
-      dualMode: 'Configuration double mode',
-      remoteDesc: 'API de transcription compatible OpenAI. Multilingue, payante, sans modèle local',
-      keyPlaceholder: 'Vide pour utiliser OPENAI_API_KEY',
-      ready: 'Prêt',
-      notDownloaded: 'Non téléchargé',
-      localDesc: 'Whisper base local (~140Mo + torch). Hors ligne ; FunASR recommandé pour le chinois',
-      consentTitle: 'Consentement admin requis',
-      consentDesc: 'Télécharge ~140Mo et utilise le calcul local (torch CPU). Consentir télécharge et active immédiatement en repli hors ligne',
-      consentButton: 'Consentir et télécharger (~140Mo)',
-      consentGranted: 'Whisper local activé',
-      consentGrantedDesc: 'Whisper local participe à la chaîne de repli',
-    },
     approvalHint: '该操作被安全策略标记为需人工确认，请核实后再放行。',
   },
   neuron: {

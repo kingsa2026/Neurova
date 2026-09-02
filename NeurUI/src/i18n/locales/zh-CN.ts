@@ -2,6 +2,7 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    clear: "清除",
     confirm: '确认',
     cancel: '取消',
     globalSettingHint: '本页面为全局系统配置/数据，对所有用户生效',
@@ -403,6 +404,7 @@ export default {
     archive: '存档',
     pin: '置顶',
     unpin: '取消置顶',
+    queued: '已加入队列（第 {n} 条），当前回复完成后自动发送',
     pinFailed: '置顶失败',
     archivedSessions: '存档会话',
     restore: '恢复',
@@ -1904,6 +1906,26 @@ export default {
     deleteSuccess: '删除成功',
     deleteError: '删除失败',
   },
+
+  voiceTranscription: {
+    title: '语音转写设置',
+    subtitle: 'ASR 引擎双模：本地 FunASR 中文优先 / Whisper 多语言兜底',
+    currentEngine: '当前生效引擎',
+    chain: '降级链',
+    noEngine: '无可用引擎',
+    dualMode: '双模配置',
+    remoteDesc: 'OpenAI 兼容转写 API，多语言，按量计费；无需本地模型',
+    keyPlaceholder: '留空使用已配置的 OPENAI_API_KEY',
+    ready: '已就绪',
+    notDownloaded: '未下载',
+    localDesc: '本地 Whisper base（~140MB+torch），离线可用；中文场景建议 FunASR',
+    consentTitle: '需要管理员同意',
+    consentDesc: '下载模型约 140MB 并占用本地算力（torch CPU 推理）。同意后立即下载并启用，作为远程不可用时的离线兜底。',
+    consentButton: '同意下载并启用（约 140MB）',
+    consentGranted: '已启用本地 Whisper',
+    consentGrantedDesc: '本地 Whisper 已参与降级链（funasr → remote → local）',
+  },
+
   ui: {
     subagent: '子代理',
     expand: '展开',
@@ -1991,25 +2013,6 @@ export default {
     rememberNone: '仅本次',
     rememberExact: '记住精确命令',
     rememberSimilar: '记住同类命令',
-
-    voiceTranscription: {
-      title: '语音转写设置',
-      subtitle: 'ASR 引擎双模：本地 FunASR 中文优先 / Whisper 多语言兜底',
-      currentEngine: '当前生效引擎',
-      chain: '降级链',
-      noEngine: '无可用引擎',
-      dualMode: '双模配置',
-      remoteDesc: 'OpenAI 兼容转写 API，多语言，按量计费；无需本地模型',
-      keyPlaceholder: '留空使用已配置的 OPENAI_API_KEY',
-      ready: '已就绪',
-      notDownloaded: '未下载',
-      localDesc: '本地 Whisper base（~140MB+torch），离线可用；中文场景建议 FunASR',
-      consentTitle: '需要管理员同意',
-      consentDesc: '下载模型约 140MB 并占用本地算力（torch CPU 推理）。同意后立即下载并启用，作为远程不可用时的离线兜底。',
-      consentButton: '同意下载并启用（约 140MB）',
-      consentGranted: '已启用本地 Whisper',
-      consentGrantedDesc: '本地 Whisper 已参与降级链（funasr → remote → local）',
-    },
     approvalHint: '该操作已被安全策略标记为需要人工确认',
   },
   neuron: {

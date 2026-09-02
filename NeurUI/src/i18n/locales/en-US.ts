@@ -2,6 +2,7 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    clear: "Clear",
     confirm: 'Confirm',
     cancel: 'Cancel',
     save: 'Save',
@@ -399,6 +400,7 @@ export default {
     archive: 'Archive',
     pin: 'Pin',
     unpin: 'Unpin',
+    queued: 'Queued (#{n}) — will send after the current reply',
     pinFailed: 'Failed to pin',
     archivedSessions: 'Archived Sessions',
     restore: 'Restore',
@@ -1892,6 +1894,26 @@ export default {
     deleteSuccess: 'Delete successful',
     deleteError: 'Delete failed',
   },
+
+  voiceTranscription: {
+    title: 'Voice Transcription',
+    subtitle: 'Dual-mode ASR: local FunASR (Chinese-first) / Whisper (multilingual fallback)',
+    currentEngine: 'Active Engine',
+    chain: 'Fallback chain',
+    noEngine: 'No engine available',
+    dualMode: 'Dual-mode Configuration',
+    remoteDesc: 'OpenAI-compatible transcription API. Multilingual, pay-per-use, no local model required.',
+    keyPlaceholder: 'Leave empty to use configured OPENAI_API_KEY',
+    ready: 'Ready',
+    notDownloaded: 'Not downloaded',
+    localDesc: 'Local Whisper base (~140MB + torch). Works offline; prefer FunASR for Chinese.',
+    consentTitle: 'Admin consent required',
+    consentDesc: 'Downloads ~140MB model and uses local compute (torch CPU). Consent downloads and enables it immediately as offline fallback when remote is unavailable.',
+    consentButton: 'Consent & download (~140MB)',
+    consentGranted: 'Local Whisper enabled',
+    consentGrantedDesc: 'Local Whisper now participates in the fallback chain (funasr → remote → local)',
+  },
+
   ui: {
     subagent: 'Sub-Agent',
     expand: 'Expand',
@@ -1979,25 +2001,6 @@ export default {
     rememberNone: 'Just once',
     rememberExact: 'Remember exact command',
     rememberSimilar: 'Remember similar commands',
-
-    voiceTranscription: {
-      title: 'Voice Transcription',
-      subtitle: 'Dual-mode ASR: local FunASR (Chinese-first) / Whisper (multilingual fallback)',
-      currentEngine: 'Active Engine',
-      chain: 'Fallback chain',
-      noEngine: 'No engine available',
-      dualMode: 'Dual-mode Configuration',
-      remoteDesc: 'OpenAI-compatible transcription API. Multilingual, pay-per-use, no local model required.',
-      keyPlaceholder: 'Leave empty to use configured OPENAI_API_KEY',
-      ready: 'Ready',
-      notDownloaded: 'Not downloaded',
-      localDesc: 'Local Whisper base (~140MB + torch). Works offline; prefer FunASR for Chinese.',
-      consentTitle: 'Admin consent required',
-      consentDesc: 'Downloads ~140MB model and uses local compute (torch CPU). Consent downloads and enables it immediately as offline fallback when remote is unavailable.',
-      consentButton: 'Consent & download (~140MB)',
-      consentGranted: 'Local Whisper enabled',
-      consentGrantedDesc: 'Local Whisper now participates in the fallback chain (funasr → remote → local)',
-    },
     approvalHint: 'This action is flagged by the security policy as requiring human confirmation. Please verify before allowing it.',
   },
   neuron: {

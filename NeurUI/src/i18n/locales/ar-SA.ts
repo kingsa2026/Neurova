@@ -2,6 +2,7 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    clear: "مسح",
     confirm: 'تأكيد',
     cancel: 'إلغاء',
     save: 'حفظ',
@@ -398,6 +399,7 @@ export default {
     archive: 'أرشفة',
     pin: 'تثبيت',
     unpin: 'إلغاء التثبيت',
+    queued: 'في قائمة الانتظار (#{n}) — سيُرسل بعد الرد الحالي',
     pinFailed: 'فشل التثبيت',
     archivedSessions: 'الجلسات المؤرشفة',
     restore: 'استعادة',
@@ -1890,6 +1892,26 @@ export default {
     deleteSuccess: 'تم الحذف بنجاح',
     deleteError: 'فشل الحذف',
   },
+
+  voiceTranscription: {
+    title: 'إعدادات تحويل الصوت',
+    subtitle: 'ASR ثنائي الوضع: FunASR محلي (الأولوية للصينية) / Whisper (متعدد اللغات)',
+    currentEngine: 'المحرك النشط',
+    chain: 'سلسلة الاحتياط',
+    noEngine: 'لا يوجد محرك متاح',
+    dualMode: 'إعداد الوضع المزدوج',
+    remoteDesc: 'واجهة برمجية متوافقة مع OpenAI. متعدد اللغات، دفع حسب الاستخدام، بدون نموذج محلي',
+    keyPlaceholder: 'اتركه فارغاً لاستخدام OPENAI_API_KEY',
+    ready: 'جاهز',
+    notDownloaded: 'غير محمل',
+    localDesc: 'Whisper base محلي (~140MB + torch). يعمل دون اتصال؛ يفضل FunASR للصينية',
+    consentTitle: 'مطلوب موافقة المدير',
+    consentDesc: 'يحمل نموذجاً بحجم ~140MB ويستخدم حوسبة محلية (torch CPU). الموافقة تحمل وتفعل فوراً كاحتياط دون اتصال',
+    consentButton: 'أوافق وحمّل (~140MB)',
+    consentGranted: 'تم تمكين Whisper المحلي',
+    consentGrantedDesc: 'Whisper المحلي يشارك في سلسلة الاحتياط',
+  },
+
   ui: {
     subagent: 'وكيل فرعي',
     expand: 'توسيع',
@@ -1977,25 +1999,6 @@ export default {
     rememberNone: 'هذه المرة فقط',
     rememberExact: 'تذكر الأمر بدقة',
     rememberSimilar: 'تذكر الأوامر المشابهة',
-
-    voiceTranscription: {
-      title: 'إعدادات تحويل الصوت',
-      subtitle: 'ASR ثنائي الوضع: FunASR محلي (الأولوية للصينية) / Whisper (متعدد اللغات)',
-      currentEngine: 'المحرك النشط',
-      chain: 'سلسلة الاحتياط',
-      noEngine: 'لا يوجد محرك متاح',
-      dualMode: 'إعداد الوضع المزدوج',
-      remoteDesc: 'واجهة برمجية متوافقة مع OpenAI. متعدد اللغات، دفع حسب الاستخدام، بدون نموذج محلي',
-      keyPlaceholder: 'اتركه فارغاً لاستخدام OPENAI_API_KEY',
-      ready: 'جاهز',
-      notDownloaded: 'غير محمل',
-      localDesc: 'Whisper base محلي (~140MB + torch). يعمل دون اتصال؛ يفضل FunASR للصينية',
-      consentTitle: 'مطلوب موافقة المدير',
-      consentDesc: 'يحمل نموذجاً بحجم ~140MB ويستخدم حوسبة محلية (torch CPU). الموافقة تحمل وتفعل فوراً كاحتياط دون اتصال',
-      consentButton: 'أوافق وحمّل (~140MB)',
-      consentGranted: 'تم تمكين Whisper المحلي',
-      consentGrantedDesc: 'Whisper المحلي يشارك في سلسلة الاحتياط',
-    },
     approvalHint: '该操作被安全策略标记为需人工确认，请核实后再放行。',
   },
   neuron: {
