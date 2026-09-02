@@ -656,6 +656,7 @@ import { useASRRestartGuard } from '@/composables/useASRRestartGuard'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
 import { useMessageQueueStore } from '@/stores/messageQueue'
+import { useRouter } from 'vue-router'
 import { useChat } from '@/composables/useChat'
 import type { ChatMessage, Session, PendingFile } from '@/types/chat'
 import { api } from '@/api'
@@ -711,6 +712,7 @@ const isMainLayout = computed(() => props.layoutMode === 'main')
 // ---------------------------------------------------------------------------
 const chatStore = useChatStore()
 const messageQueue = useMessageQueueStore()
+const router = useRouter()
 const {
   messages,
   sessions,
@@ -858,6 +860,8 @@ const approvalRemember = ref<'' | 'exact' | 'similar'>('')
 const chatModelOptions = ref<ChatModelOption[]>([])
 // 补课 A1：429 限流横幅——当前轮被限流的模型 + 一键切换候选列表
 const rateLimitBanner = ref<{ model: string; alternatives: ChatModelOption[] } | null>(null)
+// 补课 A2：无已启用模型提示（自动路由将无人可派）——引导去模型管理页
+const noModelsHint = ref(false)
 const selectedModel = ref<string>('')
 const chatModelLoading = ref(false)
 
@@ -879,6 +883,8 @@ async function loadChatModels() {
       })),
     ]
     chatModelOptions.value = options
+    // 补课 A2：列表拉取成功但零已启用模型 → 自动路由无候选可派，提示配置
+    noModelsHint.value = enabled.length === 0
   } catch (e) {
     // 加载失败不阻塞聊天，保留"自动路由"选项即可
     console.warn('[ChatPage] failed to load model list:', e)
@@ -1281,6 +1287,13 @@ async function sendMessage() {
     return
   }
   if (!agentId.value) return
+  // 补课 A2：零可用模型时提示（QP 模型未配 Result 提示对齐）——
+  // 只拦自动路由且无任何已启用模型的场景；用户已手动选模型则放行
+  if (!selectedModel.value && noModelsHint.value) {
+    uiMessage.warning(t('chat.noModelsConfigured'))
+    router.push({ path: '/models' })
+    return
+  }
 
   // Stop any active ASR recording
   if (isRecording.value) stopRecording()
