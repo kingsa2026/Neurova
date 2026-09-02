@@ -97,4 +97,5 @@ def test_funasr_transcribe_never_returns_fake_text():
 
 def test_production_chain_excludes_mock():
     assert "mock" not in FALLBACK_CHAIN
-    assert FALLBACK_CHAIN == ["funasr", "whisper"]
+    # 三级链（远程 whisper 落地后）：中文本地优先 → 远程多语言 → 本地离线兜底
+    assert FALLBACK_CHAIN == ["funasr", "remote_whisper", "whisper"]

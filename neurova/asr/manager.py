@@ -25,13 +25,13 @@ _ROOT_DIR = Path(__file__).parent.parent.parent.resolve()
 # Fallback 引擎优先级
 # 生产默认链不含 mock（补课 4.1：mock 引擎返回假识别会污染上层）——
 # mock 仅在显式 engine="mock" 或 NEUROVA_ENV=test 时追加
-FALLBACK_CHAIN = ["funasr", "whisper"]
+FALLBACK_CHAIN = ["funasr", "remote_whisper", "whisper"]
 
 
 class ASRConfig(BaseModel):
     """ASR 配置"""
 
-    engine: Literal["funasr", "whisper", "mock", "auto"] = "auto"
+    engine: Literal["funasr", "remote_whisper", "whisper", "mock", "auto"] = "auto"
     voice: str = "zh"
     model_path: Optional[str] = None
     auto_download: bool = True
@@ -125,6 +125,10 @@ class ASRManager:
                     model_dir=model_path,
                     auto_download=self._config.auto_download,
                 )
+            elif engine_name == "remote_whisper":
+                from neurova.asr.remote_whisper_engine import RemoteWhisperEngine
+
+                engine = RemoteWhisperEngine()
             elif engine_name == "whisper":
                 from neurova.asr.whisper_engine import WhisperEngine
 
