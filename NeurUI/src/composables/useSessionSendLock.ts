@@ -12,7 +12,7 @@
  */
 import { onUnmounted, ref, watch, type Ref } from 'vue'
 
-export function useSessionSendLock(sessionId: Ref<string>) {
+export function useSessionSendLock(sessionId: Ref<string | null | undefined>) {
   const isOwner = ref(true)
   let releaseLock: (() => void) | null = null
   let currentKey: string | null = null
