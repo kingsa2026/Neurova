@@ -340,6 +340,10 @@ export default {
     loadError: '仪表盘数据加载失败',
     retry: '重试',
     anotherTabSending: '另一个标签页正在此会话中发送',
+    groupPinned: '置顶',
+    groupToday: '今天',
+    groupWeek: '7 天内',
+    groupEarlier: '更早',
   },
   agent: {
     title: '智能体管理',

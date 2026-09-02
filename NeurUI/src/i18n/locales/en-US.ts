@@ -338,6 +338,10 @@ export default {
     loadError: 'Failed to load dashboard data',
     retry: 'Retry',
     anotherTabSending: 'Another tab is sending in this session',
+    groupPinned: 'Pinned',
+    groupToday: 'Today',
+    groupWeek: 'Last 7 days',
+    groupEarlier: 'Earlier',
   },
   agent: {
     title: 'Agent Management',

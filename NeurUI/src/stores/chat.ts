@@ -89,6 +89,15 @@ export const useChatStore = defineStore('chat', () => {
     archivedSessions.value = archivedSessions.value.filter((s) => s.id !== sessionId)
   }
 
+  /** 拖拽重排（补课 A5）：source 的 updatedAt 置于 target 之后（本地视觉排序）。 */
+  function moveSessionAfter(sourceId: string, targetId: string): void {
+    const src = sessions.value.find((s) => s.id === sourceId)
+    const tgt = sessions.value.find((s) => s.id === targetId)
+    if (!src || !tgt) return
+    const tgtTs = tgt.updatedAt ? Date.parse(tgt.updatedAt) : Date.now()
+    src.updatedAt = new Date(tgtTs + 1).toISOString()
+  }
+
   function setSessionPinned(sessionId: string, pinned: boolean): void {
     const s = sessions.value.find((x) => x.id === sessionId)
     if (s) s.pinned = pinned
@@ -200,6 +209,7 @@ export const useChatStore = defineStore('chat', () => {
     setArchivedSessions,
     removeArchivedSession,
     setSessionPinned,
+    moveSessionAfter,
     renameSessionTitle,
     setCurrentSession,
     // message mutations

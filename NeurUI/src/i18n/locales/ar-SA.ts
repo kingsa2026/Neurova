@@ -337,6 +337,10 @@ export default {
     loadError: 'فشل تحميل بيانات لوحة القيادة',
     retry: 'إعادة المحاولة',
     anotherTabSending: 'علامة تبويب أخرى ترسل في هذه الجلسة',
+    groupPinned: 'مثبتة',
+    groupToday: 'اليوم',
+    groupWeek: 'آخر 7 أيام',
+    groupEarlier: 'أقدم',
   },
   agent: {
     title: 'إدارة الوكلاء',
