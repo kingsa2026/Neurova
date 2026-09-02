@@ -26,6 +26,14 @@ def main():
         from neurova.api.app import create_app
         import uvicorn
 
+        # 进化权重持久化装配（显式；单例本身零 IO 副作用）
+        try:
+            from neurova.evolution.closed_loop import bootstrap_evolution_persistence
+
+            bootstrap_evolution_persistence()
+        except Exception as _persist_err:  # noqa: BLE001 - 权重恢复失败不阻断启动
+            print(f"Warning: 进化权重恢复失败（忽略）: {_persist_err}")
+
         # 创建应用
         app = create_app()
 
