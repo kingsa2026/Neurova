@@ -57,7 +57,8 @@
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "sidebarImage": "./nsis/sidebar.bmp",
-        "headerImage": "./nsis/header.bmp"
+        "headerImage": "./nsis/header.bmp",
+        "uninstallerHeaderImage": "./nsis/header.bmp"
       }
     },
     "resources": {
