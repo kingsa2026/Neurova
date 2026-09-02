@@ -45,7 +45,8 @@
           "English"
         ],
         "displayLanguageSelector": false,
-        "installMode": "currentUser"
+        "installMode": "perMachine",
+        "template": "./nsis/installer.nsi"
       }
     },
     "resources": {
