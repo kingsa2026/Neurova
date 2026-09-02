@@ -1183,6 +1183,7 @@ export default {
     updatedAt: 'آخر تحديث',
     project: 'المشروع',
     projectOptional: 'اختياري: تعيين إلى مشروع',
+    noProject: "غير معيّن",
   },
   project: {
     title: 'إدارة المشاريع',

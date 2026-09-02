@@ -1183,6 +1183,7 @@ export default {
     updatedAt: 'Aktualisiert am',
     project: 'Projekt',
     projectOptional: 'Optional: einem Projekt zuordnen',
+    noProject: "Nicht zugeordnet",
   },
   project: {
     title: 'Projektverwaltung',

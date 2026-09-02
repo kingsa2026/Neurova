@@ -1183,6 +1183,7 @@ export default {
     updatedAt: 'Обновлено',
     project: 'Проект',
     projectOptional: 'Необязательно: назначить проекту',
+    noProject: "Не назначен",
   },
   project: {
     title: 'Управление проектами',
