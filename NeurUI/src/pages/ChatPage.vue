@@ -654,6 +654,7 @@ import ComputerUsePanel from '@/components/chat/ComputerUsePanel.vue'
 import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
 import { toolCardVariant, variantIcon, variantColor } from '@/utils/toolCardVariant'
 import { useThinkingEffort } from '@/composables/useThinkingEffort'
+import { useChatDraft } from '@/composables/useChatDraft'
 import { useInputHistory } from '@/composables/useInputHistory'
 import { useIMEComposition } from '@/composables/useIMEComposition'
 import { findMessageMatches } from '@/utils/messageSearch'
@@ -925,6 +926,8 @@ async function createSession(): Promise<void> {
 async function switchSession(sessionId: string): Promise<void> {
   const result = await _switchSession(sessionId)
   _notifySwitchFailure(result)
+  // 补课 D：恢复新会话草稿
+  chatStore.setInputText(chatDraft.restore(sessionId))
   scrollToBottom()
 }
 
@@ -1999,6 +2002,8 @@ function jumpToMatch(dir: 1 | -1): void {
 }
 
 // ── 输入历史回溯（补课 C）─────────────────────────────
+const chatDraft = useChatDraft()
+
 const { record: recordInputHistory, up: historyUp, down: historyDown } = useInputHistory()
 
 const { onCompositionStart, onCompositionEnd, shouldBlockSend } = useIMEComposition()
@@ -2086,6 +2091,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  // 补课 D：离开页面保存当前会话草稿
+  if (currentSessionId.value) chatDraft.save(currentSessionId.value, inputText.value)
   abortController?.abort()
   stopRecording()
   for (const pf of pendingFiles.value) {
