@@ -483,10 +483,15 @@ async def create_canvas(request: Request, payload: Dict[str, Any] = Body(...)):
 
 
 @router.get("/canvas")
-async def list_canvases(request: Request):
-    """画布摘要列表（不含节点数据），按更新时间倒序——前端"我的画布"入口"""
+async def list_canvases(request: Request, project_id: Optional[str] = Query(default=None)):
+    """画布摘要列表（不含节点数据），按更新时间倒序——前端"我的画布"入口。
+
+    project_id 可选：限定项目归属的画布（项目顶层 → 工作流归属模型）。
+    """
     try:
         items = _get_canvas_store().list()
+        if project_id:
+            items = [i for i in items if i.get("project_id") == project_id]
         return {"code": 0, "message": "success", "data": items}
     except Exception as e:
         logger.exception("Error listing canvases: %s", e)
