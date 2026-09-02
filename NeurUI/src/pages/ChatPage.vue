@@ -159,7 +159,7 @@
         <button class="nr-msg-search-btn" @click="msgSearchOpen = false">✕</button>
       </div>
 
-      <div class="nr-chat-messages" ref="messagesRef">
+      <div class="nr-chat-messages" ref="messagesRef" @scroll="onMessagesScroll">
         <div v-if="messages.length === 0" class="nr-chat-empty">
           <div v-if="isMainLayout && !agentId" class="nr-chat-empty">
             <div class="nr-chat-empty-icon">💬</div>
@@ -174,7 +174,7 @@
         </div>
 
         <div
-          v-for="(msg, idx) in messages"
+          v-for="(msg, idx) in renderedMessages"
           :id="`nr-msg-${idx}`"
           :key="idx"
           class="nr-msg"
@@ -970,6 +970,49 @@ const {
 
 // 补课 A4：跨标签单发送者锁（同 session 多标签只有一个能发）
 const { isOwner: isSendLockOwner } = useSessionSendLock(currentSessionId)
+
+// 补课 A6：长会话窗口化渲染（虚拟列表轻量版）——超过阈值只渲染尾部
+// WINDOW+BUFFER 条，向上滚动到顶部附近再向前扩窗（保留原生滚动条，
+// 不引入固定高度虚拟库——消息高度差异大，库方案需全量预测量）。
+const RENDER_WINDOW = 60
+const RENDER_BUFFER = 30
+const renderStart = ref(0)
+
+const renderedMessages = computed(() => {
+  const all = messages.value
+  if (all.length <= RENDER_WINDOW + RENDER_BUFFER) {
+    renderStart.value = 0
+    return all
+  }
+  const start = Math.max(0, Math.min(renderStart.value, all.length - RENDER_WINDOW))
+  return all.slice(start, start + RENDER_WINDOW)
+})
+
+watch(
+  () => messages.value.length,
+  (len, prev) => {
+    if (len <= RENDER_WINDOW + RENDER_BUFFER) {
+      renderStart.value = 0
+      return
+    }
+    if (renderStart.value + RENDER_WINDOW >= (prev ?? len)) {
+      renderStart.value = Math.max(0, len - RENDER_WINDOW)
+    }
+  },
+)
+
+/** 上滚扩窗：滚动接近容器顶且窗口前还有未渲染消息 → 前扩 BUFFER 条。 */
+function onMessagesScroll(): void {
+  const el = messagesRef.value
+  if (!el) return
+  if (
+    el.scrollTop < 120 &&
+    renderStart.value > 0 &&
+    messages.value.length > RENDER_WINDOW + RENDER_BUFFER
+  ) {
+    renderStart.value = Math.max(0, renderStart.value - RENDER_BUFFER)
+  }
+}
 
 // 补课 A5：会话日期分组（置顶/今天/7 天内/更早）+ 拖拽移动
 interface SessionGroup {
