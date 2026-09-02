@@ -190,6 +190,30 @@ class NeurflowStorage:
                 "ON webhook_deliveries(trigger_id)"
             )
 
+            # 执行检查点表（Checkpoint 借鉴：与 workflows 解耦——画布运行时
+            # 工作流定义在内存（DRAFT→PUBLISHED 不落库），executions FK 会拒，
+            # 故检查点独立存储，支持失败续跑/Probe/审计）
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS execution_checkpoints (
+                    execution_id TEXT PRIMARY KEY,
+                    workflow_id TEXT NOT NULL,
+                    status TEXT DEFAULT 'running',
+                    inputs_json TEXT DEFAULT '{}',
+                    outputs_json TEXT,
+                    node_results_json TEXT DEFAULT '{}',
+                    variables_json TEXT DEFAULT '{}',
+                    error TEXT,
+                    started_at REAL DEFAULT 0,
+                    finished_at REAL,
+                    duration REAL,
+                    updated_at REAL DEFAULT 0
+                )
+            """)
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_execution_checkpoints_wf "
+                "ON execution_checkpoints(workflow_id)"
+            )
+
             # 执行实例表
             self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS executions (
@@ -1088,6 +1112,95 @@ class NeurflowStorage:
             ]
 
     # ==================== 执行实例 CRUD ====================
+
+    # ── 执行检查点（Checkpoint 借鉴：独立 store，无 FK）──────
+
+    def save_checkpoint(self, instance: ExecutionInstance) -> bool:
+        """保存执行实例检查点快照（节点结果/变量/状态）。"""
+        import time as _time
+
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO execution_checkpoints
+                    (execution_id, workflow_id, status, inputs_json, outputs_json,
+                     node_results_json, variables_json, error, started_at,
+                     finished_at, duration, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(execution_id) DO UPDATE SET
+                    status=excluded.status,
+                    inputs_json=excluded.inputs_json,
+                    outputs_json=excluded.outputs_json,
+                    node_results_json=excluded.node_results_json,
+                    variables_json=excluded.variables_json,
+                    error=excluded.error,
+                    finished_at=excluded.finished_at,
+                    duration=excluded.duration,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    instance.id,
+                    instance.workflow_id,
+                    instance.status.value,
+                    json.dumps(instance.inputs, ensure_ascii=False),
+                    json.dumps(instance.outputs, ensure_ascii=False) if instance.outputs is not None else None,
+                    json.dumps(
+                        {k: v.__dict__ for k, v in (instance.node_results or {}).items()},
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(instance.variables, ensure_ascii=False),
+                    instance.error,
+                    instance.started_at or 0.0,
+                    instance.finished_at,
+                    instance.duration,
+                    _time.time(),
+                ),
+            )
+            self._conn.commit()
+        return True
+
+    def get_checkpoint(self, execution_id: str) -> Optional[ExecutionInstance]:
+        """按 execution_id 取检查点；不存在返回 None。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM execution_checkpoints WHERE execution_id = ?",
+                (execution_id,),
+            ).fetchone()
+        return self._row_to_checkpoint(row) if row else None
+
+    def list_checkpoints(self, workflow_id: str, limit: int = 10) -> list:
+        """某工作流的检查点历史（倒序，Probe/审计界面用）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM execution_checkpoints WHERE workflow_id = ? "
+                "ORDER BY updated_at DESC LIMIT ?",
+                (workflow_id, limit),
+            ).fetchall()
+        return [self._row_to_checkpoint(r) for r in rows]
+
+    def _row_to_checkpoint(self, row) -> Optional[ExecutionInstance]:
+        import json as _json
+
+        node_results = {}
+        try:
+            for nid, nd in _json.loads(row["node_results_json"] or "{}").items():
+                node_results[nid] = NodeExecutionResult(**nd)
+        except Exception:
+            node_results = {}
+        return ExecutionInstance(
+            id=row["execution_id"],
+            workflow_id=row["workflow_id"],
+            status=WorkflowStatus(row["status"]),
+            inputs=_json.loads(row["inputs_json"] or "{}"),
+            outputs=_json.loads(row["outputs_json"]) if row["outputs_json"] else None,
+            node_results=node_results,
+            variables=_json.loads(row["variables_json"] or "{}"),
+            started_at=row["started_at"] or 0.0,
+            finished_at=row["finished_at"],
+            duration=row["duration"],
+            error=row["error"],
+        )
+
 
     def save_execution(self, execution: ExecutionInstance) -> bool:
         """

@@ -319,6 +319,23 @@ class WorkflowExecutor:
 
         return _load
 
+    def _save_checkpoint(self, instance, store=None) -> None:
+        """检查点落盘（Checkpoint 借鉴）：execute 各出口统一保存实例快照。
+
+        走独立 checkpoint store（与 workflows 无 FK 耦合——画布运行时
+        工作流定义在内存不落库，executions 表的 FK 会拒绝写入）。
+        存储不可用时静默降级（执行不受影响）。
+        """
+        try:
+            if store is not None:
+                store.save_checkpoint(instance)
+            else:
+                from .storage import NeurflowStorage
+
+                NeurflowStorage().save_checkpoint(instance)
+        except Exception:
+            logger.debug("checkpoint save skipped: %s", getattr(instance, "id", "?"))
+
     async def execute(
         self,
         workflow: WorkflowDefinition,
@@ -335,6 +352,8 @@ class WorkflowExecutor:
         subflow_chain: Optional[List[str]] = None,
         subflow_loader: Optional[Callable] = None,
         debug_session: Optional["DebugSession"] = None,
+        resume: bool = False,
+        checkpoint_store: Optional[Any] = None,
     ) -> ExecutionInstance:
         """
         执行工作流
@@ -380,6 +399,7 @@ class WorkflowExecutor:
             instance.finished_at = time.time()
             instance.duration = instance.finished_at - instance.started_at
             self._statuses[execution_id] = ExecutionStatus.FAILED
+            self._save_checkpoint(instance, checkpoint_store)
             return instance
 
         # 构建节点映射
@@ -466,13 +486,31 @@ class WorkflowExecutor:
             skipped: Set[str] = set()
             loop_driven: Set[str] = set()
 
+            # ── Resume（Checkpoint 续跑）──：已成功节点不重跑、
+            # 结果/变量从 instance 恢复、skipped 集从 node_results 重建
+            if resume and instance is not None:
+                for nid, res in (instance.node_results or {}).items():
+                    if res.status == "success":
+                        resolution_context.node_results[nid] = {
+                            "status": res.status,
+                            "output": res.output,
+                        }
+                    elif res.status == "skipped":
+                        skipped.add(nid)
+                for k, v in (instance.variables or {}).items():
+                    resolution_context.variables.setdefault(k, v)
+
             for layer in layers:
                 # 本层中的 loop 节点单独驱动（不参与 gather）
                 loop_nodes = [nid for nid in layer if node_map[nid].type == "builtin:loop"]
                 active = [
                     nid
                     for nid in layer
-                    if nid not in skipped and nid not in loop_driven and node_map[nid].type != "builtin:loop"
+                    if nid not in skipped
+                    and nid not in loop_driven
+                    and node_map[nid].type != "builtin:loop"
+                    # Resume：已成功节点不重跑（前置输出已在 resolution_context）
+                    and not (resume and resolution_context.node_results.get(nid, {}).get("status") == "success")
                 ]
 
                 # ── 层内并发执行普通节点 ──
@@ -607,6 +645,8 @@ class WorkflowExecutor:
                 )
             )
 
+        # Checkpoint（借鉴）：统一出口保存实例快照（成功/失败均落盘）
+        self._save_checkpoint(instance, checkpoint_store)
         return instance
 
     # ── 节点执行（单节点，含结果记录与事件） ──────────────────────
