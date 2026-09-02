@@ -824,6 +824,12 @@ Section Install
     StrCpy $AdminPassword2 ""
   ${EndIf}
 
+  ; Neurova：后端以普通用户运行时需在安装目录写 data/ logs/ agent_workspaces/
+  ; （SQLite/日志/工作区），Program Files 型目录默认对 Users 只读会令后端
+  ; 启动即崩 → 递归授予 Users 组修改权（用 SID 避开非英文系统组名）。
+  nsExec::Exec 'icacls "$INSTDIR\backend" /grant *S-1-5-32-545:(OI)(CI)M /T'
+  Pop $0
+
   ; Copy external binaries
   {{#each binaries}}
     File /a "/oname={{this}}" "{{no-escape @key}}"
