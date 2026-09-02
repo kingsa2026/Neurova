@@ -312,6 +312,21 @@ async def get_current_user(request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to get user: {str(e)}")
 
 
+@router.get("/setup-status")
+async def setup_status():
+    """首启初始化状态（公开端点）：系统中是否还没有任何用户。
+
+    桌面壳首启向导据此决定是否展示"创建管理员账号"页。
+    """
+    try:
+        user_model = _get_user_model()
+        needs_setup = user_model.count_users() == 0
+        return {"code": 0, "message": "ok", "data": {"needs_setup": needs_setup}}
+    except Exception as e:
+        logger.error(f"Setup status error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get setup status: {str(e)}")
+
+
 @router.post("/register")
 async def register(request: Request, body: RegisterRequest):
     """用户注册"""
@@ -346,10 +361,11 @@ async def register(request: Request, body: RegisterRequest):
                 verification_model.record_register_attempt(ip_address, success=False)
                 raise HTTPException(status_code=400, detail="Email already exists")
 
-        # 4. 创建用户
+        # 4. 创建用户（首启场景：系统中尚无任何用户时，注册者即为管理员）
         password_hash = hash_password(body.password)
+        role = "admin" if user_model.count_users() == 0 else "user"
         user = user_model.create_user(
-            username=body.username, password_hash=password_hash, email=body.email, role="user"
+            username=body.username, password_hash=password_hash, email=body.email, role=role
         )
 
         # 5. 生成 token (审计修复 P0-2: 补齐身份声明)
