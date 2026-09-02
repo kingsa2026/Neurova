@@ -47,6 +47,7 @@ sentencepiece>=0.2.0
 
 # ASR (optional, auto-fallback)
 funasr>=1.0.0  # FunASR 语音识别引擎（补课 4.2 续：Paraformer 中文优先，whisper 兜底）
+torchaudio  # FunASR fbank 特征提取依赖（实测缺失报"torchaudio is not installed"）
 openai-whisper>=20231117  # Whisper 语音识别引擎（补课 4.2 本地真模型；torch CPU 版约 200MB）
 
 # Edge TTS (online fallback)
