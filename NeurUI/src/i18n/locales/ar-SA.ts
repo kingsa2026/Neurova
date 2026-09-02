@@ -2505,5 +2505,6 @@ export default {
     optObjectiveAddCart: 'إضافة للسلة',
     rateLimited: 'النموذج {model} تم تحديد معدله (429)',
     rateLimitSwitched: 'تم تبديل النموذج',
+    noModelsConfigured: 'لا توجد نماذج مهيأة — أضف نموذجاً وفعّله أولاً',
   },
 }

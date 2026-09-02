@@ -2507,5 +2507,6 @@ export default {
     optObjectiveAddCart: 'Add to Cart',
     rateLimited: 'Model {model} is rate-limited (429)',
     rateLimitSwitched: 'Model switched',
+    noModelsConfigured: 'No models configured — add and enable one in Model settings first',
   },
 }
