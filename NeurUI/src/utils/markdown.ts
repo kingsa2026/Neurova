@@ -60,6 +60,12 @@ function createRenderer(copyLabel: string) {
     code(token: Tokens.Code): string {
       const rawLang = (token.lang || '').trim().toLowerCase()
       const lang = rawLang.split(/\s+/)[0]
+      // mermaid 占位（补课 E）：不产 pre/code 卡片，输出带 data-mermaid-code
+      // 的占位 div，ChatPage 在 DOM 插入后动态 import mermaid 渲染 SVG
+      if (lang === 'mermaid') {
+        const encoded = encodeURIComponent(token.text)
+        return `<div class="nr-mermaid" data-mermaid-code="${encoded}"><pre class="nr-mermaid-src">${escapeHtml(token.text)}</pre></div>`
+      }
       // hljs 高亮输出本身已转义 HTML 特殊字符; 语言未知时退回纯转义
       const highlighted =
         lang && hljs.getLanguage(lang) ? hljs.highlight(token.text, { language: lang }).value : escapeHtml(token.text)
