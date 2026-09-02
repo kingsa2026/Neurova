@@ -264,6 +264,8 @@ export default {
     setupHint: 'Questo è il primo account e avrà privilegi di amministratore',
     setupSubmit: 'Crea account amministratore',
     registerFailed: 'Registrazione non riuscita',
+    backendStarting: 'Il backend è in avvio — attendere alcuni secondi e riprovare',
+    backendFailed: 'Avvio del backend non riuscito. Consultare backendackend.log nella cartella di installazione o contattare l\'assistenza',
   },
   dashboard: {
     welcome: 'Bentornato',
@@ -378,6 +380,8 @@ export default {
     viewTable: 'Tabella',
   },
   chat: {
+    searchInSession: 'Cerca nella sessione',
+    searchMatches: '{n} corrispondenze',
     title: 'Chat',
     newChat: 'Nuova chat',
     history: 'Cronologia',

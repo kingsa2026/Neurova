@@ -264,6 +264,8 @@ export default {
     setupHint: 'Esta es la primera cuenta y tendrá privilegios de administrador',
     setupSubmit: 'Crear cuenta de administrador',
     registerFailed: 'Error de registro',
+    backendStarting: 'El backend se está iniciando: espere unos segundos e inténtelo de nuevo',
+    backendFailed: 'Error al iniciar el backend. Consulte backendackend.log en la carpeta de instalación o contacte con soporte',
   },
   dashboard: {
     welcome: 'Bienvenido de nuevo',
@@ -378,6 +380,8 @@ export default {
     viewTable: 'Tabla',
   },
   chat: {
+    searchInSession: 'Buscar en la sesión',
+    searchMatches: '{n} coincidencias',
     title: 'Chat',
     newChat: 'Nuevo chat',
     history: 'Historial',

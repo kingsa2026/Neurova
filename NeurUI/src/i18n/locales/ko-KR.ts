@@ -264,6 +264,8 @@ export default {
     setupHint: '시스템의 첫 번째 계정이며 관리자 권한이 부여됩니다',
     setupSubmit: '관리자 계정 만들기',
     registerFailed: '등록 실패',
+    backendStarting: '백엔드가 시작 중입니다. 몇 초 후 다시 시도해 주세요',
+    backendFailed: '백엔드 시작에 실패했습니다. 설치 폴더의 backendackend.log를 확인하거나 지원팀에 문의하세요',
   },
   dashboard: {
     welcome: '다시 오신 것을 환영합니다',
@@ -378,6 +380,8 @@ export default {
     viewTable: '테이블',
   },
   chat: {
+    searchInSession: '세션 내 검색',
+    searchMatches: '{n}개 일치',
     title: '채팅',
     newChat: '새 대화',
     history: '기록',

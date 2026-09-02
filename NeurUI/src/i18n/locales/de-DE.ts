@@ -264,6 +264,8 @@ export default {
     setupHint: 'Dies ist das erste Konto und erhält Administratorrechte',
     setupSubmit: 'Administratorkonto erstellen',
     registerFailed: 'Registrierung fehlgeschlagen',
+    backendStarting: 'Das Backend startet gerade — bitte warten Sie einige Sekunden und versuchen es erneut',
+    backendFailed: 'Backend-Start fehlgeschlagen. Bitte prüfen Sie backendackend.log im Installationsordner oder wenden Sie sich an den Support',
   },
   dashboard: {
     welcome: 'Willkommen zurück',
@@ -378,6 +380,8 @@ export default {
     viewTable: 'Tabelle',
   },
   chat: {
+    searchInSession: 'In Sitzung suchen',
+    searchMatches: '{n} Treffer',
     title: 'Chat',
     newChat: 'Neuer Chat',
     history: 'Verlauf',
