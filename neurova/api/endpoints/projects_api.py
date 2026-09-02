@@ -216,7 +216,7 @@ async def delete_project(project_id: str):
 
 @router.get("/{project_id}/stats", response_model=ProjectStats)
 async def get_project_stats(project_id: str):
-    """获取项目统计（团队/任务/工作流计数来自同一存储）"""
+    """获取项目统计（团队/任务来自项目存储；工作流计数=画布快照按 project_id 归属）"""
     iso = _get_iso_manager()
     project = _require_project(iso, project_id)
 
@@ -226,8 +226,37 @@ async def get_project_stats(project_id: str):
         tasks_count=len(project.tasks),
         completed_tasks=0,
         active_tasks=sum(1 for t in project.tasks.values() if t.status == "active"),
-        workflows_count=len(project.workflows),
+        workflows_count=_count_project_workflows(project_id),
     )
+
+
+def _count_project_workflows(project_id: str) -> int:
+    """项目下工作流数（画布快照归属，真实统计；异常回退 0）。"""
+    try:
+        from neurova.collaboration.canvas_store import get_canvas_store
+
+        return sum(1 for w in get_canvas_store().list() if w.get("project_id") == project_id)
+    except Exception:
+        return 0
+
+
+@router.get("/{project_id}/workflows")
+async def list_project_workflows(project_id: str):
+    """项目下工作流列表（画布快照按 project_id 归属）——项目顶层模型：
+
+    项目包含 协作（画布）/ 团队 / 工作流，本端点供项目详情页展示工作流归属。
+    """
+    iso = _get_iso_manager()
+    _require_project(iso, project_id)
+
+    try:
+        from neurova.collaboration.canvas_store import get_canvas_store
+
+        items = [w for w in get_canvas_store().list() if w.get("project_id") == project_id]
+        return {"code": 0, "message": "success", "data": items}
+    except Exception as e:
+        logger.exception("list project workflows failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"list project workflows failed: {e}")
 
 
 # ---------------------------------------------------------------------------
