@@ -35,13 +35,20 @@
       </div>
 
       <div class="nr-session-list">
-        <div
-          v-for="session in filteredSessions"
-          :key="session.id"
-          class="nr-session-item"
-          :class="{ active: session.id === currentSessionId }"
-          @click="switchSession(session.id)"
-        >
+        <template v-for="group in groupedSessions" :key="group.key">
+          <div v-if="group.label" class="nr-session-group-label">{{ group.label }}</div>
+          <div
+            v-for="session in group.sessions"
+            :key="session.id"
+            class="nr-session-item"
+            :class="{ active: session.id === currentSessionId, 'drop-target': dragOverSessionId === session.id }"
+            draggable="true"
+            @click="switchSession(session.id)"
+            @dragstart="onSessionDragStart(session.id, $event)"
+            @dragover.prevent="dragOverSessionId = session.id"
+            @dragleave="dragOverSessionId = null"
+            @drop.prevent="onSessionDrop(session.id)"
+          >
           <span class="nr-session-icon">💬</span>
           <span class="nr-session-name">{{ session.pinned ? '📌 ' : '' }}{{ session.title }}</span>
           <a-dropdown :trigger="['click']" @click.stop>
@@ -60,7 +67,8 @@
               </a-menu>
             </template>
           </a-dropdown>
-        </div>
+          </div>
+        </template>
         <div v-if="filteredSessions.length === 0" class="nr-session-empty">
           {{ t('chat.noSessions') }}
         </div>
@@ -962,6 +970,50 @@ const {
 
 // 补课 A4：跨标签单发送者锁（同 session 多标签只有一个能发）
 const { isOwner: isSendLockOwner } = useSessionSendLock(currentSessionId)
+
+// 补课 A5：会话日期分组（置顶/今天/7 天内/更早）+ 拖拽移动
+interface SessionGroup {
+  key: string
+  label: string
+  sessions: Session[]
+}
+const dragOverSessionId = ref<string | null>(null)
+const draggingSessionId = ref<string | null>(null)
+
+const groupedSessions = computed<SessionGroup[]>(() => {
+  const pinned = filteredSessions.value.filter((s) => s.pinned)
+  const rest = filteredSessions.value.filter((s) => !s.pinned)
+  const now = Date.now()
+  const DAY = 86_400_000
+  const buckets: Record<string, Session[]> = { today: [], week: [], earlier: [] }
+  for (const s of rest) {
+    const ts = s.updatedAt ? Date.parse(s.updatedAt) : NaN
+    if (Number.isNaN(ts)) buckets.today.push(s)
+    else if (now - ts < DAY) buckets.today.push(s)
+    else if (now - ts < 7 * DAY) buckets.week.push(s)
+    else buckets.earlier.push(s)
+  }
+  const groups: SessionGroup[] = []
+  if (pinned.length) groups.push({ key: 'pinned', label: t('chat.groupPinned'), sessions: pinned })
+  if (buckets.today.length) groups.push({ key: 'today', label: t('chat.groupToday'), sessions: buckets.today })
+  if (buckets.week.length) groups.push({ key: 'week', label: t('chat.groupWeek'), sessions: buckets.week })
+  if (buckets.earlier.length) groups.push({ key: 'earlier', label: t('chat.groupEarlier'), sessions: buckets.earlier })
+  return groups
+})
+
+function onSessionDragStart(sessionId: string, e: DragEvent): void {
+  draggingSessionId.value = sessionId
+  e.dataTransfer?.setData('text/plain', sessionId)
+}
+
+/** 拖拽放下 = 把拖拽会话的 updatedAt 移到目标之后（重排=本地排序，QP 同款语义）。 */
+function onSessionDrop(targetId: string): void {
+  const sourceId = draggingSessionId.value
+  draggingSessionId.value = null
+  dragOverSessionId.value = null
+  if (!sourceId || sourceId === targetId) return
+  chatStore.moveSessionAfter(sourceId, targetId)
+}
 
 /** 加载当前 agent 的 session 列表(模板 onMounted / agentId watch 调用)。 */
 async function loadSessions(): Promise<void> {
@@ -3660,6 +3712,19 @@ onBeforeUnmount(() => {
 @keyframes nr-retrieval-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+.nr-session-group-label {
+  font-size: 11px;
+  color: var(--nr-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 6px 2px;
+  user-select: none;
+}
+
+.nr-session-item.drop-target {
+  border-top: 2px solid #6366f1;
 }
 
 .nr-rate-limit-banner {

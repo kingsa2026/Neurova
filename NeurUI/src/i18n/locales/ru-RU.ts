@@ -337,6 +337,10 @@ export default {
     loadError: 'Не удалось загрузить данные панели',
     retry: 'Повторить',
     anotherTabSending: 'Другая вкладка отправляет в этой сессии',
+    groupPinned: 'Закреплённые',
+    groupToday: 'Сегодня',
+    groupWeek: 'За 7 дней',
+    groupEarlier: 'Ранее',
   },
   agent: {
     title: 'Управление агентами',

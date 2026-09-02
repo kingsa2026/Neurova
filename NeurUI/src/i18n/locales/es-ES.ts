@@ -337,6 +337,10 @@ export default {
     loadError: 'Error al cargar los datos del panel',
     retry: 'Reintentar',
     anotherTabSending: 'Otra pestaña está enviando en esta sesión',
+    groupPinned: 'Fijadas',
+    groupToday: 'Hoy',
+    groupWeek: 'Últimos 7 días',
+    groupEarlier: 'Antes',
   },
   agent: {
     title: 'Gestión de agentes',

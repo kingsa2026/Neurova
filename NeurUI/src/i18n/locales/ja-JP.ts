@@ -337,6 +337,10 @@ export default {
     loadError: 'ダッシュボードの読み込みに失敗',
     retry: '再試行',
     anotherTabSending: '別のタブがこのセッションで送信中です',
+    groupPinned: 'ピン留め',
+    groupToday: '今日',
+    groupWeek: '7 日以内',
+    groupEarlier: 'それ以前',
   },
   agent: {
     title: 'エージェント管理',
