@@ -335,6 +335,7 @@ export default {
     statusHealthy: 'النظام صحي',
     refresh: 'تحديث',
     loadError: 'فشل تحميل بيانات لوحة القيادة',
+    retry: 'إعادة المحاولة',
   },
   agent: {
     title: 'إدارة الوكلاء',

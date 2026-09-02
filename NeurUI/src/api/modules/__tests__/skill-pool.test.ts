@@ -56,6 +56,37 @@ describe('skill-pool API — 既有函数 URL 对齐', () => {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   })
+
+  // --- 提交-审核三连(ADR 0013 canonical 前缀;后端曾只有 /v1/marketplace 版,404 断链) ---
+  it('submitSkillForReview calls POST /skill-pool/skills/submit', async () => {
+    await skillPool.submitSkillForReview({
+      skill_id: 'my-tool',
+      name: 'My Tool',
+      version: '1.0.0',
+      description: 'A community skill',
+    })
+    expect(mockPost).toHaveBeenCalledWith('/skill-pool/skills/submit', {
+      skill_id: 'my-tool',
+      name: 'My Tool',
+      version: '1.0.0',
+      description: 'A community skill',
+    })
+  })
+
+  it('listSkillSubmissions calls GET /skill-pool/skill-submissions with review_status param', async () => {
+    await skillPool.listSkillSubmissions('pending')
+    expect(mockGet).toHaveBeenCalledWith('/skill-pool/skill-submissions', {
+      params: { review_status: 'pending' },
+    })
+  })
+
+  it('reviewSkillSubmission calls POST /skill-pool/skill-submissions/{id}/review', async () => {
+    await skillPool.reviewSkillSubmission('subs_1', true, 'looks good')
+    expect(mockPost).toHaveBeenCalledWith('/skill-pool/skill-submissions/subs_1/review', {
+      approve: true,
+      note: 'looks good',
+    })
+  })
 })
 
 // ===========================================================================

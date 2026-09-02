@@ -335,6 +335,7 @@ export default {
     statusHealthy: 'Sistema saludable',
     refresh: 'Actualizar',
     loadError: 'Error al cargar los datos del panel',
+    retry: 'Reintentar',
   },
   agent: {
     title: 'Gestión de agentes',

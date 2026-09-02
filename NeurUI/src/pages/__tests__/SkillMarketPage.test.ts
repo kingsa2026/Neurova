@@ -50,7 +50,7 @@ vi.mock('@/api/modules/skill-pool', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ user: { id: 'a9', username: 'admin', role: 'admin' } }),
+  useAuthStore: vi.fn(),
 }))
 
 vi.mock('ant-design-vue', () => ({
@@ -58,6 +58,22 @@ vi.mock('ant-design-vue', () => ({
 }))
 
 import * as skillPoolApi from '@/api/modules/skill-pool'
+import { useAuthStore } from '@/stores/auth'
+
+const ADMIN = {
+  id: 'a9',
+  username: 'admin',
+  email: 'admin@example.com',
+  role: 'admin' as const,
+  status: 'active' as const,
+}
+const USER = {
+  id: 'u1',
+  username: 'alice',
+  email: 'alice@example.com',
+  role: 'user' as const,
+  status: 'active' as const,
+}
 
 const messages = {
   common: { refresh: '刷新' },
@@ -142,9 +158,20 @@ function mountPage() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(useAuthStore).mockReturnValue({ user: ADMIN } as any)
 })
 
 describe('SkillMarketPage 提交与审核', () => {
+  it('普通用户:不渲染审核面板、不拉取待审列表,但保留提交入口', async () => {
+    vi.mocked(useAuthStore).mockReturnValue({ user: USER } as any)
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(skillPoolApi.listSkillSubmissions).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('技能审核')
+    expect(wrapper.text()).toContain('提交技能')
+  })
+
   it('管理员挂载时拉取待审列表并渲染审核面板', async () => {
     const wrapper = mountPage()
     await flushPromises()

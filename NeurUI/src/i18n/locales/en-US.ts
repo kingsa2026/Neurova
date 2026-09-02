@@ -336,6 +336,7 @@ export default {
     statusHealthy: 'System healthy',
     refresh: 'Refresh',
     loadError: 'Failed to load dashboard data',
+    retry: 'Retry',
   },
   agent: {
     title: 'Agent Management',

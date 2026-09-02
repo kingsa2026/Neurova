@@ -1,15 +1,20 @@
 <template>
   <GlassPanel :variant="variant" :radius="radius" :padding="padding" :glow="glow">
     <div class="nr-glass-card">
-      <div v-if="title || $slots.header" class="nr-glass-card-header">
-        <slot name="header">
-          <div v-if="icon" class="nr-glass-card-icon">
-            <component :is="icon" v-if="typeof icon === 'object'" />
-            <span v-else>{{ icon }}</span>
-          </div>
-          <h3 v-if="title" class="nr-glass-card-title">{{ title }}</h3>
-          <p v-if="subtitle" class="nr-glass-card-subtitle">{{ subtitle }}</p>
-        </slot>
+      <div v-if="title || $slots.header || $slots.extra" class="nr-glass-card-header" :class="{ 'nr-glass-card-header-row': !!$slots.extra }">
+        <div class="nr-glass-card-header-main">
+          <slot name="header">
+            <div v-if="icon" class="nr-glass-card-icon">
+              <component :is="icon" v-if="typeof icon === 'object'" />
+              <span v-else>{{ icon }}</span>
+            </div>
+            <h3 v-if="title" class="nr-glass-card-title">{{ title }}</h3>
+            <p v-if="subtitle" class="nr-glass-card-subtitle">{{ subtitle }}</p>
+          </slot>
+        </div>
+        <div v-if="$slots.extra" class="nr-glass-card-extra">
+          <slot name="extra" />
+        </div>
       </div>
       <div class="nr-glass-card-body">
         <slot />
@@ -43,6 +48,10 @@ withDefaults(defineProps<{
 <style scoped>
 .nr-glass-card { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .nr-glass-card-header { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* extra 插槽（标题右侧内容，如分组描述/统计）时改为一行布局 */
+.nr-glass-card-header-row { flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.nr-glass-card-header-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+.nr-glass-card-extra { flex-shrink: 0; min-width: 0; }
 .nr-glass-card-icon { font-size: 24px; color: var(--nr-primary-light); margin-bottom: 4px; }
 .nr-glass-card-title {
   font-family: var(--nr-font-display); font-size: 18px; font-weight: 600;
