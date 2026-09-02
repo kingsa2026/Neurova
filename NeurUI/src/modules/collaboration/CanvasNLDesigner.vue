@@ -145,7 +145,7 @@ defineExpose({ collapsed })
   height: 46px;
   border-radius: 50%;
   border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.14));
-  background: rgba(20, 22, 40, 0.9);
+  background: var(--nr-bg-elevated);
   color: var(--nr-text-primary, #e8e9f0);
   font-size: 20px;
   cursor: pointer;
@@ -158,7 +158,7 @@ defineExpose({ collapsed })
   flex-direction: column;
   border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.14));
   border-radius: 12px;
-  background: rgba(20, 22, 40, 0.96);
+  background: var(--nr-bg-elevated);
   overflow: hidden;
 }
 .nl-header {
@@ -210,7 +210,7 @@ defineExpose({ collapsed })
   color: #fff;
 }
 .nl-msg--agent .nl-bubble {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--nr-glass-bg);
   color: var(--nr-text-primary, #e8e9f0);
 }
 .nl-bubble--loading {
