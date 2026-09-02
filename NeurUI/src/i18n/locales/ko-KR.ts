@@ -335,6 +335,7 @@ export default {
     statusHealthy: '시스템 정상',
     refresh: '새로 고침',
     loadError: '대시보드 데이터 로드 실패',
+    retry: '재시도',
   },
   agent: {
     title: '에이전트 관리',

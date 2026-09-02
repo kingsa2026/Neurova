@@ -335,6 +335,7 @@ export default {
     statusHealthy: 'Система здорова',
     refresh: 'Обновить',
     loadError: 'Не удалось загрузить данные панели',
+    retry: 'Повторить',
   },
   agent: {
     title: 'Управление агентами',

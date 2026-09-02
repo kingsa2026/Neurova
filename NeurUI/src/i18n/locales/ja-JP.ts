@@ -335,6 +335,7 @@ export default {
     statusHealthy: 'システム正常',
     refresh: '更新',
     loadError: 'ダッシュボードの読み込みに失敗',
+    retry: '再試行',
   },
   agent: {
     title: 'エージェント管理',

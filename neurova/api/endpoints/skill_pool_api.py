@@ -21,9 +21,17 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
+from neurova.api.deps import get_current_user, require_admin
+from neurova.api.endpoints.marketplace import (
+    MarketplaceSkillSubmit,
+    SkillSubmissionReview,
+    list_skill_submissions,
+    review_skill_submission,
+    submit_market_skill,
+)
 from neurova.api.endpoints._pydantic_compat import safe_model_dump
 
 logger = get_logger(__name__)
@@ -316,3 +324,41 @@ async def install_from_zip(file: UploadFile = File(...)):
     except Exception as e:
         logger.exception("install_from_zip failed: %s", e)
         return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# 技能提交-审核三连(canonical /v1/skill-pool 域,ADR 0013)
+#
+# 2026-09-03 线上 404:提交/审核后端实现曾寄生在 /v1/marketplace(废弃域),
+# 前端按 canonical 前缀 /skill-pool/* 接线导致三连全部 404。
+# 修复:在此委托 marketplace 的同源 handler —— 共享 submissions 存储、
+# 通知与鉴权;迁移后 marketplace 旧前缀仍然可用,存量兼容。
+# ---------------------------------------------------------------------------
+@router.post("/skills/submit")
+async def submit_skill_for_review(
+    body: MarketplaceSkillSubmit,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """用户提交技能上架申请(登录用户):进入待审批并通知管理员。"""
+    return await submit_market_skill(body, current_user)
+
+
+@router.get("/skill-submissions")
+async def skill_submissions_list(
+    review_status: str = Query(
+        default="pending", description="筛选状态: pending/approved/rejected/all"
+    ),
+    admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """提交审批列表(仅管理员)。"""
+    return await list_skill_submissions(review_status=review_status, admin=admin)
+
+
+@router.post("/skill-submissions/{submission_id}/review")
+async def skill_submission_review(
+    submission_id: str,
+    body: SkillSubmissionReview,
+    admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """审批技能提交(仅管理员):approve 写入市场目录,reject 不上架。"""
+    return await review_skill_submission(submission_id=submission_id, body=body, admin=admin)

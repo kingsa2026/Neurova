@@ -335,6 +335,7 @@ export default {
     statusHealthy: 'सिस्टम स्वस्थ',
     refresh: 'ताज़ा करें',
     loadError: 'डैशबोर्ड डेटा लोड विफल',
+    retry: 'पुनः प्रयास',
   },
   agent: {
     title: 'एजेंट प्रबंधन',

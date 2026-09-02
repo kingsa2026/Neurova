@@ -335,6 +335,7 @@ export default {
     statusHealthy: 'System gesund',
     refresh: 'Aktualisieren',
     loadError: 'Dashboard-Daten konnten nicht geladen werden',
+    retry: 'Wiederholen',
   },
   agent: {
     title: 'Agentenverwaltung',
