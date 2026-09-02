@@ -412,6 +412,8 @@
             class="nr-chat-textarea"
             :placeholder="isRecording ? t('chat.recording') : t('chat.placeholder')"
             rows="1"
+            @compositionstart="onCompositionStart"
+            @compositionend="onCompositionEnd"
             @keydown="handleKeydown"
             @input="autoResize"
             @paste="handlePaste"
@@ -634,6 +636,7 @@ import ComputerUsePanel from '@/components/chat/ComputerUsePanel.vue'
 import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
 import { toolCardVariant, variantIcon, variantColor } from '@/utils/toolCardVariant'
 import { useThinkingEffort } from '@/composables/useThinkingEffort'
+import { useIMEComposition } from '@/composables/useIMEComposition'
 import type { ThinkingEffort } from '@/composables/useThinkingEffort'
 import { useSessionSync } from '@/composables/useSessionSync'
 import { listModels } from '@/api/modules/models'
@@ -1945,8 +1948,12 @@ function openLightbox(src: string, alt: string) {
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
+const { onCompositionStart, onCompositionEnd, shouldBlockSend } = useIMEComposition()
+
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
+    // IME 合成防误发（补课 A）：输入法选词回车不发送
+    if (shouldBlockSend(e)) return
     e.preventDefault()
     sendMessage()
   }
