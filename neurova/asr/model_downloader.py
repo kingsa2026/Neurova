@@ -36,6 +36,16 @@ ASR_MODEL_REGISTRY = {
     },
 }
 
+# FunASR Paraformer（中文优先，ModelScope 下载；补课 4.2 续）
+FUNASR_MODEL_REGISTRY = {
+    "paraformer-zh": {
+        "description": "FunASR Paraformer-zh（中文 SOTA 非自回归，~350MB，标点/VAD 内建）",
+        "model_id": "paraformer-zh",
+        "cache_dir": "models/asr/funasr",
+        "size_hint": "~350MB",
+    },
+}
+
 # 默认模型：base（质量/体积平衡点）
 DEFAULT_ASR_MODEL = "whisper-base"
 
