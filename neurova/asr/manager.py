@@ -7,6 +7,7 @@ ASR Manager - ASR引擎管理器
 3. mock: MockASR（测试用）
 """
 
+import asyncio
 import os
 
 from neurova.core.logger import get_logger
@@ -36,6 +37,9 @@ class ASRConfig(BaseModel):
     model_path: Optional[str] = None
     auto_download: bool = True
     fallback_enabled: bool = True
+    # 本地 Whisper 下载安装同意门（补课：管理员 opt-in）——False 时本地
+    # whisper 引擎在链中跳过（模型 ~140MB+torch），同意后置 True 才参与
+    local_whisper_consent: bool = False
 
 
 class ASRManager:
@@ -89,20 +93,79 @@ class ASRManager:
                 FALLBACK_CHAIN.append("mock")
             return await self._initialize_with_fallback()
         else:
+            # 显式指定本地 whisper 同样过同意门（拒绝优于静默下载）
+            if (
+                self._config.engine == "whisper"
+                and not self._config.local_whisper_consent
+            ):
+                logger.warning("本地 whisper 未获用户同意（管理员设置页），拒绝初始化")
+                return False
             return await self._initialize_engine(self._config.engine)
 
     async def _initialize_with_fallback(self) -> bool:
-        """按 fallback 链初始化"""
-        for engine_name in FALLBACK_CHAIN:
+        """按 fallback 链初始化。
+
+        本地 whisper 是管理员 opt-in（local_whisper_consent）：未同意时
+        链中跳过（模型 ~140MB+torch 下载需用户知情同意），同意后自动参与。
+        """
+        chain = list(FALLBACK_CHAIN)
+        if not self._config.local_whisper_consent and "whisper" in chain:
+            chain.remove("whisper")
+            logger.info("本地 whisper 未获用户同意，链中跳过（funasr→remote_whisper）")
+        for engine_name in chain:
             logger.info("尝试初始化 ASR 引擎: %s", engine_name)
-            success = await self._initialize_engine(engine_name)
+            outcome = self._initialize_engine(engine_name)
+            success = await outcome if asyncio.iscoroutine(outcome) else bool(outcome)
             if success:
-                self._fallback_index = FALLBACK_CHAIN.index(engine_name)
+                self._fallback_index = chain.index(engine_name)
+                # 统一由链层设置状态（重跑同意链时引擎实例来自新构造，
+                # _initialize_engine 已赋值——此处兜底保证 _engine_name/
+                # _initialized 与链结果一致）
+                if self._engine_name != engine_name or not self._initialized:
+                    self._engine_name = engine_name
+                    self._initialized = True
                 return True
             self._available_engines[engine_name] = False
 
         logger.error("所有 ASR 引擎初始化失败")
+        self._engine_name = None
+        self._initialized = False
         return False
+
+    def grant_local_whisper_consent(self) -> bool:
+        """管理员同意本地 whisper 下载安装——重跑链使其参与。
+
+        Returns:
+            同意后任一引擎初始化成功（通常即 whisper）。
+        """
+        self._config.local_whisper_consent = True
+        self._initialized = False
+        self._engine = None
+        self._engine_name = None
+
+        # 首次下载（~140MB+torch 依赖检查）+ 重跑链可能耗时数分钟；
+        # 本方法为同步入口（FastAPI def 端点在线程池运行），直接
+        # asyncio.run 新建事件循环执行——不与调用方 loop 交互
+        import concurrent.futures
+
+        async def _rerun():
+            return await self._initialize_with_fallback()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, _rerun()).result(timeout=600)
+
+    def get_consent_status(self) -> dict:
+        """本地 whisper 同意门状态（前端设置页消费）。"""
+        from neurova.asr.model_downloader import get_asr_model_dir, is_model_ready
+
+        return {
+            "consent": self._config.local_whisper_consent,
+            "model_ready": is_model_ready("base"),
+            "model_dir": str(get_asr_model_dir()),
+            "active_engine": self._engine_name,
+            "available": {k: v for k, v in self._available_engines.items()},
+            "chain": list(FALLBACK_CHAIN),
+        }
 
     async def _initialize_engine(self, engine_name: str) -> bool:
         """初始化指定引擎"""
@@ -130,6 +193,9 @@ class ASRManager:
 
                 engine = RemoteWhisperEngine()
             elif engine_name == "whisper":
+                if not self._config.local_whisper_consent:
+                    logger.warning("本地 whisper 未获用户同意（管理员设置页），跳过")
+                    return False
                 from neurova.asr.whisper_engine import WhisperEngine
 
                 engine = WhisperEngine(

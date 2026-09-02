@@ -13,9 +13,9 @@ import base64
 from neurova.core.logger import get_logger
 import time
 import uuid
-from typing import Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -25,6 +25,15 @@ router = APIRouter()
 
 # 模块级导入（避免重复导入）
 from neurova.api.endpoints import get_app_state
+
+
+def require_admin_dep():
+    """路由内延迟获取（模块导入顺序安全）"""
+    from neurova.api.deps import require_admin
+
+    return require_admin()
+
+
 
 
 class SynthesizeRequest(BaseModel):
@@ -402,4 +411,36 @@ async def list_engines():
     return {
         "code": 0,
         "data": engines,
+    }
+
+
+# ── 本地 Whisper opt-in（补课：管理员同意后下载安装兜底） ──────────
+
+
+@router.get("/asr/local-whisper/status")
+async def local_whisper_status(
+    current_user: Dict[str, Any] = Depends(require_admin_dep),
+):
+    """本地 Whisper 同意门状态（管理员）"""
+    asr_manager = _get_asr_manager()
+    if not asr_manager or not hasattr(asr_manager, "get_consent_status"):
+        raise HTTPException(status_code=503, detail="ASR manager not available")
+    return {"code": 0, "data": asr_manager.get_consent_status()}
+
+
+@router.post("/asr/local-whisper/consent")
+async def local_whisper_consent(
+    current_user: Dict[str, Any] = Depends(require_admin_dep),
+):
+    """管理员同意本地 Whisper 下载安装并即时启用（阻塞至重跑链完成，上限 10 分钟）"""
+    asr_manager = _get_asr_manager()
+    if not asr_manager or not hasattr(asr_manager, "grant_local_whisper_consent"):
+        raise HTTPException(status_code=503, detail="ASR manager not available")
+    ok = asr_manager.grant_local_whisper_consent()
+    return {
+        "code": 0,
+        "data": {
+            "enabled": bool(ok),
+            "status": asr_manager.get_consent_status(),
+        },
     }
