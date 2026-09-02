@@ -154,7 +154,7 @@
                   <div class="result-item">
                     <span class="result-content">{{ item.content || item.text }}</span>
                     <a-tag>{{ (item.score ?? 0).toFixed(3) }}</a-tag>
-                    <a-tag v-if="item.channel_scores" color="cyan" class="nerf-tag">NeRF</a-tag>
+                    <a-tag v-if="item.channel_scores" color="cyan" class="nerf-tag">{{ t('memorySearch.nerfTag') }}</a-tag>
                   </div>
                 </a-list-item>
               </template>

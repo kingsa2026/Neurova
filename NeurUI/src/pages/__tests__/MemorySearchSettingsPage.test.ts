@@ -92,7 +92,7 @@ const messages = {
     channelGraph: '图谱',
     channelEmotion: '情感',
     channelVoice: '语音',
-    nerfTag: 'NeRF',
+    nerfTag: 'NeRF 专用标签',
     saved: 'NeRF 设置已保存',
     resetDone: 'NeRF 设置已重置',
   },
@@ -123,7 +123,10 @@ const globalStubs = {
   'a-tooltip': { template: '<span><slot/></span>' },
   'a-select': { props: ['value'], emits: ['update:value'], template: '<div><select/><slot/></div>' },
   'a-select-option': { props: ['value'], template: '<option :value="value"><slot/></option>' },
-  'a-list': { props: ['dataSource'], template: '<div class="ant-list"><slot/></div>' },
+  'a-list': {
+    props: ['dataSource'],
+    template: '<div class="ant-list"><slot name="renderItem" v-for="(item, i) in dataSource" :key="i" :item="item"/></div>',
+  },
   'a-list-item': { template: '<div class="ant-list-item"><slot/></div>' },
   'a-tag': { template: '<span><slot/></span>' },
   'a-empty': { props: ['description'], template: '<div class="ant-empty">{{ description }}<slot/></div>' },
@@ -217,5 +220,20 @@ describe('MemorySearchSettingsPage 首帧渲染', () => {
 
     expect(wrapper.text()).toContain('搜索方式')
     expect(wrapper.text()).toContain('混合')
+  })
+
+  it('测试结果 NeRF 标签走 nerfTag i18n 键（非硬编码）', async () => {
+    vi.mocked(request.post).mockResolvedValue({
+      data: { results: [{ content: '结果A', score: 0.9, channel_scores: { text: 0.8 } }] },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const input = wrapper.find('input.ant-input-search')
+    await input.setValue('测试查询')
+    await input.trigger('keyup.enter')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('NeRF 专用标签')
   })
 })

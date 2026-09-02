@@ -363,11 +363,39 @@
                   <span v-if="m.tags.includes('built-in')" class="nr-mm-tag nr-mm-tag-builtin">{{ t('model.builtin') }}</span>
                 </div>
                 <div class="nr-mm-item-actions">
+                  <button class="nr-mm-icon-btn" :title="t('model.editModel')" @click="startEditModel(m)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                  </button>
                   <button class="nr-mm-icon-btn" :title="t('model.settings')" @click="activateModel(m)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                   </button>
-                  <button v-if="m.tags.includes('user-added')" class="nr-mm-icon-btn nr-mm-icon-danger" :title="t('model.delete')" @click="deleteModel(m)">
+                  <button class="nr-mm-icon-btn nr-mm-icon-danger" :title="t('model.delete')" @click="deleteModel(m)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Edit model section -->
+            <div v-if="editingModel" class="nr-mm-add-section">
+              <div class="nr-mm-add-form">
+                <div class="nr-mm-add-title">{{ t('model.editModel') }} — {{ editingModel.id }}</div>
+                <div class="nr-mm-add-fields">
+                  <div class="nr-mm-add-field">
+                    <label>{{ t('model.modelId') }} <span class="req">*</span></label>
+                    <input v-model="editModelId" class="nr-input" :placeholder="t('ui.egModelId')" autocomplete="off" />
+                  </div>
+                  <div class="nr-mm-add-field">
+                    <label>{{ t('model.modelNameOptional') }}</label>
+                    <input v-model="editModelName" class="nr-input" :placeholder="t('ui.egModelName')" autocomplete="off" />
+                  </div>
+                </div>
+                <div class="nr-mm-add-buttons">
+                  <button class="nr-mm-btn-cancel" @click="cancelEditModel">
+                    {{ t('common.cancel') }}
+                  </button>
+                  <button class="nr-mm-btn-submit" :disabled="!editModelId.trim() || savingEdit" @click="saveEditedModel">
+                    {{ savingEdit ? '...' : t('common.save') }}
                   </button>
                 </div>
               </div>
@@ -413,7 +441,7 @@ import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
 import { listProviders, getActiveModel, activateModel as apiActivateModel, updateProvider, createProvider as apiCreateProvider, deleteProvider as apiDeleteProvider, discoverModels as apiDiscoverModels, filterProviderModels, getProviderSeries, testConnection } from '@/api/modules/providers'
 import type { FilteredProviderModel } from '@/api/modules/providers'
-import { listModels, deleteModel as apiDeleteModel } from '@/api/modules/models'
+import { listModels, updateModel, deleteModel as apiDeleteModel } from '@/api/modules/models'
 import { getSettings, updateSettings } from '@/api/modules/settings'
 import { useAuthStore } from '@/stores/auth'
 import GlassCard from '@/components/GlassCard.vue'
@@ -479,7 +507,7 @@ const BUILTIN_PROVIDERS: SeedProvider[] = [
   { id: 'arkcoding-anthropic', name: 'arkcoding-anthropic', icon: 'AA', color: '#0891b2', type: 'builtin', category: 'paid', base_url: 'https://ark.cn-beijing.volces.com/api/coding/v3', protocol: 'anthropic', enabled: true },
   { id: 'sambanova', name: 'sambanova.ai', icon: 'SN', color: '#dc2626', type: 'builtin', category: 'paid', base_url: 'https://api.sambanova.ai/v1', protocol: 'openai', enabled: true },
   { id: 'nsc', name: t('ui.providerNsc'), icon: 'N', color: '#b91c1c', type: 'builtin', category: 'paid', base_url: 'https://api.nsc.org.cn/v1', protocol: 'openai', enabled: true },
-  { id: 'sensetime', name: t('ui.providerSensetime'), icon: 'S', color: '#7c3aed', type: 'builtin', category: 'paid', base_url: 'https://api.sensetime.com/v1', protocol: 'openai', enabled: true },
+  { id: 'sensetime', name: t('ui.providerSensetime'), icon: 'S', color: '#7c3aed', type: 'builtin', category: 'paid', base_url: 'https://token.sensenova.cn/v1', protocol: 'openai', enabled: true },
   { id: 'xiaomi', name: t('ui.providerXiaomi'), icon: 'Mi', iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01TSCOAt1XP7fywLDei_!!6000000002915-2-tps-3483-3483.png', color: '#f97316', type: 'builtin', category: 'paid', base_url: 'https://api.xiaomi.com/v1', protocol: 'openai', enabled: true },
   { id: 'modelscope', name: 'ModelScope', icon: 'MS', iconSrc: 'https://gw.alicdn.com/imgextra/i4/O1CN01exenB61EAwhgY4pmA_!!6000000000312-2-tps-400-400.png', color: '#0d9488', type: 'builtin', category: 'paid', base_url: 'https://api.modelscope.cn/v1', protocol: 'openai', enabled: true },
   { id: 'dashscope', name: 'DashScope', icon: 'DS', iconSrc: 'https://gw.alicdn.com/imgextra/i4/O1CN01aDHDeq1mgj7gbRkhi_!!6000000004984-2-tps-400-400.png', color: '#0284c7', type: 'builtin', category: 'paid', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', protocol: 'openai', enabled: true },
@@ -563,6 +591,10 @@ const isOpenRouterTarget = computed(() => modelTarget.value?.id === 'openrouter'
 const newModelId = ref('')
 const newModelName = ref('')
 const addModelExpanded = ref(false)
+const editingModel = ref<ModelItem | null>(null)
+const editModelId = ref('')
+const editModelName = ref('')
+const savingEdit = ref(false)
 
 // ---------------------------------------------------------------------------
 // Computed
@@ -1148,6 +1180,54 @@ async function deleteModel(m: ModelItem) {
     allModels.value = allModels.value.filter((mm) => mm.id !== m.id)
   } catch {
     message.error(t('common.error'))
+  }
+}
+
+function startEditModel(m: ModelItem) {
+  editingModel.value = m
+  editModelId.value = m.id
+  editModelName.value = m.name
+}
+
+function cancelEditModel() {
+  editingModel.value = null
+  editModelId.value = ''
+  editModelName.value = ''
+}
+
+async function saveEditedModel() {
+  if (!editingModel.value) return
+  const target = editingModel.value
+  const newId = editModelId.value.trim()
+  const newName = editModelName.value.trim()
+  if (!newId) return
+  // 前端去重:改 ID 不得与相同服务商下其他条目冲突
+  const dup = allModels.value.some(
+    (mm) => mm.id === newId && mm !== target && mm.provider_id === target.provider_id,
+  )
+  if (dup) {
+    message.warning(t('model.modelAlreadyExists', { name: newId }))
+    return
+  }
+  savingEdit.value = true
+  try {
+    await updateModel(target.id, { id: newId, name: newName || newId, provider_id: target.provider_id })
+    message.success(t('common.success'))
+    const oldId = target.id
+    target.id = newId
+    target.name = newName || newId
+    const live = providers.value.find((p) => p.id === target.provider_id)
+    if (live) {
+      const idx = live.models.findIndex((mm) => mm.id === oldId)
+      if (idx >= 0) live.models[idx] = { ...target }
+    }
+    const allIdx = allModels.value.findIndex((mm) => mm.id === oldId && mm.provider_id === target.provider_id)
+    if (allIdx >= 0) allModels.value[allIdx] = { ...target }
+    cancelEditModel()
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    savingEdit.value = false
   }
 }
 

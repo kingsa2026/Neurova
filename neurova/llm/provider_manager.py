@@ -195,6 +195,16 @@ _BUILTIN_PROVIDER_DEFS: tuple[dict, ...] = (
         "provider": "openai",
         "base_url": "https://models.github.ai/inference",
     },
+    {
+        # 商汤 LLM:真实端点 token.sensenova.cn/v1(OpenAI 兼容)。
+        # 曾查实前端卡片写的是 api.sensetime.com/v1(不可用),用户须手动
+        # 新建自定义 provider 才能用 —— 内置后填 key 即开箱。
+        "id": "sensetime",
+        "name": "商汤科技",
+        "provider": "openai",
+        "base_url": "https://token.sensenova.cn/v1",
+        "api_key_prefix": "",
+    },
 )
 
 
@@ -516,6 +526,53 @@ class LLMProviderManager(Module):
 
         logger.info("Updated provider: %s", provider.name)
         return True
+
+    def rename_model_entry(
+        self,
+        provider_id: str,
+        old_id: str,
+        new_id: Optional[str] = None,
+        name: Optional[str] = None,
+    ) -> bool:
+        """编辑模型条目:改模型 ID 或显示名称(内置/发现的条目同样可编辑)。
+
+        - 改 ID:models 列表替换、model_metadata 键迁移、default_model 同步
+        - 改名称:写入 model_metadata[model_id]["name"];无元数据条目时补建
+        条目归属用户配置的 provider 实体,不影响内置种子(种子只补缺失 id,
+        models 恒为空,删除/改名不会被种子覆盖)。
+        """
+        provider = self._providers.get(provider_id)
+        if provider is None or old_id not in (provider.models or []):
+            return False
+
+        new_id = (new_id or old_id).strip() or old_id
+        if new_id == old_id and not name:
+            return False
+
+        metadata = dict(provider.model_metadata or {})
+        new_models: Optional[List[str]] = None
+        new_default: Optional[str] = None
+
+        if new_id != old_id:
+            if old_id in metadata:
+                meta = dict(metadata.pop(old_id))
+                meta["id"] = new_id
+                metadata.setdefault(new_id, meta)
+            new_models = [new_id if m == old_id else m for m in provider.models]
+            if provider.default_model == old_id:
+                new_default = new_id
+
+        if name:
+            meta = metadata.get(new_id) or {"id": new_id}
+            meta["name"] = name
+            metadata[new_id] = meta
+
+        provider.model_metadata = metadata
+        return self.update_provider(
+            provider_id,
+            models=new_models,
+            default_model=new_default,
+        )
 
     def update_provider_metadata(self, provider_id: str, metadata: Dict[str, Any]) -> bool:
         """更新服务商元数据"""

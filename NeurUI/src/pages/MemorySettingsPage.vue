@@ -80,9 +80,9 @@
 
                 <div class="param-info">
                   <div class="param-name">{{ formatParamKey(param.key) }}</div>
-                  <div class="param-desc">{{ param.description }}</div>
+                  <div class="param-desc">{{ paramDesc(param) }}</div>
                   <div class="param-meta">
-                    <a-tag size="small" :color="typeColor(param.type)">{{ param.type }}</a-tag>
+                    <a-tag size="small" :color="typeColor(param.type)">{{ typeLabel(param.type) }}</a-tag>
                     <span v-if="param.min != null || param.max != null" class="param-range">
                       {{ param.min ?? '∞' }} ~ {{ param.max ?? '∞' }}
                     </span>
@@ -167,7 +167,7 @@
     <!-- Save bar -->
     <div v-if="isAdmin && hasChanges" class="save-bar">
       <div class="save-info">
-        {{ changedKeys.length }} {{ t('memorySettings.paramKey') }} changed
+        {{ t('memorySettings.changedHint', { n: changedKeys.length }) }}
       </div>
       <GlassButton variant="ghost" size="sm" @click="discardChanges">
         {{ t('common.cancel') }}
@@ -189,7 +189,7 @@ import * as memSettingsApi from '@/api/modules/memory-settings'
 import type { ParamSchema } from '@/api/modules/memory-settings'
 import { useAuthStore } from '@/stores/auth'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const authStore = useAuthStore()
 /** 全局配置仅管理员可操作；普通用户只读查看 */
 const isAdmin = computed(() => authStore.user?.role === 'admin')
@@ -260,6 +260,18 @@ const sectionDesc = (sec: string) => {
   const key = sectionDescMap[sec]
   return key ? t(key) : ''
 }
+
+const typeLabelMap: Record<string, string> = {
+  float: 'memorySettings.typeFloat',
+  int: 'memorySettings.typeInt',
+  bool: 'memorySettings.typeBool',
+  string: 'memorySettings.typeString',
+}
+
+const typeLabel = (type: string) => t(typeLabelMap[type] || type)
+
+// 描述优先走后端 desc_key（i18n 语言包键）；当前语言缺键时回退后端中文 description。
+const paramDesc = (p: ParamSchema) => (p.desc_key && te(p.desc_key) ? t(p.desc_key) : p.description)
 
 const paramsInSection = (sec: string) => schema.value.filter(p => p.key.startsWith(sec + '.'))
 

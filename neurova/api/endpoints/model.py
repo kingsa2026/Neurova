@@ -15,7 +15,7 @@ from neurova.core.logger import get_logger
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_optional_user
@@ -164,6 +164,70 @@ async def delete_model(
     except Exception as e:
         logger.error(f"Delete model error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to delete model: {str(e)}")
+
+
+class UpdateModelRequest(BaseModel):
+    """编辑模型条目请求:name(显示名)、id(新模型 ID)、provider_id(归属服务商)"""
+
+    name: Optional[str] = None
+    id: Optional[str] = None
+    provider_id: Optional[str] = None
+
+
+@router.put("/{model_id}")
+async def update_model(
+    request: Request,
+    model_id: str = Path(...),
+    body: UpdateModelRequest = Body(...),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+):
+    """编辑模型条目(模型 ID / 显示名称),内置/发现的条目同样可编辑。
+
+    body.id 为新模型 ID(缺省保持不变),body.name 为新显示名称。
+    无任何改动返回 400;模型不在任何服务商列表中返回 404。
+    """
+    _get_request_id(request)
+
+    provider_manager = _get_provider_manager(current_user)
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+
+    new_id = (body.id or model_id).strip() or model_id
+    if new_id == model_id and not (body.name or "").strip():
+        raise HTTPException(status_code=400, detail="Nothing to update: provide 'name' or a new 'id'")
+
+    try:
+        # 归属服务商:body.provider_id 优先,否则全服务商扫描
+        target_provider = None
+        if body.provider_id and hasattr(provider_manager, "get_provider"):
+            target_provider = provider_manager.get_provider(body.provider_id)
+        if target_provider is None and hasattr(provider_manager, "list_providers"):
+            for provider in provider_manager.list_providers():
+                if model_id in getattr(provider, "models", []):
+                    target_provider = provider
+                    break
+        if target_provider is None:
+            raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found in any provider")
+
+        updated = False
+        if hasattr(provider_manager, "rename_model_entry"):
+            updated = provider_manager.rename_model_entry(
+                getattr(target_provider, "id", "unknown"),
+                model_id,
+                new_id=new_id,
+                name=(body.name or "").strip() or None,
+            )
+        if not updated:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Model '{model_id}' not found in provider '{getattr(target_provider, 'id', 'unknown')}'",
+            )
+        return {"code": 0, "message": f"Model '{model_id}' updated to '{new_id}'"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update model error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update model: {str(e)}")
 
 @router.get("/active", response_model=ModelInfo)
 async def get_active_model(request: Request, agent_id: str = Query(default="default")):
