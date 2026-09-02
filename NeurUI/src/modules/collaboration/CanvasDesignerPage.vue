@@ -2404,7 +2404,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.canvas-designer { display: flex; flex-direction: column; height: calc(100vh - 64px); background: var(--nr-bg-primary, #0a0e1a); }
+.canvas-designer { display: flex; flex-direction: column; height: calc(100vh - 64px); background: var(--nr-bg-base, #0a0e1a); }
 .canvas-designer:fullscreen { height: 100vh; width: 100vw; }
 
 /* 店铺下拉空态/降级提示（§6.1） */
@@ -2423,7 +2423,7 @@ onBeforeUnmount(() => {
 .badge-expired, .badge-pending { background: rgba(250, 173, 20, 0.15); color: #faad14; }
 
 /* 工具栏 */
-.canvas-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid var(--nr-border, rgba(255, 255, 255, 0.08)); }
+.canvas-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--nr-glass-bg); border-bottom: 1px solid var(--nr-border, rgba(255, 255, 255, 0.08)); }
 .toolbar-left { display: flex; align-items: center; gap: 12px; }
 .canvas-title { color: var(--nr-text-primary); font-size: 15px; font-weight: 600; margin: 0; }
 .toolbar-right { display: flex; gap: 8px; }
@@ -2435,7 +2435,7 @@ onBeforeUnmount(() => {
 .canvas-body { display: flex; flex: 1; overflow: hidden; }
 
 /* 侧边栏通用 */
-.canvas-sidebar { width: 240px; background: rgba(255, 255, 255, 0.02); border-right: 1px solid var(--nr-border, rgba(255, 255, 255, 0.06)); overflow-y: auto; padding: 12px; }
+.canvas-sidebar { width: 240px; background: var(--nr-glass-bg); border-right: 1px solid var(--nr-border, rgba(255, 255, 255, 0.06)); overflow-y: auto; padding: 12px; }
 .canvas-properties { border-right: none; border-left: 1px solid var(--nr-border, rgba(255, 255, 255, 0.06)); }
 .sidebar-title { color: var(--nr-text-primary); font-size: 13px; font-weight: 600; margin: 0 0 12px 0; text-transform: uppercase; letter-spacing: 0.5px; }
 
@@ -2443,18 +2443,18 @@ onBeforeUnmount(() => {
 .palette-categories { display: flex; flex-direction: column; gap: 8px; }
 .palette-category { }
 .category-header { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; color: var(--nr-text-secondary); font-size: 12px; font-weight: 600; }
-.category-header:hover { background: rgba(255, 255, 255, 0.04); }
+.category-header:hover { background: var(--nr-glass-bg-hover); }
 .category-arrow { font-size: 9px; transition: transform 0.2s; }
 .category-arrow.expanded { transform: rotate(180deg); }
 .category-items { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 4px 12px; }
-.palette-node { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.03); cursor: grab; transition: all 0.15s; }
+.palette-node { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; background: var(--nr-glass-bg); cursor: grab; transition: all 0.15s; }
 .palette-node:hover { background: rgba(99, 102, 241, 0.1); }
 .palette-node:active { cursor: grabbing; }
 .node-icon { font-size: 14px; }
 .node-label { color: var(--nr-text-secondary); font-size: 12px; }
 
 /* 画布主区域 */
-.canvas-main { flex: 1; position: relative; overflow: hidden; background-image: radial-gradient(circle, rgba(255, 255, 255, 0.04) 1px, transparent 1px); background-size: 20px 20px; }
+.canvas-main { flex: 1; position: relative; overflow: hidden; background-image: radial-gradient(circle, color-mix(in srgb, var(--nr-text-muted) 22%, transparent) 1px, transparent 1px); background-size: 20px 20px; }
 /* 空格+左键平移（Figma 式抓取）：空格按下→抓手，拖动中→抓取 */
 .canvas-main.space-down { cursor: grab; }
 .canvas-main.space-panning { cursor: grabbing; }
@@ -2472,7 +2472,7 @@ onBeforeUnmount(() => {
 .canvas-edges { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; filter: none; overflow: visible; }
 
 /* 画布节点 */
-.graph-node { position: absolute; min-width: 140px; background: rgba(20, 25, 40, 0.95); border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.1)); border-radius: 10px; cursor: move; user-select: none; transition: border-color 0.15s; }
+.graph-node { position: absolute; min-width: 140px; background: var(--nr-bg-elevated); border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.1)); border-radius: 10px; cursor: move; user-select: none; transition: border-color 0.15s; }
 .graph-node.multi-selected { border-color: var(--nr-primary-light, #818cf8); box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.35); }
 .canvas-marquee { position: absolute; border: 1px dashed var(--nr-primary-light, #818cf8); background: rgba(129, 140, 248, 0.08); pointer-events: none; z-index: 40; }
 .graph-node:hover { border-color: rgba(99, 102, 241, 0.3); }
@@ -2484,10 +2484,10 @@ onBeforeUnmount(() => {
 .graph-node.run-running { border-color: rgba(250, 204, 21, 0.8); box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.2); }
 .node-output-view {
   max-height: 200px; overflow: auto; margin: 4px 0 0; padding: 8px;
-  border-radius: 6px; background: rgba(0, 0, 0, 0.3); font-size: 11px;
+  border-radius: 6px; background: var(--nr-bg-inset); font-size: 11px;
   color: var(--nr-text-secondary); white-space: pre-wrap; word-break: break-all;
 }
-.graph-node-header { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.graph-node-header { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--nr-glass-border); }
 .graph-node-icon { font-size: 14px; }
 .graph-node-title { color: var(--nr-text-primary); font-size: 12px; font-weight: 600; }
 .graph-node-body { padding: 6px 10px; display: flex; flex-direction: column; gap: 4px; }
@@ -2554,7 +2554,7 @@ onBeforeUnmount(() => {
   gap: 4px;
   padding: 4px 6px;
   border-radius: 8px;
-  background: rgba(20, 25, 40, 0.85);
+  background: var(--nr-bg-overlay);
   border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.08));
   z-index: 5;
 }
@@ -2566,7 +2566,7 @@ onBeforeUnmount(() => {
   font-size: 14px;
   cursor: pointer;
 }
-.zoom-btn:hover { background: rgba(255, 255, 255, 0.1); }
+.zoom-btn:hover { background: var(--nr-glass-bg-active); }
 .zoom-value {
   min-width: 44px;
   text-align: center;
@@ -2583,7 +2583,7 @@ onBeforeUnmount(() => {
   min-width: 180px;
   padding: 4px;
   border-radius: 8px;
-  background: rgba(20, 25, 40, 0.97);
+  background: var(--nr-bg-elevated);
   border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.1));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
