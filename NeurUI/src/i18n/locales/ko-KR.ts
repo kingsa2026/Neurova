@@ -408,6 +408,8 @@ export default {
     pin: '고정',
     unpin: '고정 해제',
     queued: '대기열에 추가됨 (#{n}) — 현재 응답 후 전송됩니다',
+    toolBackground: '백그라운드 실행 중',
+    toolBackgroundHint: '백그라운드로 전환됨 — 결과는 다음 턴에 주입됩니다',
     pinFailed: '고정 실패',
     archivedSessions: '보관된 세션',
     restore: '복원',

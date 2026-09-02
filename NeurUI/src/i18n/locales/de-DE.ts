@@ -408,6 +408,8 @@ export default {
     pin: 'Anheften',
     unpin: 'Loslösen',
     queued: 'In Warteschlange (Nr. {n}) — wird nach der aktuellen Antwort gesendet',
+    toolBackground: 'Läuft im Hintergrund',
+    toolBackgroundHint: 'In den Hintergrund verlegt — Ergebnis wird im nächsten Turn eingefügt',
     pinFailed: 'Anheften fehlgeschlagen',
     archivedSessions: 'Archivierte Sitzungen',
     restore: 'Wiederherstellen',

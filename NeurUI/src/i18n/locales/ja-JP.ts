@@ -408,6 +408,8 @@ export default {
     pin: 'ピン留め',
     unpin: 'ピン留め解除',
     queued: 'キューに追加（{n} 番目）— 現在の返信後に送信します',
+    toolBackground: 'バックグラウンド実行中',
+    toolBackgroundHint: 'バックグラウンドに移動しました。結果は次ターンで注入されます',
     pinFailed: 'ピン留めに失敗しました',
     archivedSessions: 'アーカイブ済みセッション',
     restore: '復元',

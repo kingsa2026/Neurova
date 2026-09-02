@@ -409,6 +409,8 @@ export default {
     pin: 'Pin',
     unpin: 'Unpin',
     queued: 'Queued (#{n}) — will send after the current reply',
+    toolBackground: 'Running in background',
+    toolBackgroundHint: 'Moved to background — result will be injected into the next turn',
     pinFailed: 'Failed to pin',
     archivedSessions: 'Archived Sessions',
     restore: 'Restore',
