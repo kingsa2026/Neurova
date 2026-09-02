@@ -340,3 +340,7 @@ _em.txt
 _mp*.txt
 _cfg.json
 test_api_output.wav
+
+# 桌面壳（Tauri）签名密钥与产物（src-tauri 自带 /target 忽略）
+*.pfx
+desktop/*.pfx
