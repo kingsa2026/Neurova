@@ -203,7 +203,7 @@ QP 有两个罕见机制值得记录：**real_behavior_proof_check**（CI 门禁
 
 ## 19. 合并补课清单（工程面 + 前端功能面，按性价比）
 
-> **✅ 执行完毕（2026-09-02 自动长任务 21 commits + 第二轮补课 5 commits）**：除"明确排除"外全部落地——含第二轮补齐的 CONTRIBUTING/SECURITY（48f48ab）、telegram inline_keyboard（62a7aa9）、情感分析入口收敛（4e3d9d5）、**断线重连+replay 快进（d66c28d）**。第三轮补课落地 P3-b 消息队列（7b2d699：流式排队+done 自动续发+队列 UI）——**仅剩 P3-a Tauri 桌面**一个大工程。执行明细见 `docs/04-plans/2026-09-02-noncore-upgrade-autorun-plan.md` 执行结果节。
+> **✅ 执行完毕（2026-09-02 自动长任务 21 commits + 第二轮补课 5 commits）**：除"明确排除"外全部落地——含第二轮补齐的 CONTRIBUTING/SECURITY（48f48ab）、telegram inline_keyboard（62a7aa9）、情感分析入口收敛（4e3d9d5）、**断线重连+replay 快进（d66c28d）**。第三轮补课落地 P3-b 消息队列（7b2d699：流式排队+done 自动续发+队列 UI）——P3-a Tauri 桌面壳 **Phase 1 已落地**（c9ca5c1+47c037c：最小壳拉起后端/健康等待/退出清理，自签名 Authenticode+DigiCert 时间戳，NSIS+MSI 双包实跑产出；诚实边界=不捆绑运行时，Windows 分发策略拍板=自签名自用/内测，macOS 搁置）——全方位评分的桌面端 0→4（自用可用，对外分发仍需付费证书或商店）。执行明细见 `docs/04-plans/2026-09-02-noncore-upgrade-autorun-plan.md` 执行结果节。
 
 > 工程面 9 项已细化为可执行计划：`docs/04-plans/2026-09-02-noncore-cleanup-plan.md`（含 MoE 索引勘误 Task——勘误注记已于本次合并写入 §5/§11）。Tauri 桌面（工程 P3-a）需独立立项，不入细化计划。
 
