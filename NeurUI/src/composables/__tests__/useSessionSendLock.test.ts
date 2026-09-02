@@ -24,7 +24,7 @@ describe('useSessionSendLock', () => {
   })
 
   it('acquires lock when available', async () => {
-    let heldResolve: (() => void) | null = null
+    let heldResolve: (() => void) | null = null as (() => void) | null
     const request = vi.fn(
       (_name: string, _opts: any, cb: any) =>
         new Promise<void>((resolve) => {
@@ -44,7 +44,7 @@ describe('useSessionSendLock', () => {
     )
     expect(isOwner.value).toBe(true)
     release()
-    heldResolve?.apply(null)
+    heldResolve?.()
   })
 
   it('switches session releases old lock and reacquires', async () => {
