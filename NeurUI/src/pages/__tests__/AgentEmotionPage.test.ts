@@ -9,7 +9,7 @@
  *    dominant（数量最多类型）+ 占比 + 总量
  * 2. 类型映射对齐后端 EmotionType 枚举（joy/sadness/...），emoji/标签不再
  *    用 happy/sad 旧键（只有 angry/neutral 对得上的时代）
- * 3. 情绪类型中文名走 i18n（emotion.type.*）
+ * 3. 情绪类型中文名走 i18n（emotion.*）
  * 4. 无数据时分类区显示 a-empty（不再留白）；时间线卡移除（后端无 history 契约）
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -57,10 +57,8 @@ const zhMessages = {
     share: '占比 ',
     entries: '条情感标注',
     neutral: '中性',
-    type: {
-      joy: '开心', sadness: '难过', anger: '生气', fear: '害怕', surprise: '惊讶',
-      disgust: '厌恶', trust: '信任', anticipation: '期待', neutral: '中性',
-    },
+    joy: '开心', sadness: '难过', anger: '生气', fear: '害怕', surprise: '惊讶',
+    disgust: '厌恶', trust: '信任', anticipation: '期待',
   },
   growth: { motivation: '动力状态', personality: '个性特质' },
 }

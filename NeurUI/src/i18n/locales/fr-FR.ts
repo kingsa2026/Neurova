@@ -1117,14 +1117,10 @@ export default {
     analysis: 'Analyse des émotions',
     personality: 'Gestion de la personnalité',
     traits: 'Traits de personnalité',
-    neutral: 'Neutre',
     intensity: 'Intensité : ',
     share: 'Part ',
     entries: 'annotations émotionnelles',
-    type: {
-      joy: 'Joie', sadness: 'Tristesse', anger: 'Colère', fear: 'Peur', surprise: 'Surprise', disgust: 'Dégoût', trust: 'Confiance', anticipation: 'Anticipation', neutral: 'Neutre',
-    },
-
+    joy: 'Joie', sadness: 'Tristesse', anger: 'Colère', fear: 'Peur', surprise: 'Surprise', disgust: 'Dégoût', trust: 'Confiance', anticipation: 'Anticipation', neutral: "Neutre"
   },
   computer: {
     title: 'Contrôle PC',
