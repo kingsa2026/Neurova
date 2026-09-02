@@ -33,6 +33,11 @@ const routes: RouteRecordRaw[] = [
         name: 'Dashboard',
         component: () => import('@/pages/DashboardPage.vue'),
       },
+      {
+        path: 'analytics',
+        name: 'Analytics',
+        component: () => import('@/pages/AnalyticsPage.vue'),
+      },
 
       // ----- Agents -----
       {
@@ -399,6 +404,11 @@ const routes: RouteRecordRaw[] = [
         path: 'settings',
         name: 'Settings',
         component: () => import('@/pages/SettingPage.vue'),
+      },
+      {
+        path: 'settings/voice-transcription',
+        name: 'VoiceTranscriptionSettings',
+        component: () => import('@/pages/VoiceTranscriptionSettingsPage.vue'),
       },
       {
         path: 'notifications',
