@@ -228,7 +228,7 @@ export function sanitizeHtmlStrict(html: string): string {
       'table', 'thead', 'tbody', 'tr', 'th', 'td', 'button', 'hr',
     ],
     ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'target', 'rel', 'loading'],
-    ALLOW_DATA_ATTR: false,
+    ADD_ATTR: ['data-mermaid-code'],
   })
 }
 
