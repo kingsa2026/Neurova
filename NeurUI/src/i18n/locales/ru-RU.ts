@@ -336,6 +336,7 @@ export default {
     refresh: 'Обновить',
     loadError: 'Не удалось загрузить данные панели',
     retry: 'Повторить',
+    anotherTabSending: 'Другая вкладка отправляет в этой сессии',
   },
   agent: {
     title: 'Управление агентами',

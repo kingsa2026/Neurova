@@ -337,6 +337,7 @@ export default {
     refresh: 'Refresh',
     loadError: 'Failed to load dashboard data',
     retry: 'Retry',
+    anotherTabSending: 'Another tab is sending in this session',
   },
   agent: {
     title: 'Agent Management',

@@ -336,6 +336,7 @@ export default {
     refresh: 'Actualiser',
     loadError: 'Échec du chargement du tableau de bord',
     retry: 'Réessayer',
+    anotherTabSending: 'Un autre onglet envoie dans cette session',
   },
   agent: {
     title: 'Gestion des agents',

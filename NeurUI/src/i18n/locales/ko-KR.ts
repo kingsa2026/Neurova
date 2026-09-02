@@ -336,6 +336,7 @@ export default {
     refresh: '새로 고침',
     loadError: '대시보드 데이터 로드 실패',
     retry: '재시도',
+    anotherTabSending: '다른 탭이 이 세션에서 전송 중입니다',
   },
   agent: {
     title: '에이전트 관리',

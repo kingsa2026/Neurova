@@ -336,6 +336,7 @@ export default {
     refresh: '更新',
     loadError: 'ダッシュボードの読み込みに失敗',
     retry: '再試行',
+    anotherTabSending: '別のタブがこのセッションで送信中です',
   },
   agent: {
     title: 'エージェント管理',

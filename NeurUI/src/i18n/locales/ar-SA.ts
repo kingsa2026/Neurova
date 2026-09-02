@@ -336,6 +336,7 @@ export default {
     refresh: 'تحديث',
     loadError: 'فشل تحميل بيانات لوحة القيادة',
     retry: 'إعادة المحاولة',
+    anotherTabSending: 'علامة تبويب أخرى ترسل في هذه الجلسة',
   },
   agent: {
     title: 'إدارة الوكلاء',
