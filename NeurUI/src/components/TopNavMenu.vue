@@ -56,7 +56,7 @@ import {
   FileTextOutlined,
   TeamOutlined, ProjectOutlined, ClockCircleOutlined,
   BranchesOutlined, ApiOutlined, HistoryOutlined,
-  SettingOutlined, UserOutlined, BellOutlined, AlertOutlined,
+  SettingOutlined, UserOutlined, BellOutlined, AlertOutlined, AudioOutlined,
   BgColorsOutlined, ApartmentOutlined,
 } from '@ant-design/icons-vue'
 
@@ -147,15 +147,21 @@ const categories: NavCategory[] = [
     ],
   },
   {
+    // 系统设置组（统筹：配置/访问/审计/工具按逻辑排序）
     key: 'admin',
     labelKey: 'nav.admin',
     icon: SettingOutlined,
     items: [
+      // 配置域
       { to: '/settings', labelKey: 'nav.settings', icon: SettingOutlined },
-      { to: '/groups', labelKey: 'nav.groups', icon: TeamOutlined },
-      { to: '/enhanced-users', labelKey: 'nav.enhancedusers', icon: UserOutlined },
+      { to: '/settings/voice-transcription', labelKey: 'nav.voiceTranscription', icon: AudioOutlined },
+      { to: '/models', labelKey: 'nav.models', icon: CloudServerOutlined },
       { to: '/notifications', labelKey: 'nav.notifications', icon: BellOutlined },
+      // 访问域
+      { to: '/enhanced-users', labelKey: 'nav.enhancedusers', icon: UserOutlined },
+      { to: '/groups', labelKey: 'nav.groups', icon: TeamOutlined },
       { to: '/firewall', labelKey: 'nav.firewall', icon: AlertOutlined },
+      // 审计与工具
       { to: '/audit', labelKey: 'nav.audit', icon: HistoryOutlined },
       { to: '/benchmark', labelKey: 'nav.benchmark', icon: DashboardOutlined },
       { to: '/marketplace', labelKey: 'nav.marketplace', icon: ShopOutlined },
