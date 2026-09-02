@@ -738,8 +738,6 @@ const isMainLayout = computed(() => props.layoutMode === 'main')
 const chatStore = useChatStore()
 const messageQueue = useMessageQueueStore()
 const router = useRouter()
-// 补课 A4：跨标签单发送者锁（同 session 多标签只有一个能发）
-const { isOwner: isSendLockOwner } = useSessionSendLock(currentSessionId)
 const {
   messages,
   sessions,
@@ -961,6 +959,9 @@ const {
   errorMessage: (key, fallback) => resolveI18nMessage(t, key, fallback),
   onError: (msg) => uiMessage.error(msg),
 })
+
+// 补课 A4：跨标签单发送者锁（同 session 多标签只有一个能发）
+const { isOwner: isSendLockOwner } = useSessionSendLock(currentSessionId)
 
 /** 加载当前 agent 的 session 列表(模板 onMounted / agentId watch 调用)。 */
 async function loadSessions(): Promise<void> {
