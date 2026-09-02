@@ -72,10 +72,22 @@ fn spawn_backend(root: &std::path::Path) -> Result<Child, String> {
             "http://tauri.localhost,tauri://localhost,http://127.0.0.1:8100",
         );
     }
-    cmd.stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("后端进程启动失败: {e}"))
+    // 后端输出进文件：崩溃/导入错误/启动日志可追溯（此前 Stdio::null 吞掉
+    // 全部输出，装机现场后端起不来自查无门）。backend.log 位于安装目录，
+    // icacls 已授 Users 组修改权，普通用户可写；打开失败则退回 null。
+    let backend_log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("backend.log"))
+        .ok();
+    let stdout = backend_log
+        .as_ref()
+        .and_then(|f| f.try_clone().ok())
+        .map(Stdio::from)
+        .unwrap_or(Stdio::null());
+    let stderr = backend_log.map(Stdio::from).unwrap_or(Stdio::null());
+
+    cmd.stdout(stdout).stderr(stderr).spawn().map_err(|e| format!("后端进程启动失败: {e}"))
 }
 
 /// 轮询 /health 直到就绪（最多 120s——冷启动含 MoE 渐进索引）。
@@ -112,6 +124,21 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
+            // 日志落盘（release 也开）：appData/logs/ 下——排查装机现场
+            // "Network Error"（后端 spawn 失败/就绪超时都有迹可循）。
+            let log_handle = handle.clone();
+            let _ = log_handle.plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .targets([
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                            file_name: None,
+                        }),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    ])
+                    .build(),
+            );
+
             // 后端拉起放独立线程：不阻塞窗口首帧；就绪与否前端自行降级。
             // 子进程句柄经 app.manage(BackendChild) 交给 Tauri 状态表托管，
             // 退出清理时从那里取回。
@@ -121,7 +148,7 @@ pub fn run() {
                     Ok(child) => {
                         let pid = child.id();
                         let ready = wait_backend_ready(Duration::from_secs(120));
-                        log::info!("backend pid={pid} ready={ready}");
+                        log::info!("backend pid={pid} ready={ready} root={}", root.display());
                         let _ = handle.emit(
                             "backend-status",
                             if ready { "ready" } else { "timeout" },
@@ -135,13 +162,6 @@ pub fn run() {
                 }
             });
 
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
             Ok(())
         })
         .on_window_event(|window, event| {

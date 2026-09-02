@@ -826,8 +826,11 @@ Section Install
 
   ; Neurova：后端以普通用户运行时需在安装目录写 data/ logs/ agent_workspaces/
   ; （SQLite/日志/工作区），Program Files 型目录默认对 Users 只读会令后端
-  ; 启动即崩 → 递归授予 Users 组修改权（用 SID 避开非英文系统组名）。
-  nsExec::Exec 'icacls "$INSTDIR\backend" /grant *S-1-5-32-545:(OI)(CI)M /T'
+  ; 启动即崩 → 在 backend 根目录授予 Users 组修改权（(OI)(CI) 继承到新建
+  ; 子对象即满足；**严禁 /T 递归**——数万文件逐个改 ACL 会卡死安装器）。
+  ; 用 SID 避开非英文系统组名。
+  DetailPrint "正在配置运行目录权限..."
+  nsExec::Exec 'icacls "$INSTDIR\backend" /grant *S-1-5-32-545:(OI)(CI)M'
   Pop $0
 
   ; Copy external binaries
