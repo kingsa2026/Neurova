@@ -2,6 +2,7 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    clear: "Очистить",
     confirm: 'Подтвердить',
     cancel: 'Отмена',
     save: 'Сохранить',
@@ -398,6 +399,7 @@ export default {
     archive: 'В архив',
     pin: 'Закрепить',
     unpin: 'Открепить',
+    queued: 'В очереди (#{n}) — будет отправлено после текущего ответа',
     pinFailed: 'Не удалось закрепить',
     archivedSessions: 'Архивированные сессии',
     restore: 'Восстановить',
@@ -1890,6 +1892,26 @@ export default {
     deleteSuccess: 'Удаление успешно',
     deleteError: 'Ошибка удаления',
   },
+
+  voiceTranscription: {
+    title: 'Настройки транскрипции',
+    subtitle: 'Двухрежимный ASR: локальный FunASR (китайский) / Whisper (мультиязычный)',
+    currentEngine: 'Активный движок',
+    chain: 'Цепочка fallback',
+    noEngine: 'Нет доступного движка',
+    dualMode: 'Настройка двух режимов',
+    remoteDesc: 'OpenAI-совместимый API транскрипции. Мультиязычный, оплата по использованию, без локальной модели',
+    keyPlaceholder: 'Оставьте пустым для OPENAI_API_KEY',
+    ready: 'Готово',
+    notDownloaded: 'Не загружено',
+    localDesc: 'Локальный Whisper base (~140МБ + torch). Работает офлайн; для китайского лучше FunASR',
+    consentTitle: 'Требуется согласие администратора',
+    consentDesc: 'Загружает модель ~140МБ и использует локальные ресурсы (torch CPU). Согласие сразу загружает и включает офлайн-резерв',
+    consentButton: 'Согласиться и скачать (~140МБ)',
+    consentGranted: 'Локальный Whisper включён',
+    consentGrantedDesc: 'Локальный Whisper участвует в цепочке fallback',
+  },
+
   ui: {
     subagent: 'Субагент',
     expand: 'Развернуть',
@@ -1977,25 +1999,6 @@ export default {
     rememberNone: 'Только сейчас',
     rememberExact: 'Запомнить точную команду',
     rememberSimilar: 'Запомнить похожие',
-
-    voiceTranscription: {
-      title: 'Настройки транскрипции',
-      subtitle: 'Двухрежимный ASR: локальный FunASR (китайский) / Whisper (мультиязычный)',
-      currentEngine: 'Активный движок',
-      chain: 'Цепочка fallback',
-      noEngine: 'Нет доступного движка',
-      dualMode: 'Настройка двух режимов',
-      remoteDesc: 'OpenAI-совместимый API транскрипции. Мультиязычный, оплата по использованию, без локальной модели',
-      keyPlaceholder: 'Оставьте пустым для OPENAI_API_KEY',
-      ready: 'Готово',
-      notDownloaded: 'Не загружено',
-      localDesc: 'Локальный Whisper base (~140МБ + torch). Работает офлайн; для китайского лучше FunASR',
-      consentTitle: 'Требуется согласие администратора',
-      consentDesc: 'Загружает модель ~140МБ и использует локальные ресурсы (torch CPU). Согласие сразу загружает и включает офлайн-резерв',
-      consentButton: 'Согласиться и скачать (~140МБ)',
-      consentGranted: 'Локальный Whisper включён',
-      consentGrantedDesc: 'Локальный Whisper участвует в цепочке fallback',
-    },
     approvalHint: '该操作被安全策略标记为需人工确认，请核实后再放行。',
   },
   neuron: {

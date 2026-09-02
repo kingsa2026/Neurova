@@ -2,6 +2,7 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    clear: "クリア",
     confirm: '確認',
     cancel: 'キャンセル',
     save: '保存',
@@ -398,6 +399,7 @@ export default {
     archive: 'アーカイブ',
     pin: 'ピン留め',
     unpin: 'ピン留め解除',
+    queued: 'キューに追加（{n} 番目）— 現在の返信後に送信します',
     pinFailed: 'ピン留めに失敗しました',
     archivedSessions: 'アーカイブ済みセッション',
     restore: '復元',
@@ -1890,6 +1892,26 @@ export default {
     deleteSuccess: '削除成功',
     deleteError: '削除失敗',
   },
+
+  voiceTranscription: {
+    title: '音声文字起こし設定',
+    subtitle: 'デュアルモード ASR：ローカル FunASR（中国語優先）/ Whisper（多言語フォールバック）',
+    currentEngine: '有効なエンジン',
+    chain: 'フォールバックチェーン',
+    noEngine: '利用可能なエンジンなし',
+    dualMode: 'デュアルモード設定',
+    remoteDesc: 'OpenAI 互換文字起こし API。多言語・従量課金・ローカルモデル不要',
+    keyPlaceholder: '空欄で設定済み OPENAI_API_KEY を使用',
+    ready: '準備完了',
+    notDownloaded: '未ダウンロード',
+    localDesc: 'ローカル Whisper base（約140MB＋torch）。オフライン利用可。中国語は FunASR 推奨',
+    consentTitle: '管理者の同意が必要',
+    consentDesc: '約140MB のモデルをダウンロードしローカル演算を使用します（torch CPU）。同意後すぐダウンロードして有効化し、リモート不可時のオフラインフォールバックとします',
+    consentButton: '同意してダウンロード（約140MB）',
+    consentGranted: 'ローカル Whisper 有効',
+    consentGrantedDesc: 'ローカル Whisper がフォールバックチェーンに参加しました',
+  },
+
   ui: {
     subagent: 'サブエージェント',
     expand: '展開',
@@ -1977,25 +1999,6 @@ export default {
     rememberNone: '今回のみ',
     rememberExact: '同一コマンドを記憶',
     rememberSimilar: '類似コマンドを記憶',
-
-    voiceTranscription: {
-      title: '音声文字起こし設定',
-      subtitle: 'デュアルモード ASR：ローカル FunASR（中国語優先）/ Whisper（多言語フォールバック）',
-      currentEngine: '有効なエンジン',
-      chain: 'フォールバックチェーン',
-      noEngine: '利用可能なエンジンなし',
-      dualMode: 'デュアルモード設定',
-      remoteDesc: 'OpenAI 互換文字起こし API。多言語・従量課金・ローカルモデル不要',
-      keyPlaceholder: '空欄で設定済み OPENAI_API_KEY を使用',
-      ready: '準備完了',
-      notDownloaded: '未ダウンロード',
-      localDesc: 'ローカル Whisper base（約140MB＋torch）。オフライン利用可。中国語は FunASR 推奨',
-      consentTitle: '管理者の同意が必要',
-      consentDesc: '約140MB のモデルをダウンロードしローカル演算を使用します（torch CPU）。同意後すぐダウンロードして有効化し、リモート不可時のオフラインフォールバックとします',
-      consentButton: '同意してダウンロード（約140MB）',
-      consentGranted: 'ローカル Whisper 有効',
-      consentGrantedDesc: 'ローカル Whisper がフォールバックチェーンに参加しました',
-    },
     approvalHint: '该操作被安全策略标记为需人工确认，请核实后再放行。',
   },
   neuron: {
