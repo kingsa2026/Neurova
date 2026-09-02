@@ -344,6 +344,9 @@ test_api_output.wav
 # 桌面壳（Tauri）签名密钥与产物（src-tauri 自带 /target 忽略）
 *.pfx
 desktop/*.pfx
+# 后端全量打包 stage（1.6GB，构建脚本 scripts/desktop/bundle_backend.py 生成）
+NeurUI/src-tauri/resources/backend/
+NeurUI/src-tauri/resources/_python-*
 
 # ==================== 根目录杂物防再生（2026-09-02 二次清理） ====================
 # stash 事故复活过的根级临时测试脚本/产物，统一规范到 tests/ 分类目录

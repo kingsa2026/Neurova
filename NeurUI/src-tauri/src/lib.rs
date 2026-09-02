@@ -15,7 +15,7 @@ use tauri::{Emitter, Manager};
 
 struct BackendChild(Mutex<Option<Child>>);
 
-/// 仓库根 = src-tauri 的上两级（NeurUI/src-tauri → Neurova）。
+/// 仓库根 = src-tauri 的上两级（NeurUI/src-tauri → Neurova）。仅 dev 回退用。
 fn repo_root() -> std::path::PathBuf {
     let manifest = env!("CARGO_MANIFEST_DIR");
     std::path::Path::new(manifest)
@@ -25,9 +25,31 @@ fn repo_root() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
-fn spawn_backend() -> Result<Child, String> {
-    let root = repo_root();
-    let python = root.join(".venv/Scripts/python.exe");
+/// 后端根解析（补课 P3-a 路线 A 全量打包）：
+/// 1) 打包态：resource_dir()/backend（python/ neurova/ models/ config/ start_server.py）
+/// 2) 开发态回退：仓库根 + .venv
+fn resolve_backend_root(app: &tauri::AppHandle) -> std::path::PathBuf {
+    use tauri::Manager;
+    if let Ok(rd) = app.path().resource_dir() {
+        let bundled = rd.join("backend");
+        if bundled.join("start_server.py").exists() && bundled.join("python/python.exe").exists() {
+            return bundled;
+        }
+    }
+    repo_root()
+}
+
+fn is_bundled(root: &std::path::Path) -> bool {
+    root.join("python/python.exe").exists()
+}
+
+fn spawn_backend(root: &std::path::Path) -> Result<Child, String> {
+    let bundled = is_bundled(root);
+    let python = if bundled {
+        root.join("python/python.exe")
+    } else {
+        root.join(".venv/Scripts/python.exe")
+    };
     if !python.exists() {
         return Err(format!("后端解释器不存在: {}", python.display()));
     }
@@ -35,10 +57,22 @@ fn spawn_backend() -> Result<Child, String> {
     if !server.exists() {
         return Err(format!("后端入口不存在: {}", server.display()));
     }
-    Command::new(&python)
-        .arg(&server)
-        .current_dir(&root) // start_server 按仓库根解析 data/ logs/ 等相对路径
-        .stdout(Stdio::null())
+
+    let mut cmd = Command::new(&python);
+    cmd.arg(&server).current_dir(root);
+    if bundled {
+        // 打包态：PYTHONPATH 指向后端根（neurova 包）；CORS 放行 Tauri WebView origin
+        // （Windows 默认 origin=http://tauri.localhost；macOS/Linux 为 tauri://localhost）
+        cmd.env(
+            "PYTHONPATH",
+            std::env::join_paths([root.to_path_buf()]).unwrap(),
+        );
+        cmd.env(
+            "NEUROVA_CORS_ORIGINS",
+            "http://tauri.localhost,tauri://localhost,http://127.0.0.1:8100",
+        );
+    }
+    cmd.stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| format!("后端进程启动失败: {e}"))
@@ -82,7 +116,8 @@ pub fn run() {
             // 子进程句柄经 app.manage(BackendChild) 交给 Tauri 状态表托管，
             // 退出清理时从那里取回。
             std::thread::spawn(move || {
-                match spawn_backend() {
+                let root = resolve_backend_root(&handle);
+                match spawn_backend(&root) {
                     Ok(child) => {
                         let pid = child.id();
                         let ready = wait_backend_ready(Duration::from_secs(120));
