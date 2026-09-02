@@ -1117,14 +1117,10 @@ export default {
     analysis: 'Анализ эмоций',
     personality: 'Управление личностью',
     traits: 'Черты личности',
-    neutral: 'Нейтральный',
     intensity: 'Интенсивность: ',
     share: 'Доля ',
     entries: 'эмоциональных меток',
-    type: {
-      joy: 'Радость', sadness: 'Грусть', anger: 'Злость', fear: 'Страх', surprise: 'Удивление', disgust: 'Отвращение', trust: 'Доверие', anticipation: 'Предвкушение', neutral: 'Нейтрально',
-    },
-
+    joy: 'Радость', sadness: 'Грусть', anger: 'Злость', fear: 'Страх', surprise: 'Удивление', disgust: 'Отвращение', trust: 'Доверие', anticipation: 'Предвкушение', neutral: "Нейтрально"
   },
   computer: {
     title: 'Управление ПК',

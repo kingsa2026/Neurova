@@ -1129,14 +1129,10 @@ export default {
     analysis: '情绪分析',
     personality: '个性管理',
     traits: '个性特质',
-    neutral: '中性',
     intensity: '强度: ',
     share: '占比 ',
     entries: '条情感标注',
-    type: {
-      joy: '开心', sadness: '难过', anger: '生气', fear: '害怕', surprise: '惊讶', disgust: '厌恶', trust: '信任', anticipation: '期待', neutral: '中性',
-    },
-
+    joy: '开心', sadness: '难过', anger: '生气', fear: '害怕', surprise: '惊讶', disgust: '厌恶', trust: '信任', anticipation: '期待', neutral: "中性"
   },
   computer: {
     title: '电脑操控',

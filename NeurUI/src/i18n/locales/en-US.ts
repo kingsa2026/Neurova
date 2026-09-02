@@ -1119,14 +1119,10 @@ export default {
     analysis: 'Emotion Analysis',
     personality: 'Personality Management',
     traits: 'Personality Traits',
-    neutral: 'Neutral',
     intensity: 'Intensity: ',
     share: 'Share ',
     entries: 'annotated memories',
-    type: {
-      joy: 'Joy', sadness: 'Sadness', anger: 'Anger', fear: 'Fear', surprise: 'Surprise', disgust: 'Disgust', trust: 'Trust', anticipation: 'Anticipation', neutral: 'Neutral',
-    },
-
+    joy: 'Joy', sadness: 'Sadness', anger: 'Anger', fear: 'Fear', surprise: 'Surprise', disgust: 'Disgust', trust: 'Trust', anticipation: 'Anticipation', neutral: "Neutral"
   },
   computer: {
     title: 'Computer Use',

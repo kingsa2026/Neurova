@@ -1117,14 +1117,10 @@ export default {
     analysis: 'Emotionsanalyse',
     personality: 'Persönlichkeitsverwaltung',
     traits: 'Persönlichkeitsmerkmale',
-    neutral: 'Neutral',
     intensity: 'Intensität: ',
     share: 'Anteil ',
     entries: 'Emotionseinträge',
-    type: {
-      joy: 'Freude', sadness: 'Trauer', anger: 'Wut', fear: 'Angst', surprise: 'Überraschung', disgust: 'Ekel', trust: 'Vertrauen', anticipation: 'Erwartung', neutral: 'Neutral',
-    },
-
+    joy: 'Freude', sadness: 'Trauer', anger: 'Wut', fear: 'Angst', surprise: 'Überraschung', disgust: 'Ekel', trust: 'Vertrauen', anticipation: 'Erwartung', neutral: "Neutral"
   },
   computer: {
     title: 'PC-Steuerung',

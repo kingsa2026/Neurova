@@ -1117,14 +1117,10 @@ export default {
     analysis: 'भावना विश्लेषण',
     personality: 'व्यक्तित्व प्रबंधन',
     traits: 'व्यक्तित्व गुण',
-    neutral: 'तटस्थ',
     intensity: 'तीव्रता: ',
     share: 'अनुपात ',
     entries: 'भावनात्मक लेबल',
-    type: {
-      joy: 'खुशी', sadness: 'दुख', anger: 'गुस्सा', fear: 'डर', surprise: 'हैरानी', disgust: 'घृणा', trust: 'भरोसा', anticipation: 'प्रत्याशा', neutral: 'तटस्थ',
-    },
-
+    joy: 'खुशी', sadness: 'दुख', anger: 'गुस्सा', fear: 'डर', surprise: 'हैरानी', disgust: 'घृणा', trust: 'भरोसा', anticipation: 'प्रत्याशा', neutral: "तटस्थ"
   },
   computer: {
     title: 'कंप्यूटर नियंत्रण',
