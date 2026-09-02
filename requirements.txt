@@ -46,7 +46,7 @@ huggingface_hub>=0.20.0
 sentencepiece>=0.2.0
 
 # ASR (optional, auto-fallback)
-# funasr>=1.0.0  # FunASR 语音识别引擎 (可选)
+funasr>=1.0.0  # FunASR 语音识别引擎（补课 4.2 续：Paraformer 中文优先，whisper 兜底）
 openai-whisper>=20231117  # Whisper 语音识别引擎（补课 4.2 本地真模型；torch CPU 版约 200MB）
 
 # Edge TTS (online fallback)

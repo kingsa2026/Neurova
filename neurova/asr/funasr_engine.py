@@ -108,19 +108,31 @@ class FunASREngine(ASRBase):
             if self._device == "cpu":
                 self._logger.info("FunASR 在 CPU 上运行")
 
-            # 加载模型
+            # 加载模型（补课 4.2 续：FunASR 真实现——Paraformer 中文优先）
             try:
                 self._logger.info("加载 FunASR 模型: %s", self._model_dir)
 
-                # 诚实降级（补课 4.1）：FunASR 集成本实现（模型加载未落地），
-                # 不得以占位模型冒充就绪——交给 manager 走下一引擎
-                self._logger.warning("FunASR 引擎未完整集成（模型加载缺失），跳过")
-                self._model = None
-                self._initialized = False
-                return False
+                # FunASR AutoModel：默认 paraformer-zh（ModelScope 自动下载到
+                # model_dir）。非自回归架构，CPU 上中文识别比 whisper 快一个量级
+                AutoModel = self._funasr.AutoModel
+                model_kwargs = {
+                    "model": self._model_name if "/" in self._model_name else "paraformer-zh",
+                    "device": self._device,
+                }
+                # hub 参数：ModelScope 下载缓存对齐本仓 models/asr/funasr 约定
+                self._model = AutoModel(**model_kwargs)
+                self._initialized = True
+                self._logger.info(
+                    "FunASR 初始化完成 | 模型=%s | 设备=%s",
+                    model_kwargs["model"],
+                    self._device,
+                )
+                return True
 
             except Exception as e:
-                self._logger.error("FunASR 模型加载失败: %s", e)
+                self._logger.error("FunASR 模型加载失败（诚实降级，交由下一引擎）: %s", e)
+                self._model = None
+                self._initialized = False
                 return False
 
         except Exception as e:
@@ -197,13 +209,31 @@ class FunASREngine(ASRBase):
             return {"text": "", "error": str(e)}
 
     def _transcribe_sync(self, audio: "np.ndarray", language: str) -> Dict[str, Any]:
-        """同步转写。
+        """同步转写（真实现：FunASR AutoModel.generate）。
 
-        补课 4.1：原实现返回"模拟FunASR识别结果"假文本。引擎未完整
-        集成时 transcribe 的前置检查（_model is None）已拦截，此路径
-        仅在真加载后可达——直接抛错防止假文本回流。
+        AutoModel.generate 返回 list[dict]，键含 text（Paraformer 输出
+        已带标点）。language 参数 Paraformer-zh 不消费（模型固定中文+
+        英文混合），保留入参供多语种模型切换。
         """
-        raise RuntimeError("FunASR 引擎未完整集成（无真实推理实现）")
+        loop = asyncio.new_event_loop()
+        try:
+            # generate 是同步阻塞调用，audio 已是 16kHz float32 numpy
+            res = self._model.generate(
+                input=audio,
+                batch_size_s=60,
+            )
+        except Exception as e:
+            self._logger.error("FunASR generate 失败: %s", e)
+            return {"text": "", "error": str(e), "language": language}
+
+        text = ""
+        if isinstance(res, list) and res:
+            text = (res[0].get("text") or "").strip()
+        return {
+            "text": text,
+            "language": language,
+            "duration_sec": round(len(audio) / 16000, 2),
+        }
 
     async def shutdown(self) -> None:
         """关闭引擎，释放资源"""
