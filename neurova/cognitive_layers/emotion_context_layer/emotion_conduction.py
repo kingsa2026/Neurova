@@ -220,8 +220,19 @@ class EmotionConductionManager:
                 "fusion_weight": self._fusion_weight,
             }
 
+    def set_emotion_module(self, module) -> None:
+        """注入 memory_layer 的 EmotionModule（补课 7 认知收敛第二批）。
+
+        注入后 analyze_text_emotion 走 EmotionModule 语义分类器
+        （8 基础情感 zero-shot，消除 hub 关键词表的"好"字效应）；
+        未注入或分析失败时回退 hub 关键词规则（17 细粒度）。
+        两引擎分工不变：EmotionModule=逐记忆持久化+主分析源，
+        HubEngine=会话级状态机（传导/温度/风格）。
+        """
+        self._emotion_module = module
+
     def analyze_text_emotion(self, text: str) -> Dict[str, float]:
-        """分析文本情感
+        """分析文本情感（收敛入口：语义分类器优先，hub 规则兜底）
 
         Args:
             text: 输入文本
@@ -229,6 +240,22 @@ class EmotionConductionManager:
         Returns:
             情感分数字典
         """
+        # 收敛路径：EmotionModule 语义分析（主源）——返回主导情感+强度
+        emotion_module = getattr(self, "_emotion_module", None)
+        if emotion_module is not None:
+            try:
+                state = emotion_module.analyze_text_emotion(text)
+                if state is not None:
+                    intensity = float(getattr(state, "intensity", 0.0) or 0.0)
+                    primary = getattr(state, "primary_emotion", None)
+                    label = str(getattr(primary, "value", primary) or "neutral")
+                    with self._lock:
+                        self._stats["total_text_analyses"] += 1
+                    # 中性/零强度 → 空表（与 hub 无关键词命中契约一致）
+                    return {label: intensity} if label != "neutral" and intensity > 0 else {}
+            except Exception as e:
+                logger.warning("EmotionModule 语义分析失败，回退 hub 关键词: %s", e)
+
         with self._lock:
             try:
                 result = self._hub_engine.analyze_text(text)

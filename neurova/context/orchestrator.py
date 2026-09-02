@@ -185,6 +185,13 @@ class ContextOrchestrator:
             agent_id = str(getattr(getattr(self._agent, "config", None), "agent_id", "default") or "default")
             manager = get_emotion_conduction_manager(agent_id)
 
+            # 补课 7：注入 EmotionModule 语义分析器（主分析源收敛，消除
+            # hub 关键词表"好"字效应）；memory_manager 缺失自动走 hub 兜底
+            memory_manager = getattr(self._agent, "memory_manager", None)
+            emotion_module = getattr(memory_manager, "emotion_module", None) if memory_manager else None
+            if emotion_module is not None:
+                manager.set_emotion_module(emotion_module)
+
             turn_scores = manager.analyze_text_emotion(user_input)
             if turn_scores:
                 manager.update_emotional_state(turn_scores)
