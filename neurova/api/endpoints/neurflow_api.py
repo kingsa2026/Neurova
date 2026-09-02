@@ -1694,3 +1694,80 @@ async def rollback_workflow_api(
         "message": "rollback ok",
         "data": {"workflow": storage.get_workflow(workflow_id).to_dict()},
     }
+
+
+# ==================== Checkpoint API（Probe + Retry，借鉴 langflow） ====================
+
+
+@router.get("/executions/{execution_id}/checkpoint")
+async def get_execution_checkpoint(
+    execution_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Probe：执行检查点摘要（completed/failed/pending/变量快照/错误）。"""
+    from neurova.collaboration.neurflow.storage import NeurflowStorage as _Ck
+
+    storage = _get_storage()
+    instance = storage.get_checkpoint(execution_id)
+    if instance is None:
+        raise HTTPException(status_code=404, detail="检查点不存在")
+    # pending 需要完整节点集：优先从 DB 工作流取；画布内存型退化为已知集
+    workflow = storage.get_workflow(instance.workflow_id)
+    node_ids = [n.id for n in workflow.nodes] if workflow else list((instance.node_results or {}).keys())
+    return {"code": 0, "data": _checkpoint_summary(instance, node_ids)}
+
+
+@router.post("/executions/{execution_id}/retry")
+async def retry_from_checkpoint(
+    execution_id: str,
+    body: Dict[str, Any] = Body(default={}),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Resume：从检查点续跑（跳过已完成节点，保留变量）。
+
+    要求工作流定义在 DB（发布型）；画布内存型工作流（DRAFT→内存
+    PUBLISHED 不落库）无法恢复定义——返回 400 明确说明。
+    """
+    from neurova.collaboration.neurflow.checkpoint import execution_checkpoint_summary
+
+    storage = _get_storage()
+    instance = storage.get_checkpoint(execution_id)
+    if instance is None:
+        raise HTTPException(status_code=404, detail="检查点不存在")
+
+    workflow = storage.get_workflow(instance.workflow_id)
+    if workflow is None:
+        raise HTTPException(
+            status_code=400,
+            detail="画布型工作流暂不支持恢复（定义未落库），请重新执行",
+        )
+
+    instance.status = WorkflowStatus.RUNNING
+    instance.error = None
+    instance.finished_at = None
+
+    await get_workflow_executor().execute(
+        workflow=workflow,
+        inputs=instance.inputs,
+        instance=instance,
+        resume=True,
+    )
+    return {
+        "code": 0,
+        "message": "retry ok",
+        "data": {
+            "execution_id": instance.id,
+            "status": instance.status.value,
+            "summary": execution_checkpoint_summary(instance, [n.id for n in workflow.nodes]),
+        },
+    }
+
+
+def _checkpoint_summary(instance, node_ids=None) -> dict:
+    """端点内轻量摘要（不依赖 checkpoint 模块 import 循环）。"""
+    from neurova.collaboration.neurflow.checkpoint import execution_checkpoint_summary
+
+    # node_ids 缺失时仅按已知结果分类（pending 需节点集才能算，此处以检查点记录为准）
+    import typing as _t
+    node_ids = node_ids or list((instance.node_results or {}).keys())
+    return execution_checkpoint_summary(instance, node_ids)
