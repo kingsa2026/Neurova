@@ -194,22 +194,31 @@ class ExperienceKnowledgeBase:
 
     def get_experience_records(
         self,
-        skill_name: str,
+        skill_name: str = "",
         success_only: Optional[bool] = None,
         limit: Optional[int] = None,
+        agent_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """获取指定技能的经验记录
+        """获取经验记录
 
         Args:
-            skill_name: 技能名
+            skill_name: 技能名（空字符串=不限技能）
             success_only: True 仅成功，False 仅失败，None 全部
             limit: 返回数量上限
+            agent_id: 限定 Agent（None=不限）
 
         Returns:
             记录字典列表（每条含 skill_name/success 等字段，success 为 int 0/1）
         """
-        sql = "SELECT * FROM experience_records WHERE skill_name = ?"
-        params: List[Any] = [skill_name]
+        sql = "SELECT * FROM experience_records WHERE 1=1"
+        params: List[Any] = []
+
+        if skill_name:
+            sql += " AND skill_name = ?"
+            params.append(skill_name)
+        if agent_id is not None:
+            sql += " AND agent_id = ?"
+            params.append(agent_id)
 
         if success_only is True:
             sql += " AND success = 1"
@@ -234,6 +243,7 @@ class ExperienceKnowledgeBase:
         context: Optional[Dict[str, Any]] = None,
         limit: int = 5,
         top_k: Optional[int] = None,  # 兼容旧调用（injector.py）
+        agent_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """查找相似经验
 
@@ -247,6 +257,7 @@ class ExperienceKnowledgeBase:
             context: 查询上下文（含 user_input/topic）
             limit: 返回数量上限（top_k 为旧别名，优先级低于 limit）
             top_k: 旧参数别名（向后兼容 injector.py）
+            agent_id: 限定 Agent（None 不限）
 
         Returns:
             按相似度降序的记录列表，每条附加 similarity_score 字段
@@ -269,11 +280,14 @@ class ExperienceKnowledgeBase:
 
         query_words = [w for w in query_input.lower().split() if w]
 
-        sql = "SELECT * FROM experience_records"
+        sql = "SELECT * FROM experience_records WHERE 1=1"
         params: List[Any] = []
         if skill_name:
-            sql += " WHERE skill_name = ?"
+            sql += " AND skill_name = ?"
             params.append(skill_name)
+        if agent_id is not None:
+            sql += " AND agent_id = ?"
+            params.append(agent_id)
 
         with self._lock:
             cur = self._conn.cursor()
@@ -458,11 +472,12 @@ class ExperienceKnowledgeBase:
 
         return recommendations
 
-    def get_experience_stats(self, skill_name: Optional[str] = None) -> Dict[str, Any]:
+    def get_experience_stats(self, skill_name: Optional[str] = None, agent_id: Optional[str] = None) -> Dict[str, Any]:
         """获取经验统计
 
         Args:
             skill_name: 指定技能则返回单技能统计，None 返回全局统计
+            agent_id: 限定 Agent（None 不限）
 
         Returns:
             单技能: skill_name/total_experiences/success_count (+ success_rate 若 >0)
@@ -472,10 +487,12 @@ class ExperienceKnowledgeBase:
         with self._lock:
             cur = self._conn.cursor()
             if skill_name:
-                cur.execute(
-                    "SELECT COUNT(*) AS total, SUM(success) AS succ FROM experience_records WHERE skill_name = ?",
-                    (skill_name,),
-                )
+                sql = "SELECT COUNT(*) AS total, SUM(success) AS succ FROM experience_records WHERE skill_name = ?"
+                params: List[Any] = [skill_name]
+                if agent_id is not None:
+                    sql += " AND agent_id = ?"
+                    params.append(agent_id)
+                cur.execute(sql, params)
                 row = cur.fetchone()
                 total = row["total"] or 0
                 succ = row["succ"] or 0
@@ -488,11 +505,17 @@ class ExperienceKnowledgeBase:
                     stats["success_rate"] = round(succ / total, 4)
                 return stats
             else:
-                cur.execute("SELECT COUNT(*) AS total FROM experience_records")
+                sql = "SELECT COUNT(*) AS total FROM experience_records"
+                params = []
+                if agent_id is not None:
+                    sql += " WHERE agent_id = ?"
+                    params.append(agent_id)
+                cur.execute(sql, params)
                 total_records = cur.fetchone()["total"] or 0
-                cur.execute(
-                    "SELECT COUNT(DISTINCT skill_name) AS total_skills FROM experience_records"
-                )
+                sql2 = "SELECT COUNT(DISTINCT skill_name) AS total_skills FROM experience_records"
+                if agent_id is not None:
+                    sql2 += " WHERE agent_id = ?"
+                cur.execute(sql2, params)
                 total_skills = cur.fetchone()["total_skills"] or 0
                 return {
                     "total_skills": total_skills,
@@ -503,28 +526,34 @@ class ExperienceKnowledgeBase:
         self,
         metric: str = "success_rate",
         limit: int = 10,
+        agent_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """获取技能排名
 
         Args:
             metric: 排序指标，支持 success_rate / total / avg_execution_time
             limit: 返回数量上限
+            agent_id: 限定 Agent（None 不限）
 
         Returns:
             排名字典列表，每条含 skill_name/total/success_rate 等
         """
-        with self._lock:
-            cur = self._conn.cursor()
-            cur.execute(
-                """
+        sql = """
                 SELECT skill_name,
                        COUNT(*) AS total,
                        SUM(success) AS successes,
                        AVG(execution_time) AS avg_execution_time
                 FROM experience_records
-                GROUP BY skill_name
                 """
-            )
+        params: List[Any] = []
+        if agent_id is not None:
+            sql += " WHERE agent_id = ?"
+            params.append(agent_id)
+        sql += " GROUP BY skill_name"
+
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(sql, params)
             rows = cur.fetchall()
 
         rankings: List[Dict[str, Any]] = []
@@ -550,6 +579,26 @@ class ExperienceKnowledgeBase:
             rankings.sort(key=lambda x: x["success_rate"], reverse=True)
 
         return rankings[:limit] if limit > 0 else rankings
+
+    def get_record_by_id(self, record_id: int) -> Optional[Dict[str, Any]]:
+        """按主键取单条记录（API 层查看/删除前置用）。"""
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                "SELECT * FROM experience_records WHERE id = ?", (int(record_id),)
+            )
+            row = cur.fetchone()
+        return self._row_to_dict(row) if row else None
+
+    def delete_record(self, record_id: int) -> bool:
+        """删除指定记录，返回是否实际删除。"""
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                "DELETE FROM experience_records WHERE id = ?", (int(record_id),)
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
 
     # ------------------------------------------------------------------
     # 资源管理
