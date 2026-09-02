@@ -1117,14 +1117,10 @@ export default {
     analysis: 'تحليل العواطف',
     personality: 'إدارة الشخصية',
     traits: 'سمات الشخصية',
-    neutral: 'محايد',
     intensity: 'الشدة: ',
     share: 'النسبة ',
     entries: 'تسميات عاطفية',
-    type: {
-      joy: 'فرح', sadness: 'حزن', anger: 'غضب', fear: 'خوف', surprise: 'مفاجأة', disgust: 'اشمئزاز', trust: 'ثقة', anticipation: 'ترقب', neutral: 'محايد',
-    },
-
+    joy: 'فرح', sadness: 'حزن', anger: 'غضب', fear: 'خوف', surprise: 'مفاجأة', disgust: 'اشمئزاز', trust: 'ثقة', anticipation: 'ترقب', neutral: "محايد"
   },
   computer: {
     title: 'التحكم بالحاسوب',

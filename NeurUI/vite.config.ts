@@ -17,6 +17,11 @@ export default defineConfig({
   server: {
     port: 8100,
     strictPort: true,
+    watch: {
+      // src-tauri/target 是 Rust 构建产物目录：体积巨大且 exe 被构建器/杀软锁定，
+      // Vite 监听会触发 EBUSY 使 dev server 崩溃（2026-09-02 实测），必须排除
+      ignored: ['**/src-tauri/target/**'],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:9527',

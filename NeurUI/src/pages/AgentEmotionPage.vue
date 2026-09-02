@@ -154,7 +154,7 @@ const emotionEmoji = (emotion?: string) => {
 
 const emotionLabel = (emotion?: string) => {
   if (!emotion) return ''
-  const key = `emotion.type.${emotion.toLowerCase()}`
+  const key = `emotion.${emotion.toLowerCase()}`
   return t(key) !== key ? t(key) : emotion
 }
 

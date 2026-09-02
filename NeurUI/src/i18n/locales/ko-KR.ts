@@ -1117,14 +1117,10 @@ export default {
     analysis: '감정 분석',
     personality: '성격 관리',
     traits: '성격 특성',
-    neutral: '중립',
     intensity: '강도: ',
     share: '비율 ',
     entries: '개 감정 라벨',
-    type: {
-      joy: '기쁨', sadness: '슬픔', anger: '분노', fear: '두려움', surprise: '놀람', disgust: '혐오', trust: '신뢰', anticipation: '기대', neutral: '중립',
-    },
-
+    joy: '기쁨', sadness: '슬픔', anger: '분노', fear: '두려움', surprise: '놀람', disgust: '혐오', trust: '신뢰', anticipation: '기대', neutral: "중립"
   },
   computer: {
     title: 'PC 제어',

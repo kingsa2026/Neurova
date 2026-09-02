@@ -1117,14 +1117,10 @@ export default {
     analysis: '感情分析',
     personality: 'パーソナリティ管理',
     traits: 'パーソナリティ特性',
-    neutral: 'ニュートラル',
     intensity: '強度: ',
     share: '割合 ',
     entries: '件の感情ラベル',
-    type: {
-      joy: '喜び', sadness: '悲しみ', anger: '怒り', fear: '恐れ', surprise: '驚き', disgust: '嫌悪', trust: '信頼', anticipation: '期待', neutral: '中立',
-    },
-
+    joy: '喜び', sadness: '悲しみ', anger: '怒り', fear: '恐れ', surprise: '驚き', disgust: '嫌悪', trust: '信頼', anticipation: '期待', neutral: "中立"
   },
   computer: {
     title: 'PC操作',
