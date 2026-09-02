@@ -262,6 +262,10 @@ export default {
     editor: '编辑者',
     admin: '管理员',
     quota: '配额',
+    setupTitle: '初始化管理员账号',
+    setupHint: '这是系统的第一个账号，将拥有管理员权限',
+    setupSubmit: '创建管理员账号',
+    registerFailed: '注册失败',
   },
   dashboard: {
     welcome: '欢迎回来',
