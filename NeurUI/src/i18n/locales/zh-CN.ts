@@ -338,6 +338,7 @@ export default {
     statusHealthy: '系统健康',
     refresh: '刷新',
     loadError: '仪表盘数据加载失败',
+    retry: '重试',
   },
   agent: {
     title: '智能体管理',

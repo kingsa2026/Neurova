@@ -335,6 +335,7 @@ export default {
     statusHealthy: 'Sistema sano',
     refresh: 'Aggiorna',
     loadError: 'Errore di caricamento della dashboard',
+    retry: 'Riprova',
   },
   agent: {
     title: 'Gestione agenti',

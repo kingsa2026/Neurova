@@ -309,8 +309,9 @@ class MemoryManager:
     def _load_from_db(self):
         """从 SQLite 加载记忆到内存
 
-        Bug 4 修复: WHERE 子句原仅按 agent_id 过滤, 跨 neuser_id/user_id 加载记忆。
-        现加上 AND neuser_id=? AND user_id=? 保证三层隔离。
+        快照口径 = agent 全量(WHERE 仅 agent_id 一层): 视图层(_scoped_memories
+        三层隔离 / agent_wide 浏览口径)再按调用语义过滤。早期按三元组加载会
+        把其他用户域的记忆挡在快照外, 管理页永远看不全。
         """
         if not getattr(self, "_persist_db_path", None):
             return
@@ -318,9 +319,9 @@ class MemoryManager:
             conn = sqlite3.connect(self._persist_db_path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT * FROM memories WHERE agent_id = ? AND neuser_id = ? AND user_id = ? "
+                "SELECT * FROM memories WHERE agent_id = ? "
                 "ORDER BY created_at DESC",
-                (self._agent_id, self._neuser_id, self._user_id),
+                (self._agent_id,),
             ).fetchall()
 
             from datetime import datetime
@@ -490,6 +491,15 @@ class MemoryManager:
             for m in self._memories.values()
             if m.agent_id == self._agent_id and m.neuser_id == ne and m.user_id == uid
         ]
+
+    def _agent_memories(self) -> List[Any]:
+        """agent 级浏览视图基集: 仅按实例绑定的 agent_id 过滤。
+
+        记忆管理页按 agent 隔离(页面路径 /agent/:agentId/*), 该口径下
+        展示本 agent 全部记忆(含其他用户域行); 聊天检索仍走
+        _scoped_memories 三层过滤, 两者互不影响。
+        """
+        return [m for m in self._memories.values() if m.agent_id == self._agent_id]
 
     @property
     def emotion_module(self):
@@ -681,7 +691,13 @@ class MemoryManager:
             logger.warning("依赖提取初始化失败（不影响记忆存储）: %s", e)
 
     def recall(
-        self, query: str = "", category: Optional[str] = None, limit: int = 10, min_temperature: float = 0.0, **kwargs
+        self,
+        query: str = "",
+        category: Optional[str] = None,
+        limit: int = 10,
+        min_temperature: float = 0.0,
+        agent_wide: bool = False,
+        **kwargs,
     ) -> List[Dict[str, Any]]:
         """检索记忆
 
@@ -692,12 +708,16 @@ class MemoryManager:
         P-3 修复:
           - 排除 lifecycle_stage == FORGOTTEN 的记忆（forget 后不应再被 recall 返回）
           - category 支持任意字符串（非法枚举值按 metadata._original_category 匹配）
+
+        agent_wide=True: 管理/浏览口径, 基集改为 agent 全量(仅 agent_id 过滤);
+        默认 False: 聊天检索, 保持生效三元组(`_scoped_memories`)三层隔离。
         """
+        base = self._agent_memories() if agent_wide else self._scoped_memories()
         with self._lock:
             self._stats["recall_count"] += 1
-            # 审计修复: 所有检索路径统一按生效三元组过滤 (原 use_semantic=False
-            # 的关键词路径完全不过滤, 存在跨用户泄漏)
-            results = self._scoped_memories()
+            # 审计修复: 检索路径统一按生效三元组过滤 (agent_wide 时基集已
+            # 按 agent 口径扩权, 此处不再重复收窄)
+            results = base
 
             # P-3 修复: 排除已遗忘记忆（forget soft-delete 后不应被 recall 返回）
             results = [m for m in results if m.lifecycle_stage != LifecycleStage.FORGOTTEN]
@@ -834,17 +854,19 @@ class MemoryManager:
         ordered_ids = [mid for mid, _ in sorted(fused.items(), key=lambda kv: -kv[1])]
         return [id_to_memory[mid] for mid in ordered_ids if mid in id_to_memory][:limit]
 
-    def get_memory(self, memory_id: str) -> Optional[Dict[str, Any]]:
+    def get_memory(self, memory_id: str, agent_wide: bool = False) -> Optional[Dict[str, Any]]:
         """获取单条记忆
 
         BUG-7 修复: 加 self._lock 保护, 避免并发 forget 时 RuntimeError。
+        agent_wide=True: 管理页口径, 仅校验 agent 归属。
         """
         with self._lock:
             mem = self._memories.get(memory_id)
             # 审计修复 (P1-6): 与 forget 同规则 —— 不属于当前作用域的记忆视同不存在
-            if mem and (
-                mem.agent_id != self._agent_id
-                or mem.neuser_id != self._eff_neuser_id()
+            if mem and mem.agent_id != self._agent_id:
+                mem = None
+            if mem and not agent_wide and (
+                mem.neuser_id != self._eff_neuser_id()
                 or mem.user_id != self._eff_user_id()
             ):
                 mem = None
@@ -895,23 +917,27 @@ class MemoryManager:
         )
         return True
 
-    def forget(self, memory_id: str, soft: bool = True) -> bool:
+    def forget(self, memory_id: str, soft: bool = True, agent_wide: bool = False) -> bool:
         """遗忘记忆"""
         # Bug 5 修复：加 RLock 保护，避免并发 forget 同一 memory_id 抛 KeyError
         with self._lock:
             if memory_id not in self._memories:
                 return False
             mem = self._memories[memory_id]
-            # 审计修复 (P1-6): 校验记忆归属 —— 知道对方 memory_id 不能越权删除
-            if (
-                mem.agent_id != self._agent_id
-                or mem.neuser_id != self._eff_neuser_id()
-                or mem.user_id != self._eff_user_id()
+            # 审计修复 (P1-6): 校验记忆归属 —— 知道对方 memory_id 不能越权删除;
+            # agent_wide=True(管理页口径)仅校验 agent 归属。
+            if mem.agent_id != self._agent_id or (
+                not agent_wide
+                and (
+                    mem.neuser_id != self._eff_neuser_id()
+                    or mem.user_id != self._eff_user_id()
+                )
             ):
                 logger.warning(
-                    "拒绝越权删除记忆: id=%s 归属(%s,%s,%s) 请求作用域(%s,%s,%s)",
+                    "拒绝越权删除记忆: id=%s 归属(%s,%s,%s) 请求作用域(%s,%s,%s) agent_wide=%s",
                     memory_id, mem.agent_id, mem.neuser_id, mem.user_id,
                     self._agent_id, self._eff_neuser_id(), self._eff_user_id(),
+                    agent_wide,
                 )
                 return False
             if soft:
@@ -940,6 +966,7 @@ class MemoryManager:
         category: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        agent_wide: bool = False,
     ) -> List[Dict[str, Any]]:
         """获取记忆列表（可按 category 过滤）
 
@@ -949,10 +976,12 @@ class MemoryManager:
                       (2) 任意字符串 → 按 metadata._original_category 匹配（remember 时保留）
             limit: 返回上限
             offset: 偏移量
+            agent_wide: True=agent 级浏览口径(管理页), False=生效三元组(默认)
         """
+        base = self._agent_memories() if agent_wide else self._scoped_memories()
         with self._lock:
-            # 审计修复: 读路径统一按生效三元组过滤
-            mems = self._scoped_memories()
+            # 审计修复: 读路径默认按生效三元组过滤; agent_wide 基集已按 agent 口径扩权
+            mems = base
 
             # 排除已遗忘记忆（forget 后不应被 get_memories 返回）
             mems = [m for m in mems if m.lifecycle_stage != LifecycleStage.FORGOTTEN]
@@ -1034,21 +1063,23 @@ class MemoryManager:
         """获取统计信息"""
         return self.get_stats()
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self, agent_wide: bool = False) -> Dict[str, Any]:
         """获取统计信息"""
+        base = self._agent_memories() if agent_wide else self._scoped_memories()
         with self._lock:
             return {
-                # 审计修复: 统计按生效作用域计数, 不泄漏其他用户的数据量
-                "total_memories": len(self._scoped_memories()),
+                # 审计修复: 统计按生效作用域计数, 不泄漏其他用户的数据量;
+                # agent_wide=True(管理页)按 agent 全量口径计数。
+                "total_memories": len(base),
                 "remember_count": self._stats["remember_count"],
                 "recall_count": self._stats["recall_count"],
                 "bus_events": self._bus.emit_count,
                 "bus_handlers": self._bus.handler_count(),
             }
 
-    def get_full_stats(self) -> Dict[str, Any]:
+    def get_full_stats(self, agent_wide: bool = False) -> Dict[str, Any]:
         """获取完整统计"""
-        return self.get_stats()
+        return self.get_stats(agent_wide=agent_wide)
 
     # ────── Emotion (analyze_emotion 真实实现, 其余 stub 抛出 NotImplementedError) ──────
 
@@ -1381,20 +1412,22 @@ class MemoryManager:
 
         return count
 
-    def get_crystallized(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_crystallized(self, limit: int = 10, agent_wide: bool = False) -> List[Dict[str, Any]]:
         """获取固化记忆
 
         BUG-7 修复: 加 self._lock 保护读路径。
+        agent_wide=True: agent 级浏览口径(管理页), 默认三层。
         """
+        base = self._agent_memories() if agent_wide else self._scoped_memories()
         with self._lock:
             return [
                 m.to_dict()
-                for m in self._scoped_memories()
+                for m in base
                 if m.lifecycle_stage == LifecycleStage.CRYSTALLIZED
             ][:limit]
 
     def get_hot_memories(
-        self, limit: int = 10, min_temperature: Optional[float] = None
+        self, limit: int = 10, min_temperature: Optional[float] = None, agent_wide: bool = False
     ) -> List[Dict[str, Any]]:
         # 阈值配置化（memory-settings 配置页）: manager.hot_memories_threshold，
         # settings 默认 80.0 与历史硬编码一致；显式传参时优先于配置。
@@ -1406,7 +1439,9 @@ class MemoryManager:
             min_temperature = float(
                 get_memory_settings().get("manager.hot_memories_threshold", 80.0)
             )
-        return self.recall(limit=limit, min_temperature=min_temperature)
+        return self.recall(
+            limit=limit, min_temperature=min_temperature, agent_wide=agent_wide
+        )
 
     def flush_all_pending_updates(self) -> int:
         """刷新所有待处理的更新（委托到 BufferModule）"""

@@ -335,6 +335,7 @@ export default {
     statusHealthy: 'Système sain',
     refresh: 'Actualiser',
     loadError: 'Échec du chargement du tableau de bord',
+    retry: 'Réessayer',
   },
   agent: {
     title: 'Gestion des agents',

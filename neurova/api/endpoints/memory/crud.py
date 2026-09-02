@@ -37,7 +37,7 @@ async def search_memories(
     """搜索记忆 - query 为空时返回全部"""
     try:
         manager = get_memory_manager(agent_id, user)
-        memories = manager.recall(query=query, category=category, limit=limit)
+        memories = manager.recall(query=query, category=category, limit=limit, agent_wide=True)
 
         return success_response(
             data={
@@ -109,7 +109,7 @@ async def get_memory_stats(
 ):
     try:
         manager = get_memory_manager(agent_id, user)
-        stats = manager.get_stats()
+        stats = manager.get_stats(agent_wide=True)
         return success_response(data=stats, message="获取成功", request_id=_get_request_id(None))
     except APIError:
         raise
@@ -134,7 +134,7 @@ async def get_hot_memories(
     """
     try:
         manager = get_memory_manager(agent_id, user)
-        memories = manager.get_hot_memories(limit=limit)
+        memories = manager.get_hot_memories(limit=limit, agent_wide=True)
 
         return success_response(
             data={
@@ -163,7 +163,7 @@ async def get_crystallized_memories(
     """
     try:
         manager = get_memory_manager(agent_id, user)
-        memories = manager.get_crystallized(limit=limit)
+        memories = manager.get_crystallized(limit=limit, agent_wide=True)
 
         return success_response(
             data={
@@ -305,7 +305,7 @@ async def delete_memory(
     """
     try:
         manager = get_memory_manager(agent_id, user)
-        success = manager.forget(memory_id)
+        success = manager.forget(memory_id, agent_wide=True)
 
         if not success:
             raise APIError.not_found(f"记忆不存在: {memory_id}")
