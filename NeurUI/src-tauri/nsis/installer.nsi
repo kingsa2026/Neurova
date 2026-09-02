@@ -175,6 +175,23 @@ VIAddVersionKey "Comments" "${PRODUCTNAME} — ${TAGLINE}. Homepage: ${HOMEPAGE}
 !define MUI_LANGDLL_REGISTRY_KEY "${MANUPRODUCTKEY}"
 !define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
 
+; Neurova：欢迎/完成页品牌配色（与启动进度窗 #1A2148 同色系）
+; NSIS 颜色为 0xBBGGRR：深蓝 #1A2148 → 0x48211A；浅字 #F2F5FF → 0xFFF5F2
+!define MUI_BGCOLOR "0x48211A"
+!define MUI_TEXTCOLOR "0xFFF5F2"
+LangString nsWelcomeTitle ${LANG_ENGLISH} "Welcome to Neurova"
+LangString nsWelcomeTitle ${LANG_SIMPCHINESE} "欢迎使用 Neurova 智星"
+LangString nsWelcomeText ${LANG_ENGLISH} "This will install Neurova, a personal AI agent with memory, emotion and self-evolution, on your computer.$\r$\n$\r$\nIt is recommended to close other applications before continuing."
+LangString nsWelcomeText ${LANG_SIMPCHINESE} "将把 Neurova 智星 —— 具备记忆、情感与自我进化的个人 AI 智能体 —— 安装到您的电脑。$\r$\n$\r$\n建议关闭其他程序后继续。"
+LangString nsFinishTitle ${LANG_ENGLISH} "Neurova Installation Complete"
+LangString nsFinishTitle ${LANG_SIMPCHINESE} "Neurova 智星 安装完成"
+LangString nsFinishText ${LANG_ENGLISH} "Setup has finished installing Neurova on your computer.$\r$\n$\r$\nClick Finish to close this wizard."
+LangString nsFinishText ${LANG_SIMPCHINESE} "Neurova 智星 已成功安装到您的电脑。$\r$\n$\r$\n点击“完成”关闭本向导。"
+!define MUI_WELCOMEPAGE_TITLE "$(nsWelcomeTitle)"
+!define MUI_WELCOMEPAGE_TEXT "$(nsWelcomeText)"
+!define MUI_FINISHPAGE_TITLE "$(nsFinishTitle)"
+!define MUI_FINISHPAGE_TEXT "$(nsFinishText)"
+
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
