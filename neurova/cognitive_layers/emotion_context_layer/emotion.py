@@ -82,13 +82,23 @@ class EmotionAnalyzer:
 
         logger.info("EmotionAnalyzer 初始化完成 (agent_id=%s)", agent_id)
 
+    def set_emotion_module(self, module) -> None:
+        """注入 memory_layer 的 EmotionModule（补课 7 认知收敛第二批）。
+
+        注入后 analyze() 走 EmotionModule 语义分类器（8 基础情感
+        zero-shot，消除 hub 关键词表的"好"字效应）；未注入或失败时
+        回退 hub 关键词规则。两引擎分工：EmotionModule=逐记忆持久化
+        +主分析源；HubEngine=会话级 17 细粒度状态机（本类消费其状态）。
+        """
+        self._emotion_module = module
+
     def analyze(
         self,
         text: str,
         update_state: bool = False,
         blend_factor: float = 0.3,
     ) -> Dict[str, float]:
-        """分析文本情感
+        """分析文本情感（收敛入口：语义分类器优先，hub 关键词兜底）
 
         Args:
             text: 输入文本
@@ -98,6 +108,26 @@ class EmotionAnalyzer:
         Returns:
             情感分数字典
         """
+        # 收敛路径：EmotionModule 语义分析（主源）——主导情感+强度
+        emotion_module = getattr(self, "_emotion_module", None)
+        if emotion_module is not None:
+            try:
+                state = emotion_module.analyze_text_emotion(text)
+                if state is not None:
+                    intensity = float(getattr(state, "intensity", 0.0) or 0.0)
+                    primary = getattr(state, "primary_emotion", None)
+                    label = str(getattr(primary, "value", primary) or "neutral")
+                    with self._lock:
+                        self._stats["total_analyses"] += 1
+                        # 中性/零强度 → 空表（与 hub 无命中契约一致，避免注入噪音）
+                        scores = {label: intensity} if label != "neutral" and intensity > 0 else {}
+                        # 会话状态机照常消费（可选更新）
+                        if update_state and scores:
+                            self._hub_engine.update_emotional_state(scores, blend_factor)
+                        return scores
+            except Exception as e:
+                logger.warning("EmotionModule 语义分析失败，回退 hub 关键词: %s", e)
+
         with self._lock:
             try:
                 # 使用情感中枢引擎分析
