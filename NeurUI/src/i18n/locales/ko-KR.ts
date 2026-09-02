@@ -2,6 +2,7 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    clear: "지우기",
     confirm: '확인',
     cancel: '취소',
     save: '저장',
@@ -398,6 +399,7 @@ export default {
     archive: '보관',
     pin: '고정',
     unpin: '고정 해제',
+    queued: '대기열에 추가됨 (#{n}) — 현재 응답 후 전송됩니다',
     pinFailed: '고정 실패',
     archivedSessions: '보관된 세션',
     restore: '복원',
@@ -1890,6 +1892,26 @@ export default {
     deleteSuccess: '삭제 성공',
     deleteError: '삭제 실패',
   },
+
+  voiceTranscription: {
+    title: '음성 전사 설정',
+    subtitle: '듀얼 모드 ASR: 로컬 FunASR(중국어 우선) / Whisper(다국어 폴백)',
+    currentEngine: '활성 엔진',
+    chain: '폴백 체인',
+    noEngine: '사용 가능한 엔진 없음',
+    dualMode: '듀얼 모드 설정',
+    remoteDesc: 'OpenAI 호환 전사 API. 다국어, 종량제, 로컬 모델 불필요',
+    keyPlaceholder: '비워두면 설정된 OPENAI_API_KEY 사용',
+    ready: '준비됨',
+    notDownloaded: '미다운로드',
+    localDesc: '로컬 Whisper base(약 140MB+torch). 오프라인 사용 가능. 중국어는 FunASR 권장',
+    consentTitle: '관리자 동의 필요',
+    consentDesc: '약 140MB 모델을 다운로드하고 로컬 연산을 사용합니다(torch CPU). 동의 시 즉시 다운로드되어 원격 사용 불가 시 오프라인 폴백으로 활성화됩니다',
+    consentButton: '동의 후 다운로드(약 140MB)',
+    consentGranted: '로컬 Whisper 활성화됨',
+    consentGrantedDesc: '로컬 Whisper가 폴백 체인에 참여합니다',
+  },
+
   ui: {
     subagent: '하위 에이전트',
     expand: '펼치기',
@@ -1977,25 +1999,6 @@ export default {
     rememberNone: '이번만',
     rememberExact: '정확한 명령 기억',
     rememberSimilar: '유사 명령 기억',
-
-    voiceTranscription: {
-      title: '음성 전사 설정',
-      subtitle: '듀얼 모드 ASR: 로컬 FunASR(중국어 우선) / Whisper(다국어 폴백)',
-      currentEngine: '활성 엔진',
-      chain: '폴백 체인',
-      noEngine: '사용 가능한 엔진 없음',
-      dualMode: '듀얼 모드 설정',
-      remoteDesc: 'OpenAI 호환 전사 API. 다국어, 종량제, 로컬 모델 불필요',
-      keyPlaceholder: '비워두면 설정된 OPENAI_API_KEY 사용',
-      ready: '준비됨',
-      notDownloaded: '미다운로드',
-      localDesc: '로컬 Whisper base(약 140MB+torch). 오프라인 사용 가능. 중국어는 FunASR 권장',
-      consentTitle: '관리자 동의 필요',
-      consentDesc: '약 140MB 모델을 다운로드하고 로컬 연산을 사용합니다(torch CPU). 동의 시 즉시 다운로드되어 원격 사용 불가 시 오프라인 폴백으로 활성화됩니다',
-      consentButton: '동의 후 다운로드(약 140MB)',
-      consentGranted: '로컬 Whisper 활성화됨',
-      consentGrantedDesc: '로컬 Whisper가 폴백 체인에 참여합니다',
-    },
     approvalHint: '该操作被安全策略标记为需人工确认，请核实后再放行。',
   },
   neuron: {

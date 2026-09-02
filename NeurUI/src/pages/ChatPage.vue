@@ -416,6 +416,26 @@
             @input="autoResize"
             @paste="handlePaste"
           />
+      <!-- 消息队列提示（补课 P3-b）：流式中的排队发送 -->
+      <div v-if="messageQueue.items.length > 0" class="nr-msg-queue">
+        <span class="nr-msg-queue-count">
+          {{ t('chat.queued', { n: messageQueue.pendingCount }) }}
+        </span>
+        <button
+          v-for="qi in messageQueue.items"
+          :key="qi.id"
+          class="nr-msg-queue-item"
+          :title="qi.status === 'failed' ? qi.error : qi.text"
+          @click="messageQueue.retry(qi.id) && drainMessageQueue()"
+        >
+          <span class="nr-msg-queue-text">{{ qi.text.slice(0, 40) }}</span>
+          <span class="nr-msg-queue-status" :class="qi.status">{{ qi.status }}</span>
+        </button>
+        <button class="nr-msg-queue-clear" @click="messageQueue.clear()">
+          {{ t('common.clear') }}
+        </button>
+      </div>
+
           <GlassButton
             v-if="isStreaming"
             variant="danger"
@@ -594,6 +614,7 @@ import { useAgentPage } from '@/composables/useAgentPage'
 import { useASRRestartGuard } from '@/composables/useASRRestartGuard'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
+import { useMessageQueueStore } from '@/stores/messageQueue'
 import { useChat } from '@/composables/useChat'
 import type { ChatMessage, Session, PendingFile } from '@/types/chat'
 import { api } from '@/api'
@@ -642,6 +663,7 @@ const isMainLayout = computed(() => props.layoutMode === 'main')
 // storeToRefs 解构为本地 ref(保持响应性 + 模板兼容),所有 mutation 走 store actions。
 // ---------------------------------------------------------------------------
 const chatStore = useChatStore()
+const messageQueue = useMessageQueueStore()
 const {
   messages,
   sessions,
@@ -1146,10 +1168,44 @@ async function deleteRoundAt(idx: number): Promise<void> {
 // ---------------------------------------------------------------------------
 // Message Sending with SSE Streaming
 // ---------------------------------------------------------------------------
+/**
+ * 队列续发（补课 P3-b）：当前轮 done 后取下一条 pending 发送。
+ * 递归经由 sendMessage → 流式 finally → drainMessageQueue 链自然排空。
+ * markSending/markSent 失败说明状态竞争（如用户手动移除）——静默跳过。
+ */
+const _draining = ref(false)
+async function drainMessageQueue(): Promise<void> {
+  if (_draining.value || messageQueue.paused) return
+  const item = messageQueue.next()
+  if (!item) return
+  _draining.value = true
+  try {
+    if (!messageQueue.markSending(item.id)) return
+    chatStore.setInputText(item.text)
+    try {
+      await sendMessage()
+      messageQueue.markSent(item.id)
+    } catch (err: any) {
+      messageQueue.markFailed(item.id, err?.message || 'send failed')
+    }
+  } finally {
+    _draining.value = false
+  }
+}
+
 async function sendMessage() {
   const text = inputText.value.trim()
   if (!text && pendingFiles.value.length === 0) return
-  if (isStreaming.value) return
+  // 补课 P3-b：流式中再次发送 → 入队（纯文本轮；附件轮保持丢弃语义，
+  // 避免队列项携带上传会话）。done 后 drainMessageQueue 自动续发。
+  if (isStreaming.value) {
+    if (text && pendingFiles.value.length === 0 && agentId.value) {
+      messageQueue.enqueue(text)
+      chatStore.setInputText('')
+      uiMessage.info(t('chat.queued', { n: messageQueue.pendingCount }))
+    }
+    return
+  }
   if (!agentId.value) return
 
   // Stop any active ASR recording
@@ -1311,6 +1367,8 @@ async function sendMessage() {
     chatStore.setStreaming(false)
     abortController = null
     scrollToBottom()
+    // 补课 P3-b：当前轮结束 → 自动续发下一条排队消息（暂停时不续发）
+    await drainMessageQueue()
   }
 }
 
@@ -3402,5 +3460,42 @@ onBeforeUnmount(() => {
 @keyframes nr-retrieval-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+.nr-msg-queue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.nr-msg-queue-count {
+  color: var(--nr-text-secondary);
+}
+
+.nr-msg-queue-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--nr-glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--nr-text-primary);
+  cursor: pointer;
+}
+
+.nr-msg-queue-item .nr-msg-queue-status.pending { color: var(--nr-text-tertiary); }
+.nr-msg-queue-item .nr-msg-queue-status.sending { color: #6366f1; }
+.nr-msg-queue-item .nr-msg-queue-status.failed { color: #ef4444; }
+
+.nr-msg-queue-clear {
+  border: none;
+  background: none;
+  color: var(--nr-text-tertiary);
+  cursor: pointer;
+  font-size: 12px;
 }
 </style>
