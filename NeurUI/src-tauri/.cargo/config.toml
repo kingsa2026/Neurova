@@ -1,0 +1,4 @@
+# MSVC link.exe 全路径钉死：Git Bash 的 /usr/bin/link.exe（coreutils）会抢 PATH
+# 且不支持 MSVC 语义（"extra operand" 错误根因）；vswhere 定位 BuildTools 实装路径
+[target.x86_64-pc-windows-msvc]
+linker = "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
