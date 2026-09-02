@@ -91,3 +91,41 @@ describe('messageQueue store', () => {
     expect(q.paused).toBe(true)
   })
 })
+
+describe('messageQueue reorder / moveToTop（补课 A3）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('moveToTop puts item at pending queue head', () => {
+    const q = useMessageQueueStore()
+    q.enqueue('a')
+    const b = q.enqueue('b')
+    expect(q.next()?.text).toBe('a')
+    expect(q.moveToTop(b.id)).toBe(true)
+    expect(q.next()?.text).toBe('b')
+    // a 仍在队列中
+    expect(q.pendingCount).toBe(2)
+  })
+
+  it('reorder reorders pending items, keeping non-pending pinned', () => {
+    const q = useMessageQueueStore()
+    const a = q.enqueue('a')
+    const b = q.enqueue('b')
+    const c = q.enqueue('c')
+    q.markSending(a.id)
+    q.reorder([c.id, b.id])
+    const pending = q.items.filter((i) => i.status === 'pending')
+    expect(pending.map((i) => i.text)).toEqual(['c', 'b'])
+    // sending 项仍在队里
+    expect(q.items.some((i) => i.id === a.id)).toBe(true)
+    expect(c.id).toBeDefined()
+  })
+
+  it('reorder ignores unknown ids', () => {
+    const q = useMessageQueueStore()
+    q.enqueue('a')
+    q.reorder(['ghost-id'])
+    expect(q.items.filter((i) => i.status === 'pending')).toHaveLength(1)
+  })
+})
