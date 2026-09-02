@@ -35,6 +35,10 @@ export interface ChatMessage {
   repliedAt?: string
   /** 用户对回复质量的反馈（点赞/点踩），持久化在 session 消息 metadata */
   feedback?: 'like' | 'dislike'
+  /** 流式实时 TTS 的句块 blob URL 列表（回放用；合成顺序即播放顺序） */
+  ttsUrls?: string[]
+  /** 回放当前句块下标 */
+  ttsIdx?: number
 }
 
 export interface Session {

@@ -121,6 +121,14 @@
               {{ t(opt.label) }}
             </button>
           </div>
+          <button
+            class="nr-auto-voice-btn"
+            :class="{ active: autoVoice }"
+            :title="t('chat.autoVoiceTitle')"
+            @click="toggleAutoVoice"
+          >
+            {{ autoVoice ? '🔊' : '🔇' }}
+          </button>
           <a-select
             v-model:value="selectedModel"
             class="nr-chat-model-select"
@@ -306,7 +314,9 @@
                     />
                   </div>
                 </div>
-                <span class="nr-audio-time">{{ formatAudioTime(msg.audioCurrentTime || 0) }}</span>
+                <span class="nr-audio-time">
+                  {{ msg.ttsUrls ? `${(msg.ttsIdx || 0) + 1}/${msg.ttsUrls.length}` : formatAudioTime(msg.audioCurrentTime || 0) }}
+                </span>
                 <button class="nr-audio-speed-btn" @click="cycleAudioSpeed(msg)">
                   {{ msg.audioSpeed || 1 }}x
                 </button>
@@ -327,7 +337,7 @@
               v-if="msg.role === 'assistant' && !msg.streaming && msg.content && !msg.audioUrl && ttsAvailable"
               class="nr-msg-tts-action"
             >
-              <button class="nr-tts-btn" @click="synthesizeTTS(msg)" :disabled="msg.ttsLoading">
+              <button v-if="!msg.ttsUrls" class="nr-tts-btn" @click="synthesizeTTS(msg)" :disabled="msg.ttsLoading">
                 {{ msg.ttsLoading ? '⏳' : '🔊' }}
                 <span>{{ msg.ttsLoading ? t('chat.ttsLoading') : t('chat.playTTS') }}</span>
               </button>
@@ -689,6 +699,7 @@ import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
 import { useMessageQueueStore } from '@/stores/messageQueue'
 import { useSessionSendLock } from '@/composables/useSessionSendLock'
+import { StreamTTSRunner } from '@/composables/useStreamTTS'
 import { useRouter } from 'vue-router'
 import { useChat } from '@/composables/useChat'
 import type { ChatMessage, Session, PendingFile } from '@/types/chat'
@@ -895,6 +906,21 @@ const chatModelOptions = ref<ChatModelOption[]>([])
 const rateLimitBanner = ref<{ model: string; alternatives: ChatModelOption[] } | null>(null)
 // 补课 A2：无已启用模型提示（自动路由将无人可派）——引导去模型管理页
 const noModelsHint = ref(false)
+
+// ── 流式实时 TTS（自动语音开关，补课）──────────────────────
+const AUTO_VOICE_KEY = 'neurova_auto_voice'
+const autoVoice = ref(localStorage.getItem(AUTO_VOICE_KEY) === '1')
+function toggleAutoVoice(): void {
+  autoVoice.value = !autoVoice.value
+  localStorage.setItem(AUTO_VOICE_KEY, autoVoice.value ? '1' : '0')
+  if (!autoVoice.value) streamTTSRunner?.abort()
+}
+let streamTTSRunner: StreamTTSRunner | null = null
+// live 播放：专用 audio 元素顺序播句子块；结束后由模板 onended 推进
+const liveTtsUrl = ref('')
+const liveTtsQueue = ref<string[]>([])
+const liveTtsIdx = ref(0)
+const liveTtsAudio = ref<HTMLAudioElement | null>(null)
 const selectedModel = ref<string>('')
 const chatModelLoading = ref(false)
 
@@ -1474,6 +1500,8 @@ async function sendMessage() {
   const filesToUpload = [...pendingFiles.value]
   pendingFiles.value = []
   chatStore.setStreaming(true)
+  // 补课：自动语音开启 → 本轮流式 TTS 会话开始（句级实时播）
+  beginStreamTTS(streamingMsg)
   scrollToBottom()
 
   // Upload files first if any
@@ -1692,10 +1720,16 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       // 回复内容开始 → 检索已结束，清空临时进度显示
       if (retrievalStatus.value) retrievalStatus.value = ''
       msg.content += event.content || event.text || event.delta || ''
+      // 补课：自动语音 → 流式文本增量喂入句子流水线
+      if (autoVoice.value && streamTTSRunner && !streamTTSRunner.isFinished) {
+        streamTTSRunner.feed(event.content || event.text || event.delta || '')
+      }
       break
 
     case 'audio':
     case 'tts':
+      // autoVoice 已实时逐句播过——忽略整段音频事件避免重复
+      if (autoVoice.value && streamTTSRunner) break
       if (event.url) {
         msg.audioUrl = event.url
         msg.audioProgress = 0
@@ -1714,8 +1748,10 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'done':
     case 'complete':
       msg.streaming = false
+      // 补课：流式语音会话收尾（滞留句 flush；回放列表定稿）
+      if (autoVoice.value && streamTTSRunner) streamTTSRunner.end()
       // 补课 4.4 兜底：后端把 audio_url 附在 done 事件上（而非独立 audio 帧）
-      if (event.audio_url && !msg.audioUrl) {
+      if (event.audio_url && !msg.audioUrl && !msg.ttsUrls) {
         msg.audioUrl = event.audio_url
         msg.audioProgress = 0
         msg.audioCurrentTime = 0
@@ -1739,6 +1775,7 @@ function processSSEEvent(event: any, msg: ChatMessage) {
 
 function stopStreaming() {
   abortController?.abort()
+  stopStreamTTS()
   chatStore.setStreaming(false)
 }
 
@@ -1970,7 +2007,17 @@ function onAudioLoaded(msg: ChatMessage) {
 }
 
 function onAudioEnded(msg: ChatMessage) {
+  // 补课：chunk 列表回放——还有下一句则自动续播
+  if (msg.ttsUrls && (msg.ttsIdx ?? 0) < msg.ttsUrls.length - 1) {
+    msg.ttsIdx = (msg.ttsIdx ?? 0) + 1
+    msg.audioPlaying = true
+    msg.audioProgress = 0
+    msg.audioCurrentTime = 0
+    nextTick(() => msg.audioEl?.play().catch(() => {}))
+    return
+  }
   msg.audioPlaying = false
+  msg.ttsIdx = 0
   msg.audioProgress = 0
   msg.audioCurrentTime = 0
 }
@@ -2266,6 +2313,78 @@ function scrollToBottom() {
   })
 }
 
+// ── 流式 TTS 会话编排 ──────────────────────────────────────
+
+/** live 播放推进：当前句播完自动播下一句（顺序保持合成序）。 */
+function playLiveChunk(index: number): void {
+  const urls = streamTTSRunner?.urls.value ?? []
+  if (index >= urls.length) return
+  liveTtsIdx.value = index
+  liveTtsUrl.value = urls[index]
+  nextTick(() => liveTtsAudio.value?.play().catch(() => {}))
+}
+
+function startStreamTTS(): void {
+  streamTTSRunner = new StreamTTSRunner({
+    synthesize: async (text, signal) => {
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+      const token = secureStorage.get('auth_token')
+      const resp = await fetch(`${baseUrl}/audio/synthesize-stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ text, speed: 1.0 }),
+        signal,
+      })
+      if (!resp.ok) throw new Error(`TTS ${resp.status}`)
+      const blob = await resp.blob()
+      return URL.createObjectURL(blob)
+    },
+    onChunkReady: (_url, index) => {
+      // 首句就绪即开播；后续句由 onended 推进
+      if (liveTtsIdx.value < 0 || liveTtsUrl.value === '') playLiveChunk(index)
+    },
+    onDone: (urls) => {
+      // 回放定稿：句块列表挂到消息上（下方播放器按列表回放）
+      const msg = streamingTtsMsg
+      if (msg && urls.length > 0) {
+        msg.ttsUrls = urls
+        msg.ttsIdx = 0
+      }
+      streamingTtsMsg = null
+    },
+  })
+  streamTTSRunner.begin()
+}
+
+let streamingTtsMsg: ChatMessage | null = null
+
+/** 开启一轮流式语音（autoVoice 开启时在发起对话时调用）。 */
+function beginStreamTTS(msg: ChatMessage): void {
+  if (!autoVoice.value || !ttsAvailable.value) return
+  streamingTtsMsg = msg
+  startStreamTTS()
+}
+
+function stopStreamTTS(): void {
+  streamTTSRunner?.abort()
+  streamTTSRunner = null
+  streamingTtsMsg = null
+  liveTtsUrl.value = ''
+  liveTtsQueue.value = []
+  liveTtsIdx.value = -1
+  if (liveTtsAudio.value) liveTtsAudio.value.pause()
+}
+
+/** live 元素当前句播完 → 下一句；全部播完静默收尾。 */
+function onLiveTtsEnded(): void {
+  const urls = streamTTSRunner?.urls.value ?? liveTtsQueue.value
+  const next = liveTtsIdx.value + 1
+  if (next < urls.length) playLiveChunk(next)
+}
+
 /**
  * 打开/切换会话 → 定位到最新记录（结尾处）。与实时流的 scrollToBottom
  * 不同：历史渲染含 hljs/mermaid/图片异步膨胀，且窗口化渲染（补课 A6）
@@ -2366,6 +2485,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   historyAnchorObserver?.disconnect()
   historyAnchorObserver = null
+  stopStreamTTS()
   // 补课 D：离开页面保存当前会话草稿
   if (currentSessionId.value) chatDraft.save(currentSessionId.value, inputText.value)
   disposeMermaid()
@@ -3831,6 +3951,22 @@ onBeforeUnmount(() => {
 
 .nr-session-item.drop-target {
   border-top: 2px solid #6366f1;
+}
+
+.nr-auto-voice-btn {
+  border: 1px solid var(--nr-glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 14px;
+  opacity: 0.6;
+}
+
+.nr-auto-voice-btn.active {
+  opacity: 1;
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.1);
 }
 
 .nr-rate-limit-banner {
