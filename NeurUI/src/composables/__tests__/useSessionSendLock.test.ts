@@ -44,7 +44,7 @@ describe('useSessionSendLock', () => {
     )
     expect(isOwner.value).toBe(true)
     release()
-    heldResolve?.call(null)
+    heldResolve?.apply(null)
   })
 
   it('switches session releases old lock and reacquires', async () => {
