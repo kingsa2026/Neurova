@@ -169,14 +169,11 @@ fn boot_tail(state: tauri::State<BackendChild>, log_offset: u64) -> serde_json::
 /// backend.log 绝对路径（spawn 成功后登记，boot_tail 拉取用）
 static BOOT_LOG_PATH: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
 
-/// 就绪/失败后收尾：关 boot 窗口、亮主窗（主窗默认 visible:false）。
+/// 就绪/失败后收尾：亮主窗（boot 页轮询到 backend 状态变化会自行放完动画自关；
+/// 壳侧延迟兜底关一次，幂等）。
 fn finish_boot(handle: &tauri::AppHandle, ok: bool, msg: &str) {
-    let _ = handle.emit_to(
-        "boot",
-        "boot://progress",
-        serde_json::json!({ "done": true, "ok": ok, "msg": msg }),
-    );
-    std::thread::sleep(Duration::from_millis(if ok { 800 } else { 2600 }));
+    log::info!("boot finish: ok={ok} msg={msg}");
+    std::thread::sleep(Duration::from_millis(if ok { 900 } else { 3000 }));
     if let Some(w) = handle.get_webview_window("boot") {
         let _ = w.close();
     }
@@ -255,10 +252,10 @@ pub fn run() {
                 match spawn_backend(&root) {
                     Ok(child) => {
                         let pid = child.id();
-                        // 先托管再等待：启动期内 backend_status 可见 "running"
+                        *BOOT_LOG_PATH.lock().unwrap() = Some(log_path);
+                        // 先托管再等待：启动期内 backend_status/boot_tail 可见 "running"
                         handle.manage(BackendChild(Mutex::new(Some(child))));
-                        let ready =
-                            wait_backend_ready(&handle, &log_path, Duration::from_secs(120));
+                        let ready = wait_backend_ready(Duration::from_secs(120));
                         log::info!("backend pid={pid} ready={ready} root={}", root.display());
                         let _ = handle.emit(
                             "backend-status",
@@ -297,7 +294,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![backend_status])
+        .invoke_handler(tauri::generate_handler![backend_status, boot_tail])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
