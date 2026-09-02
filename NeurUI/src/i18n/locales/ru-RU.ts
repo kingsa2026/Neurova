@@ -2505,5 +2505,6 @@ export default {
     optObjectiveAddCart: 'В корзину',
     rateLimited: 'Модель {model} ограничена (429)',
     rateLimitSwitched: 'Модель переключена',
+    noModelsConfigured: 'Модели не настроены — добавьте и включите модель в настройках',
   },
 }

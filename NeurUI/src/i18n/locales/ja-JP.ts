@@ -2505,5 +2505,6 @@ export default {
     optObjectiveAddCart: 'カート追加',
     rateLimited: 'モデル {model} がレート制限中です (429)',
     rateLimitSwitched: 'モデルを切り替えました',
+    noModelsConfigured: '利用可能なモデルが未設定です — モデル管理ページで追加・有効化してください',
   },
 }
