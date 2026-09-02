@@ -439,6 +439,24 @@
             @input="autoResize"
             @paste="handlePaste"
           />
+      <!-- 429 限流横幅（补课 A1）：一键切换备选模型 -->
+      <div v-if="rateLimitBanner" class="nr-rate-limit-banner">
+        <span class="nr-rate-limit-text">
+          ⚠ {{ t('chat.rateLimited', { model: rateLimitBanner.model || t('ui.autoRoute') }) }}
+        </span>
+        <div class="nr-rate-limit-alts">
+          <button
+            v-for="alt in rateLimitBanner.alternatives.slice(0, 3)"
+            :key="alt.value"
+            class="nr-rate-limit-alt"
+            @click="switchAfterRateLimit(alt.value)"
+          >
+            {{ alt.label }}
+          </button>
+        </div>
+        <button class="nr-rate-limit-dismiss" @click="rateLimitBanner = null">✕</button>
+      </div>
+
       <!-- 消息队列提示（补课 P3-b）：流式中的排队发送 -->
       <div v-if="messageQueue.items.length > 0" class="nr-msg-queue">
         <span class="nr-msg-queue-count">
@@ -838,6 +856,8 @@ const approvalRemember = ref<'' | 'exact' | 'similar'>('')
 // 空串'' = 自动路由（默认，不影响富媒体→多模态 LLM 的自动路由）
 // 非空 = 手动指定模型，随消息 POST body 的 model 字段转发到后端热切换
 const chatModelOptions = ref<ChatModelOption[]>([])
+// 补课 A1：429 限流横幅——当前轮被限流的模型 + 一键切换候选列表
+const rateLimitBanner = ref<{ model: string; alternatives: ChatModelOption[] } | null>(null)
 const selectedModel = ref<string>('')
 const chatModelLoading = ref(false)
 
@@ -1200,6 +1220,29 @@ async function deleteRoundAt(idx: number): Promise<void> {
 // Message Sending with SSE Streaming
 // ---------------------------------------------------------------------------
 /**
+ * 429 限流识别与横幅（补课 A1）：错误文本含 429/rate limit 措辞时，
+ * 从已启用模型列表（排除当前选中）生成备选候选，弹出横幅一键切换。
+ * 非限流错误返回 false 走原有错误路径。
+ */
+function handleRateLimit(err: any): boolean {
+  const msg = String(err?.message || '')
+  if (!/429|rate.?limit|too many requests|限流|请求过于频繁/i.test(msg)) return false
+  const current = selectedModel.value || ''
+  const alternatives = chatModelOptions.value.filter(
+    (o) => o.value && o.value !== current,
+  )
+  rateLimitBanner.value = { model: current, alternatives }
+  return true
+}
+
+/** 横幅一键切换：选定备选模型后关闭横幅（用户重发即走新模型）。 */
+function switchAfterRateLimit(modelValue: string): void {
+  selectedModel.value = modelValue
+  rateLimitBanner.value = null
+  uiMessage.success(t('chat.rateLimitSwitched'))
+}
+
+/**
  * 队列续发（补课 P3-b）：当前轮 done 后取下一条 pending 发送。
  * 递归经由 sendMessage → 流式 finally → drainMessageQueue 链自然排空。
  * markSending/markSent 失败说明状态竞争（如用户手动移除）——静默跳过。
@@ -1380,19 +1423,25 @@ async function sendMessage() {
   try {
     await readStream()
   } catch (err: any) {
-    // 网络层中断且已收到至少一个事件 → 重连快进一次（HTTP 错误/中止不重连）
-    const networkDrop =
-      err.name !== 'AbortError' && receivedSeq[0] > 0 && (err instanceof TypeError || /network|failed|fetch/i.test(String(err.message || '')))
-    if (networkDrop) {
-      try {
-        await readStream(receivedSeq[0])
-      } catch (retryErr: any) {
-        if (retryErr.name !== 'AbortError') {
-          streamingMsg.content += `\n\n**Error:** ${retryErr.message || 'Stream failed.'}`
+    if (err.name === 'AbortError') {
+      // 用户主动停止
+    } else if (handleRateLimit(err)) {
+      // 补课 A1：429 → 横幅一键切模型（不计入消息正文错误）
+    } else {
+      // 网络层中断且已收到至少一个事件 → 重连快进一次（HTTP 错误/中止不重连）
+      const networkDrop =
+        receivedSeq[0] > 0 && (err instanceof TypeError || /network|failed|fetch/i.test(String(err.message || '')))
+      if (networkDrop) {
+        try {
+          await readStream(receivedSeq[0])
+        } catch (retryErr: any) {
+          if (retryErr.name !== 'AbortError') {
+            streamingMsg.content += `\n\n**Error:** ${retryErr.message || 'Stream failed.'}`
+          }
         }
+      } else {
+        streamingMsg.content += `\n\n**Error:** ${err.message || 'Stream failed.'}`
       }
-    } else if (err.name !== 'AbortError') {
-      streamingMsg.content += `\n\n**Error:** ${err.message || 'Stream failed.'}`
     }
   } finally {
     streamingMsg.streaming = false
@@ -3559,6 +3608,51 @@ onBeforeUnmount(() => {
 @keyframes nr-retrieval-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+.nr-rate-limit-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.08);
+  font-size: 12px;
+}
+
+.nr-rate-limit-text {
+  color: var(--nr-text-primary);
+}
+
+.nr-rate-limit-alts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.nr-rate-limit-alt {
+  padding: 3px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--nr-text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.nr-rate-limit-alt:hover {
+  background: rgba(99, 102, 241, 0.2);
+}
+
+.nr-rate-limit-dismiss {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--nr-text-tertiary);
+  cursor: pointer;
 }
 
 .nr-msg-queue {
