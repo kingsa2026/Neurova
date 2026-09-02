@@ -25,6 +25,20 @@ fn repo_root() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
+/// 去掉 Windows verbatim 前缀（\\?\）：打包态 resource_dir() 返回 verbatim
+/// 路径，作为子进程 CWD 会让 Python 的 os.getcwd() 也带前缀，与源码里的
+/// 相对路径成分（..\..\agent_workspaces）拼接触发 WinError 123 启动即崩。
+fn normalize_windows_path(p: std::path::PathBuf) -> std::path::PathBuf {
+    let s = p.as_os_str().to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return std::path::PathBuf::from(format!(r"\\{}", rest));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return std::path::PathBuf::from(rest.to_string());
+    }
+    p
+}
+
 /// 后端根解析（补课 P3-a 路线 A 全量打包）：
 /// 1) 打包态：resource_dir()/backend（python/ neurova/ models/ config/ start_server.py）
 /// 2) 开发态回退：仓库根 + .venv
@@ -33,10 +47,10 @@ fn resolve_backend_root(app: &tauri::AppHandle) -> std::path::PathBuf {
     if let Ok(rd) = app.path().resource_dir() {
         let bundled = rd.join("backend");
         if bundled.join("start_server.py").exists() && bundled.join("python/python.exe").exists() {
-            return bundled;
+            return normalize_windows_path(bundled);
         }
     }
-    repo_root()
+    normalize_windows_path(repo_root())
 }
 
 fn is_bundled(root: &std::path::Path) -> bool {
