@@ -28,7 +28,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,13 +39,21 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "certificateThumbprint": "11F098DB1C2E2EB47BD74CF82059A81A046A8757",
-      "digestAlgorithm": "sha256",
-      "timestampUrl": "http://timestamp.digicert.com",
       "nsis": {
-        "languages": ["SimpChinese", "English"],
-        "displayLanguageSelector": false
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
+        "displayLanguageSelector": false,
+        "installMode": "currentUser"
       }
+    },
+    "resources": {
+      "resources/backend/python": "backend/python",
+      "resources/backend/neurova": "backend/neurova",
+      "resources/backend/models": "backend/models",
+      "resources/backend/config": "backend/config",
+      "resources/backend/start_server.py": "backend/start_server.py"
     }
   }
 }
