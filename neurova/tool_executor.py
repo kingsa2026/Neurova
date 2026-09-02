@@ -2848,21 +2848,45 @@ class ToolExecutor:
             execution_time: 执行耗时 (秒)
             result: 工具执行结果 dict (H3，可 None)
         """
-        # P2-4：Prometheus 仪表（失败不影响钩子主流程）
+        # 闭环审计断点 B：策略性拒绝（治理拦截/待审批）≠ 真实故障，
+        # 三处统计（metrics/肌肉记忆/生命周期）跳过失败计数；拒绝留痕由
+        # _audit_governance 承担。判定单源：security.governance.is_policy_denial。
         try:
-            from neurova.core.metrics import get_metrics
+            from neurova.security.governance import is_policy_denial
 
-            get_metrics().record_tool_execution(
-                tool_name=tool_name,
-                source=tool_source or "unknown",
-                success=success,
-                duration_s=execution_time or 0.0,
-            )
+            policy_denial = is_policy_denial(result)
         except Exception:
-            logger.debug("tool metrics 埋点跳过", exc_info=True)
+            policy_denial = False
+
+        # 断点 A 修复（闭环审计）：真实执行反馈 → 自适应权重。失败 ×0.95 降
+        # adaptive_multiplier → check_tool_memory 动态阈值联动升高 → 更难自动执行
+        # （齿轮已存在，此前缺传动轴）。策略拒绝不更新（决策≠故障，与断点 B 同口径）；
+        # evolution/tool_weights 缺失时 no-op（可选增强，不阻断主流程）。
+        if not policy_denial:
+            try:
+                evolution = getattr(self._agent, "evolution", None)
+                weights = getattr(evolution, "tool_weights", None) if evolution else None
+                if weights is not None and hasattr(weights, "update_weight"):
+                    weights.update_weight(tool_name, success, float(execution_time or 0.0))
+            except Exception:
+                logger.debug("tool weight 反馈跳过", exc_info=True)
+
+        # P2-4：Prometheus 仪表（失败不影响钩子主流程）
+        if not policy_denial:
+            try:
+                from neurova.core.metrics import get_metrics
+
+                get_metrics().record_tool_execution(
+                    tool_name=tool_name,
+                    source=tool_source or "unknown",
+                    success=success,
+                    duration_s=execution_time or 0.0,
+                )
+            except Exception:
+                logger.debug("tool metrics 埋点跳过", exc_info=True)
 
         # 记录工具使用统计 → 传播到肌肉记忆 L1/L2/L3
-        if self.tool_memory:
+        if self.tool_memory and not policy_denial:
             try:
                 self.tool_memory.record_tool_usage(
                     tool_name=tool_name,
@@ -2879,7 +2903,7 @@ class ToolExecutor:
 
         # 更新工具生命周期 (真实方法是 touch, 不是 update_usage)
         # 更新工具生命周期 (真实方法是 touch, 不是 update_usage)
-        if self.tool_lifecycle:
+        if self.tool_lifecycle and not policy_denial:
             try:
                 self.tool_lifecycle.touch(tool_name, success)
             except Exception:
@@ -2899,6 +2923,22 @@ class ToolExecutor:
                 )
             except Exception:
                 logger.debug("skill_packer.observe 失败（忽略）", exc_info=True)
+
+        # 五段流水线 result 观察者门面（neurova/agent/tool_pipeline）：
+        # 默认无观察者注册时 no-op，行为与未接入完全一致（零回归面）。
+        try:
+            from neurova.agent.tool_pipeline import notify_tool_result
+
+            notify_tool_result(
+                tool_name=tool_name,
+                success=success,
+                result=result if isinstance(result, dict) else None,
+                execution_time=execution_time or 0.0,
+                tool_source=tool_source,
+                user_input=user_input,
+            )
+        except Exception:
+            logger.debug("pipeline result 通知失败（忽略）", exc_info=True)
 
     @staticmethod
     def _parse_params(params_str: str) -> Dict[str, Any]:
