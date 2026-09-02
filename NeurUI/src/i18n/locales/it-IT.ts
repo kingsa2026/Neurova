@@ -336,6 +336,10 @@ export default {
     refresh: 'Aggiorna',
     loadError: 'Errore di caricamento della dashboard',
     retry: 'Riprova',
+    groupPinned: 'Fissate',
+    groupToday: 'Oggi',
+    groupWeek: 'Ultimi 7 giorni',
+    groupEarlier: 'Prima',
     anotherTabSending: 'Un\'altra scheda sta inviando in questa sessione',
   },
   agent: {

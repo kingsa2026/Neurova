@@ -337,6 +337,10 @@ export default {
     loadError: 'Échec du chargement du tableau de bord',
     retry: 'Réessayer',
     anotherTabSending: 'Un autre onglet envoie dans cette session',
+    groupPinned: 'Épinglées',
+    groupToday: 'Aujourd\'hui',
+    groupWeek: '7 derniers jours',
+    groupEarlier: 'Plus tôt',
   },
   agent: {
     title: 'Gestion des agents',

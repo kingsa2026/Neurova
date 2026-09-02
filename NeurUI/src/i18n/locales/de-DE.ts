@@ -337,6 +337,10 @@ export default {
     loadError: 'Dashboard-Daten konnten nicht geladen werden',
     retry: 'Erneut versuchen',
     anotherTabSending: 'Ein anderer Tab sendet in dieser Sitzung',
+    groupPinned: 'Angeheftet',
+    groupToday: 'Heute',
+    groupWeek: 'Letzte 7 Tage',
+    groupEarlier: 'Früher',
   },
   agent: {
     title: 'Agentenverwaltung',
