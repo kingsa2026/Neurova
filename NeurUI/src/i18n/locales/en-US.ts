@@ -2507,6 +2507,9 @@ export default {
     optObjectiveAddCart: 'Add to Cart',
     rateLimited: 'Model {model} is rate-limited (429)',
     rateLimitSwitched: 'Model switched',
+    queueTop: 'Move to top',
+    queueEdit: 'Edit queued message',
+    retry: 'Retry',
     noModelsConfigured: 'No models configured — add and enable one in Model settings first',
   },
 }

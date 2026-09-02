@@ -2505,6 +2505,9 @@ export default {
     optObjectiveAddCart: 'Ajouter au panier',
     rateLimited: 'Le modèle {model} est limité (429)',
     rateLimitSwitched: 'Modèle changé',
+    queueTop: 'Mettre en tête',
+    queueEdit: 'Modifier le message en attente',
+    retry: 'Réessayer',
     noModelsConfigured: 'Aucun modèle configuré — ajoutez-en un dans les paramètres',
   },
 }

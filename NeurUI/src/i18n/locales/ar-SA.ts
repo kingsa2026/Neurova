@@ -2505,6 +2505,9 @@ export default {
     optObjectiveAddCart: 'إضافة للسلة',
     rateLimited: 'النموذج {model} تم تحديد معدله (429)',
     rateLimitSwitched: 'تم تبديل النموذج',
+    queueTop: 'إلى المقدمة',
+    queueEdit: 'تحرير الرسالة المنتظرة',
+    retry: 'إعادة المحاولة',
     noModelsConfigured: 'لا توجد نماذج مهيأة — أضف نموذجاً وفعّله أولاً',
   },
 }

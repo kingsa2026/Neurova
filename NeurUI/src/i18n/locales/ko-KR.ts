@@ -2505,6 +2505,9 @@ export default {
     optObjectiveAddCart: '장바구니 담기',
     rateLimited: '모델 {model} 이(가) 요청 한도 초과 (429)',
     rateLimitSwitched: '모델이 전환되었습니다',
+    queueTop: '맨 앞으로',
+    queueEdit: '대기열 편집',
+    retry: '재시도',
     noModelsConfigured: '사용 가능한 모델이 없습니다 — 모델 설정에서 추가·활성화하세요',
   },
 }
