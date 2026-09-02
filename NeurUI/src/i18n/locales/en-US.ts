@@ -264,6 +264,8 @@ export default {
     setupHint: 'This is the first account and will have administrator privileges',
     setupSubmit: 'Create Admin Account',
     registerFailed: 'Registration failed',
+    backendStarting: 'Backend is starting up — please wait a few seconds and try again',
+    backendFailed: 'Backend failed to start. Check backendackend.log in the install folder, or contact support',
   },
   dashboard: {
     welcome: 'Welcome Back',
@@ -379,6 +381,8 @@ export default {
     viewTable: 'Table',
   },
   chat: {
+    searchInSession: 'Search in session',
+    searchMatches: '{n} matches',
     title: 'Chat',
     newChat: 'New Chat',
     history: 'History',

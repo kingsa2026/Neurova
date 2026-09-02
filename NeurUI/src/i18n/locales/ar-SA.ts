@@ -264,6 +264,8 @@ export default {
     setupHint: 'هذا هو الحساب الأول وسيحصل على صلاحيات المسؤول',
     setupSubmit: 'إنشاء حساب المسؤول',
     registerFailed: 'فشل التسجيل',
+    backendStarting: 'خدمة الخلفية قيد التشغيل — يرجى الانتظار بضع ثوانٍ والمحاولة مرة أخرى',
+    backendFailed: 'فشل بدء خدمة الخلفية. راجع backendackend.log في مجلد التثبيت أو تواصل مع الدعم',
   },
   dashboard: {
     welcome: 'مرحبًا بعودتك',
@@ -378,6 +380,8 @@ export default {
     viewTable: 'جدول',
   },
   chat: {
+    searchInSession: 'بحث في الجلسة',
+    searchMatches: '{n} مطابقة',
     title: 'المحادثة',
     newChat: 'محادثة جديدة',
     history: 'السجل',

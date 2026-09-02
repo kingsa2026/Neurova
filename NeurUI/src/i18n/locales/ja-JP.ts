@@ -264,6 +264,8 @@ export default {
     setupHint: 'システムの最初のアカウントで、管理者権限が付与されます',
     setupSubmit: '管理者アカウントを作成',
     registerFailed: '登録に失敗しました',
+    backendStarting: 'バックエンドを起動中です。数秒待ってから再試行してください',
+    backendFailed: 'バックエンドの起動に失敗しました。インストールフォルダの backendackend.log を確認するか、サポートまでご連絡ください',
   },
   dashboard: {
     welcome: 'おかえりなさい',
@@ -378,6 +380,8 @@ export default {
     viewTable: 'テーブル',
   },
   chat: {
+    searchInSession: 'セッション内検索',
+    searchMatches: '{n} 件一致',
     title: 'チャット',
     newChat: '新しい会話',
     history: '履歴',

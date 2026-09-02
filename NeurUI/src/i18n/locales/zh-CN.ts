@@ -266,6 +266,8 @@ export default {
     setupHint: '这是系统的第一个账号，将拥有管理员权限',
     setupSubmit: '创建管理员账号',
     registerFailed: '注册失败',
+    backendStarting: '后端服务正在启动，请稍候几秒后重试',
+    backendFailed: '后端服务启动失败。请查看安装目录 backendackend.log，或联系支持',
   },
   dashboard: {
     welcome: '欢迎回来',
@@ -381,6 +383,8 @@ export default {
     viewTable: '表格',
   },
   chat: {
+    searchInSession: '会话内搜索',
+    searchMatches: '{n} 处匹配',
     title: '对话',
     newChat: '新对话',
     history: '历史记录',
