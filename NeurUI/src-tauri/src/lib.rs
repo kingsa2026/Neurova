@@ -112,45 +112,62 @@ fn spawn_backend(root: &std::path::Path) -> Result<Child, String> {
     cmd.stdout(stdout).stderr(stderr).spawn().map_err(|e| format!("后端进程启动失败: {e}"))
 }
 
-/// 轮询 /health 直到就绪；期间把 backend.log 新增行实时推给启动进度窗。
-/// 返回 true=就绪。
-fn wait_backend_ready(handle: &tauri::AppHandle, log_path: &std::path::Path, timeout: Duration) -> bool {
+/// 轮询 /health 直到就绪（日志增量由 boot 页经 boot_tail 命令拉取）。
+fn wait_backend_ready(timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(2)).build();
-    let mut offset: u64 = 0;
     while Instant::now() < deadline {
         if let Ok(resp) = agent.get("http://127.0.0.1:9527/health").call() {
             if resp.status() == 200 {
-                drain_backend_log(handle, log_path, &mut offset);
                 return true;
             }
         }
-        drain_backend_log(handle, log_path, &mut offset);
         std::thread::sleep(Duration::from_millis(500));
     }
     false
 }
 
-/// 读 backend.log 自 offset 起的增量并 emit 给 boot 窗口（阶段识别在 JS 侧做）。
-fn drain_backend_log(handle: &tauri::AppHandle, log_path: &std::path::Path, offset: &mut u64) {
+/// 读 backend.log 自 offset 起的增量（拉模式：boot 页定时 invoke boot_tail）。
+/// 返回 (新行列表, 新 offset)。
+fn read_log_increment(log_path: &std::path::Path, offset: u64) -> (Vec<String>, u64) {
     use std::io::{Read, Seek, SeekFrom};
-    let Ok(meta) = std::fs::metadata(log_path) else { return };
+    let Ok(meta) = std::fs::metadata(log_path) else { return (vec![], offset) };
     let len = meta.len();
-    if len <= *offset { return; }
-    let mut file = match std::fs::File::open(log_path) { Ok(f) => f, Err(_) => return };
-    if file.seek(SeekFrom::Start(*offset)).is_err() { return; }
-    let take = (len - *offset).min(128 * 1024) as usize;
+    if len <= offset { return (vec![], offset); }
+    let mut file = match std::fs::File::open(log_path) { Ok(f) => f, Err(_) => return (vec![], offset) };
+    if file.seek(SeekFrom::Start(offset)).is_err() { return (vec![], offset); }
+    let take = (len - offset).min(128 * 1024) as usize;
     let mut buf = vec![0u8; take];
-    let Ok(n) = file.read(&mut buf) else { return };
+    let Ok(n) = file.read(&mut buf) else { return (vec![], offset) };
     let text = String::from_utf8_lossy(&buf[..n]);
     let lines: Vec<String> = text.lines().map(|s| s.chars().take(500).collect()).collect();
-    let _ = handle.emit_to(
-        "boot",
-        "boot://progress",
-        serde_json::json!({ "lines": lines }),
-    );
-    *offset += n as u64;
+    (lines, offset + n as u64)
 }
+
+/// boot 页拉模式数据源：日志增量（按前端上报的 offset）+ 后端进程状态。
+#[tauri::command]
+fn boot_tail(state: tauri::State<BackendChild>, log_offset: u64) -> serde_json::Value {
+    let backend_root = BOOT_LOG_PATH.lock().unwrap().clone();
+    let (lines, next_offset) = match &backend_root {
+        Some(p) => read_log_increment(p, log_offset),
+        None => (vec![], log_offset),
+    };
+    let backend = {
+        let mut guard = state.0.lock().unwrap();
+        match guard.as_mut() {
+            Some(child) => match child.try_wait() {
+                Ok(Some(status)) => format!("exited: {status}"),
+                Ok(None) => "running".into(),
+                Err(e) => format!("error: {e}"),
+            },
+            None => "not started".into(),
+        }
+    };
+    serde_json::json!({ "lines": lines, "offset": next_offset, "backend": backend })
+}
+
+/// backend.log 绝对路径（spawn 成功后登记，boot_tail 拉取用）
+static BOOT_LOG_PATH: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
 
 /// 就绪/失败后收尾：关 boot 窗口、亮主窗（主窗默认 visible:false）。
 fn finish_boot(handle: &tauri::AppHandle, ok: bool, msg: &str) {
