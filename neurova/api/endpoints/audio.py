@@ -235,20 +235,47 @@ async def synthesize_speech_stream(request: Request, body: SynthesizeRequest):
     将文本流式合成为语音，返回 chunked 音频流。
     """
     tts = _get_tts_manager()
-    if not tts or not tts.is_initialized:
+    # 根因修复：_get_tts_manager 优先返回 VoiceEngine 统一层（无
+    # is_initialized/synthesize_stream/get_audio_media_type 接口）——
+    # 直接当 TTSManager 用必然 AttributeError → 500。
+    # 策略：VoiceEngine 场景解包其底层 TTS 引擎（有完整流式接口）；
+    # 引擎不可用再 503。
+    if tts is None:
         raise HTTPException(status_code=503, detail="TTS 引擎未就绪")
 
+    # 鸭子判定：VoiceEngine 统一层持有 _engine（真实引擎）——解包使用，
+    # 避免把包装对象当 TTSManager（AttributeError 曾直接 500）
+    inner = getattr(tts, "_engine", None)
+    if inner is not None and hasattr(tts, "is_available") and not hasattr(tts, "synthesize_stream"):
+        if not getattr(inner, "is_initialized", False):
+            raise HTTPException(status_code=503, detail="TTS 引擎未就绪")
+        engine = inner
+    else:
+        engine = tts
+        if not getattr(engine, "is_initialized", False):
+            raise HTTPException(status_code=503, detail="TTS 引擎未就绪")
+
+    if not hasattr(engine, "synthesize_stream"):
+        raise HTTPException(status_code=503, detail="当前 TTS 引擎不支持流式合成")
+
     async def audio_generator():
-        async for chunk in tts.synthesize_stream(body.text):
+        async for chunk in engine.synthesize_stream(body.text):
             yield chunk
 
     # 补课 4.3：按引擎动态声明 MIME（edge=audio/mpeg，moss/sapi5=audio/wav）——
     # 原实现恒 audio/wav 而 edge-tts 产 MP3 裸字节，前端解码必然失败
+    media_type = getattr(engine, "audio_media_type", "audio/wav")
+    if hasattr(tts, "get_engine_name"):
+        engine_name = tts.get_engine_name()
+    elif hasattr(engine, "get_engine_name"):
+        engine_name = engine.get_engine_name()
+    else:
+        engine_name = type(engine).__name__
     return StreamingResponse(
         audio_generator(),
-        media_type=tts.get_audio_media_type(),
+        media_type=media_type,
         headers={
-            "X-TTS-Engine": tts.get_engine_name() or "unknown",
+            "X-TTS-Engine": engine_name or "unknown",
             "Transfer-Encoding": "chunked",
         },
     )
