@@ -16,7 +16,7 @@ export interface LoginForm {
 
 export interface RegisterForm {
   username: string
-  email: string
+  email?: string
   password: string
   confirmPassword: string
   code?: string
