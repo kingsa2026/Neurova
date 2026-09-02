@@ -152,9 +152,12 @@ export interface CanvasSummary {
   updated_at?: number
 }
 
-/** List saved canvas summaries (newest first) — "我的画布"入口. */
-export function listCanvases() {
-  return api.get<ApiResponse<CanvasSummary[]>>(`${BASE}/canvas`)
+/** List saved canvas summaries (newest first) — "我的画布"入口.
+ *  projectId 可选：限定项目归属（项目顶层 → 工作流归属模型）。 */
+export function listCanvases(projectId?: string) {
+  return api.get<ApiResponse<CanvasSummary[]>>(`${BASE}/canvas`, {
+    params: projectId ? { project_id: projectId } : undefined,
+  })
 }
 
 /** 画布运行状态（节点级结果，供画布着色与输出查看） */

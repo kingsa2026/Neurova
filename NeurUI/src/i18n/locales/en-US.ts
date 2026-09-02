@@ -1185,6 +1185,7 @@ export default {
     updatedAt: 'Updated',
     project: 'Project',
     projectOptional: 'Optional: assign to a project',
+    noProject: "Unassigned",
   },
   project: {
     title: 'Projects',

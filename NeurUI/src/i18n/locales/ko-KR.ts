@@ -1183,6 +1183,7 @@ export default {
     updatedAt: '수정일',
     project: '프로젝트',
     projectOptional: '선택 사항: 프로젝트에 할당',
+    noProject: "미배정",
   },
   project: {
     title: '프로젝트 관리',

@@ -1195,6 +1195,7 @@ export default {
     updatedAt: '更新于',
     project: '归属项目',
     projectOptional: '可选：归属到某个项目',
+    noProject: "未归属",
   },
   project: {
     title: '项目管理',
