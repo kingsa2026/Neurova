@@ -31,6 +31,7 @@
           :placeholder="t('common.search')"
           @update:model-value="searchQuery = $event"
         />
+      </div>      <button class="nr-msg-search-open" :title="t('chat.searchInSession')" @click="openMsgSearch">🔍</button>
       </div>
 
       <div class="nr-session-list">
@@ -134,6 +135,22 @@
         </div>
       </div>
       <!-- Message List -->
+      <!-- 会话内消息搜索（补课 B） -->
+      <div v-if="msgSearchOpen" class="nr-msg-search">
+        <input
+          v-model="msgSearchQuery"
+          class="nr-msg-search-input"
+          :placeholder="t('chat.searchInSession')"
+          @keydown.enter.prevent
+        />
+        <span class="nr-msg-search-count">
+          {{ msgSearchQuery.trim() ? t('chat.searchMatches', { n: msgSearchHits.length }) : '' }}
+        </span>
+        <button class="nr-msg-search-btn" :disabled="msgSearchHits.length === 0" @click="jumpToMatch(-1)">↑</button>
+        <button class="nr-msg-search-btn" :disabled="msgSearchHits.length === 0" @click="jumpToMatch(1)">↓</button>
+        <button class="nr-msg-search-btn" @click="msgSearchOpen = false">✕</button>
+      </div>
+
       <div class="nr-chat-messages" ref="messagesRef">
         <div v-if="messages.length === 0" class="nr-chat-empty">
           <div v-if="isMainLayout && !agentId" class="nr-chat-empty">
@@ -150,9 +167,10 @@
 
         <div
           v-for="(msg, idx) in messages"
+          :id="`nr-msg-${idx}`"
           :key="idx"
           class="nr-msg"
-          :class="`nr-msg--${msg.role}`"
+          :class="[`nr-msg--${msg.role}`, { 'nr-msg--hit': msgSearchHits.includes(idx) && idx === msgSearchCursor }]"
         >
           <div class="nr-msg-avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
           <div class="nr-msg-body">
@@ -636,7 +654,9 @@ import ComputerUsePanel from '@/components/chat/ComputerUsePanel.vue'
 import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
 import { toolCardVariant, variantIcon, variantColor } from '@/utils/toolCardVariant'
 import { useThinkingEffort } from '@/composables/useThinkingEffort'
+import { useInputHistory } from '@/composables/useInputHistory'
 import { useIMEComposition } from '@/composables/useIMEComposition'
+import { findMessageMatches } from '@/utils/messageSearch'
 import type { ThinkingEffort } from '@/composables/useThinkingEffort'
 import { useSessionSync } from '@/composables/useSessionSync'
 import { listModels } from '@/api/modules/models'
@@ -1213,6 +1233,9 @@ async function sendMessage() {
 
   // Stop any active ASR recording
   if (isRecording.value) stopRecording()
+
+  // 补课 C：发送即记录输入历史（↑↓ 回溯用）
+  recordInputHistory(text)
 
   // Build user message
   // timestamp 同时是轮次定位键：随 client_timestamp 发给后端持久化到
@@ -1948,6 +1971,36 @@ function openLightbox(src: string, alt: string) {
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
+// ── 会话内消息搜索（补课 B）─────────────────────────────
+const msgSearchOpen = ref(false)
+const msgSearchQuery = ref('')
+const msgSearchCursor = ref(0)  // 当前命中下标（0..hits.length-1）
+const msgSearchHits = computed(() => findMessageMatches(messages.value, msgSearchQuery.value))
+
+function openMsgSearch(): void {
+  msgSearchOpen.value = !msgSearchOpen.value
+  if (msgSearchOpen.value) {
+    msgSearchQuery.value = ''
+    msgSearchCursor.value = 0
+  }
+}
+
+function jumpToMatch(dir: 1 | -1): void {
+  const hits = msgSearchHits.value
+  if (hits.length === 0) return
+  // 游标循环移动
+  msgSearchCursor.value = (msgSearchCursor.value + dir + hits.length) % hits.length
+  const idx = hits[msgSearchCursor.value]
+  // 滚动到命中消息（offsetTop 相对滚动容器）
+  const el = document.getElementById(`nr-msg-${idx}`)
+  if (el && messagesRef.value) {
+    messagesRef.value.scrollTop = el.offsetTop - 80
+  }
+}
+
+// ── 输入历史回溯（补课 C）─────────────────────────────
+const { record: recordInputHistory, up: historyUp, down: historyDown } = useInputHistory()
+
 const { onCompositionStart, onCompositionEnd, shouldBlockSend } = useIMEComposition()
 
 function handleKeydown(e: KeyboardEvent) {
@@ -1956,6 +2009,21 @@ function handleKeydown(e: KeyboardEvent) {
     if (shouldBlockSend(e)) return
     e.preventDefault()
     sendMessage()
+    return
+  }
+  // ↑↓ 历史回溯（补课 C）：仅无修饰键时生效
+  if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    const next = historyUp(inputText.value)
+    if (next !== null) {
+      e.preventDefault()
+      chatStore.setInputText(next)
+    }
+  } else if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    const next = historyDown(inputText.value)
+    if (next !== null) {
+      e.preventDefault()
+      chatStore.setInputText(next)
+    }
   }
 }
 
@@ -3504,5 +3572,57 @@ onBeforeUnmount(() => {
   color: var(--nr-text-tertiary);
   cursor: pointer;
   font-size: 12px;
+}
+
+.nr-msg-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 0 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--nr-glass-border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.nr-msg-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--nr-text-primary);
+  font-size: 13px;
+}
+
+.nr-msg-search-count {
+  font-size: 12px;
+  color: var(--nr-text-tertiary);
+  white-space: nowrap;
+}
+
+.nr-msg-search-btn {
+  border: none;
+  background: none;
+  color: var(--nr-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.nr-msg-search-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.nr-msg--hit {
+  outline: 2px solid rgba(99, 102, 241, 0.7);
+  border-radius: 10px;
+}
+
+.nr-msg-search-open {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
 }
 </style>
