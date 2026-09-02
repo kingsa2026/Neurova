@@ -2505,5 +2505,6 @@ export default {
     optObjectiveAddCart: 'Ajouter au panier',
     rateLimited: 'Le modèle {model} est limité (429)',
     rateLimitSwitched: 'Modèle changé',
+    noModelsConfigured: 'Aucun modèle configuré — ajoutez-en un dans les paramètres',
   },
 }

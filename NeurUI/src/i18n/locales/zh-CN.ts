@@ -2428,6 +2428,7 @@ export default {
     workflowNamePrefix: '工作流',
     rateLimited: '模型 {model} 触发限流（429）',
     rateLimitSwitched: '已切换模型',
+    noModelsConfigured: '尚未配置可用模型——请先在模型管理页添加并启用',
     ...STORE_CANVAS,
   },
 }
