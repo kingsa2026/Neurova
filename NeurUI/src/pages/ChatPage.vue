@@ -31,7 +31,7 @@
           :placeholder="t('common.search')"
           @update:model-value="searchQuery = $event"
         />
-      </div>      <button class="nr-msg-search-open" :title="t('chat.searchInSession')" @click="openMsgSearch">🔍</button>
+        <button class="nr-msg-search-open" :title="t('chat.searchInSession')" @click="openMsgSearch">🔍</button>
       </div>
 
       <div class="nr-session-list">
