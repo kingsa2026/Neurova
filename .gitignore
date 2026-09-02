@@ -344,3 +344,11 @@ test_api_output.wav
 # 桌面壳（Tauri）签名密钥与产物（src-tauri 自带 /target 忽略）
 *.pfx
 desktop/*.pfx
+
+# ==================== 根目录杂物防再生（2026-09-02 二次清理） ====================
+# stash 事故复活过的根级临时测试脚本/产物，统一规范到 tests/ 分类目录
+/test_*.py
+/test_*.wav
+/.tmp_*
+/.neurova_token.json
+/MagicMock/
