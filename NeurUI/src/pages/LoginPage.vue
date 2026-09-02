@@ -236,10 +236,33 @@ async function handleSetup() {
       error.value = (res as any)?.message || t('auth.registerFailed')
     }
   } catch (err: any) {
-    error.value = err?.response?.data?.message || err?.message || t('auth.registerFailed')
+    const netErr = err?.response ? null : await backendDiagnosis()
+    error.value = netErr || err?.response?.data?.message || err?.message || t('auth.registerFailed')
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 桌面环境网络层失败时的可行动诊断：查询壳的后端子进程状态。
+ * - "running"（进程活着但 /health 未就绪）→ 后端仍在启动（首启要建索引）
+ * - "exited"/"not started" → 后端启动失败或压根没拉起
+ * 浏览器（非 Tauri）环境动态导入失败 → 返回 null，维持原错误文案。
+ */
+async function backendDiagnosis(): Promise<string | null> {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const status = await invoke<string>('backend_status')
+    if (status === 'running' || status === 'not started') {
+      return t('auth.backendStarting')
+    }
+    if (status.startsWith('exited') || status.startsWith('error')) {
+      return t('auth.backendFailed')
+    }
+  } catch {
+    /* 非 Tauri 环境 */
+  }
+  return null
 }
 
 async function handleLogin() {
@@ -267,10 +290,13 @@ async function handleLogin() {
       const redirect = (route.query.redirect as string) || '/dashboard'
       router.push(redirect)
     } else {
-      error.value = authStore.error || t('auth.loginFailed')
+      // Network Error 类（响应为空）→ 用后端子进程状态给出可行动提示
+      const diag = await backendDiagnosis()
+      error.value = diag || authStore.error || t('auth.loginFailed')
     }
   } catch (err: any) {
-    error.value = err?.message || t('auth.loginFailed')
+    const netErr = err?.response ? null : await backendDiagnosis()
+    error.value = netErr || err?.message || t('auth.loginFailed')
   } finally {
     loading.value = false
   }
