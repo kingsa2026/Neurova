@@ -1950,7 +1950,7 @@ export default {
     testPushTaskName: '测试推送',
     testPushContent: '## 测试内容\n\n这是来自 Neurova 的测试推送消息。\n\n**时间**: ',
     testPushResult: '测试完成',
-    chXiaoyi: '小绎',
+    chXiaoyi: '小艺',
     chDingtalk: '钉钉',
     chFeishu: '飞书',
     chWechat: '微信',
