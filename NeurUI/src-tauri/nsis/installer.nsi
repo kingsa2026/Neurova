@@ -76,6 +76,12 @@ Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
 
+; Neurova 首装管理员账号页（仅全新安装显示；写入 data/bootstrap_admin.ini 由后端首启消费）
+Var AdminUsername
+Var AdminPassword
+Var AdminPassword2
+Var AdminWritten
+
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
 OutFile "${OUTFILE}"
@@ -384,7 +390,134 @@ Function PageLeaveReinstall
   reinst_done:
 FunctionEnd
 
-; 5. Choose install directory page
+; 5. Neurova 首装管理员账号页（仅全新安装；升级时 Abort 跳过）
+Page custom PageAdminAccount PageLeaveAdminAccount
+
+Function PageAdminAccount
+  ; 升级/重装场景（检测到既有安装注册表项）→ 不显示
+  ReadRegStr $R0 SHCTX "${UNINSTKEY}" ""
+  ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
+  ${IfThen} "$R0$R1" != "" ${|} Abort ${|}
+  ${IfThen} $PassiveMode = 1 ${|} Abort ${|}
+
+  !insertmacro MUI_HEADER_TEXT "$(adminPageTitle)" "$(adminPageSubtitle)"
+
+  StrCpy $AdminUsername ""
+  StrCpy $AdminPassword ""
+  StrCpy $AdminPassword2 ""
+
+  nsDialogs::Create 1018
+  Pop $R4
+  ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
+
+  ${NSD_CreateLabel} 0 2u 100% 8u "$(adminUsernameLabel)"
+  Pop $R0
+  ${NSD_CreateText} 0 12u 100% 12u ""
+  Pop $AdminUsername
+
+  ${NSD_CreateLabel} 0 30u 100% 8u "$(adminPasswordLabel)"
+  Pop $R0
+  ${NSD_CreatePassword} 0 40u 100% 12u ""
+  Pop $AdminPassword
+
+  ${NSD_CreateLabel} 0 58u 100% 8u "$(adminPassword2Label)"
+  Pop $R0
+  ${NSD_CreatePassword} 0 68u 100% 12u ""
+  Pop $AdminPassword2
+
+  ${NSD_CreateLabel} 0 86u 100% 16u "$(adminPageHint)"
+  Pop $R0
+
+  ${NSD_SetFocus} $AdminUsername
+  nsDialogs::Show
+FunctionEnd
+
+Function PageLeaveAdminAccount
+  ${NSD_GetText} $AdminUsername $R0
+  ${NSD_GetText} $AdminPassword $R1
+  ${NSD_GetText} $AdminPassword2 $R2
+
+  ; 用户名为空 → 拦截
+  ${If} "$R0" == ""
+    MessageBox MB_ICONEXCLAMATION "$(adminInvalidUsername)"
+    Abort
+  ${EndIf}
+
+  ; 合法字符集校验（黑名单扫描）
+  Push "$R0"
+  Call ValidateAdminUsername
+  Pop $R3
+  ${If} "$R3" != "1"
+    MessageBox MB_ICONEXCLAMATION "$(adminInvalidUsername)"
+    Abort
+  ${EndIf}
+
+  ; 密码为空或两次不一致 → 拦截
+  ${If} "$R1" == ""
+    MessageBox MB_ICONEXCLAMATION "$(adminInvalidPassword)"
+    Abort
+  ${EndIf}
+  ${If} "$R1" != "$R2"
+    MessageBox MB_ICONEXCLAMATION "$(adminPasswordMismatch)"
+    Abort
+  ${EndIf}
+
+  ; 暂存到 Var（Section Install 里 WriteINIStr）
+  StrCpy $AdminUsername "$R0"
+  StrCpy $AdminPassword "$R1"
+  StrCpy $AdminWritten "1"
+FunctionEnd
+
+; 合法用户名 = 仅字母/数字/_-/.，长度 1..32（黑名单扫描：空格、引号、
+; 冒号、斜杠、反斜杠、尖括号、竖线、问号、星号、百分号、制表符）
+; 结果入栈："1" 合法 / "0" 非法
+Function ValidateAdminUsername
+  Exch $R9          ; 入参：用户名
+  Push $R8
+  Push $R7
+  Push $R6
+  Push $R5
+
+  StrCpy $R6 "1"
+  StrLen $R8 "$R9"
+  ${If} $R8 < 1
+  ${OrIf} $R8 > 32
+    StrCpy $R6 "0"
+    Goto validate_done
+  ${EndIf}
+
+  StrCpy $R7 0
+  ${While} $R7 < $R8
+    StrCpy $R5 "$R9" 1 $R7
+    ${If} "$R5" == " "
+    ${OrIf} "$R5" == "$\t"
+    ${OrIf} "$R5" == "$\""
+    ${OrIf} "$R5" == ":"
+    ${OrIf} "$R5" == "/"
+    ${OrIf} "$R5" == "\"
+    ${OrIf} "$R5" == "<"
+    ${OrIf} "$R5" == ">"
+    ${OrIf} "$R5" == "|"
+    ${OrIf} "$R5" == "?"
+    ${OrIf} "$R5" == "*"
+    ${OrIf} "$R5" == "%"
+    ${OrIf} "$R5" == "$$"
+      StrCpy $R6 "0"
+      Goto validate_done
+    ${EndIf}
+    IntOp $R7 $R7 + 1
+  ${EndWhile}
+
+  validate_done:
+  StrCpy $R9 "$R6"
+  Pop $R5
+  Pop $R6
+  Pop $R7
+  Pop $R8
+  Exch $R9
+FunctionEnd
+
+; 6. Choose install directory page
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 !insertmacro MUI_PAGE_DIRECTORY
 
@@ -474,7 +607,31 @@ FunctionEnd
   !include "{{this}}"
 {{/each}}
 
+; Neurova 首装管理员账号页文案（SimpChinese + English；其他语言回退 English）
+LangString adminPageTitle        ${LANG_ENGLISH} "Create Admin Account"
+LangString adminPageSubtitle     ${LANG_ENGLISH} "This is the first account and will have administrator privileges"
+LangString adminUsernameLabel    ${LANG_ENGLISH} "Username:"
+LangString adminPasswordLabel    ${LANG_ENGLISH} "Password:"
+LangString adminPassword2Label   ${LANG_ENGLISH} "Confirm password:"
+LangString adminPageHint         ${LANG_ENGLISH} "You will use this account to log in to Neurova. Remember your password."
+LangString adminInvalidUsername  ${LANG_ENGLISH} "Invalid username: 1-32 characters, no spaces or special characters ( : \\ / < > | ? * % quotes )"
+LangString adminInvalidPassword  ${LANG_ENGLISH} "Password cannot be empty"
+LangString adminPasswordMismatch ${LANG_ENGLISH} "Passwords do not match"
+
+LangString adminPageTitle        ${LANG_SIMPCHINESE} "创建管理员账号"
+LangString adminPageSubtitle     ${LANG_SIMPCHINESE} "这是系统的第一个账号，将拥有管理员权限"
+LangString adminUsernameLabel    ${LANG_SIMPCHINESE} "用户名："
+LangString adminPasswordLabel    ${LANG_SIMPCHINESE} "密码："
+LangString adminPassword2Label   ${LANG_SIMPCHINESE} "确认密码："
+LangString adminPageHint         ${LANG_SIMPCHINESE} "此账号用于登录 Neurova，请牢记密码。"
+LangString adminInvalidUsername  ${LANG_SIMPCHINESE} "用户名无效：1-32 个字符，不能含空格或特殊字符（: \\ / < > | ? * % 引号）"
+LangString adminInvalidPassword  ${LANG_SIMPCHINESE} "密码不能为空"
+LangString adminPasswordMismatch ${LANG_SIMPCHINESE} "两次输入的密码不一致"
+
 Function .onInit
+  ; Neurova：账号页凭据标志（仅 PageLeaveAdminAccount 置 1）
+  StrCpy $AdminWritten "0"
+
   ${GetOptions} $CMDLINE "/P" $PassiveMode
   ${IfNot} ${Errors}
     StrCpy $PassiveMode 1
@@ -656,6 +813,16 @@ Section Install
   {{#each resources}}
     File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
   {{/each}}
+
+  ; Neurova 首装管理员凭据：账号页通过校验后写入，后端首启消费后删除
+  ${If} "$AdminWritten" == "1"
+    CreateDirectory "$INSTDIR\backend\data"
+    WriteINIStr "$INSTDIR\backend\data\bootstrap_admin.ini" "bootstrap" "username" "$AdminUsername"
+    WriteINIStr "$INSTDIR\backend\data\bootstrap_admin.ini" "bootstrap" "password" "$AdminPassword"
+    ; 口令不再留在安装器内存
+    StrCpy $AdminPassword ""
+    StrCpy $AdminPassword2 ""
+  ${EndIf}
 
   ; Copy external binaries
   {{#each binaries}}
