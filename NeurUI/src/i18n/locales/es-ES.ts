@@ -336,6 +336,7 @@ export default {
     refresh: 'Actualizar',
     loadError: 'Error al cargar los datos del panel',
     retry: 'Reintentar',
+    anotherTabSending: 'Otra pestaña está enviando en esta sesión',
   },
   agent: {
     title: 'Gestión de agentes',

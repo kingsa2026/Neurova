@@ -336,6 +336,7 @@ export default {
     refresh: 'Aggiorna',
     loadError: 'Errore di caricamento della dashboard',
     retry: 'Riprova',
+    anotherTabSending: 'Un\'altra scheda sta inviando in questa sessione',
   },
   agent: {
     title: 'Gestione agenti',
