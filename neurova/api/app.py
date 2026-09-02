@@ -498,6 +498,14 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
     except Exception as _boot_err:  # noqa: BLE001 - 引导失败不阻断启动
         logger.warning("bootstrap user 引导异常（忽略）: %s", _boot_err)
 
+    # 桌面安装包首装向导凭据（data/bootstrap_admin.ini；消费即删，fail-open）
+    try:
+        from neurova.api.bootstrap_user import consume_bootstrap_admin_file
+
+        consume_bootstrap_admin_file()
+    except Exception as _boot_err:  # noqa: BLE001 - 引导失败不阻断启动
+        logger.warning("bootstrap_admin.ini 消费异常（忽略）: %s", _boot_err)
+
     logger.info("Routes registered")
 
 
