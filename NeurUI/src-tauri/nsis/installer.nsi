@@ -42,6 +42,7 @@ ${StrLoc}
 !define VERSION "{{version}}"
 !define VERSIONWITHBUILD "{{version_with_build}}"
 !define HOMEPAGE "{{homepage}}"
+!define TAGLINE "具备记忆、情感与自我进化的个人 AI 智能体"
 !define INSTALLMODE "{{install_mode}}"
 !define LICENSE "{{license}}"
 !define INSTALLERICON "{{installer_icon}}"
@@ -94,10 +95,14 @@ InstallDir "${PLACEHOLDER_INSTALL_DIR}"
 
 VIProductVersion "${VERSIONWITHBUILD}"
 VIAddVersionKey "ProductName" "${PRODUCTNAME}"
-VIAddVersionKey "FileDescription" "${PRODUCTNAME}"
+VIAddVersionKey "FileDescription" "${PRODUCTNAME} Setup — AI Agent Desktop (智星)"
 VIAddVersionKey "LegalCopyright" "${COPYRIGHT}"
 VIAddVersionKey "FileVersion" "${VERSION}"
-VIAddVersionKey "ProductVersion" "${VERSION}"
+VIAddVersionKey "ProductVersion" "${VERSION} (${ARCH})"
+VIAddVersionKey "CompanyName" "${MANUFACTURER}"
+VIAddVersionKey "InternalName" "${PRODUCTNAME} Setup"
+VIAddVersionKey "OriginalFilename" "${PRODUCTNAME}_${VERSION}_${ARCH}-setup.exe"
+VIAddVersionKey "Comments" "${PRODUCTNAME} — ${TAGLINE}. Homepage: ${HOMEPAGE}"
 
 # additional plugins
 !addplugindir "${ADDITIONALPLUGINSPATH}"
@@ -539,10 +544,12 @@ Var AppStartMenuFolder
 ; Don't auto jump to finish page after installation page,
 ; because the installation page has useful info that can be used debug any issues with the installer.
 !define MUI_FINISHPAGE_NOAUTOCLOSE
-; Use show readme button in the finish page as a button create a desktop shortcut
+; Neurova：完成页唯一勾选位 =「开机自动启动」（默认不勾）；
+; 桌面快捷方式改为安装时恒建（见 Section Install 尾部）。
 !define MUI_FINISHPAGE_SHOWREADME
-!define MUI_FINISHPAGE_SHOWREADME_TEXT "$(createDesktop)"
-!define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateOrUpdateDesktopShortcut
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "$(autostart)"
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION SetAutostartEntry
+!define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
 ; Show run app after installation.
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary
@@ -551,6 +558,11 @@ Var AppStartMenuFolder
 
 Function RunMainBinary
   nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
+FunctionEnd
+
+; 开机自启 = HKCU Run 键（卸载时模板原有逻辑会清 HKCU Run）
+Function SetAutostartEntry
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\""
 FunctionEnd
 
 ; Uninstaller Pages
@@ -583,7 +595,7 @@ Function un.ConfirmShow ; Add add a `Delete app data` check box
   IntOp $5 $5 / 96
   IntOp $6 $6 / 96
   IntOp $7 $7 / 96
-  System::Call 'user32::CreateWindowEx(i r3, w "${__NSD_CheckBox_CLASS}", w "$(deleteAppData)", i ${__NSD_CheckBox_STYLE}, i r4, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
+  System::Call 'user32::CreateWindowEx(i r3, w "${__NSD_CheckBox_CLASS}", w "$(nsDeleteData)", i ${__NSD_CheckBox_STYLE}, i r4, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
   Pop $DeleteAppDataCheckbox
   SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
   SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
@@ -627,6 +639,12 @@ LangString adminPageHint         ${LANG_SIMPCHINESE} "此账号用于登录 Neur
 LangString adminInvalidUsername  ${LANG_SIMPCHINESE} "用户名无效：1-32 个字符，不能含空格或特殊字符（: \\ / < > | ? * % 引号）"
 LangString adminInvalidPassword  ${LANG_SIMPCHINESE} "密码不能为空"
 LangString adminPasswordMismatch ${LANG_SIMPCHINESE} "两次输入的密码不一致"
+
+; Neurova 卸载数据策略 + 完成页自启（双语）
+LangString nsDeleteData ${LANG_ENGLISH} "Delete ALL my data (agent memory, skills, chat history, config — cannot be undone)"
+LangString nsDeleteData ${LANG_SIMPCHINESE} "彻底删除我的全部数据（Agent 记忆/技能/聊天记录/配置，不可恢复）"
+LangString autostart ${LANG_ENGLISH} "Start Neurova automatically when Windows starts"
+LangString autostart ${LANG_SIMPCHINESE} "开机自动启动 Neurova"
 
 Function .onInit
   ; Neurova：账号页凭据标志（仅 PageLeaveAdminAccount 置 1）
@@ -853,6 +871,13 @@ Section Install
     WriteRegStr SHCTX "Software\Classes\\{{protocol}}\shell\open\command" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
   {{/each}}
 
+  ; Neurova：桌面快捷方式恒建（原完成页勾选位已让给「开机自启」）；
+  ; 升级覆盖安装时幂等刷新；静默 /NS 模式尊重跳过。
+  ${If} $NoShortcutMode = 0
+    CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+    !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
+  ${EndIf}
+
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
@@ -1059,6 +1084,20 @@ Section Uninstall
     SetShellVarContext current
     RmDir /r "$APPDATA\${BUNDLEID}"
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+
+    ; Neurova：用户产生的全部数据（勾选"保留数据"时以下都不删）——
+    ; ① 安装目录内的后端数据（用户库/记忆/聊天/工作区/日志/引导凭据）
+    RmDir /r "$INSTDIR\backend\data"
+    RmDir /r "$INSTDIR\agent_workspaces"
+    RmDir /r "$INSTDIR\logs"
+    RmDir /r "$INSTDIR\backend\logs"
+    Delete "$INSTDIR\backend\backend.log"
+    ; ② 后端运行期可能在用户目录生成的数据（双写兜底）
+    RmDir /r "$APPDATA\${PRODUCTNAME}\agent_workspaces"
+    RmDir /r "$APPDATA\${PRODUCTNAME}\data"
+    RmDir /r "$APPDATA\${PRODUCTNAME}\logs"
+    ; ③ 彻底清安装目录（此刻程序文件已删，仅剩运行时残留）
+    RmDir /r "$INSTDIR"
   ${EndIf}
 
   !ifmacrodef NSIS_HOOK_POSTUNINSTALL

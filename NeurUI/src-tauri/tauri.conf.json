@@ -33,6 +33,11 @@
     "targets": [
       "nsis"
     ],
+    "publisher": "Neurova Team",
+    "copyright": "Copyright © 2026 Neurova Team. All rights reserved.",
+    "homepage": "https://neurova.top",
+    "shortDescription": "Neurova 智星 — 具备记忆、情感与自我进化的个人 AI 智能体",
+    "longDescription": "Neurova（智星）是一个具备多维记忆、情感认知与自我进化能力的个人 AI 智能体桌面端。内置 17 维情感识别、活水记忆池、技能市场、NeurFlow 可视化工作流与 MCP 工具生态，支持本地语音（TTS/ASR）与多模型路由。",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
