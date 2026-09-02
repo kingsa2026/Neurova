@@ -161,8 +161,15 @@ class PatternCrystallizer:
         primary_tool = max(tool_counts.items(), key=lambda x: x[1])[0]
 
         # 创建结晶记忆节点
+        # content 附原始 context 片段（预存失败修复 2026-09-02）：旧内容只含
+        # pattern_key（管道符键），自然语言检索永远命中不了结晶经验；
+        # 顺修 f-string 的 %% 笔误（字面双百分号）
+        sample_ctx = entries[0].get("context", "")[:80]
         node = UnifiedMemoryNode(
-            content=f"模式: '{key}' 类任务用 {primary_tool} 成功率 {rate * 100:.0f}%%",
+            content=(
+                f"模式: '{key}' 类任务用 {primary_tool} 成功率 {rate * 100:.0f}%"
+                f" | {sample_ctx}"
+            ),
             memory_type=MemoryType.PATTERN,
             category="crystallized",
             temperature=rate * 100.0,  # 成功率即温度（0-100）
