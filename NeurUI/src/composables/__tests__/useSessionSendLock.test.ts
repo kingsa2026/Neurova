@@ -25,19 +25,15 @@ describe('useSessionSendLock', () => {
 
   it('acquires lock when available', async () => {
     let heldResolve: (() => void) | null = null
-    const request = vi.fn(async (_name: string, _opts: any, cb: any) => {
-      return await cb({ name: _name, mode: 'exclusive' })
-    })
-    // @ts-expect-error 注入 mock
-    navigator.locks = { request }
-    // 让 cb 返回未完成 Promise（持锁中）
-    request.mockImplementation(
+    const request = vi.fn(
       (_name: string, _opts: any, cb: any) =>
         new Promise<void>((resolve) => {
-          heldResolve = resolve as unknown as () => void
+          heldResolve = resolve
           void cb({ name: _name })
         }),
     )
+    // @ts-expect-error 注入 mock
+    navigator.locks = { request }
     const sid = ref('s1')
     const { isOwner, release } = useSessionSendLock(sid)
     await new Promise((r) => setTimeout(r, 0))
