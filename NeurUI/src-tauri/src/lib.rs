@@ -11,7 +11,7 @@
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 struct BackendChild(Mutex<Option<Child>>);
 
