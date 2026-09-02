@@ -1080,9 +1080,9 @@ async function createSession(): Promise<void> {
 async function switchSession(sessionId: string): Promise<void> {
   const result = await _switchSession(sessionId)
   _notifySwitchFailure(result)
-  // 补课 D：恢复新会话草稿
+  // 补课 D：恢复新会话草稿；补课 A6+F：历史会话打开定位到最新记录
   chatStore.setInputText(chatDraft.restore(sessionId))
-  scrollToBottom()
+  scrollToBottomForHistory()
 }
 
 /** 打开重命名 modal(只读取 sessions,不调 API)。 */
@@ -2195,11 +2195,17 @@ function jumpToMatch(dir: 1 | -1): void {
   // 游标循环移动
   msgSearchCursor.value = (msgSearchCursor.value + dir + hits.length) % hits.length
   const idx = hits[msgSearchCursor.value]
-  // 滚动到命中消息（offsetTop 相对滚动容器）
-  const el = document.getElementById(`nr-msg-${idx}`)
-  if (el && messagesRef.value) {
-    messagesRef.value.scrollTop = el.offsetTop - 80
+  // 窗口化渲染（补课 A6）：命中在窗口外时先前扩窗直到包含该下标
+  if (idx < renderStart.value) {
+    renderStart.value = Math.max(0, idx - RENDER_BUFFER)
   }
+  // 滚动到命中消息（offsetTop 相对滚动容器）
+  nextTick(() => {
+    const el = document.getElementById(`nr-msg-${idx}`)
+    if (el && messagesRef.value) {
+      messagesRef.value.scrollTop = el.offsetTop - 80
+    }
+  })
 }
 
 // ── 输入历史回溯（补课 C）─────────────────────────────
@@ -2246,9 +2252,62 @@ function autoResize() {
 
 function scrollToBottom() {
   nextTick(() => {
-    if (messagesRef.value) {
-      messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+    const el = messagesRef.value
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    // 代码高亮/mermaid 渲染会随后续帧继续撑高内容——再锚定两帧，
+    // 否则打开历史会话时视口停在中部（用户感知"不在最新消息处"）
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight
+      })
+    })
+  })
+}
+
+/**
+ * 打开/切换会话 → 定位到最新记录（结尾处）。与实时流的 scrollToBottom
+ * 不同：历史渲染含 hljs/mermaid/图片异步膨胀，且窗口化渲染（补课 A6）
+ * 切换时 renderStart 可能停在旧位置——这里三重保障：
+ * 1) renderStart 归位贴尾；2) 双 rAF 连滚；3) ResizeObserver 兜底
+ * 渲染膨胀期的最后位置校正（首个膨胀帧后自断）。
+ */
+let historyAnchorObserver: ResizeObserver | null = null
+function scrollToBottomForHistory(): void {
+  // A6：窗口化渲染下打开历史会话必须先贴尾窗口
+  renderStart.value = Math.max(0, messages.value.length - RENDER_WINDOW)
+  nextTick(() => {
+    const el = messagesRef.value
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight
+    })
+    if (typeof ResizeObserver === 'undefined') return
+    historyAnchorObserver?.disconnect()
+    let ticks = 0
+    historyAnchorObserver = new ResizeObserver(() => {
+      if (el && messagesRef.value === el) el.scrollTop = el.scrollHeight
+      // 渲染稳定（连续 3 帧高度不变或观察 10 次）后停表
+      if (++ticks >= 10) {
+        historyAnchorObserver?.disconnect()
+        historyAnchorObserver = null
+      }
+    })
+    historyAnchorObserver.observe(el)
+  })
+}
+
+/** 定位到指定下标消息（会话内搜索跳转用；无则回退底部）。 */
+function scrollToMessage(idx: number): void {
+  nextTick(() => {
+    const el = document.getElementById(`nr-msg-${idx}`)
+    if (el) {
+      el.scrollIntoView({ block: 'center' })
+      return
     }
+    scrollToBottomForHistory()
   })
 }
 
@@ -2300,9 +2359,13 @@ onMounted(() => {
   initASR()
   checkTTSAvailability()
   loadChatModels()
+  // 打开页面即定位到最新记录（loadSessions 自动切换首会话后双保险）
+  void nextTick().then(() => scrollToBottomForHistory())
 })
 
 onBeforeUnmount(() => {
+  historyAnchorObserver?.disconnect()
+  historyAnchorObserver = null
   // 补课 D：离开页面保存当前会话草稿
   if (currentSessionId.value) chatDraft.save(currentSessionId.value, inputText.value)
   disposeMermaid()
