@@ -67,12 +67,15 @@
   <div class="logbox" id="logbox"></div>
 
 <script>
-  // 由 Tauri withGlobalTauri 注入的全局对象驱动；无注入（开发误开）时静默降级。
+  // 拉模式：定时 invoke boot_tail 取日志增量 + 后端进程状态。
+  // 不依赖事件时序（WebView 初始化早期事件会丢）。
   const stageEl = document.getElementById('stage')
   const fillEl = document.getElementById('fill')
   const box = document.getElementById('logbox')
   let progress = 6
   let stageIdx = -1
+  let done = false
+  let failCount = 0
 
   const STAGES = [
     [20, '正在初始化数据库',    /Database tables initialized|sqlite|SQLite/i],
@@ -103,41 +106,49 @@
   }
 
   function bootDone(ok, msg) {
+    if (done) return
+    done = true
     fillEl.style.width = '100%'
     stageEl.textContent = msg || (ok ? '启动完成，即将进入…' : '启动遇到问题')
     stageEl.classList.add(ok ? 'done' : 'err')
     setTimeout(() => { try { window.close() } catch (e) {} }, ok ? 800 : 3000)
   }
 
-  function handlePayload(p) {
-    if (Array.isArray(p.lines)) {
-      for (const line of p.lines) {
+  async function tick() {
+    if (done) return
+    const t = window.__TAURI__?.core?.invoke
+    if (!t) {
+      failCount++
+      if (failCount === 3) appendLog('[boot] 未检测到 Tauri 桥接，无法读取后端状态', true)
+      if (failCount > 40) bootDone(false, '页面与壳通信失败，请重启应用')
+      return
+    }
+    try {
+      const p = await t('boot_tail', { logOffset: 0 })
+      failCount = 0
+      for (const line of p.lines || []) {
         appendLog(line)
-        // 阶段识别：后端日志行命中关键词 → 推进阶段
         for (let i = stageIdx + 1; i < STAGES.length; i++) {
           if (STAGES[i][2].test(line)) { setStage(i); break }
         }
       }
+      const backend = String(p.backend || '')
+      if (backend.startsWith('exited')) {
+        bootDone(false, '后端进程已退出，详见安装目录 backend\\backend.log')
+      } else if (backend === 'running') {
+        progress = Math.max(progress, 12)
+        fillEl.style.width = progress + '%'
+      }
+    } catch (e) {
+      failCount++
+      if (failCount === 3) appendLog('[boot] 读取后端状态失败: ' + e, true)
+      if (failCount > 40) bootDone(false, '页面与壳通信失败，请重启应用')
     }
-    if (typeof p.stageIdx === 'number') setStage(p.stageIdx)
-    if (p.line) appendLog(p.line)
-    if (p.done) bootDone(!!p.ok, p.msg)
   }
 
-  const tauri = window.__TAURI__
-  if (tauri?.event?.listen) {
-    tauri.event.listen('boot://progress', (ev) => handlePayload(ev.payload || {}))
-    tauri.event.listen('backend-status', (ev) => {
-      const s = String(ev.payload || '')
-      if (s === 'ready') bootDone(true)
-      else if (s === 'timeout') bootDone(false, '后端启动超时，仍将打开主窗口')
-      else if (s.startsWith('error')) bootDone(false, '后端启动失败：' + s)
-    })
-  } else {
-    // 无 Tauri 注入：静态自演示（防止白屏卡死）
-    appendLog('[boot] 未检测到 Tauri 桥接，此窗口将自动关闭', true)
-    setTimeout(() => bootDone(true, '启动完成'), 1200)
-  }
+  const timer = setInterval(tick, 700)
+  const stopWhenDone = setInterval(() => { if (done) { clearInterval(timer); clearInterval(stopWhenDone) } }, 500)
+  tick()
 </script>
 </body>
 </html>
