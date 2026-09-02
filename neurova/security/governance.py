@@ -29,6 +29,19 @@ from neurova.security.tool_guard import ApprovalMode, GuardSeverity, ToolGuardEn
 _ENFORCED_SANDBOX_BACKENDS = {}
 
 
+def is_policy_denial(result: Any) -> bool:
+    """判定执行结果是否为"策略性拒绝"（治理拦截/待审批）。
+
+    单源判定（闭环审计断点 B）：治理 DENY/SANDBOX 阻止/ASK 待确认产生的
+    结果 dict 携带 governance / pending_approval 键——这是"决策"而非
+    "后端故障"。消费方（on_tool_executed 三处统计、熔断器观察者）必须
+    使用本函数区分，避免策略事件被误记为工具失败。
+    """
+    if not isinstance(result, dict):
+        return False
+    return bool(result.get("governance") or result.get("pending_approval"))
+
+
 def _platform_has_enforced_sandbox() -> bool:
     """当前平台是否存在任一可用真隔离后端（诚实化：占位后端不算数）。"""
     for name, backend in _ENFORCED_SANDBOX_BACKENDS.items():
@@ -258,6 +271,20 @@ class GovernancePolicy:
             GovernanceResult: 命中可裁决内容时的裁决
             None: 无可裁决内容（不触发覆盖/白名单/内容检测）
         """
+        # 单调守卫（可插拔拒绝链，语义见 monotonic_guard 模块头注释）：
+        # 任一守卫 DENY 即拒绝，先于内容裁决；守卫契约上不存在 ALLOW，
+        # 空注册表恒为 None —— 与接入前行为完全等价。
+        from neurova.security.monotonic_guard import get_monotonic_guards
+
+        guard_outcome = get_monotonic_guards().check_all(tool_name, params, user_id)
+        if guard_outcome is not None:
+            return GovernanceResult(
+                decision=GovernanceDecision.DENY,
+                reasons=[guard_outcome.message],
+                severity=SandboxSeverity.NONE,
+                findings=[guard_outcome.to_dict()],
+            )
+
         command, file_paths = extract_adjudicable_params(params, scan_all=scan_all)
         if not command and file_paths is None:
             return None
@@ -410,5 +437,6 @@ __all__ = [
     "GovernanceResult",
     "GovernancePolicy",
     "get_governance",
+    "is_policy_denial",
     "reset_governance",
 ]
