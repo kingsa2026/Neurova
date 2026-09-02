@@ -36,6 +36,7 @@ export interface BehaviorAnalytics {
 export interface ErrorAnalytics {
   period: string
   total_errors: number
+  error_rate: number
   by_type: { type: string; count: number }[]
   by_endpoint: { endpoint: string; count: number }[]
   recent_errors: { timestamp: string; type: string; message: string; endpoint: string }[]
