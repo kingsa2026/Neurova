@@ -146,6 +146,14 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
+   * Persist tokens obtained directly from a registration response
+   * (first-install wizard: register returns tokens, skipping a second login call).
+   */
+  function setTokensFromRegistration(tokens: Pick<AuthTokens, 'access_token' | 'refresh_token'>): void {
+    persistTokens(tokens as AuthTokens)
+  }
+
+  /**
    * Log out: invalidate server token and clear local state.
    */
   async function logout(): Promise<void> {
@@ -218,6 +226,7 @@ export const useAuthStore = defineStore('auth', () => {
     // actions
     login,
     register,
+    setTokensFromRegistration,
     logout,
     fetchCurrentUser,
     restoreUser,

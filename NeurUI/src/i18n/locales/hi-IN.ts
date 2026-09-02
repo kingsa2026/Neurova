@@ -260,6 +260,10 @@ export default {
     editor: 'संपादक',
     admin: 'व्यवस्थापक',
     quota: 'कोटा',
+    setupTitle: 'व्यवस्थापक खाता सेट करें',
+    setupHint: 'यह पहला खाता है और इसे व्यवस्थापक अधिकार मिलेंगे',
+    setupSubmit: 'व्यवस्थापक खाता बनाएं',
+    registerFailed: 'पंजीकरण विफल',
   },
   dashboard: {
     welcome: 'वापसी पर स्वागत',

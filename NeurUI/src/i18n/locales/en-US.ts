@@ -260,6 +260,10 @@ export default {
     editor: 'Editor',
     admin: 'Admin',
     quota: 'Quota',
+    setupTitle: 'Set Up Admin Account',
+    setupHint: 'This is the first account and will have administrator privileges',
+    setupSubmit: 'Create Admin Account',
+    registerFailed: 'Registration failed',
   },
   dashboard: {
     welcome: 'Welcome Back',

@@ -260,6 +260,10 @@ export default {
     editor: 'محرر',
     admin: 'مسؤول',
     quota: 'الحصة',
+    setupTitle: 'إعداد حساب المسؤول',
+    setupHint: 'هذا هو الحساب الأول وسيحصل على صلاحيات المسؤول',
+    setupSubmit: 'إنشاء حساب المسؤول',
+    registerFailed: 'فشل التسجيل',
   },
   dashboard: {
     welcome: 'مرحبًا بعودتك',
