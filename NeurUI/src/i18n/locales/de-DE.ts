@@ -2505,6 +2505,9 @@ export default {
     optObjectiveAddCart: 'In den Warenkorb',
     rateLimited: 'Modell {model} ist ratenbegrenzt (429)',
     rateLimitSwitched: 'Modell gewechselt',
+    queueTop: 'Nach oben',
+    queueEdit: 'Warteschlange bearbeiten',
+    retry: 'Wiederholen',
     noModelsConfigured: 'Keine Modelle konfiguriert — bitte zuerst in den Modelleinstellungen hinzufügen',
   },
 }

@@ -2505,6 +2505,9 @@ export default {
     optObjectiveAddCart: 'कार्ट में जोड़ें',
     rateLimited: 'मॉडल {model} दर-सीमित है (429)',
     rateLimitSwitched: 'मॉडल बदला गया',
+    queueTop: 'सबसे ऊपर',
+    queueEdit: 'कतार संदेश संपादित करें',
+    retry: 'पुनः प्रयास',
     noModelsConfigured: 'कोई मॉडल कॉन्फ़िगर नहीं — पहले मॉडल सेटिंग में जोड़ें',
   },
 }
