@@ -17,6 +17,14 @@ export interface ProjectInfo {
   updated_at?: number
 }
 
+/** ProjectPage 视图别名：兼容本地 id 回退与展示用 memberCount/progress/activities */
+export type Project = ProjectInfo & {
+  id?: string
+  memberCount?: number
+  progress?: number
+  activities?: string[]
+}
+
 /** 项目团队（后端 collaboration_isolation.ProjectTeam） */
 export interface ProjectTeamDto {
   team_id: string
