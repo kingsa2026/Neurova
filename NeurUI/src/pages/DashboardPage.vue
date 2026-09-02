@@ -175,6 +175,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAgentStore } from '@/stores/agents'
 import GlassStatCard from '@/components/GlassStatCard.vue'
+import GlassCard from '@/components/GlassCard.vue'
 import { useDashboardStats, type DashboardStatCard } from '@/composables/useDashboardStats'
 import { useFeedbackStats } from '@/composables/useFeedbackStats'
 

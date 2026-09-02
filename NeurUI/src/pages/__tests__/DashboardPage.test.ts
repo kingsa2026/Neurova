@@ -105,9 +105,11 @@ const messages = {
 }
 
 const stubs = {
-  GlassPanel: { props: ['variant', 'padding', 'radius'], template: '<div class="glass-panel" @click="$emit(\'click\', $event)"><slot/></div>' },
+  // GlassCard 刻意不 stub：其真实模板（GlassCard.vue → GlassPanel）是毛玻璃背板的载体；
+  // 曾发生过 <script setup> 漏 import GlassCard，模板退化为未知元素 <glasscard>
+  // （标题只留 attribute、卡片无背板无标题），stub 会掩盖该回归。
+  GlassPanel: { props: ['variant', 'padding', 'radius', 'blur'], template: '<div class="glass-panel"><div class="glass-backdrop"/><slot/></div>' },
   GlassButton: { props: ['variant', 'size', 'loading'], emits: ['click'], template: '<button class="glass-btn" @click="$emit(\'click\')"><slot/></button>' },
-  GlassCard: { props: ['title', 'variant', 'radius', 'padding'], template: '<div class="glass-card"><div class="gc-title" v-if="title">{{ title }}</div><slot/></div>' },
   VChart: { props: ['option'], template: '<div class="vchart-stub" :data-has-option="option ? 1 : 0" />' },
   'a-spin': { props: ['spinning'], template: '<div><slot/></div>' },
   'a-badge': { props: ['status', 'text'], template: '<span class="a-badge" :data-status="status"><slot/>{{ text }}</span>' },
@@ -209,5 +211,32 @@ describe('DashboardPage', () => {
 
     expect(wrapper.text()).toContain('暂无反馈')
     expect(wrapper.text()).toContain('回复质量反馈')
+  })
+
+  it('renders grid cards through the real GlassCard shell (glass backdrop regression)', async () => {
+    // 回归背景（2026-09-02）：<script setup> 曾漏 import GlassCard，模板把 <GlassCard>
+    // 渲染为未知元素 <glasscard>——标题只保留为 attribute，GlassPanel 毛玻璃背板整体缺失，
+    // 趋势图/快捷操作等卡片裸奔（无背板、无边框、无标题）。本用例不 stub GlassCard，
+    // 断言 5 张网格卡均由 GlassCard → GlassPanel 真实模板输出。
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const titles = wrapper.findAll('.nr-glass-card-title').map((w) => w.text())
+    expect(titles).toContain('7 天活跃趋势')
+    expect(titles).toContain('模型 Token 分布')
+    expect(titles).toContain('快捷操作')
+    expect(titles).toContain('回复质量反馈')
+    expect(titles).toContain('系统健康')
+
+    // 每张标题卡都包在 GlassPanel 外壳内（毛玻璃载体的组件边界）
+    const titleEls = wrapper.findAll('.nr-glass-card-title')
+    for (const t of titleEls) {
+      expect(t.element.closest('.glass-panel')).not.toBeNull()
+    }
+
+    // 趋势图 canvas 容器位于 GlassPanel 内，而非裸露在页面背景上
+    const wrap = wrapper.find('.nr-chart-wrap')
+    expect(wrap.exists()).toBe(true)
+    expect(wrap.element.closest('.glass-panel')).not.toBeNull()
   })
 })
