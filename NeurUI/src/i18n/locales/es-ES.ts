@@ -408,6 +408,8 @@ export default {
     pin: 'Fijar',
     unpin: 'Dejar de fijar',
     queued: 'En cola (#{n}) — se enviará tras la respuesta actual',
+    toolBackground: 'Ejecutando en segundo plano',
+    toolBackgroundHint: 'Movido a segundo plano — el resultado se inyectará en el siguiente turno',
     pinFailed: 'Error al fijar',
     archivedSessions: 'Sesiones archivadas',
     restore: 'Restaurar',

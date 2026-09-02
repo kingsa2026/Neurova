@@ -413,6 +413,8 @@ export default {
     pin: '置顶',
     unpin: '取消置顶',
     queued: '已加入队列（第 {n} 条），当前回复完成后自动发送',
+    toolBackground: '后台运行中',
+    toolBackgroundHint: '任务已转后台执行，完成后结果将自动注入下一轮',
     pinFailed: '置顶失败',
     archivedSessions: '存档会话',
     restore: '恢复',
