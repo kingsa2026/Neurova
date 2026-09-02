@@ -15,6 +15,15 @@ class TelegramSenderMixin:
         if not self._ensure_initialized():
             return False
 
+        # inline_keyboard 透传（补漏 Task 9）：metadata["reply_markup"] 约定
+        # 携带 Bot API 原生 dict；发送后清理，避免跨消息残留
+        self._current_metadata = message.metadata
+        try:
+            return self._dispatch_message(message)
+        finally:
+            self._current_metadata = None
+
+    def _dispatch_message(self: Any, message: UnifiedMessage) -> bool:
         try:
             if self.show_typing:
                 self._send_chat_action(message.chat_id, "typing")
@@ -52,6 +61,11 @@ class TelegramSenderMixin:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if parse_mode:
             payload["parse_mode"] = parse_mode
+        # reply_markup 透传（metadata["reply_markup"] 约定，Bot API 原生 dict；
+        # parse_mode 语法回退重发时保留键盘）
+        reply_markup = (getattr(self, "_current_metadata", None) or {}).get("reply_markup")
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
 
         data = self._api_request("POST", f"/bot{self.bot_token}/sendMessage", json=payload)
         if data.get("ok"):
