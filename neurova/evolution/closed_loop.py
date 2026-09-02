@@ -12,10 +12,13 @@
 """
 
 from neurova.core.logger import get_logger
+import json
+import os
 import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # H7 修复: 删除本地 Version A ToolLifecycleManager（touch 仅 1 参、get_state 返回字符串），
@@ -46,7 +49,85 @@ class AdaptiveToolWeights:
     def __init__(self):
         self._weights: Dict[str, ToolWeight] = {}
         self._lock = threading.RLock()  # CL-1: RLock 支持读路径间的可重入调用
+        # 断点 A 收尾：持久化挂载（None=纯内存/测试语义，行为零变化）
+        self._persist_path: Optional[Path] = None
+        self._save_interval: float = 10.0
+        self._last_save_at: float = 0.0
         logger.info("AdaptiveToolWeights initialized")
+
+    def attach_persistence(self, path: Path, save_interval: float = 10.0) -> None:
+        """挂载持久化（仅首次生效；save_interval 为落盘节流秒数）。"""
+        if self._persist_path is not None:
+            return
+        self._persist_path = path
+        self._save_interval = save_interval if save_interval > 0 else 0.0
+        logger.info("AdaptiveToolWeights 持久化挂载: %s (interval=%ss)", path, save_interval)
+
+    def save(self, path: Optional[Path] = None) -> bool:
+        """落盘全部权重（锁内快照、锁外写；失败 warning 不抛）。"""
+        target = path or self._persist_path
+        if target is None:
+            return False
+        with self._lock:
+            payload = {
+                "version": 1,
+                "weights": {
+                    name: {
+                        "success_count": w.success_count,
+                        "failure_count": w.failure_count,
+                        "total_latency": w.total_latency,
+                        "adaptive_multiplier": w.adaptive_multiplier,
+                        "last_used": w.last_used.isoformat() if w.last_used else None,
+                        "lifecycle_state": w.lifecycle_state,
+                    }
+                    for name, w in self._weights.items()
+                },
+            }
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._last_save_at = time.time()
+            return True
+        except Exception:  # noqa: BLE001 - 落盘失败不阻断权重更新
+            logger.warning("权重持久化保存失败: %s", target, exc_info=True)
+            return False
+
+    def load(self, path: Path) -> bool:
+        """从文件恢复权重（覆盖语义；缺失/损坏 → 安全回退空表）。"""
+        try:
+            if not path.exists():
+                logger.debug("权重持久化文件不存在（首次启动）: %s", path)
+                return False
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            data = raw.get("weights", raw)
+            with self._lock:
+                for name, payload in data.items():
+                    entry = ToolWeight(tool_name=name)
+                    entry.success_count = int(payload.get("success_count", 0))
+                    entry.failure_count = int(payload.get("failure_count", 0))
+                    entry.total_latency = float(payload.get("total_latency", 0.0))
+                    entry.adaptive_multiplier = float(payload.get("adaptive_multiplier", 1.0))
+                    last_used = payload.get("last_used")
+                    if isinstance(last_used, str):
+                        try:
+                            entry.last_used = datetime.fromisoformat(last_used)
+                        except ValueError:
+                            entry.last_used = None
+                    self._weights[name] = entry
+            logger.info("权重持久化恢复: %s 个工具", len(data))
+            return True
+        except Exception:  # noqa: BLE001 - 损坏文件回退空表，不阻断启动
+            logger.warning("权重持久化加载失败（回退空表）: %s", path, exc_info=True)
+            return False
+
+    def _maybe_persist(self) -> None:
+        """节流落盘（更新路径自动保存；未挂载时 no-op）。"""
+        if self._persist_path is None:
+            return
+        now = time.time()
+        if self._save_interval <= 0 or (now - self._last_save_at) >= self._save_interval:
+            self.save()
 
     def register_tool(self, tool_name: str, base_weight: float = 1.0) -> None:
         """注册工具（预设基础权重）"""
@@ -80,6 +161,9 @@ class AdaptiveToolWeights:
 
             weight.total_latency += latency
             weight.last_used = datetime.now(UTC)
+            # 断点 A 收尾：节流落盘（挂载了持久化且达到间隔 → 保存；IO 在锁内
+            # 快照、锁外写，见 save()）
+            self._maybe_persist()
             logger.debug(
                 f"Weight updated for {tool_name}: success={success}, multiplier={weight.adaptive_multiplier:.3f}"
             )
@@ -439,6 +523,30 @@ def get_evolution_orchestrator() -> EvolutionOrchestrator:
             if _evolution_orchestrator is None:
                 _evolution_orchestrator = EvolutionOrchestrator()
     return _evolution_orchestrator
+
+
+def default_evolution_weights_path() -> Path:
+    """默认权重持久化路径（环境变量可覆盖，测试隔离用）。"""
+    env_path = os.environ.get("NEUROVA_EVOLUTION_WEIGHTS")
+    if env_path:
+        return Path(env_path)
+    return Path("data") / "evolution" / "tool_weights.json"
+
+
+def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
+    """显式挂载权重持久化并恢复（幂等；启动时调用一次）。
+
+    与 get_evolution_orchestrator 分离：单例保持零 IO 副作用，
+    测试/嵌入场景不会污染 data/；生产由 start_server 显式装配。
+    返回是否从既有文件恢复了权重。
+    """
+    orchestrator = get_evolution_orchestrator()
+    persist_path = path or default_evolution_weights_path()
+    orchestrator.tool_weights.attach_persistence(persist_path)
+    restored = orchestrator.tool_weights.load(persist_path)
+    if restored:
+        logger.info("进化权重已从 %s 恢复", persist_path)
+    return restored
 
 
 def reset_evolution_orchestrator() -> None:
