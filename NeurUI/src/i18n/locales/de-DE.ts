@@ -336,6 +336,7 @@ export default {
     refresh: 'Aktualisieren',
     loadError: 'Dashboard-Daten konnten nicht geladen werden',
     retry: 'Erneut versuchen',
+    anotherTabSending: 'Ein anderer Tab sendet in dieser Sitzung',
   },
   agent: {
     title: 'Agentenverwaltung',

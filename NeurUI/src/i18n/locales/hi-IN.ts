@@ -336,6 +336,7 @@ export default {
     refresh: 'ताज़ा करें',
     loadError: 'डैशबोर्ड डेटा लोड विफल',
     retry: 'पुनः प्रयास',
+    anotherTabSending: 'दूसरा टैब इस सत्र में भेज रहा है',
   },
   agent: {
     title: 'एजेंट प्रबंधन',

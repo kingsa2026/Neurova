@@ -512,7 +512,8 @@
             v-else
             variant="primary"
             size="md"
-            :disabled="!inputText.trim() && pendingFiles.length === 0"
+            :disabled="(!inputText.trim() && pendingFiles.length === 0) || !isSendLockOwner"
+            :title="!isSendLockOwner ? t('chat.anotherTabSending') : undefined"
             @click="sendMessage"
           >
             {{ t('chat.send') }}
@@ -679,6 +680,7 @@ import { useASRRestartGuard } from '@/composables/useASRRestartGuard'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
 import { useMessageQueueStore } from '@/stores/messageQueue'
+import { useSessionSendLock } from '@/composables/useSessionSendLock'
 import { useRouter } from 'vue-router'
 import { useChat } from '@/composables/useChat'
 import type { ChatMessage, Session, PendingFile } from '@/types/chat'
@@ -736,6 +738,8 @@ const isMainLayout = computed(() => props.layoutMode === 'main')
 const chatStore = useChatStore()
 const messageQueue = useMessageQueueStore()
 const router = useRouter()
+// 补课 A4：跨标签单发送者锁（同 session 多标签只有一个能发）
+const { isOwner: isSendLockOwner } = useSessionSendLock(currentSessionId)
 const {
   messages,
   sessions,
@@ -1316,6 +1320,11 @@ async function sendMessage() {
     return
   }
   if (!agentId.value) return
+  // 补课 A4：非锁持有者标签禁止发送（同 session 多标签互斥）
+  if (!isSendLockOwner.value) {
+    uiMessage.warning(t('chat.anotherTabSending'))
+    return
+  }
   // 补课 A2：零可用模型时提示（QP 模型未配 Result 提示对齐）——
   // 只拦自动路由且无任何已启用模型的场景；用户已手动选模型则放行
   if (!selectedModel.value && noModelsHint.value) {
