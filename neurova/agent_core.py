@@ -196,6 +196,7 @@ class AgentConfig:
         enable_active_skill_acquisition: bool = False,  # 主动技能获取
         llm_provider: str = "",  # LLM 服务商 ID
         enable_skill_packer: bool = True,  # 自动打包技能（默认开启：让反复出现的工具序列沉淀为可执行技能）
+        muscle_memory_threshold: float = 0.85,  # 肌肉记忆阈值（RSI tool_memory 系统可优化参数的配置单源）
         enable_cognitive_capabilities: bool = True,  # 认知能力
         enable_evolution: bool = True,  # 进化能力
         enable_experience_summary: bool = True,  # 经验总结
@@ -266,6 +267,7 @@ class AgentConfig:
         self.enable_streaming = enable_streaming
         self.enable_active_skill_acquisition = enable_active_skill_acquisition  # 主动技能获取
         self.enable_skill_packer = enable_skill_packer  # 自动打包技能
+        self.muscle_memory_threshold = muscle_memory_threshold  # RSI 配置单源（SubSystemContainer 经 agent.config 取用）
 
         # 认知能力配置
         self.enable_cognitive_capabilities = enable_cognitive_capabilities
@@ -474,9 +476,10 @@ class SubSystemContainer:
                     confidence_threshold=0.8,
                     temperature_threshold=30.0,
                     # P-G 修复（docs/tool-memory-muscle-analysis.md）：显式传入
-                    # muscle_memory_threshold（单源 = 本类属性），消除三处默认值
-                    # （0.85/0.8/隐式默认）不一致导致的 RSI 调参失效风险
-                    muscle_memory_threshold=self.muscle_memory_threshold,
+                    # muscle_memory_threshold（单源 = AgentConfig 配置字段）。
+                    # 注意 self 是 SubSystemContainer——阈值此前误写在 _NullSystem
+                    # 类上，经 self 取值必 AttributeError 致 ToolMemory 初始化整体失败。
+                    muscle_memory_threshold=c.muscle_memory_threshold,
                 )
             except Exception as e:
                 logger.warning("ToolMemory 初始化失败: %s", e)
@@ -733,11 +736,14 @@ class SubSystemContainer:
 
         a.model_adapter = None
         try:
-            from neurova.cognitive_layers.model_adapter import ModelAdapterRegistry
+            # 导入 builtin 触发内置适配器模式注册（import 侧 register_builtin_adapters）；
+            # find_adapter 按正则匹配最佳适配器（不存在 get_adapter 方法）。
+            import neurova.cognitive_layers.model_adapter.builtin  # noqa: F401
+            from neurova.cognitive_layers.model_adapter import get_model_adapter_registry
 
             model_name = a.config.llm_config.model if a.config.llm_config else ""
             model_name = model_name or "deepseek-v4-flash"
-            a.model_adapter = ModelAdapterRegistry.get_adapter(model_name)
+            a.model_adapter = get_model_adapter_registry().find_adapter(model_name)
         except Exception as e:
             logger.warning("模型适配器初始化失败: %s", e)
 

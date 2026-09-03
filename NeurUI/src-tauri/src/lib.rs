@@ -113,6 +113,23 @@ fn spawn_backend(root: &std::path::Path) -> Result<Child, String> {
             "NEUROVA_CORS_ORIGINS",
             "http://tauri.localhost,tauri://localhost,http://127.0.0.1:8100",
         );
+        // MCP 服务器经 npx 启动（如 filesystem）——打包态宿主机可能没有
+        // Node，把随包 node 目录前置到 PATH（user 指定：Node 环境整体随包）。
+        let node_dir = root.join("node");
+        if node_dir.join("npx.cmd").exists() {
+            let old_path = std::env::var("PATH").unwrap_or_default();
+            let new_path = std::env::join_paths(
+                [node_dir.clone(), root.to_path_buf()]
+                    .into_iter()
+                    .chain(
+                        std::env::split_paths(&old_path),
+                    ),
+            )
+            .unwrap();
+            cmd.env("PATH", new_path);
+            // npm 全局 prefix 指向随包目录（避免写宿主机 Program Files）
+            cmd.env("npm_config_prefix", node_dir);
+        }
     }
     // 后端输出进 logs/ 目录、按天分文件（backend-YYYYMMDD.log）：崩溃/导入
     // 错误/启动日志可追溯，且同日多次启动追加不互相覆盖；历史 GBK 编码旧

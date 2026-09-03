@@ -186,12 +186,16 @@ class ChatPipeline:
         # TKG 构造失败/为空时跳过（可选增强，不阻断链装配）
         try:
             from neurova.cognitive_layers.memory_layer.temporal_knowledge_graph import (
+                TemporalKGMemoryBridge,
                 TemporalKnowledgeGraph,
             )
 
             tkg = getattr(self._agent, "_tkg_instance", None)
             if tkg is None:
-                tkg = TemporalKnowledgeGraph()
+                # 适配器调用 query_tkg_for_context（Bridge 方法，关键词抽取+
+                # 时效窗口+置信度排序），裸 TemporalKnowledgeGraph 没有该方法
+                # （实测缺陷：每次检索 TKG 分支必 AttributeError 空转）。
+                tkg = TemporalKGMemoryBridge(TemporalKnowledgeGraph())
                 try:
                     self._agent._tkg_instance = tkg
                 except Exception:
