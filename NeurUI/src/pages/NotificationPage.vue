@@ -6,7 +6,7 @@
         <a-badge :count="unreadCount" :offset="[8, -4]" />
       </h2>
       <div class="header-actions">
-        <GlassButton variant="ghost" size="sm" :loading="markingAll" @click="markAllRead">{{ t('common.all') }} Read</GlassButton>
+        <GlassButton variant="ghost" size="sm" :loading="markingAll" @click="markAllRead">{{ t('common.markAllRead') }}</GlassButton>
         <GlassButton variant="ghost" size="sm" :loading="loading" @click="fetchNotifications">{{ t('common.refresh') }}</GlassButton>
       </div>
     </div>
@@ -32,7 +32,7 @@
               <a-tag v-if="notif.type" :color="typeColor(notif.type)" size="small">{{ notif.type }}</a-tag>
               <div class="notif-actions" @click.stop>
                 <GlassButton v-if="!notif.read" variant="ghost" size="sm" @click="markRead(notif.id)">
-                  Mark Read
+                  {{ t('common.markRead') }}
                 </GlassButton>
                 <a-popconfirm :title="t('common.confirm') + '?'" @confirm="deleteNotif(notif.id)">
                   <GlassButton variant="ghost" size="sm">

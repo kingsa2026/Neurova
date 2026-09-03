@@ -1,5 +1,5 @@
 import api from '@/api'
-import type { ApiResponse, PaginatedData, PageParams } from '@/types/response'
+import type { ApiResponse, LimitOffsetParams, PaginatedData, PageParams } from '@/types/response'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,9 +44,22 @@ export interface SkillUpdatePayload {
 
 const BASE = '/skill-pool'
 
-/** List public skills available in the marketplace. */
-export function getPublicSkills(params?: PageParams & { category?: string; search?: string }) {
-  return api.get<ApiResponse<PaginatedData<Skill>>>(`${BASE}/public`, { params })
+/** List public skills available in the marketplace.
+ *
+ * 2026-09-03: 原调 /skill-pool/public(僵尸空 dict, 无人填充)。
+ * 与 /marketplace 页同源: catalog/远端源搜索, 登录用户可读。
+ */
+export function getPublicSkills(
+  params?: LimitOffsetParams & { category?: string; search?: string },
+) {
+  return api.get<ApiResponse<PaginatedData<Skill>>>('/marketplace/skills', {
+    params: {
+      ...params,
+      limit: params?.limit ?? 100,
+      offset: params?.offset ?? 0,
+      with_total: true,
+    },
+  })
 }
 
 /** List private (installed) skills for an agent. */

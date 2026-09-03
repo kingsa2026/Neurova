@@ -2,6 +2,8 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    markAllRead: 'Mark all read',
+    markRead: 'Mark read',
     clear: "Clear",
     confirm: 'Confirm',
     cancel: 'Cancel',
@@ -381,6 +383,16 @@ export default {
     viewTable: 'Table',
   },
   chat: {
+    retrievalUnified: 'Unified Retrieval',
+    retrievalMoE: 'MoE Router',
+    retrievalCache: 'Cache Retrieval',
+    retrievalFallback: 'Fallback Retrieval',
+    retrievalStatus: 'Retrieving memories ({name})…',
+    retrievalDone: '{name} done: {count} hit ({ms}ms)',
+    retrievalError: '{name} failed, falling back…',
+    retrievalExpert: 'MoE routing: {n} experts active',
+    retrievalSemanticFallback: 'Semantic fallback: {count} hit',
+    retrievalExpertDone: 'Expert retrieval done: {count} hit',
     searchInSession: 'Search in session',
     searchMatches: '{n} matches',
     title: 'Chat',
@@ -456,6 +468,16 @@ export default {
     queueEdit: 'Edit queued message',
   },
   memory: {
+    categoryEpisodic: 'Episodic',
+    categorySemantic: 'Semantic',
+    hot: '🔥 Hot',
+    crystallized: '💎 Crystallized',
+    shortTerm: 'Short Term',
+    jsonData: 'JSON Data',
+    mergeMode: 'Merge Mode',
+    mergeSkip: 'Skip',
+    mergeOverwrite: 'Overwrite',
+    mergeMerge: 'Merge',
     title: 'Memory Management',
     search: 'Search Memory',
     create: 'Create Memory',
@@ -868,6 +890,7 @@ export default {
     parameters: 'Parameters (JSON)',
   },
   channel: {
+    disconnected: 'Disconnected',
     title: 'Channel Management',
     create: 'Create Channel',
     test: 'Test Connection',
@@ -923,6 +946,9 @@ export default {
     onebot: 'OneBot',
   },
   collab: {
+    webhooks: 'Webhooks',
+    sessionsync: 'Session Sync',
+    neuron: 'NEURON Graph',
     title: 'Collaboration Management',
     hubSubtitle: 'Unified hub for sessions, workflows, canvas, projects, teams',
     templates: 'Collaboration Templates',
@@ -1313,6 +1339,9 @@ export default {
     source: 'Source',
   },
   health: {
+    response: 'Response: ',
+    systemIssues: 'System Issues Detected',
+    checksSummary: '{checks} checks · {healthy} healthy · {issues} issues',
     title: 'Health Check',
     report: 'Report',
     allOperational: 'All Systems Operational',
@@ -1783,6 +1812,11 @@ export default {
     keyTakeaways: 'Key takeaways...',
   },
   experience: {
+    taskType: 'Task type',
+    outcomeSuccess: 'Success',
+    outcomeFailure: 'Failure',
+    outcomePartial: 'Partial',
+    addLessons: 'Add lessons learned',
     title: 'Experience Knowledge',
     successRate: 'Success Rate',
     findSimilar: 'Find Similar',
@@ -2167,6 +2201,14 @@ export default {
     resumeFailed: 'Failed to resume execution',
   },
   canvas: {
+    aiDesign: 'AI Canvas Designer',
+    workflowIdLabel: 'Target workflow ID',
+    inputMappingLabel: 'Input mapping (JSON)',
+    designFailed: 'Design failed, try a different description',
+    generateSuccess: 'Generated {nodes} nodes, {edges} edges ({name}); applied to canvas — save and run when ready.',
+    generateFailed: 'Generation failed: {error}',
+    nodeConfigError: 'Node config error, execution stopped',
+    unknownError: 'Unknown error',
     subflowNode: 'Subflow',
     runBlocked: 'Workflow execution blocked',
     runFailed: 'Execution failed',
@@ -2519,3 +2561,4 @@ export default {
     optObjectiveAddCart: 'Add to Cart',
   },
 }
+

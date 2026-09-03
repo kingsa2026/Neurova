@@ -364,6 +364,10 @@ class ExecutionEngine:
         if self._execution_monitor:
             self._execution_monitor.set_event_bus(event_bus)
 
+    def get_execution_monitor(self) -> typing.Optional["ExecutionMonitor"]:
+        """获取执行监控器（可能为 None: 组件导入失败时的占位）"""
+        return self._execution_monitor
+
 
 # 工厂函数
 _execution_engine: typing.Optional[ExecutionEngine] = None

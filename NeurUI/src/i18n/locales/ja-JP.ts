@@ -2,6 +2,8 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    markAllRead: '全部标记已读',
+    markRead: '标记已读',
     clear: "クリア",
     confirm: '確認',
     cancel: 'キャンセル',
@@ -380,6 +382,16 @@ export default {
     viewTable: 'テーブル',
   },
   chat: {
+    retrievalUnified: '统一检索',
+    retrievalMoE: 'MoE 专家路由',
+    retrievalCache: '缓存检索',
+    retrievalFallback: '兜底检索',
+    retrievalStatus: '记忆检索中（{name}）…',
+    retrievalDone: '{name} 完成：命中 {count} 条 ({ms}ms)',
+    retrievalError: '{name} 检索异常，降级下一通道…',
+    retrievalExpert: 'MoE 专家路由：激活 {n} 个专家',
+    retrievalSemanticFallback: '全库语义兜底：命中 {count} 条',
+    retrievalExpertDone: '专家检索完成：{count} 条',
     searchInSession: 'セッション内検索',
     searchMatches: '{n} 件一致',
     title: 'チャット',
@@ -454,6 +466,16 @@ export default {
     queueEdit: 'キューを編集',
   },
   memory: {
+    categoryEpisodic: '情景记忆',
+    categorySemantic: '语义记忆',
+    hot: '🔥 热点',
+    crystallized: '💎 结晶',
+    shortTerm: '短期记忆',
+    jsonData: 'JSON 数据',
+    mergeMode: '合并模式',
+    mergeSkip: '跳过',
+    mergeOverwrite: '覆盖',
+    mergeMerge: '合并',
     title: 'メモリ管理',
     search: 'メモリ検索',
     create: 'メモリ作成',
@@ -866,6 +888,7 @@ export default {
     parameters: 'パラメータ (JSON)',
   },
   channel: {
+    disconnected: '已断开',
     title: 'チャンネル管理',
     create: 'チャンネル作成',
     test: '接続テスト',
@@ -921,6 +944,9 @@ export default {
     onebot: 'OneBot',
   },
   collab: {
+    webhooks: 'Webhook 集成',
+    sessionsync: '会话同步',
+    neuron: 'NEURON 图谱',
     title: 'コラボレーション管理',
     hubSubtitle: 'コラボレーションの統合エントリ: セッション、ワークフロー、キャンバス、プロジェクト、チーム',
     templates: 'コラボレーションテンプレート',
@@ -1311,6 +1337,9 @@ export default {
     source: 'ソース',
   },
   health: {
+    response: '响应: ',
+    systemIssues: '检测到系统问题',
+    checksSummary: '{checks} 项检查 · {healthy} 项健康 · {issues} 项问题',
     title: 'ヘルスチェック',
     report: 'レポート',
     allOperational: '全システム正常稼働中',
@@ -1781,6 +1810,11 @@ export default {
     keyTakeaways: '重要な学び...',
   },
   experience: {
+    taskType: '任务类型',
+    outcomeSuccess: '成功',
+    outcomeFailure: '失败',
+    outcomePartial: '部分成功',
+    addLessons: '添加经验教训',
     title: '経験知識',
     successRate: '成功率',
     findSimilar: '類似を検索',
@@ -2165,6 +2199,14 @@ export default {
     resumeFailed: '実行再開に失敗',
   },
   canvas: {
+    aiDesign: 'AI 画布设计',
+    workflowIdLabel: '目标工作流 ID',
+    inputMappingLabel: '入参映射（JSON）',
+    designFailed: '设计失败，请尝试换一种描述',
+    generateSuccess: '已生成 {nodes} 个节点、{edges} 条连线（{name}），已应用到画布，可保存后执行。',
+    generateFailed: '生成失败: {error}',
+    nodeConfigError: '节点配置异常，已停止执行',
+    unknownError: '未知错误',
     subflowNode: 'サブワークフロー',
     runBlocked: 'ワークフロー実行がブロックされました',
     runFailed: '実行失敗',
@@ -2517,3 +2559,4 @@ export default {
     optObjectiveAddCart: 'カート追加',
   },
 }
+

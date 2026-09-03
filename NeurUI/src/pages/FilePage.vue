@@ -54,7 +54,7 @@
             <div class="file-actions">
               <GlassButton variant="ghost" size="sm" @click="previewFile(record)">{{ t('common.open') }}</GlassButton>
               <GlassButton variant="ghost" size="sm" @click="downloadFile(record)">{{ t('common.download') }}</GlassButton>
-              <GlassButton variant="ghost" size="sm" @click="showHistory(record)">History</GlassButton>
+              <GlassButton variant="ghost" size="sm" @click="showHistory(record)">{{ t('file.history') }}</GlassButton>
               <GlassButton variant="danger" size="sm" @click="deleteFile(record.id)">{{ t('common.delete') }}</GlassButton>
             </div>
           </template>

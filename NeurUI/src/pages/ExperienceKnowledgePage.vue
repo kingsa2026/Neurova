@@ -255,20 +255,20 @@
     >
       <a-form layout="vertical" :model="createForm">
         <a-form-item :label="t('common.type')" required>
-          <a-input v-model:value="createForm.task_type" :placeholder="'Task type'" />
+          <a-input v-model:value="createForm.task_type" :placeholder="t('experience.taskType')" />
         </a-form-item>
         <a-form-item :label="t('common.description')" required>
           <a-textarea v-model:value="createForm.context" :rows="4" />
         </a-form-item>
         <a-form-item :label="t('experience.outcome')">
           <a-select v-model:value="createForm.outcome" style="width: 100%">
-            <a-select-option value="success">Success</a-select-option>
-            <a-select-option value="failure">Failure</a-select-option>
-            <a-select-option value="partial">Partial</a-select-option>
+            <a-select-option value="success">{{ t('experience.outcomeSuccess') }}</a-select-option>
+            <a-select-option value="failure">{{ t('experience.outcomeFailure') }}</a-select-option>
+            <a-select-option value="partial">{{ t('experience.outcomePartial') }}</a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item :label="t('growth.lesson') + 's'">
-          <a-select v-model:value="createForm.lessons" mode="tags" :placeholder="'Add lessons learned'" />
+          <a-select v-model:value="createForm.lessons" mode="tags" :placeholder="t('experience.addLessons')" />
         </a-form-item>
       </a-form>
     </a-modal>
