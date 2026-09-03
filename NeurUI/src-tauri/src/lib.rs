@@ -57,6 +57,29 @@ fn is_bundled(root: &std::path::Path) -> bool {
     root.join("python/python.exe").exists()
 }
 
+/// 当天日期戳（本地时区 YYYYMMDD），backend 日志按天分文件用。
+fn day_stamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // 东八区偏移（桌面版当前仅面向中国区用户）；秒→天再格式化
+    let days = (secs / 86400) as i64;
+    // civil-from-days 算法（Howard Hinnant）：直接从 epoch 天数算 Y/M/D
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{:04}{:02}{:02}", y, m, d)
+}
+
 fn spawn_backend(root: &std::path::Path) -> Result<Child, String> {
     let bundled = is_bundled(root);
     let python = if bundled {
@@ -91,25 +114,29 @@ fn spawn_backend(root: &std::path::Path) -> Result<Child, String> {
             "http://tauri.localhost,tauri://localhost,http://127.0.0.1:8100",
         );
     }
-    // 后端输出进文件：崩溃/导入错误/启动日志可追溯（此前 Stdio::null 吞掉
-    // 全部输出，装机现场后端起不来自查无门）。backend.log 位于安装目录，
+    // 后端输出进 logs/ 目录、按天分文件（backend-YYYYMMDD.log）：崩溃/导入
+    // 错误/启动日志可追溯，且同日多次启动追加不互相覆盖；历史 GBK 编码旧
+    // 日志（backend.log）移为 .bak 供人工查证。位于安装目录 backend\logs\，
     // icacls 已授 Users 组修改权，普通用户可写；打开失败则退回 null。
-    // 旧日志轮换：历史版本以 GBK 写过，按 UTF-8 读会乱码 → 移为 .gbk.bak
-    // （供需要时人工查证），新日志从干净 UTF-8 开始。
-    let log_path = root.join("backend.log");
-    if log_path.exists() {
-        let raw = std::fs::read(&log_path).unwrap_or_default();
+    let logs_dir = root.join("logs");
+    let _ = std::fs::create_dir_all(&logs_dir);
+    // 旧版单文件日志迁移（编码污染隔离）
+    let legacy_log = root.join("backend.log");
+    if legacy_log.exists() {
+        let raw = std::fs::read(&legacy_log).unwrap_or_default();
         let is_utf8 = String::from_utf8(raw).is_ok();
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
         let backup = root.join(format!("backend.{stamp}.log.bak"));
-        let _ = std::fs::rename(&log_path, &backup);
+        let _ = std::fs::rename(&legacy_log, &backup);
         if !is_utf8 {
             log::info!("backend.log 非UTF-8（旧版GBK），已轮换为 {}", backup.display());
         }
     }
+    let day = day_stamp();
+    let log_path = logs_dir.join(format!("backend-{day}.log"));
     let backend_log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -247,12 +274,13 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // 日志落盘（release 也开）：appData/logs/ 下——排查装机现场
-            // "Network Error"（后端 spawn 失败/就绪超时都有迹可循）。
+            // 壳日志落盘：appData/logs/，只记 Warn 及以上（用户需求：启动
+            // 日志与异常日志，不记常规运行日志）；后端完整日志在
+            // <安装目录>\backend\backend.log（按启动轮换，见 spawn_backend）。
             let log_handle = handle.clone();
             let _ = log_handle.plugin(
                 tauri_plugin_log::Builder::default()
-                    .level(log::LevelFilter::Info)
+                    .level(log::LevelFilter::Warn)
                     .targets([
                         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
                             file_name: None,
@@ -263,12 +291,13 @@ pub fn run() {
             );
 
             // 后端拉起放独立线程：不阻塞窗口首帧。流程 =
-            // 建 boot 进度窗（默认隐藏主窗的替代可见面）→ spawn 后端 →
-            // 轮询 /health 并实时推送 backend.log 增量 → 就绪关 boot 亮主窗；
-            // 超时/失败也亮主窗（登录页诊断会指路 backend.log）。
+            // 建 boot 进度窗（默认隐藏主窗的替代可见面）→ spawn 后端（日志
+            // 按 day 写 backend\logs\backend-YYYYMMDD.log）→ 轮询 /health 并
+            // 实时推送日志增量 → 就绪关 boot 亮主窗；
+            // 超时/失败也亮主窗（登录页诊断会指路日志）。
             std::thread::spawn(move || {
                 let root = resolve_backend_root(&handle);
-                let log_path = root.join("backend.log");
+                let log_path = root.join("logs").join(format!("backend-{}.log", day_stamp()));
                 let _ = create_boot_window(&handle);
                 match spawn_backend(&root) {
                     Ok(child) => {
