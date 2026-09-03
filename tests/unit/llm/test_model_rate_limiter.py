@@ -58,9 +58,10 @@ class TestGlobal429Pause:
         clock = {"t": 100.0}
         monkeypatch.setattr(limiter, "_now", lambda: clock["t"])
         # 固定抖动=1.0（否则 ±50% 随机抖动下快进 6s 可能仍在 7.5s 暂停内，
-        # 抽样 flaky）；指数退避首次 429 的 base 与旧固定语义一致
+        # 抽样 flaky）；uniform 返回 0.0 = 区间中点 → jitter 恰为 1.0。
+        # 指数退避首次 429 的 base 与旧固定语义一致
         monkeypatch.setattr(
-            "neurova.llm.model_rate_limiter.random.uniform", lambda a, b: 1.0
+            "neurova.llm.model_rate_limiter.random.uniform", lambda a, b: 0.0
         )
         limiter.report_429("m", pause_seconds=5)
         with pytest.raises(RateLimitExceeded):
