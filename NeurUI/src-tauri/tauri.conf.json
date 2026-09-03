@@ -46,6 +46,9 @@
       "icons/icon.ico"
     ],
     "windows": {
+      "certificateThumbprint": "11F098DB1C2E2EB47BD74CF82059A81A046A8757",
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
       "nsis": {
         "languages": [
           "SimpChinese",

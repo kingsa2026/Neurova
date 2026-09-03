@@ -594,6 +594,8 @@ export default {
     import: 'ナレッジをインポート',
     colTitle: 'タイトル',
     colCategory: 'カテゴリ',
+    chunkHit: 'ヒット箇所',
+    chunkCount: '全{count}ブロック',
     colContent: 'コンテンツ',
     colCreated: '作成日時',
     colActions: 'アクション',

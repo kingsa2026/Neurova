@@ -594,6 +594,8 @@ export default {
     import: 'Wissen importieren',
     colTitle: 'Titel',
     colCategory: 'Kategorie',
+    chunkHit: 'Treffer-Ausschnitt',
+    chunkCount: '{count} Blöcke',
     colContent: 'Inhalt',
     colCreated: 'Erstellt am',
     colActions: 'Aktionen',

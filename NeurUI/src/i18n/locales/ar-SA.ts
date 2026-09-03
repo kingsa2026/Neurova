@@ -594,6 +594,8 @@ export default {
     import: 'استيراد المعرفة',
     colTitle: 'العنوان',
     colCategory: 'الفئة',
+    chunkHit: 'مقطع مطابق',
+    chunkCount: '{count} قطعة',
     colContent: 'المحتوى',
     colCreated: 'تاريخ الإنشاء',
     colActions: 'الإجراءات',

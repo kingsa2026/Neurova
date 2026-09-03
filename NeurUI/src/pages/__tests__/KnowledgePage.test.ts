@@ -58,7 +58,23 @@ vi.mock('ant-design-vue', () => ({
   Modal: { confirm: vi.fn() },
 }))
 
-import { createKbConfig } from '@/api/modules/knowledge'
+import { createKbConfig, getKnowledgeNodes, searchKnowledge } from '@/api/modules/knowledge'
+
+/** P0-2 分块样例：长文被切成 4 块，检索命中第 3 块 */
+const CHUNKED_ITEM = {
+  id: 'kid-1',
+  knowledge_id: 'kid-1',
+  title: 'Neurova 架构手册',
+  category: 'tech',
+  content: '第一章……第二章……第三章 内存系统……第四章……',
+  visibility: 'private',
+  owner_user_id: 'u-1',
+  chunk_count: 4,
+  chunk_hits: [
+    { chunk_index: 2, content: '第三章 内存系统', score: 0.87 },
+    { chunk_index: 0, content: '第一章', score: 0.12 },
+  ],
+}
 
 const messages = {
   knowledge: {
@@ -99,6 +115,8 @@ const messages = {
     collectionConfigPh: '选择配置',
     collectionNamePlaceholder: '集合名称',
     collectionCreate: '添加集合',
+    chunkHit: '命中片段',
+    chunkCount: '共 {count} 块',
     colTitle: '标题',
     colCategory: '分类',
     colVisibility: '可见性',
@@ -125,11 +143,14 @@ const messages = {
 const stubs = {
   GlassPanel: { template: '<div><slot/></div>' },
   GlassButton: { props: ['variant', 'size', 'loading'], emits: ['click'], template: '<button @click="$emit(\'click\')"><slot/></button>' },
-  'a-table': { props: ['dataSource', 'columns'], template: '<div class="ant-table"></div>' },
+  'a-table': {
+    props: ['dataSource', 'columns'],
+    template: `<div class="ant-table"><div v-for="r in dataSource || []" :key="r.id" class="ant-table-row" :data-id="r.id"><template v-for="c in columns || []" :key="c.key"><slot name="bodyCell" :column="c" :record="r" /></template></div></div>`,
+  },
   'a-modal': { props: ['open', 'title'], template: '<div v-if="open" class="ant-modal"><h3>{{ title }}</h3><slot/></div>' },
   'a-upload-dragger': { template: '<div><slot/></div>' },
   'a-divider': { template: '<hr />' },
-  'a-input-search': { template: '<div />' },
+  'a-input-search': { props: ['value', 'placeholder'], emits: ['update:value', 'search'], template: `<input class="ant-input-search" :value="value" :data-placeholder="placeholder" @input="$emit('update:value', $event.target.value)" @keyup.enter="$emit('search', value)" />` },
   'a-checkbox': { template: '<div />' },
   'a-radio-button': { template: '<div />' },
   'a-radio-group': { template: '<div />' },
@@ -302,6 +323,93 @@ describe('KnowledgePage 远程配置弹窗（分类型表单）', () => {
     expect(payload.source_type).toBe('custom')
     expect(payload.api_key, '切换类型后上一类型的凭据不得残留').toBeUndefined()
     expect(payload.settings).toEqual(expect.objectContaining({ api_url: 'https://kb.example/retrieve' }))
+    wrapper.unmount()
+  })
+})
+
+// ══════════════════════════════════════════════════════════════
+// P0-2 RAG 分块 — 前端块级溯源展示（防回归）
+//
+// 背景（2026-09-03）：后端 88ae8ec3 已落「摄取即分块 + 检索块级溯源」
+// 契约（chunk_count / chunk_hits[{chunk_index, content, score}]），但
+// KnowledgePage 从未消费；且普通搜索把 q 发给 GET /knowledge（后端
+// 忽略该参数）——真正带块级溯源的 POST /knowledge/search 已 import
+// 却从未调用。
+//
+// 契约（防回归）：
+// 1. 关键词搜索走 searchKnowledge（POST /knowledge/search），不再发
+//    GET q 参数（后端列表端点忽略 q，属断链）。
+// 2. 列表渲染块数标签（chunk_count > 1 时）。
+// 3. 有 chunk_hits 的条目渲染「命中片段」明细（块序号 + 片段正文）。
+// ══════════════════════════════════════════════════════════════
+describe('KnowledgePage P0-2 分块溯源展示', () => {
+  it('关键词搜索走 POST /knowledge/search（带块级溯源的端点），不走 GET q 断链', async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ data: [CHUNKED_ITEM] } as any)
+    vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [], total: 0 } } as any)
+
+    const wrapper = mountPage()
+    await flushPromises()
+    vi.mocked(getKnowledgeNodes).mockClear()
+
+    const input = wrapper.find('input.ant-input-search')
+    expect(input.exists(), '页面须有搜索框').toBe(true)
+    await input.setValue('内存系统')
+    await input.trigger('keyup.enter')
+    await flushPromises()
+
+    expect(searchKnowledge, '关键词搜索须调 POST /knowledge/search').toHaveBeenCalledTimes(1)
+    const [query, params] = vi.mocked(searchKnowledge).mock.calls[0]
+    expect(query).toBe('内存系统')
+    expect(params).toEqual(expect.objectContaining({ agent_id: 'default', scope: 'all' }))
+    expect(getKnowledgeNodes, '搜索时不得回退到 GET /knowledge?q= 断链').not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('无搜索词时仍走 GET 列表端点（分页浏览语义）', async () => {
+    vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [], total: 0 } } as any)
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(getKnowledgeNodes).toHaveBeenCalledTimes(1)
+    expect(searchKnowledge).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('列表渲染块数标签：chunk_count > 1 显示「共 N 块」', async () => {
+    vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [CHUNKED_ITEM], total: 1 } } as any)
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const text = wrapper.find('.ant-table').text()
+    expect(text).toContain('共 4 块')
+    wrapper.unmount()
+  })
+
+  it('列表渲染命中片段：块序号 + 片段正文按得分降序', async () => {
+    vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [CHUNKED_ITEM], total: 1 } } as any)
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const text = wrapper.find('.ant-table').text()
+    expect(text).toContain('命中片段')
+    expect(text).toContain('#3')
+    expect(text).toContain('第三章 内存系统')
+    wrapper.unmount()
+  })
+
+  it('单块（chunk_count=1）与无 chunk_hits 时不渲染块级明细', async () => {
+    const single = { ...CHUNKED_ITEM, id: 'kid-2', knowledge_id: 'kid-2', chunk_count: 1, chunk_hits: [] }
+    vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [single], total: 1 } } as any)
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const text = wrapper.find('.ant-table').text()
+    expect(text).not.toContain('共 1 块')
+    expect(text).not.toContain('命中片段')
     wrapper.unmount()
   })
 })
