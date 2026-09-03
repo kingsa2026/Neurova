@@ -594,6 +594,8 @@ export default {
     import: 'Importar conocimiento',
     colTitle: 'Título',
     colCategory: 'Categoría',
+    chunkHit: 'Fragmento coincidente',
+    chunkCount: '{count} bloques',
     colContent: 'Contenido',
     colCreated: 'Fecha de creación',
     colActions: 'Acciones',

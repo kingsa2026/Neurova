@@ -8,8 +8,14 @@ Semantic Search API - 语义搜索API端点
   knowledge 语料 = 当前用户可见的知识条目（标题+正文），
   经 KnowledgeRepository.visible_items 做可见性过滤
 - /hybrid 每条结果附带 confidence_breakdown（bm25/vector/fts/rrf 归一化分），
-  供前端展示召回可信度（fts 当前为占位实现恒 0，如实标注）
+  供前端展示召回可信度
 - 检索端点接入 JWT 鉴权（知识语料依赖用户身份；前端此前无调用方）
+
+P0-3（Dify 对标 2026-09-03）：
+- fts 路复活：full_text_search（IDF 加权词覆盖，真分数）替换 0.0 占位
+- body.retrieval_method 四态（RetrievalMethod）：semantic/full_text/hybrid/keyword
+- body.rerank 双模重排出口（WeightRerankRunner/ModelRerankRunner），
+  结果带 rerank_score/rerank_method；rerank 异常降级 rrf 原序不阻断
 """
 
 from neurova.core.logger import get_logger
@@ -24,6 +30,7 @@ from pydantic import BaseModel, Field
 from neurova.api.auth import get_current_user_or_service
 from neurova.cognitive_layers.memory_layer.manager import get_memory_manager
 from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
+from neurova.knowledge.search import RetrievalMethod, full_text_search as _kb_full_text_search
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -54,6 +61,16 @@ class HybridSearchRequest(BaseModel):
     fts_weight: float = Field(default=0.2, ge=0, le=1)
     filters: typing.Optional[dict] = None
     source: str = Field(default="memory", description="语料来源：memory（默认）/ knowledge")
+    # P0-3：RetrievalMethod 四态（短别名 semantic/full_text/keyword/hybrid 均可）
+    retrieval_method: str = Field(
+        default="hybrid",
+        description="检索方法：hybrid（默认）/semantic/full_text/keyword",
+    )
+    # P0-3：rerank 出口，None = 不重排（保持 rrf 次序）
+    rerank: typing.Optional[dict] = Field(
+        default=None,
+        description='重排配置：{"method":"weight","weights":{...}} / {"method":"model","rerank_provider":"<name>"}',
+    )
 
 
 def _load_corpus(body: "HybridSearchRequest", request: Request, current_user: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -258,19 +275,16 @@ def _vector_search_impl(query: str, all_memories: List[Dict[str, Any]], top_k: i
 
 
 def _fts_search_impl(query: str, all_memories: List[Dict[str, Any]], top_k: int) -> List[Tuple[str, float]]:
-    """FTS 路占位实现：SemanticSearch.search_by_keywords 返回 id 列表（无分数）
+    """FTS 路：knowledge.search.full_text_search（P0-3 复活）。
 
-    项目无统一 FTS5 表，此处用关键词索引占位，分数统一 0.0。
+    IDF 加权词覆盖评分，输出真实 [0,1] 分数；替换旧占位实现
+    （search_by_keywords 无分数恒 0.0，且每次调用重建单例关键词索引有副作用）。
     """
-    ss = get_semantic_search()
     try:
-        # 让 SemanticSearch 基于当前语料构建关键词索引
-        ss.build_keyword_index(all_memories)
-        ids = ss.search_by_keywords(query, limit=top_k)
+        return _kb_full_text_search(query, all_memories, top_k)
     except Exception as e:
-        logger.warning("FTS 占位搜索失败: %s", e)
+        logger.warning("FTS 全文搜索失败: %s", e)
         return []
-    return [(mid, 0.0) for mid in ids]
 
 
 def _mem_id_to_content_map(all_memories: List[Dict[str, Any]]) -> Dict[str, str]:
@@ -292,53 +306,152 @@ def _vector_search_knowledge(query: str, current_user: Dict[str, Any], top_k: in
     return [(str(h["id"]), float(h["score"])) for h in hits]
 
 
+def _build_rerank_runner(config: dict):
+    """按请求配置装配 rerank runner（P0-3；显式装配，无全局态）。
+
+    返回 (runner, method_label)：method="model" 但 provider 不可用时
+    退化为加权融合，label 如实回 "weight"。
+    """
+    from neurova.knowledge.rerank import ModelRerankRunner, WeightRerankRunner
+
+    method = (config.get("method") or "weight").strip().lower()
+    weights = config.get("weights") or None
+
+    if method == "model":
+        provider_name = str(config.get("rerank_provider") or "").strip()
+        provider = _resolve_rerank_provider(provider_name) if provider_name else None
+        if provider is not None:
+            return ModelRerankRunner(provider, fallback_weights=weights), "model"
+        # 无可用 provider → 加权融合退化（多路分数明细仍在）
+        logger.info("rerank: 无可用模型重排 provider，退化加权融合")
+    return WeightRerankRunner(weights), "weight"
+
+
+def _resolve_rerank_provider(name: str):
+    """解析命名 rerank provider（扩展点：当前无内置实现，恒 None）。
+
+    预留接入面：bge-reranker（本地 ONNX）/ cohere rerank API 等装配后
+    在此注册，端点与管线代码无需再改。
+    """
+    return None
+
+
+def _single_channel_results(scored, corpus, channel: str) -> List[Dict[str, Any]]:
+    """单方法（semantic/full_text/keyword）的统一结果投影。"""
+    id_to_content = _mem_id_to_content_map(corpus)
+    id_to_title = {str(m.get("id", "")): str(m.get("title", "")) for m in corpus if m.get("title")}
+    return [
+        {
+            "id": mid,
+            "title": id_to_title.get(mid, ""),
+            "content": id_to_content.get(mid, ""),
+            "score": round(float(score), 6),
+            "confidence_breakdown": {channel: round(float(score), 4)},
+        }
+        for mid, score in scored
+    ]
+
+
 @router.post("/hybrid")
 async def hybrid_search(
     body: HybridSearchRequest,
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """混合搜索 - BM25 + 向量 + FTS5 三层融合 (RRF算法)，支持 memory/knowledge 语料"""
+    """混合搜索 - BM25 + 向量 + FTS 三路融合 (RRF算法)，支持 memory/knowledge 语料
+
+    P0-3：retrieval_method 四态（semantic 只走向量 / full_text 只走词法 /
+    keyword 纯子串 / hybrid 三路融合）；可选 rerank 出口重排 hybrid 结果。
+    """
     features = _analyze_query_features(body.query)
     corpus = _load_corpus(body, request, current_user)
 
     try:
-        bm25_res = _bm25_search(body.query, corpus, top_k=body.top_k * 2)
-        if (getattr(body, "source", "memory") or "memory") == "knowledge":
-            vector_res = _vector_search_knowledge(body.query, current_user, top_k=body.top_k * 2)
-        else:
-            vector_res = _vector_search_impl(body.query, corpus, top_k=body.top_k * 2)
-        fts_res = _fts_search_impl(body.query, corpus, top_k=body.top_k * 2)
-        fused = _rrf_fusion(
-            bm25_res,
-            vector_res,
-            fts_res,
-            bm25_weight=body.bm25_weight,
-            vector_weight=body.vector_weight,
-            fts_weight=body.fts_weight,
-        )
-        id_to_content = _mem_id_to_content_map(corpus)
-        id_to_title = {str(m.get("id", "")): str(m.get("title", "")) for m in corpus if m.get("title")}
-        bm25_map = {mid: s for mid, s in bm25_res}
-        vector_map = {mid: s for mid, s in vector_res}
-        fts_map = {mid: s for mid, s in fts_res}
-        results = []
-        for mid, rrf_score in fused[: body.top_k]:
-            results.append(
-                {
-                    "id": mid,
-                    "title": id_to_title.get(mid, ""),
-                    "content": id_to_content.get(mid, ""),
-                    "rrf_score": rrf_score,
-                    "score": rrf_score,
-                    "confidence_breakdown": {
-                        "bm25": round(float(bm25_map.get(mid, 0.0)), 4),
-                        "vector": round(float(vector_map.get(mid, 0.0)), 4),
-                        "fts": round(float(fts_map.get(mid, 0.0)), 4),
-                        "rrf": round(float(rrf_score), 6),
-                    },
-                }
+        retrieval_method = RetrievalMethod.from_str(body.retrieval_method)
+    except ValueError:
+        retrieval_method = RetrievalMethod.HYBRID_SEARCH
+    is_knowledge = (getattr(body, "source", "memory") or "memory") == "knowledge"
+
+    try:
+        if retrieval_method == RetrievalMethod.SEMANTIC_SEARCH:
+            if is_knowledge:
+                vector_res = _vector_search_knowledge(body.query, current_user, top_k=body.top_k)
+            else:
+                vector_res = _vector_search_impl(body.query, corpus, top_k=body.top_k)
+            results = _single_channel_results(vector_res, corpus, "vector")
+
+        elif retrieval_method == RetrievalMethod.KEYWORD_SEARCH:
+            from neurova.knowledge.search import keyword_search
+
+            scored = keyword_search(body.query, corpus, top_k=body.top_k)
+            results = _single_channel_results(scored, corpus, "keyword")
+
+        elif retrieval_method == RetrievalMethod.FULL_TEXT_SEARCH:
+            scored = _fts_search_impl(body.query, corpus, top_k=body.top_k)
+            results = _single_channel_results(scored, corpus, "fts")
+
+        else:  # HYBRID_SEARCH（默认）：三路 RRF + 可选 rerank
+            bm25_res = _bm25_search(body.query, corpus, top_k=body.top_k * 2)
+            if is_knowledge:
+                vector_res = _vector_search_knowledge(body.query, current_user, top_k=body.top_k * 2)
+            else:
+                vector_res = _vector_search_impl(body.query, corpus, top_k=body.top_k * 2)
+            fts_res = _fts_search_impl(body.query, corpus, top_k=body.top_k * 2)
+            fused = _rrf_fusion(
+                bm25_res,
+                vector_res,
+                fts_res,
+                bm25_weight=body.bm25_weight,
+                vector_weight=body.vector_weight,
+                fts_weight=body.fts_weight,
             )
+            id_to_content = _mem_id_to_content_map(corpus)
+            id_to_title = {str(m.get("id", "")): str(m.get("title", "")) for m in corpus if m.get("title")}
+            bm25_map = {mid: s for mid, s in bm25_res}
+            vector_map = {mid: s for mid, s in vector_res}
+            fts_map = {mid: s for mid, s in fts_res}
+            results = []
+            for mid, rrf_score in fused[: body.top_k]:
+                results.append(
+                    {
+                        "id": mid,
+                        "title": id_to_title.get(mid, ""),
+                        "content": id_to_content.get(mid, ""),
+                        "rrf_score": rrf_score,
+                        "score": rrf_score,
+                        "confidence_breakdown": {
+                            "bm25": round(float(bm25_map.get(mid, 0.0)), 4),
+                            "vector": round(float(vector_map.get(mid, 0.0)), 4),
+                            "fts": round(float(fts_map.get(mid, 0.0)), 4),
+                            "rrf": round(float(rrf_score), 6),
+                        },
+                    }
+                )
+
+            # rerank 出口（异常降级 rrf 原序，不阻断检索）
+            if body.rerank and results:
+                try:
+                    runner, rerank_label = _build_rerank_runner(body.rerank)
+                    candidates = [
+                        {
+                            "index": i,
+                            "id": r["id"],
+                            "content": r["content"],
+                            "bm25": r["confidence_breakdown"]["bm25"],
+                            "vector": r["confidence_breakdown"]["vector"],
+                            "fts": r["confidence_breakdown"]["fts"],
+                        }
+                        for i, r in enumerate(results)
+                    ]
+                    reranked = runner.rerank(body.query, candidates)
+                    results = [
+                        {**results[rr["index"]],
+                         "rerank_score": round(float(rr["score"]), 6),
+                         "rerank_method": rerank_label}
+                        for rr in reranked
+                    ]
+                except Exception as e:
+                    logger.warning("hybrid rerank 失败（降级 rrf 原序）: %s", e)
     except Exception as e:
         logger.error("hybrid_search 融合失败: %s", e)
         results = []
@@ -349,6 +462,7 @@ async def hybrid_search(
         "data": {
             "query": body.query,
             "source": getattr(body, "source", "memory"),
+            "retrieval_method": retrieval_method.value,
             "results": results,
             "total": len(results),
             "weights": {"bm25": body.bm25_weight, "vector": body.vector_weight, "fts": body.fts_weight},

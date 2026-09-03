@@ -158,11 +158,14 @@ VIAddVersionKey "Comments" "${PRODUCTNAME} — ${TAGLINE}. Homepage: ${HOMEPAGE}
 ; Installer header image
 !if "${HEADERIMAGE}" != ""
   !define MUI_HEADERIMAGE_BITMAP "${HEADERIMAGE}"
+  ; 保高不变形：默认 FitControl 会把 150x57 横向拉满整条标题栏
+  !define MUI_HEADERIMAGE_BITMAP_STRETCH "AspectFitHeight"
 !endif
 
 ; Uninstaller header image
 !if "${UNINSTALLERHEADERIMAGE}" != ""
   !define MUI_HEADERIMAGE_UNBITMAP "${UNINSTALLERHEADERIMAGE}"
+  !define MUI_HEADERIMAGE_UNBITMAP_STRETCH "AspectFitHeight"
 !endif
 
 ; Uninstaller icon
@@ -176,9 +179,10 @@ VIAddVersionKey "Comments" "${PRODUCTNAME} — ${TAGLINE}. Homepage: ${HOMEPAGE}
 !define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
 
 ; Neurova：欢迎/完成页品牌配色（与启动进度窗 #1A2148 同色系）
-; NSIS 颜色为 0xBBGGRR：深蓝 #1A2148 → 0x48211A；浅字 #F2F5FF → 0xFFF5F2
-!define MUI_BGCOLOR "0x48211A"
-!define MUI_TEXTCOLOR "0xFFF5F2"
+; NSIS SetCtlColors 颜色字面量为 RRGGBB（红在前）——此前按 BBGGRR 误写
+; 0x48211A，实际渲染成 RGB(72,33,26) 咖啡棕（用户截图证实）。
+!define MUI_BGCOLOR "1A2148"
+!define MUI_TEXTCOLOR "F2F5FF"
 LangString nsWelcomeTitle ${LANG_ENGLISH} "Welcome to Neurova"
 LangString nsWelcomeTitle ${LANG_SIMPCHINESE} "欢迎使用 Neurova 智星"
 LangString nsWelcomeText ${LANG_ENGLISH} "This will install Neurova, a personal AI agent with memory, emotion and self-evolution, on your computer.$\r$\n$\r$\nIt is recommended to close other applications before continuing."

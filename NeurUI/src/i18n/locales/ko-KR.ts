@@ -594,6 +594,8 @@ export default {
     import: '지식 가져오기',
     colTitle: '제목',
     colCategory: '카테고리',
+    chunkHit: '일치 구간',
+    chunkCount: '총 {count}개 청크',
     colContent: '내용',
     colCreated: '생성일',
     colActions: '작업',

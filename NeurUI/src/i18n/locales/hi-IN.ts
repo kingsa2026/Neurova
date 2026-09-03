@@ -594,6 +594,8 @@ export default {
     import: 'ज्ञान आयात करें',
     colTitle: 'शीर्षक',
     colCategory: 'श्रेणी',
+    chunkHit: 'मेल खाता अंश',
+    chunkCount: '{count} खंड',
     colContent: 'सामग्री',
     colCreated: 'निर्माण तिथि',
     colActions: 'कार्यवाही',
