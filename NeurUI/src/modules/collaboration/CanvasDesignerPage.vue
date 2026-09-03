@@ -531,6 +531,7 @@ import {
   runCanvas as runCanvasApi,
   getCanvasRun,
   setNodeMock,
+  subscribeExecutionEvents,
   type CanvasRunStatus,
 } from '@/api/modules/collaboration'
 import type { CanvasNodeSnapshot, CanvasEdgeSnapshot } from '@/api/modules/collaboration'
@@ -2007,7 +2008,7 @@ async function handleRun() {
     await handleSave()
     if (!canvasId.value) return
   }
-  // 蜂群编排：执行 + 轮询节点级状态（画布着色 + 输出查看）
+  // 蜂群编排：执行 + 事件流实时点亮节点（SSE），轮询兜底
   runState.value = 'running'
   runStatus.value = {}
   try {
@@ -2022,30 +2023,7 @@ async function handleRun() {
     }
     lastRunId.value = runId
     if (debugController.breakpoints.value.size > 0) showDebugPanel.value = true
-    // 轮询执行状态（1s 间隔，终态停止）
-    for (;;) {
-      await new Promise(r => setTimeout(r, 1000))
-      try {
-        const statusRes = await getCanvasRun(canvasId.value, runId)
-        const data = statusRes as unknown as CanvasRunStatus
-        if (!data) continue
-        runStatus.value = data.node_results ?? {}
-        if (data.status === 'completed') {
-          runState.value = 'completed'
-          break
-        }
-        if (data.status === 'failed' || data.status === 'cancelled') {
-          runState.value = 'failed'
-          showNodeConfigIssues({
-            message: data.error ?? t('canvas.runFailed'),
-            failedNodes: collectFailedNodes(data.node_results ?? {}),
-          })
-          break
-        }
-      } catch {
-        // 单次轮询失败忽略，继续下一轮
-      }
-    }
+    await waitForRunCompletion(canvasId.value, runId)
   } catch (err: any) {
     runState.value = 'failed'
     // 节点配置校验失败：后端 400 detail={code:1, errors:[{node_id,label,type,missing,message}]}
@@ -2054,6 +2032,99 @@ async function handleRun() {
       showNodeConfigIssues({ message: blockDetail.message, issues: blockDetail.issues })
     } else {
       uiMessage.error(t('canvas.runFailed'))
+    }
+  }
+}
+
+/**
+ * P0-1 run/stream 分离：优先订阅执行事件流实时点亮节点；
+ * 流异常断开（未到终态）时降级 1s 轮询，两种路径共享同一终态处理。
+ */
+async function waitForRunCompletion(canvasId: string, runId: string) {
+  const terminalTypes = ['workflow_completed', 'workflow_failed']
+  let streamEnded = false
+  let sawTerminal = false
+
+  const applyNodeFrame = (nodeId: string, status: string, output?: unknown, error?: string | null) => {
+    runStatus.value = { ...runStatus.value, [nodeId]: { status, output, error } }
+  }
+  const finishRun = (state: 'completed' | 'failed', data: Record<string, unknown>) => {
+    runState.value = state
+    if (state === 'failed') {
+      showNodeConfigIssues({
+        message: (data.error as string) ?? t('canvas.runFailed'),
+        failedNodes: collectFailedNodes(runStatus.value),
+      })
+    }
+  }
+
+  const unsubscribe = subscribeExecutionEvents(runId, frame => {
+    switch (frame.type) {
+      case 'node_started':
+        applyNodeFrame(frame.node_id ?? '', 'running')
+        break
+      case 'node_completed': {
+        const result = (frame.data?.result ?? {}) as { status?: string; output?: unknown }
+        applyNodeFrame(frame.node_id ?? '', result.status ?? 'success', result.output)
+        break
+      }
+      case 'node_failed':
+        applyNodeFrame(frame.node_id ?? '', 'failed', undefined, String(frame.data?.error ?? ''))
+        break
+      case 'node_skipped':
+        applyNodeFrame(frame.node_id ?? '', 'skipped')
+        break
+      case 'workflow_completed':
+        sawTerminal = true
+        finishRun('completed', frame.data ?? {})
+        break
+      case 'workflow_failed':
+        sawTerminal = true
+        finishRun('failed', frame.data ?? {})
+        break
+    }
+    if (sawTerminal) streamEnded = true
+  })
+
+  // 事件流结束后（终态收尾或断流）决定是否需要轮询兜底
+  await new Promise<void>(resolve => {
+    const timer = setInterval(() => {
+      if (streamEnded) {
+        clearInterval(timer)
+        unsubscribe()
+        resolve()
+      }
+    }, 100)
+    // 安全上限：10 分钟强制收束
+    setTimeout(() => {
+      streamEnded = true
+    }, 600_000)
+  })
+
+  if (sawTerminal) return
+
+  // 降级：轮询执行状态（1s 间隔，终态停止）
+  for (;;) {
+    await new Promise(r => setTimeout(r, 1000))
+    try {
+      const statusRes = await getCanvasRun(canvasId, runId)
+      const data = statusRes as unknown as CanvasRunStatus
+      if (!data) continue
+      runStatus.value = data.node_results ?? {}
+      if (data.status === 'completed') {
+        runState.value = 'completed'
+        break
+      }
+      if (data.status === 'failed' || data.status === 'cancelled') {
+        runState.value = 'failed'
+        showNodeConfigIssues({
+          message: data.error ?? t('canvas.runFailed'),
+          failedNodes: collectFailedNodes(data.node_results ?? {}),
+        })
+        break
+      }
+    } catch {
+      // 单次轮询失败忽略，继续下一轮
     }
   }
 }

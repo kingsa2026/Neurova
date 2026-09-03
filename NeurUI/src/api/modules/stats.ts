@@ -61,6 +61,46 @@ export interface TokenUsage {
 }
 
 // ---------------------------------------------------------------------------
+// 使用统计总览（持久化历史：data/usage_history.db）
+// ---------------------------------------------------------------------------
+
+export interface UsageOverviewHeatmapDay {
+  date: string
+  tokens: number
+  calls: number
+}
+
+export interface UsageOverviewTrendPoint {
+  date: string
+  model: string
+  tokens: number
+}
+
+export interface UsageOverviewModelTotal {
+  model: string
+  tokens: number
+  calls: number
+}
+
+/** Kimi 式使用统计总览（/stats/usage-overview）。 */
+export interface UsageOverview {
+  scope?: 'user' | 'global'
+  summary: {
+    total_tokens: number
+    total_calls: number
+    peak_daily_tokens: number
+    peak_daily_date: string | null
+    longest_session_seconds: number
+    current_streak_days: number
+    longest_streak_days: number
+    active_days: number
+  }
+  heatmap: UsageOverviewHeatmapDay[]
+  trends: UsageOverviewTrendPoint[]
+  by_model: UsageOverviewModelTotal[]
+}
+
+// ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
 
@@ -89,4 +129,9 @@ export function getSystemInfo() {
 /** Get process-level token usage (real accounting snapshot, since server start). */
 export function getTokenUsage() {
   return api.get<TokenUsage>(`${BASE}/token-usage`)
+}
+
+/** Get persisted usage overview (SQLite history: summary + heatmap + per-model trend). */
+export function getUsageOverview(params: { days?: number; trend_days?: number } = {}) {
+  return api.get<UsageOverview>(`${BASE}/usage-overview`, { params })
 }

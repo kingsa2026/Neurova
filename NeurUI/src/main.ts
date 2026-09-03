@@ -4,8 +4,14 @@ import Antd from 'ant-design-vue'
 import 'ant-design-vue/dist/reset.css'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { LineChart, BarChart, PieChart, GraphChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components'
+import { LineChart, BarChart, PieChart, GraphChart, HeatmapChart } from 'echarts/charts'
+import {
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  TitleComponent,
+  VisualMapComponent,
+} from 'echarts/components'
 import VChart from 'vue-echarts'
 import App from './App.vue'
 import { captureAppError } from '@/utils/errorReporter'
@@ -21,10 +27,12 @@ use([
   BarChart,
   PieChart,
   GraphChart,
+  HeatmapChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
   TitleComponent,
+  VisualMapComponent,
 ])
 
 const app = createApp(App)

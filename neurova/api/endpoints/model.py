@@ -19,10 +19,28 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Reques
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_optional_user
+from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# canonical 能力词表(与 capability_detector.CAPABILITY_ORDER 核心六类对齐)
+_VALID_CAPABILITIES = frozenset(
+    {
+        "text",
+        "reasoning",
+        "vision",
+        "video",
+        "image_generation",
+        "video_generation",
+        "audio",
+        "tts",
+        "stt",
+        "tool_use",
+        "multimodal",
+    }
+)
 
 
 class ModelInfo(BaseModel):
@@ -32,6 +50,8 @@ class ModelInfo(BaseModel):
     name: str
     provider: str = ""
     capabilities: List[str] = []
+    context_window: Optional[int] = None
+    max_tokens: Optional[int] = None
     is_active: bool = False
     status: str = "unknown"
 
@@ -53,6 +73,16 @@ class ProbeRequest(BaseModel):
 def _get_request_id(request: Request) -> str:
     """安全获取 request_id"""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
+
+
+def _clean_limit(value: Any) -> Optional[int]:
+    """4096/0/None 视为未设置(占位值不外发,前端据此隐藏限额标记)。"""
+    if value in (None, 0, 4096, "", "4096"):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _get_provider_manager(current_user: Optional[Dict[str, Any]] = None):
@@ -95,12 +125,24 @@ async def list_models(
                 all_models = provider_manager.get_all_models()
                 for model in all_models:
                     # PydanticModelInfo uses 'owned_by' for provider_id
+                    # 能力标记兜底:元数据缺失时即时推断,响应永不缺 capabilities(AIGC 下拉/路由依赖)
+                    caps = [str(c) for c in (getattr(model, "capabilities", None) or [])]
+                    if not caps:
+                        from neurova.llm.capability_detector import detect_model_capabilities
+
+                        caps = detect_model_capabilities(
+                            getattr(model, "id", ""),
+                            display_name=getattr(model, "name", "") or "",
+                        )
                     models.append(
                         ModelInfo(
                             model_id=getattr(model, "id", "unknown"),
                             name=getattr(model, "name", "Unknown"),
                             provider=getattr(model, "owned_by", ""),
-                            capabilities=getattr(model, "capabilities", []),
+                            capabilities=caps,
+                            # 限额透传(预埋兜底已在 get_all_models 完成;4096 占位不外发)
+                            context_window=_clean_limit(getattr(model, "context_window", None)),
+                            max_tokens=_clean_limit(getattr(model, "max_tokens", None)),
                             is_active=getattr(model, "is_active", False),
                             status=getattr(model, "status", "available"),
                         )
@@ -122,6 +164,90 @@ async def list_models(
         ]
 
     return models
+
+
+class DetectCapabilitiesRequest(BaseModel):
+    """能力批量检测请求"""
+
+    provider_id: Optional[str] = Field(default=None, description="服务商 ID(缺省=全部)")
+    model_id: Optional[str] = Field(default=None, description="模型 ID(缺省=该商全部)")
+    force: bool = Field(default=False, description="已有标记时是否强制重检")
+
+
+@router.post("/detect-capabilities")
+async def detect_capabilities(
+    request: Request,
+    body: DetectCapabilitiesRequest,
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+):
+    """批量自动检测模型能力(文本/推理/图片理解/视频理解/图片生成/视频生成)并持久化。
+
+    检测顺序:显式元数据 > 已知模型目录 > 名称启发式;force=True 可重检已有标记。
+    """
+    _get_request_id(request)
+
+    provider_manager = _get_provider_manager(current_user)
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+
+    if not hasattr(provider_manager, "detect_and_persist_capabilities"):
+        raise HTTPException(status_code=501, detail="Provider manager does not support capability detection")
+
+    # 显式 provider_id 必须存在(防误传静默成功)
+    if body.provider_id and hasattr(provider_manager, "get_provider"):
+        if provider_manager.get_provider(body.provider_id) is None:
+            raise HTTPException(status_code=404, detail=f"Provider '{body.provider_id}' not found")
+
+    try:
+        result = provider_manager.detect_and_persist_capabilities(
+            provider_id=body.provider_id,
+            model_id=body.model_id,
+            force=body.force,
+        )
+        return {"code": 0, "message": f"Detected capabilities for {result['detected']} models", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Detect capabilities error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to detect capabilities: {str(e)}")
+
+
+@router.get("/by-capability", response_model=List[ModelInfo])
+async def list_models_by_capability(
+    request: Request,
+    cap: str = Query(..., description="所需能力(text/reasoning/vision/video/image_generation/video_generation...)"),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+):
+    """按能力过滤模型列表(AIGC 页面下拉数据源)。"""
+    _get_request_id(request)
+
+    cap_value = (cap or "").strip().lower()
+    if cap_value not in _VALID_CAPABILITIES:
+        raise HTTPException(status_code=400, detail=f"Unknown capability: '{cap}'")
+
+    provider_manager = _get_provider_manager(current_user)
+    if not provider_manager:
+        raise HTTPException(status_code=503, detail="Provider manager not available")
+
+    matched: List[ModelInfo] = []
+    try:
+        for model in provider_manager.get_all_models():
+            caps = [str(c) for c in (getattr(model, "capabilities", None) or [])]
+            if cap_value in caps:
+                matched.append(
+                    ModelInfo(
+                        model_id=getattr(model, "id", "unknown"),
+                        name=getattr(model, "name", "Unknown"),
+                        provider=getattr(model, "owned_by", ""),
+                        capabilities=caps,
+                        is_active=getattr(model, "is_active", False),
+                        status=getattr(model, "status", "available"),
+                    )
+                )
+    except Exception as e:
+        logger.warning("List models by capability error: %s", e)
+
+    return matched
 
 
 @router.delete("/{model_id}")

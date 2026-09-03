@@ -230,9 +230,19 @@ async def get_usage_stats(
                 {"date": d, "requests": c, "tokens": 0}
                 for d, c in zip(agg["labels"], agg["conv_data"])
             ]
-            msg_per_day = agg["msg_data"]
+            # token 列取真值（根因修复 2026-09-03: 原先填 msg_per_day——消息数冒
+            # 充 tokens；持久化历史已上线，按 MM-DD 对齐汇总）
+            try:
+                from neurova.core.usage_history import get_usage_history
+
+                daily_tokens_mmdd = {
+                    r["usage_date"][5:]: int(r["tokens"] or 0)
+                    for r in get_usage_history().daily_totals()
+                }
+            except Exception:
+                daily_tokens_mmdd = {}
             for i, item in enumerate(daily_trend):
-                item["tokens"] = msg_per_day[i] if i < len(msg_per_day) else 0
+                item["tokens"] = daily_tokens_mmdd.get(item["date"], 0)
         except Exception:
             daily_trend = []
 

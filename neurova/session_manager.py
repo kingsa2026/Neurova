@@ -235,9 +235,36 @@ class SessionManager(SessionRepository):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
+        except json.JSONDecodeError as e:
+            # 损坏文件（含 0 字节截断）：根因 = Windows 无 flock + 旧版
+            # 先截断后写入的交叉写。坏文件若不隔离，每次读取请求都会
+            # 重复打 ERROR 且永远解析失败——隔离留档（.corrupt-*.bak）后
+            # 目录回归干净，sessions 列表/history 可正常跳过该会话。
+            self._quarantine_broken_file(file_path)
+            logger.warning(
+                "读取session文件失败(非法JSON)，已隔离损坏文件 %s -> %s.corrupt-*.bak: %s",
+                file_path, file_path, e,
+            )
+            return None
         except Exception as e:
             logger.error("读取session文件失败: %s", e)
             return None
+
+    def _quarantine_broken_file(self, file_path: Path) -> None:
+        """将损坏的 session 文件重命名隔离，避免后续每次请求重复报错。"""
+        try:
+            lock = self._get_file_lock(file_path)
+            with lock:
+                if not file_path.exists():
+                    return
+                quarantine = file_path.with_name(
+                    "%s.corrupt-%s.bak" % (file_path.name, datetime.now().strftime("%Y%m%d%H%M%S"))
+                )
+                file_path.replace(quarantine)
+                logger.warning("session 损坏文件已隔离: %s -> %s", file_path, quarantine)
+        except Exception as e:
+            # 隔离失败不致命：保持现状（后续请求仍会报错但不会崩溃）
+            logger.debug("隔离损坏 session 文件失败: %s", e, exc_info=True)
 
     def _write_session_file(self, file_path: Path, data: Dict[str, Any]) -> bool:
         """写入session文件 (向后兼容: 内部获取 file_lock).
@@ -269,18 +296,23 @@ class SessionManager(SessionRepository):
             return False
 
         try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                if HAS_FCNTL:
-                    try:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                        f.write(text)
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                    except OSError:
-                        f.write(text)
-                else:
-                    f.write(text)
+            # 原子写（tmp + os.replace）：直接 open(file_path, "w") 会先截断
+            # 目标文件；Windows 无 flock 可用的场景（HAS_FCNTL=False）下，
+            # 两个进程同时写同一文件 → 交叉截断 → 磁盘留下非法 JSON（即
+            # "读取session文件失败 Expecting value" 的根因）。tmp+replace 使
+            # 读方永远看到完整文件（last-write-wins，最坏丢更新不损坏）。
+            tmp_path = file_path.with_name(file_path.name + ".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, file_path)
             return True
         except Exception as e:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
             # WARN #4 优化 (摘要+详情分层): 内层降级为 debug,保留诊断细节.
             # 外层 add_message 失败时已 logger.error (带 agent_id/session_id/file_path
             # 上下文),内层重复 error 会产生双 error 日志 noise. 内层 debug = 详情层.

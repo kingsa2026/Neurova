@@ -94,13 +94,15 @@ class TestUsageRealStats:
         by_model = {m["model"]: (m["requests"], m["tokens"]) for m in res["by_model"]}
         assert by_model.get("gpt-4o") == (1, 150)
 
-        # daily_trend：最后一天 2 条会话 / 8 条消息，倒数第二天 1 / 1
+        # daily_trend：最后一天 2 条会话 / 8 条消息
         # （date 为 MM-DD 短标签，与 /home/trends 一致）
+        # tokens 列=持久化 token 聚合（根因修复 2026-09-03：原先是消息数冒充）；
+        # 本测试未写入 usage_history → 0（诚实零态，不再断言旧 bug 行为）
         trend = res["daily_trend"]
         assert len(trend) == 7
         assert trend[-1]["date"] == datetime.now().strftime("%m-%d")
-        assert (trend[-1]["requests"], trend[-1]["tokens"]) == (2, 8)
-        assert (trend[-2]["requests"], trend[-2]["tokens"]) == (1, 1)
+        assert (trend[-1]["requests"], trend[-1]["tokens"]) == (2, 0)
+        assert (trend[-2]["requests"], trend[-2]["tokens"]) == (1, 0)
 
     @pytest.mark.asyncio
     async def test_source_failure_degrades_to_empty(self, monkeypatch):

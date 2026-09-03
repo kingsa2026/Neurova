@@ -9,9 +9,43 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   StreamTTSRunner,
+  audioSourceFor,
   extractSentences,
+  requireNonEmptyAudioBlob,
   sanitizeForSpeech,
 } from '@/composables/useStreamTTS'
+
+describe('audioSourceFor（回放 src 选取）', () => {
+  it('有 ttsUrls 时按 ttsIdx 取句块（播放器逐句回放）', () => {
+    const msg = { ttsUrls: ['blob:0', 'blob:1'], ttsIdx: 1 }
+    expect(audioSourceFor(msg)).toBe('blob:1')
+  })
+
+  it('ttsIdx 越界回落首块（避免 <audio> 拿到空 src）', () => {
+    const msg = { ttsUrls: ['blob:0', 'blob:1'], ttsIdx: 99 }
+    expect(audioSourceFor(msg)).toBe('blob:0')
+  })
+
+  it('无 ttsUrls 时回落 audioUrl（手动单段 TTS）', () => {
+    expect(audioSourceFor({ audioUrl: 'blob:full' })).toBe('blob:full')
+  })
+
+  it('两者皆无返回空串', () => {
+    expect(audioSourceFor({})).toBe('')
+  })
+})
+
+describe('requireNonEmptyAudioBlob', () => {
+  it('rejects empty blob (0 字节 → <audio> 416 根因)', () => {
+    expect(() => requireNonEmptyAudioBlob(new Blob([]))).toThrow()
+    expect(() => requireNonEmptyAudioBlob(new Blob(['']))).toThrow()
+  })
+
+  it('passes through non-empty blob', () => {
+    const blob = new Blob([new Uint8Array([0xff, 0xf3, 0x64])], { type: 'audio/mpeg' })
+    expect(requireNonEmptyAudioBlob(blob)).toBe(blob)
+  })
+})
 
 describe('sanitizeForSpeech', () => {
   it('strips urls', () => {

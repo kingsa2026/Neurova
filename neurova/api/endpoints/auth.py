@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from neurova.core.logger import get_logger
 import uuid
-from typing import Optional
+import time
+from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -39,6 +40,16 @@ from neurova.auth.verification_code import VerificationCodeModel, VerificationTy
 
 # Token 黑名单（生产环境应使用 Redis 或数据库）
 _token_blacklist: set = set()
+
+# 忘记密码/取回密码：最高权重恢复密码（写死常量）。
+# 校验只允许发生在服务端（前端仅做 UX 即时校验）；双条件缺一不可：
+# 1) username 是系统内角色为 admin 的管理员账号；2) master_password == 此常量。
+MASTER_RECOVERY_PASSWORD = "nerovamakehappy"
+
+# recover-password 简易限流：key=(username|ip) -> 尝试时间戳列表
+_recover_attempts: Dict[str, list] = {}
+_RECOVER_LIMIT = 5  # 窗口内最大尝试次数
+_RECOVER_WINDOW = 900  # 15 分钟
 
 # 用户模型实例（单例）
 _user_model: Optional[UserModel] = None
@@ -111,6 +122,20 @@ class RegisterRequest(BaseModel):
     password: str = Field(..., description="密码")
     email: Optional[str] = Field(default=None, description="邮箱")
     invite_code: Optional[str] = Field(default=None, description="邀请码")
+
+
+class RecoverPasswordRequest(BaseModel):
+    """忘记密码/取回密码请求
+
+    双条件缺一不可（必须都对上）：
+    1. username：系统中存在且角色为 admin 的管理员账号
+    2. master_password：最高权重恢复密码（写死常量）
+    """
+
+    username: str = Field(..., description="管理员账号")
+    master_password: str = Field(..., description="最高权重恢复密码")
+    new_password: str = Field(..., description="新密码")
+    confirm_password: str = Field(..., description="确认新密码")
 
 
 class RefreshRequest(BaseModel):
@@ -201,6 +226,76 @@ async def login(request: Request, body: LoginRequest):
     except Exception as e:
         logger.error(f"Login error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
+def _check_recover_rate_limit(key: str) -> bool:
+    """recover-password 限流：窗口内达到上限返回 True。"""
+    now = time.time()
+    records = [t for t in _recover_attempts.get(key, []) if now - t < _RECOVER_WINDOW]
+    _recover_attempts[key] = records
+    return len(records) >= _RECOVER_LIMIT
+
+
+def _record_recover_attempt(key: str) -> None:
+    _recover_attempts.setdefault(key, []).append(time.time())
+
+
+@router.post("/recover-password")
+async def recover_password(request: Request, body: RecoverPasswordRequest):
+    """忘记密码/取回密码（管理员账号 + 最高权重密码，双条件缺一不可）。
+
+    - username 必须是系统中角色为 admin 的管理员账号
+    - master_password 必须等于 MASTER_RECOVERY_PASSWORD（服务端校验）
+    - 错误统一文案（不泄露账号是否存在/角色），防用户名探测
+    """
+    _get_request_id(request)
+
+    ip_address = request.client.host if request.client else "unknown"
+    rate_key = f"{body.username}|{ip_address}"
+
+    try:
+        if _check_recover_rate_limit(rate_key):
+            raise HTTPException(status_code=429, detail="尝试次数过多，请 15 分钟后再试")
+
+        user_model = _get_user_model()
+        user = user_model.get_user_by_username(body.username)
+
+        master_ok = body.master_password == MASTER_RECOVERY_PASSWORD
+        user_ok = bool(user) and user.role == "admin"
+        if not (user_ok and master_ok):
+            _record_recover_attempt(rate_key)
+            logger.warning(
+                "recover-password 验证失败: username=%s (admin=%s, master=%s) ip=%s",
+                body.username, bool(user) and user.role == "admin", bool(master_ok), ip_address,
+            )
+            raise HTTPException(status_code=400, detail="管理员账号或最高权重密码不正确，请核对后重试")
+
+        if not body.new_password or not body.confirm_password:
+            raise HTTPException(status_code=400, detail="请填写新密码")
+        if body.new_password != body.confirm_password:
+            raise HTTPException(status_code=400, detail="两次输入的新密码不一致")
+
+        # 双条件对上 → 重置密码（同时清除历史失败计数）
+        updated = user_model.update_user(
+            user.id,
+            password_hash=hash_password(body.new_password),
+            failed_attempts=0,
+        )
+        if not updated:
+            raise HTTPException(status_code=500, detail="密码重置失败，请稍后重试")
+
+        logger.warning("Password recovered (最高权重密码): username=%s ip=%s", body.username, ip_address)
+        return {
+            "code": 0,
+            "message": "密码已重置，请使用新密码登录",
+            "data": {"username": body.username},
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Recover password error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Recover password failed: {str(e)}")
 
 
 def is_token_blacklisted(token: str) -> bool:

@@ -40,6 +40,9 @@
           :spark-color="CARD_META[card.key].color"
           :trend="card.trend"
           :spark-data="card.spark"
+          :class="{ 'nr-stat-card--link': card.key === 'tokens' }"
+          :title="card.key === 'tokens' ? t('dashboard.usageStatsEntry') : undefined"
+          @click="card.key === 'tokens' && router.push('/usage-stats')"
         />
       </div>
     </a-spin>
@@ -363,6 +366,18 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
+}
+
+/* Token 卡 = 使用统计入口（点击跳转 /usage-stats） */
+.nr-stat-card--link {
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.nr-stat-card--link:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(167, 139, 250, 0.18);
+  border-color: var(--nr-glass-border-hover, rgba(167, 139, 250, 0.4));
 }
 
 @media (max-width: 1200px) {

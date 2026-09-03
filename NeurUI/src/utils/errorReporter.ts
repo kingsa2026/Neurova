@@ -45,6 +45,8 @@ export interface ReporterOptions {
 export interface ReporterInstance {
   /** 手工捕获一条错误（Vue errorHandler / 业务代码调用） */
   capture: (source: ErrorSource, errorCode: string, message: string, stack?: string, extra?: Record<string, unknown>) => void
+  /** 用户主动手动上报（不受自动开关/去重/日限额限制，仍脱敏） */
+  captureManual: (message: string, extra?: Record<string, unknown>) => void
   /** 卸载全局监听 */
   dispose: () => void
   /** 调试：当前队列长度 */
@@ -138,10 +140,45 @@ function saveQueue(items: QueueItem[]) {
 // 采集器
 // ---------------------------------------------------------------------------
 
+const STORAGE_REPORT_PREF = 'nv_err_report_enabled' // 'on' | 'off' | 缺省=默认策略
+
+/** 用户偏好：true=显式开启，false=显式关闭，null=未设置（跟随默认策略） */
+export function getReportEnabledPref(): boolean | null {
+  try {
+    const v = localStorage.getItem(STORAGE_REPORT_PREF)
+    if (v === 'on') return true
+    if (v === 'off') return false
+    return null
+  } catch {
+    return null
+  }
+}
+
+export function setReportEnabledPref(on: boolean): void {
+  try {
+    localStorage.setItem(STORAGE_REPORT_PREF, on ? 'on' : 'off')
+  } catch {
+    /* localStorage 不可用时仅本次会话生效 */
+  }
+}
+
+/** 默认策略：生产构建默认自动启用；开发需显式 VITE_ENABLE_ERROR_REPORT=true */
+function defaultReportEnabled(): boolean {
+  return import.meta.env.PROD || import.meta.env.VITE_ENABLE_ERROR_REPORT === 'true'
+}
+
+/** 运行时开关（用户设置 > 默认策略）：随偏好即时生效 */
+export function isErrorReporterEnabled(): boolean {
+  const pref = getReportEnabledPref()
+  if (pref === true) return true
+  if (pref === false) return false
+  return defaultReportEnabled()
+}
+
 export function initErrorReporter(opts: ReporterOptions = {}): ReporterInstance {
   const version = opts.version ?? (import.meta.env.VITE_APP_VERSION || '')
   const force = opts.force === true
-  const enabled = force || import.meta.env.VITE_ENABLE_ERROR_REPORT === 'true'
+  const enabled = force || isErrorReporterEnabled()
 
   const clientId = getClientId()
   const platform = detectPlatform()
@@ -174,6 +211,9 @@ export function initErrorReporter(opts: ReporterOptions = {}): ReporterInstance 
     }
   }
 
+  let retryDelay = 30_000 // 失败后的指数退避：30s → 60s → … → 10min 封顶
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+
   async function flush() {
     // 顺序排空：成功/客户端拒绝(4xx) 继续下一条；网络失败/5xx 保留剩余等待重试
     while (queue.length > 0) {
@@ -191,18 +231,33 @@ export function initErrorReporter(opts: ReporterOptions = {}): ReporterInstance 
           queue = queue.slice(1)
           saveQueue(queue)
           markSent()
+          retryDelay = 30_000 // 成功：退避归零
           continue
         }
+        if (res.status === 429 || res.status >= 500) {
+          scheduleRetry() // 429 限流/5xx：临时失败，保留队列退避重试
+          return
+        }
         if (res.status >= 400 && res.status < 500) {
-          queue = queue.slice(1)
+          queue = queue.slice(1) // 400/404 等 schema 拒绝：永久丢弃避免死循环
           saveQueue(queue)
           continue
         }
-        return // 5xx：保留重试
       } catch {
-        return // 网络不可用：保留队列，等下次触发/定时器重试
+        scheduleRetry() // 网络不可用：保留队列 + 退避（避免高频重试被网络层限流饿死）
+        return
       }
     }
+  }
+
+  /** 失败退避：指数增长 30s→60s→120s→…→10min 封顶，成功时归零 */
+  function scheduleRetry() {
+    if (retryTimer) return
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      void flush()
+    }, retryDelay)
+    retryDelay = Math.min(retryDelay * 2, 10 * 60_000)
   }
 
   /** 页面卸载兜底：sendBeacon 不需要 CORS preflight，天然 keepalive */
@@ -226,8 +281,32 @@ export function initErrorReporter(opts: ReporterOptions = {}): ReporterInstance 
     void flush()
   }
 
+  function buildReport(
+    source: ErrorSource,
+    errorCode: string,
+    message: string,
+    stack?: string,
+    extra?: Record<string, unknown>,
+  ): QueueItem {
+    const safeMessage = sanitizeText(message, 500)
+    const safeCode = sanitizeText(errorCode, 64).replace(/[^a-zA-Z0-9_:.-]/g, '_') || 'unknown'
+    return {
+      error_at: now().toISOString().slice(0, 19) + 'Z', // 精确到秒
+      client_id: clientId,
+      platform,
+      source,
+      error_code: safeCode,
+      location: sanitizeText((extra?.location as string) ?? '', 200),
+      message: safeMessage,
+      stack: sanitizeText(stack ?? '', 4000),
+      app_version: sanitizeText(version, 40),
+      ua: sanitizeText(navigator.userAgent ?? '', 256),
+      extra: extra && typeof extra === 'object' ? extra : undefined,
+    }
+  }
+
   function capture(source: ErrorSource, errorCode: string, message: string, stack?: string, extra?: Record<string, unknown>) {
-    if (!force && !enabled) return
+    if (!force && !isErrorReporterEnabled()) return // 运行时门控：用户开关即时生效
 
     const safeMessage = sanitizeText(message, 500)
     const safeCode = sanitizeText(errorCode, 64).replace(/[^a-zA-Z0-9_:.-]/g, '_') || 'unknown'
@@ -236,21 +315,23 @@ export function initErrorReporter(opts: ReporterOptions = {}): ReporterInstance 
     if (now().getTime() - last < DEDUPE_WINDOW_MS) return // 同一错误 30s 窗口内只报一次
     if (sentToday() >= DAILY_CAP) return
 
-    const report: QueueItem = {
-      error_at: now().toISOString().slice(0, 19) + 'Z', // 精确到秒
-      client_id: clientId,
-      platform,
-      source,
-      error_code: safeCode,
-      location: sanitizeText(extra?.location as string ?? '', 200),
-      message: safeMessage,
-      stack: sanitizeText(stack ?? '', 4000),
-      app_version: sanitizeText(version, 40),
-      ua: sanitizeText(navigator.userAgent ?? '', 256),
-      extra: extra && typeof extra === 'object' ? extra : undefined,
-    }
+    const report = buildReport(source, errorCode, message, stack, extra)
     lastSent.set(dedupeKey, now().getTime())
     enqueue(report)
+  }
+
+  /** 手动上报：用户主动提交，不受自动开关/去重/日限额限制（仍会脱敏） */
+  function captureManual(message: string, extra?: Record<string, unknown>) {
+    const text = (message ?? '').trim()
+    if (!text) return
+    const safeMessage = sanitizeText(text, 500)
+    if (!safeMessage) return
+    enqueue(
+      buildReport('manual', 'user-feedback', safeMessage, '', {
+        ...(extra ?? {}),
+        manual: true,
+      }),
+    )
   }
 
   function onWindowError(event: ErrorEvent) {
@@ -272,19 +353,23 @@ export function initErrorReporter(opts: ReporterOptions = {}): ReporterInstance 
     window.addEventListener('error', onWindowError)
     window.addEventListener('unhandledrejection', onUnhandledRejection)
     window.addEventListener('pagehide', onPageHide)
-    timer = setInterval(() => void flush(), 60_000) // 队列非空时周期重试
+    timer = setInterval(() => void flush(), 5 * 60_000) // 兜底周期检查（失败重试走指数退避）
   }
 
-  if (enabled || force) bind()
+  // 监听器始终绑定（采集入口 capture 内部做运行时门控实现开关即时生效）
+  bind()
 
   return {
     capture,
+    captureManual,
     dispose: () => {
       window.removeEventListener('error', onWindowError)
       window.removeEventListener('unhandledrejection', onUnhandledRejection)
       window.removeEventListener('pagehide', onPageHide)
       if (timer) clearInterval(timer)
       timer = null
+      if (retryTimer) clearTimeout(retryTimer)
+      retryTimer = null
     },
     queueLength: () => queue.length,
   }
@@ -311,4 +396,9 @@ export function captureAppError(
   extra?: Record<string, unknown>,
 ): void {
   errorReporterRef.instance?.capture(source, errorCode, message, stack, extra)
+}
+
+/** 用户主动手动上报（不受自动上报开关/去重/日限额限制） */
+export function reportManualFeedback(message: string, extra?: Record<string, unknown>): void {
+  errorReporterRef.instance?.captureManual(message, extra)
 }
