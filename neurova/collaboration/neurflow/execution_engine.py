@@ -135,6 +135,8 @@ class WorkflowExecutor:
         """初始化执行器"""
         self._dag_validator = get_dag_validator()
         self._variable_resolver = get_variable_resolver()
+        # registry 每次经 get_node_registry() 动态解析（单例可能被
+        # reset_node_registry 重建——缓存旧引用会让节点执行器静默落空）
         self._node_registry = get_node_registry()
         # 确保内置节点已注册
         self._node_registry.ensure_builtin()
@@ -1189,9 +1191,9 @@ class WorkflowExecutor:
             expression = config.get("expression", "")
             return {"output": f"transform: {expression}"}
 
-        # 注册表中的节点
+        # 注册表中的节点（registry 动态解析，防单例重建后旧引用落空）
         node_type = node.type
-        executor = self._node_registry.get_executor(node_type)
+        executor = get_node_registry().get_executor(node_type)
         if executor:
             return await executor(config, context)
 
