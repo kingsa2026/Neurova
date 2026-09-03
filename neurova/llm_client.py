@@ -50,6 +50,10 @@ class LLMAuthError(LLMError):
     """认证失败（不可重试）"""
 
 
+class LLMBadRequestError(LLMError):
+    """请求构造错误（模型不存在/参数非法等 4xx，不可重试）"""
+
+
 class LLMConnectionError(LLMError):
     """连接失败（可重试）"""
 
