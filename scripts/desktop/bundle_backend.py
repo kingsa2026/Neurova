@@ -57,13 +57,42 @@ def dir_fingerprint(d: Path) -> dict:
 
 
 def robocopy(src: Path, dst: Path, extra: list[str] | None = None) -> int:
-    """Windows 原生 robocopy（/E 递归，不带 /PURGE——绝不删目标已有文件）。"""
-    cmd = ["robocopy", str(src), str(dst), "/E", "/NFL", "/NDL", "/NJH", "/NJS", "/NP"]
+    """Windows 原生 robocopy（/E 递归，不带 /PURGE——绝不删目标已有文件）。
+
+    NSIS 对单文件数据有 ~2GB mmap 硬顶（Internal compiler error #12345），
+    __pycache__/*.pyc 属可再生态且随开发/测试进程持续增长（实测 +225MB 直击
+    红线），必须在拷贝侧排除，否则解压阶段还会在 2GB 边界附近产出损坏数据流。
+    """
+    cmd = [
+        "robocopy", str(src), str(dst), "/E", "/NFL", "/NDL", "/NJH", "/NJS", "/NP",
+        "/XD", "__pycache__", ".mimosa", ".pytest_cache",
+        "/XF", "*.pyc", "*.pyo",
+    ]
     if extra:
         cmd += extra
     r = subprocess.run(cmd, capture_output=True, text=True)
     # robocopy 返回码 < 8 都算成功（1=拷了文件，3=拷了文件+ Extra 等）
     return r.returncode
+
+
+def purge_pyc_cache(stage_python: Path) -> int:
+    """清除暂存区存量 pycache/pyc（robocopy 不带 /PURGE，历史存量需手动清）。"""
+    purged = 0
+    for p in stage_python.rglob("*"):
+        try:
+            if p.is_file() and p.suffix.lower() in {".pyc", ".pyo"}:
+                p.unlink()
+                purged += 1
+        except OSError:
+            continue
+    for d in list(stage_python.rglob("__pycache__")):
+        try:
+            if d.is_dir():
+                shutil.rmtree(d, ignore_errors=True)
+                purged += 1
+        except OSError:
+            continue
+    return purged
 
 
 def ensure_standalone_python(stage_python: Path) -> None:
@@ -123,14 +152,19 @@ def copy_venv_site_packages(stage_python: Path, manifest: dict) -> None:
     fp_now = dir_fingerprint(VENV_SP)
     if manifest.get("venv_sp") == fp_now and sp_dst.exists():
         log("site-packages 指纹未变，跳过大拷贝")
-        return
-    log(f"拷贝 site-packages → {sp_dst}（{fp_now['files']} 文件 / {fp_now['bytes'] / 1e6:.0f}MB）…")
-    t0 = time.time()
-    rc = robocopy(VENV_SP, sp_dst)
-    if rc >= 8:
-        raise RuntimeError(f"robocopy site-packages 失败 rc={rc}")
-    log(f"site-packages 拷贝完成（{time.time() - t0:.0f}s）")
-    manifest["venv_sp"] = fp_now
+    else:
+        log(f"拷贝 site-packages → {sp_dst}（{fp_now['files']} 文件 / {fp_now['bytes'] / 1e6:.0f}MB）…")
+        t0 = time.time()
+        rc = robocopy(VENV_SP, sp_dst)
+        if rc >= 8:
+            raise RuntimeError(f"robocopy site-packages 失败 rc={rc}")
+        log(f"site-packages 拷贝完成（{time.time() - t0:.0f}s）")
+        manifest["venv_sp"] = fp_now
+    # 指纹含 pyc：venv 侧任何开发/测试活动都会改指纹触发重拷，但拷贝侧已排除
+    # pyc/pycache；历史存量（robocopy 无 /PURGE）在此统一清除。
+    n = purge_pyc_cache(sp_dst)
+    if n:
+        log(f"清除暂存 pycache/pyc 存量 {n} 项（NSIS 2GB 红线）")
 
 
 EXCLUDE_DIR_NAMES = {"__pycache__", ".mimosa", ".pytest_cache"}
