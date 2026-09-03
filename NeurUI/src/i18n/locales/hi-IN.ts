@@ -2,6 +2,8 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    markAllRead: '全部标记已读',
+    markRead: '标记已读',
     clear: "साफ़ करें",
     confirm: 'पुष्टि करें',
     cancel: 'रद्द करें',
@@ -380,6 +382,16 @@ export default {
     viewTable: 'तालिका',
   },
   chat: {
+    retrievalUnified: '统一检索',
+    retrievalMoE: 'MoE 专家路由',
+    retrievalCache: '缓存检索',
+    retrievalFallback: '兜底检索',
+    retrievalStatus: '记忆检索中（{name}）…',
+    retrievalDone: '{name} 完成：命中 {count} 条 ({ms}ms)',
+    retrievalError: '{name} 检索异常，降级下一通道…',
+    retrievalExpert: 'MoE 专家路由：激活 {n} 个专家',
+    retrievalSemanticFallback: '全库语义兜底：命中 {count} 条',
+    retrievalExpertDone: '专家检索完成：{count} 条',
     searchInSession: 'सत्र में खोजें',
     searchMatches: '{n} मैच',
     title: 'चैट',
@@ -454,6 +466,16 @@ export default {
     queueEdit: 'कतार संदेश संपादित करें',
   },
   memory: {
+    categoryEpisodic: '情景记忆',
+    categorySemantic: '语义记忆',
+    hot: '🔥 热点',
+    crystallized: '💎 结晶',
+    shortTerm: '短期记忆',
+    jsonData: 'JSON 数据',
+    mergeMode: '合并模式',
+    mergeSkip: '跳过',
+    mergeOverwrite: '覆盖',
+    mergeMerge: '合并',
     title: 'मेमोरी प्रबंधन',
     search: 'मेमोरी खोजें',
     create: 'मेमोरी बनाएं',
@@ -866,6 +888,7 @@ export default {
     parameters: 'पैरामीटर (JSON)',
   },
   channel: {
+    disconnected: '已断开',
     title: 'चैनल प्रबंधन',
     create: 'चैनल बनाएं',
     test: 'कनेक्शन परीक्षण',
@@ -921,6 +944,9 @@ export default {
     onebot: 'OneBot',
   },
   collab: {
+    webhooks: 'Webhook 集成',
+    sessionsync: '会话同步',
+    neuron: 'NEURON 图谱',
     title: 'सहयोग प्रबंधन',
     hubSubtitle: 'सहयोग के लिए एकीकृत प्रवेश: सत्र, वर्कफ़्लो, कैनवास, परियोजनाएँ, टीमें',
     templates: 'सहयोग टेम्पलेट',
@@ -1311,6 +1337,9 @@ export default {
     source: 'स्रोत',
   },
   health: {
+    response: '响应: ',
+    systemIssues: '检测到系统问题',
+    checksSummary: '{checks} 项检查 · {healthy} 项健康 · {issues} 项问题',
     title: 'स्वास्थ्य जांच',
     report: 'रिपोर्ट',
     allOperational: 'सभी सिस्टम सामान्य रूप से चल रहे हैं',
@@ -1781,6 +1810,11 @@ export default {
     keyTakeaways: 'मुख्य निष्कर्ष...',
   },
   experience: {
+    taskType: '任务类型',
+    outcomeSuccess: '成功',
+    outcomeFailure: '失败',
+    outcomePartial: '部分成功',
+    addLessons: '添加经验教训',
     title: 'अनुभव ज्ञान',
     successRate: 'सफलता दर',
     findSimilar: 'समान खोजें',
@@ -2165,6 +2199,14 @@ export default {
     resumeFailed: 'जारी रखने में विफल',
   },
   canvas: {
+    aiDesign: 'AI 画布设计',
+    workflowIdLabel: '目标工作流 ID',
+    inputMappingLabel: '入参映射（JSON）',
+    designFailed: '设计失败，请尝试换一种描述',
+    generateSuccess: '已生成 {nodes} 个节点、{edges} 条连线（{name}），已应用到画布，可保存后执行。',
+    generateFailed: '生成失败: {error}',
+    nodeConfigError: '节点配置异常，已停止执行',
+    unknownError: '未知错误',
     subflowNode: 'सबफ़्लो',
     runBlocked: 'वर्कफ़्लो निष्पादन अवरुद्ध',
     runFailed: 'निष्पादन विफल',
@@ -2517,3 +2559,4 @@ export default {
     optObjectiveAddCart: 'कार्ट में जोड़ें',
   },
 }
+

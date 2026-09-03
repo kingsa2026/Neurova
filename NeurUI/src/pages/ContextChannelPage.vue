@@ -58,22 +58,40 @@ interface ChannelSharing {
 const channelSharings = ref<ChannelSharing[]>([])
 const loading = ref(false)
 const testingId = ref<string | null>(null)
+const sharingEnabled = ref(false)
 
 async function fetchSharings() {
   loading.value = true
   try {
-    const res = await request.get('/channel-sharing') as unknown as ChannelSharing[]
-    channelSharings.value = res ?? []
+    // 契约：GET /channel-sharing 返回配置信封 {code, data:{config}}；
+    // 逐渠道列表在 GET /channel-sharing/available-channels 的 data.channels
+    // （{type, label, description, is_shared}）。此前按数组解析该信封，
+    // v-for 遍历对象导致卡片标题全空（无渠道名）。
+    const [cfgRes, availRes] = await Promise.all([
+      request.get('/channel-sharing') as Promise<unknown>,
+      request.get('/channel-sharing/available-channels') as Promise<unknown>,
+    ])
+    sharingEnabled.value = !!((cfgRes as { data?: { config?: { enabled?: boolean } } })?.data?.config?.enabled)
+    const channels =
+      (availRes as { data?: { channels?: Array<{ type: string; label: string; is_shared: boolean }> } })?.data
+        ?.channels ?? []
+    channelSharings.value = channels.map((c) => ({
+      channelId: c.type,
+      channelName: c.label,
+      type: c.type,
+      sharingEnabled: c.is_shared,
+    }))
   } catch { channelSharings.value = [] } finally { loading.value = false }
 }
 
 async function handleToggle(channelId: string, enabled: boolean) {
   try {
-    if (enabled) {
-      await request.post('/channel-sharing/enable', { channelId })
-    } else {
-      await request.post('/channel-sharing/disable', { channelId })
-    }
+    // 逐渠道开关 = 维护 shared_channels 集合：其余已共享渠道 + 本渠道
+    const others = channelSharings.value
+      .filter((c) => c.channelId !== channelId && c.sharingEnabled)
+      .map((c) => c.channelId)
+    const next = [...others, ...(enabled ? [channelId] : [])]
+    await request.post('/channel-sharing/channels', { channels: next, shared_context: sharingEnabled.value })
     await fetchSharings()
   } catch { /* handled */ }
 }
@@ -81,7 +99,7 @@ async function handleToggle(channelId: string, enabled: boolean) {
 async function handleTest(channelId: string) {
   testingId.value = channelId
   try {
-    await request.post('/channel-sharing/test', { channelId })
+    await request.post('/channel-sharing/test', { channel: channelId })
   } catch { /* handled */ } finally { testingId.value = null }
 }
 

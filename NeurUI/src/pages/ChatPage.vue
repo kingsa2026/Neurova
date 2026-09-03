@@ -1640,26 +1640,26 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       const stage = event.stage || ''
       const retriever = event.retriever || ''
       const names: Record<string, string> = {
-        unified: '统一检索',
-        MoERetriever: 'MoE 专家路由',
-        CacheRetriever: '缓存检索',
-        FallbackRetriever: '兜底检索',
+        unified: t('chat.retrievalUnified'),
+        MoERetriever: t('chat.retrievalMoE'),
+        CacheRetriever: t('chat.retrievalCache'),
+        FallbackRetriever: t('chat.retrievalFallback'),
       }
       const rName = names[retriever] || retriever
       if (stage === 'retriever_start') {
-        retrievalStatus.value = `记忆检索中（${rName}）…`
+        retrievalStatus.value = t('chat.retrievalStatus', { name: rName })
       } else if (stage === 'retriever_done') {
-        retrievalStatus.value = `${rName} 完成：命中 ${event.count ?? 0} 条 (${event.ms ?? 0}ms)`
+        retrievalStatus.value = t('chat.retrievalDone', { name: rName, count: event.count ?? 0, ms: event.ms ?? 0 })
       } else if (stage === 'retriever_error' || stage === 'retriever_timeout') {
-        retrievalStatus.value = `${rName} 检索异常，降级下一通道…`
+        retrievalStatus.value = t('chat.retrievalError', { name: rName })
       } else if (stage === 'moe_gate') {
-        retrievalStatus.value = `MoE 专家路由：激活 ${(event.experts || []).length} 个专家`
+        retrievalStatus.value = t('chat.retrievalExpert', { n: (event.experts || []).length })
       } else if (stage === 'moe_expert') {
-        retrievalStatus.value = `专家下钻 ${event.expert || ''}：${event.count ?? 0} 条`
+        retrievalStatus.value = `${event.expert || ''}：${event.count ?? 0}`
       } else if (stage === 'moe_done') {
         retrievalStatus.value = event.fallback
-          ? `全库语义兜底：命中 ${event.count ?? 0} 条`
-          : `专家检索完成：${event.count ?? 0} 条`
+          ? t('chat.retrievalSemanticFallback', { count: event.count ?? 0 })
+          : t('chat.retrievalExpertDone', { count: event.count ?? 0 })
       }
       break
     }

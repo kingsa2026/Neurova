@@ -27,7 +27,7 @@ const i18n = createI18n({
   legacy: false,
   locale: 'en-US',
   fallbackLocale: 'en-US',
-  messages: { 'en-US': { system: { health: 'Health' }, common: { refresh: 'Refresh', error: 'Error', success: 'Success', noData: 'No data' }, health: { report: 'Report', reportTitle: 'Report' } } },
+  messages: { 'en-US': { system: { health: 'Health' }, common: { refresh: 'Refresh', error: 'Error', success: 'Success', noData: 'No data' }, health: { report: 'Report', reportTitle: 'Report', allOperational: 'All Systems Operational', someDegraded: 'Some Systems Degraded', systemIssues: 'System Issues Detected', checksSummary: '{checks} checks · {healthy} healthy · {issues} issues', lastChecked: 'Last checked: ', response: 'Response: ', recover: 'Recover' } } },
   globalInjection: true,
 })
 

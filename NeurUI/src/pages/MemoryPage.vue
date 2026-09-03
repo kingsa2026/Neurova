@@ -89,18 +89,10 @@
         <a-tab-pane key="all" :tab="t('common.all')" />
         <a-tab-pane key="short_term" :tab="t('memory.workingMemory')" />
         <a-tab-pane key="long_term" :tab="t('memory.longTerm')" />
-        <a-tab-pane key="episodic">
-          <template #tab><span>Episodic</span></template>
-        </a-tab-pane>
-        <a-tab-pane key="semantic">
-          <template #tab><span>Semantic</span></template>
-        </a-tab-pane>
-        <a-tab-pane key="hot">
-          <template #tab><span>🔥 Hot</span></template>
-        </a-tab-pane>
-        <a-tab-pane key="crystallized">
-          <template #tab><span>💎 Crystallized</span></template>
-        </a-tab-pane>
+        <a-tab-pane key="episodic" :tab="t('memory.categoryEpisodic')" />
+        <a-tab-pane key="semantic" :tab="t('memory.categorySemantic')" />
+        <a-tab-pane key="hot" :tab="t('memory.hot')" />
+        <a-tab-pane key="crystallized" :tab="t('memory.crystallized')" />
       </a-tabs>
 
       <div class="toolbar">
@@ -121,7 +113,7 @@
           <a-select-option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</a-select-option>
         </a-select>
         <a-checkbox v-model:checked="semanticSearch" class="semantic-toggle">
-          {{ t('memory.semanticSearch') || 'Semantic Search' }}
+          {{ t('memory.semanticSearch') }}
         </a-checkbox>
         <a-button class="md-edit-btn" @click="openMarkdownEditor">
           {{ t('ui.mdViewEditShort') }}
@@ -244,10 +236,10 @@
           <a-col :span="12">
             <a-form-item :label="t('common.type')">
               <a-select v-model:value="createForm.type" style="width: 100%">
-                <a-select-option value="short_term">Short Term</a-select-option>
-                <a-select-option value="long_term">Long Term</a-select-option>
-                <a-select-option value="episodic">Episodic</a-select-option>
-                <a-select-option value="semantic">Semantic</a-select-option>
+                <a-select-option value="short_term">{{ t('memory.shortTerm') }}</a-select-option>
+                <a-select-option value="long_term">{{ t('memory.longTerm') }}</a-select-option>
+                <a-select-option value="episodic">{{ t('memory.categoryEpisodic') }}</a-select-option>
+                <a-select-option value="semantic">{{ t('memory.categorySemantic') }}</a-select-option>
               </a-select>
             </a-form-item>
           </a-col>
@@ -324,18 +316,18 @@
       @ok="handleImport"
     >
       <a-form layout="vertical">
-        <a-form-item label="JSON Data">
+        <a-form-item :label="t('memory.jsonData')">
           <a-textarea v-model:value="importJson" :rows="8" placeholder='[{"content": "...", "type": "long_term"}]' />
         </a-form-item>
-        <a-form-item label="Merge Mode">
+        <a-form-item :label="t('memory.mergeMode')">
           <a-radio-group v-model:value="importMergeMode">
-            <a-radio-button value="skip">Skip</a-radio-button>
-            <a-radio-button value="overwrite">Overwrite</a-radio-button>
-            <a-radio-button value="merge">Merge</a-radio-button>
+            <a-radio-button value="skip">{{ t('memory.mergeSkip') }}</a-radio-button>
+            <a-radio-button value="overwrite">{{ t('memory.mergeOverwrite') }}</a-radio-button>
+            <a-radio-button value="merge">{{ t('memory.mergeMerge') }}</a-radio-button>
           </a-radio-group>
         </a-form-item>
         <a-upload :before-upload="onImportFile" :show-upload-list="false" accept=".json">
-          <GlassButton variant="ghost" size="sm">{{ t('memory.importMem') }} (File)</GlassButton>
+          <GlassButton variant="ghost" size="sm">{{ t('memory.importMem') }}</GlassButton>
         </a-upload>
       </a-form>
     </a-modal>

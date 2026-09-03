@@ -58,7 +58,7 @@ import { reviewKnowledgePublic } from '@/api/modules/knowledge'
 import { reviewSkillSubmission } from '@/api/modules/skill-pool'
 
 const messages = {
-  common: { all: 'All', refresh: '刷新', confirm: '确认', delete: '删除', noData: '暂无数据', success: '成功', error: '失败' },
+  common: { all: 'All', refresh: '刷新', confirm: '确认', delete: '删除', noData: '暂无数据', success: '成功', error: '失败', markAllRead: '全部标记已读', markRead: '标记已读' },
   system: { notifications: '通知中心' },
   knowledge: { reviewApprove: '通过', reviewReject: '拒绝' },
   notification: {
@@ -156,7 +156,7 @@ describe('NotificationPage 契约', () => {
   it('markRead 走 POST 契约', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    const readBtn = wrapper.findAll('button').find((b) => b.text().includes('Mark Read'))
+    const readBtn = wrapper.findAll('button').find((b) => b.text().trim() === '标记已读')
     await readBtn!.trigger('click')
     await flushPromises()
     expect(notifApi.markRead).toHaveBeenCalledWith('n-1')
@@ -165,7 +165,7 @@ describe('NotificationPage 契约', () => {
   it('markAllRead 走 POST /mark-all-read 契约', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    const btn = wrapper.findAll('button').find((b) => b.text().includes('All Read'))
+    const btn = wrapper.findAll('button').find((b) => b.text().trim() === '全部标记已读')
     await btn!.trigger('click')
     await flushPromises()
     expect(notifApi.markAllRead).toHaveBeenCalledTimes(1)

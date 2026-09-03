@@ -109,6 +109,7 @@ const getProgressColor = (pct: number) => {
 }
 
 const fetchAll = async () => {
+  if (!isAdmin.value) return
   loading.value = true
   try {
     const [resRes, connRes, alertRes]: any[] = await Promise.all([

@@ -797,7 +797,9 @@ function resolveStatus(data: any): Provider['status'] {
 function resolveStatusLabel(data: any): string {
   const status = resolveStatus(data)
   switch (status) {
-    case 'available': return t('model.statusAvailable')
+    // active/已启用的 provider 若无模型列表（models_count=0），
+    // 不应再显示「可用（有模型）」——与模型计数行保持语义一致
+    case 'available': return (data.models?.length || data.models_count) ? t('model.statusAvailable') : t('model.statusNotReady')
     case 'unavailable': return t('model.statusUnavailable')
     case 'not_ready': return data.models?.length ? t('model.statusNoModels') : t('model.statusNotReady')
     case 'not_configured': return t('model.statusNotReady')

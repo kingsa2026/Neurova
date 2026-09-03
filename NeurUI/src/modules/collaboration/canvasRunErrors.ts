@@ -5,6 +5,8 @@
  * collectFailedNodes：轮询 node_results → failed 节点列表。
  */
 
+import i18n from '@/i18n'
+
 export interface NodeConfigIssueView {
   label: string
   message: string
@@ -26,7 +28,7 @@ export function extractRunBlockDetail(err: any): RunBlockDetail | null {
   if (!detail || typeof detail !== 'object') return null
   if (detail.code !== 1 || !Array.isArray(detail.errors)) return null
   return {
-    message: String(detail.message ?? '节点配置异常，已停止执行'),
+    message: String(detail.message ?? i18n.global.t('canvas.nodeConfigError')),
     issues: detail.errors.map((e: any) => ({
       label: e.label ?? e.node_id ?? '',
       message: e.message ?? '',

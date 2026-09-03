@@ -1,14 +1,14 @@
 <template>
   <div class="nl-designer" :class="{ collapsed }">
     <!-- 收缩态：角落小按钮 -->
-    <button v-if="collapsed" class="nl-fab" @click="collapsed = false" title="AI 画布设计">
+    <button v-if="collapsed" class="nl-fab" @click="collapsed = false" :title="t('canvas.aiDesign')">
       💬
     </button>
 
     <!-- 展开态：对话面板 -->
     <div v-else class="nl-panel">
       <div class="nl-header">
-        <span class="nl-title">AI 画布设计</span>
+        <span class="nl-title">{{ t('canvas.aiDesign') }}</span>
         <span class="nl-min" @click="collapsed = true">—</span>
       </div>
       <!-- R-8: 指定 agent + 切换模型 -->
@@ -110,7 +110,7 @@ async function send() {
     const res: any = await canvasFromNl(prompt, agentId.value || 'default', modelId.value || undefined)
     const data = res?.data ?? res
     if (data?.status === 'failed' || !data?.nodes?.length) {
-      addMessage('agent', (data?.error as string) || '设计失败，请尝试换一种描述')
+      addMessage('agent', (data?.error as string) || t('canvas.designFailed'))
       return
     }
     emit('apply', {
@@ -121,10 +121,10 @@ async function send() {
     })
     addMessage(
       'agent',
-      `已生成 ${data.nodes.length} 个节点、${data.edges.length} 条连线（${data.name || '流程'}），已应用到画布，可保存后执行。`,
+      t('canvas.generateSuccess', { nodes: data.nodes.length, edges: data.edges.length, name: data.name || t('canvas.workflowNamePrefix') }),
     )
   } catch (err: any) {
-    addMessage('agent', `生成失败: ${err?.message || '未知错误'}`)
+    addMessage('agent', t('canvas.generateFailed', { error: err?.message || t('canvas.unknownError') }))
   } finally {
     loading.value = false
   }

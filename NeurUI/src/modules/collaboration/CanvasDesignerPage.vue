@@ -1106,8 +1106,8 @@ const paletteCategories = [
       { type: 'builtin:agent', label: t('canvas.c0062'), icon: '🧠', category: 'builtin', inputs: [{ id: 'task', label: t('canvas.c0063') }], outputs: [{ id: 'result', label: t('canvas.c0064') }], defaultConfig: {} },
       { type: 'builtin:condition', label: t('canvas.c0065'), icon: '❓', category: 'builtin', inputs: [{ id: 'in', label: t('canvas.c0066') }], outputs: [{ id: 'true', label: t('canvas.c0067') }, { id: 'false', label: t('canvas.c0068') }], defaultConfig: {} },
       { type: 'builtin:subflow', label: t('canvas.subflowNode'), icon: '🧩', category: 'builtin', inputs: [{ id: 'in', label: t('canvas.c0066') }], outputs: [{ id: 'output', label: t('canvas.c0053') }], defaultConfig: { workflow_id: '', input_mapping: '{}' }, subBlocks: [
-        { id: 'workflow_id', title: '目标工作流 ID', type: 'input' },
-        { id: 'input_mapping', title: '入参映射（JSON）', type: 'json' },
+        { id: 'workflow_id', title: t('canvas.workflowIdLabel'), type: 'input' },
+        { id: 'input_mapping', title: t('canvas.inputMappingLabel'), type: 'json' },
       ] as SubBlockDef[] },
     ] as PaletteNode[],
   },
@@ -2084,7 +2084,7 @@ function showNodeConfigIssues(opts: {
           ...failedList.map(f =>
             h('div', { class: 'node-issue-item' }, [
               h('strong', f.nodeId),
-              h('span', '：' + (f.error ?? '执行失败')),
+              h('span', '：' + (f.error ?? t('canvas.runFailed'))),
             ]),
           ),
         ],
