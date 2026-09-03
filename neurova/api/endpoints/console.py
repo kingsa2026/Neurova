@@ -534,7 +534,15 @@ async def post_console_chat(
             try:
                 live_events: typing.List[Dict[str, Any]] = []
                 while True:
-                    item = await queue.get()
+                    # 15s 无事件发 SSE 注释心跳（": ping"）：agent 工具执行/LLM
+                    # 慢响应期间流可能长时间无数据，代理/杀软/网络栈会掐空闲
+                    # 连接造成"对话中断"。SSE 规范里冒号开头是注释，前端解析
+                    # 器天然忽略，客户端收不到任何业务语义。
+                    try:
+                        item = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        yield ": ping\n\n"
+                        continue
                     if item is _EMIT_DONE:
                         break
                     for event in _sse_events_from_emitter_item(item, seen_calls, seen_results):
