@@ -416,10 +416,14 @@ FunctionEnd
 Page custom PageAdminAccount PageLeaveAdminAccount
 
 Function PageAdminAccount
-  ; 升级/重装场景（检测到既有安装注册表项）→ 不显示
+  ; 升级/重装场景（检测到既有安装注册表项）→ 不显示。
+  ; 双查 HKLM（perMachine 本版/历史）+ HKCU（早期 currentUser 旧版安装）：
+  ; 否则 currentUser→perMachine 升级会误判为全新安装、重复索要账号。
   ReadRegStr $R0 SHCTX "${UNINSTKEY}" ""
   ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
-  ${IfThen} "$R0$R1" != "" ${|} Abort ${|}
+  ReadRegStr $R2 HKCU "${UNINSTKEY}" ""
+  ReadRegStr $R3 HKCU "${UNINSTKEY}" "UninstallString"
+  ${IfThen} "$R0$R1$R2$R3" != "" ${|} Abort ${|}
   ${IfThen} $PassiveMode = 1 ${|} Abort ${|}
 
   !insertmacro MUI_HEADER_TEXT "$(adminPageTitle)" "$(adminPageSubtitle)"
