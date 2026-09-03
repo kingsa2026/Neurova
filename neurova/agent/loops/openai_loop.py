@@ -510,14 +510,21 @@ class OpenAILoop(BaseAgentLoop):
 
     @staticmethod
     def _raise_for_error_dict(chunk: Dict) -> Exception:
-        """把流式错误 dict 转成分类异常（error_type 优先，缺省保持 RuntimeError 语义）。"""
+        """把流式错误 dict 转成分类异常（error_type 优先，缺省按消息内容兜底分类）。
+
+        实测缺陷：商汤 404 "model route not found" 曾以裸 RuntimeError 抛出，
+        chat_pipeline 的供应商错误守卫认不出它 → 错误地 fallback 到 legacy
+        再撞同一个坏模型（429/200 抽签，用户表现为"回复时有时无"）。
+        """
         from neurova.llm_client import (
             LLMConnectionError,
             LLMAuthError,
+            LLMBadRequestError,
             LLMRateLimitError,
             TokenLimitExceeded,
         )
 
+        raw = str(chunk.get("error") or "")
         message = f"LLM 流式调用失败: {chunk.get('error')}"
         error_type = str(chunk.get("error_type") or "")
         mapping = {
@@ -527,6 +534,16 @@ class OpenAILoop(BaseAgentLoop):
             "connection": LLMConnectionError,
         }
         cls = mapping.get(error_type)
+        if cls is None:
+            # error_type 缺失时按 HTTP 语义兜底分类（供应商 404 模型不存在
+            # 属请求构造错误，重试/换 fallback 路径无意义）
+            low = raw.lower()
+            if "404" in low or "not found" in low or "not_found" in low:
+                cls = LLMBadRequestError
+            elif "429" in low or "rate limit" in low or "too many requests" in low:
+                cls = LLMRateLimitError
+            elif "401" in low or "403" in low or "unauthorized" in low or "forbidden" in low:
+                cls = LLMAuthError
         if cls is not None:
             return cls(message)
         return RuntimeError(message)

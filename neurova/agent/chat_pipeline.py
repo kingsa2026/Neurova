@@ -318,6 +318,16 @@ class ChatPipeline:
 
     async def execute(self, ctx: ChatContext) -> Dict[str, Any]:
         """执行完整的对话管线"""
+        # 身份注入：把请求级 user_id 写入 ContextVar（对齐 memory/tool 三层隔离
+        # 模式），深层模块（multi_model_client 的 usage_history 入账等）在同一
+        # 请求任务/线程上下文内直接读取，无需逐层透传。
+        try:
+            from neurova.core.identity_context import set_request_user_id
+
+            set_request_user_id((ctx.metadata or {}).get("user_id") or None)
+        except Exception:
+            pass
+
         self._init_agent_state(ctx)
 
         # Step 0: 记录活动 + 轨迹
@@ -388,8 +398,27 @@ class ChatPipeline:
                 metadata={"source": "chat_pipeline"},
             )
 
+            # 源侧净化：AGENT_REPLY 的 payload.metadata 来自 ctx.metadata，
+            # 其中 event_emitter 是 callable（蜂群流式透传）。函数对象入历史后，
+            # WS 连接回放历史时 to_json() 必然炸（"function is not JSON
+            # serializable"，每次连接固定一次）。此处剥离 callable；
+            # SessionEvent.to_dict 另有 _json_safe 边界兜底（双保险）。
+            safe_payload: Dict[str, Any] = {
+                k: v for k, v in payload.items() if not callable(v)
+            }
+            metadata = safe_payload.get("metadata")
+            if isinstance(metadata, dict):
+                safe_payload["metadata"] = {
+                    k: v for k, v in metadata.items() if not callable(v)
+                }
+
             # 创建事件
-            event = SessionEvent(event_type=event_type, session_id=session_id, source_channel="agent", payload=payload)
+            event = SessionEvent(
+                event_type=event_type,
+                session_id=session_id,
+                source_channel="agent",
+                payload=safe_payload,
+            )
 
             # 广播事件
             await sync_manager.broadcast_event(session_id, event)
@@ -1560,15 +1589,16 @@ class ChatPipeline:
         """流式 fallback
 
         chat_stream 产出 LLMResponse 对象（与 _predict_stream 同契约）：
-        content 字段进入回复并向 emitter 转发；错误 dict 以原始信息抛
-        RuntimeError——不得把对象当字符串 join 掩盖真实 LLM 错误。
+        content 字段进入回复并向 emitter 转发；错误 dict 按语义分类后抛
+        LLMError（供应商错误守卫可识别，不再裸 RuntimeError）——不得把
+        对象当字符串 join 掩盖真实 LLM 错误。
         """
         reply_parts = []
         emitter = ctx.event_emitter
         async for chunk in self.llm_client.chat_stream(ctx.context):
             if isinstance(chunk, dict):
                 if chunk.get("error"):
-                    raise RuntimeError(f"LLM 流式调用失败: {chunk['error']}")
+                    raise self._raise_for_llm_error_dict(chunk)
                 continue
             content = getattr(chunk, "content", "") or ""
             if content:
@@ -1579,6 +1609,30 @@ class ChatPipeline:
                     except Exception as e:  # noqa: BLE001 - 转发失败不影响主流程
                         logger.debug("legacy 流式 emitter 转发失败: %s", e)
         return "".join(reply_parts)
+
+    @staticmethod
+    def _raise_for_llm_error_dict(chunk: Dict) -> Exception:
+        """错误 dict → 分类异常（供应商错误守卫据此不再 fallback 重撞坏模型）。"""
+        from neurova.llm_client import (
+            LLMAuthError,
+            LLMBadRequestError,
+            LLMConnectionError,
+            LLMError,
+            LLMRateLimitError,
+        )
+
+        raw = str(chunk.get("error") or "")
+        message = f"LLM 流式调用失败: {chunk.get('error')}"
+        low = raw.lower()
+        if "404" in low or "not found" in low or "not_found" in low:
+            return LLMBadRequestError(message)
+        if "429" in low or "rate limit" in low or "too many requests" in low or "限流" in raw:
+            return LLMRateLimitError(message)
+        if "401" in low or "403" in low or "unauthorized" in low or "forbidden" in low:
+            return LLMAuthError(message)
+        if "connect" in low or "timeout" in low or "connection" in low:
+            return LLMConnectionError(message)
+        return LLMError(message)
 
     @staticmethod
     def _is_api_config_error(exc: Exception) -> bool:
