@@ -1,0 +1,163 @@
+{
+  "version": 1,
+  "saved_at": "2026-06-06T15:02:31.252410+00:00",
+  "records": {
+    "mem_61c213ec3fa84af8a5742b4b893e0428": {
+      "id": "mem_61c213ec3fa84af8a5742b4b893e0428",
+      "content": "测试记忆",
+      "memory_type": "semantic",
+      "owner": "default",
+      "tags": [],
+      "metadata": {},
+      "importance": 0.0,
+      "access_count": 0,
+      "created_at": "2026-06-06T15:02:24.527564+00:00",
+      "updated_at": "2026-06-06T15:02:24.527564+00:00",
+      "agent_id": "agent_1",
+      "neuser_id": "default",
+      "user_id": "user_1"
+    },
+    "mem_fd78def8e1234cb683f27fc5dab19006": {
+      "id": "mem_fd78def8e1234cb683f27fc5dab19006",
+      "content": "用户1的记忆",
+      "memory_type": "semantic",
+      "owner": "default",
+      "tags": [],
+      "metadata": {},
+      "importance": 0.0,
+      "access_count": 0,
+      "created_at": "2026-06-06T15:02:24.535009+00:00",
+      "updated_at": "2026-06-06T15:02:24.535009+00:00",
+      "agent_id": "agent_1",
+      "neuser_id": "default",
+      "user_id": "user_1"
+    },
+    "mem_2b942052120d4d20a7245c2aaebe581f": {
+      "id": "mem_2b942052120d4d20a7245c2aaebe581f",
+      "content": "用户2的记忆",
+      "memory_type": "semantic",
+      "owner": "default",
+      "tags": [],
+      "metadata": {},
+      "importance": 0.0,
+      "access_count": 0,
+      "created_at": "2026-06-06T15:02:24.535610+00:00",
+      "updated_at": "2026-06-06T15:02:24.535610+00:00",
+      "agent_id": "agent_1",
+      "neuser_id": "default",
+      "user_id": "user_2"
+    },
+    "mem_fc486a803e424ae69b0bd965d290fdc4": {
+      "id": "mem_fc486a803e424ae69b0bd965d290fdc4",
+      "content": "测试记忆",
+      "memory_type": "semantic",
+      "owner": "default",
+      "tags": [],
+      "metadata": {},
+      "importance": 0.0,
+      "access_count": 0,
+      "created_at": "2026-06-06T15:02:31.215420+00:00",
+      "updated_at": "2026-06-06T15:02:31.215420+00:00",
+      "agent_id": "agent_1",
+      "neuser_id": "default",
+      "user_id": "user_1"
+    },
+    "mem_bc5b6039ab584b838d47cea1e888a122": {
+      "id": "mem_bc5b6039ab584b838d47cea1e888a122",
+      "content": "用户1的记忆",
+      "memory_type": "semantic",
+      "owner": "default",
+      "tags": [],
+      "metadata": {},
+      "importance": 0.0,
+      "access_count": 0,
+      "created_at": "2026-06-06T15:02:31.251700+00:00",
+      "updated_at": "2026-06-06T15:02:31.251700+00:00",
+      "agent_id": "agent_1",
+      "neuser_id": "default",
+      "user_id": "user_1"
+    },
+    "mem_d3d22d7dbbcb495a98104bd646de749b": {
+      "id": "mem_d3d22d7dbbcb495a98104bd646de749b",
+      "content": "用户2的记忆",
+      "memory_type": "semantic",
+      "owner": "default",
+      "tags": [],
+      "metadata": {},
+      "importance": 0.0,
+      "access_count": 0,
+      "created_at": "2026-06-06T15:02:31.252359+00:00",
+      "updated_at": "2026-06-06T15:02:31.252359+00:00",
+      "agent_id": "agent_1",
+      "neuser_id": "default",
+      "user_id": "user_2"
+    }
+  },
+  "index": {
+    "by_type": {
+      "semantic": [
+        "mem_61c213ec3fa84af8a5742b4b893e0428",
+        "mem_fd78def8e1234cb683f27fc5dab19006",
+        "mem_2b942052120d4d20a7245c2aaebe581f",
+        "mem_fc486a803e424ae69b0bd965d290fdc4",
+        "mem_bc5b6039ab584b838d47cea1e888a122",
+        "mem_d3d22d7dbbcb495a98104bd646de749b"
+      ]
+    },
+    "by_owner": {
+      "default": [
+        "mem_61c213ec3fa84af8a5742b4b893e0428",
+        "mem_fd78def8e1234cb683f27fc5dab19006",
+        "mem_2b942052120d4d20a7245c2aaebe581f",
+        "mem_fc486a803e424ae69b0bd965d290fdc4",
+        "mem_bc5b6039ab584b838d47cea1e888a122",
+        "mem_d3d22d7dbbcb495a98104bd646de749b"
+      ]
+    },
+    "by_tag": {},
+    "by_agent": {
+      "agent_1": [
+        "mem_61c213ec3fa84af8a5742b4b893e0428",
+        "mem_fd78def8e1234cb683f27fc5dab19006",
+        "mem_2b942052120d4d20a7245c2aaebe581f",
+        "mem_fc486a803e424ae69b0bd965d290fdc4",
+        "mem_bc5b6039ab584b838d47cea1e888a122",
+        "mem_d3d22d7dbbcb495a98104bd646de749b"
+      ]
+    },
+    "by_neuser": {
+      "default": [
+        "mem_61c213ec3fa84af8a5742b4b893e0428",
+        "mem_fd78def8e1234cb683f27fc5dab19006",
+        "mem_2b942052120d4d20a7245c2aaebe581f",
+        "mem_fc486a803e424ae69b0bd965d290fdc4",
+        "mem_bc5b6039ab584b838d47cea1e888a122",
+        "mem_d3d22d7dbbcb495a98104bd646de749b"
+      ]
+    },
+    "by_user": {
+      "user_1": [
+        "mem_61c213ec3fa84af8a5742b4b893e0428",
+        "mem_fd78def8e1234cb683f27fc5dab19006",
+        "mem_fc486a803e424ae69b0bd965d290fdc4",
+        "mem_bc5b6039ab584b838d47cea1e888a122"
+      ],
+      "user_2": [
+        "mem_2b942052120d4d20a7245c2aaebe581f",
+        "mem_d3d22d7dbbcb495a98104bd646de749b"
+      ]
+    },
+    "by_isolation_key": {
+      "agent_1:default:user_1": [
+        "mem_61c213ec3fa84af8a5742b4b893e0428",
+        "mem_fd78def8e1234cb683f27fc5dab19006",
+        "mem_fc486a803e424ae69b0bd965d290fdc4",
+        "mem_bc5b6039ab584b838d47cea1e888a122"
+      ],
+      "agent_1:default:user_2": [
+        "mem_2b942052120d4d20a7245c2aaebe581f",
+        "mem_d3d22d7dbbcb495a98104bd646de749b"
+      ]
+    }
+  }
+}
