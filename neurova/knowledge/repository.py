@@ -36,6 +36,38 @@ _SUBMISSION_APPROVED = "approved"
 _SUBMISSION_REJECTED = "rejected"
 
 
+def _chunk_hit(item: Dict[str, Any], chunk_index: int, score: float) -> Dict[str, Any]:
+    """按块序号取块命中明细（content 实时从 content 切片，不存正文副本）。"""
+    chunks = item.get("chunks") or []
+    if 0 <= chunk_index < len(chunks):
+        ch = chunks[chunk_index]
+        content = ch.get("content", "")
+        if not content and item.get("content"):
+            content = item["content"][ch.get("char_start", 0) : ch.get("char_end", 0)]
+    else:
+        content = ""
+    return {"chunk_index": chunk_index, "content": content, "score": score}
+
+
+def _substring_chunk_hits(item: Dict[str, Any], q_lower: str) -> List[Dict[str, Any]]:
+    """substring 兜底的块定位：返回首个包含查询词的块（整篇模式返回 []）。"""
+    if not q_lower:
+        return []
+    for ch in item.get("chunks") or []:
+        content = ch.get("content", "")
+        if not content and item.get("content"):
+            content = item["content"][ch.get("char_start", 0) : ch.get("char_end", 0)]
+        if q_lower in content.lower():
+            return [
+                {
+                    "chunk_index": ch.get("index", 0),
+                    "content": content,
+                    "score": 0.0,
+                }
+            ]
+    return []
+
+
 class KnowledgeRepository:
     """按 agent_id 分组的 JSON 知识条目仓库。"""
 
@@ -88,16 +120,33 @@ class KnowledgeRepository:
         return self._indexes[key]
 
     def _rebuild_indexes(self, agent_id: str) -> None:
-        """重建全部相关分片（懒重建，按脏标记触发）。仅在 dirty 时全量；否则增量由各分片维护。"""
-        # 收集当前 agent 的条目 → 分组到分片
+        """重建全部相关分片（懒重建，按脏标记触发）。仅在 dirty 时全量；否则增量由各分片维护。
+
+        P0-2 分块：索引粒度从"条目"降为"块"——
+        - 存量条目无 chunks 字段 → 就地惰性分块（split_with_meta 回写，一次性成本）
+        - doc id = f"{knowledge_id}#{chunk_index}"，content = 标题 + 块正文
+          （标题进块正文提升命中率，同 Dify chunk 策略）
+        """
         items = self._items.get(agent_id, [])
         grouped: Dict[str, List[Dict[str, Any]]] = {}
+        migrated = False
         for it in items:
+            # 惰性分块迁移：整篇模式条目补 chunks（幂等）
+            if it.get("chunks") is None and it.get("content"):
+                try:
+                    from neurova.knowledge.splitter import split_with_meta
+
+                    it["chunks"] = split_with_meta(it["content"])
+                    migrated = True
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("知识条目分块失败（按整篇索引）: %s", e)
             scope = self._get_shard_scope(it)
             if scope == "private":
                 grouped.setdefault(f"user:{it.get('owner_user_id', 'default')}", []).append(it)
             else:
                 grouped.setdefault(scope, []).append(it)
+        if migrated:
+            self._save()
 
         # 重建全部分片（每个分片小、non-incremental 重建成本可控）
         for key, shard_items in grouped.items():
@@ -105,10 +154,23 @@ class KnowledgeRepository:
             store = self._get_vector_store_by_shard_key(key)
             if store is None:
                 continue
-            docs = [
-                {"id": it.get("knowledge_id"), "content": f"{it.get('title', '')} {it.get('content', '')}"}
-                for it in shard_items if it.get("knowledge_id")
-            ]
+            docs: List[Dict[str, Any]] = []
+            for it in shard_items:
+                kid = it.get("knowledge_id")
+                if not kid:
+                    continue
+                title = it.get("title", "")
+                chunks = it.get("chunks")
+                if chunks:
+                    for ch in chunks:
+                        docs.append(
+                            {
+                                "id": f"{kid}#{ch.get('index', 0)}",
+                                "content": f"{title}\n{ch.get('content', '')}",
+                            }
+                        )
+                else:
+                    docs.append({"id": kid, "content": f"{title} {it.get('content', '')}"})
             try:
                 if docs:
                     store.index_memories(docs, incremental=False)
@@ -185,6 +247,7 @@ class KnowledgeRepository:
         knowledge_id: Optional[str] = None,
         visibility: str = VISIBILITY_PRIVATE,
         owner_user_id: str = "",
+        chunks: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
         item: Dict[str, Any] = {
@@ -202,6 +265,8 @@ class KnowledgeRepository:
             "shared_with": [],
             "graph_node_ids": [],
             "submission": None,
+            # P0-2 分块（[{content, index, char_start, char_end}]）；None=整篇模式
+            "chunks": chunks,
         }
         with self._lock:
             self._items.setdefault(agent_id, []).append(item)
@@ -475,12 +540,14 @@ class KnowledgeRepository:
         if idx_results is not None:
             return idx_results
 
-        # Substring 兜底（索引不可用）
+        # Substring 兜底（索引不可用）——命中块定位到首个含查询词的块
         results: List[Dict[str, Any]] = []
         for item in visible:
             if q and q not in (item.get("title") or "").lower() and q not in (item.get("content") or "").lower():
                 continue
-            results.append(item)
+            merged = dict(item)
+            merged["chunk_hits"] = _substring_chunk_hits(item, q)
+            results.append(merged)
             if len(results) >= limit:
                 break
         return results
@@ -516,9 +583,10 @@ class KnowledgeRepository:
         if not shard_scopes:
             return None
 
-        # 回映可见条目（按 knowledge_id 匹配，隔离兜底）
+        # 回映可见条目（按 knowledge_id 匹配，隔离兜底）；块级命中聚为 chunk_hits
         visible_by_id = {it.get("knowledge_id"): it for it in visible if it.get("knowledge_id")}
         results: List[Dict[str, Any]] = []
+        hits_by_kid: Dict[str, List[Dict[str, Any]]] = {}
         seen_id = set()
 
         for store in shard_scopes:
@@ -529,18 +597,28 @@ class KnowledgeRepository:
                 continue
             for hit in raw:
                 hid = hit.get("id") or hit.get("memory_id") or ""
-                if hid in seen_id:
-                    continue
-                item = visible_by_id.get(hid)
+                kid, _, chunk_idx = hid.partition("#")
+                item = visible_by_id.get(kid)
                 if item is None:
                     continue
+                score = float(hit.get("score", 0.0))
+                if chunk_idx:
+                    hits_by_kid.setdefault(kid, []).append(
+                        _chunk_hit(item, int(chunk_idx), score)
+                    )
+                if kid in seen_id:
+                    continue
                 merged = dict(item)
-                merged["score"] = float(hit.get("score", 0.0))
+                merged["score"] = score
                 results.append(merged)
-                seen_id.add(hid)
+                seen_id.add(kid)
 
-        # 按 score 降序，取 top-limit
+        # 按 score 降序，取 top-limit；附块级命中明细（按块得分降序）
         results.sort(key=lambda r: r.get("score", 0.0), reverse=True)
+        for r in results:
+            hits = hits_by_kid.get(r.get("knowledge_id", ""), [])
+            hits.sort(key=lambda h: h.get("score", 0.0), reverse=True)
+            r["chunk_hits"] = hits
         return results[:limit]
 
     def update_knowledge(self, agent_id: str, knowledge_id: str, fields: Dict[str, Any]) -> bool:

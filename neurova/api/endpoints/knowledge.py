@@ -50,6 +50,9 @@ class KnowledgeItem(BaseModel):
     shared_with: List[str] = []
     submission: Optional[Dict[str, Any]] = None
     graph_node_ids: List[str] = []
+    # P0-2 分块契约：块数 + 检索命中的块级溯源（[{chunk_index, content, score}]）
+    chunk_count: int = 1
+    chunk_hits: List[Dict[str, Any]] = []
 
 
 class KnowledgeCreate(BaseModel):
@@ -140,6 +143,8 @@ def _item_response(item: Dict[str, Any]) -> KnowledgeItem:
         shared_with=item.get("shared_with") or [],
         submission=item.get("submission"),
         graph_node_ids=item.get("graph_node_ids") or [],
+        chunk_count=len(item.get("chunks") or []) or 1,
+        chunk_hits=item.get("chunk_hits") or [],
     )
 
 
@@ -618,7 +623,11 @@ async def delete_knowledge(
 # ══════════════════════════════════════════════════════════════
 
 def _build_item_dict(item: Dict[str, Any]) -> Dict[str, Any]:
-    return dict(item)
+    """导入响应投影：剔 chunks 正文冗余（块已含于 content），附 chunk_count。"""
+    item = dict(item)
+    chunks = item.pop("chunks", None) or []
+    item["chunk_count"] = len(chunks) or 1
+    return item
 
 
 def _default_llm_call(request: Request):
@@ -684,6 +693,7 @@ def _import_file_data(
     data: bytes, filename: str, agent_id: str, user: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
     from neurova.attachment_parser import extract_attachment_text
+    from neurova.knowledge.splitter import split_with_meta
 
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     file_type = _guess_type(ext)
@@ -694,6 +704,7 @@ def _import_file_data(
 
     repo = _get_repository()
     title = _title_from_filename(filename)
+    # P0-2 分块：摄取即分块（段落→句→硬切降级），检索命中可溯源到块
     item = repo.create_knowledge(
         agent_id=agent_id,
         title=title,
@@ -704,6 +715,7 @@ def _import_file_data(
         confidence=0.7,
         visibility="private",
         owner_user_id=str((user or {}).get("user_id", "") or "default"),
+        chunks=split_with_meta(text),
     )
     return [_build_item_dict(item)]
 
