@@ -133,7 +133,31 @@ def copy_venv_site_packages(stage_python: Path, manifest: dict) -> None:
     manifest["venv_sp"] = fp_now
 
 
-def copy_tree_light(src: Path, dst: Path, manifest: dict, key: str) -> None:
+EXCLUDE_DIR_NAMES = {"__pycache__", ".mimosa", ".pytest_cache"}
+
+# 打包体积红线：NSIS 对单文件 mmap 有 ~2GB 限制，安装包体积也应克制。
+# 排除原始权重 blob（.data，如 moss-nano TTS ~640MB）；embedding（bge，检索核心）
+# 等普通模型保留。缺权重的引擎由应用自行降级或首启按需下载。
+EXCLUDE_MODEL_SUFFIXES = {".data"}
+MAX_MODEL_FILE_BYTES = 512 * 1024 * 1024
+
+
+def _ignore_model_weights(directory: str, entries: list[str]) -> list[str]:
+    """shutil.copytree 的 ignore 回调（shutil 会逐子目录调用）。"""
+    ignored = list(EXCLUDE_DIR_NAMES)
+    for entry in entries:
+        p = Path(directory) / entry
+        try:
+            if p.is_file() and (
+                p.suffix.lower() in EXCLUDE_MODEL_SUFFIXES or p.stat().st_size > MAX_MODEL_FILE_BYTES
+            ):
+                ignored.append(entry)
+        except OSError:
+            continue
+    return ignored
+
+
+def copy_tree_light(src: Path, dst: Path, manifest: dict, key: str, skip_heavy: bool = False) -> None:
     """小目录/文件快速同步：先粗校验（文件数+大小），不一致才重拷。"""
     fp = dir_fingerprint(src) if src.is_dir() else {"files": 0, "bytes": src.stat().st_size if src.exists() else 0}
     if manifest.get(key) == fp and (dst.exists() if src.is_dir() else dst.exists()):
@@ -143,7 +167,10 @@ def copy_tree_light(src: Path, dst: Path, manifest: dict, key: str) -> None:
         shutil.rmtree(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
-        shutil.copytree(src, dst, ignore=shutil.ignore_patterns(*EXCLUDE_DIR_NAMES))
+        ignore = _ignore_model_weights if skip_heavy else (
+            lambda directory, entries: list(EXCLUDE_DIR_NAMES)
+        )
+        shutil.copytree(src, dst, ignore=ignore)
     else:
         shutil.copy2(src, dst)
     manifest[key] = fp
@@ -176,7 +203,7 @@ def main() -> int:
     copy_venv_site_packages(stage_python, manifest)
 
     copy_tree_light(REPO / "neurova", STAGE / "neurova", manifest, "neurova")
-    copy_tree_light(REPO / "models", STAGE / "models", manifest, "models")
+    copy_tree_light(REPO / "models", STAGE / "models", manifest, "models", skip_heavy=True)
     copy_tree_light(REPO / "config", STAGE / "config", manifest, "config")
     copy_tree_light(REPO / "start_server.py", STAGE / "start_server.py", manifest, "start_server")
 
