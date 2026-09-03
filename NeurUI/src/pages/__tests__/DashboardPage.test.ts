@@ -17,6 +17,12 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { setActivePinia, createPinia } from 'pinia'
 
+// 入口跳转断言：token 卡点击 → /usage-stats
+const { push: routerPush } = vi.hoisted(() => ({ push: vi.fn() }))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPush }),
+}))
+
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     currentUser: { id: 'a9', username: 'admin' },
@@ -101,6 +107,7 @@ const messages = {
     healthMemory: '内存',
     healthDisk: '磁盘',
     statusHealthy: '系统健康',
+    usageStatsEntry: '点击查看 Token 使用统计',
   },
 }
 
@@ -211,6 +218,17 @@ describe('DashboardPage', () => {
 
     expect(wrapper.text()).toContain('暂无反馈')
     expect(wrapper.text()).toContain('回复质量反馈')
+  })
+
+  it('opens usage stats page when token card is clicked', async () => {
+    // 入口语义（用户指定）：点击看板的 token 调用量卡 → /usage-stats
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const tokenCard = wrapper.find('.nr-stat-card--link')
+    expect(tokenCard.exists()).toBe(true)
+    await tokenCard.trigger('click')
+    expect(routerPush).toHaveBeenCalledWith('/usage-stats')
   })
 
   it('renders grid cards through the real GlassCard shell (glass backdrop regression)', async () => {

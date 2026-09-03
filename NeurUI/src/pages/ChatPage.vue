@@ -321,10 +321,10 @@
                   {{ msg.audioSpeed || 1 }}x
                 </button>
               </div>
-              <!-- Hidden audio element -->
+              <!-- Hidden audio element（句块回放：src 随 ttsIdx 逐句切换） -->
               <audio
                 :ref="(el) => setAudioRef(msg, el as HTMLAudioElement)"
-                :src="msg.audioUrl"
+                :src="audioSourceFor(msg)"
                 preload="metadata"
                 @timeupdate="onAudioTimeUpdate(msg)"
                 @loadedmetadata="onAudioLoaded(msg)"
@@ -686,6 +686,15 @@
         <p class="approval-hint">{{ t('ui.approvalHint') }}</p>
       </div>
     </a-modal>
+
+    <!-- 流式实时语音：常驻隐藏 live 播放器。src 逐句切换，播完自动推进下一句 -->
+    <audio
+      class="nr-live-tts-audio"
+      :ref="(el) => setLiveTtsAudioRef(el as HTMLAudioElement | null)"
+      :src="liveTtsUrl"
+      @ended="onLiveTtsEnded"
+      @error="onLiveTtsError"
+    />
   </div>
 </template>
 
@@ -699,7 +708,9 @@ import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
 import { useMessageQueueStore } from '@/stores/messageQueue'
 import { useSessionSendLock } from '@/composables/useSessionSendLock'
-import { StreamTTSRunner } from '@/composables/useStreamTTS'
+import { StreamTTSRunner, audioSourceFor, requireNonEmptyAudioBlob } from '@/composables/useStreamTTS'
+import { useTtsAudioGate } from '@/composables/useTtsAudioGate'
+import { isDefaultChatTitle } from '@/utils/sessionTitle'
 import { useRouter } from 'vue-router'
 import { useChat } from '@/composables/useChat'
 import type { ChatMessage, Session, PendingFile } from '@/types/chat'
@@ -1765,6 +1776,8 @@ function processSSEEvent(event: any, msg: ChatMessage) {
           title: inputText.value.slice(0, 50) || t('chat.newChat'),
         })
       }
+      // 补课 6：默认标题（新对话/新建对话）→ 语义概括自动填充，不再停留默认名
+      void maybeAutoTitle()
       break
 
     case 'error':
@@ -1777,6 +1790,26 @@ function stopStreaming() {
   abortController?.abort()
   stopStreamTTS()
   chatStore.setStreaming(false)
+}
+
+/**
+ * 补课 6：默认标题 → 会话语义概括自动填充。
+ * 仅当标题命中默认清单（新对话/新建对话等）时调用；失败静默不影响聊天。
+ */
+async function maybeAutoTitle(): Promise<void> {
+  const sid = currentSessionId.value
+  if (!sid) return
+  const session = sessions.value.find((s) => s.id === sid)
+  if (!session) return
+  if (!isDefaultChatTitle(session.title, [t('ui.newConversation'), t('chat.newChat')])) return
+  try {
+    const res: any = await api.post(`/console/chat/sessions/${sid}/auto-title`)
+    const data = res?.data ?? res
+    const title: string | undefined = data?.title
+    if (title && title !== session.title) chatStore.renameSessionTitle(sid, title)
+  } catch {
+    // 自动填充是增强：失败静默，用户仍可手动改名
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1958,20 +1991,25 @@ async function synthesizeTTS(msg: ChatMessage) {
     // 交给 <audio> 自动嗅探，长文本首字节到达即开始下载（整段合成时间
     // 不再阻塞在服务端全量编码完成后）
     const blob = await response.blob()
+    // 实测根因：后端引擎链失败时流式端点返回 200+0 字节 → 0 字节 blob
+    // 交给 <audio> 必发 Range 请求 416。拒绝造 blob URL，给用户真实报错。
+    requireNonEmptyAudioBlob(blob)
     const url = URL.createObjectURL(blob)
     msg.audioUrl = url
     msg.audioProgress = 0
     msg.audioCurrentTime = 0
     msg.audioSpeed = 1
 
-    // Auto-play
+    // Auto-play（起播门控：先软停 live/其他消息音源，防两声音重叠）
     nextTick(() => {
       if (msg.audioEl) {
+        syncAudioUiState(audioGate.pauseOthers(ttsGateId(msg)))
         msg.audioEl.play().catch(() => {})
       }
     })
   } catch (err) {
     console.error('[TTS] Synthesis failed:', err)
+    uiMessage.error(t('chat.ttsFailed'))
   } finally {
     msg.ttsLoading = false
   }
@@ -1980,6 +2018,7 @@ async function synthesizeTTS(msg: ChatMessage) {
 // Custom Audio Player Controls
 function setAudioRef(msg: ChatMessage, el: HTMLAudioElement | null) {
   msg.audioEl = el
+  audioGate.track(ttsGateId(msg), el)
 }
 
 function toggleAudioPlay(msg: ChatMessage) {
@@ -1988,6 +2027,8 @@ function toggleAudioPlay(msg: ChatMessage) {
     msg.audioEl.pause()
     msg.audioPlaying = false
   } else {
+    // 起播门控：本消息播放器开播 → 先软停 live/其他消息音源
+    syncAudioUiState(audioGate.pauseOthers(ttsGateId(msg)))
     msg.audioEl.play().catch(() => {})
     msg.audioPlaying = true
   }
@@ -2315,13 +2356,59 @@ function scrollToBottom() {
 
 // ── 流式 TTS 会话编排 ──────────────────────────────────────
 
+// live 播放（补课）：audio 元素常驻模板（此前 liveTtsAudio 从未被模板
+// ref 赋值 → 播放链整条是哑的：onChunkReady 开播 no-op）
+const livePlaying = ref(false)
+// 单声道门控：所有 TTS 音源（live + 各消息播放器）起播前软停其他音源，
+// 防两轮对话间隔相近时两个声音重叠播放（实测缺陷）。
+const audioGate = useTtsAudioGate()
+
+/** 消息播放器的门控 id（元素随 v-for 重渲染，同消息固定 id 覆盖旧句柄）。
+ *  ChatMessage 无业务 id，用对象上惰性挂的序号保持同一消息稳定。 */
+let ttsGateSeq = 0
+function ttsGateId(msg: ChatMessage): string {
+  const withId = msg as ChatMessage & { __ttsGateId?: string }
+  withId.__ttsGateId ??= `msg:${++ttsGateSeq}`
+  return withId.__ttsGateId
+}
+
+/** 门控软停后的宿主状态同步：live 解锁；消息播放器 ⏸→▶ 复位。 */
+function syncAudioUiState(stoppedIds: string[]): void {
+  for (const id of stoppedIds) {
+    if (id === 'live') {
+      livePlaying.value = false
+      continue
+    }
+    const msg = messages.value.find((m) => ttsGateId(m) === id)
+    if (msg) msg.audioPlaying = false
+  }
+}
+
+function setLiveTtsAudioRef(el: HTMLAudioElement | null): void {
+  liveTtsAudio.value = el
+  audioGate.track('live', el)
+}
+
+function onLiveTtsError(): void {
+  // 单句加载/解码失败：解除播放锁，下一句就绪即可重试
+  livePlaying.value = false
+}
+
 /** live 播放推进：当前句播完自动播下一句（顺序保持合成序）。 */
 function playLiveChunk(index: number): void {
   const urls = streamTTSRunner?.urls.value ?? []
   if (index >= urls.length) return
+  // 起播门控：live 开播/续播 → 先软停消息播放器等其他音源
+  syncAudioUiState(audioGate.pauseOthers('live'))
   liveTtsIdx.value = index
   liveTtsUrl.value = urls[index]
-  nextTick(() => liveTtsAudio.value?.play().catch(() => {}))
+  livePlaying.value = true
+  nextTick(() => {
+    liveTtsAudio.value?.play().catch(() => {
+      // 自动播放被拒（浏览器策略等）：解锁，等服务端下一句就绪重试
+      livePlaying.value = false
+    })
+  })
 }
 
 function startStreamTTS(): void {
@@ -2340,11 +2427,15 @@ function startStreamTTS(): void {
       })
       if (!resp.ok) throw new Error(`TTS ${resp.status}`)
       const blob = await resp.blob()
-      return URL.createObjectURL(blob)
+      // 0 字节 blob 不允许造 URL（<audio> 加载必 416）；抛错由 Runner
+      // 跳过该句继续后续句子。
+      return URL.createObjectURL(requireNonEmptyAudioBlob(blob))
     },
     onChunkReady: (_url, index) => {
-      // 首句就绪即开播；后续句由 onended 推进
-      if (liveTtsIdx.value < 0 || liveTtsUrl.value === '') playLiveChunk(index)
+      // 首句就绪即开播；后续句由 onended 推进。
+      // 若当前未在播放（含上一句已播完而下一句尚未合成完的间隙），
+      // 新句就绪立即补播——原判 liveTtsIdx<0/url=='' 会漏掉该间隙。
+      if (!livePlaying.value) playLiveChunk(index)
     },
     onDone: (urls) => {
       // 回放定稿：句块列表挂到消息上（下方播放器按列表回放）
@@ -2352,6 +2443,8 @@ function startStreamTTS(): void {
       if (msg && urls.length > 0) {
         msg.ttsUrls = urls
         msg.ttsIdx = 0
+        // 播放器 v-if=msg.audioUrl 才显示——挂首块 URL 出回放入口
+        msg.audioUrl = urls[0]
       }
       streamingTtsMsg = null
     },
@@ -2364,6 +2457,8 @@ let streamingTtsMsg: ChatMessage | null = null
 /** 开启一轮流式语音（autoVoice 开启时在发起对话时调用）。 */
 function beginStreamTTS(msg: ChatMessage): void {
   if (!autoVoice.value || !ttsAvailable.value) return
+  // 新轮次硬停上一轮 live（旧的 runner/播放若还活着会与新轮重叠）
+  stopStreamTTS()
   streamingTtsMsg = msg
   startStreamTTS()
 }
@@ -2375,11 +2470,13 @@ function stopStreamTTS(): void {
   liveTtsUrl.value = ''
   liveTtsQueue.value = []
   liveTtsIdx.value = -1
+  livePlaying.value = false
   if (liveTtsAudio.value) liveTtsAudio.value.pause()
 }
 
 /** live 元素当前句播完 → 下一句；全部播完静默收尾。 */
 function onLiveTtsEnded(): void {
+  livePlaying.value = false
   const urls = streamTTSRunner?.urls.value ?? liveTtsQueue.value
   const next = liveTtsIdx.value + 1
   if (next < urls.length) playLiveChunk(next)

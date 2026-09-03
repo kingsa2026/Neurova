@@ -284,6 +284,9 @@
               <GlassButton variant="ghost" size="sm" :loading="discoveringId === modelTarget.id" @click="discoverModels(modelTarget!.id)">
                 {{ t('model.discover') }}
               </GlassButton>
+              <GlassButton variant="ghost" size="sm" :loading="detectingCaps" @click="detectCapabilities(modelTarget!.id)" :title="t('model.detectCapsTip')">
+                {{ t('model.detectCaps') }}
+              </GlassButton>
             </div>
 
             <!-- OpenRouter 模型筛选 -->
@@ -326,8 +329,8 @@
                         <span class="nr-mm-item-name">{{ m.name }}</span>
                       </div>
                       <span class="nr-mm-item-id">{{ m.id }}</span>
-                      <div v-if="m.capabilities && m.capabilities.length > 0" class="nr-mm-item-caps">
-                        <span v-for="cap in m.capabilities" :key="cap" class="nr-mm-cap">{{ cap }}</span>
+                      <div v-if="coreCapabilityLabels(m).length > 0" class="nr-mm-item-caps">
+                        <span v-for="cap in coreCapabilityLabels(m)" :key="cap.key" class="nr-mm-cap" :class="'nr-mm-cap-' + cap.key">{{ cap.label }}</span>
                       </div>
                     </div>
                     <div class="nr-mm-item-tags">
@@ -352,8 +355,9 @@
                     <span v-if="m.is_active" class="nr-mm-active-dot" title="Active"></span>
                   </div>
                   <span class="nr-mm-item-id">{{ m.id }}</span>
-                  <div v-if="m.capabilities.length > 0" class="nr-mm-item-caps">
-                    <span v-for="cap in m.capabilities" :key="cap" class="nr-mm-cap">{{ cap }}</span>
+                  <div v-if="coreCapabilityLabels(m).length > 0 || m.context_window" class="nr-mm-item-caps">
+                    <span v-for="cap in coreCapabilityLabels(m)" :key="cap.key" class="nr-mm-cap" :class="'nr-mm-cap-' + cap.key">{{ cap.label }}</span>
+                    <span v-if="m.context_window" class="nr-mm-cap nr-mm-cap-limit">{{ modelLimitLabel(m) }}</span>
                   </div>
                 </div>
                 <div class="nr-mm-item-tags">
@@ -441,7 +445,7 @@ import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
 import { listProviders, getActiveModel, activateModel as apiActivateModel, updateProvider, createProvider as apiCreateProvider, deleteProvider as apiDeleteProvider, discoverModels as apiDiscoverModels, filterProviderModels, getProviderSeries, testConnection } from '@/api/modules/providers'
 import type { FilteredProviderModel } from '@/api/modules/providers'
-import { listModels, updateModel, deleteModel as apiDeleteModel } from '@/api/modules/models'
+import { listModels, updateModel, deleteModel as apiDeleteModel, detectCapabilities as apiDetectCapabilities } from '@/api/modules/models'
 import { getSettings, updateSettings } from '@/api/modules/settings'
 import { useAuthStore } from '@/stores/auth'
 import GlassCard from '@/components/GlassCard.vue'
@@ -961,6 +965,55 @@ async function discoverModels(providerId: string) {
     message.error(t('model.discoverFailed'))
   } finally {
     discoveringId.value = null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 模型能力自动检测（2026-09-03）
+// 六类核心能力：text/reasoning/vision/video/image_generation/video_generation
+// ---------------------------------------------------------------------------
+/** 能力 key → i18n 标签（model.capText 等），按 canonical 顺序渲染。 */
+const CAP_LABEL_KEYS: Array<{ key: string; labelKey: string }> = [
+  { key: 'text', labelKey: 'model.capText' },
+  { key: 'reasoning', labelKey: 'model.capReasoning' },
+  { key: 'vision', labelKey: 'model.capVision' },
+  { key: 'video', labelKey: 'model.capVideo' },
+  { key: 'image_generation', labelKey: 'model.capImageGen' },
+  { key: 'video_generation', labelKey: 'model.capVideoGen' },
+]
+
+function coreCapabilityLabels(m: { capabilities?: string[] }): Array<{ key: string; label: string }> {
+  return CAP_LABEL_KEYS.filter((c) => m.capabilities?.includes(c.key)).map((c) => ({
+    key: c.key,
+    label: t(c.labelKey),
+  }))
+}
+
+/** 限额 chip：展示上下文窗口（预埋/服务商值，4096 占位由后端过滤不外发）。 */
+function modelLimitLabel(m: { context_window?: number; max_tokens?: number }): string {
+  if (!m.context_window) return ''
+  const ctx = m.context_window >= 1000 ? `${Math.round(m.context_window / 1000)}K` : String(m.context_window)
+  return `ctx ${ctx}`
+}
+
+const detectingCaps = ref(false)
+
+async function detectCapabilities(providerId: string) {
+  detectingCaps.value = true
+  try {
+    const res: any = await apiDetectCapabilities({ provider_id: providerId, force: true })
+    const detected = res?.data?.detected ?? res?.detected ?? 0
+    if (detected > 0) {
+      // 重新拉取模型列表以带上新能力标记
+      await fetchModels()
+      message.success(t('model.detectCapsDone', { n: detected }))
+    } else {
+      message.info(t('model.noModels'))
+    }
+  } catch {
+    message.error(t('model.detectCapsFailed'))
+  } finally {
+    detectingCaps.value = false
   }
 }
 

@@ -20,14 +20,34 @@ MODEL_REGISTRY = {
         "repo_id": "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX",
         "local_dir": "models/tts/moss-nano",
         "description": "MOSS-TTS-Nano 0.1B ONNX 推理模型",
-        "required_files": ["model.onnx"],
+        # 仓库实际是 5 图级联（prefill/decode_step/local_cached_step/
+        # local_decoder/local_fixed_sampled_frame）+ 2 份 .data 共享权重，
+        # 旧契约的 model.onnx 在仓库不存在——导致 is_model_available 恒
+        # False、ensure_model 恒报"下载不完整"，模型已下载也无法初始化
+        "required_files": [
+            "moss_tts_prefill.onnx",
+            "moss_tts_decode_step.onnx",
+            "moss_tts_local_cached_step.onnx",
+            "moss_tts_local_decoder.onnx",
+            "moss_tts_local_fixed_sampled_frame.onnx",
+            "moss_tts_global_shared.data",
+            "moss_tts_local_shared.data",
+            "tokenizer.model",
+        ],
         "size_hint": "~200MB",
     },
     "moss-audio-tokenizer": {
         "repo_id": "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX",
         "local_dir": "models/tts/moss-tokenizer",
         "description": "MOSS-Audio-Tokenizer-Nano (声音克隆编码器)",
-        "required_files": ["model.onnx"],
+        # 同样无 model.onnx：实际是 encode/decode 双端 onnx + .data 权重。
+        # 声音克隆是可选功能，不齐时 ensure_model 抛错只降级克隆能力
+        "required_files": [
+            "moss_audio_tokenizer_encode.onnx",
+            "moss_audio_tokenizer_encode.data",
+            "moss_audio_tokenizer_decode_step.onnx",
+            "moss_audio_tokenizer_decode_shared.data",
+        ],
         "size_hint": "~50MB",
     },
     "bge-small-zh-v1.5": {

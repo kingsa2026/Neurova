@@ -52,7 +52,7 @@ import {
   BookOutlined, AppstoreOutlined, ShopOutlined, RocketOutlined,
   NodeIndexOutlined, FileOutlined,
   CloudServerOutlined, ToolOutlined, CodeOutlined,
-  BarChartOutlined, MonitorOutlined, HeartOutlined, PieChartOutlined,
+  BarChartOutlined, LineChartOutlined, MonitorOutlined, HeartOutlined, PieChartOutlined,
   FileTextOutlined,
   TeamOutlined, ProjectOutlined, ClockCircleOutlined,
   BranchesOutlined, ApiOutlined, HistoryOutlined,
@@ -114,6 +114,7 @@ const categories: NavCategory[] = [
     icon: MonitorOutlined,
     items: [
       { to: '/stats', labelKey: 'nav.stats', icon: BarChartOutlined },
+      { to: '/usage-stats', labelKey: 'nav.usageStats', icon: LineChartOutlined },
       { to: '/monitor', labelKey: 'nav.monitor', icon: MonitorOutlined },
       { to: '/health', labelKey: 'nav.health', icon: HeartOutlined },
       { to: '/logs', labelKey: 'nav.logs', icon: FileTextOutlined },

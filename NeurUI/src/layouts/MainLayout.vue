@@ -118,12 +118,30 @@
             <span class="nr-nav-user-name">{{ authStore.currentUser.username }}</span>
             <span class="nr-nav-user-role">{{ authStore.currentUser.role }}</span>
           </div>
+          <GlassButton
+            v-if="!appStore.sidebarCollapsed"
+            variant="ghost"
+            size="sm"
+            :title="t('identity.title')"
+            @click="showIdentity = true"
+          >
+            <IdcardOutlined />
+          </GlassButton>
           <GlassButton v-if="!appStore.sidebarCollapsed" variant="ghost" size="sm" @click="handleLogout">
             <LogoutOutlined />
           </GlassButton>
         </div>
       </template>
     </GlassNav>
+
+    <ClientIdentityModal
+      v-model:open="showIdentity"
+      :client-id="clientId"
+      :platform="platform"
+      :report-enabled="reportEnabled"
+      @toggle-report="toggleErrorReport"
+      @submit-manual="submitManualFeedback"
+    />
 
     <!-- Main Content -->
     <div class="nr-main">
@@ -197,6 +215,15 @@ import GlassNavItem from '@/components/GlassNavItem.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import AgentSwitcher from '@/components/AgentSwitcher.vue'
 import TopNavMenu from '@/components/TopNavMenu.vue'
+import ClientIdentityModal from '@/components/ClientIdentityModal.vue'
+import { message } from 'ant-design-vue'
+import {
+  getClientId,
+  detectPlatform,
+  isErrorReporterEnabled,
+  setReportEnabledPref,
+  reportManualFeedback,
+} from '@/utils/errorReporter'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import {
   DashboardOutlined, RobotOutlined, MessageOutlined, DatabaseOutlined,
@@ -207,7 +234,7 @@ import {
   SettingOutlined, BellOutlined, GlobalOutlined,
   LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   CoffeeOutlined, FileTextOutlined, HistoryOutlined,
-  UserOutlined, PlayCircleOutlined, SmileOutlined,
+  UserOutlined, PlayCircleOutlined, SmileOutlined, IdcardOutlined,
 } from '@ant-design/icons-vue'
 
 const router = useRouter()
@@ -217,6 +244,24 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const agentStore = useAgentStore()
 const notifStore = useNotificationStore()
+
+// 设备标识（错误日志上报链路）：用户可查看/复制自己的客户端唯一代号
+const showIdentity = ref(false)
+const clientId = getClientId()
+const platform = detectPlatform()
+const reportEnabled = ref(isErrorReporterEnabled())
+
+function toggleErrorReport() {
+  const next = !reportEnabled.value
+  setReportEnabledPref(next)
+  reportEnabled.value = next
+  message.success(next ? t('identity.reportOn') : t('identity.reportOff'))
+}
+
+function submitManualFeedback(text: string) {
+  reportManualFeedback(text)
+  message.success(t('identity.manualSent'))
+}
 
 // 铃铛未读数：SSE 流优先（补课 2.2），断流降级 60s 轮询
 const unreadCount = computed(() => notifStore.unreadTotal)

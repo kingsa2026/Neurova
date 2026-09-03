@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Dict, List
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Query, Request
 
+from neurova.api.deps import get_optional_user
 from neurova.api.endpoints import get_app_state
 from neurova.core.logger import get_logger
 
@@ -252,6 +254,139 @@ async def get_token_usage(request: Request):
         "by_model": by_model,
         "last_call": accounting.last_call(),
     }
+
+
+def _empty_usage_overview(days: int, scope: str) -> Dict[str, Any]:
+    """空库零态（契约完整，绝不 500）：summary 全 0、heatmap 连续窗口全 0。"""
+    today = date.today()
+    start = today - timedelta(days=days - 1)
+    return {
+        "scope": scope,
+        "summary": {
+            "total_tokens": 0,
+            "total_calls": 0,
+            "peak_daily_tokens": 0,
+            "peak_daily_date": None,
+            "longest_session_seconds": 0,
+            "current_streak_days": 0,
+            "longest_streak_days": 0,
+            "active_days": 0,
+        },
+        "heatmap": [
+            {"date": (start + timedelta(days=i)).isoformat(), "tokens": 0, "calls": 0}
+            for i in range(days)
+        ],
+        "trends": [],
+        "by_model": [],
+    }
+
+
+@router.get("/usage-overview")
+async def get_usage_overview(
+    request: Request,
+    days: int = Query(default=365, ge=7, le=730, description="热力图窗口天数"),
+    trend_days: int = Query(default=30, ge=7, le=365, description="趋势图窗口天数"),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+):
+    """使用统计总览（Kimi 式看板数据源，SQLite 持久化历史）。
+
+    数据源: neurova.core.usage_history.UsageHistoryStore（multi_model_client
+    每次 LLM 调用入账一行，落 data/usage_history.db，重启不归零）。
+    登录用户 → scope=user（隔离该用户）；匿名 → scope=global（全部用户合计）。
+
+    返回 summary（累计/单日峰值/最长会话时长/当前与最长连续天数/活跃天数）
+    + heatmap（连续 days 天，无记录=0）+ trends（按天×模型）+ by_model。
+    """
+    _get_request_id(request)
+    try:
+        from neurova.core.usage_history import compute_streaks, get_usage_history
+
+        user_id = (current_user or {}).get("user_id") or None
+        scope = "user" if user_id else "global"
+        history = get_usage_history()
+
+        # 会话摘要（用户口径过滤；仅用于活跃日期/最长会话时长）
+        sessions: List[Dict[str, Any]] = []
+        try:
+            from neurova.session_repository import get_session_repository
+
+            sessions = get_session_repository().list_sessions(user_id=user_id or "")
+        except Exception:
+            sessions = []
+
+        daily = history.daily_totals(user_id=user_id)
+        daily_map = {r["usage_date"]: r for r in daily}
+
+        today = date.today()
+        start = today - timedelta(days=days - 1)
+        heatmap = [
+            {
+                "date": (start + timedelta(days=i)).isoformat(),
+                "tokens": int((daily_map.get((start + timedelta(days=i)).isoformat(), {}) or {}).get("tokens", 0) or 0),
+                "calls": int((daily_map.get((start + timedelta(days=i)).isoformat(), {}) or {}).get("calls", 0) or 0),
+            }
+            for i in range(days)
+        ]
+
+        trend_start = (today - timedelta(days=trend_days - 1)).isoformat()
+        trends = [
+            {"date": r["usage_date"], "model": r["model"], "tokens": int(r["tokens"] or 0)}
+            for r in history.daily_by_model(user_id=user_id)
+            if r["usage_date"] >= trend_start
+        ]
+
+        by_model = sorted(
+            (
+                {"model": m["model"], "tokens": int(m["tokens"] or 0), "calls": int(m["calls"] or 0)}
+                for m in history.model_totals(user_id=user_id)
+            ),
+            key=lambda m: m["tokens"],
+            reverse=True,
+        )
+
+        total = history.total(user_id=user_id)
+        peak = history.peak_daily(user_id=user_id)
+
+        # 活跃日期集 = token 日期 ∪ 会话创建日期（聊天但无 token 的日子也算活跃）
+        active_dates = {r["usage_date"] for r in daily}
+        for s in sessions:
+            created = str(s.get("created_at") or "")[:10]
+            if len(created) == 10 and created[:4].isdigit():
+                active_dates.add(created)
+        current_streak, longest_streak = compute_streaks(active_dates, today)
+
+        longest_session_seconds = 0
+        for s in sessions:
+            try:
+                created = str(s.get("created_at") or "").replace("T", " ")
+                updated = str(s.get("updated_at") or "").replace("T", " ")
+                if not created or not updated:
+                    continue
+                delta = datetime.fromisoformat(updated) - datetime.fromisoformat(created)
+                longest_session_seconds = max(longest_session_seconds, int(delta.total_seconds()))
+            except Exception:
+                continue
+
+        return {
+            "scope": scope,
+            "summary": {
+                "total_tokens": int(total["tokens"]),
+                "total_calls": int(total["calls"]),
+                "peak_daily_tokens": int(peak["tokens"] or 0) if peak else 0,
+                "peak_daily_date": peak["usage_date"] if peak else None,
+                "longest_session_seconds": longest_session_seconds,
+                "current_streak_days": current_streak,
+                "longest_streak_days": longest_streak,
+                "active_days": len(active_dates),
+            },
+            "heatmap": heatmap,
+            "trends": trends,
+            "by_model": by_model,
+        }
+    except Exception as e:  # noqa: BLE001 - 诚实回退零态，绝不 500
+        logger.error(f"获取使用统计总览失败: {e}", exc_info=True)
+        scope = "user" if (current_user or {}).get("user_id") else "global"
+        return _empty_usage_overview(days, scope)
 
 
 @router.get("/export")

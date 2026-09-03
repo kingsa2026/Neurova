@@ -9,7 +9,7 @@ export interface ModelItem {
   type: 'text' | 'image' | 'audio'
   tags: string[]          // 'free', 'built-in', 'user-added'
   enabled: boolean
-  capabilities: string[]  // 'text', 'vision', 'audio', 'tool_use', etc.
+  capabilities: string[]  // 六类核心: text/reasoning/vision/video/image_generation/video_generation（另有 audio/tts/stt/tool_use）
   is_active: boolean
   context_window?: number
   max_tokens?: number

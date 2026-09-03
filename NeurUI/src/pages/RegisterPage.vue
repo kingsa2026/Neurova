@@ -44,9 +44,9 @@
           <div class="nr-auth-terms">
             <a-checkbox v-model:checked="form.agreedTerms">
               {{ t('auth.agreeTo') }}
-              <a href="#" class="nr-auth-link-inline">{{ t('auth.termsOfService') }}</a>
+              <router-link to="/terms" class="nr-auth-link-inline">{{ t('auth.termsOfService') }}</router-link>
               {{ t('auth.and') }}
-              <a href="#" class="nr-auth-link-inline">{{ t('auth.privacyPolicy') }}</a>
+              <router-link to="/privacy" class="nr-auth-link-inline">{{ t('auth.privacyPolicy') }}</router-link>
             </a-checkbox>
           </div>
 
@@ -148,7 +148,7 @@ async function handleRegister() {
   }
 
   if (!form.agreedTerms) {
-    error.value = 'Please agree to the Terms of Service.'
+    error.value = t('auth.agreeTermsRequired')
     return
   }
 
@@ -171,7 +171,7 @@ async function handleRegister() {
       error.value = authStore.error || t('auth.loginFailed')
     }
     } catch (err: any) {
-      error.value = err?.message || 'Registration failed. Please try again.'
+      error.value = err?.message || t('auth.registerFailed')
     } finally {
       loading.value = false
     }

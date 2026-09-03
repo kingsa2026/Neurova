@@ -132,6 +132,9 @@ class MultiModelLLMClient:
             self._current_provider_id: Optional[str] = None
             self._current_model: Optional[str] = None
             self._round_robin_index = 0
+            # 404 重连防抖：model -> 上次重连时刻（monotonic）。合理间隔内不重复
+            # 触发 provider 重发现，防止模型已下线时形成请求风暴。
+            self._last_404_reconnect: Dict[str, float] = {}
             # 使用 RLock：refresh_provider() 持锁后调用 _initialize_provider_clients()
             # 后者也获取 _init_lock，Lock 会死锁；RLock 可重入避免死锁
             self._init_lock = threading.RLock()
@@ -396,6 +399,81 @@ class MultiModelLLMClient:
     # per-provider 熔断器缓存：{provider_id: CircuitBreaker}
     _retry_guards: Dict[str, Any] = {}
 
+    # 404 重连防抖间隔（秒）：同一模型两次重发现之间的最小间隔
+    _RECONNECT_DEBOUNCE_SECONDS = 300.0
+
+    @staticmethod
+    def _classify_error(error: Exception) -> str:
+        """按异常文本分类可路由的故障类型（429 限流 / 404 模型失效）。"""
+        text = str(error or "")
+        lowered = text.lower()
+        if "429" in text or "rate limit" in lowered or "too many requests" in lowered:
+            return "rate_limit"
+        if (
+            "404" in text
+            or "not found" in lowered
+            or "does not exist" in lowered
+            or "not exist" in lowered
+            or "decommissioned" in lowered
+            or "model_not_found" in lowered
+        ):
+            return "not_found"
+        return "unknown"
+
+    def _note_404_reconnect(self, provider_id: Optional[str], model: Optional[str]) -> bool:
+        """模型 404（下线/改名）→ 触发 provider 重发现，300s 防抖。
+
+        Returns:
+            True = 本次实际触发了重连；False = 防抖窗口内跳过。
+        """
+        key = f"{provider_id or '?'}/{model or '?'}"
+        now = time.monotonic()
+        last = self._last_404_reconnect.get(key)
+        if last is not None and (now - last) < self._RECONNECT_DEBOUNCE_SECONDS:
+            logger.warning(
+                "模型 %s 404 处于重连防抖窗口（剩余 %.0fs），跳过重发现",
+                key,
+                self._RECONNECT_DEBOUNCE_SECONDS - (now - last),
+            )
+            return False
+        self._last_404_reconnect[key] = now
+        logger.warning("模型 %s 返回 404（可能下线/改名），触发服务商重发现", key)
+        try:
+            self._reconnect_provider(provider_id)
+        except Exception as e:  # noqa: BLE001 - 重连失败不阻断错误返回
+            logger.error("404 重连执行失败（provider=%s）: %s", provider_id, e)
+        return True
+
+    def _reconnect_provider(self, provider_id: Optional[str]) -> None:
+        """404 后的重新连接：重建 provider 客户端 + 异步重发现上游模型列表。"""
+        if provider_id:
+            try:
+                self.refresh_provider(provider_id)
+                logger.info("404 重连：已重建 provider %s 客户端", provider_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("404 重连：重建 provider %s 客户端失败: %s", provider_id, e)
+        # 重发现上游模型列表（异步 fire-and-forget；无运行事件循环时跳过）
+        if provider_id:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._rediscover_provider_models(provider_id))
+            except RuntimeError:
+                logger.debug("404 重连：无运行事件循环，跳过上游模型重发现")
+
+    async def _rediscover_provider_models(self, provider_id: str) -> None:
+        """上游模型列表重发现：404 常见于模型下线/改名，重新 fetch 以对齐配置。"""
+        try:
+            fetch = getattr(self._provider_manager, "fetch_provider_models", None)
+            if fetch is None:
+                return
+            models = await fetch(provider_id, merge=False)
+            ids = [m.id for m in models]
+            logger.info("404 重连：provider %s 上游模型重发现 %s 个", provider_id, len(ids))
+            if ids:
+                self.refresh_provider(provider_id)
+        except Exception as e:  # noqa: BLE001 - 后台任务失败仅记录
+            logger.warning("404 重连：provider %s 模型重发现失败: %s", provider_id, e)
+
     # 可重试集合：限流/连接/超时；认证错误不重试（换 key 才有意义）
     _RETRYABLE = (LLMRateLimitError, LLMConnectionError, ConnectionError, TimeoutError)
 
@@ -459,14 +537,40 @@ class MultiModelLLMClient:
                 "provider": "mock",
             }
 
-        client = self._get_client_for_request(model, provider_id)
-        if not client:
-            logger.warning("No client available for chat")
-            return {
-                "success": False,
-                "error": "No client available",
-            }
+        # auto failover：仅未显式指定 provider 时启用（显式指定尊重用户选择，不静默切换）
+        auto_failover = not provider_id
+        if auto_failover:
+            self._failover_excluded = set()
+        # __new__ 最小注入的测试实例可能不带 _clients，防御性读取
+        max_attempts = max(1, len(getattr(self, "_clients", {}) or {})) if auto_failover else 1
 
+        client = self._get_client_for_request(model, provider_id)
+        last_result: Dict[str, Any] = {"success": False, "error": "No client available"}
+        for _attempt in range(max_attempts):
+            if not client:
+                return last_result
+            result = await self._chat_single_attempt(client, messages, **kwargs)
+            if result.get("success"):
+                return result
+            last_result = result
+            # 仅 429 退避 / 404 模型失效触发切换；认证/参数错误换模型无意义
+            error_kind = self._classify_error(result.get("error") or "")
+            if not auto_failover or error_kind not in ("rate_limit", "not_found"):
+                return result
+            logger.warning(
+                "auto 切换：%s/%s 失败（%s），尝试下一可用候选",
+                client.provider.id, client.model, error_kind,
+            )
+            client = self._next_failover_client(client.model)
+        return last_result
+
+    async def _chat_single_attempt(
+        self,
+        client: ModelClient,
+        messages: List[Dict[str, str]],
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """单模型一次聊天尝试（原 chat 主体：限流/调用/记账/错误分类）。"""
         # P2-a：每模型限流（QPM+并发+429 暂停），acquire 在 retry 之前
         from neurova.llm.model_rate_limiter import (
             RateLimitExceeded,
@@ -529,6 +633,20 @@ class MultiModelLLMClient:
                     completion_tokens=_completion or 0,
                     estimated=_estimated,
                 )
+                # 持久化历史：同一回 true usage 同时落 SQLite（重启不归零）。
+                # user_id 取请求级 ContextVar（chat_pipeline.execute 注入），
+                # 缺失记 anonymous —— 与内存记账同源不同命，失败静默。
+                from neurova.core.identity_context import get_request_user_id
+                from neurova.core.usage_history import get_usage_history
+
+                get_usage_history().record(
+                    model=client.model,
+                    provider=client.provider.id,
+                    prompt_tokens=_prompt or 0,
+                    completion_tokens=_completion or 0,
+                    estimated=_estimated,
+                    user_id=get_request_user_id() or "anonymous",
+                )
             except Exception:
                 pass
             finally:
@@ -562,8 +680,13 @@ class MultiModelLLMClient:
         except Exception as e:
             client.increment_request(success=False)
             # P2-a：429 类错误反馈成该模型全局暂停（防继续撞限流）
-            if "429" in str(e) or "rate limit" in str(e).lower():
+            # 2026-09-03：错误分类驱动——429 → 指数退避暂停；404（模型下线/改名）
+            # → 300s 防抖的 provider 重发现+重连；其余错误仅记录。
+            error_kind = self._classify_error(e)
+            if error_kind == "rate_limit":
                 limiter.report_429(model_key, pause_seconds=30.0)
+            elif error_kind == "not_found":
+                self._note_404_reconnect(client.provider.id, client.model)
             try:
                 from neurova.core.metrics import get_metrics
 
@@ -674,6 +797,18 @@ class MultiModelLLMClient:
                     completion_tokens=_completion or 0,
                     estimated=_estimated,
                 )
+                # 持久化历史（同 chat 路径）：user_id 取请求级 ContextVar，缺失记 anonymous
+                from neurova.core.identity_context import get_request_user_id
+                from neurova.core.usage_history import get_usage_history
+
+                get_usage_history().record(
+                    model=client.model or "unknown",
+                    provider=client.provider.id,
+                    prompt_tokens=_prompt or 0,
+                    completion_tokens=_completion or 0,
+                    estimated=_estimated,
+                    user_id=get_request_user_id() or "anonymous",
+                )
             except Exception:
                 logger.debug("流式 usage 入账跳过", exc_info=True)
         except Exception as e:
@@ -688,7 +823,10 @@ class MultiModelLLMClient:
                 pass
             yield {"error": str(e)}
 
-    def _resolve_available_fallback(self) -> Optional[ModelClient]:
+    def _resolve_available_fallback(
+        self,
+        exclude_models: Optional[set] = None,
+    ) -> Optional[ModelClient]:
         """请求的 provider/model 不可用时的兜底客户端。
 
         目标：只要系统里存在任一个 enabled 且有 api_key 的服务商，就不允许
@@ -697,11 +835,71 @@ class MultiModelLLMClient:
         2. _clients 为空（冷启动或初始化失败）→ 触发 refresh_all_providers() 自愈，
            重建所有 enabled + 有 key 的服务商客户端后再取。
 
+        ``exclude_models``：auto 失败切换时排除已失败模型（同能力下一候选）。
+
         根因背景：默认服务商（如 sensetime，优先级最高）可能没有 api_key，
         而其他有效服务商（如 b.ai）反而有 key；若严格按请求的 provider/model
         查找将永远拿不到客户端，导致 "[LLM Error] No client available"。
         """
         current = self.get_current_client()
+        if current and (not exclude_models or current.model not in exclude_models):
+            return current
+        if exclude_models:
+            # 失败切换：从全部客户端中选第一个不在排除集的（保持注册序）
+            for client in self._clients.values():
+                if client.model not in exclude_models:
+                    return client
+        logger.info("Auto-refreshing providers due to empty _clients")
+        try:
+            self.refresh_all_providers()
+        except Exception as e:
+            logger.warning("Auto-refresh failed: %s", e, exc_info=True)
+        return self.get_current_client()
+
+    def _next_failover_client(self, failed_model: Optional[str]) -> Optional[ModelClient]:
+        """auto 失败切换：返回排除已失败模型后的下一候选（None=无候选）。"""
+        exclude = getattr(self, "_failover_excluded", None) or set()
+        if failed_model:
+            exclude = set(exclude)
+            exclude.add(failed_model)
+        self._failover_excluded = exclude
+        return self._resolve_available_fallback(exclude_models=exclude)
+
+    def _resolve_available_fallback(
+        self,
+        exclude_models: Optional[set] = None,
+    ) -> Optional[ModelClient]:
+        """请求的 provider/model 不可用时的兜底客户端。
+
+        目标：只要系统里存在任一个 enabled 且有 api_key 的服务商，就不允许
+        返回 "No client available"。分两步：
+        1. 已有可用客户端 → 直接返回当前/首个客户端；
+        2. _clients 为空（冷启动或初始化失败）→ 触发 refresh_all_providers() 自愈，
+           重建所有 enabled + 有 key 的服务商客户端后再取。
+
+        ``exclude_models``：auto 失败切换时排除已失败模型（同能力下一候选）。
+
+        根因背景：默认服务商（如 sensetime，优先级最高）可能没有 api_key，
+        而其他有效服务商（如 b.ai）反而有 key；若严格按请求的 provider/model
+        查找将永远拿不到客户端，导致 "[LLM Error] No client available"。
+        """
+        # __new__ 最小注入的测试实例可能不带 _clients/_current_*，防御性读取
+        clients = getattr(self, "_clients", {}) or {}
+        current_provider_id = getattr(self, "_current_provider_id", None)
+        current_model = getattr(self, "_current_model", None)
+
+        if exclude_models:
+            # 失败切换：从全部客户端中选第一个不在排除集的（保持注册序）
+            for client in clients.values():
+                if client.model not in exclude_models:
+                    return client
+            return None  # 排除后无候选 → 终止 failover（有界）
+
+        current = None
+        if current_provider_id and current_model:
+            current = clients.get(f"{current_provider_id}/{current_model}")
+        if current is None and clients:
+            current = next(iter(clients.values()))
         if current:
             return current
         logger.info("Auto-refreshing providers due to empty _clients")

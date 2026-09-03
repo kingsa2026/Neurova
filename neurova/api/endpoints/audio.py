@@ -80,6 +80,14 @@ def _get_voice_engine(engine_type: str):
     return None
 
 
+def _engine_label(engine) -> str:
+    """引擎标签（日志用）：优先 get_engine_name()。"""
+    fn = getattr(engine, "get_engine_name", None)
+    if callable(fn):
+        return str(fn()) or type(engine).__name__
+    return type(engine).__name__
+
+
 def _get_tts_manager():
     """获取 TTS Manager (向后兼容)"""
     # 优先使用 VoiceEngine
@@ -258,9 +266,19 @@ async def synthesize_speech_stream(request: Request, body: SynthesizeRequest):
     if not hasattr(engine, "synthesize_stream"):
         raise HTTPException(status_code=503, detail="当前 TTS 引擎不支持流式合成")
 
-    async def audio_generator():
-        async for chunk in engine.synthesize_stream(body.text):
-            yield chunk
+    # 先取首个 chunk 再声明响应头：流式 fallback 在首个 chunk 产生前切换引擎
+    # （实测 moss 失败 → edge，字节是 MP3 而旧实现头部恒标 moss/audio/wav），
+    # 取首块后引擎身份才定局，头部才能说真话；后续块照常流式下发。
+    gen = engine.synthesize_stream(body.text)
+    try:
+        first_chunk = await gen.__anext__()
+    except StopAsyncIteration:
+        label = _engine_label(engine)
+        logger.warning("TTS 引擎 %s 未产出音频（空流）", label)
+        raise HTTPException(status_code=502, detail="TTS 引擎未产出音频")
+    except Exception as e:
+        logger.warning("TTS 引擎 %s 流式合成失败: %s", _engine_label(engine), e)
+        raise HTTPException(status_code=502, detail=f"TTS 合成失败: {e}")
 
     # 补课 4.3：按引擎动态声明 MIME（edge=audio/mpeg，moss/sapi5=audio/wav）——
     # 原实现恒 audio/wav 而 edge-tts 产 MP3 裸字节，前端解码必然失败
@@ -271,6 +289,12 @@ async def synthesize_speech_stream(request: Request, body: SynthesizeRequest):
         engine_name = engine.get_engine_name()
     else:
         engine_name = type(engine).__name__
+
+    async def audio_generator():
+        yield first_chunk
+        async for chunk in gen:
+            yield chunk
+
     return StreamingResponse(
         audio_generator(),
         media_type=media_type,

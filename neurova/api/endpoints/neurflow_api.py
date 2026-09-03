@@ -4,18 +4,23 @@ Neurflow API — 工作流管理端点
 """
 
 from neurova.core.logger import get_logger
+import asyncio
 import json
 import time
 import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
 from neurova.api.auth import get_current_user, get_current_user_or_default
 from neurova.api.endpoints import get_agent_instance
 from neurova.collaboration.neurflow.dag import get_dag_validator
+from neurova.collaboration.neurflow.event_recorder import (
+    attach_event_recorder,
+    get_execution_event_recorder,
+)
 from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
 from neurova.collaboration.neurflow.models import (
     TriggerType,
@@ -32,6 +37,10 @@ from neurova.collaboration.neurflow.storage import NeurflowStorage
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# P0-1 生产装配：事件录制器挂上引擎事件总线（幂等；转发到全局单例，
+# 画布 run / API execute / 调度器触发的执行统一入流）
+attach_event_recorder(get_workflow_executor())
 
 
 def _port_to_dict(p) -> Dict[str, Any]:
@@ -484,12 +493,16 @@ async def execute_workflow(
     inputs: Dict[str, Any] = Body(default={}),
     user_id: Optional[str] = Body(default=None),
     agent_id: Optional[str] = Body(default=None),
+    wait: bool = Body(default=True),
     current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """执行工作流
 
     用户隔离：执行实例的 user_id 取 JWT 实名（未认证回退 default），
     不再信任请求体——知识库节点引用用户级远程配置（默认私有）时按此校验属主。
+
+    wait=false（P0-1 run/stream 分离）：立即返回 runId/events_url，
+    后台执行并落库；默认 wait=true 同步返回终态实例（行为不变）。
     """
     storage = _get_storage()
     workflow = storage.get_workflow(workflow_id)
@@ -572,6 +585,39 @@ async def execute_workflow(
             logger.warning("创建默认 ContextPool 失败: %s", e)
 
     executor = get_workflow_executor()
+
+    # P0-1 run/stream 分离：wait=false 预创建实例立即返回，后台执行+落库；
+    # 客户端凭 events_url 订阅节点级事件流（画布/页面实时点亮节点）。
+    if not wait:
+        instance = executor.create_instance(
+            workflow, inputs=inputs, user_id=user_id, agent_id=agent_id
+        )
+
+        async def _run_and_save():
+            result = await executor.execute(
+                workflow=workflow,
+                inputs=inputs,
+                user_id=user_id,
+                agent_id=agent_id,
+                memory_manager=memory_manager,
+                context_pool=context_pool,
+                emotion_module=emotion_module,
+                crystallizer=crystallizer,
+                instance=instance,
+            )
+            try:
+                storage.save_execution(result)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("后台执行落库失败 %s: %s", result.id, exc)
+
+        asyncio.create_task(_run_and_save())
+        return {
+            "runId": instance.id,
+            "status": "pending",
+            "workflow_id": workflow.id,
+            "events_url": f"/api/v1/neurflow/executions/{instance.id}/events",
+        }
+
     instance = await executor.execute(
         workflow=workflow,
         inputs=inputs,
@@ -652,6 +698,92 @@ async def get_execution(execution_id: str):
             "error": execution.error,
         }
     }
+
+
+@router.get("/executions/{execution_id}/events")
+async def stream_execution_events(
+    execution_id: str,
+    after: int = Query(0, ge=0),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """执行事件 SSE 流（P0-1 run/stream 分离，Dify stream-events 对标）。
+
+    帧格式 data: {seq,type,workflow_id,execution_id,node_id,data,timestamp}；
+    回放 seq>after 历史帧 + 实时推送，终态帧（workflow_completed/failed）后收尾；
+    keep-alive 注释行防代理超时。用户隔离：仅属主（或未认证 default）可订阅。
+    """
+    recorder = get_execution_event_recorder()
+    executor = get_workflow_executor()
+    user_id = str(current_user.get("user_id") or "")
+
+    instance = executor._instances.get(execution_id)
+    if instance is None:
+        instance = _get_storage().get_execution(execution_id)
+
+    if instance is None and not recorder.is_tracked(execution_id):
+        raise HTTPException(status_code=404, detail=f"执行不存在: {execution_id}")
+
+    owner = str(getattr(instance, "user_id", "") or "") if instance is not None else ""
+    if owner and user_id and owner != user_id:
+        raise HTTPException(status_code=403, detail="无权访问该执行")
+
+    async def event_generator():
+        import json as _json
+
+        status_value = ""
+        if instance is not None:
+            raw_status = getattr(instance, "status", None)
+            status_value = getattr(raw_status, "value", str(raw_status or ""))
+        is_live = status_value in ("pending", "running", "paused")
+
+        # 竞态兜底：wait=false 返回与客户端连接之间首帧可能未发（引擎刚起跑）
+        waited = 0.0
+        while not recorder.snapshot(execution_id) and is_live and waited < 5.0:
+            await asyncio.sleep(0.05)
+            waited += 0.05
+
+        if not recorder.snapshot(execution_id):
+            if is_live:
+                return  # 仍在执行但无事件可回放（不应发生；由轮询端点兜底）
+            # 重启兜底：缓冲为空但已落库 → 合成终态帧收尾（不进 recorder）
+            stored = _get_storage().get_execution(execution_id)
+            if stored is not None:
+                raw = getattr(stored, "status", None)
+                stored_status = getattr(raw, "value", str(raw or ""))
+                terminal = {
+                    "completed": "workflow_completed",
+                    "failed": "workflow_failed",
+                    "cancelled": "workflow_failed",
+                }.get(stored_status)
+                if terminal:
+                    frame = {
+                        "seq": 0,
+                        "type": terminal,
+                        "workflow_id": stored.workflow_id,
+                        "execution_id": execution_id,
+                        "node_id": None,
+                        "data": {"outputs": stored.outputs or {}, "error": stored.error},
+                        "timestamp": stored.finished_at or 0.0,
+                    }
+                    yield f"data: {_json.dumps(frame, ensure_ascii=False)}\n\n"
+            return
+
+        it = recorder.subscribe(execution_id, after=after).__aiter__()
+        while True:
+            try:
+                frame = await asyncio.wait_for(it.__anext__(), timeout=15.0)
+            except asyncio.TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            except StopAsyncIteration:
+                break
+            yield f"data: {_json.dumps(frame, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 # ==================== 节点注册表 ====================
