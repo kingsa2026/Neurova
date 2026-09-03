@@ -594,6 +594,8 @@ export default {
     import: 'Импорт знаний',
     colTitle: 'Название',
     colCategory: 'Категория',
+    chunkHit: 'Найденный фрагмент',
+    chunkCount: '{count} блоков',
     colContent: 'Содержание',
     colCreated: 'Дата создания',
     colActions: 'Действия',

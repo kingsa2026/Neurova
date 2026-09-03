@@ -596,6 +596,8 @@ export default {
     import: 'Import Knowledge',
     colTitle: 'Title',
     colCategory: 'Category',
+    chunkHit: 'Matched snippet',
+    chunkCount: '{count} chunks',
     colContent: 'Content',
     colCreated: 'Created At',
     colActions: 'Actions',

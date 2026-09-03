@@ -604,6 +604,8 @@ export default {
     import: '导入知识',
     colTitle: '标题',
     colCategory: '分类',
+    chunkHit: '命中片段',
+    chunkCount: '共 {count} 块',
     colContent: '内容',
     colCreated: '创建时间',
     colActions: '操作',

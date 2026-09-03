@@ -59,6 +59,9 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'title'">
             <span class="kb-title-cell">{{ record.title }}</span>
+            <a-tag v-if="(record.chunk_count ?? 1) > 1" color="geekblue" class="kb-conf-tag">
+              {{ t('knowledge.chunkCount', { count: record.chunk_count }) }}
+            </a-tag>
             <a-tag v-if="confidenceMap[record.id] !== undefined" color="purple" class="kb-conf-tag">
               {{ Math.round(confidenceMap[record.id] * 1000) / 10 }}%
             </a-tag>
@@ -77,6 +80,13 @@
           </template>
           <template v-if="column.key === 'content'">
             <span class="kb-preview">{{ truncate(record.content, 80) }}</span>
+            <div v-if="(record.chunk_hits?.length ?? 0) > 0" class="kb-chunk-hits">
+              <span class="kb-chunk-label">{{ t('knowledge.chunkHit') }}</span>
+              <div v-for="hit in record.chunk_hits" :key="hit.chunk_index" class="kb-chunk-item">
+                <a-tag color="default" class="kb-chunk-idx">#{{ hit.chunk_index + 1 }}</a-tag>
+                <span class="kb-chunk-text">{{ truncate(hit.content, 60) }}</span>
+              </div>
+            </div>
           </template>
           <template v-if="column.key === 'created_at'">
             {{ formatDate(record.created_at) }}
@@ -384,6 +394,9 @@ interface KnowledgeItem {
   owner_user_id?: string
   shared_with?: string[]
   submission?: { status?: string } | null
+  // P0-2 分块契约：块数 + 检索命中的块级溯源
+  chunk_count?: number
+  chunk_hits?: { chunk_index: number; content: string; score?: number }[]
 }
 
 const { t } = useI18n()
@@ -601,20 +614,33 @@ async function fetchKnowledge() {
   loading.value = true
   confidenceMap.value = {}
   try {
-    const params: Record<string, any> = {
-      agent_id: agentId.value,
-      scope: activeScope.value,
-      page: currentPage.value,
-      page_size: pageSize.value,
-    }
-    if (searchQuery.value) params.q = searchQuery.value
-    if (activeCategory.value) params.category = activeCategory.value
+    // 关键词搜索走 POST /knowledge/search（后端带 chunk_hits 块级溯源）；
+    // GET /knowledge 列表端点不支持 q（传了也被忽略，属断链）
+    if (searchQuery.value.trim()) {
+      const res: any = await searchKnowledge(searchQuery.value.trim(), {
+        agent_id: agentId.value,
+        scope: activeScope.value,
+        limit: pageSize.value,
+      })
+      const data = res?.data ?? res
+      const rawItems: KnowledgeNode[] = Array.isArray(data) ? data : data?.items ?? []
+      knowledgeItems.value = rawItems.map(normalizeItem)
+      totalItems.value = knowledgeItems.value.length
+    } else {
+      const params: Record<string, any> = {
+        agent_id: agentId.value,
+        scope: activeScope.value,
+        page: currentPage.value,
+        page_size: pageSize.value,
+      }
+      if (activeCategory.value) params.category = activeCategory.value
 
-    const res: any = await getKnowledgeNodes(params)
-    const data = res?.data ?? res
-    const rawItems: KnowledgeNode[] = Array.isArray(data) ? data : data?.items ?? []
-    knowledgeItems.value = rawItems.map(normalizeItem)
-    totalItems.value = data?.total ?? knowledgeItems.value.length
+      const res: any = await getKnowledgeNodes(params)
+      const data = res?.data ?? res
+      const rawItems: KnowledgeNode[] = Array.isArray(data) ? data : data?.items ?? []
+      knowledgeItems.value = rawItems.map(normalizeItem)
+      totalItems.value = data?.total ?? knowledgeItems.value.length
+    }
 
     // Extract categories from results
     const cats = new Set(knowledgeItems.value.map((i: KnowledgeItem) => i.category).filter(Boolean))
@@ -1017,6 +1043,37 @@ onMounted(() => {
 .kb-preview {
   font-size: 13px;
   color: var(--nr-text-secondary);
+}
+
+/* P0-2 块级溯源：命中片段明细 */
+.kb-chunk-hits {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kb-chunk-label {
+  font-size: 12px;
+  color: var(--nr-text-tertiary, #999);
+}
+
+.kb-chunk-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.kb-chunk-idx {
+  flex-shrink: 0;
+  margin: 0;
+  font-family: monospace;
+}
+
+.kb-chunk-text {
+  color: var(--nr-text-secondary);
+  word-break: break-all;
 }
 
 .kb-share-target {

@@ -24,6 +24,16 @@ export interface KnowledgeNode {
   shared_with?: string[]
   submission?: { status?: string; submitted_at?: string; reviewed_by?: string; note?: string } | null
   graph_node_ids?: string[]
+  // P0-2 分块：块数 + 检索命中的块级溯源
+  chunk_count?: number
+  chunk_hits?: KnowledgeChunkHit[]
+}
+
+/** 检索命中的块级明细（chunk_index 定位 + 块正文 + 相关度得分） */
+export interface KnowledgeChunkHit {
+  chunk_index: number
+  content: string
+  score?: number
 }
 
 export type KnowledgeScope = 'all' | 'public' | 'private' | 'shared'
