@@ -268,7 +268,8 @@ token.txt
 /neurova/agents/
 /neurova/projects/
 /neurova/.test_deps/
-/tests/
+# tests/ 正式测试目录必须入库（历史上整目录忽略导致 809 个测试文件漏跟踪，
+# 只能 git add -f 补救——2026-09-04 已改为只忽略根级临时脚本）
 /backup_reports/
 
 # neurova/memory 只排除数据文件，保留脚本

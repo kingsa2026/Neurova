@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "saved_at": "2026-06-06T15:02:31.275520+00:00",
+  "records": {
+    "mem_c2ce27b20cea41c0bd65fd8bf27f39b2": {
+      "id": "mem_c2ce27b20cea41c0bd65fd8bf27f39b2",
+      "content": "集成测试记忆",
+      "memory_type": "semantic",
+      "owner": "default",
+      "tags": [],
+      "metadata": {},
+      "importance": 0.0,
+      "access_count": 0,
+      "created_at": "2026-06-06T15:02:24.574430+00:00",
+      "updated_at": "2026-06-06T15:02:24.574430+00:00",
+      "agent_id": "agent_1",
+      "neuser_id": "neuser_1",
+      "user_id": "user_1"
+    },
+    "mem_0c7777e579ab4ea7bb0155c54abec013": {
+      "id": "mem_0c7777e579ab4ea7bb0155c54abec013",
+      "content": "集成测试记忆",
+      "memory_type": "semantic",
+      "owner": "default",
+      "tags": [],
+      "metadata": {},
+      "importance": 0.0,
+      "access_count": 0,
+      "created_at": "2026-06-06T15:02:31.275508+00:00",
+      "updated_at": "2026-06-06T15:02:31.275508+00:00",
+      "agent_id": "agent_1",
+      "neuser_id": "neuser_1",
+      "user_id": "user_1"
+    }
+  },
+  "index": {
+    "by_type": {
+      "semantic": [
+        "mem_c2ce27b20cea41c0bd65fd8bf27f39b2",
+        "mem_0c7777e579ab4ea7bb0155c54abec013"
+      ]
+    },
+    "by_owner": {
+      "default": [
+        "mem_c2ce27b20cea41c0bd65fd8bf27f39b2",
+        "mem_0c7777e579ab4ea7bb0155c54abec013"
+      ]
+    },
+    "by_tag": {},
+    "by_agent": {
+      "agent_1": [
+        "mem_c2ce27b20cea41c0bd65fd8bf27f39b2",
+        "mem_0c7777e579ab4ea7bb0155c54abec013"
+      ]
+    },
+    "by_neuser": {
+      "neuser_1": [
+        "mem_c2ce27b20cea41c0bd65fd8bf27f39b2",
+        "mem_0c7777e579ab4ea7bb0155c54abec013"
+      ]
+    },
+    "by_user": {
+      "user_1": [
+        "mem_c2ce27b20cea41c0bd65fd8bf27f39b2",
+        "mem_0c7777e579ab4ea7bb0155c54abec013"
+      ]
+    },
+    "by_isolation_key": {
+      "agent_1:neuser_1:user_1": [
+        "mem_c2ce27b20cea41c0bd65fd8bf27f39b2",
+        "mem_0c7777e579ab4ea7bb0155c54abec013"
+      ]
+    }
+  }
+}
