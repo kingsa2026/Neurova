@@ -17,6 +17,9 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(secureStorage.getObject<User | null>(USER_KEY, null))
   const loading = ref<boolean>(false)
   const error = ref<string | null>(null)
+  // 最近一次失败是否属于网络层（无 HTTP 响应）：登录页据此决定是否做
+  // 后端进程诊断提示（401 等有响应的错误必须如实显示，不能被"正在启动"覆盖）
+  const lastNetworkFailed = ref<boolean>(false)
 
   // ---------------------------------------------------------------------------
   // Computed
@@ -76,14 +79,23 @@ export const useAuthStore = defineStore('auth', () => {
       const res = await authAPI.login({ ...form, username: identifier })
       const data = (res as any)?.data ?? res
       if (data?.access_token) {
+        lastNetworkFailed.value = false
         persistTokens(data as AuthTokens)
         await fetchCurrentUser()
         return true
       }
+      lastNetworkFailed.value = false
       error.value = (res as any)?.message || 'Login failed.'
       return false
     } catch (err: any) {
-      error.value = err?.response?.data?.message || err?.message || 'Login failed. Please try again.'
+      // 网络层失败 = 无 HTTP 响应（连接被拒/超时/DNS）；
+      // 401 等有响应的错误是凭据问题，必须透传后端 detail。
+      lastNetworkFailed.value = !err?.response
+      error.value =
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Login failed. Please try again.'
       return false
     } finally {
       loading.value = false
@@ -225,6 +237,7 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     loading,
     error,
+    lastNetworkFailed,
     // computed
     isAuthenticated,
     currentUser,

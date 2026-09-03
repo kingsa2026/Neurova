@@ -8,6 +8,7 @@ import { LineChart, BarChart, PieChart, GraphChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import App from './App.vue'
+import { captureAppError } from '@/utils/errorReporter'
 import router from './router'
 import i18n from './i18n'
 import './styles/global.css'
@@ -34,5 +35,11 @@ app.use(router)
 app.use(i18n)
 app.use(Antd)
 app.component('VChart', VChart)
+
+// Vue 组件渲染错误 → 错误日志上报链路（官网收报端点）
+app.config.errorHandler = (err: unknown, _instance, info) => {
+  const e = err as Error
+  captureAppError('vue', 'vue-error', e?.message ?? String(err), e?.stack, { info: String(info ?? '') })
+}
 
 app.mount('#app')

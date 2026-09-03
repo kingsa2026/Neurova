@@ -7,6 +7,17 @@ import sys
 import os
 import logging
 
+# 强制 UTF-8 输出：stdout/stderr 重定向到文件时 Python 默认用系统 ANSI
+# 代码页（中文 Windows = GBK），桌面壳按 UTF-8 读取会乱码。须在 stderr
+# 首次使用前设置（io 编码在解释器初始化后只认环境变量/重配置）。
+os.environ.setdefault("PYTHONUTF8", "1")
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+try:
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+except Exception:
+    pass
+
 # 添加项目路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
