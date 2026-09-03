@@ -5,7 +5,7 @@
       <div class="header-actions">
         <div class="ws-indicator" :class="{ connected: wsConnected }">
           <span class="ws-dot" />
-          <span class="ws-label">{{ wsConnected ? 'Connected' : 'Disconnected' }}</span>
+          <span class="ws-label">{{ wsConnected ? t('channel.connected') : t('channel.disconnected') }}</span>
         </div>
         <GlassButton variant="primary" size="sm" @click="openCreate">{{ t('common.create') }}</GlassButton>
       </div>

@@ -24,7 +24,7 @@ vi.mock('@/api/modules/skill-pool', () => ({
   createSkill: vi.fn(),
   updateSkill: vi.fn(),
   deleteSkill: vi.fn(),
-  installSkill: vi.fn(),
+  installSkill: vi.fn().mockResolvedValue({ data: {} }),
   uninstallSkill: vi.fn(),
   submitSkillForReview: vi.fn().mockResolvedValue({ data: { id: 'subs_1', status: 'pending' } }),
   listSkillSubmissions: vi.fn().mockResolvedValue({
@@ -125,7 +125,7 @@ const messages = {
 
 const stubs = {
   GlassPanel: { props: ['variant'], template: '<div class="glass-panel"><slot/></div>' },
-  GlassCard: { props: ['title', 'subtitle'], template: '<div class="glass-card"><slot/></div>' },
+  GlassCard: { props: ['title', 'subtitle'], template: '<div class="glass-card">{{ title }}<slot/></div>' },
   GlassButton: { props: ['variant', 'size', 'loading'], emits: ['click'], template: '<button class="glass-btn" @click="$emit(\'click\')"><slot/></button>' },
   'a-button': { props: ['type', 'danger', 'size'], emits: ['click'], template: '<button class="a-btn" @click="$emit(\'click\')"><slot/></button>' },
   'a-input-search': { props: ['value', 'placeholder'], emits: ['update:value', 'search'], template: '<input />' },
@@ -170,6 +170,32 @@ describe('SkillMarketPage 提交与审核', () => {
     expect(skillPoolApi.listSkillSubmissions).not.toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('技能审核')
     expect(wrapper.text()).toContain('提交技能')
+  })
+
+  it('市场列表归一化: market 域 skill_id/downloads 映射渲染且安装用归一化 id', async () => {
+    vi.mocked(skillPoolApi.getPublicSkills).mockResolvedValue({
+      data: {
+        items: [
+          {
+            skill_id: 'web-search',
+            name: 'Web Search',
+            description: '搜索互联网获取实时信息',
+            downloads: 1200,
+            category: 'utility',
+          },
+        ],
+        total: 1,
+      },
+    } as any)
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Web Search')
+    const card = wrapper.find('.glass-card')
+    const installBtn = card.findAll('button').find((b) => b.text().includes('安装'))
+    await installBtn!.trigger('click')
+    await flushPromises()
+    expect(skillPoolApi.installSkill).toHaveBeenCalledWith('web-search', 'default')
   })
 
   it('管理员挂载时拉取待审列表并渲染审核面板', async () => {

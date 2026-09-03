@@ -26,9 +26,11 @@ beforeEach(() => {
 // 既有函数 — 验证 URL 对齐 ADR 0013 canonical 端点 (/skill-pool/*)
 // ===========================================================================
 describe('skill-pool API — 既有函数 URL 对齐', () => {
-  it('getPublicSkills calls GET /skill-pool/public', async () => {
+  it('getPublicSkills calls GET /marketplace/skills (catalog 同源; 功能页原走 /skill-pool/public 僵尸空字典)', async () => {
     await skillPool.getPublicSkills()
-    expect(mockGet).toHaveBeenCalledWith('/skill-pool/public', { params: undefined })
+    expect(mockGet).toHaveBeenCalledWith('/marketplace/skills', {
+      params: { limit: 100, offset: 0, with_total: true },
+    })
   })
 
   it('getPrivateSkills calls GET /skill-pool/private with agent_id param', async () => {

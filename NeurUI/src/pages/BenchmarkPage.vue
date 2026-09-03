@@ -112,7 +112,9 @@ const fetchSuites = async () => {
   loading.value = true
   try {
     const res: any = await request.get('/benchmark/suites')
-    suites.value = res?.data ?? res ?? []
+    // 契约：信封 {code, data:{suites}}。此前取 res?.data 得到的是 data
+    // 对象 {suites,total}，v-for 遍历对象 → 无名称幽灵卡，套件名丢失。
+    suites.value = res?.data?.suites ?? (Array.isArray(res?.data) ? res.data : [])
   } catch {
     message.error(t('common.error'))
   } finally {

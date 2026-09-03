@@ -16,8 +16,20 @@
       <div class="status-banner">
         <span class="status-icon">{{ overallStatus === 'healthy' ? '✅' : overallStatus === 'degraded' ? '⚠️' : '❌' }}</span>
         <div class="status-text">
-          <strong>{{ overallStatus === 'healthy' ? 'All Systems Operational' : overallStatus === 'degraded' ? 'Some Systems Degraded' : 'System Issues Detected' }}</strong>
-          <span>{{ checks.length }} checks · {{ checks.filter(c => c.status === 'healthy').length }} healthy · {{ checks.filter(c => c.status !== 'healthy').length }} issues</span>
+          <strong>{{
+            overallStatus === 'healthy'
+              ? t('health.allOperational')
+              : overallStatus === 'degraded'
+                ? t('health.someDegraded')
+                : t('health.systemIssues')
+          }}</strong>
+          <span>{{
+            t('health.checksSummary', {
+              checks: checks.length,
+              healthy: checks.filter((c) => c.status === 'healthy').length,
+              issues: checks.filter((c) => c.status !== 'healthy').length,
+            })
+          }}</span>
         </div>
       </div>
     </GlassPanel>
@@ -36,8 +48,8 @@
           </template>
           <div class="check-body">
             <p v-if="check.message" class="check-message">{{ check.message }}</p>
-            <p class="check-time">Last checked: {{ formatTime(check.last_check) }}</p>
-            <p v-if="check.response_time" class="check-response">Response: {{ check.response_time }}ms</p>
+            <p class="check-time">{{ t('health.lastChecked') }}{{ formatTime(check.last_check) }}</p>
+            <p v-if="check.response_time" class="check-response">{{ t('health.response') }}{{ check.response_time }}ms</p>
           </div>
           <template #footer>
             <div class="check-actions">
@@ -45,7 +57,7 @@
                 {{ t('common.refresh') }}
               </GlassButton>
               <GlassButton v-if="check.status !== 'healthy'" variant="danger" size="sm" @click="recover(check.name)">
-                Recover
+                {{ t('health.recover') }}
               </GlassButton>
             </div>
           </template>

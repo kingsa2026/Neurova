@@ -2,6 +2,8 @@ import { STORE_CANVAS } from './_canvasStores'
 
 export default {
   common: {
+    markAllRead: '全部标记已读',
+    markRead: '标记已读',
     clear: "清除",
     confirm: '确认',
     cancel: '取消',
@@ -383,6 +385,16 @@ export default {
     viewTable: '表格',
   },
   chat: {
+    retrievalUnified: '统一检索',
+    retrievalMoE: 'MoE 专家路由',
+    retrievalCache: '缓存检索',
+    retrievalFallback: '兜底检索',
+    retrievalStatus: '记忆检索中（{name}）…',
+    retrievalDone: '{name} 完成：命中 {count} 条 ({ms}ms)',
+    retrievalError: '{name} 检索异常，降级下一通道…',
+    retrievalExpert: 'MoE 专家路由：激活 {n} 个专家',
+    retrievalSemanticFallback: '全库语义兜底：命中 {count} 条',
+    retrievalExpertDone: '专家检索完成：{count} 条',
     searchInSession: '会话内搜索',
     searchMatches: '{n} 处匹配',
     title: '对话',
@@ -464,6 +476,16 @@ export default {
     queueEdit: '编辑排队消息',
   },
   memory: {
+    categoryEpisodic: '情景记忆',
+    categorySemantic: '语义记忆',
+    hot: '🔥 热点',
+    crystallized: '💎 结晶',
+    shortTerm: '短期记忆',
+    jsonData: 'JSON 数据',
+    mergeMode: '合并模式',
+    mergeSkip: '跳过',
+    mergeOverwrite: '覆盖',
+    mergeMerge: '合并',
     title: '记忆管理',
     search: '搜索记忆',
     create: '创建记忆',
@@ -876,6 +898,7 @@ export default {
     parameters: '参数 (JSON)',
   },
   channel: {
+    disconnected: '已断开',
     title: '渠道管理',
     create: '创建渠道',
     test: '测试连接',
@@ -931,6 +954,9 @@ export default {
     onebot: 'OneBot',
   },
   collab: {
+    webhooks: 'Webhook 集成',
+    sessionsync: '会话同步',
+    neuron: 'NEURON 图谱',
     title: '协作管理',
     hubSubtitle: '协作域统一入口：会话、工作流、画布、项目、团队',
     templates: '协作模板',
@@ -1323,6 +1349,9 @@ export default {
     source: '来源',
   },
   health: {
+    response: '响应: ',
+    systemIssues: '检测到系统问题',
+    checksSummary: '{checks} 项检查 · {healthy} 项健康 · {issues} 项问题',
     title: '健康检查',
     report: '报告',
     allOperational: '所有系统正常运行',
@@ -1796,6 +1825,11 @@ export default {
     keyTakeaways: '关键收获...',
   },
   experience: {
+    taskType: '任务类型',
+    outcomeSuccess: '成功',
+    outcomeFailure: '失败',
+    outcomePartial: '部分成功',
+    addLessons: '添加经验教训',
     title: '经验知识',
     successRate: '成功率',
     findSimilar: '查找相似',
@@ -2121,7 +2155,7 @@ export default {
     explanation: '解释',
     suggestion: '建议',
     reasoning: '推理',
-    subtitle: '调优记忆系统子模块的运行时参数',
+    subtitle: '依赖图谱 · 级联推理 · 缺失检测',
     systemStatus: '系统状态',
     title: 'Agent 管理',
     confidence: '置信度：',
@@ -2180,6 +2214,14 @@ export default {
     resumeFailed: '恢复执行失败',
   },
   canvas: {
+    aiDesign: 'AI 画布设计',
+    workflowIdLabel: '目标工作流 ID',
+    inputMappingLabel: '入参映射（JSON）',
+    designFailed: '设计失败，请尝试换一种描述',
+    generateSuccess: '已生成 {nodes} 个节点、{edges} 条连线（{name}），已应用到画布，可保存后执行。',
+    generateFailed: '生成失败: {error}',
+    nodeConfigError: '节点配置异常，已停止执行',
+    unknownError: '未知错误',
     subflowNode: '子工作流',
     runBlocked: '工作流执行被拦截',
     runFailed: '执行失败',
@@ -2441,3 +2483,4 @@ export default {
     ...STORE_CANVAS,
   },
 }
+

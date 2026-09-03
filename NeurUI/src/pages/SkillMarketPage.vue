@@ -338,8 +338,11 @@ async function fetchSkills() {
   try {
     const res = await skillPoolApi.getPublicSkills()
     const data: any = (res as any)?.data ?? res
+    // 市场域返回 skill_id/downloads; 归一化为页内 Skill 形状(id/install_count)
     skills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({
       ...s,
+      id: s.id ?? s.skill_id,
+      install_count: s.install_count ?? s.downloads ?? 0,
       _installing: false,
     }))
     // Refresh category counts based on the freshly loaded list.

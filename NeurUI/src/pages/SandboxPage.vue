@@ -97,8 +97,10 @@ const formatTime = (ts?: string) => ts ? new Date(ts).toLocaleString() : ''
 const fetchSandboxes = async () => {
   loading.value = true
   try {
-    const res = await sandboxApi.listSandboxes()
-    sandboxes.value = res ?? []
+    const res: any = await sandboxApi.listSandboxes()
+    // 契约：GET /sandbox 返回信封 {code, data:{sandboxes, total}}。
+    // 此前把信封对象当数组 v-for → code/message/data 三张无名称幽灵卡。
+    sandboxes.value = Array.isArray(res) ? res : (res?.data?.sandboxes ?? [])
   } catch {
     message.error(t('common.error'))
   } finally {
