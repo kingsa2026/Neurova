@@ -25,6 +25,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useAgentStore } from '@/stores/agents'
+import { initErrorReporter, setErrorReporterInstance } from '@/utils/errorReporter'
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
@@ -87,6 +88,12 @@ onMounted(() => {
   if (authStore.isAuthenticated) {
     authStore.fetchCurrentUser()
   }
+  // 错误日志自动上报：桌面/浏览器端崩溃与运行期错误采集（官网收报端点）
+  setErrorReporterInstance(
+    initErrorReporter({
+      version: import.meta.env.VITE_APP_VERSION || '',
+    }),
+  )
 })
 </script>
 

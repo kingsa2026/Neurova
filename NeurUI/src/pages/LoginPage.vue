@@ -119,7 +119,7 @@
             <a-checkbox v-model:checked="form.remember">
               {{ t('auth.rememberMe') }}
             </a-checkbox>
-            <a class="nr-auth-forgot" href="#">{{ t('auth.forgotPassword') }}</a>
+            <router-link class="nr-auth-forgot" to="/forgot-password">{{ t('auth.forgotPassword') }}</router-link>
           </div>
 
           <a-alert
@@ -289,10 +289,12 @@ async function handleLogin() {
       // Navigate to the originally requested page, or dashboard
       const redirect = (route.query.redirect as string) || '/dashboard'
       router.push(redirect)
-    } else {
-      // Network Error 类（响应为空）→ 用后端子进程状态给出可行动提示
+    } else if (authStore.lastNetworkFailed) {
+      // 仅网络层失败（无 HTTP 响应）才做进程诊断；401 等有响应错误如实显示
       const diag = await backendDiagnosis()
       error.value = diag || authStore.error || t('auth.loginFailed')
+    } else {
+      error.value = authStore.error || t('auth.loginFailed')
     }
   } catch (err: any) {
     const netErr = err?.response ? null : await backendDiagnosis()

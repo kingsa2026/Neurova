@@ -474,12 +474,13 @@ Function PageLeaveAdminAccount
     Abort
   ${EndIf}
 
-  ; 密码为空或两次不一致 → 拦截
+  ; 密码为空或两次不一致 → 拦截（S!= = 大小写敏感比较；LogicLib 的 != 不分
+  ; 大小写，"Pass123" 与 "pass123" 会被误判一致）
   ${If} "$R1" == ""
     MessageBox MB_ICONEXCLAMATION "$(adminInvalidPassword)"
     Abort
   ${EndIf}
-  ${If} "$R1" != "$R2"
+  ${If} "$R1" S!= "$R2"
     MessageBox MB_ICONEXCLAMATION "$(adminPasswordMismatch)"
     Abort
   ${EndIf}
