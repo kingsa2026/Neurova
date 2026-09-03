@@ -355,3 +355,6 @@ NeurUI/src-tauri/resources/_python-*
 /.tmp_*
 /.neurova_token.json
 /MagicMock/
+
+# 本地模型权重（运行时下载/生成，不入 git）
+models/**/*.data
