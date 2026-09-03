@@ -136,17 +136,27 @@ def copy_venv_site_packages(stage_python: Path, manifest: dict) -> None:
 EXCLUDE_DIR_NAMES = {"__pycache__", ".mimosa", ".pytest_cache"}
 
 # 打包体积红线：NSIS 对单文件 mmap 有 ~2GB 限制，安装包体积也应克制。
-# 排除原始权重 blob（.data，如 moss-nano TTS ~640MB）；embedding（bge，检索核心）
-# 等普通模型保留。缺权重的引擎由应用自行降级或首启按需下载。
+# 排除原始权重 blob（.data，如 moss-nano TTS ~640MB）；bge embedding 是
+# 检索核心（用户指定固定包含，豁免排除），其余 >512MB 文件仍排除。
 EXCLUDE_MODEL_SUFFIXES = {".data"}
 MAX_MODEL_FILE_BYTES = 512 * 1024 * 1024
+# 用户指定封包固定包含的模型目录（豁免 skip_heavy 排除）
+KEEP_MODEL_DIRS = {"embedding"}
 
 
 def _ignore_model_weights(directory: str, entries: list[str]) -> list[str]:
     """shutil.copytree 的 ignore 回调（shutil 会逐子目录调用）。"""
     ignored = list(EXCLUDE_DIR_NAMES)
+    dir_path = Path(directory)
+    # 固定包含目录（及其子目录）不做权重排除
+    for keep in KEEP_MODEL_DIRS:
+        try:
+            dir_path.relative_to(Path(__file__).resolve().parent.parent.parent / "models" / keep)
+            return ignored
+        except ValueError:
+            continue
     for entry in entries:
-        p = Path(directory) / entry
+        p = dir_path / entry
         try:
             if p.is_file() and (
                 p.suffix.lower() in EXCLUDE_MODEL_SUFFIXES or p.stat().st_size > MAX_MODEL_FILE_BYTES

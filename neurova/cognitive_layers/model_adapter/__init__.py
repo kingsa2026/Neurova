@@ -22,4 +22,15 @@ try:
 except ImportError:
     re = None  # type: ignore[assignment]
 
-__all__ = ["BaseModel"]
+from neurova.cognitive_layers.model_adapter.registry import (
+    ModelAdapterRegistry,
+    get_model_adapter_registry,
+    reset_model_adapter_registry,
+)
+
+__all__ = [
+    "BaseModel",
+    "ModelAdapterRegistry",
+    "get_model_adapter_registry",
+    "reset_model_adapter_registry",
+]
