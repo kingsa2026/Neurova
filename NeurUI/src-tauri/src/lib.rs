@@ -74,6 +74,11 @@ fn spawn_backend(root: &std::path::Path) -> Result<Child, String> {
 
     let mut cmd = Command::new(&python);
     cmd.arg(&server).current_dir(root);
+    // 强制 Python 全程 UTF-8：stdout/stderr 重定向到文件时默认用系统 ANSI
+    // 代码页（中文 Windows = GBK），boot 进度窗按 UTF-8 读会乱码。
+    // PYTHONUTF8=1（PEP 540）+ PYTHONIOENCODING 双保险，dev/打包都生效。
+    cmd.env("PYTHONUTF8", "1");
+    cmd.env("PYTHONIOENCODING", "utf-8");
     if bundled {
         // 打包态：PYTHONPATH 指向后端根（neurova 包）；CORS 放行 Tauri WebView origin
         // （Windows 默认 origin=http://tauri.localhost；macOS/Linux 为 tauri://localhost）
@@ -89,10 +94,26 @@ fn spawn_backend(root: &std::path::Path) -> Result<Child, String> {
     // 后端输出进文件：崩溃/导入错误/启动日志可追溯（此前 Stdio::null 吞掉
     // 全部输出，装机现场后端起不来自查无门）。backend.log 位于安装目录，
     // icacls 已授 Users 组修改权，普通用户可写；打开失败则退回 null。
+    // 旧日志轮换：历史版本以 GBK 写过，按 UTF-8 读会乱码 → 移为 .gbk.bak
+    // （供需要时人工查证），新日志从干净 UTF-8 开始。
+    let log_path = root.join("backend.log");
+    if log_path.exists() {
+        let raw = std::fs::read(&log_path).unwrap_or_default();
+        let is_utf8 = String::from_utf8(raw).is_ok();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let backup = root.join(format!("backend.{stamp}.log.bak"));
+        let _ = std::fs::rename(&log_path, &backup);
+        if !is_utf8 {
+            log::info!("backend.log 非UTF-8（旧版GBK），已轮换为 {}", backup.display());
+        }
+    }
     let backend_log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(root.join("backend.log"))
+        .open(&log_path)
         .ok();
     let stdout = backend_log
         .as_ref()
