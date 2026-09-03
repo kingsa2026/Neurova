@@ -79,6 +79,35 @@ class EventType(str, Enum):
     HEARTBEAT = "heartbeat"
 
 
+def _json_safe(value: Any) -> Any:
+    """将值转换为可 JSON 序列化的形式。
+
+    根因（"WebSocket send error: Object of type function is not JSON
+    serializable"）：AGENT_REPLY 事件 payload 携带 ctx.metadata，其中
+    event_emitter 是 callable（蜂群流式透传），函数对象随事件进入历史；
+    WS 连接回放历史时 to_json() 序列化失败——每次连接固定报错一次。
+
+    此处做边界兜底：callable → 函数名描述；dict/list/set 递归；
+    datetime → ISO；其余不可序列化对象 → str()。与源头剥离（chat_pipeline
+    _sync_event）双保险，防止任何未来 payload 破坏 WS 契约。
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if callable(value):
+        return "<%s>" % getattr(value, "__name__", "callable")
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    try:
+        json.dumps(value)
+        return value
+    except (TypeError, ValueError):
+        return str(value)
+
+
 @dataclass
 class SessionEvent:
     """会话事件"""
@@ -95,6 +124,8 @@ class SessionEvent:
         data = asdict(self)
         data["event_type"] = self.event_type.value
         data["timestamp"] = self.timestamp.isoformat()
+        # payload 兜底净化（函数/不可序列化对象降级），见 _json_safe 注释
+        data["payload"] = _json_safe(self.payload)
         return data
 
     @classmethod

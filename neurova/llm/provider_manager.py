@@ -981,14 +981,39 @@ class LLMProviderManager(Module):
         )
 
     def get_all_models(self) -> List[PydanticModelInfo]:
-        """获取所有服务商的模型列表(聚合,携带模型元数据)"""
+        """获取所有服务商的模型列表(聚合,携带模型元数据)
+
+        兜底:元数据缺 capabilities/context_window/max_tokens 时,即时推断能力、
+        按预埋目录(model_limits 精确表优先)补限额 —— 检测尚未显式执行过也能在
+        /models、/models/by-capability 响应中拿到完整模型档案。
+        """
+        from neurova.llm.capability_detector import (
+            apply_preset_defaults,
+            detect_model_capabilities,
+        )
+
         all_models: List[PydanticModelInfo] = []
         for provider in self.list_providers():
             model_ids = list(getattr(provider, "models", None) or [])
             if provider.default_model and provider.default_model not in model_ids:
                 model_ids.append(provider.default_model)
             for model_id in model_ids:
-                all_models.append(self._build_model_view(provider, model_id))
+                meta = dict((provider.model_metadata or {}).get(model_id, {}) or {})
+                if not (meta.get("capabilities") or []):
+                    meta["capabilities"] = detect_model_capabilities(
+                        model_id,
+                        display_name=str(meta.get("name") or ""),
+                    )
+                # 三元组兜底合并（服务商已有值首选，仅补缺）
+                meta = apply_preset_defaults(model_id, meta)
+                view = self._build_model_view(provider, model_id)
+                if view.context_window in (None, 0, 4096) and meta.get("context_window") not in (None, 0, 4096):
+                    view.context_window = int(meta["context_window"])
+                if view.max_tokens in (None, 0, 4096) and meta.get("max_tokens") not in (None, 0, 4096):
+                    view.max_tokens = int(meta["max_tokens"])
+                if not (view.capabilities or []):
+                    view.capabilities = list(meta.get("capabilities") or [])
+                all_models.append(view)
         return all_models
 
     @staticmethod
@@ -1072,11 +1097,26 @@ class LLMProviderManager(Module):
             return []
 
         if models:
+            from neurova.llm.capability_detector import (
+                apply_preset_defaults,
+                detect_model_capabilities,
+            )
+
             with self._config_lock:
                 metadata = dict(provider.model_metadata or {})
                 for model in models:
                     entry = model.to_dict()
                     entry["owned_by"] = provider_id
+                    # 自动检测能力标记:发现链路写入时缺 capabilities 则推断补齐并持久化
+                    if not (entry.get("capabilities") or []):
+                        old_entry = metadata.get(model.id, {}) or {}
+                        entry["capabilities"] = detect_model_capabilities(
+                            model.id,
+                            existing=old_entry.get("capabilities") or [],
+                            display_name=str(model.name or ""),
+                        )
+                    # 限额三元组兜底:服务商返回的真实值首选,缺省(或 4096 占位)才按预埋补
+                    entry = apply_preset_defaults(model.id, entry)
                     metadata[model.id] = entry
                 current_ids = set(provider.models or [])
                 if merge:
@@ -1138,6 +1178,112 @@ class LLMProviderManager(Module):
             provider.name,
         )
         return len(chosen)
+
+    # ------------------------------------------------------------------
+    # 模型能力自动检测与持久化(2026-09-03)
+    # ------------------------------------------------------------------
+    def set_model_capabilities(
+        self,
+        provider_id: str,
+        model_id: str,
+        capabilities: List[str],
+    ) -> bool:
+        """写入单个模型的显式能力标记并持久化(合并进 model_metadata,限额随预埋兜底)。"""
+        from neurova.llm.capability_detector import (
+            apply_preset_defaults,
+            detect_model_capabilities,
+        )
+
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            logger.warning("set_model_capabilities: provider %s not found", provider_id)
+            return False
+
+        canonical = detect_model_capabilities(model_id, existing=capabilities)
+        with self._config_lock:
+            metadata = dict(provider.model_metadata or {})
+            entry = dict(metadata.get(model_id, {}) or {})
+            entry["capabilities"] = canonical
+            entry = apply_preset_defaults(model_id, entry)
+            metadata[model_id] = entry
+            provider.model_metadata = metadata
+            self._save_config()
+        return True
+
+    def detect_and_persist_capabilities(
+        self,
+        provider_id: Optional[str] = None,
+        model_id: Optional[str] = None,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        """批量检测模型能力并持久化。
+
+        - ``provider_id`` 缺省 → 全部服务商;``model_id`` 缺省 → 该商全部模型。
+        - ``force=False``(默认)跳过已有显式 capabilities 的模型(幂等);
+          ``force=True`` 强制重检。
+        - 检测顺序:显式元数据 > 已知模型目录 > 名称启发式(见 capability_detector)。
+
+        Returns:
+            {"detected": 实际检测并持久化的模型数,
+             "results": [{"provider_id", "provider_name", "model_id", "capabilities"}]}
+        """
+        from neurova.llm.capability_detector import (
+            apply_preset_defaults,
+            detect_model_capabilities,
+        )
+
+        results: List[Dict[str, Any]] = []
+        with self._config_lock:
+            for pid, provider in self._providers.items():
+                if provider_id is not None and pid != provider_id:
+                    continue
+                model_ids = list(getattr(provider, "models", None) or [])
+                if provider.default_model and provider.default_model not in model_ids:
+                    model_ids.append(provider.default_model)
+                if model_id is not None:
+                    model_ids = [m for m in model_ids if m == model_id]
+
+                metadata = dict(provider.model_metadata or {})
+                changed = False
+                for mid in model_ids:
+                    entry = dict(metadata.get(mid, {}) or {})
+                    existing = entry.get("capabilities") or []
+                    if existing and not force:
+                        results.append(
+                            {
+                                "provider_id": pid,
+                                "provider_name": provider.name,
+                                "model_id": mid,
+                                "capabilities": list(existing),
+                            }
+                        )
+                        continue
+                    caps = detect_model_capabilities(
+                        mid,
+                        existing=existing,
+                        display_name=str(entry.get("name") or ""),
+                    )
+                    entry["capabilities"] = caps
+                    # 三元组兜底(服务商自有值首选):能力外同时补缺 context_window/max_tokens
+                    entry = apply_preset_defaults(mid, entry)
+                    metadata[mid] = entry
+                    changed = True
+                    results.append(
+                        {
+                            "provider_id": pid,
+                            "provider_name": provider.name,
+                            "model_id": mid,
+                            "capabilities": caps,
+                            "context_window": entry.get("context_window"),
+                            "max_tokens": entry.get("max_tokens"),
+                        }
+                    )
+                if changed:
+                    provider.model_metadata = metadata
+            self._save_config()
+
+        logger.info("Capability detection persisted for %s models", len(results))
+        return {"detected": len(results), "results": results}
 
     async def probe_model_multimodal(
         self,

@@ -40,13 +40,13 @@ tiktoken>=0.5.0
 apscheduler>=3.10.0
 
 # MOSS TTS (local inference)
-onnxruntime>=1.16.0
+onnxruntime>=1.29.0  # 2026-09-03 实测升级：1.26→1.29，MOSS-TTS 5 图全加载验证
 soundfile>=0.12.0
-huggingface_hub>=0.20.0
+huggingface_hub>=1.29.0  # 模型下载器实测版本（旧下限 0.20 与 1.x 差距过大）
 sentencepiece>=0.2.0
 
 # ASR (optional, auto-fallback)
-funasr>=1.0.0  # FunASR 语音识别引擎（补课 4.2 续：Paraformer 中文优先，whisper 兜底）
+funasr>=1.4.13  # 2026-09-02 发布：修复 NumPy 2 ABI 不匹配（元数据强制 numpy<2，pip 自动降级）
 torchaudio  # FunASR fbank 特征提取依赖（实测缺失报"torchaudio is not installed"）
 openai-whisper>=20231117  # Whisper 语音识别引擎（补课 4.2 本地真模型；torch CPU 版约 200MB）
 
@@ -56,7 +56,7 @@ edge-tts>=6.1.0
 comtypes; sys_platform == "win32"
 
 # Embedding (ONNX-based local inference)
-sentence-transformers>=2.2.0
+sentence-transformers>=6.0.1  # 2026-09-03 实测升级 5.5→6.0（major），bge 真实推理 512 维验证
 transformers>=4.20.0
 tokenizers>=0.13.0
 

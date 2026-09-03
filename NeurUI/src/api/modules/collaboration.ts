@@ -1,5 +1,10 @@
 import api from '@/api'
+import config from '@/config'
+import { secureStorage } from '@/utils/security'
 import type { ApiResponse } from '@/types/response'
+
+/** SSE 订阅取 token 的键名（与 notifications.ts 同源） */
+const TOKEN_KEY = 'auth_token'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -200,6 +205,75 @@ export function canvasFromNl(prompt: string, agentId = 'default', model?: string
 /** Poll a canvas run's execution status. */
 export function getCanvasRun(canvasId: string, runId: string) {
   return api.get<ApiResponse<CanvasRunStatus>>(`${BASE}/canvas/${canvasId}/runs/${runId}`)
+}
+
+// ---------------------------------------------------------------------------
+// 执行事件流（P0-1 run/stream 分离：SSE 节点级事件，替代 1s 轮询）
+// ---------------------------------------------------------------------------
+
+/** 后端执行事件帧（neurflow event_recorder 归一化契约）。 */
+export interface ExecutionEventFrame {
+  seq: number
+  type: string
+  workflow_id: string
+  execution_id: string
+  node_id?: string | null
+  data: Record<string, unknown>
+  timestamp: number
+}
+
+/**
+ * 订阅执行事件 SSE 流（fetch+ReadableStream——EventSource 无法带 Bearer 头）。
+ *
+ * 服务端回放 seq>after 历史帧 + 实时推送，终态帧（workflow_completed/failed）后
+ * 自然收尾（reader.read() done）。返回关闭函数（abort）。
+ */
+export function subscribeExecutionEvents(
+  executionId: string,
+  onEvent: (frame: ExecutionEventFrame) => void,
+  options?: { after?: number },
+): () => void {
+  const controller = new AbortController()
+  const token = secureStorage.get(TOKEN_KEY)
+  const base = config.apiBaseUrl
+  const params = new URLSearchParams()
+  if (options?.after != null) params.set('after', String(options.after))
+  const qs = params.toString()
+  const url = `${base}/neurflow/executions/${executionId}/events${qs ? `?${qs}` : ''}`
+
+  ;(async () => {
+    try {
+      const resp = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: controller.signal,
+      })
+      if (!resp.ok || !resp.body) return
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue
+          try {
+            onEvent(JSON.parse(line.slice(5).trim()) as ExecutionEventFrame)
+          } catch {
+            // 非 JSON 行（keep-alive 注释等）忽略
+          }
+        }
+      }
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') {
+        // 断流静默——调用方以轮询兜底
+      }
+    }
+  })()
+
+  return () => controller.abort()
 }
 
 /** Get a canvas workflow by id. */

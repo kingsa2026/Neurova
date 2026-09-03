@@ -672,6 +672,55 @@ async def delete_chat_session(session_id: str, request: Request):
     return {"code": 0, "message": "Session deleted"}
 
 
+@router.post("/chat/sessions/{session_id}/auto-title")
+async def auto_title_chat_session(session_id: str, request: Request):
+    """
+    会话语义标题自动填充：LLM 概括首轮对话，失败回退首条用户消息截断。
+
+    仅当会话仍为默认标题（新对话/新建对话）时应被调用（前端判定）；
+    端点为幂等重命名，失败不返回 500（标题生成内部已兜底）。
+    """
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    sessions = repo.list_sessions()
+    target = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
+    if not target:
+        raise HTTPException(status_code=404, detail="Session not found")
+    target_user_id = target[0].get("user_id") or ""
+    if target_user_id and user_id and target_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    agent_id = target[0].get("agent_id", "")
+
+    messages = repo.get_history(agent_id=agent_id, session_id=session_id)
+    first_user = next((m for m in messages if m.get("role") == "user"), None)
+    if first_user is None or not (first_user.get("content") or "").strip():
+        raise HTTPException(status_code=400, detail="会话暂无对话内容")
+    assistant_reply = next(
+        (m for m in messages if m.get("role") == "assistant" and (m.get("content") or "").strip()),
+        None,
+    )
+
+    # 函数内导入：测试可 monkeypatch neurova.session_title.generate_semantic_title
+    from neurova.session_title import generate_semantic_title
+
+    # 优先用会话 agent 的 LLM 客户端（与聊天同机制：带 provider/model 上下文）；
+    # 拿不到 agent 时传 None，生成器回退多模型客户端/截断（绝不 500）。
+    llm = None
+    try:
+        agent = get_agent_instance(agent_id=agent_id or "default")
+        llm = getattr(agent, "llm_client", None)
+    except Exception:
+        llm = None
+
+    title = await generate_semantic_title(
+        first_user.get("content", ""),
+        (assistant_reply or {}).get("content", ""),
+        llm=llm,
+    )
+    repo.rename_session(agent_id=agent_id, session_id=session_id, title=title)
+    return {"code": 0, "message": "success", "data": {"session_id": session_id, "title": title}}
+
+
 # ── 会话存档（删除 → 存档：历史列表隐藏，可随时恢复） ──────────────────
 
 def _check_session_ownership(target: Dict[str, Any], user_id: str) -> None:

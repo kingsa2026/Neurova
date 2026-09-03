@@ -332,6 +332,13 @@ class MOSSNanTTS(TTSBase):
                 return np.array([tokens], dtype=np.int64)
         except ImportError:
             pass
+        except OSError as e:
+            # sentencepiece 0.2.x 在 Windows 中文路径（如 E:\项目\...）下
+            # 用绝对路径加载 model_file 必抛 OSError（fopen 窄字符路径
+            # 编码问题）；构造失败时按"分词器不可用"降级，交由下方字符
+            # 映射兜底，避免异常冒泡导致 synthesize 返回空音频
+            self._sp = None  # 一次降级，避免每次合成重复加载尝试
+            logger.warning("sentencepiece 加载失败（降级字符映射）: %s", e)
 
         # Fallback: 简单字符到 ID 映射
         tokens = [ord(c) % 30000 for c in text]
@@ -485,6 +492,9 @@ class MOSSNanTTS(TTSBase):
 
         except Exception as e:
             logger.error(f"MOSSNanTTS 流式合成失败: {e}", exc_info=True)
+            # 失败必须冒泡：管理器流式 fallback 依赖异常信号；静默空产出
+            # 会让流式端点返回 200+0 字节（前端 0 字节 blob → <audio> 416）。
+            raise RuntimeError(f"MOSSNanTTS 流式合成失败: {e}") from e
 
     def _load_audio_from_bytes(self, audio_bytes: bytes) -> np.ndarray:
         """从字节数据加载音频为 numpy 数组"""

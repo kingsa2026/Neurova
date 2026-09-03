@@ -39,6 +39,33 @@ export function sanitizeForSpeech(text: string): string {
     .trim()
 }
 
+/**
+ * 空音频守卫：0 字节 blob 交给 <audio> 加载时 Chromium 会发
+ * `Range: bytes=0-` 请求 → 416（ERR_REQUEST_RANGE_NOT_SATISFIABLE）。
+ * 后端全链路失败时端点可能返回 200+空 body，这里绝对拒绝造 blob URL。
+ */
+export function requireNonEmptyAudioBlob(blob: Blob): Blob {
+  if (!blob || blob.size === 0) {
+    throw new Error('TTS 返回空音频（0 字节），已拒绝创建 blob URL')
+  }
+  return blob
+}
+
+/**
+ * 播放器回放源选取：带句块列表时逐句取（ttsIdx 推进），
+ * 否则回落单段 audioUrl。越界回落首块，避免 <audio> 拿空 src。
+ */
+export function audioSourceFor(msg: {
+  audioUrl?: string | null
+  ttsUrls?: string[] | null
+  ttsIdx?: number | null
+}): string {
+  if (msg.ttsUrls && msg.ttsUrls.length) {
+    return msg.ttsUrls[msg.ttsIdx ?? 0] ?? msg.ttsUrls[0]
+  }
+  return msg.audioUrl ?? ''
+}
+
 /** ── 纯函数：流式句子切分 ────────────────────────────────── */
 
 const SENTENCE_END_RE = /([。！？!?；;…]+["'”’）)]*\s*|\n+)/

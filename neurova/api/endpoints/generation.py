@@ -18,10 +18,30 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.endpoints import get_agent_instance, get_app_state
+from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+def _route_model_for_request(request_type: str):
+    """按请求类型经 LLMRouter 自动选模型（model=auto/缺省时）。
+
+    Returns:
+        (model_id, provider_name)；路由不可用时 (None, None)。
+    """
+    try:
+        from neurova.llm.llm_router import RequestType, select_model_for_request
+
+        rt = RequestType(request_type)
+        result = select_model_for_request(rt)
+        if result is None:
+            return None, None
+        return result.model, result.provider_name
+    except Exception as e:
+        logger.warning("Auto route failed (%s), degrade to agent default: %s", request_type, e)
+        return None, None
 
 
 class TextGenerationRequest(BaseModel):
@@ -75,7 +95,7 @@ def _get_agent(agent_id: str = "default"):
 
 @router.post("/text")
 async def generate_text(request: Request, body: TextGenerationRequest):
-    """文本生成"""
+    """文本生成（model 缺省/"auto" → LLMRouter 按 CHAT 自动路由）"""
     request_id = _get_request_id(request)
 
     agent = _get_agent()
@@ -83,6 +103,18 @@ async def generate_text(request: Request, body: TextGenerationRequest):
         raise HTTPException(status_code=503, detail="Agent not available")
 
     try:
+        # model=auto/None：LLMRouter 按请求类型选模型；路由失败降级 agent 默认模型
+        routed_model: Optional[str] = None
+        routed_provider: Optional[str] = None
+        requested_model = (body.model or "").strip()
+        if not requested_model or requested_model.lower() == "auto":
+            routed_model, routed_provider = _route_model_for_request("chat")
+            effective_model = routed_model
+            routed = routed_model is not None
+        else:
+            effective_model = requested_model
+            routed = False
+
         # 使用 Agent 的 chat 方法进行文本生成
         # S7 修复 (B-2 #10): 不注入 "history": [],保留其他 metadata 字段,
         # 让 agent.chat() 自行从 session 恢复历史.
@@ -93,6 +125,7 @@ async def generate_text(request: Request, body: TextGenerationRequest):
                 "generation_type": "text",
                 "max_tokens": body.max_tokens,
                 "temperature": body.temperature,
+                **({"model": effective_model} if effective_model else {}),
             },
         )
 
@@ -100,7 +133,10 @@ async def generate_text(request: Request, body: TextGenerationRequest):
             "code": 0,
             "data": {
                 "text": response,
-                "model": body.model or "auto",
+                "model": effective_model or "auto",
+                "routed": routed,
+                "routed_model": routed_model,
+                "routed_provider": routed_provider,
                 "request_id": request_id,
             },
         }

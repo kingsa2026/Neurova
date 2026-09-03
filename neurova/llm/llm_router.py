@@ -46,6 +46,7 @@ class ModelCapability(Enum):
     """模型能力枚举"""
 
     TEXT = "text"  # 文本处理
+    REASONING = "reasoning"  # 深度推理
     VISION = "vision"  # 视觉理解
     AUDIO = "audio"  # 音频处理
     VIDEO = "video"  # 视频处理
@@ -175,8 +176,13 @@ class LLMRouter:
                 if model_data.get("health_status") == "unhealthy":
                     continue
 
-                # 检查能力匹配
-                model_capabilities = [ModelCapability(cap) for cap in model_data.get("capabilities", [])]
+                # 检查能力匹配（未知能力字符串防御性跳过，不炸路由链路）
+                model_capabilities: List[ModelCapability] = []
+                for cap in model_data.get("capabilities", []):
+                    try:
+                        model_capabilities.append(ModelCapability(cap))
+                    except ValueError:
+                        continue
 
                 # 检查是否满足必需能力
                 if required_capabilities:
@@ -204,6 +210,18 @@ class LLMRouter:
         if not candidates:
             logger.warning("No model found for request type: %s", request_type.value)
             return None
+
+        # auto 路由健康过滤：429 退避暂停中的模型本轮跳过（落到同能力下一候选）。
+        # 全部暂停时降级返回排序首位（路由可用的兜底，由限流器在调用前拦截）。
+        try:
+            from neurova.llm.model_rate_limiter import get_shared_limiter
+
+            limiter = get_shared_limiter()
+            healthy = [c for c in candidates if limiter.pause_remaining(c.model) <= 0.0]
+            if healthy:
+                candidates = healthy
+        except Exception as e:  # noqa: BLE001 - 限流器不可用时按原序路由
+            logger.debug("路由健康过滤跳过（限流器不可用）: %s", e)
 
         # 按优先级和响应时间排序
         candidates.sort(key=lambda x: (-x.priority, x.response_time, -x.weight))
@@ -266,39 +284,49 @@ def get_llm_router() -> "LLMRouter":
 
 
 def _infer_capabilities(model_name: str) -> List[ModelCapability]:
-    """根据模型名关键词推断能力（覆盖常见视觉/音频/视频/生成场景）。"""
-    n = (model_name or "").lower()
-    caps = {ModelCapability.TEXT}
-    if any(k in n for k in ["vision", "vl", "image", "视觉", "看图", "多模态", "multimodal"]):
-        caps.add(ModelCapability.VISION)
-    if any(k in n for k in ["audio", "语音", "asr", "whisper"]):
-        caps.add(ModelCapability.AUDIO)
-        caps.add(ModelCapability.STT)
-    if any(k in n for k in ["tts", "语音合成"]):
-        caps.add(ModelCapability.TTS)
-    if any(k in n for k in ["video", "视频"]):
-        caps.add(ModelCapability.VIDEO)
-    if any(k in n for k in ["dall", "stable-diffusion", "sd-", "绘画", "生图", "flux", "imagen"]):
-        caps.add(ModelCapability.IMAGE_GENERATION)
-    return list(caps)
+    """根据模型名关键词推断能力（委托 capability_detector 单一来源）。"""
+    from neurova.llm.capability_detector import infer_capabilities as _detect
+
+    return [
+        ModelCapability(c)
+        for c in _detect(model_name)
+        if c in {m.value for m in ModelCapability}
+    ]
 
 
 def register_provider_from_config(
-    provider_id: str, provider_name: str, model_names: List[str]
+    provider_id: str,
+    provider_name: str,
+    model_names: List[str],
+    model_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> None:
-    """将 ProviderConfig 风格的 providers 注册到全局 LLMRouter。"""
+    """将 ProviderConfig 风格的 providers 注册到全局 LLMRouter。
+
+    能力来源：provider.model_metadata 中已持久化的 capabilities 优先
+    （模型管理页"自动检测"写入），缺失时名称推断兜底 —— 路由与标记同源。
+    """
+    from neurova.llm.capability_detector import detect_model_capabilities
+
     router = get_llm_router()
-    models = [
-        {
-            "name": m,
-            "capabilities": [c.value for c in _infer_capabilities(m)],
-            "priority": 1,
-            "health_status": "healthy",
-            "response_time": 0.0,
-            "weight": 1.0,
-        }
-        for m in (model_names or [])
-    ]
+    metadata = model_metadata or {}
+    models = []
+    for m in model_names or []:
+        meta = metadata.get(m, {}) or {}
+        caps = detect_model_capabilities(
+            m,
+            existing=[str(c) for c in (meta.get("capabilities") or [])],
+            display_name=str(meta.get("name") or ""),
+        )
+        models.append(
+            {
+                "name": m,
+                "capabilities": [c for c in caps if c in {mc.value for mc in ModelCapability}],
+                "priority": 1,
+                "health_status": "healthy",
+                "response_time": 0.0,
+                "weight": 1.0,
+            }
+        )
     router.register_provider(provider_id, provider_name, models)
 
 
@@ -311,7 +339,7 @@ def sync_llm_router() -> None:
         if mgr is None:
             return
         for pid, pconf in mgr._providers.items():
-            register_provider_from_config(pid, pconf.name, pconf.models)
+            register_provider_from_config(pid, pconf.name, pconf.models, pconf.model_metadata)
     except Exception as e:  # noqa: BLE001
         logger.warning("sync_llm_router 失败（多模态路由将惰性回退）: %s", e)
 

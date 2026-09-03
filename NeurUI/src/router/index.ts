@@ -17,6 +17,25 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/pages/RegisterPage.vue'),
     meta: { guest: true },
   },
+  {
+    path: '/forgot-password',
+    name: 'ForgotPassword',
+    component: () => import('@/pages/ForgotPasswordPage.vue'),
+    meta: { guest: true },
+  },
+  // 条款/隐私为公开页（登录与否都可查看；注册/登录页引用）
+  {
+    path: '/terms',
+    name: 'Terms',
+    component: () => import('@/pages/LegalDocPage.vue'),
+    props: { type: 'terms' },
+  },
+  {
+    path: '/privacy',
+    name: 'Privacy',
+    component: () => import('@/pages/LegalDocPage.vue'),
+    props: { type: 'privacy' },
+  },
 
   // ---------------------------------------------------------------------------
   // Protected routes under MainLayout
@@ -369,6 +388,11 @@ const routes: RouteRecordRaw[] = [
         path: 'stats',
         name: 'Stats',
         component: () => import('@/pages/StatsPage.vue'),
+      },
+      {
+        path: 'usage-stats',
+        name: 'UsageStats',
+        component: () => import('@/pages/UsageStatsPage.vue'),
       },
       {
         path: 'monitor',

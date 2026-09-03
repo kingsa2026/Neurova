@@ -16,7 +16,7 @@
                 <a-textarea v-model:value="textPrompt" :rows="6" :placeholder="t('aigc.textPromptPlaceholder')" />
               </a-form-item>
               <a-form-item :label="t('aigc.model')">
-                <a-select v-model:value="textModel" :options="textModels" :placeholder="t('aigc.selectModel')" show-search />
+                <a-select v-model:value="textModel" class="model-select-text" :options="textModelOptions" :placeholder="t('aigc.selectModel')" show-search />
               </a-form-item>
               <GlassButton variant="primary" :loading="textGenerating" @click="generateText">
                 {{ t('aigc.generate') }}
@@ -40,6 +40,9 @@
               </a-form-item>
               <a-form-item :label="t('aigc.template')">
                 <a-select v-model:value="imageTemplate" :options="imageTemplateOptions" :placeholder="t('aigc.selectTemplate')" show-search />
+              </a-form-item>
+              <a-form-item :label="t('aigc.model')">
+                <a-select v-model:value="imageModel" class="model-select-image" :options="imageModelOptions" :placeholder="t('aigc.selectModel')" show-search />
               </a-form-item>
               <GlassButton variant="primary" :loading="imageGenerating" @click="generateImage">
                 {{ t('aigc.generate') }}
@@ -90,6 +93,9 @@
               <a-form-item :label="t('aigc.prompt')">
                 <a-textarea v-model:value="videoPrompt" :rows="4" :placeholder="t('aigc.videoPromptPlaceholder')" />
               </a-form-item>
+              <a-form-item :label="t('aigc.model')">
+                <a-select v-model:value="videoModel" class="model-select-video" :options="videoModelOptions" :placeholder="t('aigc.selectModel')" show-search />
+              </a-form-item>
               <GlassButton variant="primary" :loading="videoGenerating" @click="generateVideo">
                 {{ t('aigc.generate') }}
               </GlassButton>
@@ -124,7 +130,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
-import { getAdapters } from '@/api/modules/model-adapter'
+import { listModels } from '@/api/modules/models'
 import { getTemplates as getImageTemplates } from '@/api/modules/image'
 import { generateText as apiGenerateText, generateImage as apiGenerateImage } from '@/api/modules/generation'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -135,26 +141,58 @@ const { t } = useI18n()
 
 const activeTab = ref<'text' | 'image' | 'audio' | 'video'>('text')
 
-// --- Dynamic options from backend ---
-const textModels = ref<{ label: string; value: string }[]>([])
+// --- 能力感知模型下拉（2026-09-03）---
+// 数据源 = GET /models（capabilities 由后端自动检测并持久化），
+// 各 Tab 按 capability 过滤；首选项恒为 auto（LLMRouter 自动路由）。
+interface CapModel {
+  id: string
+  name: string
+  provider: string
+  capabilities: string[]
+}
+
+const allCapModels = ref<CapModel[]>([])
 const imageTemplateOptions = ref<{ label: string; value: string }[]>([])
+
+function normalizeCapModel(m: any): CapModel {
+  return {
+    id: m.model_id || m.id || m.name || 'unknown',
+    name: m.name || m.model_id || m.id || 'Unknown',
+    provider: m.provider || m.provider_id || '',
+    capabilities: Array.isArray(m.capabilities) ? m.capabilities.map(String) : [],
+  }
+}
+
+function modelsWithCap(cap: string): CapModel[] {
+  const seen = new Set<string>()
+  return allCapModels.value.filter((m) => {
+    if (!m.capabilities.includes(cap) || seen.has(m.id)) return false
+    seen.add(m.id)
+    return true
+  })
+}
+
+function capOptions(cap: string) {
+  return [
+    { label: t('ui.autoRoute'), value: 'auto' },
+    ...modelsWithCap(cap).map((m) => ({
+      label: m.provider ? `${m.provider} / ${m.name}` : m.name,
+      value: m.id,
+    })),
+  ]
+}
+
+const textModelOptions = computed(() => capOptions('text'))
+const imageModelOptions = computed(() => capOptions('image_generation'))
+const videoModelOptions = computed(() => capOptions('video_generation'))
 
 onMounted(async () => {
   try {
-    const [adaptersRes, templatesRes] = await Promise.allSettled([getAdapters(), getImageTemplates()])
-    if (adaptersRes.status === 'fulfilled') {
-      const adapters = adaptersRes.value?.data?.adapters ?? []
-      const models: { label: string; value: string }[] = []
-      for (const a of adapters) {
-        for (const m of a.models ?? []) {
-          models.push({ label: `${a.name} / ${m}`, value: m })
-        }
-      }
-      textModels.value = models.length ? models : [
-        { label: 'GPT-4', value: 'gpt-4' },
-        { label: 'GPT-3.5', value: 'gpt-3.5-turbo' },
-        { label: 'Claude 3', value: 'claude-3' },
-      ]
+    const [modelsRes, templatesRes] = await Promise.allSettled([listModels(), getImageTemplates()])
+    if (modelsRes.status === 'fulfilled') {
+      const raw = (modelsRes.value as any)?.data ?? modelsRes.value
+      const list = Array.isArray(raw) ? raw : (raw?.models ?? raw?.data ?? [])
+      allCapModels.value = list.map(normalizeCapModel)
     }
     if (templatesRes.status === 'fulfilled') {
       const templates = templatesRes.value?.data?.templates ?? []
@@ -173,7 +211,7 @@ onMounted(async () => {
 
 // --- Text ---
 const textPrompt = ref('')
-const textModel = ref('gpt-4')
+const textModel = ref('auto')
 const textGenerating = ref(false)
 const textResult = ref('')
 
@@ -208,6 +246,7 @@ async function generateText() {
 // --- Image ---
 const imagePrompt = ref('')
 const imageTemplate = ref('default')
+const imageModel = ref('auto')
 const imageGenerating = ref(false)
 const imageResults = ref<{ url: string; prompt: string }[]>([])
 const imagePreviewVisible = ref(false)
@@ -220,6 +259,7 @@ async function generateImage() {
     const res: any = await apiGenerateImage({
       prompt: imagePrompt.value,
       style: imageTemplate.value,
+      model: imageModel.value,
     })
     const data = res?.data ?? res
     const urls: string[] = data?.urls ?? data?.images ?? (data?.url ? [data.url] : [])
@@ -275,6 +315,7 @@ async function generateAudio() {
 
 // --- Video ---
 const videoPrompt = ref('')
+const videoModel = ref('auto')
 const videoGenerating = ref(false)
 const videoStatus = ref<{ status: string; progress: number; url?: string } | null>(null)
 let videoPollTimer: ReturnType<typeof setInterval> | null = null
@@ -284,7 +325,7 @@ async function generateVideo() {
   videoGenerating.value = true
   videoStatus.value = { status: 'pending', progress: 0 }
   try {
-    const res: any = await request.post('/generation/video', { prompt: videoPrompt.value })
+    const res: any = await request.post('/generation/video', { prompt: videoPrompt.value, model: videoModel.value })
     const data = res?.data ?? res
     const taskId = data?.task_id ?? data?.id
     videoStatus.value = { status: data?.status ?? 'processing', progress: data?.progress ?? 0 }

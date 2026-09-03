@@ -29,6 +29,9 @@ class RateLimitExceeded(Exception):
 class ModelRateLimiter:
     """每模型独立限流器（线程安全）。"""
 
+    # 429 指数退避封顶（30min）：连续限流时暂停时长 30s→60s→120s→…→封顶
+    BACKOFF_CAP_SECONDS = 1800.0
+
     def __init__(
         self,
         qpm: int = 0,
@@ -45,6 +48,7 @@ class ModelRateLimiter:
         self._windows: Dict[str, deque] = {}       # model -> 最近调用时间戳
         self._concurrent: Dict[str, int] = {}      # model -> 当前并发数
         self._pause_until: Dict[str, float] = {}   # model -> 暂停截止（monotonic）
+        self._consecutive_429: Dict[str, int] = {}  # model -> 连续 429 计数（退避指数，成功复位）
 
     # 时钟（测试注入）
     def _now(self) -> float:
@@ -105,17 +109,28 @@ class ModelRateLimiter:
             return self._concurrent.get(model, 0)
 
     def report_429(self, model: str, pause_seconds: float = 30.0) -> None:
-        """上游 429 反馈 → 该模型全局暂停（±jitter 抖动）。"""
+        """上游 429 反馈 → 该模型全局暂停（±jitter 抖动）。
+
+        指数退避：连续 429 时暂停时长按 2^n 增长（30s→60s→120s→240s→…），
+        封顶 ``BACKOFF_CAP_SECONDS``，成功调用即复位 —— 避免限流期间以固定
+        间隔反复撞上游。
+        """
         jitter = 1.0 + random.uniform(-self.pause_jitter, self.pause_jitter)
-        effective = max(1.0, pause_seconds * jitter)
         with self._lock:
+            consecutive = self._consecutive_429.get(model, 0) + 1
+            self._consecutive_429[model] = consecutive
+            base = min(pause_seconds * (2 ** (consecutive - 1)), self.BACKOFF_CAP_SECONDS)
+            effective = max(1.0, base * jitter)
             self._pause_until[model] = self._now() + effective
-        logger.warning("模型 %s 收到 429，暂停 %.1fs（抖动后）", model, effective)
+        logger.warning(
+            "模型 %s 收到 429（连续第 %s 次），暂停 %.1fs（抖动后）", model, consecutive, effective
+        )
 
     def report_success(self, model: str) -> None:
-        """成功调用清除陈旧暂停（限流恢复信号）。"""
+        """成功调用清除陈旧暂停并复位退避计数（限流恢复信号）。"""
         with self._lock:
             self._pause_until.pop(model, None)
+            self._consecutive_429.pop(model, None)
 
     def pause_remaining(self, model: str) -> float:
         with self._lock:

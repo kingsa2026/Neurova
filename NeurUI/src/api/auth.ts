@@ -61,6 +61,17 @@ export const authAPI = {
    */
   verifyCode: (email: string, code: string) =>
     api.post<ApiResponse<{ verified: boolean }>>('/auth/register/verify-code', { email, code }),
+
+  /**
+   * Recover/reset password with the master recovery password (double condition:
+   * admin account + master password must both match — verified server-side).
+   */
+  recoverPassword: (data: {
+    username: string
+    master_password: string
+    new_password: string
+    confirm_password: string
+  }) => api.post<ApiResponse<{ username: string }>>('/auth/recover-password', data),
 }
 
 export default authAPI
