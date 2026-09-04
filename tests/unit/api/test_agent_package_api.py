@@ -142,6 +142,24 @@ def test_export_404_for_unknown_agent(client, env):
     assert resp.status_code == 404
 
 
+def test_export_config_only_agent_reads_nested_config(client, env, monkeypatch):
+    """config_only（仅登记面、无运行时）agent 导出：model/provider 嵌在
+    agents.json 的 config 键下，必须读得到（防断点：dict 分支只读顶层
+    会让导出面恒空）。"""
+    from neurova.agent_config import get_config_manager
+
+    get_config_manager().create_agent(
+        agent_id="cfgonly",
+        name="CfgAgent",
+        description="config only",
+        config={"model": "m-1", "provider": "p-1"},
+    )
+    body = client.get("/v1/agents/cfgonly/export-package").json()
+    assert body["agent"]["name"] == "CfgAgent"
+    assert body["agent"]["model"] == "m-1"
+    assert body["agent"]["provider"] == "p-1"
+
+
 def test_export_forbidden_for_non_owner(client, env):
     """三层隔离契约：非属主不得导出他人 agent（对齐 agent.py _user_can_access_agent）。"""
     _seed_runtime_agent(env)
@@ -355,3 +373,95 @@ def test_import_cron_creates_scheduler_tasks(client, env, monkeypatch):
 def test_import_invalid_agent_id_422(client, env):
     resp = _post_import(client, MANIFEST_V1, agent_id="../evil")
     assert resp.status_code == 422
+
+
+def test_import_skill_registration_failure_rolls_back(client, env, monkeypatch):
+    """register_auto_skill 返回 bool（False=登记故障）——登记失败必须触发
+    回滚而非静默吞掉（防回归：原实现 isinstance(result, dict) 对 bool
+    恒 False，登记故障被当作成功）。"""
+    import neurova.api.endpoints.agent_package as ap
+
+    class _Svc:
+        def __init__(self, agent_id):
+            pass
+
+        def get_skill_info(self, sid):
+            return None  # 始终"不存在"→ 走 register 分支
+
+        def register_auto_skill(self, **kw):
+            return False  # 模拟登记故障
+
+    monkeypatch.setattr(ap, "_SkillService", _Svc)
+    resp = client.post(
+        "/v1/agents/import-package",
+        json={"manifest": MANIFEST_V1, "agent_id": "packa",
+              "import_skills": True, "import_cron": False, "import_mcp": False},
+    )
+    assert resp.status_code == 500
+    assert not (env / "agent_workspaces" / "packa").exists()  # 回滚三清
+
+
+def test_import_idempotent_existing_skill(client, env, monkeypatch):
+    """技能已存在 → 幂等成功（不回滚、计入 imported 列表）。"""
+    import neurova.api.endpoints.agent_package as ap
+
+    class _Svc:
+        def __init__(self, agent_id):
+            pass
+
+        def get_skill_info(self, sid):
+            return {"id": sid}  # 已存在
+
+        def register_auto_skill(self, **kw):
+            raise AssertionError("已存在时不得再调 register")
+
+    monkeypatch.setattr(ap, "_SkillService", _Svc)
+    resp = client.post(
+        "/v1/agents/import-package",
+        json={"manifest": MANIFEST_V1, "agent_id": "packa",
+              "import_skills": True, "import_cron": False, "import_mcp": False},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["imported"]["skills"] == ["skill-a"]
+
+
+def test_export_import_description_roundtrip(client, env):
+    """description 跨机迁移闭环（E2E 实测抓到的双断点防回归）：
+    ① 导出侧——workspace 文件 description 为空时必须回查中枢登记面
+      （AgentConfig 无 description 属性，登记面是描述的持久真值源）；
+    ② 导入侧——hasattr(config, 'description') 恒 False 使描述静默跳过，
+      必须动态 setattr 让 _save_agent_config 落盘。"""
+    from neurova.agent_config import get_config_manager
+    from neurova.api.endpoints import get_app_state
+
+    # 场景①：workspace 文件与运行时 config 的描述都为空，描述只在登记面
+    # （真实世界的存量形态：AgentConfig 无 description 属性 → 运行时面
+    # 无此信息，登记面是唯一持久真值源）
+    _seed_runtime_agent(env)
+    ws_cfg_path = env / "agent_workspaces" / "packa" / "agent_config.json"
+    ws_cfg = json.loads(ws_cfg_path.read_text(encoding="utf-8"))
+    ws_cfg["description"] = ""
+    ws_cfg_path.write_text(json.dumps(ws_cfg, ensure_ascii=False), encoding="utf-8")
+    _agent = get_app_state()["agents"]["packa"]
+    if hasattr(_agent.config, "description"):
+        _agent.config.description = ""
+    get_config_manager().create_agent(
+        agent_id="packa", name="PackAgent", description="迁移描述",
+        config={"model": "test-model", "provider": "test-provider"},
+    )
+
+    manifest = client.get("/v1/agents/packa/export-package").json()
+    assert manifest["agent"]["description"] == "迁移描述"
+
+    # 场景②：目标机重导入 → 描述落进新 workspace 文件
+    get_config_manager().delete_agent("packa")
+    resp = client.post(
+        "/v1/agents/import-package",
+        json={"manifest": manifest, "agent_id": "packa2",
+              "import_skills": False, "import_cron": False, "import_mcp": False},
+    )
+    assert resp.status_code == 200, resp.text
+    ws_cfg2 = json.loads(
+        (env / "agent_workspaces" / "packa2" / "agent_config.json").read_text(encoding="utf-8")
+    )
+    assert ws_cfg2["description"] == "迁移描述", ws_cfg2

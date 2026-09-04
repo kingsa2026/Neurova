@@ -2246,8 +2246,12 @@ class PostChatPipeline:
         # 优先级：env 显式设 0 强制关 > 治理设置值 > 默认关。
         import os as _os
 
-        if _os.environ.get("NEUROVA_CONVERSATION_RULES") == "0":
+        env_val = _os.environ.get("NEUROVA_CONVERSATION_RULES")
+        if env_val == "0":
+            # 运维后门：env 显式设 0 强制关（优先级最高）
             rules_enabled = False
+        elif env_val == "1":
+            rules_enabled = True
         else:
             try:
                 from neurova.security.governance_settings import (

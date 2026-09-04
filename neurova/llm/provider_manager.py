@@ -66,7 +66,7 @@ import re
 import shutil
 import threading
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -324,6 +324,19 @@ class ProviderConfig:
                 )
         # 移除不需要的字段
         data.pop("encrypted_api_key", None)
+        # 未知字段容错:旧版本/外部工具写出的配置可能带已废弃字段
+        # (如 metadata/weight/health_check_interval)。一个未知键曾让整份
+        # 配置加载炸进异常分支 → 内置种子覆盖(2026-09-05 事故原始触发点)。
+        valid_fields = {f.name for f in fields(cls)}
+        unknown = set(data) - valid_fields
+        if unknown:
+            logger.warning(
+                "Ignoring unknown/legacy fields for provider %s: %s",
+                data.get("id", "?"),
+                sorted(unknown),
+            )
+            for key in unknown:
+                data.pop(key)
         return cls(**data)
 
 

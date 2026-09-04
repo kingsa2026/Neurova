@@ -127,6 +127,11 @@ class UserGroup:
     group_type: UserGroupType
     permissions: List[Permission]
     resource_quota: ResourceQuota
+    # 功能模块白名单（前端菜单路由 key，如 "/chat"、"/agent/:id/memory"）。
+    # 空列表 = 未配置 = 不限制（向后兼容：存量组全模块可见）。
+    allowed_modules: List[str] = None
+    # 组成员（用户名列表）。用户名即账号唯一标识（users.username UNIQUE）。
+    members: List[str] = None
     is_system: bool = False  # 是否系统预设组
     is_active: bool = True
     created_at: Optional[float] = None
@@ -138,6 +143,11 @@ class UserGroup:
             self.created_at = time.time()
         if self.updated_at is None:
             self.updated_at = time.time()
+        # 旧 JSON 无新字段（dataclass 传 None）→ 归一为空列表
+        if self.allowed_modules is None:
+            self.allowed_modules = []
+        if self.members is None:
+            self.members = []
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -153,6 +163,9 @@ class UserGroup:
         data["group_type"] = UserGroupType(data["group_type"])
         data["permissions"] = [Permission(p) for p in data["permissions"]]
         data["resource_quota"] = ResourceQuota.from_dict(data["resource_quota"])
+        # 旧 JSON 无新字段 → 归一为空列表
+        data["allowed_modules"] = list(data.get("allowed_modules") or [])
+        data["members"] = list(data.get("members") or [])
         return cls(**data)
 
     def has_permission(self, permission: Permission) -> bool:
@@ -625,6 +638,112 @@ class UserGroupManager:
         except Exception as e:
             logger.error("Failed to delete user group: %s", e)
             return False
+
+    # ------------------------------------------------------------------
+    # 功能模块白名单（allowed_modules）
+    # ------------------------------------------------------------------
+
+    def set_allowed_modules(self, group_id: str, modules: List[str]) -> Optional[UserGroup]:
+        """
+        设置用户组可用功能模块（菜单路由 key 列表）。
+
+        系统组的 name/description 受保护，但 allowed_modules 属运营配置可调整。
+
+        Returns:
+            更新后的用户组，组不存在返回 None
+        """
+        group = self.get_group(group_id)
+        if group is None:
+            logger.warning("User group not found: %s", group_id)
+            return None
+
+        try:
+            group.allowed_modules = [str(m) for m in (modules or []) if str(m)]
+            group.updated_at = time.time()
+            self._save_groups()
+            logger.info("Set allowed_modules for user group %s: %s", group_id, group.allowed_modules)
+            return group
+        except Exception as e:
+            logger.error("Failed to set allowed_modules for user group %s: %s", group_id, e)
+            return None
+
+    # ------------------------------------------------------------------
+    # 成员管理（groups_api 成员端点的底层支撑）
+    # ------------------------------------------------------------------
+
+    def get_group_members(self, group_id: str) -> List[str]:
+        """获取组成员用户名列表，组不存在返回空列表"""
+        group = self.get_group(group_id)
+        if group is None:
+            logger.warning("User group not found: %s", group_id)
+            return []
+        return list(group.members)
+
+    def add_user_to_group(self, username: str, group_id: str) -> bool:
+        """
+        添加用户到组（按用户名，去重幂等）。
+
+        Args:
+            username: 用户名（users.username 唯一，作为成员标识）
+            group_id: 用户组ID
+
+        Returns:
+            是否成功
+        """
+        group = self.get_group(group_id)
+        if group is None:
+            logger.warning("User group not found: %s", group_id)
+            return False
+
+        try:
+            if username not in group.members:
+                group.members.append(username)
+                group.updated_at = time.time()
+                self._save_groups()
+            return True
+        except Exception as e:
+            logger.error("Failed to add user %s to group %s: %s", username, group_id, e)
+            return False
+
+    def remove_user_from_group(self, username: str, group_id: str) -> bool:
+        """
+        从组移除用户（按用户名）。
+
+        Returns:
+            是否成功移除（用户不在组内返回 False）
+        """
+        group = self.get_group(group_id)
+        if group is None:
+            logger.warning("User group not found: %s", group_id)
+            return False
+
+        try:
+            if username not in group.members:
+                return False
+            group.members.remove(username)
+            group.updated_at = time.time()
+            self._save_groups()
+            return True
+        except Exception as e:
+            logger.error("Failed to remove user %s from group %s: %s", username, group_id, e)
+            return False
+
+    def get_groups_for_user(self, username: str) -> List[UserGroup]:
+        """获取用户所属的所有组"""
+        return [g for g in self.groups.values() if username in (g.members or [])]
+
+    def get_allowed_modules_for_user(self, username: str) -> List[str]:
+        """
+        获取用户可用功能模块（所属组并集，排序去重）。
+
+        语义约定：
+        - 用户不属于任何组 → 空列表 = 不限制（全模块可见）
+        - 所属组均未勾选模块 → 空列表 = 不限制（向后兼容存量组）
+        """
+        union: set = set()
+        for g in self.get_groups_for_user(username):
+            union.update(g.allowed_modules or [])
+        return sorted(union)
 
     def check_permission(self, group_id: str, permission: Permission) -> bool:
         """

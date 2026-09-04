@@ -18,18 +18,19 @@
 
       <template v-if="agentStore.currentAgent">
         <!-- Agent: 高频平铺 -->
-        <GlassNavItem to="/chat" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed" active-path="/chat">
+        <GlassNavItem to="/chat" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed" active-path="/chat" v-if="can('/chat')">
           <template #icon><MessageOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/memory`" :label="t('nav.memory')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/memory`" :label="t('nav.memory')" :collapsed="appStore.sidebarCollapsed" v-if="can('/agent/:id/memory')">
           <template #icon><DatabaseOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/files`" :label="t('nav.agentfiles')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/files`" :label="t('nav.agentfiles')" :collapsed="appStore.sidebarCollapsed" v-if="can('/agent/:id/files')">
           <template #icon><FileOutlined /></template>
         </GlassNavItem>
 
         <!-- Agent: 知识与认知（低频折叠） -->
         <GlassNavGroup
+          v-if="canAgent('experience-knowledge') || canAgent('knowledge-graph') || canAgent('metacognition') || canAgent('reflection') || canAgent('growth') || canAgent('emotion') || canAgent('personality')"
           :label-key="'nav.knowledgeCognition'"
           storage-key="agent-cognition"
           :collapsed="appStore.sidebarCollapsed"
@@ -37,31 +38,32 @@
           :count="7"
         >
           <template #icon><BulbOutlined /></template>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/experience-knowledge`" :label="t('nav.experience')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/experience-knowledge`" :label="t('nav.experience')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('experience-knowledge')">
             <template #icon><BulbOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/knowledge-graph`" :label="t('nav.knowledgeGraph')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/knowledge-graph`" :label="t('nav.knowledgeGraph')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('knowledge-graph')">
             <template #icon><ShareAltOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/metacognition`" :label="t('nav.metacognition')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/metacognition`" :label="t('nav.metacognition')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('metacognition')">
             <template #icon><ExperimentOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/reflection`" :label="t('nav.reflection')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/reflection`" :label="t('nav.reflection')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('reflection')">
             <template #icon><BulbOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/growth`" :label="t('nav.growth')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/growth`" :label="t('nav.growth')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('growth')">
             <template #icon><RiseOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/emotion`" :label="t('nav.emotion')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/emotion`" :label="t('nav.emotion')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('emotion')">
             <template #icon><HeartOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/personality`" :label="t('nav.personality')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/personality`" :label="t('nav.personality')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('personality')">
             <template #icon><SmileOutlined /></template>
           </GlassNavItem>
         </GlassNavGroup>
 
         <!-- Agent: 能力（低频折叠） -->
         <GlassNavGroup
+          v-if="canAgent('skills') || canAgent('rules') || canAgent('media')"
           :label-key="'nav.agentCapabilities'"
           storage-key="agent-capabilities"
           :collapsed="appStore.sidebarCollapsed"
@@ -69,19 +71,20 @@
           :count="3"
         >
           <template #icon><ThunderboltOutlined /></template>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/skills`" :label="t('nav.skills')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/skills`" :label="t('nav.skills')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('skills')">
             <template #icon><ThunderboltOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/rules`" :label="t('nav.rules')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/rules`" :label="t('nav.rules')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('rules')">
             <template #icon><SafetyOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/media`" :label="t('nav.media')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/media`" :label="t('nav.media')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('media')">
             <template #icon><PlayCircleOutlined /></template>
           </GlassNavItem>
         </GlassNavGroup>
 
         <!-- Agent: 运行（低频折叠） -->
         <GlassNavGroup
+          v-if="canAgent('scheduler') || canAgent('channel') || canAgent('sleep') || canAgent('computer') || canAgent('trace')"
           :label-key="'nav.agentRuntime'"
           storage-key="agent-runtime"
           :collapsed="appStore.sidebarCollapsed"
@@ -89,19 +92,19 @@
           :count="5"
         >
           <template #icon><SettingOutlined /></template>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/scheduler`" :label="t('nav.scheduler')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/scheduler`" :label="t('nav.scheduler')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('scheduler')">
             <template #icon><ClockCircleOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/channel`" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/channel`" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('channel')">
             <template #icon><ApiOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/sleep/status`" :label="t('nav.sleep')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/sleep/status`" :label="t('nav.sleep')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('sleep')">
             <template #icon><CoffeeOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/computer`" :label="t('nav.computer')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/computer`" :label="t('nav.computer')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('computer')">
             <template #icon><DesktopOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/trace`" :label="t('nav.debug')" :collapsed="appStore.sidebarCollapsed">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/trace`" :label="t('nav.debug')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('trace')">
             <template #icon><CodeOutlined /></template>
           </GlassNavItem>
         </GlassNavGroup>
@@ -129,30 +132,31 @@
       <GlassNavItem to="/dashboard" :label="t('nav.dashboard')" :collapsed="appStore.sidebarCollapsed">
         <template #icon><DashboardOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/agents" :label="t('nav.agents')" :collapsed="appStore.sidebarCollapsed">
+      <GlassNavItem to="/agents" :label="t('nav.agents')" :collapsed="appStore.sidebarCollapsed" v-if="can('/agents')">
         <template #icon><RobotOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/knowledge" :label="t('nav.knowledge')" :collapsed="appStore.sidebarCollapsed">
+      <GlassNavItem to="/knowledge" :label="t('nav.knowledge')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge')">
         <template #icon><BookOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/skill-pool" :label="t('nav.skillPool')" :collapsed="appStore.sidebarCollapsed">
+      <GlassNavItem to="/skill-pool" :label="t('nav.skillPool')" :collapsed="appStore.sidebarCollapsed" v-if="can('/skill-pool')">
         <template #icon><AppstoreOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/marketplace/skills" :label="t('nav.skillMarket')" :collapsed="appStore.sidebarCollapsed">
+      <GlassNavItem to="/marketplace/skills" :label="t('nav.skillMarket')" :collapsed="appStore.sidebarCollapsed" v-if="can('/marketplace/skills')">
         <template #icon><ShopOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/aigc" :label="t('nav.aigc')" :collapsed="appStore.sidebarCollapsed">
+      <GlassNavItem to="/aigc" :label="t('nav.aigc')" :collapsed="appStore.sidebarCollapsed" v-if="can('/aigc')">
         <template #icon><RocketOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/files" :label="t('nav.files')" :collapsed="appStore.sidebarCollapsed">
+      <GlassNavItem to="/files" :label="t('nav.files')" :collapsed="appStore.sidebarCollapsed" v-if="can('/files')">
         <template #icon><FileOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/neuron" :label="t('nav.neuron')" :collapsed="appStore.sidebarCollapsed">
+      <GlassNavItem to="/neuron" :label="t('nav.neuron')" :collapsed="appStore.sidebarCollapsed" v-if="can('/neuron')">
         <template #icon><NodeIndexOutlined /></template>
       </GlassNavItem>
 
       <!-- 用户: 协作（低频折叠，含全局渠道接入） -->
       <GlassNavGroup
+        v-if="can('/collaboration') || can('/channels')"
         :label-key="'nav.collaboration'"
         storage-key="user-collaboration"
         :collapsed="appStore.sidebarCollapsed"
@@ -160,54 +164,54 @@
         :count="12"
       >
         <template #icon><TeamOutlined /></template>
-        <GlassNavItem to="/collaboration/hub" :label="t('nav.collabHub')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/hub" :label="t('nav.collabHub')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><DashboardOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/collaboration/sessions" :label="t('nav.collabSessions')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/sessions" :label="t('nav.collabSessions')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><TeamOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/collaboration/workflows" :label="t('nav.workflows')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/workflows" :label="t('nav.workflows')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><RocketOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/collaboration/canvas" :label="t('nav.collabCanvas')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/canvas" :label="t('nav.collabCanvas')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><BgColorsOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/collaboration/templates" :label="t('nav.collaborationtemplates')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/templates" :label="t('nav.collaborationtemplates')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><NodeIndexOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/collaboration/history" :label="t('nav.collaborationhistory')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/history" :label="t('nav.collaborationhistory')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><HistoryOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/collaboration/projects" :label="t('nav.projects')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/projects" :label="t('nav.projects')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><ProjectOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/collaboration/teams" :label="t('nav.teams')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/teams" :label="t('nav.teams')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><TeamOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/collaboration/tasks" :label="t('nav.tasks')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/tasks" :label="t('nav.tasks')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><ClockCircleOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/collaboration/webhooks" :label="t('nav.webhooks')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/webhooks" :label="t('nav.webhooks')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><BranchesOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/collaboration/session-sync" :label="t('nav.sessionsync')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/session-sync" :label="t('nav.sessionsync')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
           <template #icon><ApiOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/channels" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/channels" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed" v-if="can('/channels')">
           <template #icon><GlobalOutlined /></template>
         </GlassNavItem>
       </GlassNavGroup>
 
-      <GlassNavItem to="/notifications" :label="t('nav.notifications')" :collapsed="appStore.sidebarCollapsed">
+      <GlassNavItem to="/notifications" :label="t('nav.notifications')" :collapsed="appStore.sidebarCollapsed" v-if="can('/notifications')">
         <template #icon><BellOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/usage-stats" :label="t('nav.usageStats')" :collapsed="appStore.sidebarCollapsed">
+      <GlassNavItem to="/usage-stats" :label="t('nav.usageStats')" :collapsed="appStore.sidebarCollapsed" v-if="can('/usage-stats')">
         <template #icon><LineChartOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/analytics" :label="t('nav.analytics')" :collapsed="appStore.sidebarCollapsed">
+      <GlassNavItem to="/analytics" :label="t('nav.analytics')" :collapsed="appStore.sidebarCollapsed" v-if="can('/analytics')">
         <template #icon><BarChartOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/memory/search-settings" :label="t('nav.searchSettings')" :collapsed="appStore.sidebarCollapsed">
+      <GlassNavItem to="/memory/search-settings" :label="t('nav.searchSettings')" :collapsed="appStore.sidebarCollapsed" v-if="can('/memory/search-settings')">
         <template #icon><ControlOutlined /></template>
       </GlassNavItem>
 
@@ -327,6 +331,7 @@ import {
   reportManualFeedback,
 } from '@/utils/errorReporter'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import { canAccessModule } from '@/utils/permissions'
 import {
   DashboardOutlined, RobotOutlined, MessageOutlined, DatabaseOutlined,
   ShareAltOutlined, ExperimentOutlined, BulbOutlined, RiseOutlined,
@@ -339,6 +344,7 @@ import {
   UserOutlined, PlayCircleOutlined, SmileOutlined, IdcardOutlined,
   BookOutlined, AppstoreOutlined, RocketOutlined, NodeIndexOutlined,
   TeamOutlined, ProjectOutlined, BranchesOutlined, BgColorsOutlined,
+  ShopOutlined,
 } from '@ant-design/icons-vue'
 
 const router = useRouter()
@@ -392,6 +398,8 @@ onMounted(() => {
   if (authStore.user) {
     notifStore.fetchUnreadCount()
     startUnreadStream()
+    // 刷新用户组 allowed_modules：管理员调整组配置后无需重新登录即生效
+    authStore.fetchCurrentUser()
   }
 })
 
@@ -429,6 +437,14 @@ const breadcrumbs = computed(() => {
   }
   return crumbs
 })
+
+// ── 用户组功能模块可见性（allowed_modules 空 = 不限制；admin 恒全量）──
+// 模块 key 即菜单路由 path（动态段 :id 占位），目录见 config/modules.ts
+const can = (moduleKey: string) =>
+  canAccessModule(moduleKey, authStore.user ?? {})
+
+const canAgent = (name: string) =>
+  can(`/agent/:id/${name}`)
 </script>
 
 <style scoped>

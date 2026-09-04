@@ -883,7 +883,9 @@ async function fetchPending() {
     const res: any = await memoryApi.listPendingMemories()
     pendingMemories.value = res?.data?.items ?? res?.items ?? []
   } catch {
+    // 闭环审查：静默置空会让 admin 误以为队列空——显式提示
     pendingMemories.value = []
+    message.error(t('memory.pendingError'))
   }
 }
 

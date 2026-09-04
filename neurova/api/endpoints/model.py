@@ -274,7 +274,9 @@ async def list_models_by_capability(
     return matched
 
 
-@router.delete("/{model_id}")
+# model_id 用 :path 转换器:OpenRouter 等服务商的模型 ID 原生含斜杠(openai/gpt-4o),
+# 单段参数匹配不了两段路径 → DELETE/PUT 恒 404(2026-09-05 回归)
+@router.delete("/{model_id:path}")
 async def delete_model(
     request: Request,
     model_id: str = Path(...),
@@ -324,7 +326,7 @@ class UpdateModelRequest(BaseModel):
     provider_id: Optional[str] = None
 
 
-@router.put("/{model_id}")
+@router.put("/{model_id:path}")
 async def update_model(
     request: Request,
     model_id: str = Path(...),

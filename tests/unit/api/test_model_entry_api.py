@@ -55,6 +55,61 @@ def app_client(mock_manager):
         yield client
 
 
+@pytest.fixture
+def slash_manager():
+    """模型 ID 原生含斜杠的服务商(OpenRouter 的 openai/gpt-4o 等)"""
+    manager = MagicMock()
+    manager.rename_model_entry.return_value = True
+    manager.update_provider.return_value = True
+    provider = MagicMock()
+    provider.id = "openrouter"
+    provider.name = "OpenRouter"
+    provider.models = ["openai/gpt-4o", "anthropic/claude-sonnet-4"]
+    provider.model_metadata = {}
+    provider.is_builtin = True
+    manager.list_providers.return_value = [provider]
+    manager.get_provider.return_value = provider
+    return manager
+
+
+@pytest.fixture
+def slash_client(slash_manager):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from unittest.mock import patch
+
+    from neurova.api.endpoints import model as model_mod
+    from neurova.api.auth import get_optional_user
+
+    app = FastAPI()
+    with patch.object(model_mod, "_get_provider_manager", return_value=slash_manager):
+        app.include_router(model_mod.router, prefix="/models")
+        app.dependency_overrides[get_optional_user] = _mock_current_user
+        client = TestClient(app)
+        yield client
+
+
+class TestSlashModelIdRouting:
+    """回归(2026-09-05):含斜杠模型 ID 的路由契约。
+
+    OpenRouter 等服务商的模型 ID 原生形如 openai/gpt-4o,单段 {model_id}
+    匹配不了两段路径 → DELETE/PUT 恒 404。路由必须用 {model_id:path}。
+    """
+
+    def test_delete_slash_model_id(self, slash_client):
+        resp = slash_client.delete("/models/openai/gpt-4o")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["code"] == 0
+
+    def test_put_slash_model_id(self, slash_client):
+        resp = slash_client.put(
+            "/models/openai/gpt-4o",
+            json={"id": "openai/gpt-4o-2024-11-20"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["code"] == 0
+
+
 class TestUpdateModelEndpoint:
     def test_put_updates_id_and_name(self, app_client, mock_manager):
         resp = app_client.put(

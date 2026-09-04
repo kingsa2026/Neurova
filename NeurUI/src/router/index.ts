@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { canAccessModule } from '@/utils/permissions'
 
 const routes: RouteRecordRaw[] = [
   // ---------------------------------------------------------------------------
@@ -503,6 +504,15 @@ router.beforeEach((to, _from, next) => {
     next({ name: 'Login', query: { redirect: to.fullPath } })
   } else if (to.meta.guest && authStore.isAuthenticated) {
     // Redirect already-authenticated users away from guest-only pages
+    next({ name: 'Dashboard' })
+  } else if (
+    to.name !== 'Dashboard' &&
+    authStore.user?.role !== 'admin' &&
+    (authStore.user?.allowed_modules?.length ?? 0) > 0 &&
+    !canAccessModule(to.path, authStore.user ?? {})
+  ) {
+    // 用户组功能模块守卫：受限用户访问未授权模块 → 兜底回总览
+    // （dashboard 恒可见，避免重定向循环）
     next({ name: 'Dashboard' })
   } else {
     next()

@@ -201,6 +201,7 @@ export const useAuthStore = defineStore('auth', () => {
           email: data.email || '',
           role: data.role || 'user',
           status: data.status || 'active',
+          allowed_modules: Array.isArray(data.allowed_modules) ? data.allowed_modules : [],
           createdAt: data.created_at,
         }
         persistUser(user)

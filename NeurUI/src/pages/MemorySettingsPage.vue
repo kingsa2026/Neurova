@@ -45,13 +45,26 @@
     <a-spin :spinning="loading">
       <!-- Section navigation -->
       <GlassCard style="margin-top: 8px">
-        <div class="section-nav">
-          <a-radio-group v-model:value="activeSection" button-style="solid" size="small">
-            <a-radio-button value="__all__">{{ t('memorySettings.allSettings') }}</a-radio-button>
-            <a-radio-button v-for="sec in sections" :key="sec" :value="sec">
-              {{ sectionLabel(sec) }}
-            </a-radio-button>
-          </a-radio-group>
+        <!-- Section navigation: 站内统一胶囊 tab 范式(与 AgentPageTabs 一致) -->
+        <div class="section-tabs">
+          <button
+            type="button"
+            class="section-tab"
+            :class="{ 'is-active': activeSection === '__all__' }"
+            @click="activeSection = '__all__'"
+          >
+            {{ t('memorySettings.allSettings') }}
+          </button>
+          <button
+            v-for="sec in sections"
+            :key="sec"
+            type="button"
+            class="section-tab"
+            :class="{ 'is-active': activeSection === sec }"
+            @click="activeSection = sec"
+          >
+            {{ sectionLabel(sec) }}
+          </button>
         </div>
       </GlassCard>
 
@@ -79,7 +92,7 @@
                 </div>
 
                 <div class="param-info">
-                  <div class="param-name">{{ formatParamKey(param.key) }}</div>
+                  <div class="param-name" :title="param.key">{{ paramName(param) }}</div>
                   <div class="param-desc">{{ paramDesc(param) }}</div>
                   <div class="param-meta">
                     <a-tag size="small" :color="typeColor(param.type)">{{ typeLabel(param.type) }}</a-tag>
@@ -278,6 +291,22 @@ const paramsInSection = (sec: string) => schema.value.filter(p => p.key.startsWi
 const formatParamKey = (key: string) => {
   const parts = key.split('.')
   return parts.length > 1 ? parts.slice(1).join('.') : key
+}
+
+// 参数名 i18n: 键名规律 = 'paramName' + PascalCase(参数键去点)
+// (如 temperature.decay_rate → paramNameTemperatureDecayRate);
+// 未登记的键回落剥离 section 前缀的原始名,与 desc_key 回落策略一致。
+const paramNameKey = (key: string) =>
+  'memorySettings.paramName' +
+  key
+    .split(/[._]/)
+    .filter(Boolean)
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+    .join('')
+
+const paramName = (p: ParamSchema) => {
+  const key = paramNameKey(p.key)
+  return te(key) ? t(key) : formatParamKey(p.key)
 }
 
 const typeColor = (type: string) => {
@@ -491,8 +520,42 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
-.section-nav {
+/* 站内统一胶囊 tab(与 AgentPageTabs/NeuronPage 同范式) */
+.section-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 12px;
+  max-width: 100%;
   overflow-x: auto;
+}
+
+.section-tab {
+  padding: 5px 14px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--nr-text-secondary);
+  border-radius: 9px;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.section-tab:hover {
+  color: var(--nr-text-primary);
+  background: var(--nr-glass-bg-hover);
+}
+
+.section-tab.is-active {
+  color: var(--nr-primary-light);
+  background: var(--nr-primary-soft);
+  font-weight: 550;
 }
 
 .section-desc {

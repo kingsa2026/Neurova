@@ -65,6 +65,8 @@ const messages = {
     typeInt: '整数',
     typeBool: '布尔值',
     typeString: '字符串',
+    paramNameTemperatureDecayRate: '温度衰减速率',
+    paramNameGraphBeamWidth: '搜索宽度',
     paramtemperatureDecayRate: '温度衰减率（每小时）',
   },
 }
@@ -81,8 +83,6 @@ const globalStubs = {
   'a-menu': { template: '<div class="ant-menu"><slot/></div>' },
   'a-menu-item': { emits: ['click'], template: '<div class="ant-menu-item"><slot/></div>' },
   'a-upload': { props: ['accept'], template: '<span class="ant-upload"><slot/></span>' },
-  'a-radio-group': { props: ['value'], emits: ['update:value'], template: '<div class="ant-radio-group" :data-value="value"><slot/></div>' },
-  'a-radio-button': { props: ['value'], template: '<button type="button"><slot/></button>' },
   'a-checkbox': { props: ['checked'], emits: ['change'], template: '<input type="checkbox" class="ant-checkbox" :checked="checked" />' },
   'a-tag': { template: '<span><slot/></span>' },
   'a-switch': { props: ['checked'], emits: ['update:checked'], template: '<button class="ant-switch"><slot/></button>' },
@@ -163,5 +163,18 @@ describe('MemorySettingsPage 多语言适配', () => {
     expect(wrapper.text()).not.toContain('记忆温度衰减速率（每小时）')
     // 无 desc_key → 回退 description
     expect(wrapper.text()).toContain('beam search 宽度')
+  })
+
+  it('参数名走 paramName<Key> i18n 映射，未登记键回落剥离前缀的原始名', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    // 已登记 → 语言包名称（不再显示 snake_case 键名）
+    expect(wrapper.text()).toContain('温度衰减速率')
+    expect(wrapper.text()).not.toContain('decay_rate')
+    // 未登记 → 回落剥离前缀（compression.enable_llm_compression → enable_llm_compression）
+    expect(wrapper.text()).toContain('enable_llm_compression')
+    // 原始键保留在 title tooltip
+    expect(wrapper.html()).toContain('title="temperature.decay_rate"')
   })
 })

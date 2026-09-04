@@ -130,3 +130,57 @@ class TestExecutorHook:
         assert result.success is True
         assert result.output == {"stored": True}
         mm.remember.assert_called_once()
+
+
+class TestProposedByServerSide:
+    """P1-2 闭环审查修 F：提议归属以服务端隔离作用域身份优先，
+    防调用方伪造 proposed_by 把内容栽进他人待审队列。"""
+
+    def _executor_with_store(self, mm, tmp_path):
+        from neurova.skills.builtin.memory_executor import MemorySkillExecutor
+
+        ex = MemorySkillExecutor(mm)
+        ex.pending_store = PendingMemoryStore(db_path=str(tmp_path / "p.db"))
+        return ex
+
+    def test_scope_identity_overrides_forged_param(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        mm = MagicMock()
+        mm.effective_user_id.return_value = "u_real"
+        ex = self._executor_with_store(mm, tmp_path)
+
+        result = ex.execute(
+            {"action": "store", "content": "伪造归属的内容", "proposed_by": "u_victim"}
+        )
+        assert result.success is True
+        rec = ex.pending_store.list_pending()[0]
+        assert rec["proposed_by"] == "u_real"  # 服务端身份胜出
+        assert rec["proposed_by"] != "u_victim"
+
+    def test_falls_back_to_param_without_scope(self, tmp_path):
+        """无作用域环境（CLI 等未设 request scope）：回退参数自报。"""
+        from unittest.mock import MagicMock
+
+        mm = MagicMock(spec=[])  # 无 effective_user_id 属性
+        ex = self._executor_with_store(mm, tmp_path)
+
+        result = ex.execute(
+            {"action": "store", "content": "无作用域提议", "proposed_by": "u_cli"}
+        )
+        assert result.success is True
+        rec = ex.pending_store.list_pending()[0]
+        assert rec["proposed_by"] == "u_cli"
+
+    def test_default_scope_ignored(self, tmp_path):
+        """作用域返回 default（未登录/系统上下文）：不冒充真实用户，
+        回退参数（原行为）。"""
+        from unittest.mock import MagicMock
+
+        mm = MagicMock()
+        mm.effective_user_id.return_value = "default"
+        ex = self._executor_with_store(mm, tmp_path)
+
+        ex.execute({"action": "store", "content": "默认作用域", "proposed_by": "u9"})
+        rec = ex.pending_store.list_pending()[0]
+        assert rec["proposed_by"] == "u9"

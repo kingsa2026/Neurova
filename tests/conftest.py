@@ -287,6 +287,17 @@ def _isolate_usage_history(tmp_path, monkeypatch):
 # 仓库 data/。统一指向每测试临时目录（含单例重建），与 _isolate_usage_history 同模式。
 
 @pytest.fixture(autouse=True)
+def _isolate_governance_settings(tmp_path, monkeypatch):
+    """所有测试的治理设置（governance_settings.json）指向临时目录。
+
+    data/governance_settings.json 是运行时管理面（RSI 部署阶段/对话规则提取
+    门控），读写真实文件会（a）污染仓库 data/（b）让测试读到彼此的开关值。
+    与 _isolate_usage_history 同模式。
+    """
+    monkeypatch.setenv("NEUROVA_GOVERNANCE_SETTINGS", str(tmp_path / "governance_settings.json"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_meta_ledger(tmp_path, monkeypatch):
     """所有测试的元认知台账落盘指向临时目录。"""
     monkeypatch.setenv("NEUROVA_META_LEDGER_DB", str(tmp_path / "metacognition.db"))

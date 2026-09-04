@@ -20,6 +20,10 @@ import re
 from enum import Enum
 from typing import Any, Dict, List, Tuple
 
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
+
 # 语义路支持集：向量类后端；词法路支持集：倒排/词频类后端
 _VECTOR_BACKENDS = {"faiss", "onnx", "fastembed", "annoy", "hnswlib", "weaviate", "qdrant"}
 _FULLTEXT_BACKENDS = {"tfidf", "bm25", "fts5", "fts", "keyword"}
@@ -77,7 +81,11 @@ def _ngram_tokenize(text: str) -> List[str]:
 
 
 def _get_jieba() -> Any:
-    """进程级惰性加载 jieba；不可用返回 None（调用方回退 n-gram）。"""
+    """进程级惰性加载 jieba；不可用返回 None（调用方回退 n-gram）。
+
+    缺席走 n-gram 是"失败方向"的弱化版（缺一个 jieba 维度的精度，不是检索坏掉），
+    但**必须**留下 WARN 日志——否则升级 ABI / funasr 冲突卸载会让 FTS/BM25
+    静默回退，监控盲。"""
     global _jieba
     if _jieba is not None:
         return _jieba if _jieba is not False else None
@@ -86,8 +94,11 @@ def _get_jieba() -> Any:
 
         _j.setLogLevel(logging.WARNING)
         _jieba = _j
-    except Exception:  # noqa: BLE001 — 可选依赖，缺席走回退
+    except Exception as exc:  # noqa: BLE001 — 可选依赖，缺席走回退
         _jieba = False
+        logger.warning(
+            "知识库 jieba 不可用，FTS/BM25 静默回退 n-gram（中文检索精度降级）: %s", exc
+        )
     return None if _jieba is False else _jieba
 
 

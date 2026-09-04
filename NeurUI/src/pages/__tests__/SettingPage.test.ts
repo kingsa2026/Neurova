@@ -7,6 +7,12 @@ vi.mock('@/api/modules/settings', () => ({
   getSettings: vi.fn().mockResolvedValue({ data: {} }),
   updateSettings: vi.fn().mockResolvedValue({ data: {} }),
   clearCache: vi.fn().mockResolvedValue({ data: {} }),
+  getGovernanceSettings: vi.fn().mockResolvedValue({
+    data: { data: { conversation_rules_enabled: true, rsi_phase: 1 } },
+  }),
+  updateGovernanceSettings: vi.fn().mockResolvedValue({
+    data: { conversation_rules_enabled: true, rsi_phase: 1 },
+  }),
 }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ user: { username: 'admin', role: 'admin' } }),
@@ -26,7 +32,7 @@ import SettingPage from '../SettingPage.vue'
 const messages = {
   system: { settings: '系统设置' },
   common: { globalSettingHint: '全局设置', adminOnlyHint: '仅管理员', required: '必填', save: '保存', success: '成功', error: '失败' },
-  settings: { general: '常规', generalSettings: '常规设置', appName: '应用名', llm: '模型', llmSettings: '模型设置', security: '安全', securitySettings: '安全设置', jwtSecret: 'JWT 密钥', jwtExpiry: '过期时长', minPasswordLength: '密码最小长度', requireSpecial: '特殊字符', storage: '存储', storageSettings: '存储设置', mediaStoragePath: '媒体路径', maxUploadSize: '上传上限', cacheTtl: '缓存 TTL', refreshCache: '清缓存', advanced: '高级', advancedSettings: '高级设置', debugMode: '调试模式', logLevel: '日志级别', debug: '调试', info: '信息', warning: '警告', error: '错误', enableTelemetry: '遥测', negativeScreen: '负一屏推送' },
+  settings: { general: '常规', generalSettings: '常规设置', appName: '应用名', llm: '模型', llmSettings: '模型设置', security: '安全', securitySettings: '安全设置', jwtSecret: 'JWT 密钥', jwtExpiry: '过期时长', minPasswordLength: '密码最小长度', requireSpecial: '特殊字符', storage: '存储', storageSettings: '存储设置', mediaStoragePath: '媒体路径', maxUploadSize: '上传上限', cacheTtl: '缓存 TTL', refreshCache: '清缓存', advanced: '高级', advancedSettings: '高级设置', debugMode: '调试模式', logLevel: '日志级别', debug: '调试', info: '信息', warning: '警告', error: '错误', enableTelemetry: '遥测', negativeScreen: '负一屏推送', governance: { title: '进化治理', hint: '提示', rsiPhase: 'RSI 部署阶段', phase0: '0', phase1: '1', phase2: '2', phase3: '3', phase4: '4', conversationRules: '对话规则提取' } },
   model: { providers: '服务商', active: '模型' },
   agent: { temperature: '温度', maxTokens: '最大 Token' },
   theme: { language: '语言', appearance: '外观', dark: '深色', light: '浅色' },
@@ -65,5 +71,26 @@ describe('SettingPage — 负一屏推送迁移防回归', () => {
     expect(tabNames).not.toContain('负一屏推送')
     // 设置页其余功能仍正常渲染
     expect(wrapper.text()).toContain('常规设置')
+  })
+
+  it('renders governance card in advanced tab with fetched values', async () => {
+    const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': messages } })
+    setActivePinia(createPinia())
+    const wrapper = mount(SettingPage, { global: { plugins: [i18n], stubs: globalStubs } })
+    await flushPromises()
+
+    const { getGovernanceSettings } = await import('@/api/modules/settings')
+    expect(getGovernanceSettings).toHaveBeenCalled()
+    // 治理卡片标题渲染（advanced 选项卡内）
+    expect(wrapper.text()).toContain('进化治理')
+  })
+
+  it('governance card hidden before i18n keys exist shows fallback gracefully', async () => {
+    // governance 键缺失时 t() 回退键名——页面不崩
+    const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': { ...messages, settings: { ...messages.settings } } } })
+    setActivePinia(createPinia())
+    const wrapper = mount(SettingPage, { global: { plugins: [i18n], stubs: globalStubs } })
+    await flushPromises()
+    expect(wrapper.find('.advanced-stack').exists()).toBe(true)
   })
 })

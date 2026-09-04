@@ -58,7 +58,12 @@ const i18n = createI18n({
       common: { error: '错误', success: '成功', status: '状态', noData: '暂无数据', open: '打开' },
       system: { benchmark: '基准测试' },
       workflow: { execute: '执行' },
-      benchmark: { execute: '执行', idle: '空闲', open: '打开', resultsComparison: '结果对比', perAgentResults: '按智能体结果', agent: '智能体', test: '测试', score: '分数', duration: '耗时', testsRun: '测试次数', passed: '通过', failed: '失败', avgScore: '平均分', pass: '通过', fail: '失败', lastRun: '上次: ', tests: '测试' },
+      benchmark: { execute: '执行', idle: '空闲', open: '打开', resultsComparison: '结果对比', perAgentResults: '按智能体结果', agent: '智能体', test: '测试', score: '分数', duration: '耗时', testsRun: '测试次数', passed: '通过', failed: '失败', avgScore: '平均分', pass: '通过', fail: '失败', lastRun: '上次: ', tests: '测试',
+        suites: {
+          'reasoning-v1': { name: '逻辑推理', description: '测试逻辑推演与问题求解' },
+          'coding-v1': { name: '代码生成', description: '测试代码生成与调试' },
+        },
+      },
     },
   },
 })
@@ -96,12 +101,23 @@ describe('BenchmarkPage 套件列表解包', () => {
     requestMock.get.mockResolvedValue(suitesEnvelope)
   })
 
-  it('从 res.data.suites 渲染套件名称', async () => {
+  it('从 res.data.suites 解包并渲染映射后的套件名', async () => {
     const wrapper = mountPage()
     await flushPromises()
     const text = wrapper.text()
-    expect(text).toContain('Logical Reasoning')
-    expect(text).toContain('Code Generation')
+    // 套件名经 i18n 映射(见相邻用例),后端英文值不作展示
+    expect(text).toContain('逻辑推理')
+    expect(text).toContain('代码生成')
+  })
+
+  it('套件名/描述经 i18n 映射渲染（后端英文值不作展示）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).toContain('逻辑推理')
+    expect(text).toContain('测试逻辑推演与问题求解')
+    expect(text).toContain('代码生成')
+    expect(text).not.toContain('Logical Reasoning')
   })
 
   it('空套件列表渲染暂无数据且无幽灵卡片', async () => {
@@ -191,7 +207,9 @@ describe('BenchmarkPage Agent 层契约', () => {
     expect(tables.length).toBe(2)
     const runRows = tables[0].text()
     expect(runRows).toContain('r1')
-    expect(runRows).toContain('Logical Reasoning')
+    // stub 表只渲染原始数据源;suite_name 的 i18n 映射在 bodyCell 插槽层
+    expect(runRows).toContain('reasoning-v1')
+    expect(runRows).toContain('suite_name')
     expect(runRows).toContain('72.5')
     expect(runRows).toContain('a1')
     // 每智能体聚合表：agent 名从 store 反查

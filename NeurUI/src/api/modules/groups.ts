@@ -5,10 +5,15 @@ import api from '@/api'
 // ---------------------------------------------------------------------------
 
 export interface Group {
-  id: string
+  /** 后端契约字段（GroupInfo.group_id） */
+  group_id: string
   name: string
   description?: string
+  members?: string[]
   members_count?: number
+  /** 可用功能模块（菜单路由 key）；空数组 = 不限制 */
+  allowed_modules?: string[]
+  is_system?: boolean
 }
 
 export interface GroupMember {
@@ -34,12 +39,15 @@ export function getGroup(groupId: string) {
 }
 
 /** Create a new group. */
-export function createGroup(data: { name: string; description?: string }) {
+export function createGroup(data: { name: string; description?: string; allowed_modules?: string[] }) {
   return api.post<Group>(BASE, data)
 }
 
 /** Update a group. */
-export function updateGroup(groupId: string, data: { name?: string; description?: string }) {
+export function updateGroup(
+  groupId: string,
+  data: { name?: string; description?: string; allowed_modules?: string[] },
+) {
   return api.put<Group>(`${BASE}/${groupId}`, data)
 }
 
@@ -53,12 +61,12 @@ export function listGroupMembers(groupId: string) {
   return api.get<GroupMember[]>(`${BASE}/${groupId}/members`)
 }
 
-/** Add a member to a group. */
+/** Add a member to a group (by username). */
 export function addGroupMember(groupId: string, data: { username: string }) {
   return api.post<null>(`${BASE}/${groupId}/members`, data)
 }
 
-/** Remove a member from a group. */
-export function removeGroupMember(groupId: string, memberId: string) {
-  return api.delete<null>(`${BASE}/${groupId}/members/${memberId}`)
+/** Remove a member from a group (by username). */
+export function removeGroupMember(groupId: string, username: string) {
+  return api.delete<null>(`${BASE}/${groupId}/members/${encodeURIComponent(username)}`)
 }

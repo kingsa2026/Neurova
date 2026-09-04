@@ -833,6 +833,10 @@ def _import_file_data(
         visibility="private",
         owner_user_id=str((user or {}).get("user_id", "") or "default"),
         chunks=split_with_meta(text),
+        # P0-3 闭环审查修 D：批量导入不进同值冲突队列——同名文件批量导入
+        # （课件/周报）会瞬间产生 N-1 条 pending 刷屏待审；导入条目已有
+        # source 字段独立溯源，冲突检测留给交互式单条创建路径
+        detect_conflict=False,
     )
     return [_build_item_dict(item)]
 
