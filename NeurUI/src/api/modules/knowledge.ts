@@ -205,3 +205,43 @@ export function createKbCollection(data: { config_id: string; collection_name: s
 export function deleteKbCollection(id: string) {
   return api.delete<ApiResponse<null>>(`${BASE}/collections/${id}`)
 }
+
+// ── P2 标注闭环：精准回复命中表 ──
+
+export interface AnnotationItem {
+  id: string
+  question: string
+  answer: string
+  source: string
+  enabled: boolean
+  hit_count: number
+  created_at: number
+  updated_at: number
+}
+
+/** 标注清单（按命中次数排序；q 过滤问题/答案子串） */
+export function listAnnotations(q = '', limit = 100) {
+  return api.get<ApiResponse<{ items: AnnotationItem[]; total: number }>>(`${BASE}/annotations`, {
+    params: { q, limit },
+  })
+}
+
+/** 新增精准回复 */
+export function createAnnotation(question: string, answer: string) {
+  return api.post<ApiResponse<{ id: string }>>(`${BASE}/annotations`, { question, answer })
+}
+
+/** 更新答案/启停用 */
+export function updateAnnotation(id: string, data: { answer?: string; enabled?: boolean }) {
+  return api.put<ApiResponse<AnnotationItem>>(`${BASE}/annotations/${id}`, data)
+}
+
+/** 删除标注 */
+export function deleteAnnotation(id: string) {
+  return api.delete<ApiResponse<null>>(`${BASE}/annotations/${id}`)
+}
+
+/** 重训练化集导出（JSONL） */
+export function exportAnnotationTrainingSet() {
+  return api.get<ApiResponse<{ jsonl: string; count: number }>>(`${BASE}/annotations/export`)
+}

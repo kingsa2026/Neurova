@@ -176,11 +176,18 @@ class TriggerManager:
     async def fire(
         self, trigger: WorkflowTrigger, inputs: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
-        """手动/定时触发：经注入的 dispatch 派发。"""
+        """统一触发面（P2）：cron/plugin/manual 共用——inputs 注入
+        trigger_source 标记（工作流内变量可引用来源），webhook 入站
+        不经此路径（签名验签链路独立）。"""
         if self._dispatch is None:
             logger.warning("TriggerManager dispatch not configured; fire skipped")
             return None
-        return await self._dispatch(trigger.workflow_id, inputs or {})
+        payload = dict(inputs or {})
+        payload.setdefault(
+            "trigger_source", getattr(getattr(trigger, "type", None), "value", "manual")
+        )
+        payload.setdefault("trigger_id", getattr(trigger, "id", ""))
+        return await self._dispatch(trigger.workflow_id, payload)
 
     def _scheduled_fire(self, trigger_id: str) -> None:
         """scheduler 到期回调入口（同步壳，把 fire 协程回投到主事件循环）。

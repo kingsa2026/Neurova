@@ -207,10 +207,28 @@ class MarketImporter:
                 task.status = ImportStatus.DOWNLOADING
                 task.progress = 0.3
 
+                # P0-4 安装时声明校验：catalog entry 携带的 permissions 在落盘
+                # 前过安装门（fail-closed）；远端 zip 场景 permissions 取自
+                # entry 元数据（SKILL.md frontmatter 由 hub_client 链路负责）
+                entry = self._lookup_catalog_entry(skill_id)
+                perm_raw = (entry or {}).get("permissions")
+                if perm_raw is not None:
+                    from neurova.skills.skill_install_gate import validate_permissions_for_install
+
+                    perm_verdict = validate_permissions_for_install(perm_raw)
+                    if perm_verdict.get("blocked"):
+                        task.status = ImportStatus.FAILED
+                        task.error_message = "权限声明校验失败: " + "; ".join(perm_verdict.get("errors", []))
+                        logger.error(
+                            "Skill '%s' rejected by permissions gate: %s",
+                            skill_id,
+                            task.error_message,
+                        )
+                        return task
+
                 # 远端市场源条目: 真实下载 zip 并安全解压到 skills_dir/{skill_id}
                 # （SKILL.md 格式技能包；本地种子条目仍走原模拟链路）
                 downloaded = False
-                entry = self._lookup_catalog_entry(skill_id)
                 download_url = (entry or {}).get("download_url") or ""
                 if download_url:
                     from neurova.skills import market_sources
@@ -243,6 +261,11 @@ class MarketImporter:
                     "version": installed_version,
                     "installed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 }
+                # P0-4：通过校验的权限声明随 skill.json 持久化（运行时读取源）
+                if perm_raw is not None:
+                    from neurova.skills.permissions import SkillPermissions
+
+                    skill_meta["permissions"] = SkillPermissions.from_dict(perm_raw).to_dict()
                 (skill_dir / "skill.json").write_text(
                     json.dumps(skill_meta, ensure_ascii=False, indent=2),
                     encoding="utf-8",

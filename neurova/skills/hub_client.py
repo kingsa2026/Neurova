@@ -477,11 +477,37 @@ class SkillHubClient:
         """P1-6 安装安全门：落盘后扫描，不通过则回滚删除并拒绝。
 
         fail-closed：门自身异常视为不通过（安全默认值优先于可用性）。
+        P0-4：SKILL.md/manifest 携带的 permissions 声明一并过门——非法
+        声明（未知能力键/白名单引用未知工具等）拒绝安装并回滚；合法
+        声明归一化持久化进 skill.json（运行时读取源）。声明缺省放行
+        （向后兼容；Claude 式 allowed-tools 模式语法不映射，避免误拒）。
         """
         import shutil
 
         try:
-            from neurova.skills.skill_install_gate import scan_skill_for_install
+            from neurova.skills.skill_install_gate import (
+                scan_skill_for_install,
+                validate_permissions_for_install,
+            )
+
+            # P0-4：声明式权限校验（缺省 → 放行）
+            try:
+                skill_config = self._parse_skill_md(skill_dir)
+            except Exception as e:  # noqa: BLE001 — 解析失败按无声明处理
+                logger.debug("permissions 提取失败（按无声明处理）: %s", e)
+                skill_config = {}
+            perm_raw = (skill_config or {}).get("permissions") if isinstance(skill_config, dict) else None
+            perm_verdict = validate_permissions_for_install(perm_raw)
+            if perm_verdict.get("blocked"):
+                shutil.rmtree(skill_dir, ignore_errors=True)
+                logger.warning(
+                    "Skill %s blocked by permissions gate: %s",
+                    skill_name,
+                    "; ".join(perm_verdict.get("errors", [])),
+                )
+                return False
+            if perm_raw is not None:
+                self._persist_declared_permissions(skill_dir, perm_raw)
 
             verdict = scan_skill_for_install(skill_name, str(skill_dir))
         except Exception as e:
@@ -495,6 +521,27 @@ class SkillHubClient:
             )
             return False
         return True
+
+    @staticmethod
+    def _persist_declared_permissions(skill_dir: Path, perm_raw: dict) -> None:
+        """把通过校验的权限声明归一化写进 skill.json（可观测 + 运行时读取源）。"""
+        try:
+            from neurova.skills.permissions import SkillPermissions
+
+            normalized = SkillPermissions.from_dict(perm_raw).to_dict()
+            meta_path = skill_dir / "skill.json"
+            meta: dict = {}
+            if meta_path.exists():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001 — 损坏元数据不阻断安装
+                    meta = {}
+            meta["permissions"] = normalized
+            meta_path.write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception as e:  # noqa: BLE001 — 声明持久化失败不回滚安装
+            logger.warning("persist skill permissions failed for %s: %s", skill_dir, e)
 
     def install_skill(self, skill: RemoteSkill) -> bool:
         """

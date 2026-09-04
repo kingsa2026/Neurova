@@ -1459,6 +1459,44 @@ async def set_node_mock(
     return {"node_id": node_id, "mocked": True}
 
 
+# ==================== P1-1 单节点 step-run（画布调试 UX 底座） ====================
+
+
+class StepRunRequest(BaseModel):
+    node_id: str
+    inputs: Optional[Dict[str, Any]] = None
+    upstream_outputs: Optional[Dict[str, Any]] = None
+
+
+@router.post("/workflows/{workflow_id}/step-run")
+async def step_run_node(
+    workflow_id: str,
+    body: StepRunRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """单节点试跑：只执行指定节点（mock 优先），上游输出经
+    upstream_outputs 注入（画布右键面板/变量检查的数据源）。"""
+    storage = _get_storage()
+    workflow = storage.get_workflow(workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+    if not any(n.id == body.node_id for n in workflow.nodes):
+        raise HTTPException(status_code=404, detail=f"节点不存在: {body.node_id}")
+
+    executor = get_workflow_executor()
+    try:
+        result = await executor.step_run(
+            workflow,
+            body.node_id,
+            upstream_outputs=body.upstream_outputs or {},
+            inputs=body.inputs or {},
+            user_id=str(current_user.get("user_id") or "") or None,
+        )
+    except Exception as e:  # noqa: BLE001 — 引擎异常转失败信封
+        result = {"status": "failed", "error": str(e), "duration_ms": 0.0}
+    return {"code": 0, "message": "ok", "data": result}
+
+
 # ==================== P1 Step 4b — Webhook 入站触发（薄壳） ====================
 
 
@@ -1903,3 +1941,104 @@ def _checkpoint_summary(instance, node_ids=None) -> dict:
     import typing as _t
     node_ids = node_ids or list((instance.node_results or {}).keys())
     return execution_checkpoint_summary(instance, node_ids)
+
+
+@router.get("/otel/status")
+def otel_status():
+    """P0-5 OTel 桥状态（可选依赖探测 + 投影账目）。"""
+    try:
+        from neurova.core.otel_bridge import bridge_stats
+
+        return {"code": 0, "message": "ok", "data": {**bridge_stats()}}
+    except Exception as e:  # noqa: BLE001 — 状态端点不 500
+        return {"code": 0, "message": "ok", "data": {"installed": False, "enabled": False, "error": str(e)}}
+
+
+# ══════════════════════════════════════════════════════════════
+# P2 trigger 统一契约 — 投递重试管理 API
+# ══════════════════════════════════════════════════════════════
+
+
+async def handle_webhook_ingress_simple(trigger_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """按 trigger_id 重投（重试链路的重放壳）。
+
+    直接调 handle_webhook_ingress（完整验签/限流/派发语义）；宽松模式
+    trigger 空负载即可重放；严格模式 trigger 无原始签名头——重试链路
+    以 INGRESS 侧结果为准（4xx 视为不可重投失败，由账目标 dead/pending）。
+    """
+    import json as _json
+
+    from neurova.collaboration.neurflow import webhook_ingress as _ingress
+
+    try:
+        outcome = await _ingress.handle_webhook_ingress(
+            trigger_id, _json.dumps(payload or {}).encode("utf-8"),
+            signature_header=None, timestamp_header=None,
+        )
+        return {"success": True, "execution_id": (outcome or {}).get("execution_id"),
+                "raw": outcome}
+    except _ingress.IngressRejected as e:
+        return {"success": False, "error": f"{e.status_code} {e.reason}"}
+
+
+def _get_retry_service() -> "Any":
+    from neurova.collaboration.neurflow.trigger_retry import TriggerRetryService
+
+    return TriggerRetryService(_get_storage())
+
+
+@router.get("/trigger/deliveries/failed")
+async def list_failed_deliveries(
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """失败投递队列（重试管理页数据源）。"""
+    svc = _get_retry_service()
+    return {"code": 0, "message": "ok", "data": {"items": svc.list_failed(limit=limit)}}
+
+
+@router.post("/trigger/deliveries/{delivery_id}/retry")
+async def retry_delivery(
+    delivery_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """手动重试单条失败投递（重新走 webhook 入站验签+执行链路）。"""
+    async def _redeliver(trigger_id: str, attempt: int) -> Dict[str, Any]:
+        from neurova.api.endpoints import neurflow_api as _self
+
+        deps = _self._webhook_ingress_deps()
+        try:
+            trigger = deps["load_trigger"](trigger_id)
+            if trigger is None:
+                return {"ok": False, "error": "trigger 不存在"}
+            # 重新投递：空 payload 重放（签名按 trigger secret 重新计算语义
+            # 由 handle_webhook_ingress 的宽松/严格模式处理）
+            outcome = await _self.handle_webhook_ingress_simple(trigger_id, {})
+            return {"ok": bool(outcome.get("success") or outcome.get("execution_id")),
+                    "execution_id": outcome.get("execution_id")}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+
+    svc = _get_retry_service()
+    outcome = await svc.retry_delivery(delivery_id, redeliver=_redeliver)
+    return {"code": 0, "message": "ok", "data": outcome}
+
+
+@router.post("/trigger/deliveries/retry-due")
+async def retry_due_deliveries(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """到期批量重试（后台调度亦可调用此入口）。"""
+    async def _redeliver(trigger_id: str, attempt: int) -> Dict[str, Any]:
+        try:
+            from neurova.api.endpoints import neurflow_api as _self
+
+            outcome = await _self.handle_webhook_ingress_simple(trigger_id, {})
+            return {"ok": bool(outcome.get("success") or outcome.get("execution_id")),
+                    "execution_id": outcome.get("execution_id")}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+
+    svc = _get_retry_service()
+    processed = await svc.retry_due(redeliver=_redeliver)
+    return {"code": 0, "message": "ok", "data": {"processed": processed, "count": len(processed)}}

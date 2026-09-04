@@ -774,6 +774,51 @@ def _get_multi_model_client():
         return None
 
 
+def _extract_llm_usage(response: Any) -> Dict[str, int]:
+    """从 LLM 响应提取 usage 真值（P1-6；对象/dict 双形态；缺失恒 0 不造假）"""
+    usage = getattr(response, "usage", None)
+    if usage is None and isinstance(response, dict):
+        usage = response.get("usage")
+    if not usage:
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+    def _u(key: str) -> int:
+        v = getattr(usage, key, None)
+        if v is None and isinstance(usage, dict):
+            v = usage.get(key)
+        try:
+            return int(v or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    prompt, completion = _u("prompt_tokens"), _u("completion_tokens")
+    total = _u("total_tokens") or (prompt + completion)
+    return {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total}
+
+
+def _record_usage_quota(usage: Dict[str, int], user_id: str) -> None:
+    """usage 真值 → ResourceQuotaManager 记账（P1-6；0 值不记，避免噪声计数）"""
+    total = int((usage or {}).get("total_tokens") or 0)
+    if total <= 0 or not user_id:
+        return
+    try:
+        quota = _get_resource_quota_manager()
+        if quota is not None:
+            quota.increment_llm_token(user_id, total)
+    except Exception as e:  # noqa: BLE001 — 记账失败不阻断执行
+        logger.debug("节点 token 配额记账失败: %s", e)
+
+
+def _get_resource_quota_manager():
+    """获取配额管理器（可选依赖；不可用返回 None）"""
+    try:
+        from neurova.admin.resource_quota_manager import get_resource_quota_manager
+
+        return get_resource_quota_manager()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _extract_llm_text(response: Any) -> str:
     """从多种响应形状中安全提取文本内容"""
     if isinstance(response, str):
@@ -991,11 +1036,13 @@ async def exec_llm(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
                         "error": result.get("error", "LLM 调用失败"),
                         "output": None,
                     }
+                _usage = _extract_llm_usage(result.get("response"))
+                _record_usage_quota(_usage, str(ctx.get("user_id") or ""))
                 return {
                     "status": "success",
                     "output": {
                         "text": _extract_llm_text(result.get("response")),
-                        "usage": {},
+                        "usage": _usage,
                     },
                     "provider": result.get("provider") or provider,
                     "model": result.get("model") or model_name,
@@ -1027,11 +1074,13 @@ async def exec_llm(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any
             metadata={"history": []},
         )
 
+        _usage = _extract_llm_usage(response if isinstance(response, dict) else None)
+        _record_usage_quota(_usage, str(ctx.get("user_id") or ""))
         return {
             "status": "success",
             "output": {
                 "text": response if isinstance(response, str) else str(response),
-                "usage": {},  # TODO: 从 response 提取 usage
+                "usage": _usage,
             },
         }
     except Exception as e:

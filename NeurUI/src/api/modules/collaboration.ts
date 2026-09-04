@@ -419,3 +419,27 @@ export function listTriggerDeliveries(triggerId: string, limit = 50) {
     { params: { limit } },
   )
 }
+
+// ── P2 trigger 统一契约：投递重试 ──
+
+/** 失败投递队列（重试管理数据源） */
+export function listFailedDeliveries(limit = 50) {
+  return api.get<ApiResponse<{ items: Array<Record<string, unknown>> }>>(
+    `${NF_BASE}/trigger/deliveries/failed`,
+    { params: { limit } },
+  )
+}
+
+/** 手动重试单条失败投递 */
+export function retryDelivery(deliveryId: number) {
+  return api.post<ApiResponse<Record<string, unknown>>>(
+    `${NF_BASE}/trigger/deliveries/${deliveryId}/retry`,
+  )
+}
+
+/** 到期批量重试 */
+export function retryDueDeliveries() {
+  return api.post<ApiResponse<{ processed: number[]; count: number }>>(
+    `${NF_BASE}/trigger/deliveries/retry-due`,
+  )
+}

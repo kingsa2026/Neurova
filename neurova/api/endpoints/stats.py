@@ -278,6 +278,8 @@ def _empty_usage_overview(days: int, scope: str) -> Dict[str, Any]:
         ],
         "trends": [],
         "by_model": [],
+        # P1-8（OpenOcta 启发）：按模型延迟 p50/p95/max（缺延迟数据为空数组）
+        "latency_stats": [],
     }
 
 
@@ -382,6 +384,8 @@ async def get_usage_overview(
             "heatmap": heatmap,
             "trends": trends,
             "by_model": by_model,
+            # P1-8（OpenOcta 启发）：按模型延迟 p50/p95/max 报表
+            "latency_stats": history.latency_stats(user_id=user_id),
         }
     except Exception as e:  # noqa: BLE001 - 诚实回退零态，绝不 500
         logger.error(f"获取使用统计总览失败: {e}", exc_info=True)

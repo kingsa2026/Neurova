@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     prompt_tokens INTEGER NOT NULL DEFAULT 0,
     completion_tokens INTEGER NOT NULL DEFAULT 0,
     total_tokens INTEGER NOT NULL DEFAULT 0,
-    estimated INTEGER NOT NULL DEFAULT 0
+    estimated INTEGER NOT NULL DEFAULT 0,
+    first_token_ms INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER NOT NULL DEFAULT 0
 )
 """
 
@@ -72,6 +74,14 @@ class UsageHistoryStore:
                     conn.execute(_CREATE_TABLE)
                     for index_sql in _CREATE_INDEXES:
                         conn.execute(index_sql)
+                    # 存量库幂等迁移（OpenOcta 启发 P1-8 延迟维度）：
+                    # 旧库无 first_token_ms/duration_ms 列时补列，旧数据默认 0
+                    existing = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage)")}
+                    for column in ("first_token_ms", "duration_ms"):
+                        if column not in existing:
+                            conn.execute(
+                                f"ALTER TABLE llm_usage ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
+                            )
         except Exception:
             pass  # 落盘不可用 → 内存记账主流程不受影响
 
@@ -88,8 +98,15 @@ class UsageHistoryStore:
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         estimated: bool = False,
+        first_token_ms: int = 0,
+        duration_ms: int = 0,
     ) -> None:
-        """记一次 LLM 调用（一行）。任何失败都静默——仅为附加统计。"""
+        """记一次 LLM 调用（一行）。任何失败都静默——仅为附加统计。
+
+        first_token_ms/duration_ms（OpenOcta 启发 P1-8）：流式调用由
+        multi_model_client 记录首块耗时与总耗时；缺省 0 = 旧调用方零改动，
+        延迟报表只统计 >0 的行（诚实统计，不用 0 冒充超低延迟）。
+        """
         prompt_tokens = int(prompt_tokens or 0)
         completion_tokens = int(completion_tokens or 0)
         total = prompt_tokens + completion_tokens
@@ -104,8 +121,9 @@ class UsageHistoryStore:
                         """
                         INSERT INTO llm_usage (
                             ts, usage_date, user_id, model, provider,
-                            prompt_tokens, completion_tokens, total_tokens, estimated
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            prompt_tokens, completion_tokens, total_tokens, estimated,
+                            first_token_ms, duration_ms
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             ts,
@@ -117,6 +135,8 @@ class UsageHistoryStore:
                             completion_tokens,
                             total,
                             1 if estimated else 0,
+                            max(0, int(first_token_ms or 0)),
+                            max(0, int(duration_ms or 0)),
                         ),
                     )
         except Exception:
@@ -191,6 +211,53 @@ class UsageHistoryStore:
                         params,
                     ).fetchall()
             return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def latency_stats(self, user_id: Optional[str] = None, min_calls: int = 1) -> List[Dict[str, Any]]:
+        """按模型聚合延迟 p50/p95/max（OpenOcta 启发 P1-8）。
+
+        仅统计 duration_ms > 0 的行（旧调用方/缺延迟数据不进报表——诚实
+        统计，不用 0 冒充超低延迟）。异常回退空列表。
+        """
+        try:
+            where, params = self._where(user_id)
+            # where 为空串（全局口径）时不能拼 " AND ..."——分开构造条件
+            latency_where = f"{where} AND duration_ms > 0" if where else "WHERE duration_ms > 0"
+            with self._lock:
+                with self._connect() as conn:
+                    rows = conn.execute(
+                        f"""
+                        SELECT model, duration_ms
+                        FROM llm_usage
+                        {latency_where}
+                        ORDER BY model
+                        """,
+                        params,
+                    ).fetchall()
+            by_model: Dict[str, List[int]] = {}
+            for r in rows:
+                by_model.setdefault(r["model"], []).append(int(r["duration_ms"]))
+
+            def _pct(sorted_vals: List[int], pct: float) -> int:
+                if not sorted_vals:
+                    return 0
+                k = min(len(sorted_vals) - 1, max(0, int(round((len(sorted_vals) - 1) * pct))))
+                return sorted_vals[k]
+
+            stats = []
+            for model in sorted(by_model):
+                durs = sorted(by_model[model])
+                if len(durs) < min_calls:
+                    continue
+                stats.append({
+                    "model": model,
+                    "calls": len(durs),
+                    "p50_ms": _pct(durs, 0.50),
+                    "p95_ms": _pct(durs, 0.95),
+                    "max_ms": durs[-1],
+                })
+            return stats
         except Exception:
             return []
 

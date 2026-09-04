@@ -118,6 +118,11 @@ class SessionEvent:
     source_channel: str = ""
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     payload: Dict[str, Any] = field(default_factory=dict)
+    # 服务端单调序号（OpenOcta 启发 P0-1）。由 UnifiedSession.add_event 在进
+    # 历史时盖章（per-session 从 1 递增）；未进历史的裸事件保持 None。前端
+    # sync WS 据此做 gap 检测（seq > lastSeq+1 = 丢帧），断线重连重放历史
+    # 时 seq 随帧带出，游标自然重建。
+    seq: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典"""
@@ -187,9 +192,18 @@ class UnifiedSession:
     # 历史限制
     max_history_size: int = 1000
 
+    # per-session 单调 seq 发号器（下一个待发号）。1 起递增；add_event 是唯一
+    # 盖章点（全部调用点在 SessionSyncManager._lock 内，天然串行）。
+    next_seq: int = 1
+
     def add_event(self, event: SessionEvent):
         """添加事件到历史"""
         event.session_id = self.session_id
+        # 盖章 per-session 单调 seq（幂等：已带 seq 的事件不重发号，
+        # 保证同一事件无论从哪条链路观测到序号一致）
+        if event.seq is None:
+            event.seq = self.next_seq
+            self.next_seq += 1
         self.history.append(event)
         self.last_activity = datetime.now(timezone.utc)
 

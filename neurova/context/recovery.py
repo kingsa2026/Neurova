@@ -68,6 +68,103 @@ def _opens_tool_block(msg: Dict[str, Any]) -> bool:
     return (msg or {}).get("role") == "assistant" and bool(msg.get("tool_calls"))
 
 
+# ── tool-turn 修复（OpenOcta 启发 P1-7：toolTurnRepair） ──────────────────
+
+
+def _synth_tool_result(calls_seen: List[str]) -> str:
+    return (
+        f"{_RECOVERY_STUB_PREFIX} 工具调用 {', '.join(calls_seen)} 的结果已在上下文折叠时"
+        "摘要化；如需细节请重新调用该工具。]"
+    )
+
+
+def repair_tool_turns(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """折叠/压缩/视图重建后修复 tool_use/tool_result 配对完整性。
+
+    两类协议断裂（OpenAI 语义，违反即 400）：
+    - 孤儿 tool 消息：tool_call_id 不在任何前文 assistant.tool_calls 中
+      → 剥离为普通 user 注记（保留信息量，角色合法）
+    - 悬空 tool_calls：assistant 声明了调用但结果缺失/被折掉
+      → 就地补合成 tool 结果（"已折叠"说明），保持配对闭合
+
+    纯函数：返回新列表，不修改输入；非 tool 语义消息原样保留。
+
+    接线点（OpenOcta 思想：修复链放在"最后进入模型前"，任何上游折叠
+    策略变化都无需各自重推配对规则）：
+    - context.orchestrator.build_context：视图重建剥 tool_calls 后的
+      残留 role:"tool"（caller_provided_history/渠道回传混入）
+    - 本模块 compact_messages_for_overflow 的消费方可按需二次调用兜底
+    """
+    if not messages:
+        return []
+
+    # 前向扫描：记录每个 tool_call_id 是否已被某个 assistant.tool_calls 声明
+    declared_ids: set = set()
+    for msg in messages:
+        if _opens_tool_block(msg):
+            for call in msg.get("tool_calls") or []:
+                cid = (call or {}).get("id") if isinstance(call, dict) else None
+                if cid:
+                    declared_ids.add(cid)
+
+    out: List[Dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            out.append(msg)
+            continue
+
+        if _is_tool_result(msg):
+            cid = msg.get("tool_call_id")
+            if cid and cid in declared_ids:
+                out.append(msg)  # 配对完整，原样保留
+            else:
+                # 孤儿 tool 结果 → 转为 user 注记（不丢信息，协议合法）
+                content = msg.get("content", "")
+                tool_name = msg.get("name") or msg.get("tool_name") or "tool"
+                out.append({
+                    "role": "user",
+                    "content": (
+                        f"[{tool_name} 结果（tool_call_id={cid or '未知'}，"
+                        f"前文工具调用已折叠）] {content}"
+                    ),
+                })
+            continue
+
+        out.append(msg)
+
+    # 第二遍：补齐悬空 tool_calls（扫描产出序列中每个 assistant 声明的 id
+    # 是否都在其后的连续 tool 段中有结果；缺 → 就地插入合成结果）
+    repaired: List[Dict[str, Any]] = []
+    i = 0
+    n = len(out)
+    while i < n:
+        msg = out[i]
+        repaired.append(msg)
+        if _opens_tool_block(msg):
+            calls = [c for c in (msg.get("tool_calls") or []) if isinstance(c, dict)]
+            expected_ids = [c.get("id") for c in calls if c.get("id")]
+            # 收集紧随其后的 tool 消息段
+            j = i + 1
+            seen_ids: set = set()
+            while j < n and _is_tool_result(out[j]):
+                seen_ids.add(out[j].get("tool_call_id"))
+                repaired.append(out[j])
+                j += 1
+            missing = [cid for cid in expected_ids if cid not in seen_ids]
+            if missing:
+                repaired.append({
+                    "role": "tool",
+                    "tool_call_id": missing[0] if len(missing) == 1 else ",".join(map(str, missing)),
+                    "name": calls[0].get("function", {}).get("name", "tool") if calls else "tool",
+                    "content": _synth_tool_result([str(c) for c in missing]),
+                })
+            i = j
+            continue
+        i += 1
+
+    return repaired
+
+
 def compact_messages_for_overflow(
     messages: List[Dict[str, Any]],
     recent_keep: int = 6,

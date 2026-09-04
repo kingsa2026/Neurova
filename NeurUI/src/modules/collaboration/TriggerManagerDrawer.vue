@@ -13,6 +13,9 @@ import {
   createWorkflowTrigger,
   deleteWorkflowTrigger,
   fireWorkflowTrigger,
+  listFailedDeliveries,
+  retryDelivery,
+  retryDueDeliveries,
   type WorkflowTriggerSummary,
 } from '@/api/modules/collaboration'
 
@@ -30,6 +33,55 @@ const { t } = useI18n()
 const triggers = ref<WorkflowTriggerSummary[]>([])
 const loading = ref(false)
 const busy = ref<string | null>(null)
+
+// ── P2 失败投递重试 ──
+interface FailedDelivery {
+  id: number
+  trigger_id: string
+  status_code: number
+  attempt: number
+  created_at: number
+}
+const failedDeliveries = ref<FailedDelivery[]>([])
+const retrying = ref<number | null>(null)
+const bulkRetrying = ref(false)
+
+async function reloadFailed() {
+  try {
+    const res = await listFailedDeliveries(50)
+    const data = (res?.data ?? res) as unknown as { items?: FailedDelivery[] }
+    failedDeliveries.value = data?.items ?? []
+  } catch {
+    failedDeliveries.value = []
+  }
+}
+
+async function handleRetry(id: number) {
+  retrying.value = id
+  try {
+    await retryDelivery(id)
+    message.success(t('trigger.retrySuccess'))
+    await reloadFailed()
+  } catch {
+    /* 拦截器已提示 */
+  } finally {
+    retrying.value = null
+  }
+}
+
+async function handleRetryDue() {
+  bulkRetrying.value = true
+  try {
+    const res = await retryDueDeliveries()
+    const data = (res?.data ?? res) as { count?: number }
+    message.success(t('trigger.retryDueDone', { n: data?.count ?? 0 }))
+    await reloadFailed()
+  } catch {
+    /* 拦截器已提示 */
+  } finally {
+    bulkRetrying.value = false
+  }
+}
 
 // ── 新建表单 ──
 const creating = ref(false)
@@ -56,7 +108,10 @@ async function reload() {
 watch(
   () => [props.open, props.workflowId] as const,
   async ([open, wfId]) => {
-    if (open && wfId) await reload()
+    if (open && wfId) {
+      await reload()
+      await reloadFailed()
+    }
   },
   { immediate: true },
 )
@@ -106,7 +161,13 @@ async function handleFire(id: string) {
 }
 
 function typeLabel(type: string): string {
-  return t(`trigger.${type === "webhook" ? "typeWebhook" : type === "cron" ? "typeCron" : "typeManual"}`)
+  const map: Record<string, string> = {
+    webhook: 'typeWebhook',
+    cron: 'typeCron',
+    manual: 'typeManual',
+    plugin: 'typePlugin',
+  }
+  return t(`trigger.${map[type] ?? 'typeManual'}`)
 }
 </script>
 
@@ -160,6 +221,32 @@ function typeLabel(type: string): string {
           </div>
         </div>
       </div>
+
+      <!-- P2 失败投递重试 -->
+      <template v-if="failedDeliveries.length > 0">
+        <a-divider>
+          <span>{{ t('trigger.failedDeliveries') }}（{{ failedDeliveries.length }}）</span>
+        </a-divider>
+        <div class="trig-list">
+          <div v-for="d in failedDeliveries" :key="d.id" class="trig-row" data-testid="delivery-row">
+            <div class="trig-main">
+              <div class="trig-title">
+                <a-tag color="red">HTTP {{ d.status_code }}</a-tag>
+                <span class="trig-id">#{{ d.id }} · {{ d.trigger_id.slice(0, 12) }}</span>
+                <a-tag v-if="d.attempt > 0" color="orange">×{{ d.attempt }}</a-tag>
+              </div>
+            </div>
+            <div class="trig-actions">
+              <a-button size="small" :loading="retrying === d.id" @click="handleRetry(d.id)">
+                {{ t('trigger.retry') }}
+              </a-button>
+            </div>
+          </div>
+        </div>
+        <a-button size="small" block style="margin-top: 8px" :loading="bulkRetrying" @click="handleRetryDue">
+          {{ t('trigger.retryDueAll') }}
+        </a-button>
+      </template>
 
       <a-divider>{{ t('trigger.createDivider') }}</a-divider>
 

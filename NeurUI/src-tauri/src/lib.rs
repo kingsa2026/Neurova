@@ -8,12 +8,33 @@
 //! 诚实边界（Phase 1）：不捆绑 Python 运行时与依赖——要求本机已有
 //! `.venv`（仓库根）。后续 Phase 3 再决定"轻壳+首启下载"或"全量打包"。
 
+use std::borrow::Cow;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 struct BackendChild(Mutex<Option<Child>>);
+
+/// boot 进度页：编译期内嵌进壳二进制，经 boot:// 自定义协议伺服。
+/// 历史教训（白屏回归）：此前走 WebviewUrl::App("boot.html") 加载前端 dist
+/// 嵌入资产，dist 缺/过期该文件时窗口整页 404 = 纯白且无 JS 永不自关。
+/// 内嵌后与前端构建管线彻底解耦，任何构建形态都不会再白屏。
+fn boot_html() -> &'static str {
+    static BOOT_HTML: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BOOT_HTML.get_or_init(|| {
+        include_str!("boot_page.html")
+            .replace("__NEUROVA_ICON_B64__", env!("NEUROVA_ICON_B64"))
+    })
+}
+
+/// boot:// 协议伺服：任何请求都回同一份内嵌页（boot 页自包含，无子资源）。
+fn boot_page_response() -> tauri::http::Response<Cow<'static, [u8]>> {
+    tauri::http::Response::builder()
+        .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .body(Cow::Owned(boot_html().as_bytes().to_vec()))
+        .expect("boot 页响应构造失败")
+}
 
 /// 仓库根 = src-tauri 的上两级（NeurUI/src-tauri → Neurova）。仅 dev 回退用。
 fn repo_root() -> std::path::PathBuf {
@@ -254,13 +275,9 @@ fn create_boot_window(handle: &tauri::AppHandle) -> Result<(), String> {
     if handle.get_webview_window("boot").is_some() {
         return Ok(());
     }
-    // 打包态 dist 里带 boot.html；开发态走 devUrl 根路径也行（页面会自降级）
-    let bundled = handle.path().resource_dir().map(|rd| rd.join("backend")).is_ok();
-    let url = if bundled {
-        WebviewUrl::App("boot.html".into())
-    } else {
-        WebviewUrl::External("http://localhost:8100/boot.html".parse().unwrap())
-    };
+    // 页面走 boot:// 自定义协议（内嵌 HTML，零 dist 依赖）；深色底兜底，
+    // 页面渲染前的瞬间也不是白板。
+    let url = WebviewUrl::CustomProtocol("boot://localhost/boot.html".parse().unwrap());
     WebviewWindowBuilder::new(handle, "boot", url)
         .title("Neurova 启动中")
         .inner_size(400.0, 480.0)
@@ -362,6 +379,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![backend_status, boot_tail])
+        .register_uri_scheme_protocol("boot", |_ctx, _request| boot_page_response())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

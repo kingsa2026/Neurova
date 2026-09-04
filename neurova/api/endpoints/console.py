@@ -17,7 +17,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from neurova.api.deps import get_current_user, require_admin
 from neurova.api.endpoints import get_agent_instance
@@ -916,6 +916,8 @@ class FeedbackRequest(BaseModel):
     timestamp: str
     # None 表示取消已有反馈（清除点赞/点踩）
     feedback: typing.Optional[typing.Literal["like", "dislike"]] = None
+    # P2 标注闭环：点赞 + 人工修正答案 → 固化为"精准回复"命中表
+    corrected_answer: typing.Optional[str] = None
 
 
 def _apply_feedback_to_memory(
@@ -955,6 +957,38 @@ def _apply_feedback_to_memory(
         logger.warning("反馈记忆温度更新失败 (session=%s): %s", session_id, e)
 
 
+def _maybe_crystallize_annotation(
+    store,
+    feedback: str,
+    user_input: str,
+    agent_response: str,
+    corrected_answer: typing.Optional[str],
+) -> bool:
+    """P2 标注闭环：点赞 + 修正文本 → 固化为精准回复命中表。
+
+    纯点赞（无修正）不落表（同义反复无价值）；点踩永不落表（负样本
+    走记忆温度抑制链路）；同问重复修正更新原条目（不堆积）。
+    """
+    if feedback != "like" or not (corrected_answer or "").strip():
+        return False
+    try:
+        norm_q = user_input.strip()
+        if not norm_q:
+            return False
+        existing = store._conn.execute(
+            "SELECT id FROM annotations WHERE question_norm = ?",
+            (__import__("neurova.core.annotation_store", fromlist=["normalize_query"]).normalize_query(norm_q),),
+        ).fetchone()
+        if existing:
+            store.update_answer(existing["id"], corrected_answer.strip())
+        else:
+            store.add(question=norm_q, answer=corrected_answer.strip(), source="feedback")
+        return True
+    except Exception as e:  # noqa: BLE001 — 标注固化失败不阻断反馈主链路
+        logger.warning("标注固化失败: %s", e)
+        return False
+
+
 @router.post("/chat/feedback")
 async def post_chat_feedback(body: FeedbackRequest, request: Request):
     """点赞/点踩 agent 回复。
@@ -982,6 +1016,21 @@ async def post_chat_feedback(body: FeedbackRequest, request: Request):
     # 记忆温度反馈（best-effort，不阻断反馈持久化结果；取消反馈不做温度操作）
     if body.feedback:
         _apply_feedback_to_memory(repo, agent_id, body.session_id, body.timestamp, body.feedback)
+        # P2 标注闭环：点赞 + 修正 → 精准回复命中表（best-effort）
+        if body.corrected_answer is not None:
+            try:
+                round_data = repo.get_round(agent_id=agent_id, session_id=body.session_id, timestamp=body.timestamp)
+                _round_user = (round_data or {}).get("user")
+                _round_assistant = (round_data or {}).get("assistant")
+                _user_text = _round_user.get("content", "") if isinstance(_round_user, dict) else ""
+                _agent_text = _round_assistant.get("content", "") if isinstance(_round_assistant, dict) else ""
+                from neurova.core.annotation_store import get_annotation_store
+
+                _maybe_crystallize_annotation(
+                    get_annotation_store(), body.feedback, _user_text, _agent_text, body.corrected_answer
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("标注闭环处理失败: %s", e)
 
     return {"code": 0, "message": "Feedback saved"}
 
@@ -1237,3 +1286,79 @@ async def post_push_message(body: dict, request: Request):
     await _manager.broadcast(message)
     _manager.store_message(_get_user_id(request), message)
     return {"code": 0, "message": "Push sent"}
+
+
+# ══════════════════════════════════════════════════════════════
+# P2 标注闭环 — 精准回复命中表管理 API
+# ══════════════════════════════════════════════════════════════
+
+
+class AnnotationCreateRequest(BaseModel):
+    question: str
+    answer: str
+
+
+class AnnotationUpdateRequest(BaseModel):
+    answer: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+@router.get("/annotations")
+async def list_annotations(
+    request: Request,
+    q: str = Query(default="", description="按问题/答案子串过滤"),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """精准回复命中表清单（管理页：按命中次数排序）。"""
+    from neurova.core.annotation_store import get_annotation_store
+
+    store = get_annotation_store()
+    items = store.list_annotations(limit=limit)
+    if q:
+        ql = q.lower()
+        items = [a for a in items if ql in (a.get("question") or "").lower() or ql in (a.get("answer") or "").lower()]
+    return {"code": 0, "message": "ok", "data": {"items": items, "total": store.count()}}
+
+
+@router.post("/annotations")
+async def create_annotation(body: AnnotationCreateRequest, request: Request):
+    """手工新增精准回复（不限于反馈链路沉淀）。"""
+    if not body.question.strip() or not body.answer.strip():
+        raise HTTPException(status_code=400, detail="question/answer 不能为空")
+    from neurova.core.annotation_store import get_annotation_store
+
+    ann_id = get_annotation_store().add(body.question.strip(), body.answer.strip(), source="manual")
+    return {"code": 0, "message": "ok", "data": {"id": ann_id}}
+
+
+@router.put("/annotations/{annotation_id}")
+async def update_annotation(annotation_id: str, body: AnnotationUpdateRequest, request: Request):
+    """更新答案 / 启停用（停用即下线该精准回复）。"""
+    from neurova.core.annotation_store import get_annotation_store
+
+    store = get_annotation_store()
+    if store.get(annotation_id) is None:
+        raise HTTPException(status_code=404, detail="标注不存在")
+    if body.answer is not None:
+        store.update_answer(annotation_id, body.answer)
+    if body.enabled is not None:
+        store.set_enabled(annotation_id, body.enabled)
+    return {"code": 0, "message": "ok", "data": store.get(annotation_id)}
+
+
+@router.delete("/annotations/{annotation_id}")
+async def delete_annotation(annotation_id: str, request: Request):
+    from neurova.core.annotation_store import get_annotation_store
+
+    if not get_annotation_store().delete(annotation_id):
+        raise HTTPException(status_code=404, detail="标注不存在")
+    return {"code": 0, "message": "ok"}
+
+
+@router.get("/annotations/export")
+async def export_training_set(request: Request):
+    """重训练化集导出：JSONL（input/output 对）——供后续 SFT 微调集。"""
+    from neurova.core.annotation_store import get_annotation_store
+
+    lines = get_annotation_store().export_training_set()
+    return {"code": 0, "message": "ok", "data": {"jsonl": "\n".join(lines), "count": len(lines)}}

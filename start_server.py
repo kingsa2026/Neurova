@@ -27,6 +27,15 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
+def _get_app_version():
+    try:
+        from neurova import __version__
+
+        return __version__
+    except Exception:
+        return "unknown"
+
+
 def main():
     """启动服务器"""
     print("=" * 60)
@@ -36,6 +45,15 @@ def main():
     try:
         from neurova.api.app import create_app
         import uvicorn
+
+        # torch 环境预检：c10.dll 初始化失败（缺 VC++ 运行库）→ 自动下载安装。
+        # 任何失败只告警，不阻断启动。
+        try:
+            from neurova.core.env_check import preflight_torch_runtime
+
+            preflight_torch_runtime()
+        except Exception as _env_err:  # noqa: BLE001 - 预检失败不阻断启动
+            print(f"Warning: torch 环境预检失败（忽略）: {_env_err}")
 
         # 进化权重持久化装配（显式；单例本身零 IO 副作用）
         try:
@@ -68,6 +86,14 @@ def main():
         print(f"Server failed to start: {e}")
         import traceback
         traceback.print_exc()
+
+        # 启动失败上报远程错误日志（尽力而为：无网/关闭/失败都不影响退出）
+        try:
+            from neurova.core.crash_report import report_startup_failure
+
+            report_startup_failure(e, stage="startup", app_version=_get_app_version())
+        except Exception:
+            pass
         return 1
 
     return 0
