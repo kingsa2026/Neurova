@@ -32,6 +32,40 @@ import { TOP_NAV_CATEGORIES } from '@/config/navigation'
 import GlassNavGroup from '../GlassNavGroup.vue'
 import AgentPageTabs from '../AgentPageTabs.vue'
 import router from '@/router'
+import zhCN from '@/i18n/locales/zh-CN'
+import enUS from '@/i18n/locales/en-US'
+import jaJP from '@/i18n/locales/ja-JP'
+import koKR from '@/i18n/locales/ko-KR'
+import deDE from '@/i18n/locales/de-DE'
+import frFR from '@/i18n/locales/fr-FR'
+import esES from '@/i18n/locales/es-ES'
+import itIT from '@/i18n/locales/it-IT'
+import ruRU from '@/i18n/locales/ru-RU'
+import hiIN from '@/i18n/locales/hi-IN'
+import arSA from '@/i18n/locales/ar-SA'
+
+const ALL_LOCALES: Record<string, any> = {
+  'zh-CN': zhCN, 'en-US': enUS, 'ja-JP': jaJP, 'ko-KR': koKR,
+  'de-DE': deDE, 'fr-FR': frFR, 'es-ES': esES, 'it-IT': itIT,
+  'ru-RU': ruRU, 'hi-IN': hiIN, 'ar-SA': arSA,
+}
+
+describe('侧栏导航 i18n 完整性', () => {
+  // MainLayout 三区导航实际引用的 nav 分组/条目键
+  const NAV_KEYS_IN_MAINLAYOUT = [
+    'knowledgeCognition', 'agentCapabilities', 'agentRuntime',
+    'userZone', 'collaboration', 'skillMarket', 'skillPool',
+  ]
+
+  it('nav 分组键在全部 11 个语言包存在（缺失即渲染原始键名回归）', () => {
+    for (const [locale, msgs] of Object.entries(ALL_LOCALES)) {
+      const nav = msgs?.nav ?? {}
+      for (const key of NAV_KEYS_IN_MAINLAYOUT) {
+        expect(nav[key], `${locale}.nav.${key} 缺失`).toBeTruthy()
+      }
+    }
+  })
+})
 
 function makeI18n() {
   return createI18n({

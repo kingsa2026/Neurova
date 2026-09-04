@@ -260,17 +260,59 @@ class TestMemoryNodeExecutors:
             mock_memory.search.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_exec_memory_save(self):
-        """记忆保存节点"""
+    async def test_exec_memory_save(self, tmp_path, monkeypatch):
+        """记忆保存节点（confirm=True 直写语义，契约不变）"""
+        from neurova.memory.pending_memory import PendingMemoryStore
+
+        monkeypatch.setattr(
+            "neurova.memory.pending_memory.get_pending_memory_store",
+            lambda: PendingMemoryStore(db_path=str(tmp_path / "p.db")),
+        )
         mock_memory = MagicMock()
         mock_memory.remember = MagicMock()
 
         with patch("neurova.collaboration.neurflow.builtin._get_memory_manager", return_value=mock_memory):
-            config = {"content": "new memory", "importance": 0.8}
+            config = {"content": "new memory", "importance": 0.8, "confirm": True}
             ctx = {}
             result = await exec_memory_save(config, ctx)
             assert result["status"] == "success"
+            assert result["output"]["saved"] is True
             mock_memory.remember.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_exec_memory_save_pending_interception(self, tmp_path, monkeypatch):
+        """P1-2 闭环审查修 E：工作流 memory-save 节点默认进待确认队列，
+        不直写主库；confirm=True 按次直写；队列缺席降级直写。"""
+        from neurova.memory.pending_memory import PendingMemoryStore
+        import neurova.collaboration.neurflow.builtin as builtin_mod
+
+        store = PendingMemoryStore(db_path=str(tmp_path / "p2.db"))
+        monkeypatch.setattr(
+            "neurova.memory.pending_memory.get_pending_memory_store", lambda: store
+        )
+        mock_memory = MagicMock()
+
+        with patch("neurova.collaboration.neurflow.builtin._get_memory_manager", return_value=mock_memory):
+            # 默认：进待审，不直写
+            result = await exec_memory_save({"content": "需要确认的记忆"}, {"user_id": "u9"})
+            assert result["status"] == "success"
+            assert result["output"]["pending"] is True
+            assert result["output"]["review_id"]
+            assert store.list_pending()[0]["proposed_by"] == "u9"
+            mock_memory.remember.assert_not_called()
+
+            # confirm=True：按次直写
+            result = await exec_memory_save({"content": "直接入库", "confirm": True}, {})
+            assert result["output"] == {"saved": True, "content": "直接入库"}
+            mock_memory.remember.assert_called_once()
+
+        # 队列缺席（挂载失败）：降级直写
+        def boom():
+            raise RuntimeError("queue unavailable")
+
+        with patch("neurova.collaboration.neurflow.builtin._get_memory_manager", return_value=mock_memory),              patch("neurova.memory.pending_memory.get_pending_memory_store", boom):
+            result = await exec_memory_save({"content": "降级直写"}, {})
+            assert result["output"] == {"saved": True, "content": "降级直写"}
 
 
 class TestDataNodeExecutors:

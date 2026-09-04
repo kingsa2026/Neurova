@@ -74,14 +74,19 @@ def _list_scheduler_tasks() -> List[Any]:
 
 def _import_skills(agent_id: str, skills: List[Dict[str, Any]]) -> List[str]:
     """登记技能清单到目标 agent（登记面，不安装代码体——技能本体须从
-    市场或原始来源另行获取；此处只保证清单可达）。"""
+    市场或原始来源另行获取；此处只保证清单可达）。
+
+    register_auto_skill 返回 bool：False=已存在或登记故障。
+    已存在在此是幂等正常路径（导入前先 get_skill_info 预检），但
+    register 内部仍可能因并发竞争返回 False——区分二者：
+    已存在 → 视为登记成功；否则视为故障（fail-closed，触发回滚）。
+    """
     service = _SkillService(agent_id)
     installed: List[str] = []
     for skill in skills or []:
         sid = str(skill.get("id") or "").strip()
         if not sid:
             continue
-        # 幂等登记：已存在则跳过，不覆盖既有安装
         if service.get_skill_info(sid) is not None:
             installed.append(sid)
             continue
@@ -91,8 +96,11 @@ def _import_skills(agent_id: str, skills: List[Dict[str, Any]]) -> List[str]:
             description=str(skill.get("description") or ""),
             version=str(skill.get("version") or "1.0.0"),
         )
-        if isinstance(result, dict) and result.get("success") is False:
-            raise RuntimeError(f"技能登记失败 {sid}: {result.get('error')}")
+        if result is not True:
+            if service.get_skill_info(sid) is not None:
+                installed.append(sid)  # 并发竞争下已落位，幂等成功
+                continue
+            raise RuntimeError(f"技能登记失败 {sid}")
         installed.append(sid)
     return installed
 
@@ -142,15 +150,20 @@ def _check_owner(agent, user: Dict[str, Any]) -> None:
         raise HTTPException(status_code=403, detail="Not the owner of this agent")
 
 
-def _agent_face(agent) -> Dict[str, Any]:
+def _agent_face(agent, agent_id: str = "") -> Dict[str, Any]:
     """提取 agent 配置面（不含秘密：无 API key/凭据字段）。"""
     cfg = getattr(agent, "config", None)
     if isinstance(agent, dict):
+        # AgentConfigManager 登记面（data/agents/agents.json）：model/provider
+        # 嵌套在 config 键下，顶层无这两个键
+        nested = agent.get("config") or {}
+        if not isinstance(nested, dict):
+            nested = {}
         return {
-            "name": agent.get("name", ""),
-            "description": agent.get("description", "") or "",
-            "model": agent.get("model", ""),
-            "provider": agent.get("provider", ""),
+            "name": agent.get("name", "") or nested.get("name", ""),
+            "description": (agent.get("description", "") or "") or str(nested.get("description", "") or ""),
+            "model": agent.get("model", "") or str(nested.get("model", "") or ""),
+            "provider": agent.get("provider", "") or str(nested.get("provider", "") or ""),
         }
     llm_model = ""
     if cfg is not None and hasattr(cfg, "llm_config"):
@@ -165,10 +178,22 @@ def _agent_face(agent) -> Dict[str, Any]:
                 workspace_cfg = json.loads(raw.read_text(encoding="utf-8"))
         except Exception as e:  # noqa: BLE001 - 工作区配置读不到则降级运行时面
             logger.debug("读取 agent_config.json 失败: %s", e)
+    # description 只持久化在中枢登记面（AgentConfig 无该属性，workspace
+    # 文件恒空串）——导出面必须回查登记面，否则跨机迁移丢描述
+    registry_cfg = {}
+    try:
+        from neurova.agent_config import get_config_manager
+
+        registry_cfg = get_config_manager().get_agent(agent_id) or {}
+        if not isinstance(registry_cfg, dict):
+            registry_cfg = {}
+    except Exception as e:  # noqa: BLE001 - 登记面不可达时降级
+        logger.debug("导出回查登记面失败 agent_id=%s: %s", agent_id, e)
     return {
         "name": workspace_cfg.get("name") or getattr(cfg, "name", ""),
-        "description": workspace_cfg.get("description", "")
-        or (getattr(cfg, "description", "") or ""),
+        "description": workspace_cfg.get("description")
+        or (getattr(cfg, "description", "") or "")
+        or str(registry_cfg.get("description", "") or ""),
         "model": workspace_cfg.get("model") or llm_model,
         "provider": workspace_cfg.get("provider") or llm_provider,
         "personality": workspace_cfg.get("personality", "") or "",
@@ -229,7 +254,7 @@ async def export_agent_package(
     return {
         "kind": MANIFEST_KIND,
         "manifest_version": MANIFEST_VERSION,
-        "agent": _agent_face(agent),
+        "agent": _agent_face(agent, agent_id),
         "skills": skills,
         "cron": cron,
         "mcp": mcp_refs,
@@ -379,8 +404,12 @@ async def import_agent_package(
             llm_model=str(agent_face.get("model") or "gpt-4"),
             llm_provider=str(agent_face.get("provider") or ""),
         )
-        if hasattr(config, "description"):
-            config.description = str(agent_face.get("description") or "")
+        # description 在 AgentConfig 上不是声明字段（workspace 文件此前
+        # 恒空串、update 端点的 hasattr 守卫也静默跳过）——但 AgentConfig
+        # 非 slots 类，动态属性可落：setattr 后 _save_agent_config 的
+        # getattr 能读到，agent_to_info 也能在列表接口回显。personality/
+        # constitution 是真字段，直接赋值。
+        config.description = str(agent_face.get("description") or "")
         if hasattr(config, "personality"):
             config.personality = str(agent_face.get("personality") or "")
         if hasattr(config, "constitution"):

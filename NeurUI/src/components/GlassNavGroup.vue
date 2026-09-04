@@ -79,31 +79,45 @@ const anyChildActive = computed(() => isActiveRoute(props.firstItemTo))
 <style scoped>
 .nr-nav-group-head {
   display: flex; align-items: center; gap: 6px;
-  width: 100%; border: none; background: transparent;
-  padding: 8px 12px 4px; cursor: pointer;
-  border-radius: 8px;
-  transition: background 0.2s;
-  font-size: 10px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.08em; color: var(--nr-text-muted);
+  width: 100%; border: 1px solid var(--nr-glass-border);
+  background: var(--nr-glass-bg);
+  -webkit-backdrop-filter: blur(var(--nr-glass-blur)) saturate(160%);
+  backdrop-filter: blur(var(--nr-glass-blur)) saturate(160%);
+  padding: 7px 10px; margin: 10px 0 4px; cursor: pointer;
+  border-radius: 10px;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.02em; color: var(--nr-text-secondary);
   font-family: inherit;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
-.nr-nav-group-head:hover { background: var(--nr-glass-bg); color: var(--nr-text-secondary); }
-.nr-nav-group-head.is-active { color: var(--nr-text-secondary); }
+.nr-nav-group-head:hover {
+  background: var(--nr-glass-bg-hover);
+  border-color: var(--nr-glass-border-hover);
+  color: var(--nr-text-primary);
+}
+.nr-nav-group-head.is-active {
+  background: var(--nr-primary-soft);
+  border-color: var(--nr-primary-soft-border);
+  color: var(--nr-primary-light);
+}
 
 .nr-nav-group-caret {
   display: flex; align-items: center;
   font-size: 9px; transition: transform 0.2s ease;
+  color: var(--nr-text-muted);
 }
+.nr-nav-group-head:hover .nr-nav-group-caret { color: var(--nr-text-secondary); }
 .nr-nav-group-caret.is-open { transform: rotate(90deg); }
 
 .nr-nav-group-label { flex: 1; text-align: left; }
 
 .nr-nav-group-count {
-  font-size: 9px; font-weight: 600; letter-spacing: 0;
-  color: var(--nr-text-muted);
-  background: var(--nr-glass-bg);
-  padding: 0 6px; border-radius: 8px;
-  line-height: 16px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0;
+  color: var(--nr-text-secondary);
+  background: var(--nr-glass-bg-active);
+  padding: 0 7px; border-radius: 9px;
+  line-height: 17px;
 }
 
 .nr-nav-group-body {

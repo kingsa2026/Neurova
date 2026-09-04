@@ -147,3 +147,48 @@ class TestLoadCorruptConfigBackup:
         )
         reloaded = _make_manager(tmp_path)
         assert any(p.name == "DS" for p in reloaded.list_providers())
+
+
+class TestLegacyFieldTolerance:
+    """根因 3:from_dict 对未知/已废弃字段零容错 —— 一个 metadata 键
+    曾让整份配置加载炸进异常分支(2026-09-05 事故原始触发点)。
+    验收:未知字段忽略告警,合法服务商全部加载。"""
+
+    def test_legacy_unknown_fields_do_not_break_load(self, tmp_path):
+        cfg = tmp_path / "providers.json"
+        _write_config(cfg, {
+            "providers": [
+                {
+                    "id": "legacy",
+                    "name": "旧版字段服务商",
+                    "provider": "openai",
+                    "base_url": "https://x/v1",
+                    "models": ["m1"],
+                    # 旧版本字段(现 ProviderConfig 已移除)
+                    "metadata": {"foo": "bar"},
+                    "weight": 1.0,
+                    "health_check_interval": 300,
+                    "consecutive_failures": 0,
+                }
+            ],
+            "default_provider_id": "legacy",
+        })
+        mgr = _make_manager(tmp_path)
+        assert "legacy" in mgr._providers
+        assert mgr._providers["legacy"].models == ["m1"]
+        assert mgr._default_provider_id == "legacy"
+
+    def test_full_legacy_file_loads_all_providers(self, tmp_path):
+        """与真实恢复数据同构:多条带旧字段的服务商全部加载。"""
+        cfg = tmp_path / "providers.json"
+        provs = []
+        for i in range(3):
+            provs.append({
+                "id": f"p{i}", "name": f"P{i}", "provider": "openai",
+                "base_url": "https://x/v1", "models": [f"m{i}"],
+                "metadata": {}, "health_check_interval": 300,
+                "health_status": "unknown", "total_requests": 0,
+            })
+        _write_config(cfg, {"providers": provs, "default_provider_id": "p0"})
+        mgr = _make_manager(tmp_path)
+        assert set(mgr._providers) >= {"p0", "p1", "p2"}

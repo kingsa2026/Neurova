@@ -1060,7 +1060,9 @@ async function testProviderConnection() {
   if (!configureTarget.value) return
   testingProvider.value = true
   try {
-    const data: any = await testConnection(configureTarget.value.id) as any
+    const res: any = await testConnection(configureTarget.value.id) as any
+    // 后端信封 {code, data:{connected, success, ...}}：须解包再读字段（2026-09-05 修复恒报连接失败）
+    const data = res?.data ?? res ?? {}
     if (data.success || data.connected) {
       message.success(t('model.connectionOk', { ms: data.latency_ms || '' }))
     } else {

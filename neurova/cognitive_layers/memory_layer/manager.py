@@ -506,6 +506,11 @@ class MemoryManager:
         scope = _scope_var.get()
         return scope[1] if scope else self._user_id
 
+    def effective_user_id(self) -> str:
+        """当前请求隔离作用域的 user_id（服务端可信身份，P1-2 修 F：
+        pending 记忆提议的归属以此优先于调用方自报参数）。"""
+        return self._eff_user_id()
+
     def _scoped_memories(self) -> List[Any]:
         """按生效三元组过滤的内存记忆视图 (agent 恒取实例自身)"""
         ne = self._eff_neuser_id()

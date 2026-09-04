@@ -43,28 +43,44 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { DownOutlined, DashboardOutlined } from '@ant-design/icons-vue'
 import { TOP_NAV_CATEGORIES } from '@/config/navigation'
+import { useAuthStore } from '@/stores/auth'
+import { canAccessModule } from '@/utils/permissions'
 
 const route = useRoute()
 const { t } = useI18n()
+const authStore = useAuthStore()
 
 // ── 快捷入口 ──
 const quickItems = [
   { to: '/dashboard', labelKey: 'nav.dashboard', icon: DashboardOutlined },
 ]
 
-// ── 系统配置分类（4 组，模板仅渲染) ──
-const categories = TOP_NAV_CATEGORIES
+// ── 系统配置分类（4 组数据源 config/navigation.ts；按用户组 allowed_modules 过滤）──
+interface FilteredCategory {
+  key: string
+  labelKey: string
+  icon: (typeof TOP_NAV_CATEGORIES)[number]['icon']
+  items: (typeof TOP_NAV_CATEGORIES)[number]['items']
+}
+
+const categories = computed<FilteredCategory[]>(() =>
+  TOP_NAV_CATEGORIES.map(cat => ({
+    ...cat,
+    items: cat.items.filter(item => canAccessModule(item.to, authStore.user ?? {})),
+  })).filter(cat => cat.items.length > 0),
+)
 
 // ── 路由状态判定 ──
 function isActiveRoute(to: string): boolean {
   return route.path === to || route.path.startsWith(to + '/')
 }
 
-function isCategoryActive(cat: (typeof TOP_NAV_CATEGORIES)[number]): boolean {
+function isCategoryActive(cat: FilteredCategory): boolean {
   return cat.items.some(item => isActiveRoute(item.to))
 }
 </script>

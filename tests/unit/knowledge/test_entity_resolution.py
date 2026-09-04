@@ -247,3 +247,59 @@ class TestEntityResolver:
             llm_call=lambda p: json.dumps({"verdict": "same", "confidence": 0.95})
         )
         assert resolver.find_candidates()["grey"] == []
+
+
+class TestClosedLoopReview:
+    """P1-1 闭环审查 WARN 补测：双向边合并、desc 漂移键、undo 现状优先。"""
+
+    def test_merge_with_bidirectional_edges(self, graph):
+        """src↔other 双向边 + src→src 自环合并：无重复边、无丢失。"""
+        src = _node(graph, "甲公司")
+        dst = _node(graph, "甲Corp")
+        other = _node(graph, "某部门")
+        graph.add_edge(source_id=src.node_id, target_id=other.node_id, relation_type=RelationType.RELATED_TO)
+        graph.add_edge(source_id=other.node_id, target_id=src.node_id, relation_type=RelationType.RELATED_TO)
+        graph.add_edge(source_id=src.node_id, target_id=src.node_id, relation_type=RelationType.RELATED_TO)  # 自环
+
+        assert graph.merge_nodes(src.node_id, dst.node_id, reason="test") is True
+        # dst↔other 双向仍在（各一条）
+        assert len(graph.get_edges_between(dst.node_id, other.node_id)) == 1
+        assert len(graph.get_edges_between(other.node_id, dst.node_id)) == 1
+        # 自环被摘除（dst 上不存在 src→src 复制品）
+        self_loops = [
+            e for e in graph._edges.values()
+            if e.source_id == dst.node_id and e.target_id == dst.node_id
+        ]
+        assert self_loops == []
+        # undo：双向边翻回原端点，自环原路放回 src
+        assert graph.undo_merge(src.node_id) is True
+        assert len(graph.get_edges_between(src.node_id, other.node_id)) == 1
+        assert len(graph.get_edges_between(other.node_id, src.node_id)) == 1
+        assert any(
+            e.source_id == src.node_id and e.target_id == src.node_id
+            for e in graph._edges.values()
+        )
+
+    def test_pair_key_changes_when_description_changes(self, graph):
+        """契约澄清：pair_key 的稳定性以 label+别名+类型不变为前提，
+        description 参与签名（跨对撞名时用 top_facts 区分是 Utopia 原意）——
+        重传不改 desc 不重复付费，改了 desc 视为新证据重新裁决。"""
+        a1 = _node(graph, "同名实体", description="旧描述")
+        a2 = _node(graph, "同名实体", description="旧描述")
+        k1 = pair_key(a1, a2)
+        a3 = _node(graph, "同名实体", description="全新完全不同的描述文本")
+        k2 = pair_key(_node(graph, "同名实体", description="旧描述"), a3)
+        assert k1 != k2
+
+    def test_undo_after_third_party_edge_deletion(self, graph):
+        """undo 现状优先：合并后边被第三方删除，undo 不复活它。"""
+        src = _node(graph, "被合并方")
+        dst = _node(graph, "存活方")
+        other = _node(graph, "第三方")
+        edge = graph.add_edge(source_id=src.node_id, target_id=other.node_id, relation_type=RelationType.RELATED_TO)
+        assert graph.merge_nodes(src.node_id, dst.node_id, reason="test") is True
+        # 第三方删除这条（现挂在 dst 上）
+        assert graph.delete_edge(edge.edge_id) is True
+        assert graph.undo_merge(src.node_id) is True
+        assert graph.get_node(src.node_id) is not None  # 节点复活
+        assert graph.get_edges_between(src.node_id, other.node_id) == []  # 边不复活

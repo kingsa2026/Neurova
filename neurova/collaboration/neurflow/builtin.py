@@ -1282,7 +1282,13 @@ async def exec_memory_load(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
 
 
 async def exec_memory_save(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """记忆保存节点执行器"""
+    """记忆保存节点执行器
+
+    P1-2 闭环审查修 E：工作流的 memory-save 节点是交互式单条写入口
+    （与聊天 memory_save 工具平行），默认进待确认队列、人工确认后才
+    入主库（Utopia 0018 语义）；config.confirm=True 按次直写。
+    队列不可用时降级直写——错误方向是"少一个待审项"，不是"工作流坏掉"。
+    """
     memory_manager = ctx.get("memory_manager") or _get_memory_manager()
     if memory_manager is None:
         return {
@@ -1294,6 +1300,35 @@ async def exec_memory_save(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
     content = config.get("content", "")
     importance = config.get("importance", 0.5)
     tags = config.get("tags", [])
+
+    pending_store = None
+    if config.get("confirm") is not True:
+        try:
+            from neurova.memory.pending_memory import get_pending_memory_store
+
+            pending_store = get_pending_memory_store()
+        except Exception as e:  # noqa: BLE001 — 队列缺席降级直写
+            logger.warning("待确认队列不可用，memory-save 节点降级直写: %s", e)
+
+    if pending_store is not None:
+        try:
+            rec = pending_store.propose(
+                content=content,
+                category=config.get("category", "general"),
+                memory_type=config.get("memory_type", "semantic"),
+                proposed_by=str(ctx.get("user_id", "") or ""),
+            )
+            if rec.get("rejected"):
+                return {
+                    "status": "success",
+                    "output": {"pending": True, "rejected": True, "reason": rec.get("reason", "")},
+                }
+            return {
+                "status": "success",
+                "output": {"pending": True, "review_id": rec["id"], "content": content},
+            }
+        except Exception as e:  # noqa: BLE001 — 提议失败降级直写
+            logger.warning("memory-save 节点写入待确认队列失败，降级直写: %s", e)
 
     try:
         memory_manager.remember(

@@ -95,12 +95,14 @@ class HealthCheckResult:
         message: str = "",
         details: Optional[Dict[str, Any]] = None,
         duration: float = 0.0,
+        check_type: CheckType = CheckType.CUSTOM,
     ) -> None:
         self.name = name
         self.status = status
         self.message = message
         self.details = details or {}
         self.duration = duration
+        self.check_type = check_type
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -109,6 +111,7 @@ class HealthCheckResult:
             "message": self.message,
             "details": self.details,
             "duration": self.duration,
+            "check_type": self.check_type.value,
         }
 
 
@@ -174,6 +177,7 @@ class HealthChecker:
             status=status,
             message=message,
             duration=duration,
+            check_type=health_check.check_type,
         )
         self._results[name] = result
         return result

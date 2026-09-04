@@ -1,8 +1,8 @@
 <template>
   <div class="neuron-page">
     <div class="page-header">
-<h1>{{ t('neuron.title') }}</h1>
-    <p class="subtitle">{{ t('neuron.subtitle') }}</p>
+      <h1>{{ t('neuron.title') }}</h1>
+      <p class="subtitle">{{ t('neuron.subtitle') }}</p>
     </div>
 
     <!-- 统计卡片 -->
@@ -334,11 +334,11 @@ async function runAbsenceCheck() {
 .page-header h1 {
   margin: 0 0 8px 0;
   font-size: 28px;
-  color: #1a1a1a;
+  color: var(--nr-text-primary);
 }
 
 .subtitle {
-  color: #666;
+  color: var(--nr-text-secondary);
   margin: 0;
 }
 
@@ -350,63 +350,82 @@ async function runAbsenceCheck() {
 }
 
 .stat-card {
-  background: #f8f9fa;
-  border-radius: 8px;
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+  -webkit-backdrop-filter: blur(var(--nr-glass-blur)) saturate(160%);
+  backdrop-filter: blur(var(--nr-glass-blur)) saturate(160%);
+  border-radius: 12px;
   padding: 20px;
   text-align: center;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.stat-card:hover {
+  background: var(--nr-glass-bg-hover);
+  border-color: var(--nr-glass-border-hover);
 }
 
 .stat-value {
   font-size: 32px;
   font-weight: 600;
-  color: #1a1a1a;
+  color: var(--nr-text-primary);
 }
 
 .stat-label {
-  color: #666;
+  color: var(--nr-text-secondary);
   margin-top: 8px;
 }
 
+/* 胶囊标签页: 与 AgentPageTabs 同范式 */
 .tabs {
-  display: flex;
-  gap: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin-bottom: 24px;
-  border-bottom: 1px solid #e0e0e0;
-  padding-bottom: 8px;
+  padding: 3px;
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 12px;
 }
 
 .tab {
-  padding: 10px 20px;
+  padding: 6px 16px;
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 14px;
-  color: #666;
-  border-radius: 4px;
-  transition: all 0.2s;
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--nr-text-secondary);
+  border-radius: 9px;
+  transition: all 0.18s ease;
+  font-family: inherit;
 }
 
 .tab:hover {
-  background: #f0f0f0;
+  background: var(--nr-glass-bg-hover);
+  color: var(--nr-text-primary);
 }
 
 .tab.active {
-  background: #1890ff;
-  color: white;
+  background: var(--nr-primary-soft);
+  color: var(--nr-primary-light);
+  font-weight: 550;
 }
 
 .section {
-  background: white;
-  border-radius: 8px;
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+  -webkit-backdrop-filter: blur(var(--nr-glass-blur)) saturate(160%);
+  backdrop-filter: blur(var(--nr-glass-blur)) saturate(160%);
+  border-radius: 12px;
   padding: 20px;
   margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .section h3 {
   margin: 0 0 16px 0;
   font-size: 16px;
-  color: #1a1a1a;
+  color: var(--nr-text-primary);
 }
 
 .entity-list {
@@ -419,63 +438,73 @@ async function runAbsenceCheck() {
   align-items: center;
   gap: 12px;
   padding: 12px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--nr-border-light);
 }
 
+.entity-item:last-child { border-bottom: none; }
+
 .entity-type {
-  background: #e6f7ff;
-  color: #1890ff;
+  background: var(--nr-primary-soft);
+  color: var(--nr-primary-light);
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 12px;
 }
 
 .entity-name {
   flex: 1;
   font-weight: 500;
+  color: var(--nr-text-primary);
 }
 
 .btn-sm {
   padding: 4px 12px;
-  border: 1px solid #d9d9d9;
-  border-radius: 4px;
-  background: white;
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 6px;
+  background: var(--nr-glass-bg);
+  color: var(--nr-text-secondary);
   cursor: pointer;
   font-size: 12px;
+  transition: all 0.2s;
+  font-family: inherit;
 }
 
 .btn-sm:hover {
-  border-color: #1890ff;
-  color: #1890ff;
+  border-color: var(--nr-primary-soft-border);
+  color: var(--nr-primary-light);
+  background: var(--nr-primary-soft);
 }
 
 .empty-state {
   text-align: center;
-  color: #999;
+  color: var(--nr-text-muted);
   padding: 40px;
 }
+
+.dependency-view p { color: var(--nr-text-secondary); }
+.dependency-view strong { color: var(--nr-text-primary); }
 
 .dependency-view h4 {
   margin: 16px 0 8px 0;
   font-size: 14px;
-  color: #666;
+  color: var(--nr-text-secondary);
 }
 
 .dep-item {
   padding: 8px 12px;
   margin: 4px 0;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 13px;
 }
 
 .dep-item.downstream {
-  background: #e6f7ff;
-  color: #1890ff;
+  background: var(--nr-primary-soft);
+  color: var(--nr-primary-light);
 }
 
 .dep-item.upstream {
-  background: #f6ffed;
-  color: #52c41a;
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--nr-success);
 }
 
 .form-group {
@@ -486,72 +515,87 @@ async function runAbsenceCheck() {
   display: block;
   margin-bottom: 8px;
   font-weight: 500;
-  color: #333;
+  color: var(--nr-text-secondary);
 }
 
 .form-group input,
 .form-group select {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #d9d9d9;
-  border-radius: 4px;
+  background: var(--nr-bg-inset);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 8px;
   font-size: 14px;
+  color: var(--nr-text-primary);
+  font-family: inherit;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
+
+.form-group select option {
+  background: var(--nr-bg-elevated, #1a2236);
+  color: var(--nr-text-primary);
+}
+
+.form-group input::placeholder { color: var(--nr-text-muted); }
 
 .form-group input:focus,
 .form-group select:focus {
-  border-color: #1890ff;
+  border-color: var(--nr-primary);
   outline: none;
-  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+  box-shadow: 0 0 0 2px var(--nr-primary-ring);
 }
 
 .btn-primary {
   padding: 10px 24px;
-  background: #1890ff;
-  color: white;
+  background: var(--nr-primary);
+  color: #fff;
   border: none;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
   transition: background 0.2s;
+  font-family: inherit;
 }
 
 .btn-primary:hover {
-  background: #40a9ff;
+  background: var(--nr-primary-light);
 }
 
 .btn-primary:disabled {
-  background: #d9d9d9;
+  background: var(--nr-glass-bg-active);
+  color: var(--nr-text-muted);
   cursor: not-allowed;
 }
 
 .result-panel {
   margin-top: 24px;
   padding: 20px;
-  background: #f8f9fa;
-  border-radius: 8px;
+  background: var(--nr-bg-inset);
+  border: 1px solid var(--nr-border-light);
+  border-radius: 10px;
 }
 
 .result-panel h4 {
   margin: 0 0 12px 0;
   font-size: 16px;
+  color: var(--nr-text-primary);
 }
 
 .status-badge {
   display: inline-block;
   padding: 8px 16px;
-  border-radius: 4px;
+  border-radius: 8px;
   font-weight: 500;
 }
 
 .status-badge.absent {
-  background: #fff1f0;
-  color: #ff4d4f;
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--nr-error);
 }
 
 .status-badge.present {
-  background: #f6ffed;
-  color: #52c41a;
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--nr-success);
 }
 
 .effects-list {
@@ -563,35 +607,39 @@ async function runAbsenceCheck() {
   gap: 12px;
   padding: 8px;
   margin: 4px 0;
-  background: white;
-  border-radius: 4px;
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-border-light);
+  border-radius: 6px;
 }
 
+.effect-id { color: var(--nr-text-secondary); }
+
 .effect-type {
-  background: #e6f7ff;
-  color: #1890ff;
+  background: var(--nr-primary-soft);
+  color: var(--nr-primary-light);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 12px;
 }
 
 .effect-conf {
-  color: #52c41a;
+  color: var(--nr-success);
   font-weight: 500;
 }
 
 .reasoning-chain {
   margin-top: 16px;
   padding: 12px;
-  background: white;
-  border-radius: 4px;
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-border-light);
+  border-radius: 6px;
 }
 
 .chain-line {
   padding: 4px 0;
   font-family: monospace;
   font-size: 13px;
-  color: #666;
+  color: var(--nr-text-secondary);
 }
 
 .check-results {
@@ -602,16 +650,16 @@ async function runAbsenceCheck() {
   display: flex;
   justify-content: space-between;
   padding: 8px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--nr-border-light);
 }
 
 .check-item .ok {
-  color: #52c41a;
+  color: var(--nr-success);
   font-weight: bold;
 }
 
 .check-item .fail {
-  color: #ff4d4f;
+  color: var(--nr-error);
   font-weight: bold;
 }
 
@@ -619,14 +667,15 @@ async function runAbsenceCheck() {
 .suggestions {
   margin-top: 16px;
   padding: 12px;
-  background: white;
-  border-radius: 4px;
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-border-light);
+  border-radius: 6px;
 }
 
 .explanation h4,
 .suggestions h4 {
   margin: 0 0 8px 0;
   font-size: 14px;
-  color: #666;
+  color: var(--nr-text-secondary);
 }
 </style>

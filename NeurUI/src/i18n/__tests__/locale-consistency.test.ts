@@ -84,6 +84,12 @@ describe('locale value sanity', () => {
   it('zh-CN keys are two-level camelCase (section.key)', () => {
     const bad = refKeys.filter((k) => {
       const parts = k.split('.')
+      // 数据词表豁免: <section>.suites.<data-id>.<field> 按 id 索引翻译词表
+      // (如 benchmark.suites.reasoning-v1.name),id 是外部数据键而非 UI 命名,
+      // 不适用 camelCase 规则;首段/末段仍须合规。
+      if (parts.length === 4 && parts[1] === 'suites') {
+        return !/^[a-z][a-zA-Z0-9]*$/.test(parts[0]) || !/^[a-z][a-zA-Z0-9]*$/.test(parts[3])
+      }
       return parts.length !== 2 || !/^[a-z][a-zA-Z0-9]*$/.test(parts[0]) || !/^[a-z][a-zA-Z0-9]*$/.test(parts[1])
     })
     expect(bad).toEqual([])
