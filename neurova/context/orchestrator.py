@@ -353,13 +353,25 @@ class ContextOrchestrator:
 
         # 构建工具描述
         tools_desc = await self.get_tools_description()
-        
+
         # Phase 2: 构建系统提示
-        system_instructions = [self.soul]
-        if self.personality:
-            system_instructions.append(self.personality)
-        if self.config.constitution:
-            system_instructions.append(self.config.constitution)
+        # P2-11（OpenOcta 启发 SnapshotForSession）：优先消费会话身份快照
+        # （ChatPipeline 每轮经 session_snapshot 冻结，同会话内身份写入
+        # 不改变当前 prompt，下次会话生效）；未装配快照时活值兜底（零行为
+        # 变化）。
+        frozen = getattr(self._agent, "_frozen_identity_snapshot", None)
+        if isinstance(frozen, dict) and frozen.get("soul"):
+            system_instructions = [frozen["soul"]]
+            if frozen.get("personality"):
+                system_instructions.append(frozen["personality"])
+            if frozen.get("constitution"):
+                system_instructions.append(frozen["constitution"])
+        else:
+            system_instructions = [self.soul]
+            if self.personality:
+                system_instructions.append(self.personality)
+            if self.config.constitution:
+                system_instructions.append(self.config.constitution)
 
         # Bug T-1 修复:注入当前时间上下文(避免 LLM 误用训练截止日期回答时间问题)
         # build_context 是 chat_pipeline 实际调用的路径(build_system_prompt 只是工具方法,未被调用),

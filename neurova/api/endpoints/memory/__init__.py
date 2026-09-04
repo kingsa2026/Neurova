@@ -21,4 +21,5 @@ from . import questions  # noqa: F401
 from . import reflection  # noqa: F401
 from . import tkg  # noqa: F401
 from . import working_memory  # noqa: F401
+from . import pending  # noqa: F401  # P1-2 待确认队列（字面路由，先于 crud）
 from . import crud  # noqa: F401

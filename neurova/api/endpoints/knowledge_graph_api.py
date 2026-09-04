@@ -12,6 +12,7 @@ is_demo:false + 引导提示（hint），图谱 manager 是唯一数据源。
 
 from neurova.core.logger import get_logger
 import typing
+from typing import Dict
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -158,4 +159,89 @@ async def get_graph_node_detail(agent_id: str, request: Request, node_id: str):
             "edges": related_edges,
             "related_nodes": related_nodes,
         },
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# P1-1 实体消解：人工队列 + 攒批裁决（仅管理员）
+# ══════════════════════════════════════════════════════════════
+
+from fastapi import Depends  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+
+from neurova.api.auth import get_current_user_or_service  # noqa: E402
+from neurova.knowledge.resolution import EntityResolver  # noqa: E402
+
+
+class ResolutionDecisionRequest(BaseModel):
+    decision: str = Field(..., description="merged=同一实体（执行合并） / kept=不同实体")
+
+
+def _get_resolver(agent_id: str) -> EntityResolver:
+    return EntityResolver(_get_kg_manager(agent_id))
+
+
+def _admin_or_403(current_user) -> None:
+    if (current_user or {}).get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可操作实体消解")
+
+
+@router.get("/{agent_id}/knowledge-graph/resolution/reviews")
+async def list_resolution_reviews(
+    agent_id: str,
+    request: Request,
+    status: str = Query("pending", description="pending 待审 / resolved 历史"),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """实体消解人工队列（灰区对：高置信已自动处置，低置信转人工）"""
+    _admin_or_403(current_user)
+    resolver = _get_resolver(agent_id)
+    return {"code": 0, "data": {"reviews": resolver.list_human_reviews(status=status)}}
+
+
+@router.post("/{agent_id}/knowledge-graph/resolution/reviews/{review_id}/resolve")
+async def resolve_resolution_review(
+    agent_id: str,
+    review_id: str,
+    body: ResolutionDecisionRequest,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """人工裁决灰区对：merged 执行合并（可 undo_merge 回滚），kept 关闭不再提议"""
+    _admin_or_403(current_user)
+    resolver = _get_resolver(agent_id)
+    try:
+        ok = resolver.resolve_human(review_id, body.decision, decided_by=str(current_user.get("user_id", "")))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=404, detail="Review '%s' not found or already resolved" % review_id)
+    return {"code": 0, "message": "resolved (%s)" % body.decision}
+
+
+@router.post("/{agent_id}/knowledge-graph/resolution/run")
+async def run_resolution(
+    agent_id: str,
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """运行一轮消解：灰区召回 + 攒批裁决（未配 LLM 时灰区对全部转人工）"""
+    _admin_or_403(current_user)
+    resolver = _get_resolver(agent_id)
+
+    # LLM 调用器可选：失败/未配置时裁决全部转人工（消解绝不阻断）
+    llm_call = None
+    try:
+        from neurova.api.endpoints.knowledge import _default_llm_call
+
+        llm_call = _default_llm_call(request)
+    except Exception as e:  # noqa: BLE001
+        logger.info("实体消解：LLM 调用器不可用，灰区对转人工: %s", e)
+
+    result = resolver.run_adjudication(llm_call=llm_call)
+    grey = resolver.find_candidates()["grey"]
+    return {
+        "code": 0,
+        "data": {"result": result, "pending_grey": len(grey), "human_reviews": len(resolver.list_human_reviews())},
     }

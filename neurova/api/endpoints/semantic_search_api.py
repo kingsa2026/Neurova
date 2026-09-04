@@ -31,6 +31,7 @@ from neurova.api.auth import get_current_user_or_service
 from neurova.cognitive_layers.memory_layer.manager import get_memory_manager
 from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
 from neurova.knowledge.search import RetrievalMethod, full_text_search as _kb_full_text_search
+from neurova.knowledge.search import tokenize as _kb_tokenize
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -162,16 +163,9 @@ def _get_suggestion(features: dict) -> str:
 
 
 def _tokenize(text: str) -> List[str]:
-    """中英文分词（BM25 用）
-
-    英文按空格切分；中文提取 2-4 字连续片段。
-    """
-    if not text:
-        return []
-    cleaned = re.sub(r"[^\w\u4e00-\u9fa5\s]", " ", text.lower())
-    tokens = cleaned.split()
-    tokens.extend(re.findall(r"[\u4e00-\u9fa5]{2,4}", text))
-    return [t for t in tokens if len(t) >= 2]
+    """中英文分词（BM25 用）——委托 knowledge.search.tokenize 单一实现，
+    与 FTS/keyword 通道保持可比（P0-1 jieba 真分词后双通道同源）。"""
+    return _kb_tokenize(text)
 
 
 def _bm25_search(

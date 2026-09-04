@@ -427,7 +427,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "spawn_subagent": {
-        "description": "【蜂群派生子Agent】将一个子任务派交给另一个 Agent 执行（蜂群编排）。当任务可分解为多个相对独立的子任务（如：多主题调研、多文件分析、多视角评审）时，对每个子任务各调用一次本工具即可并行蜂群执行。每个子 Agent 拥有独立的人设/记忆/模型配置。前台模式等待完成并返回最终报告；background=true 立即返回 subagent_id（用 subagent_status 查询结果）。子 Agent 的执行过程会实时显示在聊天界面的子 Agent 小窗中。可先用 list_agents 查看可用的子 Agent。",
+        "description": "【蜂群派生子Agent】将一个子任务派交给另一个 Agent 执行（蜂群编排）。当任务可分解为多个相对独立的子任务（如：多主题调研、多文件分析、多视角评审）时，对每个子任务各调用一次本工具即可并行蜂群执行。每个子 Agent 拥有独立的人设/记忆/模型配置。前台模式等待完成并返回最终报告；background=true 立即返回 subagent_id（用 subagent_status 查询结果）。子 Agent 的执行过程会实时显示在聊天界面的子 Agent 小窗中。可先用 list_agents 查看可用的子 Agent。配额纪律（系统强制，超限派生会被数据层直接拒绝）：任务要求 N 个子任务就只调 N 次；用户未指定数量时每层 1-3 个；禁止为同一子任务重复派生；禁止派生与当前任务无关的子 Agent；并发上限 5，超限先 subagent_status 等待回收再派生。",
         "parameters": {
             "type": "object",
             "properties": {
