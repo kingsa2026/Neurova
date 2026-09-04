@@ -21,8 +21,14 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("NEUROVA_PROVIDER_USAGE_DB", str(tmp_path / "provider_usage.db"))
     from neurova.core.provider_usage import reset_provider_usage_collector
 
+    # P1-13 TTL 节流（三轮断链修复①）引入模块级同步时间戳，逐测试重置
+    # 保持"每次 fresh 同步"的旧测试语义
+    import neurova.llm.provider_usage_adapters as _adapters
+
+    _adapters._last_sync_at = 0.0
     reset_provider_usage_collector()
     yield
+    _adapters._last_sync_at = 0.0
     reset_provider_usage_collector()
 
 

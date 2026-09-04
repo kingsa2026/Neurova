@@ -69,7 +69,7 @@ describe('subscribeExecutionEvents', () => {
     await vi.waitFor(() => expect(received.length).toBe(3))
 
     expect(received.map(f => f.type)).toEqual(['workflow_started', 'node_started', 'node_completed'])
-    expect(received[2].data.result.output).toBe('结果中文')
+    expect((received[2].data.result as { output: string }).output).toBe('结果中文')
     close()
   })
 

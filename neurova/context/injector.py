@@ -140,6 +140,8 @@ class UnifiedContextInjector(BaseModule):
         self._memory_manager = memory_manager
         self._growth_log_manager = growth_log_manager
         self._question_queue_manager = question_queue_manager
+        # V3 自模型：教训注入的 agent 归属（kwargs 可选；未设置则不注入）
+        self._metacog_agent_id = kwargs.pop("metacog_agent_id", None)
         self._token_budget = token_budget or TokenBudget()
         self._enable_cache = enable_cache
         self._enable_compression = enable_compression
@@ -175,12 +177,9 @@ class UnifiedContextInjector(BaseModule):
         self.subscribe_event("context.set_priority", self._handle_set_priority)
 
         self.log_info(
-            "UnifiedContextInjector 初始化完成",
-            {
-                "max_total_tokens": self._token_budget.max_total,
-                "enable_cache": self._enable_cache,
-                "enable_compression": self._enable_compression,
-            },
+            "UnifiedContextInjector 初始化完成 "
+            f"(max_total_tokens={self._token_budget.max_total}, "
+            f"enable_cache={self._enable_cache}, enable_compression={self._enable_compression})"
         )
 
     async def on_start(self) -> None:
@@ -312,10 +311,18 @@ class UnifiedContextInjector(BaseModule):
         if include_reflection_log and self._growth_log_manager:
             reflection_content = self._build_reflection_context()
 
+        # V3 自模型：结构化教训（agent_id 经 kwargs 注入；缺省跳过——零行为变化）
+        metacog_content = ""
+        if getattr(self, "_metacog_agent_id", None):
+            metacog_content = self._build_metacog_lessons(self._metacog_agent_id)
+
         memory_content = self._build_memory_context(memories, user_input)
 
         # 构建经验上下文（Phase 4: 优先使用预检索的经验，消除双重检索）
-        if experience is not None:
+        # 断链修复（闭环审计 2026-09-04）：主链路恒传 []（非 None），`is not None`
+        # 判定使 EKB 查询成为不可达分支——EKB 每轮写入却永不复用（写了没人读）。
+        # 空列表/None 均回退按需查 EKB；非空列表（池预检索命中）维持跳过二次查询。
+        if experience:
             experience_content = self._format_experience_from_list(experience)
         else:
             experience_content = self._build_experience_context(user_input)
@@ -328,6 +335,7 @@ class UnifiedContextInjector(BaseModule):
             base_prompt=system_prompt,
             reflection_content=reflection_content,
             memory_content=memory_content,
+            metacog_content=metacog_content,
             emotion_content=emotion_content,
             experience_content=experience_content,
         )
@@ -378,12 +386,9 @@ class UnifiedContextInjector(BaseModule):
         )
 
         self.log_info(
-            "上下文构建完成",
-            {
-                "total_tokens": total_tokens,
-                "within_budget": result.stats["within_budget"],
-                "compression_ratio": compression_ratio,
-            },
+            "上下文构建完成 "
+            f"(total_tokens={total_tokens}, within_budget={result.stats['within_budget']}, "
+            f"compression_ratio={compression_ratio})"
         )
 
         return result
@@ -395,12 +400,17 @@ class UnifiedContextInjector(BaseModule):
         memory_content: str = "",
         emotion_content: str = "",
         experience_content: str = "",
+        metacog_content: str = "",
     ) -> str:
         """构建系统提示"""
         parts = [base_prompt]
 
         if reflection_content:
             parts.append(f"\n## 反思日志\n{reflection_content}")
+
+        # V3 自模型：结构化教训注入（行为改变通道②——教训到达推理上下文）
+        if metacog_content:
+            parts.append(f"\n## 自我认知教训\n{metacog_content}")
 
         if memory_content:
             parts.append(f"\n## 相关记忆\n{memory_content}")
@@ -452,6 +462,31 @@ class UnifiedContextInjector(BaseModule):
 
         except Exception as e:
             self.log_warning(f"构建反思日志上下文失败: {e}")
+            return ""
+
+    def _build_metacog_lessons(self, agent_id: str, limit: int = 3) -> str:
+        """构建元认知教训上下文（活跃 avoid_tool/discount/review 教训，全确定性）"""
+        try:
+            from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+
+            result = get_meta_ledger(agent_id).list_records(
+                agent_id=agent_id, page=1, size=20, kind="lesson"
+            )
+            parts = []
+            import datetime as _dt
+
+            now_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
+            for it in result["items"]:
+                meta = it.get("metadata") or {}
+                expires_at = meta.get("expires_at")
+                if expires_at and expires_at < now_iso:
+                    continue
+                parts.append(f"- [{meta.get('operator', '?')}] {meta.get('text', '')[:100]}")
+                if len(parts) >= limit:
+                    break
+            return "\n".join(parts)
+        except Exception as e:
+            self.log_debug(f"元认知教训注入跳过: {e}")
             return ""
 
     def _build_memory_context(self, memories: List[Dict], user_input: str = "") -> str:
@@ -635,9 +670,15 @@ class UnifiedContextInjector(BaseModule):
                 else:
                     context_summary = str(ctx)[:50]
                 # 2.0: result 是 dict 或 None
+                # 契约对齐（闭环审计 2026-09-04）：写入端 post_chat 存的是
+                # result["reply_excerpt"]，此处只读 output 曾使注入摘要恒空串
                 result_data = exp.get("result")
                 if isinstance(result_data, dict):
-                    result_summary = str(result_data.get("output", ""))[:50]
+                    result_summary = str(
+                        result_data.get("reply_excerpt")
+                        or result_data.get("output")
+                        or ""
+                    )[:50]
                 else:
                     result_summary = str(result_data or "")[:50]
                 # success 在 2.0 中是 int 0/1

@@ -115,7 +115,7 @@ class TestOnExperienceRecordedTriggersCrystallization:
         assert result["success"] is True
 
     def test_no_tools_skips_crystallization(self):
-        """验证没有工具时不调用结晶器"""
+        """验证没有工具时以 "chat" 伪工具名进结晶缓冲（2026-09-04 修复⑦：入口放宽）"""
         from neurova.evolution.closed_loop import EvolutionOrchestrator
 
         mock_crystallizer = MagicMock()
@@ -128,7 +128,9 @@ class TestOnExperienceRecordedTriggersCrystallization:
             success=True,
         )
 
-        mock_crystallizer.observe.assert_not_called()
+        mock_crystallizer.observe.assert_called_once_with(
+            tool_name="chat", context="闲聊", success=True
+        )
 
     def test_unregistered_tools_still_trigger_crystallization(self):
         """验证未注册的工具也触发结晶（结晶器独立于注册表）"""
@@ -292,20 +294,26 @@ class TestExperienceLoopEndToEndFlow:
         evolution = EvolutionOrchestrator(crystallizer=crystallizer)
         evolution.register_tools(["search"])
 
-        # 2. 模拟 Agent
+        # 2. 模拟 Agent（crystallizer 必须显式挂在 agent 上——Step9 现按
+        # agent 级隔离把 agent.crystallizer 传给 facade）
         agent = MagicMock()
         agent.evolution = evolution
+        agent.crystallizer = crystallizer
         agent._collect_tool_messages = MagicMock(return_value=[
             {"tool_name": "search", "success": True},
         ])
 
         # 3. 记录经验（触发 crystallizer.observe）
-        pipeline = PostChatPipeline(agent)
-        asyncio.run(pipeline._step_record_experience(
-            user_input="搜索信息",
-            reply="搜索结果",
-            save_memory=True,
-        ))
+        # EKB 写入走真实 SQLite，须隔离防污染真库
+        with patch(
+            "neurova.skills.experience_knowledge_base.ExperienceKnowledgeBase.add_experience_record"
+        ):
+            pipeline = PostChatPipeline(agent)
+            asyncio.run(pipeline._step_record_experience(
+                user_input="搜索信息",
+                reply="搜索结果",
+                save_memory=True,
+            ))
 
         # 4. 验证 crystallizer.observe 被调用
         # (通过 observe 积累模式，3次后结晶)
@@ -339,7 +347,7 @@ class TestExperienceLoopEdgeCases:
     """边界情况测试"""
 
     def test_empty_tools_list(self):
-        """空工具列表不触发结晶"""
+        """空工具列表以 "chat" 伪工具名观察（2026-09-04 修复⑦：入口放宽）"""
         from neurova.evolution.closed_loop import EvolutionOrchestrator
 
         mock_crystallizer = MagicMock()
@@ -352,7 +360,9 @@ class TestExperienceLoopEdgeCases:
             success=True,
         )
 
-        mock_crystallizer.observe.assert_not_called()
+        mock_crystallizer.observe.assert_called_once_with(
+            tool_name="chat", context="闲聊", success=True
+        )
 
     def test_none_crystallizer(self):
         """crystallizer 为 None 时正常工作"""

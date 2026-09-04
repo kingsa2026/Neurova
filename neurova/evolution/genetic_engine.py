@@ -474,7 +474,7 @@ class ToolGeneticEngine:
         logger.info("Rejected tool: %s", genotype.tools)
         return False
 
-    def register_to_skill_registry(self, registry) -> int:
+    def register_to_skill_registry(self, registry, skill_service=None) -> int:
         """将高适应度的工具基因型注册到 SkillRegistry
 
         Bug A-6 修复 [MED]: 之前 ToolGeneticEngine 仅通过 register_if_valid
@@ -487,8 +487,15 @@ class ToolGeneticEngine:
         将 fitness >= validation_threshold 的个体转换为 Skill manifest
         注册到 SkillRegistry。
 
+        断点 #2 修复（Skill 递归进化审计）：SkillRegistry._skills 为纯内存
+        dict，genetic 技能重启即丢——演化史（generation/reuse_count）清零、
+        前端技能页不可见、下轮重复合成。提供 skill_service 时经
+        register_auto_skill 持久化到磁盘 manifest（与 _step_pattern_mining
+        的 skill_packer 注册路径对齐）；None 保持原行为向后兼容。
+
         Args:
             registry: SkillRegistry 实例
+            skill_service: 可选，SkillService 实例。提供则持久化到磁盘。
 
         Returns:
             int: 成功注册的技能数量
@@ -547,6 +554,22 @@ class ToolGeneticEngine:
                         skill_id,
                         genotype.fitness,
                     )
+                    # 断点 #2：可选持久化到 SkillService（磁盘 manifest）
+                    if skill_service is not None:
+                        try:
+                            skill_service.register_auto_skill(
+                                skill_id=skill_id,
+                                name=skill_id,
+                                description=skill.description,
+                                version="1.0.0",
+                                config=dict(skill.config),
+                            )
+                        except Exception as svc_err:
+                            logger.warning(
+                                "持久化进化技能 %s 到 SkillService 失败: %s",
+                                skill_id,
+                                svc_err,
+                            )
             except Exception as e:
                 logger.warning("注册进化工具 %s 失败: %s", skill_id, e)
 

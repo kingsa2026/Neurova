@@ -60,12 +60,14 @@ class MetaCognitionModule:
     - 认知策略调整
     """
 
-    def __init__(self, max_history: int = 1000):
+    def __init__(self, max_history: int = 1000, agent_id: str = "default"):
         """
         Args:
             max_history: 最大历史记录数
+            agent_id: 归属 agent（台账写入用）
         """
         self._max_history = max_history
+        self._agent_id = agent_id
         self._lock = threading.RLock()
         self._initialized = False
 
@@ -166,6 +168,9 @@ class MetaCognitionModule:
             # 更新统计
             self._update_stats(event)
 
+            # V3 写穿透：落台账
+            self._persist_event(event)
+
             # 重置当前状态(仅当无活跃过程时)
             if not self._active_processes:
                 self._current_process = None
@@ -199,6 +204,9 @@ class MetaCognitionModule:
                 self._events = self._events[-self._max_history :]
 
             self._update_stats(event)
+
+            # V3 写穿透：落台账
+            self._persist_event(event)
 
         return event
 
@@ -273,3 +281,21 @@ class MetaCognitionModule:
         if event.success:
             stats["success_count"] += 1
         stats["total_duration_ms"] += event.duration_ms
+
+    def _persist_event(self, event: CognitiveEvent) -> None:
+        """V3 写穿透：事件落统一台账（meta_events 表）。
+
+        台账故障不影响内存热窗主链路。"""
+        try:
+            from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+
+            get_meta_ledger(self._agent_id).write_event(
+                agent_id=self._agent_id,
+                process_type=event.process_type.value,
+                description=event.description,
+                duration_ms=event.duration_ms,
+                success=event.success,
+                metadata=event.metadata,
+            )
+        except Exception as e:
+            logger.debug("认知事件落台账跳过: %s", e)

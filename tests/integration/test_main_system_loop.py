@@ -187,7 +187,12 @@ class TestMainSystemClosedLoop:
 
     @pytest.mark.asyncio
     async def test_crystallizer_observe_in_post_processing(self):
-        """后处理中结晶器观察"""
+        """后处理中结晶器观察（闭环审计 2026-09-04 修复后契约）。
+
+        直挂 _last_tool_used 分支已删除（死信号 + 硬编码 success=True 污染）；
+        观察统一走 post_chat Step9 → on_experience_recorded。此处 agent 的
+        post_chat_pipeline 是 mock，故 execute 直挂路径必须不再触发 observe。
+        """
         from neurova.agent.chat_pipeline import ChatPipeline
 
         agent = self._make_agent_with_evolution()
@@ -198,8 +203,8 @@ class TestMainSystemClosedLoop:
         ctx = ChatContext(user_input="Hello")
         await pipeline.execute(ctx)
 
-        # crystallizer.observe 应被调用
-        agent.crystallizer.observe.assert_called_once()
+        # 直挂观察必须不存在（防止双计回归）
+        agent.crystallizer.observe.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_full_loop_data_flow(self):

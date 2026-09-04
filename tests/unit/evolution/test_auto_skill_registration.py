@@ -53,6 +53,10 @@ class TestAutoSkillBuilderRegistration:
         # 清理单例状态，确保测试隔离
         registry._skills = {}
 
+        # C10 评审闸：先批准全部待审模板再触发注册
+        for _t in builder.list_pending_templates():
+            assert builder.approve_template(_t["template_id"])
+
         # 触发注册（当前代码缺失此步骤）
         builder.register_to_skill_registry(registry)
 

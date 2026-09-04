@@ -30,6 +30,8 @@
       </div>
     </div>
 
+    <AgentPageTabs :tabs="sleepTabs" />
+
     <!-- Current sleep state -->
     <GlassPanel :variant="sleepStatus?.is_sleeping ? 'prominent' : 'subtle'" :glow="sleepStatus?.is_sleeping">
       <div class="sleep-state">
@@ -197,6 +199,7 @@ import { message } from 'ant-design-vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { usePolling } from '@/composables/usePolling'
 import * as sleepApi from '@/api/modules/sleep'
@@ -204,6 +207,11 @@ import type { SleepStatus, Dream, SleepInsight, MergeConflict } from '@/api/modu
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage()
+
+const sleepTabs = computed(() => [
+  { labelKey: 'nav.sleepstatus', to: `/agent/${agentId.value}/sleep/status` },
+  { labelKey: 'nav.sleepsettings', to: `/agent/${agentId.value}/sleep/settings` },
+])
 
 // --- State ---
 const initialLoading = ref(false)

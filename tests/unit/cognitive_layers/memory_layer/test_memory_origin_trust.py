@@ -11,6 +11,7 @@ import os
 import sys
 
 import pytest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..")))
 
@@ -198,3 +199,83 @@ class TestMemCoreConversationOrigins:
         by_sender = {r["metadata"].get("sender_type"): r["origin"] for r in rows}
         assert by_sender.get("user") == "owner"
         assert by_sender.get("agent") == "agent"
+
+
+class TestMoEOriginWeighting:
+    """P1-9 断点④: MoE 通道 origin 加权"""
+
+    def test_weight_of_string_values(self):
+        from neurova.cognitive_layers.memory_layer.models import MemoryOrigin
+
+        assert MemoryOrigin.weight_of("untrusted") == 0.6
+        assert MemoryOrigin.weight_of("owner") == 1.0
+        assert MemoryOrigin.weight_of("agent") == 1.0
+        assert MemoryOrigin.weight_of(None) == 1.0
+        assert MemoryOrigin.weight_of("GOD_MODE") == 0.6  # 非法 fail-safe 降权
+
+    def test_moe_retrieve_applies_origin_weight(self):
+        """expert 激活分 × origin 权重——同分记忆 untrusted 排后"""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from neurova.cognitive_layers.memory_layer.moe_router import MoEMemoryRouter
+
+        router = MoEMemoryRouter.__new__(MoEMemoryRouter)
+        router.vector_store = MagicMock()
+        router.vector_store.encode.return_value = [0.1] * 8
+        router.gating_network = MagicMock()
+        router.gating_network.route = AsyncMock(return_value={"expert_a": 1.0})
+        router.experts = {"expert_a": {"name": "a"}}
+        router.storage = MagicMock()
+        router.min_expert_results = 1
+        router.min_relevance = 0.0
+
+        owner_item = {"id": "m1", "content": "x", "score": 0.8, "origin": "owner"}
+        untrusted_item = {"id": "m2", "content": "y", "score": 0.8, "origin": "untrusted"}
+        retriever = MagicMock()
+        retriever.retrieve = AsyncMock(return_value=[owner_item, untrusted_item])
+
+        with patch(
+            "neurova.cognitive_layers.memory_layer.moe_router.ExpertDrilldownRetriever",
+            return_value=retriever,
+        ):
+            import asyncio
+
+            results = asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+                router.retrieve("q", limit=5)
+            )
+
+        scores = {r["id"]: r["score"] for r in results}
+        assert scores["m1"] == pytest.approx(0.8)
+        assert scores["m2"] == pytest.approx(0.48)
+        assert results[0]["id"] == "m1"  # owner 排前
+
+    def test_moe_no_origin_key_unchanged(self):
+        """条目无 origin 键 → 加权 1.0，等价历史行为"""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from neurova.cognitive_layers.memory_layer.moe_router import MoEMemoryRouter
+
+        router = MoEMemoryRouter.__new__(MoEMemoryRouter)
+        router.vector_store = MagicMock()
+        router.vector_store.encode.return_value = [0.1] * 8
+        router.gating_network = MagicMock()
+        router.gating_network.route = AsyncMock(return_value={"expert_a": 1.0})
+        router.experts = {"expert_a": {"name": "a"}}
+        router.storage = MagicMock()
+        router.min_expert_results = 1
+        router.min_relevance = 0.0
+
+        legacy_item = {"id": "m1", "content": "x", "score": 0.8}
+        retriever = MagicMock()
+        retriever.retrieve = AsyncMock(return_value=[legacy_item])
+
+        with patch(
+            "neurova.cognitive_layers.memory_layer.moe_router.ExpertDrilldownRetriever",
+            return_value=retriever,
+        ):
+            import asyncio
+
+            results = asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+                router.retrieve("q", limit=5)
+            )
+        assert results[0]["score"] == pytest.approx(0.8)

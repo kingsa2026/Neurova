@@ -139,6 +139,10 @@ def test_closed_loop_exec_weight_pattern_skill_registry():
     templates = skill_builder.get_all_templates()
     assert len(templates) > 0, f"应有技能被封装, 实际 {len(templates)}"
 
+    # C10 评审闸：产物默认 pending，注册前先批准全部待审模板
+    for _t in skill_builder.list_pending_templates():
+        assert skill_builder.approve_template(_t["template_id"])
+
     # 7. 注册到 SkillRegistry（闭环第五环: 技能入库, 供下次对话使用）
     registry = SkillRegistry()
     registered = skill_builder.register_to_skill_registry(registry)

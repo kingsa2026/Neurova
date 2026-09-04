@@ -114,16 +114,20 @@ class TestToolWeightDecay:
     """权重衰减机制"""
 
     def test_inactivity_decay_integration(self):
-        """与 AdaptiveToolWeights 的衰减集成"""
+        """与 AdaptiveToolWeights 的衰减集成
+
+        A/B 融合（2026-09-04）：AdaptiveToolWeights 统一为 closed_loop 版本
+        （含惰性时间衰减），evolution/tool_weights.py A 版死代码已删除。
+        """
         from neurova.evolution.tool_lifecycle import ToolLifecycleManager
-        from neurova.evolution.tool_weights import AdaptiveToolWeights
+        from neurova.evolution.closed_loop import AdaptiveToolWeights
 
         atw = AdaptiveToolWeights()
         atw.register_tool("browser_click")
 
         # 奖励
-        atw.record_success("browser_click")
-        atw.record_success("browser_click")
+        atw.update_weight("browser_click", True)
+        atw.update_weight("browser_click", True)
 
         # 获取权重
         weight_before = atw.get_effective_weight("browser_click")

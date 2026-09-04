@@ -305,6 +305,42 @@ class SkillService:
             self._logger.error("Failed to disable skill: %s", e)
             return {"success": False, "error": str(e)}
 
+    def record_skill_usage(self, skill_id: str, success: bool = True) -> bool:
+        """记录技能使用（C11：use_count/last_used_at_ms 持久化到 manifest）。
+
+        collection-review/改进提案的消费面——此前技能层没有使用计数，
+        只有肌肉记忆侧有。manifest 写穿（文件小，频率=技能执行频率）。
+        """
+        import time as _time
+
+        try:
+            with self._lock:
+                info = self._skills.get(skill_id)
+                if info is None:
+                    return False
+                usage = info.setdefault(
+                    "usage", {"use_count": 0, "success_count": 0, "last_used_at_ms": 0}
+                )
+                usage["use_count"] = int(usage.get("use_count", 0)) + 1
+                if success:
+                    usage["success_count"] = int(usage.get("success_count", 0)) + 1
+                usage["last_used_at_ms"] = int(_time.time() * 1000)
+            self._save_manifest()
+            return True
+        except Exception as e:
+            self._logger.warning("记录技能使用失败: %s", e)
+            return False
+
+    def get_skill_usage(self, skill_id: str) -> Dict[str, Any]:
+        """读取技能使用计数（无记录返回零值）。"""
+        info = self._skills.get(skill_id) or {}
+        usage = info.get("usage") or {}
+        return {
+            "use_count": int(usage.get("use_count", 0)),
+            "success_count": int(usage.get("success_count", 0)),
+            "last_used_at_ms": int(usage.get("last_used_at_ms", 0)),
+        }
+
     def register_auto_skill(
         self,
         skill_id: str,
@@ -354,6 +390,42 @@ class SkillService:
                 return True
         except Exception as e:
             self._logger.exception("Failed to register auto skill %s: %s", skill_id, e)
+            return False
+
+    def update_auto_skill(
+        self,
+        skill_id: str,
+        version: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """更新已存在自动技能的版本/配置并落盘（改进持久化通道）。
+
+        仅允许更新已存在的技能（自动技能由 register_auto_skill 创建）；
+        manifest.source 保持 "auto" 不变。不存在时返回 False。
+
+        Args:
+            skill_id: 技能 ID
+            version: 新版本号（None 保持不变）
+            config: 新配置（None 保持不变；提供时整体替换 manifest.config）
+
+        Returns:
+            bool: 更新并落盘成功
+        """
+        try:
+            with self._lock:
+                entry = self._skills.get(skill_id)
+                if entry is None:
+                    self._logger.debug("update_auto_skill: skill_id=%s 不存在", skill_id)
+                    return False
+                if version is not None:
+                    entry["version"] = str(version)
+                if config is not None:
+                    entry["manifest"] = {**entry.get("manifest", {}), "config": dict(config)}
+                self._save_manifest()
+                self._logger.info("Updated auto skill: %s → v%s", skill_id, entry["version"])
+                return True
+        except Exception as e:
+            self._logger.exception("Failed to update auto skill %s: %s", skill_id, e)
             return False
 
     def list_skills(self, enabled_only: bool = False) -> List[Dict[str, Any]]:

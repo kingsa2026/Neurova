@@ -20,6 +20,7 @@ import json
 from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
+from neurova.channels.feishu_auth import AuthMixin, FEISHU_API_BASE
 from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
@@ -28,8 +29,11 @@ from neurova.channels.base import (
 
 logger = get_logger(__name__)
 
+# 语音消息下载大小上限（P1-12 断点③）：防御异常大文件拖垮内存
+_VOICE_DOWNLOAD_MAX_BYTES = 10 * 1024 * 1024
 
-class FeishuAdapter(ChannelAdapter):
+
+class FeishuAdapter(AuthMixin, ChannelAdapter):
     """
     飞书渠道适配器
 
@@ -38,6 +42,9 @@ class FeishuAdapter(ChannelAdapter):
     2. 添加机器人能力
     3. 配置权限: im:message, im:message.group_at_msg, im:message.p2p_msg
     4. 选择 Stream 模式或 Webhook 模式
+
+    复审断链修复③: 补继承 AuthMixin——_download_media_bytes 依赖的
+    tenant token 管理在此 Mixin（此前该 Mixin 与 MediaMixin 均为孤儿）。
     """
 
     def __init__(self, config: ChannelConfig):
@@ -132,8 +139,24 @@ class FeishuAdapter(ChannelAdapter):
                                 for elem in paragraph:
                                     if elem.get("tag") == "text":
                                         content += elem.get("text", "")
+            elif msg.message_type == "audio":
+                content = "[语音]"
 
             # 构造统一消息
+            audio_metadata: Dict[str, Any] = {}
+            if msg.message_type == "audio":
+                # P1-12 断点③: 下载语音字节供 voice_precheck 预转写。
+                # file_key 在 content JSON；失败静默降级占位（绝不丢消息）。
+                try:
+                    content_json = json.loads(msg.content) if msg.content else {}
+                    file_key = content_json.get("file_key", "")
+                    if file_key and msg.message_id:
+                        audio_data = self._download_media_bytes(msg.message_id, file_key)
+                        if audio_data:
+                            audio_metadata["audio_bytes"] = audio_data
+                except Exception as dl_err:  # noqa: BLE001 - 下载失败降级占位
+                    logger.warning("Feishu 语音下载失败，降级占位: %s", dl_err)
+
             channel_msg = self._make_message(
                 message_id=msg.message_id or "",
                 sender_id=sender.sender_id.user_id if sender.sender_id else "",
@@ -142,6 +165,7 @@ class FeishuAdapter(ChannelAdapter):
                 chat_id=msg.chat_id or "",
                 chat_type=msg.chat_type or "p2p",
                 message_type=msg.message_type or "text",
+                metadata=audio_metadata,
                 raw_event={
                     "header": ctx.__dict__ if hasattr(ctx, "__dict__") else {},
                     "event": event.__dict__ if hasattr(event, "__dict__") else {},
@@ -162,6 +186,38 @@ class FeishuAdapter(ChannelAdapter):
 
         except Exception as e:
             logger.exception("Feishu message handler error: %s", e)
+
+    def _download_media_bytes(self, message_id: str, file_key: str) -> Optional[bytes]:
+        """下载消息媒体文件的二进制内容（P1-12 断点③）。
+
+        走 REST /im/v1/messages/{id}/resources/{key}（Bearer tenant token，
+        响应为原始字节流——MediaMixin.download_media 的 JSON 解析版本拉不了
+        二进制，故此处独立实现）。失败返回 None（调用方降级占位）。
+        """
+        try:
+            import requests
+
+            token = self._get_tenant_access_token()
+            resp = requests.get(
+                f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/resources/{file_key}",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"type": "file"},
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                logger.warning("Feishu 媒体下载 HTTP %s: msg=%s", resp.status_code, message_id)
+                return None
+            declared = resp.headers.get("Content-Length")
+            if declared and int(declared) > _VOICE_DOWNLOAD_MAX_BYTES:
+                logger.warning("Feishu 媒体超大小上限，拒收: %s bytes", declared)
+                return None
+            if len(resp.content) > _VOICE_DOWNLOAD_MAX_BYTES:
+                logger.warning("Feishu 媒体实际字节超上限，拒收")
+                return None
+            return resp.content
+        except Exception as e:  # noqa: BLE001 - 下载失败由调用方降级
+            logger.warning("Feishu 媒体下载异常: %s", e)
+            return None
 
     async def send_message(
         self,

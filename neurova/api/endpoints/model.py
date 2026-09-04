@@ -18,12 +18,36 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
-from neurova.api.auth import get_optional_user
+from neurova.api.auth import get_optional_user, get_current_user
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# ---- 模型下载（双源选择 + 后台触发 + 进度轮询）----
+# 提示框数据面：前端启动/进语音页时查 pending-downloads 渲染对话框，
+# 用户选源 POST download-source，触发 POST download，轮询 download-progress。
+_downloader = None  # 惰性初始化（测试注入点）
+_service = None
+
+
+def _get_downloader():
+    global _downloader
+    if _downloader is None:
+        from neurova.tts.model_downloader import get_model_downloader
+
+        _downloader = get_model_downloader()
+    return _downloader
+
+
+def _get_service():
+    global _service
+    if _service is None:
+        from neurova.tts.download_service import ModelDownloadService
+
+        _service = ModelDownloadService(downloader=_get_downloader())
+    return _service
 
 # canonical 能力词表(与 capability_detector.CAPABILITY_ORDER 核心六类对齐)
 _VALID_CAPABILITIES = frozenset(
@@ -478,3 +502,90 @@ async def check_connection(
     except Exception as e:
         logger.error(f"Check connection error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Connection check failed: {str(e)}")
+
+
+# ==================== 模型下载（双源选择 + 后台触发 + 进度轮询） ====================
+
+class DownloadSourceRequest(BaseModel):
+    """下载源选择"""
+    model: str
+    choice: str  # auto | always_modelscope | always_huggingface | skip
+
+
+class DownloadTriggerRequest(BaseModel):
+    """下载触发"""
+    model: str
+    source: Optional[str] = None  # 缺省读用户已存选择
+
+
+@router.get("/pending-downloads")
+async def pending_downloads(current_user: Optional[Dict[str, Any]] = Depends(get_optional_user)):
+    """待下载清单（模型缺失项 + 每模型已存选择），供前端渲染下载提示框。"""
+    from neurova.tts.download_source import get as get_choice
+
+    try:
+        dl = _get_downloader()
+        items = []
+        for item in dl.pending_downloads():
+            item["choice"] = get_choice(item["model"])
+            items.append(item)
+        return items
+    except Exception as e:
+        logger.error(f"Pending downloads error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to list pending downloads: {str(e)}")
+
+
+@router.get("/download-source")
+async def get_download_source(current_user: Optional[Dict[str, Any]] = Depends(get_optional_user)):
+    """用户下载源选择映射 {model: choice}。"""
+    from neurova.tts.download_source import get as get_choice, VALID_CHOICES
+    from neurova.tts.model_downloader import MODEL_REGISTRY
+
+    try:
+        return {name: get_choice(name) for name in MODEL_REGISTRY}
+    except Exception as e:
+        logger.error(f"Get download source error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/download-source")
+async def set_download_source(
+    body: DownloadSourceRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """写某模型的下载源选择（非法值/未知模型 400）。"""
+    from neurova.tts.download_source import DownloadSourceChoice, set as set_choice
+
+    try:
+        set_choice(DownloadSourceChoice(model=body.model, choice=body.choice))
+        return {"ok": True, "model": body.model, "choice": body.choice}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Set download source error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/download")
+async def trigger_download(
+    body: DownloadTriggerRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """触发模型下载（幂等；重复触发返回同一状态）。"""
+    try:
+        return _get_service().start(body.model, source=body.source)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Trigger download error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/download-progress")
+async def download_progress(current_user: Optional[Dict[str, Any]] = Depends(get_optional_user)):
+    """已触发模型的下载状态快照（前端进度条轮询数据源）。"""
+    try:
+        return _get_service().progress()
+    except Exception as e:
+        logger.error(f"Download progress error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

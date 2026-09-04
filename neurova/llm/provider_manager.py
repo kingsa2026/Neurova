@@ -489,6 +489,7 @@ class LLMProviderManager(Module):
         priority: Optional[int] = None,
         base_url: Optional[str] = None,
         description: Optional[str] = None,
+        usage_collection: Optional[bool] = None,
     ) -> bool:
         """更新服务商配置"""
         if provider_id not in self._providers:
@@ -521,6 +522,9 @@ class LLMProviderManager(Module):
             provider.base_url = base_url
         if description is not None:
             provider.description = description
+        # P1-13 断链修复: 真账单采集开关经 API 可达（复审断点②）
+        if usage_collection is not None:
+            provider.usage_collection = usage_collection
 
         provider.updated_at = datetime.now().isoformat()
 

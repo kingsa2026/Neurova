@@ -59,22 +59,87 @@ class ToolMemoryIntegration:
         self.muscle_memory = muscle_memory
         self.confidence_threshold = confidence_threshold
         self.temperature_threshold = temperature_threshold
-        self.tool_weights = tool_weights
         self.tool_lifecycle = tool_lifecycle
         self.usage_history: List[ToolUsageRecord] = []
         self.tool_stats: Dict[str, Dict[str, Any]] = {}
         # 并发锁：保护 usage_history 和 tool_stats 的读写
         self._lock = threading.RLock()
-        # RSI 可优化参数（可由 RSI 编排器调整，作用于肌肉记忆自动执行阈值）
+        # RSI 可优化参数（property 定义见类尾：success_bonus/failure_penalty/decay_rate
+        # 经 configure() 转发 AdaptiveToolWeights 权重本体——A/B 融合收尾，RSI 活表；
+        # muscle_memory_threshold 直接作用于 _get_dynamic_threshold 基准）。
+        # 注意顺序：参数先于 tool_weights 赋值，附着时同步才有值可推。
         self.success_bonus: float = success_bonus
         self.failure_penalty: float = failure_penalty
         self.decay_rate: float = decay_rate
         self.muscle_memory_threshold: float = muscle_memory_threshold
+        # tool_weights 最后赋值（property setter 会把上面参数同步进权重对象）
+        self.tool_weights = tool_weights
         # 维护触发（docs/tool-memory-muscle-analysis.md P-A/P-F）：遗忘与生命周期
         # 清理原为无调用方的死代码，借 record_tool_usage 计数周期性触发
         self.maintenance_interval: int = 50
         self._ops_since_maintenance: int = 0
         logger.info("ToolMemoryIntegration initialized")
+
+    # ── RSI 活表参数：A/B 融合收尾（docs/Neurova_OpenClaw工具技能专项对比 §7）──
+    # RSI apply_optimization 以 setattr(tool_memory_system, name, value) 应用参数，
+    # property setter 保持该语义不变，同时把值推进 AdaptiveToolWeights.configure。
+
+    @property
+    def success_bonus(self) -> float:
+        return self._success_bonus
+
+    @success_bonus.setter
+    def success_bonus(self, value: float) -> None:
+        self._success_bonus = float(value)
+        self._sync_weight_params()
+
+    @property
+    def failure_penalty(self) -> float:
+        return self._failure_penalty
+
+    @failure_penalty.setter
+    def failure_penalty(self, value: float) -> None:
+        self._failure_penalty = float(value)
+        self._sync_weight_params()
+
+    @property
+    def decay_rate(self) -> float:
+        return self._decay_rate
+
+    @decay_rate.setter
+    def decay_rate(self, value: float) -> None:
+        self._decay_rate = float(value)
+        self._sync_weight_params()
+
+    @property
+    def tool_weights(self):
+        return self._tool_weights
+
+    @tool_weights.setter
+    def tool_weights(self, value) -> None:
+        self._tool_weights = value
+        self._sync_weight_params()
+
+    def _sync_weight_params(self) -> None:
+        """把 RSI 参数同步进已挂载的 AdaptiveToolWeights。
+
+        integration 是 RSI 面向的参数表面，附着/调参任一时点都保持两者一致；
+        无挂载或权重对象无 configure（测试桩）时静默跳过。
+        """
+        weights = getattr(self, "_tool_weights", None)
+        if weights is None:
+            return
+        configure = getattr(weights, "configure", None)
+        if not callable(configure):
+            return
+        try:
+            configure(
+                success_bonus=getattr(self, "_success_bonus", None),
+                failure_penalty=getattr(self, "_failure_penalty", None),
+                decay_rate=getattr(self, "_decay_rate", None),
+            )
+        except Exception as e:  # noqa: BLE001 - 同步失败不影响主流程
+            logger.debug("权重参数同步失败: %s", e)
 
     def record_tool_usage(
         self,
@@ -357,8 +422,13 @@ class ToolMemoryIntegration:
         try:
             weight_obj = self.tool_weights.get_weight(tool_name)
             if weight_obj:
-                multiplier = getattr(weight_obj, "adaptive_multiplier", 1.0)
-                if multiplier > 0:
+                effective_getter = getattr(self.tool_weights, "get_effective_multiplier", None)
+                if callable(effective_getter):
+                    # 含惰性衰减的乘数：长期未用的工具阈值回升（更难自动执行）
+                    multiplier = effective_getter(tool_name)
+                else:
+                    multiplier = getattr(weight_obj, "adaptive_multiplier", 1.0)
+                if isinstance(multiplier, (int, float)) and multiplier > 0:
                     import math
 
                     threshold = self.muscle_memory_threshold / math.sqrt(multiplier)

@@ -12,6 +12,7 @@ from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from neurova.cognitive_layers.memory_layer.models import MemoryOrigin
 from neurova.cognitive_layers.memory_layer.unified_vector_store import (
     UnifiedVectorStore,
     cosine_similarity,
@@ -396,9 +397,10 @@ class MoEMemoryRouter:
             expert_results = await retriever.retrieve(query, query_vec, limit=limit)
             _emit({"stage": "moe_expert", "expert": expert_id, "count": len(expert_results)})
 
-            # 按激活权重加权
+            # 按激活权重加权（P1-9 断点④: 叠加 origin 信任权重——untrusted
+            # （外部网络抓取）在 MoE 通道同样降权；条目无 origin 键=1.0 等价）
             for r in expert_results:
-                r["score"] = float(r.get("score", 0.5)) * activation
+                r["score"] = float(r.get("score", 0.5)) * activation * MemoryOrigin.weight_of(r.get("origin"))
                 r["expert_id"] = expert_id
 
             all_results.extend(expert_results)

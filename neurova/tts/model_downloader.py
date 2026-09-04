@@ -35,6 +35,9 @@ MODEL_REGISTRY = {
             "tokenizer.model",
         ],
         "size_hint": "~200MB",
+        # ModelScope 无 ONNX 权重镜像（只有 PyTorch 训练仓，文件格式不同，
+        # 拿来即错）——显式 None，国内源走 hf-mirror（尽力而为）
+        "ms_repo_id": None,
     },
     "moss-audio-tokenizer": {
         "repo_id": "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX",
@@ -49,9 +52,12 @@ MODEL_REGISTRY = {
             "moss_audio_tokenizer_decode_shared.data",
         ],
         "size_hint": "~50MB",
+        "ms_repo_id": None,  # 同上：ModelScope 只有 PyTorch 训练仓
     },
     "bge-small-zh-v1.5": {
         "repo_id": "BAAI/bge-small-zh-v1.5",
+        # ModelScope 官方镜像（实测 14 文件与 HF 对齐，国内直连硬可靠）
+        "ms_repo_id": "AI-ModelScope/bge-small-zh-v1.5",
         "description": "中文文本嵌入向量模型 (512维)",
         "local_dir": "models/embedding/bge-small-zh-v1.5",
         "size_hint": "~130MB",
@@ -122,19 +128,24 @@ class ModelDownloader:
         except (KeyError, ValueError):
             return False
 
-    def ensure_model(self, model_name: str, force: bool = False) -> Path:
+    def ensure_model(self, model_name: str, force: bool = False, source: str = "auto") -> Path:
         """
         确保模型已下载，没有则自动下载
 
         Args:
             model_name: 模型名称
             force: 强制重新下载
+            source: 下载源 auto|modelscope|huggingface。
+                auto = ModelScope（有镜像时）→ hf-mirror → HF 直连 依次降级；
+                显式指定源失败不换源（用户选择必须被尊重）。
 
         Returns:
             模型本地目录路径
         """
         if model_name not in MODEL_REGISTRY:
             raise ValueError(f"未知模型: {model_name}，可用: {list(MODEL_REGISTRY.keys())}")
+        if source not in ("auto", "modelscope", "huggingface"):
+            raise ValueError(f"非法下载源: {source!r}，合法值: auto/modelscope/huggingface")
 
         model_dir = self.get_model_dir(model_name)
         registry = MODEL_REGISTRY[model_name]
@@ -144,136 +155,50 @@ class ModelDownloader:
             self._logger.debug("模型已存在: %s -> %s", model_name, model_dir)
             return model_dir
 
-        # 下载模型
-        self._logger.info("开始下载模型: %s " f"(%s) -> %s", registry['description'], registry['size_hint'], model_dir)
+        # 下载模型（按源解析出引擎序列，依次尝试）
+        self._logger.info("开始下载模型: %s " f"(%s -> %s) -> %s", registry['description'], source, registry['size_hint'], model_dir)
 
-        try:
-            import threading
-            import time
-
-            from huggingface_hub import snapshot_download
-            from huggingface_hub.utils import disable_progress_bars
-
-            model_dir.mkdir(parents=True, exist_ok=True)
-
-            # Disable default tqdm bars so our callback owns the output
+        engine_errors: list[str] = []
+        progress_cb = _wrap_progress(model_name, self._progress_callback)
+        for engine in _resolve_engines(source, registry):
             try:
-                disable_progress_bars()
-            except Exception:
-                pass
+                engine(registry, model_dir, progress_cb)
+                break
+            except Exception as e:  # noqa: BLE001 - 单源失败降级下一源
+                engine_errors.append(f"{getattr(engine, '__name__', engine)}: {e}")
+                self._logger.warning("下载源失败，尝试下一源: %s", e)
+        else:
+            raise RuntimeError(
+                f"所有下载源均失败: {'; '.join(engine_errors)}"
+            )
 
-            def _tqdm_progress_callback(file_path, current_size, total_size):
-                """snapshot_download 的 tqdm 风格回调（如果支持）"""
-                try:
-                    if total_size and total_size > 0 and self._progress_callback:
-                        pct = min(100.0, current_size / total_size * 100.0)
-                        speed = float(current_size)  # approximate
-                        eta = 0.0
-                        self._progress_callback(
-                            DownloadProgress(
-                                model_name=model_name,
-                                total_size=int(total_size),
-                                downloaded_size=int(current_size),
-                                percentage=pct,
-                                speed=speed,
-                                eta=eta,
-                            )
-                        )
-                except Exception:
-                    pass
+        # 完整性校验（引擎已负责下载与进度；此处统一验证 required_files）
+        if not self.is_model_available(model_name):
+            raise RuntimeError(f"模型下载不完整: 缺少必要文件 {registry['required_files']}")
 
-            # 启动一个后台线程，通过监控目录大小来推送进度
-            stop_event = threading.Event()
-            expected_size = _parse_size_hint(registry.get("size_hint", ""))
-            start_ts = time.time()
-            last_size = 0
-            last_ts = start_ts
+        self._logger.info("模型下载完成: %s -> %s", model_name, model_dir)
+        return model_dir
 
-            def _poll_progress():
-                nonlocal last_size, last_ts
-                while not stop_event.is_set():
-                    try:
-                        current_size = _dir_size(model_dir)
-                        now = time.time()
-                        dt = max(now - last_ts, 0.001)
-                        speed = max(current_size - last_size, 0) / dt
-                        last_size = current_size
-                        last_ts = now
-                        if self._progress_callback:
-                            total = expected_size if expected_size > 0 else max(current_size, 1)
-                            pct = min(99.0, current_size / total * 100.0) if expected_size > 0 else 0.0
-                            eta = (total - current_size) / speed if speed > 0 and expected_size > 0 else 0.0
-                            try:
-                                self._progress_callback(
-                                    DownloadProgress(
-                                        model_name=model_name,
-                                        total_size=int(total),
-                                        downloaded_size=int(current_size),
-                                        percentage=pct,
-                                        speed=speed,
-                                        eta=eta,
-                                    )
-                                )
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                    stop_event.wait(0.2)
+        # 完整性校验（引擎已负责下载与进度；此处统一验证 required_files）
+        if not self.is_model_available(model_name):
+            raise RuntimeError(f"模型下载不完整: 缺少必要文件 {registry['required_files']}")
 
-            poll_thread = None
-            if self._progress_callback:
-                poll_thread = threading.Thread(target=_poll_progress, daemon=True)
-                poll_thread.start()
+        self._logger.info("模型下载完成: %s -> %s", model_name, model_dir)
+        return model_dir
 
-            try:
-                try:
-                    snapshot_download(
-                        repo_id=registry["repo_id"],
-                        local_dir=str(model_dir),
-                        resume_download=True,
-                        tqdm_class=None,
-                    )
-                except TypeError:
-                    # 旧版 huggingface_hub 不支持 tqdm_class 参数
-                    snapshot_download(
-                        repo_id=registry["repo_id"],
-                        local_dir=str(model_dir),
-                        resume_download=True,
-                    )
-            finally:
-                stop_event.set()
-                if poll_thread is not None:
-                    poll_thread.join(timeout=1.0)
-                # 发送 100% 进度
-                if self._progress_callback:
-                    try:
-                        final_size = _dir_size(model_dir)
-                        self._progress_callback(
-                            DownloadProgress(
-                                model_name=model_name,
-                                total_size=max(final_size, 1),
-                                downloaded_size=final_size,
-                                percentage=100.0,
-                                speed=0.0,
-                                eta=0.0,
-                            )
-                        )
-                    except Exception:
-                        pass
-
-            # 验证下载完整性
-            if not self.is_model_available(model_name):
-                raise RuntimeError(f"模型下载不完整: 缺少必要文件 {registry['required_files']}")
-
-            self._logger.info("模型下载完成: %s -> %s", model_name, model_dir)
-            return model_dir
-
-        except ImportError:
-            self._logger.error("huggingface_hub 未安装，请运行: pip install huggingface_hub")
-            raise
-        except Exception as e:
-            self._logger.error("模型下载失败: %s - %s", model_name, e)
-            raise
+    def pending_downloads(self) -> list:
+        """待下载清单（模型缺失项），供前端渲染下载提示框。"""
+        return [
+            {
+                "model": name,
+                "description": registry["description"],
+                "size_hint": registry["size_hint"],
+                "available": self.is_model_available(name),
+                "has_ms_mirror": bool(registry.get("ms_repo_id")),
+            }
+            for name, registry in MODEL_REGISTRY.items()
+            if not self.is_model_available(name)
+        ]
 
     def list_models(self) -> list:
         """列出所有可用模型及其状态"""
@@ -310,6 +235,165 @@ class ModelDownloader:
 
 # 全局单例
 _downloader: Optional[ModelDownloader] = None
+
+
+def _wrap_progress(model_name: str, raw_cb):
+    """把 (current, total) 风格的引擎回调包装成 DownloadProgress 推送。
+
+    各引擎统一用 (current_bytes, total_bytes) 上报；total 未知传 0。
+    """
+    if raw_cb is None:
+        return None
+
+    def cb(current: int, total: int = 0):
+        try:
+            total_i = int(total or 0)
+            pct = min(100.0, current / total_i * 100.0) if total_i > 0 else 0.0
+            raw_cb(
+                DownloadProgress(
+                    model_name=model_name,
+                    total_size=total_i,
+                    downloaded_size=int(current),
+                    percentage=pct,
+                    speed=0.0,
+                    eta=0.0,
+                )
+            )
+        except Exception:
+            pass
+
+    return cb
+
+
+def _resolve_engines(source: str, registry: dict) -> list:
+    """把 source 解析为引擎函数序列（依次尝试，前败后继）。
+
+    - auto: ModelScope（registry.ms_repo_id 存在时）→ hf-mirror → HF 直连
+    - modelscope / huggingface: 仅指定引擎（用户显式选择失败不换源）
+    """
+    if source == "modelscope":
+        if not registry.get("ms_repo_id"):
+            raise ValueError(
+                f"该模型无 ModelScope 镜像: {registry.get('repo_id')}（国内源将走 hf-mirror）"
+            )
+        return [_download_via_modelscope]
+    if source == "huggingface":
+        return [_download_via_huggingface]
+    # auto
+    engines: list = []
+    if registry.get("ms_repo_id"):
+        engines.append(_download_via_modelscope)
+    engines.append(_download_via_hf_mirror)
+    engines.append(_download_via_huggingface)
+    return engines
+
+
+def _with_progress_polling(model_dir: Path, download_fn) -> None:
+    """下载执行 + 目录体积轮询推送进度（各引擎共用的进度壳）。
+
+    下载函数异常时停止轮询后原样抛出；进度失败绝不影响下载本身。
+    """
+    import threading
+    import time
+
+    stop_event = threading.Event()
+
+    def _poll_progress():
+        while not stop_event.is_set():
+            try:
+                current_size = _dir_size(model_dir)
+                if download_fn.progress_callback:
+                    download_fn.progress_callback(
+                        DownloadProgress(
+                            model_name=download_fn.model_name,
+                            total_size=max(current_size, 1),
+                            downloaded_size=current_size,
+                            percentage=0.0,  # 体积未知时恒 0（MS 镜像无 size_hint）
+                            speed=0.0,
+                            eta=0.0,
+                        )
+                    )
+            except Exception:
+                pass
+            stop_event.wait(0.5)
+
+    poll_thread = threading.Thread(target=_poll_progress, daemon=True)
+    poll_thread.start()
+    try:
+        download_fn()
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=1.0)
+
+
+def _download_via_modelscope(registry: dict, model_dir: Path, progress_cb=None) -> None:
+    """ModelScope 源（国内直连硬可靠；仅 registry.ms_repo_id 存在时启用）。"""
+    from modelscope import snapshot_download as ms_snapshot
+
+    ms_snapshot(
+        model_id=registry["ms_repo_id"],
+        local_dir=str(model_dir),
+    )
+
+
+def _download_via_hf_mirror(registry: dict, model_dir: Path, progress_cb=None) -> None:
+    """hf-mirror.com 源：HF 协议代理镜像（国内尽力而为——LFS 大文件会
+    308 跳回 huggingface.co 的 Xet CDN，无代理网络可能失败）。
+
+    实现走 huggingface_hub 但临时切 HF_ENDPOINT；hf_hub 1.x 与镜像的
+    API 协议不兼容（实测 LocalEntryNotFoundError），因此直接用
+    requests 拉直链清单 + 文件，不依赖 hf_hub 的镜像兼容性。
+    """
+    import requests
+
+    repo = registry["repo_id"]
+    base = f"https://hf-mirror.com/{repo}/resolve/main/"
+    files = registry.get("required_files") or registry.get("files") or []
+    if not files:
+        # 无清单时退回 hf_hub（配置镜像端点；可能因 1.x 协议不兼容失败）
+        import os
+
+        old = os.environ.get("HF_ENDPOINT")
+        os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+        try:
+            from huggingface_hub import snapshot_download
+
+            snapshot_download(repo_id=repo, local_dir=str(model_dir), resume_download=True)
+        finally:
+            if old is None:
+                os.environ.pop("HF_ENDPOINT", None)
+            else:
+                os.environ["HF_ENDPOINT"] = old
+        return
+
+    model_dir.mkdir(parents=True, exist_ok=True)
+    import urllib.request
+
+    for fname in files:
+        dest = model_dir / fname
+        if dest.exists() and dest.stat().st_size > 0:
+            continue  # 断点续传粒度：文件级
+        req = urllib.request.Request(
+            base + fname, headers={"User-Agent": "Neurova/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=300) as resp, open(dest, "wb") as f:
+            while True:
+                chunk = resp.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+
+
+def _download_via_huggingface(registry: dict, model_dir: Path, progress_cb=None) -> None:
+    """HuggingFace 直连源（huggingface_hub 官方协议）。"""
+    from huggingface_hub import snapshot_download
+
+    snapshot_download(
+        repo_id=registry["repo_id"],
+        local_dir=str(model_dir),
+        resume_download=True,
+        tqdm_class=None,
+    )
 
 
 def _parse_size_hint(size_hint: str) -> int:

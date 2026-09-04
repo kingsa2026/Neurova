@@ -170,6 +170,16 @@ class MetaCognition:
             # 确定负荷级别
             load_level = self._determine_load_level(load_score)
 
+            # 负荷四因子（归一化）随 metadata 透出，供前端负荷构成视图
+            factors = {
+                "tasks": min(1.0, active_tasks / 10.0),
+                "memory": min(1.0, memory_usage),
+                "response": min(1.0, response_time_ms / 5000.0),
+                "error": min(1.0, error_rate),
+            }
+            merged_metadata = dict(metadata or {})
+            merged_metadata.setdefault("factors", factors)
+
             # 创建新状态
             state = CognitiveState(
                 timestamp=datetime.datetime.now(datetime.timezone.utc),
@@ -179,7 +189,7 @@ class MetaCognition:
                 memory_usage=memory_usage,
                 response_time_ms=response_time_ms,
                 error_rate=error_rate,
-                metadata=metadata or {},
+                metadata=merged_metadata,
             )
 
             # 更新状态
@@ -192,7 +202,36 @@ class MetaCognition:
                 self._stats["avg_load_score"] * (self._stats["total_updates"] - 1) + load_score
             ) / self._stats["total_updates"]
 
+            # V3 写穿透：负荷快照落台账（节流——级别变化或每 10 次更新落一行，
+            # 防止每轮对话写放大；台账是元认知单一事实源）
+            self._persist_state_throttled(state, load_level)
+
             return state
+
+    def _persist_state_throttled(self, state: CognitiveState, load_level) -> None:
+        """负荷快照节流落台账：级别变化或每 10 次更新写一行。"""
+        try:
+            level_changed = getattr(self, "_last_persisted_level", None) != load_level.value
+            count = getattr(self, "_updates_since_persist", 0) + 1
+            if not (level_changed or count >= 10):
+                self._updates_since_persist = count
+                return
+            self._last_persisted_level = load_level.value
+            self._updates_since_persist = 0
+            from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+
+            get_meta_ledger(self._agent_id).write_state(
+                agent_id=self._agent_id,
+                load_level=load_level.value,
+                load_score=state.load_score,
+                active_tasks=state.active_tasks,
+                memory_usage=state.memory_usage,
+                response_time_ms=state.response_time_ms,
+                error_rate=state.error_rate,
+                metadata=state.metadata,
+            )
+        except Exception as e:  # 台账故障不得影响主链路
+            logger.debug("负荷快照落台账跳过: %s", e)
 
     def _calculate_load_score(
         self,
