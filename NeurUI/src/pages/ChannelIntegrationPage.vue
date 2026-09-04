@@ -121,6 +121,9 @@
 
           <!-- Modal Body -->
           <div class="nr-ci-modal-body">
+            <!-- 负一屏推送：复用专用设置组件（含授权码指引/测试推送/统计/删除） -->
+            <NegativeScreenSettings v-if="currentChannel?.channelKey === 'negative-screen'" />
+            <template v-else>
             <!-- Common Settings -->
             <div class="nr-ci-section">
               <div class="nr-ci-section-title">{{ t('channel.commonSettings') }}</div>
@@ -199,10 +202,11 @@
                 </div>
               </div>
             </div>
+            </template>
           </div>
 
-          <!-- Modal Footer -->
-          <div class="nr-ci-modal-footer">
+          <!-- Modal Footer（负一屏自带保存/删除，隐藏通用 footer） -->
+          <div v-if="currentChannel?.channelKey !== 'negative-screen'" class="nr-ci-modal-footer">
             <GlassButton variant="ghost" @click="closeConfigModal">{{ t('common.cancel') }}</GlassButton>
             <GlassButton variant="primary" :loading="saving" @click="saveConfig">{{ t('common.save') }}</GlassButton>
           </div>
@@ -217,6 +221,8 @@ import { ref, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { listChannelConfigs, createChannelConfig, testChannelConfig, getIngressStats, type ChannelIngressStats } from '@/api/modules/channel-configs'
+import { getNegativeScreenConfig, updateNegativeScreenConfig, testNegativeScreenPush } from '@/api/modules/negative-screen'
+import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
@@ -393,6 +399,8 @@ const channels = ref<ChannelItem[]>([
   { name: 'Twilio', icon: '', iconSrc: 'https://img.alicdn.com/imgextra/i2/O1CN01nwY8ZK1eY0etBKDWb_!!6000000003882-2-tps-48-48.png', type: 'builtin', enabled: false, color: '#f22f46', channelKey: 'twilio', backendType: 'voice', connected: false },
   { name: 'OneBot', icon: '', iconSrc: 'https://gw.alicdn.com/imgextra/i3/O1CN01xqM0EN1oKrRiAFX3K_!!6000000005207-2-tps-400-400.png', type: 'builtin', enabled: false, color: '#10b981', channelKey: 'onebot', backendType: 'qqbot', connected: false },
   { name: 'iMessage', icon: '', iconSrc: 'https://img.alicdn.com/imgextra/i4/O1CN01QtLiI31uAgL02USNH_!!6000000005997-2-tps-48-48.png', type: 'builtin', enabled: false, color: '#34aadc', channelKey: 'imessage', backendType: 'imessage', connected: false },
+  // 负一屏推送（华为）：迁移自系统设置页，走独立的 /negative-screen API（非 channel-configs）
+  { name: t('settings.negativeScreen'), icon: '📲', type: 'builtin', enabled: false, color: '#e11d48', channelKey: 'negative-screen', backendType: '', connected: false },
 ])
 
 // ─── State ───
@@ -409,6 +417,11 @@ const toastMessage = ref('')
 // ─── Helpers ───
 function openConfigModal(ch: ChannelItem) {
   currentChannel.value = ch
+  // 负一屏推送：配置由内嵌的 NegativeScreenSettings 组件自理，无需填充通用表单
+  if (ch.channelKey === 'negative-screen') {
+    showConfigModal.value = true
+    return
+  }
   const defaults: Record<string, any> = {
     enabled: ch.enabled,
     bot_prefix: '@bot',
@@ -434,7 +447,22 @@ function closeConfigModal() {
 }
 
 function toggleChannel(ch: ChannelItem) {
+  if (ch.channelKey === 'negative-screen') {
+    toggleNegativeScreen(ch)
+    return
+  }
   ch.enabled = !ch.enabled
+}
+
+// 负一屏推送：启用状态持久化到 /negative-screen（非本地翻转）
+async function toggleNegativeScreen(ch: ChannelItem) {
+  const next = !ch.enabled
+  try {
+    await updateNegativeScreenConfig({ enabled: next })
+    ch.enabled = next
+  } catch {
+    showToast(t('negativeScreen.saveFailed'))
+  }
 }
 
 async function loadConfigs() {
@@ -449,6 +477,17 @@ async function loadConfigs() {
           ch.connected = cfg.connected || false
         }
       })
+    }
+    // 负一屏推送走独立 API 回读启用状态
+    const negCh = channels.value.find((c) => c.channelKey === 'negative-screen')
+    if (negCh) {
+      try {
+        const cfg: any = await getNegativeScreenConfig()
+        const d = cfg?.data ?? cfg ?? {}
+        negCh.enabled = !!d.enabled
+      } catch {
+        /* 保持默认停用 */
+      }
     }
   } catch (e) {
     message.error(t('common.error'))
@@ -468,6 +507,8 @@ const ingressStats = ref<ChannelIngressStats | null>(null)
 
 async function saveConfig() {
   if (!currentChannel.value) return
+  // 负一屏推送的保存走内嵌组件，通用保存不适用
+  if (currentChannel.value.channelKey === 'negative-screen') return
   saving.value = true
   const ch = currentChannel.value
   try {
@@ -508,6 +549,17 @@ async function saveConfig() {
 async function testChannel(ch: ChannelItem) {
   testingChannel.value = ch.channelKey
   try {
+    // 负一屏推送：后端用已存配置发测试推送
+    if (ch.channelKey === 'negative-screen') {
+      const result: any = await testNegativeScreenPush({
+        task_name: t('ui.testPushTaskName'),
+        task_content: t('ui.testPushContent') + new Date().toLocaleString(),
+        task_result: t('ui.testPushResult'),
+      })
+      const d = result?.data ?? result ?? {}
+      showToast(d.success ? t('negativeScreen.testPushSuccess') : t('negativeScreen.testPushFailed'))
+      return
+    }
     const payload: Record<string, any> = {
       channel_type: ch.backendType,
       enabled: true,

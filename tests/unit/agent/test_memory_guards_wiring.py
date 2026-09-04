@@ -172,3 +172,61 @@ class TestStep996Gate:
             n == "extract_conversation_rules" and "executed" in s.lower()
             for n, s in statuses
         )
+
+
+class TestCognitiveGraphInit:
+    """总闸级回归（2026-09-05 复审抓虫）：_init_cognitive_graph 缺 c=self.config
+    → NameError 被调用方 try/except 吞掉 → cognitive_engine/unified_retriever/
+    crystallizer/RSI/trace_manager 五组件在真实 Agent 上从未初始化。
+    """
+
+    def test_real_agent_init_creates_five_components(self):
+        """真实 Agent（真构造器）上五个认知组件必须全部就位"""
+        import tempfile
+        from neurova.agent_core import Agent, AgentConfig
+
+        ws = tempfile.mkdtemp(prefix="cog_graph_test_")
+        agent = Agent(
+            AgentConfig(name="t", agent_id="cog_graph_test_agent", workspace_path=ws)
+        )
+        assert agent.cognitive_engine is not None, "认知存储引擎未初始化"
+        assert agent.unified_retriever is not None, "统一检索器未初始化"
+        assert agent.crystallizer is not None, "结晶器未初始化（结晶链死路）"
+        assert getattr(agent, "rsi_orchestrator", None) is not None, "RSI 未初始化"
+        assert agent.trace_manager is not None, "推理链未初始化"
+
+    def test_cognitive_components_injected_into_evolution_singleton(self):
+        """cognition 子系统先于 evolution 执行——其尾部注入条件恒 False，
+        init_evolution 尾部的补注入必须把 crystallizer/RSI 送进单例"""
+        import tempfile
+        from neurova.agent_core import Agent, AgentConfig
+        from neurova.evolution.closed_loop import get_evolution_orchestrator
+
+        ws = tempfile.mkdtemp(prefix="cog_inject_test_")
+        agent = Agent(
+            AgentConfig(name="t", agent_id="cog_inject_test_agent", workspace_path=ws)
+        )
+        orch = get_evolution_orchestrator()
+        assert orch.crystallizer is agent.crystallizer, (
+            "单例 crystallizer 未收到 agent 实例（注入时序断点）"
+        )
+        assert orch.rsi_orchestrator is agent.rsi_orchestrator
+
+    def test_cognitive_graph_survives_nameerror_free_execution(self):
+        """_init_cognitive_graph 在典型最小 agent 桩上必须无 NameError 跑通"""
+        import tempfile
+        from pathlib import Path
+        from neurova.agent_core import Agent
+
+        agent = object.__new__(Agent)
+        agent.config = type(
+            "C", (), {"agent_id": "ng_test", "name": "ng", "workspace_path": Path(tempfile.mkdtemp())}
+        )()
+        agent.evolution = None
+        agent.memory_agent = None
+        agent.memory_manager = None
+        # 缺失依赖走 getattr 默认；只断言不抛 NameError
+        try:
+            agent._init_cognitive_graph()
+        except NameError as e:
+            raise AssertionError(f"_init_cognitive_graph 有未定义名称: {e}")

@@ -748,6 +748,17 @@ class SubSystemContainer:
             except Exception as e:
                 logger.warning("NLToolSynthesizer 初始化失败: %s", e)
 
+        # 认知组件补注入（2026-09-05 复审修复）：_init_cognitive_graph 在 init_memory
+        # 期执行时 evolution 尚未创建，其尾部的 crystallizer/rsi_orchestrator 注入
+        # 条件恒 False（从未跑通过）。子系统顺序 cognition 先于 evolution，故在
+        # 此处（evolution 就绪后）补注入——幂等，晚到组件（如 crystallizer 在
+        # cognitive graph 被跳过时为 None）不覆盖单例已有实例。
+        if a.evolution is not None:
+            if a.crystallizer is not None:
+                a.evolution.crystallizer = a.crystallizer
+            if getattr(a, "rsi_orchestrator", None) is not None:
+                a.evolution.rsi_orchestrator = a.rsi_orchestrator
+
     def init_tools(self):
         """初始化工具系统"""
         a = self.agent
@@ -1297,6 +1308,12 @@ class Agent:
         logger.info("UnifiedRetriever 初始化完成")
 
         # 3. 初始化 PatternCrystallizer
+        # 修复（2026-09-05 复审抓虫）：本方法从 __init__ 抽出时丢了 `c = self.config`，
+        # NameError 被调用方 try/except 吞掉——cognitive_engine/unified_retriever/
+        # crystallizer/RSI/trace_manager 五组件在真实 Agent 上从未初始化
+        # （crystallizer 恒 None → 结晶写入/检索/注入全链死路；
+        #   rsi_orchestrator 缺失 → RSI 迭代/审批/phase 全链死路）。
+        c = self.config
         evolution = getattr(self, "evolution", None)
         self.crystallizer = PatternCrystallizer(
             engine=self.cognitive_engine,

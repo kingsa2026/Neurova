@@ -255,6 +255,7 @@ class PatternCrystallizer:
                     key,
                     [primary_tool],
                     True,
+                    crystallizer=self,  # 自喂回调锚定本实例（否则回退单例，跨 agent 串写复活）
                 )
             except Exception as e:
                 logger.warning("通知 EvolutionOrchestrator 失败: %s", e)
