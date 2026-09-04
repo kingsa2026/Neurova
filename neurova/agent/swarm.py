@@ -42,7 +42,14 @@ class SubAgentRun:
     agent_name: str = ""
     task: str = ""
     origin: str = "chat"  # chat | workflow
-    session_id: Optional[str] = None
+    session_id: Optional[str] = None  # 事件广播目标（发起者的聊天会话）
+    # P2-9（OpenOcta 启发 Member 即 SessionKey）：member 会话键。
+    # member 的任务对话经既有 save_to_session → SessionManager.add_message
+    # 持久化到 sessions/<agent_id>/session_<member_session_id>_*.json，
+    # 完全复用单 agent 会话存储/历史恢复/usage 记账——不建第二套管线。
+    # Windows 文件名安全（冒号在 NTFS 非法，OpenOcta 冒号分节形式在此
+    # 等价转写为下划线）。
+    member_session_id: str = ""
     status: str = "pending"  # pending | running | completed | failed
     report: str = ""
     error: Optional[str] = None
@@ -65,6 +72,7 @@ class SubAgentRun:
             "task": self.task,
             "origin": self.origin,
             "session_id": self.session_id,
+            "member_session_id": self.member_session_id,
             "status": self.status,
             "report": self.report,
             "error": self.error,
@@ -77,13 +85,30 @@ class SubAgentRun:
 
 
 class SwarmManager:
-    """蜂群管理器：派生、执行、事件广播、结果回流"""
+    """蜂群管理器：派生、执行、事件广播、结果回流
+
+    spawn 三明治治理（OpenOcta 启发 P2-10）——LLM 自主繁殖子 agent 时
+    "提示词约束必然被忽略"，由数据层硬拒绝兜底：
+    - 常量硬限：MAX_ACTIVE_CHILDREN / MAX_TASK_CHARS（本类属性，数据层
+      消费方不可绕过）
+    - 结构化拒绝：spawn() 返回 {rejected: True, rejection: {code, message}}，
+      is_policy_denial 识别 swarm_rejection 标记（决策非故障，不计熔断）
+    - 配额闭环：返回值带 active_children / limit；工具描述内嵌配额纪律
+      （builtin_tools.py spawn_subagent schema，第三层提示词纪律）
+    """
 
     # P2-10 修复: 已完成 run 的保留上限。超出后按完成时间从最旧逐出，
     # 防止 _runs 随派生次数无界增长导致长期运行内存泄漏。
     # 运行中（pending/running）的 run 永不逐出；status() 查询已逐出的
     # 历史记录返回"未找到"（与从未存在等价，可接受）。
     MAX_FINISHED_RUNS = 500
+
+    # ── spawn 三明治之常量硬限（数据层） ──────────────────────────
+    # 同时运行中的派生上限（pending/running 全局口径；桌面单用户产品的
+    # 进程保护阀门，member 内递归派生同受此限）。OpenOcta 直接子数=5 同量级。
+    MAX_ACTIVE_CHILDREN = 5
+    # 单个 task 长度上限（防 LLM 把整段对话历史塞进 task 拖垮子 Agent）
+    MAX_TASK_CHARS = 8000
 
     def __init__(self):
         self._runs: Dict[str, SubAgentRun] = {}
@@ -123,6 +148,23 @@ class SwarmManager:
         if not task or not str(task).strip():
             return {"error": "task 不能为空"}
 
+        # ── 三明治之数据层结构化拒绝（先于一切派生动作） ──────────
+        task = str(task)
+        if len(task) > self.MAX_TASK_CHARS:
+            return self._rejection(
+                "TASK_TOO_LARGE",
+                f"task 长度 {len(task)} 超过硬限 {self.MAX_TASK_CHARS}——"
+                "请压缩为自包含的子任务描述，不要把对话历史整段塞入",
+            )
+        active_children = self._count_active()
+        if active_children >= self.MAX_ACTIVE_CHILDREN:
+            return self._rejection(
+                "MAX_ACTIVE_CHILDREN",
+                f"运行中的子 Agent 已达硬限 {self.MAX_ACTIVE_CHILDREN}——"
+                "请等待现有子任务完成（subagent_status 查询）后再派生",
+                active_children=active_children,
+            )
+
         agent, resolved_id, fallback = self._resolve_agent(agent_id)
         if agent is None:
             return {"error": f"未找到可用的子 Agent（请求: {agent_id or 'default'}）"}
@@ -130,9 +172,10 @@ class SwarmManager:
         run = SubAgentRun(
             agent_id=resolved_id,
             agent_name=getattr(agent.config, "name", resolved_id) if hasattr(agent, "config") else resolved_id,
-            task=str(task),
+            task=task,
             origin=origin,
             session_id=session_id,
+            member_session_id=f"swarm_{uuid.uuid4().hex[:12]}",
             node_id=node_id,
             execution_id=execution_id,
         )
@@ -143,6 +186,7 @@ class SwarmManager:
         if fallback:
             logger.info("Swarm: 请求的 agent_id=%s 不存在，回退到 %s", agent_id, resolved_id)
 
+        quota = self._quota_snapshot()
         if background:
             asyncio_task = asyncio.create_task(
                 self._execute(run, agent, initiator_agent, stream)
@@ -158,13 +202,15 @@ class SwarmManager:
                 "subagent_id": run.subagent_id,
                 "agent_id": run.agent_id,
                 "agent_name": run.agent_name,
+                "member_session_id": run.member_session_id,
                 "status": "pending",
                 "background": True,
                 "hint": "使用 subagent_status 工具查询执行结果",
+                **quota,
             }
 
         await self._execute(run, agent, initiator_agent, stream)
-        return run.to_dict()
+        return {**run.to_dict(), **self._quota_snapshot()}
 
     def status(self, subagent_id: str) -> Dict[str, Any]:
         """查询子 Agent 运行状态"""
@@ -187,6 +233,37 @@ class SwarmManager:
         return [r.to_dict() for r in runs[:limit]]
 
     # ── 内部实现 ──────────────────────────────────────────────
+
+    def _count_active(self) -> int:
+        """运行中（pending/running）派生数（含后台任务）。"""
+        with self._lock:
+            return sum(1 for r in self._runs.values() if r.status in ("pending", "running"))
+
+    def _quota_snapshot(self) -> Dict[str, Any]:
+        """配额闭环快照（返回值带 active_children/limit，OpenOcta 语义）。"""
+        return {
+            "active_children": self._count_active(),
+            "limit": self.MAX_ACTIVE_CHILDREN,
+        }
+
+    def _rejection(
+        self, code: str, message: str, active_children: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """数据层结构化拒绝（SpawnRejectReason 对应物）。
+
+        swarm_rejection 标记键使 is_policy_denial 归类为"决策"而非
+        "后端故障"——熔断器/失败统计不计数。
+        """
+        payload: Dict[str, Any] = {
+            "rejected": True,
+            "swarm_rejection": True,
+            "rejection": {"code": code, "message": message},
+            "limit": self.MAX_ACTIVE_CHILDREN,
+            "hint": "蜂群派生受数据层硬限保护；提示词纪律要求按需派生（未指定数量时每层 1-3 个）",
+        }
+        if active_children is not None:
+            payload["active_children"] = active_children
+        return payload
 
     def _forget_task(self, subagent_id: str) -> None:
         """移除已完成后台任务的引用（done 回调）"""
@@ -272,12 +349,24 @@ class SwarmManager:
             # metadata, enable_tts) —— 不接受 temperature/max_tokens，
             # 子 Agent 使用自身 llm_config（独立模型/人设是蜂群的前提）。
             # event_emitter 经 metadata 透传（chat_pipeline._init_agent_state 提取）
-            spawn_metadata = {"source": "swarm", "origin": run.origin, "subagent_id": run.subagent_id}
+            #
+            # P2-9（OpenOcta 启发 Member 即 SessionKey）：session_id = member
+            # 会话键——任务对话经既有 save_to_session 落盘到
+            # sessions/<agent_id>/session_<member_session_id>_*.json，member
+            # 拥有可查询/可审计/跨轮恢复的普通会话，完全复用单 agent 会话
+            # 存储；不再用 None（不落盘、无历史）。member 内递归 spawn 时
+            # 其 current_session_id 即 member 键，治理阀门天然覆盖递归。
+            spawn_metadata = {
+                "source": "swarm",
+                "origin": run.origin,
+                "subagent_id": run.subagent_id,
+                "session_id": run.member_session_id,
+            }
             if emitter is not None:
                 spawn_metadata["event_emitter"] = emitter
             response = await agent.chat(
                 run.task,
-                session_id=None,  # 子 Agent 用独立上下文，不复用主会话历史
+                session_id=run.member_session_id,
                 metadata=spawn_metadata,
             )
             report = self._extract_text(response)

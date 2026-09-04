@@ -61,6 +61,7 @@ class GraphNode:
     label: str = ""
     node_type: NodeType = NodeType.CONCEPT
     properties: Dict[str, Any] = field(default_factory=dict)
+    aliases: List[str] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
     weight: float = 1.0
     created_at: float = field(default_factory=time.time)
@@ -74,6 +75,7 @@ class GraphNode:
             "label": self.label,
             "node_type": self.node_type.value,
             "properties": self.properties,
+            "aliases": self.aliases,
             "tags": self.tags,
             "weight": self.weight,
             "created_at": self.created_at,
@@ -84,11 +86,13 @@ class GraphNode:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GraphNode":
         """从字典创建"""
+        aliases = data.get("aliases", [])
         return cls(
             node_id=data.get("node_id", str(uuid.uuid4())),
             label=data.get("label", ""),
             node_type=NodeType(data.get("node_type", "concept")),
             properties=data.get("properties", {}),
+            aliases=aliases if isinstance(aliases, list) else [],
             tags=data.get("tags", []),
             weight=data.get("weight", 1.0),
             created_at=data.get("created_at", time.time()),
@@ -231,6 +235,11 @@ class KnowledgeGraphManager:
         # 线程安全
         self._lock = threading.RLock()
 
+        # P1-1 实体消解合并台账：source_id -> {target_id, moved_edge_ids,
+        # source_snapshot, reason, merged_at}。独立结构而非删除——undo 按
+        # 名单原路读回，此前已删的边不在名单不会被误救（Utopia 0005）。
+        self._merge_log: Dict[str, Dict[str, Any]] = {}
+
         # 加载已有数据
         if self._storage_dir:
             self._storage_dir.mkdir(parents=True, exist_ok=True)
@@ -245,6 +254,15 @@ class KnowledgeGraphManager:
 
         nodes_file = self._storage_dir / "nodes.json"
         edges_file = self._storage_dir / "edges.json"
+        merges_file = self._storage_dir / "merges.json"
+
+        if merges_file.exists():
+            try:
+                data = json.loads(merges_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self._merge_log = {k: v for k, v in data.items() if isinstance(v, dict)}
+            except Exception as e:
+                logger.warning("Failed to load merge log: %s", e)
 
         if nodes_file.exists():
             try:
@@ -294,6 +312,19 @@ class KnowledgeGraphManager:
             )
         except Exception as e:
             logger.error("Failed to save knowledge graph: %s", e)
+
+    def _save_merges(self):
+        """合并台账持久化（与 nodes/edges 分文件， undo 依赖它）。"""
+        if not self._storage_dir or not self._auto_save:
+            return
+        try:
+            merges_file = self._storage_dir / "merges.json"
+            merges_file.write_text(
+                json.dumps(self._merge_log, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.error("Failed to save merge log: %s", e)
 
     def _rebuild_indexes(self):
         """重建索引"""
@@ -470,6 +501,95 @@ class KnowledgeGraphManager:
             self._save()
             return True
 
+    # ============================================================
+    # P1-1 实体消解：合并原语（可回滚，Utopia 0005 裁剪版）
+    # ============================================================
+
+    def merge_nodes(self, source_id: str, target_id: str, reason: str = "") -> bool:
+        """source 并入 target：source 出图（快照进台账），触及边端点原位改挂
+        target；并入后成自环的边摘除入名单。undo_merge 按名单原路读回。"""
+        with self._lock:
+            src = self._nodes.get(source_id)
+            dst = self._nodes.get(target_id)
+            if not src or not dst or source_id == target_id:
+                return False
+
+            moved: Dict[str, Dict[str, str]] = {}
+            dropped: Dict[str, Dict[str, Any]] = {}
+            for edge_id in list(self._adjacency.get(source_id, set())):
+                edge = self._edges.get(edge_id)
+                if not edge:
+                    continue
+                orig = {"orig_source": edge.source_id, "orig_target": edge.target_id}
+                new_source = target_id if edge.source_id == source_id else edge.source_id
+                new_target = target_id if edge.target_id == source_id else edge.target_id
+                if new_source == new_target:
+                    # 并入即自环：从图摘除，undo 时原路放回
+                    dropped[edge_id] = edge.to_dict()
+                    self._edges.pop(edge_id, None)
+                    continue
+                moved[edge_id] = orig
+                edge.source_id = new_source
+                edge.target_id = new_target
+
+            # source 出图（索引清理与 delete_node 同法）
+            self._node_type_index[src.node_type.value].discard(source_id)
+            self._label_index[src.label.lower()].discard(source_id)
+            for tag in src.tags:
+                self._tag_index[tag.lower()].discard(source_id)
+            self._adjacency.pop(source_id, None)
+            self._source_index.pop(source_id, None)
+            self._target_index.pop(source_id, None)
+            self._nodes.pop(source_id, None)
+            self._rebuild_indexes()
+
+            self._merge_log[source_id] = {
+                "target_id": target_id,
+                "source_snapshot": src.to_dict(),
+                "moved_edges": moved,
+                "dropped_edges": dropped,
+                "reason": str(reason or ""),
+                "merged_at": time.time(),
+            }
+            self._save()
+            self._save_merges()
+            return True
+
+    def undo_merge(self, source_id: str) -> bool:
+        """按台账把 source 原路读回：节点复活、moved 边端点翻回原值、dropped
+        边放回。边已被第三方删除/再次改挂的不在补救范围（现存为准）。"""
+        with self._lock:
+            rec = self._merge_log.get(source_id)
+            if not rec:
+                return False
+
+            node = GraphNode.from_dict(rec.get("source_snapshot") or {})
+            self._nodes[node.node_id] = node
+            self._node_type_index[node.node_type.value].add(node.node_id)
+            self._label_index[node.label.lower()].add(node.node_id)
+            for tag in node.tags:
+                self._tag_index[tag.lower()].add(node.node_id)
+
+            for edge_id, orig in (rec.get("moved_edges") or {}).items():
+                edge = self._edges.get(edge_id)
+                if edge is None:
+                    continue
+                if edge.source_id == rec.get("target_id"):
+                    edge.source_id = orig["orig_source"]
+                if edge.target_id == rec.get("target_id"):
+                    edge.target_id = orig["orig_target"]
+            for edge_id, snapshot in (rec.get("dropped_edges") or {}).items():
+                if edge_id in self._edges:
+                    continue
+                edge = GraphEdge.from_dict(snapshot)
+                self._edges[edge.edge_id] = edge
+
+            del self._merge_log[source_id]
+            self._rebuild_indexes()
+            self._save()
+            self._save_merges()
+            return True
+
     def search_nodes(
         self,
         query: str,
@@ -511,6 +631,9 @@ class KnowledgeGraphManager:
                         candidates &= tag_ids
 
             results = [self._nodes[nid] for nid in candidates if nid in self._nodes]
+            # 已并入其他节点的实体不出现在检索（merge_nodes 时已出图，此为
+            # 台账旁路/加载竞态的双保险）
+            results = [n for n in results if n.node_id not in self._merge_log]
             results.sort(key=lambda n: n.weight, reverse=True)
             return results[:limit]
 
@@ -875,7 +998,10 @@ class KnowledgeGraphManager:
     def get_stats(self) -> GraphStats:
         """获取图谱统计信息"""
         with self._lock:
-            node_type_counts = {k: len(v) for k, v in self._node_type_index.items()}
+            # 合并出图的节点不计入统计（台账旁路双保险）
+            node_type_counts = {
+                k: len(v - set(self._merge_log.keys())) for k, v in self._node_type_index.items()
+            }
             relation_type_counts = {}
             degrees = defaultdict(int)
 
@@ -889,7 +1015,7 @@ class KnowledgeGraphManager:
             max_degree = max(degrees.values()) if degrees else 0
 
             return GraphStats(
-                node_count=len(self._nodes),
+                node_count=len(self._nodes) - len(self._merge_log),
                 edge_count=len(self._edges),
                 node_type_counts=node_type_counts,
                 relation_type_counts=relation_type_counts,

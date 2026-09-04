@@ -64,6 +64,33 @@
       </div>
     </a-spin>
 
+    <!-- P1-2 待确认记忆队列：交互式写入先入待审，确认后才进主库 -->
+    <GlassCard v-if="isAdmin" variant="subtle" class="pending-panel">
+      <div class="breakdown-header">
+        {{ t('memory.pendingQueue') }}
+        <a-badge :count="pendingMemories.length" :offset="[6, 0]" />
+      </div>
+      <a-empty v-if="!pendingMemories.length" :description="t('memory.pendingEmpty')" />
+      <a-list v-else :data-source="pendingMemories" row-key="id" size="small">
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-list-item-meta
+              :title="item.content"
+              :description="`${item.category} · ${formatPendingTime(item.created_at)}`"
+            />
+            <template #actions>
+              <a-button size="small" @click="handleRejectPending(item)">
+                {{ t('memory.pendingReject') }}
+              </a-button>
+              <a-button type="primary" size="small" @click="handleConfirmPending(item)">
+                {{ t('memory.pendingConfirm') }}
+              </a-button>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
+    </GlassCard>
+
     <!-- By-type breakdown (NEW - from stats API) -->
     <div v-if="memoryStats?.by_type?.length" class="type-breakdown">
       <GlassCard variant="subtle">
@@ -371,10 +398,15 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useAgentStore } from '@/stores/agents'
+import { useAuthStore } from '@/stores/auth'
 import * as memoryApi from '@/api/modules/memory'
 import type { MemoryEntry, MemorySearchResult, MemoryStats } from '@/api/modules/memory'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
+const pendingMemories = ref<memoryApi.PendingMemory[]>([])
+
 const { agentId, currentAgent } = useAgentPage({
   onAgentChange: () => {
     fetchMemories()
@@ -814,7 +846,48 @@ const onImportFile = (file: File) => {
 onMounted(() => {
   fetchMemories()
   fetchStats()
+  fetchPending()
 })
+
+// ── P1-2 待确认记忆队列 ──────────────────────────────────────
+
+async function fetchPending() {
+  if (!isAdmin.value) return
+  try {
+    const res: any = await memoryApi.listPendingMemories()
+    pendingMemories.value = res?.data?.items ?? res?.items ?? []
+  } catch {
+    pendingMemories.value = []
+  }
+}
+
+function formatPendingTime(ts: number) {
+  return ts ? new Date(ts * 1000).toLocaleString() : '—'
+}
+
+async function handleConfirmPending(item: memoryApi.PendingMemory) {
+  try {
+    await memoryApi.confirmPendingMemory(item.id)
+    message.success(t('memory.pendingConfirmed'))
+    await fetchPending()
+    fetchMemories()
+    fetchStats()
+  } catch (err: any) {
+    const detail = err?.response?.data?.message
+    message.error(typeof detail === 'string' ? detail : t('memory.pendingError'))
+  }
+}
+
+async function handleRejectPending(item: memoryApi.PendingMemory) {
+  try {
+    await memoryApi.rejectPendingMemory(item.id)
+    message.success(t('memory.pendingRejected'))
+    await fetchPending()
+  } catch (err: any) {
+    const detail = err?.response?.data?.message
+    message.error(typeof detail === 'string' ? detail : t('memory.pendingError'))
+  }
+}
 </script>
 
 <style scoped>
@@ -822,6 +895,12 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+.pending-panel .breakdown-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
 }
 
 .page-header {

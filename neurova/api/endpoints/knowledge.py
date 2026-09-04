@@ -273,6 +273,116 @@ async def list_public_submissions(
     return [_item_response(i) for i in repo.pending_submissions()]
 
 
+class ConflictResolutionRequest(BaseModel):
+    """同值冲突裁决请求（仅管理员）"""
+
+    resolution: str = Field(..., description="keep_both=保留双条目 / supersede_old=新说法接管（旧条目入墓碑）")
+
+
+@router.get("/conflicts")
+async def list_conflicts(
+    request: Request,
+    status: str = Query(default="pending", description="pending 待审 / resolved 裁决历史"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """同值冲突清单（仅管理员）：新条目与旧条目疑似「同一事实的新说法」"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可查看冲突队列")
+    repo = _get_repository()
+    return repo.list_conflicts(status=status)
+
+
+@router.post("/conflicts/{conflict_id}/resolve")
+async def resolve_conflict(
+    request: Request,
+    conflict_id: str = Path(..., description="冲突记录ID"),
+    body: ConflictResolutionRequest = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """裁决同值冲突（仅管理员）。supersede_old 会把旧条目移入墓碑（可复活）。"""
+    _get_request_id(request)
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可裁决冲突")
+    repo = _get_repository()
+    try:
+        ok = repo.resolve_conflict(
+            conflict_id, body.resolution, resolved_by=str(current_user.get("user_id", ""))
+        )
+    except ValueError as e:
+        raise _guard(e)
+    except LookupError as e:
+        raise _guard(e)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conflict '%s' not found or already resolved" % conflict_id)
+    return {
+        "code": 0,
+        "message": "Conflict resolved (%s)" % body.resolution,
+        "data": {"conflict_id": conflict_id, "resolution": body.resolution},
+    }
+
+
+@router.get("/deleted")
+async def list_deleted_knowledge(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """墓碑清单（仅管理员）：软删条目审计视图，Utopia 0022 删除是事件。"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可查看墓碑清单")
+    repo = _get_repository()
+    out = []
+    for rec in repo.list_deleted():
+        item = rec.get("item") or {}
+        out.append(
+            {
+                "knowledge_id": rec.get("knowledge_id"),
+                "title": item.get("title", ""),
+                "owner_user_id": item.get("owner_user_id", ""),
+                "deleted_at": rec.get("deleted_at"),
+                "deleted_by": rec.get("deleted_by"),
+                "superseded_by": rec.get("superseded_by"),
+            }
+        )
+    return out
+
+
+@router.post("/{knowledge_id}/restore")
+async def restore_knowledge(
+    request: Request,
+    knowledge_id: str = Path(..., description="知识ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """从墓碑复活条目（属主或管理员）"""
+    _get_request_id(request)
+    repo = _get_repository()
+    rec = next((r for r in repo.list_deleted() if r.get("knowledge_id") == knowledge_id), None)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Knowledge '%s' is not deleted" % knowledge_id)
+    owner_id = str((rec.get("item") or {}).get("owner_user_id", "") or "")
+    if current_user.get("role") != "admin" and str(current_user.get("user_id", "")) != owner_id:
+        raise HTTPException(status_code=403, detail="仅条目属主或管理员可恢复")
+    if not repo.restore_knowledge(knowledge_id):
+        raise HTTPException(status_code=404, detail="Knowledge '%s' is not deleted" % knowledge_id)
+    return {
+        "code": 0,
+        "message": "Knowledge '%s' restored" % knowledge_id,
+        "data": {"knowledge_id": knowledge_id, "action": "restored"},
+        "request_id": _get_request_id(request),
+    }
+
+
+@router.get("/{knowledge_id}/revisions")
+async def list_knowledge_revisions(
+    request: Request,
+    knowledge_id: str = Path(..., description="知识ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """条目 revision 账本（最新在前；仅可见条目）"""
+    repo = _get_repository()
+    _entry_or_404(repo, knowledge_id, current_user)
+    return repo.list_revisions(knowledge_id)
+
+
 @router.post("/{knowledge_id}/share", response_model=KnowledgeItem)
 async def share_knowledge(
     request: Request,
@@ -608,7 +718,14 @@ async def delete_knowledge(
                 "request_id": request_id,
             }
 
-    repo.delete_knowledge(_agent_id, knowledge_id)
+    if purge:
+        repo.purge_knowledge(_agent_id, knowledge_id)
+    else:
+        repo.delete_knowledge(
+            _agent_id,
+            knowledge_id,
+            deleted_by=str(current_user.get("user_id", "")),
+        )
 
     return {
         "code": 0,

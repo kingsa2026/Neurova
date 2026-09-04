@@ -1006,3 +1006,44 @@ export function compareSearchMethods(query: string, topK = 10) {
 export function analyzeSearchQuery(query: string) {
   return api.post<ApiResponse<SearchAnalysis>>(`${SEMANTIC_BASE}/analyze`, { query })
 }
+
+// ---------------------------------------------------------------------------
+// P1-2 记忆待确认队列（Utopia pending_facts 裁剪版：交互式写入先入待审）
+// ---------------------------------------------------------------------------
+
+/** 待确认记忆记录。 */
+export interface PendingMemory {
+  id: string
+  content: string
+  category: string
+  memory_type: string
+  source_sentence: string
+  status: 'pending' | 'confirmed' | 'rejected'
+  proposed_by: string
+  created_at: number
+  decided_by?: string
+  decided_at?: number
+  note?: string
+}
+
+/** 待确认记忆清单（本人提议；admin 全量）。 */
+export function listPendingMemories() {
+  return api.get<ApiResponse<{ items: PendingMemory[]; total: number }>>(`${BASE}/pending`)
+}
+
+/** 确认记忆入主库。 */
+export function confirmPendingMemory(id: string) {
+  return api.post<ApiResponse<{ memory_id: string }>>(`${BASE}/pending/${id}/confirm`, { note: '' })
+}
+
+/** 拒绝记忆提议（同内容不再重复提议）。 */
+export function rejectPendingMemory(id: string, note = '') {
+  return api.post<ApiResponse<{ pending_id: string }>>(`${BASE}/pending/${id}/reject`, { note })
+}
+
+/** Admin: 裁决历史。 */
+export function listPendingMemoryDecisions(status: 'confirmed' | 'rejected' = 'confirmed') {
+  return api.get<ApiResponse<{ items: PendingMemory[]; total: number }>>(`${BASE}/pending/decisions`, {
+    params: { status },
+  })
+}

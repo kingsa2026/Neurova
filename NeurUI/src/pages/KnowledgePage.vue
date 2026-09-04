@@ -115,6 +115,9 @@
               <GlassButton variant="ghost" size="sm" @click="editItem(record)">
                 {{ t('common.edit') }}
               </GlassButton>
+              <GlassButton variant="ghost" size="sm" @click="openRevisions(record)">
+                {{ t('knowledge.revisionsBtn') }}
+              </GlassButton>
               <GlassButton variant="danger" size="sm" @click="confirmDelete(record)">
                 {{ t('common.delete') }}
               </GlassButton>
@@ -158,6 +161,98 @@
               </a-button>
               <a-button danger size="small" @click="handleReview(item, false)">
                 {{ t('knowledge.reviewReject') }}
+              </a-button>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
+    </GlassPanel>
+
+    <!-- P0-3 同值冲突队列（admin）：新条目疑似"同一事实的新说法" -->
+    <GlassPanel v-if="isAdmin" class="kb-conflicts">
+      <div class="kb-review-header">
+        <h3 class="kb-review-title">{{ t('knowledge.conflictQueue') }}</h3>
+      </div>
+      <a-empty v-if="!conflicts.length" :description="t('knowledge.conflictEmpty')" />
+      <a-list v-else :data-source="conflicts" row-key="conflict_id">
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-list-item-meta
+              :title="item.title"
+              :description="t('knowledge.conflictSimilarity', { score: (item.similarity * 100).toFixed(0) })"
+            />
+            <template #actions>
+              <a-button size="small" @click="handleResolveConflict(item, 'keep_both')">
+                {{ t('knowledge.conflictKeepBoth') }}
+              </a-button>
+              <a-button type="primary" size="small" @click="handleResolveConflict(item, 'supersede_old')">
+                {{ t('knowledge.conflictSupersede') }}
+              </a-button>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
+    </GlassPanel>
+
+    <!-- P0-2 墓碑清单（admin）：软删条目可复活 -->
+    <GlassPanel v-if="isAdmin" class="kb-tombstones">
+      <div class="kb-review-header">
+        <h3 class="kb-review-title">{{ t('knowledge.tombstones') }}</h3>
+      </div>
+      <a-empty v-if="!tombstones.length" :description="t('knowledge.tombstoneEmpty')" />
+      <a-list v-else :data-source="tombstones" row-key="knowledge_id">
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-list-item-meta
+              :title="item.title"
+              :description="t('knowledge.tombstoneMeta', { by: item.deleted_by || '-', superseded: item.superseded_by ? t('knowledge.tombstoneSuperseded') : '' })"
+            />
+            <template #actions>
+              <a-button size="small" @click="handleRestore(item)">
+                {{ t('knowledge.tombstoneRestore') }}
+              </a-button>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
+    </GlassPanel>
+
+    <!-- P0-2 revision 历史（属主/管理员）：update 前旧值快照 -->
+    <a-drawer v-model:open="revisionsOpen" :title="t('knowledge.revisionsTitle')" width="480">
+      <a-empty v-if="!revisions.length" :description="t('knowledge.revisionsEmpty')" />
+      <a-timeline v-else>
+        <a-timeline-item v-for="(rev, idx) in revisions" :key="idx">
+          <p class="rev-time">{{ formatDate(rev.updated_at) }}</p>
+          <p v-for="field in rev.changed_fields" :key="field" class="rev-field">
+            <span class="rev-name">{{ field }}</span>
+            <span class="rev-old">{{ truncate(String(rev.old?.[field] ?? ''), 120) }}</span>
+          </p>
+        </a-timeline-item>
+      </a-timeline>
+    </a-drawer>
+
+    <!-- P1-1 图谱实体消解队列（admin） -->
+    <GlassPanel v-if="isAdmin" class="kb-resolution">
+      <div class="kb-review-header">
+        <h3 class="kb-review-title">{{ t('knowledge.resolutionQueue') }}</h3>
+        <a-button size="small" :loading="resolutionRunning" @click="handleRunResolution">
+          {{ t('knowledge.resolutionRun') }}
+        </a-button>
+      </div>
+      <a-empty v-if="!resolutionReviews.length" :description="t('knowledge.resolutionEmpty')" />
+      <a-list v-else :data-source="resolutionReviews" row-key="review_id">
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-list-item-meta
+              :title="`${item.left_label} ↔ ${item.right_label}`"
+              :description="t('knowledge.conflictSimilarity', { score: (item.similarity * 100).toFixed(0) })"
+            />
+            <template #actions>
+              <a-button size="small" @click="handleResolveReview(item, 'kept')">
+                {{ t('knowledge.resolutionKept') }}
+              </a-button>
+              <a-button type="primary" size="small" @click="handleResolveReview(item, 'merged')">
+                {{ t('knowledge.resolutionMerged') }}
               </a-button>
             </template>
           </a-list-item>
@@ -379,8 +474,16 @@ import {
   listKbCollections,
   createKbCollection,
   deleteKbCollection,
+  listKnowledgeConflicts,
+  resolveKnowledgeConflict,
+  listDeletedKnowledge,
+  restoreKnowledgeNode,
+  listKnowledgeRevisions,
+  listResolutionReviews,
+  resolveResolutionReview,
+  runEntityResolution,
 } from '@/api/modules/knowledge'
-import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope } from '@/api/modules/knowledge'
+import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, DeletedKnowledge, GraphResolutionReview } from '@/api/modules/knowledge'
 import { request } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -438,6 +541,13 @@ const sharing = ref(false)
 const shareTarget = ref<KnowledgeItem | null>(null)
 const shareUsernames = ref('')
 const publicSubmissions = ref<KnowledgeItem[]>([])
+// P0-3 冲突队列 / P0-2 墓碑 + revisions / P1-1 消解队列
+const conflicts = ref<KnowledgeConflict[]>([])
+const tombstones = ref<DeletedKnowledge[]>([])
+const resolutionReviews = ref<GraphResolutionReview[]>([])
+const resolutionRunning = ref(false)
+const revisionsOpen = ref(false)
+const revisions = ref<{ old: Record<string, unknown>; changed_fields: string[]; updated_at: string }[]>([])
 // 语义检索的可信度映射（id → rrf 归一化分）
 const confidenceMap = ref<Record<string, number>>({})
 
@@ -772,6 +882,99 @@ async function handleReview(item: KnowledgeItem, approve: boolean) {
   }
 }
 
+// ── P0-3 同值冲突 / P0-2 墓碑 + revisions / P1-1 消解 ──────────
+
+async function fetchConflicts() {
+  if (!isAdmin.value) return
+  try {
+    const res: any = await listKnowledgeConflicts('pending')
+    const data = res?.data ?? res
+    conflicts.value = Array.isArray(data) ? data : data?.items ?? []
+  } catch {
+    conflicts.value = []
+  }
+}
+
+async function handleResolveConflict(item: KnowledgeConflict, resolution: 'keep_both' | 'supersede_old') {
+  try {
+    await resolveKnowledgeConflict(item.conflict_id, resolution)
+    message.success(t('knowledge.conflictResolved'))
+    await fetchConflicts()
+    fetchKnowledge()
+    if (isAdmin.value) fetchTombstones()
+  } catch (err: any) {
+    const detail = err?.response?.data?.detail
+    message.error(typeof detail === 'string' ? detail : t('knowledge.reviewError'))
+  }
+}
+
+async function fetchTombstones() {
+  if (!isAdmin.value) return
+  try {
+    const res: any = await listDeletedKnowledge()
+    tombstones.value = Array.isArray(res?.data ?? res) ? res?.data ?? res : []
+  } catch {
+    tombstones.value = []
+  }
+}
+
+async function handleRestore(item: DeletedKnowledge) {
+  try {
+    await restoreKnowledgeNode(item.knowledge_id)
+    message.success(t('knowledge.tombstoneRestored'))
+    await fetchTombstones()
+    fetchKnowledge()
+  } catch (err: any) {
+    const detail = err?.response?.data?.detail
+    message.error(typeof detail === 'string' ? detail : t('knowledge.tombstoneRestoreError'))
+  }
+}
+
+async function openRevisions(item: KnowledgeItem) {
+  try {
+    const res: any = await listKnowledgeRevisions(item.id)
+    revisions.value = Array.isArray(res) ? res : (res?.data ?? [])
+    revisionsOpen.value = true
+  } catch {
+    message.error(t('knowledge.revisionsError'))
+  }
+}
+
+async function fetchResolutionReviews() {
+  if (!isAdmin.value) return
+  try {
+    const res: any = await listResolutionReviews(agentId.value)
+    resolutionReviews.value = res?.data?.reviews ?? []
+  } catch {
+    resolutionReviews.value = []
+  }
+}
+
+async function handleRunResolution() {
+  resolutionRunning.value = true
+  try {
+    await runEntityResolution(agentId.value)
+    message.success(t('knowledge.resolutionRan'))
+    await fetchResolutionReviews()
+  } catch (err: any) {
+    const detail = err?.response?.data?.detail
+    message.error(typeof detail === 'string' ? detail : t('knowledge.resolutionRunError'))
+  } finally {
+    resolutionRunning.value = false
+  }
+}
+
+async function handleResolveReview(item: GraphResolutionReview, decision: 'merged' | 'kept') {
+  try {
+    await resolveResolutionReview(agentId.value, item.review_id, decision)
+    message.success(t('knowledge.resolutionResolved'))
+    await fetchResolutionReviews()
+  } catch (err: any) {
+    const detail = err?.response?.data?.detail
+    message.error(typeof detail === 'string' ? detail : t('knowledge.resolutionRunError'))
+  }
+}
+
 function editItem(item: KnowledgeItem) {
   editingItem.value = item
   form.value = {
@@ -988,6 +1191,9 @@ onMounted(() => {
   fetchKbConfigs()
   fetchKbCollections()
   fetchSubmissions()
+  fetchConflicts()
+  fetchTombstones()
+  fetchResolutionReviews()
 })
 </script>
 
@@ -1093,6 +1299,10 @@ onMounted(() => {
 }
 
 .kb-review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 12px;
 }
 
@@ -1101,5 +1311,28 @@ onMounted(() => {
   font-size: 16px;
   font-weight: 600;
   color: var(--nr-text-primary);
+}
+
+.rev-time {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+}
+
+.rev-field {
+  margin: 2px 0;
+  font-size: 13px;
+}
+
+.rev-name {
+  display: inline-block;
+  min-width: 72px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+}
+
+.rev-old {
+  color: var(--nr-text-secondary);
+  word-break: break-all;
 }
 </style>

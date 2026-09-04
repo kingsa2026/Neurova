@@ -466,6 +466,19 @@ class ChatPipeline:
         # 递增对话轮次（经 Agent 显式 API）
         self._agent.increment_turn_count()
 
+        # P2-11（OpenOcta 启发 SnapshotForSession）：会话身份快照冻结——
+        # 同会话首轮取 {soul, personality, constitution} 快照并缓存，之后
+        # 轮次复用冻结值（身份文件/进化写入不漂移当前 prompt，下次会话
+        # 生效）；build_context 消费 agent._frozen_identity_snapshot。
+        try:
+            from neurova.agent.session_snapshot import get_session_snapshot_cache
+
+            self._agent._frozen_identity_snapshot = get_session_snapshot_cache().get(
+                self._agent, session_id=ctx.session_id
+            )
+        except Exception as e:  # noqa: BLE001 - 快照故障退回活值路径
+            logger.debug("身份快照冻结跳过: %s", e)
+
         # 会话历史恢复
         # 当调用方通过 metadata.history 提供了对话历史时，跳过 session_manager 恢复
         # 因为调用方的历史是权威来源，session_manager 可能包含过期/重复数据

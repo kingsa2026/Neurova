@@ -17,6 +17,7 @@ tags/source/confidence/created_at/updated_at），重启保留。
 """
 
 import datetime
+import difflib
 import json
 import threading
 import uuid
@@ -28,12 +29,20 @@ from neurova.core.logger import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_STORAGE_DIR = "./data/knowledge"
-
 VISIBILITY_PUBLIC = "public"
 VISIBILITY_PRIVATE = "private"
 _SUBMISSION_PENDING = "pending"
 _SUBMISSION_APPROVED = "approved"
 _SUBMISSION_REJECTED = "rejected"
+
+# P0-2 revision 链：这些字段被覆盖前，旧值快照进条目 revisions 账本。
+# graph_node_ids 等引擎簿记字段不在列——graph_bridge 回写不该刷屏账本。
+_REVISION_FIELDS = ("title", "content", "category", "tags", "confidence", "source")
+
+
+def _norm_title(title: str) -> str:
+    """冲突检测的 subject 归一化：大小写/首尾空白不敏感。"""
+    return (title or "").strip().lower()
 
 
 def _chunk_hit(item: Dict[str, Any], chunk_index: int, score: float) -> Dict[str, Any]:
@@ -75,8 +84,17 @@ class KnowledgeRepository:
         self._dir = Path(storage_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._path = self._dir / "knowledge.json"
+        self._tombstones_path = self._dir / "knowledge_tombstones.json"
+        self._conflicts_path = self._dir / "knowledge_conflicts.json"
         self._lock = threading.RLock()
         self._items: Dict[str, List[Dict[str, Any]]] = {}  # agent_id -> items
+        # P0-2 tombstone：knowledge_id -> {item, deleted_at, deleted_by, superseded_by}
+        # 独立结构而非条目打标——读路径漏过滤的错误方向是"复活条目不可见"
+        # （缺一个可见物），不是"已删数据混进主列表"（脏数据）。
+        self._tombstones: Dict[str, Dict[str, Any]] = {}
+        # P0-3 同值冲突账本：conflict_id -> {old_id, new_id, similarity, reason,
+        # detected_at, status, resolution, resolved_by, resolved_at}
+        self._conflicts: Dict[str, Dict[str, Any]] = {}
         # 分片索引：public（公库无隔离）/ user:<uid>（按属主私库）/ shared（共享集）
         self._indexes: Dict[str, Any] = {}
         self._index_dirty = True   # 索引脏标记（写入后置位，检索时按需重建）
@@ -210,6 +228,42 @@ class KnowledgeRepository:
                     }
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to load knowledge repo %s: %s", self._path, e)
+        if self._tombstones_path.exists():
+            try:
+                data = json.loads(self._tombstones_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self._tombstones = {
+                        kid: rec for kid, rec in data.items() if isinstance(rec, dict)
+                    }
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to load knowledge tombstones %s: %s", self._tombstones_path, e)
+        if self._conflicts_path.exists():
+            try:
+                data = json.loads(self._conflicts_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self._conflicts = {
+                        cid: rec for cid, rec in data.items() if isinstance(rec, dict)
+                    }
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to load knowledge conflicts %s: %s", self._conflicts_path, e)
+
+    def _save_tombstones(self) -> None:
+        try:
+            self._tombstones_path.write_text(
+                json.dumps(self._tombstones, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error("Failed to save knowledge tombstones %s: %s", self._tombstones_path, e)
+
+    def _save_conflicts(self) -> None:
+        try:
+            self._conflicts_path.write_text(
+                json.dumps(self._conflicts, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error("Failed to save knowledge conflicts %s: %s", self._conflicts_path, e)
 
     @staticmethod
     def _migrate_entry(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -248,6 +302,7 @@ class KnowledgeRepository:
         visibility: str = VISIBILITY_PRIVATE,
         owner_user_id: str = "",
         chunks: Optional[List[Dict[str, Any]]] = None,
+        detect_conflict: bool = True,
     ) -> Dict[str, Any]:
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
         item: Dict[str, Any] = {
@@ -272,9 +327,19 @@ class KnowledgeRepository:
             self._items.setdefault(agent_id, []).append(item)
             self._save()
             self._index_dirty = True
+            if detect_conflict:
+                # P0-3 同值冲突可见化：检测失败绝不阻断写入（错误方向是
+                # "少一个待审项"，不是"新知识丢失"）
+                try:
+                    self._detect_conflicts(agent_id, item)
+                    self._save_conflicts()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("知识冲突检测失败（条目已入库）: %s", e)
         return item
 
     def get_item(self, agent_id: str, knowledge_id: str) -> Optional[Dict[str, Any]]:
+        if knowledge_id in self._tombstones:
+            return None
         with self._lock:
             for item in self._items.get(agent_id, []):
                 if item.get("knowledge_id") == knowledge_id:
@@ -285,6 +350,8 @@ class KnowledgeRepository:
 
     def find_item(self, knowledge_id: str) -> Optional[Tuple[str, Dict[str, Any]]]:
         """跨 agent 分组查找条目，返回 (agent_id, 条目副本)；不存在返回 None"""
+        if knowledge_id in self._tombstones:
+            return None
         with self._lock:
             for agent_id, items in self._items.items():
                 for item in items:
@@ -625,6 +692,21 @@ class KnowledgeRepository:
         with self._lock:
             for item in self._items.get(agent_id, []):
                 if item.get("knowledge_id") == knowledge_id:
+                    # P0-2 revision 链：知识实体字段被覆盖前，旧值快照进账本
+                    # （append-only，重启保留）。失败不阻断更新。
+                    changed = [k for k in fields if k in _REVISION_FIELDS and k in item and item[k] != fields[k]]
+                    if changed:
+                        try:
+                            revs = item.setdefault("revisions", [])
+                            revs.append(
+                                {
+                                    "old": {k: item[k] for k in changed},
+                                    "changed_fields": changed,
+                                    "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                }
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning("知识条目 revision 快照失败: %s", e)
                     for k, v in fields.items():
                         # 注意：visibility/shared_with/submission 不在白名单内——
                         # 公开与共享只能走专用方法（share/submit/review），防提权
@@ -636,16 +718,190 @@ class KnowledgeRepository:
                     return True
         return False
 
-    def delete_knowledge(self, agent_id: str, knowledge_id: str) -> bool:
+    def delete_knowledge(
+        self, agent_id: str, knowledge_id: str, deleted_by: str = ""
+    ) -> bool:
+        """tombstone 软删：条目移入墓碑账本（所有读路径不可见），数据保留可恢复。
+
+        Utopia 0022「删除是事件不是减法」：物理清除走 purge_knowledge 显式通道。
+        """
+        with self._lock:
+            items = self._items.get(agent_id, [])
+            for idx, item in enumerate(items):
+                if item.get("knowledge_id") == knowledge_id:
+                    items.pop(idx)
+                    self._tombstones[knowledge_id] = {
+                        "item": item,
+                        "agent_id": agent_id,
+                        "deleted_at": datetime.datetime.now(datetime.timezone.utc).timestamp(),
+                        "deleted_by": str(deleted_by or ""),
+                        "superseded_by": None,
+                    }
+                    self._save()
+                    self._save_tombstones()
+                    self._index_dirty = True
+                    return True
+        return False
+
+    def purge_knowledge(self, agent_id: str, knowledge_id: str) -> bool:
+        """物理删除（显式清除通道：违规内容清理等）。墓碑与正文一并清除。"""
         with self._lock:
             items = self._items.get(agent_id, [])
             for idx, item in enumerate(items):
                 if item.get("knowledge_id") == knowledge_id:
                     del items[idx]
+                    self._tombstones.pop(knowledge_id, None)
                     self._save()
+                    self._save_tombstones()
                     self._index_dirty = True
                     return True
+        # 不在主存储也可能躺在墓碑里（已被软删过）
+        if knowledge_id in self._tombstones:
+            del self._tombstones[knowledge_id]
+            self._save_tombstones()
+            return True
         return False
+
+    def restore_knowledge(self, knowledge_id: str) -> bool:
+        """从墓碑复活条目（普通复活不带 supersede 链）。活着/不存在返回 False。"""
+        with self._lock:
+            rec = self._tombstones.get(knowledge_id)
+            if rec is None:
+                return False
+            agent_id = rec.get("agent_id") or "default"
+            self._items.setdefault(agent_id, []).append(rec["item"])
+            del self._tombstones[knowledge_id]
+            self._save()
+            self._save_tombstones()
+            self._index_dirty = True
+            return True
+
+    def list_deleted(self) -> List[Dict[str, Any]]:
+        """墓碑清单（admin 审计消费）。记录含 item 快照 + 删除元数据。"""
+        with self._lock:
+            return [dict(rec, knowledge_id=kid) for kid, rec in self._tombstones.items()]
+
+    def list_revisions(self, knowledge_id: str) -> List[Dict[str, Any]]:
+        """条目 revision 账本（最新在前）。条目不存在返回 []。"""
+        with self._lock:
+            found = self.find_item(knowledge_id)
+            if found is None:
+                return []
+            return list(reversed((found[1].get("revisions") or [])))
+
+    # ── P0-3 同值冲突可见化 ────────────────────────────────────
+
+    _CONFLICT_SIMILARITY_THRESHOLD = 0.9
+
+    def _detect_conflicts(self, agent_id: str, new_item: Dict[str, Any]) -> None:
+        """新条目 vs 同 agent 旧条目的同值冲突检测（调用方持有锁）。
+
+        判定：标题归一化相似 ≥ 阈值 = "同一事实的新说法"候选（subject 强匹配），
+        内容相异才是冲突本体；内容也相同属完全一致重复（P1 实体消解范围）。
+        每条新条目只对内容最接近的旧条目记一条冲突，防批量导入刷屏。
+        检测只记账不阻断写入——错误方向是"少一个待审项"，不是"新知识丢失"。
+        """
+        title = _norm_title(new_item.get("title", ""))
+        if not title:
+            return
+        new_id = new_item.get("knowledge_id")
+        best: Optional[Tuple[Dict[str, Any], float]] = None
+        for old in self._items.get(agent_id, []):
+            old_id = old.get("knowledge_id")
+            if not old_id or old_id == new_id:
+                continue
+            old_title = _norm_title(old.get("title", ""))
+            if not old_title:
+                continue
+            title_sim = difflib.SequenceMatcher(None, old_title, title).ratio()
+            if title_sim < self._CONFLICT_SIMILARITY_THRESHOLD:
+                continue
+            content_sim = difflib.SequenceMatcher(
+                None, str(old.get("content", "")), str(new_item.get("content", ""))
+            ).ratio()
+            if content_sim >= 0.999:
+                continue  # 完全一致重复：不算同值冲突
+            if best is None or content_sim > best[1]:
+                best = (old, title_sim)
+        if best is None:
+            return
+        old_item, title_sim = best
+        self._conflicts[str(uuid.uuid4())] = {
+            "old_id": old_item.get("knowledge_id"),
+            "new_id": new_id,
+            "knowledge_id": old_item.get("knowledge_id"),
+            "title": new_item.get("title", ""),
+            "similarity": round(title_sim, 4),
+            "reason": "same_title: 新条目与旧条目标题一致，疑似同一事实的新说法",
+            "detected_at": datetime.datetime.now(datetime.timezone.utc).timestamp(),
+            "status": "pending",
+            "resolution": None,
+            "resolved_by": None,
+            "resolved_at": None,
+        }
+        # 双端可追溯：旧条目自身视角的标记（读路径漏读只是少一个展示位，
+        # 权威账本在 _conflicts，混入风险为零）
+        old_item["conflict"] = {
+            "status": "pending",
+            "against": new_id,
+        }
+
+    def list_conflicts(self, status: str = "pending") -> List[Dict[str, Any]]:
+        """冲突清单（默认待审 pending；status='resolved' 查裁决历史）。"""
+        with self._lock:
+            recs = [
+                dict(rec, conflict_id=cid)
+                for cid, rec in self._conflicts.items()
+                if rec.get("status") == status
+            ]
+        recs.sort(key=lambda r: r.get("detected_at", 0), reverse=True)
+        return recs
+
+    def resolve_conflict(
+        self, conflict_id: str, resolution: str, resolved_by: str = ""
+    ) -> bool:
+        """人工裁决冲突：keep_both 保留双条目关闭记录；supersede_old 旧条目
+        打 superseded_by 链并 tombstone（新说法接管，旧值按 Utopia 0022 原路
+        入墓碑可复活）。非法裁决值抛 ValueError。"""
+        if resolution not in ("keep_both", "supersede_old"):
+            raise ValueError("未知裁决: %r（有效值: keep_both / supersede_old）" % resolution)
+        with self._lock:
+            rec = self._conflicts.get(conflict_id)
+            if rec is None or rec.get("status") != "pending":
+                return False
+            supersede_payload: Optional[Dict[str, Any]] = None
+            if resolution == "supersede_old":
+                old_id = rec.get("old_id")
+                new_id = rec.get("new_id")
+                found = self.find_item(old_id or "")
+                if found is None:
+                    raise LookupError("旧条目不存在或已删除: %s" % old_id)
+                agent_id = found[0]
+                old_item = None
+                items_list = self._items.get(agent_id, [])
+                for idx, stored in enumerate(items_list):
+                    if stored.get("knowledge_id") == old_id:
+                        old_item = items_list.pop(idx)
+                        break
+                if old_item is None:
+                    raise LookupError("旧条目不存在或已删除: %s" % old_id)
+                supersede_payload = {
+                    "item": old_item,
+                    "agent_id": agent_id,
+                    "deleted_at": datetime.datetime.now(datetime.timezone.utc).timestamp(),
+                    "deleted_by": str(resolved_by or ""),
+                    "superseded_by": new_id,
+                }
+            rec["status"] = "resolved"
+            rec["resolution"] = resolution
+            rec["resolved_by"] = str(resolved_by or "")
+            rec["resolved_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            if supersede_payload is not None:
+                self._tombstones[rec["old_id"]] = supersede_payload
+                self._save_tombstones()
+            self._save_conflicts()
+            self._index_dirty = True
+            return True
 
 
 _singleton: Optional[KnowledgeRepository] = None
