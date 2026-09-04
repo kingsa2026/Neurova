@@ -42,6 +42,7 @@ from neurova.llm_client import (
     LLMConnectionError,
     LLMRateLimitError,
     LLMResponse,
+    LLMServiceUnavailableError,
 )
 from neurova.llm.providers.rate_limiter import (
     CircuitBreaker,
@@ -474,8 +475,8 @@ class MultiModelLLMClient:
         except Exception as e:  # noqa: BLE001 - 后台任务失败仅记录
             logger.warning("404 重连：provider %s 模型重发现失败: %s", provider_id, e)
 
-    # 可重试集合：限流/连接/超时；认证错误不重试（换 key 才有意义）
-    _RETRYABLE = (LLMRateLimitError, LLMConnectionError, ConnectionError, TimeoutError)
+    # 可重试集合：限流/连接/超时/服务不可用；认证错误不重试（换 key 才有意义）
+    _RETRYABLE = (LLMRateLimitError, LLMConnectionError, LLMServiceUnavailableError, ConnectionError, TimeoutError)
 
     @staticmethod
     def _get_retry_guard(client) -> tuple:
@@ -646,6 +647,7 @@ class MultiModelLLMClient:
                     completion_tokens=_completion or 0,
                     estimated=_estimated,
                     user_id=get_request_user_id() or "anonymous",
+                    duration_ms=int(duration * 1000),
                 )
             except Exception:
                 pass
@@ -746,7 +748,11 @@ class MultiModelLLMClient:
             # 必须调用异步版本 chat_stream_async。
             stream_usage: Dict[str, int] = {}
             reply_text = ""
+            first_token_ms = 0  # P1-8（OpenOcta 启发）：首块耗时入账
             async for chunk in client.client.chat_stream_async(messages, **kwargs):
+                if first_token_ms == 0:
+                    # 首个有效 chunk（含 reasoning/content/usage 任一载荷）
+                    first_token_ms = int((time.time() - start_time) * 1000)
                 # 根因修复 (2026-09-02): 流式 usage 在最后一个 chunk 携带全量
                 # （LLMClient 已请求 stream_options.include_usage）——
                 # 取最后一次非空值，逐 chunk 累加会把 token 双计。
@@ -808,6 +814,8 @@ class MultiModelLLMClient:
                     completion_tokens=_completion or 0,
                     estimated=_estimated,
                     user_id=get_request_user_id() or "anonymous",
+                    first_token_ms=first_token_ms,
+                    duration_ms=int(duration * 1000),
                 )
             except Exception:
                 logger.debug("流式 usage 入账跳过", exc_info=True)

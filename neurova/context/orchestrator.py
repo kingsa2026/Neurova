@@ -396,12 +396,21 @@ class ContextOrchestrator:
         # Phase 3: 构建 ContextInput → ContextCollector → 候选池
         # session_context 包含完整的 user+assistant 历史（优先使用）
         # conversation_history 只有 user 消息且不更新（仅作 fallback）
+        # P1-7（OpenOcta 启发 toolTurnRepair）：repair 配对完整性——孤儿
+        # tool 结果转注记、悬空 tool_calls 补合成结果（纯函数，well-formed
+        # 输入逐条等价通过，今日 user/assistant 会话历史零行为变化）
         if session_context is not None:
             conversation_context = list(session_context)
         else:
             conversation_context = list(
                 {"role": m["role"], "content": m["content"]} for m in (self.conversation_history or [])
             )
+        try:
+            from neurova.context.recovery import repair_tool_turns
+
+            conversation_context = repair_tool_turns(conversation_context)
+        except Exception as e:  # noqa: BLE001 - 修复故障不阻断上下文构建
+            logger.debug("tool-turn 修复跳过: %s", e)
 
         logger.info(
             "[CTX_TRACE] conversation_context=%d msgs, session_context_provided=%s",

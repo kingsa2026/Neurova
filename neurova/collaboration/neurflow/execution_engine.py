@@ -1200,6 +1200,81 @@ class WorkflowExecutor:
         # 默认返回
         return {"output": None}
 
+    async def step_run(
+        self,
+        workflow: WorkflowDefinition,
+        node_id: str,
+        upstream_outputs: Optional[Dict[str, Any]] = None,
+        inputs: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """单节点试跑（P1-1——Dify step-run 画布 UX 的引擎底座）。
+
+        只执行指定节点：上游输出经 upstream_outputs 注入上下文（画布
+        变量检查面板的调试形态），mock 语义与全量 run 一致（node.
+        mock_output 优先，回退全局 _NODE_MOCKS）。
+
+        Returns:
+            {"status": "success"|"failed", "output": ..., "duration_ms": ...,
+             "error"?: str}
+        """
+        node_map = {n.id: n for n in workflow.nodes}
+        node = node_map.get(node_id)
+        if node is None:
+            return {"status": "failed", "error": f"节点不存在: {node_id}", "duration_ms": 0.0}
+
+        from neurova.collaboration.neurflow.node_registry import get_node_registry
+
+        if node.type.startswith("builtin:") and node.type not in (
+            "builtin:start", "builtin:end", "builtin:variable", "builtin:transform",
+        ):
+            if get_node_registry().get_executor(node.type) is None:
+                return {
+                    "status": "failed",
+                    "error": f"节点类型无执行器: {node.type}",
+                    "duration_ms": 0.0,
+                }
+
+        started = time.time()
+        try:
+            mock_output = getattr(node, "mock_output", None) or _NODE_MOCKS.get(node_id)
+            if mock_output is not None:
+                result: Dict[str, Any] = {"status": "success", "output": mock_output}
+            else:
+                context: Dict[str, Any] = {
+                    "inputs": dict(inputs or {}),
+                    "node_id": node_id,
+                    "node_results": {
+                        # 上游输出注入（变量解析面板数据基础）
+                        nid: {"output": out}
+                        for nid, out in (upstream_outputs or {}).items()
+                    },
+                    "variables": dict(inputs or {}),
+                    "user_id": user_id or "",
+                }
+                config = dict(node.config or {})
+                result = await self._execute_node(node, config, context)
+                if not isinstance(result, dict):
+                    result = {"output": result}
+                result.setdefault("status", "success")
+        except Exception as e:  # noqa: BLE001 — 节点异常转失败信封
+            logger.warning("step-run 节点 %s 执行失败: %s", node_id, e)
+            return {
+                "status": "failed",
+                "error": str(e),
+                "duration_ms": round((time.time() - started) * 1000, 2),
+            }
+
+        result["duration_ms"] = round((time.time() - started) * 1000, 2)
+        # 上游变量回显（面板展示注入了什么）
+        if upstream_outputs:
+            merged_vars: Dict[str, Any] = {}
+            for out in upstream_outputs.values():
+                if isinstance(out, dict):
+                    merged_vars.update(out.get("output") or {})
+            result["variables"] = merged_vars
+        return result
+
     def cancel(self, execution_id: str) -> bool:
         """
         取消执行

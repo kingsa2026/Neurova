@@ -39,7 +39,9 @@ def is_policy_denial(result: Any) -> bool:
     """
     if not isinstance(result, dict):
         return False
-    return bool(result.get("governance") or result.get("pending_approval"))
+    # param_guard 键：工具参数守卫的拒绝（截断 JSON 无法配平等）同样是
+    # "决策"——OpenOcta 启发 P1-5，与治理 DENY 同源口径，不计工具故障。
+    return bool(result.get("governance") or result.get("pending_approval") or result.get("param_guard"))
 
 
 def _platform_has_enforced_sandbox() -> bool:

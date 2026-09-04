@@ -166,6 +166,19 @@ def copy_venv_site_packages(stage_python: Path, manifest: dict) -> None:
     if n:
         log(f"清除暂存 pycache/pyc 存量 {n} 项（NSIS 2GB 红线）")
 
+def ensure_runtime_dirs(stage: Path) -> None:
+    """预创建后端运行必需的空数据目录。
+
+    干净安装机上 agent_workspaces/ 天然不存在（源码仓里有 git 跟踪文件所以
+    开发机从不复现），后端启动曾因 os.listdir 缺目录直接崩。安装包必须自带
+    该目录，不依赖后端运行时自建（双保险：_load_saved_agents 亦有守卫）。
+    """
+    if not stage.is_dir():
+        raise RuntimeError(f"暂存区不存在: {stage}")
+    workspaces = stage / "agent_workspaces" / "default"
+    workspaces.mkdir(parents=True, exist_ok=True)
+    log(f"运行时数据目录就绪: {workspaces}")
+
 
 EXCLUDE_DIR_NAMES = {"__pycache__", ".mimosa", ".pytest_cache"}
 
@@ -250,6 +263,7 @@ def main() -> int:
     copy_tree_light(REPO / "models", STAGE / "models", manifest, "models", skip_heavy=True)
     copy_tree_light(REPO / "config", STAGE / "config", manifest, "config")
     copy_tree_light(REPO / "start_server.py", STAGE / "start_server.py", manifest, "start_server")
+    ensure_runtime_dirs(STAGE)
 
     manifest["built_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     manifest["python"] = sys.version.split()[0]

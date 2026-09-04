@@ -189,6 +189,15 @@ class NeurflowStorage:
                 "CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_trigger "
                 "ON webhook_deliveries(trigger_id)"
             )
+            # P2 trigger 统一契约：投递重试三列（幂等迁移——老库自动补列）
+            _existing_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(webhook_deliveries)").fetchall()}
+            if "attempt" not in _existing_cols:
+                self._conn.execute("ALTER TABLE webhook_deliveries ADD COLUMN attempt INTEGER DEFAULT 0")
+            if "next_retry_at" not in _existing_cols:
+                self._conn.execute("ALTER TABLE webhook_deliveries ADD COLUMN next_retry_at REAL DEFAULT 0")
+            if "status" not in _existing_cols:
+                # 存量行默认 delivered（历史记录不进重试队列）
+                self._conn.execute("ALTER TABLE webhook_deliveries ADD COLUMN status TEXT DEFAULT 'delivered'")
 
             # 执行检查点表（Checkpoint 借鉴：与 workflows 解耦——画布运行时
             # 工作流定义在内存（DRAFT→PUBLISHED 不落库），executions FK 会拒，
@@ -785,17 +794,30 @@ class NeurflowStorage:
         execution_id: Optional[str],
         status_code: int,
         latency_ms: float = 0.0,
-    ) -> None:
-        """记录一次 webhook 入站投递。"""
+        status: Optional[str] = None,
+    ) -> int:
+        """记录一次 webhook 入站投递；返回行 id（P2 重试用）。
+
+        status 缺省规则：有 execution_id → delivered；验签失败 → rejected；
+        其余（执行失败/无执行）→ failed（进重试队列）。
+        """
         import time as _time
 
+        if status is None:
+            if execution_id:
+                status = "delivered"
+            elif not signature_valid:
+                status = "rejected"
+            else:
+                status = "failed"
+
         with self._lock:
-            self._conn.execute(
+            cur = self._conn.execute(
                 """
                 INSERT INTO webhook_deliveries
                     (trigger_id, signature_valid, execution_id, status_code,
-                     latency_ms, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                     latency_ms, created_at, attempt, next_retry_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)
                 """,
                 (
                     trigger_id,
@@ -804,7 +826,51 @@ class NeurflowStorage:
                     status_code,
                     latency_ms,
                     _time.time(),
+                    status,
                 ),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid or 0)
+
+    def get_delivery(self, delivery_id: int) -> Optional[dict]:
+        """按 id 取单条投递记录（P2 重试用）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM webhook_deliveries WHERE id = ?", (int(delivery_id),)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_failed_deliveries(self, limit: int = 100) -> list:
+        """待重试队列：failed 且 attempt < 24 的投递（按创建时间正序）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM webhook_deliveries
+                WHERE status = 'failed' AND attempt < 24
+                ORDER BY created_at ASC LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_delivery_retry(
+        self,
+        delivery_id: int,
+        attempt: int,
+        next_retry_at: float,
+        status: str,
+        execution_id: Optional[str] = None,
+    ) -> None:
+        """更新投递的重试状态（attempt/next_retry_at/status，成功时补 execution_id）。"""
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE webhook_deliveries
+                SET attempt = ?, next_retry_at = ?, status = ?,
+                    execution_id = COALESCE(?, execution_id)
+                WHERE id = ?
+                """,
+                (int(attempt), float(next_retry_at), status, execution_id, int(delivery_id)),
             )
             self._conn.commit()
 

@@ -40,6 +40,98 @@ def reset_install_gate_scanner() -> None:
     _scanner = None
 
 
+def validate_permissions_for_install(permissions_raw: Any) -> Dict[str, Any]:
+    """manifest.permissions 声明校验（P0-4 安装时声明面）。
+
+    语义：permissions 声明在安装时验证合法性——未知能力键、tools.allow
+    非列表、白名单含未知工具、mcp.* 白名单未声明网络能力均拒绝；
+    permissions 缺省（None/空）放行（存量技能向后兼容，运行时模型级
+    fail-closed 兜底）。
+
+    Returns:
+        {"blocked": bool, "errors": [...]}（与扫描门同风格的 dict 信封）
+    """
+    errors: list = []
+
+    if permissions_raw is None or (isinstance(permissions_raw, dict) and not permissions_raw):
+        return {"blocked": False, "errors": []}
+
+    if not isinstance(permissions_raw, dict):
+        return {"blocked": True, "errors": [f"permissions 必须是 dict，实际 {type(permissions_raw).__name__}"]}
+
+    from neurova.skills.permissions import (
+        KNOWN_CAPABILITY_KEYS,
+        tool_category,
+        tools_for_categories,
+    )
+
+    for key in permissions_raw:
+        if key not in KNOWN_CAPABILITY_KEYS:
+            errors.append(f"未知权限能力键: {key!r}（有效: {sorted(KNOWN_CAPABILITY_KEYS)}）")
+
+    tools_raw = permissions_raw.get("tools")
+    allow: list = []
+    if tools_raw is not None:
+        if isinstance(tools_raw, dict):
+            allow = tools_raw.get("allow") if isinstance(tools_raw.get("allow"), list) else None
+            if tools_raw.get("enabled") and allow is None:
+                errors.append("tools.allow 必须是工具名列表")
+        elif isinstance(tools_raw, (list, tuple)):
+            allow = list(tools_raw)
+        else:
+            errors.append(f"tools 必须是 dict/列表，实际 {type(tools_raw).__name__}")
+
+    if allow is not None:
+        # 已知工具全集：分类注册表 + 内置注册表动态键（单一事实源）
+        known = tools_for_categories(
+            "network", "file", "system", "model", "node"
+        )
+        try:
+            from neurova.builtin_tools import get_builtin_tool_params
+
+            # 注册表探针：知名工具逐个验证（注册表无直接列表 API）
+            builtin_known = {
+                name
+                for name in (
+                    "recall_history", "memory_search", "file_read", "file_write",
+                    "file_create", "file_delete", "file_edit", "file_list",
+                    "file_search", "computer_screenshot", "computer_click",
+                    "computer_type", "computer_scroll", "computer_shell",
+                    "browser_navigate", "browser_click", "browser_type",
+                    "browser_screenshot", "browser_extract_text", "browser_dom_snapshot",
+                    "browser_click_role", "browser_fill_role", "youtube_transcript",
+                    "browser_read", "bilibili_search", "rss_read", "social_search",
+                    "planning", "emotion_analyze", "asr_transcribe", "tts_synthesize",
+                    "voice_memory_search", "weather", "web_search", "spawn_subagent",
+                    "subagent_status", "list_agents", "create_skill", "web_fetch",
+                    "run_code",
+                )
+                if get_builtin_tool_params(name) is not None
+            }
+            known |= builtin_known
+        except Exception:
+            pass
+
+        network_declared = bool(permissions_raw.get("network"))
+
+        for tool in allow:
+            if not isinstance(tool, str) or not tool.strip():
+                errors.append(f"tools.allow 含非法工具名: {tool!r}")
+                continue
+            if tool in known:
+                continue
+            if tool.startswith("mcp."):
+                # MCP 白名单必须有网络能力声明配套（声明一致性）
+                if not network_declared:
+                    errors.append(f"白名单放行 MCP 工具 {tool!r} 但未声明 network 能力")
+                continue
+            errors.append(f"tools.allow 含未知工具: {tool!r}")
+
+    if errors:
+        return {"blocked": True, "errors": errors}
+    return {"blocked": False, "errors": []}
+
+
 def scan_skill_for_install(skill_id: str, skill_path: str) -> Dict[str, Any]:
     """安装前扫描门。
 

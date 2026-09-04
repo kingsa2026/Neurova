@@ -86,9 +86,14 @@ class BaseProvider(ABC):
     async def check_connection(self) -> ConnectionResult:
         """检查连接状态
 
+        失败时异常经 error_mapping 归一为五类标准错误（error_category/
+        error_hint 附带在结果上，前端可据此给可行动提示）。
+
         Returns:
             连接测试结果
         """
+        from neurova.llm.providers.error_mapping import normalize_provider_error
+
         start_time = time.time()
         try:
             models = await self.get_available_models()
@@ -100,10 +105,14 @@ class BaseProvider(ABC):
             )
         except Exception as e:
             latency = (time.time() - start_time) * 1000
+            normalized = normalize_provider_error(e)
             return ConnectionResult(
                 success=False,
                 latency_ms=latency,
                 error=str(e),
+                error_category=normalized.category.value,
+                error_hint=normalized.user_hint,
+                metadata={"retryable": normalized.retryable},
             )
 
     async def fetch_models(self) -> typing.List[ModelInfo]:
@@ -132,8 +141,10 @@ class BaseProvider(ABC):
             model_id: 模型ID
 
         Returns:
-            连接测试结果
+            连接测试结果（失败时附五类归一 error_category/error_hint）
         """
+        from neurova.llm.providers.error_mapping import normalize_provider_error
+
         start_time = time.time()
         try:
             await self.create_chat_model(model_id)
@@ -145,11 +156,14 @@ class BaseProvider(ABC):
             )
         except Exception as e:
             latency = (time.time() - start_time) * 1000
+            normalized = normalize_provider_error(e)
             return ConnectionResult(
                 success=False,
                 latency_ms=latency,
                 error=str(e),
-                metadata={"model_id": model_id},
+                error_category=normalized.category.value,
+                error_hint=normalized.user_hint,
+                metadata={"model_id": model_id, "retryable": normalized.retryable},
             )
 
     async def probe_model_multimodal(self, model_id: str) -> ProbeResult:

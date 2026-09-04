@@ -152,6 +152,12 @@ class ToolSequenceSkill(Skill):
         if not sequence:
             return SkillResult(success=False, error="技能 tool_sequence 为空")
 
+        # P0-4：manifest 声明式权限——按自身声明裁决每一步（fail-closed）。
+        # 无声明（存量技能）parse 为 None，维持旧行为，由治理预检兜底。
+        from neurova.skills.permissions import check_tool_permission, parse_permissions
+
+        _perm = parse_permissions((self.config or {}).get("permissions"))
+
         step_outputs: Dict[int, Any] = {}
         for idx, step in enumerate(sequence):
             if not isinstance(step, dict):
@@ -163,6 +169,16 @@ class ToolSequenceSkill(Skill):
             step_params = step.get("params") or {}
             if not tool_name:
                 return SkillResult(success=False, error=f"第 {idx} 步缺少 tool 字段")
+
+            # P0-4：步进裁决在路由之前——被拒步进不得真的执行工具
+            if _perm is not None:
+                _denial = check_tool_permission(_perm, tool_name)
+                if _denial:
+                    return SkillResult(
+                        success=False,
+                        error=f"第 {idx} 步工具被技能权限声明拒绝: {_denial}",
+                    )
+
             if not self._tool_router:
                 return SkillResult(
                     success=False,
@@ -498,6 +514,15 @@ class SkillRegistry:
             description = getattr(manifest, "description", "") or ""
             _config = getattr(manifest, "config", None)
             config_dict = _config if isinstance(_config, dict) else {}
+
+            # P0-4：manifest 携带的权限声明并入 config（运行时按声明裁决）
+            _perm_raw = getattr(manifest, "permissions", None)
+            if _perm_raw is not None and "permissions" not in config_dict:
+                _perm_dict = (
+                    _perm_raw.to_dict() if hasattr(_perm_raw, "to_dict") else _perm_raw
+                )
+                if isinstance(_perm_dict, dict):
+                    config_dict = {**config_dict, "permissions": _perm_dict}
 
             # 自动技能：含 tool_sequence 时构造可执行子类
             if isinstance(config_dict.get("tool_sequence"), list) and config_dict["tool_sequence"]:

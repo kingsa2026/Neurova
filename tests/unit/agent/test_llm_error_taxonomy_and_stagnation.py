@@ -115,8 +115,14 @@ class TestErrorTaxonomy:
         )
         token_err = TokenLimitExceeded("over budget")
         assert LLMClient._wrap_llm_error(token_err) is token_err
+        # P0 补课：五类标准错误——5xx APIError 归一为服务不可用（可重试）
+        from neurova.llm_client import LLMServiceUnavailableError
+
         generic = LLMClient._wrap_llm_error(_generic_api_error())
-        assert isinstance(generic, RuntimeError) and "API 错误" in str(generic)
+        assert isinstance(generic, LLMServiceUnavailableError) and "error-500" in str(generic)
+        # 未知异常（无类型/状态码/关键词命中）原样透传，不篡改类型
+        weird = ValueError("totally unknown")
+        assert LLMClient._wrap_llm_error(weird) is weird
 
     @pytest.mark.asyncio
     async def test_stream_async_surfaces_classified_error(self):

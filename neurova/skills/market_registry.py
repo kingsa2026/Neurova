@@ -131,16 +131,21 @@ def persist_synthesized_skill(
     version: str,
     tool_sequence: list,
     service: Any,
+    permissions: Optional[dict] = None,
 ) -> bool:
     """agent 自主分装（合成）技能持久化到 agent 技能页 manifest。
 
     合成技能 config.tool_sequence 一并落盘(source=synthesized), 冷启动时
     restore 按 manifest 恢复为可执行的 ToolSequenceSkill。
+    permissions: P0-4 声明式权限（可选）——随 config 落盘，恢复不丢失。
     """
+    extra = {"tool_sequence": tool_sequence}
+    if permissions is not None:
+        extra["permissions"] = permissions
     return _write_agent_manifest(
         service, skill_id, name, description, version,
         source="synthesized",
-        extra_config={"tool_sequence": tool_sequence},
+        extra_config=extra,
     )
 
 
@@ -261,11 +266,17 @@ def restore_market_skills_from_service(service: Any, registry: Any, market_skill
                     # （需要 registry.tool_router 已注入，否则执行时报无路由器）
                     from types import SimpleNamespace
 
+                    _config = {"tool_sequence": tool_sequence, "source": source}
+                    # P0-4：声明随 manifest 恢复（无声明=存量语义不裁决）
+                    _perm = (manifest.get("config") or {}).get("permissions")
+                    if _perm is not None:
+                        _config["permissions"] = _perm
+
                     m = SimpleNamespace(
                         id=skill_id,
                         name=str(entry.get("name") or entry.get("id") or skill_id),
                         description=entry.get("description", ""),
-                        config={"tool_sequence": tool_sequence, "source": source},
+                        config=_config,
                     )
                     registry.register_skill(m)
                 else:

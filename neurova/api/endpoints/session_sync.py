@@ -153,7 +153,17 @@ async def websocket_sync(websocket: WebSocket, session_id: str, channel_type: st
         metadata={"connection_id": ws_conn.connection_id},
     )
 
-    # 发送历史事件（最近 50 条）
+    # 纪元探测帧（OpenOcta 启发 P0-1）：告知客户端当前发号器位置，必须
+    # 先于历史重放发送。客户端游标 >= next_seq 说明服务端已重启（seq 归
+    # 零，历史为空或属新纪元），先重置游标再收重放帧，避免重放被当作旧
+    # 帧误吞；游标落后则保留（重放中的旧帧由客户端去重跳过）。
+    try:
+        await websocket.send_json({"type": "sync_hello", "next_seq": session.next_seq})
+    except Exception:
+        pass
+
+    # 发送历史事件（最近 50 条）。事件在 add_event 时已盖章 per-session
+    # 单调 seq，重放帧天然带序号——客户端据此重建 gap 检测游标。
     history = session.get_history(limit=50)
     for event in history:
         try:
@@ -179,6 +189,21 @@ async def websocket_sync(websocket: WebSocket, session_id: str, channel_type: st
                 ws_conn.update_heartbeat()
                 manager.update_heartbeat(session_id, channel_type)
                 await websocket.send_json({"type": "heartbeat_ack"})
+                continue
+
+            # 定向补发（gap 检测配套）：客户端报 last_seq，服务端把历史中
+            # seq > last_seq 的事件重发一遍。缓冲即 UnifiedSession.history
+            # （有界 1000），超出覆盖范围的缺口由客户端 onGap 提示兜底。
+            if msg_type == "sync_resume":
+                last_seq = message.get("last_seq")
+                if isinstance(last_seq, (int, float)) and last_seq >= 0:
+                    resumed = [e for e in session.get_history(limit=1000) if (e.seq or 0) > int(last_seq)]
+                    for event in resumed:
+                        try:
+                            await ws_conn.send_event(event)
+                        except Exception:
+                            break
+                await websocket.send_json({"type": "sync_resume_done"})
                 continue
 
             # 处理用户消息

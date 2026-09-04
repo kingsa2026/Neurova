@@ -22,11 +22,13 @@ class WorkflowStatus(Enum):
 
 
 class TriggerType(Enum):
-    """触发器类型枚举（P1 Step 2）"""
+    """触发器类型枚举（P1 Step 2；P2 统一 trigger 面补 plugin）"""
 
     WEBHOOK = "webhook"
     CRON = "cron"
     MANUAL = "manual"
+    # P2：插件事件触发（插件经 plugin_api_registry 投递事件 → 统一 dispatch）
+    PLUGIN = "plugin"
 
 
 @dataclass

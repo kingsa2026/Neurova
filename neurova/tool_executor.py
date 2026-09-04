@@ -548,8 +548,14 @@ class ToolExecutor:
             if not skill:
                 return {"error": f"Skill {skill_name} 不存在"}
 
-            # 执行 Skill
-            result = await skill.execute(params, context)
+            # P0-4：技能执行期间挂载声明式权限作用域——治理预检
+            # （_governance_precheck）对 skill 内的工具调用按声明仲裁
+            from neurova.skills.permissions import parse_permissions, skill_permission_scope
+
+            _perm = parse_permissions(getattr(skill, "config", {}).get("permissions"))
+            with skill_permission_scope(_perm):
+                # 执行 Skill
+                result = await skill.execute(params, context)
             return result
 
         except Exception as e:
@@ -657,6 +663,20 @@ class ToolExecutor:
         result = None
         tool_source = "unknown"
         try:
+            # P1-5（OpenOcta 启发 toolArgumentsGuard）：工具参数守卫——
+            # 别名归一 + 截断 JSON 配平；修不了的残缺参数拒绝执行并返回
+            # 修复建议（is_policy_denial 识别 param_guard 键，不计工具故障）。
+            # 默认未装配 = get_param_guard() None = 原样透传（零行为变化）。
+            from neurova.security.tool_param_guard import get_param_guard
+
+            _guard = get_param_guard()
+            if _guard is not None:
+                _schema = self._builtin_param_names(tool_name)
+                params, _guard_rejection = _guard.guard(tool_name, params, schema=_schema)
+                if _guard_rejection is not None:
+                    result = _guard_rejection
+                    return result
+
             # 方案 P0-1.5: 统一治理预检 —— DENY 拦截、SANDBOX 隔离执行、
             # ASK 待确认；ALLOW / 无裁决内容返回 None 放行。
             precheck = (None if skip_governance
@@ -680,6 +700,13 @@ class ToolExecutor:
                 tool_source = "background"
                 return result
             result, success, tool_source = core_out
+            # P1-6（OpenOcta 启发 OutputRef）：大输出落盘为引用——默认未
+            # 装配恒透传；写盘失败诚实降级原样返回（宁可膨胀不丢输出）。
+            from neurova.agent.tool_output_ref import maybe_output_ref
+
+            result = maybe_output_ref(
+                tool_name, result, getattr(self._agent, "workspace_path", None)
+            )
             return result
         finally:
             # H5: 所有路径统一触发 on_tool_executed（成功/失败均触发）
@@ -711,6 +738,25 @@ class ToolExecutor:
             result = await self._execute_workflow_agent_tool(params)
             success = self._result_is_success(result)
             return result, success, tool_source
+
+        # P1-3：workflow_as_tool——workflow:{id} 命名空间直达已发布工作流
+        # （输入校验来自工作流 start 节点 DAG 声明；属主身份透传）
+        if tool_name.startswith("workflow:"):
+            tool_source = "workflow_tool"
+            try:
+                from neurova.collaboration.neurflow.workflow_as_tool import (
+                    execute_workflow_as_tool,
+                    split_workflow_tool_name,
+                )
+
+                wf_id = split_workflow_tool_name(tool_name)
+                outcome = await execute_workflow_as_tool(
+                    wf_id, dict(params or {}), user_id=self._agent_identity()[0] or None
+                )
+            except Exception as e:
+                outcome = {"success": False, "error": f"workflow 工具执行异常: {e}"}
+            success = self._result_is_success(outcome)
+            return outcome, success, tool_source
 
         # 优先使用 ToolEngine（如果可用）
         if self.tool_engine:
@@ -773,6 +819,47 @@ class ToolExecutor:
 
         return {"error": f"未知工具: {tool_name}"}, success, tool_source
 
+    @staticmethod
+    def _check_skill_declaration(tool_name: str, permissions) -> Optional[Dict]:
+        """P0-4：按技能权限声明仲裁工具调用（声明面入口）。
+
+        - permissions 为 None（技能无声明）→ None 放行（存量语义，
+          内容治理预检仍兜底）
+        - 有声明且工具未授权 → DENY 形态 dict（fail-closed 有依据）
+        """
+        from neurova.skills.permissions import check_tool_permission
+
+        denial = check_tool_permission(permissions, tool_name)
+        if denial is None:
+            return None
+        return {
+            "success": False,
+            "error": f"被技能权限声明拦截: {denial}",
+            "governance": {
+                "decision": "deny",
+                "source": "skill_permissions",
+                "reasons": [denial],
+            },
+        }
+
+    def _builtin_param_names(self, tool_name: str) -> Optional[set]:
+        """内置工具规范参数名集合（参数守卫 schema 感知档的数据源）。
+
+        以 builtin_tools.py 注册表为单一事实源；非内置工具返回 None
+        （守卫降级只用无歧义别名档）。
+        """
+        try:
+            from neurova.builtin_tools import get_builtin_tool_params
+
+            schema_obj = get_builtin_tool_params(tool_name)
+            if isinstance(schema_obj, dict):
+                props = (schema_obj.get("parameters") or {}).get("properties")
+                if isinstance(props, dict):
+                    return set(props)
+        except Exception:  # noqa: BLE001 - schema 查询失败降级，不阻断执行
+            pass
+        return None
+
     async def _governance_precheck(self, tool_name: str, params: Dict) -> Optional[Dict]:
         """执行前统一治理预检（方案 P0-1.5 集成点，async：SANDBOX 的 Docker
         后端为异步执行）。
@@ -792,6 +879,25 @@ class ToolExecutor:
         """
         is_mcp = tool_name.startswith("mcp.")
         is_builtin = tool_name in self._builtin_dispatch
+
+        # P0-4：技能声明仲裁——skill 执行作用域内的工具调用按 manifest
+        # 声明裁决（fail-closed 有依据，先于内容裁决；无声明恒放行）
+        try:
+            from neurova.skills.permissions import current_skill_permissions
+
+            _decl_verdict = self._check_skill_declaration(
+                tool_name, current_skill_permissions()
+            )
+        except Exception as e:
+            logger.warning("技能声明仲裁异常 %s（fail-closed 拦截）: %s", tool_name, e)
+            _decl_verdict = {"success": False, "error": f"技能权限声明仲裁异常: {e}"}
+        if _decl_verdict is not None:
+            self._audit_governance(
+                tool_name,
+                _decl_verdict.get("governance", {"decision": "deny"}),
+                params,
+            )
+            return _decl_verdict
 
         try:
             from neurova.security.governance import GovernanceDecision, get_governance
@@ -1128,11 +1234,30 @@ class ToolExecutor:
                 raise  # 扫描器缺失是部署错误，不静默
             return {"error": f"create_skill 拒绝：注入扫描器异常（fail-closed）: {scan_error}"}
 
+        # P0-4：create_skill 自动产出与行为一致的声明——步进用到的工具
+        # 全部白名单化（声明=实际能力面，安装语义与调用语义对齐）。
+        # 未分类平台工具（memory_search 等）不受能力面约束，无需列出。
+        try:
+            from neurova.skills.permissions import tool_category
+
+            declared_tools = sorted({
+                s.get("tool") for s in tool_sequence
+                if s.get("tool") and tool_category(s.get("tool")) is not None
+            })
+        except Exception:
+            declared_tools = []
+        permissions = {"tools": {"enabled": True, "allow": declared_tools}} if declared_tools else None
+
         manifest = SimpleNamespace(
             name=name,
             id=name,
             description=description,
-            config={"tool_sequence": tool_sequence, "source": "llm_created"},
+            permissions=permissions,
+            config={
+                "tool_sequence": tool_sequence,
+                "source": "llm_created",
+                **({"permissions": permissions} if permissions else {}),
+            },
         )
         registry = getattr(self._agent, "_skill_registry", None)
         if registry is None:
@@ -1154,6 +1279,7 @@ class ToolExecutor:
                 service=SkillService(
                     agent_id=getattr(self._agent.config, "agent_id", "") or "default"
                 ),
+                permissions=permissions,
             )
         except Exception:
             logger.warning("create_skill 持久化失败: %s", name, exc_info=True)

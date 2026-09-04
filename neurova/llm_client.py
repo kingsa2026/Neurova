@@ -58,6 +58,10 @@ class LLMConnectionError(LLMError):
     """连接失败（可重试）"""
 
 
+class LLMServiceUnavailableError(LLMError):
+    """服务端不可用（5xx，可重试——Dify 五类标准错误补全）"""
+
+
 class TokenLimitExceeded(LLMError):
     """输入 token 超出预算（不可重试，应优雅终止）"""
 
@@ -629,17 +633,44 @@ class LLMClient:
 
     @staticmethod
     def _wrap_llm_error(e: Exception) -> Exception:
-        """把 openai 异常分类为 LLMError 子类（限流/认证/连接），不丢失原语义"""
+        """把 provider 异常分类为 LLMError 子类（五类标准错误，单一事实源）。
+
+        复用 providers.error_mapping 归一器；结果映射回既有异常类型
+        （既有 except 处理器向后兼容）。映射为 BAD_REQUEST 兜底的未知
+        异常原样返回——只包装已识别的错误，不篡改未知异常类型。
+        """
+        from neurova.llm.providers.error_mapping import ErrorCategory, normalize_provider_error
+
         if isinstance(e, TokenLimitExceeded):
             return e
-        if isinstance(e, (APIConnectionError,)):
-            return LLMConnectionError(f"连接失败: {e}")
-        if isinstance(e, (RateLimitError,)):
-            return LLMRateLimitError(f"请求频率过高: {e}")
-        if isinstance(e, (AuthenticationError,)):
-            return LLMAuthError(f"认证失败: {e}")
-        if isinstance(e, (APIError,)):
-            return RuntimeError(f"API 错误: {e}")
+        if isinstance(e, (
+            LLMRateLimitError, LLMAuthError, LLMBadRequestError,
+            LLMConnectionError, LLMServiceUnavailableError,
+        )):
+            return e
+
+        normalized = normalize_provider_error(e)
+        msg = str(e)
+        cat = normalized.category
+
+        if cat is ErrorCategory.CONNECTION:
+            return LLMConnectionError(f"连接失败: {msg}")
+        if cat is ErrorCategory.RATE_LIMIT:
+            return LLMRateLimitError(f"请求频率过高: {msg}")
+        if cat is ErrorCategory.AUTH:
+            return LLMAuthError(f"认证失败: {msg}")
+        if cat is ErrorCategory.UNAVAILABLE:
+            return LLMServiceUnavailableError(f"服务不可用: {msg}")
+
+        # BAD_REQUEST：只有类型映射命中（SDK 明确的 4xx）才包装；
+        # 归一器兜底产生的 bad_request（未知异常）原样透传，保持旧语义
+        if normalized.cause is not None and type(e).__name__ in (
+            "NotFoundError", "BadRequestError", "UnprocessableEntityError",
+        ):
+            return LLMBadRequestError(f"请求错误: {msg}")
+        if isinstance(e, (RateLimitError, AuthenticationError, APIConnectionError, APIError)):
+            # openai 已知族但归一兜底的（如 400/422 状态码）→ 坏请求
+            return LLMBadRequestError(f"请求错误: {msg}")
         return e
 
     def count_tokens(self, text: str) -> int:

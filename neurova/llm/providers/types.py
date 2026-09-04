@@ -8,7 +8,7 @@ Provider 核心类型定义
 """
 
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -106,3 +106,7 @@ class ConnectionResult(BaseModel):
     error: str = ""
     models_available: int = 0
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # P0 补课：五类标准错误归一（error_mapping.ErrorCategory.value）；
+    # 成功/未分类时为 None
+    error_category: Optional[str] = None
+    error_hint: str = ""
