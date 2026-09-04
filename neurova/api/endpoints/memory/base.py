@@ -98,6 +98,17 @@ class MemoryItem(BaseModel):
     last_accessed_at: Optional[str] = None
 
 
+def _origin_to_str(origin) -> str:
+    """origin → 闭集字符串（P1-9 复审修复）。枚举取 .value（str(MemoryOrigin.X)
+    会得到 "MemoryOrigin.AGENT" 破坏前端徽标映射），字符串透传校验，异常回退 agent。"""
+    if origin is None:
+        return "agent"
+    if isinstance(origin, str):
+        return origin if origin in ("owner", "agent", "untrusted", "system") else "agent"
+    value = getattr(origin, "value", None)
+    return value if isinstance(value, str) and value in ("owner", "agent", "untrusted", "system") else "agent"
+
+
 def memory_to_dict(memory) -> dict:
     """将 Memory 对象或 recall() 返回的 to_dict() 字典转换为 API 响应字典
 
@@ -118,7 +129,7 @@ def memory_to_dict(memory) -> dict:
                 "temperature": float(memory.get("temperature", 100.0) or 0.0),
                 "lifecycle_stage": str(memory.get("lifecycle_stage", "")),
                 # P1-9 来源信任级透传（缺失回退 agent，等价旧行为）
-                "origin": str(memory.get("origin", "agent") or "agent"),
+                "origin": _origin_to_str(memory.get("origin")),
                 "is_important": bool(memory.get("is_important", metadata.get("is_important", importance >= 80.0))),
                 "is_crystallized": bool(
                     memory.get("is_crystallized", memory.get("lifecycle_stage") == "crystallized")
@@ -137,7 +148,7 @@ def memory_to_dict(memory) -> dict:
             "category": str(getattr(memory, "category", "")),
             "temperature": float(getattr(memory, "temperature", 100.0)),
             "lifecycle_stage": str(getattr(memory, "lifecycle_stage", "")),
-            "origin": str(getattr(memory, "origin", "agent") or "agent"),
+            "origin": _origin_to_str(getattr(memory, "origin", None)),
             "is_important": bool(getattr(memory, "is_important", False)),
             "is_crystallized": bool(getattr(memory, "is_crystallized", False)),
             "emotion_score": float(getattr(memory, "emotion_score", 0.5)),
