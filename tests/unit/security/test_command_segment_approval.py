@@ -102,6 +102,26 @@ class TestSegmentedWhitelistGate(unittest.TestCase):
         result = gov.evaluate("cat a.txt | rm -rf /", tool_name="computer_shell")
         self.assertNotEqual(result.decision.value, "allow")
 
+    def test_code_tool_not_segmented(self):
+        """非 shell 工具（run_code 的 Python 代码）不进分段门。
+
+        Python 代码里的 |/;/&& 是代码语法而非 shell 连接符，切段会把
+        合法代码误入审批（本轮复审抓到的语义错位回归）。
+        """
+        gov = self._gov()
+        code = (
+            "import pandas as pd\n"
+            "df = df[(df.a > 1) | (df.b < 2)]\n"
+            'print(df); df.to_csv("x.csv")'
+        )
+        result = gov.evaluate(code, tool_name="run_code")
+        self.assertNotEqual(
+            result.decision.value,
+            "ask",
+            f"非 shell 工具的代码不得进分段审批: {result.reasons}",
+        )
+        self.assertIsNone(result.segments, "非 shell 工具不携带分段信息")
+
 
 if __name__ == "__main__":
     unittest.main()

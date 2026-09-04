@@ -844,11 +844,6 @@ class MultiModelLLMClient:
             # 不再靠 HTTP 语义字符串二次猜测。
             yield _instream_error_dict(e)
 
-    @staticmethod
-    def _instream_error_dict_payload(error: Exception) -> Dict[str, Any]:
-        """公开给测试/调用方的错误 dict 形态（与 _instream_error_dict 同源）。"""
-        return _instream_error_dict(error)
-
     def _resolve_available_fallback(
         self,
         exclude_models: Optional[set] = None,

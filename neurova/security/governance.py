@@ -96,6 +96,19 @@ class GovernanceDecision(str, Enum):
     SANDBOX = "sandbox"
 
 
+# P0-6 分段审批适用面：shell 方言工具。run_code 的 code 是 Python/脚本
+# 本体（|、;、&& 是代码语法而非 shell 连接符），分段会造成合法代码误入
+# 审批——非 shell 工具保持整串白名单/内容检测旧行为。
+_SEGMENTED_SHELL_TOOLS = frozenset({
+    "shell",
+    "computer_shell",
+    "execute_cli_tool",
+    "process",
+    "terminal",
+    "bash",
+})
+
+
 @dataclass
 class GovernanceResult:
     decision: GovernanceDecision
@@ -227,7 +240,11 @@ class GovernancePolicy:
         # 单段命令走 match_whitelist 原语义（字节等价旧行为）。
         from neurova.security.command_segments import parse_command_segments
 
-        segs = parse_command_segments(command) if command else []
+        segs = (
+            parse_command_segments(command)
+            if command and (tool_name in _SEGMENTED_SHELL_TOOLS or tool_name.startswith("mcp."))
+            else []
+        )
         is_multi_seg = len(segs) > 1
         if is_multi_seg:
             seg_hits = [self.match_whitelist(s.text, tool_name) for s in segs]

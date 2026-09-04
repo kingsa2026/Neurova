@@ -17,12 +17,8 @@
 """
 from __future__ import annotations
 
-import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
-
-# 顶层分隔符：命令链与管道（引号内不切）
-_CHAIN_SPLIT_RE = None  # 惰性构建（见 _split_top_level）
 
 
 @dataclass
@@ -44,26 +40,15 @@ class CommandSegment:
 
 
 def _split_top_level(command: str, seps: str) -> List[str]:
-    """按 seps 中的单字符分隔符切段；shlex 感知引号，引号内不切。
+    """按 seps 中的单字符分隔符切段；引号感知，引号内不切。
 
-    shlex 失败（引号不平衡）时退化为整串一段（保守：不切就整体裁决）。
+    字符级扫描跟踪引号/转义状态；引号不平衡时引号保持开启，
+    引号内分隔符一律不切（保守：宁整段裁决不误切）。
     """
-    try:
-        lexer = shlex.shlex(command, posix=True)
-        lexer.whitespace_split = False
-        lexer.commenters = ""
-        tokens = list(lexer)
-    except ValueError:
-        return [command]
-
-    # 重新拼接 token 流，在顶层分隔符处切段
-    segments: List[str] = []
-    buf: List[str] = []
-    # shlex posix 模式会剥引号——为保留原文语义，这里用轻量扫描替代：
-    # 直接字符级扫描，跟踪引号状态
     quote: Optional[str] = None
     esc = False
     buf_chars: List[str] = []
+    segments: List[str] = []
     for ch in command:
         if esc:
             buf_chars.append(ch)
