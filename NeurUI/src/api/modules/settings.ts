@@ -65,3 +65,20 @@ export function updateSettings(section: string, data: Record<string, unknown>) {
 export function clearCache() {
   return api.post<ApiResponse<null>>(`${BASE}/clear-cache`)
 }
+
+// ---------------------------------------------------------------------------
+// Governance settings（进化治理：RSI 部署阶段 + 对话规则提取 LLM 成本门控）
+// ---------------------------------------------------------------------------
+
+export interface GovernanceSettings {
+  conversation_rules_enabled: boolean
+  rsi_phase: number
+}
+
+export function getGovernanceSettings() {
+  return api.get<ApiResponse<GovernanceSettings>>('/governance/settings')
+}
+
+export function updateGovernanceSettings(data: Partial<GovernanceSettings>) {
+  return api.put<ApiResponse<GovernanceSettings>>('/governance/settings', data)
+}

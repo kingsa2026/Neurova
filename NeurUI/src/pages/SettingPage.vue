@@ -105,6 +105,7 @@
 
       <!-- Advanced -->
       <a-tab-pane key="advanced" :tab="t('settings.advanced')">
+        <div class="advanced-stack">
         <GlassCard :title="t('settings.advancedSettings')">
           <a-form layout="vertical" :model="advanced" :rules="{ log_level: [{ required: true, message: t('common.required') }] }">
             <a-form-item :label="t('settings.debugMode')">
@@ -126,6 +127,29 @@
             <GlassButton variant="primary" size="sm" :loading="saving" @click="saveSection('advanced')">{{ t('common.save') }}</GlassButton>
           </template>
         </GlassCard>
+
+        <!-- 进化治理（RSI 部署阶段 + 对话规则提取 LLM 成本门控） -->
+        <GlassCard :title="t('settings.governance.title')">
+          <p class="governance-hint">{{ t('settings.governance.hint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.governance.rsiPhase')">
+              <a-select v-model:value="governance.rsi_phase" style="width: 100%">
+                <a-select-option :value="0">{{ t('settings.governance.phase0') }}</a-select-option>
+                <a-select-option :value="1">{{ t('settings.governance.phase1') }}</a-select-option>
+                <a-select-option :value="2">{{ t('settings.governance.phase2') }}</a-select-option>
+                <a-select-option :value="3">{{ t('settings.governance.phase3') }}</a-select-option>
+                <a-select-option :value="4">{{ t('settings.governance.phase4') }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item :label="t('settings.governance.conversationRules')">
+              <a-switch v-model:checked="governance.conversation_rules_enabled" />
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="savingGovernance" @click="saveGovernance">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+        </div>
       </a-tab-pane>
     </a-tabs>
     </template>
@@ -135,7 +159,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSettings, updateSettings, clearCache as clearCacheApi } from '@/api/modules/settings'
+import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings } from '@/api/modules/settings'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { supportedLocales } from '@/i18n'
